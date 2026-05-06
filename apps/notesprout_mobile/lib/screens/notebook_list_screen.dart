@@ -199,6 +199,39 @@ class _NotebookListScreenState extends State<NotebookListScreen> {
   }
 
   // ---------------------------------------------------------------------------
+  // Context sheet
+  // ---------------------------------------------------------------------------
+
+  Future<void> _showContextSheet(_NotebookEntry entry) async {
+    await showModalBottomSheet<void>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.edit_outlined),
+              title: const Text('Rename'),
+              onTap: () {
+                Navigator.pop(ctx);
+                _showRenameDialog(entry);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.delete_outline, color: Colors.red),
+              title: const Text('Delete', style: TextStyle(color: Colors.red)),
+              onTap: () {
+                Navigator.pop(ctx);
+                _showDeleteDialog(entry);
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ---------------------------------------------------------------------------
   // Build
   // ---------------------------------------------------------------------------
 
@@ -224,8 +257,10 @@ class _NotebookListScreenState extends State<NotebookListScreen> {
                   separatorBuilder: (_, __) => const SizedBox(height: 8),
                   itemBuilder: (_, index) => _NotebookCard(
                     entry: _notebooks[index],
-                    onTap: () => _showRenameDialog(_notebooks[index]),
-                    onDelete: () => _showDeleteDialog(_notebooks[index]),
+                    onTap: () => ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Opening soon...')),
+                    ),
+                    onLongPress: () => _showContextSheet(_notebooks[index]),
                   ),
                 ),
       floatingActionButton: FloatingActionButton(
@@ -239,12 +274,12 @@ class _NotebookListScreenState extends State<NotebookListScreen> {
 class _NotebookCard extends StatelessWidget {
   final _NotebookEntry entry;
   final VoidCallback onTap;
-  final VoidCallback onDelete;
+  final VoidCallback onLongPress;
 
   const _NotebookCard({
     required this.entry,
     required this.onTap,
-    required this.onDelete,
+    required this.onLongPress,
   });
 
   @override
@@ -259,11 +294,8 @@ class _NotebookCard extends StatelessWidget {
           _dateFormatter.format(entry.meta.createdAt),
           style: const TextStyle(fontSize: 12, color: Colors.grey),
         ),
-        trailing: IconButton(
-          icon: const Icon(Icons.delete_outline, color: Colors.grey),
-          onPressed: onDelete,
-        ),
         onTap: onTap,
+        onLongPress: onLongPress,
       ),
     );
   }
