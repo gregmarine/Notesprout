@@ -9,11 +9,16 @@ const _notesDir = '/storage/emulated/0/Documents/NoteSprout';
 final _dateFormatter = DateFormat('MMM dd, yyyy');
 final _fileNameFormatter = DateFormat('yyyyMMdd_HHmmss');
 
+// Each notebook lives at: _notesDir/{folderName}/notebook.soil
+const _soilFile = 'notebook.soil';
+
 class _NotebookEntry {
-  final String filePath;
+  final String folderPath;
   final NotebookMeta meta;
 
-  const _NotebookEntry({required this.filePath, required this.meta});
+  const _NotebookEntry({required this.folderPath, required this.meta});
+
+  String get soilPath => p.join(folderPath, _soilFile);
 }
 
 class NotebookListScreen extends StatefulWidget {
@@ -43,13 +48,17 @@ class _NotebookListScreenState extends State<NotebookListScreen> {
 
     final entries = <_NotebookEntry>[];
     await for (final entity in dir.list()) {
-      if (entity is! File || p.extension(entity.path) != '.soil') continue;
-      final db = SoilDatabase(entity.path);
+      if (entity is! Directory) continue;
+
+      final soilPath = p.join(entity.path, _soilFile);
+      if (!await File(soilPath).exists()) continue;
+
+      final db = SoilDatabase(soilPath);
       try {
         final meta = await db.getNotebookMeta();
-        entries.add(_NotebookEntry(filePath: entity.path, meta: meta));
+        entries.add(_NotebookEntry(folderPath: entity.path, meta: meta));
       } catch (_) {
-        // Skip corrupt or unreadable files.
+        // Skip folders whose notebook.soil is corrupt or unreadable.
       } finally {
         await db.close();
       }
@@ -100,8 +109,10 @@ class _NotebookListScreenState extends State<NotebookListScreen> {
     final name = controller.text.trim();
     if (name.isEmpty) return;
 
-    final filePath = '$_notesDir/$name.soil';
-    final db = SoilDatabase(filePath);
+    final folderPath = p.join(_notesDir, name);
+    await Directory(folderPath).create(recursive: true);
+
+    final db = SoilDatabase(p.join(folderPath, _soilFile));
     await db.initializeNotebook(name);
     await db.close();
 
@@ -142,14 +153,14 @@ class _NotebookListScreenState extends State<NotebookListScreen> {
     final newName = controller.text.trim();
     if (newName.isEmpty || newName == entry.meta.name) return;
 
-    // Update the name in the database.
-    final db = SoilDatabase(entry.filePath);
+    // Update the name stored inside the database first.
+    final db = SoilDatabase(entry.soilPath);
     await db.updateNotebookName(newName);
     await db.close();
 
-    // Rename the file on disk.
-    final newPath = '${_notesDir}/$newName.soil';
-    await File(entry.filePath).rename(newPath);
+    // Rename the folder — notebook.soil stays in place inside it.
+    final newFolderPath = p.join(_notesDir, newName);
+    await Directory(entry.folderPath).rename(newFolderPath);
 
     await _loadNotebooks();
   }
@@ -182,7 +193,8 @@ class _NotebookListScreenState extends State<NotebookListScreen> {
 
     if (confirmed != true) return;
 
-    await File(entry.filePath).delete();
+    // Delete the entire folder and everything inside it.
+    await Directory(entry.folderPath).delete(recursive: true);
     await _loadNotebooks();
   }
 
