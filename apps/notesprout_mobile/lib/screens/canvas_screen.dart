@@ -1,3 +1,5 @@
+import 'dart:ui' as ui;
+
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:notesprout_core/notesprout_core.dart';
@@ -27,6 +29,9 @@ class _CanvasScreenState extends State<CanvasScreen> {
   List<StrokeModel> _strokes = [];
   List<StrokePoint> _activePoints = [];
   bool _ready = false;
+  ui.Image? _committedImage;
+  double _pageWidth = 0;
+  double _pageHeight = 0;
 
   @override
   void initState() {
@@ -36,12 +41,14 @@ class _CanvasScreenState extends State<CanvasScreen> {
 
   @override
   void dispose() {
+    _committedImage?.dispose();
     _db?.close();
     super.dispose();
   }
 
   Future<void> _initCanvas() async {
     final db = SoilDatabase(p.join(widget.folderPath, _soilFile));
+    final meta = await db.getNotebookMeta();
     final layers = await db.getLayers(widget.pageId);
     if (layers.isEmpty) {
       await db.close();
@@ -51,13 +58,61 @@ class _CanvasScreenState extends State<CanvasScreen> {
     final strokes = await db.getStrokes(layerId);
 
     _db = db;
+    _pageWidth = meta.pageWidth;
+    _pageHeight = meta.pageHeight;
+
     if (mounted) {
       setState(() {
         _layerId = layerId;
         _strokes = strokes;
         _ready = true;
       });
+      await _rebuildCommittedImage();
     }
+  }
+
+  Future<void> _rebuildCommittedImage() async {
+    if (_pageWidth <= 0 || _pageHeight <= 0) return;
+
+    final recorder = ui.PictureRecorder();
+    final canvas = ui.Canvas(recorder);
+
+    for (final stroke in _strokes) {
+      _drawPoints(canvas, stroke.points, stroke.color, stroke.width);
+    }
+
+    final picture = recorder.endRecording();
+    final image = await picture.toImage(_pageWidth.ceil(), _pageHeight.ceil());
+    picture.dispose();
+
+    if (mounted) {
+      setState(() {
+        _committedImage?.dispose();
+        _committedImage = image;
+      });
+    }
+  }
+
+  void _drawPoints(
+    ui.Canvas canvas,
+    List<StrokePoint> points,
+    int color,
+    double width,
+  ) {
+    if (points.isEmpty) return;
+
+    final paint = Paint()
+      ..color = Color(color)
+      ..strokeWidth = width
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round
+      ..style = PaintingStyle.stroke;
+
+    final path = Path()..moveTo(points.first.x, points.first.y);
+    for (var i = 1; i < points.length; i++) {
+      path.lineTo(points[i].x, points[i].y);
+    }
+    canvas.drawPath(path, paint);
   }
 
   // ---------------------------------------------------------------------------
@@ -101,7 +156,7 @@ class _CanvasScreenState extends State<CanvasScreen> {
     final now = DateTime.now();
     final stroke = StrokeModel(
       id: _uuid.v4(),
-      parentId: _layerId,
+      parentId: _layerId!,
       createdAt: now,
       updatedAt: now,
       points: List.unmodifiable(_activePoints),
@@ -115,6 +170,7 @@ class _CanvasScreenState extends State<CanvasScreen> {
     });
 
     await _db?.addStroke(stroke);
+    await _rebuildCommittedImage();
   }
 
   Future<void> _close() async {
@@ -138,12 +194,23 @@ class _CanvasScreenState extends State<CanvasScreen> {
             onPointerDown: _onPointerDown,
             onPointerMove: _onPointerMove,
             onPointerUp: _onPointerUp,
-            child: CustomPaint(
-              painter: _StrokePainter(
-                strokes: _strokes,
-                activePoints: _activePoints,
-              ),
-              child: const SizedBox.expand(),
+            child: Stack(
+              children: [
+                // Bottom layer: committed strokes rendered from cached image.
+                RepaintBoundary(
+                  child: CustomPaint(
+                    painter: _CommittedStrokesPainter(image: _committedImage),
+                    child: const SizedBox.expand(),
+                  ),
+                ),
+                // Top layer: active (in-progress) stroke only.
+                RepaintBoundary(
+                  child: CustomPaint(
+                    painter: _ActiveStrokePainter(points: _activePoints),
+                    child: const SizedBox.expand(),
+                  ),
+                ),
+              ],
             ),
           ),
 
@@ -205,36 +272,36 @@ class _Toolbar extends StatelessWidget {
 }
 
 // ---------------------------------------------------------------------------
-// Painter
+// Painters
 // ---------------------------------------------------------------------------
 
-class _StrokePainter extends CustomPainter {
-  final List<StrokeModel> strokes;
-  final List<StrokePoint> activePoints;
+class _CommittedStrokesPainter extends CustomPainter {
+  final ui.Image? image;
 
-  const _StrokePainter({required this.strokes, required this.activePoints});
+  const _CommittedStrokesPainter({required this.image});
 
   @override
   void paint(Canvas canvas, Size size) {
-    for (final stroke in strokes) {
-      _drawPoints(canvas, stroke.points, stroke.color, stroke.width);
-    }
-    if (activePoints.isNotEmpty) {
-      _drawPoints(canvas, activePoints, 0xFF000000, 3.0);
-    }
+    if (image == null) return;
+    canvas.drawImage(image!, Offset.zero, Paint());
   }
 
-  void _drawPoints(
-    Canvas canvas,
-    List<StrokePoint> points,
-    int color,
-    double width,
-  ) {
+  @override
+  bool shouldRepaint(_CommittedStrokesPainter old) => old.image != image;
+}
+
+class _ActiveStrokePainter extends CustomPainter {
+  final List<StrokePoint> points;
+
+  const _ActiveStrokePainter({required this.points});
+
+  @override
+  void paint(Canvas canvas, Size size) {
     if (points.isEmpty) return;
 
     final paint = Paint()
-      ..color = Color(color)
-      ..strokeWidth = width
+      ..color = const Color(0xFF000000)
+      ..strokeWidth = 3.0
       ..strokeCap = StrokeCap.round
       ..strokeJoin = StrokeJoin.round
       ..style = PaintingStyle.stroke;
@@ -247,6 +314,5 @@ class _StrokePainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(_StrokePainter old) =>
-      old.strokes != strokes || old.activePoints != activePoints;
+  bool shouldRepaint(_ActiveStrokePainter old) => old.points != points;
 }
