@@ -5,6 +5,8 @@ import 'package:intl/intl.dart';
 import 'package:notesprout_core/notesprout_core.dart';
 import 'package:path/path.dart' as p;
 
+import 'canvas_screen.dart';
+
 const _notesDir = '/storage/emulated/0/Documents/NoteSprout';
 final _dateFormatter = DateFormat('MMM dd, yyyy');
 final _fileNameFormatter = DateFormat('yyyyMMdd_HHmmss');
@@ -205,6 +207,27 @@ class _NotebookListScreenState extends State<NotebookListScreen> {
   }
 
   // ---------------------------------------------------------------------------
+  // Open
+  // ---------------------------------------------------------------------------
+
+  Future<void> _openNotebook(_NotebookEntry entry) async {
+    final db = SoilDatabase(entry.soilPath);
+    final pages = await db.getPages();
+    await db.close();
+
+    if (pages.isEmpty || !mounted) return;
+
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => CanvasScreen(
+          folderPath: entry.folderPath,
+          pageId: pages.first.id,
+        ),
+      ),
+    );
+  }
+
+  // ---------------------------------------------------------------------------
   // Context sheet
   // ---------------------------------------------------------------------------
 
@@ -263,9 +286,7 @@ class _NotebookListScreenState extends State<NotebookListScreen> {
                   separatorBuilder: (_, __) => const SizedBox(height: 8),
                   itemBuilder: (_, index) => _NotebookCard(
                     entry: _notebooks[index],
-                    onTap: () => ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Opening soon...')),
-                    ),
+                    onTap: () => _openNotebook(_notebooks[index]),
                     onLongPress: () => _showContextSheet(_notebooks[index]),
                   ),
                 ),
