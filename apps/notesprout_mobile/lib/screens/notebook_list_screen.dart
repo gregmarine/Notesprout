@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:notesprout_core/notesprout_core.dart';
+import 'package:path/path.dart' as p;
 
 const _notesDir = '/storage/emulated/0/Documents/NoteSprout';
 final _dateFormatter = DateFormat('MMM dd, yyyy');
@@ -42,14 +43,15 @@ class _NotebookListScreenState extends State<NotebookListScreen> {
 
     final entries = <_NotebookEntry>[];
     await for (final entity in dir.list()) {
-      if (entity is! File || !entity.path.endsWith('.soil')) continue;
+      if (entity is! File || p.extension(entity.path) != '.soil') continue;
+      final db = SoilDatabase(entity.path);
       try {
-        final db = SoilDatabase(entity.path);
         final meta = await db.getNotebookMeta();
-        await db.close();
         entries.add(_NotebookEntry(filePath: entity.path, meta: meta));
       } catch (_) {
         // Skip corrupt or unreadable files.
+      } finally {
+        await db.close();
       }
     }
 
