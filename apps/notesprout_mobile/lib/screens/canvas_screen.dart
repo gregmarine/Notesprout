@@ -3,6 +3,7 @@ import 'dart:ui' as ui;
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:notesprout_core/notesprout_core.dart';
+import 'package:notesprout_onyx/notesprout_onyx.dart';
 import 'package:path/path.dart' as p;
 import 'package:uuid/uuid.dart';
 
@@ -33,6 +34,8 @@ class _CanvasScreenState extends State<CanvasScreen> {
   double _pageWidth = 0;
   double _pageHeight = 0;
 
+  final DrawingEngine _drawingEngine = DrawingEngineFactory.create();
+
   @override
   void initState() {
     super.initState();
@@ -41,6 +44,7 @@ class _CanvasScreenState extends State<CanvasScreen> {
 
   @override
   void dispose() {
+    _drawingEngine.dispose();
     _committedImage?.dispose();
     _db?.close();
     super.dispose();
@@ -67,6 +71,8 @@ class _CanvasScreenState extends State<CanvasScreen> {
         _strokes = strokes;
         _ready = true;
       });
+      _drawingEngine.initialize(null);
+      _drawingEngine.setDrawingMode();
       await _rebuildCommittedImage();
     }
   }

@@ -9,6 +9,8 @@ dependencies:
     sdk: flutter
   notesprout_core:
     path: ../../packages/notesprout_core
+  notesprout_onyx:
+    path: ../../packages/notesprout_onyx
   path: ^1.9.0
   path_provider: ^2.1.5
   intl: ^0.20.2

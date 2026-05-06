@@ -37,6 +37,15 @@ android {
             signingConfig = signingConfigs.getByName("debug")
         }
     }
+
+    packaging {
+        resources.excludes.add("META-INF/*.kotlin_module")
+    }
+}
+
+dependencies {
+    implementation("com.onyx.android.sdk:onyxsdk-device:1.1.11")
+    implementation("com.onyx.android.sdk:onyxsdk-pen:1.2.1")
 }
 
 flutter {

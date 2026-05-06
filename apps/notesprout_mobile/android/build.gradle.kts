@@ -2,6 +2,11 @@ allprojects {
     repositories {
         google()
         mavenCentral()
+        maven {
+            url = uri("http://repo.boox.com/repository/maven-public/")
+            isAllowInsecureProtocol = true
+        }
+        maven { url = uri("https://jitpack.io") }
     }
 }
 
