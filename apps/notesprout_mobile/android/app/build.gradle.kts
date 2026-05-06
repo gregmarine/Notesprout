@@ -43,9 +43,24 @@ android {
     }
 }
 
+configurations.all {
+    resolutionStrategy {
+        force("commons-io:commons-io:2.11.0")
+        force("com.tencent:mmkv:1.3.9")
+    }
+    resolutionStrategy.dependencySubstitution {
+        substitute(module("org.apache.commons.io:commonsIO:2.5.0"))
+            .using(module("commons-io:commons-io:2.11.0"))
+    }
+}
+
 dependencies {
-    implementation("com.onyx.android.sdk:onyxsdk-device:1.1.11")
-    implementation("com.onyx.android.sdk:onyxsdk-pen:1.2.1")
+    implementation("com.onyx.android.sdk:onyxsdk-device:1.1.11") {
+        exclude(group = "com.android.support")
+    }
+    implementation("com.onyx.android.sdk:onyxsdk-pen:1.2.1") {
+        exclude(group = "com.android.support")
+    }
 }
 
 flutter {
