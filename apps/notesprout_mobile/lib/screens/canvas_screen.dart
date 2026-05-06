@@ -1,3 +1,4 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:notesprout_core/notesprout_core.dart';
 import 'package:path/path.dart' as p;
@@ -60,15 +61,15 @@ class _CanvasScreenState extends State<CanvasScreen> {
   }
 
   // ---------------------------------------------------------------------------
-  // Gesture handlers
+  // Pointer handlers (stylus only)
   // ---------------------------------------------------------------------------
 
-  void _onPanStart(DragStartDetails details) {
-    if (!_ready) return;
+  void _onPointerDown(PointerDownEvent event) {
+    if (!_ready || event.kind != PointerDeviceKind.stylus) return;
     _activePoints = [
       StrokePoint(
-        x: details.localPosition.dx,
-        y: details.localPosition.dy,
+        x: event.localPosition.dx,
+        y: event.localPosition.dy,
         pressure: 1.0,
         tilt: 0.0,
         timestamp: DateTime.now().millisecondsSinceEpoch,
@@ -76,14 +77,15 @@ class _CanvasScreenState extends State<CanvasScreen> {
     ];
   }
 
-  void _onPanUpdate(DragUpdateDetails details) {
-    if (!_ready || _activePoints.isEmpty) return;
+  void _onPointerMove(PointerMoveEvent event) {
+    if (!_ready || event.kind != PointerDeviceKind.stylus) return;
+    if (_activePoints.isEmpty) return;
     setState(() {
       _activePoints = [
         ..._activePoints,
         StrokePoint(
-          x: details.localPosition.dx,
-          y: details.localPosition.dy,
+          x: event.localPosition.dx,
+          y: event.localPosition.dy,
           pressure: 1.0,
           tilt: 0.0,
           timestamp: DateTime.now().millisecondsSinceEpoch,
@@ -92,8 +94,9 @@ class _CanvasScreenState extends State<CanvasScreen> {
     });
   }
 
-  Future<void> _onPanEnd(DragEndDetails _) async {
-    if (!_ready || _activePoints.isEmpty || _layerId == null) return;
+  Future<void> _onPointerUp(PointerUpEvent event) async {
+    if (!_ready || event.kind != PointerDeviceKind.stylus) return;
+    if (_activePoints.isEmpty || _layerId == null) return;
 
     final now = DateTime.now();
     final stroke = StrokeModel(
@@ -130,11 +133,11 @@ class _CanvasScreenState extends State<CanvasScreen> {
       backgroundColor: Colors.white,
       body: Stack(
         children: [
-          // Full-screen drawing surface.
-          GestureDetector(
-            onPanStart: _onPanStart,
-            onPanUpdate: _onPanUpdate,
-            onPanEnd: _onPanEnd,
+          // Full-screen drawing surface — stylus input only.
+          Listener(
+            onPointerDown: _onPointerDown,
+            onPointerMove: _onPointerMove,
+            onPointerUp: _onPointerUp,
             child: CustomPaint(
               painter: _StrokePainter(
                 strokes: _strokes,
@@ -145,11 +148,15 @@ class _CanvasScreenState extends State<CanvasScreen> {
           ),
 
           // Floating toolbar — top left, respects safe area.
+          // SafeArea must be the direct Stack child; Positioned cannot be
+          // wrapped before reaching the Stack.
           SafeArea(
-            child: Positioned(
-              top: 8,
-              left: 8,
-              child: _Toolbar(onClose: _close),
+            child: Align(
+              alignment: Alignment.topLeft,
+              child: Padding(
+                padding: const EdgeInsets.all(8),
+                child: _Toolbar(onClose: _close),
+              ),
             ),
           ),
         ],
