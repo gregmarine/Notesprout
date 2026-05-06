@@ -4,6 +4,8 @@ class NotebookMeta {
   final DateTime createdAt;
   final DateTime updatedAt;
   final int syncVersion;
+  final double pageWidth;
+  final double pageHeight;
 
   const NotebookMeta({
     required this.id,
@@ -11,12 +13,16 @@ class NotebookMeta {
     required this.createdAt,
     required this.updatedAt,
     this.syncVersion = 0,
+    required this.pageWidth,
+    required this.pageHeight,
   });
 
   NotebookMeta copyWith({
     String? name,
     DateTime? updatedAt,
     int? syncVersion,
+    double? pageWidth,
+    double? pageHeight,
   }) {
     return NotebookMeta(
       id: id,
@@ -24,6 +30,8 @@ class NotebookMeta {
       createdAt: createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
       syncVersion: syncVersion ?? this.syncVersion,
+      pageWidth: pageWidth ?? this.pageWidth,
+      pageHeight: pageHeight ?? this.pageHeight,
     );
   }
 
@@ -34,6 +42,8 @@ class NotebookMeta {
       'createdAt': createdAt.millisecondsSinceEpoch,
       'updatedAt': updatedAt.millisecondsSinceEpoch,
       'syncVersion': syncVersion,
+      'pageWidth': pageWidth,
+      'pageHeight': pageHeight,
     };
   }
 
@@ -44,6 +54,8 @@ class NotebookMeta {
       createdAt: DateTime.fromMillisecondsSinceEpoch(map['createdAt'] as int),
       updatedAt: DateTime.fromMillisecondsSinceEpoch(map['updatedAt'] as int),
       syncVersion: map['syncVersion'] as int,
+      pageWidth: (map['pageWidth'] as num).toDouble(),
+      pageHeight: (map['pageHeight'] as num).toDouble(),
     );
   }
 }

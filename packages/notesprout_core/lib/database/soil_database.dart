@@ -30,7 +30,9 @@ class SoilDatabase {
             name TEXT NOT NULL,
             createdAt INTEGER NOT NULL,
             updatedAt INTEGER NOT NULL,
-            syncVersion INTEGER NOT NULL DEFAULT 0
+            syncVersion INTEGER NOT NULL DEFAULT 0,
+            pageWidth REAL NOT NULL,
+            pageHeight REAL NOT NULL
           )
         ''');
 
@@ -86,7 +88,11 @@ class SoilDatabase {
   // Notebook meta
   // ---------------------------------------------------------------------------
 
-  Future<void> initializeNotebook(String name) async {
+  Future<void> initializeNotebook(
+    String name, {
+    required double pageWidth,
+    required double pageHeight,
+  }) async {
     final db = await _database;
     final now = DateTime.now();
 
@@ -95,6 +101,8 @@ class SoilDatabase {
       name: name,
       createdAt: now,
       updatedAt: now,
+      pageWidth: pageWidth,
+      pageHeight: pageHeight,
     );
     await db.insert('notebook_meta', meta.toMap());
 
@@ -103,8 +111,8 @@ class SoilDatabase {
       createdAt: now,
       updatedAt: now,
       pageNumber: 1,
-      width: 1404,
-      height: 1872,
+      width: pageWidth,
+      height: pageHeight,
     );
     await db.insert('pages', page.toMap());
 

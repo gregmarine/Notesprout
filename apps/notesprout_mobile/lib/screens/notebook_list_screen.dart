@@ -109,11 +109,17 @@ class _NotebookListScreenState extends State<NotebookListScreen> {
     final name = controller.text.trim();
     if (name.isEmpty) return;
 
+    final size = MediaQuery.of(context).size;
+
     final folderPath = p.join(_notesDir, name);
     await Directory(folderPath).create(recursive: true);
 
     final db = SoilDatabase(p.join(folderPath, _soilFile));
-    await db.initializeNotebook(name);
+    await db.initializeNotebook(
+      name,
+      pageWidth: size.width,
+      pageHeight: size.height,
+    );
     await db.close();
 
     await _loadNotebooks();
