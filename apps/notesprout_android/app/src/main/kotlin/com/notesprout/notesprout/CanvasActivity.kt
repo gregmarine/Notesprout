@@ -34,13 +34,12 @@ import com.notesprout.notesprout.data.PageModel
 import com.notesprout.notesprout.data.SoilDatabase
 import com.notesprout.notesprout.data.StrokeModel
 import com.notesprout.notesprout.data.StrokePoint
+import com.notesprout.notesprout.device.DrawingEngine
+import com.notesprout.notesprout.device.DrawingEngineCallback
+import com.notesprout.notesprout.device.DrawingEngineFactory
+import com.notesprout.notesprout.device.TouchPointData
 import com.notesprout.notesprout.undo.UndoAction
 import com.notesprout.notesprout.undo.UndoStack
-import com.onyx.android.sdk.api.device.epd.EpdController
-import com.onyx.android.sdk.data.note.TouchPoint
-import com.onyx.android.sdk.pen.RawInputCallback
-import com.onyx.android.sdk.pen.TouchHelper
-import com.onyx.android.sdk.pen.data.TouchPointList
 import java.util.UUID
 import kotlin.math.abs
 import kotlin.math.sqrt
@@ -59,8 +58,8 @@ class CanvasActivity : AppCompatActivity() {
     private enum class ToolMode { PEN, ERASER }
 
     private lateinit var surfaceView: SurfaceView
-    private lateinit var touchHelper: TouchHelper
-    private var touchHelperInitialized = false
+    private lateinit var drawingEngine: DrawingEngine
+    private var engineInitialized = false
     private var surfaceReady = false
 
     private var folderPath: String = ""
@@ -74,14 +73,11 @@ class CanvasActivity : AppCompatActivity() {
     private var committedBitmap: Bitmap? = null
     private var committedCanvas: Canvas? = null
 
-    // In-memory stroke list — all mutations on the main thread
     private val strokes = mutableListOf<StrokeModel>()
 
-    // Page state
     private val pages = mutableListOf<PageModel>()
     private var currentPageIndex = 0
 
-    // Two-finger swipe detection
     private var trackingTwoFingerSwipe = false
     private var twoFingerSwipeStartX = 0f
     private var twoFingerSwipeStartTime = 0L
@@ -97,7 +93,6 @@ class CanvasActivity : AppCompatActivity() {
 
     private val activePoints = mutableListOf<StrokePoint>()
 
-    // Collects all strokes erased during a single eraser drag gesture
     private val pendingErasedStrokes = mutableListOf<StrokeModel>()
 
     private val undoStack = UndoStack()
@@ -108,80 +103,117 @@ class CanvasActivity : AppCompatActivity() {
     private lateinit var redoBtn: ImageButton
     private lateinit var pageIndicator: TextView
 
-    private val callback = object : RawInputCallback() {
-        override fun onBeginRawDrawing(p0: Boolean, p1: TouchPoint) {
-            activePoints.clear()
-            activePoints.add(StrokePoint(
-                x = p1.x.toDouble(), y = p1.y.toDouble(),
-                pressure = p1.pressure.toDouble(), tilt = p1.tiltX.toDouble(),
-                timestamp = System.currentTimeMillis()
-            ))
-        }
-
-        override fun onEndRawDrawing(p0: Boolean, p1: TouchPoint) {}
-
-        override fun onRawDrawingTouchPointMoveReceived(p0: TouchPoint) {
-            activePoints.add(StrokePoint(
-                x = p0.x.toDouble(), y = p0.y.toDouble(),
-                pressure = p0.pressure.toDouble(), tilt = p0.tiltX.toDouble(),
-                timestamp = System.currentTimeMillis()
-            ))
-        }
-
-        override fun onRawDrawingTouchPointListReceived(p0: TouchPointList) {
-            Log.i(TAG, "onRawDrawingTouchPointListReceived: ${p0.size()} points, active=${activePoints.size}")
-            val pts = if (activePoints.size >= 2) {
-                activePoints.toList()
-            } else {
-                (0 until p0.size()).map { i ->
-                    val tp = p0.get(i)
-                    StrokePoint(
-                        x = tp.x.toDouble(), y = tp.y.toDouble(),
-                        pressure = tp.pressure.toDouble(), tilt = tp.tiltX.toDouble(),
-                        timestamp = System.currentTimeMillis()
-                    )
-                }
-            }
-            activePoints.clear()
-            if (pts.size < 2) return
-            val lid = layerId ?: return
-
-            val now = System.currentTimeMillis()
-            val stroke = StrokeModel(
-                id = UUID.randomUUID().toString(),
-                parentId = lid,
-                createdAt = now,
-                updatedAt = now,
-                points = pts,
-                color = Color.BLACK,
-                width = 3.0
-            )
-
+    private val engineCallback = object : DrawingEngineCallback {
+        override fun onStrokeStarted(x: Float, y: Float) {
             runOnUiThread {
+                activePoints.clear()
+                activePoints.add(StrokePoint(
+                    x = x.toDouble(), y = y.toDouble(),
+                    pressure = 0.0, tilt = 0.0,
+                    timestamp = System.currentTimeMillis()
+                ))
+            }
+        }
+
+        override fun onStrokePoint(x: Float, y: Float, pressure: Float, tilt: Float) {
+            runOnUiThread {
+                activePoints.add(StrokePoint(
+                    x = x.toDouble(), y = y.toDouble(),
+                    pressure = pressure.toDouble(), tilt = tilt.toDouble(),
+                    timestamp = System.currentTimeMillis()
+                ))
+            }
+        }
+
+        override fun onActiveStrokeUpdated() {
+            if (drawingEngine.supportsLivePreview) {
+                blitBitmapWithActivePath()
+            }
+        }
+
+        override fun onStrokeEnded(points: List<TouchPointData>) {
+            runOnUiThread {
+                activePoints.clear()
+                if (points.size < 2) return@runOnUiThread
+                val lid = layerId ?: return@runOnUiThread
+
+                val now = System.currentTimeMillis()
+                val stroke = StrokeModel(
+                    id = UUID.randomUUID().toString(),
+                    parentId = lid,
+                    createdAt = now,
+                    updatedAt = now,
+                    points = points.map {
+                        StrokePoint(
+                            x = it.x.toDouble(), y = it.y.toDouble(),
+                            pressure = it.pressure.toDouble(), tilt = it.tilt.toDouble(),
+                            timestamp = it.timestamp
+                        )
+                    },
+                    color = Color.BLACK,
+                    width = 3.0
+                )
+
                 strokes.add(stroke)
                 drawStrokeToBitmap(stroke)
                 undoStack.push(UndoAction.DrawStroke(stroke))
                 updateUndoRedoButtons()
                 blitBitmapToSurface()
-                // Cycle raw drawing so the e-ink compositor refreshes the full screen
-                // (including toolbar) — without this, the ONYX SDK's direct framebuffer
-                // writes suppress the Android view hierarchy refresh entirely.
-                resetRawDrawing()
-            }
+                drawingEngine.resetDrawing()
 
-            Thread {
-                try {
-                    db?.addStroke(stroke)
-                } catch (e: Exception) {
-                    Log.e(TAG, "Failed to save stroke", e)
-                }
-            }.start()
+                Thread {
+                    try {
+                        db?.addStroke(stroke)
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Failed to save stroke", e)
+                    }
+                }.start()
+            }
         }
 
-        override fun onBeginRawErasing(p0: Boolean, p1: TouchPoint) {}
-        override fun onEndRawErasing(p0: Boolean, p1: TouchPoint) {}
-        override fun onRawErasingTouchPointMoveReceived(p0: TouchPoint) {}
-        override fun onRawErasingTouchPointListReceived(p0: TouchPointList) {}
+        override fun onEraserMoved(x: Float, y: Float) {
+            val sx = x.toDouble()
+            val sy = y.toDouble()
+            val threshold = eraserThresholdPx.toDouble()
+            val toDelete = mutableListOf<StrokeModel>()
+
+            for (stroke in strokes) {
+                for (pt in stroke.points) {
+                    val dx = pt.x - sx
+                    val dy = pt.y - sy
+                    if (sqrt(dx * dx + dy * dy) < threshold) {
+                        toDelete.add(stroke)
+                        break
+                    }
+                }
+            }
+
+            if (toDelete.isNotEmpty()) {
+                strokes.removeAll(toDelete.toSet())
+                pendingErasedStrokes.addAll(toDelete)
+                val snapshot = toDelete.toList()
+                val dbRef = db
+                Thread {
+                    snapshot.forEach { stroke ->
+                        try {
+                            dbRef?.deleteStroke(stroke.id)
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Failed to delete stroke ${stroke.id}", e)
+                        }
+                    }
+                }.start()
+                rebuildBitmap()
+                blitBitmapToSurface()
+            }
+        }
+
+        override fun onEraserEnded() {
+            if (pendingErasedStrokes.isNotEmpty()) {
+                undoStack.push(UndoAction.EraseStrokes(pendingErasedStrokes.toList()))
+                pendingErasedStrokes.clear()
+                updateUndoRedoButtons()
+            }
+        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -198,6 +230,8 @@ class CanvasActivity : AppCompatActivity() {
         val density = resources.displayMetrics.density
         eraserThresholdPx = ERASER_THRESHOLD_DP * density
         swipeMinDistancePx = SWIPE_MIN_DISTANCE_DP * density
+
+        drawingEngine = DrawingEngineFactory.create()
 
         supportActionBar?.hide()
 
@@ -275,18 +309,15 @@ class CanvasActivity : AppCompatActivity() {
                 Log.i(TAG, "surfaceChanged: ${width}x${height}")
                 if (width == 0 || height == 0) return
 
-                if (!touchHelperInitialized) {
-                    touchHelperInitialized = true
+                if (!engineInitialized) {
+                    engineInitialized = true
                     initBitmap(width, height)
                     loadStrokesFromDb()
-                    initTouchHelper(width, height)
-                } else if (::touchHelper.isInitialized) {
-                    updateLimitRect()
+                    drawingEngine.initialize(surfaceView, engineCallback)
+                } else {
+                    drawingEngine.updateLimitRect(getUsableLimitRect())
                     if (currentMode == ToolMode.PEN) {
-                        EpdController.enterScribbleMode(surfaceView)
-                        touchHelper.setRawDrawingEnabled(false)
-                        touchHelper.setRawDrawingEnabled(true)
-                        touchHelper.setRawInputReaderEnable(true)
+                        drawingEngine.resetDrawing()
                     }
                     blitBitmapToSurface()
                 }
@@ -295,11 +326,7 @@ class CanvasActivity : AppCompatActivity() {
             override fun surfaceDestroyed(holder: SurfaceHolder) {
                 Log.i(TAG, "surfaceDestroyed")
                 surfaceReady = false
-                if (::touchHelper.isInitialized) {
-                    touchHelper.setRawInputReaderEnable(false)
-                    touchHelper.setRawDrawingEnabled(false)
-                    EpdController.leaveScribbleMode(surfaceView)
-                }
+                drawingEngine.setDrawingEnabled(false)
             }
         })
 
@@ -342,7 +369,6 @@ class CanvasActivity : AppCompatActivity() {
         deletePageBtn.setOnClickListener { deletePageAction() }
         closeBtn.setOnClickListener { finish() }
 
-        // Initially dim undo/redo since stack is empty
         undoBtn.alpha = 0.4f
         redoBtn.alpha = 0.4f
 
@@ -421,76 +447,23 @@ class CanvasActivity : AppCompatActivity() {
             (8 * density).toInt(), (8 * density).toInt()
         )
 
+        activePoints.clear()
         if (mode == ToolMode.PEN) {
             pendingErasedStrokes.clear()
-        }
-
-        if (::touchHelper.isInitialized) {
-            when (mode) {
-                ToolMode.PEN -> {
-                    activePoints.clear()
-                    EpdController.enterScribbleMode(surfaceView)
-                    touchHelper.setRawDrawingEnabled(true)
-                    touchHelper.setRawInputReaderEnable(true)
-                }
-                ToolMode.ERASER -> {
-                    activePoints.clear()
-                    touchHelper.setRawDrawingEnabled(false)
-                    EpdController.leaveScribbleMode(surfaceView)
-                }
-            }
+            drawingEngine.setDrawingEnabled(true)
+        } else {
+            drawingEngine.setEraserEnabled(true)
         }
     }
 
     private fun handleEraserTouch(ev: MotionEvent) {
         if (ev.getToolType(0) != MotionEvent.TOOL_TYPE_STYLUS) return
         when (ev.actionMasked) {
-            MotionEvent.ACTION_DOWN, MotionEvent.ACTION_MOVE -> {
-                val sx = ev.x.toDouble()
-                val sy = ev.y.toDouble()
-                val threshold = eraserThresholdPx.toDouble()
-                val toDelete = mutableListOf<StrokeModel>()
-
-                for (stroke in strokes) {
-                    for (pt in stroke.points) {
-                        val dx = pt.x - sx
-                        val dy = pt.y - sy
-                        if (sqrt(dx * dx + dy * dy) < threshold) {
-                            toDelete.add(stroke)
-                            break
-                        }
-                    }
-                }
-
-                if (toDelete.isNotEmpty()) {
-                    strokes.removeAll(toDelete.toSet())
-                    pendingErasedStrokes.addAll(toDelete)
-                    val snapshot = toDelete.toList()
-                    val dbRef = db
-                    Thread {
-                        snapshot.forEach { stroke ->
-                            try {
-                                dbRef?.deleteStroke(stroke.id)
-                            } catch (e: Exception) {
-                                Log.e(TAG, "Failed to delete stroke ${stroke.id}", e)
-                            }
-                        }
-                    }.start()
-                    rebuildBitmap()
-                    blitBitmapToSurface()
-                }
-            }
-            MotionEvent.ACTION_UP -> {
-                if (pendingErasedStrokes.isNotEmpty()) {
-                    undoStack.push(UndoAction.EraseStrokes(pendingErasedStrokes.toList()))
-                    pendingErasedStrokes.clear()
-                    updateUndoRedoButtons()
-                }
-            }
+            MotionEvent.ACTION_DOWN, MotionEvent.ACTION_MOVE -> engineCallback.onEraserMoved(ev.x, ev.y)
+            MotionEvent.ACTION_UP -> engineCallback.onEraserEnded()
         }
     }
 
-    // Returns true if a two-finger swipe was detected and consumed.
     private fun detectTwoFingerSwipe(ev: MotionEvent): Boolean {
         when (ev.actionMasked) {
             MotionEvent.ACTION_POINTER_DOWN -> {
@@ -526,12 +499,32 @@ class CanvasActivity : AppCompatActivity() {
     }
 
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
-        if (detectTwoFingerSwipe(ev)) return true
-        if (::touchHelper.isInitialized && currentMode == ToolMode.PEN) {
-            touchHelper.onTouchEvent(ev)
-        } else if (currentMode == ToolMode.ERASER) {
-            handleEraserTouch(ev)
+        val actionName = when (ev.actionMasked) {
+            MotionEvent.ACTION_DOWN -> "DOWN"
+            MotionEvent.ACTION_MOVE -> "MOVE"
+            MotionEvent.ACTION_UP -> "UP"
+            MotionEvent.ACTION_CANCEL -> "CANCEL"
+            MotionEvent.ACTION_POINTER_DOWN -> "POINTER_DOWN"
+            MotionEvent.ACTION_POINTER_UP -> "POINTER_UP"
+            else -> "OTHER(${ev.actionMasked})"
         }
+        val toolType = ev.getToolType(0)
+        Log.d("NSStylusDebug", "dispatchTouchEvent: action=$actionName toolType=$toolType pointers=${ev.pointerCount} x=%.1f y=%.1f mode=$currentMode".format(ev.x, ev.y))
+
+        if (detectTwoFingerSwipe(ev)) {
+            Log.d("NSStylusDebug", "  → consumed by two-finger swipe detector")
+            return true
+        }
+        if (currentMode == ToolMode.PEN) {
+            Log.d("NSStylusDebug", "  → PEN mode: calling drawingEngine.onTouchEvent (engine=${drawingEngine::class.simpleName})")
+            drawingEngine.onTouchEvent(ev)
+        } else if (currentMode == ToolMode.ERASER) {
+            Log.d("NSStylusDebug", "  → ERASER mode: calling handleEraserTouch")
+            handleEraserTouch(ev)
+        } else {
+            Log.d("NSStylusDebug", "  → no mode match, passing to super only")
+        }
+        Log.d("NSStylusDebug", "  → calling super.dispatchTouchEvent (SurfaceView touch listener will fire here)")
         return super.dispatchTouchEvent(ev)
     }
 
@@ -546,12 +539,6 @@ class CanvasActivity : AppCompatActivity() {
         val bottom = frame.bottom - loc[1]
         Log.i(TAG, "usableLimitRect: [$left,$top,$right,$bottom]")
         return Rect(left, top, right, bottom)
-    }
-
-    private fun updateLimitRect() {
-        if (::touchHelper.isInitialized) {
-            touchHelper.setLimitRect(listOf(getUsableLimitRect()), emptyList())
-        }
     }
 
     private fun initBitmap(width: Int, height: Int) {
@@ -617,10 +604,8 @@ class CanvasActivity : AppCompatActivity() {
                 rebuildBitmap()
                 blitBitmapToSurface()
                 updatePageIndicator()
-                if (::touchHelper.isInitialized && currentMode == ToolMode.PEN) {
-                    touchHelper.setRawDrawingEnabled(false)
-                    touchHelper.setRawDrawingEnabled(true)
-                    touchHelper.setRawInputReaderEnable(true)
+                if (currentMode == ToolMode.PEN) {
+                    drawingEngine.resetDrawing()
                 }
             }
         }.start()
@@ -707,17 +692,6 @@ class CanvasActivity : AppCompatActivity() {
         }.start()
     }
 
-    // Clears the ONYX SDK stroke overlay so the committed bitmap becomes the ground truth.
-    // Must be called on the main thread after rebuildBitmap()/blitBitmapToSurface() whenever
-    // strokes are added or removed outside of a normal page load (i.e. undo/redo).
-    private fun resetRawDrawing() {
-        if (::touchHelper.isInitialized && currentMode == ToolMode.PEN) {
-            touchHelper.setRawDrawingEnabled(false)
-            touchHelper.setRawDrawingEnabled(true)
-            touchHelper.setRawInputReaderEnable(true)
-        }
-    }
-
     private fun performUndo() {
         val action = undoStack.undo() ?: return
         updateUndoRedoButtons()
@@ -734,7 +708,7 @@ class CanvasActivity : AppCompatActivity() {
                 strokes.remove(stroke)
                 rebuildBitmap()
                 blitBitmapToSurface()
-                resetRawDrawing()
+                drawingEngine.resetDrawing()
             }
 
             is UndoAction.EraseStrokes -> {
@@ -751,7 +725,7 @@ class CanvasActivity : AppCompatActivity() {
                 strokes.addAll(onCurrentPage)
                 rebuildBitmap()
                 blitBitmapToSurface()
-                resetRawDrawing()
+                drawingEngine.resetDrawing()
             }
 
             is UndoAction.AddPage -> {
@@ -824,7 +798,7 @@ class CanvasActivity : AppCompatActivity() {
                 }
                 rebuildBitmap()
                 blitBitmapToSurface()
-                resetRawDrawing()
+                drawingEngine.resetDrawing()
             }
 
             is UndoAction.EraseStrokes -> {
@@ -839,7 +813,7 @@ class CanvasActivity : AppCompatActivity() {
                 strokes.removeAll(toErase.toSet())
                 rebuildBitmap()
                 blitBitmapToSurface()
-                resetRawDrawing()
+                drawingEngine.resetDrawing()
             }
 
             is UndoAction.AddPage -> {
@@ -923,48 +897,47 @@ class CanvasActivity : AppCompatActivity() {
         }
     }
 
-    private fun initTouchHelper(width: Int, height: Int) {
-        Log.i(TAG, "initTouchHelper: surface ${width}x${height}")
-        val limitRect = getUsableLimitRect()
-        touchHelper = TouchHelper.create(surfaceView, TouchHelper.FEATURE_SF_TOUCH_RENDER, callback)
-            .setStrokeWidth(3.0f)
-            .setStrokeColor(Color.BLACK)
-            .setLimitRect(listOf(limitRect), emptyList())
-            .openRawDrawing()
-
-        Log.i(TAG, "openRawDrawing done — isRawDrawingCreated=${touchHelper.isRawDrawingCreated()}")
-        EpdController.enterScribbleMode(surfaceView)
-        touchHelper.setRawDrawingEnabled(true)
-        Log.i(TAG, "setRawDrawingEnabled(true) — inputEnabled=${touchHelper.isRawDrawingInputEnabled()} renderEnabled=${touchHelper.isRawDrawingRenderEnabled()}")
-        touchHelper.setRawInputReaderEnable(true)
-        Log.i(TAG, "TouchHelper init complete")
+    private fun blitBitmapWithActivePath() {
+        if (activePoints.size < 2) {
+            blitBitmapToSurface()
+            return
+        }
+        val bmp = committedBitmap ?: return
+        if (!surfaceReady) return
+        val canvas = surfaceView.holder.lockCanvas() ?: return
+        try {
+            canvas.drawBitmap(bmp, 0f, 0f, null)
+            val path = Path().apply {
+                moveTo(activePoints[0].x.toFloat(), activePoints[0].y.toFloat())
+                for (i in 1 until activePoints.size) {
+                    lineTo(activePoints[i].x.toFloat(), activePoints[i].y.toFloat())
+                }
+            }
+            canvas.drawPath(path, strokePaint)
+        } finally {
+            surfaceView.holder.unlockCanvasAndPost(canvas)
+        }
     }
 
     override fun onResume() {
         super.onResume()
-        if (::touchHelper.isInitialized && surfaceReady && currentMode == ToolMode.PEN) {
-            Log.i(TAG, "onResume — re-entering scribble mode")
-            EpdController.enterScribbleMode(surfaceView)
-            touchHelper.setRawDrawingEnabled(true)
-            touchHelper.setRawInputReaderEnable(true)
+        if (surfaceReady && currentMode == ToolMode.PEN) {
+            Log.i(TAG, "onResume — re-entering drawing mode")
+            drawingEngine.onResume()
             blitBitmapToSurface()
         }
     }
 
     override fun onPause() {
         super.onPause()
-        if (::touchHelper.isInitialized) {
-            Log.i(TAG, "onPause — leaving scribble mode")
-            touchHelper.setRawInputReaderEnable(false)
-            touchHelper.setRawDrawingEnabled(false)
-            EpdController.leaveScribbleMode(surfaceView)
-        }
+        Log.i(TAG, "onPause — pausing drawing engine")
+        drawingEngine.onPause()
     }
 
     override fun onDestroy() {
         super.onDestroy()
         undoStack.clear()
-        if (::touchHelper.isInitialized) touchHelper.closeRawDrawing()
+        drawingEngine.onDestroy()
         db?.close()
         committedBitmap?.recycle()
     }
