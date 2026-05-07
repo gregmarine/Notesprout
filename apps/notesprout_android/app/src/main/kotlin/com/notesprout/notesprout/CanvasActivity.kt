@@ -34,6 +34,8 @@ import com.notesprout.notesprout.data.PageModel
 import com.notesprout.notesprout.data.SoilDatabase
 import com.notesprout.notesprout.data.StrokeModel
 import com.notesprout.notesprout.data.StrokePoint
+import com.notesprout.notesprout.undo.UndoAction
+import com.notesprout.notesprout.undo.UndoStack
 import com.onyx.android.sdk.api.device.epd.EpdController
 import com.onyx.android.sdk.data.note.TouchPoint
 import com.onyx.android.sdk.pen.RawInputCallback
@@ -95,8 +97,15 @@ class CanvasActivity : AppCompatActivity() {
 
     private val activePoints = mutableListOf<StrokePoint>()
 
+    // Collects all strokes erased during a single eraser drag gesture
+    private val pendingErasedStrokes = mutableListOf<StrokeModel>()
+
+    private val undoStack = UndoStack()
+
     private lateinit var penBtn: ImageButton
     private lateinit var eraserBtn: ImageButton
+    private lateinit var undoBtn: ImageButton
+    private lateinit var redoBtn: ImageButton
     private lateinit var pageIndicator: TextView
 
     private val callback = object : RawInputCallback() {
@@ -151,7 +160,13 @@ class CanvasActivity : AppCompatActivity() {
             runOnUiThread {
                 strokes.add(stroke)
                 drawStrokeToBitmap(stroke)
+                undoStack.push(UndoAction.DrawStroke(stroke))
+                updateUndoRedoButtons()
                 blitBitmapToSurface()
+                // Cycle raw drawing so the e-ink compositor refreshes the full screen
+                // (including toolbar) — without this, the ONYX SDK's direct framebuffer
+                // writes suppress the Android view hierarchy refresh entirely.
+                resetRawDrawing()
             }
 
             Thread {
@@ -292,8 +307,8 @@ class CanvasActivity : AppCompatActivity() {
     }
 
     private fun buildToolbar(density: Float): LinearLayout {
-        val btnSize = (48 * density).toInt()
-        val btnPadding = (10 * density).toInt()
+        val btnSize = (40 * density).toInt()
+        val btnPadding = (8 * density).toInt()
         val cornerRadius = 12 * density
 
         val toolbarBg = GradientDrawable().apply {
@@ -311,17 +326,25 @@ class CanvasActivity : AppCompatActivity() {
                 setColorFilter(Color.BLACK)
             }
 
+        undoBtn = makeBtn(R.drawable.ic_undo, "Undo")
+        redoBtn = makeBtn(R.drawable.ic_redo, "Redo")
         penBtn = makeBtn(R.drawable.ic_pen, "Pen")
         eraserBtn = makeBtn(R.drawable.ic_eraser, "Eraser")
         val addPageBtn = makeBtn(R.drawable.ic_add_page, "Add Page")
         val deletePageBtn = makeBtn(R.drawable.ic_delete_page, "Delete Page")
         val closeBtn = makeBtn(android.R.drawable.ic_menu_close_clear_cancel, "Close")
 
+        undoBtn.setOnClickListener { performUndo() }
+        redoBtn.setOnClickListener { performRedo() }
         penBtn.setOnClickListener { setToolMode(ToolMode.PEN) }
         eraserBtn.setOnClickListener { setToolMode(ToolMode.ERASER) }
         addPageBtn.setOnClickListener { addPageAction() }
         deletePageBtn.setOnClickListener { deletePageAction() }
         closeBtn.setOnClickListener { finish() }
+
+        // Initially dim undo/redo since stack is empty
+        undoBtn.alpha = 0.4f
+        redoBtn.alpha = 0.4f
 
         return LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -337,12 +360,19 @@ class CanvasActivity : AppCompatActivity() {
                 (4 * density).toInt(), (4 * density).toInt(),
                 (4 * density).toInt(), (4 * density).toInt()
             )
+            addView(undoBtn, LinearLayout.LayoutParams(btnSize, btnSize))
+            addView(redoBtn, LinearLayout.LayoutParams(btnSize, btnSize))
             addView(penBtn, LinearLayout.LayoutParams(btnSize, btnSize))
             addView(eraserBtn, LinearLayout.LayoutParams(btnSize, btnSize))
             addView(addPageBtn, LinearLayout.LayoutParams(btnSize, btnSize))
             addView(deletePageBtn, LinearLayout.LayoutParams(btnSize, btnSize))
             addView(closeBtn, LinearLayout.LayoutParams(btnSize, btnSize))
         }
+    }
+
+    private fun updateUndoRedoButtons() {
+        undoBtn.alpha = if (undoStack.canUndo()) 1.0f else 0.4f
+        redoBtn.alpha = if (undoStack.canRedo()) 1.0f else 0.4f
     }
 
     private fun buildPageIndicator(density: Float): TextView {
@@ -382,14 +412,18 @@ class CanvasActivity : AppCompatActivity() {
         val density = resources.displayMetrics.density
         penBtn.background = if (mode == ToolMode.PEN) makeActiveBg() else null
         penBtn.setPadding(
-            (10 * density).toInt(), (10 * density).toInt(),
-            (10 * density).toInt(), (10 * density).toInt()
+            (8 * density).toInt(), (8 * density).toInt(),
+            (8 * density).toInt(), (8 * density).toInt()
         )
         eraserBtn.background = if (mode == ToolMode.ERASER) makeActiveBg() else null
         eraserBtn.setPadding(
-            (10 * density).toInt(), (10 * density).toInt(),
-            (10 * density).toInt(), (10 * density).toInt()
+            (8 * density).toInt(), (8 * density).toInt(),
+            (8 * density).toInt(), (8 * density).toInt()
         )
+
+        if (mode == ToolMode.PEN) {
+            pendingErasedStrokes.clear()
+        }
 
         if (::touchHelper.isInitialized) {
             when (mode) {
@@ -430,6 +464,7 @@ class CanvasActivity : AppCompatActivity() {
 
                 if (toDelete.isNotEmpty()) {
                     strokes.removeAll(toDelete.toSet())
+                    pendingErasedStrokes.addAll(toDelete)
                     val snapshot = toDelete.toList()
                     val dbRef = db
                     Thread {
@@ -443,6 +478,13 @@ class CanvasActivity : AppCompatActivity() {
                     }.start()
                     rebuildBitmap()
                     blitBitmapToSurface()
+                }
+            }
+            MotionEvent.ACTION_UP -> {
+                if (pendingErasedStrokes.isNotEmpty()) {
+                    undoStack.push(UndoAction.EraseStrokes(pendingErasedStrokes.toList()))
+                    pendingErasedStrokes.clear()
+                    updateUndoRedoButtons()
                 }
             }
         }
@@ -602,12 +644,17 @@ class CanvasActivity : AppCompatActivity() {
         Thread {
             try {
                 val newPage = dbRef.addPage(meta.pageWidth, meta.pageHeight)
+                val newLayer = dbRef.getFirstLayer(newPage.id)
                 val allPages = dbRef.getAllPages()
                 runOnUiThread {
                     pages.clear()
                     pages.addAll(allPages)
                     currentPageIndex = pages.indexOfFirst { it.id == newPage.id }.coerceAtLeast(0)
                     loadPage(pages[currentPageIndex])
+                    if (newLayer != null) {
+                        undoStack.push(UndoAction.AddPage(newPage, newLayer))
+                        updateUndoRedoButtons()
+                    }
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "addPageAction failed", e)
@@ -624,7 +671,7 @@ class CanvasActivity : AppCompatActivity() {
         val pageNum = currentPageIndex + 1
         val dialog = AlertDialog.Builder(this)
             .setTitle("Delete Page")
-            .setMessage("Are you sure you want to delete page $pageNum? This cannot be undone.")
+            .setMessage("Are you sure you want to delete page $pageNum?")
             .setNegativeButton("Cancel", null)
             .setPositiveButton("Delete") { _, _ ->
                 performDeletePage(page)
@@ -639,10 +686,16 @@ class CanvasActivity : AppCompatActivity() {
         val targetIndex = if (currentPageIndex > 0) currentPageIndex - 1 else 1
         Thread {
             try {
+                val layer = dbRef.getFirstLayer(page.id)
+                val strokesAlive = if (layer != null) dbRef.getNonDeletedStrokesForLayer(layer.id) else emptyList()
                 dbRef.softDeleteLayersForPage(page.id)
                 dbRef.deletePage(page.id)
                 val allPages = dbRef.getAllPages()
                 runOnUiThread {
+                    if (layer != null) {
+                        undoStack.push(UndoAction.DeletePage(page, layer, strokesAlive))
+                        updateUndoRedoButtons()
+                    }
                     pages.clear()
                     pages.addAll(allPages)
                     currentPageIndex = targetIndex.coerceIn(0, pages.size - 1)
@@ -652,6 +705,193 @@ class CanvasActivity : AppCompatActivity() {
                 Log.e(TAG, "performDeletePage failed", e)
             }
         }.start()
+    }
+
+    // Clears the ONYX SDK stroke overlay so the committed bitmap becomes the ground truth.
+    // Must be called on the main thread after rebuildBitmap()/blitBitmapToSurface() whenever
+    // strokes are added or removed outside of a normal page load (i.e. undo/redo).
+    private fun resetRawDrawing() {
+        if (::touchHelper.isInitialized && currentMode == ToolMode.PEN) {
+            touchHelper.setRawDrawingEnabled(false)
+            touchHelper.setRawDrawingEnabled(true)
+            touchHelper.setRawInputReaderEnable(true)
+        }
+    }
+
+    private fun performUndo() {
+        val action = undoStack.undo() ?: return
+        updateUndoRedoButtons()
+        val dbRef = db ?: return
+
+        when (action) {
+            is UndoAction.DrawStroke -> {
+                val stroke = action.stroke
+                Thread {
+                    try { dbRef.deleteStroke(stroke.id) } catch (e: Exception) {
+                        Log.e(TAG, "Undo DrawStroke failed", e)
+                    }
+                }.start()
+                strokes.remove(stroke)
+                rebuildBitmap()
+                blitBitmapToSurface()
+                resetRawDrawing()
+            }
+
+            is UndoAction.EraseStrokes -> {
+                val toRestore = action.strokes
+                Thread {
+                    toRestore.forEach { stroke ->
+                        try { dbRef.restoreStroke(stroke.id) } catch (e: Exception) {
+                            Log.e(TAG, "Undo EraseStrokes failed for ${stroke.id}", e)
+                        }
+                    }
+                }.start()
+                val currentLayerId = layerId
+                val onCurrentPage = toRestore.filter { it.parentId == currentLayerId }
+                strokes.addAll(onCurrentPage)
+                rebuildBitmap()
+                blitBitmapToSurface()
+                resetRawDrawing()
+            }
+
+            is UndoAction.AddPage -> {
+                val page = action.page
+                val wasOnThisPage = pages.getOrNull(currentPageIndex)?.id == page.id
+                val fallbackIndex = if (wasOnThisPage) (currentPageIndex - 1).coerceAtLeast(0) else currentPageIndex
+                Thread {
+                    try {
+                        dbRef.softDeleteLayersForPage(page.id)
+                        dbRef.deletePage(page.id)
+                        val allPages = dbRef.getAllPages()
+                        runOnUiThread {
+                            pages.clear()
+                            pages.addAll(allPages)
+                            currentPageIndex = fallbackIndex.coerceIn(0, pages.size - 1)
+                            loadPage(pages[currentPageIndex])
+                            updatePageIndicator()
+                        }
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Undo AddPage failed", e)
+                    }
+                }.start()
+            }
+
+            is UndoAction.DeletePage -> {
+                val page = action.page
+                val layer = action.layer
+                val strokesAlive = action.strokesAliveAtDeletion
+                Thread {
+                    try {
+                        dbRef.restorePage(page.id)
+                        dbRef.restoreLayer(layer.id)
+                        strokesAlive.forEach { stroke ->
+                            try { dbRef.restoreStroke(stroke.id) } catch (e: Exception) {
+                                Log.e(TAG, "Undo DeletePage restoreStroke failed for ${stroke.id}", e)
+                            }
+                        }
+                        val allPages = dbRef.getAllPages()
+                        runOnUiThread {
+                            pages.clear()
+                            pages.addAll(allPages)
+                            currentPageIndex = pages.indexOfFirst { it.id == page.id }.coerceAtLeast(0)
+                            loadPage(pages[currentPageIndex])
+                            updatePageIndicator()
+                        }
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Undo DeletePage failed", e)
+                    }
+                }.start()
+            }
+        }
+    }
+
+    private fun performRedo() {
+        val action = undoStack.redo() ?: return
+        updateUndoRedoButtons()
+        val dbRef = db ?: return
+
+        when (action) {
+            is UndoAction.DrawStroke -> {
+                val stroke = action.stroke
+                Thread {
+                    try { dbRef.restoreStroke(stroke.id) } catch (e: Exception) {
+                        Log.e(TAG, "Redo DrawStroke failed", e)
+                    }
+                }.start()
+                val currentLayerId = layerId
+                if (stroke.parentId == currentLayerId) {
+                    strokes.add(stroke)
+                }
+                rebuildBitmap()
+                blitBitmapToSurface()
+                resetRawDrawing()
+            }
+
+            is UndoAction.EraseStrokes -> {
+                val toErase = action.strokes
+                Thread {
+                    toErase.forEach { stroke ->
+                        try { dbRef.deleteStroke(stroke.id) } catch (e: Exception) {
+                            Log.e(TAG, "Redo EraseStrokes failed for ${stroke.id}", e)
+                        }
+                    }
+                }.start()
+                strokes.removeAll(toErase.toSet())
+                rebuildBitmap()
+                blitBitmapToSurface()
+                resetRawDrawing()
+            }
+
+            is UndoAction.AddPage -> {
+                val page = action.page
+                val layer = action.layer
+                Thread {
+                    try {
+                        dbRef.restorePage(page.id)
+                        dbRef.restoreLayer(layer.id)
+                        val allPages = dbRef.getAllPages()
+                        runOnUiThread {
+                            pages.clear()
+                            pages.addAll(allPages)
+                            currentPageIndex = pages.indexOfFirst { it.id == page.id }.coerceAtLeast(0)
+                            loadPage(pages[currentPageIndex])
+                            updatePageIndicator()
+                        }
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Redo AddPage failed", e)
+                    }
+                }.start()
+            }
+
+            is UndoAction.DeletePage -> {
+                val page = action.page
+                val layer = action.layer
+                val strokesAlive = action.strokesAliveAtDeletion
+                val wasOnThisPage = pages.getOrNull(currentPageIndex)?.id == page.id
+                val fallbackIndex = if (wasOnThisPage) (currentPageIndex - 1).coerceAtLeast(0) else currentPageIndex
+                Thread {
+                    try {
+                        strokesAlive.forEach { stroke ->
+                            try { dbRef.deleteStroke(stroke.id) } catch (e: Exception) {
+                                Log.e(TAG, "Redo DeletePage deleteStroke failed for ${stroke.id}", e)
+                            }
+                        }
+                        dbRef.deleteLayer(layer.id)
+                        dbRef.deletePage(page.id)
+                        val allPages = dbRef.getAllPages()
+                        runOnUiThread {
+                            pages.clear()
+                            pages.addAll(allPages)
+                            currentPageIndex = fallbackIndex.coerceIn(0, pages.size - 1)
+                            loadPage(pages[currentPageIndex])
+                            updatePageIndicator()
+                        }
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Redo DeletePage failed", e)
+                    }
+                }.start()
+            }
+        }
     }
 
     private fun drawStrokeToBitmap(stroke: StrokeModel) {
@@ -723,6 +963,7 @@ class CanvasActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
+        undoStack.clear()
         if (::touchHelper.isInitialized) touchHelper.closeRawDrawing()
         db?.close()
         committedBitmap?.recycle()

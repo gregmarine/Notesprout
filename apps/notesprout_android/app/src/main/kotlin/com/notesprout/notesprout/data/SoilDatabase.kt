@@ -249,6 +249,45 @@ class SoilDatabase(private val filePath: String) {
         d.update("strokes", cv, "id = ?", arrayOf(strokeId))
     }
 
+    fun deleteLayer(layerId: String) {
+        val d = db ?: return
+        val now = System.currentTimeMillis()
+        val cv = ContentValues().apply {
+            put("deletedAt", now)
+            put("updatedAt", now)
+        }
+        d.update("layers", cv, "id = ?", arrayOf(layerId))
+    }
+
+    fun restoreStroke(strokeId: String) {
+        val d = db ?: return
+        val cv = ContentValues().apply {
+            putNull("deletedAt")
+            put("updatedAt", System.currentTimeMillis())
+        }
+        d.update("strokes", cv, "id = ?", arrayOf(strokeId))
+    }
+
+    fun restorePage(pageId: String) {
+        val d = db ?: return
+        val cv = ContentValues().apply {
+            putNull("deletedAt")
+            put("updatedAt", System.currentTimeMillis())
+        }
+        d.update("pages", cv, "id = ?", arrayOf(pageId))
+    }
+
+    fun restoreLayer(layerId: String) {
+        val d = db ?: return
+        val cv = ContentValues().apply {
+            putNull("deletedAt")
+            put("updatedAt", System.currentTimeMillis())
+        }
+        d.update("layers", cv, "id = ?", arrayOf(layerId))
+    }
+
+    fun getNonDeletedStrokesForLayer(layerId: String): List<StrokeModel> = getStrokes(layerId)
+
     fun close() {
         db?.close()
         db = null
