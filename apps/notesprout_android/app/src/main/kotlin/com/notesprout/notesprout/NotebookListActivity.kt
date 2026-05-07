@@ -15,6 +15,7 @@ import android.view.WindowInsets
 import android.view.WindowInsetsController
 import android.widget.EditText
 import android.widget.TextView
+import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.ViewCompat
@@ -24,12 +25,14 @@ import androidx.recyclerview.widget.DividerItemDecoration
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.floatingactionbutton.FloatingActionButton
-import com.notesprout.notesprout.data.NotebookMeta
+import com.notesprout.notesprout.data.NotebookRegistry
+import com.notesprout.notesprout.data.RegistryEntry
 import com.notesprout.notesprout.data.SoilDatabase
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.UUID
 
 class NotebookListActivity : AppCompatActivity() {
 
@@ -39,11 +42,11 @@ class NotebookListActivity : AppCompatActivity() {
         private const val SOIL_FILE = "notebook.soil"
     }
 
-    data class NotebookEntry(val folderPath: String, val meta: NotebookMeta)
-
     private lateinit var recyclerView: RecyclerView
     private lateinit var adapter: NotebookAdapter
-    private val notebooks = mutableListOf<NotebookEntry>()
+    private lateinit var registry: NotebookRegistry
+    private val notebooks = mutableListOf<RegistryEntry>()
+    private var skippedWarningShown = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -73,6 +76,8 @@ class NotebookListActivity : AppCompatActivity() {
             view.setPadding(systemBars.left, systemBars.top, systemBars.right, systemBars.bottom)
             insets
         }
+
+        registry = NotebookRegistry(File("$NOTES_DIR/registry.json"))
 
         recyclerView = findViewById(R.id.recyclerView)
         recyclerView.layoutManager = LinearLayoutManager(this)
@@ -114,62 +119,70 @@ class NotebookListActivity : AppCompatActivity() {
         AlertDialog.Builder(this)
             .setTitle("Storage Permission Required")
             .setMessage(
-                "NoteSprout needs \"All files access\" to save your notebooks to " +
-                "/storage/emulated/0/Documents/NoteSprout.\n\n" +
-                "Tap OK to open Settings and grant the permission."
+                "NoteSprout needs full storage access to save and manage your notebooks in the " +
+                "Documents folder. This allows you to access your notebooks from file managers " +
+                "and back them up."
             )
+            .setCancelable(false)
             .setPositiveButton("Open Settings") { _, _ ->
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                     try {
-                        startActivity(Intent(
-                            Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
-                            Uri.parse("package:$packageName")
-                        ))
+                        startActivity(
+                            Intent(
+                                Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                                Uri.parse("package:$packageName")
+                            )
+                        )
                     } catch (e: Exception) {
                         Log.e(TAG, "Failed to open all-files-access settings", e)
                         startActivity(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION))
                     }
                 }
             }
-            .setNegativeButton("Cancel", null)
+            .setNegativeButton("Cancel") { _, _ ->
+                Toast.makeText(this, "NoteSprout requires storage access to function", Toast.LENGTH_LONG).show()
+                finish()
+            }
             .show()
     }
 
     private fun loadNotebooks() {
         val dir = File(NOTES_DIR)
-        Log.i(TAG, "loadNotebooks: scanning $NOTES_DIR (exists=${dir.exists()}, canRead=${dir.canRead()})")
-        if (!dir.exists()) {
-            val created = dir.mkdirs()
-            Log.i(TAG, "Created notes dir: $created")
-        }
+        Log.i(TAG, "loadNotebooks: dir=$NOTES_DIR exists=${dir.exists()}")
+        if (!dir.exists()) dir.mkdirs()
 
-        val entries = mutableListOf<NotebookEntry>()
-        dir.listFiles()?.filter { it.isDirectory }?.forEach { folder ->
-            val soilFile = File(folder, SOIL_FILE)
-            if (!soilFile.exists()) return@forEach
-            val db = SoilDatabase(soilFile.absolutePath)
-            try {
-                db.open()
-                val meta = db.getNotebookMeta() ?: run {
-                    Log.w(TAG, "No meta in ${folder.name}")
-                    return@forEach
-                }
-                entries.add(NotebookEntry(folder.absolutePath, meta))
+        Thread {
+            val result = try {
+                registry.reconcile(dir)
             } catch (e: Exception) {
-                Log.w(TAG, "Skipping corrupt notebook: ${folder.name}", e)
-            } finally {
-                db.close()
+                Log.e(TAG, "loadNotebooks: reconcile failed", e)
+                return@Thread
             }
-        }
 
-        Log.i(TAG, "loadNotebooks: found ${entries.size} notebooks")
-        entries.sortByDescending { it.meta.updatedAt }
-        notebooks.clear()
-        notebooks.addAll(entries)
-        adapter.notifyDataSetChanged()
+            if (result.orphansAdopted > 0) {
+                Log.i(TAG, "loadNotebooks: adopted ${result.orphansAdopted} orphan notebooks")
+            }
+            if (result.missingRemoved > 0) {
+                Log.i(TAG, "loadNotebooks: removed ${result.missingRemoved} missing registry entries")
+            }
+
+            val sorted = result.entries.sortedByDescending { it.updatedAt }
+            Log.i(TAG, "loadNotebooks: found ${sorted.size} notebooks")
+
+            runOnUiThread {
+                notebooks.clear()
+                notebooks.addAll(sorted)
+                adapter.notifyDataSetChanged()
+
+                if (result.skippedCount > 0 && !skippedWarningShown) {
+                    skippedWarningShown = true
+                    Toast.makeText(this, "Some notebooks could not be read", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }.start()
     }
 
-    private fun openNotebook(entry: NotebookEntry) {
+    private fun openNotebook(entry: RegistryEntry) {
         Log.i(TAG, "openNotebook: ${entry.folderPath}")
         val intent = Intent(this, CanvasActivity::class.java).apply {
             putExtra(CanvasActivity.EXTRA_FOLDER_PATH, entry.folderPath)
@@ -199,32 +212,44 @@ class NotebookListActivity : AppCompatActivity() {
         val soilPath = "$folderPath/$SOIL_FILE"
         Log.i(TAG, "createNotebook: name=$name folderPath=$folderPath")
 
-        try {
-            val folder = File(folderPath)
-            val folderCreated = folder.mkdirs()
-            Log.i(TAG, "mkdirs($folderPath) = $folderCreated, exists=${folder.exists()}, canWrite=${folder.canWrite()}")
+        Thread {
+            try {
+                val folder = File(folderPath)
+                val folderCreated = folder.mkdirs()
+                Log.i(TAG, "createNotebook: mkdirs=$folderCreated exists=${folder.exists()} canWrite=${folder.canWrite()}")
 
-            if (!folder.exists()) {
-                Log.e(TAG, "Folder does not exist after mkdirs — aborting")
-                showError("Could not create notebook folder. Check storage permission.")
-                return
+                if (!folder.exists()) {
+                    Log.e(TAG, "createNotebook: folder absent after mkdirs — aborting")
+                    runOnUiThread { showError("Could not create notebook folder. Check storage permission.") }
+                    return@Thread
+                }
+
+                val dm = resources.displayMetrics
+                Log.i(TAG, "createNotebook: opening DB at $soilPath, page=${dm.widthPixels}x${dm.heightPixels}")
+
+                val db = SoilDatabase(soilPath)
+                db.open()
+                db.initializeNotebook(name, dm.widthPixels.toDouble(), dm.heightPixels.toDouble())
+                val meta = db.getNotebookMeta()
+                db.close()
+
+                Log.i(TAG, "createNotebook: success, soil size=${File(soilPath).length()} bytes")
+
+                val now = System.currentTimeMillis()
+                val entry = RegistryEntry(
+                    id = meta?.id ?: UUID.randomUUID().toString(),
+                    folderPath = folderPath,
+                    name = name,
+                    createdAt = meta?.createdAt ?: now,
+                    updatedAt = meta?.updatedAt ?: now
+                )
+                registry.add(entry)
+                loadNotebooks()
+            } catch (e: Exception) {
+                Log.e(TAG, "createNotebook FAILED for name=$name", e)
+                runOnUiThread { showError("Failed to create notebook: ${e.message}") }
             }
-
-            Log.i(TAG, "Opening SoilDatabase at $soilPath")
-            val dm = resources.displayMetrics
-            Log.i(TAG, "Page dimensions: ${dm.widthPixels}x${dm.heightPixels}")
-
-            val db = SoilDatabase(soilPath)
-            db.open()
-            db.initializeNotebook(name, dm.widthPixels.toDouble(), dm.heightPixels.toDouble())
-            db.close()
-            Log.i(TAG, "createNotebook: success — soil file size=${File(soilPath).length()} bytes")
-
-            loadNotebooks()
-        } catch (e: Exception) {
-            Log.e(TAG, "createNotebook FAILED for name=$name", e)
-            showError("Failed to create notebook: ${e.message}")
-        }
+        }.start()
     }
 
     private fun showError(msg: String) {
@@ -235,9 +260,9 @@ class NotebookListActivity : AppCompatActivity() {
             .show()
     }
 
-    private fun showContextMenu(entry: NotebookEntry) {
+    private fun showContextMenu(entry: RegistryEntry) {
         AlertDialog.Builder(this)
-            .setTitle(entry.meta.name)
+            .setTitle(entry.name)
             .setItems(arrayOf("Rename", "Delete")) { _, which ->
                 when (which) {
                     0 -> showRenameDialog(entry)
@@ -247,9 +272,9 @@ class NotebookListActivity : AppCompatActivity() {
             .show()
     }
 
-    private fun showRenameDialog(entry: NotebookEntry) {
+    private fun showRenameDialog(entry: RegistryEntry) {
         val input = EditText(this).apply {
-            setText(entry.meta.name)
+            setText(entry.name)
             setPadding(48, 24, 48, 8)
         }
         AlertDialog.Builder(this)
@@ -257,7 +282,7 @@ class NotebookListActivity : AppCompatActivity() {
             .setView(input)
             .setPositiveButton("Save") { _, _ ->
                 val newName = input.text.toString().trim()
-                if (newName.isNotEmpty() && newName != entry.meta.name) {
+                if (newName.isNotEmpty() && newName != entry.name) {
                     renameNotebook(entry, newName)
                 }
             }
@@ -265,43 +290,91 @@ class NotebookListActivity : AppCompatActivity() {
             .show()
     }
 
-    private fun renameNotebook(entry: NotebookEntry, newName: String) {
-        try {
-            val db = SoilDatabase("${entry.folderPath}/$SOIL_FILE")
-            db.open()
-            db.updateNotebookName(newName)
-            db.close()
-            File(entry.folderPath).renameTo(File("$NOTES_DIR/$newName"))
-            Log.i(TAG, "Renamed ${entry.meta.name} -> $newName")
-            loadNotebooks()
-        } catch (e: Exception) {
-            Log.e(TAG, "renameNotebook failed", e)
-            showError("Rename failed: ${e.message}")
-        }
+    private fun renameNotebook(entry: RegistryEntry, newName: String) {
+        Thread {
+            try {
+                val db = SoilDatabase("${entry.folderPath}/$SOIL_FILE")
+                db.open()
+                db.updateNotebookName(newName)
+                db.close()
+
+                val newFolderPath = "$NOTES_DIR/$newName"
+                val renamed = File(entry.folderPath).renameTo(File(newFolderPath))
+                Log.i(TAG, "renameNotebook: ${entry.name} -> $newName, folderRenamed=$renamed")
+
+                registry.remove(entry.folderPath)
+                registry.add(
+                    entry.copy(
+                        folderPath = newFolderPath,
+                        name = newName,
+                        updatedAt = System.currentTimeMillis()
+                    )
+                )
+                loadNotebooks()
+            } catch (e: Exception) {
+                Log.e(TAG, "renameNotebook failed", e)
+                runOnUiThread { showError("Rename failed: ${e.message}") }
+            }
+        }.start()
     }
 
-    private fun showDeleteDialog(entry: NotebookEntry) {
+    private fun showDeleteDialog(entry: RegistryEntry) {
         AlertDialog.Builder(this)
             .setTitle("Delete Notebook")
-            .setMessage("Delete \"${entry.meta.name}\"? This cannot be undone.")
-            .setPositiveButton("Delete") { _, _ ->
-                try {
-                    File(entry.folderPath).deleteRecursively()
-                    Log.i(TAG, "Deleted ${entry.folderPath}")
-                    loadNotebooks()
-                } catch (e: Exception) {
-                    Log.e(TAG, "deleteNotebook failed", e)
-                    showError("Delete failed: ${e.message}")
-                }
-            }
+            .setMessage("Delete \"${entry.name}\"? This cannot be undone.")
+            .setPositiveButton("Delete") { _, _ -> deleteNotebook(entry) }
             .setNegativeButton("Cancel", null)
             .show()
     }
 
+    private fun deleteNotebook(entry: RegistryEntry) {
+        Thread {
+            Log.i(TAG, "deleteNotebook: starting delete of ${entry.folderPath}")
+
+            // Step 1: Remove from registry before touching disk
+            registry.remove(entry.folderPath)
+
+            // Step 2: Open and immediately close the DB to flush WAL checkpoint
+            val soilPath = "${entry.folderPath}/$SOIL_FILE"
+            try {
+                val db = SoilDatabase(soilPath)
+                db.open()
+                db.close()
+                Log.i(TAG, "deleteNotebook: WAL flushed for $soilPath")
+            } catch (e: Exception) {
+                Log.w(TAG, "deleteNotebook: could not flush database before delete: ${e.message}")
+            }
+
+            // Step 3: Explicitly delete WAL/SHM/journal companion files
+            val soilFile = File(soilPath)
+            for (suffix in listOf("-wal", "-shm", "-journal")) {
+                val companion = File(soilFile.path + suffix)
+                if (companion.exists()) {
+                    val ok = companion.delete()
+                    Log.i(TAG, "deleteNotebook: delete $suffix ok=$ok path=${companion.path}")
+                }
+            }
+
+            // Step 4: Delete the folder recursively
+            val folder = File(entry.folderPath)
+            val deleted = folder.deleteRecursively()
+            Log.i(TAG, "deleteNotebook: folder=${entry.folderPath} deleted=$deleted exists=${folder.exists()}")
+
+            if (!deleted || folder.exists()) {
+                Log.e(TAG, "deleteNotebook: FAILED to delete folder ${entry.folderPath}")
+                runOnUiThread {
+                    Toast.makeText(this, "Could not delete notebook. Please try again.", Toast.LENGTH_SHORT).show()
+                }
+            }
+
+            loadNotebooks()
+        }.start()
+    }
+
     inner class NotebookAdapter(
-        private val items: List<NotebookEntry>,
-        private val onClick: (NotebookEntry) -> Unit,
-        private val onLongClick: (NotebookEntry) -> Unit
+        private val items: List<RegistryEntry>,
+        private val onClick: (RegistryEntry) -> Unit,
+        private val onLongClick: (RegistryEntry) -> Unit
     ) : RecyclerView.Adapter<NotebookAdapter.ViewHolder>() {
 
         inner class ViewHolder(view: View) : RecyclerView.ViewHolder(view) {
@@ -317,8 +390,8 @@ class NotebookListActivity : AppCompatActivity() {
 
         override fun onBindViewHolder(holder: ViewHolder, position: Int) {
             val entry = items[position]
-            holder.nameText.text = entry.meta.name
-            holder.dateText.text = DateFormat.format("MMM dd, yyyy", entry.meta.updatedAt)
+            holder.nameText.text = entry.name
+            holder.dateText.text = DateFormat.format("MMM dd, yyyy", entry.updatedAt)
             holder.itemView.setOnClickListener { onClick(entry) }
             holder.itemView.setOnLongClickListener { onLongClick(entry); true }
         }
