@@ -3,9 +3,11 @@ package com.notesprout.notesprout
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.Outline
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.Rect
+import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.os.Bundle
 import android.util.Log
@@ -14,10 +16,12 @@ import android.view.MotionEvent
 import android.view.SurfaceHolder
 import android.view.SurfaceView
 import android.view.View
+import android.view.ViewOutlineProvider
 import android.view.WindowInsets
 import android.view.WindowInsetsController
 import android.widget.FrameLayout
-import com.google.android.material.floatingactionbutton.FloatingActionButton
+import android.widget.ImageButton
+import android.widget.LinearLayout
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
@@ -31,6 +35,7 @@ import com.onyx.android.sdk.pen.RawInputCallback
 import com.onyx.android.sdk.pen.TouchHelper
 import com.onyx.android.sdk.pen.data.TouchPointList
 import java.util.UUID
+import kotlin.math.sqrt
 
 class CanvasActivity : AppCompatActivity() {
 
@@ -38,7 +43,10 @@ class CanvasActivity : AppCompatActivity() {
         private const val TAG = "Canvas"
         private const val SOIL_FILE = "notebook.soil"
         const val EXTRA_FOLDER_PATH = "extra_folder_path"
+        private const val ERASER_THRESHOLD_DP = 20f
     }
+
+    private enum class ToolMode { PEN, ERASER }
 
     private lateinit var surfaceView: SurfaceView
     private lateinit var touchHelper: TouchHelper
@@ -46,12 +54,17 @@ class CanvasActivity : AppCompatActivity() {
     private var surfaceReady = false
 
     private var folderPath: String = ""
+    private var currentMode = ToolMode.PEN
+    private var eraserThresholdPx = 0f
 
     @Volatile private var layerId: String? = null
     @Volatile private var db: SoilDatabase? = null
 
     private var committedBitmap: Bitmap? = null
     private var committedCanvas: Canvas? = null
+
+    // In-memory stroke list — all mutations on the main thread
+    private val strokes = mutableListOf<StrokeModel>()
 
     private val strokePaint = Paint().apply {
         color = Color.BLACK
@@ -64,9 +77,11 @@ class CanvasActivity : AppCompatActivity() {
 
     private val activePoints = mutableListOf<StrokePoint>()
 
+    private lateinit var penBtn: ImageButton
+    private lateinit var eraserBtn: ImageButton
+
     private val callback = object : RawInputCallback() {
         override fun onBeginRawDrawing(p0: Boolean, p1: TouchPoint) {
-            Log.i(TAG, "onBeginRawDrawing x=${p1.x} y=${p1.y}")
             activePoints.clear()
             activePoints.add(StrokePoint(
                 x = p1.x.toDouble(), y = p1.y.toDouble(),
@@ -75,9 +90,7 @@ class CanvasActivity : AppCompatActivity() {
             ))
         }
 
-        override fun onEndRawDrawing(p0: Boolean, p1: TouchPoint) {
-            Log.i(TAG, "onEndRawDrawing")
-        }
+        override fun onEndRawDrawing(p0: Boolean, p1: TouchPoint) {}
 
         override fun onRawDrawingTouchPointMoveReceived(p0: TouchPoint) {
             activePoints.add(StrokePoint(
@@ -102,7 +115,6 @@ class CanvasActivity : AppCompatActivity() {
                 }
             }
             activePoints.clear()
-
             if (pts.size < 2) return
             val lid = layerId ?: return
 
@@ -118,6 +130,7 @@ class CanvasActivity : AppCompatActivity() {
             )
 
             runOnUiThread {
+                strokes.add(stroke)
                 drawStrokeToBitmap(stroke)
                 blitBitmapToSurface()
             }
@@ -148,6 +161,9 @@ class CanvasActivity : AppCompatActivity() {
         }
         Log.i(TAG, "folderPath=$folderPath")
 
+        val density = resources.displayMetrics.density
+        eraserThresholdPx = ERASER_THRESHOLD_DP * density
+
         supportActionBar?.hide()
 
         val root = FrameLayout(this)
@@ -161,20 +177,16 @@ class CanvasActivity : AppCompatActivity() {
             FrameLayout.LayoutParams.MATCH_PARENT
         ))
 
-        val closeFab = FloatingActionButton(this).apply {
-            setImageDrawable(resources.getDrawable(android.R.drawable.ic_menu_close_clear_cancel, theme))
-            contentDescription = "Close"
-            setOnClickListener { finish() }
-        }
-        val fabMargin = (16 * resources.displayMetrics.density).toInt()
-        val fabParams = FrameLayout.LayoutParams(
+        val toolbar = buildToolbar(density)
+        val toolbarMargin = (16 * density).toInt()
+        val toolbarParams = FrameLayout.LayoutParams(
             FrameLayout.LayoutParams.WRAP_CONTENT,
             FrameLayout.LayoutParams.WRAP_CONTENT
         ).apply {
-            gravity = Gravity.BOTTOM or Gravity.END
-            setMargins(0, 0, fabMargin, fabMargin)
+            gravity = Gravity.TOP or Gravity.START
+            setMargins(toolbarMargin, toolbarMargin, 0, 0)
         }
-        root.addView(closeFab, fabParams)
+        root.addView(toolbar, toolbarParams)
 
         setContentView(root)
 
@@ -195,11 +207,12 @@ class CanvasActivity : AppCompatActivity() {
                     or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
             )
         }
+
         ViewCompat.setOnApplyWindowInsetsListener(root) { _, insets ->
-            val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
-            val params = closeFab.layoutParams as FrameLayout.LayoutParams
-            params.setMargins(0, 0, systemBars.right + fabMargin, systemBars.bottom + fabMargin)
-            closeFab.layoutParams = params
+            val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            val params = toolbar.layoutParams as FrameLayout.LayoutParams
+            params.setMargins(bars.left + toolbarMargin, bars.top + toolbarMargin, 0, 0)
+            toolbar.layoutParams = params
             insets
         }
 
@@ -220,10 +233,12 @@ class CanvasActivity : AppCompatActivity() {
                     initTouchHelper(width, height)
                 } else if (::touchHelper.isInitialized) {
                     updateLimitRect()
-                    EpdController.enterScribbleMode(surfaceView)
-                    touchHelper.setRawDrawingEnabled(false)
-                    touchHelper.setRawDrawingEnabled(true)
-                    touchHelper.setRawInputReaderEnable(true)
+                    if (currentMode == ToolMode.PEN) {
+                        EpdController.enterScribbleMode(surfaceView)
+                        touchHelper.setRawDrawingEnabled(false)
+                        touchHelper.setRawDrawingEnabled(true)
+                        touchHelper.setRawInputReaderEnable(true)
+                    }
                     blitBitmapToSurface()
                 }
             }
@@ -238,10 +253,145 @@ class CanvasActivity : AppCompatActivity() {
                 }
             }
         })
+
+        setToolMode(ToolMode.PEN)
+    }
+
+    private fun buildToolbar(density: Float): LinearLayout {
+        val btnSize = (48 * density).toInt()
+        val btnPadding = (10 * density).toInt()
+        val cornerRadius = 12 * density
+
+        val toolbarBg = GradientDrawable().apply {
+            shape = GradientDrawable.RECTANGLE
+            setCornerRadius(cornerRadius)
+            setColor(Color.WHITE)
+        }
+
+        fun makeBtn(iconRes: Int, desc: String): ImageButton =
+            ImageButton(this).apply {
+                setImageResource(iconRes)
+                contentDescription = desc
+                setBackgroundColor(Color.TRANSPARENT)
+                setPadding(btnPadding, btnPadding, btnPadding, btnPadding)
+                setColorFilter(Color.BLACK)
+            }
+
+        penBtn = makeBtn(R.drawable.ic_pen, "Pen")
+        eraserBtn = makeBtn(R.drawable.ic_eraser, "Eraser")
+        val closeBtn = makeBtn(android.R.drawable.ic_menu_close_clear_cancel, "Close")
+
+        penBtn.setOnClickListener { setToolMode(ToolMode.PEN) }
+        eraserBtn.setOnClickListener { setToolMode(ToolMode.ERASER) }
+        closeBtn.setOnClickListener { finish() }
+
+        return LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            background = toolbarBg
+            elevation = 8 * density
+            outlineProvider = object : ViewOutlineProvider() {
+                override fun getOutline(view: View, outline: Outline) {
+                    outline.setRoundRect(0, 0, view.width, view.height, cornerRadius)
+                }
+            }
+            clipToOutline = true
+            setPadding(
+                (4 * density).toInt(), (4 * density).toInt(),
+                (4 * density).toInt(), (4 * density).toInt()
+            )
+            addView(penBtn, LinearLayout.LayoutParams(btnSize, btnSize))
+            addView(eraserBtn, LinearLayout.LayoutParams(btnSize, btnSize))
+            addView(closeBtn, LinearLayout.LayoutParams(btnSize, btnSize))
+        }
+    }
+
+    private fun makeActiveBg(): GradientDrawable {
+        val density = resources.displayMetrics.density
+        return GradientDrawable().apply {
+            shape = GradientDrawable.RECTANGLE
+            setCornerRadius(8 * density)
+            setColor(0xFFD0E8FF.toInt())
+        }
+    }
+
+    private fun setToolMode(mode: ToolMode) {
+        currentMode = mode
+
+        val density = resources.displayMetrics.density
+        penBtn.background = if (mode == ToolMode.PEN) makeActiveBg() else null
+        penBtn.setPadding(
+            (10 * density).toInt(), (10 * density).toInt(),
+            (10 * density).toInt(), (10 * density).toInt()
+        )
+        eraserBtn.background = if (mode == ToolMode.ERASER) makeActiveBg() else null
+        eraserBtn.setPadding(
+            (10 * density).toInt(), (10 * density).toInt(),
+            (10 * density).toInt(), (10 * density).toInt()
+        )
+
+        if (::touchHelper.isInitialized) {
+            when (mode) {
+                ToolMode.PEN -> {
+                    activePoints.clear()
+                    EpdController.enterScribbleMode(surfaceView)
+                    touchHelper.setRawDrawingEnabled(true)
+                    touchHelper.setRawInputReaderEnable(true)
+                }
+                ToolMode.ERASER -> {
+                    activePoints.clear()
+                    touchHelper.setRawDrawingEnabled(false)
+                    EpdController.leaveScribbleMode(surfaceView)
+                }
+            }
+        }
+    }
+
+    private fun handleEraserTouch(ev: MotionEvent) {
+        if (ev.getToolType(0) != MotionEvent.TOOL_TYPE_STYLUS) return
+        when (ev.actionMasked) {
+            MotionEvent.ACTION_DOWN, MotionEvent.ACTION_MOVE -> {
+                val sx = ev.x.toDouble()
+                val sy = ev.y.toDouble()
+                val threshold = eraserThresholdPx.toDouble()
+                val toDelete = mutableListOf<StrokeModel>()
+
+                for (stroke in strokes) {
+                    for (pt in stroke.points) {
+                        val dx = pt.x - sx
+                        val dy = pt.y - sy
+                        if (sqrt(dx * dx + dy * dy) < threshold) {
+                            toDelete.add(stroke)
+                            break
+                        }
+                    }
+                }
+
+                if (toDelete.isNotEmpty()) {
+                    strokes.removeAll(toDelete.toSet())
+                    val snapshot = toDelete.toList()
+                    val dbRef = db
+                    Thread {
+                        snapshot.forEach { stroke ->
+                            try {
+                                dbRef?.deleteStroke(stroke.id)
+                            } catch (e: Exception) {
+                                Log.e(TAG, "Failed to delete stroke ${stroke.id}", e)
+                            }
+                        }
+                    }.start()
+                    rebuildBitmap()
+                    blitBitmapToSurface()
+                }
+            }
+        }
     }
 
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
-        if (::touchHelper.isInitialized) touchHelper.onTouchEvent(ev)
+        if (::touchHelper.isInitialized && currentMode == ToolMode.PEN) {
+            touchHelper.onTouchEvent(ev)
+        } else if (currentMode == ToolMode.ERASER) {
+            handleEraserTouch(ev)
+        }
         return super.dispatchTouchEvent(ev)
     }
 
@@ -254,7 +404,7 @@ class CanvasActivity : AppCompatActivity() {
         val top = maxOf(0, frame.top - loc[1])
         val right = frame.right - loc[0]
         val bottom = frame.bottom - loc[1]
-        Log.i(TAG, "usableLimitRect: [$left,$top,$right,$bottom] screenFrame=$frame svOffset=${loc[0]},${loc[1]}")
+        Log.i(TAG, "usableLimitRect: [$left,$top,$right,$bottom]")
         return Rect(left, top, right, bottom)
     }
 
@@ -291,11 +441,12 @@ class CanvasActivity : AppCompatActivity() {
                     return@Thread
                 }
                 layerId = layer.id
-                val strokes = database.getStrokes(layer.id)
+                val loaded = database.getStrokes(layer.id)
                 db = database
-                Log.i(TAG, "Loaded ${strokes.size} strokes, layerId=${layer.id}")
+                Log.i(TAG, "Loaded ${loaded.size} strokes, layerId=${layer.id}")
                 runOnUiThread {
-                    strokes.forEach { drawStrokeToBitmap(it) }
+                    strokes.addAll(loaded)
+                    loaded.forEach { drawStrokeToBitmap(it) }
                     blitBitmapToSurface()
                 }
             } catch (e: Exception) {
@@ -315,6 +466,12 @@ class CanvasActivity : AppCompatActivity() {
             }
         }
         canvas.drawPath(path, strokePaint)
+    }
+
+    private fun rebuildBitmap() {
+        val canvas = committedCanvas ?: return
+        canvas.drawColor(Color.WHITE)
+        strokes.forEach { drawStrokeToBitmap(it) }
     }
 
     private fun blitBitmapToSurface() {
@@ -347,7 +504,7 @@ class CanvasActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
-        if (::touchHelper.isInitialized && surfaceReady) {
+        if (::touchHelper.isInitialized && surfaceReady && currentMode == ToolMode.PEN) {
             Log.i(TAG, "onResume — re-entering scribble mode")
             EpdController.enterScribbleMode(surfaceView)
             touchHelper.setRawDrawingEnabled(true)

@@ -163,6 +163,16 @@ class SoilDatabase(private val filePath: String) {
         d.insert("strokes", null, stroke.toContentValues())
     }
 
+    fun deleteStroke(strokeId: String) {
+        val d = db ?: return
+        val now = System.currentTimeMillis()
+        val cv = ContentValues().apply {
+            put("deletedAt", now)
+            put("updatedAt", now)
+        }
+        d.update("strokes", cv, "id = ?", arrayOf(strokeId))
+    }
+
     fun close() {
         db?.close()
         db = null
