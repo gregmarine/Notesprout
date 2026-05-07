@@ -139,6 +139,82 @@ class SoilDatabase(private val filePath: String) {
         }
     }
 
+    fun getAllPages(): List<PageModel> {
+        val d = db ?: return emptyList()
+        return d.query("pages", null, "deletedAt IS NULL", null, null, null, "pageNumber ASC").use { c ->
+            val result = mutableListOf<PageModel>()
+            while (c.moveToNext()) result.add(PageModel.fromCursor(c))
+            result
+        }
+    }
+
+    fun addPage(pageWidth: Double, pageHeight: Double): PageModel {
+        val d = db ?: throw IllegalStateException("Database not open")
+        val now = System.currentTimeMillis()
+        val maxPageNum = d.rawQuery("SELECT MAX(pageNumber) FROM pages WHERE deletedAt IS NULL", null).use { c ->
+            if (c.moveToFirst()) c.getInt(0) else 0
+        }
+        val page = PageModel(
+            id = UUID.randomUUID().toString(),
+            parentId = null,
+            createdAt = now,
+            updatedAt = now,
+            pageNumber = maxPageNum + 1,
+            width = pageWidth,
+            height = pageHeight
+        )
+        d.insert("pages", null, page.toContentValues())
+        val layer = LayerModel(
+            id = UUID.randomUUID().toString(),
+            parentId = page.id,
+            createdAt = now,
+            updatedAt = now
+        )
+        d.insert("layers", null, layer.toContentValues())
+        return page
+    }
+
+    fun deletePage(pageId: String) {
+        val d = db ?: return
+        val now = System.currentTimeMillis()
+        val cv = ContentValues().apply {
+            put("deletedAt", now)
+            put("updatedAt", now)
+        }
+        d.update("pages", cv, "id = ?", arrayOf(pageId))
+    }
+
+    fun getLayersForPage(pageId: String): List<LayerModel> {
+        val d = db ?: return emptyList()
+        return d.query("layers", null, "parentId = ? AND deletedAt IS NULL", arrayOf(pageId), null, null, null).use { c ->
+            val result = mutableListOf<LayerModel>()
+            while (c.moveToNext()) result.add(LayerModel.fromCursor(c))
+            result
+        }
+    }
+
+    fun softDeleteStrokesForLayer(layerId: String) {
+        val d = db ?: return
+        val now = System.currentTimeMillis()
+        val cv = ContentValues().apply {
+            put("deletedAt", now)
+            put("updatedAt", now)
+        }
+        d.update("strokes", cv, "parentId = ? AND deletedAt IS NULL", arrayOf(layerId))
+    }
+
+    fun softDeleteLayersForPage(pageId: String) {
+        val d = db ?: return
+        val layers = getLayersForPage(pageId)
+        layers.forEach { softDeleteStrokesForLayer(it.id) }
+        val now = System.currentTimeMillis()
+        val cv = ContentValues().apply {
+            put("deletedAt", now)
+            put("updatedAt", now)
+        }
+        d.update("layers", cv, "parentId = ? AND deletedAt IS NULL", arrayOf(pageId))
+    }
+
     fun getFirstLayer(pageId: String): LayerModel? {
         val d = db ?: return null
         return d.query("layers", null, "parentId = ? AND deletedAt IS NULL", arrayOf(pageId), null, null, null, "1").use { c ->

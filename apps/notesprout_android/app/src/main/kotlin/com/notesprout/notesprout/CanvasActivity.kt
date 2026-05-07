@@ -1,5 +1,6 @@
 package com.notesprout.notesprout
 
+import android.content.DialogInterface
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
@@ -22,10 +23,14 @@ import android.view.WindowInsetsController
 import android.widget.FrameLayout
 import android.widget.ImageButton
 import android.widget.LinearLayout
+import android.widget.TextView
+import android.widget.Toast
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
+import com.notesprout.notesprout.data.PageModel
 import com.notesprout.notesprout.data.SoilDatabase
 import com.notesprout.notesprout.data.StrokeModel
 import com.notesprout.notesprout.data.StrokePoint
@@ -35,6 +40,7 @@ import com.onyx.android.sdk.pen.RawInputCallback
 import com.onyx.android.sdk.pen.TouchHelper
 import com.onyx.android.sdk.pen.data.TouchPointList
 import java.util.UUID
+import kotlin.math.abs
 import kotlin.math.sqrt
 
 class CanvasActivity : AppCompatActivity() {
@@ -44,6 +50,8 @@ class CanvasActivity : AppCompatActivity() {
         private const val SOIL_FILE = "notebook.soil"
         const val EXTRA_FOLDER_PATH = "extra_folder_path"
         private const val ERASER_THRESHOLD_DP = 20f
+        private const val SWIPE_MIN_DISTANCE_DP = 80f
+        private const val SWIPE_MAX_DURATION_MS = 300L
     }
 
     private enum class ToolMode { PEN, ERASER }
@@ -56,6 +64,7 @@ class CanvasActivity : AppCompatActivity() {
     private var folderPath: String = ""
     private var currentMode = ToolMode.PEN
     private var eraserThresholdPx = 0f
+    private var swipeMinDistancePx = 0f
 
     @Volatile private var layerId: String? = null
     @Volatile private var db: SoilDatabase? = null
@@ -65,6 +74,15 @@ class CanvasActivity : AppCompatActivity() {
 
     // In-memory stroke list — all mutations on the main thread
     private val strokes = mutableListOf<StrokeModel>()
+
+    // Page state
+    private val pages = mutableListOf<PageModel>()
+    private var currentPageIndex = 0
+
+    // Two-finger swipe detection
+    private var trackingTwoFingerSwipe = false
+    private var twoFingerSwipeStartX = 0f
+    private var twoFingerSwipeStartTime = 0L
 
     private val strokePaint = Paint().apply {
         color = Color.BLACK
@@ -79,6 +97,7 @@ class CanvasActivity : AppCompatActivity() {
 
     private lateinit var penBtn: ImageButton
     private lateinit var eraserBtn: ImageButton
+    private lateinit var pageIndicator: TextView
 
     private val callback = object : RawInputCallback() {
         override fun onBeginRawDrawing(p0: Boolean, p1: TouchPoint) {
@@ -163,6 +182,7 @@ class CanvasActivity : AppCompatActivity() {
 
         val density = resources.displayMetrics.density
         eraserThresholdPx = ERASER_THRESHOLD_DP * density
+        swipeMinDistancePx = SWIPE_MIN_DISTANCE_DP * density
 
         supportActionBar?.hide()
 
@@ -188,6 +208,17 @@ class CanvasActivity : AppCompatActivity() {
         }
         root.addView(toolbar, toolbarParams)
 
+        pageIndicator = buildPageIndicator(density)
+        val indicatorMargin = (16 * density).toInt()
+        val indicatorParams = FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.WRAP_CONTENT,
+            FrameLayout.LayoutParams.WRAP_CONTENT
+        ).apply {
+            gravity = Gravity.BOTTOM or Gravity.END
+            setMargins(0, 0, indicatorMargin, indicatorMargin)
+        }
+        root.addView(pageIndicator, indicatorParams)
+
         setContentView(root)
 
         WindowCompat.setDecorFitsSystemWindows(window, false)
@@ -210,9 +241,12 @@ class CanvasActivity : AppCompatActivity() {
 
         ViewCompat.setOnApplyWindowInsetsListener(root) { _, insets ->
             val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
-            val params = toolbar.layoutParams as FrameLayout.LayoutParams
-            params.setMargins(bars.left + toolbarMargin, bars.top + toolbarMargin, 0, 0)
-            toolbar.layoutParams = params
+            val tbParams = toolbar.layoutParams as FrameLayout.LayoutParams
+            tbParams.setMargins(bars.left + toolbarMargin, bars.top + toolbarMargin, 0, 0)
+            toolbar.layoutParams = tbParams
+            val indParams = pageIndicator.layoutParams as FrameLayout.LayoutParams
+            indParams.setMargins(0, 0, bars.right + indicatorMargin, bars.bottom + indicatorMargin)
+            pageIndicator.layoutParams = indParams
             insets
         }
 
@@ -279,10 +313,14 @@ class CanvasActivity : AppCompatActivity() {
 
         penBtn = makeBtn(R.drawable.ic_pen, "Pen")
         eraserBtn = makeBtn(R.drawable.ic_eraser, "Eraser")
+        val addPageBtn = makeBtn(R.drawable.ic_add_page, "Add Page")
+        val deletePageBtn = makeBtn(R.drawable.ic_delete_page, "Delete Page")
         val closeBtn = makeBtn(android.R.drawable.ic_menu_close_clear_cancel, "Close")
 
         penBtn.setOnClickListener { setToolMode(ToolMode.PEN) }
         eraserBtn.setOnClickListener { setToolMode(ToolMode.ERASER) }
+        addPageBtn.setOnClickListener { addPageAction() }
+        deletePageBtn.setOnClickListener { deletePageAction() }
         closeBtn.setOnClickListener { finish() }
 
         return LinearLayout(this).apply {
@@ -301,8 +339,32 @@ class CanvasActivity : AppCompatActivity() {
             )
             addView(penBtn, LinearLayout.LayoutParams(btnSize, btnSize))
             addView(eraserBtn, LinearLayout.LayoutParams(btnSize, btnSize))
+            addView(addPageBtn, LinearLayout.LayoutParams(btnSize, btnSize))
+            addView(deletePageBtn, LinearLayout.LayoutParams(btnSize, btnSize))
             addView(closeBtn, LinearLayout.LayoutParams(btnSize, btnSize))
         }
+    }
+
+    private fun buildPageIndicator(density: Float): TextView {
+        return TextView(this).apply {
+            textSize = 12f
+            setTextColor(Color.BLACK)
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                setCornerRadius(8 * density)
+                setColor(Color.WHITE)
+            }
+            elevation = 8 * density
+            setPadding(
+                (8 * density).toInt(), (4 * density).toInt(),
+                (8 * density).toInt(), (4 * density).toInt()
+            )
+            text = "Page 1 / 1"
+        }
+    }
+
+    private fun updatePageIndicator() {
+        pageIndicator.text = "Page ${currentPageIndex + 1} / ${pages.size}"
     }
 
     private fun makeActiveBg(): GradientDrawable {
@@ -386,7 +448,43 @@ class CanvasActivity : AppCompatActivity() {
         }
     }
 
+    // Returns true if a two-finger swipe was detected and consumed.
+    private fun detectTwoFingerSwipe(ev: MotionEvent): Boolean {
+        when (ev.actionMasked) {
+            MotionEvent.ACTION_POINTER_DOWN -> {
+                if (ev.pointerCount == 2) {
+                    twoFingerSwipeStartX = (ev.getX(0) + ev.getX(1)) / 2f
+                    twoFingerSwipeStartTime = System.currentTimeMillis()
+                    trackingTwoFingerSwipe = true
+                }
+            }
+            MotionEvent.ACTION_POINTER_UP -> {
+                if (ev.pointerCount == 2 && trackingTwoFingerSwipe) {
+                    val elapsed = System.currentTimeMillis() - twoFingerSwipeStartTime
+                    if (elapsed <= SWIPE_MAX_DURATION_MS) {
+                        val liftIdx = ev.actionIndex
+                        val remainIdx = if (liftIdx == 0) 1 else 0
+                        val endAvgX = (ev.getX(liftIdx) + ev.getX(remainIdx)) / 2f
+                        val dx = endAvgX - twoFingerSwipeStartX
+                        if (abs(dx) >= swipeMinDistancePx) {
+                            trackingTwoFingerSwipe = false
+                            activePoints.clear()
+                            if (dx > 0) navigateToPreviousPage() else navigateToNextPage()
+                            return true
+                        }
+                    }
+                    trackingTwoFingerSwipe = false
+                }
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                trackingTwoFingerSwipe = false
+            }
+        }
+        return false
+    }
+
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+        if (detectTwoFingerSwipe(ev)) return true
         if (::touchHelper.isInitialized && currentMode == ToolMode.PEN) {
             touchHelper.onTouchEvent(ev)
         } else if (currentMode == ToolMode.ERASER) {
@@ -430,28 +528,128 @@ class CanvasActivity : AppCompatActivity() {
             val database = SoilDatabase(soilPath)
             try {
                 database.open()
-                val page = database.getFirstPage() ?: run {
-                    Log.w(TAG, "No page found in $soilPath")
+                val allPages = database.getAllPages()
+                if (allPages.isEmpty()) {
+                    Log.w(TAG, "No pages found in $soilPath")
                     database.close()
                     return@Thread
                 }
-                val layer = database.getFirstLayer(page.id) ?: run {
-                    Log.w(TAG, "No layer found for pageId=${page.id}")
+                val firstPage = allPages[0]
+                val layer = database.getFirstLayer(firstPage.id) ?: run {
+                    Log.w(TAG, "No layer found for pageId=${firstPage.id}")
                     database.close()
                     return@Thread
                 }
                 layerId = layer.id
                 val loaded = database.getStrokes(layer.id)
                 db = database
-                Log.i(TAG, "Loaded ${loaded.size} strokes, layerId=${layer.id}")
+                Log.i(TAG, "Loaded ${loaded.size} strokes for page 1, layerId=${layer.id}")
                 runOnUiThread {
+                    pages.clear()
+                    pages.addAll(allPages)
+                    currentPageIndex = 0
                     strokes.addAll(loaded)
                     loaded.forEach { drawStrokeToBitmap(it) }
                     blitBitmapToSurface()
+                    updatePageIndicator()
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "loadStrokesFromDb failed", e)
                 database.close()
+            }
+        }.start()
+    }
+
+    private fun loadPage(page: PageModel) {
+        val dbRef = db ?: return
+        Thread {
+            val layer = dbRef.getFirstLayer(page.id) ?: run {
+                Log.w(TAG, "No layer found for pageId=${page.id}")
+                return@Thread
+            }
+            val loaded = dbRef.getStrokes(layer.id)
+            runOnUiThread {
+                layerId = layer.id
+                strokes.clear()
+                strokes.addAll(loaded)
+                rebuildBitmap()
+                blitBitmapToSurface()
+                updatePageIndicator()
+                if (::touchHelper.isInitialized && currentMode == ToolMode.PEN) {
+                    touchHelper.setRawDrawingEnabled(false)
+                    touchHelper.setRawDrawingEnabled(true)
+                    touchHelper.setRawInputReaderEnable(true)
+                }
+            }
+        }.start()
+    }
+
+    private fun navigateToNextPage() {
+        if (currentPageIndex >= pages.size - 1) return
+        currentPageIndex++
+        loadPage(pages[currentPageIndex])
+    }
+
+    private fun navigateToPreviousPage() {
+        if (currentPageIndex <= 0) return
+        currentPageIndex--
+        loadPage(pages[currentPageIndex])
+    }
+
+    private fun addPageAction() {
+        val dbRef = db ?: return
+        val meta = dbRef.getNotebookMeta() ?: return
+        Thread {
+            try {
+                val newPage = dbRef.addPage(meta.pageWidth, meta.pageHeight)
+                val allPages = dbRef.getAllPages()
+                runOnUiThread {
+                    pages.clear()
+                    pages.addAll(allPages)
+                    currentPageIndex = pages.indexOfFirst { it.id == newPage.id }.coerceAtLeast(0)
+                    loadPage(pages[currentPageIndex])
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "addPageAction failed", e)
+            }
+        }.start()
+    }
+
+    private fun deletePageAction() {
+        if (pages.size <= 1) {
+            Toast.makeText(this, "Cannot delete the only page", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val page = pages[currentPageIndex]
+        val pageNum = currentPageIndex + 1
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("Delete Page")
+            .setMessage("Are you sure you want to delete page $pageNum? This cannot be undone.")
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Delete") { _, _ ->
+                performDeletePage(page)
+            }
+            .create()
+        dialog.show()
+        dialog.getButton(DialogInterface.BUTTON_POSITIVE)?.setTextColor(Color.RED)
+    }
+
+    private fun performDeletePage(page: PageModel) {
+        val dbRef = db ?: return
+        val targetIndex = if (currentPageIndex > 0) currentPageIndex - 1 else 1
+        Thread {
+            try {
+                dbRef.softDeleteLayersForPage(page.id)
+                dbRef.deletePage(page.id)
+                val allPages = dbRef.getAllPages()
+                runOnUiThread {
+                    pages.clear()
+                    pages.addAll(allPages)
+                    currentPageIndex = targetIndex.coerceIn(0, pages.size - 1)
+                    loadPage(pages[currentPageIndex])
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "performDeletePage failed", e)
             }
         }.start()
     }
