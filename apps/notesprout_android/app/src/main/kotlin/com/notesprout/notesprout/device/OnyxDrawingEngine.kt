@@ -116,6 +116,7 @@ class OnyxDrawingEngine : DrawingEngine {
         val sv = surfaceView ?: return
         try {
             if (enabled) {
+                touchHelper?.setRawInputReaderEnable(false)
                 touchHelper?.setRawDrawingEnabled(false)
                 EpdController.leaveScribbleMode(sv)
             } else {

@@ -108,6 +108,7 @@ class CanvasActivity : AppCompatActivity() {
 
     private val engineCallback = object : DrawingEngineCallback {
         override fun onStrokeStarted(x: Float, y: Float) {
+            if (currentMode == ToolMode.ERASER) return
             runOnUiThread {
                 activePoints.clear()
                 activePoints.add(StrokePoint(
@@ -119,6 +120,7 @@ class CanvasActivity : AppCompatActivity() {
         }
 
         override fun onStrokePoint(x: Float, y: Float, pressure: Float, tilt: Float) {
+            if (currentMode == ToolMode.ERASER) return
             runOnUiThread {
                 activePoints.add(StrokePoint(
                     x = x.toDouble(), y = y.toDouble(),
@@ -129,12 +131,14 @@ class CanvasActivity : AppCompatActivity() {
         }
 
         override fun onActiveStrokeUpdated() {
+            if (currentMode == ToolMode.ERASER) return
             if (drawingEngine.supportsLivePreview) {
                 blitBitmapWithActivePath()
             }
         }
 
         override fun onStrokeEnded(points: List<TouchPointData>) {
+            if (currentMode == ToolMode.ERASER) return
             runOnUiThread {
                 activePoints.clear()
                 if (points.size < 2) return@runOnUiThread
@@ -807,6 +811,7 @@ class CanvasActivity : AppCompatActivity() {
                 }.start()
             }
         }
+        setToolMode(currentMode)
     }
 
     private fun performRedo() {
@@ -898,6 +903,7 @@ class CanvasActivity : AppCompatActivity() {
                 }.start()
             }
         }
+        setToolMode(currentMode)
     }
 
     private fun drawStrokeToBitmap(stroke: StrokeModel) {
