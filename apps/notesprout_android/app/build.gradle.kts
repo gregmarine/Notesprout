@@ -30,6 +30,18 @@ android {
             signingConfig = signingConfigs.getByName("debug")
         }
     }
+
+    packaging {
+        jniLibs {
+            // onyxsdk-pen 1.5.x and onyxsdk-pennative both ship libc++_shared.so — pick one.
+            pickFirsts += setOf(
+                "lib/arm64-v8a/libc++_shared.so",
+                "lib/armeabi-v7a/libc++_shared.so",
+                "lib/x86_64/libc++_shared.so",
+                "lib/x86/libc++_shared.so"
+            )
+        }
+    }
 }
 
 configurations.all {
@@ -46,10 +58,10 @@ configurations.all {
 }
 
 dependencies {
-    implementation("com.onyx.android.sdk:onyxsdk-device:1.2.0") {
+    implementation("com.onyx.android.sdk:onyxsdk-device:1.3.5") {
         exclude(group = "com.android.support")
     }
-    implementation("com.onyx.android.sdk:onyxsdk-pen:1.4.11") {
+    implementation("com.onyx.android.sdk:onyxsdk-pen:1.5.4") {
         exclude(group = "com.android.support")
     }
     implementation("androidx.core:core-ktx:1.13.1")

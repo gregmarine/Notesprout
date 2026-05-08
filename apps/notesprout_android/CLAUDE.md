@@ -39,21 +39,30 @@ Device detection and drawing are fully abstracted. `CanvasActivity` has zero kno
 
 ```
 CanvasActivity
-  └── DrawingEngineFactory
+  └── DrawingEngineFactory(context)
         └── DeviceDetector
-              ├── BOOX → OnyxDrawingEngine
+              ├── BOOX_EMR    → OnyxDrawingEngine      (Wacom EMR — NA5C etc.)
+              ├── BOOX_USI    → OnyxUsiDrawingEngine   (InkSense/USI 2.0 — Palma2 Pro, Go Color 7 etc.)
               └── GENERIC_ANDROID → GenericDrawingEngine
 ```
 
-**DeviceDetector** — Three-layer BOOX detection:
-1. `Build.MANUFACTURER` / `Build.BRAND` / `Build.MODEL` string check
+**DeviceDetector** — Three-layer detection:
+1. `Build.MANUFACTURER` / `Build.BRAND` / `Build.MODEL` string check for BOOX
 2. `Class.forName("com.onyx.android.sdk.pen.TouchHelper")` existence check
-3. Returns `BOOX` or `GENERIC_ANDROID`
+3. `InputManager` device scan: name contains "wacom" + `SOURCE_STYLUS` → `BOOX_EMR`, else `BOOX_USI`
+   - NA5C uses an I2C Wacom digitizer (`onyx_emp_Wacom I2C Digitizer`, vendorId=0x2d1f) — name match is more reliable than vendor ID
 
-**OnyxDrawingEngine** — Wraps Onyx `TouchHelper` and `EpdController`.
+**OnyxDrawingEngine** — Wraps Onyx `TouchHelper` with `FEATURE_SF_TOUCH_RENDER` (EMR only).
 - All Onyx SDK calls must be wrapped in `try/catch`
 - Never let SDK exceptions propagate to `CanvasActivity`
 - `isAvailable` set to `false` if `initialize()` throws
+- `supportsLivePreview = false` — SDK renders ink natively via EPD kernel hook
+
+**OnyxUsiDrawingEngine** — Standard `MotionEvent` + `EpdController` for USI/InkSense devices.
+- Bypasses `TouchHelper` entirely — USI styli report as `TOOL_TYPE_STYLUS` through standard input stack
+- `EpdController.enterScribbleMode` / `leaveScribbleMode` for EPD optimization
+- `supportsLivePreview = true` — `CanvasActivity` renders live path via incremental `activeLiveBitmap`
+- Consumes historical points from batched `ACTION_MOVE` events for smooth strokes
 
 **GenericDrawingEngine** — Standard Android `Canvas` / `MotionEvent`.
 - Works on Wacom Movink, generic tablets, phones
