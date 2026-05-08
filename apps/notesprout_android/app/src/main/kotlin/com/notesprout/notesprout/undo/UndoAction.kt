@@ -7,7 +7,7 @@ import com.notesprout.notesprout.data.StrokeModel
 sealed class UndoAction {
     data class DrawStroke(val stroke: StrokeModel) : UndoAction()
     data class EraseStrokes(val strokes: List<StrokeModel>) : UndoAction()
-    data class AddPage(val page: PageModel, val layer: LayerModel) : UndoAction()
+    data class AddPage(val page: PageModel, val layer: LayerModel, val insertedAfterPageNumber: Int) : UndoAction()
     data class DeletePage(
         val page: PageModel,
         val layer: LayerModel,

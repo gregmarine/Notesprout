@@ -148,30 +148,64 @@ class SoilDatabase(private val filePath: String) {
         }
     }
 
-    fun addPage(pageWidth: Double, pageHeight: Double): PageModel {
+    fun addPage(pageWidth: Double, pageHeight: Double, insertAfterPageNumber: Int = -1): PageModel {
         val d = db ?: throw IllegalStateException("Database not open")
         val now = System.currentTimeMillis()
-        val maxPageNum = d.rawQuery("SELECT MAX(pageNumber) FROM pages WHERE deletedAt IS NULL", null).use { c ->
-            if (c.moveToFirst()) c.getInt(0) else 0
+        d.beginTransaction()
+        try {
+            val newPageNumber: Int
+            if (insertAfterPageNumber == -1) {
+                val maxPageNum = d.rawQuery("SELECT MAX(pageNumber) FROM pages WHERE deletedAt IS NULL", null).use { c ->
+                    if (c.moveToFirst()) c.getInt(0) else 0
+                }
+                newPageNumber = maxPageNum + 1
+            } else {
+                d.execSQL(
+                    "UPDATE pages SET pageNumber = pageNumber + 1, updatedAt = ? WHERE deletedAt IS NULL AND pageNumber > ?",
+                    arrayOf(now, insertAfterPageNumber)
+                )
+                newPageNumber = insertAfterPageNumber + 1
+            }
+            val page = PageModel(
+                id = UUID.randomUUID().toString(),
+                parentId = null,
+                createdAt = now,
+                updatedAt = now,
+                pageNumber = newPageNumber,
+                width = pageWidth,
+                height = pageHeight
+            )
+            d.insert("pages", null, page.toContentValues())
+            val layer = LayerModel(
+                id = UUID.randomUUID().toString(),
+                parentId = page.id,
+                createdAt = now,
+                updatedAt = now
+            )
+            d.insert("layers", null, layer.toContentValues())
+            d.setTransactionSuccessful()
+            return page
+        } finally {
+            d.endTransaction()
         }
-        val page = PageModel(
-            id = UUID.randomUUID().toString(),
-            parentId = null,
-            createdAt = now,
-            updatedAt = now,
-            pageNumber = maxPageNum + 1,
-            width = pageWidth,
-            height = pageHeight
+    }
+
+    fun decrementPageNumbersAfter(pageNumber: Int) {
+        val d = db ?: return
+        val now = System.currentTimeMillis()
+        d.execSQL(
+            "UPDATE pages SET pageNumber = pageNumber - 1, updatedAt = ? WHERE deletedAt IS NULL AND pageNumber > ?",
+            arrayOf(now, pageNumber)
         )
-        d.insert("pages", null, page.toContentValues())
-        val layer = LayerModel(
-            id = UUID.randomUUID().toString(),
-            parentId = page.id,
-            createdAt = now,
-            updatedAt = now
+    }
+
+    fun incrementPageNumbersAfter(pageNumber: Int) {
+        val d = db ?: return
+        val now = System.currentTimeMillis()
+        d.execSQL(
+            "UPDATE pages SET pageNumber = pageNumber + 1, updatedAt = ? WHERE deletedAt IS NULL AND pageNumber > ?",
+            arrayOf(now, pageNumber)
         )
-        d.insert("layers", null, layer.toContentValues())
-        return page
     }
 
     fun deletePage(pageId: String) {

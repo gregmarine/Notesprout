@@ -231,9 +231,10 @@ class NotebookListActivity : AppCompatActivity() {
                 db.open()
                 db.initializeNotebook(name, dm.widthPixels.toDouble(), dm.heightPixels.toDouble())
                 val meta = db.getNotebookMeta()
+                val firstPage = db.getFirstPage()
                 db.close()
 
-                Log.i(TAG, "createNotebook: success, soil size=${File(soilPath).length()} bytes")
+                Log.i(TAG, "createNotebook: success, soil size=${File(soilPath).length()} bytes firstPageId=${firstPage?.id}")
 
                 val now = System.currentTimeMillis()
                 val entry = RegistryEntry(
@@ -244,7 +245,12 @@ class NotebookListActivity : AppCompatActivity() {
                     updatedAt = meta?.updatedAt ?: now
                 )
                 registry.add(entry)
-                loadNotebooks()
+                runOnUiThread {
+                    val intent = Intent(this@NotebookListActivity, CanvasActivity::class.java).apply {
+                        putExtra(CanvasActivity.EXTRA_FOLDER_PATH, folderPath)
+                    }
+                    startActivity(intent)
+                }
             } catch (e: Exception) {
                 Log.e(TAG, "createNotebook FAILED for name=$name", e)
                 runOnUiThread { showError("Failed to create notebook: ${e.message}") }

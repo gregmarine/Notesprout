@@ -626,9 +626,11 @@ class CanvasActivity : AppCompatActivity() {
     private fun addPageAction() {
         val dbRef = db ?: return
         val meta = dbRef.getNotebookMeta() ?: return
+        val currentPage = pages.getOrNull(currentPageIndex) ?: return
+        val insertAfterPageNumber = currentPage.pageNumber
         Thread {
             try {
-                val newPage = dbRef.addPage(meta.pageWidth, meta.pageHeight)
+                val newPage = dbRef.addPage(meta.pageWidth, meta.pageHeight, insertAfterPageNumber)
                 val newLayer = dbRef.getFirstLayer(newPage.id)
                 val allPages = dbRef.getAllPages()
                 runOnUiThread {
@@ -637,7 +639,7 @@ class CanvasActivity : AppCompatActivity() {
                     currentPageIndex = pages.indexOfFirst { it.id == newPage.id }.coerceAtLeast(0)
                     loadPage(pages[currentPageIndex])
                     if (newLayer != null) {
-                        undoStack.push(UndoAction.AddPage(newPage, newLayer))
+                        undoStack.push(UndoAction.AddPage(newPage, newLayer, insertAfterPageNumber))
                         updateUndoRedoButtons()
                     }
                 }
@@ -730,17 +732,19 @@ class CanvasActivity : AppCompatActivity() {
 
             is UndoAction.AddPage -> {
                 val page = action.page
-                val wasOnThisPage = pages.getOrNull(currentPageIndex)?.id == page.id
-                val fallbackIndex = if (wasOnThisPage) (currentPageIndex - 1).coerceAtLeast(0) else currentPageIndex
+                val insertedAfterPageNumber = action.insertedAfterPageNumber
                 Thread {
                     try {
                         dbRef.softDeleteLayersForPage(page.id)
                         dbRef.deletePage(page.id)
+                        dbRef.decrementPageNumbersAfter(insertedAfterPageNumber)
                         val allPages = dbRef.getAllPages()
                         runOnUiThread {
                             pages.clear()
                             pages.addAll(allPages)
-                            currentPageIndex = fallbackIndex.coerceIn(0, pages.size - 1)
+                            val targetIdx = pages.indexOfFirst { it.pageNumber == insertedAfterPageNumber }
+                                .coerceAtLeast(0).coerceIn(0, pages.size - 1)
+                            currentPageIndex = targetIdx
                             loadPage(pages[currentPageIndex])
                             updatePageIndicator()
                         }
@@ -819,8 +823,10 @@ class CanvasActivity : AppCompatActivity() {
             is UndoAction.AddPage -> {
                 val page = action.page
                 val layer = action.layer
+                val insertedAfterPageNumber = action.insertedAfterPageNumber
                 Thread {
                     try {
+                        dbRef.incrementPageNumbersAfter(insertedAfterPageNumber)
                         dbRef.restorePage(page.id)
                         dbRef.restoreLayer(layer.id)
                         val allPages = dbRef.getAllPages()
