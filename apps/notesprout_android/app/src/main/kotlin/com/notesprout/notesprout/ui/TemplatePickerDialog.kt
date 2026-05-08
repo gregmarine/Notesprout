@@ -11,6 +11,7 @@ import android.view.Gravity
 import android.widget.*
 import androidx.appcompat.app.AlertDialog
 import java.io.File
+import com.notesprout.notesprout.ui.EinkStyle
 
 class TemplatePickerDialog(
     private val context: Context,
@@ -21,7 +22,6 @@ class TemplatePickerDialog(
     companion object {
         private const val TEMPLATES_DIR = "/storage/emulated/0/Documents/NoteSprout/Templates"
         private const val COLOR_SELECTED = "#2196F3"
-        private const val COLOR_UNSELECTED = "#CCCCCC"
     }
 
     fun show() {
@@ -46,11 +46,12 @@ class TemplatePickerDialog(
         // Each entry holds the ImageView and its associated template path (null = "None")
         val itemImageViews = mutableListOf<Pair<ImageView, String?>>()
 
+        val density = context.resources.displayMetrics.density
         fun borderDrawable(selected: Boolean, isNone: Boolean): GradientDrawable =
             GradientDrawable().apply {
                 setColor(if (isNone) Color.WHITE else Color.TRANSPARENT)
-                if (selected) setStroke(dp(4), Color.parseColor(COLOR_SELECTED))
-                else setStroke(dp(2), Color.parseColor(COLOR_UNSELECTED))
+                if (selected) setStroke(dp(3), Color.parseColor(COLOR_SELECTED))
+                else setStroke((1.5f * density).toInt(), Color.BLACK)
             }
 
         fun refreshBorders() {
@@ -128,15 +129,26 @@ class TemplatePickerDialog(
             root.addView(HorizontalScrollView(context).apply { addView(row) })
         }
 
-        val cancelBtn = Button(context).apply { text = "Cancel" }
-        val applyBtn = Button(context).apply { text = "Apply" }
+        fun flatBtn(label: String): Button = Button(context).apply {
+            text = label
+            setTextColor(Color.BLACK)
+            background = EinkStyle.flatBackground(cornerRadiusDp = 4f, borderWidthDp = 1f)
+            elevation = 0f
+            stateListAnimator = null
+            setPadding(dp(16), dp(8), dp(16), dp(8))
+        }
+        val cancelBtn = flatBtn("Cancel")
+        val applyBtn = flatBtn("Apply")
 
         root.addView(LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.END
             setPadding(dp(8), dp(8), dp(8), dp(8))
+            val gap = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+                leftMargin = dp(8)
+            }
             addView(cancelBtn)
-            addView(applyBtn)
+            addView(applyBtn, gap)
         })
 
         val dialog = AlertDialog.Builder(context)
@@ -150,6 +162,7 @@ class TemplatePickerDialog(
         }
 
         dialog.show()
+        EinkStyle.applyToDialog(dialog)
     }
 
     private fun dp(value: Int): Int = TypedValue.applyDimension(

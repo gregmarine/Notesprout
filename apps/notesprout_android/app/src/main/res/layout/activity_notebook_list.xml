@@ -19,6 +19,11 @@
         android:layout_gravity="bottom|end"
         android:layout_margin="16dp"
         android:contentDescription="New Notebook"
-        app:srcCompat="@android:drawable/ic_input_add" />
+        app:srcCompat="@android:drawable/ic_input_add"
+        app:elevation="0dp"
+        app:backgroundTint="#FFFFFF"
+        app:tint="#000000"
+        app:strokeWidth="2dp"
+        app:strokeColor="#000000" />
 
 </androidx.coordinatorlayout.widget.CoordinatorLayout>

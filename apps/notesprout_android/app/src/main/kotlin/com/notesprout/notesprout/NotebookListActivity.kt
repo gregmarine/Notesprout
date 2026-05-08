@@ -1,6 +1,9 @@
 package com.notesprout.notesprout
 
+import android.content.DialogInterface
 import android.content.Intent
+import android.content.res.ColorStateList
+import android.graphics.Color
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -29,6 +32,7 @@ import com.google.android.material.floatingactionbutton.FloatingActionButton
 import com.notesprout.notesprout.data.NotebookRegistry
 import com.notesprout.notesprout.data.RegistryEntry
 import com.notesprout.notesprout.data.SoilDatabase
+import com.notesprout.notesprout.ui.EinkStyle
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -91,13 +95,18 @@ class NotebookListActivity : AppCompatActivity() {
         )
         recyclerView.adapter = adapter
 
-        findViewById<FloatingActionButton>(R.id.fab).setOnClickListener {
+        val fab = findViewById<FloatingActionButton>(R.id.fab)
+        fab.setOnClickListener {
             if (!hasStoragePermission()) {
                 showPermissionDialog()
             } else {
                 showCreateDialog()
             }
         }
+        fab.elevation = 0f
+        fab.stateListAnimator = null
+        fab.backgroundTintList = ColorStateList.valueOf(Color.WHITE)
+        fab.imageTintList = ColorStateList.valueOf(Color.BLACK)
     }
 
     override fun onResume() {
@@ -118,7 +127,7 @@ class NotebookListActivity : AppCompatActivity() {
     }
 
     private fun showPermissionDialog() {
-        AlertDialog.Builder(this)
+        val dialog = AlertDialog.Builder(this)
             .setTitle("Storage Permission Required")
             .setMessage(
                 "NoteSprout needs full storage access to save and manage your notebooks in the " +
@@ -145,7 +154,9 @@ class NotebookListActivity : AppCompatActivity() {
                 Toast.makeText(this, "NoteSprout requires storage access to function", Toast.LENGTH_LONG).show()
                 finish()
             }
-            .show()
+            .create()
+        dialog.show()
+        EinkStyle.applyToDialog(dialog)
     }
 
     private fun loadNotebooks() {
@@ -202,11 +213,12 @@ class NotebookListActivity : AppCompatActivity() {
 
     private fun showCreateDialog() {
         val nameSuggestion = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+        val padding = (12 * resources.displayMetrics.density).toInt()
         val input = EditText(this).apply {
             setText(nameSuggestion)
-            setPadding(48, 24, 48, 8)
+            setPadding(padding, padding, padding, padding)
         }
-        AlertDialog.Builder(this)
+        val dialog = AlertDialog.Builder(this)
             .setTitle("New Notebook")
             .setView(input)
             .setPositiveButton("Create") { _, _ ->
@@ -214,7 +226,9 @@ class NotebookListActivity : AppCompatActivity() {
                 if (name.isNotEmpty()) createNotebook(name)
             }
             .setNegativeButton("Cancel", null)
-            .show()
+            .create()
+        dialog.show()
+        EinkStyle.applyToDialog(dialog)
     }
 
     private fun createNotebook(name: String) {
@@ -269,15 +283,17 @@ class NotebookListActivity : AppCompatActivity() {
     }
 
     private fun showError(msg: String) {
-        AlertDialog.Builder(this)
+        val dialog = AlertDialog.Builder(this)
             .setTitle("Error")
             .setMessage(msg)
             .setPositiveButton("OK", null)
-            .show()
+            .create()
+        dialog.show()
+        EinkStyle.applyToDialog(dialog)
     }
 
     private fun showContextMenu(entry: RegistryEntry) {
-        AlertDialog.Builder(this)
+        val dialog = AlertDialog.Builder(this)
             .setTitle(entry.name)
             .setItems(arrayOf("Rename", "Delete")) { _, which ->
                 when (which) {
@@ -285,15 +301,18 @@ class NotebookListActivity : AppCompatActivity() {
                     1 -> showDeleteDialog(entry)
                 }
             }
-            .show()
+            .create()
+        dialog.show()
+        EinkStyle.applyToDialog(dialog)
     }
 
     private fun showRenameDialog(entry: RegistryEntry) {
+        val padding = (12 * resources.displayMetrics.density).toInt()
         val input = EditText(this).apply {
             setText(entry.name)
-            setPadding(48, 24, 48, 8)
+            setPadding(padding, padding, padding, padding)
         }
-        AlertDialog.Builder(this)
+        val dialog = AlertDialog.Builder(this)
             .setTitle("Rename Notebook")
             .setView(input)
             .setPositiveButton("Save") { _, _ ->
@@ -303,7 +322,9 @@ class NotebookListActivity : AppCompatActivity() {
                 }
             }
             .setNegativeButton("Cancel", null)
-            .show()
+            .create()
+        dialog.show()
+        EinkStyle.applyToDialog(dialog)
     }
 
     private fun renameNotebook(entry: RegistryEntry, newName: String) {
@@ -335,12 +356,15 @@ class NotebookListActivity : AppCompatActivity() {
     }
 
     private fun showDeleteDialog(entry: RegistryEntry) {
-        AlertDialog.Builder(this)
+        val dialog = AlertDialog.Builder(this)
             .setTitle("Delete Notebook")
             .setMessage("Delete \"${entry.name}\"? This cannot be undone.")
             .setPositiveButton("Delete") { _, _ -> deleteNotebook(entry) }
             .setNegativeButton("Cancel", null)
-            .show()
+            .create()
+        dialog.show()
+        EinkStyle.applyToDialog(dialog)
+        dialog.getButton(DialogInterface.BUTTON_POSITIVE)?.setTextColor(Color.RED)
     }
 
     private fun deleteNotebook(entry: RegistryEntry) {

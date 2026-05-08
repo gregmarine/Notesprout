@@ -5,7 +5,6 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Color
-import android.graphics.Outline
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.Rect
@@ -18,7 +17,6 @@ import android.view.MotionEvent
 import android.view.SurfaceHolder
 import android.view.SurfaceView
 import android.view.View
-import android.view.ViewOutlineProvider
 import android.view.WindowInsets
 import android.view.WindowInsetsController
 import android.widget.FrameLayout
@@ -34,6 +32,7 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import com.notesprout.notesprout.data.PageModel
 import com.notesprout.notesprout.data.SoilDatabase
+import com.notesprout.notesprout.ui.EinkStyle
 import com.notesprout.notesprout.ui.TemplatePickerDialog
 import com.notesprout.notesprout.data.StrokeModel
 import com.notesprout.notesprout.data.StrokePoint
@@ -347,6 +346,7 @@ class CanvasActivity : AppCompatActivity() {
             shape = GradientDrawable.RECTANGLE
             setCornerRadius(cornerRadius)
             setColor(Color.WHITE)
+            setStroke((1.5f * density).toInt(), Color.BLACK)
         }
 
         fun makeBtn(iconRes: Int, desc: String): ImageButton =
@@ -387,13 +387,6 @@ class CanvasActivity : AppCompatActivity() {
         return LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             background = toolbarBg
-            elevation = 8 * density
-            outlineProvider = object : ViewOutlineProvider() {
-                override fun getOutline(view: View, outline: Outline) {
-                    outline.setRoundRect(0, 0, view.width, view.height, cornerRadius)
-                }
-            }
-            clipToOutline = true
             setPadding(
                 (4 * density).toInt(), (4 * density).toInt(),
                 (4 * density).toInt(), (4 * density).toInt()
@@ -423,7 +416,6 @@ class CanvasActivity : AppCompatActivity() {
                 setCornerRadius(8 * density)
                 setColor(Color.WHITE)
             }
-            elevation = 8 * density
             setPadding(
                 (8 * density).toInt(), (4 * density).toInt(),
                 (8 * density).toInt(), (4 * density).toInt()
@@ -436,12 +428,13 @@ class CanvasActivity : AppCompatActivity() {
         pageIndicator.text = "Page ${currentPageIndex + 1} / ${pages.size}"
     }
 
-    private fun makeActiveBg(): GradientDrawable {
+    private fun makeActiveToolBg(): GradientDrawable {
         val density = resources.displayMetrics.density
         return GradientDrawable().apply {
             shape = GradientDrawable.RECTANGLE
             setCornerRadius(8 * density)
-            setColor(0xFFD0E8FF.toInt())
+            setColor(Color.WHITE)
+            setStroke((2 * density).toInt(), Color.BLACK)
         }
     }
 
@@ -449,12 +442,12 @@ class CanvasActivity : AppCompatActivity() {
         currentMode = mode
 
         val density = resources.displayMetrics.density
-        penBtn.background = if (mode == ToolMode.PEN) makeActiveBg() else null
+        penBtn.background = if (mode == ToolMode.PEN) makeActiveToolBg() else null
         penBtn.setPadding(
             (8 * density).toInt(), (8 * density).toInt(),
             (8 * density).toInt(), (8 * density).toInt()
         )
-        eraserBtn.background = if (mode == ToolMode.ERASER) makeActiveBg() else null
+        eraserBtn.background = if (mode == ToolMode.ERASER) makeActiveToolBg() else null
         eraserBtn.setPadding(
             (8 * density).toInt(), (8 * density).toInt(),
             (8 * density).toInt(), (8 * density).toInt()
@@ -681,6 +674,7 @@ class CanvasActivity : AppCompatActivity() {
             }
             .create()
         dialog.show()
+        EinkStyle.applyToDialog(dialog)
         dialog.getButton(DialogInterface.BUTTON_POSITIVE)?.setTextColor(Color.RED)
     }
 
