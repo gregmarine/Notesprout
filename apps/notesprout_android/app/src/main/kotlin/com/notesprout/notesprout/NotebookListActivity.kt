@@ -18,6 +18,7 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.appcompat.app.AppCompatDelegate
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -50,6 +51,7 @@ class NotebookListActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        AppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_NO)
         setContentView(R.layout.activity_notebook_list)
 
         WindowCompat.setDecorFitsSystemWindows(window, false)
@@ -150,6 +152,14 @@ class NotebookListActivity : AppCompatActivity() {
         val dir = File(NOTES_DIR)
         Log.i(TAG, "loadNotebooks: dir=$NOTES_DIR exists=${dir.exists()}")
         if (!dir.exists()) dir.mkdirs()
+
+        val templatesDir = File("$NOTES_DIR/Templates")
+        if (!templatesDir.exists()) {
+            templatesDir.mkdirs()
+            Log.i(TAG, "Templates folder created")
+        } else {
+            Log.i(TAG, "Templates folder already exists")
+        }
 
         Thread {
             val result = try {

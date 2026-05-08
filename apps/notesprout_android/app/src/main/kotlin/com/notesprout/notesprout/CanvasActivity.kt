@@ -2,6 +2,7 @@ package com.notesprout.notesprout
 
 import android.content.DialogInterface
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Outline
@@ -27,11 +28,13 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.appcompat.app.AppCompatDelegate
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import com.notesprout.notesprout.data.PageModel
 import com.notesprout.notesprout.data.SoilDatabase
+import com.notesprout.notesprout.ui.TemplatePickerDialog
 import com.notesprout.notesprout.data.StrokeModel
 import com.notesprout.notesprout.data.StrokePoint
 import com.notesprout.notesprout.device.DrawingEngine
@@ -40,6 +43,7 @@ import com.notesprout.notesprout.device.DrawingEngineFactory
 import com.notesprout.notesprout.device.TouchPointData
 import com.notesprout.notesprout.undo.UndoAction
 import com.notesprout.notesprout.undo.UndoStack
+import java.io.File
 import java.util.UUID
 import kotlin.math.abs
 import kotlin.math.sqrt
@@ -268,6 +272,7 @@ class CanvasActivity : AppCompatActivity() {
         }
         root.addView(pageIndicator, indicatorParams)
 
+        AppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_NO)
         setContentView(root)
 
         WindowCompat.setDecorFitsSystemWindows(window, false)
@@ -359,6 +364,7 @@ class CanvasActivity : AppCompatActivity() {
         eraserBtn = makeBtn(R.drawable.ic_eraser, "Eraser")
         val addPageBtn = makeBtn(R.drawable.ic_add_page, "Add Page")
         val deletePageBtn = makeBtn(R.drawable.ic_delete_page, "Delete Page")
+        val templateBtn = makeBtn(R.drawable.ic_template, "Template")
         val closeBtn = makeBtn(android.R.drawable.ic_menu_close_clear_cancel, "Close")
 
         undoBtn.setOnClickListener { performUndo() }
@@ -367,6 +373,12 @@ class CanvasActivity : AppCompatActivity() {
         eraserBtn.setOnClickListener { setToolMode(ToolMode.ERASER) }
         addPageBtn.setOnClickListener { addPageAction() }
         deletePageBtn.setOnClickListener { deletePageAction() }
+        templateBtn.setOnClickListener {
+            val currentTemplate = pages.getOrNull(currentPageIndex)?.templatePath
+            TemplatePickerDialog(this, currentTemplate) { selectedPath ->
+                applyTemplate(selectedPath)
+            }.show()
+        }
         closeBtn.setOnClickListener { finish() }
 
         undoBtn.alpha = 0.4f
@@ -392,6 +404,7 @@ class CanvasActivity : AppCompatActivity() {
             addView(eraserBtn, LinearLayout.LayoutParams(btnSize, btnSize))
             addView(addPageBtn, LinearLayout.LayoutParams(btnSize, btnSize))
             addView(deletePageBtn, LinearLayout.LayoutParams(btnSize, btnSize))
+            addView(templateBtn, LinearLayout.LayoutParams(btnSize, btnSize))
             addView(closeBtn, LinearLayout.LayoutParams(btnSize, btnSize))
         }
     }
@@ -578,7 +591,8 @@ class CanvasActivity : AppCompatActivity() {
                     pages.addAll(allPages)
                     currentPageIndex = 0
                     strokes.addAll(loaded)
-                    loaded.forEach { drawStrokeToBitmap(it) }
+                    Log.i(TAG, "loadPage: templatePath=${pages.getOrNull(currentPageIndex)?.templatePath}")
+                    rebuildBitmap()
                     blitBitmapToSurface()
                     updatePageIndicator()
                 }
@@ -601,6 +615,7 @@ class CanvasActivity : AppCompatActivity() {
                 layerId = layer.id
                 strokes.clear()
                 strokes.addAll(loaded)
+                Log.i(TAG, "loadPage: templatePath=${pages.getOrNull(currentPageIndex)?.templatePath}")
                 rebuildBitmap()
                 blitBitmapToSurface()
                 updatePageIndicator()
@@ -628,9 +643,10 @@ class CanvasActivity : AppCompatActivity() {
         val meta = dbRef.getNotebookMeta() ?: return
         val currentPage = pages.getOrNull(currentPageIndex) ?: return
         val insertAfterPageNumber = currentPage.pageNumber
+        val inheritedTemplate = pages.getOrNull(currentPageIndex)?.templatePath
         Thread {
             try {
-                val newPage = dbRef.addPage(meta.pageWidth, meta.pageHeight, insertAfterPageNumber)
+                val newPage = dbRef.addPage(meta.pageWidth, meta.pageHeight, insertAfterPageNumber, inheritedTemplate)
                 val newLayer = dbRef.getFirstLayer(newPage.id)
                 val allPages = dbRef.getAllPages()
                 runOnUiThread {
@@ -690,6 +706,22 @@ class CanvasActivity : AppCompatActivity() {
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "performDeletePage failed", e)
+            }
+        }.start()
+    }
+
+    private fun applyTemplate(templatePath: String?) {
+        pages[currentPageIndex] = pages[currentPageIndex].copy(templatePath = templatePath)
+        val pageId = pages[currentPageIndex].id
+        Thread {
+            try {
+                db?.updatePageTemplate(pageId, templatePath)
+            } catch (e: Exception) {
+                Log.e(TAG, "applyTemplate failed", e)
+            }
+            runOnUiThread {
+                rebuildBitmap()
+                blitBitmapToSurface()
             }
         }.start()
     }
@@ -889,6 +921,24 @@ class CanvasActivity : AppCompatActivity() {
     private fun rebuildBitmap() {
         val canvas = committedCanvas ?: return
         canvas.drawColor(Color.WHITE)
+        val templatePath = pages.getOrNull(currentPageIndex)?.templatePath
+        if (templatePath != null) {
+            if (File(templatePath).exists()) {
+                val template = BitmapFactory.decodeFile(templatePath)
+                if (template != null) {
+                    val width = committedBitmap!!.width
+                    val height = committedBitmap!!.height
+                    val scaledTemplate = Bitmap.createScaledBitmap(template, width, height, true)
+                    canvas.drawBitmap(scaledTemplate, 0f, 0f, null)
+                    if (scaledTemplate !== template) scaledTemplate.recycle()
+                    template.recycle()
+                } else {
+                    Log.w(TAG, "Template not found or failed to load: $templatePath")
+                }
+            } else {
+                Log.w(TAG, "Template not found or failed to load: $templatePath")
+            }
+        }
         strokes.forEach { drawStrokeToBitmap(it) }
     }
 

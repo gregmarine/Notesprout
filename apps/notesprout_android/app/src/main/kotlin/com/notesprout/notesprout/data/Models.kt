@@ -47,7 +47,8 @@ data class PageModel(
     val deletedAt: Long? = null,
     val pageNumber: Int,
     val width: Double,
-    val height: Double
+    val height: Double,
+    val templatePath: String? = null
 ) {
     fun toContentValues() = ContentValues().apply {
         put("id", id)
@@ -60,22 +61,28 @@ data class PageModel(
         put("pageNumber", pageNumber)
         put("width", width)
         put("height", height)
+        if (templatePath != null) put("templatePath", templatePath) else putNull("templatePath")
     }
 
     companion object {
-        fun fromCursor(c: Cursor) = PageModel(
-            id = c.getString(c.getColumnIndexOrThrow("id")),
-            parentId = c.getString(c.getColumnIndexOrThrow("parentId")),
-            type = c.getString(c.getColumnIndexOrThrow("type")),
-            subtype = c.getString(c.getColumnIndexOrThrow("subtype")),
-            createdAt = c.getLong(c.getColumnIndexOrThrow("createdAt")),
-            updatedAt = c.getLong(c.getColumnIndexOrThrow("updatedAt")),
-            deletedAt = if (c.isNull(c.getColumnIndexOrThrow("deletedAt"))) null
-                        else c.getLong(c.getColumnIndexOrThrow("deletedAt")),
-            pageNumber = c.getInt(c.getColumnIndexOrThrow("pageNumber")),
-            width = c.getDouble(c.getColumnIndexOrThrow("width")),
-            height = c.getDouble(c.getColumnIndexOrThrow("height"))
-        )
+        fun fromCursor(c: Cursor): PageModel {
+            val templatePathIdx = c.getColumnIndex("templatePath")
+            return PageModel(
+                id = c.getString(c.getColumnIndexOrThrow("id")),
+                parentId = c.getString(c.getColumnIndexOrThrow("parentId")),
+                type = c.getString(c.getColumnIndexOrThrow("type")),
+                subtype = c.getString(c.getColumnIndexOrThrow("subtype")),
+                createdAt = c.getLong(c.getColumnIndexOrThrow("createdAt")),
+                updatedAt = c.getLong(c.getColumnIndexOrThrow("updatedAt")),
+                deletedAt = if (c.isNull(c.getColumnIndexOrThrow("deletedAt"))) null
+                            else c.getLong(c.getColumnIndexOrThrow("deletedAt")),
+                pageNumber = c.getInt(c.getColumnIndexOrThrow("pageNumber")),
+                width = c.getDouble(c.getColumnIndexOrThrow("width")),
+                height = c.getDouble(c.getColumnIndexOrThrow("height")),
+                templatePath = if (templatePathIdx == -1 || c.isNull(templatePathIdx)) null
+                               else c.getString(templatePathIdx)
+            )
+        }
     }
 }
 

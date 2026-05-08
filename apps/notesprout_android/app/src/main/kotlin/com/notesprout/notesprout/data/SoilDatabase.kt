@@ -49,9 +49,15 @@ class SoilDatabase(private val filePath: String) {
                 deletedAt INTEGER,
                 pageNumber INTEGER NOT NULL,
                 width REAL NOT NULL,
-                height REAL NOT NULL
+                height REAL NOT NULL,
+                templatePath TEXT
             )
         """)
+        try {
+            d.execSQL("ALTER TABLE pages ADD COLUMN templatePath TEXT")
+        } catch (_: Exception) {
+            // column already exists
+        }
         d.execSQL("""
             CREATE TABLE IF NOT EXISTS layers (
                 id TEXT PRIMARY KEY,
@@ -148,7 +154,16 @@ class SoilDatabase(private val filePath: String) {
         }
     }
 
-    fun addPage(pageWidth: Double, pageHeight: Double, insertAfterPageNumber: Int = -1): PageModel {
+    fun updatePageTemplate(pageId: String, templatePath: String?) {
+        val d = db ?: return
+        val cv = ContentValues().apply {
+            if (templatePath != null) put("templatePath", templatePath) else putNull("templatePath")
+            put("updatedAt", System.currentTimeMillis())
+        }
+        d.update("pages", cv, "id = ?", arrayOf(pageId))
+    }
+
+    fun addPage(pageWidth: Double, pageHeight: Double, insertAfterPageNumber: Int = -1, templatePath: String? = null): PageModel {
         val d = db ?: throw IllegalStateException("Database not open")
         val now = System.currentTimeMillis()
         d.beginTransaction()
@@ -173,7 +188,8 @@ class SoilDatabase(private val filePath: String) {
                 updatedAt = now,
                 pageNumber = newPageNumber,
                 width = pageWidth,
-                height = pageHeight
+                height = pageHeight,
+                templatePath = templatePath
             )
             d.insert("pages", null, page.toContentValues())
             val layer = LayerModel(
