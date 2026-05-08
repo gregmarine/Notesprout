@@ -78,6 +78,9 @@ class CanvasActivity : AppCompatActivity() {
 
     private var committedBitmap: Bitmap? = null
     private var committedCanvas: Canvas? = null
+    private var activeLiveBitmap: Bitmap? = null
+    private var activeLiveCanvas: Canvas? = null
+    private var lastLivePreviewIndex = 0
 
     private val strokes = mutableListOf<StrokeModel>()
 
@@ -119,6 +122,14 @@ class CanvasActivity : AppCompatActivity() {
                     pressure = 0.0, tilt = 0.0,
                     timestamp = System.currentTimeMillis()
                 ))
+                val committed = committedBitmap
+                if (committed != null) {
+                    activeLiveBitmap?.recycle()
+                    val bmp = committed.copy(Bitmap.Config.ARGB_8888, true)
+                    activeLiveBitmap = bmp
+                    activeLiveCanvas = Canvas(bmp)
+                    lastLivePreviewIndex = 0
+                }
             }
         }
 
@@ -143,6 +154,9 @@ class CanvasActivity : AppCompatActivity() {
         override fun onStrokeEnded(points: List<TouchPointData>) {
             if (currentMode == ToolMode.ERASER) return
             runOnUiThread {
+                activeLiveBitmap?.recycle()
+                activeLiveBitmap = null
+                activeLiveCanvas = null
                 activePoints.clear()
                 if (points.size < 2) return@runOnUiThread
                 val lid = layerId ?: return@runOnUiThread
@@ -241,7 +255,7 @@ class CanvasActivity : AppCompatActivity() {
         eraserThresholdPx = ERASER_THRESHOLD_DP * density
         swipeMinDistancePx = SWIPE_MIN_DISTANCE_DP * density
 
-        drawingEngine = DrawingEngineFactory.create()
+        drawingEngine = DrawingEngineFactory.create(this)
 
         supportActionBar?.hide()
 
@@ -519,32 +533,12 @@ class CanvasActivity : AppCompatActivity() {
     }
 
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
-        val actionName = when (ev.actionMasked) {
-            MotionEvent.ACTION_DOWN -> "DOWN"
-            MotionEvent.ACTION_MOVE -> "MOVE"
-            MotionEvent.ACTION_UP -> "UP"
-            MotionEvent.ACTION_CANCEL -> "CANCEL"
-            MotionEvent.ACTION_POINTER_DOWN -> "POINTER_DOWN"
-            MotionEvent.ACTION_POINTER_UP -> "POINTER_UP"
-            else -> "OTHER(${ev.actionMasked})"
-        }
-        val toolType = ev.getToolType(0)
-        Log.d("NSStylusDebug", "dispatchTouchEvent: action=$actionName toolType=$toolType pointers=${ev.pointerCount} x=%.1f y=%.1f mode=$currentMode".format(ev.x, ev.y))
-
-        if (detectTwoFingerSwipe(ev)) {
-            Log.d("NSStylusDebug", "  → consumed by two-finger swipe detector")
-            return true
-        }
+        if (detectTwoFingerSwipe(ev)) return true
         if (currentMode == ToolMode.PEN) {
-            Log.d("NSStylusDebug", "  → PEN mode: calling drawingEngine.onTouchEvent (engine=${drawingEngine::class.simpleName})")
             drawingEngine.onTouchEvent(ev)
         } else if (currentMode == ToolMode.ERASER) {
-            Log.d("NSStylusDebug", "  → ERASER mode: calling handleEraserTouch")
             handleEraserTouch(ev)
-        } else {
-            Log.d("NSStylusDebug", "  → no mode match, passing to super only")
         }
-        Log.d("NSStylusDebug", "  → calling super.dispatchTouchEvent (SurfaceView touch listener will fire here)")
         return super.dispatchTouchEvent(ev)
     }
 
@@ -968,20 +962,29 @@ class CanvasActivity : AppCompatActivity() {
             blitBitmapToSurface()
             return
         }
-        val bmp = committedBitmap ?: return
-        if (!surfaceReady) return
-        val canvas = surfaceView.holder.lockCanvas() ?: return
-        try {
-            canvas.drawBitmap(bmp, 0f, 0f, null)
-            val path = Path().apply {
-                moveTo(activePoints[0].x.toFloat(), activePoints[0].y.toFloat())
-                for (i in 1 until activePoints.size) {
-                    lineTo(activePoints[i].x.toFloat(), activePoints[i].y.toFloat())
-                }
+        val liveBmp = activeLiveBitmap
+        val liveCanvas = activeLiveCanvas
+        if (liveBmp != null && liveCanvas != null) {
+            val from = (lastLivePreviewIndex + 1).coerceAtLeast(1)
+            for (i in from until activePoints.size) {
+                val prev = activePoints[i - 1]
+                val curr = activePoints[i]
+                liveCanvas.drawLine(
+                    prev.x.toFloat(), prev.y.toFloat(),
+                    curr.x.toFloat(), curr.y.toFloat(),
+                    strokePaint
+                )
             }
-            canvas.drawPath(path, strokePaint)
-        } finally {
-            surfaceView.holder.unlockCanvasAndPost(canvas)
+            lastLivePreviewIndex = (activePoints.size - 1).coerceAtLeast(0)
+            if (!surfaceReady) return
+            val canvas = surfaceView.holder.lockCanvas() ?: return
+            try {
+                canvas.drawBitmap(liveBmp, 0f, 0f, null)
+            } finally {
+                surfaceView.holder.unlockCanvasAndPost(canvas)
+            }
+        } else {
+            blitBitmapToSurface()
         }
     }
 
@@ -1006,5 +1009,6 @@ class CanvasActivity : AppCompatActivity() {
         drawingEngine.onDestroy()
         db?.close()
         committedBitmap?.recycle()
+        activeLiveBitmap?.recycle()
     }
 }
