@@ -21,7 +21,6 @@ class TemplatePickerDialog(
 
     companion object {
         private const val TEMPLATES_DIR = "/storage/emulated/0/Documents/NoteSprout/Templates"
-        private const val COLOR_SELECTED = "#2196F3"
     }
 
     fun show() {
@@ -46,17 +45,17 @@ class TemplatePickerDialog(
         // Each entry holds the ImageView and its associated template path (null = "None")
         val itemImageViews = mutableListOf<Pair<ImageView, String?>>()
 
-        val density = context.resources.displayMetrics.density
-        fun borderDrawable(selected: Boolean, isNone: Boolean): GradientDrawable =
-            GradientDrawable().apply {
-                setColor(if (isNone) Color.WHITE else Color.TRANSPARENT)
-                if (selected) setStroke(dp(3), Color.parseColor(COLOR_SELECTED))
-                else setStroke((1.5f * density).toInt(), Color.BLACK)
-            }
-
         fun refreshBorders() {
             itemImageViews.forEach { (iv, path) ->
-                iv.background = borderDrawable(path == selectedPath, isNone = path == null)
+                iv.background = if (path == selectedPath) {
+                    GradientDrawable().apply {
+                        shape = GradientDrawable.RECTANGLE
+                        setColor(Color.WHITE)
+                        setStroke(dp(3), Color.BLACK)
+                    }
+                } else {
+                    null
+                }
             }
         }
 

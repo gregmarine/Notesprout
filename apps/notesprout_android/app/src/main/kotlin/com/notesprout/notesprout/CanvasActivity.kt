@@ -8,6 +8,9 @@ import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.Rect
+import android.graphics.ColorFilter
+import android.graphics.PixelFormat
+import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.os.Bundle
@@ -344,11 +347,9 @@ class CanvasActivity : AppCompatActivity() {
     private fun buildToolbar(density: Float): LinearLayout {
         val btnSize = (40 * density).toInt()
         val btnPadding = (8 * density).toInt()
-        val cornerRadius = 12 * density
 
         val toolbarBg = GradientDrawable().apply {
             shape = GradientDrawable.RECTANGLE
-            setCornerRadius(cornerRadius)
             setColor(Color.WHITE)
             setStroke((1.5f * density).toInt(), Color.BLACK)
         }
@@ -432,13 +433,22 @@ class CanvasActivity : AppCompatActivity() {
         pageIndicator.text = "Page ${currentPageIndex + 1} / ${pages.size}"
     }
 
-    private fun makeActiveToolBg(): GradientDrawable {
-        val density = resources.displayMetrics.density
-        return GradientDrawable().apply {
-            shape = GradientDrawable.RECTANGLE
-            setCornerRadius(8 * density)
-            setColor(Color.WHITE)
-            setStroke((2 * density).toInt(), Color.BLACK)
+    private fun makeActiveToolBg(density: Float): Drawable {
+        val borderWidth = (3 * density).toInt()
+        return object : Drawable() {
+            private val paint = Paint().apply {
+                color = Color.BLACK
+                strokeWidth = borderWidth.toFloat()
+                style = Paint.Style.STROKE
+            }
+            override fun draw(canvas: Canvas) {
+                val y = bounds.bottom - borderWidth / 2f
+                canvas.drawLine(bounds.left.toFloat(), y, bounds.right.toFloat(), y, paint)
+            }
+            override fun setAlpha(alpha: Int) {}
+            override fun setColorFilter(cf: ColorFilter?) {}
+            @Deprecated("Deprecated in Java")
+            override fun getOpacity() = PixelFormat.TRANSPARENT
         }
     }
 
@@ -446,12 +456,12 @@ class CanvasActivity : AppCompatActivity() {
         currentMode = mode
 
         val density = resources.displayMetrics.density
-        penBtn.background = if (mode == ToolMode.PEN) makeActiveToolBg() else null
+        penBtn.background = if (mode == ToolMode.PEN) makeActiveToolBg(density) else null
         penBtn.setPadding(
             (8 * density).toInt(), (8 * density).toInt(),
             (8 * density).toInt(), (8 * density).toInt()
         )
-        eraserBtn.background = if (mode == ToolMode.ERASER) makeActiveToolBg() else null
+        eraserBtn.background = if (mode == ToolMode.ERASER) makeActiveToolBg(density) else null
         eraserBtn.setPadding(
             (8 * density).toInt(), (8 * density).toInt(),
             (8 * density).toInt(), (8 * density).toInt()
