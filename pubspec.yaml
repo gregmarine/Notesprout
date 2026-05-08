@@ -1,0 +1,9 @@
+name: notesprout_workspace
+
+environment:
+  sdk: ">=3.3.0 <4.0.0"
+
+workspace:
+  - apps/notesprout_mobile
+  - packages/notesprout_core
+  - packages/notesprout_onyx
