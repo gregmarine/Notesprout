@@ -1,14 +1,13 @@
-// NoteSprout Plugin — Eraser
-// Plugin ID: com.notesprout.tools.eraser
-// Version: 1
-
-(function () {
+(function() {
+  const PLUGIN_ID = "com.notesprout.tools.eraser";
+  const VERSION = 1;
 
   function getManifest() {
     return JSON.stringify({
-      pluginId: "com.notesprout.tools.eraser",
-      version: 1,
-      name: "Eraser"
+      pluginId: PLUGIN_ID,
+      version: VERSION,
+      name: "Eraser",
+      type: "tool"
     });
   }
 
@@ -24,11 +23,12 @@
     return objectJson;
   }
 
-  globalThis["com.notesprout.tools.eraser"] = {
-    getManifest: getManifest,
-    onCreate: onCreate,
-    onLoad: onLoad,
-    onSave: onSave
+  globalThis[PLUGIN_ID] = {
+    getManifest,
+    onCreate,
+    onLoad,
+    onSave
   };
 
+  context.registerPlugin(PLUGIN_ID);
 })();

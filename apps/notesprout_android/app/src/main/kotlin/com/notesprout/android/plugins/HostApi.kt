@@ -1,9 +1,11 @@
 package com.notesprout.android.plugins
 
 import android.util.Log
+import com.notesprout.android.BuildConfig
 import com.notesprout.android.data.BaseObject
-import com.notesprout.android.data.BoundingBox
 import com.notesprout.android.data.SoilDatabase
+import com.notesprout.android.data.baseObjectFromJson
+import com.notesprout.android.data.toJson
 import kotlinx.coroutines.runBlocking
 import org.json.JSONArray
 import org.json.JSONObject
@@ -16,6 +18,11 @@ import java.util.UUID
 interface IContextApi {
     fun getPluginId(): String
     fun getObjectId(): String
+    fun newId(): String
+    fun now(): Long
+    fun getAppVersion(): String
+    // Called from each plugin's IIFE at load time so the registry can discover its pluginId.
+    fun registerPlugin(pluginId: String)
 }
 
 interface ICanvasApi {
@@ -46,8 +53,27 @@ class ContextApi : IContextApi {
     var currentPluginId: String = ""
     var currentObjectId: String = ""
 
+    // Populated by each plugin's context.registerPlugin(PLUGIN_ID) call at load time.
+    // clearPendingRegistrations() is intentionally NOT on IContextApi: QuickJS-Android
+    // proxies every interface method and List<String> is not a JS-compatible return type.
+    private val pendingRegistrations: MutableList<String> = mutableListOf()
+
     override fun getPluginId(): String = currentPluginId
     override fun getObjectId(): String = currentObjectId
+    override fun newId(): String = UUID.randomUUID().toString()
+    override fun now(): Long = System.currentTimeMillis()
+    override fun getAppVersion(): String = BuildConfig.VERSION_NAME
+
+    override fun registerPlugin(pluginId: String) {
+        pendingRegistrations.add(pluginId)
+        Log.d("NoteSprout", "plugin registered: $pluginId")
+    }
+
+    fun clearPendingRegistrations(): List<String> {
+        val snapshot = pendingRegistrations.toList()
+        pendingRegistrations.clear()
+        return snapshot
+    }
 }
 
 class CanvasApi : ICanvasApi {
@@ -131,39 +157,3 @@ class HostApi(database: SoilDatabase?) {
     val events = EventsApi()
     val external = ExternalApi()
 }
-
-// ─── JSON helpers (private to this file) ─────────────────────────────────────
-
-private fun baseObjectFromJson(json: String): BaseObject {
-    val obj = JSONObject(json)
-    val now = System.currentTimeMillis()
-    val boundingBoxJson = if (obj.has("boundingBox") && !obj.isNull("boundingBox"))
-        obj.get("boundingBox").toString()
-    else
-        BoundingBox.empty().toJson()
-    return BaseObject(
-        id = obj.optString("id").ifEmpty { UUID.randomUUID().toString() },
-        parentId = obj.optString("parentId", ""),
-        pluginId = obj.optString("pluginId", ""),
-        boundingBox = BoundingBox.fromJson(boundingBoxJson),
-        order = obj.optInt("order", 0),
-        createdAt = obj.optLong("createdAt", now),
-        updatedAt = obj.optLong("updatedAt", now),
-        deletedAt = if (obj.isNull("deletedAt")) null else obj.optLong("deletedAt"),
-        syncVersion = obj.optLong("syncVersion", 0),
-        data = obj.optString("data", "{}")
-    )
-}
-
-private fun BaseObject.toJson(): String = JSONObject().apply {
-    put("id", id)
-    put("parentId", parentId)
-    put("pluginId", pluginId)
-    put("boundingBox", JSONObject(boundingBox.toJson()))
-    put("order", order)
-    put("createdAt", createdAt)
-    put("updatedAt", updatedAt)
-    if (deletedAt != null) put("deletedAt", deletedAt) else put("deletedAt", JSONObject.NULL)
-    put("syncVersion", syncVersion)
-    put("data", data)
-}.toString()

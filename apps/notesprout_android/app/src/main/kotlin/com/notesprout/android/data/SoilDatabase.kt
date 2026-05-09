@@ -148,12 +148,11 @@ class SoilDatabase(context: Context, filePath: String) {
         }
     }
 
-    suspend fun getNotebook(): BaseObject? = withContext(dbDispatcher) {
+    suspend fun getNotebook(pluginId: String): BaseObject? = withContext(dbDispatcher) {
         db.rawQuery(
             """SELECT * FROM objects
-               WHERE pluginId = 'com.notesprout.structural.notebook'
-               AND deletedAt IS NULL LIMIT 1""",
-            null
+               WHERE pluginId = ? AND deletedAt IS NULL LIMIT 1""",
+            arrayOf(pluginId)
         ).use { cursor ->
             if (cursor.moveToFirst()) cursor.toBaseObject() else null
         }

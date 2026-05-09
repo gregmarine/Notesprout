@@ -1,14 +1,13 @@
-// NoteSprout Plugin — Gel Pen
-// Plugin ID: com.notesprout.tools.gel_pen
-// Version: 1
-
-(function () {
+(function() {
+  const PLUGIN_ID = "com.notesprout.tools.gel_pen";
+  const VERSION = 1;
 
   function getManifest() {
     return JSON.stringify({
-      pluginId: "com.notesprout.tools.gel_pen",
-      version: 1,
-      name: "Gel Pen"
+      pluginId: PLUGIN_ID,
+      version: VERSION,
+      name: "Gel Pen",
+      type: "tool"
     });
   }
 
@@ -24,11 +23,12 @@
     return objectJson;
   }
 
-  globalThis["com.notesprout.tools.gel_pen"] = {
-    getManifest: getManifest,
-    onCreate: onCreate,
-    onLoad: onLoad,
-    onSave: onSave
+  globalThis[PLUGIN_ID] = {
+    getManifest,
+    onCreate,
+    onLoad,
+    onSave
   };
 
+  context.registerPlugin(PLUGIN_ID);
 })();

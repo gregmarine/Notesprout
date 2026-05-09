@@ -9,19 +9,26 @@ import android.os.Bundle
 import android.os.Environment
 import android.provider.Settings
 import android.util.Log
+import android.widget.TextView
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.notesprout.android.R
+import com.notesprout.android.data.DatabaseManager
 import com.notesprout.android.plugins.PluginEngine
+import com.notesprout.android.plugins.PluginRegistry
+import com.notesprout.android.plugins.structural.NotebookManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import org.json.JSONObject
 
 class MainActivity : AppCompatActivity() {
 
     private lateinit var pluginEngine: PluginEngine
+    private lateinit var databaseManager: DatabaseManager
 
     private val requestPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -34,12 +41,45 @@ class MainActivity : AppCompatActivity() {
         setContentView(R.layout.activity_main)
         checkStoragePermission()
 
-        // database = null: no notebook is open yet; DataApi logs warnings if called.
-        // A real SoilDatabase will be wired in Step 4 when notebook creation is added.
+        databaseManager = DatabaseManager(this)
+
+        // database = null: no notebook open yet; DataApi logs warnings if called before open.
         pluginEngine = PluginEngine(this, database = null)
         lifecycleScope.launch(Dispatchers.IO) {
-            pluginEngine.initialize()
+            pluginEngine.initializeRuntime()
+            PluginRegistry.initialize(applicationContext, pluginEngine)
             Log.d("NoteSprout", "plugin engine ready")
+
+            val notebookManager = NotebookManager(databaseManager, pluginEngine)
+
+            if (databaseManager.listNotebooks().isEmpty()) {
+                Log.d("NoteSprout", "no notebooks found — creating Test Notebook")
+                notebookManager.createNotebook("Test Notebook", 1404.0, 1872.0)
+            }
+
+            val notebookFiles = databaseManager.listNotebooks()
+            val notebookObj = if (notebookFiles.isNotEmpty()) {
+                notebookManager.openNotebook(notebookFiles.first().absolutePath)
+            } else null
+
+            val notebookName = notebookObj?.let {
+                JSONObject(it.data).optString("name", "Unknown")
+            } ?: "none"
+            val notebookId = notebookObj?.id ?: "none"
+            Log.d("NoteSprout", "notebook: $notebookName  id=$notebookId")
+
+            val pages = notebookObj?.let { notebookManager.getPages(it.id) } ?: emptyList()
+            Log.d("NoteSprout", "pages: ${pages.size}")
+
+            val layers = if (pages.isNotEmpty()) {
+                notebookManager.getLayers(pages.first().id)
+            } else emptyList()
+            Log.d("NoteSprout", "layers on first page: ${layers.size}")
+
+            val displayText = "NoteSprout\n$notebookName\n${pages.size} page(s)"
+            withContext(Dispatchers.Main) {
+                findViewById<TextView>(R.id.statusText).text = displayText
+            }
         }
     }
 

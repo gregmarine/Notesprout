@@ -21,7 +21,9 @@ class PluginEngine(
     private val loadedPlugins: MutableMap<String, String> = mutableMapOf()
     private val coroutineScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
-    fun initialize() {
+    // Sets up the QuickJS runtime and exposes all host API namespaces.
+    // Does NOT load any plugin JS files — PluginRegistry.initialize() does that.
+    fun initializeRuntime() {
         quickJs = QuickJs.create()
         hostApi = HostApi(database)
 
@@ -32,26 +34,25 @@ class PluginEngine(
         quickJs.set("data", IDataApi::class.java, hostApi.data)
         quickJs.set("events", IEventsApi::class.java, hostApi.events)
         quickJs.set("external", IExternalApi::class.java, hostApi.external)
-
-        PluginRegistry.getAll().forEach { manifest ->
-            try {
-                loadPlugin(manifest)
-                Log.d("NoteSprout", "loaded plugin ${manifest.pluginId} v${manifest.version}")
-            } catch (e: PluginNotFoundException) {
-                Log.e("NoteSprout", "failed to load plugin ${manifest.pluginId}: ${e.message}")
-            }
-        }
     }
 
-    private fun loadPlugin(manifest: PluginManifest): String {
+    // Reads and evaluates one plugin JS file from assets.
+    // The plugin's IIFE calls context.registerPlugin(PLUGIN_ID) as its last act,
+    // which populates pendingRegistrations. This function clears and returns those
+    // IDs so the caller (PluginRegistry) knows what was just loaded.
+    // Deviation from spec: returns List<String> instead of taking pluginId as a
+    // parameter — pluginId is unknown until after JS evaluation.
+    fun loadFromPath(assetPath: String): List<String> {
         val source = try {
-            context.assets.open(manifest.assetPath).bufferedReader().use { it.readText() }
+            context.assets.open(assetPath).bufferedReader().use { it.readText() }
         } catch (e: Exception) {
-            throw PluginNotFoundException("Plugin not found: ${manifest.assetPath}")
+            throw PluginNotFoundException("Plugin asset not found: $assetPath")
         }
-        loadedPlugins[manifest.pluginId] = source
         quickJs.evaluate(source)
-        return source
+        Log.d("NoteSprout", "evaluated $assetPath")
+        val pluginIds = hostApi.context.clearPendingRegistrations()
+        pluginIds.forEach { pluginId -> loadedPlugins[pluginId] = source }
+        return pluginIds
     }
 
     suspend fun callFunction(
@@ -64,7 +65,7 @@ class PluginEngine(
 
         val argsStr = args.joinToString(", ") { serializeArg(it) }
 
-        // Plugins expose functions via globalThis[pluginId] namespace (see index.js stubs).
+        // Plugins expose functions via globalThis[pluginId] namespace (see index.js files).
         // A bare functionName() call would not work because each plugin wraps its functions
         // in an IIFE to avoid name collisions across plugins in the same QuickJS runtime.
         val js = """
