@@ -13,30 +13,31 @@ Open source handwriting-first notes app. Built initially for BOOX e-ink devices,
 
 ```
 apps/
-  notesprout_android/   # Native Android app (Kotlin) — PRIMARY active codebase
-  notesprout_mobile/    # Flutter mobile app (in progress)
-  android_poc/          # Android proof-of-concept
-packages/
-  notesprout_core/      # Dart/Flutter shared core models and data layer
-  notesprout_onyx/      # Dart/Flutter Onyx drawing engine package
+  notesprout_android/   # Native Android app (Kotlin) — ONLY active codebase
 docs/
 templates/
   NoteAir5C/            # Page templates (e.g. Lined.png)
 ```
 
+The Flutter mobile app and shared Dart packages from the MVP have been removed. The MVP is preserved in full on the `mvp` branch. All active development targets `apps/notesprout_android`.
+
 ---
 
 ## Architecture
 
-- **Everything is an object** — universal `BaseObject` model in the Dart core package (`packages/notesprout_core`); Android Kotlin app uses parallel model classes (`NotebookMeta`, `PageModel`, `LayerModel`, `StrokeModel`)
+- **Everything is a BaseObject** — a single `objects` table in SQLite stores all content. Every page, layer, stroke, text block, heading, and plugin is a row with a shared schema.
+- **BaseObject fields:** `id` (UUID), `parentId`, `type`, `subtype`, `createdAt`, `updatedAt`, `deletedAt`, plus a flexible `data` JSON column for type-specific fields.
 - **Notebook** = folder on disk containing a SQLite `.soil` file
 - **Hierarchy:** Notebook → Pages → Layers → Content Objects
 - **Layers:** base layer (template, locked) + content layer(s)
-- **Object fields:** `id`, `parentId`, `type`, `subtype`, `createdAt`, `updatedAt`, `deletedAt` (plus model-specific fields — e.g. `pageNumber`, `width`, `height`, `templatePath` for pages; `isLocked`, `isVisible`, `opacity` for layers; `points`, `color`, `width` for strokes)
-- **Stroke data:** point arrays `(x, y, pressure, tilt, timestamp)` stored as JSON in a TEXT column — format is intentionally flexible
+- **Stroke data:** point arrays `(x, y, pressure, tilt, timestamp)` stored as JSON in the `data` column
 - **Soft deletes** with a periodic cleanup process
 - **Stable UUIDs** everywhere — pages, layers, objects
-- **Delta sync** via `syncVersion` counter on `NotebookMeta`; `SyncProvider` abstraction planned (Supabase first, BYO cloud later) — not yet implemented
+- **Plugin system** — all object interactions are implemented as plugins. Two plugin types:
+  - **Tool plugins** — handle input (stylus, touch, gesture) and produce objects
+  - **Container plugins** — render and manage objects of a given type
+  - Plugins run in a QuickJS JavaScript sandbox embedded in the Android app
+- **Delta sync** via `syncVersion` counter on the notebook metadata object; `SyncProvider` abstraction planned (Supabase first, BYO cloud later) — not yet implemented
 
 ---
 
@@ -45,8 +46,9 @@ templates/
 | Layer | Tech |
 |---|---|
 | Native Android | Kotlin, SQLite, Onyx SDK |
-| Future targets | Flutter / Dart, sqflite, Onyx SDK via platform channels |
-| Sync | Supabase |
+| Plugin runtime | QuickJS (embedded JS engine) |
+| Async | Kotlin coroutines |
+| Sync (future) | Supabase |
 | Tools | VS Code, Claude Code |
 | License | MIT |
 
@@ -54,8 +56,8 @@ templates/
 
 ## Release Status
 
-- **v1.0 — First Bloom** ✅ SHIPPED. Native Android MVP complete.
-- **Next — Germination** 🌿 First post-MVP release. See Germination scope below.
+- **v1.0 — First Bloom** ✅ SHIPPED. Native Android MVP complete. Full source preserved on the `mvp` branch.
+- **Next — Germination** 🌿 First post-MVP release. Active development on the `germination` branch.
 
 ### Germination Release Scope
 - Page Navigator (tap indicator → jump to page)
@@ -103,4 +105,5 @@ templates/
 | New Branches | New features |
 | Gardeners | Contributors |
 | First Bloom | v1.0 |
-| The Soil | README |
+| Germination | v1.1 (next release) |
+| The Soil | README / design philosophy doc |
