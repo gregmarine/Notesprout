@@ -52,15 +52,22 @@ class MainActivity : AppCompatActivity() {
 
             val notebookManager = NotebookManager(databaseManager, pluginEngine)
 
-            if (databaseManager.listNotebooks().isEmpty()) {
-                Log.d("NoteSprout", "no notebooks found — creating Test Notebook")
-                notebookManager.createNotebook("Test Notebook", 1404.0, 1872.0)
-            }
-
-            val notebookFiles = databaseManager.listNotebooks()
-            val notebookObj = if (notebookFiles.isNotEmpty()) {
-                notebookManager.openNotebook(notebookFiles.first().absolutePath)
+            // Open the first available notebook, if any.
+            val existingFiles = databaseManager.listNotebooks()
+            var notebookObj = if (existingFiles.isNotEmpty()) {
+                notebookManager.openNotebook(existingFiles.first().absolutePath)
             } else null
+
+            // Create if no file exists OR if the file exists but is empty (e.g. a previous
+            // launch crashed before the schema or objects were written).
+            if (notebookObj == null) {
+                Log.d("NoteSprout", "no valid notebook found — creating Test Notebook")
+                notebookManager.createNotebook("Test Notebook", 1404.0, 1872.0)
+                val files = databaseManager.listNotebooks()
+                notebookObj = if (files.isNotEmpty()) {
+                    notebookManager.openNotebook(files.first().absolutePath)
+                } else null
+            }
 
             val notebookName = notebookObj?.let {
                 JSONObject(it.data).optString("name", "Unknown")

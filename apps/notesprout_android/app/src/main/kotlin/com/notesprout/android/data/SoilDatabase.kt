@@ -15,7 +15,9 @@ class SoilDatabase(context: Context, filePath: String) {
     }
 
     init {
-        db.execSQL("PRAGMA journal_mode=WAL")
+        // BOOX SQLite driver rejects execSQL for PRAGMAs that return a result row.
+        // journal_mode=WAL returns the active mode, so rawQuery is required.
+        db.rawQuery("PRAGMA journal_mode=WAL", null).close()
         db.execSQL("PRAGMA foreign_keys=OFF")
         openOrMigrateSchema()
     }

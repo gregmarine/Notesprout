@@ -19,7 +19,7 @@ interface IContextApi {
     fun getPluginId(): String
     fun getObjectId(): String
     fun newId(): String
-    fun now(): Long
+    fun now(): Double
     fun getAppVersion(): String
     // Called from each plugin's IIFE at load time so the registry can discover its pluginId.
     fun registerPlugin(pluginId: String)
@@ -61,7 +61,7 @@ class ContextApi : IContextApi {
     override fun getPluginId(): String = currentPluginId
     override fun getObjectId(): String = currentObjectId
     override fun newId(): String = UUID.randomUUID().toString()
-    override fun now(): Long = System.currentTimeMillis()
+    override fun now(): Double = System.currentTimeMillis().toDouble()
     override fun getAppVersion(): String = BuildConfig.VERSION_NAME
 
     override fun registerPlugin(pluginId: String) {

@@ -23,7 +23,7 @@
     return objectJson;
   }
 
-  globalThis[PLUGIN_ID] = {
+  __plugins__[PLUGIN_ID] = {
     getManifest,
     onCreate,
     onLoad,
