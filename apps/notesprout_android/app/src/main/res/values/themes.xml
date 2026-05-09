@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <!--
+        E-ink first theme: true black and white, no animations, no shadows,
+        no rounded corners, no accents, forced light mode always.
+    -->
+    <style name="Theme.NoteSprout" parent="Theme.AppCompat.Light.NoActionBar">
+
+        <!-- Force light mode — e-ink displays are always light -->
+        <item name="android:forceDarkAllowed">false</item>
+
+        <!-- True white background, true black text -->
+        <item name="android:windowBackground">@android:color/white</item>
+        <item name="android:colorBackground">@android:color/white</item>
+        <item name="android:textColor">@android:color/black</item>
+        <item name="android:textColorPrimary">@android:color/black</item>
+        <item name="android:textColorSecondary">@android:color/black</item>
+
+        <!-- No color accents -->
+        <item name="colorPrimary">@android:color/black</item>
+        <item name="colorPrimaryDark">@android:color/black</item>
+        <item name="colorAccent">@android:color/black</item>
+
+        <!-- Black status and navigation bars with white icons -->
+        <item name="android:statusBarColor">@android:color/black</item>
+        <item name="android:navigationBarColor">@android:color/black</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">false</item>
+
+        <!-- No animations or transitions (e-ink unfriendly) -->
+        <item name="android:windowAnimationStyle">@null</item>
+        <item name="android:activityOpenEnterAnimation">@null</item>
+        <item name="android:activityOpenExitAnimation">@null</item>
+        <item name="android:activityCloseEnterAnimation">@null</item>
+        <item name="android:activityCloseExitAnimation">@null</item>
+
+        <!-- No shadows or elevation -->
+        <item name="android:elevation">0dp</item>
+
+        <!-- No rounded corners on system components -->
+        <item name="android:dialogCornerRadius">0dp</item>
+
+    </style>
+
+</resources>
