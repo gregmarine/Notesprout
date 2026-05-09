@@ -8,91 +8,29 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Environment
 import android.provider.Settings
-import android.util.Log
-import android.widget.TextView
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
-import com.notesprout.android.R
-import com.notesprout.android.data.DatabaseManager
-import com.notesprout.android.plugins.PluginEngine
+import com.notesprout.android.NoteSproutApp
 import com.notesprout.android.plugins.PluginRegistry
-import com.notesprout.android.plugins.structural.NotebookManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import org.json.JSONObject
 
 class MainActivity : AppCompatActivity() {
-
-    private lateinit var pluginEngine: PluginEngine
-    private lateinit var databaseManager: DatabaseManager
 
     private val requestPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { permissions ->
-        if (permissions.values.any { !it }) showStoragePermissionDialog()
+        if (permissions.values.all { it }) initializeAndLaunch()
+        else showStoragePermissionDialog()
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContentView(R.layout.activity_main)
         checkStoragePermission()
-
-        databaseManager = DatabaseManager(this)
-
-        // database = null: no notebook open yet; DataApi logs warnings if called before open.
-        pluginEngine = PluginEngine(this, database = null)
-        lifecycleScope.launch(Dispatchers.IO) {
-            pluginEngine.initializeRuntime()
-            PluginRegistry.initialize(applicationContext, pluginEngine)
-            Log.d("NoteSprout", "plugin engine ready")
-
-            val notebookManager = NotebookManager(databaseManager, pluginEngine)
-
-            // Open the first available notebook, if any.
-            val existingFiles = databaseManager.listNotebooks()
-            var notebookObj = if (existingFiles.isNotEmpty()) {
-                notebookManager.openNotebook(existingFiles.first().absolutePath)
-            } else null
-
-            // Create if no file exists OR if the file exists but is empty (e.g. a previous
-            // launch crashed before the schema or objects were written).
-            if (notebookObj == null) {
-                Log.d("NoteSprout", "no valid notebook found — creating Test Notebook")
-                notebookManager.createNotebook("Test Notebook", 1404.0, 1872.0)
-                val files = databaseManager.listNotebooks()
-                notebookObj = if (files.isNotEmpty()) {
-                    notebookManager.openNotebook(files.first().absolutePath)
-                } else null
-            }
-
-            val notebookName = notebookObj?.let {
-                JSONObject(it.data).optString("name", "Unknown")
-            } ?: "none"
-            val notebookId = notebookObj?.id ?: "none"
-            Log.d("NoteSprout", "notebook: $notebookName  id=$notebookId")
-
-            val pages = notebookObj?.let { notebookManager.getPages(it.id) } ?: emptyList()
-            Log.d("NoteSprout", "pages: ${pages.size}")
-
-            val layers = if (pages.isNotEmpty()) {
-                notebookManager.getLayers(pages.first().id)
-            } else emptyList()
-            Log.d("NoteSprout", "layers on first page: ${layers.size}")
-
-            val displayText = "NoteSprout\n$notebookName\n${pages.size} page(s)"
-            withContext(Dispatchers.Main) {
-                findViewById<TextView>(R.id.statusText).text = displayText
-            }
-        }
-    }
-
-    override fun onDestroy() {
-        super.onDestroy()
-        if (::pluginEngine.isInitialized) pluginEngine.destroy()
     }
 
     override fun onResume() {
@@ -104,18 +42,30 @@ class MainActivity : AppCompatActivity() {
 
     private fun checkStoragePermission() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            if (!Environment.isExternalStorageManager()) showStoragePermissionDialog()
+            if (Environment.isExternalStorageManager()) initializeAndLaunch()
+            else showStoragePermissionDialog()
         } else {
             val writeGranted = ContextCompat.checkSelfPermission(
                 this, Manifest.permission.WRITE_EXTERNAL_STORAGE
             ) == PackageManager.PERMISSION_GRANTED
-            if (!writeGranted) {
-                requestPermissionLauncher.launch(
-                    arrayOf(
-                        Manifest.permission.READ_EXTERNAL_STORAGE,
-                        Manifest.permission.WRITE_EXTERNAL_STORAGE
-                    )
+            if (writeGranted) initializeAndLaunch()
+            else requestPermissionLauncher.launch(
+                arrayOf(
+                    Manifest.permission.READ_EXTERNAL_STORAGE,
+                    Manifest.permission.WRITE_EXTERNAL_STORAGE
                 )
+            )
+        }
+    }
+
+    private fun initializeAndLaunch() {
+        val app = application as NoteSproutApp
+        lifecycleScope.launch(Dispatchers.IO) {
+            app.pluginEngine.initializeRuntime()
+            PluginRegistry.initialize(applicationContext, app.pluginEngine)
+            withContext(Dispatchers.Main) {
+                startActivity(Intent(this@MainActivity, NotebookListActivity::class.java))
+                finish()
             }
         }
     }

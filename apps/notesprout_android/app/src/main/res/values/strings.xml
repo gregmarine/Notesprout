@@ -1,4 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">NoteSprout</string>
+    <string name="new_notebook_title">New Notebook</string>
+    <string name="new_notebook_hint">Notebook name</string>
+    <string name="new_notebook_create">Create</string>
+    <string name="new_notebook_cancel">Cancel</string>
+    <string name="empty_notebooks">No notebooks yet.\nTap New to create one.</string>
+    <string name="back_arrow">←</string>
+    <string name="prev_page">←</string>
+    <string name="next_page">→</string>
 </resources>

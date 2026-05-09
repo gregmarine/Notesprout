@@ -13,6 +13,9 @@ class DatabaseManager(private val context: Context) {
 
     private var currentDatabase: SoilDatabase? = null
 
+    var currentNotebookPath: String? = null
+        private set
+
     init {
         ensureDirectoryExists()
     }
@@ -25,11 +28,13 @@ class DatabaseManager(private val context: Context) {
         closeCurrentDatabase()
         val fileName = sanitizeName(notebookName) + ".soil"
         val file = File(noteSproutDir, fileName)
+        currentNotebookPath = file.absolutePath
         return SoilDatabase(context, file.absolutePath).also { currentDatabase = it }
     }
 
     fun openNotebook(filePath: String): SoilDatabase {
         closeCurrentDatabase()
+        currentNotebookPath = filePath
         return SoilDatabase(context, filePath).also { currentDatabase = it }
     }
 
@@ -39,6 +44,7 @@ class DatabaseManager(private val context: Context) {
     fun closeCurrentDatabase() {
         currentDatabase?.close()
         currentDatabase = null
+        currentNotebookPath = null
     }
 
     private fun sanitizeName(name: String): String =

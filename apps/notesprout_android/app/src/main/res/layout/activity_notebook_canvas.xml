@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical">
+
+    <RelativeLayout
+        android:layout_width="match_parent"
+        android:layout_height="@dimen/top_bar_height"
+        android:background="@color/black">
+
+        <TextView
+            android:id="@+id/backButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_centerVertical="true"
+            android:layout_alignParentStart="true"
+            android:paddingStart="@dimen/horizontal_padding"
+            android:text="@string/back_arrow"
+            android:textColor="@color/white"
+            android:textSize="@dimen/body_text_size"
+            android:clickable="true"
+            android:focusable="true" />
+
+        <TextView
+            android:id="@+id/notebookTitle"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_centerInParent="true"
+            android:textColor="@color/white"
+            android:textSize="@dimen/body_text_size" />
+
+    </RelativeLayout>
+
+    <View
+        android:id="@+id/canvasArea"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:background="@color/white" />
+
+    <RelativeLayout
+        android:layout_width="match_parent"
+        android:layout_height="@dimen/bottom_bar_height"
+        android:background="@color/black">
+
+        <TextView
+            android:id="@+id/prevPage"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_centerVertical="true"
+            android:layout_alignParentStart="true"
+            android:paddingStart="@dimen/horizontal_padding"
+            android:text="@string/prev_page"
+            android:textColor="@color/white"
+            android:textSize="@dimen/page_indicator_text_size"
+            android:clickable="true"
+            android:focusable="true" />
+
+        <TextView
+            android:id="@+id/pageIndicator"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_centerInParent="true"
+            android:text="1 / 1"
+            android:textColor="@color/white"
+            android:textSize="@dimen/page_indicator_text_size" />
+
+        <TextView
+            android:id="@+id/nextPage"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_centerVertical="true"
+            android:layout_alignParentEnd="true"
+            android:paddingEnd="@dimen/horizontal_padding"
+            android:text="@string/next_page"
+            android:textColor="@color/white"
+            android:textSize="@dimen/page_indicator_text_size"
+            android:clickable="true"
+            android:focusable="true" />
+
+    </RelativeLayout>
+
+</LinearLayout>

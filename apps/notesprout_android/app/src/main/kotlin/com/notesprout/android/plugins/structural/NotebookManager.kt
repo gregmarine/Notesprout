@@ -5,6 +5,8 @@ import com.notesprout.android.data.DatabaseManager
 import com.notesprout.android.data.SoilDatabase
 import com.notesprout.android.plugins.PluginEngine
 import com.notesprout.android.plugins.PluginRunner
+import org.json.JSONObject
+import java.io.File
 
 class NotebookManager(
     private val databaseManager: DatabaseManager,
@@ -73,4 +75,15 @@ class NotebookManager(
 
     suspend fun getLayers(pageId: String): List<BaseObject> =
         currentDatabase?.getChildren(pageId, LAYER_PLUGIN) ?: emptyList()
+
+    suspend fun listNotebooks(): List<File> = databaseManager.listNotebooks()
+
+    suspend fun getNotebookName(notebookObj: BaseObject): String =
+        try {
+            JSONObject(notebookObj.data).optString("name", "Untitled").ifEmpty { "Untitled" }
+        } catch (_: Exception) {
+            "Untitled"
+        }
+
+    suspend fun getPageCount(notebookId: String): Int = getPages(notebookId).size
 }

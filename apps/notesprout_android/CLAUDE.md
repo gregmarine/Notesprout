@@ -6,6 +6,24 @@
 - Min SDK: 26 / Target SDK: 35
 - Build: Gradle Kotlin DSL
 
+## Runtime Constraints
+These were discovered during device testing and must never be regressed.
+
+### PRAGMA calls
+Always use `rawQuery().close()` for PRAGMA statements.
+Never `execSQL()` for PRAGMAs that return result rows.
+The BOOX SQLite driver rejects `execSQL()` for these.
+
+### QuickJS plugin registration
+Plugins register under `__plugins__[PLUGIN_ID]`.
+Kotlin initializes `var __plugins__ = {}` before any plugin JS is evaluated.
+Never use `globalThis[PLUGIN_ID]` — unavailable on this QuickJS build.
+
+### QuickJS thread stack
+ALL `callFunction()` calls must run on PluginEngine's dedicated `Executors.newSingleThreadExecutor` thread created with a 4MB stack size.
+`Dispatchers.IO` threads have ~512KB stacks — always fatal for QuickJS function invocation on device.
+Never call QuickJS functions from `Dispatchers.IO` directly. Always go through PluginEngine.
+
 ## Architecture
 - Single objects table in SQLite — everything is a row
 - BaseObject: id, parentId, pluginId, boundingBox, order, createdAt, updatedAt, deletedAt, syncVersion, data

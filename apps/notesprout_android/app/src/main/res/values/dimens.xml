@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <dimen name="top_bar_height">56dp</dimen>
+    <dimen name="bottom_bar_height">48dp</dimen>
+    <dimen name="horizontal_padding">16dp</dimen>
+    <dimen name="top_bar_text_size">18sp</dimen>
+    <dimen name="body_text_size">16sp</dimen>
+    <dimen name="small_text_size">12sp</dimen>
+    <dimen name="page_indicator_text_size">14sp</dimen>
+</resources>
