@@ -40,6 +40,18 @@ android {
         jvmTarget = "17"
     }
 
+    packaging {
+        jniLibs {
+            // onyxsdk-pen and onyxsdk-pennative both ship libc++_shared.so — keep one.
+            pickFirsts += setOf(
+                "lib/arm64-v8a/libc++_shared.so",
+                "lib/armeabi-v7a/libc++_shared.so",
+                "lib/x86_64/libc++_shared.so",
+                "lib/x86/libc++_shared.so"
+            )
+        }
+    }
+
     sourceSets {
         getByName("main") {
             kotlin.srcDirs("src/main/kotlin")
@@ -54,6 +66,12 @@ android {
 }
 
 dependencies {
+    implementation("com.onyx.android.sdk:onyxsdk-device:1.3.5") {
+        exclude(group = "com.android.support")
+    }
+    implementation("com.onyx.android.sdk:onyxsdk-pen:1.5.4") {
+        exclude(group = "com.android.support")
+    }
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.appcompat)
     implementation(libs.androidx.activity.ktx)

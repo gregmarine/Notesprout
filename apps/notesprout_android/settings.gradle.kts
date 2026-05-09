@@ -16,6 +16,10 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
+        maven {
+            url = uri("http://repo.boox.com/repository/maven-public/")
+            isAllowInsecureProtocol = true
+        }
     }
 }
 

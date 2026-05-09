@@ -2,6 +2,7 @@ package com.notesprout.android.plugins
 
 import android.util.Log
 import com.notesprout.android.BuildConfig
+import com.notesprout.android.canvas.CanvasDelegate
 import com.notesprout.android.data.BaseObject
 import com.notesprout.android.data.SoilDatabase
 import com.notesprout.android.data.baseObjectFromJson
@@ -21,14 +22,18 @@ interface IContextApi {
     fun newId(): String
     fun now(): Double
     fun getAppVersion(): String
+    fun getCurrentPageId(): String
+    fun getCurrentLayerId(): String
     // Called from each plugin's IIFE at load time so the registry can discover its pluginId.
     fun registerPlugin(pluginId: String)
 }
 
 interface ICanvasApi {
     fun draw(objectJson: String)
+    fun drawStroke(pointsJson: String, styleJson: String)
     fun refresh()
     fun clear()
+    fun redrawAll(strokesJson: String)
 }
 
 interface IDataApi {
@@ -37,6 +42,8 @@ interface IDataApi {
     fun softDelete(id: String)
     // pluginId="" means no filter — JS must always pass both args
     fun getChildren(parentId: String, pluginId: String): String
+    // Returns all non-deleted children of parentId regardless of plugin
+    fun query(parentId: String): String
 }
 
 interface IEventsApi {
@@ -52,6 +59,8 @@ interface IExternalApi {
 class ContextApi : IContextApi {
     var currentPluginId: String = ""
     var currentObjectId: String = ""
+    var pageId: String = ""
+    var layerId: String = ""
 
     // Populated by each plugin's context.registerPlugin(PLUGIN_ID) call at load time.
     // clearPendingRegistrations() is intentionally NOT on IContextApi: QuickJS-Android
@@ -63,6 +72,8 @@ class ContextApi : IContextApi {
     override fun newId(): String = UUID.randomUUID().toString()
     override fun now(): Double = System.currentTimeMillis().toDouble()
     override fun getAppVersion(): String = BuildConfig.VERSION_NAME
+    override fun getCurrentPageId(): String = pageId
+    override fun getCurrentLayerId(): String = layerId
 
     override fun registerPlugin(pluginId: String) {
         pendingRegistrations.add(pluginId)
@@ -77,20 +88,35 @@ class ContextApi : IContextApi {
 }
 
 class CanvasApi : ICanvasApi {
+    var delegate: CanvasDelegate? = null
+
     override fun draw(objectJson: String) {
         Log.d("NoteSprout", "canvas.draw called: $objectJson")
     }
 
+    override fun drawStroke(pointsJson: String, styleJson: String) {
+        delegate?.drawStroke(pointsJson, styleJson)
+            ?: Log.d("NoteSprout", "canvas.drawStroke called but no delegate attached")
+    }
+
     override fun refresh() {
-        Log.d("NoteSprout", "canvas.refresh called")
+        delegate?.refresh()
+            ?: Log.d("NoteSprout", "canvas.refresh called but no delegate attached")
     }
 
     override fun clear() {
-        Log.d("NoteSprout", "canvas.clear called")
+        delegate?.clear()
+            ?: Log.d("NoteSprout", "canvas.clear called but no delegate attached")
+    }
+
+    override fun redrawAll(strokesJson: String) {
+        delegate?.redrawAll(strokesJson)
+            ?: Log.d("NoteSprout", "canvas.redrawAll called but no delegate attached")
+        delegate?.refresh()
     }
 }
 
-class DataApi(private val database: SoilDatabase?) : IDataApi {
+class DataApi(var database: SoilDatabase?) : IDataApi {
 
     // runBlocking is intentional: QuickJS is synchronous and always runs on a
     // background thread (IO dispatcher), so blocking here is safe and correct.
@@ -134,6 +160,8 @@ class DataApi(private val database: SoilDatabase?) : IDataApi {
         children.forEach { arr.put(JSONObject(it.toJson())) }
         arr.toString()
     }
+
+    override fun query(parentId: String): String = getChildren(parentId, "")
 }
 
 class EventsApi : IEventsApi {

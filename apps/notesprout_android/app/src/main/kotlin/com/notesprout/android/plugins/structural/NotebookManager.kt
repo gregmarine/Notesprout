@@ -86,4 +86,7 @@ class NotebookManager(
         }
 
     suspend fun getPageCount(notebookId: String): Int = getPages(notebookId).size
+
+    suspend fun getStrokes(layerId: String): List<BaseObject> =
+        currentDatabase?.getChildren(layerId, null) ?: emptyList()
 }

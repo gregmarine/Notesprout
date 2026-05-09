@@ -3,6 +3,7 @@ package com.notesprout.android.plugins
 import android.content.Context
 import android.util.Log
 import app.cash.quickjs.QuickJs
+import com.notesprout.android.canvas.CanvasDelegate
 import com.notesprout.android.data.SoilDatabase
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -95,6 +96,25 @@ class PluginEngine(
         } catch (e: Exception) {
             // Re-throw with the JS error message so device crash logs include it.
             throw RuntimeException("QuickJS $pluginId.$functionName: ${e.message}", e)
+        }
+    }
+
+    fun setDatabase(db: com.notesprout.android.data.SoilDatabase?) {
+        if (::hostApi.isInitialized) {
+            hostApi.data.database = db
+        }
+    }
+
+    fun setPageContext(pageId: String, layerId: String) {
+        if (::hostApi.isInitialized) {
+            hostApi.context.pageId = pageId
+            hostApi.context.layerId = layerId
+        }
+    }
+
+    fun setCanvasDelegate(delegate: CanvasDelegate?) {
+        if (::hostApi.isInitialized) {
+            hostApi.canvas.delegate = delegate
         }
     }
 

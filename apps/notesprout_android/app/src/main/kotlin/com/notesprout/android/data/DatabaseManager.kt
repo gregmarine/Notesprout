@@ -41,6 +41,8 @@ class DatabaseManager(private val context: Context) {
     fun listNotebooks(): List<File> =
         noteSproutDir.listFiles { file -> file.extension == "soil" }?.toList() ?: emptyList()
 
+    fun getCurrentDatabase(): SoilDatabase? = currentDatabase
+
     fun closeCurrentDatabase() {
         currentDatabase?.close()
         currentDatabase = null

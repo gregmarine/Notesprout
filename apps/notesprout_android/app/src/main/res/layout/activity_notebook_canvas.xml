@@ -32,12 +32,47 @@
 
     </RelativeLayout>
 
-    <View
-        android:id="@+id/canvasArea"
+    <FrameLayout
+        android:id="@+id/canvasContainer"
         android:layout_width="match_parent"
         android:layout_height="0dp"
-        android:layout_weight="1"
-        android:background="@color/white" />
+        android:layout_weight="1">
+
+        <LinearLayout
+            android:id="@+id/toolbar"
+            android:layout_width="48dp"
+            android:layout_height="wrap_content"
+            android:layout_gravity="top|end"
+            android:orientation="vertical"
+            android:background="@color/black">
+
+            <TextView
+                android:id="@+id/toolGelPen"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:gravity="center"
+                android:text="&#x270F;"
+                android:textSize="20sp"
+                android:textColor="@color/black"
+                android:background="@color/white"
+                android:clickable="true"
+                android:focusable="true" />
+
+            <TextView
+                android:id="@+id/toolEraser"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:gravity="center"
+                android:text="&#x25FB;"
+                android:textSize="20sp"
+                android:textColor="@color/white"
+                android:background="@color/black"
+                android:clickable="true"
+                android:focusable="true" />
+
+        </LinearLayout>
+
+    </FrameLayout>
 
     <RelativeLayout
         android:layout_width="match_parent"
