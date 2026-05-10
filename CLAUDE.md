@@ -1,109 +1,123 @@
-# NoteSprout — Project Context for Claude Code
-
-> "Where thoughts have a place to grow 🌱"
+# NoteSprout — Claude Code Project Intelligence
 
 ## What is NoteSprout?
-Open source handwriting-first notes app. Built initially for BOOX e-ink devices, expanding to iPad, Android, Supernote, phones, and web. MIT license.
+A handwriting-first, meditative notes app. Think paper, but smarter underneath. Built for e-ink devices first (BOOX), expanding to iPad, Android tablets, phones, and web.
 
-**Core philosophy:** Meditative, paper-like writing experience with an intelligent document model underneath. Fixed screen-size pages — no infinite scrolling. Human-first.
+**Slogan:** "Where thoughts have a place to grow 🌱"
+**License:** MIT
+**Monorepo root:** ~/git/NoteSprout
 
 ---
 
 ## Monorepo Structure
 
-```
-apps/
-  notesprout_android/   # Native Android app (Kotlin) — ONLY active codebase
-docs/
-templates/
-  NoteAir5C/            # Page templates (e.g. Lined.png)
-```
-
-The Flutter mobile app and shared Dart packages from the MVP have been removed. The MVP is preserved in full on the `mvp` branch. All active development targets `apps/notesprout_android`.
+- apps/notesprout_flutter — Flutter app (primary active codebase, all platforms)
+- apps/notesprout_android — Native Android app (Kotlin, v1.0 / First Bloom — shipped, reference only)
 
 ---
 
-## Architecture
+## Core Philosophy — Never Violate These
 
-- **Everything is a BaseObject** — a single `objects` table in SQLite stores all content. Every page, layer, stroke, text block, heading, and plugin is a row with a shared schema.
-- **BaseObject fields:** `id` (UUID), `parentId`, `type`, `subtype`, `createdAt`, `updatedAt`, `deletedAt`, plus a flexible `data` JSON column for type-specific fields.
-- **Notebook** = folder on disk containing a SQLite `.soil` file
-- **Hierarchy:** Notebook → Pages → Layers → Content Objects
-- **Layers:** base layer (template, locked) + content layer(s)
-- **Stroke data:** point arrays `(x, y, pressure, tilt, timestamp)` stored as JSON in the `data` column
-- **Soft deletes** with a periodic cleanup process
-- **Stable UUIDs** everywhere — pages, layers, objects
-- **Plugin system** — all object interactions are implemented as plugins. Two plugin types:
-  - **Tool plugins** — handle input (stylus, touch, gesture) and produce objects
-  - **Container plugins** — render and manage objects of a given type
-  - Plugins run in a QuickJS JavaScript sandbox embedded in the Android app
-- **Delta sync** via `syncVersion` counter on the notebook metadata object; `SyncProvider` abstraction planned (Supabase first, BYO cloud later) — not yet implemented
+- Human-first: fixed screen-size pages, never infinite scroll
+- Meditative, paper-like writing experience
+- A coexistence of human and machine — intelligent underneath, calm on the surface
+- Everything is an object (universal BaseObject model — relational, compositional)
+- Pages feel like physical pages. The app should never feel like a web app.
 
 ---
 
-## Tech Stack
+## Tech Decisions — Already Made, Do Not Revisit Without Discussion
 
-| Layer | Tech |
-|---|---|
-| Native Android | Kotlin, SQLite, Onyx SDK |
-| Plugin runtime | QuickJS (embedded JS engine) |
-| Async | Kotlin coroutines |
-| Sync (future) | Supabase |
-| Tools | VS Code, Claude Code |
-| License | MIT |
-
----
-
-## Release Status
-
-- **v1.0 — First Bloom** ✅ SHIPPED. Native Android MVP complete. Full source preserved on the `mvp` branch.
-- **Next — Germination** 🌿 First post-MVP release. Active development on the `germination` branch.
-
-### Germination Release Scope
-- Page Navigator (tap indicator → jump to page)
-- Headings (H1–H3) with semantic ToC tree
-- Dynamic page links via stable IDs
-- Gesture-based heading marking with OCR conversion to styled text
-- Selection tool
-- Text objects (typed text as first-class content objects)
-- Layer visibility and opacity controls
-- Plugin system — interaction with objects via a plugin layer (everything is a plugin)
-- Supabase sync via SyncProvider abstraction
-- Open file format spec (.soil) — published and documented
-- Folder-per-notebook → single .soil file format revisit
+- Flutter latest stable — no pinned version, always latest stable
+- State management: Riverpod (flutter_riverpod, latest stable)
+- Database: sqflite (SQLite) — not yet implemented, coming soon
+- Package name: com.notesprout.app
+- Primary test device: BOOX e-ink Android devices
+- Drawing engine: abstracted — OnyxDrawingEngine (BOOX) and GenericDrawingEngine (all others) — not yet implemented
+- Onyx SDK integration: via Flutter platform channels — not yet implemented, reference ~/git/BOOXDemo for lessons learned
 
 ---
 
-## Device Support
+## Architecture — Foundational Decisions
 
-### Tier 1 — Primary targets
+- Notebook = a folder containing a SQLite file
+- Hierarchy: Notebook → Pages → Layers → Content Objects
+- Layers: base layer (template, locked) and content layers
+- Every object carries: id, parentId, type, subtype, position, boundingBox, link, createdAt, updatedAt, deletedAt, data
+- Stroke data: proprietary point arrays (x, y, pressure, tilt, timestamp), stored as JSON in TEXT column
+- Soft deletes with cleanup process
+- Stable UUIDs everywhere
+- Delta sync via syncVersion counter; SyncProvider abstraction (Supabase first)
+
+---
+
+## Device Target Tiers
+
+**Tier 1 — Daily drivers:**
 - BOOX NoteAir5C (EMR stylus, e-ink color) — flagship
 - BOOX Palma2 Pro (USI 2.0 stylus, Android phone form factor)
-- BOOX Go Color 7 Gen II (smaller e-ink color)
-- Wacom Movink Pad 11 & 14 (Android, active stylus)
+- BOOX Go Color 7 Gen II
+- Wacom Movink Pad 11 & 14 (Android, GenericDrawingEngine)
 - iPhone 14 (touch-only)
-- MacBook / Web
+- MacBook (Flutter desktop / web)
+- Web (mobile and desktop)
 
-### Tier 2 — QA / testing
-- BOOX NoteAir4C, Tab XC
+**Tier 2 — Testing/QA:**
+- BOOX NoteAir4C
+- BOOX Tab XC
 - iPad Air + Apple Pencil
-- Supernote Nomad & Manta (laggy; future consideration)
-
-### Stylus protocols
-- BOOX NoteAir5C — EMR
-- BOOX Palma2 Pro — USI 2.0 (different initialization path)
-- Wacom Movink — active stylus via Android `MotionEvent.TOOL_TYPE_STYLUS`
+- Supernote Nomad & Manta (GenericDrawingEngine fallback)
 
 ---
 
-## Community Nomenclature
+## Branch Strategy
 
-| Term | Meaning |
-|---|---|
-| Growth Logs | Release notes |
-| Pruning | Bug fixes |
-| New Branches | New features |
-| Gardeners | Contributors |
-| First Bloom | v1.0 |
-| Germination | v1.1 (next release) |
-| The Soil | README / design philosophy doc |
+- main — stable releases only
+- germination — previous post-MVP feature branch (reference, not active)
+- seed — current active development (clean restart, lessons learned)
+
+---
+
+## Community Nomenclature — Use These Consistently
+
+- Release notes → Growth Logs
+- Bug fixes → Pruning
+- New features → New Branches
+- Contributors → Gardeners
+- v1.0 → First Bloom
+- README → The Soil
+- CLAUDE.md → The Soil for Claude Code
+
+---
+
+## What NOT To Do
+
+- Do not use infinite scroll anywhere — ever
+- Do not default to Material Design conventions that make the app feel like a generic Android app
+- Do not add dependencies without discussion
+- Do not restructure the monorepo layout without discussion
+- Do not implement drawing, canvas, or Onyx SDK until explicitly instructed
+- Do not implement SQLite/sqflite until explicitly instructed
+- Do not guess at architectural decisions — ask first
+
+---
+
+## Build & Run
+
+```bash
+cd ~/git/NoteSprout/apps/notesprout_flutter
+flutter run                        # run on connected device
+flutter run -d chrome              # run in browser
+flutter build apk --debug          # build Android debug APK
+```
+
+*This section will be updated as we make discoveries.*
+
+---
+
+## Current Step
+
+Seed branch is live. Hello World scaffold complete. Next: [TBD after Hello World verified]
+
+---
+*Last updated: Seed branch initialization*
