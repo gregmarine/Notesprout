@@ -51,6 +51,38 @@ A handwriting-first, meditative notes app. Think paper, but smarter underneath. 
 
 ---
 
+## Design System — E-Ink First (Never Violate These)
+
+NoteSprout's visual language is designed for e-ink displays first. All other platforms inherit this aesthetic — we do not diverge for web or standard Android.
+
+**Palette (UI Chrome Only):**
+- `inkBlack` = `#000000`
+- `paperWhite` = `#FFFFFF`
+- `inkLight` = `#888888` — disabled / secondary text only
+- `borderGray` = `#CCCCCC` — subtle dividers only
+- No color in UI chrome — ever. Color belongs to content only.
+
+**Visual Rules:**
+- No shadows, no elevation, no gradients, no blur
+- No Material splash or ripple effects (`NoSplash.splashFactory` everywhere)
+- Animations: `Duration.zero` or minimum required — never decorative
+- Borders: 1px solid inkBlack
+- Corner radius: 4.0 — slightly rounded, not pill, not sharp
+- Typography: clear, high-contrast, black on white
+
+**Source of Truth:**
+- All theme values live in `lib/theme/app_theme.dart`
+- Do not hardcode colors or styles on widgets — always reference `AppTheme`
+
+**What NOT To Do (Design):**
+- No color in any UI chrome element
+- No shadows or elevation on any widget
+- No decorative animations
+- No pill-shaped buttons or fully sharp corners
+- Do not use Material 3 defaults without explicit override
+
+---
+
 ## Device Target Tiers
 
 **Tier 1 — Daily drivers:**
@@ -117,7 +149,7 @@ flutter build apk --debug          # build Android debug APK
 
 ## Current Step
 
-Seed branch is live. Hello World scaffold complete. Next: [TBD after Hello World verified]
+Seed branch is live. Hello World verified. Next: E-ink design system — establishing AppTheme and visual QA screen.
 
 ---
 *Last updated: Seed branch initialization*
