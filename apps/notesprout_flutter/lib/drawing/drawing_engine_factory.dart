@@ -17,6 +17,7 @@ class DrawingEngineFactory {
       final result = await _channel.invokeMethod<String>('ping');
       if (result == 'ok') return OnyxDrawingEngine();
     } catch (_) {}
-    return GenericDrawingEngine();
+    // Non-BOOX Android tablet: stylus only until touch input is made configurable.
+    return GenericDrawingEngine(allowTouch: false);
   }
 }

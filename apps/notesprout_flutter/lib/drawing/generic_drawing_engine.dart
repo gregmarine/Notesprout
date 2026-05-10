@@ -5,10 +5,13 @@ import 'package:flutter/widgets.dart';
 import 'drawing_engine.dart';
 
 class GenericDrawingEngine implements DrawingEngine {
+  GenericDrawingEngine({this.allowTouch = true});
+
+  final bool allowTouch;
   final _key = GlobalKey<_GenericCanvasState>();
 
   @override
-  Widget buildCanvas() => _GenericCanvas(key: _key);
+  Widget buildCanvas() => _GenericCanvas(key: _key, allowTouch: allowTouch);
 
   @override
   void clear() => _key.currentState?.clear();
@@ -18,7 +21,9 @@ class GenericDrawingEngine implements DrawingEngine {
 }
 
 class _GenericCanvas extends StatefulWidget {
-  const _GenericCanvas({super.key});
+  const _GenericCanvas({super.key, required this.allowTouch});
+
+  final bool allowTouch;
 
   @override
   State<_GenericCanvas> createState() => _GenericCanvasState();
@@ -31,6 +36,9 @@ class _GenericCanvasState extends State<_GenericCanvas> {
   final _activeNotifier = ValueNotifier<List<Offset>>([]);
   Size _canvasSize = Size.zero;
 
+  bool _accept(PointerEvent e) =>
+      widget.allowTouch || e.kind != ui.PointerDeviceKind.touch;
+
   @override
   void dispose() {
     _committedNotifier.value?.dispose();
@@ -40,17 +48,20 @@ class _GenericCanvasState extends State<_GenericCanvas> {
   }
 
   void _onPointerDown(PointerDownEvent e) {
+    if (!_accept(e)) return;
     _active.clear();
     _active.add(e.localPosition);
     _activeNotifier.value = List.from(_active);
   }
 
   void _onPointerMove(PointerMoveEvent e) {
+    if (!_accept(e)) return;
     _active.add(e.localPosition);
     _activeNotifier.value = List.from(_active);
   }
 
   void _onPointerUp(PointerUpEvent e) {
+    if (!_accept(e)) return;
     if (_active.isNotEmpty) {
       _committed.add(List.from(_active));
       _active.clear();
