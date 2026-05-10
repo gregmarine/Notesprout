@@ -33,8 +33,10 @@ A handwriting-first, meditative notes app. Think paper, but smarter underneath. 
 - Database: sqflite (SQLite) — not yet implemented, coming soon
 - Package name: com.notesprout.app
 - Primary test device: BOOX e-ink Android devices
-- Drawing engine: abstracted — OnyxDrawingEngine (BOOX) and GenericDrawingEngine (all others) — not yet implemented
-- Onyx SDK integration: via Flutter platform channels — not yet implemented, reference ~/git/BOOXDemo for lessons learned
+- Drawing engine: abstracted — OnyxDrawingEngine (BOOX) and GenericDrawingEngine (all others) — **IMPLEMENTED**
+- Onyx SDK: onyxsdk-device:1.3.3 + onyxsdk-pen:1.5.4 via Flutter platform channels — **IMPLEMENTED**
+- Onyx SDK repo: `http://repo.boox.com/repository/maven-public/` (insecure protocol — required, do not change)
+- hiddenapibypass:4.3 from JitPack — required for Android 14+ BOOX devices (applied in NoteSproutApplication.onCreate)
 
 ---
 
@@ -122,13 +124,36 @@ NoteSprout's visual language is designed for e-ink displays first. All other pla
 
 ---
 
+## Drawing Engine Architecture (Implemented)
+
+### Dart Layer
+- `lib/drawing/drawing_engine.dart` — `DrawingEngine` abstract interface (`buildCanvas`, `clear`, `dispose`)
+- `lib/drawing/generic_drawing_engine.dart` — Flutter-native fallback: `Listener` + two-layer `CustomPainter` (committed strokes as cached `ui.Image`, active stroke repaints per point)
+- `lib/drawing/onyx_drawing_engine.dart` — BOOX path: embeds native `SurfaceView` via `AndroidView`, speaks over `MethodChannel("com.notesprout/onyx_canvas")`
+- `lib/drawing/drawing_engine_factory.dart` — Pings native channel; uses `OnyxDrawingEngine` if response is `"ok"` (BOOX only), otherwise `GenericDrawingEngine`
+- `lib/screens/drawing_screen.dart` — Drawing screen with e-ink toolbar (Clear button) above canvas
+
+### Native Android Layer (package: `com.notesprout.app`)
+- `OnyxDrawingView.kt` — Ported DIRECTLY from BOOXDemo `DrawingView.kt`: TouchHelper, RawInputCallback, limit rect, bitmap commit. Do not refactor — matches proven BOOXDemo logic exactly.
+- `OnyxCanvasView.kt` — PlatformView wrapper returning `OnyxDrawingView`
+- `OnyxCanvasViewFactory.kt` — PlatformViewFactory, notifies `OnyxCanvasMethodChannel` on view creation
+- `OnyxCanvasMethodChannel.kt` — MethodChannel handler; `ping` checks `Build.MANUFACTURER` for "onyx" before returning `"ok"`
+
+### Key Build Facts
+- `minSdk = 29` (BOOX devices are Android 10+; Onyx SDK requires it)
+- `android.enableJetifier=true` required — Onyx SDK bundles old `com.android.support` classes
+- `tools:replace="android:label"` on `<application>` — Onyx SDK manifest conflicts on label
+- `FlutterEngine.platformViewsController.registry` — correct API for registering PlatformViewFactory (NOT `platformViewRegistry` — that method does not exist in Flutter 3.41.x)
+- `NoteSproutApplication` replaces `${applicationName}` in manifest to call `HiddenApiBypass.addHiddenApiExemptions("")` before SDK init
+
+---
+
 ## What NOT To Do
 
 - Do not use infinite scroll anywhere — ever
 - Do not default to Material Design conventions that make the app feel like a generic Android app
 - Do not add dependencies without discussion
 - Do not restructure the monorepo layout without discussion
-- Do not implement drawing, canvas, or Onyx SDK until explicitly instructed
 - Do not implement SQLite/sqflite until explicitly instructed
 - Do not guess at architectural decisions — ask first
 
@@ -149,7 +174,11 @@ flutter build apk --debug          # build Android debug APK
 
 ## Current Step
 
-Seed branch is live. Hello World verified. Next: E-ink design system — establishing AppTheme and visual QA screen.
+Drawing engine tested and verified on NoteAir5C (EMR), Palma2 Pro (USI 2.0), and Go Color 7. Next: page/notebook data model and SQLite persistence.
+
+### Known Build Notes (from device testing)
+- `setStrokeColor(Color.BLACK)` required on TouchHelper init — NoteAir5C color e-ink panel defaults to non-black
+- Toolbar must be in a `Stack` above the canvas, not a `Column` sibling — native `SurfaceView` can occlude Flutter siblings below it in z-order
 
 ---
-*Last updated: Seed branch initialization*
+*Last updated: Drawing engine — device testing complete (seed branch)*

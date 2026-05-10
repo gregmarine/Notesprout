@@ -9,7 +9,15 @@ class AppThemeTestScreen extends StatelessWidget {
     final tt = Theme.of(context).textTheme;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Theme QA')),
+      appBar: AppBar(
+        title: const Text('Theme QA'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pushNamed(context, '/draw'),
+            child: const Text('Draw'),
+          ),
+        ],
+      ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(24),
         child: Column(

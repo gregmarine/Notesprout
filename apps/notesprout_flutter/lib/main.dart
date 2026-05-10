@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'screens/drawing_screen.dart';
 import 'theme/app_theme.dart';
 import 'theme/app_theme_test_screen.dart';
 
@@ -21,6 +22,9 @@ class NoteSproutApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       theme: AppTheme.themeData,
       home: const AppThemeTestScreen(),
+      routes: {
+        '/draw': (_) => const DrawingScreen(),
+      },
     );
   }
 }

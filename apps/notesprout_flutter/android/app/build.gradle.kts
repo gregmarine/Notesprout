@@ -20,14 +20,23 @@ android {
     }
 
     defaultConfig {
-        // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
         applicationId = "com.notesprout.notesprout_flutter"
-        // You can update the following values to match your application needs.
-        // For more information, see: https://flutter.dev/to/review-gradle-config.
-        minSdk = flutter.minSdkVersion
+        minSdk = 29  // BOOX devices are Android 10+; Onyx SDK requires API 29
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+    }
+
+    packaging {
+        jniLibs {
+            // Onyx SDK ships native libs that conflict with Flutter's own copies
+            pickFirsts += setOf(
+                "lib/arm64-v8a/libc++_shared.so",
+                "lib/armeabi-v7a/libc++_shared.so",
+                "lib/x86/libc++_shared.so",
+                "lib/x86_64/libc++_shared.so",
+            )
+        }
     }
 
     buildTypes {
@@ -41,4 +50,13 @@ android {
 
 flutter {
     source = "../.."
+}
+
+dependencies {
+    // Onyx BOOX SDK — versions pinned to match BOOXDemo (proven working on NoteAir5C, Palma2 Pro)
+    implementation("com.onyx.android.sdk:onyxsdk-device:1.3.3")
+    implementation("com.onyx.android.sdk:onyxsdk-pen:1.5.4")
+
+    // Bypasses Android 14+ JNI enforcement so the BOOX SDK can call hidden system APIs
+    implementation("org.lsposed.hiddenapibypass:hiddenapibypass:4.3")
 }

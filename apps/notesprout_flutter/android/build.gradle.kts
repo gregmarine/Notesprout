@@ -2,6 +2,13 @@ allprojects {
     repositories {
         google()
         mavenCentral()
+        // BOOX SDK — repo URL copied exactly from BOOXDemo/settings.gradle
+        maven {
+            url = uri("http://repo.boox.com/repository/maven-public/")
+            isAllowInsecureProtocol = true
+        }
+        // hiddenapibypass is hosted on JitPack
+        maven { url = uri("https://jitpack.io") }
     }
 }
 
