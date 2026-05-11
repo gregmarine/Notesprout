@@ -184,7 +184,7 @@ adb -s <serial> install -r app/build/outputs/apk/debug/app-debug.apk
 
 ## Current Step
 
-Native Android drawing engine verified on NA5C (EMR), P2P (USI 2.0), GC7, NA4C, and Movink Pad 11. Next: Optimize NA5C canvas flicker. On deck: page/notebook data model and SQLite persistence.
+EPD handoff flicker eliminated across all devices (NA5C, NA4C, P2P, GC7, MIP11). Next: page/notebook data model and SQLite persistence.
 
 ---
-*Last updated: Native Android port complete — moving forward with native Kotlin (seed branch)*
+*Last updated: EPD flicker fix complete — all drawing targets verified clean*
