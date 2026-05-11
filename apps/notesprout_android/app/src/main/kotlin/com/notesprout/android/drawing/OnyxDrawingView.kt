@@ -55,6 +55,10 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
     private val rawInputCallback = object : RawInputCallback() {
         override fun onBeginRawDrawing(shortcutDrawing: Boolean, touchPoint: TouchPoint) {
             handler.removeCallbacks(idleFlushRunnable)
+            // Re-enable EPD rendering for the new stroke. By the time the user starts
+            // a new stroke the Android canvas is fully composited, so the EPD surface
+            // initialises from the correct bitmap (all previous strokes visible).
+            if (isSetup) touchHelper.setRawDrawingRenderEnabled(true)
         }
 
         override fun onEndRawDrawing(shortcutDrawing: Boolean, touchPoint: TouchPoint) {
@@ -87,14 +91,17 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
         canvas.drawPath(path, strokePaint)
     }
 
+    // EPD-to-canvas handoff: draw the bitmap first, then swap the EPD layer from within
+    // onDraw once we know the Android canvas has the strokes. Doing it the other way
+    // (disable EPD first, then invalidate) causes a visible flash on NoteAir devices because
+    // their EPD controller clears the hardware layer before the next Android frame is drawn.
+    private var pendingEpdSwap = false
+
     // Uses setRawDrawingRenderEnabled (render-only flag) rather than setRawDrawingEnabled
     // (which toggles both input and render and always triggers a full EPD waveform refresh).
     private fun commitToScreen() {
-        post {
-            touchHelper.setRawDrawingRenderEnabled(false)
-            invalidate()
-            post { touchHelper.setRawDrawingRenderEnabled(true) }
-        }
+        pendingEpdSwap = true
+        invalidate()
     }
 
     override fun onAttachedToWindow() {
@@ -138,8 +145,16 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
-        canvas.drawColor(Color.WHITE)
-        renderBitmap?.let { canvas.drawBitmap(it, 0f, 0f, null) }
+        // renderBitmap is initialised white — no need to drawColor(WHITE) first,
+        // which would create an intermediate blank state visible as a flash on e-ink.
+        renderBitmap?.let { canvas.drawBitmap(it, 0f, 0f, null) } ?: canvas.drawColor(Color.WHITE)
+        if (pendingEpdSwap) {
+            pendingEpdSwap = false
+            // Bitmap is now on the Android canvas. Disable EPD rendering so the canvas
+            // becomes visible. Do NOT re-enable here — onBeginRawDrawing re-enables it
+            // at the next stroke start, by which time the canvas is fully composited.
+            post { touchHelper.setRawDrawingRenderEnabled(false) }
+        }
     }
 
     override fun onDetachedFromWindow() {
