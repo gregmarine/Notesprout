@@ -11,8 +11,8 @@ A handwriting-first, meditative notes app. Think paper, but smarter underneath. 
 
 ## Monorepo Structure
 
-- apps/notesprout_flutter — Flutter app (primary active codebase, all platforms)
-- apps/notesprout_android — Native Android app
+- apps/notesprout_android — Native Android app (primary active codebase)
+- apps/notesprout_flutter — Flutter app (reference only — do not add features here)
 
 ---
 
@@ -28,15 +28,15 @@ A handwriting-first, meditative notes app. Think paper, but smarter underneath. 
 
 ## Tech Decisions — Already Made, Do Not Revisit Without Discussion
 
-- Flutter latest stable — no pinned version, always latest stable
-- State management: Riverpod (flutter_riverpod, latest stable)
-- Database: sqflite (SQLite) — not yet implemented, coming soon
-- Package name: com.notesprout.app
+- Language: Kotlin (Java 17 target — use Temurin-17 JDK)
+- Package name: com.notesprout.android
 - Primary test device: BOOX e-ink Android devices
 - Drawing engine: abstracted — OnyxDrawingEngine (BOOX) and GenericDrawingEngine (all others) — **IMPLEMENTED**
-- Onyx SDK: onyxsdk-device:1.3.3 + onyxsdk-pen:1.5.4 via Flutter platform channels — **IMPLEMENTED**
+- Onyx SDK: onyxsdk-device:1.3.3 + onyxsdk-pen:1.5.4 — **IMPLEMENTED**
 - Onyx SDK repo: `http://repo.boox.com/repository/maven-public/` (insecure protocol — required, do not change)
 - hiddenapibypass:4.3 from JitPack — required for Android 14+ BOOX devices (applied in NoteSproutApplication.onCreate)
+- Database: Room/SQLite — not yet implemented, coming soon
+- AGP 8.11.1 + Kotlin 2.2.20 + Gradle 8.14
 
 ---
 
@@ -55,26 +55,28 @@ A handwriting-first, meditative notes app. Think paper, but smarter underneath. 
 
 ## Design System — E-Ink First (Never Violate These)
 
-NoteSprout's visual language is designed for e-ink displays first. All other platforms inherit this aesthetic — we do not diverge for web or standard Android.
+NoteSprout's visual language is designed for e-ink displays first. All other platforms inherit this aesthetic.
 
 **Palette (UI Chrome Only):**
 - `inkBlack` = `#000000`
 - `paperWhite` = `#FFFFFF`
 - `inkLight` = `#888888` — disabled / secondary text only
-- `borderGray` = `#CCCCCC` — subtle dividers only
+- `borderGray` = `#CCCCCC` — subtle dividers only (invisible on e-ink — use inkBlack for any visible border)
 - No color in UI chrome — ever. Color belongs to content only.
 
 **Visual Rules:**
 - No shadows, no elevation, no gradients, no blur
-- No Material splash or ripple effects (`NoSplash.splashFactory` everywhere)
-- Animations: `Duration.zero` or minimum required — never decorative
-- Borders: 1px solid inkBlack
-- Corner radius: 4.0 — slightly rounded, not pill, not sharp
+- No Material splash or ripple effects (`rippleColor=transparent`, `stateListAnimator=null`)
+- Animations: none or minimum required — never decorative
+- Borders: 1dp solid inkBlack
+- Corner radius: 4dp — slightly rounded, not pill, not sharp
 - Typography: clear, high-contrast, black on white
 
 **Source of Truth:**
-- All theme values live in `lib/theme/app_theme.dart`
-- Do not hardcode colors or styles on widgets — always reference `AppTheme`
+- Colors: `app/src/main/res/values/colors.xml`
+- Styles/typography: `app/src/main/res/values/styles.xml`
+- Theme: `app/src/main/res/values/themes.xml`
+- Do not hardcode colors or styles on views — always reference named resources
 
 **What NOT To Do (Design):**
 - No color in any UI chrome element
@@ -92,15 +94,14 @@ NoteSprout's visual language is designed for e-ink displays first. All other pla
 - BOOX Palma2 Pro (USI 2.0 stylus, Android phone form factor)
 - BOOX Go Color 7 Gen II
 - Wacom Movink Pad 11 & 14 (Android, GenericDrawingEngine)
-- iPhone 14 (touch-only)
-- MacBook (Flutter desktop / web)
-- Web (mobile and desktop)
+- iPhone 14 (touch-only) — future
+- MacBook / Web — future
 
 **Tier 2 — Testing/QA:**
 - BOOX NoteAir4C
 - BOOX Tab XC
-- iPad Air + Apple Pencil
-- Supernote Nomad & Manta (GenericDrawingEngine fallback)
+- iPad Air + Apple Pencil — future
+- Supernote Nomad & Manta (GenericDrawingEngine fallback) — future
 
 ## ADB Device Serials
 
@@ -128,7 +129,6 @@ NoteSprout's visual language is designed for e-ink displays first. All other pla
 - Bug fixes → Pruning
 - New features → New Branches
 - Contributors → Gardeners
-- v1.0 → First Bloom
 - README → The Soil
 - CLAUDE.md → The Soil for Claude Code
 
@@ -136,25 +136,21 @@ NoteSprout's visual language is designed for e-ink displays first. All other pla
 
 ## Drawing Engine Architecture (Implemented)
 
-### Dart Layer
-- `lib/drawing/drawing_engine.dart` — `DrawingEngine` abstract interface (`buildCanvas`, `clear`, `dispose`)
-- `lib/drawing/generic_drawing_engine.dart` — Flutter-native fallback: `Listener` + two-layer `CustomPainter` (committed strokes as cached `ui.Image`, active stroke repaints per point)
-- `lib/drawing/onyx_drawing_engine.dart` — BOOX path: embeds native `SurfaceView` via `AndroidView`, speaks over `MethodChannel("com.notesprout/onyx_canvas")`
-- `lib/drawing/drawing_engine_factory.dart` — Pings native channel; uses `OnyxDrawingEngine` if response is `"ok"` (BOOX only), otherwise `GenericDrawingEngine`
-- `lib/screens/drawing_screen.dart` — Drawing screen with e-ink toolbar (Clear button) above canvas
-
-### Native Android Layer (package: `com.notesprout.app`)
-- `OnyxDrawingView.kt` — Ported DIRECTLY from BOOXDemo `DrawingView.kt`: TouchHelper, RawInputCallback, limit rect, bitmap commit. Do not refactor — matches proven BOOXDemo logic exactly.
-- `OnyxCanvasView.kt` — PlatformView wrapper returning `OnyxDrawingView`
-- `OnyxCanvasViewFactory.kt` — PlatformViewFactory, notifies `OnyxCanvasMethodChannel` on view creation
-- `OnyxCanvasMethodChannel.kt` — MethodChannel handler; `ping` checks `Build.MANUFACTURER` for "onyx" before returning `"ok"`
+### Native Android Layer (package: `com.notesprout.android`)
+- `drawing/DrawingView.kt` — interface: `asView()`, `setToolbarHeight(Int)`, `enableDrawing()`, `disableDrawing()`, `clearCanvas()`, `releaseResources()`
+- `drawing/OnyxDrawingView.kt` — BOOX path: TouchHelper, RawInputCallback, limit rect, bitmap commit, 800ms idle flush via `setRawDrawingRenderEnabled`. Do not refactor — matches proven BOOXDemo logic exactly.
+- `drawing/GenericDrawingView.kt` — Flutter Canvas fallback: two-layer Bitmap approach, stylus-only (`TOOL_TYPE_STYLUS`), historical point capture for smooth strokes
+- `DrawingActivity.kt` — fullscreen immersive (`WindowInsetsControllerCompat`), detects BOOX via `Build.MANUFACTURER`, `doOnLayout` for precise toolbar height
+- `MainActivity.kt` — theme test screen + entry point to DrawingActivity
 
 ### Key Build Facts
 - `minSdk = 29` (BOOX devices are Android 10+; Onyx SDK requires it)
 - `android.enableJetifier=true` required — Onyx SDK bundles old `com.android.support` classes
-- `tools:replace="android:label"` on `<application>` — Onyx SDK manifest conflicts on label
-- `FlutterEngine.platformViewsController.registry` — correct API for registering PlatformViewFactory (NOT `platformViewRegistry` — that method does not exist in Flutter 3.41.x)
-- `NoteSproutApplication` replaces `${applicationName}` in manifest to call `HiddenApiBypass.addHiddenApiExemptions("")` before SDK init
+- `jniLibs.pickFirsts` for `libc++_shared.so` — resolves native lib conflict with Onyx SDK
+- `org.gradle.java.home` in `gradle.properties` pins Temurin-17 — system Java 26 is incompatible with current AGP/Gradle
+- `NoteSproutApplication.onCreate` calls `HiddenApiBypass.addHiddenApiExemptions("")` before any SDK init
+- `setStrokeColor(Color.BLACK)` required on TouchHelper init — NoteAir5C color panel defaults to non-black
+- Toolbar z-order: toolbar must overlay the drawing container in a `FrameLayout`, not sit as a sibling — native SurfaceView occludes Flutter/View siblings below it
 
 ---
 
@@ -164,37 +160,31 @@ NoteSprout's visual language is designed for e-ink displays first. All other pla
 - Do not default to Material Design conventions that make the app feel like a generic Android app
 - Do not add dependencies without discussion
 - Do not restructure the monorepo layout without discussion
-- Do not implement SQLite/sqflite until explicitly instructed
+- Do not implement Room/SQLite until explicitly instructed
 - Do not guess at architectural decisions — ask first
+- Do not add new features to apps/notesprout_flutter — it is reference only
 
 ---
 
 ## Build & Run
 
 ```bash
-cd ~/git/NoteSprout/apps/notesprout_flutter
-flutter run                        # run on connected device
-flutter run -d chrome              # run in browser
-flutter build apk --debug          # build Android debug APK
+cd ~/git/NoteSprout/apps/notesprout_android
+
+./gradlew assembleDebug                        # build debug APK
+./gradlew installDebug                         # build + install on connected device
+
+# Install on a specific device by serial
+adb -s <serial> install -r app/build/outputs/apk/debug/app-debug.apk
 ```
 
-*This section will be updated as we make discoveries.*
+*See ADB Device Serials table above for device serials.*
 
 ---
 
 ## Current Step
 
-Drawing engine tested and verified on NoteAir5C (EMR), Palma2 Pro (USI 2.0), and Go Color 7. Next: page/notebook data model and SQLite persistence.
-
-### Known Build Notes (from device testing)
-- `setStrokeColor(Color.BLACK)` required on TouchHelper init — NoteAir5C color e-ink panel defaults to non-black
-- Toolbar must be in a `Stack` above the canvas, not a `Column` sibling — native `SurfaceView` can occlude Flutter siblings below it in z-order
+Native Android drawing engine verified on NA5C (EMR), P2P (USI 2.0), GC7, NA4C, and Movink Pad 11. Next: Optimize NA5C canvas flicker. On deck: page/notebook data model and SQLite persistence.
 
 ---
-*Last updated: Drawing engine — device testing complete (seed branch)*
-
-## Native Android Port
-
-We are porting the Flutter to native Android.
-
-- Be sure to use Java 17
+*Last updated: Native Android port complete — moving forward with native Kotlin (seed branch)*
