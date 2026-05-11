@@ -13,10 +13,12 @@ import android.util.Log
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewTreeObserver
+import com.onyx.android.sdk.api.device.epd.EpdController
 import com.onyx.android.sdk.data.note.TouchPoint
 import com.onyx.android.sdk.pen.RawInputCallback
 import com.onyx.android.sdk.pen.TouchHelper
 import com.onyx.android.sdk.pen.data.TouchPointList
+import java.util.concurrent.atomic.AtomicInteger
 
 // Ported from notesprout_flutter's OnyxDrawingView (which was itself ported from BOOXDemo).
 // TouchHelper, RawInputCallback, limit rect, and EPD commit logic are unchanged.
@@ -31,6 +33,11 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
     companion object {
         private const val TAG = "NoteSprout"
         private const val IDLE_FLUSH_THRESHOLD_MS = 800L
+        // Suppresses the EPD controller's automatic GC16 ghosting-removal refresh, which
+        // fires after this many fast-waveform (A2) updates. We raise it well above any
+        // realistic stroke count so the hardware doesn't self-trigger mid-session;
+        // our handwritingRepaint at the idle flush is the controlled quality refresh instead.
+        private const val EPD_UPDATE_LIST_SIZE = 512
     }
 
     private val handler = Handler(Looper.getMainLooper())
@@ -55,10 +62,22 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
     private val rawInputCallback = object : RawInputCallback() {
         override fun onBeginRawDrawing(shortcutDrawing: Boolean, touchPoint: TouchPoint) {
             handler.removeCallbacks(idleFlushRunnable)
-            // Re-enable EPD rendering for the new stroke. By the time the user starts
-            // a new stroke the Android canvas is fully composited, so the EPD surface
-            // initialises from the correct bitmap (all previous strokes visible).
-            if (isSetup) touchHelper.setRawDrawingRenderEnabled(true)
+            // Advance the generation so any post{} from the previous idle flush sees a
+            // stale generation and skips setRawDrawingRenderEnabled(false). Without this
+            // guard the post{} can fire after we've already re-enabled render here, leaving
+            // the overlay disabled mid-stroke and hiding strokes (seen as disappearing text
+            // on NoteAir4C where handwritingRepaint takes longer and the race is more likely).
+            epdSwapGeneration.incrementAndGet()
+            if (isSetup) {
+                // Re-enable EPD rendering for the new stroke. By the time the user starts
+                // a new stroke the Android canvas is fully composited, so the EPD surface
+                // initialises from the correct bitmap (all previous strokes visible).
+                touchHelper.setRawDrawingRenderEnabled(true)
+                // Re-arm the auto-GC suppression each stroke start. The idle flush resets
+                // the update list size so the handoff can land cleanly; we restore it here
+                // so the hardware won't self-trigger GC16 during the next writing burst.
+                EpdController.setUpdListSize(EPD_UPDATE_LIST_SIZE)
+            }
         }
 
         override fun onEndRawDrawing(shortcutDrawing: Boolean, touchPoint: TouchPoint) {
@@ -96,6 +115,14 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
     // (disable EPD first, then invalidate) causes a visible flash on NoteAir devices because
     // their EPD controller clears the hardware layer before the next Android frame is drawn.
     private var pendingEpdSwap = false
+
+    // Guard against the race where onBeginRawDrawing (Onyx SDK thread) re-enables render
+    // while a stale post{} from a previous idle flush is still queued on the main thread.
+    // Without this, the stale post{} fires setRawDrawingRenderEnabled(false) after the new
+    // stroke has already re-enabled it — hiding in-progress strokes until the next flush.
+    // Incrementing the generation in onBeginRawDrawing lets the post{} detect it's stale
+    // and bail out before touching the render flag. AtomicInteger for cross-thread visibility.
+    private val epdSwapGeneration = AtomicInteger(0)
 
     // Uses setRawDrawingRenderEnabled (render-only flag) rather than setRawDrawingEnabled
     // (which toggles both input and render and always triggers a full EPD waveform refresh).
@@ -150,10 +177,30 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
         renderBitmap?.let { canvas.drawBitmap(it, 0f, 0f, null) } ?: canvas.drawColor(Color.WHITE)
         if (pendingEpdSwap) {
             pendingEpdSwap = false
-            // Bitmap is now on the Android canvas. Disable EPD rendering so the canvas
-            // becomes visible. Do NOT re-enable here — onBeginRawDrawing re-enables it
-            // at the next stroke start, by which time the canvas is fully composited.
-            post { touchHelper.setRawDrawingRenderEnabled(false) }
+            // Flush the EPD pen layer with the handwriting waveform BEFORE disabling raw
+            // rendering. This drains any pending pen-layer content with the correct waveform
+            // so that the subsequent disable has nothing left to composite — preventing it
+            // from queuing a GC16 full-panel refresh, which is the visible flicker on
+            // NoteAir5C/4C panels.
+            val expectedGen = epdSwapGeneration.incrementAndGet()
+            post {
+                // Reset the update list size before the repaint so the EPD controller is
+                // back at its default threshold — ready to manage its own refresh cycle
+                // once raw drawing restarts. Then flush with the handwriting waveform and
+                // disable the overlay; with the pen layer already drained by handwritingRepaint,
+                // the disable has nothing to composite and won't queue a GC16.
+                EpdController.resetUpdListSize()
+                EpdController.handwritingRepaint(this@OnyxDrawingView, Rect(0, 0, width, height))
+                // Guard the disable with the generation check. handwritingRepaint always runs
+                // (needed for quality refresh and to drain the pen layer on NA5C), but the
+                // disable is only safe when no new stroke has started since we scheduled this.
+                // On slower panels (NoteAir4C), handwritingRepaint can take long enough that
+                // onBeginRawDrawing fires during it — disabling render under an active stroke
+                // hides in-progress strokes until the next idle flush.
+                if (isSetup && epdSwapGeneration.get() == expectedGen) {
+                    touchHelper.setRawDrawingRenderEnabled(false)
+                }
+            }
         }
     }
 
@@ -225,6 +272,7 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
             touchHelper.restartRawDrawing()
         }
         touchHelper.setRawDrawingEnabled(true)
+        EpdController.setUpdListSize(EPD_UPDATE_LIST_SIZE)
         Log.d(TAG, "openRawDrawing done — inputEnabled=${touchHelper.isRawDrawingInputEnabled}")
     }
 }
