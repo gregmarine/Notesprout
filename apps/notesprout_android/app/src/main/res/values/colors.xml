@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="inkBlack">#000000</color>
+    <color name="paperWhite">#FFFFFF</color>
+    <color name="inkLight">#888888</color>
+    <color name="borderGray">#CCCCCC</color>
+</resources>

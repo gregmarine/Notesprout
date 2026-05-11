@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Drawing screen — native equivalent of DrawingScreen in Flutter.
+     FrameLayout: drawing container fills entire screen, toolbar overlays on top.
+     z-order: drawingContainer is drawn first (bottom), toolbar second (top). -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/paperWhite">
+
+    <!-- Drawing view is added here programmatically -->
+    <FrameLayout
+        android:id="@+id/drawingContainer"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@color/paperWhite" />
+
+    <!-- Toolbar floats above the canvas.
+         On BOOX, setLimitRect excludes this region from pen input.
+         Height is 48dp content; toolbar_background drawable provides the 1dp inkBlack bottom border. -->
+    <LinearLayout
+        android:id="@+id/drawingToolbar"
+        android:layout_width="match_parent"
+        android:layout_height="48dp"
+        android:layout_gravity="top"
+        android:background="@drawable/toolbar_background"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="8dp"
+        android:paddingEnd="8dp">
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnClear"
+            style="@style/Widget.NoteSprout.OutlinedButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Clear" />
+
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:gravity="center"
+            android:text="Canvas"
+            android:textColor="@color/inkBlack"
+            android:textSize="14sp"
+            android:textStyle="bold" />
+
+        <!-- Spacer to visually balance the Clear button on the left -->
+        <Space
+            android:layout_width="80dp"
+            android:layout_height="wrap_content" />
+
+    </LinearLayout>
+
+</FrameLayout>

@@ -12,7 +12,7 @@ A handwriting-first, meditative notes app. Think paper, but smarter underneath. 
 ## Monorepo Structure
 
 - apps/notesprout_flutter — Flutter app (primary active codebase, all platforms)
-- apps/notesprout_android — Native Android app (Kotlin, v1.0 / First Bloom — shipped, reference only)
+- apps/notesprout_android — Native Android app
 
 ---
 
@@ -102,6 +102,16 @@ NoteSprout's visual language is designed for e-ink displays first. All other pla
 - iPad Air + Apple Pencil
 - Supernote Nomad & Manta (GenericDrawingEngine fallback)
 
+## ADB Device Serials
+
+| Device | ADB Serial |
+|---|---|
+| BOOX NoteAir5C (NA5C) | `92c16533` |
+| BOOX Palma2 Pro (P2P) | `287d2364` |
+| BOOX Go Color 7 (GC7) | `98d56306` |
+| BOOX NoteAir4C (NA4C) | `1d36f870` |
+| Wacom Movink Pad 11 (MIP11) | `5HL21V5007384` |
+
 ---
 
 ## Branch Strategy
@@ -182,3 +192,9 @@ Drawing engine tested and verified on NoteAir5C (EMR), Palma2 Pro (USI 2.0), and
 
 ---
 *Last updated: Drawing engine — device testing complete (seed branch)*
+
+## Native Android Port
+
+We are porting the Flutter to native Android.
+
+- Be sure to use Java 17

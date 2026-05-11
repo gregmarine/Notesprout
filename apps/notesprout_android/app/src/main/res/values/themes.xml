@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <style name="Theme.NoteSprout" parent="Theme.MaterialComponents.Light.NoActionBar">
+        <!-- Brand palette -->
+        <item name="colorPrimary">@color/inkBlack</item>
+        <item name="colorOnPrimary">@color/paperWhite</item>
+        <item name="colorPrimaryVariant">@color/inkBlack</item>
+        <item name="colorSecondary">@color/inkBlack</item>
+        <item name="colorOnSecondary">@color/paperWhite</item>
+        <item name="colorSurface">@color/paperWhite</item>
+        <item name="colorOnSurface">@color/inkBlack</item>
+
+        <!-- No ripple / highlight anywhere -->
+        <item name="colorControlHighlight">@android:color/transparent</item>
+        <item name="android:colorControlHighlight">@android:color/transparent</item>
+
+        <!-- Background -->
+        <item name="android:windowBackground">@color/paperWhite</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+
+        <!-- No action bar shadow -->
+        <item name="android:windowContentOverlay">@null</item>
+    </style>
+
+</resources>

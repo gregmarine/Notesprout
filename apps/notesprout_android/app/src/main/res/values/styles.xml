@@ -1,0 +1,119 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <!-- ── Typography ── -->
+
+    <!-- Base required by AAPT2 for dot-notation implicit parent chain -->
+    <style name="TextAppearance.NoteSprout" parent="@android:style/TextAppearance">
+        <item name="android:textColor">@color/inkBlack</item>
+    </style>
+
+    <style name="TextAppearance.NoteSprout.DisplayLarge">
+        <item name="android:textSize">57sp</item>
+        <item name="android:textStyle">normal</item>
+        <item name="android:textColor">@color/inkBlack</item>
+        <item name="android:letterSpacing">-0.015</item>
+    </style>
+
+    <style name="TextAppearance.NoteSprout.HeadlineLarge">
+        <item name="android:textSize">32sp</item>
+        <item name="android:textStyle">normal</item>
+        <item name="android:textColor">@color/inkBlack</item>
+    </style>
+
+    <style name="TextAppearance.NoteSprout.HeadlineMedium">
+        <item name="android:textSize">28sp</item>
+        <item name="android:textStyle">normal</item>
+        <item name="android:textColor">@color/inkBlack</item>
+    </style>
+
+    <style name="TextAppearance.NoteSprout.TitleLarge">
+        <item name="android:textSize">22sp</item>
+        <item name="android:textStyle">bold</item>
+        <item name="android:textColor">@color/inkBlack</item>
+    </style>
+
+    <style name="TextAppearance.NoteSprout.TitleMedium">
+        <item name="android:textSize">16sp</item>
+        <item name="android:textStyle">bold</item>
+        <item name="android:textColor">@color/inkBlack</item>
+    </style>
+
+    <style name="TextAppearance.NoteSprout.BodyLarge">
+        <item name="android:textSize">16sp</item>
+        <item name="android:textStyle">normal</item>
+        <item name="android:textColor">@color/inkBlack</item>
+    </style>
+
+    <style name="TextAppearance.NoteSprout.BodyMedium">
+        <item name="android:textSize">14sp</item>
+        <item name="android:textStyle">normal</item>
+        <item name="android:textColor">@color/inkBlack</item>
+    </style>
+
+    <style name="TextAppearance.NoteSprout.BodySmall">
+        <item name="android:textSize">12sp</item>
+        <item name="android:textStyle">normal</item>
+        <item name="android:textColor">@color/inkLight</item>
+    </style>
+
+    <style name="TextAppearance.NoteSprout.LabelLarge">
+        <item name="android:textSize">14sp</item>
+        <item name="android:textStyle">normal</item>
+        <item name="android:textColor">@color/inkBlack</item>
+    </style>
+
+    <!-- ── Buttons ── -->
+
+    <!-- Black fill, white text, 4dp radius, no elevation, no ripple -->
+    <style name="Widget.NoteSprout.ElevatedButton" parent="Widget.MaterialComponents.Button">
+        <item name="android:backgroundTint">@color/inkBlack</item>
+        <item name="android:textColor">@color/paperWhite</item>
+        <item name="android:textSize">14sp</item>
+        <item name="cornerRadius">4dp</item>
+        <item name="elevation">0dp</item>
+        <item name="android:stateListAnimator">@null</item>
+        <item name="rippleColor">@android:color/transparent</item>
+        <item name="android:insetTop">0dp</item>
+        <item name="android:insetBottom">0dp</item>
+    </style>
+
+    <!-- White fill, black text, 1dp black stroke, 4dp radius, no elevation, no ripple -->
+    <style name="Widget.NoteSprout.OutlinedButton" parent="Widget.MaterialComponents.Button.OutlinedButton">
+        <item name="android:backgroundTint">@color/paperWhite</item>
+        <item name="android:textColor">@color/inkBlack</item>
+        <item name="android:textSize">14sp</item>
+        <item name="cornerRadius">4dp</item>
+        <item name="strokeColor">@color/inkBlack</item>
+        <item name="strokeWidth">1dp</item>
+        <item name="elevation">0dp</item>
+        <item name="android:stateListAnimator">@null</item>
+        <item name="rippleColor">@android:color/transparent</item>
+        <item name="android:insetTop">0dp</item>
+        <item name="android:insetBottom">0dp</item>
+    </style>
+
+    <!-- No background, black text, no ripple -->
+    <style name="Widget.NoteSprout.TextButton" parent="Widget.MaterialComponents.Button.TextButton">
+        <item name="android:textColor">@color/inkBlack</item>
+        <item name="android:textSize">14sp</item>
+        <item name="rippleColor">@android:color/transparent</item>
+        <item name="android:insetTop">0dp</item>
+        <item name="android:insetBottom">0dp</item>
+    </style>
+
+    <!-- ── Input ── -->
+
+    <style name="Widget.NoteSprout.TextInputLayout" parent="Widget.MaterialComponents.TextInputLayout.OutlinedBox">
+        <item name="boxStrokeColor">@color/inkBlack</item>
+        <item name="boxStrokeWidth">1dp</item>
+        <item name="boxCornerRadiusTopStart">4dp</item>
+        <item name="boxCornerRadiusTopEnd">4dp</item>
+        <item name="boxCornerRadiusBottomStart">4dp</item>
+        <item name="boxCornerRadiusBottomEnd">4dp</item>
+        <item name="hintTextColor">@color/inkLight</item>
+        <item name="android:textColorHint">@color/inkLight</item>
+        <item name="boxBackgroundColor">@color/paperWhite</item>
+    </style>
+
+</resources>
