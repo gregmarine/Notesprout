@@ -7,6 +7,8 @@ import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.Rect
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import android.view.MotionEvent
 import android.view.View
@@ -19,14 +21,30 @@ import com.onyx.android.sdk.pen.data.TouchPointList
 // Ported directly from BOOXDemo DrawingView.kt.
 // TouchHelper, RawInputCallback, limit rect, and EPD commit logic are
 // unchanged — only naming and lifecycle hooks differ for the PlatformView context.
+//
+// Coordinate alignment: the drawing screen runs in SystemUiMode.immersiveSticky,
+// so the Flutter canvas sits at physical screen (0,0). RawInputCallback touch
+// points are also in screen coordinates. No offset subtraction is needed in
+// renderStroke — the two coordinate spaces are identical in fullscreen mode.
+// The toolbar exclusion rect passed via setCanvasOffset() restricts pen input
+// to the area below the floating toolbar without any coordinate math.
 class OnyxDrawingView(context: Context) : View(context) {
 
     companion object {
         private const val TAG = "NoteSprout"
+        private const val IDLE_FLUSH_THRESHOLD_MS = 800L
     }
+
+    private val handler = Handler(Looper.getMainLooper())
+    private val idleFlushRunnable = Runnable { commitToScreen() }
 
     private var renderBitmap: Bitmap? = null
     private var renderCanvas: Canvas? = null
+
+    // Height of the floating toolbar in physical pixels. Used as the top of
+    // the setLimitRect exclusion zone so pen strokes cannot be registered
+    // over the toolbar. Set by Flutter via setCanvasOffset() before drawing.
+    private var toolbarHeight = 0
 
     private val strokePaint = Paint().apply {
         isAntiAlias = true
@@ -41,8 +59,13 @@ class OnyxDrawingView(context: Context) : View(context) {
     private var isSetup = false
 
     private val rawInputCallback = object : RawInputCallback() {
-        override fun onBeginRawDrawing(shortcutDrawing: Boolean, touchPoint: TouchPoint) {}
-        override fun onEndRawDrawing(shortcutDrawing: Boolean, touchPoint: TouchPoint) {}
+        override fun onBeginRawDrawing(shortcutDrawing: Boolean, touchPoint: TouchPoint) {
+            handler.removeCallbacks(idleFlushRunnable)
+        }
+        override fun onEndRawDrawing(shortcutDrawing: Boolean, touchPoint: TouchPoint) {
+            handler.removeCallbacks(idleFlushRunnable)
+            handler.postDelayed(idleFlushRunnable, IDLE_FLUSH_THRESHOLD_MS)
+        }
         override fun onRawDrawingTouchPointMoveReceived(touchPoint: TouchPoint) {}
 
         override fun onRawDrawingTouchPointListReceived(pointList: TouchPointList) {
@@ -61,20 +84,30 @@ class OnyxDrawingView(context: Context) : View(context) {
         val points = pointList.points
         if (points.isNullOrEmpty()) return
         val path = Path()
+        // In immersive fullscreen mode the view is at screen (0,0), so touch
+        // point coordinates are already in view-local space — no subtraction.
         path.moveTo(points[0].x, points[0].y)
         for (i in 1 until points.size) {
             path.lineTo(points[i].x, points[i].y)
         }
         canvas.drawPath(path, strokePaint)
         // Hardware overlay shows the stroke in real time; bitmap stays in sync silently.
-        // commitToScreen() is only needed for clear and focus transitions.
+        // The bitmap surfaces via onDraw whenever the hardware layer resets (clear, focus loss).
+        // No toggle here — setRawDrawingEnabled(false) unconditionally triggers an EPD
+        // waveform refresh that flashes visibly. Toggle only for clear and focus transitions.
     }
 
+    // Hides the hardware pen overlay, paints the Flutter bitmap, then restores the overlay.
+    // Uses setRawDrawingRenderEnabled (render-only flag) rather than setRawDrawingEnabled
+    // (which controls both input and render and unconditionally triggers a full EPD waveform
+    // refresh). If setRawDrawingRenderEnabled exists and operates independently, the bitmap
+    // should surface without the visible flash. If the method doesn't exist the build will
+    // fail here, which is the intended signal to fall back to setRawDrawingEnabled.
     private fun commitToScreen() {
         post {
-            touchHelper.setRawDrawingEnabled(false)
+            touchHelper.setRawDrawingRenderEnabled(false)
             invalidate()
-            post { touchHelper.setRawDrawingEnabled(true) }
+            post { touchHelper.setRawDrawingRenderEnabled(true) }
         }
     }
 
@@ -114,21 +147,38 @@ class OnyxDrawingView(context: Context) : View(context) {
         }
     }
 
+    // Called from Flutter with the toolbar height (y) so native can exclude
+    // the toolbar region from pen input via setLimitRect. x is always 0 in
+    // fullscreen mode and is ignored. Calling this after setup re-applies the
+    // limit rect immediately with the updated exclusion zone.
+    fun setCanvasOffset(x: Int, y: Int) {
+        toolbarHeight = y
+        Log.d(TAG, "setCanvasOffset toolbarHeight=$toolbarHeight")
+        if (isSetup) applyLimitRect()
+    }
+
+    private fun applyLimitRect() {
+        val fullScreen = Rect(0, 0, width, height)
+        val exclusion = if (toolbarHeight > 0) {
+            listOf(Rect(0, 0, width, toolbarHeight))
+        } else {
+            emptyList()
+        }
+        touchHelper.setLimitRect(fullScreen, exclusion)
+    }
+
     private fun openRawDrawing() {
-        val loc = IntArray(2)
-        getLocationOnScreen(loc)
-        val screenRect = Rect(loc[0], loc[1], loc[0] + width, loc[1] + height)
-        Log.d(TAG, "openRawDrawing isSetup=$isSetup screenRect=$screenRect")
+        Log.d(TAG, "openRawDrawing isSetup=$isSetup toolbarHeight=$toolbarHeight size=${width}x${height}")
 
         if (!isSetup) {
+            applyLimitRect()
             touchHelper
-                .setLimitRect(screenRect, emptyList())
                 .setStrokeWidth(3.0f)
                 .setStrokeColor(Color.BLACK)
                 .openRawDrawing()
             isSetup = true
         } else {
-            touchHelper.setLimitRect(screenRect, emptyList())
+            applyLimitRect()
             touchHelper.restartRawDrawing()
         }
         touchHelper.setRawDrawingEnabled(true)
@@ -160,6 +210,7 @@ class OnyxDrawingView(context: Context) : View(context) {
 
     override fun onDetachedFromWindow() {
         super.onDetachedFromWindow()
+        handler.removeCallbacks(idleFlushRunnable)
         if (isSetup) {
             touchHelper.closeRawDrawing()
             isSetup = false
@@ -167,6 +218,7 @@ class OnyxDrawingView(context: Context) : View(context) {
     }
 
     fun releaseResources() {
+        handler.removeCallbacks(idleFlushRunnable)
         if (isSetup) {
             touchHelper.closeRawDrawing()
             isSetup = false

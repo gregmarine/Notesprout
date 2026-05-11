@@ -30,6 +30,12 @@ class OnyxCanvasMethodChannel(flutterEngine: FlutterEngine, context: Context) {
                     result.success(if (isBoox) "ok" else "not_boox")
                 }
                 "initialize" -> result.success(null)
+                "setCanvasOffset" -> {
+                    val x = call.argument<Int>("x") ?: 0
+                    val y = call.argument<Int>("y") ?: 0
+                    currentView?.setCanvasOffset(x, y)
+                    result.success(null)
+                }
                 "clear" -> {
                     currentView?.clear()
                     result.success(null)

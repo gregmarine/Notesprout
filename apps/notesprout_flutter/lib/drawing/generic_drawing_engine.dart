@@ -18,6 +18,9 @@ class GenericDrawingEngine implements DrawingEngine {
 
   @override
   void dispose() {}
+
+  @override
+  void setToolbarHeight(double height) {}
 }
 
 class _GenericCanvas extends StatefulWidget {

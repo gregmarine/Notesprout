@@ -10,6 +10,8 @@ class OnyxCanvasView(context: Context, id: Int, args: Any?) : PlatformView {
 
     override fun getView(): View = drawingView
 
+    fun setCanvasOffset(x: Int, y: Int) = drawingView.setCanvasOffset(x, y)
+
     fun clear() = drawingView.clearCanvas()
 
     override fun dispose() {
