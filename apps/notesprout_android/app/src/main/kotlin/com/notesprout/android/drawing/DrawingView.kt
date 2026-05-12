@@ -9,6 +9,10 @@ interface DrawingView {
     fun setToolbarHeight(heightPx: Int)
     fun enableDrawing()
     fun disableDrawing()
+    // Bakes any hardware-layer strokes into the canvas bitmap, then calls onComplete.
+    // Must be called before any action that ends the current writing session
+    // (tool switch, clear, page turn, undo, onPause, etc.).
+    fun commitStrokes(onComplete: () -> Unit = {})
     fun clearCanvas()
     fun releaseResources()
 }

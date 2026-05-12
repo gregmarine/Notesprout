@@ -45,10 +45,12 @@
             android:textSize="14sp"
             android:textStyle="bold" />
 
-        <!-- Spacer to visually balance the Clear button on the left -->
-        <Space
-            android:layout_width="80dp"
-            android:layout_height="wrap_content" />
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/btnCommitTest"
+            style="@style/Widget.NoteSprout.OutlinedButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Commit" />
 
     </LinearLayout>
 

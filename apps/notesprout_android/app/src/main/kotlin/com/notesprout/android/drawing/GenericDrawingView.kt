@@ -101,6 +101,7 @@ class GenericDrawingView(context: Context) : View(context), DrawingView {
     override fun setToolbarHeight(heightPx: Int) {} // no limit rect needed; toolbar is above canvas in z-order
     override fun enableDrawing() {}
     override fun disableDrawing() {}
+    override fun commitStrokes(onComplete: () -> Unit) { onComplete() }
 
     override fun clearCanvas() {
         activePoints.clear()
