@@ -1,7 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- ThemeQA screen — native equivalent of AppThemeTestScreen in Flutter -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="@color/paperWhite"
@@ -26,7 +25,7 @@
             android:textSize="18sp"
             android:textStyle="bold" />
 
-        <com.google.android.material.button.MaterialButton
+        <androidx.appcompat.widget.AppCompatButton
             android:id="@+id/btnDraw"
             style="@style/Widget.NoteSprout.TextButton"
             android:layout_width="wrap_content"
@@ -110,7 +109,7 @@
             <View android:layout_width="match_parent" android:layout_height="1dp" android:background="@color/inkBlack" />
             <View android:layout_width="match_parent" android:layout_height="12dp" />
 
-            <com.google.android.material.button.MaterialButton
+            <androidx.appcompat.widget.AppCompatButton
                 style="@style/Widget.NoteSprout.ElevatedButton"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
@@ -118,7 +117,7 @@
 
             <View android:layout_width="match_parent" android:layout_height="8dp" />
 
-            <com.google.android.material.button.MaterialButton
+            <androidx.appcompat.widget.AppCompatButton
                 style="@style/Widget.NoteSprout.OutlinedButton"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
@@ -126,7 +125,7 @@
 
             <View android:layout_width="match_parent" android:layout_height="8dp" />
 
-            <com.google.android.material.button.MaterialButton
+            <androidx.appcompat.widget.AppCompatButton
                 style="@style/Widget.NoteSprout.TextButton"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
@@ -143,40 +142,32 @@
             <View android:layout_width="match_parent" android:layout_height="1dp" android:background="@color/inkBlack" />
             <View android:layout_width="match_parent" android:layout_height="12dp" />
 
-            <com.google.android.material.card.MaterialCardView
+            <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                app:cardCornerRadius="4dp"
-                app:cardElevation="0dp"
-                app:strokeColor="@color/inkBlack"
-                app:strokeWidth="1dp">
+                android:background="@drawable/shape_bordered"
+                android:orientation="vertical"
+                android:padding="16dp">
 
-                <LinearLayout
-                    android:layout_width="match_parent"
+                <TextView
+                    android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:orientation="vertical"
-                    android:padding="16dp">
+                    android:text="Card Title"
+                    style="@style/TextAppearance.NoteSprout.TitleMedium" />
+                <View android:layout_width="match_parent" android:layout_height="4dp" />
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Card body text — content lives here."
+                    style="@style/TextAppearance.NoteSprout.BodyMedium" />
+                <View android:layout_width="match_parent" android:layout_height="4dp" />
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Secondary caption"
+                    style="@style/TextAppearance.NoteSprout.BodySmall" />
 
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="Card Title"
-                        style="@style/TextAppearance.NoteSprout.TitleMedium" />
-                    <View android:layout_width="match_parent" android:layout_height="4dp" />
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="Card body text — content lives here."
-                        style="@style/TextAppearance.NoteSprout.BodyMedium" />
-                    <View android:layout_width="match_parent" android:layout_height="4dp" />
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="Secondary caption"
-                        style="@style/TextAppearance.NoteSprout.BodySmall" />
-                </LinearLayout>
-
-            </com.google.android.material.card.MaterialCardView>
+            </LinearLayout>
 
             <!-- ── Input ── -->
             <TextView
@@ -189,18 +180,18 @@
             <View android:layout_width="match_parent" android:layout_height="1dp" android:background="@color/inkBlack" />
             <View android:layout_width="match_parent" android:layout_height="12dp" />
 
-            <com.google.android.material.textfield.TextInputLayout
-                style="@style/Widget.NoteSprout.TextInputLayout"
+            <androidx.appcompat.widget.AppCompatEditText
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:hint="Label">
-
-                <com.google.android.material.textfield.TextInputEditText
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:hint="Hint text" />
-
-            </com.google.android.material.textfield.TextInputLayout>
+                android:background="@drawable/shape_bordered"
+                android:hint="Label"
+                android:textColorHint="@color/inkLight"
+                android:textColor="@color/inkBlack"
+                android:textSize="14sp"
+                android:paddingStart="12dp"
+                android:paddingEnd="12dp"
+                android:paddingTop="12dp"
+                android:paddingBottom="12dp" />
 
             <!-- ── Divider ── -->
             <TextView

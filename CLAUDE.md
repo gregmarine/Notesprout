@@ -83,7 +83,7 @@ NoteSprout's visual language is designed for e-ink displays first. All other pla
 - No shadows or elevation on any widget
 - No decorative animations
 - No pill-shaped buttons or fully sharp corners
-- Do not use Material 3 defaults without explicit override
+- Do not use Material Components — theme is `Theme.AppCompat.Light.NoActionBar`, buttons are `AppCompatButton` with explicit drawable backgrounds
 
 ---
 
@@ -151,6 +151,7 @@ NoteSprout's visual language is designed for e-ink displays first. All other pla
 - `NoteSproutApplication.onCreate` calls `HiddenApiBypass.addHiddenApiExemptions("")` before any SDK init
 - `setStrokeColor(Color.BLACK)` required on TouchHelper init — NoteAir5C color panel defaults to non-black
 - Toolbar z-order: toolbar must overlay the drawing container in a `FrameLayout`, not sit as a sibling — native SurfaceView occludes Flutter/View siblings below it
+- No `com.google.android.material` dependency — removed; BOOX GC7 OEM skin intercepts Material's backgroundTint mechanism and renders all non-primary-colored buttons solid black. AppCompat with explicit drawable backgrounds is reliable across all devices.
 
 ---
 
@@ -182,9 +183,17 @@ adb -s <serial> install -r app/build/outputs/apk/debug/app-debug.apk
 
 ---
 
-## Current Step
+## Pruning Log
 
-EPD handoff flicker eliminated across all devices (NA5C, NA4C, P2P, GC7, MIP11). Next: page/notebook data model and SQLite persistence.
+### Pruning: Fullscreen + Button rendering (verified NA5C, GC7, P2P)
+- **Fullscreen:** `MainActivity` was not fullscreen — on Android 15 devices (NA5C, P2P) the status bar overlaid the window and intercepted touches near the top. Fixed by mirroring `DrawingActivity`'s `WindowInsetsControllerCompat` setup: hide system bars, `BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE`. Both activities are now fully immersive; swipe from edges to transiently reveal system bars.
+- **Buttons on GC7:** BOOX Go Color 7 OEM skin intercepts Material Components' `backgroundTint` mechanism and renders all buttons as solid black regardless of the tint value set. Root fix: dropped `com.google.android.material` entirely. Theme moved to `Theme.AppCompat.Light.NoActionBar`; all buttons switched from `MaterialButton` to `AppCompatButton` with explicit `android:background` drawables (`btn_elevated_background.xml`, `shape_bordered.xml`). `MaterialCardView` replaced with `LinearLayout` + `shape_bordered`. `TextInputLayout` replaced with `AppCompatEditText`. Reliable rendering confirmed on all three test devices.
 
 ---
-*Last updated: EPD flicker fix complete — all drawing targets verified clean*
+
+## Current Step
+
+Fullscreen and button rendering pruned and verified on NA5C, GC7, P2P. Next: Revisit BOOX stylus input hardware handoff to the canvas — timing, interception point, and related ideas TBD with user.
+
+---
+*Last updated: Fullscreen + Material removal complete — all pruning targets verified clean*
