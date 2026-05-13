@@ -38,12 +38,24 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
     private val touchHelper: TouchHelper by lazy { TouchHelper.create(this, rawInputCallback) }
     private var isSetup = false
 
+    private val idleReleaseRunnable = Runnable {
+        if (isSetup) {
+            Log.d(TAG, "idle release — handing overlay back to canvas")
+            touchHelper.setRawDrawingRenderEnabled(false)
+            invalidate()
+        }
+    }
+
     private val rawInputCallback = object : RawInputCallback() {
         override fun onBeginRawDrawing(shortcutDrawing: Boolean, touchPoint: TouchPoint) {
+            removeCallbacks(idleReleaseRunnable)
             if (isSetup) touchHelper.setRawDrawingRenderEnabled(true)
         }
 
-        override fun onEndRawDrawing(shortcutDrawing: Boolean, touchPoint: TouchPoint) {}
+        override fun onEndRawDrawing(shortcutDrawing: Boolean, touchPoint: TouchPoint) {
+            postDelayed(idleReleaseRunnable, 1500)
+        }
+
         override fun onRawDrawingTouchPointMoveReceived(touchPoint: TouchPoint) {}
 
         override fun onRawDrawingTouchPointListReceived(pointList: TouchPointList) {
@@ -93,6 +105,7 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
             }
         } else {
             if (isSetup) {
+                removeCallbacks(idleReleaseRunnable)
                 invalidate()
                 touchHelper.setRawDrawingEnabled(false)
             }
@@ -119,6 +132,7 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
 
     override fun onDetachedFromWindow() {
         super.onDetachedFromWindow()
+        removeCallbacks(idleReleaseRunnable)
         if (isSetup) {
             touchHelper.closeRawDrawing()
             isSetup = false

@@ -194,14 +194,16 @@ adb -s <serial> install -r app/build/outputs/apk/debug/app-debug.apk
 - **Fullscreen:** `MainActivity` was not fullscreen — on Android 15 devices (NA5C, P2P) the status bar overlaid the window and intercepted touches near the top. Fixed by mirroring `DrawingActivity`'s `WindowInsetsControllerCompat` setup: hide system bars, `BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE`. Both activities are now fully immersive; swipe from edges to transiently reveal system bars.
 - **Buttons on GC7:** BOOX Go Color 7 OEM skin intercepts Material Components' `backgroundTint` mechanism and renders all buttons as solid black regardless of the tint value set. Root fix: dropped `com.google.android.material` entirely. Theme moved to `Theme.AppCompat.Light.NoActionBar`; all buttons switched from `MaterialButton` to `AppCompatButton` with explicit `android:background` drawables (`btn_elevated_background.xml`, `shape_bordered.xml`). `MaterialCardView` replaced with `LinearLayout` + `shape_bordered`. `TextInputLayout` replaced with `AppCompatEditText`. Reliable rendering confirmed on all three test devices.
 
+### Pruning: Idle overlay release — 1.5s after last stroke (verified NA5C, P2P, GC7, NA4C)
+- **What:** After 1.5s of pen inactivity, `setRawDrawingRenderEnabled(false)` + `invalidate()` is called, handing the overlay back to the Android canvas. The overlay reactivates automatically on the next `onBeginRawDrawing`.
+- **Implementation:** `idleReleaseRunnable` posted via `postDelayed` in `onEndRawDrawing`; cancelled via `removeCallbacks` in `onBeginRawDrawing`, on focus loss, and on detach. No explicit reactivation needed — `onBeginRawDrawing` already calls `setRawDrawingRenderEnabled(true)`.
+- **Timing rationale:** 1.5s filters natural mid-thought pen lifts without feeling sluggish. Revisit if explicit page refresh controls are added.
+
 ---
 
 ## Current Step
 
-EPD handoff flicker resolved and verified on NA5C, P2P, GC7. Two pruning items queued for next session:
-
-1. **Navigation bar artifact** — nav bar behavior issue observed on all devices; details TBD
-2. **Canvas artifact on P2P and GC7** — minor visual issue specific to those two devices; details TBD
+Next: fix canvas artifacts on P2P and GC7 — minor visual glitches specific to those two devices observed during writing; root cause TBD.
 
 ---
-*Last updated: EPD handoff flicker resolved — verified NA5C, P2P, GC7*
+*Last updated: Idle overlay release — verified NA5C, P2P, GC7, NA4C*
