@@ -2,7 +2,6 @@ package com.notesprout.android
 
 import android.os.Build
 import android.os.Bundle
-import android.widget.Toast
 import android.widget.FrameLayout
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.ViewCompat
@@ -50,12 +49,8 @@ class DrawingActivity : AppCompatActivity() {
             drawingView.setToolbarHeight(toolbar.height)
         }
 
-        binding.btnClear.setOnClickListener { drawingView.commitStrokes { drawingView.clearCanvas() } }
-        binding.btnCommitTest.setOnClickListener {
-            drawingView.commitStrokes {
-                Toast.makeText(this, "Commit complete", Toast.LENGTH_SHORT).show()
-            }
-        }
+        binding.btnClear.setOnClickListener { drawingView.clearCanvas() }
+        binding.btnCommitTest.setOnClickListener { drawingView.resetOverlay() }
     }
 
     override fun onResume() {
@@ -65,9 +60,6 @@ class DrawingActivity : AppCompatActivity() {
 
     override fun onPause() {
         super.onPause()
-        // Visual commit is handled by onWindowFocusChanged(false) in OnyxDrawingView.
-        // Calling disableDrawing() here would fire setRawDrawingEnabled(false) after the
-        // commit already ran, triggering a second EPD refresh that clears the screen.
     }
 
     override fun onDestroy() {

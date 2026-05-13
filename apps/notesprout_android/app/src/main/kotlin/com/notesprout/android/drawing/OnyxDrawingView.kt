@@ -11,30 +11,15 @@ import android.util.Log
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewTreeObserver
-import com.onyx.android.sdk.api.device.epd.EpdController
 import com.onyx.android.sdk.data.note.TouchPoint
 import com.onyx.android.sdk.pen.RawInputCallback
 import com.onyx.android.sdk.pen.TouchHelper
 import com.onyx.android.sdk.pen.data.TouchPointList
-import java.util.concurrent.atomic.AtomicInteger
 
-// Ported from notesprout_flutter's OnyxDrawingView (which was itself ported from BOOXDemo).
-// TouchHelper, RawInputCallback, limit rect, and EPD commit logic are unchanged.
-//
-// Coordinate note: DrawingActivity runs in fullscreen immersive mode, so the view
-// sits at physical screen (0,0). Onyx touch points are also in screen coordinates.
-// No offset subtraction is needed — the two spaces are identical.
-// The toolbar exclusion rect passed via setToolbarHeight() restricts pen input to
-// the area below the floating toolbar without any additional coordinate math.
 class OnyxDrawingView(context: Context) : View(context), DrawingView {
 
     companion object {
         private const val TAG = "NoteSprout"
-        // Suppresses the EPD controller's automatic GC16 ghosting-removal refresh, which
-        // fires after this many fast-waveform (A2) updates. We raise it well above any
-        // realistic stroke count so the hardware doesn't self-trigger mid-session;
-        // the handwritingRepaint in commitStrokes is the controlled quality refresh instead.
-        private const val EPD_UPDATE_LIST_SIZE = 512
     }
 
     private var renderBitmap: Bitmap? = null
@@ -55,24 +40,10 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
 
     private val rawInputCallback = object : RawInputCallback() {
         override fun onBeginRawDrawing(shortcutDrawing: Boolean, touchPoint: TouchPoint) {
-            // Advance the generation so any in-flight post{} from a commitStrokes call sees
-            // a stale generation and skips setRawDrawingRenderEnabled(false). Without this
-            // guard the stale post{} can fire after we've already re-enabled render here,
-            // leaving the overlay disabled mid-stroke and hiding strokes.
-            epdSwapGeneration.incrementAndGet()
-            if (isSetup) {
-                // Re-enable EPD rendering for the new stroke. By the time the user starts
-                // a new stroke the Android canvas is fully composited, so the EPD surface
-                // initialises from the correct bitmap (all previous strokes visible).
-                touchHelper.setRawDrawingRenderEnabled(true)
-                // Re-arm the auto-GC suppression each stroke start so the hardware won't
-                // self-trigger GC16 during the writing burst.
-                EpdController.setUpdListSize(EPD_UPDATE_LIST_SIZE)
-            }
+            if (isSetup) touchHelper.setRawDrawingRenderEnabled(true)
         }
 
         override fun onEndRawDrawing(shortcutDrawing: Boolean, touchPoint: TouchPoint) {}
-
         override fun onRawDrawingTouchPointMoveReceived(touchPoint: TouchPoint) {}
 
         override fun onRawDrawingTouchPointListReceived(pointList: TouchPointList) {
@@ -96,22 +67,8 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
             path.lineTo(points[i].x, points[i].y)
         }
         canvas.drawPath(path, strokePaint)
+        invalidate()
     }
-
-    // EPD-to-canvas handoff: draw the bitmap first, then swap the EPD layer from within
-    // onDraw once we know the Android canvas has the strokes. Doing it the other way
-    // (disable EPD first, then invalidate) causes a visible flash on NoteAir devices because
-    // their EPD controller clears the hardware layer before the next Android frame is drawn.
-    private var pendingEpdSwap = false
-    private var commitCallback: (() -> Unit)? = null
-
-    // Guard against the race where onBeginRawDrawing (Onyx SDK thread) re-enables render
-    // while a stale post{} from a previous commitStrokes is still queued on the main thread.
-    // Without this, the stale post{} fires setRawDrawingRenderEnabled(false) after the new
-    // stroke has already re-enabled it — hiding in-progress strokes until the next commit.
-    // Incrementing the generation in onBeginRawDrawing lets the post{} detect it's stale
-    // and bail out before touching the render flag. AtomicInteger for cross-thread visibility.
-    private val epdSwapGeneration = AtomicInteger(0)
 
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
@@ -135,7 +92,10 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
                 invalidate()
             }
         } else {
-            commitStrokes {}
+            if (isSetup) {
+                invalidate()
+                touchHelper.setRawDrawingEnabled(false)
+            }
         }
     }
 
@@ -154,34 +114,7 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
-        // renderBitmap is initialised white — no need to drawColor(WHITE) first,
-        // which would create an intermediate blank state visible as a flash on e-ink.
         renderBitmap?.let { canvas.drawBitmap(it, 0f, 0f, null) } ?: canvas.drawColor(Color.WHITE)
-        if (pendingEpdSwap) {
-            pendingEpdSwap = false
-            val expectedGen = epdSwapGeneration.incrementAndGet()
-            post {
-                EpdController.resetUpdListSize()
-                // Bake the pen strokes into the EPD base image while the overlay is still
-                // active. handwritingRepaint uses A2 waveform and composites the hardware pen
-                // layer into the display. Once this settles, the strokes are visible from the
-                // EPD base image itself — not from the overlay.
-                EpdController.handwritingRepaint(this@OnyxDrawingView, Rect(0, 0, width, height))
-                // Second post lets the EPD settle from the repaint before the overlay is
-                // pulled. Disabling in the same frame as handwritingRepaint causes a flash
-                // because the panel hasn't finished the A2 update when the overlay clears.
-                // With the bake already settled, pulling the overlay is invisible — the EPD
-                // already shows the correct content from the base image.
-                post {
-                    if (isSetup && epdSwapGeneration.get() == expectedGen) {
-                        touchHelper.setRawDrawingRenderEnabled(false)
-                    }
-                    val cb = commitCallback
-                    commitCallback = null
-                    cb?.invoke()
-                }
-            }
-        }
     }
 
     override fun onDetachedFromWindow() {
@@ -210,15 +143,18 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
         if (isSetup) touchHelper.setRawDrawingEnabled(false)
     }
 
-    override fun commitStrokes(onComplete: () -> Unit) {
-        commitCallback = onComplete
-        pendingEpdSwap = true
+    override fun resetOverlay() {
+        if (!isSetup) return
         invalidate()
+        touchHelper.setRawDrawingRenderEnabled(false)
+        post { touchHelper.setRawDrawingRenderEnabled(true) }
     }
 
     override fun clearCanvas() {
+        if (isSetup) touchHelper.setRawDrawingRenderEnabled(false)
         renderCanvas?.drawColor(Color.WHITE)
         invalidate()
+        post { if (isSetup) touchHelper.setRawDrawingEnabled(true) }
     }
 
     override fun releaseResources() {
@@ -256,7 +192,6 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
             touchHelper.restartRawDrawing()
         }
         touchHelper.setRawDrawingEnabled(true)
-        EpdController.setUpdListSize(EPD_UPDATE_LIST_SIZE)
         Log.d(TAG, "openRawDrawing done — inputEnabled=${touchHelper.isRawDrawingInputEnabled}")
     }
 }

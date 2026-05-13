@@ -137,8 +137,8 @@ NoteSprout's visual language is designed for e-ink displays first. All other pla
 ## Drawing Engine Architecture (Implemented)
 
 ### Native Android Layer (package: `com.notesprout.android`)
-- `drawing/DrawingView.kt` — interface: `asView()`, `setToolbarHeight(Int)`, `enableDrawing()`, `disableDrawing()`, `clearCanvas()`, `releaseResources()`
-- `drawing/OnyxDrawingView.kt` — BOOX path: TouchHelper, RawInputCallback, limit rect, bitmap commit, 800ms idle flush via `setRawDrawingRenderEnabled`. Do not refactor — matches proven BOOXDemo logic exactly.
+- `drawing/DrawingView.kt` — interface: `asView()`, `setToolbarHeight(Int)`, `enableDrawing()`, `disableDrawing()`, `resetOverlay()`, `clearCanvas()`, `releaseResources()`
+- `drawing/OnyxDrawingView.kt` — BOOX path: TouchHelper, RawInputCallback, limit rect. Key pattern: `renderStroke` calls `invalidate()` on every stroke to keep the Android canvas continuously current with the hardware overlay. `clearCanvas()` owns the overlay handoff (disable render → white bitmap → re-enable). `resetOverlay()` toggles `setRawDrawingRenderEnabled` off/on (test utility). `onBeginRawDrawing` re-enables render when a new stroke starts after a toggle.
 - `drawing/GenericDrawingView.kt` — Flutter Canvas fallback: two-layer Bitmap approach, stylus-only (`TOOL_TYPE_STYLUS`), historical point capture for smooth strokes
 - `DrawingActivity.kt` — fullscreen immersive (`WindowInsetsControllerCompat`), detects BOOX via `Build.MANUFACTURER`, `doOnLayout` for precise toolbar height
 - `MainActivity.kt` — theme test screen + entry point to DrawingActivity
@@ -185,6 +185,11 @@ adb -s <serial> install -r app/build/outputs/apk/debug/app-debug.apk
 
 ## Pruning Log
 
+### Pruning: EPD handoff — flicker-free canvas transition (verified NA5C, P2P, GC7)
+- **Root cause:** While the hardware pen overlay is active, the Android canvas bitmap was not being kept current — so when the overlay was removed, the EPD base image was stale and flashed. Fix: call `invalidate()` inside `renderStroke` so the canvas is continuously updated as strokes arrive. The overlay and canvas are always in sync; removing the overlay is seamless.
+- **Architecture simplified:** `commitStrokes` abstraction removed entirely. `clearCanvas()` owns the overlay handoff directly. `pendingCommit`/`commitCallback` fields removed. `onDraw` is now just a bitmap blit.
+- **Focus loss:** `onWindowFocusChanged(false)` calls `invalidate()` then `setRawDrawingEnabled(false)` — canvas is painted before input is stopped. On focus regain, `restartRawDrawing()` resets overlay state.
+
 ### Pruning: Fullscreen + Button rendering (verified NA5C, GC7, P2P)
 - **Fullscreen:** `MainActivity` was not fullscreen — on Android 15 devices (NA5C, P2P) the status bar overlaid the window and intercepted touches near the top. Fixed by mirroring `DrawingActivity`'s `WindowInsetsControllerCompat` setup: hide system bars, `BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE`. Both activities are now fully immersive; swipe from edges to transiently reveal system bars.
 - **Buttons on GC7:** BOOX Go Color 7 OEM skin intercepts Material Components' `backgroundTint` mechanism and renders all buttons as solid black regardless of the tint value set. Root fix: dropped `com.google.android.material` entirely. Theme moved to `Theme.AppCompat.Light.NoActionBar`; all buttons switched from `MaterialButton` to `AppCompatButton` with explicit `android:background` drawables (`btn_elevated_background.xml`, `shape_bordered.xml`). `MaterialCardView` replaced with `LinearLayout` + `shape_bordered`. `TextInputLayout` replaced with `AppCompatEditText`. Reliable rendering confirmed on all three test devices.
@@ -193,7 +198,10 @@ adb -s <serial> install -r app/build/outputs/apk/debug/app-debug.apk
 
 ## Current Step
 
-Fullscreen and button rendering pruned and verified on NA5C, GC7, P2P. Next: Revisit BOOX stylus input hardware handoff to the canvas — timing, interception point, and related ideas TBD with user.
+EPD handoff flicker resolved and verified on NA5C, P2P, GC7. Two pruning items queued for next session:
+
+1. **Navigation bar artifact** — nav bar behavior issue observed on all devices; details TBD
+2. **Canvas artifact on P2P and GC7** — minor visual issue specific to those two devices; details TBD
 
 ---
-*Last updated: Fullscreen + Material removal complete — all pruning targets verified clean*
+*Last updated: EPD handoff flicker resolved — verified NA5C, P2P, GC7*
