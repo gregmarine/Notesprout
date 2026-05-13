@@ -170,12 +170,23 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
     // ── Private helpers ──
 
     private fun applyLimitRect() {
+        val frame = Rect()
+        getWindowVisibleDisplayFrame(frame)
+        val loc = IntArray(2)
+        getLocationOnScreen(loc)
+        val limitRect = Rect(
+            maxOf(0, frame.left - loc[0]),
+            maxOf(0, frame.top - loc[1]),
+            frame.right - loc[0],
+            frame.bottom - loc[1]
+        )
         val exclusion = if (toolbarHeight > 0) {
             listOf(Rect(0, 0, width, toolbarHeight))
         } else {
             emptyList()
         }
-        touchHelper.setLimitRect(Rect(0, 0, width, height), exclusion)
+        Log.d(TAG, "applyLimitRect: limitRect=$limitRect exclusion=$exclusion")
+        touchHelper.setLimitRect(limitRect, exclusion)
     }
 
     private fun openRawDrawing() {
