@@ -138,7 +138,7 @@ NoteSprout's visual language is designed for e-ink displays first. All other pla
 
 ### Native Android Layer (package: `com.notesprout.android`)
 - `drawing/DrawingView.kt` — interface: `asView()`, `setToolbarHeight(Int)`, `enableDrawing()`, `disableDrawing()`, `resetOverlay()`, `clearCanvas()`, `releaseResources()`
-- `drawing/OnyxDrawingView.kt` — BOOX path: TouchHelper, RawInputCallback, limit rect. Key pattern: `renderStroke` calls `invalidate()` on every stroke to keep the Android canvas continuously current with the hardware overlay. `clearCanvas()` owns the overlay handoff (disable render → white bitmap → re-enable). `resetOverlay()` toggles `setRawDrawingRenderEnabled` off/on (test utility). `onBeginRawDrawing` re-enables render when a new stroke starts after a toggle.
+- `drawing/OnyxDrawingView.kt` — BOOX path: TouchHelper, RawInputCallback, limit rect. Key pattern: `renderStroke` calls `invalidate()` on every stroke to keep the Android canvas continuously current with the hardware overlay. `clearCanvas()` owns the overlay handoff: disable render → white bitmap → `invalidate()` → `EpdController.handwritingRepaint()` (bakes white into physical EPD pixels) → re-enable. `resetOverlay()` toggles `setRawDrawingRenderEnabled` off/on (test utility). `onBeginRawDrawing` re-enables render when a new stroke starts after a toggle. `EpdController.setUpdListSize(512)` called on every `openRawDrawing()` to suppress hardware auto-GC16 mid-session.
 - `drawing/GenericDrawingView.kt` — Flutter Canvas fallback: two-layer Bitmap approach, stylus-only (`TOOL_TYPE_STYLUS`), historical point capture for smooth strokes
 - `DrawingActivity.kt` — fullscreen immersive (`WindowInsetsControllerCompat`), detects BOOX via `Build.MANUFACTURER`, `doOnLayout` for precise toolbar height
 - `MainActivity.kt` — theme test screen + entry point to DrawingActivity
@@ -199,11 +199,16 @@ adb -s <serial> install -r app/build/outputs/apk/debug/app-debug.apk
 - **Implementation:** `idleReleaseRunnable` posted via `postDelayed` in `onEndRawDrawing`; cancelled via `removeCallbacks` in `onBeginRawDrawing`, on focus loss, and on detach. No explicit reactivation needed — `onBeginRawDrawing` already calls `setRawDrawingRenderEnabled(true)`.
 - **Timing rationale:** 1.5s filters natural mid-thought pen lifts without feeling sluggish. Revisit if explicit page refresh controls are added.
 
+### Pruning: clearCanvas phantom strokes + EPD ghosting (verified NA5C, P2P, GC7, NA4C, MIP11)
+- **Root cause:** Two distinct problems caused by the removal of `EpdController.handwritingRepaint()` from the clear path in commit 99d7b72. (1) **Gray residue** — physical EPD pixels retained old stroke content because the display was never properly refreshed; no overlay toggle fixes this. (2) **Black flash** — the EPD overlay hardware buffer carries old strokes independently of `renderBitmap`; when render is re-enabled after a clear, the stale buffer briefly renders at full black before new strokes overwrite it.
+- **Fix:** Restored `EpdController.handwritingRepaint(view, Rect(0,0,w,h))` in `clearCanvas()` after painting `renderBitmap` white. With the overlay disabled and the bitmap white, `handwritingRepaint` bakes white into the physical EPD pixels, clearing both the ghosting and the stale overlay buffer state. Restored `EpdController.setUpdListSize(512)` in `openRawDrawing()` to suppress the hardware's automatic mid-session GC16 refresh.
+- **Key distinction:** `setRawDrawingRenderEnabled(false/true)` is a lightweight toggle — it hides/shows the overlay but does NOT clear the hardware buffer. `handwritingRepaint` is required to physically commit content to the EPD base layer. Never remove it from the clear path.
+
 ---
 
 ## Current Step
 
-Next: fix canvas artifacts on P2P and GC7 — minor visual glitches specific to those two devices observed during writing; root cause TBD.
+Next: implement stroke erasing.
 
 ---
-*Last updated: Idle overlay release — verified NA5C, P2P, GC7, NA4C*
+*Last updated: clearCanvas phantom strokes + EPD ghosting — verified NA5C, P2P, GC7, NA4C, MIP11*
