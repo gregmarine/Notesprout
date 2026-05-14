@@ -11,6 +11,7 @@ import android.util.Log
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewTreeObserver
+import com.onyx.android.sdk.api.device.epd.EpdController
 import com.onyx.android.sdk.data.note.TouchPoint
 import com.onyx.android.sdk.pen.RawInputCallback
 import com.onyx.android.sdk.pen.TouchHelper
@@ -20,6 +21,9 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
 
     companion object {
         private const val TAG = "NoteSprout"
+        // Suppresses EPD hardware auto-GC16 refresh mid-session; we control quality
+        // refreshes explicitly via handwritingRepaint in clearCanvas().
+        private const val EPD_UPDATE_LIST_SIZE = 512
     }
 
     private var renderBitmap: Bitmap? = null
@@ -168,7 +172,10 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
         if (isSetup) touchHelper.setRawDrawingRenderEnabled(false)
         renderCanvas?.drawColor(Color.WHITE)
         invalidate()
-        post { if (isSetup) touchHelper.setRawDrawingEnabled(true) }
+        post {
+            EpdController.handwritingRepaint(this, Rect(0, 0, width, height))
+            post { if (isSetup) touchHelper.setRawDrawingEnabled(true) }
+        }
     }
 
     override fun releaseResources() {
@@ -217,6 +224,7 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
             touchHelper.restartRawDrawing()
         }
         touchHelper.setRawDrawingEnabled(true)
+        EpdController.setUpdListSize(EPD_UPDATE_LIST_SIZE)
         Log.d(TAG, "openRawDrawing done — inputEnabled=${touchHelper.isRawDrawingInputEnabled}")
     }
 }
