@@ -6,6 +6,7 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Path
+import android.graphics.PointF
 import android.graphics.Rect
 import android.util.Log
 import android.view.MotionEvent
@@ -22,8 +23,9 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
     companion object {
         private const val TAG = "NoteSprout"
         // Suppresses EPD hardware auto-GC16 refresh mid-session; we control quality
-        // refreshes explicitly via handwritingRepaint in clearCanvas().
+        // refreshes explicitly via handwritingRepaint in clearCanvas() and after erasing.
         private const val EPD_UPDATE_LIST_SIZE = 512
+        private const val ERASER_RADIUS_PX = 15f
     }
 
     private var renderBitmap: Bitmap? = null
@@ -42,6 +44,13 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
     private val touchHelper: TouchHelper by lazy { TouchHelper.create(this, rawInputCallback) }
     private var isSetup = false
 
+    // Stroke store — required for stroke-level erasing.
+    private val strokes = mutableListOf<List<PointF>>()
+
+    // When true, drawing callbacks treat pen input as erasing.
+    // Set by setEraserMode(); also fires via physical eraser hardware callbacks regardless of this flag.
+    private var isEraserMode = false
+
     private val idleReleaseRunnable = Runnable {
         if (isSetup) {
             Log.d(TAG, "idle release — handing overlay back to canvas")
@@ -53,37 +62,118 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
     private val rawInputCallback = object : RawInputCallback() {
         override fun onBeginRawDrawing(shortcutDrawing: Boolean, touchPoint: TouchPoint) {
             removeCallbacks(idleReleaseRunnable)
-            if (isSetup) touchHelper.setRawDrawingRenderEnabled(true)
+            // In software eraser mode pen-tip events still arrive here, but we must not
+            // re-enable the overlay render — doing so would show a black stroke on the hardware
+            // buffer even though we're erasing, not drawing.
+            if (isSetup && !isEraserMode) touchHelper.setRawDrawingRenderEnabled(true)
         }
 
         override fun onEndRawDrawing(shortcutDrawing: Boolean, touchPoint: TouchPoint) {
+            if (isEraserMode) post { EpdController.handwritingRepaint(this@OnyxDrawingView, Rect(0, 0, width, height)) }
             postDelayed(idleReleaseRunnable, 1500)
         }
 
-        override fun onRawDrawingTouchPointMoveReceived(touchPoint: TouchPoint) {}
-
-        override fun onRawDrawingTouchPointListReceived(pointList: TouchPointList) {
-            Log.d(TAG, "onRawDrawingTouchPointListReceived count=${pointList.size()}")
-            renderStroke(pointList)
+        override fun onRawDrawingTouchPointMoveReceived(touchPoint: TouchPoint) {
+            if (isEraserMode) eraseAtPath(listOf(PointF(touchPoint.x, touchPoint.y)))
         }
 
-        override fun onBeginRawErasing(shortcutErasing: Boolean, touchPoint: TouchPoint) {}
-        override fun onEndRawErasing(shortcutErasing: Boolean, touchPoint: TouchPoint) {}
-        override fun onRawErasingTouchPointMoveReceived(touchPoint: TouchPoint) {}
-        override fun onRawErasingTouchPointListReceived(pointList: TouchPointList) {}
+        override fun onRawDrawingTouchPointListReceived(pointList: TouchPointList) {
+            // When software eraser mode is active the SDK still routes pen-tip events here.
+            if (isEraserMode) {
+                Log.d(TAG, "onRawDrawingTouchPointListReceived (eraser mode) count=${pointList.size()}")
+                eraseAtPath(pointList.toPointFs())
+            } else {
+                Log.d(TAG, "onRawDrawingTouchPointListReceived count=${pointList.size()}")
+                renderStroke(pointList)
+            }
+        }
+
+        override fun onBeginRawErasing(shortcutErasing: Boolean, touchPoint: TouchPoint) {
+            removeCallbacks(idleReleaseRunnable)
+        }
+
+        override fun onEndRawErasing(shortcutErasing: Boolean, touchPoint: TouchPoint) {
+            post { EpdController.handwritingRepaint(this@OnyxDrawingView, Rect(0, 0, width, height)) }
+            postDelayed(idleReleaseRunnable, 1500)
+        }
+
+        override fun onRawErasingTouchPointMoveReceived(touchPoint: TouchPoint) {
+            eraseAtPath(listOf(PointF(touchPoint.x, touchPoint.y)))
+        }
+
+        override fun onRawErasingTouchPointListReceived(pointList: TouchPointList) {
+            Log.d(TAG, "onRawErasingTouchPointListReceived count=${pointList.size()}")
+            eraseAtPath(pointList.toPointFs())
+        }
     }
+
+    private fun TouchPointList.toPointFs(): List<PointF> =
+        points?.map { PointF(it.x, it.y) } ?: emptyList()
 
     private fun renderStroke(pointList: TouchPointList) {
         val canvas = renderCanvas ?: return
         val points = pointList.points
         if (points.isNullOrEmpty()) return
+        val strokePoints = points.map { PointF(it.x, it.y) }
+        strokes.add(strokePoints)
         val path = Path()
-        path.moveTo(points[0].x, points[0].y)
-        for (i in 1 until points.size) {
-            path.lineTo(points[i].x, points[i].y)
+        path.moveTo(strokePoints[0].x, strokePoints[0].y)
+        for (i in 1 until strokePoints.size) {
+            path.lineTo(strokePoints[i].x, strokePoints[i].y)
         }
         canvas.drawPath(path, strokePaint)
         invalidate()
+    }
+
+    private fun eraseAtPath(eraserPoints: List<PointF>) {
+        if (eraserPoints.isEmpty()) return
+        val thresholdSq = ERASER_RADIUS_PX * ERASER_RADIUS_PX
+        val toRemove = strokes.filter { stroke ->
+            stroke.any { sp ->
+                eraserPoints.indices.drop(1).any { i ->
+                    pointToSegmentDistSq(sp, eraserPoints[i - 1], eraserPoints[i]) <= thresholdSq
+                } || pointToPointDistSq(sp, eraserPoints[0]) <= thresholdSq
+            }
+        }
+        if (toRemove.isNotEmpty()) {
+            strokes.removeAll(toRemove.toSet())
+            redrawCanvas()
+        }
+    }
+
+    private fun redrawCanvas() {
+        val canvas = renderCanvas ?: return
+        canvas.drawColor(Color.WHITE)
+        for (stroke in strokes) {
+            if (stroke.size < 2) continue
+            val path = Path()
+            path.moveTo(stroke[0].x, stroke[0].y)
+            for (i in 1 until stroke.size) {
+                path.lineTo(stroke[i].x, stroke[i].y)
+            }
+            canvas.drawPath(path, strokePaint)
+        }
+        invalidate()
+    }
+
+    // Minimum squared distance from point p to segment a→b.
+    private fun pointToSegmentDistSq(p: PointF, a: PointF, b: PointF): Float {
+        val abx = b.x - a.x
+        val aby = b.y - a.y
+        val lenSq = abx * abx + aby * aby
+        if (lenSq == 0f) return pointToPointDistSq(p, a)
+        val t = ((p.x - a.x) * abx + (p.y - a.y) * aby) / lenSq
+        val cx = a.x + t.coerceIn(0f, 1f) * abx
+        val cy = a.y + t.coerceIn(0f, 1f) * aby
+        val dx = p.x - cx
+        val dy = p.y - cy
+        return dx * dx + dy * dy
+    }
+
+    private fun pointToPointDistSq(a: PointF, b: PointF): Float {
+        val dx = a.x - b.x
+        val dy = a.y - b.y
+        return dx * dx + dy * dy
     }
 
     override fun onAttachedToWindow() {
@@ -168,7 +258,13 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
         post { touchHelper.setRawDrawingRenderEnabled(true) }
     }
 
+    override fun setEraserMode(active: Boolean) {
+        isEraserMode = active
+        if (isSetup) touchHelper.setEraserRawDrawingEnabled(active, if (active) (ERASER_RADIUS_PX * 2).toInt() else 0)
+    }
+
     override fun clearCanvas() {
+        strokes.clear()
         if (isSetup) touchHelper.setRawDrawingRenderEnabled(false)
         renderCanvas?.drawColor(Color.WHITE)
         invalidate()

@@ -137,9 +137,9 @@ NoteSprout's visual language is designed for e-ink displays first. All other pla
 ## Drawing Engine Architecture (Implemented)
 
 ### Native Android Layer (package: `com.notesprout.android`)
-- `drawing/DrawingView.kt` — interface: `asView()`, `setToolbarHeight(Int)`, `enableDrawing()`, `disableDrawing()`, `resetOverlay()`, `clearCanvas()`, `releaseResources()`
-- `drawing/OnyxDrawingView.kt` — BOOX path: TouchHelper, RawInputCallback, limit rect. Key pattern: `renderStroke` calls `invalidate()` on every stroke to keep the Android canvas continuously current with the hardware overlay. `clearCanvas()` owns the overlay handoff: disable render → white bitmap → `invalidate()` → `EpdController.handwritingRepaint()` (bakes white into physical EPD pixels) → re-enable. `resetOverlay()` toggles `setRawDrawingRenderEnabled` off/on (test utility). `onBeginRawDrawing` re-enables render when a new stroke starts after a toggle. `EpdController.setUpdListSize(512)` called on every `openRawDrawing()` to suppress hardware auto-GC16 mid-session.
-- `drawing/GenericDrawingView.kt` — Flutter Canvas fallback: two-layer Bitmap approach, stylus-only (`TOOL_TYPE_STYLUS`), historical point capture for smooth strokes
+- `drawing/DrawingView.kt` — interface: `asView()`, `setToolbarHeight(Int)`, `enableDrawing()`, `disableDrawing()`, `resetOverlay()`, `clearCanvas()`, `setEraserMode(Boolean)`, `releaseResources()`
+- `drawing/OnyxDrawingView.kt` — BOOX path: TouchHelper, RawInputCallback, limit rect. Key pattern: `renderStroke` calls `invalidate()` on every stroke to keep the Android canvas continuously current with the hardware overlay. `clearCanvas()` owns the overlay handoff: disable render → white bitmap → `invalidate()` → `EpdController.handwritingRepaint()` (bakes white into physical EPD pixels) → re-enable. `resetOverlay()` toggles `setRawDrawingRenderEnabled` off/on (test utility). `onBeginRawDrawing` re-enables render when a new stroke starts — guarded by `!isEraserMode` to prevent rogue overlay stroke during software eraser. `EpdController.setUpdListSize(512)` called on every `openRawDrawing()` to suppress hardware auto-GC16 mid-session. Erasing: stroke store (`strokes: MutableList<List<PointF>>`), point-to-segment distance hit test, `redrawCanvas()` rebuilds bitmap on erase. `handwritingRepaint` called in `onEndRawErasing` and `onEndRawDrawing` (eraser mode) to commit clean EPD pixels after erase. Overlay NOT enabled during erasing (physical or software) so bitmap updates are immediately visible.
+- `drawing/GenericDrawingView.kt` — standard Android Canvas: two-layer Bitmap approach, stylus-only (`TOOL_TYPE_STYLUS` + `TOOL_TYPE_ERASER`), historical point capture for smooth strokes. Same stroke store + eraseAtPath as OnyxDrawingView. Erasing fires on `ACTION_MOVE` for immediate feedback.
 - `DrawingActivity.kt` — fullscreen immersive (`WindowInsetsControllerCompat`), detects BOOX via `Build.MANUFACTURER`, `doOnLayout` for precise toolbar height
 - `MainActivity.kt` — theme test screen + entry point to DrawingActivity
 
@@ -204,11 +204,32 @@ adb -s <serial> install -r app/build/outputs/apk/debug/app-debug.apk
 - **Fix:** Restored `EpdController.handwritingRepaint(view, Rect(0,0,w,h))` in `clearCanvas()` after painting `renderBitmap` white. With the overlay disabled and the bitmap white, `handwritingRepaint` bakes white into the physical EPD pixels, clearing both the ghosting and the stale overlay buffer state. Restored `EpdController.setUpdListSize(512)` in `openRawDrawing()` to suppress the hardware's automatic mid-session GC16 refresh.
 - **Key distinction:** `setRawDrawingRenderEnabled(false/true)` is a lightweight toggle — it hides/shows the overlay but does NOT clear the hardware buffer. `handwritingRepaint` is required to physically commit content to the EPD base layer. Never remove it from the clear path.
 
+### New Branch: Stroke erasing (verified NA5C, P2P, GC7, NA4C, MIP11)
+- **Toolbar toggle:** `DrawingActivity` owns `isEraserActive` state; toggles button label ("Erase"/"Pen") and calls `drawingView.setEraserMode(Boolean)`.
+- **OnyxDrawingView:** `isEraserMode` flag gates overlay re-enable in `onBeginRawDrawing`. Software eraser points arrive via `onRawDrawingTouchPointMoveReceived` + `onRawDrawingTouchPointListReceived`; physical eraser via `onBeginRawErasing` / `onRawErasingTouchPointMoveReceived` / `onRawErasingTouchPointListReceived`. Move callbacks call `eraseAtPath` per-point for immediate feedback. `handwritingRepaint` in end callbacks commits clean pixels to EPD.
+- **GenericDrawingView:** `isEraserActive` flag; `TOOL_TYPE_ERASER` accepted alongside `TOOL_TYPE_STYLUS`. Erasing handled on `ACTION_MOVE` (immediate) + `ACTION_UP` (final point).
+- **Stroke store:** Both views maintain `strokes: MutableList<List<PointF>>`. `eraseAtPath` uses point-to-segment distance (`ERASER_RADIUS_PX = 15f`) to find intersecting strokes, removes them, calls `redrawCanvas()` which rebuilds the bitmap and calls `invalidate()` for immediate visual update.
+- **Key rule:** Never call `handwritingRepaint` in the erase move path — only on pen/eraser lift. Move-path repaint causes a full EPD quality flash on every erased stroke.
+
 ---
 
 ## Current Step
 
-Next: implement stroke erasing.
+Next: data structure, notebook file creation, and saving/retrieving stroke data.
+- Notebook = folder + SQLite file (Room)
+- Hierarchy: Notebook → Pages → Layers → Content Objects
+- Stroke data stored as JSON (x, y, pressure, tilt, timestamp point arrays) in a TEXT column
+- This is the first implementation of Room/SQLite in the project — proceed carefully, architecture decisions are load-bearing
 
 ---
-*Last updated: clearCanvas phantom strokes + EPD ghosting — verified NA5C, P2P, GC7, NA4C, MIP11*
+
+## Future Work — Wacom & Generic Android Stylus
+
+### Wacom stylus barrel button (MIP11 and other non-BOOX devices)
+- **What:** Barrel button(s) on Wacom/USI styli do not change `getToolType()` — they set `BUTTON_STYLUS_PRIMARY` / `BUTTON_STYLUS_SECONDARY` flags on the `MotionEvent`.
+- **Current state:** `GenericDrawingView` only inspects tool type, so barrel buttons have no effect. The eraser toggle in the toolbar works fine. Physical eraser end (`TOOL_TYPE_ERASER`) works fine.
+- **When to address:** When focusing on Wacom and generic Android device optimization. Low priority — do not let it block BOOX-first progress.
+- **Fix direction:** Check `event.isButtonPressed(MotionEvent.BUTTON_STYLUS_PRIMARY)` in `onTouchEvent` and treat it as an eraser mode for the duration of that stroke.
+
+---
+*Last updated: stroke erasing — verified NA5C, P2P, GC7, NA4C, MIP11*

@@ -17,9 +17,17 @@ import android.view.View
 //   active layer    — current in-progress stroke drawn directly in onDraw per touch event
 class GenericDrawingView(context: Context) : View(context), DrawingView {
 
+    companion object {
+        private const val ERASER_RADIUS_PX = 15f
+    }
+
     private val activePoints = ArrayList<PointF>()
     private var renderBitmap: Bitmap? = null
     private var renderCanvas: Canvas? = null
+    private var isEraserActive = false
+
+    // Stroke store — required for stroke-level erasing.
+    private val strokes = mutableListOf<List<PointF>>()
 
     private val strokePaint = Paint().apply {
         isAntiAlias = true
@@ -41,8 +49,11 @@ class GenericDrawingView(context: Context) : View(context), DrawingView {
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
-        // Stylus-only — reject finger touch to match Flutter's allowTouch: false policy
-        if (event.getToolType(0) != MotionEvent.TOOL_TYPE_STYLUS) return false
+        val toolType = event.getToolType(0)
+        // Accept stylus tip and physical eraser end; reject finger touch
+        if (toolType != MotionEvent.TOOL_TYPE_STYLUS && toolType != MotionEvent.TOOL_TYPE_ERASER) return false
+
+        val erasing = toolType == MotionEvent.TOOL_TYPE_ERASER || isEraserActive
 
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
@@ -51,16 +62,26 @@ class GenericDrawingView(context: Context) : View(context), DrawingView {
                 invalidate()
             }
             MotionEvent.ACTION_MOVE -> {
+                val newPoints = mutableListOf<PointF>()
                 // Capture historical points for smoother high-speed strokes
                 for (i in 0 until event.historySize) {
-                    activePoints.add(PointF(event.getHistoricalX(i), event.getHistoricalY(i)))
+                    newPoints.add(PointF(event.getHistoricalX(i), event.getHistoricalY(i)))
                 }
-                activePoints.add(PointF(event.x, event.y))
-                invalidate()
+                newPoints.add(PointF(event.x, event.y))
+                if (erasing) {
+                    eraseAtPath(newPoints)
+                } else {
+                    activePoints.addAll(newPoints)
+                    invalidate()
+                }
             }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                activePoints.add(PointF(event.x, event.y))
-                commitActiveStroke()
+                if (erasing) {
+                    eraseAtPath(listOf(PointF(event.x, event.y)))
+                } else {
+                    activePoints.add(PointF(event.x, event.y))
+                    commitActiveStroke()
+                }
                 activePoints.clear()
                 invalidate()
             }
@@ -73,8 +94,9 @@ class GenericDrawingView(context: Context) : View(context), DrawingView {
         canvas.drawColor(Color.WHITE)
         renderBitmap?.let { canvas.drawBitmap(it, 0f, 0f, null) }
 
-        // Draw active stroke on top of committed bitmap
-        if (activePoints.size >= 2) {
+        // Draw active stroke preview on top of committed bitmap (pen mode only).
+        // In eraser mode there is no in-progress visual; strokes disappear on lift.
+        if (!isEraserActive && activePoints.size >= 2) {
             val path = Path()
             path.moveTo(activePoints[0].x, activePoints[0].y)
             for (i in 1 until activePoints.size) {
@@ -87,12 +109,65 @@ class GenericDrawingView(context: Context) : View(context), DrawingView {
     private fun commitActiveStroke() {
         val canvas = renderCanvas ?: return
         if (activePoints.size < 2) return
+        val strokePoints = activePoints.toList()
+        strokes.add(strokePoints)
         val path = Path()
-        path.moveTo(activePoints[0].x, activePoints[0].y)
-        for (i in 1 until activePoints.size) {
-            path.lineTo(activePoints[i].x, activePoints[i].y)
+        path.moveTo(strokePoints[0].x, strokePoints[0].y)
+        for (i in 1 until strokePoints.size) {
+            path.lineTo(strokePoints[i].x, strokePoints[i].y)
         }
         canvas.drawPath(path, strokePaint)
+    }
+
+    private fun eraseAtPath(eraserPoints: List<PointF>) {
+        if (eraserPoints.isEmpty()) return
+        val thresholdSq = ERASER_RADIUS_PX * ERASER_RADIUS_PX
+        val toRemove = strokes.filter { stroke ->
+            stroke.any { sp ->
+                eraserPoints.indices.drop(1).any { i ->
+                    pointToSegmentDistSq(sp, eraserPoints[i - 1], eraserPoints[i]) <= thresholdSq
+                } || pointToPointDistSq(sp, eraserPoints[0]) <= thresholdSq
+            }
+        }
+        if (toRemove.isNotEmpty()) {
+            strokes.removeAll(toRemove.toSet())
+            redrawCanvas()
+        }
+    }
+
+    private fun redrawCanvas() {
+        val canvas = renderCanvas ?: return
+        canvas.drawColor(Color.WHITE)
+        for (stroke in strokes) {
+            if (stroke.size < 2) continue
+            val path = Path()
+            path.moveTo(stroke[0].x, stroke[0].y)
+            for (i in 1 until stroke.size) {
+                path.lineTo(stroke[i].x, stroke[i].y)
+            }
+            canvas.drawPath(path, strokePaint)
+        }
+        invalidate()
+    }
+
+    // Minimum squared distance from point p to segment a→b.
+    private fun pointToSegmentDistSq(p: PointF, a: PointF, b: PointF): Float {
+        val abx = b.x - a.x
+        val aby = b.y - a.y
+        val lenSq = abx * abx + aby * aby
+        if (lenSq == 0f) return pointToPointDistSq(p, a)
+        val t = ((p.x - a.x) * abx + (p.y - a.y) * aby) / lenSq
+        val cx = a.x + t.coerceIn(0f, 1f) * abx
+        val cy = a.y + t.coerceIn(0f, 1f) * aby
+        val dx = p.x - cx
+        val dy = p.y - cy
+        return dx * dx + dy * dy
+    }
+
+    private fun pointToPointDistSq(a: PointF, b: PointF): Float {
+        val dx = a.x - b.x
+        val dy = a.y - b.y
+        return dx * dx + dy * dy
     }
 
     // ── DrawingView interface ──
@@ -101,9 +176,11 @@ class GenericDrawingView(context: Context) : View(context), DrawingView {
     override fun setToolbarHeight(heightPx: Int) {} // no limit rect needed; toolbar is above canvas in z-order
     override fun enableDrawing() {}
     override fun disableDrawing() {}
+    override fun setEraserMode(active: Boolean) { isEraserActive = active }
 
     override fun clearCanvas() {
         activePoints.clear()
+        strokes.clear()
         renderCanvas?.drawColor(Color.WHITE)
         invalidate()
     }

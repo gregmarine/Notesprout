@@ -46,11 +46,11 @@
             android:textStyle="bold" />
 
         <androidx.appcompat.widget.AppCompatButton
-            android:id="@+id/btnCommitTest"
+            android:id="@+id/btnEraser"
             style="@style/Widget.NoteSprout.OutlinedButton"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Commit" />
+            android:text="Erase" />
 
     </LinearLayout>
 

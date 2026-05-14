@@ -19,6 +19,7 @@ class DrawingActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityDrawingBinding
     private lateinit var drawingView: DrawingView
+    private var isEraserActive = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -50,7 +51,11 @@ class DrawingActivity : AppCompatActivity() {
         }
 
         binding.btnClear.setOnClickListener { drawingView.clearCanvas() }
-        binding.btnCommitTest.setOnClickListener { drawingView.resetOverlay() }
+        binding.btnEraser.setOnClickListener {
+            isEraserActive = !isEraserActive
+            binding.btnEraser.text = if (isEraserActive) "Pen" else "Erase"
+            drawingView.setEraserMode(isEraserActive)
+        }
     }
 
     override fun onResume() {
