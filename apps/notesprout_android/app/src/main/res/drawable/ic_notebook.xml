@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Simple document icon: white page with folded top-right corner, inkBlack strokes, content lines. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="48dp"
+    android:height="48dp"
+    android:viewportWidth="48"
+    android:viewportHeight="48">
+
+    <!-- Page body (pentagon with folded corner, white fill) -->
+    <path
+        android:pathData="M6,4 L33,4 L42,13 L42,44 L6,44 Z"
+        android:fillColor="@color/paperWhite"
+        android:strokeColor="@color/inkBlack"
+        android:strokeWidth="1.5"
+        android:strokeLineJoin="round"
+        android:strokeLineCap="round" />
+
+    <!-- Fold crease: two lines forming the turned corner -->
+    <path
+        android:pathData="M33,4 L33,13 L42,13"
+        android:fillColor="#00000000"
+        android:strokeColor="@color/inkBlack"
+        android:strokeWidth="1.5"
+        android:strokeLineJoin="round"
+        android:strokeLineCap="round" />
+
+    <!-- Content lines (three horizontal rules suggesting handwriting) -->
+    <path
+        android:pathData="M13,22 L35,22 M13,29 L35,29 M13,36 L26,36"
+        android:strokeColor="@color/inkBlack"
+        android:strokeWidth="1.5"
+        android:strokeLineCap="round" />
+
+</vector>

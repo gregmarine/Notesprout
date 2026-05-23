@@ -1,15 +1,136 @@
 <?xml version="1.0" encoding="utf-8"?>
-<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
+    android:orientation="vertical"
     android:background="@color/paperWhite">
 
-    <androidx.appcompat.widget.AppCompatButton
-        android:id="@+id/btnNewNotebook"
-        style="@style/Widget.NoteSprout.OutlinedButton"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_gravity="center"
-        android:text="New Notebook" />
+    <!--
+        Grid area: fills all vertical space above the bottom bar.
+        Cards and the empty-state message are added programmatically.
+    -->
+    <FrameLayout
+        android:id="@+id/gridContainer"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1" />
 
-</FrameLayout>
+    <!--
+        Bottom bar: 1dp inkBlack top border, pagination centred, + button right-aligned.
+        Height 100dp — generous tap target on e-ink.
+    -->
+    <RelativeLayout
+        android:id="@+id/bottomBar"
+        android:layout_width="match_parent"
+        android:layout_height="100dp"
+        android:background="@color/paperWhite">
+
+        <!-- Top border (1dp inkBlack) -->
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="@color/inkBlack"
+            android:layout_alignParentTop="true" />
+
+        <!--
+            Pagination group: |<  <  n/n  >  >|
+            Centered horizontally and vertically inside the bar.
+        -->
+        <LinearLayout
+            android:id="@+id/paginationGroup"
+            android:layout_width="wrap_content"
+            android:layout_height="match_parent"
+            android:orientation="horizontal"
+            android:layout_centerInParent="true"
+            android:gravity="center_vertical">
+
+            <androidx.appcompat.widget.AppCompatButton
+                android:id="@+id/btnFirst"
+                style="@style/Widget.NoteSprout.TextButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:minWidth="0dp"
+                android:minHeight="0dp"
+                android:textSize="22sp"
+                android:paddingStart="16dp"
+                android:paddingEnd="16dp"
+                android:paddingTop="16dp"
+                android:paddingBottom="16dp"
+                android:text="|&lt;" />
+
+            <androidx.appcompat.widget.AppCompatButton
+                android:id="@+id/btnPrev"
+                style="@style/Widget.NoteSprout.TextButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:minWidth="0dp"
+                android:minHeight="0dp"
+                android:textSize="22sp"
+                android:paddingStart="16dp"
+                android:paddingEnd="16dp"
+                android:paddingTop="16dp"
+                android:paddingBottom="16dp"
+                android:text="&lt;" />
+
+            <TextView
+                android:id="@+id/tvPage"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:minWidth="72dp"
+                android:gravity="center"
+                android:textSize="22sp"
+                android:textStyle="normal"
+                android:textColor="@color/inkBlack"
+                android:paddingStart="4dp"
+                android:paddingEnd="4dp"
+                android:text="1/1" />
+
+            <androidx.appcompat.widget.AppCompatButton
+                android:id="@+id/btnNext"
+                style="@style/Widget.NoteSprout.TextButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:minWidth="0dp"
+                android:minHeight="0dp"
+                android:textSize="22sp"
+                android:paddingStart="16dp"
+                android:paddingEnd="16dp"
+                android:paddingTop="16dp"
+                android:paddingBottom="16dp"
+                android:text="&gt;" />
+
+            <androidx.appcompat.widget.AppCompatButton
+                android:id="@+id/btnLast"
+                style="@style/Widget.NoteSprout.TextButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:minWidth="0dp"
+                android:minHeight="0dp"
+                android:textSize="22sp"
+                android:paddingStart="16dp"
+                android:paddingEnd="16dp"
+                android:paddingTop="16dp"
+                android:paddingBottom="16dp"
+                android:text="&gt;|" />
+
+        </LinearLayout>
+
+        <!-- New notebook button: right-aligned, vertically centred -->
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/btnNewNotebook"
+            style="@style/Widget.NoteSprout.OutlinedButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_alignParentEnd="true"
+            android:layout_centerVertical="true"
+            android:layout_marginEnd="16dp"
+            android:textSize="22sp"
+            android:paddingStart="24dp"
+            android:paddingEnd="24dp"
+            android:paddingTop="16dp"
+            android:paddingBottom="16dp"
+            android:text="+" />
+
+    </RelativeLayout>
+
+</LinearLayout>

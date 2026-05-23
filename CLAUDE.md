@@ -263,7 +263,7 @@ adb -s <serial> install -r app/build/outputs/apk/debug/app-debug.apk
 Immediate scope (in order):
 1. ~~Define the `notebook` table schema~~ — **DONE** (see Object Schema above)
 2. ~~Room setup + `.soil` file creation at `/Documents/NoteSprout/`~~ — **DONE** (MainActivity "New Notebook" screen; raw SQLiteDatabase; verified NA5C Android 15)
-3. Notebook list screen (reads `.soil` files from that directory)
+3. ~~Notebook list screen (reads `.soil` files from that directory)~~ — **DONE** (adaptive grid, pagination, swipe, empty state, bottom bar)
 4. Open a notebook (instantiates a Room DB from the `.soil` file path)
 5. Basic stroke data persistence (save/load strokes from the `notebook` table)
 
@@ -288,6 +288,25 @@ Do not get ahead of this list. Complete one step, verify, then move to the next.
 
 ---
 
+### New Branch: Notebook list screen (MainActivity replacement — verified NA5C, P2P)
+- **Layout:** `activity_main.xml` is a vertical LinearLayout: `FrameLayout` (weight=1, grid area) + `RelativeLayout` (100dp bottom bar). Bottom bar has a 1dp inkBlack top border, pagination controls centered via an inner horizontal LinearLayout, and the + button right-aligned.
+- **Column count — screen-width breakpoints (dp):**
+  - `≥ 720dp` → 5 columns (large tablet, e.g. BOOX NoteAir)
+  - `480–719dp` → 4 columns (mid-size tablet)
+  - `< 480dp` → 3 columns (phone / small device)
+- **Adaptive grid:** Computed in `computeGridSpec()` after the first `onGlobalLayout` fires. Card aspect ratio = physical screen height ÷ width (portrait). Card width fills each column cleanly; card height follows the aspect ratio. Row count = how many complete rows fit the available height after 16dp top/bottom padding.
+- **Grid alignment:** Top-aligned (`Gravity.TOP or Gravity.CENTER_HORIZONTAL`), 16dp top margin via `containerLp.topMargin = spec.paddingVPx` — matches the 16dp side gutters baked into card widths.
+- **Cards (programmatic, no RecyclerView):** Each card group is a vertical LinearLayout: card `FrameLayout` (`shape_bordered` background, `ic_notebook` icon centered inside) + label `TextView` below (not inside the card). Rows are horizontal LinearLayouts; `Space` views provide gutters. All added to a centered outer LinearLayout inside `gridContainer`.
+- **Empty state:** When no `.soil` files exist, a centered inkLight message replaces the grid.
+- **Pagination:** `navigatePage(Int)` clamps and re-renders. `updatePaginationControls()` sets enabled state and text color (inkBlack / inkLight) on all five controls. Button text 22sp, 16dp vertical padding; bar height 100dp.
+- **Swipe:** `GestureDetector.SimpleOnGestureListener.onFling` — horizontal flings only when `|velocityX| > |velocityY|`. No animation.
+- **Scan on resume:** `onResume` calls `scanAndRender()` directly if `gridSpec` is ready; otherwise sets `pendingScan = true` so the global layout listener triggers the scan after the first measure.
+- **New notebook → page jump:** After `createNotebook`, `scanAndRender()` re-scans the sorted list, then `navigatePage(idx / itemsPerPage)` lands on the page containing the new file. (alphabetical sort)
+- **`ic_notebook.xml`:** Vector drawable, 48×48 viewport. White page body (pentagon with folded top-right corner at 33,4→42,13), fold crease (two-segment path), three content lines — all inkBlack 1.5dp stroke.
+- **`GestureDetector` (not `GestureDetectorCompat`):** minSdk 29 — no compat wrapper needed.
+
+---
+
 ## Future Work — Wacom & Generic Android Stylus
 
 ### Wacom stylus barrel button (MIP11 and other non-BOOX devices)
@@ -297,4 +316,4 @@ Do not get ahead of this list. Complete one step, verify, then move to the next.
 - **Fix direction:** Check `event.isButtonPressed(MotionEvent.BUTTON_STYLUS_PRIMARY)` in `onTouchEvent` and treat it as an eraser mode for the duration of that stroke.
 
 ---
-*Last updated: schema defined — proceeding to Room setup*
+*Last updated: notebook list screen complete — next step: open a notebook*
