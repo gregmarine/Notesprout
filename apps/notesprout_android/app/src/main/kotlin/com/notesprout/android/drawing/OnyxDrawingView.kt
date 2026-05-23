@@ -90,6 +90,13 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
 
         override fun onBeginRawErasing(shortcutErasing: Boolean, touchPoint: TouchPoint) {
             removeCallbacks(idleReleaseRunnable)
+            // Release the overlay render immediately so bitmap updates (erased strokes
+            // disappearing) are visible right away — same issue as toolbar eraser toggle.
+            // Without this the overlay obscures the updated bitmap until the idle timer fires.
+            if (isSetup) {
+                touchHelper.setRawDrawingRenderEnabled(false)
+                invalidate()
+            }
         }
 
         override fun onEndRawErasing(shortcutErasing: Boolean, touchPoint: TouchPoint) {
@@ -137,6 +144,7 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
         }
         if (toRemove.isNotEmpty()) {
             strokes.removeAll(toRemove.toSet())
+            // TODO: incremental save — soft-delete each removed stroke's NotebookObject row by UUID.
             redrawCanvas()
         }
     }
@@ -260,7 +268,18 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
 
     override fun setEraserMode(active: Boolean) {
         isEraserMode = active
-        if (isSetup) touchHelper.setEraserRawDrawingEnabled(active, if (active) (ERASER_RADIUS_PX * 2).toInt() else 0)
+        if (isSetup) {
+            touchHelper.setEraserRawDrawingEnabled(active, if (active) (ERASER_RADIUS_PX * 2).toInt() else 0)
+            if (active) {
+                // Release the overlay render immediately so the first eraser touch doesn't
+                // show a phantom pen stroke on the hardware buffer.  Without this, render
+                // stays enabled from the last drawing session until the idle timer fires
+                // 1.5 s later, causing a visible phantom stroke on the first eraser gesture.
+                removeCallbacks(idleReleaseRunnable)
+                touchHelper.setRawDrawingRenderEnabled(false)
+                invalidate()
+            }
+        }
     }
 
     override fun clearCanvas() {
@@ -273,6 +292,15 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
             post { if (isSetup) touchHelper.setRawDrawingEnabled(true) }
         }
     }
+
+    override fun loadStrokes(strokes: List<List<PointF>>) {
+        this.strokes.clear()
+        this.strokes.addAll(strokes)
+        redrawCanvas()
+        Log.d(TAG, "loadStrokes: loaded ${strokes.size} strokes")
+    }
+
+    override fun getStrokes(): List<List<PointF>> = strokes.toList()
 
     override fun releaseResources() {
         if (isSetup) {

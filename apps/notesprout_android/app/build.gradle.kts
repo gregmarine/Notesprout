@@ -63,4 +63,10 @@ dependencies {
     implementation("androidx.room:room-runtime:2.7.0")
     implementation("androidx.room:room-ktx:2.7.0")
     ksp("androidx.room:room-compiler:2.7.0")
+
+    // Coroutines — Dispatchers.IO for DB work, Dispatchers.Main for UI updates.
+    // kotlinx-coroutines-android provides Dispatchers.Main on Android.
+    // lifecycle-runtime-ktx provides lifecycleScope on Activity/Fragment.
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
+    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
 }

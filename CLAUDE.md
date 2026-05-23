@@ -266,7 +266,7 @@ Immediate scope (in order):
 2. ~~Room setup + `.soil` file creation at `/Documents/NoteSprout/`~~ — **DONE** (MainActivity "New Notebook" screen; raw SQLiteDatabase; verified NA5C Android 15)
 3. ~~Notebook list screen (reads `.soil` files from that directory)~~ — **DONE** (adaptive grid, pagination, swipe, empty state, bottom bar)
 4. ~~Open a notebook (instantiates a Room DB from the `.soil` file path)~~ — **DONE** (DrawingActivity DB lifecycle; verified NA5C, P2P)
-5. Basic stroke data persistence (save/load strokes from the `notebook` table)
+5. ~~Basic stroke data persistence (save/load strokes from the `notebook` table)~~ — **DONE** (see New Branch entry below — verify on device)
 
 Do not get ahead of this list. Complete one step, verify, then move to the next.
 
@@ -327,6 +327,34 @@ Do not get ahead of this list. Complete one step, verify, then move to the next.
 
 ---
 
+### New Branch: Basic stroke persistence — save/load from `.soil` (verified NA5C, P2P)
+- **Schema change:** Added `type TEXT NOT NULL` column to the `notebook` table. Mirrors `@ColumnInfo(name = "type")` on `NotebookObject`. No `DEFAULT` in SQL → no `defaultValue` in `@ColumnInfo`. **All existing `.soil` files must be deleted** — schema break, no migration.
+- **Page + layer bootstrap:** `MainActivity.createNotebook()` inserts two rows immediately after creating the `.soil` file using `db.execSQL(sql, arrayOf(...))` with a shared parameterized INSERT template that double-quotes `"order"`. Page: `type="page"`, `parentId=NIL_UUID`, `boundingBox`/`data` use physical screen dimensions from `windowManager.currentWindowMetrics.bounds` (API 30+) / `displayMetrics` fallback (API 29). Layer: `type="layer"`, `parentId=<pageId>`, `data={"label":"Content","isLocked":false,"isVisible":true}`. `NIL_UUID = "00000000-0000-0000-0000-000000000000"` defined as a constant in `MainActivity.Companion`.
+- **DAO:** `NotebookDao` now has five suspend functions: `insertObject`, `getObjectsByType`, `getObjectsByParent` (ORDER BY \`order\` ASC), `softDelete`, `getFirstByType`.
+- **Stroke data classes:** `StrokePoint(x,y,pressure?,tilt?,timestamp)` and `StrokeData(color,strokeWidth,points)` in `data/`. `StrokeData.toJson()` / `fromJson()` use `org.json` (no new dependency). `toPointFs()` strips pressure/tilt for rendering.
+- **DrawingView interface additions:** `loadStrokes(List<List<PointF>>)` and `getStrokes(): List<List<PointF>>`. Both `OnyxDrawingView` and `GenericDrawingView` implement them: `loadStrokes` replaces the internal stroke list and calls `redrawCanvas()`; `getStrokes` returns `strokes.toList()` (snapshot copy — thread-safe).
+- **`loadStrokes()` in DrawingActivity:** `lifecycleScope.launch { withContext(IO) { ... } }`. Queries `getFirstByType("page")` → `getObjectsByParent(pageId).filter { type == "layer" }.first()` → `getObjectsByParent(layerId)`. Stores `pageId`/`layerId` as instance fields for `saveStrokes`. Switches back to Main to call `drawingView.loadStrokes()`.
+- **`saveStrokes()` in DrawingActivity:** `private suspend fun` — must be called on `Dispatchers.IO`. Full replace strategy: soft-delete all existing children of `layerId`, then insert current strokes. Bounding box computed from point min/max. `StrokeData` serialized to JSON for the `data` column.
+- **`closeNotebook()` pattern:** `runBlocking { withContext(Dispatchers.IO) { saveStrokes(db); vacuum; checkpoint } }` then `db.close()` on main thread. `runBlocking` is intentional — close must complete before `finish()`. `allowMainThreadQueries()` removed.
+- **Dependencies added:** `kotlinx-coroutines-android:1.8.1`, `lifecycle-runtime-ktx:2.8.7` (provides `lifecycleScope` on Activity).
+- **`eraseAtPath` TODO:** Both drawing views have a TODO comment: "incremental save — soft-delete each removed stroke's NotebookObject row by UUID."
+
+### Pruning: Bootstrap inserts silently dropped — `order` SQLite reserved word (verified NA5C, P2P)
+- **Symptom:** Strokes not persisting after close/reopen. `sqlite3` inspection showed `COUNT(*) = 0` — the page and layer rows were never written even though the schema was correct and Room opened without error.
+- **Root cause:** `db.insert("notebook", null, ContentValues().apply { put("order", 0) ... })` generates SQL with `order` as an unquoted column name. `ORDER` is a SQLite reserved word; using it unquoted in an INSERT causes SQLite to **silently return -1** (failure) without throwing an exception. Both the page and layer bootstrap inserts failed silently, leaving the table empty every time.
+- **Fix:** Replaced `db.insert()` + `ContentValues` with `db.execSQL(sql, arrayOf(...))` using a shared INSERT template that double-quotes the column: `"order"`. A single `insertSql` string is reused for both page and layer inserts.
+- **General rule:** Any raw SQL touching the `order` column must double-quote it: `"order"`. Room's generated DAO handles this automatically via backtick quoting; only hand-written raw SQL is at risk.
+
+### Pruning: Eraser overlay phantom — render not released before first erase gesture (verified NA5C, P2P)
+- **Symptom 1 (toolbar toggle):** First time tapping the toolbar Erase button, the next pen touch drew a visible phantom stroke on the overlay. After the idle timer fired (1.5s), both the phantom and the erased stroke disappeared — correct erasure, but wrong visual timing and a misleading artifact.
+- **Symptom 2 (physical pen eraser button):** Flipping the pen immediately after drawing (before the idle timer fired) caused erased strokes to stay visible until the idle timer expired 1.5s later.
+- **Root cause (both):** The overlay render was still enabled from the previous drawing session when erasing began. `setEraserMode(true)` set the flag and called `setEraserRawDrawingEnabled`, but never released the render. `onBeginRawErasing` cancelled the idle timer but also never released the render. The overlay sat on top of the bitmap hiding the already-correct erase result until the idle timer finally called `setRawDrawingRenderEnabled(false)`.
+- **Fix — toolbar:** In `setEraserMode(active: Boolean)`, when `active = true`: `removeCallbacks(idleReleaseRunnable)`, `touchHelper.setRawDrawingRenderEnabled(false)`, `invalidate()`. Overlay released immediately on toggle.
+- **Fix — physical pen:** In `onBeginRawErasing`: same three calls after `removeCallbacks`. Overlay released at the start of each physical erase gesture.
+- **Key rule:** Whenever erasing begins — toolbar toggle or physical pen flip — release the overlay render immediately. The `onEndRawErasing` / idle-timer path still handles the EPD quality repaint on lift; it is unchanged.
+
+---
+
 ## Future Work — Wacom & Generic Android Stylus
 
 ### Wacom stylus barrel button (MIP11 and other non-BOOX devices)
@@ -336,4 +364,4 @@ Do not get ahead of this list. Complete one step, verify, then move to the next.
 - **Fix direction:** Check `event.isButtonPressed(MotionEvent.BUTTON_STYLUS_PRIMARY)` in `onTouchEvent` and treat it as an eraser mode for the duration of that stroke.
 
 ---
-*Last updated: open notebook + Room DB lifecycle complete — next step: basic stroke persistence*
+*Last updated: basic stroke persistence complete and verified — eraser overlay phantom pruned (toolbar + physical pen)*

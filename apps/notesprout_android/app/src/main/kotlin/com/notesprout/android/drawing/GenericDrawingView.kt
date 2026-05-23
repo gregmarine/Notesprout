@@ -131,6 +131,7 @@ class GenericDrawingView(context: Context) : View(context), DrawingView {
         }
         if (toRemove.isNotEmpty()) {
             strokes.removeAll(toRemove.toSet())
+            // TODO: incremental save — soft-delete each removed stroke's NotebookObject row by UUID.
             redrawCanvas()
         }
     }
@@ -184,6 +185,14 @@ class GenericDrawingView(context: Context) : View(context), DrawingView {
         renderCanvas?.drawColor(Color.WHITE)
         invalidate()
     }
+
+    override fun loadStrokes(strokes: List<List<PointF>>) {
+        this.strokes.clear()
+        this.strokes.addAll(strokes)
+        redrawCanvas()
+    }
+
+    override fun getStrokes(): List<List<PointF>> = strokes.toList()
 
     override fun releaseResources() {
         renderBitmap?.recycle()

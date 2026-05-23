@@ -36,8 +36,17 @@ import androidx.core.view.WindowInsetsControllerCompat
 import com.notesprout.android.databinding.ActivityMainBinding
 import com.notesprout.android.databinding.DialogNewNotebookBinding
 import java.io.File
+import java.util.UUID
 
 class MainActivity : AppCompatActivity() {
+
+    companion object {
+        /**
+         * Nil UUID used as the parentId for root-level objects (notebook pages).
+         * Defined as a constant to avoid magic strings in notebook creation.
+         */
+        const val NIL_UUID = "00000000-0000-0000-0000-000000000000"
+    }
 
     // ── Grid specification ────────────────────────────────────────────────────
 
@@ -514,6 +523,7 @@ class MainActivity : AppCompatActivity() {
                         createdAt   INTEGER NOT NULL,
                         updatedAt   INTEGER NOT NULL,
                         deletedAt   INTEGER,
+                        type        TEXT    NOT NULL,
                         data        TEXT    NOT NULL
                     )
                     """.trimIndent()
@@ -524,6 +534,38 @@ class MainActivity : AppCompatActivity() {
                         ON notebook(parentId, "order", deletedAt)
                     """.trimIndent()
                 )
+
+                // ── Bootstrap page + layer ────────────────────────────────────
+                // Get physical screen dimensions for the page bounding box.
+                val screenBounds = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    windowManager.currentWindowMetrics.bounds
+                } else {
+                    val dm = resources.displayMetrics
+                    android.graphics.Rect(0, 0, dm.widthPixels, dm.heightPixels)
+                }
+                val screenW = screenBounds.width().toFloat()
+                val screenH = screenBounds.height().toFloat()
+                val bboxJson = """{"x":0.0,"y":0.0,"width":$screenW,"height":$screenH}"""
+                val now = System.currentTimeMillis()
+
+                // `order` is a reserved word in SQLite — must be double-quoted in SQL.
+                // db.insert() with ContentValues builds the column list unquoted, so SQLite
+                // silently rejects the INSERT (returns -1). Use execSQL with explicit quoting.
+                val insertSql =
+                    """INSERT INTO notebook (id, parentId, boundingBox, "order", createdAt, updatedAt, deletedAt, type, data)
+                       VALUES (?, ?, ?, 0, ?, ?, NULL, ?, ?)"""
+
+                val pageId = UUID.randomUUID().toString()
+                db.execSQL(insertSql, arrayOf(
+                    pageId, NIL_UUID, bboxJson, now, now, "page",
+                    """{"width":$screenW,"height":$screenH}"""
+                ))
+
+                val layerId = UUID.randomUUID().toString()
+                db.execSQL(insertSql, arrayOf(
+                    layerId, pageId, bboxJson, now, now, "layer",
+                    """{"label":"Content","isLocked":false,"isVisible":true}"""
+                ))
 
                 // Clean close: reclaim space and truncate WAL to zero bytes.
                 db.rawQuery("PRAGMA incremental_vacuum",        null).use { it.moveToFirst() }

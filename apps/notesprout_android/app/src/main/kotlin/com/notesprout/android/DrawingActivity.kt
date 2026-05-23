@@ -2,6 +2,7 @@ package com.notesprout.android
 
 import android.os.Build
 import android.os.Bundle
+import android.util.Log
 import android.widget.FrameLayout
 import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AppCompatActivity
@@ -10,18 +11,29 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.core.view.doOnLayout
+import androidx.lifecycle.lifecycleScope
 import androidx.room.Room
+import com.notesprout.android.data.NotebookObject
 import com.notesprout.android.data.SoilDatabase
+import com.notesprout.android.data.StrokeData
+import com.notesprout.android.data.StrokePoint
 import com.notesprout.android.databinding.ActivityDrawingBinding
 import com.notesprout.android.drawing.DrawingView
 import com.notesprout.android.drawing.GenericDrawingView
 import com.notesprout.android.drawing.OnyxDrawingView
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.Locale
+import java.util.UUID
 
 class DrawingActivity : AppCompatActivity() {
 
     companion object {
+        private const val TAG = "NoteSprout"
+
         /** Intent extra key — the absolute path to the `.soil` notebook file. */
         const val EXTRA_NOTEBOOK_PATH = "notebook_path"
     }
@@ -32,6 +44,13 @@ class DrawingActivity : AppCompatActivity() {
 
     /** Room DB instance for the open notebook. Null before open and after close. */
     private var soilDatabase: SoilDatabase? = null
+
+    /**
+     * IDs of the active page and layer, populated by [loadStrokes] after DB open.
+     * Required by [saveStrokes] to parent new stroke rows correctly.
+     */
+    private var pageId: String? = null
+    private var layerId: String? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -96,8 +115,6 @@ class DrawingActivity : AppCompatActivity() {
                 notebookPath,
             )
                 .addCallback(SoilDatabase.openCallback())
-                // TODO Step 5: move queries to background threads and remove this.
-                .allowMainThreadQueries()
                 .build()
         }
 
@@ -124,11 +141,12 @@ class DrawingActivity : AppCompatActivity() {
     // ── Notebook DB lifecycle ─────────────────────────────────────────────────
 
     /**
-     * Runs housekeeping PRAGMAs then closes the Room database.
+     * Saves strokes, runs housekeeping PRAGMAs, then closes the Room database.
      *
-     * Must be called before [finish] so the `.soil` file is clean:
-     * - `PRAGMA incremental_vacuum` reclaims any free pages
-     * - `PRAGMA wal_checkpoint(TRUNCATE)` truncates the WAL to zero bytes
+     * This is a blocking call — all IO runs on [Dispatchers.IO] via [runBlocking],
+     * then [SoilDatabase.close] is called on the main thread after the coroutine
+     * completes.  Using runBlocking here is intentional: close must be synchronous
+     * so [finish] is only called after the file is fully written and sealed.
      *
      * Idempotent — safe to call multiple times (guarded by null check).
      */
@@ -136,29 +154,134 @@ class DrawingActivity : AppCompatActivity() {
         val db = soilDatabase ?: return
         soilDatabase = null   // mark as closed before any potentially-throwing work
 
-        saveStrokes()
-
-        try {
-            db.openHelper.writableDatabase.apply {
-                query("PRAGMA incremental_vacuum").use { it.moveToFirst() }
-                query("PRAGMA wal_checkpoint(TRUNCATE)").use { it.moveToFirst() }
+        runBlocking {
+            withContext(Dispatchers.IO) {
+                saveStrokes(db)
+                db.openHelper.writableDatabase.apply {
+                    query("PRAGMA incremental_vacuum").use { it.moveToFirst() }
+                    query("PRAGMA wal_checkpoint(TRUNCATE)").use { it.moveToFirst() }
+                }
             }
-        } finally {
-            db.close()
-            // Delete the empty -journal file Android leaves during DB initialisation.
-            val path = intent.getStringExtra(EXTRA_NOTEBOOK_PATH) ?: return
-            File("$path-journal").takeIf { it.exists() }?.delete()
+        }
+
+        db.close()
+
+        // Delete the empty -journal file Android leaves during DB initialisation.
+        val path = intent.getStringExtra(EXTRA_NOTEBOOK_PATH) ?: return
+        File("$path-journal").takeIf { it.exists() }?.delete()
+    }
+
+    // ── Persistence ───────────────────────────────────────────────────────────
+
+    /**
+     * Load strokes from the database and hand them to the drawing view.
+     *
+     * Runs asynchronously on [Dispatchers.IO]; switches back to [Dispatchers.Main]
+     * to call [DrawingView.loadStrokes] (which triggers invalidate).
+     *
+     * Also stores [pageId] and [layerId] for use by [saveStrokes].
+     */
+    private fun loadStrokes() {
+        val db = soilDatabase ?: return
+        lifecycleScope.launch {
+            val strokeLists = withContext(Dispatchers.IO) {
+                val dao = db.notebookDao()
+
+                val page = dao.getFirstByType("page")
+                if (page == null) {
+                    Log.w(TAG, "loadStrokes: no page found in notebook")
+                    return@withContext emptyList()
+                }
+                pageId = page.id
+                Log.d(TAG, "loadStrokes: pageId=$pageId")
+
+                val layer = dao.getObjectsByParent(page.id)
+                    .filter { it.type == "layer" }
+                    .firstOrNull()
+                if (layer == null) {
+                    Log.w(TAG, "loadStrokes: no layer found under page ${page.id}")
+                    return@withContext emptyList()
+                }
+                layerId = layer.id
+                Log.d(TAG, "loadStrokes: layerId=$layerId")
+
+                val strokeObjects = dao.getObjectsByParent(layer.id)
+                Log.d(TAG, "loadStrokes: found ${strokeObjects.size} stroke rows")
+
+                strokeObjects.mapNotNull { obj ->
+                    try {
+                        StrokeData.fromJson(obj.data).toPointFs()
+                    } catch (e: Exception) {
+                        Log.e(TAG, "loadStrokes: failed to deserialize stroke ${obj.id}", e)
+                        null
+                    }
+                }
+            }
+            // Back on Main — safe to call invalidate inside loadStrokes.
+            drawingView.loadStrokes(strokeLists)
         }
     }
 
-    // ── Persistence stubs (Step 5) ────────────────────────────────────────────
+    /**
+     * Persist the current in-memory stroke list to the database.
+     *
+     * Strategy: full replace — soft-delete all existing stroke rows for this layer,
+     * then insert the current set fresh.  Incremental delta saves (soft-delete only
+     * the erased rows by UUID) are a future step.
+     *
+     * Must be called on [Dispatchers.IO] — do not invoke directly from the main thread.
+     */
+    private suspend fun saveStrokes(db: SoilDatabase) {
+        val currentLayerId = layerId ?: run {
+            Log.w(TAG, "saveStrokes: layerId is null — skipping (notebook may not have loaded)")
+            return
+        }
+        val dao = db.notebookDao()
+        val now = System.currentTimeMillis()
 
-    private fun saveStrokes() {
-        // TODO: Step 5 — persist strokes to notebook table
-    }
+        // Soft-delete all existing stroke rows for this layer.
+        val existingStrokes = dao.getObjectsByParent(currentLayerId)
+        for (stroke in existingStrokes) {
+            dao.softDelete(stroke.id, now)
+        }
+        Log.d(TAG, "saveStrokes: soft-deleted ${existingStrokes.size} existing rows")
 
-    private fun loadStrokes() {
-        // TODO: Step 5 — load strokes from notebook table
+        // Insert current strokes.
+        val currentStrokes = drawingView.getStrokes()
+        Log.d(TAG, "saveStrokes: inserting ${currentStrokes.size} strokes")
+
+        for ((index, points) in currentStrokes.withIndex()) {
+            if (points.size < 2) continue   // degenerate stroke — skip
+
+            val minX = points.minOf { it.x }
+            val minY = points.minOf { it.y }
+            val maxX = points.maxOf { it.x }
+            val maxY = points.maxOf { it.y }
+            val bboxJson = """{"x":$minX,"y":$minY,"width":${maxX - minX},"height":${maxY - minY}}"""
+
+            val strokePoints = points.map { pt ->
+                StrokePoint(x = pt.x, y = pt.y, pressure = null, tilt = null, timestamp = now)
+            }
+            val strokeData = StrokeData(
+                color       = "#000000",
+                strokeWidth = 3.0f,
+                points      = strokePoints,
+            )
+
+            dao.insertObject(
+                NotebookObject(
+                    id          = UUID.randomUUID().toString(),
+                    type        = "stroke",
+                    parentId    = currentLayerId,
+                    boundingBox = bboxJson,
+                    sortOrder   = index,
+                    createdAt   = now,
+                    updatedAt   = now,
+                    deletedAt   = null,
+                    data        = strokeData.toJson(),
+                )
+            )
+        }
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
