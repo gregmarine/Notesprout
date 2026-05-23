@@ -46,11 +46,10 @@ A handwriting-first, meditative notes app. Think paper, but smarter underneath. 
 - Notebook files live at: `/Documents/NoteSprout/<notebook-name>.soil` — no other location
 - Hierarchy: Notebook → Pages → Layers → Content Objects
 - Layers: base layer (template, locked) and content layers
-- Every object carries: id, parentId, type, subtype, position, boundingBox, link, createdAt, updatedAt, deletedAt, data
-- Stroke data: proprietary point arrays (x, y, pressure, tilt, timestamp), stored as JSON in TEXT column
+- Every object carries: id, parentId, boundingBox, order, createdAt, updatedAt, deletedAt, data
+- Stroke data: proprietary point arrays (x, y, pressure, tilt, timestamp), stored as JSON in the `data` TEXT column
 - Soft deletes with cleanup process
 - Stable UUIDs everywhere
-- Delta sync via syncVersion counter; SyncProvider abstraction (Supabase first)
 
 ---
 
@@ -59,7 +58,7 @@ A handwriting-first, meditative notes app. Think paper, but smarter underneath. 
 ### Core Rules — Never Violate These
 
 - **One file per notebook.** Each `.soil` file is a self-contained SQLite database.
-- **Single table.** Everything — pages, layers, strokes, images, text, metadata — is a row in one `objects` table. No exceptions without explicit discussion.
+- **Single table.** Everything — pages, layers, strokes, images, text, metadata — is a row in one `notebook` table. No exceptions without explicit discussion.
 - **Everything is an object.** There is no special-casing of types at the schema level. Type behavior lives in Kotlin, not in the database schema.
 - **Assets are base64 strings.** No external files, no file references. Images and other binary assets are stored inline as base64 in the `data` TEXT column.
 - **SQLite must stay clean.** The folder view in a file browser should show only `.soil` files — no WAL files, no SHM files, no journals left behind.
@@ -70,15 +69,28 @@ A handwriting-first, meditative notes app. Think paper, but smarter underneath. 
 
 ### Object Schema
 
-**Placeholder — schema to be defined explicitly before implementation.**
-Do not guess at or infer column names, types, or constraints. Wait for the schema to be provided.
+```sql
+CREATE TABLE IF NOT EXISTS notebook (
+    id          TEXT    PRIMARY KEY,         -- UUID
+    parentId    TEXT    NOT NULL,            -- UUID of parent object
+    boundingBox TEXT    NOT NULL,            -- JSON {"x":0.0,"y":0.0,"width":0.0,"height":0.0}
+    "order"     INTEGER NOT NULL DEFAULT 0,  -- sort order among siblings
+    createdAt   INTEGER NOT NULL,            -- Unix epoch ms
+    updatedAt   INTEGER NOT NULL,            -- Unix epoch ms
+    deletedAt   INTEGER,                     -- null = alive; soft delete
+    data        TEXT    NOT NULL             -- type-owned JSON blob
+);
+
+CREATE INDEX IF NOT EXISTS idx_notebook_parent_order
+    ON notebook(parentId, "order", deletedAt);
+```
 
 ### Room Setup Rules
 
 - Room database class opens `.soil` files by absolute path — not from `assets/` or `getDatabasePath()`
 - Use `Room.databaseBuilder(context, SoilDatabase::class.java, absolutePath)`
 - Each open notebook gets its own Room database instance; close and release it when the notebook is closed
-- Do not implement Room until the schema is provided and implementation is explicitly instructed
+- Do not implement Room until explicitly instructed
 
 ---
 
@@ -190,10 +202,10 @@ NoteSprout's visual language is designed for e-ink displays first. All other pla
 - Do not default to Material Design conventions that make the app feel like a generic Android app
 - Do not add dependencies without discussion
 - Do not restructure the monorepo layout without discussion
-- Do not implement Room/SQLite until the schema is provided and implementation is explicitly instructed
+- Do not implement Room/SQLite until explicitly instructed
 - Do not guess at architectural decisions — ask first
 - Do not add new features to apps/notesprout_flutter — it is reference only
-- Do not create multiple tables — everything is a single `objects` table per `.soil` file
+- Do not create multiple tables — everything is a single `notebook` table per `.soil` file
 - Do not store assets as files or file references — base64 strings only
 
 ---
@@ -249,13 +261,30 @@ adb -s <serial> install -r app/build/outputs/apk/debug/app-debug.apk
 **MVP iteration — data layer foundation.**
 
 Immediate scope (in order):
-1. Define the `objects` table schema — **waiting on schema from Greg**
-2. Room setup + `.soil` file creation at `/Documents/NoteSprout/`
+1. ~~Define the `notebook` table schema~~ — **DONE** (see Object Schema above)
+2. ~~Room setup + `.soil` file creation at `/Documents/NoteSprout/`~~ — **DONE** (MainActivity "New Notebook" screen; raw SQLiteDatabase; verified NA5C Android 15)
 3. Notebook list screen (reads `.soil` files from that directory)
 4. Open a notebook (instantiates a Room DB from the `.soil` file path)
-5. Basic stroke data persistence (save/load strokes from the `objects` table)
+5. Basic stroke data persistence (save/load strokes from the `notebook` table)
 
 Do not get ahead of this list. Complete one step, verify, then move to the next.
+
+---
+
+## Pruning: AlertDialog styling + keyboard focus (verified NA5C, P2P — Android 15)
+- **Shadow removal:** `AlertDialog` carries implicit elevation from AppCompat's default window background. Fix: `dialog.window?.setElevation(0f)` + `dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)` — replaces the floating card with the same flat white/1dp-black-border drawable used by buttons and inputs throughout the app.
+- **Build order matters:** `setSoftInputMode` must be called before `show()`; `setElevation` and `setBackgroundDrawableResource` must be called after `show()` (window background only exists once the window is created). Pattern: `create()` → `setSoftInputMode` → `show()` → style window → focus field.
+- **Keyboard auto-open:** `SOFT_INPUT_STATE_VISIBLE` (a hint) and `InputMethodManager.showSoftInput` (deprecated API 30+) both silently fail on Android 11+. The correct API is `ViewCompat.getWindowInsetsController(view)?.show(WindowInsetsCompat.Type.ime())`. Must be called in `postDelayed(100)` — the dialog window needs ~100ms to become the active input connection. `InputMethodManager.showSoftInput` is kept as the API 29 fallback via the `?: run { }` branch.
+- **BOOX e-ink note:** The `WindowInsetsController` path works on NA5C (Android 15) — BOOX's own soft keyboard appears. Earlier assumption that BOOX suppresses the soft keyboard was wrong; it shows BOOX's keyboard variant, not a standard QWERTY.
+
+---
+
+## Pruning: .soil creation — rawQuery lazy execution + journal cleanup (verified NA5C Android 15)
+- **Root cause 1 — PRAGMAs not applied:** Android's `SQLiteDatabase.execSQL()` rejects any SQL that returns a result set ("Queries can be performed using SQLiteDatabase query or rawQuery methods only"). Switching to `rawQuery(...).close()` is not enough — `rawQuery` is lazy and never executes the SQL unless the cursor is consumed. Fix: `rawQuery("PRAGMA ...", null).use { it.moveToFirst() }` forces execution.
+- **Affected PRAGMAs:** `journal_mode = WAL`, `wal_autocheckpoint = 100`, `auto_vacuum = INCREMENTAL`, `incremental_vacuum`, `wal_checkpoint(TRUNCATE)` — all require `rawQuery` + `moveToFirst()`.
+- **Root cause 2 — journal file artifact:** Android's SQLiteDatabase creates an empty `-journal` file during database initialisation before WAL mode is set. It persists after `db.close()`. Fix: explicitly delete `<name>.soil-journal` after `db.close()`.
+- **wal_autocheckpoint is connection-level only** — not stored in the database file. Must be re-applied every time the database is opened. Room's `openCallback` / `SupportSQLiteDatabase` hooks are the right place for this.
+- **Storage permissions on Android 15 (NA5C):** `MANAGE_EXTERNAL_STORAGE` was already granted on the test device — no runtime prompt observed. The permission flow (Settings → All Files Access) is in place for fresh installs.
 
 ---
 
@@ -268,4 +297,4 @@ Do not get ahead of this list. Complete one step, verify, then move to the next.
 - **Fix direction:** Check `event.isButtonPressed(MotionEvent.BUTTON_STYLUS_PRIMARY)` in `onTouchEvent` and treat it as an eraser mode for the duration of that stroke.
 
 ---
-*Last updated: data layer planning — schema TBD*
+*Last updated: schema defined — proceeding to Room setup*
