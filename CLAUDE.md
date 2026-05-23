@@ -35,7 +35,8 @@ A handwriting-first, meditative notes app. Think paper, but smarter underneath. 
 - Onyx SDK: onyxsdk-device:1.3.3 + onyxsdk-pen:1.5.4 — **IMPLEMENTED**
 - Onyx SDK repo: `http://repo.boox.com/repository/maven-public/` (insecure protocol — required, do not change)
 - hiddenapibypass:4.3 from JitPack — required for Android 14+ BOOX devices (applied in NoteSproutApplication.onCreate)
-- Database: Room/SQLite — **IN PROGRESS — see Data Layer section**
+- Database: Room/SQLite — **IMPLEMENTED — see Data Layer section**
+- KSP: 2.2.20-2.0.4 (required for Room annotation processing with Kotlin 2.2.x)
 - AGP 8.11.1 + Kotlin 2.2.20 + Gradle 8.14
 
 ---
@@ -264,7 +265,7 @@ Immediate scope (in order):
 1. ~~Define the `notebook` table schema~~ — **DONE** (see Object Schema above)
 2. ~~Room setup + `.soil` file creation at `/Documents/NoteSprout/`~~ — **DONE** (MainActivity "New Notebook" screen; raw SQLiteDatabase; verified NA5C Android 15)
 3. ~~Notebook list screen (reads `.soil` files from that directory)~~ — **DONE** (adaptive grid, pagination, swipe, empty state, bottom bar)
-4. Open a notebook (instantiates a Room DB from the `.soil` file path)
+4. ~~Open a notebook (instantiates a Room DB from the `.soil` file path)~~ — **DONE** (DrawingActivity DB lifecycle; verified NA5C, P2P)
 5. Basic stroke data persistence (save/load strokes from the `notebook` table)
 
 Do not get ahead of this list. Complete one step, verify, then move to the next.
@@ -307,6 +308,25 @@ Do not get ahead of this list. Complete one step, verify, then move to the next.
 
 ---
 
+### New Branch: Open notebook — DrawingActivity + Room DB lifecycle (verified NA5C, P2P)
+- **Intent extra:** `DrawingActivity.EXTRA_NOTEBOOK_PATH` (`"notebook_path"`) — absolute path to the `.soil` file. `MainActivity.openNotebook(file)` puts this on the intent when a card is tapped.
+- **Room open:** `Room.databaseBuilder(applicationContext, SoilDatabase::class.java, absolutePath).addCallback(SoilDatabase.openCallback()).allowMainThreadQueries().build()`. Called in `onCreate` after reading the extra. `allowMainThreadQueries()` is a temporary stub — removed in step 5 when queries move off main thread.
+- **`SoilDatabase.openCallback()`:** Re-applies `PRAGMA wal_autocheckpoint = 100` on every open via `SupportSQLiteDatabase.query(...).use { it.moveToFirst() }`. This pragma is connection-level only and is not stored in the file.
+- **`closeNotebook()`:** Idempotent (null-guards `soilDatabase`). Calls `saveStrokes()` stub, runs `PRAGMA incremental_vacuum` + `PRAGMA wal_checkpoint(TRUNCATE)` on `db.openHelper.writableDatabase`, then `db.close()`, then deletes any `-journal` artifact. Called from: Close button, `OnBackPressedCallback`, and `onDestroy` safety net.
+- **Toolbar:** `btnClose` on the left; `tvNotebookName` (center, shows `file.nameWithoutExtension`); `btnClear` and `btnEraser` on the right. Close and back both route through `closeNotebook()` before `finish()`.
+- **Persistence stubs:** `saveStrokes()` and `loadStrokes()` are no-op private methods with TODO comments. `loadStrokes()` is called after DB open; `saveStrokes()` is called at the top of `closeNotebook()`.
+- **Data layer files:** `data/NotebookObject.kt` (`@Entity`), `data/NotebookDao.kt` (empty `@Dao` stub), `data/SoilDatabase.kt` (`@Database`, one instance per notebook, no singleton).
+
+### Pruning: Room schema mismatch — `.soil` files rejected on open (verified NA5C, P2P)
+- **Symptom:** `IllegalStateException: Pre-packaged database has an invalid schema: notebook`. Crash on every notebook open. Room validates the existing file's schema against the entity definition before allowing queries.
+- **Mismatch 1 — `id.notNull`:** Expected `true`, found `false`. SQLite's `TEXT PRIMARY KEY` syntax does NOT imply `NOT NULL` in column metadata — a quirk unique to SQLite. Room's `@PrimaryKey` always expects `notNull = true`. Fix: `id TEXT PRIMARY KEY` → `id TEXT NOT NULL PRIMARY KEY` in `MainActivity.createNotebook()`.
+- **Mismatch 2 — `order.defaultValue`:** Expected `'undefined'`, found `'0'`. `DEFAULT 0` was in the CREATE TABLE but not declared in `@ColumnInfo`, so Room expected no default. Fix: `@ColumnInfo(name = "order", defaultValue = "0")` on `NotebookObject.sortOrder`.
+- **Mismatch 3 — unexpected index:** Expected `indices = {}`, found `idx_notebook_parent_order`. The entity declared no indices, but `createNotebook()` created one. Room flags any index in the file that the entity doesn't declare. Fix: added `@Entity(indices = [Index(name = "idx_notebook_parent_order", value = ["parentId", "order", "deletedAt"])])` to `NotebookObject`.
+- **General rule:** Every `DEFAULT`, `NOT NULL`, and index in the raw `CREATE TABLE` must be mirrored exactly in the Room entity annotation. When these diverge, Room refuses to open the file.
+- **Cleanup required:** Existing `.soil` files created before this fix have the wrong schema and must be deleted. They cannot be migrated (no data yet). After any CREATE TABLE change, clear `/sdcard/Documents/NoteSprout/` on all devices before testing.
+
+---
+
 ## Future Work — Wacom & Generic Android Stylus
 
 ### Wacom stylus barrel button (MIP11 and other non-BOOX devices)
@@ -316,4 +336,4 @@ Do not get ahead of this list. Complete one step, verify, then move to the next.
 - **Fix direction:** Check `event.isButtonPressed(MotionEvent.BUTTON_STYLUS_PRIMARY)` in `onTouchEvent` and treat it as an eraser mode for the duration of that stroke.
 
 ---
-*Last updated: notebook list screen complete — next step: open a notebook*
+*Last updated: open notebook + Room DB lifecycle complete — next step: basic stroke persistence*

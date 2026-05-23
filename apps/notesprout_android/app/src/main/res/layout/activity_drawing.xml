@@ -16,7 +16,8 @@
 
     <!-- Toolbar floats above the canvas.
          On BOOX, setLimitRect excludes this region from pen input.
-         Height is 48dp content; toolbar_background drawable provides the 1dp inkBlack bottom border. -->
+         Height is 48dp content; toolbar_background drawable provides the 1dp inkBlack bottom border.
+         Left: Close | Center: notebook name | Right: Clear, Erase -->
     <LinearLayout
         android:id="@+id/drawingToolbar"
         android:layout_width="match_parent"
@@ -29,27 +30,38 @@
         android:paddingEnd="8dp">
 
         <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/btnClose"
+            style="@style/Widget.NoteSprout.OutlinedButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Close" />
+
+        <TextView
+            android:id="@+id/tvNotebookName"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:gravity="center"
+            android:text=""
+            android:textColor="@color/inkBlack"
+            android:textSize="14sp"
+            android:textStyle="bold"
+            android:singleLine="true"
+            android:ellipsize="end" />
+
+        <androidx.appcompat.widget.AppCompatButton
             android:id="@+id/btnClear"
             style="@style/Widget.NoteSprout.OutlinedButton"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="Clear" />
 
-        <TextView
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:gravity="center"
-            android:text="Canvas"
-            android:textColor="@color/inkBlack"
-            android:textSize="14sp"
-            android:textStyle="bold" />
-
         <androidx.appcompat.widget.AppCompatButton
             android:id="@+id/btnEraser"
             style="@style/Widget.NoteSprout.OutlinedButton"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
+            android:layout_marginStart="4dp"
             android:text="Erase" />
 
     </LinearLayout>

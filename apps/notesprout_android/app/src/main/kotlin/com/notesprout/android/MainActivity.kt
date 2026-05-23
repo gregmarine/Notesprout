@@ -367,11 +367,14 @@ class MainActivity : AppCompatActivity() {
      * [rowGap]
      * [label TextView — below the card, not inside it]
      * ```
+     * Tapping anywhere on the group opens the notebook in DrawingActivity.
      */
     private fun buildCardGroup(file: File, spec: GridSpec): LinearLayout {
         val group = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity     = Gravity.CENTER_HORIZONTAL
+            // Open the notebook when the user taps the card.
+            setOnClickListener { openNotebook(file) }
         }
 
         // ── Card ────────────────────────────────────────────────────────────
@@ -403,6 +406,15 @@ class MainActivity : AppCompatActivity() {
         group.addView(label, labelLp)
 
         return group
+    }
+
+    // ── Notebook opening ──────────────────────────────────────────────────────
+
+    private fun openNotebook(file: File) {
+        val intent = Intent(this, DrawingActivity::class.java).apply {
+            putExtra(DrawingActivity.EXTRA_NOTEBOOK_PATH, file.absolutePath)
+        }
+        startActivity(intent)
     }
 
     // ── Pagination ────────────────────────────────────────────────────────────
@@ -495,7 +507,7 @@ class MainActivity : AppCompatActivity() {
                 db.execSQL(
                     """
                     CREATE TABLE IF NOT EXISTS notebook (
-                        id          TEXT    PRIMARY KEY,
+                        id          TEXT    NOT NULL PRIMARY KEY,
                         parentId    TEXT    NOT NULL,
                         boundingBox TEXT    NOT NULL,
                         "order"     INTEGER NOT NULL DEFAULT 0,

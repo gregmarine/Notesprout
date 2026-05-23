@@ -1,6 +1,7 @@
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
+    id("com.google.devtools.ksp")
 }
 
 android {
@@ -57,4 +58,9 @@ dependencies {
 
     // Bypass Android 14+ JNI enforcement so the BOOX SDK can call hidden system APIs
     implementation("org.lsposed.hiddenapibypass:hiddenapibypass:4.3")
+
+    // Room — one instance per open .soil notebook file, managed by DrawingActivity
+    implementation("androidx.room:room-runtime:2.7.0")
+    implementation("androidx.room:room-ktx:2.7.0")
+    ksp("androidx.room:room-compiler:2.7.0")
 }
