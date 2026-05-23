@@ -35,14 +35,15 @@ A handwriting-first, meditative notes app. Think paper, but smarter underneath. 
 - Onyx SDK: onyxsdk-device:1.3.3 + onyxsdk-pen:1.5.4 — **IMPLEMENTED**
 - Onyx SDK repo: `http://repo.boox.com/repository/maven-public/` (insecure protocol — required, do not change)
 - hiddenapibypass:4.3 from JitPack — required for Android 14+ BOOX devices (applied in NoteSproutApplication.onCreate)
-- Database: Room/SQLite — not yet implemented, coming soon
+- Database: Room/SQLite — **IN PROGRESS — see Data Layer section**
 - AGP 8.11.1 + Kotlin 2.2.20 + Gradle 8.14
 
 ---
 
 ## Architecture — Foundational Decisions
 
-- Notebook = a folder containing a SQLite file
+- Notebook = a `.soil` file (SQLite database with `.soil` extension)
+- Notebook files live at: `/Documents/NoteSprout/<notebook-name>.soil` — no other location
 - Hierarchy: Notebook → Pages → Layers → Content Objects
 - Layers: base layer (template, locked) and content layers
 - Every object carries: id, parentId, type, subtype, position, boundingBox, link, createdAt, updatedAt, deletedAt, data
@@ -50,6 +51,34 @@ A handwriting-first, meditative notes app. Think paper, but smarter underneath. 
 - Soft deletes with cleanup process
 - Stable UUIDs everywhere
 - Delta sync via syncVersion counter; SyncProvider abstraction (Supabase first)
+
+---
+
+## Data Layer — `.soil` Files
+
+### Core Rules — Never Violate These
+
+- **One file per notebook.** Each `.soil` file is a self-contained SQLite database.
+- **Single table.** Everything — pages, layers, strokes, images, text, metadata — is a row in one `objects` table. No exceptions without explicit discussion.
+- **Everything is an object.** There is no special-casing of types at the schema level. Type behavior lives in Kotlin, not in the database schema.
+- **Assets are base64 strings.** No external files, no file references. Images and other binary assets are stored inline as base64 in the `data` TEXT column.
+- **SQLite must stay clean.** The folder view in a file browser should show only `.soil` files — no WAL files, no SHM files, no journals left behind.
+  - `PRAGMA journal_mode = WAL` — enables WAL mode
+  - `PRAGMA wal_autocheckpoint = 100` — checkpoint after 100 pages
+  - `PRAGMA auto_vacuum = INCREMENTAL` — reclaims space without full vacuum
+  - Run `PRAGMA incremental_vacuum` and `PRAGMA wal_checkpoint(TRUNCATE)` on clean database close to truncate WAL to zero bytes before the connection is released
+
+### Object Schema
+
+**Placeholder — schema to be defined explicitly before implementation.**
+Do not guess at or infer column names, types, or constraints. Wait for the schema to be provided.
+
+### Room Setup Rules
+
+- Room database class opens `.soil` files by absolute path — not from `assets/` or `getDatabasePath()`
+- Use `Room.databaseBuilder(context, SoilDatabase::class.java, absolutePath)`
+- Each open notebook gets its own Room database instance; close and release it when the notebook is closed
+- Do not implement Room until the schema is provided and implementation is explicitly instructed
 
 ---
 
@@ -161,9 +190,11 @@ NoteSprout's visual language is designed for e-ink displays first. All other pla
 - Do not default to Material Design conventions that make the app feel like a generic Android app
 - Do not add dependencies without discussion
 - Do not restructure the monorepo layout without discussion
-- Do not implement Room/SQLite until explicitly instructed
+- Do not implement Room/SQLite until the schema is provided and implementation is explicitly instructed
 - Do not guess at architectural decisions — ask first
 - Do not add new features to apps/notesprout_flutter — it is reference only
+- Do not create multiple tables — everything is a single `objects` table per `.soil` file
+- Do not store assets as files or file references — base64 strings only
 
 ---
 
@@ -206,7 +237,7 @@ adb -s <serial> install -r app/build/outputs/apk/debug/app-debug.apk
 
 ### New Branch: Stroke erasing (verified NA5C, P2P, GC7, NA4C, MIP11)
 - **Toolbar toggle:** `DrawingActivity` owns `isEraserActive` state; toggles button label ("Erase"/"Pen") and calls `drawingView.setEraserMode(Boolean)`.
-- **OnyxDrawingView:** `isEraserMode` flag gates overlay re-enable in `onBeginRawDrawing`. Software eraser points arrive via `onRawDrawingTouchPointMoveReceived` + `onRawDrawingTouchPointListReceived`; physical eraser via `onBeginRawErasing` / `onRawErasingTouchPointMoveReceived` / `onRawErasingTouchPointListReceived`. Move callbacks call `eraseAtPath` per-point for immediate feedback. `handwritingRepaint` in end callbacks commits clean pixels to EPD.
+- **OnyxDrawingView:** `isEraserMode` flag gates overlay re-enable in `onBeginRawDrawing`. Software eraser points arrive via `onRawDrawingTouchPointMoveReceived` + `onRawDrawingTouchPointListReceived`; physical eraser via `onBeginRawErasing` / `onRawErasingTouchPointMoveReceived` / `onRawErasingTouchPointListReceived`. Move callbacks call `eraseAtPath` per-point for immediate feedback. `handwritingRepaint` in end callbacks commits clean EPD pixels to EPD.
 - **GenericDrawingView:** `isEraserActive` flag; `TOOL_TYPE_ERASER` accepted alongside `TOOL_TYPE_STYLUS`. Erasing handled on `ACTION_MOVE` (immediate) + `ACTION_UP` (final point).
 - **Stroke store:** Both views maintain `strokes: MutableList<List<PointF>>`. `eraseAtPath` uses point-to-segment distance (`ERASER_RADIUS_PX = 15f`) to find intersecting strokes, removes them, calls `redrawCanvas()` which rebuilds the bitmap and calls `invalidate()` for immediate visual update.
 - **Key rule:** Never call `handwritingRepaint` in the erase move path — only on pen/eraser lift. Move-path repaint causes a full EPD quality flash on every erased stroke.
@@ -215,11 +246,16 @@ adb -s <serial> install -r app/build/outputs/apk/debug/app-debug.apk
 
 ## Current Step
 
-Next: data structure, notebook file creation, and saving/retrieving stroke data.
-- Notebook = folder + SQLite file (Room)
-- Hierarchy: Notebook → Pages → Layers → Content Objects
-- Stroke data stored as JSON (x, y, pressure, tilt, timestamp point arrays) in a TEXT column
-- This is the first implementation of Room/SQLite in the project — proceed carefully, architecture decisions are load-bearing
+**MVP iteration — data layer foundation.**
+
+Immediate scope (in order):
+1. Define the `objects` table schema — **waiting on schema from Greg**
+2. Room setup + `.soil` file creation at `/Documents/NoteSprout/`
+3. Notebook list screen (reads `.soil` files from that directory)
+4. Open a notebook (instantiates a Room DB from the `.soil` file path)
+5. Basic stroke data persistence (save/load strokes from the `objects` table)
+
+Do not get ahead of this list. Complete one step, verify, then move to the next.
 
 ---
 
@@ -232,4 +268,4 @@ Next: data structure, notebook file creation, and saving/retrieving stroke data.
 - **Fix direction:** Check `event.isButtonPressed(MotionEvent.BUTTON_STYLUS_PRIMARY)` in `onTouchEvent` and treat it as an eraser mode for the duration of that stroke.
 
 ---
-*Last updated: stroke erasing — verified NA5C, P2P, GC7, NA4C, MIP11*
+*Last updated: data layer planning — schema TBD*
