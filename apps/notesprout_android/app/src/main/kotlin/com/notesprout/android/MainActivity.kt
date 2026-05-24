@@ -35,6 +35,7 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import com.notesprout.android.databinding.ActivityMainBinding
 import com.notesprout.android.databinding.DialogNewNotebookBinding
+import org.json.JSONObject
 import java.io.File
 import java.util.UUID
 
@@ -535,7 +536,7 @@ class MainActivity : AppCompatActivity() {
                     """.trimIndent()
                 )
 
-                // ── Bootstrap page + layer ────────────────────────────────────
+                // ── Bootstrap notebook metadata row + first page + layer ──────
                 // Get physical screen dimensions for the page bounding box.
                 val screenBounds = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                     windowManager.currentWindowMetrics.bounds
@@ -555,12 +556,29 @@ class MainActivity : AppCompatActivity() {
                     """INSERT INTO notebook (id, parentId, boundingBox, "order", createdAt, updatedAt, deletedAt, type, data)
                        VALUES (?, ?, ?, 0, ?, ?, NULL, ?, ?)"""
 
-                val pageId = UUID.randomUUID().toString()
+                // Pre-generate the first page UUID so the notebook metadata row can
+                // record it as last_opened_page immediately at creation time.
+                val notebookId = UUID.randomUUID().toString()
+                val pageId     = UUID.randomUUID().toString()
+
+                // 1. Notebook metadata row — must be inserted first; its UUID is the
+                //    parentId for all page rows in this notebook.
+                val notebookDataJson = JSONObject().apply {
+                    put("title", name)
+                    put("cover", "")
+                    put("last_opened_page", pageId)
+                }.toString()
                 db.execSQL(insertSql, arrayOf(
-                    pageId, NIL_UUID, bboxJson, now, now, "page",
+                    notebookId, "", "{}", now, now, "notebook", notebookDataJson
+                ))
+
+                // 2. First page — parentId is the notebook metadata row's UUID.
+                db.execSQL(insertSql, arrayOf(
+                    pageId, notebookId, bboxJson, now, now, "page",
                     """{"width":$screenW,"height":$screenH}"""
                 ))
 
+                // 3. Content layer for the first page.
                 val layerId = UUID.randomUUID().toString()
                 db.execSQL(insertSql, arrayOf(
                     layerId, pageId, bboxJson, now, now, "layer",

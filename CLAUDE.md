@@ -244,8 +244,10 @@ Completed:
 - Multi-page support: LiveStroke, incremental save, add/delete/swipe pages
 - Swipe-left on last page inserts a new page (natural continuous writing flow)
 - Clear page confirmation dialog
+- Notebook metadata row (`type = "notebook"`) — title, cover, last_opened_page
+- Restore last-opened page on every notebook open; persist on every page turn
 
 Next up: TBD — discuss before starting.
 
 ---
-*Last updated: swipe-to-add-page + clear confirmation implemented*
+*Last updated: notebook metadata + last-opened-page restore implemented*

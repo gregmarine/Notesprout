@@ -103,4 +103,20 @@ interface NotebookDao {
      */
     @Query("UPDATE notebook SET `order` = :order WHERE id = :id")
     suspend fun updateOrder(id: String, order: Int)
+
+    // ── Notebook metadata ─────────────────────────────────────────────────────
+
+    /**
+     * The single notebook metadata row (type = 'notebook', parentId = ''), or null if
+     * the notebook pre-dates the metadata row introduction.
+     */
+    @Query("SELECT * FROM notebook WHERE type = 'notebook' LIMIT 1")
+    suspend fun getNotebookObject(): NotebookObject?
+
+    /**
+     * Insert or replace the notebook metadata row.
+     * Used by [saveLastOpenedPage] to persist the last-viewed page UUID.
+     */
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertNotebookObject(obj: NotebookObject)
 }

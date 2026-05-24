@@ -18,6 +18,7 @@ import androidx.lifecycle.lifecycleScope
 import androidx.room.Room
 import com.notesprout.android.data.LiveStroke
 import com.notesprout.android.data.NotebookDao
+import com.notesprout.android.data.NotebookMetadata
 import com.notesprout.android.data.NotebookObject
 import com.notesprout.android.data.SoilDatabase
 import com.notesprout.android.data.StrokeData
@@ -50,6 +51,14 @@ class DrawingActivity : AppCompatActivity() {
 
     /** Room DB instance for the open notebook. Null before open and after close. */
     private var soilDatabase: SoilDatabase? = null
+
+    /**
+     * In-memory notebook metadata row.  Loaded once when the notebook is opened.
+     * Holds the notebook UUID (used as parentId for all pages) and the last-opened
+     * page UUID (used to restore position on re-open).
+     * Null for notebooks that pre-date the metadata row (falls back gracefully).
+     */
+    private var notebookMetadata: NotebookMetadata? = null
 
     // ── Page state ────────────────────────────────────────────────────────────
 
@@ -94,6 +103,7 @@ class DrawingActivity : AppCompatActivity() {
                 val strokes = withContext(Dispatchers.IO) { loadStrokesFromDb(db) }
                 drawingView.loadStrokes(strokes)
                 updatePageIndicator()
+                saveLastOpenedPage(currentPageId)
             }
         }
 
@@ -110,6 +120,7 @@ class DrawingActivity : AppCompatActivity() {
                         val strokes = withContext(Dispatchers.IO) { loadStrokesFromDb(db) }
                         drawingView.loadStrokes(strokes)
                         updatePageIndicator()
+                        saveLastOpenedPage(currentPageId)
                     }
                 }
                 .create()
@@ -239,6 +250,7 @@ class DrawingActivity : AppCompatActivity() {
                                 val strokes = withContext(Dispatchers.IO) { loadStrokesFromDb(db) }
                                 drawingView.loadStrokes(strokes)
                                 updatePageIndicator()
+                                saveLastOpenedPage(currentPageId)
                             }
                             true
                         }
@@ -339,12 +351,25 @@ class DrawingActivity : AppCompatActivity() {
      * and hands them to the drawing view.  Also refreshes [pages], [currentPageId],
      * [currentLayerId], and the page indicator.
      *
-     * Always uses [currentPageIndex] — set it before calling to navigate pages.
+     * On first call (notebook open): loads [notebookMetadata] and uses [NotebookMetadata.lastOpenedPage]
+     * to restore the user's previous position before loading strokes.
      */
     private fun loadStrokes() {
         val db = soilDatabase ?: return
         lifecycleScope.launch {
-            val strokes = withContext(Dispatchers.IO) { loadStrokesFromDb(db) }
+            val strokes = withContext(Dispatchers.IO) {
+                // Restore last-opened page — runs before loadStrokesFromDb so
+                // currentPageIndex is correct when strokes are fetched.
+                notebookMetadata = loadNotebookMetadataFromDb(db)
+                val lastPage = notebookMetadata?.lastOpenedPage
+                if (lastPage != null) {
+                    val allPages = db.notebookDao().getPagesSorted()
+                    val idx = allPages.indexOfFirst { it.id == lastPage }
+                    if (idx >= 0) currentPageIndex = idx
+                    // If idx == -1 (page deleted), keep currentPageIndex = 0 (fallback).
+                }
+                loadStrokesFromDb(db)
+            }
             drawingView.loadStrokes(strokes)
             updatePageIndicator()
         }
@@ -448,6 +473,44 @@ class DrawingActivity : AppCompatActivity() {
         }
     }
 
+    // ── Notebook metadata operations ──────────────────────────────────────────
+
+    /**
+     * Load the notebook metadata row from [db] and parse it into a [NotebookMetadata].
+     * Returns null if the row doesn't exist (old notebook without metadata row) or
+     * the JSON is malformed.  Must be called on [Dispatchers.IO].
+     */
+    private suspend fun loadNotebookMetadataFromDb(db: SoilDatabase): NotebookMetadata? {
+        val obj = db.notebookDao().getNotebookObject() ?: return null
+        return try {
+            NotebookMetadata.fromJson(obj.id, obj.data)
+        } catch (e: Exception) {
+            Log.e(TAG, "loadNotebookMetadataFromDb: failed to parse metadata row", e)
+            null
+        }
+    }
+
+    /**
+     * Asynchronously persist [pageId] as the last-opened page in the notebook metadata row.
+     * No-op if [notebookMetadata] is null (old notebook without the row).
+     * Fast, non-blocking — launches a background coroutine and returns immediately.
+     */
+    private fun saveLastOpenedPage(pageId: String) {
+        val db = soilDatabase ?: return
+        lifecycleScope.launch {
+            withContext(Dispatchers.IO) {
+                val meta = notebookMetadata ?: return@withContext
+                val updatedMeta = meta.copy(lastOpenedPage = pageId)
+                notebookMetadata = updatedMeta
+                val obj = db.notebookDao().getNotebookObject() ?: return@withContext
+                val now = System.currentTimeMillis()
+                db.notebookDao().upsertNotebookObject(
+                    obj.copy(data = updatedMeta.toJson(), updatedAt = now)
+                )
+            }
+        }
+    }
+
     // ── Page operations ───────────────────────────────────────────────────────
 
     /**
@@ -474,13 +537,14 @@ class DrawingActivity : AppCompatActivity() {
             dao.updateOrder(pages[i].id, i + 1)
         }
 
-        // Insert the new page.
+        // Insert the new page.  parentId is the notebook metadata UUID (if present)
+        // so the hierarchy is correct; falls back to NIL_UUID for legacy notebooks.
         val newPageId = UUID.randomUUID().toString()
         dao.insertObject(
             NotebookObject(
                 id          = newPageId,
                 type        = "page",
-                parentId    = MainActivity.NIL_UUID,
+                parentId    = notebookMetadata?.id ?: MainActivity.NIL_UUID,
                 boundingBox = bboxJson,
                 sortOrder   = insertionIndex,
                 createdAt   = now,
@@ -547,7 +611,7 @@ class DrawingActivity : AppCompatActivity() {
                 NotebookObject(
                     id          = newPageId,
                     type        = "page",
-                    parentId    = MainActivity.NIL_UUID,
+                    parentId    = notebookMetadata?.id ?: MainActivity.NIL_UUID,
                     boundingBox = bboxJson,
                     sortOrder   = 0,
                     createdAt   = newNow,
@@ -584,6 +648,7 @@ class DrawingActivity : AppCompatActivity() {
 
     /**
      * Save the current page's strokes, then switch to [newIndex] and load its strokes.
+     * Persists the new current page as [NotebookMetadata.lastOpenedPage] after every turn.
      * Called from the swipe gesture detector.
      */
     private fun navigateToPage(newIndex: Int) {
@@ -595,6 +660,8 @@ class DrawingActivity : AppCompatActivity() {
             val strokes = withContext(Dispatchers.IO) { loadStrokesFromDb(db) }
             drawingView.loadStrokes(strokes)
             updatePageIndicator()
+            // Persist the new current page so the next open restores here.
+            saveLastOpenedPage(currentPageId)
         }
     }
 
