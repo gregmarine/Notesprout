@@ -72,14 +72,15 @@ A handwriting-first, meditative notes app. Think paper, but smarter underneath. 
 
 ```sql
 CREATE TABLE IF NOT EXISTS notebook (
-    id          TEXT    PRIMARY KEY,         -- UUID
-    parentId    TEXT    NOT NULL,            -- UUID of parent object
-    boundingBox TEXT    NOT NULL,            -- JSON {"x":0.0,"y":0.0,"width":0.0,"height":0.0}
-    "order"     INTEGER NOT NULL DEFAULT 0,  -- sort order among siblings
-    createdAt   INTEGER NOT NULL,            -- Unix epoch ms
-    updatedAt   INTEGER NOT NULL,            -- Unix epoch ms
-    deletedAt   INTEGER,                     -- null = alive; soft delete
-    data        TEXT    NOT NULL             -- type-owned JSON blob
+    id          TEXT    PRIMARY KEY NOT NULL,
+    parentId    TEXT    NOT NULL,
+    type        TEXT    NOT NULL,
+    boundingBox TEXT    NOT NULL,
+    "order"     INTEGER NOT NULL DEFAULT 0,
+    createdAt   INTEGER NOT NULL,
+    updatedAt   INTEGER NOT NULL,
+    deletedAt   INTEGER,
+    data        TEXT    NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_notebook_parent_order
@@ -91,7 +92,10 @@ CREATE INDEX IF NOT EXISTS idx_notebook_parent_order
 - Room database class opens `.soil` files by absolute path — not from `assets/` or `getDatabasePath()`
 - Use `Room.databaseBuilder(context, SoilDatabase::class.java, absolutePath)`
 - Each open notebook gets its own Room database instance; close and release it when the notebook is closed
-- Do not implement Room until explicitly instructed
+- `wal_autocheckpoint` is connection-level only — must be re-applied in `SoilDatabase.openCallback()` every open via `SupportSQLiteDatabase.query(...).use { it.moveToFirst() }`
+- PRAGMAs that return a result set must use `rawQuery("PRAGMA ...", null).use { it.moveToFirst() }` — never `execSQL`, never bare `rawQuery` without consuming the cursor
+- Any raw SQL touching the `order` column must double-quote it: `"order"` — it is a SQLite reserved word. Room's generated DAO handles this automatically; only hand-written raw SQL is at risk
+- `closeNotebook()` must run `PRAGMA incremental_vacuum` + `PRAGMA wal_checkpoint(TRUNCATE)`, then `db.close()`, then delete any `-journal` artifact
 
 ---
 
@@ -125,7 +129,12 @@ NoteSprout's visual language is designed for e-ink displays first. All other pla
 - No shadows or elevation on any widget
 - No decorative animations
 - No pill-shaped buttons or fully sharp corners
-- Do not use Material Components — theme is `Theme.AppCompat.Light.NoActionBar`, buttons are `AppCompatButton` with explicit drawable backgrounds
+- Do not use Material Components — theme is `Theme.AppCompat.Light.NoActionBar`, buttons are `AppCompatButton` with explicit drawable backgrounds. `com.google.android.material` is not a dependency — do not add it.
+
+**AlertDialog styling pattern:**
+- `dialog.window?.setSoftInputMode(...)` before `show()`
+- `dialog.window?.setElevation(0f)` and `dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)` after `show()` — window only exists once shown
+- This removes the floating card shadow and replaces it with the flat white/1dp-black-border consistent with all other UI
 
 ---
 
@@ -179,245 +188,64 @@ NoteSprout's visual language is designed for e-ink displays first. All other pla
 ## Drawing Engine Architecture (Implemented)
 
 ### Native Android Layer (package: `com.notesprout.android`)
-- `drawing/DrawingView.kt` — interface: `asView()`, `setToolbarHeight(Int)`, `enableDrawing()`, `disableDrawing()`, `resetOverlay()`, `clearCanvas()`, `setEraserMode(Boolean)`, `releaseResources()`
-- `drawing/OnyxDrawingView.kt` — BOOX path: TouchHelper, RawInputCallback, limit rect. Key pattern: `renderStroke` calls `invalidate()` on every stroke to keep the Android canvas continuously current with the hardware overlay. `clearCanvas()` owns the overlay handoff: disable render → white bitmap → `invalidate()` → `EpdController.handwritingRepaint()` (bakes white into physical EPD pixels) → re-enable. `resetOverlay()` toggles `setRawDrawingRenderEnabled` off/on (test utility). `onBeginRawDrawing` re-enables render when a new stroke starts — guarded by `!isEraserMode` to prevent rogue overlay stroke during software eraser. `EpdController.setUpdListSize(512)` called on every `openRawDrawing()` to suppress hardware auto-GC16 mid-session. Erasing: stroke store (`strokes: MutableList<List<PointF>>`), point-to-segment distance hit test, `redrawCanvas()` rebuilds bitmap on erase. `handwritingRepaint` called in `onEndRawErasing` and `onEndRawDrawing` (eraser mode) to commit clean EPD pixels after erase. Overlay NOT enabled during erasing (physical or software) so bitmap updates are immediately visible.
-- `drawing/GenericDrawingView.kt` — standard Android Canvas: two-layer Bitmap approach, stylus-only (`TOOL_TYPE_STYLUS` + `TOOL_TYPE_ERASER`), historical point capture for smooth strokes. Same stroke store + eraseAtPath as OnyxDrawingView. Erasing fires on `ACTION_MOVE` for immediate feedback.
-- `DrawingActivity.kt` — fullscreen immersive (`WindowInsetsControllerCompat`), detects BOOX via `Build.MANUFACTURER`, `doOnLayout` for precise toolbar height
-- `MainActivity.kt` — theme test screen + entry point to DrawingActivity
+- `drawing/DrawingView.kt` — interface: `asView()`, `setToolbarHeight(Int)`, `enableDrawing()`, `disableDrawing()`, `resetOverlay()`, `clearCanvas()`, `setEraserMode(Boolean)`, `releaseResources()`, `loadStrokes(List<LiveStroke>)`, `getStrokes(): List<LiveStroke>`, `onStrokeErased: ((String) -> Unit)?`, `onIdleSave: (() -> Unit)?`
+- `drawing/OnyxDrawingView.kt` — BOOX path: TouchHelper, RawInputCallback, limit rect. `renderStroke` calls `invalidate()` on every stroke to keep the Android canvas continuously current with the hardware overlay. `clearCanvas()` owns the overlay handoff: disable render → white bitmap → `invalidate()` → `EpdController.handwritingRepaint()` → re-enable. Erasing: stroke store (`strokes: MutableList<LiveStroke>`), point-to-segment distance hit test, `redrawCanvas()` rebuilds bitmap on erase. `onBeginRawDrawing` re-enables render — guarded by `!isEraserMode`. `EpdController.setUpdListSize(512)` called on every `openRawDrawing()`. Idle overlay release at 1.5s via `idleReleaseRunnable`; `onIdleSave` fires alongside overlay release.
+- `drawing/GenericDrawingView.kt` — standard Android Canvas: two-layer Bitmap, stylus-only (`TOOL_TYPE_STYLUS` + `TOOL_TYPE_ERASER`), historical point capture. Idle save via `idleSaveRunnable` posted on `ACTION_UP`.
+- `DrawingActivity.kt` — fullscreen immersive, multi-page state (`pages`, `currentPageIndex`, `currentPageId`, `currentLayerId`), incremental save via `insertOrIgnore`, `onStrokeErased` callback for targeted soft-delete, swipe gesture for page navigation.
+- `MainActivity.kt` — notebook list screen, adaptive grid, pagination, swipe, empty state, bottom bar.
 
 ### Key Build Facts
-- `minSdk = 29` (BOOX devices are Android 10+; Onyx SDK requires it)
-- `android.enableJetifier=true` required — Onyx SDK bundles old `com.android.support` classes
-- `jniLibs.pickFirsts` for `libc++_shared.so` — resolves native lib conflict with Onyx SDK
-- `org.gradle.java.home` in `gradle.properties` pins Temurin-17 — system Java 26 is incompatible with current AGP/Gradle
+- `minSdk = 29`
+- `android.enableJetifier=true` required — Onyx SDK bundles old support classes
+- `jniLibs.pickFirsts` for `libc++_shared.so`
+- `org.gradle.java.home` in `gradle.properties` pins Temurin-17
 - `NoteSproutApplication.onCreate` calls `HiddenApiBypass.addHiddenApiExemptions("")` before any SDK init
 - `setStrokeColor(Color.BLACK)` required on TouchHelper init — NoteAir5C color panel defaults to non-black
-- Toolbar z-order: toolbar must overlay the drawing container in a `FrameLayout`, not sit as a sibling — native SurfaceView occludes Flutter/View siblings below it
-- No `com.google.android.material` dependency — removed; BOOX GC7 OEM skin intercepts Material's backgroundTint mechanism and renders all non-primary-colored buttons solid black. AppCompat with explicit drawable backgrounds is reliable across all devices.
+- Toolbar z-order: toolbar must overlay the drawing container in a `FrameLayout` — native SurfaceView occludes siblings below it
 
 ---
 
-## What NOT To Do
+## Pruning Log — Architectural Lessons (Non-Obvious Rules)
 
-- Do not use infinite scroll anywhere — ever
-- Do not default to Material Design conventions that make the app feel like a generic Android app
-- Do not add dependencies without discussion
-- Do not restructure the monorepo layout without discussion
-- Do not implement Room/SQLite until explicitly instructed
-- Do not guess at architectural decisions — ask first
-- Do not add new features to apps/notesprout_flutter — it is reference only
-- Do not create multiple tables — everything is a single `notebook` table per `.soil` file
-- Do not store assets as files or file references — base64 strings only
+### EPD handoff — flicker-free canvas transition
+- `renderStroke` calls `invalidate()` on every stroke so the Android canvas stays continuously current with the hardware overlay. Overlay removal is always seamless.
+- `clearCanvas()` owns the overlay handoff: disable render → white bitmap → `invalidate()` → `EpdController.handwritingRepaint(view, Rect(0,0,w,h))` → re-enable.
+- **Never remove `handwritingRepaint` from the clear path.** `setRawDrawingRenderEnabled(false/true)` is a lightweight toggle — it hides/shows the overlay but does NOT clear the hardware buffer. `handwritingRepaint` is required to physically commit content to the EPD base layer. Without it: gray residue (EPD pixels not refreshed) and black flash (stale overlay buffer renders at full black on re-enable).
+- `EpdController.setUpdListSize(512)` in `openRawDrawing()` suppresses the hardware's automatic mid-session GC16 refresh. Do not remove.
+- Idle overlay release: `setRawDrawingRenderEnabled(false)` + `invalidate()` after 1.5s inactivity. Overlay reactivates automatically on next `onBeginRawDrawing`.
 
----
-
-## Build & Run
-
-```bash
-cd ~/git/NoteSprout/apps/notesprout_android
-
-./gradlew assembleDebug                        # build debug APK
-./gradlew installDebug                         # build + install on connected device
-
-# Install on a specific device by serial
-adb -s <serial> install -r app/build/outputs/apk/debug/app-debug.apk
-```
-
-*See ADB Device Serials table above for device serials.*
-
----
-
-## Pruning Log
-
-### Pruning: EPD handoff — flicker-free canvas transition (verified NA5C, P2P, GC7)
-- **Root cause:** While the hardware pen overlay is active, the Android canvas bitmap was not being kept current — so when the overlay was removed, the EPD base image was stale and flashed. Fix: call `invalidate()` inside `renderStroke` so the canvas is continuously updated as strokes arrive. The overlay and canvas are always in sync; removing the overlay is seamless.
-- **Architecture simplified:** `commitStrokes` abstraction removed entirely. `clearCanvas()` owns the overlay handoff directly. `pendingCommit`/`commitCallback` fields removed. `onDraw` is now just a bitmap blit.
-- **Focus loss:** `onWindowFocusChanged(false)` calls `invalidate()` then `setRawDrawingEnabled(false)` — canvas is painted before input is stopped. On focus regain, `restartRawDrawing()` resets overlay state.
-
-### Pruning: Fullscreen + Button rendering (verified NA5C, GC7, P2P)
-- **Fullscreen:** `MainActivity` was not fullscreen — on Android 15 devices (NA5C, P2P) the status bar overlaid the window and intercepted touches near the top. Fixed by mirroring `DrawingActivity`'s `WindowInsetsControllerCompat` setup: hide system bars, `BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE`. Both activities are now fully immersive; swipe from edges to transiently reveal system bars.
-- **Buttons on GC7:** BOOX Go Color 7 OEM skin intercepts Material Components' `backgroundTint` mechanism and renders all buttons as solid black regardless of the tint value set. Root fix: dropped `com.google.android.material` entirely. Theme moved to `Theme.AppCompat.Light.NoActionBar`; all buttons switched from `MaterialButton` to `AppCompatButton` with explicit `android:background` drawables (`btn_elevated_background.xml`, `shape_bordered.xml`). `MaterialCardView` replaced with `LinearLayout` + `shape_bordered`. `TextInputLayout` replaced with `AppCompatEditText`. Reliable rendering confirmed on all three test devices.
-
-### Pruning: Idle overlay release — 1.5s after last stroke (verified NA5C, P2P, GC7, NA4C)
-- **What:** After 1.5s of pen inactivity, `setRawDrawingRenderEnabled(false)` + `invalidate()` is called, handing the overlay back to the Android canvas. The overlay reactivates automatically on the next `onBeginRawDrawing`.
-- **Implementation:** `idleReleaseRunnable` posted via `postDelayed` in `onEndRawDrawing`; cancelled via `removeCallbacks` in `onBeginRawDrawing`, on focus loss, and on detach. No explicit reactivation needed — `onBeginRawDrawing` already calls `setRawDrawingRenderEnabled(true)`.
-- **Timing rationale:** 1.5s filters natural mid-thought pen lifts without feeling sluggish. Revisit if explicit page refresh controls are added.
-
-### Pruning: clearCanvas phantom strokes + EPD ghosting (verified NA5C, P2P, GC7, NA4C, MIP11)
-- **Root cause:** Two distinct problems caused by the removal of `EpdController.handwritingRepaint()` from the clear path in commit 99d7b72. (1) **Gray residue** — physical EPD pixels retained old stroke content because the display was never properly refreshed; no overlay toggle fixes this. (2) **Black flash** — the EPD overlay hardware buffer carries old strokes independently of `renderBitmap`; when render is re-enabled after a clear, the stale buffer briefly renders at full black before new strokes overwrite it.
-- **Fix:** Restored `EpdController.handwritingRepaint(view, Rect(0,0,w,h))` in `clearCanvas()` after painting `renderBitmap` white. With the overlay disabled and the bitmap white, `handwritingRepaint` bakes white into the physical EPD pixels, clearing both the ghosting and the stale overlay buffer state. Restored `EpdController.setUpdListSize(512)` in `openRawDrawing()` to suppress the hardware's automatic mid-session GC16 refresh.
-- **Key distinction:** `setRawDrawingRenderEnabled(false/true)` is a lightweight toggle — it hides/shows the overlay but does NOT clear the hardware buffer. `handwritingRepaint` is required to physically commit content to the EPD base layer. Never remove it from the clear path.
-
-### New Branch: Stroke erasing (verified NA5C, P2P, GC7, NA4C, MIP11)
-- **Toolbar toggle:** `DrawingActivity` owns `isEraserActive` state; toggles button label ("Erase"/"Pen") and calls `drawingView.setEraserMode(Boolean)`.
-- **OnyxDrawingView:** `isEraserMode` flag gates overlay re-enable in `onBeginRawDrawing`. Software eraser points arrive via `onRawDrawingTouchPointMoveReceived` + `onRawDrawingTouchPointListReceived`; physical eraser via `onBeginRawErasing` / `onRawErasingTouchPointMoveReceived` / `onRawErasingTouchPointListReceived`. Move callbacks call `eraseAtPath` per-point for immediate feedback. `handwritingRepaint` in end callbacks commits clean EPD pixels to EPD.
-- **GenericDrawingView:** `isEraserActive` flag; `TOOL_TYPE_ERASER` accepted alongside `TOOL_TYPE_STYLUS`. Erasing handled on `ACTION_MOVE` (immediate) + `ACTION_UP` (final point).
-- **Stroke store:** Both views maintain `strokes: MutableList<List<PointF>>`. `eraseAtPath` uses point-to-segment distance (`ERASER_RADIUS_PX = 15f`) to find intersecting strokes, removes them, calls `redrawCanvas()` which rebuilds the bitmap and calls `invalidate()` for immediate visual update.
-- **Key rule:** Never call `handwritingRepaint` in the erase move path — only on pen/eraser lift. Move-path repaint causes a full EPD quality flash on every erased stroke.
-
----
-
-## Current Step
-
-**MVP iteration — data layer foundation.**
-
-Immediate scope (in order):
-1. ~~Define the `notebook` table schema~~ — **DONE** (see Object Schema above)
-2. ~~Room setup + `.soil` file creation at `/Documents/NoteSprout/`~~ — **DONE** (MainActivity "New Notebook" screen; raw SQLiteDatabase; verified NA5C Android 15)
-3. ~~Notebook list screen (reads `.soil` files from that directory)~~ — **DONE** (adaptive grid, pagination, swipe, empty state, bottom bar)
-4. ~~Open a notebook (instantiates a Room DB from the `.soil` file path)~~ — **DONE** (DrawingActivity DB lifecycle; verified NA5C, P2P)
-5. ~~Basic stroke data persistence (save/load strokes from the `notebook` table)~~ — **DONE** (verified NA5C, P2P)
-6. ~~Multi-page support (add/delete pages, swipe navigation, incremental save, LiveStroke)~~ — **DONE** (see New Branch entry below — verify on device)
-
-Do not get ahead of this list. Complete one step, verify, then move to the next.
-
----
-
-## Pruning: AlertDialog styling + keyboard focus (verified NA5C, P2P — Android 15)
-- **Shadow removal:** `AlertDialog` carries implicit elevation from AppCompat's default window background. Fix: `dialog.window?.setElevation(0f)` + `dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)` — replaces the floating card with the same flat white/1dp-black-border drawable used by buttons and inputs throughout the app.
-- **Build order matters:** `setSoftInputMode` must be called before `show()`; `setElevation` and `setBackgroundDrawableResource` must be called after `show()` (window background only exists once the window is created). Pattern: `create()` → `setSoftInputMode` → `show()` → style window → focus field.
-- **Keyboard auto-open:** `SOFT_INPUT_STATE_VISIBLE` (a hint) and `InputMethodManager.showSoftInput` (deprecated API 30+) both silently fail on Android 11+. The correct API is `ViewCompat.getWindowInsetsController(view)?.show(WindowInsetsCompat.Type.ime())`. Must be called in `postDelayed(100)` — the dialog window needs ~100ms to become the active input connection. `InputMethodManager.showSoftInput` is kept as the API 29 fallback via the `?: run { }` branch.
-- **BOOX e-ink note:** The `WindowInsetsController` path works on NA5C (Android 15) — BOOX's own soft keyboard appears. Earlier assumption that BOOX suppresses the soft keyboard was wrong; it shows BOOX's keyboard variant, not a standard QWERTY.
-
----
-
-## Pruning: .soil creation — rawQuery lazy execution + journal cleanup (verified NA5C Android 15)
-- **Root cause 1 — PRAGMAs not applied:** Android's `SQLiteDatabase.execSQL()` rejects any SQL that returns a result set ("Queries can be performed using SQLiteDatabase query or rawQuery methods only"). Switching to `rawQuery(...).close()` is not enough — `rawQuery` is lazy and never executes the SQL unless the cursor is consumed. Fix: `rawQuery("PRAGMA ...", null).use { it.moveToFirst() }` forces execution.
-- **Affected PRAGMAs:** `journal_mode = WAL`, `wal_autocheckpoint = 100`, `auto_vacuum = INCREMENTAL`, `incremental_vacuum`, `wal_checkpoint(TRUNCATE)` — all require `rawQuery` + `moveToFirst()`.
-- **Root cause 2 — journal file artifact:** Android's SQLiteDatabase creates an empty `-journal` file during database initialisation before WAL mode is set. It persists after `db.close()`. Fix: explicitly delete `<name>.soil-journal` after `db.close()`.
-- **wal_autocheckpoint is connection-level only** — not stored in the database file. Must be re-applied every time the database is opened. Room's `openCallback` / `SupportSQLiteDatabase` hooks are the right place for this.
-- **Storage permissions on Android 15 (NA5C):** `MANAGE_EXTERNAL_STORAGE` was already granted on the test device — no runtime prompt observed. The permission flow (Settings → All Files Access) is in place for fresh installs.
-
----
-
-### New Branch: Notebook list screen (MainActivity replacement — verified NA5C, P2P)
-- **Layout:** `activity_main.xml` is a vertical LinearLayout: `FrameLayout` (weight=1, grid area) + `RelativeLayout` (100dp bottom bar). Bottom bar has a 1dp inkBlack top border, pagination controls centered via an inner horizontal LinearLayout, and the + button right-aligned.
-- **Column count — screen-width breakpoints (dp):**
-  - `≥ 720dp` → 5 columns (large tablet, e.g. BOOX NoteAir)
-  - `480–719dp` → 4 columns (mid-size tablet)
-  - `< 480dp` → 3 columns (phone / small device)
-- **Adaptive grid:** Computed in `computeGridSpec()` after the first `onGlobalLayout` fires. Card aspect ratio = physical screen height ÷ width (portrait). Card width fills each column cleanly; card height follows the aspect ratio. Row count = how many complete rows fit the available height after 16dp top/bottom padding.
-- **Grid alignment:** Top-aligned (`Gravity.TOP or Gravity.CENTER_HORIZONTAL`), 16dp top margin via `containerLp.topMargin = spec.paddingVPx` — matches the 16dp side gutters baked into card widths.
-- **Cards (programmatic, no RecyclerView):** Each card group is a vertical LinearLayout: card `FrameLayout` (`shape_bordered` background, `ic_notebook` icon centered inside) + label `TextView` below (not inside the card). Rows are horizontal LinearLayouts; `Space` views provide gutters. All added to a centered outer LinearLayout inside `gridContainer`.
-- **Empty state:** When no `.soil` files exist, a centered inkLight message replaces the grid.
-- **Pagination:** `navigatePage(Int)` clamps and re-renders. `updatePaginationControls()` sets enabled state and text color (inkBlack / inkLight) on all five controls. Button text 22sp, 16dp vertical padding; bar height 100dp.
-- **Swipe:** `GestureDetector.SimpleOnGestureListener.onFling` — horizontal flings only when `|velocityX| > |velocityY|`. No animation.
-- **Scan on resume:** `onResume` calls `scanAndRender()` directly if `gridSpec` is ready; otherwise sets `pendingScan = true` so the global layout listener triggers the scan after the first measure.
-- **New notebook → page jump:** After `createNotebook`, `scanAndRender()` re-scans the sorted list, then `navigatePage(idx / itemsPerPage)` lands on the page containing the new file. (alphabetical sort)
-- **`ic_notebook.xml`:** Vector drawable, 48×48 viewport. White page body (pentagon with folded top-right corner at 33,4→42,13), fold crease (two-segment path), three content lines — all inkBlack 1.5dp stroke.
-- **`GestureDetector` (not `GestureDetectorCompat`):** minSdk 29 — no compat wrapper needed.
-
----
-
-### New Branch: Open notebook — DrawingActivity + Room DB lifecycle (verified NA5C, P2P)
-- **Intent extra:** `DrawingActivity.EXTRA_NOTEBOOK_PATH` (`"notebook_path"`) — absolute path to the `.soil` file. `MainActivity.openNotebook(file)` puts this on the intent when a card is tapped.
-- **Room open:** `Room.databaseBuilder(applicationContext, SoilDatabase::class.java, absolutePath).addCallback(SoilDatabase.openCallback()).allowMainThreadQueries().build()`. Called in `onCreate` after reading the extra. `allowMainThreadQueries()` is a temporary stub — removed in step 5 when queries move off main thread.
-- **`SoilDatabase.openCallback()`:** Re-applies `PRAGMA wal_autocheckpoint = 100` on every open via `SupportSQLiteDatabase.query(...).use { it.moveToFirst() }`. This pragma is connection-level only and is not stored in the file.
-- **`closeNotebook()`:** Idempotent (null-guards `soilDatabase`). Calls `saveStrokes()` stub, runs `PRAGMA incremental_vacuum` + `PRAGMA wal_checkpoint(TRUNCATE)` on `db.openHelper.writableDatabase`, then `db.close()`, then deletes any `-journal` artifact. Called from: Close button, `OnBackPressedCallback`, and `onDestroy` safety net.
-- **Toolbar:** `btnClose` on the left; `tvNotebookName` (center, shows `file.nameWithoutExtension`); `btnClear` and `btnEraser` on the right. Close and back both route through `closeNotebook()` before `finish()`.
-- **Persistence stubs:** `saveStrokes()` and `loadStrokes()` are no-op private methods with TODO comments. `loadStrokes()` is called after DB open; `saveStrokes()` is called at the top of `closeNotebook()`.
-- **Data layer files:** `data/NotebookObject.kt` (`@Entity`), `data/NotebookDao.kt` (empty `@Dao` stub), `data/SoilDatabase.kt` (`@Database`, one instance per notebook, no singleton).
-
-### Pruning: Room schema mismatch — `.soil` files rejected on open (verified NA5C, P2P)
-- **Symptom:** `IllegalStateException: Pre-packaged database has an invalid schema: notebook`. Crash on every notebook open. Room validates the existing file's schema against the entity definition before allowing queries.
-- **Mismatch 1 — `id.notNull`:** Expected `true`, found `false`. SQLite's `TEXT PRIMARY KEY` syntax does NOT imply `NOT NULL` in column metadata — a quirk unique to SQLite. Room's `@PrimaryKey` always expects `notNull = true`. Fix: `id TEXT PRIMARY KEY` → `id TEXT NOT NULL PRIMARY KEY` in `MainActivity.createNotebook()`.
-- **Mismatch 2 — `order.defaultValue`:** Expected `'undefined'`, found `'0'`. `DEFAULT 0` was in the CREATE TABLE but not declared in `@ColumnInfo`, so Room expected no default. Fix: `@ColumnInfo(name = "order", defaultValue = "0")` on `NotebookObject.sortOrder`.
-- **Mismatch 3 — unexpected index:** Expected `indices = {}`, found `idx_notebook_parent_order`. The entity declared no indices, but `createNotebook()` created one. Room flags any index in the file that the entity doesn't declare. Fix: added `@Entity(indices = [Index(name = "idx_notebook_parent_order", value = ["parentId", "order", "deletedAt"])])` to `NotebookObject`.
-- **General rule:** Every `DEFAULT`, `NOT NULL`, and index in the raw `CREATE TABLE` must be mirrored exactly in the Room entity annotation. When these diverge, Room refuses to open the file.
-- **Cleanup required:** Existing `.soil` files created before this fix have the wrong schema and must be deleted. They cannot be migrated (no data yet). After any CREATE TABLE change, clear `/sdcard/Documents/NoteSprout/` on all devices before testing.
-
----
-
-### New Branch: Basic stroke persistence — save/load from `.soil` (verified NA5C, P2P)
-- **Schema change:** Added `type TEXT NOT NULL` column to the `notebook` table. Mirrors `@ColumnInfo(name = "type")` on `NotebookObject`. No `DEFAULT` in SQL → no `defaultValue` in `@ColumnInfo`. **All existing `.soil` files must be deleted** — schema break, no migration.
-- **Page + layer bootstrap:** `MainActivity.createNotebook()` inserts two rows immediately after creating the `.soil` file using `db.execSQL(sql, arrayOf(...))` with a shared parameterized INSERT template that double-quotes `"order"`. Page: `type="page"`, `parentId=NIL_UUID`, `boundingBox`/`data` use physical screen dimensions from `windowManager.currentWindowMetrics.bounds` (API 30+) / `displayMetrics` fallback (API 29). Layer: `type="layer"`, `parentId=<pageId>`, `data={"label":"Content","isLocked":false,"isVisible":true}`. `NIL_UUID = "00000000-0000-0000-0000-000000000000"` defined as a constant in `MainActivity.Companion`.
-- **DAO:** `NotebookDao` now has five suspend functions: `insertObject`, `getObjectsByType`, `getObjectsByParent` (ORDER BY \`order\` ASC), `softDelete`, `getFirstByType`.
-- **Stroke data classes:** `StrokePoint(x,y,pressure?,tilt?,timestamp)` and `StrokeData(color,strokeWidth,points)` in `data/`. `StrokeData.toJson()` / `fromJson()` use `org.json` (no new dependency). `toPointFs()` strips pressure/tilt for rendering.
-- **DrawingView interface additions:** `loadStrokes(List<List<PointF>>)` and `getStrokes(): List<List<PointF>>`. Both `OnyxDrawingView` and `GenericDrawingView` implement them: `loadStrokes` replaces the internal stroke list and calls `redrawCanvas()`; `getStrokes` returns `strokes.toList()` (snapshot copy — thread-safe).
-- **`loadStrokes()` in DrawingActivity:** `lifecycleScope.launch { withContext(IO) { ... } }`. Queries `getFirstByType("page")` → `getObjectsByParent(pageId).filter { type == "layer" }.first()` → `getObjectsByParent(layerId)`. Stores `pageId`/`layerId` as instance fields for `saveStrokes`. Switches back to Main to call `drawingView.loadStrokes()`.
-- **`saveStrokes()` in DrawingActivity:** `private suspend fun` — must be called on `Dispatchers.IO`. Full replace strategy: soft-delete all existing children of `layerId`, then insert current strokes. Bounding box computed from point min/max. `StrokeData` serialized to JSON for the `data` column.
-- **`closeNotebook()` pattern:** `runBlocking { withContext(Dispatchers.IO) { saveStrokes(db); vacuum; checkpoint } }` then `db.close()` on main thread. `runBlocking` is intentional — close must complete before `finish()`. `allowMainThreadQueries()` removed.
-- **Dependencies added:** `kotlinx-coroutines-android:1.8.1`, `lifecycle-runtime-ktx:2.8.7` (provides `lifecycleScope` on Activity).
-- **`eraseAtPath` TODO:** Both drawing views have a TODO comment: "incremental save — soft-delete each removed stroke's NotebookObject row by UUID."
-
-### Pruning: Bootstrap inserts silently dropped — `order` SQLite reserved word (verified NA5C, P2P)
-- **Symptom:** Strokes not persisting after close/reopen. `sqlite3` inspection showed `COUNT(*) = 0` — the page and layer rows were never written even though the schema was correct and Room opened without error.
-- **Root cause:** `db.insert("notebook", null, ContentValues().apply { put("order", 0) ... })` generates SQL with `order` as an unquoted column name. `ORDER` is a SQLite reserved word; using it unquoted in an INSERT causes SQLite to **silently return -1** (failure) without throwing an exception. Both the page and layer bootstrap inserts failed silently, leaving the table empty every time.
-- **Fix:** Replaced `db.insert()` + `ContentValues` with `db.execSQL(sql, arrayOf(...))` using a shared INSERT template that double-quotes the column: `"order"`. A single `insertSql` string is reused for both page and layer inserts.
-- **General rule:** Any raw SQL touching the `order` column must double-quote it: `"order"`. Room's generated DAO handles this automatically via backtick quoting; only hand-written raw SQL is at risk.
-
-### Pruning: Eraser overlay phantom — render not released before first erase gesture (verified NA5C, P2P)
-- **Symptom 1 (toolbar toggle):** First time tapping the toolbar Erase button, the next pen touch drew a visible phantom stroke on the overlay. After the idle timer fired (1.5s), both the phantom and the erased stroke disappeared — correct erasure, but wrong visual timing and a misleading artifact.
-- **Symptom 2 (physical pen eraser button):** Flipping the pen immediately after drawing (before the idle timer fired) caused erased strokes to stay visible until the idle timer expired 1.5s later.
-- **Root cause (both):** The overlay render was still enabled from the previous drawing session when erasing began. `setEraserMode(true)` set the flag and called `setEraserRawDrawingEnabled`, but never released the render. `onBeginRawErasing` cancelled the idle timer but also never released the render. The overlay sat on top of the bitmap hiding the already-correct erase result until the idle timer finally called `setRawDrawingRenderEnabled(false)`.
-- **Fix — toolbar:** In `setEraserMode(active: Boolean)`, when `active = true`: `removeCallbacks(idleReleaseRunnable)`, `touchHelper.setRawDrawingRenderEnabled(false)`, `invalidate()`. Overlay released immediately on toggle.
-- **Fix — physical pen:** In `onBeginRawErasing`: same three calls after `removeCallbacks`. Overlay released at the start of each physical erase gesture.
-- **Key rule:** Whenever erasing begins — toolbar toggle or physical pen flip — release the overlay render immediately. The `onEndRawErasing` / idle-timer path still handles the EPD quality repaint on lift; it is unchanged.
+### Eraser overlay — release render before erasing begins
+- When erasing begins (toolbar toggle or physical pen flip), release the overlay render immediately: `removeCallbacks(idleReleaseRunnable)`, `setRawDrawingRenderEnabled(false)`, `invalidate()`.
+- If the overlay is still enabled when erasing starts, the hardware overlay hides the already-correct bitmap erase result until the idle timer fires — causing phantom strokes and delayed visual feedback.
+- `handwritingRepaint` in `onEndRawErasing` / `onEndRawDrawing` (eraser mode) still commits clean EPD pixels on lift. Never call `handwritingRepaint` in the erase move path — it causes a full EPD quality flash on every erased stroke.
+- `onBeginRawDrawing` re-enables render — guarded by `!isEraserMode` to prevent rogue overlay stroke during software eraser.
 
 ---
 
 ## Future Work — Wacom & Generic Android Stylus
 
 ### Wacom stylus barrel button (MIP11 and other non-BOOX devices)
-- **What:** Barrel button(s) on Wacom/USI styli do not change `getToolType()` — they set `BUTTON_STYLUS_PRIMARY` / `BUTTON_STYLUS_SECONDARY` flags on the `MotionEvent`.
-- **Current state:** `GenericDrawingView` only inspects tool type, so barrel buttons have no effect. The eraser toggle in the toolbar works fine. Physical eraser end (`TOOL_TYPE_ERASER`) works fine.
-- **When to address:** When focusing on Wacom and generic Android device optimization. Low priority — do not let it block BOOX-first progress.
-- **Fix direction:** Check `event.isButtonPressed(MotionEvent.BUTTON_STYLUS_PRIMARY)` in `onTouchEvent` and treat it as an eraser mode for the duration of that stroke.
+- Barrel buttons set `BUTTON_STYLUS_PRIMARY` / `BUTTON_STYLUS_SECONDARY` flags on `MotionEvent` — they do not change `getToolType()`.
+- `GenericDrawingView` currently only inspects tool type; barrel buttons have no effect.
+- Fix direction: check `event.isButtonPressed(MotionEvent.BUTTON_STYLUS_PRIMARY)` in `onTouchEvent` and treat as eraser mode for the duration of that stroke.
+- Low priority — do not let it block BOOX-first progress.
 
 ---
 
-### New Branch: Multi-page support — LiveStroke, incremental save, add/delete/swipe (unverified — ready for device testing)
+## Current Step
 
-#### LiveStroke
-- `data/LiveStroke(id: String, points: List<PointF>)` — replaces raw `List<PointF>` stroke lists throughout the drawing layer. UUID assigned at stroke creation time (inside `renderStroke` / `commitActiveStroke`). The `id` is the stable key that maps to `NotebookObject.id` in the DB.
-- `DrawingView` interface: `loadStrokes(List<LiveStroke>)`, `getStrokes(): List<LiveStroke>`, plus two new callbacks: `onStrokeErased: ((String) -> Unit)?` and `onIdleSave: (() -> Unit)?`. Both views expose these as `override var` properties, defaulting to null.
+**MVP iteration — multi-page drawing with persistence.**
 
-#### Incremental save (INSERT OR IGNORE)
-- `NotebookDao.insertOrIgnore` with `@Insert(onConflict = OnConflictStrategy.IGNORE)`.
-- `saveStrokes(db)` in `DrawingActivity` iterates `drawingView.getStrokes()` and calls `insertOrIgnore` for each. Already-persisted strokes (same UUID) are silently skipped. No full soft-delete + re-insert cycle.
-- `onStrokeErased` callback: fires for each erased stroke ID → activity launches IO coroutine → `dao.softDeleteById(id, now)`. Immediate targeted delete instead of batch delete at save time.
-- `btnClear` handler: snapshots `drawingView.getStrokes()` before `clearCanvas()`, then soft-deletes all those rows on IO — correct cleanup without re-inserting.
-- `saveStrokes` is called in three places: idle timer, page navigation (before switch), and `closeNotebook` (before vacuum/checkpoint).
+Completed:
+- `.soil` schema + Room setup
+- Notebook list screen (MainActivity)
+- Open notebook → DrawingActivity + Room DB lifecycle
+- Basic stroke persistence (save/load)
+- Multi-page support: LiveStroke, incremental save, add/delete/swipe pages
+- Swipe-left on last page inserts a new page (natural continuous writing flow)
+- Clear page confirmation dialog
 
-#### Idle save
-- `OnyxDrawingView`: `onIdleSave?.invoke()` fires in `idleReleaseRunnable` (alongside the existing overlay release). Same 1.5 s timing.
-- `GenericDrawingView`: `idleSaveRunnable` posted with `postDelayed(1500)` on `ACTION_UP` for drawing strokes; cancelled on `ACTION_DOWN` and `clearCanvas()` / `loadStrokes()` / `releaseResources()`.
-- Both: `loadStrokes()` cancels any pending idle runnable via `removeCallbacks` to prevent a stale-page save after a page switch.
-
-#### Page data model additions (NotebookDao)
-- `getPagesSorted()` — `WHERE type='page' AND deletedAt IS NULL ORDER BY order ASC`
-- `getLayerForPage(pageId)` — single layer row under a page
-- `getStrokesForLayer(layerId)` — all stroke rows under a layer
-- `softDeleteById(id, deletedAt)` — targeted single-row soft delete
-- `softDeleteByParentId(parentId, deletedAt)` — cascade soft delete for all children
-- `updateOrder(id, order)` — re-order pages after insertion/deletion
-- `insertOrIgnore` — as above
-
-#### Page state in DrawingActivity
-- Replaced `pageId`/`layerId` fields with: `pages: MutableList<NotebookObject>`, `currentPageIndex: Int`, `currentPageId: String`, `currentLayerId: String`.
-- `loadStrokesFromDb(db)` — private suspend fun; queries `getPagesSorted()` → `getLayerForPage()` → `getStrokesForLayer()`, updates all state fields, returns `List<LiveStroke>`.
-- `loadStrokes()` — non-suspend; launches a coroutine, calls `loadStrokesFromDb`, updates drawing view + page indicator. Always respects the current `currentPageIndex`.
-
-#### Add page
-- `addPage(db)` suspend fun: save strokes → shift `order` of pages after insertion point → insert new page row → insert bootstrap layer → reload pages → advance `currentPageIndex`.
-- `btnAddPage "+"` wired in onCreate: IO launch → addPage → clearCanvas → loadStrokesFromDb → loadStrokes → updatePageIndicator.
-
-#### Delete page
-- `deletePage(db)` suspend fun: save strokes → softDeleteById(page) → softDeleteByParentId(page) [cascade to layer] → softDeleteByParentId(layer) [cascade to strokes] → reload pages → if empty: bootstrap new page+layer → clamp `currentPageIndex`.
-- `btnDeletePage "−"` (Unicode minus U+2212) wired same as add.
-
-#### Page swipe gesture
-- `GestureDetector` attached to `drawingContainer` via `setOnTouchListener { _, event → detector.onTouchEvent(event); false }`. Returning `false` passes events through to the drawing view (finger touches are rejected by both drawing views, so no conflict).
-- Swipe left → `currentPageIndex + 1`; swipe right → `currentPageIndex - 1`. Both guarded by bounds check. Navigation: save → set index → clearCanvas → loadStrokesFromDb → loadStrokes → updatePageIndicator.
-
-#### Toolbar changes
-- Removed `tvNotebookName` from layout and activity.
-- New toolbar order: Close | + | − | [Space weight=1] | Clear | Erase.
-- `tvPageIndicator` added as a `TextView` overlay in the root `FrameLayout` with `layout_gravity="bottom|end"` and `8dp` margins. Text `"1 / 1"`, `inkLight` color, 12sp. Not inside the toolbar LinearLayout.
-- `updatePageIndicator()` sets text to `"${currentPageIndex + 1} / ${pages.size}"`.
-
-#### Schema note
-- No schema change. `LiveStroke.id` maps to the existing `NotebookObject.id` TEXT NOT NULL PRIMARY KEY column. Existing `.soil` files are forward-compatible; old stroke rows load fine (their UUIDs become the LiveStroke IDs).
+Next up: TBD — discuss before starting.
 
 ---
-*Last updated: multi-page support implemented — LiveStroke, incremental save, add/delete/swipe pages*
+*Last updated: swipe-to-add-page + clear confirmation implemented*

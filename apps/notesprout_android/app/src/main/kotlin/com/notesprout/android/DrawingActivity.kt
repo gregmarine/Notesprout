@@ -120,21 +120,31 @@ class DrawingActivity : AppCompatActivity() {
         }
 
         binding.btnClear.setOnClickListener {
-            // Capture the stroke IDs before clearing so we can soft-delete their DB rows.
             val db = soilDatabase
-            val strokesToDelete = drawingView.getStrokes()
-            drawingView.clearCanvas()
-            if (db != null && strokesToDelete.isNotEmpty()) {
-                lifecycleScope.launch {
-                    withContext(Dispatchers.IO) {
-                        val now = System.currentTimeMillis()
-                        val dao = db.notebookDao()
-                        for (stroke in strokesToDelete) {
-                            dao.softDeleteById(stroke.id, now)
+            val dialog = AlertDialog.Builder(this)
+                .setMessage("Clear this page?")
+                .setNegativeButton("Cancel", null)
+                .setPositiveButton("Clear") { _, _ ->
+                    // Capture the stroke IDs before clearing so we can soft-delete their DB rows.
+                    val strokesToDelete = drawingView.getStrokes()
+                    drawingView.clearCanvas()
+                    if (db != null && strokesToDelete.isNotEmpty()) {
+                        lifecycleScope.launch {
+                            withContext(Dispatchers.IO) {
+                                val now = System.currentTimeMillis()
+                                val dao = db.notebookDao()
+                                for (stroke in strokesToDelete) {
+                                    dao.softDeleteById(stroke.id, now)
+                                }
+                            }
                         }
                     }
                 }
-            }
+                .create()
+            dialog.show()
+            // Style after show() — window only exists once the dialog is displayed.
+            dialog.window?.setElevation(0f)
+            dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
         }
 
         binding.btnEraser.setOnClickListener {
@@ -217,7 +227,21 @@ class DrawingActivity : AppCompatActivity() {
                     if (Math.abs(velocityX) < Math.abs(velocityY)) return false
                     return if (velocityX < 0) {
                         val next = currentPageIndex + 1
-                        if (next <= pages.lastIndex) { navigateToPage(next); true } else false
+                        if (next <= pages.lastIndex) {
+                            navigateToPage(next); true
+                        } else {
+                            // Already on the last page — swipe left inserts a new page,
+                            // identical to tapping the + button.
+                            val db = soilDatabase ?: return false
+                            lifecycleScope.launch {
+                                withContext(Dispatchers.IO) { addPage(db) }
+                                drawingView.clearCanvas()
+                                val strokes = withContext(Dispatchers.IO) { loadStrokesFromDb(db) }
+                                drawingView.loadStrokes(strokes)
+                                updatePageIndicator()
+                            }
+                            true
+                        }
                     } else {
                         val prev = currentPageIndex - 1
                         if (prev >= 0) { navigateToPage(prev); true } else false
