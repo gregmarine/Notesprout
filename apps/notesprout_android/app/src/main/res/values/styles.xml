@@ -91,6 +91,17 @@
         <item name="android:paddingBottom">8dp</item>
     </style>
 
+    <!-- Toolbar variant — same border/fill as OutlinedButton but tighter padding and no
+         minimum width so buttons fit on phone-width screens (e.g. BOOX Palma2 Pro). -->
+    <style name="Widget.NoteSprout.ToolbarButton" parent="Widget.NoteSprout.OutlinedButton">
+        <item name="android:paddingStart">8dp</item>
+        <item name="android:paddingEnd">8dp</item>
+        <item name="android:paddingTop">6dp</item>
+        <item name="android:paddingBottom">6dp</item>
+        <item name="android:minWidth">0dp</item>
+        <item name="android:minHeight">0dp</item>
+    </style>
+
     <!-- Transparent background, black text, no press effect -->
     <style name="Widget.NoteSprout.TextButton" parent="Widget.AppCompat.Button">
         <item name="android:background">@android:color/transparent</item>
