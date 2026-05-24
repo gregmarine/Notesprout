@@ -266,7 +266,8 @@ Immediate scope (in order):
 2. ~~Room setup + `.soil` file creation at `/Documents/NoteSprout/`~~ — **DONE** (MainActivity "New Notebook" screen; raw SQLiteDatabase; verified NA5C Android 15)
 3. ~~Notebook list screen (reads `.soil` files from that directory)~~ — **DONE** (adaptive grid, pagination, swipe, empty state, bottom bar)
 4. ~~Open a notebook (instantiates a Room DB from the `.soil` file path)~~ — **DONE** (DrawingActivity DB lifecycle; verified NA5C, P2P)
-5. ~~Basic stroke data persistence (save/load strokes from the `notebook` table)~~ — **DONE** (see New Branch entry below — verify on device)
+5. ~~Basic stroke data persistence (save/load strokes from the `notebook` table)~~ — **DONE** (verified NA5C, P2P)
+6. ~~Multi-page support (add/delete pages, swipe navigation, incremental save, LiveStroke)~~ — **DONE** (see New Branch entry below — verify on device)
 
 Do not get ahead of this list. Complete one step, verify, then move to the next.
 
@@ -364,4 +365,59 @@ Do not get ahead of this list. Complete one step, verify, then move to the next.
 - **Fix direction:** Check `event.isButtonPressed(MotionEvent.BUTTON_STYLUS_PRIMARY)` in `onTouchEvent` and treat it as an eraser mode for the duration of that stroke.
 
 ---
-*Last updated: basic stroke persistence complete and verified — eraser overlay phantom pruned (toolbar + physical pen)*
+
+### New Branch: Multi-page support — LiveStroke, incremental save, add/delete/swipe (unverified — ready for device testing)
+
+#### LiveStroke
+- `data/LiveStroke(id: String, points: List<PointF>)` — replaces raw `List<PointF>` stroke lists throughout the drawing layer. UUID assigned at stroke creation time (inside `renderStroke` / `commitActiveStroke`). The `id` is the stable key that maps to `NotebookObject.id` in the DB.
+- `DrawingView` interface: `loadStrokes(List<LiveStroke>)`, `getStrokes(): List<LiveStroke>`, plus two new callbacks: `onStrokeErased: ((String) -> Unit)?` and `onIdleSave: (() -> Unit)?`. Both views expose these as `override var` properties, defaulting to null.
+
+#### Incremental save (INSERT OR IGNORE)
+- `NotebookDao.insertOrIgnore` with `@Insert(onConflict = OnConflictStrategy.IGNORE)`.
+- `saveStrokes(db)` in `DrawingActivity` iterates `drawingView.getStrokes()` and calls `insertOrIgnore` for each. Already-persisted strokes (same UUID) are silently skipped. No full soft-delete + re-insert cycle.
+- `onStrokeErased` callback: fires for each erased stroke ID → activity launches IO coroutine → `dao.softDeleteById(id, now)`. Immediate targeted delete instead of batch delete at save time.
+- `btnClear` handler: snapshots `drawingView.getStrokes()` before `clearCanvas()`, then soft-deletes all those rows on IO — correct cleanup without re-inserting.
+- `saveStrokes` is called in three places: idle timer, page navigation (before switch), and `closeNotebook` (before vacuum/checkpoint).
+
+#### Idle save
+- `OnyxDrawingView`: `onIdleSave?.invoke()` fires in `idleReleaseRunnable` (alongside the existing overlay release). Same 1.5 s timing.
+- `GenericDrawingView`: `idleSaveRunnable` posted with `postDelayed(1500)` on `ACTION_UP` for drawing strokes; cancelled on `ACTION_DOWN` and `clearCanvas()` / `loadStrokes()` / `releaseResources()`.
+- Both: `loadStrokes()` cancels any pending idle runnable via `removeCallbacks` to prevent a stale-page save after a page switch.
+
+#### Page data model additions (NotebookDao)
+- `getPagesSorted()` — `WHERE type='page' AND deletedAt IS NULL ORDER BY order ASC`
+- `getLayerForPage(pageId)` — single layer row under a page
+- `getStrokesForLayer(layerId)` — all stroke rows under a layer
+- `softDeleteById(id, deletedAt)` — targeted single-row soft delete
+- `softDeleteByParentId(parentId, deletedAt)` — cascade soft delete for all children
+- `updateOrder(id, order)` — re-order pages after insertion/deletion
+- `insertOrIgnore` — as above
+
+#### Page state in DrawingActivity
+- Replaced `pageId`/`layerId` fields with: `pages: MutableList<NotebookObject>`, `currentPageIndex: Int`, `currentPageId: String`, `currentLayerId: String`.
+- `loadStrokesFromDb(db)` — private suspend fun; queries `getPagesSorted()` → `getLayerForPage()` → `getStrokesForLayer()`, updates all state fields, returns `List<LiveStroke>`.
+- `loadStrokes()` — non-suspend; launches a coroutine, calls `loadStrokesFromDb`, updates drawing view + page indicator. Always respects the current `currentPageIndex`.
+
+#### Add page
+- `addPage(db)` suspend fun: save strokes → shift `order` of pages after insertion point → insert new page row → insert bootstrap layer → reload pages → advance `currentPageIndex`.
+- `btnAddPage "+"` wired in onCreate: IO launch → addPage → clearCanvas → loadStrokesFromDb → loadStrokes → updatePageIndicator.
+
+#### Delete page
+- `deletePage(db)` suspend fun: save strokes → softDeleteById(page) → softDeleteByParentId(page) [cascade to layer] → softDeleteByParentId(layer) [cascade to strokes] → reload pages → if empty: bootstrap new page+layer → clamp `currentPageIndex`.
+- `btnDeletePage "−"` (Unicode minus U+2212) wired same as add.
+
+#### Page swipe gesture
+- `GestureDetector` attached to `drawingContainer` via `setOnTouchListener { _, event → detector.onTouchEvent(event); false }`. Returning `false` passes events through to the drawing view (finger touches are rejected by both drawing views, so no conflict).
+- Swipe left → `currentPageIndex + 1`; swipe right → `currentPageIndex - 1`. Both guarded by bounds check. Navigation: save → set index → clearCanvas → loadStrokesFromDb → loadStrokes → updatePageIndicator.
+
+#### Toolbar changes
+- Removed `tvNotebookName` from layout and activity.
+- New toolbar order: Close | + | − | [Space weight=1] | Clear | Erase.
+- `tvPageIndicator` added as a `TextView` overlay in the root `FrameLayout` with `layout_gravity="bottom|end"` and `8dp` margins. Text `"1 / 1"`, `inkLight` color, 12sp. Not inside the toolbar LinearLayout.
+- `updatePageIndicator()` sets text to `"${currentPageIndex + 1} / ${pages.size}"`.
+
+#### Schema note
+- No schema change. `LiveStroke.id` maps to the existing `NotebookObject.id` TEXT NOT NULL PRIMARY KEY column. Existing `.soil` files are forward-compatible; old stroke rows load fine (their UUIDs become the LiveStroke IDs).
+
+---
+*Last updated: multi-page support implemented — LiveStroke, incremental save, add/delete/swipe pages*

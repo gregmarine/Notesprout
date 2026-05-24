@@ -9,6 +9,8 @@ import android.graphics.Path
 import android.graphics.PointF
 import android.view.MotionEvent
 import android.view.View
+import com.notesprout.android.data.LiveStroke
+import java.util.UUID
 
 // Flutter-equivalent of GenericDrawingEngine — pure Android Canvas rendering.
 // Stylus-only: finger touch is rejected at the MotionEvent level.
@@ -26,8 +28,8 @@ class GenericDrawingView(context: Context) : View(context), DrawingView {
     private var renderCanvas: Canvas? = null
     private var isEraserActive = false
 
-    // Stroke store — required for stroke-level erasing.
-    private val strokes = mutableListOf<List<PointF>>()
+    // Stroke store — LiveStroke carries the DB row UUID for incremental save / targeted erase.
+    private val strokes = mutableListOf<LiveStroke>()
 
     private val strokePaint = Paint().apply {
         isAntiAlias = true
@@ -37,6 +39,26 @@ class GenericDrawingView(context: Context) : View(context), DrawingView {
         strokeJoin = Paint.Join.ROUND
         strokeWidth = 2.5f
     }
+
+    // ── DrawingView callbacks ────────────────────────────────────────────────
+
+    /** Invoked (on main thread) when a stroke is removed by erasing. */
+    override var onStrokeErased: ((String) -> Unit)? = null
+
+    /**
+     * Invoked (on main thread) 1.5 s after the last ACTION_UP, matching the idle
+     * pattern used by OnyxDrawingView.  The activity uses this to incrementally
+     * save new strokes without blocking the drawing thread.
+     */
+    override var onIdleSave: (() -> Unit)? = null
+
+    // ── Idle save ────────────────────────────────────────────────────────────
+
+    private val idleSaveRunnable = Runnable {
+        onIdleSave?.invoke()
+    }
+
+    // ── Touch handling ───────────────────────────────────────────────────────
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
@@ -57,6 +79,7 @@ class GenericDrawingView(context: Context) : View(context), DrawingView {
 
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
+                removeCallbacks(idleSaveRunnable)
                 activePoints.clear()
                 activePoints.add(PointF(event.x, event.y))
                 invalidate()
@@ -81,6 +104,8 @@ class GenericDrawingView(context: Context) : View(context), DrawingView {
                 } else {
                     activePoints.add(PointF(event.x, event.y))
                     commitActiveStroke()
+                    // Schedule idle save ~1.5 s after the stroke ends.
+                    postDelayed(idleSaveRunnable, 1500)
                 }
                 activePoints.clear()
                 invalidate()
@@ -109,8 +134,9 @@ class GenericDrawingView(context: Context) : View(context), DrawingView {
     private fun commitActiveStroke() {
         val canvas = renderCanvas ?: return
         if (activePoints.size < 2) return
+        val strokeId = UUID.randomUUID().toString()
         val strokePoints = activePoints.toList()
-        strokes.add(strokePoints)
+        strokes.add(LiveStroke(strokeId, strokePoints))
         val path = Path()
         path.moveTo(strokePoints[0].x, strokePoints[0].y)
         for (i in 1 until strokePoints.size) {
@@ -122,8 +148,8 @@ class GenericDrawingView(context: Context) : View(context), DrawingView {
     private fun eraseAtPath(eraserPoints: List<PointF>) {
         if (eraserPoints.isEmpty()) return
         val thresholdSq = ERASER_RADIUS_PX * ERASER_RADIUS_PX
-        val toRemove = strokes.filter { stroke ->
-            stroke.any { sp ->
+        val toRemove = strokes.filter { liveStroke ->
+            liveStroke.points.any { sp ->
                 eraserPoints.indices.drop(1).any { i ->
                     pointToSegmentDistSq(sp, eraserPoints[i - 1], eraserPoints[i]) <= thresholdSq
                 } || pointToPointDistSq(sp, eraserPoints[0]) <= thresholdSq
@@ -131,7 +157,7 @@ class GenericDrawingView(context: Context) : View(context), DrawingView {
         }
         if (toRemove.isNotEmpty()) {
             strokes.removeAll(toRemove.toSet())
-            // TODO: incremental save — soft-delete each removed stroke's NotebookObject row by UUID.
+            toRemove.forEach { onStrokeErased?.invoke(it.id) }
             redrawCanvas()
         }
     }
@@ -139,12 +165,13 @@ class GenericDrawingView(context: Context) : View(context), DrawingView {
     private fun redrawCanvas() {
         val canvas = renderCanvas ?: return
         canvas.drawColor(Color.WHITE)
-        for (stroke in strokes) {
-            if (stroke.size < 2) continue
+        for (liveStroke in strokes) {
+            val points = liveStroke.points
+            if (points.size < 2) continue
             val path = Path()
-            path.moveTo(stroke[0].x, stroke[0].y)
-            for (i in 1 until stroke.size) {
-                path.lineTo(stroke[i].x, stroke[i].y)
+            path.moveTo(points[0].x, points[0].y)
+            for (i in 1 until points.size) {
+                path.lineTo(points[i].x, points[i].y)
             }
             canvas.drawPath(path, strokePaint)
         }
@@ -171,7 +198,7 @@ class GenericDrawingView(context: Context) : View(context), DrawingView {
         return dx * dx + dy * dy
     }
 
-    // ── DrawingView interface ──
+    // ── DrawingView interface ────────────────────────────────────────────────
 
     override fun asView(): View = this
     override fun setToolbarHeight(heightPx: Int) {} // no limit rect needed; toolbar is above canvas in z-order
@@ -182,19 +209,22 @@ class GenericDrawingView(context: Context) : View(context), DrawingView {
     override fun clearCanvas() {
         activePoints.clear()
         strokes.clear()
+        removeCallbacks(idleSaveRunnable)
         renderCanvas?.drawColor(Color.WHITE)
         invalidate()
     }
 
-    override fun loadStrokes(strokes: List<List<PointF>>) {
+    override fun loadStrokes(strokes: List<LiveStroke>) {
+        removeCallbacks(idleSaveRunnable)
         this.strokes.clear()
         this.strokes.addAll(strokes)
         redrawCanvas()
     }
 
-    override fun getStrokes(): List<List<PointF>> = strokes.toList()
+    override fun getStrokes(): List<LiveStroke> = strokes.toList()
 
     override fun releaseResources() {
+        removeCallbacks(idleSaveRunnable)
         renderBitmap?.recycle()
         renderBitmap = null
         renderCanvas = null

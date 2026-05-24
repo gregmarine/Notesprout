@@ -12,11 +12,13 @@ import android.util.Log
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewTreeObserver
+import com.notesprout.android.data.LiveStroke
 import com.onyx.android.sdk.api.device.epd.EpdController
 import com.onyx.android.sdk.data.note.TouchPoint
 import com.onyx.android.sdk.pen.RawInputCallback
 import com.onyx.android.sdk.pen.TouchHelper
 import com.onyx.android.sdk.pen.data.TouchPointList
+import java.util.UUID
 
 class OnyxDrawingView(context: Context) : View(context), DrawingView {
 
@@ -44,12 +46,25 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
     private val touchHelper: TouchHelper by lazy { TouchHelper.create(this, rawInputCallback) }
     private var isSetup = false
 
-    // Stroke store — required for stroke-level erasing.
-    private val strokes = mutableListOf<List<PointF>>()
+    // Stroke store — LiveStroke carries the DB row UUID for incremental save / targeted erase.
+    private val strokes = mutableListOf<LiveStroke>()
 
     // When true, drawing callbacks treat pen input as erasing.
     // Set by setEraserMode(); also fires via physical eraser hardware callbacks regardless of this flag.
     private var isEraserMode = false
+
+    // ── DrawingView callbacks ────────────────────────────────────────────────
+
+    /** Invoked (on main thread) when a stroke is removed by erasing. */
+    override var onStrokeErased: ((String) -> Unit)? = null
+
+    /**
+     * Invoked (on main thread) after 1.5 s of pen inactivity — the same moment the
+     * hardware overlay is released back to the Android canvas.
+     */
+    override var onIdleSave: (() -> Unit)? = null
+
+    // ── Idle release + idle save ─────────────────────────────────────────────
 
     private val idleReleaseRunnable = Runnable {
         if (isSetup) {
@@ -57,7 +72,10 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
             touchHelper.setRawDrawingRenderEnabled(false)
             invalidate()
         }
+        onIdleSave?.invoke()
     }
+
+    // ── Raw input callback ───────────────────────────────────────────────────
 
     private val rawInputCallback = object : RawInputCallback() {
         override fun onBeginRawDrawing(shortcutDrawing: Boolean, touchPoint: TouchPoint) {
@@ -117,12 +135,15 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
     private fun TouchPointList.toPointFs(): List<PointF> =
         points?.map { PointF(it.x, it.y) } ?: emptyList()
 
+    // ── Drawing helpers ──────────────────────────────────────────────────────
+
     private fun renderStroke(pointList: TouchPointList) {
         val canvas = renderCanvas ?: return
         val points = pointList.points
         if (points.isNullOrEmpty()) return
+        val strokeId = UUID.randomUUID().toString()
         val strokePoints = points.map { PointF(it.x, it.y) }
-        strokes.add(strokePoints)
+        strokes.add(LiveStroke(strokeId, strokePoints))
         val path = Path()
         path.moveTo(strokePoints[0].x, strokePoints[0].y)
         for (i in 1 until strokePoints.size) {
@@ -135,8 +156,8 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
     private fun eraseAtPath(eraserPoints: List<PointF>) {
         if (eraserPoints.isEmpty()) return
         val thresholdSq = ERASER_RADIUS_PX * ERASER_RADIUS_PX
-        val toRemove = strokes.filter { stroke ->
-            stroke.any { sp ->
+        val toRemove = strokes.filter { liveStroke ->
+            liveStroke.points.any { sp ->
                 eraserPoints.indices.drop(1).any { i ->
                     pointToSegmentDistSq(sp, eraserPoints[i - 1], eraserPoints[i]) <= thresholdSq
                 } || pointToPointDistSq(sp, eraserPoints[0]) <= thresholdSq
@@ -144,7 +165,7 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
         }
         if (toRemove.isNotEmpty()) {
             strokes.removeAll(toRemove.toSet())
-            // TODO: incremental save — soft-delete each removed stroke's NotebookObject row by UUID.
+            toRemove.forEach { onStrokeErased?.invoke(it.id) }
             redrawCanvas()
         }
     }
@@ -152,12 +173,13 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
     private fun redrawCanvas() {
         val canvas = renderCanvas ?: return
         canvas.drawColor(Color.WHITE)
-        for (stroke in strokes) {
-            if (stroke.size < 2) continue
+        for (liveStroke in strokes) {
+            val points = liveStroke.points
+            if (points.size < 2) continue
             val path = Path()
-            path.moveTo(stroke[0].x, stroke[0].y)
-            for (i in 1 until stroke.size) {
-                path.lineTo(stroke[i].x, stroke[i].y)
+            path.moveTo(points[0].x, points[0].y)
+            for (i in 1 until points.size) {
+                path.lineTo(points[i].x, points[i].y)
             }
             canvas.drawPath(path, strokePaint)
         }
@@ -183,6 +205,8 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
         val dy = a.y - b.y
         return dx * dx + dy * dy
     }
+
+    // ── View lifecycle ───────────────────────────────────────────────────────
 
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
@@ -241,7 +265,7 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
         }
     }
 
-    // ── DrawingView interface ──
+    // ── DrawingView interface ────────────────────────────────────────────────
 
     override fun asView(): View = this
 
@@ -293,14 +317,15 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
         }
     }
 
-    override fun loadStrokes(strokes: List<List<PointF>>) {
+    override fun loadStrokes(strokes: List<LiveStroke>) {
+        removeCallbacks(idleReleaseRunnable)
         this.strokes.clear()
         this.strokes.addAll(strokes)
         redrawCanvas()
         Log.d(TAG, "loadStrokes: loaded ${strokes.size} strokes")
     }
 
-    override fun getStrokes(): List<List<PointF>> = strokes.toList()
+    override fun getStrokes(): List<LiveStroke> = strokes.toList()
 
     override fun releaseResources() {
         if (isSetup) {
@@ -312,7 +337,7 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
         renderCanvas = null
     }
 
-    // ── Private helpers ──
+    // ── Private helpers ──────────────────────────────────────────────────────
 
     private fun applyLimitRect() {
         val frame = Rect()

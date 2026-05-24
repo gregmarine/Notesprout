@@ -1,7 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Drawing screen — native equivalent of DrawingScreen in Flutter.
-     FrameLayout: drawing container fills entire screen, toolbar overlays on top.
-     z-order: drawingContainer is drawn first (bottom), toolbar second (top). -->
+     Root FrameLayout: drawing container fills the entire screen; toolbar and page
+     indicator overlay on top.
+     z-order: drawingContainer (bottom) → toolbar → tvPageIndicator (top). -->
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
@@ -17,7 +18,7 @@
     <!-- Toolbar floats above the canvas.
          On BOOX, setLimitRect excludes this region from pen input.
          Height is 48dp content; toolbar_background drawable provides the 1dp inkBlack bottom border.
-         Left: Close | Center: notebook name | Right: Clear, Erase -->
+         Left: Close, +, − | Right: Clear, Erase -->
     <LinearLayout
         android:id="@+id/drawingToolbar"
         android:layout_width="match_parent"
@@ -31,39 +32,62 @@
 
         <androidx.appcompat.widget.AppCompatButton
             android:id="@+id/btnClose"
-            style="@style/Widget.NoteSprout.OutlinedButton"
+            style="@style/Widget.NoteSprout.ToolbarButton"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="Close" />
 
-        <TextView
-            android:id="@+id/tvNotebookName"
-            android:layout_width="0dp"
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/btnAddPage"
+            style="@style/Widget.NoteSprout.ToolbarButton"
+            android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:gravity="center"
-            android:text=""
-            android:textColor="@color/inkBlack"
-            android:textSize="14sp"
-            android:textStyle="bold"
-            android:singleLine="true"
-            android:ellipsize="end" />
+            android:layout_marginStart="4dp"
+            android:text="+" />
+
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/btnDeletePage"
+            style="@style/Widget.NoteSprout.ToolbarButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="4dp"
+            android:text="&#x2212;" />
+
+        <!-- Flexible spacer pushes Clear and Erase to the right edge -->
+        <Space
+            android:layout_width="0dp"
+            android:layout_height="0dp"
+            android:layout_weight="1" />
 
         <androidx.appcompat.widget.AppCompatButton
             android:id="@+id/btnClear"
-            style="@style/Widget.NoteSprout.OutlinedButton"
+            style="@style/Widget.NoteSprout.ToolbarButton"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="Clear" />
 
         <androidx.appcompat.widget.AppCompatButton
             android:id="@+id/btnEraser"
-            style="@style/Widget.NoteSprout.OutlinedButton"
+            style="@style/Widget.NoteSprout.ToolbarButton"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginStart="4dp"
             android:text="Erase" />
 
     </LinearLayout>
+
+    <!-- Page indicator — overlay in the lower-right corner of the drawing surface.
+         Not inside the toolbar; rendered above the canvas via FrameLayout z-order.
+         inkLight color so it's unobtrusive on e-ink. -->
+    <TextView
+        android:id="@+id/tvPageIndicator"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom|end"
+        android:layout_marginBottom="8dp"
+        android:layout_marginEnd="8dp"
+        android:text="1 / 1"
+        android:textColor="@color/inkLight"
+        android:textSize="12sp" />
 
 </FrameLayout>
