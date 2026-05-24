@@ -162,6 +162,7 @@ NoteSprout's visual language is designed for e-ink displays first. All other pla
 | BOOX Palma2 Pro (P2P) | `287d2364` |
 | BOOX Go Color 7 (GC7) | `98d56306` |
 | BOOX NoteAir4C (NA4C) | `1d36f870` |
+| BOOX Tab XC (TXC) | `d852bed0` |
 | Wacom Movink Pad 11 (MIP11) | `5HL21V5007384` |
 
 ---
