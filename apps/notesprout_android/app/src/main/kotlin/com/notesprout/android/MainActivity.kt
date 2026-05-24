@@ -597,13 +597,19 @@ class MainActivity : AppCompatActivity() {
 
             Toast.makeText(this, "Notebook '$name' created", Toast.LENGTH_SHORT).show()
 
-            // Rescan and jump to the page that contains the new notebook.
+            // Rescan so the list is current when the user presses back.
             scanAndRender()
             val spec = gridSpec
             if (spec != null && spec.itemsPerPage > 0) {
                 val idx = notebooks.indexOfFirst { it.nameWithoutExtension == name }
                 if (idx >= 0) navigatePage(idx / spec.itemsPerPage)
             }
+
+            // Open the new notebook immediately — no need to tap it in the list.
+            val intent = Intent(this, DrawingActivity::class.java).apply {
+                putExtra(DrawingActivity.EXTRA_NOTEBOOK_PATH, soilFile.absolutePath)
+            }
+            startActivity(intent)
 
         } catch (e: Exception) {
             Toast.makeText(this, "Error: ${e.message}", Toast.LENGTH_LONG).show()

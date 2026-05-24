@@ -246,8 +246,9 @@ Completed:
 - Clear page confirmation dialog
 - Notebook metadata row (`type = "notebook"`) — title, cover, last_opened_page
 - Restore last-opened page on every notebook open; persist on every page turn
+- Auto-open new notebook in DrawingActivity immediately after creation (no extra tap required); list re-scans on back-press via onResume
 
 Next up: TBD — discuss before starting.
 
 ---
-*Last updated: notebook metadata + last-opened-page restore implemented*
+*Last updated: auto-open DrawingActivity on notebook creation*
