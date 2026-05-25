@@ -8,9 +8,11 @@ import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.PointF
 import android.graphics.RectF
+import android.util.Base64
 import android.view.MotionEvent
 import android.view.View
 import com.notesprout.android.data.LiveStroke
+import java.io.ByteArrayOutputStream
 import java.util.UUID
 
 // Flutter-equivalent of GenericDrawingEngine — pure Android Canvas rendering.
@@ -60,6 +62,13 @@ class GenericDrawingView(context: Context) : View(context), DrawingView {
      * The activity uses this to incrementally save new strokes to the database.
      */
     override var onPenLifted: (() -> Unit)? = null
+
+    /**
+     * Invoked (on main thread) at non-writing transition boundaries when a snapshot
+     * of the current strokes has been captured.  DrawingActivity wires this to persist
+     * the snapshot to the page's data JSON in the database.
+     */
+    override var onSnapshotReady: ((String) -> Unit)? = null
 
     // ── Touch handling ───────────────────────────────────────────────────────
 
@@ -258,13 +267,22 @@ class GenericDrawingView(context: Context) : View(context), DrawingView {
     override fun setToolbarHeight(heightPx: Int) {} // no limit rect needed; toolbar is above canvas in z-order
     override fun enableDrawing() {}
     override fun disableDrawing() {}
-    override fun setEraserMode(active: Boolean) { isEraserActive = active }
+    override fun setEraserMode(active: Boolean) {
+        if (active) {
+            // Capture snapshot BEFORE erasing begins — strokes still in memory at this point.
+            captureSnapshot()?.let { onSnapshotReady?.invoke(it) }
+        }
+        isEraserActive = active
+    }
 
     /**
      * Set the template bitmap to use as the page background.
      * Null = plain white. Redraws the canvas immediately (strokes on top of new template).
      */
     override fun setTemplate(bitmap: Bitmap?) {
+        // Capture snapshot BEFORE the template changes — snapshot is strokes-only so it
+        // remains valid across template switches.  Must run before templateBitmap is updated.
+        captureSnapshot()?.let { onSnapshotReady?.invoke(it) }
         templateBitmap = bitmap
         redrawCanvas()
     }
@@ -324,6 +342,55 @@ class GenericDrawingView(context: Context) : View(context), DrawingView {
         renderBitmap = bitmap
         renderCanvas = Canvas(bitmap)
         invalidate()
+    }
+
+    /**
+     * Capture snapshot when the app loses window focus — equivalent non-writing transition
+     * boundary to OnyxDrawingView.onWindowFocusChanged(false).
+     */
+    override fun onWindowFocusChanged(hasWindowFocus: Boolean) {
+        super.onWindowFocusChanged(hasWindowFocus)
+        if (!hasWindowFocus) {
+            captureSnapshot()?.let { onSnapshotReady?.invoke(it) }
+        }
+    }
+
+    /**
+     * Capture the current strokes as a base64-encoded PNG with a TRANSPARENT background.
+     * The template is intentionally excluded — at render time the stack is:
+     *   template → snapshot PNG → new strokes drawn this session.
+     * Returns null if there are no strokes or the view is not yet laid out.
+     */
+    override fun captureSnapshot(): String? {
+        if (strokes.isEmpty()) return null
+        val w = width; val h = height
+        if (w == 0 || h == 0) return null
+        val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        // Transparent base — do NOT fill with white, do NOT paint the template.
+        val snapshotCanvas = Canvas(bmp)
+        for (liveStroke in strokes) {
+            val points = liveStroke.points
+            if (points.size < 2) continue
+            val path = Path()
+            path.moveTo(points[0].x, points[0].y)
+            for (i in 1 until points.size) path.lineTo(points[i].x, points[i].y)
+            snapshotCanvas.drawPath(path, strokePaint)
+        }
+        val stream = ByteArrayOutputStream()
+        bmp.compress(Bitmap.CompressFormat.PNG, 100, stream)
+        bmp.recycle()
+        return Base64.encodeToString(stream.toByteArray(), Base64.DEFAULT)
+    }
+
+    /**
+     * Silently update the in-memory stroke list without triggering any canvas redraw.
+     * Called after a snapshot fast-load so stroke data is available for erasing and
+     * export while the snapshot composite is already displayed on screen.
+     */
+    override fun setStrokeListSilently(strokes: List<LiveStroke>) {
+        this.strokes.clear()
+        this.strokes.addAll(strokes)
+        // No redraw — the snapshot composite bitmap already shows the correct visual state.
     }
 
     override fun releaseResources() {

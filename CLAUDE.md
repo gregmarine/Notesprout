@@ -189,7 +189,7 @@ NoteSprout's visual language is designed for e-ink displays first. All other pla
 ## Drawing Engine Architecture (Implemented)
 
 ### Native Android Layer (package: `com.notesprout.android`)
-- `drawing/DrawingView.kt` — interface: `asView()`, `setToolbarHeight(Int)`, `enableDrawing()`, `disableDrawing()`, `resetOverlay()`, `clearCanvas()`, `setEraserMode(Boolean)`, `releaseResources()`, `loadStrokes(List<LiveStroke>)`, `getStrokes(): List<LiveStroke>`, `onStrokeErased: ((String) -> Unit)?`, `onPenLifted: (() -> Unit)?`
+- `drawing/DrawingView.kt` — interface: `asView()`, `setToolbarHeight(Int)`, `enableDrawing()`, `disableDrawing()`, `resetOverlay()`, `clearCanvas()`, `setEraserMode(Boolean)`, `releaseResources()`, `loadStrokes(List<LiveStroke>)`, `getStrokes(): List<LiveStroke>`, `buildRenderBitmap(List<LiveStroke>, Bitmap?): Bitmap?`, `loadStrokesWithBitmap(List<LiveStroke>, Bitmap, Bitmap?)`, `captureSnapshot(): String?`, `setStrokeListSilently(List<LiveStroke>)`, `onStrokeErased: ((String) -> Unit)?`, `onPenLifted: (() -> Unit)?`, `onSnapshotReady: ((String) -> Unit)?`
 - `drawing/OnyxDrawingView.kt` — BOOX path: TouchHelper, RawInputCallback, limit rect. `renderStroke` calls `invalidate()` on every stroke to keep the Android canvas continuously current with the hardware overlay. The EPD overlay stays active for the entire writing session — no idle release timer. Handoff only happens at non-writing transitions: `setEraserMode(true)`, `clearCanvas()`, `setTemplate()`, `loadStrokesWithBitmap()`, `onWindowFocusChanged(false)`. `onPenLifted` fires on `onEndRawDrawing` (each pen lift) to persist new strokes to DB. `onBeginRawDrawing` re-enables render — guarded by `!isEraserMode`. `EpdController.setUpdListSize(512)` called on every `openRawDrawing()`.
 - `drawing/GenericDrawingView.kt` — standard Android Canvas: two-layer Bitmap, stylus-only (`TOOL_TYPE_STYLUS` + `TOOL_TYPE_ERASER`), historical point capture. `onPenLifted` fires directly on `ACTION_UP` — no timer.
 - `DrawingActivity.kt` — fullscreen immersive, multi-page state (`pages`, `currentPageIndex`, `currentPageId`, `currentLayerId`), incremental save via `insertOrIgnore`, `onStrokeErased` callback for targeted soft-delete, swipe gesture for page navigation.
@@ -234,9 +234,10 @@ Three compounding slowdowns eliminated on heavy pages:
 - Track `persistedStrokeIds` set; skip `toJson()` entirely for strokes already in DB — fully-persisted page: 1300ms → 1–5ms (−99.8%).
 - Replace `org.json` with `kotlinx.serialization` (code-generated, zero reflection, same wire format, no DB migration) — warm JSON deserialize: 1325ms → 845ms (−36%).
 
-**Load path** (`DrawingActivity.loadStrokesFromDb`):
-- In-memory `strokeCache: LinkedHashMap<pageId, List<LiveStroke>>` (access-order LRU, capped at 10 pages / ~6 MB). Cache hit skips DB query + JSON deserialization entirely — 610-stroke load: ~900ms → 15–19ms (−98%).
-- `snapshotCurrentPageToCache()` called before every page transition so unsaved in-memory strokes are always captured. Cache refreshed on erase, cleared on page-clear/delete.
+**Load path** (`DrawingActivity.loadCurrentPage` + `tryLoadSnapshotBitmap`):
+- The 10-page LRU `strokeCache` (and `snapshotCurrentPageToCache`) was superseded by the Page Snapshot System (see below) — snapshots persist across process death and eliminate the warm-cache requirement entirely.
+- Snapshot fast path: decode stored composite bitmap and display immediately; deserialize strokes silently in background via `setStrokeListSilently()`. Effectively 0ms perceived load for any previously-visited page.
+- Full path (no/stale snapshot): `deserializeStrokesFromDb` + `buildRenderBitmap` off-thread, then `loadStrokesWithBitmap` swap on main thread — same 12ms main-thread cost as before.
 
 **Render path** (both drawing views):
 - `buildRenderBitmap()` on `Dispatchers.IO` pre-builds white → template → strokes bitmap off the main thread.
@@ -256,6 +257,11 @@ Two compounding freezes eliminated; erasing on 600+ stroke pages went from multi
 - Fix: `throttledEraseRedraw()` — redraws at most once per 60ms (~16fps) during active erasing. Strokes are removed from the list immediately so data is always correct; only the visual refresh is coalesced.
 - `finalizeEraseRedraw()` forces one clean redraw at gesture end (`onEndRawErasing`, `onEndRawDrawing` in eraser mode, `ACTION_UP` in GenericDrawingView) before `handwritingRepaint` commits pixels to the e-ink panel.
 
+### Snapshot system — close path must capture snapshot synchronously
+- `onWindowFocusChanged(false)` fires AFTER `finish()`, not before. When the user taps Close or Back, `closeNotebook()` runs first (blocking via `runBlocking`) and sets `soilDatabase = null`. By the time `onWindowFocusChanged(false)` fires in the drawing view, `onSnapshotReady` finds `soilDatabase == null` and silently discards the snapshot.
+- Fix: capture `drawingView.captureSnapshot()` on the main thread at the top of `closeNotebook()` (before `soilDatabase = null`), then persist it inside the existing `runBlocking` IO block alongside `saveStrokes`. Same pattern as `navigateToPage`, but synchronous.
+- **Rule:** any path that calls `closeNotebook()` must capture the snapshot itself — never rely on `onWindowFocusChanged` as the close-path snapshot trigger.
+
 ---
 
 ## Future Work — Wacom & Generic Android Stylus
@@ -265,6 +271,44 @@ Two compounding freezes eliminated; erasing on 600+ stroke pages went from multi
 - `GenericDrawingView` currently only inspects tool type; barrel buttons have no effect.
 - Fix direction: check `event.isButtonPressed(MotionEvent.BUTTON_STYLUS_PRIMARY)` in `onTouchEvent` and treat as eraser mode for the duration of that stroke.
 - Low priority — do not let it block BOOX-first progress.
+
+---
+
+## Page Snapshot System (Implemented)
+
+### Overview
+- Each page row's `data` JSON carries an optional `"snapshot"` field — a base64-encoded transparent-background PNG of all strokes on that page.
+- **No schema change** — snapshots live in the existing `data` TEXT column alongside `template` and other page properties.
+- Rendering order at load time: white → template → snapshot PNG → new strokes drawn this session.
+
+### Snapshot content rules
+- **Transparent background** — do NOT fill with white, do NOT draw the template. The composite stack handles backgrounds at display time.
+- **Strokes only** — `captureSnapshot()` iterates `this.strokes` and draws each path on a transparent `Bitmap.Config.ARGB_8888`, then compresses to PNG (quality 100) and base64-encodes.
+- Returns `null` if `strokes` is empty or the view isn't yet laid out (w=0/h=0).
+
+### Capture boundaries — when snapshots are taken
+- `setEraserMode(true)` — inside the drawing view, BEFORE `isEraserActive = true`.
+- `setTemplate(bitmap)` — inside the drawing view, BEFORE `templateBitmap = bitmap`.
+- `onWindowFocusChanged(false)` — inside the drawing view (app backgrounded or dialog overlay).
+- **Page navigation** — in `DrawingActivity.navigateToPage()` and the add-page paths, on the main thread BEFORE `clearCanvas()`.
+- **Close button / back press** — in `DrawingActivity.closeNotebook()`, on the main thread BEFORE the `runBlocking` IO block (see pruning note above).
+- **NOT on** user-initiated `clearCanvas()` or page delete — intentional, the page content is being discarded.
+
+### Stale detection
+- `NotebookDao.getMaxStrokeUpdatedAt(layerId)` — `SELECT MAX(updatedAt) FROM notebook WHERE type='stroke' AND parentId=:layerId` — **no** `deletedAt IS NULL` filter. Soft-deleted (erased) strokes have `updatedAt = deletedAt`, so erasures are detected as stroke changes.
+- If `maxStroke > page.updatedAt`, the snapshot pre-dates a stroke change and is discarded. Full render runs instead, and a fresh snapshot is captured after display.
+- `persistSnapshot()` bumps `page.updatedAt` to `System.currentTimeMillis()` — this is the timestamp the stale check compares against.
+
+### Two-phase page load (`DrawingActivity.loadCurrentPage`)
+1. `setupPageIds(db)` — resolves `currentPageId` / `currentLayerId` from `currentPageIndex`.
+2. `loadPageTemplateFromDb(db)` — decodes template bitmap (or null for blank).
+3. `tryLoadSnapshotBitmap(db, templateBitmap)` — staleness check + composite build (white → template → snapshot). Returns null on miss.
+4. **Fast path** (snapshot hit): `PageLoadResult(strokes=emptyList, displayBitmap=composite, usedSnapshot=true)`. `postDisplayWork` deserializes strokes in background and calls `setStrokeListSilently()` — no visual redraw.
+5. **Full path** (no/stale snapshot): `deserializeStrokesFromDb` + `buildRenderBitmap` off-thread. `postDisplayWork` captures and persists a snapshot so the NEXT load uses the fast path.
+
+### `persistSnapshot(db, pageId, snapshot)`
+- Reads the page row, parses `data` JSON, puts `"snapshot"` field, calls `updateData(pageId, data, now)`.
+- Must run on `Dispatchers.IO`. Bumps `page.updatedAt` — critical for stale detection.
 
 ---
 
@@ -314,8 +358,10 @@ Completed:
 - Auto-open new notebook in DrawingActivity immediately after creation (no extra tap required); list re-scans on back-press via onResume
 - Template system: scan from device filesystem, store in `.soil`, apply to page, inherit on new page, adaptive grid dialog
 - EPD overlay flicker fix: overlay stays active during writing; released only at non-writing transitions (tool switch, page flip, page clear, focus loss). `onIdleSave` renamed to `onPenLifted`; saves triggered per pen lift instead of idle timer.
+- Page Snapshot System: transparent-background strokes-only PNG stored in page `data` JSON. Two-phase load (fast composite path + silent background stroke deserialization). Stale detection via `MAX(updatedAt)` over all strokes including soft-deleted. LRU stroke cache removed — snapshots persist across process death and supersede it entirely.
+- ✂️ Pruning: snapshot not captured on Close/Back — `onWindowFocusChanged` fires after `finish()` so `soilDatabase` is already null. Fixed: `closeNotebook()` captures and persists snapshot synchronously on main thread before the IO block.
 
 Next up: TBD — discuss before starting.
 
 ---
-*Last updated: EPD overlay flicker fix + onPenLifted*
+*Last updated: Page Snapshot System + close-path snapshot pruning*

@@ -9,6 +9,7 @@ import android.graphics.Path
 import android.graphics.PointF
 import android.graphics.Rect
 import android.graphics.RectF
+import android.util.Base64
 import android.util.Log
 import android.view.MotionEvent
 import android.view.View
@@ -19,6 +20,7 @@ import com.onyx.android.sdk.data.note.TouchPoint
 import com.onyx.android.sdk.pen.RawInputCallback
 import com.onyx.android.sdk.pen.TouchHelper
 import com.onyx.android.sdk.pen.data.TouchPointList
+import java.io.ByteArrayOutputStream
 import java.util.UUID
 
 class OnyxDrawingView(context: Context) : View(context), DrawingView {
@@ -96,6 +98,13 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
      * (tool change, page flip, page clear, window focus loss).
      */
     override var onPenLifted: (() -> Unit)? = null
+
+    /**
+     * Invoked (on main thread) at non-writing transition boundaries when a snapshot
+     * of the current strokes has been captured.  DrawingActivity wires this to persist
+     * the snapshot to the page's data JSON in the database.
+     */
+    override var onSnapshotReady: ((String) -> Unit)? = null
 
     // ── Raw input callback ───────────────────────────────────────────────────
 
@@ -350,6 +359,8 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
                 epd("INVALIDATE caller=onWindowFocusChanged_gained")
             }
         } else {
+            // Capture snapshot when the app is backgrounded — non-writing transition boundary.
+            captureSnapshot()?.let { onSnapshotReady?.invoke(it) }
             if (isSetup) {
                 invalidate()
                 epd("INVALIDATE caller=windowFocusLost")
@@ -429,6 +440,11 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
 
     override fun setEraserMode(active: Boolean) {
         epd("SET_ERASER_MODE active=$active isSetup=$isSetup")
+        if (active) {
+            // Capture snapshot BEFORE releasing the overlay so strokes are still in memory.
+            // This is a non-writing transition boundary: the user is switching tools.
+            captureSnapshot()?.let { onSnapshotReady?.invoke(it) }
+        }
         isEraserMode = active
         if (isSetup) {
             touchHelper.setEraserRawDrawingEnabled(active, if (active) (ERASER_RADIUS_PX * 2).toInt() else 0)
@@ -455,6 +471,9 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
      */
     override fun setTemplate(bitmap: Bitmap?) {
         epd("SET_TEMPLATE_START hasTemplate=${bitmap != null} isSetup=$isSetup")
+        // Capture snapshot BEFORE the template changes — snapshot is strokes-only so it
+        // remains valid across template switches.  Must run before templateBitmap is updated.
+        captureSnapshot()?.let { onSnapshotReady?.invoke(it) }
         templateBitmap = bitmap
         if (isSetup) {
             touchHelper.setRawDrawingRenderEnabled(false)
@@ -588,6 +607,44 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
 
         Log.d(TAG, "loadStrokesWithBitmap: swapped bitmap, ${strokes.size} strokes")
         epd("LOAD_STROKES_WITH_BITMAP_END elapsed=${System.currentTimeMillis() - loadStart}ms strokeCount=${strokes.size}")
+    }
+
+    /**
+     * Capture the current strokes as a base64-encoded PNG with a TRANSPARENT background.
+     * The template is intentionally excluded — at render time the stack is:
+     *   template → snapshot PNG → new strokes drawn this session.
+     * Returns null if there are no strokes or the view is not yet laid out.
+     */
+    override fun captureSnapshot(): String? {
+        if (strokes.isEmpty()) return null
+        val w = width; val h = height
+        if (w == 0 || h == 0) return null
+        val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        // Transparent base — do NOT fill with white, do NOT paint the template.
+        val snapshotCanvas = Canvas(bmp)
+        for (liveStroke in strokes) {
+            val points = liveStroke.points
+            if (points.size < 2) continue
+            val path = Path()
+            path.moveTo(points[0].x, points[0].y)
+            for (i in 1 until points.size) path.lineTo(points[i].x, points[i].y)
+            snapshotCanvas.drawPath(path, strokePaint)
+        }
+        val stream = ByteArrayOutputStream()
+        bmp.compress(Bitmap.CompressFormat.PNG, 100, stream)
+        bmp.recycle()
+        return Base64.encodeToString(stream.toByteArray(), Base64.DEFAULT)
+    }
+
+    /**
+     * Silently update the in-memory stroke list without triggering any canvas redraw
+     * or EPD repaint.  Called after a snapshot fast-load so stroke data is available
+     * for erasing and export while the snapshot composite is already displayed.
+     */
+    override fun setStrokeListSilently(strokes: List<LiveStroke>) {
+        this.strokes.clear()
+        this.strokes.addAll(strokes)
+        // No redraw — the snapshot composite bitmap already shows the correct visual state.
     }
 
     override fun releaseResources() {

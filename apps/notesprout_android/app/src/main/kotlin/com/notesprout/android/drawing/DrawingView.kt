@@ -4,7 +4,6 @@ import android.graphics.Bitmap
 import android.view.View
 import com.notesprout.android.data.LiveStroke
 
-// Option A: stroke cache key — see DrawingActivity.strokeCache
 // Option B: buildRenderBitmap + loadStrokesWithBitmap — pre-build bitmap on IO thread
 
 interface DrawingView {
@@ -44,6 +43,15 @@ interface DrawingView {
     var onPenLifted: (() -> Unit)?
 
     /**
+     * Fired on the main thread when a snapshot has been captured at a non-writing
+     * transition boundary (eraser mode, template change, window focus loss).
+     * DrawingActivity wires this to [persistSnapshot] so the snapshot is written to
+     * the page's `data` JSON in the DB.
+     * Set this in onCreate; null by default.
+     */
+    var onSnapshotReady: ((snapshot: String) -> Unit)?
+
+    /**
      * Replace the in-memory stroke list with [strokes] loaded from the database,
      * then redraw the canvas bitmap immediately.
      * Must be called on the main thread (triggers invalidate).
@@ -55,6 +63,22 @@ interface DrawingView {
      * Safe to call from any thread — implementations return a copy.
      */
     fun getStrokes(): List<LiveStroke>
+
+    /**
+     * Update the in-memory stroke list without triggering a canvas redraw or EPD repaint.
+     * Used after a snapshot fast-load to silently populate stroke data in the background
+     * while the snapshot composite bitmap is already displayed on screen.
+     * Must be called on the main thread.
+     */
+    fun setStrokeListSilently(strokes: List<LiveStroke>)
+
+    /**
+     * Capture the current strokes as a base64-encoded PNG with a transparent background.
+     * The template is NOT included — the rendering stack is: template → snapshot → new strokes.
+     * Returns null if there are no strokes or the view is not yet laid out.
+     * Safe to call from the main thread.
+     */
+    fun captureSnapshot(): String?
 
     // ── Option B: off-thread bitmap pre-build ─────────────────────────────────
 

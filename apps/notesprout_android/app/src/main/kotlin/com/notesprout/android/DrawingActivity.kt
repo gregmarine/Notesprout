@@ -2,7 +2,10 @@ package com.notesprout.android
 
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Canvas
+import android.graphics.Color
 import android.graphics.Rect
+import android.graphics.RectF
 import android.os.Build
 import android.os.Bundle
 import android.util.Base64
@@ -47,14 +50,23 @@ class DrawingActivity : AppCompatActivity() {
 
         /** Intent extra key — the absolute path to the `.soil` notebook file. */
         const val EXTRA_NOTEBOOK_PATH = "notebook_path"
-
-        /**
-         * Maximum number of pages held in [strokeCache] at once.
-         * LRU eviction drops the least-recently-accessed page when this limit is exceeded.
-         * At ~1 KB per stroke and a worst-case 610-stroke page, 10 entries ≈ 6 MB max.
-         */
-        private const val MAX_CACHE_PAGES = 10
     }
+
+    /**
+     * Result of [loadCurrentPage]: carries everything needed to display a page and
+     * decide whether a background stroke-deserialization pass is needed.
+     *
+     * [usedSnapshot] = true  → [strokes] is empty; display [displayBitmap] then
+     *                          deserialize strokes in background via [postDisplayWork].
+     * [usedSnapshot] = false → [strokes] is fully populated; [displayBitmap] was built
+     *                          from scratch; [postDisplayWork] captures a snapshot.
+     */
+    private data class PageLoadResult(
+        val strokes: List<LiveStroke>,
+        val templateBitmap: Bitmap?,
+        val displayBitmap: Bitmap?,
+        val usedSnapshot: Boolean,
+    )
 
     private lateinit var binding: ActivityDrawingBinding
     private lateinit var drawingView: DrawingView
@@ -74,48 +86,23 @@ class DrawingActivity : AppCompatActivity() {
 
     // ── Page state ────────────────────────────────────────────────────────────
 
-    /** All live pages in sorted order. Populated (and refreshed) by [loadStrokesFromDb]. */
+    /** All live pages in sorted order. Populated (and refreshed) by [setupPageIds]. */
     private var pages: MutableList<NotebookObject> = mutableListOf()
 
     /** Index into [pages] for the currently displayed page. */
     private var currentPageIndex: Int = 0
 
-    /** ID of the currently displayed page row. Set by [loadStrokesFromDb]. */
+    /** ID of the currently displayed page row. Set by [setupPageIds]. */
     private var currentPageId: String = ""
 
-    /** ID of the content layer under [currentPageId]. Set by [loadStrokesFromDb]. */
+    /** ID of the content layer under [currentPageId]. Set by [setupPageIds]. */
     private var currentLayerId: String = ""
-
-    // ── Option A: in-memory stroke cache ─────────────────────────────────────
-
-    /**
-     * Stroke cache keyed by page UUID.  Populated by [loadStrokesFromDb] after
-     * every DB load and updated by [snapshotCurrentPageToCache] before every page
-     * transition so any in-memory strokes drawn since the last load are included.
-     *
-     * On a cache hit [loadStrokesFromDb] skips [getStrokesForLayer] + JSON
-     * deserialization entirely (~900ms saved on a 610-stroke page).
-     *
-     * Invalidated per-entry when strokes are erased or the page is cleared/deleted.
-     * Lives for the lifetime of the activity — no cross-session persistence needed.
-     */
-    /**
-     * LRU stroke cache — bounded to [MAX_CACHE_PAGES] entries.
-     *
-     * [LinkedHashMap] in access-order mode moves each entry to the head on every read,
-     * so [removeEldestEntry] always evicts the least-recently-touched page.  At 10 pages
-     * worst-case memory is ~6 MB (610 strokes × 1 KB × 10) regardless of notebook size.
-     */
-    private val strokeCache = object : LinkedHashMap<String, List<LiveStroke>>(16, 0.75f, true) {
-        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, List<LiveStroke>>): Boolean =
-            size > MAX_CACHE_PAGES
-    }
 
     // ── Persisted stroke tracking ─────────────────────────────────────────────
 
     /**
      * IDs of strokes confirmed to exist in the DB for the current page/layer.
-     * Populated by [loadStrokesFromDb] after each page load and extended by
+     * Populated by [deserializeStrokesFromDb] after each page load and extended by
      * [saveStrokes] after each incremental save.  Reduced by the [onStrokeErased]
      * callback and cleared by the page-clear handler.
      *
@@ -156,21 +143,21 @@ class DrawingActivity : AppCompatActivity() {
         binding.btnAddPage.setOnClickListener {
             val db = soilDatabase ?: return@setOnClickListener
             lifecycleScope.launch {
-                snapshotCurrentPageToCache()
-                withContext(Dispatchers.IO) { addPage(db) }
+                // Capture snapshot of the page we are leaving (main thread — before clearing).
+                val snapshot = drawingView.captureSnapshot()
+                val leavingPageId = currentPageId
+                withContext(Dispatchers.IO) {
+                    if (snapshot != null && leavingPageId.isNotEmpty()) {
+                        persistSnapshot(db, leavingPageId, snapshot)
+                    }
+                    addPage(db)
+                }
                 drawingView.clearCanvas()
-                val (strokes, templateBitmap, prebuiltBitmap) = withContext(Dispatchers.IO) {
-                    val (s, t) = loadPageData(db)
-                    Triple(s, t, drawingView.buildRenderBitmap(s, t))
-                }
-                if (prebuiltBitmap != null) {
-                    drawingView.loadStrokesWithBitmap(strokes, prebuiltBitmap, templateBitmap)
-                } else {
-                    drawingView.setTemplate(templateBitmap)
-                    drawingView.loadStrokes(strokes)
-                }
+                val result = withContext(Dispatchers.IO) { loadCurrentPage(db) }
+                displayPage(result)
                 updatePageIndicator()
                 saveLastOpenedPage(currentPageId)
+                postDisplayWork(db, result)
             }
         }
 
@@ -181,23 +168,15 @@ class DrawingActivity : AppCompatActivity() {
                 .setMessage("Delete this page?")
                 .setNegativeButton("Cancel", null)
                 .setPositiveButton("Delete") { _, _ ->
-                    val deletingPageId = currentPageId
-                    strokeCache.remove(deletingPageId)  // deleted page has no future cache value
                     lifecycleScope.launch {
+                        // No snapshot needed — the page being deleted is discarded.
                         withContext(Dispatchers.IO) { deletePage(db) }
                         drawingView.clearCanvas()
-                        val (strokes, templateBitmap, prebuiltBitmap) = withContext(Dispatchers.IO) {
-                            val (s, t) = loadPageData(db)
-                            Triple(s, t, drawingView.buildRenderBitmap(s, t))
-                        }
-                        if (prebuiltBitmap != null) {
-                            drawingView.loadStrokesWithBitmap(strokes, prebuiltBitmap, templateBitmap)
-                        } else {
-                            drawingView.setTemplate(templateBitmap)
-                            drawingView.loadStrokes(strokes)
-                        }
+                        val result = withContext(Dispatchers.IO) { loadCurrentPage(db) }
+                        displayPage(result)
                         updatePageIndicator()
                         saveLastOpenedPage(currentPageId)
+                        postDisplayWork(db, result)
                     }
                 }
                 .create()
@@ -216,10 +195,9 @@ class DrawingActivity : AppCompatActivity() {
                     // Capture the stroke IDs before clearing so we can soft-delete their DB rows.
                     val strokesToDelete = drawingView.getStrokes()
                     drawingView.clearCanvas()
-                    // All strokes removed from memory and will be soft-deleted from DB:
-                    // clear the persisted-ID registry and update the stroke cache.
+                    // All strokes removed from memory and will be soft-deleted from DB.
+                    // Clear the persisted-ID registry; no snapshot needed for a user-initiated clear.
                     persistedStrokeIds.clear()
-                    strokeCache[currentPageId] = emptyList()
                     if (db != null && strokesToDelete.isNotEmpty()) {
                         lifecycleScope.launch {
                             withContext(Dispatchers.IO) {
@@ -278,9 +256,6 @@ class DrawingActivity : AppCompatActivity() {
             // Remove from the persisted-ID registry so saveStrokes doesn't try to
             // re-insert a stroke that has already been soft-deleted from the DB.
             persistedStrokeIds.remove(strokeId)
-            // Refresh cache for the current page so a future cache hit returns the
-            // correct post-erase list (drawingView has already removed the stroke).
-            strokeCache[currentPageId] = drawingView.getStrokes()
             val db = soilDatabase
             if (db != null) {
                 lifecycleScope.launch {
@@ -298,6 +273,19 @@ class DrawingActivity : AppCompatActivity() {
             if (db != null) {
                 lifecycleScope.launch {
                     withContext(Dispatchers.IO) { saveStrokes(db) }
+                }
+            }
+        }
+
+        // Snapshot callback — fired by the drawing view at non-writing transitions
+        // (eraser mode, template change, window focus loss).  Persist to the page's
+        // data JSON so the next page load can use the fast snapshot path.
+        drawingView.onSnapshotReady = { snapshot ->
+            val db = soilDatabase
+            val pageId = currentPageId
+            if (db != null && pageId.isNotEmpty()) {
+                lifecycleScope.launch {
+                    withContext(Dispatchers.IO) { persistSnapshot(db, pageId, snapshot) }
                 }
             }
         }
@@ -350,21 +338,20 @@ class DrawingActivity : AppCompatActivity() {
                             // identical to tapping the + button.
                             val db = soilDatabase ?: return false
                             lifecycleScope.launch {
-                                snapshotCurrentPageToCache()
-                                withContext(Dispatchers.IO) { addPage(db) }
+                                val snapshot = drawingView.captureSnapshot()
+                                val leavingPageId = currentPageId
+                                withContext(Dispatchers.IO) {
+                                    if (snapshot != null && leavingPageId.isNotEmpty()) {
+                                        persistSnapshot(db, leavingPageId, snapshot)
+                                    }
+                                    addPage(db)
+                                }
                                 drawingView.clearCanvas()
-                                val (strokes, templateBitmap, prebuiltBitmap) = withContext(Dispatchers.IO) {
-                                    val (s, t) = loadPageData(db)
-                                    Triple(s, t, drawingView.buildRenderBitmap(s, t))
-                                }
-                                if (prebuiltBitmap != null) {
-                                    drawingView.loadStrokesWithBitmap(strokes, prebuiltBitmap, templateBitmap)
-                                } else {
-                                    drawingView.setTemplate(templateBitmap)
-                                    drawingView.loadStrokes(strokes)
-                                }
+                                val result = withContext(Dispatchers.IO) { loadCurrentPage(db) }
+                                displayPage(result)
                                 updatePageIndicator()
                                 saveLastOpenedPage(currentPageId)
+                                postDisplayWork(db, result)
                             }
                             true
                         }
@@ -431,7 +418,13 @@ class DrawingActivity : AppCompatActivity() {
     // ── Notebook DB lifecycle ─────────────────────────────────────────────────
 
     /**
-     * Saves strokes, runs housekeeping PRAGMAs, then closes the Room database.
+     * Saves strokes, captures a final snapshot, runs housekeeping PRAGMAs, then closes
+     * the Room database.
+     *
+     * Snapshot is captured here on the main thread (before [soilDatabase] is cleared) so
+     * the close button and back-press paths always persist the current page state.
+     * [onWindowFocusChanged] fires AFTER [finish], so its [onSnapshotReady] callback would
+     * find [soilDatabase] already null — capturing here is the only reliable close-path hook.
      *
      * Blocking — all IO runs on [Dispatchers.IO] via [runBlocking]; [SoilDatabase.close]
      * is called on the main thread after the coroutine completes so [finish] only fires
@@ -441,8 +434,17 @@ class DrawingActivity : AppCompatActivity() {
         val db = soilDatabase ?: return
         soilDatabase = null   // mark as closed before any potentially-throwing work
 
+        // Capture snapshot on the main thread — View operations must run here.
+        // Must happen before the runBlocking block so the bitmap data is ready for IO.
+        val snapshot = drawingView.captureSnapshot()
+        val pageId   = currentPageId
+
         runBlocking {
             withContext(Dispatchers.IO) {
+                // Persist snapshot for the page we are closing (mirrors navigateToPage).
+                if (snapshot != null && pageId.isNotEmpty()) {
+                    persistSnapshot(db, pageId, snapshot)
+                }
                 saveStrokes(db)
                 db.openHelper.writableDatabase.apply {
                     query("PRAGMA incremental_vacuum").use { it.moveToFirst() }
@@ -461,121 +463,197 @@ class DrawingActivity : AppCompatActivity() {
     // ── Persistence ───────────────────────────────────────────────────────────
 
     /**
-     * Launch a coroutine that loads strokes and template for the current page from the
-     * database and hands them to the drawing view. Also refreshes [pages], [currentPageId],
-     * [currentLayerId], and the page indicator.
+     * Launch a coroutine that loads the current page and hands it to the drawing view.
+     * Also restores the last-opened page position on first call (notebook open).
      *
-     * On first call (notebook open): loads [notebookMetadata] and uses [NotebookMetadata.lastOpenedPage]
-     * to restore the user's previous position before loading strokes.
+     * Fast path: if the page's stored snapshot is valid (no strokes changed since it was
+     * captured), the composite bitmap is decoded and displayed immediately — stroke
+     * deserialization happens in the background ([postDisplayWork]).
+     *
+     * Full path: strokes are deserialized, a render bitmap is built off-thread, then
+     * displayed.  A snapshot is captured and persisted after display so the NEXT load
+     * can use the fast path.
      */
     private fun loadStrokes() {
         val db = soilDatabase ?: return
         lifecycleScope.launch {
-            // IO: metadata restore + DB load + pre-build bitmap (Option A cache miss on first open).
-            val (strokes, templateBitmap, prebuiltBitmap) = withContext(Dispatchers.IO) {
-                // Restore last-opened page — runs before loadStrokesFromDb so
-                // currentPageIndex is correct when strokes are fetched.
+            val result = withContext(Dispatchers.IO) {
+                // Restore last-opened page position (first open only).
                 notebookMetadata = loadNotebookMetadataFromDb(db)
-
                 val lastPage = notebookMetadata?.lastOpenedPage
                 if (lastPage != null) {
                     val allPages = db.notebookDao().getPagesSorted()
                     val idx = allPages.indexOfFirst { it.id == lastPage }
                     if (idx >= 0) currentPageIndex = idx
-                    // If idx == -1 (page deleted), keep currentPageIndex = 0 (fallback).
+                    // If idx == -1 (page deleted), currentPageIndex = 0 is the safe fallback.
                 }
-
-                val (s, t) = loadPageData(db)
-
-                // Option B: pre-build render bitmap on IO thread so main thread just swaps.
-                val bmp = drawingView.buildRenderBitmap(s, t)
-                Triple(s, t, bmp)
+                loadCurrentPage(db)
             }
-
-            // Main thread: fast bitmap swap instead of O(N) redraw.
-            if (prebuiltBitmap != null) {
-                drawingView.loadStrokesWithBitmap(strokes, prebuiltBitmap, templateBitmap)
-            } else {
-                drawingView.setTemplate(templateBitmap)
-                drawingView.loadStrokes(strokes)
-            }
-
+            displayPage(result)
             updatePageIndicator()
+            postDisplayWork(db, result)
         }
     }
 
     /**
-     * Load strokes and the template bitmap for the current page.
-     * Calls [loadStrokesFromDb] (which updates [currentPageId] etc.) then
-     * [loadPageTemplateFromDb]. Returns both results as a [Pair].
+     * Refresh [pages], [currentPageId], and [currentLayerId] from the database using
+     * [currentPageIndex] as the target.  Does NOT load or deserialize stroke data.
      * Must be called on [Dispatchers.IO].
      */
-    private suspend fun loadPageData(db: SoilDatabase): Pair<List<LiveStroke>, Bitmap?> {
-        val strokes = loadStrokesFromDb(db)
-        val templateBitmap = loadPageTemplateFromDb(db)
-        return Pair(strokes, templateBitmap)
-    }
-
-    /**
-     * Query the database for the page at [currentPageIndex] and return its strokes
-     * as a list of [LiveStroke] ready for the drawing view.
-     *
-     * Also updates [pages], [currentPageId], and [currentLayerId] as side effects.
-     * Must be called on [Dispatchers.IO].
-     */
-    private suspend fun loadStrokesFromDb(db: SoilDatabase): List<LiveStroke> {
+    private suspend fun setupPageIds(db: SoilDatabase) {
         val dao = db.notebookDao()
-
-        // These two lightweight queries (~2–20ms total) are always needed to set
-        // currentPageId and currentLayerId, even on a cache hit.
         pages = dao.getPagesSorted().toMutableList()
-
         if (pages.isEmpty()) {
-            Log.w(TAG, "loadStrokesFromDb: no pages found in notebook")
-            return emptyList()
+            Log.w(TAG, "setupPageIds: no pages in notebook")
+            currentPageId = ""; currentLayerId = ""; return
         }
-
         currentPageIndex = currentPageIndex.coerceIn(0, pages.lastIndex)
         val page = pages[currentPageIndex]
         currentPageId = page.id
-        Log.d(TAG, "loadStrokesFromDb: page $currentPageId (${currentPageIndex + 1}/${pages.size})")
-
+        Log.d(TAG, "setupPageIds: page $currentPageId (${currentPageIndex + 1}/${pages.size})")
         val layer = dao.getLayerForPage(currentPageId)
-
         if (layer == null) {
-            Log.w(TAG, "loadStrokesFromDb: no layer found under page $currentPageId")
-            return emptyList()
+            Log.w(TAG, "setupPageIds: no layer for page $currentPageId")
+            currentLayerId = ""; return
         }
         currentLayerId = layer.id
-        Log.d(TAG, "loadStrokesFromDb: layerId=$currentLayerId")
+        Log.d(TAG, "setupPageIds: layerId=$currentLayerId")
+    }
 
-        // Option A — cache hit: skip getStrokesForLayer + JSON deserialization entirely.
-        val cached = strokeCache[currentPageId]
-        if (cached != null) {
-            persistedStrokeIds.clear()
-            persistedStrokeIds.addAll(cached.map { it.id })
-            return cached
-        }
-
-        // Cache miss — full DB load.
-        val strokeObjects = dao.getStrokesForLayer(currentLayerId)
-        Log.d(TAG, "loadStrokesFromDb: found ${strokeObjects.size} stroke rows")
-
+    /**
+     * Deserialize stroke rows for [currentLayerId] and return them as [LiveStroke]s.
+     * Also repopulates [persistedStrokeIds].
+     * Must be called on [Dispatchers.IO] AFTER [setupPageIds] has set [currentLayerId].
+     */
+    private suspend fun deserializeStrokesFromDb(db: SoilDatabase): List<LiveStroke> {
+        val layerId = currentLayerId.takeIf { it.isNotEmpty() } ?: return emptyList()
+        val strokeObjects = db.notebookDao().getStrokesForLayer(layerId)
+        Log.d(TAG, "deserializeStrokesFromDb: found ${strokeObjects.size} rows")
         val result = strokeObjects.mapNotNull { obj ->
             try {
                 LiveStroke(id = obj.id, points = StrokeData.fromJson(obj.data).toPointFs())
             } catch (e: Exception) {
-                Log.e(TAG, "loadStrokesFromDb: failed to deserialize stroke ${obj.id}", e)
+                Log.e(TAG, "deserializeStrokesFromDb: failed to parse stroke ${obj.id}", e)
                 null
             }
         }
-
-        // Populate persisted-ID registry and stroke cache for this page.
         persistedStrokeIds.clear()
         persistedStrokeIds.addAll(result.map { it.id })
-        strokeCache[currentPageId] = result
-
         return result
+    }
+
+    /**
+     * Try to build a composite display bitmap (white → template → snapshot PNG) for the
+     * current page.  Returns null if the snapshot is absent, stale, or the view isn't
+     * laid out yet — callers fall through to the full render path.
+     * Must be called on [Dispatchers.IO] AFTER [setupPageIds].
+     */
+    private suspend fun tryLoadSnapshotBitmap(db: SoilDatabase, templateBitmap: Bitmap?): Bitmap? {
+        val pageId  = currentPageId.takeIf  { it.isNotEmpty() } ?: return null
+        val layerId = currentLayerId.takeIf { it.isNotEmpty() } ?: return null
+
+        val page    = db.notebookDao().getObjectById(pageId) ?: return null
+        val dataObj = try { org.json.JSONObject(page.data) } catch (e: Exception) { return null }
+        val b64     = dataObj.optString("snapshot", "").takeIf { it.isNotEmpty() } ?: return null
+
+        // Stale check: any stroke (including soft-deleted) updated after the snapshot?
+        // Soft-deleted rows have updatedAt = deletedAt, so erased strokes are also detected.
+        val maxStroke = db.notebookDao().getMaxStrokeUpdatedAt(layerId) ?: 0L
+        if (maxStroke > page.updatedAt) {
+            Log.d(TAG, "tryLoadSnapshotBitmap: stale (maxStroke=$maxStroke > page=${page.updatedAt})")
+            return null
+        }
+
+        val bytes       = try { Base64.decode(b64, Base64.DEFAULT) } catch (e: Exception) { return null }
+        val snapshotBmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: return null
+
+        val w = drawingView.asView().width
+        val h = drawingView.asView().height
+        if (w == 0 || h == 0) { snapshotBmp.recycle(); return null }
+
+        // Build composite: white → template → strokes-only snapshot (transparent PNG)
+        val composite = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        val c = Canvas(composite)
+        c.drawColor(Color.WHITE)
+        templateBitmap?.let { c.drawBitmap(it, null, RectF(0f, 0f, w.toFloat(), h.toFloat()), null) }
+        c.drawBitmap(snapshotBmp, null, RectF(0f, 0f, w.toFloat(), h.toFloat()), null)
+        snapshotBmp.recycle()
+
+        Log.d(TAG, "tryLoadSnapshotBitmap: hit for page $pageId")
+        return composite
+    }
+
+    /**
+     * Load the current page with optional snapshot fast path.  Calls [setupPageIds] to
+     * resolve the current page/layer IDs from [currentPageIndex].
+     *
+     * Fast path (snapshot valid): returns a [PageLoadResult] with empty [strokes] and
+     * a composite [displayBitmap] ready for immediate display.  Stroke deserialization
+     * is deferred to [postDisplayWork].
+     *
+     * Full path (no/stale snapshot): deserializes strokes, builds render bitmap, returns
+     * fully populated [PageLoadResult].  [postDisplayWork] captures and persists a fresh
+     * snapshot after display.
+     *
+     * Must be called on [Dispatchers.IO].
+     */
+    private suspend fun loadCurrentPage(db: SoilDatabase): PageLoadResult {
+        setupPageIds(db)
+        val templateBitmap  = loadPageTemplateFromDb(db)
+        val snapshotBitmap  = tryLoadSnapshotBitmap(db, templateBitmap)
+        return if (snapshotBitmap != null) {
+            PageLoadResult(emptyList(), templateBitmap, snapshotBitmap, usedSnapshot = true)
+        } else {
+            val strokes      = deserializeStrokesFromDb(db)
+            val renderBitmap = drawingView.buildRenderBitmap(strokes, templateBitmap)
+            PageLoadResult(strokes, templateBitmap, renderBitmap, usedSnapshot = false)
+        }
+    }
+
+    /**
+     * Apply a [PageLoadResult] to the drawing view on the main thread.
+     */
+    private fun displayPage(result: PageLoadResult) {
+        val bitmap = result.displayBitmap
+        if (bitmap != null) {
+            drawingView.loadStrokesWithBitmap(result.strokes, bitmap, result.templateBitmap)
+        } else {
+            drawingView.setTemplate(result.templateBitmap)
+            drawingView.loadStrokes(result.strokes)
+        }
+    }
+
+    /**
+     * Work to run after [displayPage] returns, depending on which load path was taken.
+     *
+     * Snapshot path ([PageLoadResult.usedSnapshot] = true): deserialize strokes in the
+     * background and silently inject them into the drawing view — no visual redraw since
+     * the snapshot composite is already displayed.
+     *
+     * Full path: capture and persist a snapshot so the next load can use the fast path.
+     *
+     * Must be called on the main thread (launches IO coroutines internally).
+     */
+    private fun postDisplayWork(db: SoilDatabase, result: PageLoadResult) {
+        if (result.usedSnapshot) {
+            // Background stroke deserialization — strokes needed for erase / export / save.
+            val pageId = currentPageId
+            lifecycleScope.launch {
+                val strokes = withContext(Dispatchers.IO) { deserializeStrokesFromDb(db) }
+                Log.d(TAG, "postDisplayWork(snapshot): silently loaded ${strokes.size} strokes for $pageId")
+                drawingView.setStrokeListSilently(strokes)
+            }
+        } else {
+            // Full render just completed — capture snapshot for next time.
+            val snapshot = drawingView.captureSnapshot()
+            val pageId   = currentPageId
+            if (snapshot != null && pageId.isNotEmpty()) {
+                lifecycleScope.launch {
+                    withContext(Dispatchers.IO) { persistSnapshot(db, pageId, snapshot) }
+                    Log.d(TAG, "postDisplayWork(full): persisted snapshot for $pageId")
+                }
+            }
+        }
     }
 
     /**
@@ -605,25 +683,13 @@ class DrawingActivity : AppCompatActivity() {
     }
 
     /**
-     * Capture the current in-memory stroke list into [strokeCache] for the current page.
-     * Must be called on the main thread before any page transition so that strokes drawn
-     * since the last DB load are included in future cache hits for this page.
-     *
-     * Safe to call redundantly — a no-op if [currentPageId] is empty.
-     */
-    private fun snapshotCurrentPageToCache() {
-        val pageId = currentPageId.takeIf { it.isNotEmpty() } ?: return
-        strokeCache[pageId] = drawingView.getStrokes()
-    }
-
-    /**
      * Incrementally persist in-memory strokes to the database using INSERT OR IGNORE.
      *
      * Strokes already in the DB (same UUID) are silently skipped — no full delete +
      * re-insert cycle.  Erased strokes are removed from DB via the [DrawingView.onStrokeErased]
      * callback; this function only adds new ones.
      *
-     * Called from: idle timer, page navigation (before switch), [closeNotebook].
+     * Called from: page navigation (before switch), [closeNotebook].
      * Must be called on [Dispatchers.IO].
      */
     private suspend fun saveStrokes(db: SoilDatabase) {
@@ -692,6 +758,20 @@ class DrawingActivity : AppCompatActivity() {
 
         // Extend the registry so subsequent saves skip these IDs immediately.
         persistedStrokeIds.addAll(newStrokes.map { it.id })
+    }
+
+    /**
+     * Persist a [snapshot] base64 PNG into the `snapshot` field of the page row's
+     * `data` JSON.  Bumps [NotebookObject.updatedAt] so the stale-snapshot check in
+     * [tryLoadSnapshotBitmap] can detect subsequent stroke changes.
+     * Must be called on [Dispatchers.IO].
+     */
+    private suspend fun persistSnapshot(db: SoilDatabase, pageId: String, snapshot: String) {
+        val page    = db.notebookDao().getObjectById(pageId) ?: return
+        val dataObj = try { org.json.JSONObject(page.data) } catch (e: Exception) { org.json.JSONObject() }
+        dataObj.put("snapshot", snapshot)
+        db.notebookDao().updateData(pageId, dataObj.toString(), System.currentTimeMillis())
+        Log.d(TAG, "persistSnapshot: saved for page $pageId (${snapshot.length} chars)")
     }
 
     // ── Template operations ───────────────────────────────────────────────────
@@ -914,39 +994,34 @@ class DrawingActivity : AppCompatActivity() {
     // ── Page navigation ───────────────────────────────────────────────────────
 
     /**
-     * Save the current page's strokes, then switch to [newIndex] and load its strokes
-     * and template. Persists the new current page as [NotebookMetadata.lastOpenedPage]
-     * after every turn. Called from the swipe gesture detector.
+     * Save the current page's strokes and capture its snapshot, then switch to [newIndex]
+     * and load its content via the snapshot fast path or full render path.
+     * Persists [NotebookMetadata.lastOpenedPage] after every page turn.
+     * Called from the swipe gesture detector.
      */
     private fun navigateToPage(newIndex: Int) {
         val db = soilDatabase ?: return
         lifecycleScope.launch {
-            // Option A: snapshot in-memory strokes (including any drawn since last DB load)
-            // to the cache before the page switch, so returning here hits the cache.
-            snapshotCurrentPageToCache()
+            // Capture snapshot of the page we are leaving (main thread, before clear).
+            val snapshot      = drawingView.captureSnapshot()
+            val leavingPageId = currentPageId
 
-            withContext(Dispatchers.IO) { saveStrokes(db) }
+            withContext(Dispatchers.IO) {
+                // Persist snapshot and save strokes concurrently in the same IO block.
+                if (snapshot != null && leavingPageId.isNotEmpty()) {
+                    persistSnapshot(db, leavingPageId, snapshot)
+                }
+                saveStrokes(db)
+            }
 
             currentPageIndex = newIndex
             drawingView.clearCanvas()
 
-            // IO: load strokes (cache-aware) + pre-build render bitmap (Option B).
-            val (strokes, templateBitmap, prebuiltBitmap) = withContext(Dispatchers.IO) {
-                val (s, t) = loadPageData(db)
-                val bmp = drawingView.buildRenderBitmap(s, t)
-                Triple(s, t, bmp)
-            }
-
-            // Main thread: fast bitmap swap instead of O(N) redraw.
-            if (prebuiltBitmap != null) {
-                drawingView.loadStrokesWithBitmap(strokes, prebuiltBitmap, templateBitmap)
-            } else {
-                drawingView.setTemplate(templateBitmap)
-                drawingView.loadStrokes(strokes)
-            }
-
+            val result = withContext(Dispatchers.IO) { loadCurrentPage(db) }
+            displayPage(result)
             updatePageIndicator()
             saveLastOpenedPage(currentPageId)
+            postDisplayWork(db, result)
         }
     }
 
