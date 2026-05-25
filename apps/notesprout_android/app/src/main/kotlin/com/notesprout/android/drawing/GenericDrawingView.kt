@@ -214,7 +214,6 @@ class GenericDrawingView(context: Context) : View(context), DrawingView {
      * Call whenever strokes are added/removed or the template changes.
      */
     private fun redrawCanvas() {
-        val redrawStart = System.currentTimeMillis()
         val canvas = renderCanvas ?: return
         canvas.drawColor(Color.WHITE)
         templateBitmap?.let { tb ->
@@ -231,7 +230,6 @@ class GenericDrawingView(context: Context) : View(context), DrawingView {
             canvas.drawPath(path, strokePaint)
         }
         invalidate()
-        android.util.Log.d("NoteSprout_Perf", "[PERF] GenericDrawingView.redrawCanvas: ${System.currentTimeMillis() - redrawStart}ms (stroke_count=${strokes.size})")
     }
 
     // Minimum squared distance from point p to segment a→b.
@@ -285,11 +283,9 @@ class GenericDrawingView(context: Context) : View(context), DrawingView {
     }
 
     override fun loadStrokes(strokes: List<LiveStroke>) {
-        val loadStart = System.currentTimeMillis()
         this.strokes.clear()
         this.strokes.addAll(strokes)
         redrawCanvas()
-        android.util.Log.d("NoteSprout_Perf", "[PERF] GenericDrawingView.loadStrokes (incl redrawCanvas): ${System.currentTimeMillis() - loadStart}ms (stroke_count=${strokes.size})")
     }
 
     override fun getStrokes(): List<LiveStroke> = strokes.toList()
@@ -321,7 +317,6 @@ class GenericDrawingView(context: Context) : View(context), DrawingView {
         bitmap: Bitmap,
         templateBitmap: Bitmap?,
     ) {
-        val loadStart = System.currentTimeMillis()
         this.strokes.clear()
         this.strokes.addAll(strokes)
         this.templateBitmap = templateBitmap
@@ -329,7 +324,6 @@ class GenericDrawingView(context: Context) : View(context), DrawingView {
         renderBitmap = bitmap
         renderCanvas = Canvas(bitmap)
         invalidate()
-        android.util.Log.d("NoteSprout_Perf", "[PERF] GenericDrawingView.loadStrokesWithBitmap (swap only): ${System.currentTimeMillis() - loadStart}ms (stroke_count=${strokes.size})")
     }
 
     override fun releaseResources() {

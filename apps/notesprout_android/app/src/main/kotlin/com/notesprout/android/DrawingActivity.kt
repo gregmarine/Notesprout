@@ -471,50 +471,35 @@ class DrawingActivity : AppCompatActivity() {
     private fun loadStrokes() {
         val db = soilDatabase ?: return
         lifecycleScope.launch {
-            val openStart = System.currentTimeMillis()
             // IO: metadata restore + DB load + pre-build bitmap (Option A cache miss on first open).
             val (strokes, templateBitmap, prebuiltBitmap) = withContext(Dispatchers.IO) {
                 // Restore last-opened page — runs before loadStrokesFromDb so
                 // currentPageIndex is correct when strokes are fetched.
-                val metaStart = System.currentTimeMillis()
                 notebookMetadata = loadNotebookMetadataFromDb(db)
-                Log.d("NoteSprout_Perf", "[PERF] loadNotebookMetadata: ${System.currentTimeMillis() - metaStart}ms")
 
                 val lastPage = notebookMetadata?.lastOpenedPage
                 if (lastPage != null) {
-                    val pagesStart = System.currentTimeMillis()
                     val allPages = db.notebookDao().getPagesSorted()
-                    Log.d("NoteSprout_Perf", "[PERF] getPagesSorted (last-page restore): ${System.currentTimeMillis() - pagesStart}ms (page_count=${allPages.size})")
                     val idx = allPages.indexOfFirst { it.id == lastPage }
                     if (idx >= 0) currentPageIndex = idx
                     // If idx == -1 (page deleted), keep currentPageIndex = 0 (fallback).
                 }
 
-                val loadStart = System.currentTimeMillis()
                 val (s, t) = loadPageData(db)
-                Log.d("NoteSprout_Perf", "[PERF] loadPageData (open): ${System.currentTimeMillis() - loadStart}ms")
 
                 // Option B: pre-build render bitmap on IO thread so main thread just swaps.
-                val bitmapStart = System.currentTimeMillis()
                 val bmp = drawingView.buildRenderBitmap(s, t)
-                Log.d("NoteSprout_Perf", "[PERF] buildRenderBitmap (open, IO): ${System.currentTimeMillis() - bitmapStart}ms (stroke_count=${s.size})")
                 Triple(s, t, bmp)
             }
 
             // Main thread: fast bitmap swap instead of O(N) redraw.
-            val swapStart = System.currentTimeMillis()
             if (prebuiltBitmap != null) {
                 drawingView.loadStrokesWithBitmap(strokes, prebuiltBitmap, templateBitmap)
-                Log.d("NoteSprout_Perf", "[PERF] loadStrokesWithBitmap (open, main thread): ${System.currentTimeMillis() - swapStart}ms (stroke_count=${strokes.size})")
             } else {
                 drawingView.setTemplate(templateBitmap)
-                Log.d("NoteSprout_Perf", "[PERF] setTemplate (open, main thread): ${System.currentTimeMillis() - swapStart}ms")
-                val loadStrokesStart = System.currentTimeMillis()
                 drawingView.loadStrokes(strokes)
-                Log.d("NoteSprout_Perf", "[PERF] drawingView.loadStrokes (open, main thread): ${System.currentTimeMillis() - loadStrokesStart}ms (stroke_count=${strokes.size})")
             }
 
-            Log.d("NoteSprout_Perf", "[PERF] loadStrokes TOTAL (open): ${System.currentTimeMillis() - openStart}ms (stroke_count=${strokes.size})")
             updatePageIndicator()
         }
     }
@@ -539,14 +524,11 @@ class DrawingActivity : AppCompatActivity() {
      * Must be called on [Dispatchers.IO].
      */
     private suspend fun loadStrokesFromDb(db: SoilDatabase): List<LiveStroke> {
-        val fnStart = System.currentTimeMillis()
         val dao = db.notebookDao()
 
         // These two lightweight queries (~2–20ms total) are always needed to set
         // currentPageId and currentLayerId, even on a cache hit.
-        val q1Start = System.currentTimeMillis()
         pages = dao.getPagesSorted().toMutableList()
-        Log.d("NoteSprout_Perf", "[PERF] getPagesSorted (loadStrokesFromDb): ${System.currentTimeMillis() - q1Start}ms (page_count=${pages.size})")
 
         if (pages.isEmpty()) {
             Log.w(TAG, "loadStrokesFromDb: no pages found in notebook")
@@ -558,9 +540,7 @@ class DrawingActivity : AppCompatActivity() {
         currentPageId = page.id
         Log.d(TAG, "loadStrokesFromDb: page $currentPageId (${currentPageIndex + 1}/${pages.size})")
 
-        val q2Start = System.currentTimeMillis()
         val layer = dao.getLayerForPage(currentPageId)
-        Log.d("NoteSprout_Perf", "[PERF] getLayerForPage: ${System.currentTimeMillis() - q2Start}ms")
 
         if (layer == null) {
             Log.w(TAG, "loadStrokesFromDb: no layer found under page $currentPageId")
@@ -574,17 +554,13 @@ class DrawingActivity : AppCompatActivity() {
         if (cached != null) {
             persistedStrokeIds.clear()
             persistedStrokeIds.addAll(cached.map { it.id })
-            Log.d("NoteSprout_Perf", "[PERF] loadStrokesFromDb TOTAL (cache hit): ${System.currentTimeMillis() - fnStart}ms (stroke_count=${cached.size})")
             return cached
         }
 
         // Cache miss — full DB load.
-        val q3Start = System.currentTimeMillis()
         val strokeObjects = dao.getStrokesForLayer(currentLayerId)
-        Log.d("NoteSprout_Perf", "[PERF] getStrokesForLayer: ${System.currentTimeMillis() - q3Start}ms (stroke_count=${strokeObjects.size})")
         Log.d(TAG, "loadStrokesFromDb: found ${strokeObjects.size} stroke rows")
 
-        val jsonStart = System.currentTimeMillis()
         val result = strokeObjects.mapNotNull { obj ->
             try {
                 LiveStroke(id = obj.id, points = StrokeData.fromJson(obj.data).toPointFs())
@@ -593,8 +569,6 @@ class DrawingActivity : AppCompatActivity() {
                 null
             }
         }
-        Log.d("NoteSprout_Perf", "[PERF] JSON deserialize all strokes: ${System.currentTimeMillis() - jsonStart}ms (stroke_count=${result.size})")
-        Log.d("NoteSprout_Perf", "[PERF] loadStrokesFromDb TOTAL: ${System.currentTimeMillis() - fnStart}ms (stroke_count=${result.size})")
 
         // Populate persisted-ID registry and stroke cache for this page.
         persistedStrokeIds.clear()
@@ -613,27 +587,17 @@ class DrawingActivity : AppCompatActivity() {
     private suspend fun loadPageTemplateFromDb(db: SoilDatabase): Bitmap? {
         val pageId = currentPageId.takeIf { it.isNotEmpty() } ?: return null
 
-        val q1Start = System.currentTimeMillis()
         val page = db.notebookDao().getObjectById(pageId) ?: return null
-        Log.d("NoteSprout_Perf", "[PERF] getObjectById (page for template): ${System.currentTimeMillis() - q1Start}ms")
 
-        val templateId = TemplateDialog.parseTemplateId(page.data).takeIf { it.isNotEmpty() } ?: run {
-            Log.d("NoteSprout_Perf", "[PERF] loadPageTemplateFromDb: no template on this page")
-            return null
-        }
+        val templateId = TemplateDialog.parseTemplateId(page.data).takeIf { it.isNotEmpty() } ?: return null
 
-        val q2Start = System.currentTimeMillis()
         val templateObj = db.notebookDao().getTemplateById(templateId) ?: return null
-        Log.d("NoteSprout_Perf", "[PERF] getTemplateById: ${System.currentTimeMillis() - q2Start}ms")
 
         return try {
-            val decodeStart = System.currentTimeMillis()
             val dataObj = JSONObject(templateObj.data)
             val b64 = dataObj.getString("image")
             val bytes = Base64.decode(b64, android.util.Base64.DEFAULT)
-            val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
-            Log.d("NoteSprout_Perf", "[PERF] base64+BitmapFactory decode (template): ${System.currentTimeMillis() - decodeStart}ms (bytes=${bytes.size})")
-            bitmap
+            BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
         } catch (e: Exception) {
             Log.e(TAG, "loadPageTemplateFromDb: failed to decode template bitmap", e)
             null
@@ -663,7 +627,6 @@ class DrawingActivity : AppCompatActivity() {
      * Must be called on [Dispatchers.IO].
      */
     private suspend fun saveStrokes(db: SoilDatabase) {
-        val saveStart = System.currentTimeMillis()
         val layerId = currentLayerId
         if (layerId.isEmpty()) {
             Log.w(TAG, "saveStrokes: currentLayerId is empty — skipping")
@@ -680,11 +643,9 @@ class DrawingActivity : AppCompatActivity() {
         val newStrokes = currentStrokes.filter { it.id !in alreadyPersisted }
 
         Log.d(TAG, "saveStrokes: ${newStrokes.size} new / ${currentStrokes.size} total strokes")
-        Log.d("NoteSprout_Perf", "[PERF] saveStrokes new_count=${newStrokes.size} total_count=${currentStrokes.size}")
 
         if (newStrokes.isEmpty()) {
             // Nothing to write — return immediately without touching the DB at all.
-            Log.d("NoteSprout_Perf", "[PERF] saveStrokes TOTAL: ${System.currentTimeMillis() - saveStart}ms (stroke_count=${currentStrokes.size}, new_count=0 — skipped)")
             return
         }
 
@@ -731,8 +692,6 @@ class DrawingActivity : AppCompatActivity() {
 
         // Extend the registry so subsequent saves skip these IDs immediately.
         persistedStrokeIds.addAll(newStrokes.map { it.id })
-
-        Log.d("NoteSprout_Perf", "[PERF] saveStrokes TOTAL: ${System.currentTimeMillis() - saveStart}ms (stroke_count=${currentStrokes.size}, new_count=${newStrokes.size})")
     }
 
     // ── Template operations ───────────────────────────────────────────────────
@@ -962,44 +921,30 @@ class DrawingActivity : AppCompatActivity() {
     private fun navigateToPage(newIndex: Int) {
         val db = soilDatabase ?: return
         lifecycleScope.launch {
-            val navStart = System.currentTimeMillis()
-
             // Option A: snapshot in-memory strokes (including any drawn since last DB load)
             // to the cache before the page switch, so returning here hits the cache.
             snapshotCurrentPageToCache()
 
-            val saveStart = System.currentTimeMillis()
             withContext(Dispatchers.IO) { saveStrokes(db) }
-            Log.d("NoteSprout_Perf", "[PERF] saveStrokes (pre-switch): ${System.currentTimeMillis() - saveStart}ms")
 
             currentPageIndex = newIndex
             drawingView.clearCanvas()
 
             // IO: load strokes (cache-aware) + pre-build render bitmap (Option B).
-            val loadStart = System.currentTimeMillis()
             val (strokes, templateBitmap, prebuiltBitmap) = withContext(Dispatchers.IO) {
                 val (s, t) = loadPageData(db)
-                val bitmapStart = System.currentTimeMillis()
                 val bmp = drawingView.buildRenderBitmap(s, t)
-                Log.d("NoteSprout_Perf", "[PERF] buildRenderBitmap (navigate, IO): ${System.currentTimeMillis() - bitmapStart}ms (stroke_count=${s.size})")
                 Triple(s, t, bmp)
             }
-            Log.d("NoteSprout_Perf", "[PERF] loadPageData+buildBitmap (navigate): ${System.currentTimeMillis() - loadStart}ms (stroke_count=${strokes.size})")
 
             // Main thread: fast bitmap swap instead of O(N) redraw.
-            val swapStart = System.currentTimeMillis()
             if (prebuiltBitmap != null) {
                 drawingView.loadStrokesWithBitmap(strokes, prebuiltBitmap, templateBitmap)
-                Log.d("NoteSprout_Perf", "[PERF] loadStrokesWithBitmap (navigate, main thread): ${System.currentTimeMillis() - swapStart}ms (stroke_count=${strokes.size})")
             } else {
                 drawingView.setTemplate(templateBitmap)
-                Log.d("NoteSprout_Perf", "[PERF] setTemplate (navigate, main thread): ${System.currentTimeMillis() - swapStart}ms")
-                val loadStrokesStart = System.currentTimeMillis()
                 drawingView.loadStrokes(strokes)
-                Log.d("NoteSprout_Perf", "[PERF] drawingView.loadStrokes (navigate, main thread): ${System.currentTimeMillis() - loadStrokesStart}ms (stroke_count=${strokes.size})")
             }
 
-            Log.d("NoteSprout_Perf", "[PERF] navigateToPage TOTAL: ${System.currentTimeMillis() - navStart}ms (stroke_count=${strokes.size})")
             updatePageIndicator()
             saveLastOpenedPage(currentPageId)
         }

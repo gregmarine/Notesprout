@@ -302,7 +302,6 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
         epd("INVALIDATE caller=redrawCanvas($caller)")
         val elapsed = System.currentTimeMillis() - redrawStart
         epd("REDRAW_CANVAS_END caller=$caller elapsed=${elapsed}ms strokeCount=${strokes.size}")
-        Log.d("NoteSprout_Perf", "[PERF] OnyxDrawingView.redrawCanvas: ${elapsed}ms (stroke_count=${strokes.size})")
     }
 
     // Minimum squared distance from point p to segment a→b.
@@ -510,7 +509,6 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
         this.strokes.addAll(strokes)
         redrawCanvas(caller = "loadStrokes")
         Log.d(TAG, "loadStrokes: loaded ${strokes.size} strokes")
-        Log.d("NoteSprout_Perf", "[PERF] OnyxDrawingView.loadStrokes (incl redrawCanvas): ${System.currentTimeMillis() - loadStart}ms (stroke_count=${strokes.size})")
         epd("LOAD_STROKES_END elapsed=${System.currentTimeMillis() - loadStart}ms strokeCount=${strokes.size}")
     }
 
@@ -589,7 +587,6 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
         }
 
         Log.d(TAG, "loadStrokesWithBitmap: swapped bitmap, ${strokes.size} strokes")
-        Log.d("NoteSprout_Perf", "[PERF] OnyxDrawingView.loadStrokesWithBitmap (swap only): ${System.currentTimeMillis() - loadStart}ms (stroke_count=${strokes.size})")
         epd("LOAD_STROKES_WITH_BITMAP_END elapsed=${System.currentTimeMillis() - loadStart}ms strokeCount=${strokes.size}")
     }
 
