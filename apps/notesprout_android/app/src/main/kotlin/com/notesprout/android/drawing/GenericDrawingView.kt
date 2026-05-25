@@ -56,17 +56,10 @@ class GenericDrawingView(context: Context) : View(context), DrawingView {
     override var onStrokeErased: ((String) -> Unit)? = null
 
     /**
-     * Invoked (on main thread) 1.5 s after the last ACTION_UP, matching the idle
-     * pattern used by OnyxDrawingView.  The activity uses this to incrementally
-     * save new strokes without blocking the drawing thread.
+     * Invoked (on main thread) immediately on ACTION_UP after each stroke.
+     * The activity uses this to incrementally save new strokes to the database.
      */
-    override var onIdleSave: (() -> Unit)? = null
-
-    // ── Idle save ────────────────────────────────────────────────────────────
-
-    private val idleSaveRunnable = Runnable {
-        onIdleSave?.invoke()
-    }
+    override var onPenLifted: (() -> Unit)? = null
 
     // ── Touch handling ───────────────────────────────────────────────────────
 
@@ -92,7 +85,6 @@ class GenericDrawingView(context: Context) : View(context), DrawingView {
 
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
-                removeCallbacks(idleSaveRunnable)
                 activePoints.clear()
                 activePoints.add(PointF(event.x, event.y))
                 invalidate()
@@ -120,8 +112,8 @@ class GenericDrawingView(context: Context) : View(context), DrawingView {
                 } else {
                     activePoints.add(PointF(event.x, event.y))
                     commitActiveStroke()
-                    // Schedule idle save ~1.5 s after the stroke ends.
-                    postDelayed(idleSaveRunnable, 1500)
+                    // Persist new strokes immediately on pen lift.
+                    onPenLifted?.invoke()
                 }
                 activePoints.clear()
                 invalidate()
@@ -282,7 +274,6 @@ class GenericDrawingView(context: Context) : View(context), DrawingView {
     override fun clearCanvas() {
         activePoints.clear()
         strokes.clear()
-        removeCallbacks(idleSaveRunnable)
         // Clear to white then re-apply template so the template persists after clear.
         renderCanvas?.let { canvas ->
             canvas.drawColor(Color.WHITE)
@@ -295,7 +286,6 @@ class GenericDrawingView(context: Context) : View(context), DrawingView {
 
     override fun loadStrokes(strokes: List<LiveStroke>) {
         val loadStart = System.currentTimeMillis()
-        removeCallbacks(idleSaveRunnable)
         this.strokes.clear()
         this.strokes.addAll(strokes)
         redrawCanvas()
@@ -332,7 +322,6 @@ class GenericDrawingView(context: Context) : View(context), DrawingView {
         templateBitmap: Bitmap?,
     ) {
         val loadStart = System.currentTimeMillis()
-        removeCallbacks(idleSaveRunnable)
         this.strokes.clear()
         this.strokes.addAll(strokes)
         this.templateBitmap = templateBitmap
@@ -344,7 +333,6 @@ class GenericDrawingView(context: Context) : View(context), DrawingView {
     }
 
     override fun releaseResources() {
-        removeCallbacks(idleSaveRunnable)
         renderBitmap?.recycle()
         renderBitmap = null
         renderCanvas = null

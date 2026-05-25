@@ -33,12 +33,15 @@ interface DrawingView {
     var onStrokeErased: ((strokeId: String) -> Unit)?
 
     /**
-     * Called after the pen has been idle for ~1.5 s (Onyx idle-release timer; Generic
-     * equivalent posted on ACTION_UP).  The activity uses this to incrementally save
-     * new strokes to the database without blocking the drawing thread.
+     * Called immediately after the pen lifts (onEndRawDrawing on Onyx; ACTION_UP on
+     * Generic).  The activity uses this to incrementally save new strokes to the
+     * database after each stroke without blocking the drawing thread.
+     * The EPD overlay is NOT released here — it remains active until a non-writing
+     * transition (tool change, page flip, page clear, window focus loss) triggers the
+     * proper handoff.
      * Set this in onCreate; null by default.
      */
-    var onIdleSave: (() -> Unit)?
+    var onPenLifted: (() -> Unit)?
 
     /**
      * Replace the in-memory stroke list with [strokes] loaded from the database,

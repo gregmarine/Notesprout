@@ -189,9 +189,9 @@ NoteSprout's visual language is designed for e-ink displays first. All other pla
 ## Drawing Engine Architecture (Implemented)
 
 ### Native Android Layer (package: `com.notesprout.android`)
-- `drawing/DrawingView.kt` — interface: `asView()`, `setToolbarHeight(Int)`, `enableDrawing()`, `disableDrawing()`, `resetOverlay()`, `clearCanvas()`, `setEraserMode(Boolean)`, `releaseResources()`, `loadStrokes(List<LiveStroke>)`, `getStrokes(): List<LiveStroke>`, `onStrokeErased: ((String) -> Unit)?`, `onIdleSave: (() -> Unit)?`
-- `drawing/OnyxDrawingView.kt` — BOOX path: TouchHelper, RawInputCallback, limit rect. `renderStroke` calls `invalidate()` on every stroke to keep the Android canvas continuously current with the hardware overlay. `clearCanvas()` owns the overlay handoff: disable render → white bitmap → `invalidate()` → `EpdController.handwritingRepaint()` → re-enable. Erasing: stroke store (`strokes: MutableList<LiveStroke>`), point-to-segment distance hit test, `redrawCanvas()` rebuilds bitmap on erase. `onBeginRawDrawing` re-enables render — guarded by `!isEraserMode`. `EpdController.setUpdListSize(512)` called on every `openRawDrawing()`. Idle overlay release at 1.5s via `idleReleaseRunnable`; `onIdleSave` fires alongside overlay release.
-- `drawing/GenericDrawingView.kt` — standard Android Canvas: two-layer Bitmap, stylus-only (`TOOL_TYPE_STYLUS` + `TOOL_TYPE_ERASER`), historical point capture. Idle save via `idleSaveRunnable` posted on `ACTION_UP`.
+- `drawing/DrawingView.kt` — interface: `asView()`, `setToolbarHeight(Int)`, `enableDrawing()`, `disableDrawing()`, `resetOverlay()`, `clearCanvas()`, `setEraserMode(Boolean)`, `releaseResources()`, `loadStrokes(List<LiveStroke>)`, `getStrokes(): List<LiveStroke>`, `onStrokeErased: ((String) -> Unit)?`, `onPenLifted: (() -> Unit)?`
+- `drawing/OnyxDrawingView.kt` — BOOX path: TouchHelper, RawInputCallback, limit rect. `renderStroke` calls `invalidate()` on every stroke to keep the Android canvas continuously current with the hardware overlay. The EPD overlay stays active for the entire writing session — no idle release timer. Handoff only happens at non-writing transitions: `setEraserMode(true)`, `clearCanvas()`, `setTemplate()`, `loadStrokesWithBitmap()`, `onWindowFocusChanged(false)`. `onPenLifted` fires on `onEndRawDrawing` (each pen lift) to persist new strokes to DB. `onBeginRawDrawing` re-enables render — guarded by `!isEraserMode`. `EpdController.setUpdListSize(512)` called on every `openRawDrawing()`.
+- `drawing/GenericDrawingView.kt` — standard Android Canvas: two-layer Bitmap, stylus-only (`TOOL_TYPE_STYLUS` + `TOOL_TYPE_ERASER`), historical point capture. `onPenLifted` fires directly on `ACTION_UP` — no timer.
 - `DrawingActivity.kt` — fullscreen immersive, multi-page state (`pages`, `currentPageIndex`, `currentPageId`, `currentLayerId`), incremental save via `insertOrIgnore`, `onStrokeErased` callback for targeted soft-delete, swipe gesture for page navigation.
 - `MainActivity.kt` — notebook list screen, adaptive grid, pagination, swipe, empty state, bottom bar.
 
@@ -208,16 +208,21 @@ NoteSprout's visual language is designed for e-ink displays first. All other pla
 
 ## Pruning Log — Architectural Lessons (Non-Obvious Rules)
 
+### EPD overlay lifetime — stays active during writing
+- **The overlay is "writing mode."** It stays active indefinitely while the user is writing. There is no idle-release timer. This matches the behavior of the native Onyx notes app.
+- Releasing the overlay mid-session (e.g., after 1.5 s of inactivity) triggers a full-panel GC16/REGAL quality refresh on color e-ink (NoteAir5C) when the base layer is stale — the visible flicker the idle timer was causing.
+- **Non-writing transitions** are the only legitimate handoff points: `setEraserMode(true)` (tool switch), `clearCanvas()` (page clear), `setTemplate()` (template change), `loadStrokesWithBitmap()` (page flip), `onWindowFocusChanged(false)` (app moved to background). All of these already follow the full handoff sequence.
+- `onPenLifted` fires on every `onEndRawDrawing` (Onyx) / `ACTION_UP` (Generic) to persist new strokes to DB. This is purely a DB save trigger — it does not touch the overlay.
+
 ### EPD handoff — flicker-free canvas transition
 - `renderStroke` calls `invalidate()` on every stroke so the Android canvas stays continuously current with the hardware overlay. Overlay removal is always seamless.
 - `clearCanvas()` owns the overlay handoff: disable render → white bitmap → `invalidate()` → `EpdController.handwritingRepaint(view, Rect(0,0,w,h))` → re-enable.
 - **Never remove `handwritingRepaint` from the clear path.** `setRawDrawingRenderEnabled(false/true)` is a lightweight toggle — it hides/shows the overlay but does NOT clear the hardware buffer. `handwritingRepaint` is required to physically commit content to the EPD base layer. Without it: gray residue (EPD pixels not refreshed) and black flash (stale overlay buffer renders at full black on re-enable).
 - `EpdController.setUpdListSize(512)` in `openRawDrawing()` suppresses the hardware's automatic mid-session GC16 refresh. Do not remove.
-- Idle overlay release: `setRawDrawingRenderEnabled(false)` + `invalidate()` after 1.5s inactivity. Overlay reactivates automatically on next `onBeginRawDrawing`.
 
 ### Eraser overlay — release render before erasing begins
-- When erasing begins (toolbar toggle or physical pen flip), release the overlay render immediately: `removeCallbacks(idleReleaseRunnable)`, `setRawDrawingRenderEnabled(false)`, `invalidate()`.
-- If the overlay is still enabled when erasing starts, the hardware overlay hides the already-correct bitmap erase result until the idle timer fires — causing phantom strokes and delayed visual feedback.
+- When erasing begins (toolbar toggle or physical pen flip), release the overlay render immediately: `setRawDrawingRenderEnabled(false)`, `invalidate()`.
+- If the overlay is still enabled when erasing starts, the hardware overlay hides the already-correct bitmap erase result — causing phantom strokes and delayed visual feedback.
 - `handwritingRepaint` in `onEndRawErasing` / `onEndRawDrawing` (eraser mode) still commits clean EPD pixels on lift. Never call `handwritingRepaint` in the erase move path — it causes a full EPD quality flash on every erased stroke.
 - `onBeginRawDrawing` re-enables render — guarded by `!isEraserMode` to prevent rogue overlay stroke during software eraser.
 
@@ -308,8 +313,9 @@ Completed:
 - Restore last-opened page on every notebook open; persist on every page turn
 - Auto-open new notebook in DrawingActivity immediately after creation (no extra tap required); list re-scans on back-press via onResume
 - Template system: scan from device filesystem, store in `.soil`, apply to page, inherit on new page, adaptive grid dialog
+- EPD overlay flicker fix: overlay stays active during writing; released only at non-writing transitions (tool switch, page flip, page clear, focus loss). `onIdleSave` renamed to `onPenLifted`; saves triggered per pen lift instead of idle timer.
 
 Next up: TBD — discuss before starting.
 
 ---
-*Last updated: template system + adaptive grid dialog*
+*Last updated: EPD overlay flicker fix + onPenLifted*

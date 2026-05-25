@@ -291,8 +291,9 @@ class DrawingActivity : AppCompatActivity() {
             }
         }
 
-        // Idle save — fire after ~1.5 s of pen inactivity to persist new strokes.
-        drawingView.onIdleSave = {
+        // Persist new strokes immediately after each pen lift.
+        // The EPD overlay stays active during writing; this is purely a DB save trigger.
+        drawingView.onPenLifted = {
             val db = soilDatabase
             if (db != null) {
                 lifecycleScope.launch {
