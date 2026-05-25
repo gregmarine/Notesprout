@@ -47,6 +47,13 @@ class DrawingActivity : AppCompatActivity() {
 
         /** Intent extra key — the absolute path to the `.soil` notebook file. */
         const val EXTRA_NOTEBOOK_PATH = "notebook_path"
+
+        /**
+         * Maximum number of pages held in [strokeCache] at once.
+         * LRU eviction drops the least-recently-accessed page when this limit is exceeded.
+         * At ~1 KB per stroke and a worst-case 610-stroke page, 10 entries ≈ 6 MB max.
+         */
+        private const val MAX_CACHE_PAGES = 10
     }
 
     private lateinit var binding: ActivityDrawingBinding
@@ -92,7 +99,17 @@ class DrawingActivity : AppCompatActivity() {
      * Invalidated per-entry when strokes are erased or the page is cleared/deleted.
      * Lives for the lifetime of the activity — no cross-session persistence needed.
      */
-    private val strokeCache = mutableMapOf<String, List<LiveStroke>>()
+    /**
+     * LRU stroke cache — bounded to [MAX_CACHE_PAGES] entries.
+     *
+     * [LinkedHashMap] in access-order mode moves each entry to the head on every read,
+     * so [removeEldestEntry] always evicts the least-recently-touched page.  At 10 pages
+     * worst-case memory is ~6 MB (610 strokes × 1 KB × 10) regardless of notebook size.
+     */
+    private val strokeCache = object : LinkedHashMap<String, List<LiveStroke>>(16, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, List<LiveStroke>>): Boolean =
+            size > MAX_CACHE_PAGES
+    }
 
     // ── Persisted stroke tracking ─────────────────────────────────────────────
 
