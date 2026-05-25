@@ -233,6 +233,35 @@ NoteSprout's visual language is designed for e-ink displays first. All other pla
 
 ---
 
+## Template System (Implemented)
+
+### Overview
+- Templates are `type = "template"` rows stored in the `.soil` notebook database
+- Template PNG files are scanned from `/sdcard/Documents/NoteSprout/Templates/` at dialog open time
+- Selecting a template from the "All" tab inserts it into the notebook DB (base64-encoded PNG in `data`) and returns the full-res `Bitmap` to `DrawingActivity`
+- Selecting from the "Notebook" tab decodes the already-stored base64 and returns the full-res `Bitmap`
+- Template `data` JSON: `{ "width": Int, "height": Int, "name": String, "image": String (base64) }`
+- `parseTemplateId(data)` reads `data.template` from a page row to get the active template UUID (empty = Blank)
+
+### TemplateDialog
+- `TemplateDialog.kt` — two-tab dialog (All / Notebook), adaptive grid layout
+- Grid columns: `if (widthPixels >= 1500) 4 else 2` — 4 on NA5C (1860px), 2 on P2P/GC7 (≤1264px)
+- Thumbnails: decoded at `inSampleSize ≤ 4` (target ~1300px longest side); `THUMB_HEIGHT_DP = 200`
+- `thumbFrame` FrameLayout: `shape_bordered` background + **1dp padding** — the padding insets the `ImageView` so it cannot render over the border stroke. Do NOT use `clipToOutline` here — it clips the border stroke itself at the rounded corners, making the top/bottom borders appear truncated.
+- Selected cell: `shape_bordered` background on outer `cell` LinearLayout
+
+### Template inheritance on new page
+- `addPage()` in `DrawingActivity` reads the current page **fresh from DB** via `dao.getObjectById(currentPageId)` before computing `inheritedTemplate`. Do NOT read from the stale in-memory `pages` list — it is not refreshed after `applyTemplateToCurrentPage()` writes to DB.
+
+### setTemplate() EPD handoff (OnyxDrawingView)
+- `setTemplate()` must follow the full EPD handoff pattern: `setRawDrawingRenderEnabled(false)` → `redrawCanvas()` → `EpdController.handwritingRepaint()` → `setRawDrawingEnabled(true)`. Without `handwritingRepaint`, the template change is invisible on e-ink until the next physical refresh.
+
+### Race condition — strokes missing on notebook reopen
+- `loadStrokes()` is called in `onCreate()` before view layout; if the DB query completes before `onSizeChanged()`, `redrawCanvas()` is a no-op (null canvas).
+- Fix: `onSizeChanged()` calls `redrawCanvas()` (not just white fill) — this replays all currently-loaded strokes onto the fresh bitmap regardless of load order. Applied to both `OnyxDrawingView` and `GenericDrawingView`.
+
+---
+
 ## Current Step
 
 **MVP iteration — multi-page drawing with persistence.**
@@ -248,8 +277,9 @@ Completed:
 - Notebook metadata row (`type = "notebook"`) — title, cover, last_opened_page
 - Restore last-opened page on every notebook open; persist on every page turn
 - Auto-open new notebook in DrawingActivity immediately after creation (no extra tap required); list re-scans on back-press via onResume
+- Template system: scan from device filesystem, store in `.soil`, apply to page, inherit on new page, adaptive grid dialog
 
 Next up: TBD — discuss before starting.
 
 ---
-*Last updated: auto-open DrawingActivity on notebook creation*
+*Last updated: template system + adaptive grid dialog*
