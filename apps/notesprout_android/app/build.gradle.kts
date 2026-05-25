@@ -2,6 +2,7 @@ plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("com.google.devtools.ksp")
+    id("org.jetbrains.kotlin.plugin.serialization")
 }
 
 android {
@@ -69,4 +70,9 @@ dependencies {
     // lifecycle-runtime-ktx provides lifecycleScope on Activity/Fragment.
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
+
+    // kotlinx.serialization — replaces org.json for stroke data encoding/decoding.
+    // Code-generated at compile time (no reflection), significantly faster than org.json
+    // for large point arrays.  Wire format is identical JSON so no DB migration is needed.
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
 }

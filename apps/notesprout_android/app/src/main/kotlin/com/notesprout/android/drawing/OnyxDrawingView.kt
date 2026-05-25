@@ -179,6 +179,7 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
      * Call whenever strokes are added/removed or the template changes.
      */
     private fun redrawCanvas() {
+        val redrawStart = System.currentTimeMillis()
         val canvas = renderCanvas ?: return
         canvas.drawColor(Color.WHITE)
         templateBitmap?.let { tb ->
@@ -195,6 +196,7 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
             canvas.drawPath(path, strokePaint)
         }
         invalidate()
+        Log.d("NoteSprout_Perf", "[PERF] OnyxDrawingView.redrawCanvas: ${System.currentTimeMillis() - redrawStart}ms (stroke_count=${strokes.size})")
     }
 
     // Minimum squared distance from point p to segment a→b.
@@ -356,11 +358,13 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
     }
 
     override fun loadStrokes(strokes: List<LiveStroke>) {
+        val loadStart = System.currentTimeMillis()
         removeCallbacks(idleReleaseRunnable)
         this.strokes.clear()
         this.strokes.addAll(strokes)
         redrawCanvas()
         Log.d(TAG, "loadStrokes: loaded ${strokes.size} strokes")
+        Log.d("NoteSprout_Perf", "[PERF] OnyxDrawingView.loadStrokes (incl redrawCanvas): ${System.currentTimeMillis() - loadStart}ms (stroke_count=${strokes.size})")
     }
 
     override fun getStrokes(): List<LiveStroke> = strokes.toList()

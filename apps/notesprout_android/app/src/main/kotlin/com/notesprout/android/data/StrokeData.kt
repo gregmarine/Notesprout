@@ -1,14 +1,17 @@
 package com.notesprout.android.data
 
 import android.graphics.PointF
-import org.json.JSONArray
-import org.json.JSONObject
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
 
 /**
  * The full data payload for a stroke row in the `notebook` table.
  *
  * Serialized to/from JSON and stored in [NotebookObject.data].
- * Uses Android's built-in [org.json] — no additional dependency required.
+ * Uses [kotlinx.serialization] — code-generated, no reflection, significantly
+ * faster than [org.json] for large point arrays (the previous bottleneck).
+ * Wire format is identical to the original org.json output so no DB migration
+ * is required.
  *
  * JSON shape:
  * ```json
@@ -21,31 +24,16 @@ import org.json.JSONObject
  *   ]
  * }
  * ```
- * `pressure` and `tilt` are omitted from JSON when null to keep row size minimal.
+ * `pressure` and `tilt` are omitted from JSON when null ([explicitNulls] = false).
  */
+@Serializable
 data class StrokeData(
     val color: String,
     val strokeWidth: Float,
     val points: List<StrokePoint>,
 ) {
     /** Serialize to JSON string for storage in the `data` column. */
-    fun toJson(): String {
-        val pointsArray = JSONArray()
-        for (p in points) {
-            val obj = JSONObject()
-            obj.put("x", p.x.toDouble())
-            obj.put("y", p.y.toDouble())
-            if (p.pressure != null) obj.put("pressure", p.pressure.toDouble())
-            if (p.tilt != null) obj.put("tilt", p.tilt.toDouble())
-            obj.put("ts", p.timestamp)
-            pointsArray.put(obj)
-        }
-        return JSONObject().apply {
-            put("color", color)
-            put("strokeWidth", strokeWidth.toDouble())
-            put("points", pointsArray)
-        }.toString()
-    }
+    fun toJson(): String = codec.encodeToString(serializer(), this)
 
     /**
      * Extract (x, y) pairs for rendering.
@@ -54,23 +42,18 @@ data class StrokeData(
     fun toPointFs(): List<PointF> = points.map { PointF(it.x, it.y) }
 
     companion object {
-        /** Deserialize from a JSON string read out of the `data` column. */
-        fun fromJson(json: String): StrokeData {
-            val obj = JSONObject(json)
-            val color = obj.getString("color")
-            val strokeWidth = obj.getDouble("strokeWidth").toFloat()
-            val pointsArray = obj.getJSONArray("points")
-            val points = (0 until pointsArray.length()).map { i ->
-                val p = pointsArray.getJSONObject(i)
-                StrokePoint(
-                    x         = p.getDouble("x").toFloat(),
-                    y         = p.getDouble("y").toFloat(),
-                    pressure  = if (p.has("pressure")) p.getDouble("pressure").toFloat() else null,
-                    tilt      = if (p.has("tilt")) p.getDouble("tilt").toFloat() else null,
-                    timestamp = p.getLong("ts"),
-                )
-            }
-            return StrokeData(color, strokeWidth, points)
+        /**
+         * Shared Json instance.
+         * - [explicitNulls] = false  → null pressure/tilt are omitted from output,
+         *   matching the format written by the original org.json implementation.
+         * - [ignoreUnknownKeys] = true → forward-compatible with future schema additions.
+         */
+        private val codec = Json {
+            explicitNulls = false
+            ignoreUnknownKeys = true
         }
+
+        /** Deserialize from a JSON string read out of the `data` column. */
+        fun fromJson(json: String): StrokeData = codec.decodeFromString(json)
     }
 }
