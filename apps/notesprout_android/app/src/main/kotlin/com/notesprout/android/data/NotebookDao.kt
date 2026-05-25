@@ -119,4 +119,38 @@ interface NotebookDao {
      */
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertNotebookObject(obj: NotebookObject)
+
+    // ── Generic single-row lookup ─────────────────────────────────────────────
+
+    /**
+     * Fetch any single row by its [id], regardless of type or soft-delete status.
+     * Used by template loading to look up the page row and read its data JSON.
+     */
+    @Query("SELECT * FROM notebook WHERE id = :id LIMIT 1")
+    suspend fun getObjectById(id: String): NotebookObject?
+
+    // ── Template rows ─────────────────────────────────────────────────────────
+
+    /**
+     * All non-deleted template rows in this notebook, ordered by creation time ascending.
+     * Used by the template dialog's "Notebook" tab.
+     */
+    @Query("SELECT * FROM notebook WHERE type = 'template' AND deletedAt IS NULL ORDER BY createdAt ASC")
+    suspend fun getTemplatesSorted(): List<NotebookObject>
+
+    /**
+     * A single non-deleted template row by [id], or null if not found.
+     * Used when loading a page's stored template bitmap for rendering.
+     */
+    @Query("SELECT * FROM notebook WHERE type = 'template' AND id = :id AND deletedAt IS NULL LIMIT 1")
+    suspend fun getTemplateById(id: String): NotebookObject?
+
+    // ── Data column update ────────────────────────────────────────────────────
+
+    /**
+     * Overwrite the [data] column for the row with [id] and update [updatedAt].
+     * Used to persist the page's `template` property after the user picks a template.
+     */
+    @Query("UPDATE notebook SET data = :data, updatedAt = :updatedAt WHERE id = :id")
+    suspend fun updateData(id: String, data: String, updatedAt: Long)
 }

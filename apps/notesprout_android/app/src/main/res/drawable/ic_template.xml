@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Template button icon: document with horizontal lines representing a lined template.
+     Rendered at 24dp; all paths in inkBlack. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+
+    <!-- Page outline -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#000000"
+        android:strokeWidth="1.5"
+        android:strokeLineCap="square"
+        android:pathData="M5,2 L5,22 L19,22 L19,2 Z" />
+
+    <!-- Horizontal lines representing template content -->
+    <path
+        android:strokeColor="#000000"
+        android:strokeWidth="1.2"
+        android:strokeLineCap="round"
+        android:pathData="M8,7 L16,7" />
+    <path
+        android:strokeColor="#000000"
+        android:strokeWidth="1.2"
+        android:strokeLineCap="round"
+        android:pathData="M8,11 L16,11" />
+    <path
+        android:strokeColor="#000000"
+        android:strokeWidth="1.2"
+        android:strokeLineCap="round"
+        android:pathData="M8,15 L16,15" />
+    <path
+        android:strokeColor="#000000"
+        android:strokeWidth="1.2"
+        android:strokeLineCap="round"
+        android:pathData="M8,19 L13,19" />
+
+</vector>

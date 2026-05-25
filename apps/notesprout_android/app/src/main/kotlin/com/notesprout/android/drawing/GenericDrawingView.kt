@@ -7,6 +7,7 @@ import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.PointF
+import android.graphics.RectF
 import android.view.MotionEvent
 import android.view.View
 import com.notesprout.android.data.LiveStroke
@@ -27,6 +28,9 @@ class GenericDrawingView(context: Context) : View(context), DrawingView {
     private var renderBitmap: Bitmap? = null
     private var renderCanvas: Canvas? = null
     private var isEraserActive = false
+
+    /** Template bitmap — drawn as the base layer behind all strokes. Null = white background. */
+    private var templateBitmap: Bitmap? = null
 
     // Stroke store — LiveStroke carries the DB row UUID for incremental save / targeted erase.
     private val strokes = mutableListOf<LiveStroke>()
@@ -64,10 +68,13 @@ class GenericDrawingView(context: Context) : View(context), DrawingView {
         super.onSizeChanged(w, h, oldw, oldh)
         if (w == 0 || h == 0) return
         renderBitmap?.recycle()
-        renderBitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888).also {
-            renderCanvas = Canvas(it)
-            renderCanvas!!.drawColor(Color.WHITE)
-        }
+        val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        renderBitmap = bmp
+        renderCanvas = Canvas(bmp)
+        // redrawCanvas handles white → template → strokes in one pass.
+        // This ensures any strokes already loaded before layout (race with loadStrokes())
+        // are not lost when the bitmap is first created.
+        redrawCanvas()
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
@@ -116,6 +123,7 @@ class GenericDrawingView(context: Context) : View(context), DrawingView {
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
+        // renderBitmap has template + committed strokes baked in; draw it over white fallback.
         canvas.drawColor(Color.WHITE)
         renderBitmap?.let { canvas.drawBitmap(it, 0f, 0f, null) }
 
@@ -162,9 +170,16 @@ class GenericDrawingView(context: Context) : View(context), DrawingView {
         }
     }
 
+    /**
+     * Redraws the render bitmap from scratch: white base → template → all current strokes.
+     * Call whenever strokes are added/removed or the template changes.
+     */
     private fun redrawCanvas() {
         val canvas = renderCanvas ?: return
         canvas.drawColor(Color.WHITE)
+        templateBitmap?.let { tb ->
+            canvas.drawBitmap(tb, null, RectF(0f, 0f, width.toFloat(), height.toFloat()), null)
+        }
         for (liveStroke in strokes) {
             val points = liveStroke.points
             if (points.size < 2) continue
@@ -206,11 +221,26 @@ class GenericDrawingView(context: Context) : View(context), DrawingView {
     override fun disableDrawing() {}
     override fun setEraserMode(active: Boolean) { isEraserActive = active }
 
+    /**
+     * Set the template bitmap to use as the page background.
+     * Null = plain white. Redraws the canvas immediately (strokes on top of new template).
+     */
+    override fun setTemplate(bitmap: Bitmap?) {
+        templateBitmap = bitmap
+        redrawCanvas()
+    }
+
     override fun clearCanvas() {
         activePoints.clear()
         strokes.clear()
         removeCallbacks(idleSaveRunnable)
-        renderCanvas?.drawColor(Color.WHITE)
+        // Clear to white then re-apply template so the template persists after clear.
+        renderCanvas?.let { canvas ->
+            canvas.drawColor(Color.WHITE)
+            templateBitmap?.let { tb ->
+                canvas.drawBitmap(tb, null, RectF(0f, 0f, width.toFloat(), height.toFloat()), null)
+            }
+        }
         invalidate()
     }
 

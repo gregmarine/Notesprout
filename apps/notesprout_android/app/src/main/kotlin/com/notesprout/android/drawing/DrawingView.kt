@@ -1,5 +1,6 @@
 package com.notesprout.android.drawing
 
+import android.graphics.Bitmap
 import android.view.View
 import com.notesprout.android.data.LiveStroke
 
@@ -12,6 +13,14 @@ interface DrawingView {
     fun clearCanvas()
     fun setEraserMode(active: Boolean) {}
     fun releaseResources()
+
+    /**
+     * Set the template bitmap to render as the page background, behind all stroke layers.
+     * Pass null for a plain white background (no template).
+     * The template is NOT erased by the eraser and is NOT saved as strokes.
+     * Must be called on the main thread.
+     */
+    fun setTemplate(bitmap: Bitmap?) {}
 
     /**
      * Called by the activity when a stroke is erased in memory.

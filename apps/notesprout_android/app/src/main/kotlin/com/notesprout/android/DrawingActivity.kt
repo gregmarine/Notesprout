@@ -1,8 +1,11 @@
 package com.notesprout.android
 
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.Rect
 import android.os.Build
 import android.os.Bundle
+import android.util.Base64
 import android.util.Log
 import android.view.GestureDetector
 import android.view.MotionEvent
@@ -31,6 +34,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
+import org.json.JSONObject
 import java.io.File
 import java.util.Locale
 import java.util.UUID
@@ -100,7 +104,8 @@ class DrawingActivity : AppCompatActivity() {
             lifecycleScope.launch {
                 withContext(Dispatchers.IO) { addPage(db) }
                 drawingView.clearCanvas()
-                val strokes = withContext(Dispatchers.IO) { loadStrokesFromDb(db) }
+                val (strokes, templateBitmap) = withContext(Dispatchers.IO) { loadPageData(db) }
+                drawingView.setTemplate(templateBitmap)
                 drawingView.loadStrokes(strokes)
                 updatePageIndicator()
                 saveLastOpenedPage(currentPageId)
@@ -117,7 +122,8 @@ class DrawingActivity : AppCompatActivity() {
                     lifecycleScope.launch {
                         withContext(Dispatchers.IO) { deletePage(db) }
                         drawingView.clearCanvas()
-                        val strokes = withContext(Dispatchers.IO) { loadStrokesFromDb(db) }
+                        val (strokes, templateBitmap) = withContext(Dispatchers.IO) { loadPageData(db) }
+                        drawingView.setTemplate(templateBitmap)
                         drawingView.loadStrokes(strokes)
                         updatePageIndicator()
                         saveLastOpenedPage(currentPageId)
@@ -162,6 +168,23 @@ class DrawingActivity : AppCompatActivity() {
             isEraserActive = !isEraserActive
             binding.btnEraser.text = if (isEraserActive) "Pen" else "Erase"
             drawingView.setEraserMode(isEraserActive)
+        }
+
+        // TODO: implement toolbar show/hide UX
+        binding.btnTemplate.setOnClickListener {
+            val db = soilDatabase ?: return@setOnClickListener
+            val pageId = currentPageId.takeIf { it.isNotEmpty() } ?: return@setOnClickListener
+            val notebookId = notebookMetadata?.id ?: MainActivity.NIL_UUID
+            TemplateDialog(
+                activity        = this,
+                lifecycleScope  = lifecycleScope,
+                db              = db,
+                pageId          = pageId,
+                notebookId      = notebookId,
+                onConfirm       = { templateId, bitmap ->
+                    applyTemplateToCurrentPage(templateId, bitmap)
+                },
+            ).show()
         }
 
         // ── Back press ────────────────────────────────────────────────────────
@@ -247,7 +270,8 @@ class DrawingActivity : AppCompatActivity() {
                             lifecycleScope.launch {
                                 withContext(Dispatchers.IO) { addPage(db) }
                                 drawingView.clearCanvas()
-                                val strokes = withContext(Dispatchers.IO) { loadStrokesFromDb(db) }
+                                val (strokes, templateBitmap) = withContext(Dispatchers.IO) { loadPageData(db) }
+                                drawingView.setTemplate(templateBitmap)
                                 drawingView.loadStrokes(strokes)
                                 updatePageIndicator()
                                 saveLastOpenedPage(currentPageId)
@@ -347,8 +371,8 @@ class DrawingActivity : AppCompatActivity() {
     // ── Persistence ───────────────────────────────────────────────────────────
 
     /**
-     * Launch a coroutine that loads strokes for the current page from the database
-     * and hands them to the drawing view.  Also refreshes [pages], [currentPageId],
+     * Launch a coroutine that loads strokes and template for the current page from the
+     * database and hands them to the drawing view. Also refreshes [pages], [currentPageId],
      * [currentLayerId], and the page indicator.
      *
      * On first call (notebook open): loads [notebookMetadata] and uses [NotebookMetadata.lastOpenedPage]
@@ -357,7 +381,7 @@ class DrawingActivity : AppCompatActivity() {
     private fun loadStrokes() {
         val db = soilDatabase ?: return
         lifecycleScope.launch {
-            val strokes = withContext(Dispatchers.IO) {
+            val (strokes, templateBitmap) = withContext(Dispatchers.IO) {
                 // Restore last-opened page — runs before loadStrokesFromDb so
                 // currentPageIndex is correct when strokes are fetched.
                 notebookMetadata = loadNotebookMetadataFromDb(db)
@@ -368,11 +392,24 @@ class DrawingActivity : AppCompatActivity() {
                     if (idx >= 0) currentPageIndex = idx
                     // If idx == -1 (page deleted), keep currentPageIndex = 0 (fallback).
                 }
-                loadStrokesFromDb(db)
+                loadPageData(db)
             }
+            drawingView.setTemplate(templateBitmap)
             drawingView.loadStrokes(strokes)
             updatePageIndicator()
         }
+    }
+
+    /**
+     * Load strokes and the template bitmap for the current page.
+     * Calls [loadStrokesFromDb] (which updates [currentPageId] etc.) then
+     * [loadPageTemplateFromDb]. Returns both results as a [Pair].
+     * Must be called on [Dispatchers.IO].
+     */
+    private suspend fun loadPageData(db: SoilDatabase): Pair<List<LiveStroke>, Bitmap?> {
+        val strokes = loadStrokesFromDb(db)
+        val templateBitmap = loadPageTemplateFromDb(db)
+        return Pair(strokes, templateBitmap)
     }
 
     /**
@@ -414,6 +451,28 @@ class DrawingActivity : AppCompatActivity() {
                 Log.e(TAG, "loadStrokesFromDb: failed to deserialize stroke ${obj.id}", e)
                 null
             }
+        }
+    }
+
+    /**
+     * Read the current page's `template` property, look up the template row, and decode
+     * its base64 image to a Bitmap.  Returns null if the page has no template (blank).
+     *
+     * Must be called on [Dispatchers.IO]. Uses [currentPageId] set by [loadStrokesFromDb].
+     */
+    private suspend fun loadPageTemplateFromDb(db: SoilDatabase): Bitmap? {
+        val pageId = currentPageId.takeIf { it.isNotEmpty() } ?: return null
+        val page = db.notebookDao().getObjectById(pageId) ?: return null
+        val templateId = TemplateDialog.parseTemplateId(page.data).takeIf { it.isNotEmpty() } ?: return null
+        val templateObj = db.notebookDao().getTemplateById(templateId) ?: return null
+        return try {
+            val dataObj = JSONObject(templateObj.data)
+            val b64 = dataObj.getString("image")
+            val bytes = Base64.decode(b64, android.util.Base64.DEFAULT)
+            BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+        } catch (e: Exception) {
+            Log.e(TAG, "loadPageTemplateFromDb: failed to decode template bitmap", e)
+            null
         }
     }
 
@@ -473,6 +532,43 @@ class DrawingActivity : AppCompatActivity() {
         }
     }
 
+    // ── Template operations ───────────────────────────────────────────────────
+
+    /**
+     * Called when the user confirms a template selection in [TemplateDialog].
+     * Updates the current page's `template` property in the DB, then applies the
+     * bitmap to the drawing view so the change is immediately visible.
+     *
+     * [templateId] = "" means "Blank" (clear template).
+     * [bitmap] is the full-resolution template Bitmap, or null for Blank.
+     */
+    private fun applyTemplateToCurrentPage(templateId: String, bitmap: Bitmap?) {
+        val db = soilDatabase ?: return
+        val pageId = currentPageId.takeIf { it.isNotEmpty() } ?: return
+
+        // Apply to drawing view immediately (before DB write so the user sees it at once).
+        drawingView.setTemplate(bitmap)
+
+        // Persist the page's template property in the background.
+        lifecycleScope.launch {
+            withContext(Dispatchers.IO) {
+                persistPageTemplate(db.notebookDao(), pageId, templateId)
+            }
+            // TODO: apply template to all pages
+        }
+    }
+
+    /**
+     * Update the `template` property inside the page row's `data` JSON and persist it.
+     * Must be called on [Dispatchers.IO].
+     */
+    private suspend fun persistPageTemplate(dao: NotebookDao, pageId: String, templateId: String) {
+        val page = dao.getObjectById(pageId) ?: return
+        val dataObj = try { JSONObject(page.data) } catch (e: Exception) { JSONObject() }
+        dataObj.put("template", templateId)
+        dao.updateData(pageId, dataObj.toString(), System.currentTimeMillis())
+    }
+
     // ── Notebook metadata operations ──────────────────────────────────────────
 
     /**
@@ -516,6 +612,9 @@ class DrawingActivity : AppCompatActivity() {
     /**
      * Add a new page immediately after the current page.
      *
+     * The new page inherits the current page's template: if the current page has a
+     * non-empty template id, the new page starts with the same template.
+     *
      * Steps: save current strokes → shift order of subsequent pages → insert new
      * page + bootstrap layer → reload pages → advance [currentPageIndex].
      *
@@ -531,6 +630,12 @@ class DrawingActivity : AppCompatActivity() {
         val bboxJson = """{"x":0.0,"y":0.0,"width":$screenW,"height":$screenH}"""
 
         val insertionIndex = currentPageIndex + 1
+
+        // Inherit the current page's template — re-read from DB so we always get the latest
+        // template id even if the in-memory `pages` list is stale (e.g. after applyTemplateToCurrentPage
+        // updated the DB without refreshing the list).
+        val freshCurrentPage = dao.getObjectById(currentPageId)
+        val inheritedTemplate = freshCurrentPage?.let { TemplateDialog.parseTemplateId(it.data) } ?: ""
 
         // Shift the order of every page that comes after the insertion point.
         for (i in insertionIndex until pages.size) {
@@ -550,7 +655,7 @@ class DrawingActivity : AppCompatActivity() {
                 createdAt   = now,
                 updatedAt   = now,
                 deletedAt   = null,
-                data        = """{"width":$screenW,"height":$screenH}""",
+                data        = """{"width":$screenW,"height":$screenH,"template":"$inheritedTemplate"}""",
             )
         )
 
@@ -617,7 +722,7 @@ class DrawingActivity : AppCompatActivity() {
                     createdAt   = newNow,
                     updatedAt   = newNow,
                     deletedAt   = null,
-                    data        = """{"width":$screenW,"height":$screenH}""",
+                    data        = """{"width":$screenW,"height":$screenH,"template":""}""",
                 )
             )
             val newLayerId = UUID.randomUUID().toString()
@@ -647,9 +752,9 @@ class DrawingActivity : AppCompatActivity() {
     // ── Page navigation ───────────────────────────────────────────────────────
 
     /**
-     * Save the current page's strokes, then switch to [newIndex] and load its strokes.
-     * Persists the new current page as [NotebookMetadata.lastOpenedPage] after every turn.
-     * Called from the swipe gesture detector.
+     * Save the current page's strokes, then switch to [newIndex] and load its strokes
+     * and template. Persists the new current page as [NotebookMetadata.lastOpenedPage]
+     * after every turn. Called from the swipe gesture detector.
      */
     private fun navigateToPage(newIndex: Int) {
         val db = soilDatabase ?: return
@@ -657,7 +762,8 @@ class DrawingActivity : AppCompatActivity() {
             withContext(Dispatchers.IO) { saveStrokes(db) }
             currentPageIndex = newIndex
             drawingView.clearCanvas()
-            val strokes = withContext(Dispatchers.IO) { loadStrokesFromDb(db) }
+            val (strokes, templateBitmap) = withContext(Dispatchers.IO) { loadPageData(db) }
+            drawingView.setTemplate(templateBitmap)
             drawingView.loadStrokes(strokes)
             updatePageIndicator()
             // Persist the new current page so the next open restores here.

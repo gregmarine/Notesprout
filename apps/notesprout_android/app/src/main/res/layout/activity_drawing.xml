@@ -53,11 +53,24 @@
             android:layout_marginStart="4dp"
             android:text="&#x2212;" />
 
-        <!-- Flexible spacer pushes Clear and Erase to the right edge -->
+        <!-- Flexible spacer pushes Template, Clear, and Erase to the right edge -->
         <Space
             android:layout_width="0dp"
             android:layout_height="0dp"
             android:layout_weight="1" />
+
+        <!-- Template picker — opens the template selection dialog -->
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnTemplate"
+            style="@style/Widget.NoteSprout.ToolbarButton"
+            android:layout_width="36dp"
+            android:layout_height="36dp"
+            android:layout_marginEnd="4dp"
+            android:src="@drawable/ic_template"
+            android:contentDescription="Template"
+            android:background="@drawable/shape_bordered"
+            android:scaleType="center"
+            android:stateListAnimator="@null" />
 
         <androidx.appcompat.widget.AppCompatButton
             android:id="@+id/btnClear"

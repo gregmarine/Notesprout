@@ -573,9 +573,10 @@ class MainActivity : AppCompatActivity() {
                 ))
 
                 // 2. First page — parentId is the notebook metadata row's UUID.
+                //    template:"" means no template (blank background).
                 db.execSQL(insertSql, arrayOf(
                     pageId, notebookId, bboxJson, now, now, "page",
-                    """{"width":$screenW,"height":$screenH}"""
+                    """{"width":$screenW,"height":$screenH,"template":""}"""
                 ))
 
                 // 3. Content layer for the first page.
