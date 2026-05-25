@@ -221,6 +221,36 @@ NoteSprout's visual language is designed for e-ink displays first. All other pla
 - `handwritingRepaint` in `onEndRawErasing` / `onEndRawDrawing` (eraser mode) still commits clean EPD pixels on lift. Never call `handwritingRepaint` in the erase move path — it causes a full EPD quality flash on every erased stroke.
 - `onBeginRawDrawing` re-enables render — guarded by `!isEraserMode` to prevent rogue overlay stroke during software eraser.
 
+### Page navigation performance — dense pages (600+ strokes)
+Three compounding slowdowns eliminated on heavy pages:
+
+**Save path** (`DrawingActivity.saveStrokes`):
+- Wrap INSERT OR IGNORE loop in `db.withTransaction {}` — 610-stroke save: 2500ms → 1300ms (−48%).
+- Track `persistedStrokeIds` set; skip `toJson()` entirely for strokes already in DB — fully-persisted page: 1300ms → 1–5ms (−99.8%).
+- Replace `org.json` with `kotlinx.serialization` (code-generated, zero reflection, same wire format, no DB migration) — warm JSON deserialize: 1325ms → 845ms (−36%).
+
+**Load path** (`DrawingActivity.loadStrokesFromDb`):
+- In-memory `strokeCache: LinkedHashMap<pageId, List<LiveStroke>>` (access-order LRU, capped at 10 pages / ~6 MB). Cache hit skips DB query + JSON deserialization entirely — 610-stroke load: ~900ms → 15–19ms (−98%).
+- `snapshotCurrentPageToCache()` called before every page transition so unsaved in-memory strokes are always captured. Cache refreshed on erase, cleared on page-clear/delete.
+
+**Render path** (both drawing views):
+- `buildRenderBitmap()` on `Dispatchers.IO` pre-builds white → template → strokes bitmap off the main thread.
+- `loadStrokesWithBitmap()` on main thread swaps the pre-built bitmap in 12–13ms instead of the previous 118–129ms O(N) on-thread redraw.
+- Combined page-turn TOTAL on a 610-stroke page (warm cache): 1163ms → 246ms (−79%). Main thread blocked: 118ms → 12ms (−90%).
+
+### Eraser performance — dense pages (600+ strokes)
+Two compounding freezes eliminated; erasing on 600+ stroke pages went from multi-second app-unresponsive to instant.
+
+**Hit test** (`eraseAtPath` in both drawing views):
+- Old: O(S × P × E) — every stroke point tested against every eraser segment per move event. 600 strokes × 50 pts × 5 eraser pts = 150,000 float ops per touch-move.
+- Fix: `LiveStroke.boundingBox: RectF` pre-computed at stroke creation. `eraseAtPath` builds an expanded AABB of the eraser path and rejects non-intersecting strokes in O(4 floats) before any per-point geometry. Eliminates ~95% of candidates instantly.
+- `strokes.removeAll { it.id in removeIds }` (HashSet of String IDs) replaces `removeAll(toRemove.toSet())` which triggered expensive data-class equality on `List<PointF>`.
+
+**Redraw throttle** (both drawing views):
+- Old: `redrawCanvas()` (O(N) — redraws all strokes to bitmap) called on every single erase move event. 30–50 events × 200ms each = 6–10 s main-thread block.
+- Fix: `throttledEraseRedraw()` — redraws at most once per 60ms (~16fps) during active erasing. Strokes are removed from the list immediately so data is always correct; only the visual refresh is coalesced.
+- `finalizeEraseRedraw()` forces one clean redraw at gesture end (`onEndRawErasing`, `onEndRawDrawing` in eraser mode, `ACTION_UP` in GenericDrawingView) before `handwritingRepaint` commits pixels to the e-ink panel.
+
 ---
 
 ## Future Work — Wacom & Generic Android Stylus

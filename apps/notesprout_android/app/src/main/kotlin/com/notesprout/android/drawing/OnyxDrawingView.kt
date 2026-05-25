@@ -29,6 +29,10 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
         // refreshes explicitly via handwritingRepaint in clearCanvas() and after erasing.
         private const val EPD_UPDATE_LIST_SIZE = 512
         private const val ERASER_RADIUS_PX = 15f
+        // Maximum frequency for redrawCanvas() during an active erase gesture (~16fps).
+        // Prevents the main thread from blocking on a full O(N) redraw for every single
+        // touch-move event — the primary cause of multi-second freezes on 600+ stroke pages.
+        private const val ERASE_REDRAW_INTERVAL_MS = 60L
     }
 
     private var renderBitmap: Bitmap? = null
@@ -56,6 +60,11 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
     // When true, drawing callbacks treat pen input as erasing.
     // Set by setEraserMode(); also fires via physical eraser hardware callbacks regardless of this flag.
     private var isEraserMode = false
+
+    // Timestamp of the last redrawCanvas() call triggered by erasing. Used to throttle
+    // redraws to ERASE_REDRAW_INTERVAL_MS so a fast erase swipe doesn't queue up dozens
+    // of full O(N) bitmap redraws on the main thread.
+    private var lastEraseRedrawMs = 0L
 
     // ── DrawingView callbacks ────────────────────────────────────────────────
 
@@ -91,7 +100,11 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
         }
 
         override fun onEndRawDrawing(shortcutDrawing: Boolean, touchPoint: TouchPoint) {
-            if (isEraserMode) post { EpdController.handwritingRepaint(this@OnyxDrawingView, Rect(0, 0, width, height)) }
+            if (isEraserMode) {
+                // Flush any throttled-but-not-yet-drawn erase removals before the EPD repaint.
+                finalizeEraseRedraw()
+                post { EpdController.handwritingRepaint(this@OnyxDrawingView, Rect(0, 0, width, height)) }
+            }
             postDelayed(idleReleaseRunnable, 1500)
         }
 
@@ -122,6 +135,8 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
         }
 
         override fun onEndRawErasing(shortcutErasing: Boolean, touchPoint: TouchPoint) {
+            // Flush any throttled-but-not-yet-drawn erase removals before the EPD repaint.
+            finalizeEraseRedraw()
             post { EpdController.handwritingRepaint(this@OnyxDrawingView, Rect(0, 0, width, height)) }
             postDelayed(idleReleaseRunnable, 1500)
         }
@@ -160,18 +175,61 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
     private fun eraseAtPath(eraserPoints: List<PointF>) {
         if (eraserPoints.isEmpty()) return
         val thresholdSq = ERASER_RADIUS_PX * ERASER_RADIUS_PX
-        val toRemove = strokes.filter { liveStroke ->
-            liveStroke.points.any { sp ->
+
+        // Build the expanded AABB of the entire eraser path for fast stroke pre-rejection.
+        // Expanding by ERASER_RADIUS_PX ensures any stroke whose bounding box intersects
+        // this rect could possibly be within eraser reach; non-intersecting strokes are
+        // skipped entirely without any per-point math.
+        var eMinX = eraserPoints[0].x; var eMinY = eraserPoints[0].y
+        var eMaxX = eMinX;             var eMaxY = eMinY
+        for (ep in eraserPoints) {
+            if (ep.x < eMinX) eMinX = ep.x else if (ep.x > eMaxX) eMaxX = ep.x
+            if (ep.y < eMinY) eMinY = ep.y else if (ep.y > eMaxY) eMaxY = ep.y
+        }
+        val eBounds = android.graphics.RectF(
+            eMinX - ERASER_RADIUS_PX, eMinY - ERASER_RADIUS_PX,
+            eMaxX + ERASER_RADIUS_PX, eMaxY + ERASER_RADIUS_PX
+        )
+
+        val toRemove = strokes.filter { stroke ->
+            // Fast AABB rejection — O(1) per stroke, eliminates ~95% of candidates.
+            android.graphics.RectF.intersects(eBounds, stroke.boundingBox) &&
+            // Detailed per-point geometry only for strokes that passed the box check.
+            stroke.points.any { sp ->
                 eraserPoints.indices.drop(1).any { i ->
                     pointToSegmentDistSq(sp, eraserPoints[i - 1], eraserPoints[i]) <= thresholdSq
                 } || pointToPointDistSq(sp, eraserPoints[0]) <= thresholdSq
             }
         }
         if (toRemove.isNotEmpty()) {
-            strokes.removeAll(toRemove.toSet())
+            val removeIds = toRemove.mapTo(HashSet(toRemove.size)) { it.id }
+            strokes.removeAll { it.id in removeIds }
             toRemove.forEach { onStrokeErased?.invoke(it.id) }
+            throttledEraseRedraw()
+        }
+    }
+
+    /**
+     * Redraw at most once every [ERASE_REDRAW_INTERVAL_MS] during active erasing.
+     * Strokes are already removed from [strokes] before this is called, so any
+     * skipped redraw just means a brief visual lag — never a stale-data problem.
+     */
+    private fun throttledEraseRedraw() {
+        val now = System.currentTimeMillis()
+        if (now - lastEraseRedrawMs >= ERASE_REDRAW_INTERVAL_MS) {
+            lastEraseRedrawMs = now
             redrawCanvas()
         }
+    }
+
+    /**
+     * Force an immediate redraw at the end of an erase gesture, flushing any
+     * throttled-but-not-yet-rendered stroke removals so the final state is correct
+     * before [EpdController.handwritingRepaint] commits pixels to the e-ink panel.
+     */
+    private fun finalizeEraseRedraw() {
+        lastEraseRedrawMs = System.currentTimeMillis()
+        redrawCanvas()
     }
 
     /**

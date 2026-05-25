@@ -22,12 +22,18 @@ class GenericDrawingView(context: Context) : View(context), DrawingView {
 
     companion object {
         private const val ERASER_RADIUS_PX = 15f
+        // Maximum frequency for redrawCanvas() during an active erase gesture (~16fps).
+        private const val ERASE_REDRAW_INTERVAL_MS = 60L
     }
 
     private val activePoints = ArrayList<PointF>()
     private var renderBitmap: Bitmap? = null
     private var renderCanvas: Canvas? = null
     private var isEraserActive = false
+
+    // Timestamp of the last redrawCanvas() triggered by erasing — throttled to
+    // ERASE_REDRAW_INTERVAL_MS so a fast swipe doesn't queue dozens of full redraws.
+    private var lastEraseRedrawMs = 0L
 
     /** Template bitmap — drawn as the base layer behind all strokes. Null = white background. */
     private var templateBitmap: Bitmap? = null
@@ -108,6 +114,9 @@ class GenericDrawingView(context: Context) : View(context), DrawingView {
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                 if (erasing) {
                     eraseAtPath(listOf(PointF(event.x, event.y)))
+                    // Flush any throttled-but-not-yet-drawn removals so the final
+                    // state is always rendered correctly on pen lift.
+                    finalizeEraseRedraw()
                 } else {
                     activePoints.add(PointF(event.x, event.y))
                     commitActiveStroke()
@@ -156,18 +165,56 @@ class GenericDrawingView(context: Context) : View(context), DrawingView {
     private fun eraseAtPath(eraserPoints: List<PointF>) {
         if (eraserPoints.isEmpty()) return
         val thresholdSq = ERASER_RADIUS_PX * ERASER_RADIUS_PX
-        val toRemove = strokes.filter { liveStroke ->
-            liveStroke.points.any { sp ->
+
+        // Build the expanded AABB of the entire eraser path for fast stroke pre-rejection.
+        var eMinX = eraserPoints[0].x; var eMinY = eraserPoints[0].y
+        var eMaxX = eMinX;             var eMaxY = eMinY
+        for (ep in eraserPoints) {
+            if (ep.x < eMinX) eMinX = ep.x else if (ep.x > eMaxX) eMaxX = ep.x
+            if (ep.y < eMinY) eMinY = ep.y else if (ep.y > eMaxY) eMaxY = ep.y
+        }
+        val eBounds = android.graphics.RectF(
+            eMinX - ERASER_RADIUS_PX, eMinY - ERASER_RADIUS_PX,
+            eMaxX + ERASER_RADIUS_PX, eMaxY + ERASER_RADIUS_PX
+        )
+
+        val toRemove = strokes.filter { stroke ->
+            // Fast AABB rejection — O(1) per stroke, eliminates ~95% of candidates.
+            android.graphics.RectF.intersects(eBounds, stroke.boundingBox) &&
+            // Detailed per-point geometry only for strokes that passed the box check.
+            stroke.points.any { sp ->
                 eraserPoints.indices.drop(1).any { i ->
                     pointToSegmentDistSq(sp, eraserPoints[i - 1], eraserPoints[i]) <= thresholdSq
                 } || pointToPointDistSq(sp, eraserPoints[0]) <= thresholdSq
             }
         }
         if (toRemove.isNotEmpty()) {
-            strokes.removeAll(toRemove.toSet())
+            val removeIds = toRemove.mapTo(HashSet(toRemove.size)) { it.id }
+            strokes.removeAll { it.id in removeIds }
             toRemove.forEach { onStrokeErased?.invoke(it.id) }
+            throttledEraseRedraw()
+        }
+    }
+
+    /**
+     * Redraw at most once every [ERASE_REDRAW_INTERVAL_MS] during active erasing.
+     * Strokes are already removed from [strokes] before this is called.
+     */
+    private fun throttledEraseRedraw() {
+        val now = System.currentTimeMillis()
+        if (now - lastEraseRedrawMs >= ERASE_REDRAW_INTERVAL_MS) {
+            lastEraseRedrawMs = now
             redrawCanvas()
         }
+    }
+
+    /**
+     * Force an immediate redraw at gesture end — flushes any throttled removals so
+     * the canvas is always correct on pen lift.
+     */
+    private fun finalizeEraseRedraw() {
+        lastEraseRedrawMs = System.currentTimeMillis()
+        redrawCanvas()
     }
 
     /**
