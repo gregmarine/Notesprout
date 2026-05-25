@@ -4,6 +4,9 @@ import android.graphics.Bitmap
 import android.view.View
 import com.notesprout.android.data.LiveStroke
 
+// Option A: stroke cache key — see DrawingActivity.strokeCache
+// Option B: buildRenderBitmap + loadStrokesWithBitmap — pre-build bitmap on IO thread
+
 interface DrawingView {
     fun asView(): View
     fun setToolbarHeight(heightPx: Int)
@@ -49,4 +52,27 @@ interface DrawingView {
      * Safe to call from any thread — implementations return a copy.
      */
     fun getStrokes(): List<LiveStroke>
+
+    // ── Option B: off-thread bitmap pre-build ─────────────────────────────────
+
+    /**
+     * Build the full render bitmap (white → [templateBitmap] → all [strokes]) on
+     * a background thread and return it, or null if the view isn't laid out yet.
+     *
+     * Thread-safe: reads [View.width]/[View.height] only (stable after layout);
+     * does NOT call invalidate or modify any view state.  The returned Bitmap is
+     * not yet attached to the view — hand it to [loadStrokesWithBitmap] on the
+     * main thread to swap it in.
+     */
+    fun buildRenderBitmap(strokes: List<LiveStroke>, templateBitmap: Bitmap?): Bitmap?
+
+    /**
+     * Swap in a [bitmap] pre-built by [buildRenderBitmap], update the in-memory
+     * stroke list, and store [templateBitmap] for future canvas redraws (e.g. after
+     * erasing).  Replaces the main-thread O(N) redraw that [loadStrokes] would do.
+     *
+     * Must be called on the main thread — triggers invalidate (and EPD handoff on
+     * Onyx devices).
+     */
+    fun loadStrokesWithBitmap(strokes: List<LiveStroke>, bitmap: Bitmap, templateBitmap: Bitmap?)
 }

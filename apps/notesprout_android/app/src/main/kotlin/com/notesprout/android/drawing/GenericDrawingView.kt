@@ -257,6 +257,45 @@ class GenericDrawingView(context: Context) : View(context), DrawingView {
 
     override fun getStrokes(): List<LiveStroke> = strokes.toList()
 
+    // ── Option B: off-thread bitmap pre-build ─────────────────────────────────
+
+    /** Build the render bitmap on a background thread. Safe to call from Dispatchers.IO. */
+    override fun buildRenderBitmap(strokes: List<LiveStroke>, templateBitmap: Bitmap?): Bitmap? {
+        val w = width; val h = height
+        if (w == 0 || h == 0) return null
+        val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bmp)
+        canvas.drawColor(Color.WHITE)
+        templateBitmap?.let { canvas.drawBitmap(it, null, RectF(0f, 0f, w.toFloat(), h.toFloat()), null) }
+        for (liveStroke in strokes) {
+            val pts = liveStroke.points
+            if (pts.size < 2) continue
+            val path = Path()
+            path.moveTo(pts[0].x, pts[0].y)
+            for (i in 1 until pts.size) path.lineTo(pts[i].x, pts[i].y)
+            canvas.drawPath(path, strokePaint)
+        }
+        return bmp
+    }
+
+    /** Swap in a pre-built bitmap on the main thread — skips the O(N) redraw. */
+    override fun loadStrokesWithBitmap(
+        strokes: List<LiveStroke>,
+        bitmap: Bitmap,
+        templateBitmap: Bitmap?,
+    ) {
+        val loadStart = System.currentTimeMillis()
+        removeCallbacks(idleSaveRunnable)
+        this.strokes.clear()
+        this.strokes.addAll(strokes)
+        this.templateBitmap = templateBitmap
+        renderBitmap?.recycle()
+        renderBitmap = bitmap
+        renderCanvas = Canvas(bitmap)
+        invalidate()
+        android.util.Log.d("NoteSprout_Perf", "[PERF] GenericDrawingView.loadStrokesWithBitmap (swap only): ${System.currentTimeMillis() - loadStart}ms (stroke_count=${strokes.size})")
+    }
+
     override fun releaseResources() {
         removeCallbacks(idleSaveRunnable)
         renderBitmap?.recycle()

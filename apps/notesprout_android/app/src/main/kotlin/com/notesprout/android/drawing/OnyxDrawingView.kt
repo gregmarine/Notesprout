@@ -369,6 +369,66 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
 
     override fun getStrokes(): List<LiveStroke> = strokes.toList()
 
+    // ── Option B: off-thread bitmap pre-build ─────────────────────────────────
+
+    /**
+     * Build the render bitmap on a background thread.  Does NOT touch view state —
+     * safe to call from Dispatchers.IO.
+     */
+    override fun buildRenderBitmap(strokes: List<LiveStroke>, templateBitmap: Bitmap?): Bitmap? {
+        val w = width; val h = height
+        if (w == 0 || h == 0) return null
+        val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        val canvas = android.graphics.Canvas(bmp)
+        canvas.drawColor(android.graphics.Color.WHITE)
+        templateBitmap?.let { canvas.drawBitmap(it, null, RectF(0f, 0f, w.toFloat(), h.toFloat()), null) }
+        for (liveStroke in strokes) {
+            val pts = liveStroke.points
+            if (pts.size < 2) continue
+            val path = android.graphics.Path()
+            path.moveTo(pts[0].x, pts[0].y)
+            for (i in 1 until pts.size) path.lineTo(pts[i].x, pts[i].y)
+            canvas.drawPath(path, strokePaint)
+        }
+        return bmp
+    }
+
+    /**
+     * Swap in a pre-built bitmap on the main thread.  Replicates the EPD overlay
+     * handoff pattern of [setTemplate] / [clearCanvas] so e-ink pixels are committed
+     * cleanly: disable overlay render → swap bitmap → invalidate → handwritingRepaint
+     * → re-enable drawing.
+     */
+    override fun loadStrokesWithBitmap(
+        strokes: List<LiveStroke>,
+        bitmap: Bitmap,
+        templateBitmap: Bitmap?,
+    ) {
+        val loadStart = System.currentTimeMillis()
+        removeCallbacks(idleReleaseRunnable)
+        this.strokes.clear()
+        this.strokes.addAll(strokes)
+        this.templateBitmap = templateBitmap
+
+        // EPD overlay handoff — same pattern as setTemplate() / clearCanvas().
+        if (isSetup) touchHelper.setRawDrawingRenderEnabled(false)
+
+        // Swap in the pre-built bitmap and bind a new renderCanvas to it so future
+        // stroke commits via renderStroke() draw to the correct surface.
+        renderBitmap?.recycle()
+        renderBitmap = bitmap
+        renderCanvas = android.graphics.Canvas(bitmap)
+
+        invalidate()
+        post {
+            EpdController.handwritingRepaint(this, Rect(0, 0, width, height))
+            post { if (isSetup) touchHelper.setRawDrawingEnabled(true) }
+        }
+
+        Log.d(TAG, "loadStrokesWithBitmap: swapped bitmap, ${strokes.size} strokes")
+        Log.d("NoteSprout_Perf", "[PERF] OnyxDrawingView.loadStrokesWithBitmap (swap only): ${System.currentTimeMillis() - loadStart}ms (stroke_count=${strokes.size})")
+    }
+
     override fun releaseResources() {
         if (isSetup) {
             touchHelper.closeRawDrawing()

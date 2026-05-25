@@ -79,6 +79,21 @@ class DrawingActivity : AppCompatActivity() {
     /** ID of the content layer under [currentPageId]. Set by [loadStrokesFromDb]. */
     private var currentLayerId: String = ""
 
+    // ── Option A: in-memory stroke cache ─────────────────────────────────────
+
+    /**
+     * Stroke cache keyed by page UUID.  Populated by [loadStrokesFromDb] after
+     * every DB load and updated by [snapshotCurrentPageToCache] before every page
+     * transition so any in-memory strokes drawn since the last load are included.
+     *
+     * On a cache hit [loadStrokesFromDb] skips [getStrokesForLayer] + JSON
+     * deserialization entirely (~900ms saved on a 610-stroke page).
+     *
+     * Invalidated per-entry when strokes are erased or the page is cleared/deleted.
+     * Lives for the lifetime of the activity — no cross-session persistence needed.
+     */
+    private val strokeCache = mutableMapOf<String, List<LiveStroke>>()
+
     // ── Persisted stroke tracking ─────────────────────────────────────────────
 
     /**
@@ -124,11 +139,19 @@ class DrawingActivity : AppCompatActivity() {
         binding.btnAddPage.setOnClickListener {
             val db = soilDatabase ?: return@setOnClickListener
             lifecycleScope.launch {
+                snapshotCurrentPageToCache()
                 withContext(Dispatchers.IO) { addPage(db) }
                 drawingView.clearCanvas()
-                val (strokes, templateBitmap) = withContext(Dispatchers.IO) { loadPageData(db) }
-                drawingView.setTemplate(templateBitmap)
-                drawingView.loadStrokes(strokes)
+                val (strokes, templateBitmap, prebuiltBitmap) = withContext(Dispatchers.IO) {
+                    val (s, t) = loadPageData(db)
+                    Triple(s, t, drawingView.buildRenderBitmap(s, t))
+                }
+                if (prebuiltBitmap != null) {
+                    drawingView.loadStrokesWithBitmap(strokes, prebuiltBitmap, templateBitmap)
+                } else {
+                    drawingView.setTemplate(templateBitmap)
+                    drawingView.loadStrokes(strokes)
+                }
                 updatePageIndicator()
                 saveLastOpenedPage(currentPageId)
             }
@@ -141,12 +164,21 @@ class DrawingActivity : AppCompatActivity() {
                 .setMessage("Delete this page?")
                 .setNegativeButton("Cancel", null)
                 .setPositiveButton("Delete") { _, _ ->
+                    val deletingPageId = currentPageId
+                    strokeCache.remove(deletingPageId)  // deleted page has no future cache value
                     lifecycleScope.launch {
                         withContext(Dispatchers.IO) { deletePage(db) }
                         drawingView.clearCanvas()
-                        val (strokes, templateBitmap) = withContext(Dispatchers.IO) { loadPageData(db) }
-                        drawingView.setTemplate(templateBitmap)
-                        drawingView.loadStrokes(strokes)
+                        val (strokes, templateBitmap, prebuiltBitmap) = withContext(Dispatchers.IO) {
+                            val (s, t) = loadPageData(db)
+                            Triple(s, t, drawingView.buildRenderBitmap(s, t))
+                        }
+                        if (prebuiltBitmap != null) {
+                            drawingView.loadStrokesWithBitmap(strokes, prebuiltBitmap, templateBitmap)
+                        } else {
+                            drawingView.setTemplate(templateBitmap)
+                            drawingView.loadStrokes(strokes)
+                        }
                         updatePageIndicator()
                         saveLastOpenedPage(currentPageId)
                     }
@@ -167,9 +199,10 @@ class DrawingActivity : AppCompatActivity() {
                     // Capture the stroke IDs before clearing so we can soft-delete their DB rows.
                     val strokesToDelete = drawingView.getStrokes()
                     drawingView.clearCanvas()
-                    // All strokes have been removed from memory and will be soft-deleted from DB;
-                    // clear the registry so saveStrokes doesn't re-insert any of them.
+                    // All strokes removed from memory and will be soft-deleted from DB:
+                    // clear the persisted-ID registry and update the stroke cache.
                     persistedStrokeIds.clear()
+                    strokeCache[currentPageId] = emptyList()
                     if (db != null && strokesToDelete.isNotEmpty()) {
                         lifecycleScope.launch {
                             withContext(Dispatchers.IO) {
@@ -228,6 +261,9 @@ class DrawingActivity : AppCompatActivity() {
             // Remove from the persisted-ID registry so saveStrokes doesn't try to
             // re-insert a stroke that has already been soft-deleted from the DB.
             persistedStrokeIds.remove(strokeId)
+            // Refresh cache for the current page so a future cache hit returns the
+            // correct post-erase list (drawingView has already removed the stroke).
+            strokeCache[currentPageId] = drawingView.getStrokes()
             val db = soilDatabase
             if (db != null) {
                 lifecycleScope.launch {
@@ -296,11 +332,19 @@ class DrawingActivity : AppCompatActivity() {
                             // identical to tapping the + button.
                             val db = soilDatabase ?: return false
                             lifecycleScope.launch {
+                                snapshotCurrentPageToCache()
                                 withContext(Dispatchers.IO) { addPage(db) }
                                 drawingView.clearCanvas()
-                                val (strokes, templateBitmap) = withContext(Dispatchers.IO) { loadPageData(db) }
-                                drawingView.setTemplate(templateBitmap)
-                                drawingView.loadStrokes(strokes)
+                                val (strokes, templateBitmap, prebuiltBitmap) = withContext(Dispatchers.IO) {
+                                    val (s, t) = loadPageData(db)
+                                    Triple(s, t, drawingView.buildRenderBitmap(s, t))
+                                }
+                                if (prebuiltBitmap != null) {
+                                    drawingView.loadStrokesWithBitmap(strokes, prebuiltBitmap, templateBitmap)
+                                } else {
+                                    drawingView.setTemplate(templateBitmap)
+                                    drawingView.loadStrokes(strokes)
+                                }
                                 updatePageIndicator()
                                 saveLastOpenedPage(currentPageId)
                             }
@@ -410,7 +454,8 @@ class DrawingActivity : AppCompatActivity() {
         val db = soilDatabase ?: return
         lifecycleScope.launch {
             val openStart = System.currentTimeMillis()
-            val (strokes, templateBitmap) = withContext(Dispatchers.IO) {
+            // IO: metadata restore + DB load + pre-build bitmap (Option A cache miss on first open).
+            val (strokes, templateBitmap, prebuiltBitmap) = withContext(Dispatchers.IO) {
                 // Restore last-opened page — runs before loadStrokesFromDb so
                 // currentPageIndex is correct when strokes are fetched.
                 val metaStart = System.currentTimeMillis()
@@ -428,18 +473,28 @@ class DrawingActivity : AppCompatActivity() {
                 }
 
                 val loadStart = System.currentTimeMillis()
-                val result = loadPageData(db)
+                val (s, t) = loadPageData(db)
                 Log.d("NoteSprout_Perf", "[PERF] loadPageData (open): ${System.currentTimeMillis() - loadStart}ms")
-                result
+
+                // Option B: pre-build render bitmap on IO thread so main thread just swaps.
+                val bitmapStart = System.currentTimeMillis()
+                val bmp = drawingView.buildRenderBitmap(s, t)
+                Log.d("NoteSprout_Perf", "[PERF] buildRenderBitmap (open, IO): ${System.currentTimeMillis() - bitmapStart}ms (stroke_count=${s.size})")
+                Triple(s, t, bmp)
             }
 
-            val setTemplateStart = System.currentTimeMillis()
-            drawingView.setTemplate(templateBitmap)
-            Log.d("NoteSprout_Perf", "[PERF] setTemplate (open, main thread): ${System.currentTimeMillis() - setTemplateStart}ms")
-
-            val loadStrokesStart = System.currentTimeMillis()
-            drawingView.loadStrokes(strokes)
-            Log.d("NoteSprout_Perf", "[PERF] drawingView.loadStrokes (open, main thread): ${System.currentTimeMillis() - loadStrokesStart}ms (stroke_count=${strokes.size})")
+            // Main thread: fast bitmap swap instead of O(N) redraw.
+            val swapStart = System.currentTimeMillis()
+            if (prebuiltBitmap != null) {
+                drawingView.loadStrokesWithBitmap(strokes, prebuiltBitmap, templateBitmap)
+                Log.d("NoteSprout_Perf", "[PERF] loadStrokesWithBitmap (open, main thread): ${System.currentTimeMillis() - swapStart}ms (stroke_count=${strokes.size})")
+            } else {
+                drawingView.setTemplate(templateBitmap)
+                Log.d("NoteSprout_Perf", "[PERF] setTemplate (open, main thread): ${System.currentTimeMillis() - swapStart}ms")
+                val loadStrokesStart = System.currentTimeMillis()
+                drawingView.loadStrokes(strokes)
+                Log.d("NoteSprout_Perf", "[PERF] drawingView.loadStrokes (open, main thread): ${System.currentTimeMillis() - loadStrokesStart}ms (stroke_count=${strokes.size})")
+            }
 
             Log.d("NoteSprout_Perf", "[PERF] loadStrokes TOTAL (open): ${System.currentTimeMillis() - openStart}ms (stroke_count=${strokes.size})")
             updatePageIndicator()
@@ -469,6 +524,8 @@ class DrawingActivity : AppCompatActivity() {
         val fnStart = System.currentTimeMillis()
         val dao = db.notebookDao()
 
+        // These two lightweight queries (~2–20ms total) are always needed to set
+        // currentPageId and currentLayerId, even on a cache hit.
         val q1Start = System.currentTimeMillis()
         pages = dao.getPagesSorted().toMutableList()
         Log.d("NoteSprout_Perf", "[PERF] getPagesSorted (loadStrokesFromDb): ${System.currentTimeMillis() - q1Start}ms (page_count=${pages.size})")
@@ -494,6 +551,16 @@ class DrawingActivity : AppCompatActivity() {
         currentLayerId = layer.id
         Log.d(TAG, "loadStrokesFromDb: layerId=$currentLayerId")
 
+        // Option A — cache hit: skip getStrokesForLayer + JSON deserialization entirely.
+        val cached = strokeCache[currentPageId]
+        if (cached != null) {
+            persistedStrokeIds.clear()
+            persistedStrokeIds.addAll(cached.map { it.id })
+            Log.d("NoteSprout_Perf", "[PERF] loadStrokesFromDb TOTAL (cache hit): ${System.currentTimeMillis() - fnStart}ms (stroke_count=${cached.size})")
+            return cached
+        }
+
+        // Cache miss — full DB load.
         val q3Start = System.currentTimeMillis()
         val strokeObjects = dao.getStrokesForLayer(currentLayerId)
         Log.d("NoteSprout_Perf", "[PERF] getStrokesForLayer: ${System.currentTimeMillis() - q3Start}ms (stroke_count=${strokeObjects.size})")
@@ -511,10 +578,10 @@ class DrawingActivity : AppCompatActivity() {
         Log.d("NoteSprout_Perf", "[PERF] JSON deserialize all strokes: ${System.currentTimeMillis() - jsonStart}ms (stroke_count=${result.size})")
         Log.d("NoteSprout_Perf", "[PERF] loadStrokesFromDb TOTAL: ${System.currentTimeMillis() - fnStart}ms (stroke_count=${result.size})")
 
-        // All loaded strokes are already in the DB — register them so saveStrokes skips
-        // their serialization on the first (and all subsequent) idle saves for this page.
+        // Populate persisted-ID registry and stroke cache for this page.
         persistedStrokeIds.clear()
         persistedStrokeIds.addAll(result.map { it.id })
+        strokeCache[currentPageId] = result
 
         return result
     }
@@ -553,6 +620,18 @@ class DrawingActivity : AppCompatActivity() {
             Log.e(TAG, "loadPageTemplateFromDb: failed to decode template bitmap", e)
             null
         }
+    }
+
+    /**
+     * Capture the current in-memory stroke list into [strokeCache] for the current page.
+     * Must be called on the main thread before any page transition so that strokes drawn
+     * since the last DB load are included in future cache hits for this page.
+     *
+     * Safe to call redundantly — a no-op if [currentPageId] is empty.
+     */
+    private fun snapshotCurrentPageToCache() {
+        val pageId = currentPageId.takeIf { it.isNotEmpty() } ?: return
+        strokeCache[pageId] = drawingView.getStrokes()
     }
 
     /**
@@ -867,6 +946,10 @@ class DrawingActivity : AppCompatActivity() {
         lifecycleScope.launch {
             val navStart = System.currentTimeMillis()
 
+            // Option A: snapshot in-memory strokes (including any drawn since last DB load)
+            // to the cache before the page switch, so returning here hits the cache.
+            snapshotCurrentPageToCache()
+
             val saveStart = System.currentTimeMillis()
             withContext(Dispatchers.IO) { saveStrokes(db) }
             Log.d("NoteSprout_Perf", "[PERF] saveStrokes (pre-switch): ${System.currentTimeMillis() - saveStart}ms")
@@ -874,21 +957,32 @@ class DrawingActivity : AppCompatActivity() {
             currentPageIndex = newIndex
             drawingView.clearCanvas()
 
+            // IO: load strokes (cache-aware) + pre-build render bitmap (Option B).
             val loadStart = System.currentTimeMillis()
-            val (strokes, templateBitmap) = withContext(Dispatchers.IO) { loadPageData(db) }
-            Log.d("NoteSprout_Perf", "[PERF] loadPageData (navigate): ${System.currentTimeMillis() - loadStart}ms (stroke_count=${strokes.size})")
+            val (strokes, templateBitmap, prebuiltBitmap) = withContext(Dispatchers.IO) {
+                val (s, t) = loadPageData(db)
+                val bitmapStart = System.currentTimeMillis()
+                val bmp = drawingView.buildRenderBitmap(s, t)
+                Log.d("NoteSprout_Perf", "[PERF] buildRenderBitmap (navigate, IO): ${System.currentTimeMillis() - bitmapStart}ms (stroke_count=${s.size})")
+                Triple(s, t, bmp)
+            }
+            Log.d("NoteSprout_Perf", "[PERF] loadPageData+buildBitmap (navigate): ${System.currentTimeMillis() - loadStart}ms (stroke_count=${strokes.size})")
 
-            val setTemplateStart = System.currentTimeMillis()
-            drawingView.setTemplate(templateBitmap)
-            Log.d("NoteSprout_Perf", "[PERF] setTemplate (navigate, main thread): ${System.currentTimeMillis() - setTemplateStart}ms")
-
-            val loadStrokesStart = System.currentTimeMillis()
-            drawingView.loadStrokes(strokes)
-            Log.d("NoteSprout_Perf", "[PERF] drawingView.loadStrokes (navigate, main thread): ${System.currentTimeMillis() - loadStrokesStart}ms (stroke_count=${strokes.size})")
+            // Main thread: fast bitmap swap instead of O(N) redraw.
+            val swapStart = System.currentTimeMillis()
+            if (prebuiltBitmap != null) {
+                drawingView.loadStrokesWithBitmap(strokes, prebuiltBitmap, templateBitmap)
+                Log.d("NoteSprout_Perf", "[PERF] loadStrokesWithBitmap (navigate, main thread): ${System.currentTimeMillis() - swapStart}ms (stroke_count=${strokes.size})")
+            } else {
+                drawingView.setTemplate(templateBitmap)
+                Log.d("NoteSprout_Perf", "[PERF] setTemplate (navigate, main thread): ${System.currentTimeMillis() - swapStart}ms")
+                val loadStrokesStart = System.currentTimeMillis()
+                drawingView.loadStrokes(strokes)
+                Log.d("NoteSprout_Perf", "[PERF] drawingView.loadStrokes (navigate, main thread): ${System.currentTimeMillis() - loadStrokesStart}ms (stroke_count=${strokes.size})")
+            }
 
             Log.d("NoteSprout_Perf", "[PERF] navigateToPage TOTAL: ${System.currentTimeMillis() - navStart}ms (stroke_count=${strokes.size})")
             updatePageIndicator()
-            // Persist the new current page so the next open restores here.
             saveLastOpenedPage(currentPageId)
         }
     }
