@@ -413,8 +413,9 @@ Completed:
 - ✂️ Pruning: snapshot not captured on Close/Back — `onWindowFocusChanged` fires after `finish()` so `soilDatabase` is already null. Fixed: `closeNotebook()` captures and persists snapshot synchronously on main thread before the IO block.
 - Undo/Redo system: session-scoped unlimited stack, three action types (`StrokeAdded`, `StrokeErased`, `PageAdded`). Optimized same-page stroke path (one EPD handoff, no canvas clear). Two-phase cross-page stroke path (page arrives in pre-undo state, then undo applies visually in real time). Buttons always enabled — tapping empty stack silently does nothing.
 - ✂️ Pruning: accidental page turns from resting pinky/palm — page swipe now requires a deliberate two-finger horizontal fling. Replaced `GestureDetector` (single-finger) with a `VelocityTracker` state machine in `dispatchTouchEvent`: arms on `ACTION_POINTER_DOWN` (2nd finger), fires on `ACTION_POINTER_UP` (2→1 lift) if horizontal-dominant and above `ViewConfiguration.scaledMinimumFlingVelocity`. Stylus events are still excluded entirely.
+- ✂️ Pruning: page indicator too small and faint — increased `tvPageIndicator` from 12sp → 16sp and changed color from `inkLight` (#888888) → `inkBlack` (#000000) for legibility on both e-ink and LCD displays.
 
 Next up: TBD — discuss before starting.
 
 ---
-*Last updated: Two-finger page swipe*
+*Last updated: Page indicator legibility*

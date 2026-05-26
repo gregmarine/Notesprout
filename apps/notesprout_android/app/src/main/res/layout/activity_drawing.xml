@@ -116,8 +116,7 @@
     </LinearLayout>
 
     <!-- Page indicator — overlay in the lower-right corner of the drawing surface.
-         Not inside the toolbar; rendered above the canvas via FrameLayout z-order.
-         inkLight color so it's unobtrusive on e-ink. -->
+         Not inside the toolbar; rendered above the canvas via FrameLayout z-order. -->
     <TextView
         android:id="@+id/tvPageIndicator"
         android:layout_width="wrap_content"
@@ -126,7 +125,7 @@
         android:layout_marginBottom="8dp"
         android:layout_marginEnd="8dp"
         android:text="1 / 1"
-        android:textColor="@color/inkLight"
-        android:textSize="12sp" />
+        android:textColor="@color/inkBlack"
+        android:textSize="16sp" />
 
 </FrameLayout>
