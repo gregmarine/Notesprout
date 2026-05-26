@@ -341,6 +341,57 @@ Two compounding freezes eliminated; erasing on 600+ stroke pages went from multi
 
 ---
 
+## Undo/Redo System (Implemented)
+
+### Overview
+- Unlimited undo/redo stack scoped to the lifetime of a single `DrawingActivity` session (not persisted across process death).
+- `history/UndoRedoAction.kt` — sealed class with three action types:
+  - `StrokeAdded(strokeId, pageId)` — recorded when a stroke is lifted from the canvas.
+  - `StrokeErased(strokeId, pageId)` — recorded when a stroke is erased.
+  - `PageAdded(pageId)` — recorded when a new page is inserted.
+- `history/UndoRedoManager.kt` — manages `undoStack: ArrayDeque<UndoRedoAction>` and `redoStack: ArrayDeque<UndoRedoAction>`. Redo stack is cleared on any new user action. Thread-safe via `@MainThread` annotation convention; all calls from `DrawingActivity` are on the main thread.
+
+### Toolbar buttons
+- Undo (⟲) and Redo (⟳) buttons are `AppCompatImageButton` in `activity_drawing.xml` with `ic_undo` / `ic_redo` vector drawables.
+- **Both buttons are statically enabled at all times** — tapping when the stack is empty silently does nothing. This matches native BOOX notes app behavior. `updateUndoRedoButtons()` is a no-op.
+- No tinting, no alpha changes — e-ink design principle: no state-driven color in UI chrome.
+
+### `executeAction(action, isUndo)` — three execution paths
+
+**Path 1 — Cross-page stroke (two-phase, early return):**
+- Triggered when `action.pageId != currentPageId` for `StrokeAdded`/`StrokeErased`.
+- Does NOT call `saveAndSwitchPage()` — that function calls `clearCanvas()` which wipes the in-memory stroke list, causing a blank page on arrival.
+- Phase 1: inline save/snapshot of the leaving page → set `currentPageIndex` → `setupPageIds` + `loadPageTemplateFromDb` + `deserializeStrokesFromDb` all on `Dispatchers.IO` → `buildRenderBitmap` off-thread → `loadStrokesWithBitmap` on main thread. User sees the target page arrive with the stroke in its **pre-undo state** (visible before undo, absent before redo).
+- Phase 2: DB soft-delete or restore → compute `updatedStrokes` in memory → `buildRenderBitmap` off-thread → `loadStrokesWithBitmap` on main thread. User sees the stroke **visibly disappear or appear** in real time.
+- On e-ink (NA5C): the two EPD handoffs have a natural gap due to panel refresh speed — the animation is clearly perceptible. On LCD (P2P): both frames composite too fast to distinguish; user sees the final state only. This is intentional — no artificial delay added.
+
+**Path 2 — Same-page stroke (optimized, one EPD handoff):**
+- Triggered when `action.pageId == currentPageId` for `StrokeAdded`/`StrokeErased`.
+- Never calls `clearCanvas()`. Updates the in-memory stroke list directly (filter for remove, append from DB for restore).
+- `buildRenderBitmap` off-thread with `currentTemplateBitmap` → `loadStrokesWithBitmap` — ONE EPD handoff, only the affected stroke area changes visually.
+- `persistedStrokeIds` is kept in sync: `remove(strokeId)` on soft-delete, `add(strokeId)` on restore.
+
+**Path 3 — Page actions (`PageAdded`) and all other actions:**
+- Full reload path: invalidate snapshot → `clearCanvas()` → `loadCurrentPage()` → `displayPage()` → `postDisplayWork()`.
+
+### `currentTemplateBitmap` field
+- `DrawingActivity` holds `private var currentTemplateBitmap: Bitmap?` — set in `displayPage()` whenever a page is loaded.
+- Used by the same-page stroke undo/redo path to pass the correct template to `buildRenderBitmap` without re-reading the DB.
+
+### Pruning notes — things that don't work
+
+#### `repaintToolbar()` — do not implement
+- An attempt was made to add a `repaintToolbar()` method to `DrawingView` / `OnyxDrawingView` that toggled `setRawDrawingRenderEnabled` on every pen lift to visually refresh the toolbar tint state.
+- Result: visible stroke flicker and eraser regression — the overlay was being re-enabled during erase operations.
+- **Removed entirely.** Undo/redo buttons are statically always-enabled; no toolbar EPD repaint is needed or wanted.
+
+#### Cross-page undo must not use `saveAndSwitchPage()`
+- `saveAndSwitchPage()` calls `drawingView.clearCanvas()`, which calls `strokes.clear()` — the in-memory stroke list is wiped.
+- When the DB load then completes, there are no in-memory strokes to show, resulting in a blank page.
+- Fix: inline the save/snapshot/switch logic directly in the cross-page branch and reload strokes from DB explicitly.
+
+---
+
 ## Current Step
 
 **MVP iteration — multi-page drawing with persistence.**
@@ -360,8 +411,9 @@ Completed:
 - EPD overlay flicker fix: overlay stays active during writing; released only at non-writing transitions (tool switch, page flip, page clear, focus loss). `onIdleSave` renamed to `onPenLifted`; saves triggered per pen lift instead of idle timer.
 - Page Snapshot System: transparent-background strokes-only PNG stored in page `data` JSON. Two-phase load (fast composite path + silent background stroke deserialization). Stale detection via `MAX(updatedAt)` over all strokes including soft-deleted. LRU stroke cache removed — snapshots persist across process death and supersede it entirely.
 - ✂️ Pruning: snapshot not captured on Close/Back — `onWindowFocusChanged` fires after `finish()` so `soilDatabase` is already null. Fixed: `closeNotebook()` captures and persists snapshot synchronously on main thread before the IO block.
+- Undo/Redo system: session-scoped unlimited stack, three action types (`StrokeAdded`, `StrokeErased`, `PageAdded`). Optimized same-page stroke path (one EPD handoff, no canvas clear). Two-phase cross-page stroke path (page arrives in pre-undo state, then undo applies visually in real time). Buttons always enabled — tapping empty stack silently does nothing.
 
 Next up: TBD — discuss before starting.
 
 ---
-*Last updated: Page Snapshot System + close-path snapshot pruning*
+*Last updated: Undo/Redo System*

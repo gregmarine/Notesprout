@@ -1,0 +1,61 @@
+package com.notesprout.android.history
+
+import kotlinx.serialization.Serializable
+
+/**
+ * Discriminated union of every reversible user action in a notebook.
+ *
+ * Only IDs are stored — never stroke point data.  The database is the source of truth;
+ * undo/redo operations restore or soft-delete rows by ID.
+ *
+ * [layerId] is the parentId of the stroke row (= the content layer UUID) captured at
+ * action-record time from DrawingActivity.currentLayerId.
+ */
+@Serializable
+sealed class UndoRedoAction {
+
+    /** User drew a stroke — undo soft-deletes it; redo restores it. */
+    @Serializable
+    data class StrokeAdded(
+        val pageId: String,
+        val layerId: String,
+        val strokeId: String,
+    ) : UndoRedoAction()
+
+    /** User erased a stroke — undo restores it; redo soft-deletes it again. */
+    @Serializable
+    data class StrokeErased(
+        val pageId: String,
+        val layerId: String,
+        val strokeId: String,
+    ) : UndoRedoAction()
+
+    /** User added a page — undo soft-deletes it + children; redo restores it. */
+    @Serializable
+    data class PageAdded(
+        val pageId: String,
+        val pageIndex: Int,
+    ) : UndoRedoAction()
+
+    /**
+     * User deleted a page — undo restores page + all children deleted at the same instant;
+     * redo soft-deletes page + all surviving children.
+     *
+     * [deletedAt] is the timestamp passed to all soft-delete calls during the original
+     * delete operation — used to identify which child rows to restore on undo.
+     */
+    @Serializable
+    data class PageDeleted(
+        val pageId: String,
+        val pageIndex: Int,
+        val deletedAt: Long,
+    ) : UndoRedoAction()
+
+    /** User changed a page template — undo applies [previousTemplateId]; redo applies [newTemplateId]. */
+    @Serializable
+    data class TemplateChanged(
+        val pageId: String,
+        val previousTemplateId: String?,
+        val newTemplateId: String?,
+    ) : UndoRedoAction()
+}

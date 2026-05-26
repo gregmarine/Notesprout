@@ -34,6 +34,8 @@ import com.notesprout.android.databinding.ActivityDrawingBinding
 import com.notesprout.android.drawing.DrawingView
 import com.notesprout.android.drawing.GenericDrawingView
 import com.notesprout.android.drawing.OnyxDrawingView
+import com.notesprout.android.history.UndoRedoAction
+import com.notesprout.android.history.UndoRedoManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
@@ -119,6 +121,21 @@ class DrawingActivity : AppCompatActivity() {
      */
     private val persistedStrokeIds = mutableSetOf<String>()
 
+    /**
+     * The template bitmap currently displayed on the canvas.  Kept in sync by [displayPage]
+     * so the undo/redo optimised stroke path can pass it to [buildRenderBitmap] without
+     * re-reading the DB.  Null = plain white background.
+     */
+    private var currentTemplateBitmap: Bitmap? = null
+
+    // ── Undo/redo ─────────────────────────────────────────────────────────────
+
+    /**
+     * Notebook-level undo/redo history.  Replaced wholesale on [onStart] restoration;
+     * cleared and file deleted on [closeNotebook].
+     */
+    private var undoRedoManager = UndoRedoManager()
+
     // ── Activity lifecycle ────────────────────────────────────────────────────
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -152,6 +169,8 @@ class DrawingActivity : AppCompatActivity() {
                     }
                     addPage(db)
                 }
+                undoRedoManager.push(UndoRedoAction.PageAdded(currentPageId, currentPageIndex))
+                updateUndoRedoButtons()
                 drawingView.clearCanvas()
                 val result = withContext(Dispatchers.IO) { loadCurrentPage(db) }
                 displayPage(result)
@@ -168,9 +187,19 @@ class DrawingActivity : AppCompatActivity() {
                 .setMessage("Delete this page?")
                 .setNegativeButton("Cancel", null)
                 .setPositiveButton("Delete") { _, _ ->
+                    // Capture pageId, pageIndex, and deletedAt timestamp BEFORE the delete runs.
+                    // All three soft-delete calls (page, layer, strokes) use the same timestamp
+                    // so PageDeleted.undo can restore exactly those rows via restoreChildrenDeletedSince.
+                    val deletedPageId    = currentPageId
+                    val deletedPageIndex = currentPageIndex
+                    val deletedAt        = System.currentTimeMillis()
                     lifecycleScope.launch {
                         // No snapshot needed — the page being deleted is discarded.
-                        withContext(Dispatchers.IO) { deletePage(db) }
+                        withContext(Dispatchers.IO) { deletePage(db, deletedAt) }
+                        undoRedoManager.push(
+                            UndoRedoAction.PageDeleted(deletedPageId, deletedPageIndex, deletedAt)
+                        )
+                        updateUndoRedoButtons()
                         drawingView.clearCanvas()
                         val result = withContext(Dispatchers.IO) { loadCurrentPage(db) }
                         displayPage(result)
@@ -240,6 +269,10 @@ class DrawingActivity : AppCompatActivity() {
             ).show()
         }
 
+        binding.btnUndo.setOnClickListener { performUndo() }
+        binding.btnRedo.setOnClickListener { performRedo() }
+        updateUndoRedoButtons()  // both disabled initially (empty stacks)
+
         // ── Back press ────────────────────────────────────────────────────────
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
@@ -257,10 +290,17 @@ class DrawingActivity : AppCompatActivity() {
             // re-insert a stroke that has already been soft-deleted from the DB.
             persistedStrokeIds.remove(strokeId)
             val db = soilDatabase
+            val pageId  = currentPageId
+            val layerId = currentLayerId
             if (db != null) {
                 lifecycleScope.launch {
                     withContext(Dispatchers.IO) {
                         db.notebookDao().softDeleteById(strokeId, System.currentTimeMillis())
+                    }
+                    // Record undo action after the DB write completes.
+                    if (pageId.isNotEmpty() && layerId.isNotEmpty()) {
+                        undoRedoManager.push(UndoRedoAction.StrokeErased(pageId, layerId, strokeId))
+                        updateUndoRedoButtons()
                     }
                 }
             }
@@ -272,7 +312,16 @@ class DrawingActivity : AppCompatActivity() {
             val db = soilDatabase
             if (db != null) {
                 lifecycleScope.launch {
-                    withContext(Dispatchers.IO) { saveStrokes(db) }
+                    val newIds = withContext(Dispatchers.IO) { saveStrokes(db) }
+                    // Push one StrokeAdded per newly persisted stroke.
+                    val pageId  = currentPageId
+                    val layerId = currentLayerId
+                    if (pageId.isNotEmpty() && layerId.isNotEmpty()) {
+                        for (id in newIds) {
+                            undoRedoManager.push(UndoRedoAction.StrokeAdded(pageId, layerId, id))
+                        }
+                        if (newIds.isNotEmpty()) updateUndoRedoButtons()
+                    }
                 }
             }
         }
@@ -346,6 +395,8 @@ class DrawingActivity : AppCompatActivity() {
                                     }
                                     addPage(db)
                                 }
+                                undoRedoManager.push(UndoRedoAction.PageAdded(currentPageId, currentPageIndex))
+                                updateUndoRedoButtons()
                                 drawingView.clearCanvas()
                                 val result = withContext(Dispatchers.IO) { loadCurrentPage(db) }
                                 displayPage(result)
@@ -376,6 +427,36 @@ class DrawingActivity : AppCompatActivity() {
         }
 
         loadStrokes()
+    }
+
+    override fun onStart() {
+        super.onStart()
+        // Restore undo/redo state if the app was backgrounded with a non-empty history.
+        val path = intent.getStringExtra(EXTRA_NOTEBOOK_PATH) ?: return
+        val file = undoRedoPersistenceFile(path)
+        if (file.exists()) {
+            try {
+                undoRedoManager = UndoRedoManager.fromJson(file.readText())
+                updateUndoRedoButtons()
+            } catch (e: Exception) {
+                Log.e(TAG, "onStart: failed to restore undo/redo state", e)
+            } finally {
+                file.delete()
+            }
+        }
+    }
+
+    override fun onStop() {
+        super.onStop()
+        // Persist undo/redo stacks so they survive process death when the app is backgrounded.
+        if (!undoRedoManager.isEmpty()) {
+            val path = intent.getStringExtra(EXTRA_NOTEBOOK_PATH) ?: return
+            try {
+                undoRedoPersistenceFile(path).writeText(undoRedoManager.toJson())
+            } catch (e: Exception) {
+                Log.e(TAG, "onStop: failed to persist undo/redo state", e)
+            }
+        }
     }
 
     override fun onResume() {
@@ -433,6 +514,11 @@ class DrawingActivity : AppCompatActivity() {
     private fun closeNotebook() {
         val db = soilDatabase ?: return
         soilDatabase = null   // mark as closed before any potentially-throwing work
+
+        // Clear history and remove any on-disk persistence file — notebook is done.
+        undoRedoManager.clear()
+        val nbPath = intent.getStringExtra(EXTRA_NOTEBOOK_PATH)
+        if (nbPath != null) undoRedoPersistenceFile(nbPath).takeIf { it.exists() }?.delete()
 
         // Capture snapshot on the main thread — View operations must run here.
         // Must happen before the runBlocking block so the bitmap data is ready for IO.
@@ -612,8 +698,10 @@ class DrawingActivity : AppCompatActivity() {
 
     /**
      * Apply a [PageLoadResult] to the drawing view on the main thread.
+     * Also keeps [currentTemplateBitmap] in sync for the undo/redo optimised stroke path.
      */
     private fun displayPage(result: PageLoadResult) {
+        currentTemplateBitmap = result.templateBitmap
         val bitmap = result.displayBitmap
         if (bitmap != null) {
             drawingView.loadStrokesWithBitmap(result.strokes, bitmap, result.templateBitmap)
@@ -689,14 +777,18 @@ class DrawingActivity : AppCompatActivity() {
      * re-insert cycle.  Erased strokes are removed from DB via the [DrawingView.onStrokeErased]
      * callback; this function only adds new ones.
      *
-     * Called from: page navigation (before switch), [closeNotebook].
+     * Returns the list of stroke IDs that were newly inserted in this call (i.e. not
+     * previously in [persistedStrokeIds]).  The caller uses this to push [UndoRedoAction.StrokeAdded]
+     * for each new stroke.  Returns an empty list when no new strokes were saved.
+     *
+     * Called from: page navigation (before switch), [closeNotebook], [onPenLifted].
      * Must be called on [Dispatchers.IO].
      */
-    private suspend fun saveStrokes(db: SoilDatabase) {
+    private suspend fun saveStrokes(db: SoilDatabase): List<String> {
         val layerId = currentLayerId
         if (layerId.isEmpty()) {
             Log.w(TAG, "saveStrokes: currentLayerId is empty — skipping")
-            return
+            return emptyList()
         }
         val dao = db.notebookDao()
         val now = System.currentTimeMillis()
@@ -712,7 +804,7 @@ class DrawingActivity : AppCompatActivity() {
 
         if (newStrokes.isEmpty()) {
             // Nothing to write — return immediately without touching the DB at all.
-            return
+            return emptyList()
         }
 
         // Pre-build a stable index map so each new stroke keeps its global draw-order
@@ -757,7 +849,9 @@ class DrawingActivity : AppCompatActivity() {
         }
 
         // Extend the registry so subsequent saves skip these IDs immediately.
-        persistedStrokeIds.addAll(newStrokes.map { it.id })
+        val newIds = newStrokes.map { it.id }
+        persistedStrokeIds.addAll(newIds)
+        return newIds
     }
 
     /**
@@ -791,10 +885,28 @@ class DrawingActivity : AppCompatActivity() {
         // Apply to drawing view immediately (before DB write so the user sees it at once).
         drawingView.setTemplate(bitmap)
 
-        // Persist the page's template property in the background.
+        // Persist the page's template property and record the undo action in the background.
         lifecycleScope.launch {
             withContext(Dispatchers.IO) {
+                // Read current (previous) template ID before overwriting — needed for undo.
+                val page = db.notebookDao().getObjectById(pageId)
+                val previousTemplateId = page
+                    ?.let { TemplateDialog.parseTemplateId(it.data) }
+                    ?.takeIf { it.isNotEmpty() }
+
                 persistPageTemplate(db.notebookDao(), pageId, templateId)
+
+                // Push undo action on the main thread after the DB write completes.
+                withContext(Dispatchers.Main) {
+                    undoRedoManager.push(
+                        UndoRedoAction.TemplateChanged(
+                            pageId           = pageId,
+                            previousTemplateId = previousTemplateId,
+                            newTemplateId    = templateId.takeIf { it.isNotEmpty() },
+                        )
+                    )
+                    updateUndoRedoButtons()
+                }
             }
             // TODO: apply template to all pages
         }
@@ -930,12 +1042,18 @@ class DrawingActivity : AppCompatActivity() {
      * If the notebook would become empty, a fresh page + layer is bootstrapped
      * automatically so the user is never left with a blank notebook.
      *
+     * @param deletedAt The timestamp to use for all soft-delete operations.  Callers must
+     * pass the same value that was captured before calling this function so the undo action
+     * ([UndoRedoAction.PageDeleted.deletedAt]) matches the DB rows exactly — every cascade
+     * delete uses the identical timestamp so [NotebookDao.restoreChildrenDeletedSince] can
+     * recover exactly those rows on undo.
+     *
      * Must be called on [Dispatchers.IO].  Caller updates the UI after return.
      */
-    private suspend fun deletePage(db: SoilDatabase) {
+    private suspend fun deletePage(db: SoilDatabase, deletedAt: Long = System.currentTimeMillis()) {
         saveStrokes(db)
         val dao = db.notebookDao()
-        val now = System.currentTimeMillis()
+        val now = deletedAt
 
         // Cascade soft-deletes: page → layer → all strokes.
         dao.softDeleteById(currentPageId, now)
@@ -1000,35 +1118,392 @@ class DrawingActivity : AppCompatActivity() {
      * Called from the swipe gesture detector.
      */
     private fun navigateToPage(newIndex: Int) {
+        lifecycleScope.launch { navigateToPageInternal(newIndex) }
+    }
+
+    /**
+     * Suspend implementation of [navigateToPage], callable directly from coroutines
+     * (e.g. undo/redo execution).  Saves the current page, clears the canvas, loads
+     * the new page, and updates the UI — fully handling all thread context switches.
+     *
+     * Must NOT be called while already inside a [withContext] block that holds the IO
+     * dispatcher, because it starts with main-thread View work ([captureSnapshot]).
+     * Always call from the main-thread coroutine context.
+     */
+    private suspend fun navigateToPageInternal(newIndex: Int) {
         val db = soilDatabase ?: return
-        lifecycleScope.launch {
-            // Capture snapshot of the page we are leaving (main thread, before clear).
-            val snapshot      = drawingView.captureSnapshot()
-            val leavingPageId = currentPageId
+        // Capture snapshot of the page we are leaving — must be on the main thread.
+        val snapshot      = drawingView.captureSnapshot()
+        val leavingPageId = currentPageId
 
-            withContext(Dispatchers.IO) {
-                // Persist snapshot and save strokes concurrently in the same IO block.
-                if (snapshot != null && leavingPageId.isNotEmpty()) {
-                    persistSnapshot(db, leavingPageId, snapshot)
-                }
-                saveStrokes(db)
+        withContext(Dispatchers.IO) {
+            if (snapshot != null && leavingPageId.isNotEmpty()) {
+                persistSnapshot(db, leavingPageId, snapshot)
             }
-
-            currentPageIndex = newIndex
-            drawingView.clearCanvas()
-
-            val result = withContext(Dispatchers.IO) { loadCurrentPage(db) }
-            displayPage(result)
-            updatePageIndicator()
-            saveLastOpenedPage(currentPageId)
-            postDisplayWork(db, result)
+            saveStrokes(db)
         }
+
+        currentPageIndex = newIndex
+        drawingView.clearCanvas()
+
+        val result = withContext(Dispatchers.IO) { loadCurrentPage(db) }
+        displayPage(result)
+        updatePageIndicator()
+        saveLastOpenedPage(currentPageId)
+        postDisplayWork(db, result)
+    }
+
+    /**
+     * Lightweight pre-flight for undo/redo cross-page navigation: saves and snapshots
+     * the current page and sets [currentPageIndex] to [newIndex], but does NOT load the
+     * new page's content — the undo/redo caller performs its DB operation and then runs a
+     * final [loadCurrentPage] which loads the correct post-operation state in one pass.
+     *
+     * Avoids the double-load (navigate + undo reload) that [navigateToPageInternal] would cause,
+     * eliminating the background-deserialization race that could call [setStrokeListSilently]
+     * with stale data after the DB operation changed stroke rows.
+     *
+     * Must be called from the main-thread coroutine context ([captureSnapshot] requires main thread).
+     */
+    private suspend fun saveAndSwitchPage(newIndex: Int) {
+        val db = soilDatabase ?: return
+        val snapshot      = drawingView.captureSnapshot()
+        val leavingPageId = currentPageId
+        withContext(Dispatchers.IO) {
+            if (snapshot != null && leavingPageId.isNotEmpty()) {
+                persistSnapshot(db, leavingPageId, snapshot)
+            }
+            saveStrokes(db)
+        }
+        currentPageIndex = newIndex
+        drawingView.clearCanvas()
     }
 
     /** Refresh the page indicator overlay text. Call on the main thread. */
     private fun updatePageIndicator() {
         binding.tvPageIndicator.text = "${currentPageIndex + 1} / ${pages.size.coerceAtLeast(1)}"
     }
+
+    // ── Undo/redo execution ───────────────────────────────────────────────────
+
+    /**
+     * Undo/redo buttons always appear enabled — matching the native BOOX notes app behaviour.
+     * Tapping when the stack is empty is a no-op; [performUndo] / [performRedo] guard that.
+     * No visual state change needed here; this function is kept as a call-site placeholder.
+     */
+    private fun updateUndoRedoButtons() {
+        // No-op — buttons are statically enabled in the layout and never tinted.
+    }
+
+    private fun performUndo() {
+        val db = soilDatabase ?: return
+        val action = undoRedoManager.undo() ?: return
+        updateUndoRedoButtons()
+        lifecycleScope.launch { executeAction(db, action, isUndo = true) }
+    }
+
+    private fun performRedo() {
+        val db = soilDatabase ?: return
+        val action = undoRedoManager.redo() ?: return
+        updateUndoRedoButtons()
+        lifecycleScope.launch { executeAction(db, action, isUndo = false) }
+    }
+
+    /**
+     * Execute a single undo or redo [action].
+     *
+     * Called from the main-thread coroutine context (launched via [lifecycleScope]).
+     * Handles all thread switching internally.
+     *
+     * Flow — stroke actions, same page:
+     *   DB op → in-memory stroke list update → rebuild bitmap → [loadStrokesWithBitmap]
+     *   (one EPD handoff; user sees only the affected stroke change)
+     *
+     * Flow — stroke actions, cross-page (two-phase):
+     *   Phase 1: save leaving page → set [currentPageIndex] → load target page in its
+     *            PRE-undo state (stroke still present/absent as it was) → display it so
+     *            the user can see the page, THEN
+     *   Phase 2: DB op → in-memory update → [loadStrokesWithBitmap] so the stroke
+     *            visibly appears or disappears in front of the user.
+     *
+     * Flow — page / template actions:
+     *   [saveAndSwitchPage] if cross-page → DB op → snapshot invalidation →
+     *   [clearCanvas] → [loadCurrentPage] → [displayPage]
+     */
+    private suspend fun executeAction(db: SoilDatabase, action: UndoRedoAction, isUndo: Boolean) {
+        val now = System.currentTimeMillis()
+        val dao = db.notebookDao()
+
+        val targetPageId: String? = when (action) {
+            is UndoRedoAction.StrokeAdded     -> action.pageId
+            is UndoRedoAction.StrokeErased    -> action.pageId
+            is UndoRedoAction.TemplateChanged -> action.pageId
+            else                              -> null
+        }
+        val isCrossPage = targetPageId != null && targetPageId != currentPageId
+
+        // ── Cross-page stroke: two-phase display ──────────────────────────────
+        // Phase 1 displays the target page in its pre-undo state so the user sees
+        // the stroke present/absent before the action is applied.  Phase 2 applies
+        // the DB change and updates the visual so the stroke visibly appears/disappears.
+        if (isCrossPage && (action is UndoRedoAction.StrokeAdded || action is UndoRedoAction.StrokeErased)) {
+            val strokeId = when (action) {
+                is UndoRedoAction.StrokeAdded  -> action.strokeId
+                is UndoRedoAction.StrokeErased -> action.strokeId
+                else -> error("unreachable")
+            }
+
+            // ── Phase 1a: save and snapshot the page we are leaving ───────────
+            val snapshot      = drawingView.captureSnapshot()
+            val leavingPageId = currentPageId
+            withContext(Dispatchers.IO) {
+                if (snapshot != null && leavingPageId.isNotEmpty()) {
+                    persistSnapshot(db, leavingPageId, snapshot)
+                }
+                saveStrokes(db)
+            }
+
+            // Switch page index; setupPageIds (called below) will resolve IDs.
+            currentPageIndex = pages.indexOfFirst { it.id == targetPageId }.coerceAtLeast(0)
+
+            // ── Phase 1b: load and display target page in PRE-undo state ─────
+            // The DB has not been modified yet, so the stroke is still in its
+            // original state — present for StrokeAdded, absent for StrokeErased.
+            // Force the full render path (bypass snapshot) so strokes are in memory
+            // for Phase 2's in-memory update.
+            val templateBmp: Bitmap?
+            val preUndoStrokes: List<LiveStroke>
+            withContext(Dispatchers.IO) {
+                setupPageIds(db)
+                templateBmp   = loadPageTemplateFromDb(db)
+                preUndoStrokes = deserializeStrokesFromDb(db)
+            }
+            val preUndobitmap = withContext(Dispatchers.IO) {
+                drawingView.buildRenderBitmap(preUndoStrokes, templateBmp)
+            }
+            // Display: user now sees the target page with stroke in original state.
+            if (preUndobitmap != null) {
+                drawingView.loadStrokesWithBitmap(preUndoStrokes, preUndobitmap, templateBmp)
+            } else {
+                drawingView.loadStrokes(preUndoStrokes)
+            }
+            currentTemplateBitmap = templateBmp
+            updatePageIndicator()
+            saveLastOpenedPage(currentPageId)
+
+            // ── Phase 2a: apply the DB operation ─────────────────────────────
+            withContext(Dispatchers.IO) {
+                when (action) {
+                    is UndoRedoAction.StrokeAdded  ->
+                        if (isUndo) dao.softDeleteById(strokeId, now) else dao.restoreById(strokeId, now)
+                    is UndoRedoAction.StrokeErased ->
+                        if (isUndo) dao.restoreById(strokeId, now) else dao.softDeleteById(strokeId, now)
+                    else -> Unit
+                }
+            }
+
+            // ── Phase 2b: in-memory visual update — stroke appears/disappears ─
+            val shouldRemove = (action is UndoRedoAction.StrokeAdded  && isUndo) ||
+                               (action is UndoRedoAction.StrokeErased && !isUndo)
+            val updatedStrokes: List<LiveStroke>
+            if (shouldRemove) {
+                updatedStrokes = preUndoStrokes.filter { it.id != strokeId }
+                persistedStrokeIds.remove(strokeId)
+            } else {
+                val strokeObj = withContext(Dispatchers.IO) { dao.getObjectById(strokeId) }
+                val restored = strokeObj?.let {
+                    try { LiveStroke(id = it.id, points = StrokeData.fromJson(it.data).toPointFs()) }
+                    catch (e: Exception) {
+                        Log.e(TAG, "executeAction: failed to deserialize stroke $strokeId", e); null
+                    }
+                }
+                updatedStrokes = buildList { addAll(preUndoStrokes); restored?.let { add(it) } }
+                if (restored != null) persistedStrokeIds.add(strokeId)
+            }
+            val bitmap = withContext(Dispatchers.IO) {
+                drawingView.buildRenderBitmap(updatedStrokes, templateBmp)
+            }
+            if (bitmap != null) {
+                drawingView.loadStrokesWithBitmap(updatedStrokes, bitmap, templateBmp)
+            } else {
+                drawingView.loadStrokes(updatedStrokes)
+            }
+            return
+        }
+
+        // ── Step 1: Cross-page navigation (template / page actions only) ──────
+        // Stroke cross-page is handled above.  Page-add/delete skip navigation
+        // here — currentPageIndex is set inside the DB block.
+        if (isCrossPage) {
+            val idx = pages.indexOfFirst { it.id == targetPageId }
+            if (idx >= 0) saveAndSwitchPage(idx)
+        }
+        // After saveAndSwitchPage we are back on the main thread.
+
+        // ── Step 2: Action-specific DB operation ──────────────────────────────
+        when (action) {
+            is UndoRedoAction.StrokeAdded -> withContext(Dispatchers.IO) {
+                if (isUndo) dao.softDeleteById(action.strokeId, now)
+                else        dao.restoreById(action.strokeId, now)
+            }
+
+            is UndoRedoAction.StrokeErased -> withContext(Dispatchers.IO) {
+                if (isUndo) dao.restoreById(action.strokeId, now)
+                else        dao.softDeleteById(action.strokeId, now)
+            }
+
+            is UndoRedoAction.PageAdded -> withContext(Dispatchers.IO) {
+                if (isUndo) {
+                    dao.softDeleteById(action.pageId, now)
+                    dao.softDeleteByParentId(action.pageId, now)          // layer
+                    val layer = dao.getLayerForPageAny(action.pageId)
+                    if (layer != null) dao.softDeleteByParentId(layer.id, now) // strokes
+                    // Navigate to the page before the deleted one; setupPageIds will coerce.
+                    currentPageIndex = (action.pageIndex - 1).coerceAtLeast(0)
+                } else {
+                    // Redo: restore the page and its layer (strokes were never deleted on add).
+                    dao.restoreById(action.pageId, now)
+                    val layer = dao.getLayerForPageAny(action.pageId)
+                    if (layer != null) dao.restoreById(layer.id, now)
+                    currentPageIndex = action.pageIndex
+                }
+            }
+
+            is UndoRedoAction.PageDeleted -> withContext(Dispatchers.IO) {
+                if (isUndo) {
+                    // Restore the page row and all children soft-deleted at the same instant.
+                    dao.restoreById(action.pageId, now)
+                    dao.restoreChildrenDeletedSince(action.pageId, action.deletedAt, now)
+                    val layer = dao.getLayerForPageAny(action.pageId)
+                    if (layer != null) {
+                        dao.restoreChildrenDeletedSince(layer.id, action.deletedAt, now)
+                    }
+                    currentPageIndex = action.pageIndex
+                } else {
+                    // Redo: soft-delete the page and all surviving children.
+                    dao.softDeleteById(action.pageId, now)
+                    dao.softDeleteByParentId(action.pageId, now)
+                    val layer = dao.getLayerForPageAny(action.pageId)
+                    if (layer != null) dao.softDeleteByParentId(layer.id, now)
+                    // currentPageIndex will be coerced by setupPageIds in loadCurrentPage.
+                }
+            }
+
+            is UndoRedoAction.TemplateChanged -> {
+                val templateId = if (isUndo) action.previousTemplateId else action.newTemplateId
+                withContext(Dispatchers.IO) {
+                    persistPageTemplate(dao, action.pageId, templateId ?: "")
+                }
+                // Visual update is handled by the full page reload in step 3b below.
+            }
+        }
+        // After each when-branch we are back on the main thread.
+
+        // ── Step 3a: Same-page stroke — optimised in-memory update ────────────
+        // No clearCanvas(); one EPD handoff via loadStrokesWithBitmap.
+        // The snapshot stale-check uses MAX(stroke.updatedAt) > page.updatedAt,
+        // which the DB op above already guarantees — no explicit invalidation needed.
+        if (action is UndoRedoAction.StrokeAdded || action is UndoRedoAction.StrokeErased) {
+            val strokeId = when (action) {
+                is UndoRedoAction.StrokeAdded  -> action.strokeId
+                is UndoRedoAction.StrokeErased -> action.strokeId
+                else -> error("unreachable")
+            }
+            val shouldRemove = (action is UndoRedoAction.StrokeAdded  && isUndo) ||
+                               (action is UndoRedoAction.StrokeErased && !isUndo)
+
+            val updatedStrokes: List<LiveStroke>
+            if (shouldRemove) {
+                updatedStrokes = drawingView.getStrokes().filter { it.id != strokeId }
+                persistedStrokeIds.remove(strokeId)
+            } else {
+                val strokeObj = withContext(Dispatchers.IO) { dao.getObjectById(strokeId) }
+                val restored = strokeObj?.let {
+                    try { LiveStroke(id = it.id, points = StrokeData.fromJson(it.data).toPointFs()) }
+                    catch (e: Exception) {
+                        Log.e(TAG, "executeAction: failed to deserialize stroke $strokeId", e); null
+                    }
+                }
+                updatedStrokes = buildList {
+                    addAll(drawingView.getStrokes())
+                    restored?.let { add(it) }
+                }
+                if (restored != null) persistedStrokeIds.add(strokeId)
+            }
+
+            val templateBmp = currentTemplateBitmap
+            val bitmap = withContext(Dispatchers.IO) {
+                drawingView.buildRenderBitmap(updatedStrokes, templateBmp)
+            }
+            if (bitmap != null) {
+                drawingView.loadStrokesWithBitmap(updatedStrokes, bitmap, templateBmp)
+            } else {
+                drawingView.loadStrokes(updatedStrokes)
+            }
+            updatePageIndicator()
+            saveLastOpenedPage(currentPageId)
+            return
+        }
+
+        // ── Step 3b: Page / template actions — full reload ────────────────────
+        val snapshotPageId: String? = when (action) {
+            is UndoRedoAction.TemplateChanged -> action.pageId
+            is UndoRedoAction.PageDeleted     -> if (isUndo) action.pageId else null
+            is UndoRedoAction.PageAdded       -> if (!isUndo) action.pageId else null
+            else                              -> null
+        }
+        if (snapshotPageId != null) {
+            withContext(Dispatchers.IO) { invalidatePageSnapshot(db, snapshotPageId) }
+        }
+
+        persistedStrokeIds.clear()
+        drawingView.clearCanvas()
+        val result = withContext(Dispatchers.IO) { loadCurrentPage(db) }
+        displayPage(result)
+        updatePageIndicator()
+        saveLastOpenedPage(currentPageId)
+        postDisplayWork(db, result)
+    }
+
+    /**
+     * Remove the `snapshot` field from the page row's `data` JSON, forcing the next
+     * [loadCurrentPage] to take the full render path and capture a fresh snapshot.
+     * Must be called on [Dispatchers.IO].
+     */
+    private suspend fun invalidatePageSnapshot(db: SoilDatabase, pageId: String) {
+        val page = db.notebookDao().getObjectById(pageId) ?: return
+        val dataObj = try { org.json.JSONObject(page.data) } catch (e: Exception) { return }
+        if (!dataObj.has("snapshot")) return   // nothing to remove
+        dataObj.remove("snapshot")
+        db.notebookDao().updateData(pageId, dataObj.toString(), System.currentTimeMillis())
+        Log.d(TAG, "invalidatePageSnapshot: cleared for page $pageId")
+    }
+
+    /**
+     * Decode the full-resolution template bitmap for [templateId] directly from the
+     * template row in [db].  Returns null if the template row is not found or the image
+     * cannot be decoded.  Must be called on [Dispatchers.IO].
+     */
+    private suspend fun loadTemplateBitmapById(db: SoilDatabase, templateId: String): Bitmap? {
+        val templateObj = db.notebookDao().getTemplateById(templateId) ?: return null
+        return try {
+            val dataObj = org.json.JSONObject(templateObj.data)
+            val b64 = dataObj.getString("image")
+            val bytes = Base64.decode(b64, Base64.DEFAULT)
+            BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+        } catch (e: Exception) {
+            Log.e(TAG, "loadTemplateBitmapById: failed to decode template $templateId", e)
+            null
+        }
+    }
+
+    /**
+     * Returns the app-private JSON file used to persist the undo/redo stacks while the
+     * app is backgrounded.  The filename encodes the notebook path so each notebook has
+     * its own independent history file.  Never accessible to the user.
+     */
+    private fun undoRedoPersistenceFile(notebookPath: String): java.io.File =
+        java.io.File(filesDir, "undo_redo_${notebookPath.hashCode()}.json")
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 

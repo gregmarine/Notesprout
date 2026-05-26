@@ -155,6 +155,37 @@ interface NotebookDao {
     @Query("UPDATE notebook SET data = :data, updatedAt = :updatedAt WHERE id = :id")
     suspend fun updateData(id: String, data: String, updatedAt: Long)
 
+    // ── Undo/redo restore operations ──────────────────────────────────────────
+
+    /**
+     * Restore a soft-deleted row by clearing its [NotebookObject.deletedAt].
+     * Updates [NotebookObject.updatedAt] so snapshot-staleness checks detect the change.
+     * Used by undo/redo to un-erase strokes and un-delete pages.
+     */
+    @Query("UPDATE notebook SET deletedAt = NULL, updatedAt = :updatedAt WHERE id = :id")
+    suspend fun restoreById(id: String, updatedAt: Long)
+
+    /**
+     * Restore all child rows of [parentId] whose [NotebookObject.deletedAt] is >= [since].
+     *
+     * This is the cascade-restore counterpart to [softDeleteByParentId]: when a page was
+     * deleted at timestamp T, all its children (layers, strokes) also have deletedAt = T.
+     * Passing [since] = T restores exactly those rows without touching children that were
+     * independently soft-deleted before the page deletion.
+     *
+     * Updates [NotebookObject.updatedAt] so snapshot-staleness checks detect the restore.
+     */
+    @Query("UPDATE notebook SET deletedAt = NULL, updatedAt = :updatedAt WHERE parentId = :parentId AND deletedAt >= :since")
+    suspend fun restoreChildrenDeletedSince(parentId: String, since: Long, updatedAt: Long)
+
+    /**
+     * The layer row belonging to [pageId], regardless of soft-delete status.
+     * Used by undo/redo when restoring or cascade-deleting layers whose page has been
+     * soft-deleted and is not returned by [getLayerForPage].
+     */
+    @Query("SELECT * FROM notebook WHERE type = 'layer' AND parentId = :pageId LIMIT 1")
+    suspend fun getLayerForPageAny(pageId: String): NotebookObject?
+
     // ── Snapshot staleness check ──────────────────────────────────────────────
 
     /**

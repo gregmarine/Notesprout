@@ -53,6 +53,32 @@
             android:layout_marginStart="4dp"
             android:text="&#x2212;" />
 
+        <!-- Undo button — disabled (inkLight tint) when the undo stack is empty -->
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnUndo"
+            style="@style/Widget.NoteSprout.ToolbarButton"
+            android:layout_width="36dp"
+            android:layout_height="36dp"
+            android:layout_marginStart="4dp"
+            android:src="@drawable/ic_undo"
+            android:contentDescription="Undo"
+            android:background="@drawable/shape_bordered"
+            android:scaleType="center"
+            android:stateListAnimator="@null" />
+
+        <!-- Redo button — disabled (inkLight tint) when the redo stack is empty -->
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnRedo"
+            style="@style/Widget.NoteSprout.ToolbarButton"
+            android:layout_width="36dp"
+            android:layout_height="36dp"
+            android:layout_marginStart="4dp"
+            android:src="@drawable/ic_redo"
+            android:contentDescription="Redo"
+            android:background="@drawable/shape_bordered"
+            android:scaleType="center"
+            android:stateListAnimator="@null" />
+
         <!-- Flexible spacer pushes Template, Clear, and Erase to the right edge -->
         <Space
             android:layout_width="0dp"
