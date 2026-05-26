@@ -10,8 +10,9 @@ import android.os.Build
 import android.os.Bundle
 import android.util.Base64
 import android.util.Log
-import android.view.GestureDetector
 import android.view.MotionEvent
+import android.view.VelocityTracker
+import android.view.ViewConfiguration
 import android.widget.FrameLayout
 import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AlertDialog
@@ -72,8 +73,14 @@ class DrawingActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityDrawingBinding
     private lateinit var drawingView: DrawingView
-    private lateinit var pageGestureDetector: GestureDetector
     private var isEraserActive = false
+
+    // ── Two-finger page swipe state ───────────────────────────────────────────
+    // GestureDetector is single-finger only.  We use a VelocityTracker + a
+    // simple state machine so that only genuine two-finger flings turn pages.
+    // This prevents accidental page turns from resting palms / pinkies.
+    private var twoFingerActive = false
+    private var pageSwipeVelocityTracker: VelocityTracker? = null
 
     /** Room DB instance for the open notebook. Null before open and after close. */
     private var soilDatabase: SoilDatabase? = null
@@ -353,66 +360,21 @@ class DrawingActivity : AppCompatActivity() {
             drawingView.setToolbarHeight(toolbar.height)
         }
 
-        // ── Page swipe gesture ────────────────────────────────────────────────
-        // Initialised here; fed events via dispatchTouchEvent() so ALL finger
-        // swipes are seen regardless of which child view (drawingView) consumes
-        // the event.  On BOOX, touchHelper swallows stylus events through the
-        // hardware overlay and never bubbles them back, so a container-level
-        // touch listener would miss them.  dispatchTouchEvent runs before any
-        // child dispatch, so we always get the DOWN that arms the fling tracker.
+        // ── Page swipe gesture (two-finger) ──────────────────────────────────
+        // Page navigation requires a deliberate two-finger horizontal fling so
+        // that incidental contact (resting pinky, palm) never turns the page.
         //
-        // onDown() MUST return true — SimpleOnGestureListener returns false by
-        // default, which tells the GestureDetector the gesture sequence is
-        // uninteresting and silently discards all subsequent events including
-        // the ACTION_UP/fling.
-        pageGestureDetector = GestureDetector(
-            this,
-            object : GestureDetector.SimpleOnGestureListener() {
-                override fun onDown(e: MotionEvent) = true   // arm the fling tracker
-
-                override fun onFling(
-                    e1: MotionEvent?,
-                    e2: MotionEvent,
-                    velocityX: Float,
-                    velocityY: Float,
-                ): Boolean {
-                    // Only honour horizontal-dominant flings.
-                    if (Math.abs(velocityX) < Math.abs(velocityY)) return false
-                    return if (velocityX < 0) {
-                        val next = currentPageIndex + 1
-                        if (next <= pages.lastIndex) {
-                            navigateToPage(next); true
-                        } else {
-                            // Already on the last page — swipe left inserts a new page,
-                            // identical to tapping the + button.
-                            val db = soilDatabase ?: return false
-                            lifecycleScope.launch {
-                                val snapshot = drawingView.captureSnapshot()
-                                val leavingPageId = currentPageId
-                                withContext(Dispatchers.IO) {
-                                    if (snapshot != null && leavingPageId.isNotEmpty()) {
-                                        persistSnapshot(db, leavingPageId, snapshot)
-                                    }
-                                    addPage(db)
-                                }
-                                undoRedoManager.push(UndoRedoAction.PageAdded(currentPageId, currentPageIndex))
-                                updateUndoRedoButtons()
-                                drawingView.clearCanvas()
-                                val result = withContext(Dispatchers.IO) { loadCurrentPage(db) }
-                                displayPage(result)
-                                updatePageIndicator()
-                                saveLastOpenedPage(currentPageId)
-                                postDisplayWork(db, result)
-                            }
-                            true
-                        }
-                    } else {
-                        val prev = currentPageIndex - 1
-                        if (prev >= 0) { navigateToPage(prev); true } else false
-                    }
-                }
-            },
-        )
+        // GestureDetector is single-finger only, so we use a VelocityTracker +
+        // state machine instead.  Events are fed in dispatchTouchEvent() before
+        // any child dispatch, ensuring BOOX's TouchHelper cannot swallow them.
+        //
+        // State machine:
+        //   ACTION_DOWN          → reset tracker; single-finger, not yet active
+        //   ACTION_POINTER_DOWN  → second finger arrived; arm twoFingerActive
+        //   ACTION_MOVE          → feed tracker while twoFingerActive
+        //   ACTION_POINTER_UP    → 2→1 lift; compute velocity and fire if valid
+        //   ACTION_UP / CANCEL   → reset (last finger gone or gesture cancelled)
+        // No-op on init — handled entirely in dispatchTouchEvent / helpers below.
 
         // ── Open the Room DB ──────────────────────────────────────────────────
         val notebookPath = intent.getStringExtra(EXTRA_NOTEBOOK_PATH)
@@ -477,23 +439,132 @@ class DrawingActivity : AppCompatActivity() {
     }
 
     /**
-     * Feed every touch event to the page gesture detector before normal dispatch.
+     * Feed every touch event to the two-finger page swipe detector before normal dispatch.
      *
      * This is required because on BOOX the Onyx TouchHelper consumes stylus events
      * at the view level and never bubbles them back to a parent touch listener.
-     * Running the detector here means the DOWN event always arms the fling tracker,
-     * and the subsequent UP is always seen — regardless of which child consumed the
-     * intermediate move events.  We do not consume events ourselves (return super),
-     * so the drawing view still receives everything it expects.
+     * Running the detector here means we always see DOWN / POINTER_DOWN events
+     * regardless of which child consumed intermediate move events.  We do not
+     * consume events ourselves (return super), so the drawing view receives everything
+     * it expects.
+     *
+     * Only finger events are forwarded — stylus and eraser events belong to the
+     * drawing engine exclusively.  A pen swipe must never turn the page.
      */
     override fun dispatchTouchEvent(event: MotionEvent): Boolean {
-        // Only feed finger touches to the page gesture detector.
-        // Stylus and eraser events belong to the drawing engine exclusively —
-        // pen swipes must never accidentally trigger page navigation.
         if (event.getToolType(0) == MotionEvent.TOOL_TYPE_FINGER) {
-            pageGestureDetector.onTouchEvent(event)
+            handleTwoFingerPageSwipe(event)
         }
         return super.dispatchTouchEvent(event)
+    }
+
+    /**
+     * Two-finger horizontal fling detector for page navigation.
+     *
+     * Arms when a second finger touches down; fires when one of the two fingers
+     * lifts (ACTION_POINTER_UP with pointerCount == 2 → going to 1).  Uses a
+     * [VelocityTracker] so the fling threshold matches Android's standard minimum
+     * fling velocity — fast enough to be deliberate, not so fast it is tiring.
+     *
+     * Requiring two simultaneous fingers prevents accidental page turns from a
+     * resting pinky or palm that the stylus palm-rejection misses.
+     */
+    private fun handleTwoFingerPageSwipe(event: MotionEvent) {
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                // First finger — reset; not yet a two-finger gesture.
+                twoFingerActive = false
+                pageSwipeVelocityTracker?.recycle()
+                pageSwipeVelocityTracker = null
+            }
+            MotionEvent.ACTION_POINTER_DOWN -> {
+                if (event.pointerCount == 2) {
+                    // Second finger arrived — arm the tracker.
+                    twoFingerActive = true
+                    pageSwipeVelocityTracker?.recycle()
+                    pageSwipeVelocityTracker = VelocityTracker.obtain().also {
+                        it.addMovement(event)
+                    }
+                }
+            }
+            MotionEvent.ACTION_MOVE -> {
+                if (twoFingerActive) {
+                    pageSwipeVelocityTracker?.addMovement(event)
+                }
+            }
+            MotionEvent.ACTION_POINTER_UP -> {
+                // One of the two fingers just lifted (2 → 1).  Evaluate the fling.
+                if (twoFingerActive && event.pointerCount == 2) {
+                    val tracker = pageSwipeVelocityTracker ?: return
+                    tracker.addMovement(event)
+                    tracker.computeCurrentVelocity(1000)
+                    // Use pointer 0 for velocity (the anchor finger).
+                    val vx = tracker.getXVelocity(0)
+                    val vy = tracker.getYVelocity(0)
+                    evaluatePageFling(vx, vy)
+                    twoFingerActive = false
+                    tracker.recycle()
+                    pageSwipeVelocityTracker = null
+                }
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                // Last finger gone or gesture cancelled — clean up.
+                twoFingerActive = false
+                pageSwipeVelocityTracker?.recycle()
+                pageSwipeVelocityTracker = null
+            }
+        }
+    }
+
+    /**
+     * Interprets a fling velocity pair and navigates pages if the gesture qualifies.
+     *
+     * Qualifications:
+     * - Horizontal dominant (|vx| > |vy|)
+     * - At or above [ViewConfiguration.scaledMinimumFlingVelocity]
+     *
+     * Swipe left (vx < 0) → next page (or insert new page on last page).
+     * Swipe right (vx > 0) → previous page.
+     */
+    private fun evaluatePageFling(velocityX: Float, velocityY: Float) {
+        // Must be horizontal-dominant.
+        if (Math.abs(velocityX) < Math.abs(velocityY)) return
+        // Must meet the system minimum fling velocity.
+        val minVelocity = ViewConfiguration.get(this).scaledMinimumFlingVelocity.toFloat()
+        if (Math.abs(velocityX) < minVelocity) return
+
+        if (velocityX < 0) {
+            // Swipe left → advance to next page.
+            val next = currentPageIndex + 1
+            if (next <= pages.lastIndex) {
+                navigateToPage(next)
+            } else {
+                // Already on the last page — insert a new page (same as the + button).
+                val db = soilDatabase ?: return
+                lifecycleScope.launch {
+                    val snapshot = drawingView.captureSnapshot()
+                    val leavingPageId = currentPageId
+                    withContext(Dispatchers.IO) {
+                        if (snapshot != null && leavingPageId.isNotEmpty()) {
+                            persistSnapshot(db, leavingPageId, snapshot)
+                        }
+                        addPage(db)
+                    }
+                    undoRedoManager.push(UndoRedoAction.PageAdded(currentPageId, currentPageIndex))
+                    updateUndoRedoButtons()
+                    drawingView.clearCanvas()
+                    val result = withContext(Dispatchers.IO) { loadCurrentPage(db) }
+                    displayPage(result)
+                    updatePageIndicator()
+                    saveLastOpenedPage(currentPageId)
+                    postDisplayWork(db, result)
+                }
+            }
+        } else {
+            // Swipe right → go back to previous page.
+            val prev = currentPageIndex - 1
+            if (prev >= 0) navigateToPage(prev)
+        }
     }
 
     // ── Notebook DB lifecycle ─────────────────────────────────────────────────

@@ -192,7 +192,7 @@ NoteSprout's visual language is designed for e-ink displays first. All other pla
 - `drawing/DrawingView.kt` — interface: `asView()`, `setToolbarHeight(Int)`, `enableDrawing()`, `disableDrawing()`, `resetOverlay()`, `clearCanvas()`, `setEraserMode(Boolean)`, `releaseResources()`, `loadStrokes(List<LiveStroke>)`, `getStrokes(): List<LiveStroke>`, `buildRenderBitmap(List<LiveStroke>, Bitmap?): Bitmap?`, `loadStrokesWithBitmap(List<LiveStroke>, Bitmap, Bitmap?)`, `captureSnapshot(): String?`, `setStrokeListSilently(List<LiveStroke>)`, `onStrokeErased: ((String) -> Unit)?`, `onPenLifted: (() -> Unit)?`, `onSnapshotReady: ((String) -> Unit)?`
 - `drawing/OnyxDrawingView.kt` — BOOX path: TouchHelper, RawInputCallback, limit rect. `renderStroke` calls `invalidate()` on every stroke to keep the Android canvas continuously current with the hardware overlay. The EPD overlay stays active for the entire writing session — no idle release timer. Handoff only happens at non-writing transitions: `setEraserMode(true)`, `clearCanvas()`, `setTemplate()`, `loadStrokesWithBitmap()`, `onWindowFocusChanged(false)`. `onPenLifted` fires on `onEndRawDrawing` (each pen lift) to persist new strokes to DB. `onBeginRawDrawing` re-enables render — guarded by `!isEraserMode`. `EpdController.setUpdListSize(512)` called on every `openRawDrawing()`.
 - `drawing/GenericDrawingView.kt` — standard Android Canvas: two-layer Bitmap, stylus-only (`TOOL_TYPE_STYLUS` + `TOOL_TYPE_ERASER`), historical point capture. `onPenLifted` fires directly on `ACTION_UP` — no timer.
-- `DrawingActivity.kt` — fullscreen immersive, multi-page state (`pages`, `currentPageIndex`, `currentPageId`, `currentLayerId`), incremental save via `insertOrIgnore`, `onStrokeErased` callback for targeted soft-delete, swipe gesture for page navigation.
+- `DrawingActivity.kt` — fullscreen immersive, multi-page state (`pages`, `currentPageIndex`, `currentPageId`, `currentLayerId`), incremental save via `insertOrIgnore`, `onStrokeErased` callback for targeted soft-delete, two-finger swipe gesture for page navigation.
 - `MainActivity.kt` — notebook list screen, adaptive grid, pagination, swipe, empty state, bottom bar.
 
 ### Key Build Facts
@@ -412,8 +412,9 @@ Completed:
 - Page Snapshot System: transparent-background strokes-only PNG stored in page `data` JSON. Two-phase load (fast composite path + silent background stroke deserialization). Stale detection via `MAX(updatedAt)` over all strokes including soft-deleted. LRU stroke cache removed — snapshots persist across process death and supersede it entirely.
 - ✂️ Pruning: snapshot not captured on Close/Back — `onWindowFocusChanged` fires after `finish()` so `soilDatabase` is already null. Fixed: `closeNotebook()` captures and persists snapshot synchronously on main thread before the IO block.
 - Undo/Redo system: session-scoped unlimited stack, three action types (`StrokeAdded`, `StrokeErased`, `PageAdded`). Optimized same-page stroke path (one EPD handoff, no canvas clear). Two-phase cross-page stroke path (page arrives in pre-undo state, then undo applies visually in real time). Buttons always enabled — tapping empty stack silently does nothing.
+- ✂️ Pruning: accidental page turns from resting pinky/palm — page swipe now requires a deliberate two-finger horizontal fling. Replaced `GestureDetector` (single-finger) with a `VelocityTracker` state machine in `dispatchTouchEvent`: arms on `ACTION_POINTER_DOWN` (2nd finger), fires on `ACTION_POINTER_UP` (2→1 lift) if horizontal-dominant and above `ViewConfiguration.scaledMinimumFlingVelocity`. Stylus events are still excluded entirely.
 
 Next up: TBD — discuss before starting.
 
 ---
-*Last updated: Undo/Redo System*
+*Last updated: Two-finger page swipe*
