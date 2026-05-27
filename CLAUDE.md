@@ -128,7 +128,7 @@ NoteSprout's visual language is designed for e-ink displays first. All other pla
 **What NOT To Do (Design):**
 - No color in any UI chrome element
 - No shadows or elevation on any widget
-- No decorative animations
+- No decorative animations — including activity/screen transitions. `android:windowAnimationStyle="@null"` is set in `Theme.NoteSprout` to suppress all system-default slide/fade transitions globally.
 - No pill-shaped buttons or fully sharp corners
 - Do not use Material Components — theme is `Theme.AppCompat.Light.NoActionBar`, buttons are `AppCompatButton` with explicit drawable backgrounds. `com.google.android.material` is not a dependency — do not add it.
 
@@ -383,8 +383,9 @@ Completed:
 - Undo/Redo system: session-scoped, three action types, optimized same-page path, two-phase cross-page path
 - Toolbar icon system: Tabler Icons, custom state drawables, responsive sizing for Palma2 Pro
 - Pruning: clear-page now tracked as `PageCleared` undo/redo action (timestamp-anchored restore via `restoreChildrenDeletedSince`)
+- Pruning: suppress all activity transition animations via `android:windowAnimationStyle="@null"` in `Theme.NoteSprout`
 
 Next up: TBD — discuss before starting.
 
 ---
-*Last updated: Pruning — clear page undo/redo*
+*Last updated: Pruning — suppress activity transition animations*

@@ -17,6 +17,9 @@
 
         <!-- No action bar shadow -->
         <item name="android:windowContentOverlay">@null</item>
+
+        <!-- No activity transition animations — e-ink first, no slide/fade between screens -->
+        <item name="android:windowAnimationStyle">@null</item>
     </style>
 
 </resources>
