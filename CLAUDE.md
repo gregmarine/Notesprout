@@ -384,8 +384,9 @@ Completed:
 - Toolbar icon system: Tabler Icons, custom state drawables, responsive sizing for Palma2 Pro
 - Pruning: clear-page now tracked as `PageCleared` undo/redo action (timestamp-anchored restore via `restoreChildrenDeletedSince`)
 - Pruning: suppress all activity transition animations via `android:windowAnimationStyle="@null"` in `Theme.NoteSprout`
+- 🌱 New Branch: Notebook deletion via long-press context menu in MainActivity — AlertDialog mini-menu (elevation=0, shape_bordered) → confirmation dialog naming the notebook → IO-dispatched file + sibling artefact deletion → grid refresh; `ic_delete_notebook` Tabler-style VectorDrawable (notebook with minus badge)
 
 Next up: TBD — discuss before starting.
 
 ---
-*Last updated: Pruning — suppress activity transition animations*
+*Last updated: 🌱 New Branch — Notebook deletion via long-press*

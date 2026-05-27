@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Notebook with lower-right corner cut for minus badge: delete notebook icon -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+
+    <!-- Top edge + right side (stops at y=14, corner is open) -->
+    <path
+        android:fillColor="@android:color/transparent"
+        android:strokeColor="@color/inkBlack"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M7,3 L19,3 Q20,3 20,4 L20,14"/>
+
+    <!-- Bottom edge partial (left portion only, stops at x=14) -->
+    <path
+        android:fillColor="@android:color/transparent"
+        android:strokeColor="@color/inkBlack"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:pathData="M7,21 L14,21"/>
+
+    <!-- Spine line -->
+    <path
+        android:fillColor="@android:color/transparent"
+        android:strokeColor="@color/inkBlack"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:pathData="M7,3 L7,21"/>
+
+    <!-- Left border of spine -->
+    <path
+        android:fillColor="@android:color/transparent"
+        android:strokeColor="@color/inkBlack"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M7,3 Q5,3 5,5 L5,19 Q5,21 7,21"/>
+
+    <!-- Minus sign: horizontal bar only, centered in the open corner (matches plus position) -->
+    <path
+        android:fillColor="@android:color/transparent"
+        android:strokeColor="@color/inkBlack"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:pathData="M16,19 L22,19"/>
+
+</vector>

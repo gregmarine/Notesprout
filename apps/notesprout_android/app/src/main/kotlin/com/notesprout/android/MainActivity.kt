@@ -33,8 +33,12 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import androidx.lifecycle.lifecycleScope
 import com.notesprout.android.databinding.ActivityMainBinding
 import com.notesprout.android.databinding.DialogNewNotebookBinding
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.io.File
 import java.util.UUID
@@ -385,6 +389,11 @@ class MainActivity : AppCompatActivity() {
             gravity     = Gravity.CENTER_HORIZONTAL
             // Open the notebook when the user taps the card.
             setOnClickListener { openNotebook(file) }
+            // Long-press reveals the context menu (delete, etc.).
+            setOnLongClickListener {
+                showNotebookContextMenu(file)
+                true
+            }
         }
 
         // ── Card ────────────────────────────────────────────────────────────
@@ -609,6 +618,102 @@ class MainActivity : AppCompatActivity() {
 
         } catch (e: Exception) {
             Toast.makeText(this, "Error: ${e.message}", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    // ── Notebook context menu ─────────────────────────────────────────────────
+
+    /**
+     * Shows a mini-menu AlertDialog (styled like the project's other dialogs) with a
+     * single "Delete Notebook" action.  Using an AlertDialog rather than a PopupMenu
+     * keeps the e-ink aesthetic: no floating window shadow, no ripple.
+     */
+    private fun showNotebookContextMenu(file: File) {
+        val density = resources.displayMetrics.density
+
+        // Build a single-row list item: icon + label.
+        val itemPx   = (16 * density).toInt()
+        val iconSize = (24 * density).toInt()
+        val gapPx    = (12 * density).toInt()
+
+        val itemView = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity     = Gravity.CENTER_VERTICAL
+            setPadding(itemPx, itemPx, itemPx, itemPx)
+        }
+
+        val iconView = AppCompatImageView(this).apply {
+            setImageResource(R.drawable.ic_delete_notebook)
+        }
+        itemView.addView(iconView, LinearLayout.LayoutParams(iconSize, iconSize).also {
+            it.marginEnd = gapPx
+        })
+
+        val labelView = AppCompatTextView(this).apply {
+            text      = "Delete Notebook"
+            textSize  = 15f
+            setTextColor(inkBlackColor)
+        }
+        itemView.addView(labelView, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.WRAP_CONTENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT,
+        ))
+
+        val dialog = AlertDialog.Builder(this)
+            .setView(itemView)
+            .create()
+
+        // Tap anywhere on the item row to trigger delete.
+        itemView.setOnClickListener {
+            dialog.dismiss()
+            showDeleteNotebookConfirmation(file)
+        }
+
+        dialog.show()
+        // Flat styling — elevation=0, shape_bordered background, matching all other dialogs.
+        dialog.window?.setElevation(0f)
+        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+    }
+
+    /**
+     * Shows a confirmation AlertDialog before deleting [file].
+     * The notebook name is included so the user knows exactly what they're deleting.
+     */
+    private fun showDeleteNotebookConfirmation(file: File) {
+        val name   = file.nameWithoutExtension
+        val dialog = AlertDialog.Builder(this)
+            .setMessage("Delete notebook \"$name\"? This cannot be undone.")
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Delete") { _, _ -> deleteNotebook(file) }
+            .create()
+        dialog.show()
+        // Style after show() — window only exists once the dialog is displayed.
+        dialog.window?.setElevation(0f)
+        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+    }
+
+    /**
+     * Deletes a notebook's .soil file and any sibling SQLite artefacts
+     * (e.g. name.soil-wal, name.soil-shm, name.soil-journal) on the IO dispatcher,
+     * then refreshes the grid on the main thread.
+     *
+     * Guard note: DrawingActivity manages its own Room instance; there is no shared
+     * database handle in MainActivity.  If a user somehow reaches this path while the
+     * notebook is open in DrawingActivity (which the normal back-stack makes impossible),
+     * deleting the file while Room holds it open is safe on Android — the process-level
+     * file handle keeps data intact until DrawingActivity closes its instance.
+     */
+    private fun deleteNotebook(file: File) {
+        lifecycleScope.launch {
+            withContext(Dispatchers.IO) {
+                // Delete the .soil file itself plus any sibling artefacts whose names
+                // start with the .soil filename (catches -wal, -shm, -journal suffixes).
+                file.parentFile
+                    ?.listFiles { f -> f.name.startsWith(file.name) }
+                    ?.forEach { it.delete() }
+            }
+            // Re-scan on the main thread so the grid reflects the deletion.
+            scanAndRender()
         }
     }
 
