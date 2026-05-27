@@ -228,6 +228,9 @@ class DrawingActivity : AppCompatActivity() {
                 .setMessage("Clear this page?")
                 .setNegativeButton("Cancel", null)
                 .setPositiveButton("Clear") { _, _ ->
+                    // Snapshot the page/layer IDs now — they may change before the coroutine runs.
+                    val clearedPageId  = currentPageId
+                    val clearedLayerId = currentLayerId
                     // Capture the stroke IDs before clearing so we can soft-delete their DB rows.
                     val strokesToDelete = drawingView.getStrokes()
                     drawingView.clearCanvas()
@@ -236,13 +239,18 @@ class DrawingActivity : AppCompatActivity() {
                     persistedStrokeIds.clear()
                     if (db != null && strokesToDelete.isNotEmpty()) {
                         lifecycleScope.launch {
+                            val deletedAt = System.currentTimeMillis()
                             withContext(Dispatchers.IO) {
-                                val now = System.currentTimeMillis()
                                 val dao = db.notebookDao()
                                 for (stroke in strokesToDelete) {
-                                    dao.softDeleteById(stroke.id, now)
+                                    dao.softDeleteById(stroke.id, deletedAt)
                                 }
                             }
+                            // Record the clear as a single undoable action after the DB writes succeed.
+                            undoRedoManager.push(
+                                UndoRedoAction.PageCleared(clearedPageId, clearedLayerId, deletedAt)
+                            )
+                            updateUndoRedoButtons()
                         }
                     }
                 }
@@ -1324,6 +1332,7 @@ class DrawingActivity : AppCompatActivity() {
             is UndoRedoAction.StrokeAdded     -> action.pageId
             is UndoRedoAction.StrokeErased    -> action.pageId
             is UndoRedoAction.TemplateChanged -> action.pageId
+            is UndoRedoAction.PageCleared     -> action.pageId
             else                              -> null
         }
         val isCrossPage = targetPageId != null && targetPageId != currentPageId
@@ -1482,6 +1491,16 @@ class DrawingActivity : AppCompatActivity() {
                 }
                 // Visual update is handled by the full page reload in step 3b below.
             }
+
+            is UndoRedoAction.PageCleared -> withContext(Dispatchers.IO) {
+                if (isUndo) {
+                    // Restore every stroke that was soft-deleted at the clear's timestamp.
+                    dao.restoreChildrenDeletedSince(action.layerId, action.deletedAt, now)
+                } else {
+                    // Redo: soft-delete all surviving strokes on this layer.
+                    dao.softDeleteByParentId(action.layerId, now)
+                }
+            }
         }
         // After each when-branch we are back on the main thread.
 
@@ -1536,6 +1555,7 @@ class DrawingActivity : AppCompatActivity() {
             is UndoRedoAction.TemplateChanged -> action.pageId
             is UndoRedoAction.PageDeleted     -> if (isUndo) action.pageId else null
             is UndoRedoAction.PageAdded       -> if (!isUndo) action.pageId else null
+            is UndoRedoAction.PageCleared     -> action.pageId  // strokes change on both undo and redo
             else                              -> null
         }
         if (snapshotPageId != null) {

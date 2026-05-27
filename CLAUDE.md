@@ -177,6 +177,25 @@ NoteSprout's visual language is designed for e-ink displays first. All other pla
 | BOOX Tab XC (TXC) | `d852bed0` |
 | Wacom Movink Pad 11 (MIP11) | `5HL21V5007384` |
 
+## Installing on Devices
+
+When asked to install on one or more devices:
+
+1. **Trust the user.** If they say the devices are ready, skip `adb devices` — go straight to build and install.
+2. **Build** the debug APK from the Android project root:
+   ```
+   cd apps/notesprout_android
+   ./gradlew assembleDebug
+   ```
+3. **APK path:** `apps/notesprout_android/app/build/outputs/apk/debug/app-debug.apk`
+4. **Install** on each requested device using its serial from the table above:
+   ```
+   adb -s <serial> install -r <apk-path>
+   ```
+5. Install on all requested devices in a single shell block — no need to do them one at a time.
+
+**Do not** look for a project skill, run `adb devices`, or ask whether devices are plugged in. The user will say which devices to use by nickname (e.g. "NA5C", "P2P") — look up the serial in the table above.
+
 ---
 
 ## Branch Strategy
@@ -363,8 +382,9 @@ Completed:
 - Page Snapshot System: transparent-background PNG in page `data` JSON; two-phase load; stale detection; persists across process death
 - Undo/Redo system: session-scoped, three action types, optimized same-page path, two-phase cross-page path
 - Toolbar icon system: Tabler Icons, custom state drawables, responsive sizing for Palma2 Pro
+- Pruning: clear-page now tracked as `PageCleared` undo/redo action (timestamp-anchored restore via `restoreChildrenDeletedSince`)
 
 Next up: TBD — discuss before starting.
 
 ---
-*Last updated: Toolbar icon system*
+*Last updated: Pruning — clear page undo/redo*
