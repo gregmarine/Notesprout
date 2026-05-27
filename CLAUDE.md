@@ -414,8 +414,9 @@ Completed:
 - Undo/Redo system: session-scoped unlimited stack, three action types (`StrokeAdded`, `StrokeErased`, `PageAdded`). Optimized same-page stroke path (one EPD handoff, no canvas clear). Two-phase cross-page stroke path (page arrives in pre-undo state, then undo applies visually in real time). Buttons always enabled — tapping empty stack silently does nothing.
 - ✂️ Pruning: accidental page turns from resting pinky/palm — page swipe now requires a deliberate two-finger horizontal fling. Replaced `GestureDetector` (single-finger) with a `VelocityTracker` state machine in `dispatchTouchEvent`: arms on `ACTION_POINTER_DOWN` (2nd finger), fires on `ACTION_POINTER_UP` (2→1 lift) if horizontal-dominant and above `ViewConfiguration.scaledMinimumFlingVelocity`. Stylus events are still excluded entirely.
 - ✂️ Pruning: page indicator too small and faint — increased `tvPageIndicator` from 12sp → 16sp and changed color from `inkLight` (#888888) → `inkBlack` (#000000) for legibility on both e-ink and LCD displays.
+- 🌱 New Branch: Toolbar icon system — adopted Tabler Icons (MIT) for all toolbar icons. 13 icons fetched from Tabler CDN and converted to Android VectorDrawables (all stroke-based, `@color/inkBlack`, 24dp). 2 custom hand-crafted icons: `ic_close` (notebook silhouette + left-exit arrow, notebook shifted right so arrow and spine have clear separation) and `ic_new_notebook` (notebook with lower-right corner open + plus sign in the notch, matching Tabler's `-plus` icon family pattern). `bg_toolbar_button` StateListDrawable: default = white fill no border; selected/activated/pressed = white fill + 1.5dp black border. `Widget.NoteSprout.ToolbarButton` style: 44dp, `bg_toolbar_button`, 10dp padding; overridden to 36dp/7dp in `res/values-sw360dp/` for Palma2 Pro. Pen/eraser buttons use `isSelected` for persistent active state. Toolbar dividers are `@color/inkBlack` 1dp × 28dp.
 
 Next up: TBD — discuss before starting.
 
 ---
-*Last updated: Page indicator legibility*
+*Last updated: Toolbar icon system*

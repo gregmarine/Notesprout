@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Smaller toolbar button for phone-width screens (e.g. BOOX Palma2 Pro ~360dp) -->
+    <style name="Widget.NoteSprout.ToolbarButton" parent="">
+        <item name="android:layout_width">36dp</item>
+        <item name="android:layout_height">36dp</item>
+        <item name="android:background">@drawable/bg_toolbar_button</item>
+        <item name="android:padding">7dp</item>
+        <item name="android:scaleType">fitCenter</item>
+        <item name="android:stateListAnimator">@null</item>
+    </style>
+</resources>

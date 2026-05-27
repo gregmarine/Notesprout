@@ -17,101 +17,124 @@
 
     <!-- Toolbar floats above the canvas.
          On BOOX, setLimitRect excludes this region from pen input.
-         Height is 48dp content; toolbar_background drawable provides the 1dp inkBlack bottom border.
-         Left: Close, +, − | Right: Clear, Erase -->
+         Height is 56dp to comfortably fit 44dp icon buttons + padding.
+         toolbar_background drawable provides the 1dp inkBlack bottom border.
+         Order left to right: close | divider | pen | eraser | clear | divider | undo | redo | divider | template | divider | add page | delete page -->
     <LinearLayout
         android:id="@+id/drawingToolbar"
         android:layout_width="match_parent"
-        android:layout_height="48dp"
+        android:layout_height="56dp"
         android:layout_gravity="top"
         android:background="@drawable/toolbar_background"
         android:gravity="center_vertical"
         android:orientation="horizontal"
-        android:paddingStart="8dp"
-        android:paddingEnd="8dp">
+        android:paddingStart="4dp"
+        android:paddingEnd="4dp">
 
-        <androidx.appcompat.widget.AppCompatButton
+        <!-- Close button: exits the notebook -->
+        <androidx.appcompat.widget.AppCompatImageButton
             android:id="@+id/btnClose"
             style="@style/Widget.NoteSprout.ToolbarButton"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="Close" />
+            android:src="@drawable/ic_close"
+            android:contentDescription="Close notebook" />
 
-        <androidx.appcompat.widget.AppCompatButton
-            android:id="@+id/btnAddPage"
-            style="@style/Widget.NoteSprout.ToolbarButton"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
+        <!-- Divider after close -->
+        <View
+            android:layout_width="1dp"
+            android:layout_height="28dp"
+            android:background="@color/inkBlack"
             android:layout_marginStart="4dp"
-            android:text="+" />
+            android:layout_marginEnd="4dp"/>
 
-        <androidx.appcompat.widget.AppCompatButton
-            android:id="@+id/btnDeletePage"
+        <!-- Pen tool -->
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnPen"
             style="@style/Widget.NoteSprout.ToolbarButton"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginStart="4dp"
-            android:text="&#x2212;" />
+            android:src="@drawable/ic_pen"
+            android:contentDescription="Pen tool" />
 
-        <!-- Undo button — disabled (inkLight tint) when the undo stack is empty -->
+        <!-- Eraser tool -->
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnEraser"
+            style="@style/Widget.NoteSprout.ToolbarButton"
+            android:layout_marginStart="4dp"
+            android:src="@drawable/ic_eraser"
+            android:contentDescription="Eraser tool" />
+
+        <!-- Clear page -->
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnClear"
+            style="@style/Widget.NoteSprout.ToolbarButton"
+            android:layout_marginStart="4dp"
+            android:src="@drawable/ic_clear"
+            android:contentDescription="Clear page" />
+
+        <!-- Divider before undo/redo -->
+        <View
+            android:layout_width="1dp"
+            android:layout_height="28dp"
+            android:background="@color/inkBlack"
+            android:layout_marginStart="4dp"
+            android:layout_marginEnd="4dp"/>
+
+        <!-- Undo -->
         <androidx.appcompat.widget.AppCompatImageButton
             android:id="@+id/btnUndo"
             style="@style/Widget.NoteSprout.ToolbarButton"
-            android:layout_width="36dp"
-            android:layout_height="36dp"
-            android:layout_marginStart="4dp"
             android:src="@drawable/ic_undo"
-            android:contentDescription="Undo"
-            android:background="@drawable/shape_bordered"
-            android:scaleType="center"
-            android:stateListAnimator="@null" />
+            android:contentDescription="Undo" />
 
-        <!-- Redo button — disabled (inkLight tint) when the redo stack is empty -->
+        <!-- Redo -->
         <androidx.appcompat.widget.AppCompatImageButton
             android:id="@+id/btnRedo"
             style="@style/Widget.NoteSprout.ToolbarButton"
-            android:layout_width="36dp"
-            android:layout_height="36dp"
             android:layout_marginStart="4dp"
             android:src="@drawable/ic_redo"
-            android:contentDescription="Redo"
-            android:background="@drawable/shape_bordered"
-            android:scaleType="center"
-            android:stateListAnimator="@null" />
+            android:contentDescription="Redo" />
 
-        <!-- Flexible spacer pushes Template, Clear, and Erase to the right edge -->
+        <!-- Divider before template -->
+        <View
+            android:layout_width="1dp"
+            android:layout_height="28dp"
+            android:background="@color/inkBlack"
+            android:layout_marginStart="4dp"
+            android:layout_marginEnd="4dp"/>
+
+        <!-- Template picker -->
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnTemplate"
+            style="@style/Widget.NoteSprout.ToolbarButton"
+            android:src="@drawable/ic_template"
+            android:contentDescription="Template" />
+
+        <!-- Flexible spacer pushes page controls to the right edge -->
         <Space
             android:layout_width="0dp"
             android:layout_height="0dp"
             android:layout_weight="1" />
 
-        <!-- Template picker — opens the template selection dialog -->
-        <androidx.appcompat.widget.AppCompatImageButton
-            android:id="@+id/btnTemplate"
-            style="@style/Widget.NoteSprout.ToolbarButton"
-            android:layout_width="36dp"
-            android:layout_height="36dp"
-            android:layout_marginEnd="4dp"
-            android:src="@drawable/ic_template"
-            android:contentDescription="Template"
-            android:background="@drawable/shape_bordered"
-            android:scaleType="center"
-            android:stateListAnimator="@null" />
-
-        <androidx.appcompat.widget.AppCompatButton
-            android:id="@+id/btnClear"
-            style="@style/Widget.NoteSprout.ToolbarButton"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="Clear" />
-
-        <androidx.appcompat.widget.AppCompatButton
-            android:id="@+id/btnEraser"
-            style="@style/Widget.NoteSprout.ToolbarButton"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
+        <!-- Divider before page controls -->
+        <View
+            android:layout_width="1dp"
+            android:layout_height="28dp"
+            android:background="@color/inkBlack"
             android:layout_marginStart="4dp"
-            android:text="Erase" />
+            android:layout_marginEnd="4dp"/>
+
+        <!-- Add page -->
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnAddPage"
+            style="@style/Widget.NoteSprout.ToolbarButton"
+            android:src="@drawable/ic_page_add"
+            android:contentDescription="Add page" />
+
+        <!-- Delete page -->
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnDeletePage"
+            style="@style/Widget.NoteSprout.ToolbarButton"
+            android:layout_marginStart="4dp"
+            android:src="@drawable/ic_page_delete"
+            android:contentDescription="Delete page" />
 
     </LinearLayout>
 

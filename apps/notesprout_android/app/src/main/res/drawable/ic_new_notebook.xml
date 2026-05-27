@@ -1,42 +1,59 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Notebook with lower-right corner cut for plus badge: new notebook icon -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp"
     android:height="24dp"
     android:viewportWidth="24"
     android:viewportHeight="24">
+
+    <!-- Top edge + right side (stops at y=14, corner is open) -->
     <path
         android:fillColor="@android:color/transparent"
         android:strokeColor="@color/inkBlack"
         android:strokeWidth="2"
         android:strokeLineCap="round"
         android:strokeLineJoin="round"
-        android:pathData="M14 3v4a1 1 0 0 0 1 1h4"/>
+        android:pathData="M7,3 L19,3 Q20,3 20,4 L20,14"/>
+
+    <!-- Bottom edge partial (left portion only, stops at x=14) -->
+    <path
+        android:fillColor="@android:color/transparent"
+        android:strokeColor="@color/inkBlack"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:pathData="M7,21 L14,21"/>
+
+    <!-- Spine line -->
+    <path
+        android:fillColor="@android:color/transparent"
+        android:strokeColor="@color/inkBlack"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:pathData="M7,3 L7,21"/>
+
+    <!-- Left border of spine -->
     <path
         android:fillColor="@android:color/transparent"
         android:strokeColor="@color/inkBlack"
         android:strokeWidth="2"
         android:strokeLineCap="round"
         android:strokeLineJoin="round"
-        android:pathData="M17 21h-10a2 2 0 0 1 -2 -2v-14a2 2 0 0 1 2 -2h7l5 5v11a2 2 0 0 1 -2 2"/>
+        android:pathData="M7,3 Q5,3 5,5 L5,19 Q5,21 7,21"/>
+
+    <!-- Plus sign: horizontal bar, centered in the open corner -->
     <path
         android:fillColor="@android:color/transparent"
         android:strokeColor="@color/inkBlack"
         android:strokeWidth="2"
         android:strokeLineCap="round"
-        android:strokeLineJoin="round"
-        android:pathData="M9 9l1 0"/>
+        android:pathData="M16,19 L22,19"/>
+
+    <!-- Plus sign: vertical bar -->
     <path
         android:fillColor="@android:color/transparent"
         android:strokeColor="@color/inkBlack"
         android:strokeWidth="2"
         android:strokeLineCap="round"
-        android:strokeLineJoin="round"
-        android:pathData="M9 13l6 0"/>
-    <path
-        android:fillColor="@android:color/transparent"
-        android:strokeColor="@color/inkBlack"
-        android:strokeWidth="2"
-        android:strokeLineCap="round"
-        android:strokeLineJoin="round"
-        android:pathData="M9 17l6 0"/>
+        android:pathData="M19,16 L19,22"/>
+
 </vector>

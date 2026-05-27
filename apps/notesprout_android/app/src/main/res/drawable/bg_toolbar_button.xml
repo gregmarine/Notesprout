@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Selected (active tool): white fill + 1.5dp black border -->
+    <item android:state_selected="true">
+        <shape android:shape="rectangle">
+            <solid android:color="@color/paperWhite"/>
+            <stroke android:width="1.5dp" android:color="@color/inkBlack"/>
+            <corners android:radius="4dp"/>
+        </shape>
+    </item>
+    <!-- Activated state: white fill + 1.5dp black border -->
+    <item android:state_activated="true">
+        <shape android:shape="rectangle">
+            <solid android:color="@color/paperWhite"/>
+            <stroke android:width="1.5dp" android:color="@color/inkBlack"/>
+            <corners android:radius="4dp"/>
+        </shape>
+    </item>
+    <!-- Pressed state: border appears on press -->
+    <item android:state_pressed="true">
+        <shape android:shape="rectangle">
+            <solid android:color="@color/paperWhite"/>
+            <stroke android:width="1.5dp" android:color="@color/inkBlack"/>
+            <corners android:radius="4dp"/>
+        </shape>
+    </item>
+    <!-- Default: white fill, no border -->
+    <item>
+        <shape android:shape="rectangle">
+            <solid android:color="@color/paperWhite"/>
+            <corners android:radius="4dp"/>
+        </shape>
+    </item>
+</selector>

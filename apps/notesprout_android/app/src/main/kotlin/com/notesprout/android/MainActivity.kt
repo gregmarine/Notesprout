@@ -180,10 +180,10 @@ class MainActivity : AppCompatActivity() {
     // ── Bottom bar wiring ─────────────────────────────────────────────────────
 
     private fun setupBottomBar() {
-        binding.btnFirst.setOnClickListener { navigatePage(0) }
-        binding.btnPrev.setOnClickListener  { navigatePage(currentPage - 1) }
-        binding.btnNext.setOnClickListener  { navigatePage(currentPage + 1) }
-        binding.btnLast.setOnClickListener  { navigatePage(totalPages() - 1) }
+        binding.btnFirstPage.setOnClickListener { navigatePage(0) }
+        binding.btnPrevPage.setOnClickListener  { navigatePage(currentPage - 1) }
+        binding.btnNextPage.setOnClickListener  { navigatePage(currentPage + 1) }
+        binding.btnLastPage.setOnClickListener  { navigatePage(totalPages() - 1) }
 
         binding.btnNewNotebook.setOnClickListener {
             if (hasStoragePermission()) showNewNotebookDialog()
@@ -445,15 +445,10 @@ class MainActivity : AppCompatActivity() {
         val atFirst = currentPage == 0
         val atLast  = currentPage >= total - 1
 
-        applyPaginationButtonState(binding.btnFirst, disabled = atFirst)
-        applyPaginationButtonState(binding.btnPrev,  disabled = atFirst)
-        applyPaginationButtonState(binding.btnNext,  disabled = atLast)
-        applyPaginationButtonState(binding.btnLast,  disabled = atLast)
-    }
-
-    private fun applyPaginationButtonState(btn: androidx.appcompat.widget.AppCompatButton, disabled: Boolean) {
-        btn.isEnabled = !disabled
-        btn.setTextColor(if (disabled) inkLightColor else inkBlackColor)
+        binding.btnFirstPage.isEnabled = !atFirst
+        binding.btnPrevPage.isEnabled  = !atFirst
+        binding.btnNextPage.isEnabled  = !atLast
+        binding.btnLastPage.isEnabled  = !atLast
     }
 
     // ── New notebook dialog ───────────────────────────────────────────────────

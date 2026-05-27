@@ -1,42 +1,52 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Notebook with left-exit arrow: close/back icon -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp"
     android:height="24dp"
     android:viewportWidth="24"
     android:viewportHeight="24">
+
+    <!-- Notebook body outline (shifted right to x=9–21) -->
     <path
         android:fillColor="@android:color/transparent"
         android:strokeColor="@color/inkBlack"
         android:strokeWidth="2"
         android:strokeLineCap="round"
         android:strokeLineJoin="round"
-        android:pathData="M14 3v4a1 1 0 0 0 1 1h4"/>
+        android:pathData="M9,3 L21,3 Q22,3 22,4 L22,20 Q22,21 21,21 L9,21"/>
+
+    <!-- Spine line at x=9 -->
+    <path
+        android:fillColor="@android:color/transparent"
+        android:strokeColor="@color/inkBlack"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:pathData="M9,3 L9,21"/>
+
+    <!-- Left border of spine (arc from x=7 to x=9) -->
     <path
         android:fillColor="@android:color/transparent"
         android:strokeColor="@color/inkBlack"
         android:strokeWidth="2"
         android:strokeLineCap="round"
         android:strokeLineJoin="round"
-        android:pathData="M17 21h-10a2 2 0 0 1 -2 -2v-14a2 2 0 0 1 2 -2h7l5 5v11a2 2 0 0 1 -2 2"/>
+        android:pathData="M9,3 Q7,3 7,5 L7,19 Q7,21 9,21"/>
+
+    <!-- Arrow shaft: exits from spine area, tip at far left -->
+    <path
+        android:fillColor="@android:color/transparent"
+        android:strokeColor="@color/inkBlack"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:pathData="M7,12 L1,12"/>
+
+    <!-- Arrowhead: tip at x=1, wings at x=4 — clear gap from spine at x=7 -->
     <path
         android:fillColor="@android:color/transparent"
         android:strokeColor="@color/inkBlack"
         android:strokeWidth="2"
         android:strokeLineCap="round"
         android:strokeLineJoin="round"
-        android:pathData="M9 9l1 0"/>
-    <path
-        android:fillColor="@android:color/transparent"
-        android:strokeColor="@color/inkBlack"
-        android:strokeWidth="2"
-        android:strokeLineCap="round"
-        android:strokeLineJoin="round"
-        android:pathData="M9 13l6 0"/>
-    <path
-        android:fillColor="@android:color/transparent"
-        android:strokeColor="@color/inkBlack"
-        android:strokeWidth="2"
-        android:strokeLineCap="round"
-        android:strokeLineJoin="round"
-        android:pathData="M9 17l6 0"/>
+        android:pathData="M4,9 L1,12 L4,15"/>
+
 </vector>

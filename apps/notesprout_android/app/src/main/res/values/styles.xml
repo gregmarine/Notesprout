@@ -91,15 +91,15 @@
         <item name="android:paddingBottom">8dp</item>
     </style>
 
-    <!-- Toolbar variant — same border/fill as OutlinedButton but tighter padding and no
-         minimum width so buttons fit on phone-width screens (e.g. BOOX Palma2 Pro). -->
-    <style name="Widget.NoteSprout.ToolbarButton" parent="Widget.NoteSprout.OutlinedButton">
-        <item name="android:paddingStart">8dp</item>
-        <item name="android:paddingEnd">8dp</item>
-        <item name="android:paddingTop">6dp</item>
-        <item name="android:paddingBottom">6dp</item>
-        <item name="android:minWidth">0dp</item>
-        <item name="android:minHeight">0dp</item>
+    <!-- Toolbar icon button — 44dp square, bg_toolbar_button StateListDrawable,
+         10dp padding so the icon has breathing room. Selected state shows border. -->
+    <style name="Widget.NoteSprout.ToolbarButton" parent="">
+        <item name="android:layout_width">44dp</item>
+        <item name="android:layout_height">44dp</item>
+        <item name="android:background">@drawable/bg_toolbar_button</item>
+        <item name="android:padding">10dp</item>
+        <item name="android:scaleType">fitCenter</item>
+        <item name="android:stateListAnimator">@null</item>
     </style>
 
     <!-- Transparent background, black text, no press effect -->

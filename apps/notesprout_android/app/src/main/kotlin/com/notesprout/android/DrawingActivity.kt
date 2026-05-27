@@ -253,10 +253,21 @@ class DrawingActivity : AppCompatActivity() {
             dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
         }
 
+        // Pen tool button — activates pen mode (default)
+        binding.btnPen.setOnClickListener {
+            if (isEraserActive) {
+                isEraserActive = false
+                drawingView.setEraserMode(false)
+            }
+            binding.btnPen.isSelected = true
+            binding.btnEraser.isSelected = false
+        }
+
         binding.btnEraser.setOnClickListener {
             isEraserActive = !isEraserActive
-            binding.btnEraser.text = if (isEraserActive) "Pen" else "Erase"
             drawingView.setEraserMode(isEraserActive)
+            binding.btnEraser.isSelected = isEraserActive
+            binding.btnPen.isSelected = !isEraserActive
         }
 
         // TODO: implement toolbar show/hide UX
@@ -279,6 +290,10 @@ class DrawingActivity : AppCompatActivity() {
         binding.btnUndo.setOnClickListener { performUndo() }
         binding.btnRedo.setOnClickListener { performRedo() }
         updateUndoRedoButtons()  // both disabled initially (empty stacks)
+
+        // Initial tool state: pen is selected by default
+        binding.btnPen.isSelected = true
+        binding.btnEraser.isSelected = false
 
         // ── Back press ────────────────────────────────────────────────────────
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
