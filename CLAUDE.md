@@ -31,13 +31,15 @@ A handwriting-first, meditative notes app. Think paper, but smarter underneath. 
 - Language: Kotlin (Java 17 target — use Temurin-17 JDK)
 - Package name: com.notesprout.android
 - Primary test device: BOOX e-ink Android devices
-- Drawing engine: abstracted — OnyxDrawingEngine (BOOX) and GenericDrawingEngine (all others) — **IMPLEMENTED**
-- Onyx SDK: onyxsdk-device:1.3.3 + onyxsdk-pen:1.5.4 — **IMPLEMENTED**
+- Drawing engine: abstracted — OnyxDrawingEngine (BOOX) and GenericDrawingEngine (all others)
+- Onyx SDK: onyxsdk-device:1.3.3 + onyxsdk-pen:1.5.4
 - Onyx SDK repo: `http://repo.boox.com/repository/maven-public/` (insecure protocol — required, do not change)
-- hiddenapibypass:4.3 from JitPack — required for Android 14+ BOOX devices (applied in NoteSproutApplication.onCreate)
-- Database: Room/SQLite — **IMPLEMENTED — see Data Layer section**
+- hiddenapibypass:4.3 from JitPack — required for Android 14+ BOOX devices (applied in `NoteSproutApplication.onCreate`)
+- Database: Room/SQLite (`.soil` files)
 - KSP: 2.2.20-2.0.4 (required for Room annotation processing with Kotlin 2.2.x)
 - AGP 8.11.1 + Kotlin 2.2.20 + Gradle 8.14
+- JSON serialization: `kotlinx.serialization` (code-generated, zero reflection — do not use `org.json`)
+- Icons: **Tabler Icons (MIT)** — stroke-based SVGs converted to Android VectorDrawables, `@color/inkBlack`, 24dp. New icons must come from Tabler or be hand-crafted to match the Tabler stroke style. Do not use filled/solid icon sets.
 
 ---
 
@@ -63,10 +65,10 @@ A handwriting-first, meditative notes app. Think paper, but smarter underneath. 
 - **Everything is an object.** There is no special-casing of types at the schema level. Type behavior lives in Kotlin, not in the database schema.
 - **Assets are base64 strings.** No external files, no file references. Images and other binary assets are stored inline as base64 in the `data` TEXT column.
 - **SQLite must stay clean.** The folder view in a file browser should show only `.soil` files — no WAL files, no SHM files, no journals left behind.
-  - `PRAGMA journal_mode = WAL` — enables WAL mode
-  - `PRAGMA wal_autocheckpoint = 100` — checkpoint after 100 pages
-  - `PRAGMA auto_vacuum = INCREMENTAL` — reclaims space without full vacuum
-  - Run `PRAGMA incremental_vacuum` and `PRAGMA wal_checkpoint(TRUNCATE)` on clean database close to truncate WAL to zero bytes before the connection is released
+  - `PRAGMA journal_mode = WAL`
+  - `PRAGMA wal_autocheckpoint = 100`
+  - `PRAGMA auto_vacuum = INCREMENTAL`
+  - Run `PRAGMA incremental_vacuum` and `PRAGMA wal_checkpoint(TRUNCATE)` on clean database close
 
 ### Object Schema
 
@@ -89,8 +91,7 @@ CREATE INDEX IF NOT EXISTS idx_notebook_parent_order
 
 ### Room Setup Rules
 
-- Room database class opens `.soil` files by absolute path — not from `assets/` or `getDatabasePath()`
-- Use `Room.databaseBuilder(context, SoilDatabase::class.java, absolutePath)`
+- Open `.soil` files by absolute path: `Room.databaseBuilder(context, SoilDatabase::class.java, absolutePath)`
 - Each open notebook gets its own Room database instance; close and release it when the notebook is closed
 - `wal_autocheckpoint` is connection-level only — must be re-applied in `SoilDatabase.openCallback()` every open via `SupportSQLiteDatabase.query(...).use { it.moveToFirst() }`
 - PRAGMAs that return a result set must use `rawQuery("PRAGMA ...", null).use { it.moveToFirst() }` — never `execSQL`, never bare `rawQuery` without consuming the cursor
@@ -107,7 +108,7 @@ NoteSprout's visual language is designed for e-ink displays first. All other pla
 - `inkBlack` = `#000000`
 - `paperWhite` = `#FFFFFF`
 - `inkLight` = `#888888` — disabled / secondary text only
-- `borderGray` = `#CCCCCC` — subtle dividers only (invisible on e-ink — use inkBlack for any visible border)
+- `borderGray` = `#CCCCCC` — subtle dividers only (**invisible on e-ink** — use inkBlack for any visible border)
 - No color in UI chrome — ever. Color belongs to content only.
 
 **Visual Rules:**
@@ -134,7 +135,18 @@ NoteSprout's visual language is designed for e-ink displays first. All other pla
 **AlertDialog styling pattern:**
 - `dialog.window?.setSoftInputMode(...)` before `show()`
 - `dialog.window?.setElevation(0f)` and `dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)` after `show()` — window only exists once shown
-- This removes the floating card shadow and replaces it with the flat white/1dp-black-border consistent with all other UI
+
+---
+
+## Toolbar System (Implemented)
+
+- Icons: Tabler Icons, stroke-based, `@color/inkBlack`, 24dp VectorDrawables in `res/drawable/ic_*.xml`
+- Custom icons follow Tabler conventions: `ic_close` (notebook silhouette + left-exit arrow, spine offset for clear separation), `ic_new_notebook` (notebook with open lower-right corner + plus in the notch)
+- `bg_toolbar_button` StateListDrawable: default = white fill, no border; selected/activated/pressed = white fill + 1.5dp black border
+- `Widget.NoteSprout.ToolbarButton` style: 44dp, `bg_toolbar_button`, 10dp padding; overridden to 36dp/7dp in `res/values-sw360dp/` for Palma2 Pro
+- Pen/eraser buttons: `isSelected = true` for persistent active-tool state
+- Dividers: `@color/inkBlack`, 1dp × 28dp
+- Undo/Redo buttons: statically always-enabled — tapping an empty stack silently does nothing (matches native BOOX behavior). Do not add alpha/tinting state.
 
 ---
 
@@ -188,11 +200,11 @@ NoteSprout's visual language is designed for e-ink displays first. All other pla
 
 ## Drawing Engine Architecture (Implemented)
 
-### Native Android Layer (package: `com.notesprout.android`)
+### Files (package: `com.notesprout.android`)
 - `drawing/DrawingView.kt` — interface: `asView()`, `setToolbarHeight(Int)`, `enableDrawing()`, `disableDrawing()`, `resetOverlay()`, `clearCanvas()`, `setEraserMode(Boolean)`, `releaseResources()`, `loadStrokes(List<LiveStroke>)`, `getStrokes(): List<LiveStroke>`, `buildRenderBitmap(List<LiveStroke>, Bitmap?): Bitmap?`, `loadStrokesWithBitmap(List<LiveStroke>, Bitmap, Bitmap?)`, `captureSnapshot(): String?`, `setStrokeListSilently(List<LiveStroke>)`, `onStrokeErased: ((String) -> Unit)?`, `onPenLifted: (() -> Unit)?`, `onSnapshotReady: ((String) -> Unit)?`
-- `drawing/OnyxDrawingView.kt` — BOOX path: TouchHelper, RawInputCallback, limit rect. `renderStroke` calls `invalidate()` on every stroke to keep the Android canvas continuously current with the hardware overlay. The EPD overlay stays active for the entire writing session — no idle release timer. Handoff only happens at non-writing transitions: `setEraserMode(true)`, `clearCanvas()`, `setTemplate()`, `loadStrokesWithBitmap()`, `onWindowFocusChanged(false)`. `onPenLifted` fires on `onEndRawDrawing` (each pen lift) to persist new strokes to DB. `onBeginRawDrawing` re-enables render — guarded by `!isEraserMode`. `EpdController.setUpdListSize(512)` called on every `openRawDrawing()`.
-- `drawing/GenericDrawingView.kt` — standard Android Canvas: two-layer Bitmap, stylus-only (`TOOL_TYPE_STYLUS` + `TOOL_TYPE_ERASER`), historical point capture. `onPenLifted` fires directly on `ACTION_UP` — no timer.
-- `DrawingActivity.kt` — fullscreen immersive, multi-page state (`pages`, `currentPageIndex`, `currentPageId`, `currentLayerId`), incremental save via `insertOrIgnore`, `onStrokeErased` callback for targeted soft-delete, two-finger swipe gesture for page navigation.
+- `drawing/OnyxDrawingView.kt` — BOOX path: TouchHelper, RawInputCallback. `onPenLifted` fires on `onEndRawDrawing`. `onBeginRawDrawing` re-enables render, guarded by `!isEraserMode`.
+- `drawing/GenericDrawingView.kt` — standard Android Canvas: two-layer Bitmap, stylus-only (`TOOL_TYPE_STYLUS` + `TOOL_TYPE_ERASER`), historical point capture. `onPenLifted` fires on `ACTION_UP`.
+- `DrawingActivity.kt` — fullscreen immersive, multi-page state, incremental save via `insertOrIgnore`, `onStrokeErased` callback for targeted soft-delete, two-finger swipe for page navigation.
 - `MainActivity.kt` — notebook list screen, adaptive grid, pagination, swipe, empty state, bottom bar.
 
 ### Key Build Facts
@@ -204,191 +216,132 @@ NoteSprout's visual language is designed for e-ink displays first. All other pla
 - `setStrokeColor(Color.BLACK)` required on TouchHelper init — NoteAir5C color panel defaults to non-black
 - Toolbar z-order: toolbar must overlay the drawing container in a `FrameLayout` — native SurfaceView occludes siblings below it
 
----
+### EPD Rules — Never Violate These
 
-## Pruning Log — Architectural Lessons (Non-Obvious Rules)
+**Overlay lifetime:**
+- The overlay is "writing mode" — stays active indefinitely while the user writes. No idle-release timer.
+- Legitimate handoff points ONLY: `setEraserMode(true)`, `clearCanvas()`, `setTemplate()`, `loadStrokesWithBitmap()`, `onWindowFocusChanged(false)`.
+- `onPenLifted` is a DB-save trigger only — it does NOT touch the overlay.
 
-### EPD overlay lifetime — stays active during writing
-- **The overlay is "writing mode."** It stays active indefinitely while the user is writing. There is no idle-release timer. This matches the behavior of the native Onyx notes app.
-- Releasing the overlay mid-session (e.g., after 1.5 s of inactivity) triggers a full-panel GC16/REGAL quality refresh on color e-ink (NoteAir5C) when the base layer is stale — the visible flicker the idle timer was causing.
-- **Non-writing transitions** are the only legitimate handoff points: `setEraserMode(true)` (tool switch), `clearCanvas()` (page clear), `setTemplate()` (template change), `loadStrokesWithBitmap()` (page flip), `onWindowFocusChanged(false)` (app moved to background). All of these already follow the full handoff sequence.
-- `onPenLifted` fires on every `onEndRawDrawing` (Onyx) / `ACTION_UP` (Generic) to persist new strokes to DB. This is purely a DB save trigger — it does not touch the overlay.
+**Overlay handoff sequence (`clearCanvas()`):**
+- `setRawDrawingRenderEnabled(false)` → white bitmap → `invalidate()` → `EpdController.handwritingRepaint(view, Rect(0,0,w,h))` → re-enable
+- **`handwritingRepaint` is required.** `setRawDrawingRenderEnabled` is a lightweight toggle; it does NOT clear the hardware buffer. Without `handwritingRepaint`: gray residue + black flash.
+- `EpdController.setUpdListSize(512)` in `openRawDrawing()` suppresses mid-session GC16 refresh — do not remove.
+- `renderStroke` calls `invalidate()` on every stroke so the Android canvas stays continuously current with the overlay, making handoff seamless.
 
-### EPD handoff — flicker-free canvas transition
-- `renderStroke` calls `invalidate()` on every stroke so the Android canvas stays continuously current with the hardware overlay. Overlay removal is always seamless.
-- `clearCanvas()` owns the overlay handoff: disable render → white bitmap → `invalidate()` → `EpdController.handwritingRepaint(view, Rect(0,0,w,h))` → re-enable.
-- **Never remove `handwritingRepaint` from the clear path.** `setRawDrawingRenderEnabled(false/true)` is a lightweight toggle — it hides/shows the overlay but does NOT clear the hardware buffer. `handwritingRepaint` is required to physically commit content to the EPD base layer. Without it: gray residue (EPD pixels not refreshed) and black flash (stale overlay buffer renders at full black on re-enable).
-- `EpdController.setUpdListSize(512)` in `openRawDrawing()` suppresses the hardware's automatic mid-session GC16 refresh. Do not remove.
+**Eraser overlay:**
+- On eraser start: `setRawDrawingRenderEnabled(false)`, `invalidate()` — immediately, before any erase logic. If not released first, the overlay hides the bitmap erase result (phantom strokes).
+- `handwritingRepaint` after erase gesture ends only — NEVER during move events (causes full EPD flash per stroke).
+- `onBeginRawDrawing` re-enables render guarded by `!isEraserMode`.
 
-### Eraser overlay — release render before erasing begins
-- When erasing begins (toolbar toggle or physical pen flip), release the overlay render immediately: `setRawDrawingRenderEnabled(false)`, `invalidate()`.
-- If the overlay is still enabled when erasing starts, the hardware overlay hides the already-correct bitmap erase result — causing phantom strokes and delayed visual feedback.
-- `handwritingRepaint` in `onEndRawErasing` / `onEndRawDrawing` (eraser mode) still commits clean EPD pixels on lift. Never call `handwritingRepaint` in the erase move path — it causes a full EPD quality flash on every erased stroke.
-- `onBeginRawDrawing` re-enables render — guarded by `!isEraserMode` to prevent rogue overlay stroke during software eraser.
+**setTemplate() EPD handoff (OnyxDrawingView):**
+- `setRawDrawingRenderEnabled(false)` → `redrawCanvas()` → `EpdController.handwritingRepaint()` → `setRawDrawingEnabled(true)`. Without `handwritingRepaint`, the template change is invisible on e-ink until the next physical refresh.
 
-### Page navigation performance — dense pages (600+ strokes)
-Three compounding slowdowns eliminated on heavy pages:
+### Performance Rules (Do Not Regress)
 
-**Save path** (`DrawingActivity.saveStrokes`):
-- Wrap INSERT OR IGNORE loop in `db.withTransaction {}` — 610-stroke save: 2500ms → 1300ms (−48%).
-- Track `persistedStrokeIds` set; skip `toJson()` entirely for strokes already in DB — fully-persisted page: 1300ms → 1–5ms (−99.8%).
-- Replace `org.json` with `kotlinx.serialization` (code-generated, zero reflection, same wire format, no DB migration) — warm JSON deserialize: 1325ms → 845ms (−36%).
+**Save path:**
+- Wrap INSERT OR IGNORE loops in `db.withTransaction {}`
+- Track `persistedStrokeIds` set; skip `toJson()` entirely for already-persisted strokes
+- Use `kotlinx.serialization` — not `org.json`
 
-**Load path** (`DrawingActivity.loadCurrentPage` + `tryLoadSnapshotBitmap`):
-- The 10-page LRU `strokeCache` (and `snapshotCurrentPageToCache`) was superseded by the Page Snapshot System (see below) — snapshots persist across process death and eliminate the warm-cache requirement entirely.
-- Snapshot fast path: decode stored composite bitmap and display immediately; deserialize strokes silently in background via `setStrokeListSilently()`. Effectively 0ms perceived load for any previously-visited page.
-- Full path (no/stale snapshot): `deserializeStrokesFromDb` + `buildRenderBitmap` off-thread, then `loadStrokesWithBitmap` swap on main thread — same 12ms main-thread cost as before.
+**Load path:**
+- `buildRenderBitmap()` on `Dispatchers.IO` — pre-builds white → template → strokes bitmap off the main thread
+- `loadStrokesWithBitmap()` on main thread swaps the pre-built bitmap (~12ms main-thread cost)
 
-**Render path** (both drawing views):
-- `buildRenderBitmap()` on `Dispatchers.IO` pre-builds white → template → strokes bitmap off the main thread.
-- `loadStrokesWithBitmap()` on main thread swaps the pre-built bitmap in 12–13ms instead of the previous 118–129ms O(N) on-thread redraw.
-- Combined page-turn TOTAL on a 610-stroke page (warm cache): 1163ms → 246ms (−79%). Main thread blocked: 118ms → 12ms (−90%).
+**Erase path:**
+- `LiveStroke.boundingBox: RectF` pre-computed at stroke creation; `eraseAtPath` builds an AABB of the eraser path and rejects non-intersecting strokes in O(4 floats) before any per-point geometry
+- `throttledEraseRedraw()` — redraws at most once per 60ms during active erasing; strokes are removed from the list immediately
+- `finalizeEraseRedraw()` forces one clean redraw on gesture end before `handwritingRepaint` commits pixels
 
-### Eraser performance — dense pages (600+ strokes)
-Two compounding freezes eliminated; erasing on 600+ stroke pages went from multi-second app-unresponsive to instant.
-
-**Hit test** (`eraseAtPath` in both drawing views):
-- Old: O(S × P × E) — every stroke point tested against every eraser segment per move event. 600 strokes × 50 pts × 5 eraser pts = 150,000 float ops per touch-move.
-- Fix: `LiveStroke.boundingBox: RectF` pre-computed at stroke creation. `eraseAtPath` builds an expanded AABB of the eraser path and rejects non-intersecting strokes in O(4 floats) before any per-point geometry. Eliminates ~95% of candidates instantly.
-- `strokes.removeAll { it.id in removeIds }` (HashSet of String IDs) replaces `removeAll(toRemove.toSet())` which triggered expensive data-class equality on `List<PointF>`.
-
-**Redraw throttle** (both drawing views):
-- Old: `redrawCanvas()` (O(N) — redraws all strokes to bitmap) called on every single erase move event. 30–50 events × 200ms each = 6–10 s main-thread block.
-- Fix: `throttledEraseRedraw()` — redraws at most once per 60ms (~16fps) during active erasing. Strokes are removed from the list immediately so data is always correct; only the visual refresh is coalesced.
-- `finalizeEraseRedraw()` forces one clean redraw at gesture end (`onEndRawErasing`, `onEndRawDrawing` in eraser mode, `ACTION_UP` in GenericDrawingView) before `handwritingRepaint` commits pixels to the e-ink panel.
-
-### Snapshot system — close path must capture snapshot synchronously
-- `onWindowFocusChanged(false)` fires AFTER `finish()`, not before. When the user taps Close or Back, `closeNotebook()` runs first (blocking via `runBlocking`) and sets `soilDatabase = null`. By the time `onWindowFocusChanged(false)` fires in the drawing view, `onSnapshotReady` finds `soilDatabase == null` and silently discards the snapshot.
-- Fix: capture `drawingView.captureSnapshot()` on the main thread at the top of `closeNotebook()` (before `soilDatabase = null`), then persist it inside the existing `runBlocking` IO block alongside `saveStrokes`. Same pattern as `navigateToPage`, but synchronous.
-- **Rule:** any path that calls `closeNotebook()` must capture the snapshot itself — never rely on `onWindowFocusChanged` as the close-path snapshot trigger.
-
----
-
-## Future Work — Wacom & Generic Android Stylus
-
-### Wacom stylus barrel button (MIP11 and other non-BOOX devices)
-- Barrel buttons set `BUTTON_STYLUS_PRIMARY` / `BUTTON_STYLUS_SECONDARY` flags on `MotionEvent` — they do not change `getToolType()`.
-- `GenericDrawingView` currently only inspects tool type; barrel buttons have no effect.
-- Fix direction: check `event.isButtonPressed(MotionEvent.BUTTON_STYLUS_PRIMARY)` in `onTouchEvent` and treat as eraser mode for the duration of that stroke.
-- Low priority — do not let it block BOOX-first progress.
+### Race condition — strokes missing on notebook reopen
+- `loadStrokes()` is called in `onCreate()` before view layout. Fix: `onSizeChanged()` calls `redrawCanvas()` (not just white fill) to replay all currently-loaded strokes regardless of load order. Applied to both drawing views.
 
 ---
 
 ## Page Snapshot System (Implemented)
 
-### Overview
-- Each page row's `data` JSON carries an optional `"snapshot"` field — a base64-encoded transparent-background PNG of all strokes on that page.
-- **No schema change** — snapshots live in the existing `data` TEXT column alongside `template` and other page properties.
+- Each page row's `data` JSON carries an optional `"snapshot"` field — a base64-encoded transparent-background PNG of all strokes.
+- **No schema change** — snapshots live in the existing `data` TEXT column.
 - Rendering order at load time: white → template → snapshot PNG → new strokes drawn this session.
 
-### Snapshot content rules
-- **Transparent background** — do NOT fill with white, do NOT draw the template. The composite stack handles backgrounds at display time.
-- **Strokes only** — `captureSnapshot()` iterates `this.strokes` and draws each path on a transparent `Bitmap.Config.ARGB_8888`, then compresses to PNG (quality 100) and base64-encodes.
-- Returns `null` if `strokes` is empty or the view isn't yet laid out (w=0/h=0).
+**Snapshot content rules:**
+- Transparent background only — do NOT fill with white or draw the template.
+- `captureSnapshot()` returns `null` if `strokes` is empty or view isn't laid out (w=0/h=0).
 
-### Capture boundaries — when snapshots are taken
-- `setEraserMode(true)` — inside the drawing view, BEFORE `isEraserActive = true`.
-- `setTemplate(bitmap)` — inside the drawing view, BEFORE `templateBitmap = bitmap`.
-- `onWindowFocusChanged(false)` — inside the drawing view (app backgrounded or dialog overlay).
-- **Page navigation** — in `DrawingActivity.navigateToPage()` and the add-page paths, on the main thread BEFORE `clearCanvas()`.
-- **Close button / back press** — in `DrawingActivity.closeNotebook()`, on the main thread BEFORE the `runBlocking` IO block (see pruning note above).
-- **NOT on** user-initiated `clearCanvas()` or page delete — intentional, the page content is being discarded.
+**When snapshots are captured:**
+- `setEraserMode(true)` — BEFORE `isEraserActive = true`
+- `setTemplate(bitmap)` — BEFORE `templateBitmap = bitmap`
+- `onWindowFocusChanged(false)` — app backgrounded or dialog overlay
+- Page navigation — in `navigateToPage()` and add-page paths, BEFORE `clearCanvas()`
+- Close/back — in `closeNotebook()`, on the main thread BEFORE the `runBlocking` IO block
+- **NOT on** user-initiated `clearCanvas()` or page delete — content is being discarded
 
-### Stale detection
-- `NotebookDao.getMaxStrokeUpdatedAt(layerId)` — `SELECT MAX(updatedAt) FROM notebook WHERE type='stroke' AND parentId=:layerId` — **no** `deletedAt IS NULL` filter. Soft-deleted (erased) strokes have `updatedAt = deletedAt`, so erasures are detected as stroke changes.
-- If `maxStroke > page.updatedAt`, the snapshot pre-dates a stroke change and is discarded. Full render runs instead, and a fresh snapshot is captured after display.
-- `persistSnapshot()` bumps `page.updatedAt` to `System.currentTimeMillis()` — this is the timestamp the stale check compares against.
+**Critical: close path must capture snapshot synchronously.**
+`onWindowFocusChanged(false)` fires AFTER `finish()` — `soilDatabase` is already null. Any path that calls `closeNotebook()` must capture the snapshot itself. Never rely on `onWindowFocusChanged` as the close-path snapshot trigger.
 
-### Two-phase page load (`DrawingActivity.loadCurrentPage`)
-1. `setupPageIds(db)` — resolves `currentPageId` / `currentLayerId` from `currentPageIndex`.
-2. `loadPageTemplateFromDb(db)` — decodes template bitmap (or null for blank).
-3. `tryLoadSnapshotBitmap(db, templateBitmap)` — staleness check + composite build (white → template → snapshot). Returns null on miss.
-4. **Fast path** (snapshot hit): `PageLoadResult(strokes=emptyList, displayBitmap=composite, usedSnapshot=true)`. `postDisplayWork` deserializes strokes in background and calls `setStrokeListSilently()` — no visual redraw.
-5. **Full path** (no/stale snapshot): `deserializeStrokesFromDb` + `buildRenderBitmap` off-thread. `postDisplayWork` captures and persists a snapshot so the NEXT load uses the fast path.
+**Stale detection:**
+- `NotebookDao.getMaxStrokeUpdatedAt(layerId)` — `SELECT MAX(updatedAt)` with **no** `deletedAt IS NULL` filter. Soft-deleted (erased) strokes have `updatedAt = deletedAt`, so erasures are detected as changes.
+- If `maxStroke > page.updatedAt`, the snapshot is stale — full render runs and a fresh snapshot is captured.
+- `persistSnapshot()` bumps `page.updatedAt` — this is the timestamp the stale check compares against.
 
-### `persistSnapshot(db, pageId, snapshot)`
-- Reads the page row, parses `data` JSON, puts `"snapshot"` field, calls `updateData(pageId, data, now)`.
-- Must run on `Dispatchers.IO`. Bumps `page.updatedAt` — critical for stale detection.
+**Two-phase page load (`DrawingActivity.loadCurrentPage`):**
+1. `setupPageIds(db)` — resolves `currentPageId` / `currentLayerId`
+2. `loadPageTemplateFromDb(db)` — decodes template bitmap (or null for blank)
+3. `tryLoadSnapshotBitmap(db, templateBitmap)` — staleness check + composite build. Returns null on miss.
+4. **Fast path** (snapshot hit): display composite immediately; deserialize strokes in background via `setStrokeListSilently()` — no visual redraw.
+5. **Full path** (miss): `deserializeStrokesFromDb` + `buildRenderBitmap` off-thread; capture and persist snapshot for next load.
 
 ---
 
 ## Template System (Implemented)
 
-### Overview
 - Templates are `type = "template"` rows stored in the `.soil` notebook database
 - Template PNG files are scanned from `/sdcard/Documents/NoteSprout/Templates/` at dialog open time
-- Selecting a template from the "All" tab inserts it into the notebook DB (base64-encoded PNG in `data`) and returns the full-res `Bitmap` to `DrawingActivity`
-- Selecting from the "Notebook" tab decodes the already-stored base64 and returns the full-res `Bitmap`
-- Template `data` JSON: `{ "width": Int, "height": Int, "name": String, "image": String (base64) }`
+- `data` JSON: `{ "width": Int, "height": Int, "name": String, "image": String (base64) }`
 - `parseTemplateId(data)` reads `data.template` from a page row to get the active template UUID (empty = Blank)
 
-### TemplateDialog
-- `TemplateDialog.kt` — two-tab dialog (All / Notebook), adaptive grid layout
+**TemplateDialog (`TemplateDialog.kt`):**
+- Two-tab dialog (All / Notebook), adaptive grid layout
 - Grid columns: `if (widthPixels >= 1500) 4 else 2` — 4 on NA5C (1860px), 2 on P2P/GC7 (≤1264px)
-- Thumbnails: decoded at `inSampleSize ≤ 4` (target ~1300px longest side); `THUMB_HEIGHT_DP = 200`
-- `thumbFrame` FrameLayout: `shape_bordered` background + **1dp padding** — the padding insets the `ImageView` so it cannot render over the border stroke. Do NOT use `clipToOutline` here — it clips the border stroke itself at the rounded corners, making the top/bottom borders appear truncated.
-- Selected cell: `shape_bordered` background on outer `cell` LinearLayout
+- `thumbFrame` FrameLayout: `shape_bordered` background + **1dp padding** — padding insets the `ImageView` so it cannot render over the border stroke. Do NOT use `clipToOutline` here — it clips the border itself at rounded corners.
 
-### Template inheritance on new page
-- `addPage()` in `DrawingActivity` reads the current page **fresh from DB** via `dao.getObjectById(currentPageId)` before computing `inheritedTemplate`. Do NOT read from the stale in-memory `pages` list — it is not refreshed after `applyTemplateToCurrentPage()` writes to DB.
-
-### setTemplate() EPD handoff (OnyxDrawingView)
-- `setTemplate()` must follow the full EPD handoff pattern: `setRawDrawingRenderEnabled(false)` → `redrawCanvas()` → `EpdController.handwritingRepaint()` → `setRawDrawingEnabled(true)`. Without `handwritingRepaint`, the template change is invisible on e-ink until the next physical refresh.
-
-### Race condition — strokes missing on notebook reopen
-- `loadStrokes()` is called in `onCreate()` before view layout; if the DB query completes before `onSizeChanged()`, `redrawCanvas()` is a no-op (null canvas).
-- Fix: `onSizeChanged()` calls `redrawCanvas()` (not just white fill) — this replays all currently-loaded strokes onto the fresh bitmap regardless of load order. Applied to both `OnyxDrawingView` and `GenericDrawingView`.
+**Template inheritance on new page:**
+- `addPage()` reads the current page **fresh from DB** via `dao.getObjectById(currentPageId)`. Do NOT read from the stale in-memory `pages` list — it is not refreshed after `applyTemplateToCurrentPage()` writes to DB.
 
 ---
 
 ## Undo/Redo System (Implemented)
 
-### Overview
-- Unlimited undo/redo stack scoped to the lifetime of a single `DrawingActivity` session (not persisted across process death).
-- `history/UndoRedoAction.kt` — sealed class with three action types:
-  - `StrokeAdded(strokeId, pageId)` — recorded when a stroke is lifted from the canvas.
-  - `StrokeErased(strokeId, pageId)` — recorded when a stroke is erased.
-  - `PageAdded(pageId)` — recorded when a new page is inserted.
-- `history/UndoRedoManager.kt` — manages `undoStack: ArrayDeque<UndoRedoAction>` and `redoStack: ArrayDeque<UndoRedoAction>`. Redo stack is cleared on any new user action. Thread-safe via `@MainThread` annotation convention; all calls from `DrawingActivity` are on the main thread.
+- Unlimited undo/redo stack, scoped to a single `DrawingActivity` session (not persisted across process death).
+- `history/UndoRedoAction.kt` — sealed class: `StrokeAdded(strokeId, pageId)`, `StrokeErased(strokeId, pageId)`, `PageAdded(pageId)`
+- `history/UndoRedoManager.kt` — `undoStack` / `redoStack` as `ArrayDeque`. Redo stack cleared on any new user action.
 
-### Toolbar buttons
-- Undo (⟲) and Redo (⟳) buttons are `AppCompatImageButton` in `activity_drawing.xml` with `ic_undo` / `ic_redo` vector drawables.
-- **Both buttons are statically enabled at all times** — tapping when the stack is empty silently does nothing. This matches native BOOX notes app behavior. `updateUndoRedoButtons()` is a no-op.
-- No tinting, no alpha changes — e-ink design principle: no state-driven color in UI chrome.
+**`executeAction(action, isUndo)` — three paths:**
 
-### `executeAction(action, isUndo)` — three execution paths
+**Cross-page stroke** (`action.pageId != currentPageId`):
+- Do NOT call `saveAndSwitchPage()` — it calls `clearCanvas()` which wipes in-memory strokes, causing a blank page.
+- Phase 1: inline save/snapshot of the leaving page → navigate to target page → load from DB → display with stroke in pre-undo state.
+- Phase 2: apply DB soft-delete or restore → rebuild bitmap → display. User sees the stroke appear/disappear in real time.
 
-**Path 1 — Cross-page stroke (two-phase, early return):**
-- Triggered when `action.pageId != currentPageId` for `StrokeAdded`/`StrokeErased`.
-- Does NOT call `saveAndSwitchPage()` — that function calls `clearCanvas()` which wipes the in-memory stroke list, causing a blank page on arrival.
-- Phase 1: inline save/snapshot of the leaving page → set `currentPageIndex` → `setupPageIds` + `loadPageTemplateFromDb` + `deserializeStrokesFromDb` all on `Dispatchers.IO` → `buildRenderBitmap` off-thread → `loadStrokesWithBitmap` on main thread. User sees the target page arrive with the stroke in its **pre-undo state** (visible before undo, absent before redo).
-- Phase 2: DB soft-delete or restore → compute `updatedStrokes` in memory → `buildRenderBitmap` off-thread → `loadStrokesWithBitmap` on main thread. User sees the stroke **visibly disappear or appear** in real time.
-- On e-ink (NA5C): the two EPD handoffs have a natural gap due to panel refresh speed — the animation is clearly perceptible. On LCD (P2P): both frames composite too fast to distinguish; user sees the final state only. This is intentional — no artificial delay added.
+**Same-page stroke** (`action.pageId == currentPageId`):
+- Never calls `clearCanvas()`. Updates in-memory stroke list directly (filter to remove, append from DB to restore).
+- `buildRenderBitmap` off-thread with `currentTemplateBitmap` → `loadStrokesWithBitmap` — one EPD handoff.
+- Keep `persistedStrokeIds` in sync: `remove(strokeId)` on soft-delete, `add(strokeId)` on restore.
 
-**Path 2 — Same-page stroke (optimized, one EPD handoff):**
-- Triggered when `action.pageId == currentPageId` for `StrokeAdded`/`StrokeErased`.
-- Never calls `clearCanvas()`. Updates the in-memory stroke list directly (filter for remove, append from DB for restore).
-- `buildRenderBitmap` off-thread with `currentTemplateBitmap` → `loadStrokesWithBitmap` — ONE EPD handoff, only the affected stroke area changes visually.
-- `persistedStrokeIds` is kept in sync: `remove(strokeId)` on soft-delete, `add(strokeId)` on restore.
+**Page actions (`PageAdded`) and all others:**
+- Full reload: invalidate snapshot → `clearCanvas()` → `loadCurrentPage()` → `displayPage()` → `postDisplayWork()`.
 
-**Path 3 — Page actions (`PageAdded`) and all other actions:**
-- Full reload path: invalidate snapshot → `clearCanvas()` → `loadCurrentPage()` → `displayPage()` → `postDisplayWork()`.
+**`currentTemplateBitmap` field:**
+- `DrawingActivity` holds `private var currentTemplateBitmap: Bitmap?` set in `displayPage()`. Used by the same-page stroke path to avoid re-reading the DB.
 
-### `currentTemplateBitmap` field
-- `DrawingActivity` holds `private var currentTemplateBitmap: Bitmap?` — set in `displayPage()` whenever a page is loaded.
-- Used by the same-page stroke undo/redo path to pass the correct template to `buildRenderBitmap` without re-reading the DB.
+---
 
-### Pruning notes — things that don't work
+## Future Work — Wacom & Generic Android Stylus
 
-#### `repaintToolbar()` — do not implement
-- An attempt was made to add a `repaintToolbar()` method to `DrawingView` / `OnyxDrawingView` that toggled `setRawDrawingRenderEnabled` on every pen lift to visually refresh the toolbar tint state.
-- Result: visible stroke flicker and eraser regression — the overlay was being re-enabled during erase operations.
-- **Removed entirely.** Undo/redo buttons are statically always-enabled; no toolbar EPD repaint is needed or wanted.
-
-#### Cross-page undo must not use `saveAndSwitchPage()`
-- `saveAndSwitchPage()` calls `drawingView.clearCanvas()`, which calls `strokes.clear()` — the in-memory stroke list is wiped.
-- When the DB load then completes, there are no in-memory strokes to show, resulting in a blank page.
-- Fix: inline the save/snapshot/switch logic directly in the cross-page branch and reload strokes from DB explicitly.
+**Wacom barrel button (MIP11 and other non-BOOX devices):**
+- Barrel buttons set `BUTTON_STYLUS_PRIMARY` / `BUTTON_STYLUS_SECONDARY` flags on `MotionEvent` — they do not change `getToolType()`.
+- Fix direction: check `event.isButtonPressed(MotionEvent.BUTTON_STYLUS_PRIMARY)` in `onTouchEvent` and treat as eraser mode for the duration of that stroke.
+- Low priority — do not let it block BOOX-first progress.
 
 ---
 
@@ -398,23 +351,18 @@ Two compounding freezes eliminated; erasing on 600+ stroke pages went from multi
 
 Completed:
 - `.soil` schema + Room setup
-- Notebook list screen (MainActivity)
+- Notebook list screen (MainActivity) with adaptive grid, pagination, swipe
 - Open notebook → DrawingActivity + Room DB lifecycle
-- Basic stroke persistence (save/load)
 - Multi-page support: LiveStroke, incremental save, add/delete/swipe pages
-- Swipe-left on last page inserts a new page (natural continuous writing flow)
+- Swipe-left on last page inserts a new page; two-finger fling required (palm rejection)
 - Clear page confirmation dialog
-- Notebook metadata row (`type = "notebook"`) — title, cover, last_opened_page
-- Restore last-opened page on every notebook open; persist on every page turn
-- Auto-open new notebook in DrawingActivity immediately after creation (no extra tap required); list re-scans on back-press via onResume
-- Template system: scan from device filesystem, store in `.soil`, apply to page, inherit on new page, adaptive grid dialog
-- EPD overlay flicker fix: overlay stays active during writing; released only at non-writing transitions (tool switch, page flip, page clear, focus loss). `onIdleSave` renamed to `onPenLifted`; saves triggered per pen lift instead of idle timer.
-- Page Snapshot System: transparent-background strokes-only PNG stored in page `data` JSON. Two-phase load (fast composite path + silent background stroke deserialization). Stale detection via `MAX(updatedAt)` over all strokes including soft-deleted. LRU stroke cache removed — snapshots persist across process death and supersede it entirely.
-- ✂️ Pruning: snapshot not captured on Close/Back — `onWindowFocusChanged` fires after `finish()` so `soilDatabase` is already null. Fixed: `closeNotebook()` captures and persists snapshot synchronously on main thread before the IO block.
-- Undo/Redo system: session-scoped unlimited stack, three action types (`StrokeAdded`, `StrokeErased`, `PageAdded`). Optimized same-page stroke path (one EPD handoff, no canvas clear). Two-phase cross-page stroke path (page arrives in pre-undo state, then undo applies visually in real time). Buttons always enabled — tapping empty stack silently does nothing.
-- ✂️ Pruning: accidental page turns from resting pinky/palm — page swipe now requires a deliberate two-finger horizontal fling. Replaced `GestureDetector` (single-finger) with a `VelocityTracker` state machine in `dispatchTouchEvent`: arms on `ACTION_POINTER_DOWN` (2nd finger), fires on `ACTION_POINTER_UP` (2→1 lift) if horizontal-dominant and above `ViewConfiguration.scaledMinimumFlingVelocity`. Stylus events are still excluded entirely.
-- ✂️ Pruning: page indicator too small and faint — increased `tvPageIndicator` from 12sp → 16sp and changed color from `inkLight` (#888888) → `inkBlack` (#000000) for legibility on both e-ink and LCD displays.
-- 🌱 New Branch: Toolbar icon system — adopted Tabler Icons (MIT) for all toolbar icons. 13 icons fetched from Tabler CDN and converted to Android VectorDrawables (all stroke-based, `@color/inkBlack`, 24dp). 2 custom hand-crafted icons: `ic_close` (notebook silhouette + left-exit arrow, notebook shifted right so arrow and spine have clear separation) and `ic_new_notebook` (notebook with lower-right corner open + plus sign in the notch, matching Tabler's `-plus` icon family pattern). `bg_toolbar_button` StateListDrawable: default = white fill no border; selected/activated/pressed = white fill + 1.5dp black border. `Widget.NoteSprout.ToolbarButton` style: 44dp, `bg_toolbar_button`, 10dp padding; overridden to 36dp/7dp in `res/values-sw360dp/` for Palma2 Pro. Pen/eraser buttons use `isSelected` for persistent active state. Toolbar dividers are `@color/inkBlack` 1dp × 28dp.
+- Notebook metadata row — title, cover, last_opened_page; restored on every open
+- Auto-open new notebook immediately after creation
+- Template system: filesystem scan, store in `.soil`, apply to page, inherit on new page
+- EPD overlay lifetime fix: overlay stays active during writing; handoff only at non-writing transitions
+- Page Snapshot System: transparent-background PNG in page `data` JSON; two-phase load; stale detection; persists across process death
+- Undo/Redo system: session-scoped, three action types, optimized same-page path, two-phase cross-page path
+- Toolbar icon system: Tabler Icons, custom state drawables, responsive sizing for Palma2 Pro
 
 Next up: TBD — discuss before starting.
 
