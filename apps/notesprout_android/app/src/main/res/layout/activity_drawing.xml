@@ -38,7 +38,15 @@
             android:src="@drawable/ic_close"
             android:contentDescription="Close notebook" />
 
-        <!-- Divider after close -->
+        <!-- Cover button: set notebook cover image -->
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnCover"
+            style="@style/Widget.NoteSprout.ToolbarButton"
+            android:layout_marginStart="4dp"
+            android:src="@drawable/ic_polaroid"
+            android:contentDescription="Set cover" />
+
+        <!-- Divider after close/cover group -->
         <View
             android:layout_width="1dp"
             android:layout_height="28dp"

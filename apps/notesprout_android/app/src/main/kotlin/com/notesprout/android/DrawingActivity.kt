@@ -6,6 +6,7 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Rect
 import android.graphics.RectF
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.util.Base64
@@ -15,6 +16,7 @@ import android.view.VelocityTracker
 import android.view.ViewConfiguration
 import android.widget.FrameLayout
 import androidx.activity.OnBackPressedCallback
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.WindowCompat
@@ -142,6 +144,17 @@ class DrawingActivity : AppCompatActivity() {
      * cleared and file deleted on [closeNotebook].
      */
     private var undoRedoManager = UndoRedoManager()
+
+    // ── Cover image picker ────────────────────────────────────────────────────
+
+    /** Set by openCoverDialog(); called when the image picker returns a URI. */
+    private var onCoverImagePicked: ((Uri) -> Unit)? = null
+
+    private val coverPickerLauncher = registerForActivityResult(
+        ActivityResultContracts.GetContent()
+    ) { uri ->
+        if (uri != null) onCoverImagePicked?.invoke(uri)
+    }
 
     // ── Activity lifecycle ────────────────────────────────────────────────────
 
@@ -293,6 +306,10 @@ class DrawingActivity : AppCompatActivity() {
                     applyTemplateToCurrentPage(templateId, bitmap)
                 },
             ).show()
+        }
+
+        binding.btnCover.setOnClickListener {
+            openCoverDialog()
         }
 
         binding.btnUndo.setOnClickListener { performUndo() }
@@ -963,6 +980,38 @@ class DrawingActivity : AppCompatActivity() {
     }
 
     // ── Template operations ───────────────────────────────────────────────────
+
+    // ── Cover dialog ──────────────────────────────────────────────────────────
+
+    /**
+     * Opens [CoverDialog] for the current notebook.
+     * The current page snapshot is captured first so the "Last Opened Page" card
+     * shows the freshest possible preview.
+     */
+    private fun openCoverDialog() {
+        val notebookPath = intent.getStringExtra(EXTRA_NOTEBOOK_PATH) ?: return
+        val snapshot = drawingView.captureSnapshot()
+        val snapshotBitmap: Bitmap? = snapshot?.let { b64 ->
+            try {
+                val bytes = Base64.decode(b64, Base64.DEFAULT)
+                BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+            } catch (_: Exception) { null }
+        }
+
+        CoverDialog(
+            activity           = this,
+            lifecycleScope     = lifecycleScope,
+            soilFilePath       = notebookPath,
+            lastOpenedSnapshot = snapshotBitmap,
+            onRequestImagePick = { callback ->
+                onCoverImagePicked = callback
+                coverPickerLauncher.launch("image/*")
+            },
+            onCoverChanged = {
+                android.widget.Toast.makeText(this, "Cover updated", android.widget.Toast.LENGTH_SHORT).show()
+            },
+        ).show()
+    }
 
     /**
      * Called when the user confirms a template selection in [TemplateDialog].

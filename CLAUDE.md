@@ -386,8 +386,9 @@ Completed:
 - Pruning: suppress all activity transition animations via `android:windowAnimationStyle="@null"` in `Theme.NoteSprout`
 - 🌱 New Branch: Notebook deletion via long-press context menu in MainActivity — AlertDialog mini-menu (elevation=0, shape_bordered) → confirmation dialog naming the notebook → IO-dispatched file + sibling artefact deletion → grid refresh; `ic_delete_notebook` Tabler-style VectorDrawable (notebook with minus badge)
 - 🌱 New Branch: Cover image display in notebook grid — `NotebookMetadata` migrated to `kotlinx.serialization`; `CoverObject` data class; `getCoverForNotebook` + `getLastOpenedPageSnapshot` DAO methods; `loadNotebookCoverBitmap` suspend fun opens `.soil` read-only (plain `SQLiteDatabase`), resolves cover in order: explicit cover object → last-opened page snapshot → null; `buildCardGroup` shows cover via `centerCrop` `ImageView` (paperWhite FrameLayout, 1dp inset from border) with `ic_notebook` fallback; per-card coroutine jobs tracked in `coverLoadJobs` and cancelled on each re-render
+- 🌱 New Branch: Set Cover — `CoverDialog` (two-card layout: "Last Opened Page" / "Select Image"; pending-selection state with `bg_toolbar_button` selected visual; image file picker with screen-height downsampling to PNG base64; Apply/Cancel buttons; IO-dispatched cover upsert: soft-delete old cover row → insert new `type="cover"` row → update `NotebookMetadata.cover`); long-press context menu in MainActivity replaced with `PopupMenu` anchored to card (group 1: Set Cover; group 2: Delete Notebook); `ic_polaroid` Tabler-style VectorDrawable (frame + bottom strip + photo rect); `btnCover` toolbar button in DrawingActivity next to close; cover-reload callback triggers `scanAndRender()` in MainActivity; `ActivityResultContracts.GetContent` launcher pre-registered in both activities
 
 Next up: TBD — discuss before starting.
 
 ---
-*Last updated: 🌱 New Branch — Cover image display in notebook grid*
+*Last updated: 🌱 New Branch — Set Cover*

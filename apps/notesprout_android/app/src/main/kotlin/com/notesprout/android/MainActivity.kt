@@ -4,12 +4,15 @@ import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.database.sqlite.SQLiteDatabase
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Environment
 import android.provider.Settings
 import android.text.TextUtils
+import android.util.Base64
 import android.view.GestureDetector
 import android.view.Gravity
 import android.view.MotionEvent
@@ -20,6 +23,7 @@ import android.view.inputmethod.InputMethodManager
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
+import android.widget.PopupMenu
 import android.widget.Space
 import android.widget.TextView
 import android.widget.Toast
@@ -37,6 +41,8 @@ import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.lifecycleScope
 import com.notesprout.android.data.NotebookMetadata
 import com.notesprout.android.data.loadNotebookCoverBitmap
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import com.notesprout.android.databinding.ActivityMainBinding
 import com.notesprout.android.databinding.DialogNewNotebookBinding
 import kotlinx.coroutines.Dispatchers
@@ -117,6 +123,17 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         })
+    }
+
+    // ── Cover image picker launcher ───────────────────────────────────────────
+
+    /** Set by openCoverDialog(); called when the image picker returns a URI. */
+    private var onCoverImagePicked: ((Uri) -> Unit)? = null
+
+    private val coverPickerLauncher = registerForActivityResult(
+        ActivityResultContracts.GetContent()
+    ) { uri ->
+        if (uri != null) onCoverImagePicked?.invoke(uri)
     }
 
     // ── Storage permission launchers ──────────────────────────────────────────
@@ -404,7 +421,7 @@ class MainActivity : AppCompatActivity() {
             orientation = LinearLayout.VERTICAL
             gravity     = Gravity.CENTER_HORIZONTAL
             setOnClickListener { openNotebook(file) }
-            setOnLongClickListener { showNotebookContextMenu(file); true }
+            setOnLongClickListener { showNotebookContextMenu(file, this); true }
         }
 
         // ── Card ─────────────────────────────────────────────────────────────
@@ -667,55 +684,106 @@ class MainActivity : AppCompatActivity() {
     // ── Notebook context menu ─────────────────────────────────────────────────
 
     /**
-     * Shows a mini-menu AlertDialog (styled like the project's other dialogs) with a
-     * single "Delete Notebook" action.  Using an AlertDialog rather than a PopupMenu
-     * keeps the e-ink aesthetic: no floating window shadow, no ripple.
+     * Shows a PopupMenu anchored to [anchor] with two groups:
+     *   Group 1 (notebook actions): Set Cover
+     *   Group 2 (destructive): Delete Notebook
      */
-    private fun showNotebookContextMenu(file: File) {
-        val density = resources.displayMetrics.density
+    private fun showNotebookContextMenu(file: File, anchor: View) {
+        val popup = PopupMenu(this, anchor)
+        popup.menuInflater.inflate(R.menu.menu_notebook_context, popup.menu)
 
-        // Build a single-row list item: icon + label.
-        val itemPx   = (16 * density).toInt()
-        val iconSize = (24 * density).toInt()
-        val gapPx    = (12 * density).toInt()
-
-        val itemView = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity     = Gravity.CENTER_VERTICAL
-            setPadding(itemPx, itemPx, itemPx, itemPx)
+        popup.setOnMenuItemClickListener { item ->
+            when (item.itemId) {
+                R.id.action_set_cover -> {
+                    openCoverDialog(file)
+                    true
+                }
+                R.id.action_delete_notebook -> {
+                    showDeleteNotebookConfirmation(file)
+                    true
+                }
+                else -> false
+            }
         }
+        popup.show()
+    }
 
-        val iconView = AppCompatImageView(this).apply {
-            setImageResource(R.drawable.ic_delete_notebook)
+    /**
+     * Loads the last-opened page snapshot for [file], then opens [CoverDialog].
+     * Cover changes trigger a per-card cover reload via the callback.
+     */
+    private fun openCoverDialog(file: File) {
+        lifecycleScope.launch {
+            val snapshot = withContext(Dispatchers.IO) { loadLastPageSnapshot(file) }
+            val dialog = CoverDialog(
+                activity           = this@MainActivity,
+                lifecycleScope     = lifecycleScope,
+                soilFilePath       = file.absolutePath,
+                lastOpenedSnapshot = snapshot,
+                onRequestImagePick = { callback ->
+                    onCoverImagePicked = callback
+                    coverPickerLauncher.launch("image/*")
+                },
+                onCoverChanged = {
+                    // Reload the cover bitmap for this specific notebook card.
+                    reloadCoverForNotebook(file)
+                },
+            )
+            dialog.show()
         }
-        itemView.addView(iconView, LinearLayout.LayoutParams(iconSize, iconSize).also {
-            it.marginEnd = gapPx
-        })
+    }
 
-        val labelView = AppCompatTextView(this).apply {
-            text      = "Delete Notebook"
-            textSize  = 15f
-            setTextColor(inkBlackColor)
+    /** Loads the last-opened page snapshot from [file] read-only. Returns null on any error. */
+    private fun loadLastPageSnapshot(file: File): Bitmap? {
+        return try {
+            val db = android.database.sqlite.SQLiteDatabase.openDatabase(
+                file.absolutePath, null,
+                android.database.sqlite.SQLiteDatabase.OPEN_READONLY,
+            )
+            db.use {
+                val (notebookId, metaJson) = it.rawQuery(
+                    "SELECT id, data FROM notebook WHERE type = 'notebook' LIMIT 1", null
+                ).use { c ->
+                    if (!c.moveToFirst()) return null
+                    Pair(c.getString(0), c.getString(1))
+                }
+                val metadata = NotebookMetadata.fromJson(notebookId, metaJson)
+                val pageId = metadata.lastOpenedPage ?: return null
+                if (pageId.isEmpty()) return null
+
+                val pageJson = it.rawQuery(
+                    "SELECT data FROM notebook WHERE id = ? AND deletedAt IS NULL LIMIT 1",
+                    arrayOf(pageId)
+                ).use { c -> if (c.moveToFirst()) c.getString(0) else null } ?: return null
+
+                // Extract the snapshot field from the page data JSON.
+                val snapshotB64 = try {
+                    val element = kotlinx.serialization.json.Json.parseToJsonElement(pageJson)
+                    element.jsonObject["snapshot"]?.jsonPrimitive?.content ?: ""
+                } catch (_: Exception) { "" }
+                if (snapshotB64.isEmpty()) return null
+
+                val bytes = Base64.decode(snapshotB64, Base64.DEFAULT)
+                BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+            }
+        } catch (_: Exception) {
+            null
         }
-        itemView.addView(labelView, LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.WRAP_CONTENT,
-            LinearLayout.LayoutParams.WRAP_CONTENT,
-        ))
+    }
 
-        val dialog = AlertDialog.Builder(this)
-            .setView(itemView)
-            .create()
-
-        // Tap anywhere on the item row to trigger delete.
-        itemView.setOnClickListener {
-            dialog.dismiss()
-            showDeleteNotebookConfirmation(file)
-        }
-
-        dialog.show()
-        // Flat styling — elevation=0, shape_bordered background, matching all other dialogs.
-        dialog.window?.setElevation(0f)
-        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+    /**
+     * Cancels any in-flight cover load job for [file] and starts a fresh one that
+     * reloads the bitmap and rebinds it to the matching card view in the current grid.
+     *
+     * This must run on the main thread.  The cover load is launched on IO via
+     * [loadNotebookCoverBitmap] — the card view reference is safe because we only
+     * update it from the main thread after the coroutine completes.
+     */
+    private fun reloadCoverForNotebook(file: File) {
+        // Re-render the current grid page so the new cover is reflected.
+        // This is the simplest correct approach — it cancels all in-flight jobs and
+        // rebuilds all cards, picking up the updated cover from the .soil file.
+        scanAndRender()
     }
 
     /**
