@@ -18,6 +18,7 @@ import android.view.ViewTreeObserver
 import android.view.WindowManager
 import android.view.inputmethod.InputMethodManager
 import android.widget.FrameLayout
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.Space
 import android.widget.TextView
@@ -34,12 +35,14 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.lifecycleScope
+import com.notesprout.android.data.NotebookMetadata
+import com.notesprout.android.data.loadNotebookCoverBitmap
 import com.notesprout.android.databinding.ActivityMainBinding
 import com.notesprout.android.databinding.DialogNewNotebookBinding
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import org.json.JSONObject
 import java.io.File
 import java.util.UUID
 
@@ -85,8 +88,13 @@ class MainActivity : AppCompatActivity() {
 
     // ── Color cache ───────────────────────────────────────────────────────────
 
-    private val inkBlackColor by lazy { ContextCompat.getColor(this, R.color.inkBlack) }
-    private val inkLightColor by lazy { ContextCompat.getColor(this, R.color.inkLight) }
+    private val inkBlackColor  by lazy { ContextCompat.getColor(this, R.color.inkBlack) }
+    private val inkLightColor  by lazy { ContextCompat.getColor(this, R.color.inkLight) }
+    private val paperWhiteColor by lazy { ContextCompat.getColor(this, R.color.paperWhite) }
+
+    // ── Cover load jobs (cancelled on each re-render) ─────────────────────────
+
+    private val coverLoadJobs = mutableListOf<Job>()
 
     // ── Gesture detector (swipe left/right to change page) ───────────────────
 
@@ -291,6 +299,9 @@ class MainActivity : AppCompatActivity() {
 
     /** Clears the grid container and populates it with the current page's cards. */
     private fun renderPage() {
+        coverLoadJobs.forEach { it.cancel() }
+        coverLoadJobs.clear()
+
         val spec = gridSpec ?: return
         binding.gridContainer.removeAllViews()
 
@@ -377,52 +388,83 @@ class MainActivity : AppCompatActivity() {
     /**
      * Builds a single card group:
      * ```
-     * [card FrameLayout with icon]
+     * [card FrameLayout]
+     *   [imageContainer FrameLayout — paperWhite background, 1dp inset from border]
+     *     [coverImage — MATCH_PARENT, centerCrop; shown when a cover bitmap loads]
+     *     [icon — ic_notebook fallback, centered; shown when no cover is available]
      * [rowGap]
      * [label TextView — below the card, not inside it]
      * ```
      * Tapping anywhere on the group opens the notebook in DrawingActivity.
+     * A cover-load coroutine is launched immediately; its job is tracked in
+     * [coverLoadJobs] so it can be cancelled when the grid is re-rendered.
      */
     private fun buildCardGroup(file: File, spec: GridSpec): LinearLayout {
         val group = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity     = Gravity.CENTER_HORIZONTAL
-            // Open the notebook when the user taps the card.
             setOnClickListener { openNotebook(file) }
-            // Long-press reveals the context menu (delete, etc.).
-            setOnLongClickListener {
-                showNotebookContextMenu(file)
-                true
-            }
+            setOnLongClickListener { showNotebookContextMenu(file); true }
         }
 
-        // ── Card ────────────────────────────────────────────────────────────
+        // ── Card ─────────────────────────────────────────────────────────────
         val card = FrameLayout(this).apply {
             setBackgroundResource(R.drawable.shape_bordered)
         }
-        val cardLp = LinearLayout.LayoutParams(spec.cardWidthPx, spec.cardHeightPx)
-        group.addView(card, cardLp)
+        group.addView(card, LinearLayout.LayoutParams(spec.cardWidthPx, spec.cardHeightPx))
 
-        // Document icon, centred inside the card.
+        // Inner container: paperWhite background; 1dp margin keeps card border visible.
+        val density  = resources.displayMetrics.density
+        val margin1dp = (density + 0.5f).toInt()
+        val imageContainer = FrameLayout(this).apply {
+            setBackgroundColor(paperWhiteColor)
+        }
+        card.addView(imageContainer, FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.MATCH_PARENT,
+            FrameLayout.LayoutParams.MATCH_PARENT,
+        ).also { it.setMargins(margin1dp, margin1dp, margin1dp, margin1dp) })
+
+        // Cover image — fills the container, crops to fit; hidden until a bitmap loads.
+        val coverImage = AppCompatImageView(this).apply {
+            scaleType  = ImageView.ScaleType.CENTER_CROP
+            visibility = View.GONE
+        }
+        imageContainer.addView(coverImage, FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.MATCH_PARENT,
+            FrameLayout.LayoutParams.MATCH_PARENT,
+        ))
+
+        // Fallback icon — centered, visible until a cover image is available.
         val iconSize = (minOf(spec.cardWidthPx, spec.cardHeightPx) * 0.45f).toInt()
         val icon = AppCompatImageView(this).apply {
             setImageResource(R.drawable.ic_notebook)
         }
-        card.addView(icon, FrameLayout.LayoutParams(iconSize, iconSize, Gravity.CENTER))
+        imageContainer.addView(icon, FrameLayout.LayoutParams(iconSize, iconSize, Gravity.CENTER))
 
-        // ── Label (below the card) ───────────────────────────────────────────
+        // ── Label (below the card) ────────────────────────────────────────────
         val label = AppCompatTextView(this).apply {
             text      = file.nameWithoutExtension
             maxLines  = 1
             ellipsize = TextUtils.TruncateAt.END
             gravity   = Gravity.CENTER
-            textSize  = 14f   // BodyMedium — 14sp, inkBlack
+            textSize  = 14f
             setTextColor(inkBlackColor)
         }
-        val labelLp = LinearLayout.LayoutParams(spec.cardWidthPx, spec.labelHeightPx).apply {
-            topMargin = spec.rowGapPx
+        group.addView(label, LinearLayout.LayoutParams(spec.cardWidthPx, spec.labelHeightPx).also {
+            it.topMargin = spec.rowGapPx
+        })
+
+        // ── Cover load coroutine ──────────────────────────────────────────────
+        val job = lifecycleScope.launch {
+            val bitmap = loadNotebookCoverBitmap(file)
+            if (bitmap != null) {
+                coverImage.setImageBitmap(bitmap)
+                coverImage.visibility = View.VISIBLE
+                icon.visibility       = View.GONE
+            }
+            // No-cover branch: icon is already visible — nothing to update.
         }
-        group.addView(label, labelLp)
+        coverLoadJobs.add(job)
 
         return group
     }
@@ -567,11 +609,12 @@ class MainActivity : AppCompatActivity() {
 
                 // 1. Notebook metadata row — must be inserted first; its UUID is the
                 //    parentId for all page rows in this notebook.
-                val notebookDataJson = JSONObject().apply {
-                    put("title", name)
-                    put("cover", "")
-                    put("last_opened_page", pageId)
-                }.toString()
+                val notebookDataJson = NotebookMetadata(
+                    id             = notebookId,
+                    title          = name,
+                    cover          = "",
+                    lastOpenedPage = pageId,
+                ).toJson()
                 db.execSQL(insertSql, arrayOf(
                     notebookId, "", "{}", now, now, "notebook", notebookDataJson
                 ))

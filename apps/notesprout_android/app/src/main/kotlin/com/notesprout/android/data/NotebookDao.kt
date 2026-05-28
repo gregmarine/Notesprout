@@ -186,6 +186,23 @@ interface NotebookDao {
     @Query("SELECT * FROM notebook WHERE type = 'layer' AND parentId = :pageId LIMIT 1")
     suspend fun getLayerForPageAny(pageId: String): NotebookObject?
 
+    // ── Cover loading ─────────────────────────────────────────────────────────
+
+    /**
+     * The non-deleted cover object for [notebookId], or null if none exists.
+     * Used by the cover loading path to retrieve the cover image for display in the grid.
+     */
+    @Query("SELECT * FROM notebook WHERE parentId = :notebookId AND type = 'cover' AND deletedAt IS NULL LIMIT 1")
+    suspend fun getCoverForNotebook(notebookId: String): NotebookObject?
+
+    /**
+     * The non-deleted page row for [pageId], or null if not found / soft-deleted.
+     * Used by the cover loading path to extract the page's `snapshot` field when no
+     * explicit cover object is present.
+     */
+    @Query("SELECT * FROM notebook WHERE id = :pageId AND deletedAt IS NULL LIMIT 1")
+    suspend fun getLastOpenedPageSnapshot(pageId: String): NotebookObject?
+
     // ── Snapshot staleness check ──────────────────────────────────────────────
 
     /**
