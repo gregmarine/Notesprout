@@ -177,7 +177,29 @@ class DrawingActivity : AppCompatActivity() {
             finish()
         }
 
-        binding.btnAddPage.setOnClickListener {
+        binding.btnInsertPageBefore.setOnClickListener {
+            val db = soilDatabase ?: return@setOnClickListener
+            lifecycleScope.launch {
+                val snapshot = drawingView.captureSnapshot()
+                val leavingPageId = currentPageId
+                withContext(Dispatchers.IO) {
+                    if (snapshot != null && leavingPageId.isNotEmpty()) {
+                        persistSnapshot(db, leavingPageId, snapshot)
+                    }
+                    addPageBefore(db)
+                }
+                undoRedoManager.push(UndoRedoAction.PageAdded(currentPageId, currentPageIndex, insertedBefore = true))
+                updateUndoRedoButtons()
+                drawingView.clearCanvas()
+                val result = withContext(Dispatchers.IO) { loadCurrentPage(db) }
+                displayPage(result)
+                updatePageIndicator()
+                saveLastOpenedPage(currentPageId)
+                postDisplayWork(db, result)
+            }
+        }
+
+        binding.btnInsertPageAfter.setOnClickListener {
             val db = soilDatabase ?: return@setOnClickListener
             lifecycleScope.launch {
                 // Capture snapshot of the page we are leaving (main thread — before clearing).
@@ -1180,6 +1202,68 @@ class DrawingActivity : AppCompatActivity() {
     }
 
     /**
+     * Insert a new page immediately BEFORE the current page.
+     *
+     * Mirrors [addPage] exactly, except insertionIndex = currentPageIndex so the new page
+     * lands at the current position and the current page shifts forward by one.
+     *
+     * Must be called on [Dispatchers.IO].  Caller updates the UI after return.
+     */
+    private suspend fun addPageBefore(db: SoilDatabase) {
+        saveStrokes(db)
+        val dao = db.notebookDao()
+        val now = System.currentTimeMillis()
+        val bounds = screenBounds()
+        val screenW = bounds.width().toFloat()
+        val screenH = bounds.height().toFloat()
+        val bboxJson = """{"x":0.0,"y":0.0,"width":$screenW,"height":$screenH}"""
+
+        val insertionIndex = currentPageIndex
+
+        val freshCurrentPage = dao.getObjectById(currentPageId)
+        val inheritedTemplate = freshCurrentPage?.let { TemplateDialog.parseTemplateId(it.data) } ?: ""
+
+        for (i in insertionIndex until pages.size) {
+            dao.updateOrder(pages[i].id, i + 1)
+        }
+
+        val newPageId = UUID.randomUUID().toString()
+        dao.insertObject(
+            NotebookObject(
+                id          = newPageId,
+                type        = "page",
+                parentId    = notebookMetadata?.id ?: MainActivity.NIL_UUID,
+                boundingBox = bboxJson,
+                sortOrder   = insertionIndex,
+                createdAt   = now,
+                updatedAt   = now,
+                deletedAt   = null,
+                data        = """{"width":$screenW,"height":$screenH,"template":"$inheritedTemplate"}""",
+            )
+        )
+
+        val newLayerId = UUID.randomUUID().toString()
+        dao.insertObject(
+            NotebookObject(
+                id          = newLayerId,
+                type        = "layer",
+                parentId    = newPageId,
+                boundingBox = bboxJson,
+                sortOrder   = 0,
+                createdAt   = now,
+                updatedAt   = now,
+                deletedAt   = null,
+                data        = """{"label":"Content","isLocked":false,"isVisible":true}""",
+            )
+        )
+
+        pages = dao.getPagesSorted().toMutableList()
+        currentPageIndex = insertionIndex
+        currentPageId = newPageId
+        currentLayerId = newLayerId
+    }
+
+    /**
      * Delete the current page, its layer, and all strokes under the layer.
      *
      * If the notebook would become empty, a fresh page + layer is bootstrapped
@@ -1502,8 +1586,10 @@ class DrawingActivity : AppCompatActivity() {
                     dao.softDeleteByParentId(action.pageId, now)          // layer
                     val layer = dao.getLayerForPageAny(action.pageId)
                     if (layer != null) dao.softDeleteByParentId(layer.id, now) // strokes
-                    // Navigate to the page before the deleted one; setupPageIds will coerce.
-                    currentPageIndex = (action.pageIndex - 1).coerceAtLeast(0)
+                    // For insert-before: the original page returns to action.pageIndex after removal.
+                    // For insert-after: the original page was at action.pageIndex - 1.
+                    currentPageIndex = if (action.insertedBefore) action.pageIndex
+                                       else (action.pageIndex - 1).coerceAtLeast(0)
                 } else {
                     // Redo: restore the page and its layer (strokes were never deleted on add).
                     dao.restoreById(action.pageId, now)

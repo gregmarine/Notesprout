@@ -19,7 +19,7 @@
          On BOOX, setLimitRect excludes this region from pen input.
          Height is 56dp to comfortably fit 44dp icon buttons + padding.
          toolbar_background drawable provides the 1dp inkBlack bottom border.
-         Order left to right: close | divider | pen | eraser | clear | divider | undo | redo | divider | template | divider | add page | delete page -->
+         Order left to right: close | divider | pen | eraser | clear | divider | undo | redo | divider | template | divider | insert before | insert after | delete page -->
     <LinearLayout
         android:id="@+id/drawingToolbar"
         android:layout_width="match_parent"
@@ -129,12 +129,20 @@
             android:layout_marginStart="4dp"
             android:layout_marginEnd="4dp"/>
 
-        <!-- Add page -->
+        <!-- Insert page before current -->
         <androidx.appcompat.widget.AppCompatImageButton
-            android:id="@+id/btnAddPage"
+            android:id="@+id/btnInsertPageBefore"
             style="@style/Widget.NoteSprout.ToolbarButton"
-            android:src="@drawable/ic_page_add"
-            android:contentDescription="Add page" />
+            android:src="@drawable/ic_insert_page_before"
+            android:contentDescription="Insert page before" />
+
+        <!-- Insert page after current -->
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnInsertPageAfter"
+            style="@style/Widget.NoteSprout.ToolbarButton"
+            android:layout_marginStart="4dp"
+            android:src="@drawable/ic_insert_page_after"
+            android:contentDescription="Insert page after" />
 
         <!-- Delete page -->
         <androidx.appcompat.widget.AppCompatImageButton

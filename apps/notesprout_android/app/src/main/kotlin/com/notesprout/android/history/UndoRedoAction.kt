@@ -35,6 +35,7 @@ sealed class UndoRedoAction {
     data class PageAdded(
         val pageId: String,
         val pageIndex: Int,
+        val insertedBefore: Boolean = false,
     ) : UndoRedoAction()
 
     /**
