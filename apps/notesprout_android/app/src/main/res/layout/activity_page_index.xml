@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Page index screen — full-screen grid of page snapshot cards.
+     Root LinearLayout (vertical): top bar → grid area → bottom bar. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@color/paperWhite">
+
+    <!-- Top bar: back button + "Pages" label. toolbar_background gives the 1dp bottom border. -->
+    <LinearLayout
+        android:id="@+id/topBar"
+        android:layout_width="match_parent"
+        android:layout_height="56dp"
+        android:background="@drawable/toolbar_background"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="4dp"
+        android:paddingEnd="4dp">
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnBack"
+            style="@style/Widget.NoteSprout.ToolbarButton"
+            android:src="@drawable/ic_arrow_left"
+            android:contentDescription="Back" />
+
+        <androidx.appcompat.widget.AppCompatTextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="12dp"
+            android:text="Pages"
+            android:textColor="@color/inkBlack"
+            android:textSize="18sp" />
+
+    </LinearLayout>
+
+    <!-- Grid area: fills all remaining height between top and bottom bars. -->
+    <FrameLayout
+        android:id="@+id/gridContainer"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:background="@color/paperWhite" />
+
+    <!--
+        Bottom bar: 1dp inkBlack top border, pagination centred.
+        Height 72dp — fits 44dp icon buttons with comfortable vertical padding.
+    -->
+    <RelativeLayout
+        android:id="@+id/bottomBar"
+        android:layout_width="match_parent"
+        android:layout_height="72dp"
+        android:background="@color/paperWhite">
+
+        <!-- Top border (1dp inkBlack) -->
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="@color/inkBlack"
+            android:layout_alignParentTop="true" />
+
+        <!--
+            Pagination group: |<  <  n/n  >  >|
+            Centered horizontally and vertically inside the bar.
+        -->
+        <LinearLayout
+            android:id="@+id/paginationGroup"
+            android:layout_width="wrap_content"
+            android:layout_height="match_parent"
+            android:orientation="horizontal"
+            android:layout_centerInParent="true"
+            android:gravity="center_vertical">
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnFirstPage"
+                style="@style/Widget.NoteSprout.ToolbarButton"
+                android:src="@drawable/ic_page_first"
+                android:contentDescription="First page" />
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnPrevPage"
+                style="@style/Widget.NoteSprout.ToolbarButton"
+                android:layout_marginStart="4dp"
+                android:src="@drawable/ic_page_prev"
+                android:contentDescription="Previous page" />
+
+            <androidx.appcompat.widget.AppCompatTextView
+                android:id="@+id/tvPage"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:minWidth="72dp"
+                android:gravity="center"
+                android:textSize="16sp"
+                android:textColor="@color/inkBlack"
+                android:paddingStart="8dp"
+                android:paddingEnd="8dp"
+                android:text="1/1" />
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnNextPage"
+                style="@style/Widget.NoteSprout.ToolbarButton"
+                android:src="@drawable/ic_page_next"
+                android:contentDescription="Next page" />
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnLastPage"
+                style="@style/Widget.NoteSprout.ToolbarButton"
+                android:layout_marginStart="4dp"
+                android:src="@drawable/ic_page_last"
+                android:contentDescription="Last page" />
+
+        </LinearLayout>
+
+    </RelativeLayout>
+
+</LinearLayout>

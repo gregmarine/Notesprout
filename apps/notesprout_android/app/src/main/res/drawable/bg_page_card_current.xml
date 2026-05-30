@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Card background for the currently-open page in the page index — 3dp border signals selection. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android">
+    <solid android:color="@color/paperWhite" />
+    <stroke android:width="3dp" android:color="@color/inkBlack" />
+    <corners android:radius="4dp" />
+</shape>

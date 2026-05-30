@@ -1,5 +1,6 @@
 package com.notesprout.android
 
+import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
@@ -154,6 +155,19 @@ class DrawingActivity : AppCompatActivity() {
         ActivityResultContracts.GetContent()
     ) { uri ->
         if (uri != null) onCoverImagePicked?.invoke(uri)
+    }
+
+    // ── Page index launcher ───────────────────────────────────────────────────
+
+    private val pageIndexLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == RESULT_OK) {
+            val selected = result.data?.getIntExtra(PageIndexActivity.EXTRA_SELECTED_PAGE_INDEX, -1) ?: -1
+            if (selected >= 0 && selected != currentPageIndex) {
+                navigateToPage(selected)
+            }
+        }
     }
 
     // ── Activity lifecycle ────────────────────────────────────────────────────
@@ -333,6 +347,9 @@ class DrawingActivity : AppCompatActivity() {
         binding.btnCover.setOnClickListener {
             openCoverDialog()
         }
+
+        binding.btnPageIndex.setOnClickListener { openPageIndex() }
+        binding.tvPageIndicator.setOnClickListener { openPageIndex() }
 
         binding.btnUndo.setOnClickListener { performUndo() }
         binding.btnRedo.setOnClickListener { performRedo() }
@@ -1002,6 +1019,32 @@ class DrawingActivity : AppCompatActivity() {
     }
 
     // ── Template operations ───────────────────────────────────────────────────
+
+    // ── Page index ────────────────────────────────────────────────────────────
+
+    /**
+     * Saves the current page snapshot and strokes, then launches [PageIndexActivity].
+     * Snapshot is persisted first so PageIndexActivity reads the freshest state.
+     */
+    private fun openPageIndex() {
+        val db           = soilDatabase ?: return
+        val notebookPath = intent.getStringExtra(EXTRA_NOTEBOOK_PATH) ?: return
+        lifecycleScope.launch {
+            val snapshot = drawingView.captureSnapshot()
+            val pageId   = currentPageId
+            withContext(Dispatchers.IO) {
+                if (snapshot != null && pageId.isNotEmpty()) {
+                    persistSnapshot(db, pageId, snapshot)
+                }
+                saveStrokes(db)
+            }
+            val i = Intent(this@DrawingActivity, PageIndexActivity::class.java).apply {
+                putExtra(PageIndexActivity.EXTRA_NOTEBOOK_PATH, notebookPath)
+                putExtra(PageIndexActivity.EXTRA_CURRENT_PAGE_INDEX, currentPageIndex)
+            }
+            pageIndexLauncher.launch(i)
+        }
+    }
 
     // ── Cover dialog ──────────────────────────────────────────────────────────
 
