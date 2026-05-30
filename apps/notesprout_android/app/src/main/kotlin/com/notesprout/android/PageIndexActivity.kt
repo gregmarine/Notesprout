@@ -193,7 +193,9 @@ class PageIndexActivity : AppCompatActivity() {
         val rowGapPx      = (6  * density).toInt()
         val labelHeightPx = (32 * density).toInt()
 
-        val cols = 3
+        // Column count: 3 on tablets/large e-ink devices, 2 on phone-form-factor devices.
+        val screenWidthDp = availableWidth / density
+        val cols = if (screenWidthDp >= 480f) 3 else 2
 
         val dm          = resources.displayMetrics
         val aspectRatio = dm.heightPixels.toFloat() / dm.widthPixels.coerceAtLeast(1)

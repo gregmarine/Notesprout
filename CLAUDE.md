@@ -390,7 +390,9 @@ Completed:
 - 🌱 New Branch: Insert Page Before — `btnInsertPageBefore` / `btnInsertPageAfter` replace the old `btnAddPage` in the toolbar; `ic_insert_page_before` and `ic_insert_page_after` Tabler-style VectorDrawables (file-plus with 2dp vertical bar on left/right respectively, gap-separated, aligned to document body height); `addPageBefore()` mirrors `addPage()` with `insertionIndex = currentPageIndex`; `UndoRedoAction.PageAdded` gains `insertedBefore: Boolean = false` so undo lands on the correct page (original page returns to `pageIndex` after removal, not `pageIndex - 1`)
 - 🌱 New Branch: Page Index — `PageIndexActivity` full-screen grid of page snapshot cards; `ic_files` Tabler-style VectorDrawable (two overlapping document outlines); `btnPageIndex` toolbar button grouped with template (no separator); `tvPageIndicator` tap also launches index; `bg_page_card_current` 3dp-border drawable highlights the currently-open page; same adaptive GridSpec / pagination controls (`|< < n/n > >|`) as MainActivity; cards show page snapshot (transparent PNG composited on white) + "Page N" label; tapping any card calls `setResult` with selected index and finishes; `openPageIndex()` in DrawingActivity captures + persists current snapshot before launch so index always shows fresh state; on result, `navigateToPage(selected)` if index changed
 
+- ✂️ Pruning: Unified grid column counts — both `MainActivity` and `PageIndexActivity` now use `if (screenWidthDp >= 480f) 3 else 2`; large e-ink tablets (NA5C, ~988dp) get 3 columns, phone-form-factor devices (P2P, ~439dp portrait) get 2 columns
+
 Next up: TBD — discuss before starting.
 
 ---
-*Last updated: 🌱 New Branch — Page Index*
+*Last updated: ✂️ Pruning — Unified grid column counts*

@@ -250,13 +250,9 @@ class MainActivity : AppCompatActivity() {
         val rowGapPx   = (6  * density).toInt()   // gap between card bottom edge and label
         val labelHeightPx = (32 * density).toInt() // one line of body text + breathing room
 
-        // Column count from screen-width breakpoints.
+        // Column count: 3 on tablets/large e-ink devices, 2 on phone-form-factor devices.
         val screenWidthDp = availableWidth / density
-        val cols = when {
-            screenWidthDp >= 720f -> 5
-            screenWidthDp >= 480f -> 4
-            else                  -> 3
-        }
+        val cols = if (screenWidthDp >= 480f) 3 else 2
 
         // Portrait ratio: how tall a card should be relative to its width.
         val dm = resources.displayMetrics
