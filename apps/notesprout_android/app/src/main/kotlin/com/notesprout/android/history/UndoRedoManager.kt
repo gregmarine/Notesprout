@@ -79,6 +79,16 @@ class UndoRedoManager {
         return action
     }
 
+    /**
+     * Replace the top entry of the redo stack with [updated].
+     * Used by paste undo to store the soft-delete timestamp back into the redo entry
+     * so that redo can restore exactly the rows deleted during undo.
+     * No-op if the redo stack is empty.
+     */
+    fun amendLastRedo(updated: UndoRedoAction) {
+        if (redoStack.isNotEmpty()) redoStack[redoStack.lastIndex] = updated
+    }
+
     /** Empty both stacks. Call on notebook close. */
     fun clear() {
         undoStack.clear()

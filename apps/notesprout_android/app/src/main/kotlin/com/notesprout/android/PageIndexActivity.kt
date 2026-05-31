@@ -33,9 +33,13 @@ import android.view.ViewTreeObserver
 class PageIndexActivity : AppCompatActivity() {
 
     companion object {
-        const val EXTRA_NOTEBOOK_PATH        = "notebook_path"
-        const val EXTRA_CURRENT_PAGE_INDEX   = "current_page_index"
-        const val EXTRA_SELECTED_PAGE_INDEX  = "selected_page_index"
+        const val EXTRA_NOTEBOOK_PATH         = "notebook_path"
+        const val EXTRA_CURRENT_PAGE_INDEX    = "current_page_index"
+        const val EXTRA_SELECTED_PAGE_INDEX   = "selected_page_index"
+        /** Comma-separated UUIDs of pages pasted during this session (may be empty). */
+        const val EXTRA_PASTED_PAGE_IDS       = "pasted_page_ids"
+        /** Comma-separated 0-based indices matching [EXTRA_PASTED_PAGE_IDS]. */
+        const val EXTRA_PASTED_PAGE_INDICES   = "pasted_page_indices"
     }
 
     // ── Grid specification ────────────────────────────────────────────────────
@@ -76,6 +80,17 @@ class PageIndexActivity : AppCompatActivity() {
 
     private val snapshotDecodeJobs = mutableListOf<Job>()
 
+    // ── Action mode (long-press copy/paste) ───────────────────────────────────
+
+    /** Index into [pages] of the card selected by a long-press. Null = normal mode. */
+    private var actionModePageIndex: Int? = null
+
+    /** Page ID waiting to be pasted. Null means clipboard is empty. */
+    private var pendingCopyPageId: String? = null
+
+    /** Paste operations performed this session — returned to DrawingActivity for undo/redo. */
+    private val pastedActions = mutableListOf<Pair<String, Int>>()   // (pageId, pageIndex)
+
     // ── Swipe gesture (left/right to paginate) ────────────────────────────────
 
     private val gestureDetector by lazy {
@@ -112,7 +127,19 @@ class PageIndexActivity : AppCompatActivity() {
 
         currentPageIndex = intent.getIntExtra(EXTRA_CURRENT_PAGE_INDEX, 0)
 
-        binding.btnBack.setOnClickListener { finish() }
+        binding.btnBack.setOnClickListener {
+            if (actionModePageIndex != null) exitActionMode() else finishWithResult(null)
+        }
+
+        binding.btnCopyPage.setOnClickListener  { copySelectedPage() }
+        binding.btnPastePage.setOnClickListener { executePaste() }
+
+        // Back gesture exits action mode; if already in normal mode, return to DrawingActivity.
+        onBackPressedDispatcher.addCallback(this, object : androidx.activity.OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                if (actionModePageIndex != null) exitActionMode() else finishWithResult(null)
+            }
+        })
 
         binding.btnFirstPage.setOnClickListener { navigateGridPage(0) }
         binding.btnPrevPage.setOnClickListener  { navigateGridPage(currentGridPage - 1) }
@@ -309,41 +336,56 @@ class PageIndexActivity : AppCompatActivity() {
     /**
      * Builds one card group:
      * ```
-     * [card FrameLayout — bordered; thicker border if this is the current page]
-     *   [imageContainer FrameLayout — paperWhite, 1dp inset]
+     * [card FrameLayout — thick border if current page OR selected in action mode]
+     *   [imageContainer FrameLayout — paperWhite, inset]
      *     [snapshotImage — GONE until bitmap decoded]
      * [rowGap Space]
      * [label "Page N"]
      * ```
-     * Tapping the group returns the 0-based page index to DrawingActivity.
+     * Normal tap: navigate to this page (or move action-mode selection).
+     * Long press: enter action mode with this card selected.
      */
     private fun buildCardGroup(entry: PageEntry, spec: GridSpec): LinearLayout {
-        val pageIndex = entry.pageNumber - 1   // 0-based
-        val isCurrent = pageIndex == currentPageIndex
+        val pageIndex  = entry.pageNumber - 1   // 0-based
+        val isCurrent  = pageIndex == currentPageIndex
+        val isSelected = pageIndex == actionModePageIndex
 
         val group = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity     = Gravity.CENTER_HORIZONTAL
+
             setOnClickListener {
-                val result = Intent().putExtra(EXTRA_SELECTED_PAGE_INDEX, pageIndex)
-                setResult(RESULT_OK, result)
-                finish()
+                when {
+                    // Normal mode: navigate to the tapped page.
+                    actionModePageIndex == null -> finishWithResult(pageIndex)
+                    // Action mode, tapping the already-selected card: navigate + exit action mode.
+                    pageIndex == actionModePageIndex -> { exitActionMode(); finishWithResult(pageIndex) }
+                    // Action mode, tapping a different card: move paste-target selection.
+                    else -> { actionModePageIndex = pageIndex; renderGridPage() }
+                }
+            }
+
+            setOnLongClickListener {
+                enterActionMode(pageIndex)
+                true
             }
         }
 
         // ── Card ──────────────────────────────────────────────────────────────
+        // In action mode only the selected card is highlighted; outside action mode only the
+        // currently-open page is highlighted. Never show two cards highlighted at once.
+        val highlighted = if (actionModePageIndex != null) isSelected else isCurrent
         val card = FrameLayout(this).apply {
             setBackgroundResource(
-                if (isCurrent) R.drawable.bg_page_card_current else R.drawable.shape_bordered
+                if (highlighted) R.drawable.bg_page_card_current else R.drawable.shape_bordered
             )
         }
         group.addView(card, LinearLayout.LayoutParams(spec.cardWidthPx, spec.cardHeightPx))
 
-        // Inner container: white background; 1dp margin keeps border visible.
+        // Inner container: white background; inset keeps border visible.
         val density   = resources.displayMetrics.density
         val margin1dp = (density + 0.5f).toInt()
-        // Current page uses 3dp border, so inset 3dp to keep content clear of the thicker stroke.
-        val marginPx  = if (isCurrent) (3 * density + 0.5f).toInt() else margin1dp
+        val marginPx  = if (highlighted) (3 * density + 0.5f).toInt() else margin1dp
 
         val imageContainer = FrameLayout(this).apply {
             setBackgroundColor(paperWhiteColor)
@@ -402,6 +444,77 @@ class PageIndexActivity : AppCompatActivity() {
         currentGridPage = clamped
         renderGridPage()
     }
+
+    // ── Action mode ───────────────────────────────────────────────────────────
+
+    private fun enterActionMode(pageIndex: Int) {
+        actionModePageIndex = pageIndex
+        binding.btnCopyPage.visibility  = android.view.View.VISIBLE
+        binding.btnPastePage.visibility = android.view.View.VISIBLE
+        binding.btnPastePage.isEnabled  = pendingCopyPageId != null
+        renderGridPage()
+    }
+
+    private fun exitActionMode() {
+        actionModePageIndex = null
+        binding.btnCopyPage.visibility  = android.view.View.GONE
+        binding.btnPastePage.visibility = android.view.View.GONE
+        renderGridPage()
+    }
+
+    /**
+     * Copies the selected page ID to the clipboard and stays in action mode.
+     * The paste button is enabled immediately — the user can tap another card
+     * to move the paste-target selection, then tap Paste.
+     */
+    private fun copySelectedPage() {
+        val idx = actionModePageIndex ?: return
+        pendingCopyPageId = pages.getOrNull(idx)?.id
+        binding.btnPastePage.isEnabled = pendingCopyPageId != null
+    }
+
+    /** Deep-copies the clipboard page after the selected card, refreshes the grid. */
+    private fun executePaste() {
+        val sourcePageId = pendingCopyPageId ?: return
+        val targetIdx    = actionModePageIndex ?: return
+        val targetPageId = pages.getOrNull(targetIdx)?.id ?: return
+        val path         = intent.getStringExtra(EXTRA_NOTEBOOK_PATH) ?: return
+
+        lifecycleScope.launch {
+            val newPageId = withContext(Dispatchers.IO) {
+                com.notesprout.android.data.copyPageAfterRaw(sourcePageId, targetPageId, path)
+            }
+            if (newPageId == null) return@launch
+
+            // Reload pages and record the paste for undo/redo on return.
+            pages = withContext(Dispatchers.IO) { loadPagesFromSoil(path) }
+            val newPageIndex = pages.indexOfFirst { it.id == newPageId }
+            if (newPageIndex >= 0) pastedActions.add(newPageId to newPageIndex)
+
+            // Adjust currentPageIndex if the insertion shifted it.
+            val insertionIndex = targetIdx + 1
+            if (insertionIndex <= currentPageIndex) currentPageIndex++
+
+            pendingCopyPageId = null
+            exitActionMode()   // hides buttons, re-renders grid
+        }
+    }
+
+    /** Encode all session paste actions into the result and finish. */
+    private fun finishWithResult(selectedPageIndex: Int?) {
+        val result = Intent()
+        if (selectedPageIndex != null) {
+            result.putExtra(EXTRA_SELECTED_PAGE_INDEX, selectedPageIndex)
+        }
+        if (pastedActions.isNotEmpty()) {
+            result.putExtra(EXTRA_PASTED_PAGE_IDS,     pastedActions.joinToString(",") { it.first })
+            result.putExtra(EXTRA_PASTED_PAGE_INDICES, pastedActions.joinToString(",") { it.second.toString() })
+        }
+        setResult(RESULT_OK, result)
+        finish()
+    }
+
+    // ── Pagination ────────────────────────────────────────────────────────────
 
     private fun updatePaginationControls() {
         val total   = totalGridPages()

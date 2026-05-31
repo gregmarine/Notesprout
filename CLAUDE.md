@@ -392,7 +392,9 @@ Completed:
 
 - ✂️ Pruning: Unified grid column counts — both `MainActivity` and `PageIndexActivity` now use `if (screenWidthDp >= 480f) 3 else 2`; large e-ink tablets (NA5C, ~988dp) get 3 columns, phone-form-factor devices (P2P, ~439dp portrait) get 2 columns
 
+- 🌱 New Branch: Copy/Paste Page — `ic_copy_page` (single file + solid L on left/bottom + plus inside body) and `ic_paste_page` (single file + dashed L on left/bottom, 2-on/4-off hand-drawn segments — Android VectorDrawable has no `strokeDashArray`); both icons shift the file body up 2 units to give 2dp visual gap from the L-shape; copy/paste buttons in DrawingActivity toolbar grouped with page management controls (after delete); `pendingCopyPageId: String?` per-activity clipboard; copy toggles clipboard on/off; paste calls `copyPageAfter()` (Room-based, for DrawingActivity) or `copyPageAfterRaw()` (raw `SQLiteDatabase` writable, for PageIndexActivity — safe in WAL mode while DrawingActivity is paused); `data/PageCopier.kt` holds both implementations; `order` column must be backtick-quoted in `ContentValues` keys (`"\`order\`"`) — `ContentValues` embeds column names verbatim and `order` is a SQLite reserved word; long-press on a card in PageIndexActivity enters action mode (Copy + Paste buttons appear, single selection highlight, normal-mode current-page highlight suppressed — only one card highlighted at a time); Copy stays in action mode with paste immediately enabled; Paste refreshes the grid in place and accumulates `pastedActions`; `finishWithResult()` encodes all session pastes as comma-separated extras on any exit path; DrawingActivity pushes a `UndoRedoAction.PagePasted` for each on return; `UndoRedoAction.PagePasted(pageId, pageIndex, undoDeletedAt)` — undo soft-deletes page + layer + strokes at a recorded timestamp; `undoRedoManager.amendLastRedo()` stores that timestamp back into the redo entry so redo can use `restoreChildrenDeletedSince` to restore exactly those rows
+
 Next up: TBD — discuss before starting.
 
 ---
-*Last updated: ✂️ Pruning — Unified grid column counts*
+*Last updated: 🌱 New Branch — Copy/Paste Page*

@@ -73,4 +73,18 @@ sealed class UndoRedoAction {
         val layerId: String,
         val deletedAt: Long,
     ) : UndoRedoAction()
+
+    /**
+     * User pasted a copied page — undo soft-deletes the page and all its content;
+     * redo restores it with strokes intact.
+     *
+     * [undoDeletedAt] is 0 until undo executes, then set to the timestamp used for
+     * the soft-delete so redo can restore exactly those rows via [restoreChildrenDeletedSince].
+     */
+    @Serializable
+    data class PagePasted(
+        val pageId: String,
+        val pageIndex: Int,
+        val undoDeletedAt: Long = 0,
+    ) : UndoRedoAction()
 }

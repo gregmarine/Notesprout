@@ -27,6 +27,7 @@ import androidx.core.view.doOnLayout
 import androidx.lifecycle.lifecycleScope
 import androidx.room.Room
 import androidx.room.withTransaction
+import com.notesprout.android.data.copyPageAfter
 import com.notesprout.android.data.LiveStroke
 import com.notesprout.android.data.NotebookDao
 import com.notesprout.android.data.NotebookMetadata
@@ -157,13 +158,32 @@ class DrawingActivity : AppCompatActivity() {
         if (uri != null) onCoverImagePicked?.invoke(uri)
     }
 
+    // ── Copy/paste clipboard ──────────────────────────────────────────────────
+
+    /** Page ID waiting to be pasted. Null means clipboard is empty. */
+    private var pendingCopyPageId: String? = null
+
     // ── Page index launcher ───────────────────────────────────────────────────
 
     private val pageIndexLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
         if (result.resultCode == RESULT_OK) {
-            val selected = result.data?.getIntExtra(PageIndexActivity.EXTRA_SELECTED_PAGE_INDEX, -1) ?: -1
+            val data = result.data
+
+            // Push any paste actions recorded during the index session onto the undo stack.
+            val pastedIds     = data?.getStringExtra(PageIndexActivity.EXTRA_PASTED_PAGE_IDS)
+            val pastedIndices = data?.getStringExtra(PageIndexActivity.EXTRA_PASTED_PAGE_INDICES)
+            if (!pastedIds.isNullOrEmpty() && !pastedIndices.isNullOrEmpty()) {
+                val ids     = pastedIds.split(",")
+                val indices = pastedIndices.split(",").mapNotNull { it.toIntOrNull() }
+                ids.zip(indices).forEach { (pageId, pageIndex) ->
+                    undoRedoManager.push(UndoRedoAction.PagePasted(pageId, pageIndex))
+                }
+                updateUndoRedoButtons()
+            }
+
+            val selected = data?.getIntExtra(PageIndexActivity.EXTRA_SELECTED_PAGE_INDEX, -1) ?: -1
             if (selected >= 0 && selected != currentPageIndex) {
                 navigateToPage(selected)
             }
@@ -350,6 +370,10 @@ class DrawingActivity : AppCompatActivity() {
 
         binding.btnPageIndex.setOnClickListener { openPageIndex() }
         binding.tvPageIndicator.setOnClickListener { openPageIndex() }
+
+        binding.btnCopyPage.setOnClickListener { copyCurrentPage() }
+        binding.btnPastePage.setOnClickListener { pasteCopiedPage() }
+        updateCopyPasteButtons()
 
         binding.btnUndo.setOnClickListener { performUndo() }
         binding.btnRedo.setOnClickListener { performRedo() }
@@ -1046,6 +1070,58 @@ class DrawingActivity : AppCompatActivity() {
         }
     }
 
+    // ── Copy / paste ──────────────────────────────────────────────────────────
+
+    /** Copies the current page to the in-memory clipboard. Tapping again clears it (toggle). */
+    private fun copyCurrentPage() {
+        val pageId = currentPageId.takeIf { it.isNotEmpty() } ?: return
+        pendingCopyPageId = if (pendingCopyPageId == pageId) null else pageId
+        updateCopyPasteButtons()
+    }
+
+    /** Pastes the clipboard page immediately after the current page, then navigates to it. */
+    private fun pasteCopiedPage() {
+        val db     = soilDatabase ?: return
+        val copyId = pendingCopyPageId ?: return
+        lifecycleScope.launch {
+            val snapshot = drawingView.captureSnapshot()
+            val leavingPageId = currentPageId
+            var newPageId: String? = null
+            withContext(Dispatchers.IO) {
+                if (snapshot != null && leavingPageId.isNotEmpty()) {
+                    persistSnapshot(db, leavingPageId, snapshot)
+                }
+                saveStrokes(db)
+                newPageId = copyPageAfter(copyId, currentPageId, db)
+                if (newPageId != null) {
+                    pages = db.notebookDao().getPagesSorted().toMutableList()
+                    val idx = pages.indexOfFirst { it.id == newPageId }
+                    if (idx >= 0) {
+                        currentPageIndex = idx
+                        currentPageId    = pages[idx].id
+                        currentLayerId   = db.notebookDao().getLayerForPage(currentPageId)?.id ?: ""
+                    }
+                }
+            }
+            if (newPageId == null) return@launch
+            pendingCopyPageId = null
+            updateCopyPasteButtons()
+            undoRedoManager.push(UndoRedoAction.PagePasted(currentPageId, currentPageIndex))
+            updateUndoRedoButtons()
+            drawingView.clearCanvas()
+            val result = withContext(Dispatchers.IO) { loadCurrentPage(db) }
+            displayPage(result)
+            updatePageIndicator()
+            saveLastOpenedPage(currentPageId)
+            postDisplayWork(db, result)
+        }
+    }
+
+    private fun updateCopyPasteButtons() {
+        binding.btnCopyPage.isSelected  = pendingCopyPageId != null
+        binding.btnPastePage.isEnabled  = pendingCopyPageId != null
+    }
+
     // ── Cover dialog ──────────────────────────────────────────────────────────
 
     /**
@@ -1679,6 +1755,34 @@ class DrawingActivity : AppCompatActivity() {
                     dao.softDeleteByParentId(action.layerId, now)
                 }
             }
+
+            is UndoRedoAction.PagePasted -> {
+                if (isUndo) {
+                    val deletedAt = withContext(Dispatchers.IO) {
+                        val ts = System.currentTimeMillis()
+                        dao.softDeleteById(action.pageId, ts)
+                        dao.softDeleteByParentId(action.pageId, ts)          // layer
+                        val layer = dao.getLayerForPageAny(action.pageId)
+                        if (layer != null) dao.softDeleteByParentId(layer.id, ts) // strokes
+                        ts
+                    }
+                    // Store the soft-delete timestamp so redo can restore exactly these rows.
+                    undoRedoManager.amendLastRedo(action.copy(undoDeletedAt = deletedAt))
+                    currentPageIndex = (action.pageIndex - 1).coerceAtLeast(0)
+                } else {
+                    withContext(Dispatchers.IO) {
+                        dao.restoreById(action.pageId, now)
+                        val layer = dao.getLayerForPageAny(action.pageId)
+                        if (layer != null) {
+                            dao.restoreById(layer.id, now)
+                            if (action.undoDeletedAt > 0) {
+                                dao.restoreChildrenDeletedSince(layer.id, action.undoDeletedAt, now)
+                            }
+                        }
+                    }
+                    currentPageIndex = action.pageIndex
+                }
+            }
         }
         // After each when-branch we are back on the main thread.
 
@@ -1733,6 +1837,7 @@ class DrawingActivity : AppCompatActivity() {
             is UndoRedoAction.TemplateChanged -> action.pageId
             is UndoRedoAction.PageDeleted     -> if (isUndo) action.pageId else null
             is UndoRedoAction.PageAdded       -> if (!isUndo) action.pageId else null
+            is UndoRedoAction.PagePasted      -> if (!isUndo) action.pageId else null  // redo restores strokes
             is UndoRedoAction.PageCleared     -> action.pageId  // strokes change on both undo and redo
             else                              -> null
         }
