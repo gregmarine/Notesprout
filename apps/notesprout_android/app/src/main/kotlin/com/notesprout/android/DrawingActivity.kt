@@ -195,7 +195,21 @@ class DrawingActivity : AppCompatActivity() {
                 }
             }
 
-            val anySessionActions = !pastedIds.isNullOrEmpty() || !deletedIds.isNullOrEmpty()
+            // Push move actions recorded during the index session onto the undo stack.
+            val movedIds       = data?.getStringExtra(PageIndexActivity.EXTRA_MOVED_PAGE_IDS)
+            val movedPrevAfter = data?.getStringExtra(PageIndexActivity.EXTRA_MOVED_PREV_AFTER_IDS)
+            val movedTargets   = data?.getStringExtra(PageIndexActivity.EXTRA_MOVED_TARGET_IDS)
+            if (!movedIds.isNullOrEmpty() && !movedTargets.isNullOrEmpty()) {
+                val ids     = movedIds.split(",")
+                val prevs   = movedPrevAfter?.split(",") ?: emptyList()
+                val targets = movedTargets.split(",")
+                ids.zip(targets).forEachIndexed { i, (pageId, targetId) ->
+                    val prevAfterId = prevs.getOrNull(i)?.takeIf { it.isNotEmpty() }
+                    undoRedoManager.push(UndoRedoAction.PageMoved(pageId, prevAfterId, targetId))
+                }
+            }
+
+            val anySessionActions = !pastedIds.isNullOrEmpty() || !deletedIds.isNullOrEmpty() || !movedIds.isNullOrEmpty()
             if (anySessionActions) updateUndoRedoButtons()
 
             val selected = data?.getIntExtra(PageIndexActivity.EXTRA_SELECTED_PAGE_INDEX, -1) ?: -1
@@ -203,7 +217,7 @@ class DrawingActivity : AppCompatActivity() {
                 // User tapped a card — navigate to that page (forces full reload).
                 selected >= 0 -> navigateToPage(selected)
                 // No card tapped but session actions occurred — reload in place so the
-                // pages list, page count, and canvas reflect the paste/delete changes.
+                // pages list, page count, and canvas reflect the paste/delete/move changes.
                 anySessionActions -> navigateToPage(currentPageIndex)
             }
         }
@@ -1575,6 +1589,29 @@ class DrawingActivity : AppCompatActivity() {
     }
 
     /**
+     * Reorders [pageId] to be immediately after [afterPageId] (or first if null).
+     * All page `order` values are reassigned sequentially in a single transaction.
+     * Must be called on [Dispatchers.IO] (called inside [withContext] in [executeAction]).
+     */
+    private suspend fun movePageToAfter(db: SoilDatabase, pageId: String, afterPageId: String?) {
+        db.withTransaction {
+            val dao = db.notebookDao()
+            val allPages = dao.getPagesSorted().toMutableList()
+            val movingIdx = allPages.indexOfFirst { it.id == pageId }
+            if (movingIdx < 0) return@withTransaction
+            val movingPage = allPages.removeAt(movingIdx)
+            val insertAt = if (afterPageId == null) {
+                0
+            } else {
+                val afterIdx = allPages.indexOfFirst { it.id == afterPageId }
+                if (afterIdx >= 0) afterIdx + 1 else allPages.size
+            }
+            allPages.add(insertAt, movingPage)
+            allPages.forEachIndexed { i, page -> dao.updateOrder(page.id, i) }
+        }
+    }
+
+    /**
      * Execute a single undo or redo [action].
      *
      * Called from the main-thread coroutine context (launched via [lifecycleScope]).
@@ -1801,6 +1838,13 @@ class DrawingActivity : AppCompatActivity() {
                     }
                     currentPageIndex = action.pageIndex
                 }
+            }
+
+            is UndoRedoAction.PageMoved -> withContext(Dispatchers.IO) {
+                // Undo: put the page back where it was; redo: put it at the target position.
+                val afterId = if (isUndo) action.previousAfterPageId else action.targetPageId
+                movePageToAfter(db, action.pageId, afterId)
+                // currentPageIndex is resolved by setupPageIds in the full reload below.
             }
         }
         // After each when-branch we are back on the main thread.

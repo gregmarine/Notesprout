@@ -46,6 +46,12 @@ class PageIndexActivity : AppCompatActivity() {
         const val EXTRA_DELETED_PAGE_INDICES  = "deleted_page_indices"
         /** Comma-separated deletedAt timestamps matching [EXTRA_DELETED_PAGE_IDS]. */
         const val EXTRA_DELETED_PAGE_TIMESTAMPS = "deleted_page_timestamps"
+        /** Comma-separated UUIDs of pages moved during this session (may be empty). */
+        const val EXTRA_MOVED_PAGE_IDS        = "moved_page_ids"
+        /** Comma-separated previous-after page IDs matching [EXTRA_MOVED_PAGE_IDS] (empty string = was first page). */
+        const val EXTRA_MOVED_PREV_AFTER_IDS  = "moved_prev_after_ids"
+        /** Comma-separated target-after page IDs matching [EXTRA_MOVED_PAGE_IDS]. */
+        const val EXTRA_MOVED_TARGET_IDS      = "moved_target_ids"
     }
 
     // ── Grid specification ────────────────────────────────────────────────────
@@ -86,7 +92,7 @@ class PageIndexActivity : AppCompatActivity() {
 
     private val snapshotDecodeJobs = mutableListOf<Job>()
 
-    // ── Action mode (long-press copy/paste) ───────────────────────────────────
+    // ── Action mode (long-press) and move mode ────────────────────────────────
 
     /** Index into [pages] of the card selected by a long-press. Null = normal mode. */
     private var actionModePageIndex: Int? = null
@@ -94,10 +100,22 @@ class PageIndexActivity : AppCompatActivity() {
     /** Page ID waiting to be pasted. Null means clipboard is empty. */
     private var pendingCopyPageId: String? = null
 
+    /** True while the user is picking a destination for a page move. */
+    private var isMoveMode: Boolean = false
+
+    /** ID of the page being moved (set when move mode is entered). */
+    private var moveModeSourcePageId: String? = null
+
+    /** Stable ID of the currently-open page in DrawingActivity — used to recompute
+     *  [currentPageIndex] after a move reshuffles the pages list. */
+    private var currentPageId: String? = null
+
     /** Paste operations performed this session — returned to DrawingActivity for undo/redo. */
     private val pastedActions  = mutableListOf<Pair<String, Int>>()          // (pageId, pageIndex)
     /** Delete operations performed this session — returned to DrawingActivity for undo/redo. */
     private val deletedActions = mutableListOf<Triple<String, Int, Long>>()  // (pageId, pageIndex, deletedAt)
+    /** Move operations performed this session — returned to DrawingActivity for undo/redo. */
+    private val movedActions   = mutableListOf<Triple<String, String?, String>>() // (pageId, prevAfterId, targetId)
 
     // ── Swipe gesture (left/right to paginate) ────────────────────────────────
 
@@ -136,17 +154,26 @@ class PageIndexActivity : AppCompatActivity() {
         currentPageIndex = intent.getIntExtra(EXTRA_CURRENT_PAGE_INDEX, 0)
 
         binding.btnBack.setOnClickListener {
-            if (actionModePageIndex != null) exitActionMode() else finishWithResult(null)
+            when {
+                isMoveMode -> cancelMoveMode()
+                actionModePageIndex != null -> exitActionMode()
+                else -> finishWithResult(null)
+            }
         }
 
         binding.btnCopyPage.setOnClickListener  { copySelectedPage() }
         binding.btnPastePage.setOnClickListener { executePaste() }
         binding.btnDeletePage.setOnClickListener { executeDelete() }
+        binding.btnMovePage.setOnClickListener  { enterMoveMode() }
 
-        // Back gesture exits action mode; if already in normal mode, return to DrawingActivity.
+        // Back gesture exits move/action mode; if already in normal mode, return to DrawingActivity.
         onBackPressedDispatcher.addCallback(this, object : androidx.activity.OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
-                if (actionModePageIndex != null) exitActionMode() else finishWithResult(null)
+                when {
+                    isMoveMode -> cancelMoveMode()
+                    actionModePageIndex != null -> exitActionMode()
+                    else -> finishWithResult(null)
+                }
             }
         })
 
@@ -182,6 +209,7 @@ class PageIndexActivity : AppCompatActivity() {
         val path = intent.getStringExtra(EXTRA_NOTEBOOK_PATH) ?: return
         lifecycleScope.launch {
             pages = withContext(Dispatchers.IO) { loadPagesFromSoil(path) }
+            currentPageId = pages.getOrNull(currentPageIndex)?.id
             // Jump to the grid page that contains the currently-open page.
             val spec = gridSpec
             if (spec != null && spec.itemsPerPage > 0) {
@@ -345,19 +373,24 @@ class PageIndexActivity : AppCompatActivity() {
     /**
      * Builds one card group:
      * ```
-     * [card FrameLayout — thick border if current page OR selected in action mode]
+     * [card FrameLayout — thick border if current page OR selected in action/move mode]
      *   [imageContainer FrameLayout — paperWhite, inset]
      *     [snapshotImage — GONE until bitmap decoded]
      * [rowGap Space]
      * [label "Page N"]
      * ```
-     * Normal tap: navigate to this page (or move action-mode selection).
+     * Normal tap: navigate to this page.
+     * Action mode tap (same card): navigate + exit action mode.
+     * Action mode tap (different card): move paste-target selection.
+     * Move mode tap (source card): cancel move, return to action mode.
+     * Move mode tap (any other card): execute move, return to normal mode.
      * Long press: enter action mode with this card selected.
      */
     private fun buildCardGroup(entry: PageEntry, spec: GridSpec): LinearLayout {
         val pageIndex  = entry.pageNumber - 1   // 0-based
         val isCurrent  = pageIndex == currentPageIndex
         val isSelected = pageIndex == actionModePageIndex
+        val isSource   = isMoveMode && pages.getOrNull(pageIndex)?.id == moveModeSourcePageId
 
         val group = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -365,11 +398,12 @@ class PageIndexActivity : AppCompatActivity() {
 
             setOnClickListener {
                 when {
-                    // Normal mode: navigate to the tapped page.
+                    isMoveMode -> {
+                        if (isSource) cancelMoveMode()
+                        else executeMoveAfter(pageIndex)
+                    }
                     actionModePageIndex == null -> finishWithResult(pageIndex)
-                    // Action mode, tapping the already-selected card: navigate + exit action mode.
                     pageIndex == actionModePageIndex -> { exitActionMode(); finishWithResult(pageIndex) }
-                    // Action mode, tapping a different card: move paste-target selection.
                     else -> { actionModePageIndex = pageIndex; renderGridPage() }
                 }
             }
@@ -381,9 +415,14 @@ class PageIndexActivity : AppCompatActivity() {
         }
 
         // ── Card ──────────────────────────────────────────────────────────────
-        // In action mode only the selected card is highlighted; outside action mode only the
-        // currently-open page is highlighted. Never show two cards highlighted at once.
-        val highlighted = if (actionModePageIndex != null) isSelected else isCurrent
+        // Move mode: highlight only the source card being moved.
+        // Action mode: highlight only the selected card.
+        // Normal mode: highlight only the currently-open page.
+        val highlighted = when {
+            isMoveMode -> isSource
+            actionModePageIndex != null -> isSelected
+            else -> isCurrent
+        }
         val card = FrameLayout(this).apply {
             setBackgroundResource(
                 if (highlighted) R.drawable.bg_page_card_current else R.drawable.shape_bordered
@@ -462,6 +501,7 @@ class PageIndexActivity : AppCompatActivity() {
         binding.btnPastePage.visibility  = android.view.View.VISIBLE
         binding.btnPastePage.isEnabled   = pendingCopyPageId != null
         binding.btnDeletePage.visibility = android.view.View.VISIBLE
+        binding.btnMovePage.visibility   = android.view.View.VISIBLE
         renderGridPage()
     }
 
@@ -470,7 +510,76 @@ class PageIndexActivity : AppCompatActivity() {
         binding.btnCopyPage.visibility   = android.view.View.GONE
         binding.btnPastePage.visibility  = android.view.View.GONE
         binding.btnDeletePage.visibility = android.view.View.GONE
+        binding.btnMovePage.visibility   = android.view.View.GONE
         renderGridPage()
+    }
+
+    // ── Move mode ─────────────────────────────────────────────────────────────
+
+    /** Enter move mode: hide action buttons, show "Move to…" title, keep source card highlighted. */
+    private fun enterMoveMode() {
+        val idx = actionModePageIndex ?: return
+        moveModeSourcePageId = pages.getOrNull(idx)?.id ?: return
+        isMoveMode = true
+        binding.btnCopyPage.visibility   = android.view.View.GONE
+        binding.btnPastePage.visibility  = android.view.View.GONE
+        binding.btnDeletePage.visibility = android.view.View.GONE
+        binding.btnMovePage.visibility   = android.view.View.GONE
+        binding.tvTopBarTitle.text = "Move to…"
+        renderGridPage()
+    }
+
+    /** Cancel move mode: restore action mode buttons and "Pages" title. */
+    private fun cancelMoveMode() {
+        isMoveMode = false
+        moveModeSourcePageId = null
+        binding.tvTopBarTitle.text = "Pages"
+        if (actionModePageIndex != null) {
+            binding.btnCopyPage.visibility   = android.view.View.VISIBLE
+            binding.btnPastePage.visibility  = android.view.View.VISIBLE
+            binding.btnPastePage.isEnabled   = pendingCopyPageId != null
+            binding.btnDeletePage.visibility = android.view.View.VISIBLE
+            binding.btnMovePage.visibility   = android.view.View.VISIBLE
+        }
+        renderGridPage()
+    }
+
+    /** Complete move mode: restore "Pages" title and return to normal mode. */
+    private fun completeMoveMode() {
+        isMoveMode = false
+        moveModeSourcePageId = null
+        binding.tvTopBarTitle.text = "Pages"
+        exitActionMode()  // hides all buttons, clears actionModePageIndex, re-renders
+    }
+
+    /** Move [moveModeSourcePageId] to immediately after the page at [destinationIndex]. */
+    private fun executeMoveAfter(destinationIndex: Int) {
+        val sourceId = moveModeSourcePageId ?: return
+        val targetId = pages.getOrNull(destinationIndex)?.id ?: return
+        if (sourceId == targetId) { cancelMoveMode(); return }
+        val path = intent.getStringExtra(EXTRA_NOTEBOOK_PATH) ?: return
+
+        lifecycleScope.launch {
+            val prevAfterResultRaw = withContext(Dispatchers.IO) {
+                com.notesprout.android.data.movePageAfterRaw(sourceId, targetId, path)
+            }
+            if (prevAfterResultRaw == null) { cancelMoveMode(); return@launch }
+
+            // "" = source was first page (no previous page); non-empty = UUID of previous page.
+            val prevAfterId: String? = prevAfterResultRaw.ifEmpty { null }
+
+            pages = withContext(Dispatchers.IO) { loadPagesFromSoil(path) }
+            movedActions.add(Triple(sourceId, prevAfterId, targetId))
+
+            // Recompute currentPageIndex by stable ID in case the move shifted it.
+            val cid = currentPageId
+            if (cid != null) {
+                val newIdx = pages.indexOfFirst { it.id == cid }
+                if (newIdx >= 0) currentPageIndex = newIdx
+            }
+
+            completeMoveMode()
+        }
     }
 
     /**
@@ -550,7 +659,7 @@ class PageIndexActivity : AppCompatActivity() {
         dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
     }
 
-    /** Encode all session paste/delete actions into the result and finish. */
+    /** Encode all session paste/delete/move actions into the result and finish. */
     private fun finishWithResult(selectedPageIndex: Int?) {
         val result = Intent()
         if (selectedPageIndex != null) {
@@ -564,6 +673,11 @@ class PageIndexActivity : AppCompatActivity() {
             result.putExtra(EXTRA_DELETED_PAGE_IDS,        deletedActions.joinToString(",") { it.first })
             result.putExtra(EXTRA_DELETED_PAGE_INDICES,    deletedActions.joinToString(",") { it.second.toString() })
             result.putExtra(EXTRA_DELETED_PAGE_TIMESTAMPS, deletedActions.joinToString(",") { it.third.toString() })
+        }
+        if (movedActions.isNotEmpty()) {
+            result.putExtra(EXTRA_MOVED_PAGE_IDS,       movedActions.joinToString(",") { it.first })
+            result.putExtra(EXTRA_MOVED_PREV_AFTER_IDS, movedActions.joinToString(",") { it.second ?: "" })
+            result.putExtra(EXTRA_MOVED_TARGET_IDS,     movedActions.joinToString(",") { it.third })
         }
         setResult(RESULT_OK, result)
         finish()

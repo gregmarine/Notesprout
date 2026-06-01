@@ -210,6 +210,65 @@ suspend fun copyPageAfterRaw(
 }
 
 /**
+ * Moves [pageId] to immediately after [targetPageId] by reassigning page `order` values.
+ *
+ * No rows are created or deleted — only `order` is updated.  Returns the ID of the page
+ * that was immediately before [pageId] prior to the move (null = [pageId] was first).
+ * Returns an empty string on success when [pageId] was the first page.
+ * Returns null on any failure.
+ *
+ * Used by [com.notesprout.android.PageIndexActivity] which operates without a Room instance.
+ * Must be called on [Dispatchers.IO].
+ */
+suspend fun movePageAfterRaw(
+    pageId: String,
+    targetPageId: String,
+    notebookPath: String,
+): String? = withContext(Dispatchers.IO) {
+    var db: SQLiteDatabase? = null
+    try {
+        db = SQLiteDatabase.openDatabase(notebookPath, null, SQLiteDatabase.OPEN_READWRITE)
+
+        data class PageOrder(val id: String, val order: Int)
+        val allPages: MutableList<PageOrder> = db.rawQuery(
+            "SELECT id, `order` FROM notebook WHERE type = 'page' AND deletedAt IS NULL ORDER BY `order` ASC",
+            null
+        ).use { c ->
+            val list = mutableListOf<PageOrder>()
+            while (c.moveToNext()) list.add(PageOrder(c.getString(0), c.getInt(1)))
+            list
+        }
+
+        val movingIdx = allPages.indexOfFirst { it.id == pageId }
+        if (movingIdx < 0) return@withContext null
+
+        val previousAfterPageId: String? = if (movingIdx > 0) allPages[movingIdx - 1].id else null
+
+        val movingPage = allPages.removeAt(movingIdx)
+        val targetIdx = allPages.indexOfFirst { it.id == targetPageId }
+        val insertAt = if (targetIdx >= 0) targetIdx + 1 else allPages.size
+        allPages.add(insertAt, movingPage)
+
+        db.beginTransaction()
+        try {
+            allPages.forEachIndexed { i, page ->
+                val cv = ContentValues().apply { put("`order`", i) }
+                db.update("notebook", cv, "id = ?", arrayOf(page.id))
+            }
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
+
+        previousAfterPageId ?: ""
+    } catch (_: Exception) {
+        null
+    } finally {
+        db?.close()
+    }
+}
+
+/**
  * Soft-deletes [pageId] and all its descendants (layer + strokes) using a single shared
  * timestamp, matching the pattern used by DrawingActivity's deletePage().
  *

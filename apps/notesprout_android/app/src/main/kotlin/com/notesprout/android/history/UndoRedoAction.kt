@@ -87,4 +87,20 @@ sealed class UndoRedoAction {
         val pageIndex: Int,
         val undoDeletedAt: Long = 0,
     ) : UndoRedoAction()
+
+    /**
+     * User moved a page to a new position — undo moves it back; redo moves it forward again.
+     *
+     * [previousAfterPageId] is the ID of the page that was immediately before the moved page
+     * before the move (null = the moved page was first). Used by undo to restore the original
+     * position. [targetPageId] is the page it was moved after; used by redo.
+     *
+     * Only [order] values are changed — no rows are created or deleted.
+     */
+    @Serializable
+    data class PageMoved(
+        val pageId: String,
+        val previousAfterPageId: String?,
+        val targetPageId: String,
+    ) : UndoRedoAction()
 }
