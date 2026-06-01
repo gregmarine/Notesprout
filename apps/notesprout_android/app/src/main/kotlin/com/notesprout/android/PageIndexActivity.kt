@@ -40,6 +40,12 @@ class PageIndexActivity : AppCompatActivity() {
         const val EXTRA_PASTED_PAGE_IDS       = "pasted_page_ids"
         /** Comma-separated 0-based indices matching [EXTRA_PASTED_PAGE_IDS]. */
         const val EXTRA_PASTED_PAGE_INDICES   = "pasted_page_indices"
+        /** Comma-separated UUIDs of pages deleted during this session (may be empty). */
+        const val EXTRA_DELETED_PAGE_IDS      = "deleted_page_ids"
+        /** Comma-separated 0-based indices matching [EXTRA_DELETED_PAGE_IDS]. */
+        const val EXTRA_DELETED_PAGE_INDICES  = "deleted_page_indices"
+        /** Comma-separated deletedAt timestamps matching [EXTRA_DELETED_PAGE_IDS]. */
+        const val EXTRA_DELETED_PAGE_TIMESTAMPS = "deleted_page_timestamps"
     }
 
     // ── Grid specification ────────────────────────────────────────────────────
@@ -89,7 +95,9 @@ class PageIndexActivity : AppCompatActivity() {
     private var pendingCopyPageId: String? = null
 
     /** Paste operations performed this session — returned to DrawingActivity for undo/redo. */
-    private val pastedActions = mutableListOf<Pair<String, Int>>()   // (pageId, pageIndex)
+    private val pastedActions  = mutableListOf<Pair<String, Int>>()          // (pageId, pageIndex)
+    /** Delete operations performed this session — returned to DrawingActivity for undo/redo. */
+    private val deletedActions = mutableListOf<Triple<String, Int, Long>>()  // (pageId, pageIndex, deletedAt)
 
     // ── Swipe gesture (left/right to paginate) ────────────────────────────────
 
@@ -133,6 +141,7 @@ class PageIndexActivity : AppCompatActivity() {
 
         binding.btnCopyPage.setOnClickListener  { copySelectedPage() }
         binding.btnPastePage.setOnClickListener { executePaste() }
+        binding.btnDeletePage.setOnClickListener { executeDelete() }
 
         // Back gesture exits action mode; if already in normal mode, return to DrawingActivity.
         onBackPressedDispatcher.addCallback(this, object : androidx.activity.OnBackPressedCallback(true) {
@@ -449,16 +458,18 @@ class PageIndexActivity : AppCompatActivity() {
 
     private fun enterActionMode(pageIndex: Int) {
         actionModePageIndex = pageIndex
-        binding.btnCopyPage.visibility  = android.view.View.VISIBLE
-        binding.btnPastePage.visibility = android.view.View.VISIBLE
-        binding.btnPastePage.isEnabled  = pendingCopyPageId != null
+        binding.btnCopyPage.visibility   = android.view.View.VISIBLE
+        binding.btnPastePage.visibility  = android.view.View.VISIBLE
+        binding.btnPastePage.isEnabled   = pendingCopyPageId != null
+        binding.btnDeletePage.visibility = android.view.View.VISIBLE
         renderGridPage()
     }
 
     private fun exitActionMode() {
         actionModePageIndex = null
-        binding.btnCopyPage.visibility  = android.view.View.GONE
-        binding.btnPastePage.visibility = android.view.View.GONE
+        binding.btnCopyPage.visibility   = android.view.View.GONE
+        binding.btnPastePage.visibility  = android.view.View.GONE
+        binding.btnDeletePage.visibility = android.view.View.GONE
         renderGridPage()
     }
 
@@ -500,7 +511,46 @@ class PageIndexActivity : AppCompatActivity() {
         }
     }
 
-    /** Encode all session paste actions into the result and finish. */
+    private fun executeDelete() {
+        val idx      = actionModePageIndex ?: return
+        val pageId   = pages.getOrNull(idx)?.id ?: return
+        val path     = intent.getStringExtra(EXTRA_NOTEBOOK_PATH) ?: return
+        val pageNum  = pages.getOrNull(idx)?.pageNumber ?: return
+
+        if (pages.size <= 1) {
+            android.widget.Toast.makeText(this, "Cannot delete the only page", android.widget.Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        val dialog = androidx.appcompat.app.AlertDialog.Builder(this)
+            .setMessage("Delete Page $pageNum?")
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Delete") { _, _ ->
+                lifecycleScope.launch {
+                    val deletedAt = withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        com.notesprout.android.data.deletePageRaw(pageId, path)
+                    }
+                    if (deletedAt == null) return@launch
+
+                    deletedActions.add(Triple(pageId, idx, deletedAt))
+
+                    // Adjust currentPageIndex for the removed page.
+                    if (idx < currentPageIndex) currentPageIndex--
+                    else if (idx == currentPageIndex) currentPageIndex = (idx - 1).coerceAtLeast(0)
+
+                    pages = withContext(kotlinx.coroutines.Dispatchers.IO) { loadPagesFromSoil(path) }
+                    // Clamp grid page in case we were on the last grid page and it's now empty.
+                    currentGridPage = currentGridPage.coerceIn(0, (totalGridPages() - 1).coerceAtLeast(0))
+                    exitActionMode()
+                }
+            }
+            .create()
+        dialog.show()
+        dialog.window?.setElevation(0f)
+        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+    }
+
+    /** Encode all session paste/delete actions into the result and finish. */
     private fun finishWithResult(selectedPageIndex: Int?) {
         val result = Intent()
         if (selectedPageIndex != null) {
@@ -509,6 +559,11 @@ class PageIndexActivity : AppCompatActivity() {
         if (pastedActions.isNotEmpty()) {
             result.putExtra(EXTRA_PASTED_PAGE_IDS,     pastedActions.joinToString(",") { it.first })
             result.putExtra(EXTRA_PASTED_PAGE_INDICES, pastedActions.joinToString(",") { it.second.toString() })
+        }
+        if (deletedActions.isNotEmpty()) {
+            result.putExtra(EXTRA_DELETED_PAGE_IDS,        deletedActions.joinToString(",") { it.first })
+            result.putExtra(EXTRA_DELETED_PAGE_INDICES,    deletedActions.joinToString(",") { it.second.toString() })
+            result.putExtra(EXTRA_DELETED_PAGE_TIMESTAMPS, deletedActions.joinToString(",") { it.third.toString() })
         }
         setResult(RESULT_OK, result)
         finish()

@@ -171,7 +171,7 @@ class DrawingActivity : AppCompatActivity() {
         if (result.resultCode == RESULT_OK) {
             val data = result.data
 
-            // Push any paste actions recorded during the index session onto the undo stack.
+            // Push paste actions recorded during the index session onto the undo stack.
             val pastedIds     = data?.getStringExtra(PageIndexActivity.EXTRA_PASTED_PAGE_IDS)
             val pastedIndices = data?.getStringExtra(PageIndexActivity.EXTRA_PASTED_PAGE_INDICES)
             if (!pastedIds.isNullOrEmpty() && !pastedIndices.isNullOrEmpty()) {
@@ -180,12 +180,31 @@ class DrawingActivity : AppCompatActivity() {
                 ids.zip(indices).forEach { (pageId, pageIndex) ->
                     undoRedoManager.push(UndoRedoAction.PagePasted(pageId, pageIndex))
                 }
-                updateUndoRedoButtons()
             }
 
+            // Push delete actions recorded during the index session onto the undo stack.
+            val deletedIds        = data?.getStringExtra(PageIndexActivity.EXTRA_DELETED_PAGE_IDS)
+            val deletedIndices    = data?.getStringExtra(PageIndexActivity.EXTRA_DELETED_PAGE_INDICES)
+            val deletedTimestamps = data?.getStringExtra(PageIndexActivity.EXTRA_DELETED_PAGE_TIMESTAMPS)
+            if (!deletedIds.isNullOrEmpty() && !deletedIndices.isNullOrEmpty() && !deletedTimestamps.isNullOrEmpty()) {
+                val ids        = deletedIds.split(",")
+                val indices    = deletedIndices.split(",").mapNotNull { it.toIntOrNull() }
+                val timestamps = deletedTimestamps.split(",").mapNotNull { it.toLongOrNull() }
+                ids.zip(indices).zip(timestamps).forEach { (idIndex, ts) ->
+                    undoRedoManager.push(UndoRedoAction.PageDeleted(idIndex.first, idIndex.second, ts))
+                }
+            }
+
+            val anySessionActions = !pastedIds.isNullOrEmpty() || !deletedIds.isNullOrEmpty()
+            if (anySessionActions) updateUndoRedoButtons()
+
             val selected = data?.getIntExtra(PageIndexActivity.EXTRA_SELECTED_PAGE_INDEX, -1) ?: -1
-            if (selected >= 0 && selected != currentPageIndex) {
-                navigateToPage(selected)
+            when {
+                // User tapped a card — navigate to that page (forces full reload).
+                selected >= 0 -> navigateToPage(selected)
+                // No card tapped but session actions occurred — reload in place so the
+                // pages list, page count, and canvas reflect the paste/delete changes.
+                anySessionActions -> navigateToPage(currentPageIndex)
             }
         }
     }

@@ -208,3 +208,45 @@ suspend fun copyPageAfterRaw(
         db?.close()
     }
 }
+
+/**
+ * Soft-deletes [pageId] and all its descendants (layer + strokes) using a single shared
+ * timestamp, matching the pattern used by DrawingActivity's deletePage().
+ *
+ * All three soft-delete calls use the same [deletedAt] so [restoreChildrenDeletedSince]
+ * can recover exactly those rows on undo.
+ *
+ * Returns the [deletedAt] timestamp on success, or null on any failure.
+ * Must be called on [Dispatchers.IO].
+ */
+suspend fun deletePageRaw(
+    pageId: String,
+    notebookPath: String,
+): Long? = withContext(Dispatchers.IO) {
+    var db: SQLiteDatabase? = null
+    try {
+        db = SQLiteDatabase.openDatabase(notebookPath, null, SQLiteDatabase.OPEN_READWRITE)
+        val deletedAt = System.currentTimeMillis()
+
+        val layerId = db.rawQuery(
+            "SELECT id FROM notebook WHERE type = 'layer' AND parentId = ? AND deletedAt IS NULL LIMIT 1",
+            arrayOf(pageId)
+        ).use { c -> if (c.moveToFirst()) c.getString(0) else null }
+
+        val cv = ContentValues().apply {
+            put("deletedAt", deletedAt)
+            put("updatedAt", deletedAt)
+        }
+        db.update("notebook", cv, "id = ?", arrayOf(pageId))
+        db.update("notebook", cv, "parentId = ? AND deletedAt IS NULL", arrayOf(pageId))
+        if (layerId != null) {
+            db.update("notebook", cv, "parentId = ? AND deletedAt IS NULL", arrayOf(layerId))
+        }
+
+        deletedAt
+    } catch (_: Exception) {
+        null
+    } finally {
+        db?.close()
+    }
+}
