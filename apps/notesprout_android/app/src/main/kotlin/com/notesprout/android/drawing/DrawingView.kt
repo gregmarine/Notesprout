@@ -1,6 +1,9 @@
 package com.notesprout.android.drawing
 
 import android.graphics.Bitmap
+import android.graphics.Path
+import android.graphics.PointF
+import android.graphics.RectF
 import android.view.View
 import com.notesprout.android.data.LiveStroke
 
@@ -51,6 +54,38 @@ interface DrawingView {
      * Set this in onCreate; null by default.
      */
     var onSnapshotReady: ((snapshot: String) -> Unit)?
+
+    // ── Lasso selection ───────────────────────────────────────────────────────
+
+    /**
+     * Activate or deactivate lasso mode.  In lasso mode the view ignores pen/eraser
+     * input and instead tracks freehand stylus gestures for selection.
+     * On Onyx devices this disables the EPD raw-drawing overlay so the lasso path can
+     * be rendered through the normal Android Canvas.
+     */
+    fun setLassoMode(active: Boolean) {}
+
+    /**
+     * Set the visual lasso overlay: [path] is the live dashed outline drawn while the
+     * stylus is down; [selectionBox] is the dashed bounding rect shown after lift.
+     * Pass null for either (or both) to clear that element.
+     */
+    fun setLassoOverlay(path: Path?, selectionBox: RectF?) {}
+
+    /**
+     * Fired on the main thread when the stylus lifts after a lasso gesture.
+     * [path] is the raw drawn path (not yet closed); [startPoint] is the first touch
+     * coordinate.  DrawingActivity closes the path, runs the hit test, and calls
+     * [setLassoOverlay] with the resulting selection box.
+     */
+    var onLassoComplete: ((path: Path, startPoint: PointF) -> Unit)?
+
+    /**
+     * Fired on the main thread on any touch (finger or stylus) when a selection box
+     * is currently displayed.  DrawingActivity uses this to dismiss the selection and
+     * restore the previous drawing tool.
+     */
+    var onLassoTapToDismiss: (() -> Unit)?
 
     /**
      * Replace the in-memory stroke list with [strokes] loaded from the database,

@@ -5,8 +5,10 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.Path
 import android.graphics.Rect
 import android.graphics.RectF
+import android.graphics.Region
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -78,6 +80,13 @@ class DrawingActivity : AppCompatActivity() {
     private lateinit var binding: ActivityDrawingBinding
     private lateinit var drawingView: DrawingView
     private var isEraserActive = false
+
+    // ── Lasso selection state ─────────────────────────────────────────────────
+    private var isLassoMode = false
+    private enum class DrawingTool { PEN, ERASER }
+    private var lastNonLassoTool = DrawingTool.PEN
+    /** IDs of objects selected by the most recent lasso gesture. */
+    val selectedObjectIds = mutableSetOf<String>()
 
     // ── Two-finger page swipe state ───────────────────────────────────────────
     // GestureDetector is single-finger only.  We use a VelocityTracker + a
@@ -365,19 +374,28 @@ class DrawingActivity : AppCompatActivity() {
 
         // Pen tool button — activates pen mode (default)
         binding.btnPen.setOnClickListener {
+            if (isLassoMode) exitLassoMode(restorePreviousTool = false)
             if (isEraserActive) {
                 isEraserActive = false
                 drawingView.setEraserMode(false)
             }
             binding.btnPen.isSelected = true
             binding.btnEraser.isSelected = false
+            binding.btnLasso.isSelected = false
         }
 
         binding.btnEraser.setOnClickListener {
+            if (isLassoMode) exitLassoMode(restorePreviousTool = false)
             isEraserActive = !isEraserActive
             drawingView.setEraserMode(isEraserActive)
             binding.btnEraser.isSelected = isEraserActive
             binding.btnPen.isSelected = !isEraserActive
+            binding.btnLasso.isSelected = false
+        }
+
+        binding.btnLasso.setOnClickListener {
+            if (!isLassoMode) enterLassoMode()
+            // Tapping active lasso button is a no-op.
         }
 
         // TODO: implement toolbar show/hide UX
@@ -415,6 +433,7 @@ class DrawingActivity : AppCompatActivity() {
         // Initial tool state: pen is selected by default
         binding.btnPen.isSelected = true
         binding.btnEraser.isSelected = false
+        binding.btnLasso.isSelected = false
 
         // ── Back press ────────────────────────────────────────────────────────
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
@@ -480,6 +499,65 @@ class DrawingActivity : AppCompatActivity() {
                     withContext(Dispatchers.IO) { persistSnapshot(db, pageId, snapshot) }
                 }
             }
+        }
+
+        // Lasso gesture complete — auto-close the path and run hit test off main thread.
+        drawingView.onLassoComplete = { drawnPath, startPoint ->
+            // Auto-close: straight line from end back to start, then close polygon.
+            drawnPath.lineTo(startPoint.x, startPoint.y)
+            drawnPath.close()
+
+            val strokeSnapshot = drawingView.getStrokes()
+            lifecycleScope.launch(Dispatchers.Default) {
+                val lassoBounds = RectF()
+                drawnPath.computeBounds(lassoBounds, true)
+
+                // Minimum size guard: ignore accidental taps / trivially small paths.
+                val density = resources.displayMetrics.density
+                val minPx = 10f * density
+                if (lassoBounds.width() < minPx && lassoBounds.height() < minPx) return@launch
+
+                // Build a Region from the closed lasso polygon for point-in-polygon tests.
+                val clipRect = Rect(
+                    (lassoBounds.left   - 1f).toInt().coerceAtLeast(0),
+                    (lassoBounds.top    - 1f).toInt().coerceAtLeast(0),
+                    (lassoBounds.right  + 1f).toInt(),
+                    (lassoBounds.bottom + 1f).toInt(),
+                )
+                val lassoRegion = Region()
+                lassoRegion.setPath(drawnPath, Region(clipRect))
+
+                val hitIds   = mutableSetOf<String>()
+                val unionBounds = RectF()
+
+                for (stroke in strokeSnapshot) {
+                    // Phase 1: AABB pre-filter — O(1) per stroke.
+                    if (!RectF.intersects(lassoBounds, stroke.boundingBox)) continue
+                    // Phase 2: any stroke point inside the lasso polygon?
+                    for (pt in stroke.points) {
+                        if (lassoRegion.contains(pt.x.toInt(), pt.y.toInt())) {
+                            hitIds.add(stroke.id)
+                            unionBounds.union(stroke.boundingBox)
+                            break
+                        }
+                    }
+                }
+
+                withContext(Dispatchers.Main) {
+                    if (hitIds.isEmpty()) return@withContext  // nothing caught — stay in lasso mode idle
+                    selectedObjectIds.clear()
+                    selectedObjectIds.addAll(hitIds)
+                    // Pad the bounding box slightly so the dashed rect doesn't sit on the ink.
+                    val pad = 8f * resources.displayMetrics.density
+                    unionBounds.inset(-pad, -pad)
+                    drawingView.setLassoOverlay(null, unionBounds)
+                }
+            }
+        }
+
+        // Tap to dismiss: clear the selection and restore the previous drawing tool.
+        drawingView.onLassoTapToDismiss = {
+            exitLassoMode(restorePreviousTool = true)
         }
 
         binding.drawingContainer.addView(
@@ -1572,6 +1650,53 @@ class DrawingActivity : AppCompatActivity() {
      */
     private fun updateUndoRedoButtons() {
         // No-op — buttons are statically enabled in the layout and never tinted.
+    }
+
+    // ── Lasso mode helpers ────────────────────────────────────────────────────
+
+    private fun enterLassoMode() {
+        lastNonLassoTool = if (isEraserActive) DrawingTool.ERASER else DrawingTool.PEN
+        isLassoMode = true
+        // Ensure the drawing engine is in a neutral state before handing off to lasso.
+        if (isEraserActive) {
+            isEraserActive = false
+            drawingView.setEraserMode(false)
+        }
+        drawingView.setLassoMode(true)
+        binding.btnLasso.isSelected  = true
+        binding.btnPen.isSelected    = false
+        binding.btnEraser.isSelected = false
+    }
+
+    /**
+     * Exit lasso mode, clearing all selection state.
+     * If [restorePreviousTool] is true, reverts to whichever pen/eraser was active
+     * before lasso was entered (used on tap-to-dismiss).  If false, the caller is
+     * responsible for activating the desired tool (used when the user explicitly taps
+     * a different toolbar button).
+     */
+    private fun exitLassoMode(restorePreviousTool: Boolean) {
+        isLassoMode = false
+        selectedObjectIds.clear()
+        drawingView.setLassoMode(false)  // also clears overlay via setLassoMode(false) in the view
+        binding.btnLasso.isSelected = false
+
+        if (restorePreviousTool) {
+            when (lastNonLassoTool) {
+                DrawingTool.PEN -> {
+                    isEraserActive = false
+                    drawingView.setEraserMode(false)
+                    binding.btnPen.isSelected    = true
+                    binding.btnEraser.isSelected = false
+                }
+                DrawingTool.ERASER -> {
+                    isEraserActive = true
+                    drawingView.setEraserMode(true)
+                    binding.btnEraser.isSelected = true
+                    binding.btnPen.isSelected    = false
+                }
+            }
+        }
     }
 
     private fun performUndo() {

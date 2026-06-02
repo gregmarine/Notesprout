@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.DashPathEffect
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.PointF
@@ -24,8 +25,8 @@ class GenericDrawingView(context: Context) : View(context), DrawingView {
 
     companion object {
         private const val ERASER_RADIUS_PX = 15f
-        // Maximum frequency for redrawCanvas() during an active erase gesture (~16fps).
         private const val ERASE_REDRAW_INTERVAL_MS = 60L
+        private const val LASSO_REFRESH_INTERVAL_MS = 60L
     }
 
     private val activePoints = ArrayList<PointF>()
@@ -33,8 +34,6 @@ class GenericDrawingView(context: Context) : View(context), DrawingView {
     private var renderCanvas: Canvas? = null
     private var isEraserActive = false
 
-    // Timestamp of the last redrawCanvas() triggered by erasing — throttled to
-    // ERASE_REDRAW_INTERVAL_MS so a fast swipe doesn't queue dozens of full redraws.
     private var lastEraseRedrawMs = 0L
 
     /** Template bitmap — drawn as the base layer behind all strokes. Null = white background. */
@@ -52,23 +51,31 @@ class GenericDrawingView(context: Context) : View(context), DrawingView {
         strokeWidth = 2.5f
     }
 
+    // ── Lasso state ──────────────────────────────────────────────────────────
+
+    private var isLassoMode = false
+    private var lassoOverlayPath: Path? = null
+    private var lassoSelectionBox: RectF? = null
+    private var lassoGestureStartPoint: PointF? = null
+    private var lassoGesturePath: Path? = null
+    private var lastLassoRefreshMs = 0L
+
+    private val lassoPaint = Paint().apply {
+        style = Paint.Style.STROKE
+        color = Color.BLACK
+        strokeWidth = 2f
+        pathEffect = DashPathEffect(floatArrayOf(12f, 8f), 0f)
+        strokeCap = Paint.Cap.ROUND
+        isAntiAlias = false
+    }
+
     // ── DrawingView callbacks ────────────────────────────────────────────────
 
-    /** Invoked (on main thread) when a stroke is removed by erasing. */
     override var onStrokeErased: ((String) -> Unit)? = null
-
-    /**
-     * Invoked (on main thread) immediately on ACTION_UP after each stroke.
-     * The activity uses this to incrementally save new strokes to the database.
-     */
     override var onPenLifted: (() -> Unit)? = null
-
-    /**
-     * Invoked (on main thread) at non-writing transition boundaries when a snapshot
-     * of the current strokes has been captured.  DrawingActivity wires this to persist
-     * the snapshot to the page's data JSON in the database.
-     */
     override var onSnapshotReady: ((String) -> Unit)? = null
+    override var onLassoComplete: ((Path, PointF) -> Unit)? = null
+    override var onLassoTapToDismiss: (() -> Unit)? = null
 
     // ── Touch handling ───────────────────────────────────────────────────────
 
@@ -86,8 +93,9 @@ class GenericDrawingView(context: Context) : View(context), DrawingView {
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
+        if (isLassoMode) return handleLassoTouch(event)
+
         val toolType = event.getToolType(0)
-        // Accept stylus tip and physical eraser end; reject finger touch
         if (toolType != MotionEvent.TOOL_TYPE_STYLUS && toolType != MotionEvent.TOOL_TYPE_ERASER) return false
 
         val erasing = toolType == MotionEvent.TOOL_TYPE_ERASER || isEraserActive
@@ -100,7 +108,6 @@ class GenericDrawingView(context: Context) : View(context), DrawingView {
             }
             MotionEvent.ACTION_MOVE -> {
                 val newPoints = mutableListOf<PointF>()
-                // Capture historical points for smoother high-speed strokes
                 for (i in 0 until event.historySize) {
                     newPoints.add(PointF(event.getHistoricalX(i), event.getHistoricalY(i)))
                 }
@@ -115,13 +122,10 @@ class GenericDrawingView(context: Context) : View(context), DrawingView {
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                 if (erasing) {
                     eraseAtPath(listOf(PointF(event.x, event.y)))
-                    // Flush any throttled-but-not-yet-drawn removals so the final
-                    // state is always rendered correctly on pen lift.
                     finalizeEraseRedraw()
                 } else {
                     activePoints.add(PointF(event.x, event.y))
                     commitActiveStroke()
-                    // Persist new strokes immediately on pen lift.
                     onPenLifted?.invoke()
                 }
                 activePoints.clear()
@@ -131,15 +135,59 @@ class GenericDrawingView(context: Context) : View(context), DrawingView {
         return true
     }
 
+    private fun handleLassoTouch(event: MotionEvent): Boolean {
+        val toolType = event.getToolType(0)
+
+        // Any touch while a selection box is visible dismisses the selection.
+        if (lassoSelectionBox != null && event.actionMasked == MotionEvent.ACTION_DOWN) {
+            onLassoTapToDismiss?.invoke()
+            return true
+        }
+
+        // Only stylus builds the lasso path; finger taps fall through to false.
+        if (toolType != MotionEvent.TOOL_TYPE_STYLUS) return false
+
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                lassoGesturePath = Path().also { it.moveTo(event.x, event.y) }
+                lassoGestureStartPoint = PointF(event.x, event.y)
+            }
+            MotionEvent.ACTION_MOVE -> {
+                val path = lassoGesturePath ?: return true
+                for (i in 0 until event.historySize) {
+                    path.lineTo(event.getHistoricalX(i), event.getHistoricalY(i))
+                }
+                path.lineTo(event.x, event.y)
+                val now = System.currentTimeMillis()
+                if (now - lastLassoRefreshMs >= LASSO_REFRESH_INTERVAL_MS) {
+                    lastLassoRefreshMs = now
+                    lassoOverlayPath = path
+                    invalidate()
+                }
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                val path = lassoGesturePath ?: return true
+                val start = lassoGestureStartPoint ?: return true
+                for (i in 0 until event.historySize) {
+                    path.lineTo(event.getHistoricalX(i), event.getHistoricalY(i))
+                }
+                path.lineTo(event.x, event.y)
+                lassoGesturePath = null
+                lassoGestureStartPoint = null
+                lassoOverlayPath = null
+                invalidate()
+                onLassoComplete?.invoke(path, start)
+            }
+        }
+        return true
+    }
+
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
-        // renderBitmap has template + committed strokes baked in; draw it over white fallback.
         canvas.drawColor(Color.WHITE)
         renderBitmap?.let { canvas.drawBitmap(it, 0f, 0f, null) }
 
-        // Draw active stroke preview on top of committed bitmap (pen mode only).
-        // In eraser mode there is no in-progress visual; strokes disappear on lift.
-        if (!isEraserActive && activePoints.size >= 2) {
+        if (!isEraserActive && !isLassoMode && activePoints.size >= 2) {
             val path = Path()
             path.moveTo(activePoints[0].x, activePoints[0].y)
             for (i in 1 until activePoints.size) {
@@ -147,6 +195,10 @@ class GenericDrawingView(context: Context) : View(context), DrawingView {
             }
             canvas.drawPath(path, strokePaint)
         }
+
+        // Lasso overlay — drawn on top of everything.
+        lassoOverlayPath?.let { canvas.drawPath(it, lassoPaint) }
+        lassoSelectionBox?.let { canvas.drawRect(it, lassoPaint) }
     }
 
     private fun commitActiveStroke() {
@@ -264,9 +316,27 @@ class GenericDrawingView(context: Context) : View(context), DrawingView {
     // ── DrawingView interface ────────────────────────────────────────────────
 
     override fun asView(): View = this
-    override fun setToolbarHeight(heightPx: Int) {} // no limit rect needed; toolbar is above canvas in z-order
+    override fun setToolbarHeight(heightPx: Int) {}
     override fun enableDrawing() {}
     override fun disableDrawing() {}
+
+    override fun setLassoMode(active: Boolean) {
+        isLassoMode = active
+        if (!active) {
+            lassoOverlayPath = null
+            lassoSelectionBox = null
+            lassoGestureStartPoint = null
+            lassoGesturePath = null
+            invalidate()
+        }
+    }
+
+    override fun setLassoOverlay(path: Path?, selectionBox: RectF?) {
+        lassoOverlayPath = path
+        lassoSelectionBox = selectionBox
+        invalidate()
+    }
+
     override fun setEraserMode(active: Boolean) {
         if (active) {
             // Capture snapshot BEFORE erasing begins — strokes still in memory at this point.
