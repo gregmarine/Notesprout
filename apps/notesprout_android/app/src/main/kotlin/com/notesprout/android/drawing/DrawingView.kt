@@ -65,6 +65,25 @@ interface DrawingView {
      */
     fun setLassoMode(active: Boolean) {}
 
+    // ── Lasso eraser ──────────────────────────────────────────────────────────
+
+    /**
+     * Activate or deactivate lasso eraser mode.  Gesture capture is identical to lasso
+     * selection, but on gesture end the view runs the two-phase hit test internally and
+     * fires [onLassoEraseComplete] with the IDs of hit strokes instead of handing the
+     * raw path back to the activity.
+     * On Onyx devices this disables the EPD raw-drawing overlay identically to [setLassoMode].
+     */
+    fun setLassoEraserMode(active: Boolean) {}
+
+    /**
+     * Fired on the main thread when the lasso eraser gesture completes and at least one
+     * stroke was hit.  [erasedIds] is the list of stroke IDs that intersect the closed
+     * lasso path.  DrawingActivity wires this to soft-delete those rows, update the
+     * in-memory stroke list, and push a [UndoRedoAction.LassoErased] action.
+     */
+    var onLassoEraseComplete: ((erasedIds: List<String>) -> Unit)?
+
     /**
      * Set the visual lasso overlay: [path] is the live dashed outline drawn while the
      * stylus is down; [selectionBox] is the dashed bounding rect shown after lift.

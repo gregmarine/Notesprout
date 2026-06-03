@@ -10,6 +10,7 @@ import android.graphics.Path
 import android.graphics.PointF
 import android.graphics.RectF
 import android.util.Base64
+import android.graphics.Region
 import android.view.MotionEvent
 import android.view.View
 import com.notesprout.android.data.LiveStroke
@@ -54,11 +55,16 @@ class GenericDrawingView(context: Context) : View(context), DrawingView {
     // ── Lasso state ──────────────────────────────────────────────────────────
 
     private var isLassoMode = false
+    private var isLassoEraserMode = false
     private var lassoOverlayPath: Path? = null
     private var lassoSelectionBox: RectF? = null
     private var lassoGestureStartPoint: PointF? = null
     private var lassoGesturePath: Path? = null
     private var lastLassoRefreshMs = 0L
+
+    private var lassoEraserDisplayPath: Path? = null
+    private val lassoEraserRandom = java.util.Random()
+    private fun jitter() = (lassoEraserRandom.nextFloat() - 0.5f) * 8f
 
     private val lassoPaint = Paint().apply {
         style = Paint.Style.STROKE
@@ -69,6 +75,15 @@ class GenericDrawingView(context: Context) : View(context), DrawingView {
         isAntiAlias = false
     }
 
+    private val lassoEraserPaint = Paint().apply {
+        style = Paint.Style.STROKE
+        color = Color.argb(255, 150, 150, 150)
+        strokeWidth = 5f
+        strokeCap = Paint.Cap.ROUND
+        strokeJoin = Paint.Join.ROUND
+        isAntiAlias = false
+    }
+
     // ── DrawingView callbacks ────────────────────────────────────────────────
 
     override var onStrokeErased: ((String) -> Unit)? = null
@@ -76,6 +91,7 @@ class GenericDrawingView(context: Context) : View(context), DrawingView {
     override var onSnapshotReady: ((String) -> Unit)? = null
     override var onLassoComplete: ((Path, PointF) -> Unit)? = null
     override var onLassoTapToDismiss: (() -> Unit)? = null
+    override var onLassoEraseComplete: ((List<String>) -> Unit)? = null
 
     // ── Touch handling ───────────────────────────────────────────────────────
 
@@ -94,6 +110,7 @@ class GenericDrawingView(context: Context) : View(context), DrawingView {
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
         if (isLassoMode) return handleLassoTouch(event)
+        if (isLassoEraserMode) return handleLassoEraserTouch(event)
 
         val toolType = event.getToolType(0)
         if (toolType != MotionEvent.TOOL_TYPE_STYLUS && toolType != MotionEvent.TOOL_TYPE_ERASER) return false
@@ -211,8 +228,12 @@ class GenericDrawingView(context: Context) : View(context), DrawingView {
         }
 
         // Lasso overlay — drawn on top of everything.
-        lassoOverlayPath?.let { canvas.drawPath(it, lassoPaint) }
-        lassoSelectionBox?.let { canvas.drawRect(it, lassoPaint) }
+        if (isLassoEraserMode) {
+            lassoEraserDisplayPath?.let { canvas.drawPath(it, lassoEraserPaint) }
+        } else {
+            lassoOverlayPath?.let { canvas.drawPath(it, lassoPaint) }
+            lassoSelectionBox?.let { canvas.drawRect(it, lassoPaint) }
+        }
     }
 
     private fun commitActiveStroke() {
@@ -343,6 +364,111 @@ class GenericDrawingView(context: Context) : View(context), DrawingView {
             lassoGesturePath = null
             invalidate()
         }
+    }
+
+    override fun setLassoEraserMode(active: Boolean) {
+        isLassoEraserMode = active
+        if (!active) {
+            lassoOverlayPath       = null
+            lassoEraserDisplayPath = null
+            lassoGestureStartPoint = null
+            lassoGesturePath       = null
+            invalidate()
+        }
+    }
+
+    private fun handleLassoEraserTouch(event: MotionEvent): Boolean {
+        if (event.getToolType(0) != MotionEvent.TOOL_TYPE_STYLUS) return false
+
+        val tapThresholdPx = 8f * resources.displayMetrics.density
+
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                lassoEraserDisplayPath = null
+                invalidate()
+                lassoGesturePath = Path().also { it.moveTo(event.x, event.y) }
+                lassoEraserDisplayPath = Path().also { it.moveTo(event.x, event.y) }
+                lassoGestureStartPoint = PointF(event.x, event.y)
+            }
+            MotionEvent.ACTION_MOVE -> {
+                val path = lassoGesturePath ?: return true
+                val display = lassoEraserDisplayPath
+                for (i in 0 until event.historySize) {
+                    val hx = event.getHistoricalX(i)
+                    val hy = event.getHistoricalY(i)
+                    path.lineTo(hx, hy)
+                    display?.lineTo(hx + jitter(), hy + jitter())
+                }
+                path.lineTo(event.x, event.y)
+                display?.lineTo(event.x + jitter(), event.y + jitter())
+                val now = System.currentTimeMillis()
+                if (now - lastLassoRefreshMs >= LASSO_REFRESH_INTERVAL_MS) {
+                    lastLassoRefreshMs = now
+                    invalidate()
+                }
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                val path  = lassoGesturePath       ?: return true
+                val start = lassoGestureStartPoint ?: return true
+                for (i in 0 until event.historySize) {
+                    path.lineTo(event.getHistoricalX(i), event.getHistoricalY(i))
+                }
+                path.lineTo(event.x, event.y)
+                lassoGesturePath       = null
+                lassoGestureStartPoint = null
+                lassoEraserDisplayPath = null
+                invalidate()
+                val dx = event.x - start.x
+                val dy = event.y - start.y
+                if (Math.sqrt((dx * dx + dy * dy).toDouble()).toFloat() >= tapThresholdPx) {
+                    performLassoErase(path, start)
+                }
+                // Tap: clear overlay, stay in lasso eraser mode (no further action needed).
+            }
+        }
+        return true
+    }
+
+    private fun performLassoErase(drawnPath: Path, startPoint: PointF) {
+        drawnPath.lineTo(startPoint.x, startPoint.y)
+        drawnPath.close()
+        val strokeSnapshot = strokes.toList()
+        Thread {
+            val hitIds = runLassoHitTest(drawnPath, strokeSnapshot)
+            post {
+                lassoOverlayPath       = null
+                lassoEraserDisplayPath = null
+                invalidate()
+                if (hitIds.isNotEmpty()) {
+                    onLassoEraseComplete?.invoke(hitIds)
+                }
+            }
+        }.start()
+    }
+
+    private fun runLassoHitTest(path: Path, strokes: List<LiveStroke>): List<String> {
+        val bounds = RectF()
+        path.computeBounds(bounds, true)
+        if (bounds.width() < 10f || bounds.height() < 10f) return emptyList()
+        val clipRect = android.graphics.Rect(
+            (bounds.left   - 1f).toInt().coerceAtLeast(0),
+            (bounds.top    - 1f).toInt().coerceAtLeast(0),
+            (bounds.right  + 1f).toInt(),
+            (bounds.bottom + 1f).toInt(),
+        )
+        val region = Region()
+        region.setPath(path, Region(clipRect))
+        val hitIds = mutableListOf<String>()
+        for (stroke in strokes) {
+            if (!RectF.intersects(bounds, stroke.boundingBox)) continue
+            for (pt in stroke.points) {
+                if (region.contains(pt.x.toInt(), pt.y.toInt())) {
+                    hitIds.add(stroke.id)
+                    break
+                }
+            }
+        }
+        return hitIds
     }
 
     override fun setLassoOverlay(path: Path?, selectionBox: RectF?) {

@@ -19,7 +19,7 @@
          On BOOX, setLimitRect excludes this region from pen input.
          Height is 56dp to comfortably fit 44dp icon buttons + padding.
          toolbar_background drawable provides the 1dp inkBlack bottom border.
-         Order left to right: close | divider | pen | eraser | lasso | clear | divider | undo | redo | divider | template | page index | divider | insert before | insert after | delete | copy | paste -->
+         Order left to right: close | divider | pen | eraser | lasso eraser | clear | lasso | divider | undo | redo | divider | template | page index | divider | insert before | insert after | delete | copy | paste -->
     <LinearLayout
         android:id="@+id/drawingToolbar"
         android:layout_width="match_parent"
@@ -69,13 +69,13 @@
             android:src="@drawable/ic_eraser"
             android:contentDescription="Eraser tool" />
 
-        <!-- Lasso selection tool -->
+        <!-- Lasso eraser tool -->
         <androidx.appcompat.widget.AppCompatImageButton
-            android:id="@+id/btnLasso"
+            android:id="@+id/btnLassoEraser"
             style="@style/Widget.NoteSprout.ToolbarButton"
             android:layout_marginStart="4dp"
-            android:src="@drawable/ic_lasso"
-            android:contentDescription="Lasso selection" />
+            android:src="@drawable/ic_lasso_eraser"
+            android:contentDescription="Lasso eraser" />
 
         <!-- Clear page -->
         <androidx.appcompat.widget.AppCompatImageButton
@@ -84,6 +84,14 @@
             android:layout_marginStart="4dp"
             android:src="@drawable/ic_clear"
             android:contentDescription="Clear page" />
+
+        <!-- Lasso selection tool -->
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnLasso"
+            style="@style/Widget.NoteSprout.ToolbarButton"
+            android:layout_marginStart="4dp"
+            android:src="@drawable/ic_lasso"
+            android:contentDescription="Lasso selection" />
 
         <!-- Divider before undo/redo -->
         <View

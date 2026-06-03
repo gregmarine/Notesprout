@@ -103,4 +103,14 @@ sealed class UndoRedoAction {
         val previousAfterPageId: String?,
         val targetPageId: String,
     ) : UndoRedoAction()
+
+    /**
+     * User erased a batch of strokes via the lasso eraser tool — undo restores all of them;
+     * redo soft-deletes them again as a single atomic batch.
+     */
+    @Serializable
+    data class LassoErased(
+        val strokeIds: List<String>,
+        val pageId: String,
+    ) : UndoRedoAction()
 }

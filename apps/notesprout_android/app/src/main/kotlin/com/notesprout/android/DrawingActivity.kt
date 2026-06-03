@@ -83,6 +83,7 @@ class DrawingActivity : AppCompatActivity() {
 
     // ── Lasso selection state ─────────────────────────────────────────────────
     private var isLassoMode = false
+    private var isLassoEraserMode = false
     private enum class DrawingTool { PEN, ERASER }
     private var lastNonLassoTool = DrawingTool.PEN
     /** IDs of objects selected by the most recent lasso gesture. */
@@ -375,25 +376,35 @@ class DrawingActivity : AppCompatActivity() {
         // Pen tool button — activates pen mode (default)
         binding.btnPen.setOnClickListener {
             if (isLassoMode) exitLassoMode(restorePreviousTool = false)
+            if (isLassoEraserMode) exitLassoEraserMode()
             if (isEraserActive) {
                 isEraserActive = false
                 drawingView.setEraserMode(false)
             }
             binding.btnPen.isSelected = true
             binding.btnEraser.isSelected = false
+            binding.btnLassoEraser.isSelected = false
             binding.btnLasso.isSelected = false
         }
 
         binding.btnEraser.setOnClickListener {
             if (isLassoMode) exitLassoMode(restorePreviousTool = false)
+            if (isLassoEraserMode) exitLassoEraserMode()
             isEraserActive = !isEraserActive
             drawingView.setEraserMode(isEraserActive)
             binding.btnEraser.isSelected = isEraserActive
             binding.btnPen.isSelected = !isEraserActive
+            binding.btnLassoEraser.isSelected = false
             binding.btnLasso.isSelected = false
         }
 
+        binding.btnLassoEraser.setOnClickListener {
+            if (!isLassoEraserMode) enterLassoEraserMode()
+            // Tapping the active lasso eraser button is a no-op.
+        }
+
         binding.btnLasso.setOnClickListener {
+            if (isLassoEraserMode) exitLassoEraserMode()
             if (!isLassoMode) enterLassoMode()
             // Tapping active lasso button is a no-op.
         }
@@ -433,6 +444,7 @@ class DrawingActivity : AppCompatActivity() {
         // Initial tool state: pen is selected by default
         binding.btnPen.isSelected = true
         binding.btnEraser.isSelected = false
+        binding.btnLassoEraser.isSelected = false
         binding.btnLasso.isSelected = false
 
         // ── Back press ────────────────────────────────────────────────────────
@@ -559,6 +571,36 @@ class DrawingActivity : AppCompatActivity() {
         // Tap to dismiss: clear the selection and restore the previous drawing tool.
         drawingView.onLassoTapToDismiss = {
             exitLassoMode(restorePreviousTool = true)
+        }
+
+        // Lasso eraser gesture complete — soft-delete hit strokes and push undo action.
+        drawingView.onLassoEraseComplete = { erasedIds ->
+            val pageId = currentPageId.takeIf { it.isNotEmpty() }
+            if (erasedIds.isNotEmpty() && pageId != null) {
+                lifecycleScope.launch(Dispatchers.IO) {
+                    val now = System.currentTimeMillis()
+                    erasedIds.forEach { id ->
+                        soilDatabase?.notebookDao()?.softDeleteById(id, now)
+                    }
+                    withContext(Dispatchers.Main) {
+                        val erasedSet = erasedIds.toSet()
+                        val updatedStrokes = drawingView.getStrokes().filter { it.id !in erasedSet }
+                        persistedStrokeIds.removeAll(erasedSet)
+                        drawingView.setStrokeListSilently(updatedStrokes)
+                        undoRedoManager.push(UndoRedoAction.LassoErased(erasedIds.toList(), pageId))
+                        updateUndoRedoButtons()
+                        val templateBmp = currentTemplateBitmap
+                        val bitmap = withContext(Dispatchers.IO) {
+                            drawingView.buildRenderBitmap(updatedStrokes, templateBmp)
+                        }
+                        if (bitmap != null) {
+                            drawingView.loadStrokesWithBitmap(updatedStrokes, bitmap, templateBmp)
+                        } else {
+                            drawingView.loadStrokes(updatedStrokes)
+                        }
+                    }
+                }
+            }
         }
 
         binding.drawingContainer.addView(
@@ -1700,6 +1742,26 @@ class DrawingActivity : AppCompatActivity() {
         }
     }
 
+    private fun enterLassoEraserMode() {
+        if (isLassoMode) exitLassoMode(restorePreviousTool = false)
+        if (isEraserActive) {
+            isEraserActive = false
+            drawingView.setEraserMode(false)
+        }
+        isLassoEraserMode = true
+        drawingView.setLassoEraserMode(true)
+        binding.btnLassoEraser.isSelected = true
+        binding.btnPen.isSelected         = false
+        binding.btnEraser.isSelected      = false
+        binding.btnLasso.isSelected       = false
+    }
+
+    private fun exitLassoEraserMode() {
+        isLassoEraserMode = false
+        drawingView.setLassoEraserMode(false)
+        binding.btnLassoEraser.isSelected = false
+    }
+
     private fun performUndo() {
         val db = soilDatabase ?: return
         val action = undoRedoManager.undo() ?: return
@@ -1765,11 +1827,80 @@ class DrawingActivity : AppCompatActivity() {
         val targetPageId: String? = when (action) {
             is UndoRedoAction.StrokeAdded     -> action.pageId
             is UndoRedoAction.StrokeErased    -> action.pageId
+            is UndoRedoAction.LassoErased     -> action.pageId
             is UndoRedoAction.TemplateChanged -> action.pageId
             is UndoRedoAction.PageCleared     -> action.pageId
             else                              -> null
         }
         val isCrossPage = targetPageId != null && targetPageId != currentPageId
+
+        // ── Cross-page LassoErased: two-phase display (multi-stroke batch) ────
+        if (isCrossPage && action is UndoRedoAction.LassoErased) {
+            val snapshot      = drawingView.captureSnapshot()
+            val leavingPageId = currentPageId
+            withContext(Dispatchers.IO) {
+                if (snapshot != null && leavingPageId.isNotEmpty()) {
+                    persistSnapshot(db, leavingPageId, snapshot)
+                }
+                saveStrokes(db)
+            }
+            currentPageIndex = pages.indexOfFirst { it.id == action.pageId }.coerceAtLeast(0)
+
+            val templateBmp: Bitmap?
+            val preUndoStrokes: List<LiveStroke>
+            withContext(Dispatchers.IO) {
+                setupPageIds(db)
+                templateBmp    = loadPageTemplateFromDb(db)
+                preUndoStrokes = deserializeStrokesFromDb(db)
+            }
+            val preUndobitmap = withContext(Dispatchers.IO) {
+                drawingView.buildRenderBitmap(preUndoStrokes, templateBmp)
+            }
+            if (preUndobitmap != null) {
+                drawingView.loadStrokesWithBitmap(preUndoStrokes, preUndobitmap, templateBmp)
+            } else {
+                drawingView.loadStrokes(preUndoStrokes)
+            }
+            currentTemplateBitmap = templateBmp
+            updatePageIndicator()
+            saveLastOpenedPage(currentPageId)
+
+            withContext(Dispatchers.IO) {
+                if (isUndo) action.strokeIds.forEach { dao.restoreById(it, now) }
+                else        action.strokeIds.forEach { dao.softDeleteById(it, now) }
+            }
+
+            val idsSet = action.strokeIds.toSet()
+            val updatedStrokes: List<LiveStroke>
+            if (!isUndo) {
+                // Redo: re-erase → remove from in-memory list.
+                updatedStrokes = preUndoStrokes.filter { it.id !in idsSet }
+                persistedStrokeIds.removeAll(idsSet)
+            } else {
+                // Undo: restore → fetch from DB and add to list.
+                val restoredStrokes = withContext(Dispatchers.IO) {
+                    action.strokeIds.mapNotNull { id ->
+                        dao.getObjectById(id)?.let { obj ->
+                            try { LiveStroke(id = obj.id, points = StrokeData.fromJson(obj.data).toPointFs()) }
+                            catch (e: Exception) {
+                                Log.e(TAG, "executeAction LassoErased: failed to deserialize $id", e); null
+                            }
+                        }
+                    }
+                }
+                updatedStrokes = buildList { addAll(preUndoStrokes); addAll(restoredStrokes) }
+                restoredStrokes.forEach { persistedStrokeIds.add(it.id) }
+            }
+            val bitmap = withContext(Dispatchers.IO) {
+                drawingView.buildRenderBitmap(updatedStrokes, templateBmp)
+            }
+            if (bitmap != null) {
+                drawingView.loadStrokesWithBitmap(updatedStrokes, bitmap, templateBmp)
+            } else {
+                drawingView.loadStrokes(updatedStrokes)
+            }
+            return
+        }
 
         // ── Cross-page stroke: two-phase display ──────────────────────────────
         // Phase 1 displays the target page in its pre-undo state so the user sees
@@ -1972,8 +2103,50 @@ class DrawingActivity : AppCompatActivity() {
                 movePageToAfter(db, action.pageId, afterId)
                 // currentPageIndex is resolved by setupPageIds in the full reload below.
             }
+
+            is UndoRedoAction.LassoErased -> withContext(Dispatchers.IO) {
+                if (isUndo) action.strokeIds.forEach { dao.restoreById(it, now) }
+                else        action.strokeIds.forEach { dao.softDeleteById(it, now) }
+            }
         }
         // After each when-branch we are back on the main thread.
+
+        // ── Step 3a-batch: Same-page LassoErased — optimised in-memory update ─
+        if (action is UndoRedoAction.LassoErased) {
+            val idsSet = action.strokeIds.toSet()
+            val updatedStrokes: List<LiveStroke>
+            if (!isUndo) {
+                // Redo: re-erase → remove from in-memory list.
+                updatedStrokes = drawingView.getStrokes().filter { it.id !in idsSet }
+                persistedStrokeIds.removeAll(idsSet)
+            } else {
+                // Undo: restore → fetch from DB and append to list.
+                val restoredStrokes = withContext(Dispatchers.IO) {
+                    action.strokeIds.mapNotNull { id ->
+                        dao.getObjectById(id)?.let { obj ->
+                            try { LiveStroke(id = obj.id, points = StrokeData.fromJson(obj.data).toPointFs()) }
+                            catch (e: Exception) {
+                                Log.e(TAG, "executeAction LassoErased: failed to deserialize $id", e); null
+                            }
+                        }
+                    }
+                }
+                updatedStrokes = buildList { addAll(drawingView.getStrokes()); addAll(restoredStrokes) }
+                restoredStrokes.forEach { persistedStrokeIds.add(it.id) }
+            }
+            val templateBmp = currentTemplateBitmap
+            val bitmap = withContext(Dispatchers.IO) {
+                drawingView.buildRenderBitmap(updatedStrokes, templateBmp)
+            }
+            if (bitmap != null) {
+                drawingView.loadStrokesWithBitmap(updatedStrokes, bitmap, templateBmp)
+            } else {
+                drawingView.loadStrokes(updatedStrokes)
+            }
+            updatePageIndicator()
+            saveLastOpenedPage(currentPageId)
+            return
+        }
 
         // ── Step 3a: Same-page stroke — optimised in-memory update ────────────
         // No clearCanvas(); one EPD handoff via loadStrokesWithBitmap.

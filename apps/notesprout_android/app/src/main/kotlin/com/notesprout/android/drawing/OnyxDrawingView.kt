@@ -10,6 +10,7 @@ import android.graphics.Path
 import android.graphics.PointF
 import android.graphics.Rect
 import android.graphics.RectF
+import android.graphics.Region
 import android.util.Base64
 import android.util.Log
 import android.view.MotionEvent
@@ -88,11 +89,17 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
     // ── Lasso state ──────────────────────────────────────────────────────────
 
     private var isLassoMode = false
+    private var isLassoEraserMode = false
     private var lassoOverlayPath: Path? = null
     private var lassoSelectionBox: RectF? = null
     private var lassoGestureStartPoint: PointF? = null
     private var lassoGesturePath: Path? = null
     private var lastLassoRefreshMs = 0L
+
+    // Lasso eraser display path: jitter baked in at point-add time so the grain is
+    // static — no per-frame re-randomisation from PathEffect.
+    private var lassoEraserDisplayPath: Path? = null
+    private val lassoEraserRandom = java.util.Random()
 
     private val lassoPaint = Paint().apply {
         style = Paint.Style.STROKE
@@ -102,6 +109,20 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
         strokeCap = Paint.Cap.ROUND
         isAntiAlias = false
     }
+
+    // Grainy/scratchy stroke for lasso eraser — DiscretePathEffect adds random jitter
+    // to each segment, giving a chalk/eraser feel distinct from the selection lasso.
+    // No PathEffect — jitter is baked into the path at draw time so the grain is static.
+    private val lassoEraserPaint = Paint().apply {
+        style = Paint.Style.STROKE
+        color = Color.argb(255, 150, 150, 150)
+        strokeWidth = 5f
+        strokeCap = Paint.Cap.ROUND
+        strokeJoin = Paint.Join.ROUND
+        isAntiAlias = false
+    }
+
+    private fun jitter() = (lassoEraserRandom.nextFloat() - 0.5f) * 8f  // ±4px
 
     // ── DrawingView callbacks ────────────────────────────────────────────────
 
@@ -123,13 +144,14 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
     override var onSnapshotReady: ((String) -> Unit)? = null
     override var onLassoComplete: ((Path, PointF) -> Unit)? = null
     override var onLassoTapToDismiss: (() -> Unit)? = null
+    override var onLassoEraseComplete: ((List<String>) -> Unit)? = null
 
     // ── Raw input callback ───────────────────────────────────────────────────
 
     private val rawInputCallback = object : RawInputCallback() {
         override fun onBeginRawDrawing(shortcutDrawing: Boolean, touchPoint: TouchPoint) {
-            epd("ON_BEGIN_RAW_DRAWING isEraserMode=$isEraserMode isLassoMode=$isLassoMode isSetup=$isSetup")
-            if (isLassoMode) return
+            epd("ON_BEGIN_RAW_DRAWING isEraserMode=$isEraserMode isLassoMode=$isLassoMode isLassoEraserMode=$isLassoEraserMode isSetup=$isSetup")
+            if (isLassoMode || isLassoEraserMode) return
             if (isSetup && !isEraserMode) {
                 touchHelper.setRawDrawingRenderEnabled(true)
                 epd("RENDER_ENABLED caller=onBeginRawDrawing")
@@ -140,8 +162,8 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
         }
 
         override fun onEndRawDrawing(shortcutDrawing: Boolean, touchPoint: TouchPoint) {
-            epd("ON_END_RAW_DRAWING isEraserMode=$isEraserMode isLassoMode=$isLassoMode")
-            if (isLassoMode) return
+            epd("ON_END_RAW_DRAWING isEraserMode=$isEraserMode isLassoMode=$isLassoMode isLassoEraserMode=$isLassoEraserMode")
+            if (isLassoMode || isLassoEraserMode) return
             if (isEraserMode) {
                 // Flush any throttled-but-not-yet-drawn erase removals before the EPD repaint.
                 finalizeEraseRedraw()
@@ -157,12 +179,12 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
         }
 
         override fun onRawDrawingTouchPointMoveReceived(touchPoint: TouchPoint) {
-            if (isLassoMode) return
+            if (isLassoMode || isLassoEraserMode) return
             if (isEraserMode) eraseAtPath(listOf(PointF(touchPoint.x, touchPoint.y)))
         }
 
         override fun onRawDrawingTouchPointListReceived(pointList: TouchPointList) {
-            if (isLassoMode) return
+            if (isLassoMode || isLassoEraserMode) return
             // When software eraser mode is active the SDK still routes pen-tip events here.
             if (isEraserMode) {
                 Log.d(TAG, "onRawDrawingTouchPointListReceived (eraser mode) count=${pointList.size()}")
@@ -404,6 +426,7 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
         if (isLassoMode) return handleLassoTouch(event)
+        if (isLassoEraserMode) return handleLassoEraserTouch(event)
         return if (isSetup) touchHelper.onTouchEvent(event) else super.onTouchEvent(event)
     }
 
@@ -476,8 +499,12 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
         renderBitmap?.let { canvas.drawBitmap(it, 0f, 0f, null) } ?: canvas.drawColor(Color.WHITE)
 
         // Lasso overlay — drawn on top of everything.
-        lassoOverlayPath?.let { canvas.drawPath(it, lassoPaint) }
-        lassoSelectionBox?.let { canvas.drawRect(it, lassoPaint) }
+        if (isLassoEraserMode) {
+            lassoEraserDisplayPath?.let { canvas.drawPath(it, lassoEraserPaint) }
+        } else {
+            lassoOverlayPath?.let { canvas.drawPath(it, lassoPaint) }
+            lassoSelectionBox?.let { canvas.drawRect(it, lassoPaint) }
+        }
     }
 
     override fun onDetachedFromWindow() {
@@ -550,13 +577,151 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
                 EpdController.handwritingRepaint(this, Rect(0, 0, width, height))
                 epd("HANDWRITING_REPAINT caller=setLassoMode_exit")
                 post {
-                    if (isSetup) {
+                    if (isSetup && !isLassoMode && !isLassoEraserMode) {
                         touchHelper.setRawDrawingEnabled(true)
                         epd("RAW_DRAWING_ENABLED true caller=setLassoMode_exit")
                     }
                 }
             }
         }
+    }
+
+    override fun setLassoEraserMode(active: Boolean) {
+        epd("SET_LASSO_ERASER_MODE active=$active isSetup=$isSetup")
+        isLassoEraserMode = active
+        if (active) {
+            if (isSetup) {
+                touchHelper.setRawDrawingEnabled(false)
+                epd("RAW_DRAWING_ENABLED false caller=setLassoEraserMode_active")
+                touchHelper.setRawDrawingRenderEnabled(false)
+                epd("RENDER_DISABLED caller=setLassoEraserMode_active")
+                invalidate()
+                epd("INVALIDATE caller=setLassoEraserMode_active")
+            }
+        } else {
+            lassoOverlayPath       = null
+            lassoEraserDisplayPath = null
+            lassoGestureStartPoint = null
+            lassoGesturePath       = null
+            invalidate()
+            epd("INVALIDATE caller=setLassoEraserMode_exit")
+            post {
+                EpdController.handwritingRepaint(this, Rect(0, 0, width, height))
+                epd("HANDWRITING_REPAINT caller=setLassoEraserMode_exit")
+                post {
+                    if (isSetup && !isLassoMode && !isLassoEraserMode) {
+                        touchHelper.setRawDrawingEnabled(true)
+                        epd("RAW_DRAWING_ENABLED true caller=setLassoEraserMode_exit")
+                    }
+                }
+            }
+        }
+    }
+
+    private fun handleLassoEraserTouch(event: MotionEvent): Boolean {
+        if (event.getToolType(0) != MotionEvent.TOOL_TYPE_STYLUS) return false
+
+        val tapThresholdPx = 8f * resources.displayMetrics.density
+
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                lassoEraserDisplayPath = null
+                invalidate()
+                epd("INVALIDATE caller=lassoEraserDown")
+                lassoGesturePath = Path().also { it.moveTo(event.x, event.y) }
+                lassoEraserDisplayPath = Path().also { it.moveTo(event.x, event.y) }
+                lassoGestureStartPoint = PointF(event.x, event.y)
+            }
+            MotionEvent.ACTION_MOVE -> {
+                val path = lassoGesturePath ?: return true
+                val display = lassoEraserDisplayPath
+                for (i in 0 until event.historySize) {
+                    val hx = event.getHistoricalX(i)
+                    val hy = event.getHistoricalY(i)
+                    path.lineTo(hx, hy)
+                    display?.lineTo(hx + jitter(), hy + jitter())
+                }
+                path.lineTo(event.x, event.y)
+                display?.lineTo(event.x + jitter(), event.y + jitter())
+                val now = System.currentTimeMillis()
+                if (now - lastLassoRefreshMs >= LASSO_REFRESH_INTERVAL_MS) {
+                    lastLassoRefreshMs = now
+                    invalidate()
+                    epd("INVALIDATE caller=lassoEraserMove")
+                }
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                val path  = lassoGesturePath       ?: return true
+                val start = lassoGestureStartPoint ?: return true
+                for (i in 0 until event.historySize) {
+                    path.lineTo(event.getHistoricalX(i), event.getHistoricalY(i))
+                }
+                path.lineTo(event.x, event.y)
+                lassoGesturePath       = null
+                lassoGestureStartPoint = null
+                lassoEraserDisplayPath = null
+                invalidate()
+                epd("INVALIDATE caller=lassoEraserUp")
+                val dx = event.x - start.x
+                val dy = event.y - start.y
+                if (Math.sqrt((dx * dx + dy * dy).toDouble()).toFloat() < tapThresholdPx) {
+                    // Tap: clear overlay, stay in lasso eraser mode.
+                    post {
+                        EpdController.handwritingRepaint(this, Rect(0, 0, width, height))
+                        epd("HANDWRITING_REPAINT caller=lassoEraserTap")
+                    }
+                } else {
+                    performLassoErase(path, start)
+                }
+            }
+        }
+        return true
+    }
+
+    private fun performLassoErase(drawnPath: Path, startPoint: PointF) {
+        drawnPath.lineTo(startPoint.x, startPoint.y)
+        drawnPath.close()
+        val strokeSnapshot = strokes.toList()
+        Thread {
+            val hitIds = runLassoHitTest(drawnPath, strokeSnapshot)
+            post {
+                // Clear overlay regardless of result.
+                lassoOverlayPath       = null
+                lassoEraserDisplayPath = null
+                invalidate()
+                epd("INVALIDATE caller=performLassoErase_result")
+                EpdController.handwritingRepaint(this, Rect(0, 0, width, height))
+                epd("HANDWRITING_REPAINT caller=performLassoErase_result hitCount=${hitIds.size}")
+                if (hitIds.isNotEmpty()) {
+                    onLassoEraseComplete?.invoke(hitIds)
+                }
+            }
+        }.start()
+    }
+
+    private fun runLassoHitTest(path: Path, strokes: List<LiveStroke>): List<String> {
+        val bounds = RectF()
+        path.computeBounds(bounds, true)
+        if (bounds.width() < 10f || bounds.height() < 10f) return emptyList()
+        val clipRect = Rect(
+            (bounds.left   - 1f).toInt().coerceAtLeast(0),
+            (bounds.top    - 1f).toInt().coerceAtLeast(0),
+            (bounds.right  + 1f).toInt(),
+            (bounds.bottom + 1f).toInt(),
+        )
+        val region = Region()
+        region.setPath(path, Region(clipRect))
+        val hitIds = mutableListOf<String>()
+        for (stroke in strokes) {
+            if (!RectF.intersects(bounds, stroke.boundingBox)) continue
+            for (pt in stroke.points) {
+                if (region.contains(pt.x.toInt(), pt.y.toInt())) {
+                    hitIds.add(stroke.id)
+                    break
+                }
+            }
+        }
+        return hitIds
     }
 
     override fun setLassoOverlay(path: Path?, selectionBox: RectF?) {
@@ -616,7 +781,7 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
             EpdController.handwritingRepaint(this, Rect(0, 0, width, height))
             epd("HANDWRITING_REPAINT caller=setTemplate")
             post {
-                if (isSetup) {
+                if (isSetup && !isLassoMode && !isLassoEraserMode) {
                     touchHelper.setRawDrawingEnabled(true)
                     epd("RAW_DRAWING_ENABLED true caller=setTemplate")
                 }
@@ -645,7 +810,7 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
             EpdController.handwritingRepaint(this, Rect(0, 0, width, height))
             epd("HANDWRITING_REPAINT caller=clearCanvas")
             post {
-                if (isSetup) {
+                if (isSetup && !isLassoMode && !isLassoEraserMode) {
                     touchHelper.setRawDrawingEnabled(true)
                     epd("RAW_DRAWING_ENABLED true caller=clearCanvas")
                 }
@@ -730,7 +895,7 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
             EpdController.handwritingRepaint(this, Rect(0, 0, width, height))
             epd("HANDWRITING_REPAINT caller=loadStrokesWithBitmap")
             post {
-                if (isSetup) {
+                if (isSetup && !isLassoMode && !isLassoEraserMode) {
                     touchHelper.setRawDrawingEnabled(true)
                     epd("RAW_DRAWING_ENABLED true caller=loadStrokesWithBitmap")
                 }
