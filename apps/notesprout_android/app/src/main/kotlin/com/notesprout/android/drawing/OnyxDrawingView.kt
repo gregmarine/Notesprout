@@ -410,8 +410,10 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
     private fun handleLassoTouch(event: MotionEvent): Boolean {
         val toolType = event.getToolType(0)
 
-        // Any touch while a selection box is visible dismisses the selection.
-        if (lassoSelectionBox != null && event.actionMasked == MotionEvent.ACTION_DOWN) {
+        // Finger tap with an active selection dismisses it.
+        if (toolType != MotionEvent.TOOL_TYPE_STYLUS
+            && lassoSelectionBox != null
+            && event.actionMasked == MotionEvent.ACTION_DOWN) {
             onLassoTapToDismiss?.invoke()
             return true
         }
@@ -419,8 +421,15 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
         // Only stylus builds the lasso path; finger taps fall through.
         if (toolType != MotionEvent.TOOL_TYPE_STYLUS) return false
 
+        val tapThresholdPx = 8f * resources.displayMetrics.density
+
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
+                // Clear any existing selection so the user sees immediate feedback.
+                lassoSelectionBox  = null
+                lassoOverlayPath   = null
+                invalidate()
+                epd("INVALIDATE caller=lassoDown-clearSelection")
                 lassoGesturePath = Path().also { it.moveTo(event.x, event.y) }
                 lassoGestureStartPoint = PointF(event.x, event.y)
             }
@@ -450,7 +459,13 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
                 lassoOverlayPath       = null
                 invalidate()
                 epd("INVALIDATE caller=lassoUp")
-                onLassoComplete?.invoke(path, start)
+                val dx = event.x - start.x
+                val dy = event.y - start.y
+                if (Math.sqrt((dx * dx + dy * dy).toDouble()).toFloat() < tapThresholdPx) {
+                    onLassoTapToDismiss?.invoke()
+                } else {
+                    onLassoComplete?.invoke(path, start)
+                }
             }
         }
         return true

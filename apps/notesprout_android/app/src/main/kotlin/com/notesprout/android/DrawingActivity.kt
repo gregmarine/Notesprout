@@ -507,6 +507,7 @@ class DrawingActivity : AppCompatActivity() {
             drawnPath.lineTo(startPoint.x, startPoint.y)
             drawnPath.close()
 
+            selectedObjectIds.clear()
             val strokeSnapshot = drawingView.getStrokes()
             lifecycleScope.launch(Dispatchers.Default) {
                 val lassoBounds = RectF()
