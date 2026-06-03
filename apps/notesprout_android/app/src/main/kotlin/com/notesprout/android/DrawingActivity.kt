@@ -84,8 +84,6 @@ class DrawingActivity : AppCompatActivity() {
     // ── Lasso selection state ─────────────────────────────────────────────────
     private var isLassoMode = false
     private var isLassoEraserMode = false
-    private enum class DrawingTool { PEN, ERASER }
-    private var lastNonLassoTool = DrawingTool.PEN
     /** IDs of objects selected by the most recent lasso gesture. */
     val selectedObjectIds = mutableSetOf<String>()
 
@@ -375,7 +373,7 @@ class DrawingActivity : AppCompatActivity() {
 
         // Pen tool button — activates pen mode (default)
         binding.btnPen.setOnClickListener {
-            if (isLassoMode) exitLassoMode(restorePreviousTool = false)
+            if (isLassoMode) exitLassoMode()
             if (isLassoEraserMode) exitLassoEraserMode()
             if (isEraserActive) {
                 isEraserActive = false
@@ -388,7 +386,7 @@ class DrawingActivity : AppCompatActivity() {
         }
 
         binding.btnEraser.setOnClickListener {
-            if (isLassoMode) exitLassoMode(restorePreviousTool = false)
+            if (isLassoMode) exitLassoMode()
             if (isLassoEraserMode) exitLassoEraserMode()
             isEraserActive = !isEraserActive
             drawingView.setEraserMode(isEraserActive)
@@ -568,9 +566,10 @@ class DrawingActivity : AppCompatActivity() {
             }
         }
 
-        // Tap to dismiss: clear the selection and restore the previous drawing tool.
+        // Tap to dismiss: clear the selection visual but stay in lasso mode.
         drawingView.onLassoTapToDismiss = {
-            exitLassoMode(restorePreviousTool = true)
+            selectedObjectIds.clear()
+            drawingView.setLassoOverlay(null, null)
         }
 
         // Lasso eraser gesture complete — soft-delete hit strokes and push undo action.
@@ -1698,7 +1697,6 @@ class DrawingActivity : AppCompatActivity() {
     // ── Lasso mode helpers ────────────────────────────────────────────────────
 
     private fun enterLassoMode() {
-        lastNonLassoTool = if (isEraserActive) DrawingTool.ERASER else DrawingTool.PEN
         isLassoMode = true
         // Ensure the drawing engine is in a neutral state before handing off to lasso.
         if (isEraserActive) {
@@ -1711,39 +1709,16 @@ class DrawingActivity : AppCompatActivity() {
         binding.btnEraser.isSelected = false
     }
 
-    /**
-     * Exit lasso mode, clearing all selection state.
-     * If [restorePreviousTool] is true, reverts to whichever pen/eraser was active
-     * before lasso was entered (used on tap-to-dismiss).  If false, the caller is
-     * responsible for activating the desired tool (used when the user explicitly taps
-     * a different toolbar button).
-     */
-    private fun exitLassoMode(restorePreviousTool: Boolean) {
+    /** Exit lasso mode, clearing all selection state. The caller is responsible for activating the desired tool. */
+    private fun exitLassoMode() {
         isLassoMode = false
         selectedObjectIds.clear()
-        drawingView.setLassoMode(false)  // also clears overlay via setLassoMode(false) in the view
+        drawingView.setLassoMode(false)
         binding.btnLasso.isSelected = false
-
-        if (restorePreviousTool) {
-            when (lastNonLassoTool) {
-                DrawingTool.PEN -> {
-                    isEraserActive = false
-                    drawingView.setEraserMode(false)
-                    binding.btnPen.isSelected    = true
-                    binding.btnEraser.isSelected = false
-                }
-                DrawingTool.ERASER -> {
-                    isEraserActive = true
-                    drawingView.setEraserMode(true)
-                    binding.btnEraser.isSelected = true
-                    binding.btnPen.isSelected    = false
-                }
-            }
-        }
     }
 
     private fun enterLassoEraserMode() {
-        if (isLassoMode) exitLassoMode(restorePreviousTool = false)
+        if (isLassoMode) exitLassoMode()
         if (isEraserActive) {
             isEraserActive = false
             drawingView.setEraserMode(false)

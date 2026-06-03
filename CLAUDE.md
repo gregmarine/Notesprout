@@ -406,7 +406,9 @@ Completed:
 
 - ✂️ Pruning: Lasso Eraser correctness fixes — all `setRawDrawingEnabled(true)` re-enable calls in `OnyxDrawingView` (`loadStrokesWithBitmap`, `clearCanvas`, `setTemplate`, `setLassoMode` exit, `setLassoEraserMode` exit) now guarded by `!isLassoMode && !isLassoEraserMode` to prevent the BOOX hardware EPD stylus path from re-activating mid-lasso and rendering phantom pen strokes; fixes phantom stroke after first lasso-erase, unresponsive state on zero-hit second gesture, and broken lasso↔lasso-eraser tool switching (deferred `post {}` chain was racing with the incoming tool's synchronous disable call)
 
+- ✂️ Pruning: Lasso Selection Tool — remain active until tool change — lasso selection now matches lasso eraser's "stay until switched" behavior; completing a gesture (with or without hits) stays in lasso mode; tap-to-dismiss clears the selection visual but stays in lasso mode; `lastNonLassoTool` tracking and `DrawingTool` enum removed; `exitLassoMode(restorePreviousTool)` parameter removed — callers are only the explicit tool-button tap handlers
+
 Next up: TBD — discuss before starting.
 
 ---
-*Last updated: 🌱 New Branch — Lasso Eraser Tool*
+*Last updated: ✂️ Pruning — Lasso Selection Tool remain active until tool change*
