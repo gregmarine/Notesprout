@@ -18,6 +18,7 @@ import android.view.View
 import android.view.ViewTreeObserver
 import com.notesprout.android.data.LiveStroke
 import com.onyx.android.sdk.api.device.epd.EpdController
+import com.onyx.android.sdk.api.device.epd.UpdateMode
 import com.onyx.android.sdk.data.note.TouchPoint
 import com.onyx.android.sdk.pen.RawInputCallback
 import com.onyx.android.sdk.pen.TouchHelper
@@ -101,6 +102,19 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
     private var lassoEraserDisplayPath: Path? = null
     private val lassoEraserRandom = java.util.Random()
 
+    // ── Lasso drag move state ────────────────────────────────────────────────
+
+    private var isDragMoveActive = false
+    private var dragStartX = 0f
+    private var dragStartY = 0f
+    private var dragThresholdMet = false
+    private var dragDx = 0f
+    private var dragDy = 0f
+    // Deep copies of selected strokes captured at drag start (pre-move point data).
+    private var dragOriginalStrokes: List<LiveStroke> = emptyList()
+    // Backing bitmap: all non-selected strokes + template, built once at drag start.
+    private var dragBackingBitmap: Bitmap? = null
+
     private val lassoPaint = Paint().apply {
         style = Paint.Style.STROKE
         color = Color.BLACK
@@ -145,6 +159,8 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
     override var onLassoComplete: ((Path, PointF) -> Unit)? = null
     override var onLassoTapToDismiss: (() -> Unit)? = null
     override var onLassoEraseComplete: ((List<String>) -> Unit)? = null
+    override var lassoSelectedIds: Set<String> = emptySet()
+    override var onStrokesMoved: ((List<LiveStroke>, List<LiveStroke>) -> Unit)? = null
 
     // ── Raw input callback ───────────────────────────────────────────────────
 
@@ -441,14 +457,31 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
             return true
         }
 
-        // Only stylus builds the lasso path; finger taps fall through.
+        // Only stylus builds the lasso path / drag; finger taps fall through.
         if (toolType != MotionEvent.TOOL_TYPE_STYLUS) return false
 
-        val tapThresholdPx = 8f * resources.displayMetrics.density
+        val thresholdPx = DRAG_THRESHOLD_DP * resources.displayMetrics.density
 
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
-                // Clear any existing selection so the user sees immediate feedback.
+                // Check if pen-down is inside the current selection box — if so, start a drag.
+                val box = lassoSelectionBox
+                if (box != null && lassoSelectedIds.isNotEmpty() && box.contains(event.x, event.y)) {
+                    isDragMoveActive = true
+                    dragStartX = event.x; dragStartY = event.y
+                    dragThresholdMet = false
+                    dragDx = 0f; dragDy = 0f
+                    // Deep-copy selected strokes — these are the original positions before any drag.
+                    dragOriginalStrokes = strokes
+                        .filter { it.id in lassoSelectedIds }
+                        .map { LiveStroke(it.id, it.points.map { pt -> PointF(pt.x, pt.y) }) }
+                    // Build backing bitmap without selected strokes (held for duration of drag).
+                    val nonSelected = strokes.filter { it.id !in lassoSelectedIds }
+                    dragBackingBitmap = buildRenderBitmap(nonSelected, templateBitmap)
+                    epd("DRAG_START selected=${lassoSelectedIds.size}")
+                    return true
+                }
+                // Normal lasso: clear any existing selection so the user sees immediate feedback.
                 lassoSelectionBox  = null
                 lassoOverlayPath   = null
                 invalidate()
@@ -457,6 +490,29 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
                 lassoGestureStartPoint = PointF(event.x, event.y)
             }
             MotionEvent.ACTION_MOVE -> {
+                if (isDragMoveActive) {
+                    val dx = event.x - dragStartX
+                    val dy = event.y - dragStartY
+                    if (!dragThresholdMet) {
+                        val dist = Math.sqrt((dx * dx + dy * dy).toDouble()).toFloat()
+                        if (dist >= thresholdPx) {
+                            dragThresholdMet = true
+                            // Switch to A2 fast mode for responsive visual feedback during drag.
+                            EpdController.setViewDefaultUpdateMode(this, UpdateMode.GU_FAST)
+                            epd("DRAG_THRESHOLD_MET dist=$dist A2_MODE_ON")
+                        }
+                    }
+                    if (dragThresholdMet) {
+                        dragDx = dx; dragDy = dy
+                        val now = System.currentTimeMillis()
+                        if (now - lastLassoRefreshMs >= LASSO_REFRESH_INTERVAL_MS) {
+                            lastLassoRefreshMs = now
+                            invalidate()
+                            epd("INVALIDATE caller=dragMove")
+                        }
+                    }
+                    return true
+                }
                 val path = lassoGesturePath ?: return true
                 for (i in 0 until event.historySize) {
                     path.lineTo(event.getHistoricalX(i), event.getHistoricalY(i))
@@ -471,6 +527,44 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
                 }
             }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                if (isDragMoveActive) {
+                    if (dragThresholdMet) {
+                        // Translate selected strokes' points by the final drag offset.
+                        val movedStrokes = dragOriginalStrokes.map { stroke ->
+                            LiveStroke(stroke.id, stroke.points.map { pt ->
+                                PointF(pt.x + dragDx, pt.y + dragDy)
+                            })
+                        }
+                        // Update in-memory stroke list with translated positions.
+                        val movedById = movedStrokes.associateBy { it.id }
+                        val updated = strokes.map { movedById[it.id] ?: it }
+                        strokes.clear(); strokes.addAll(updated)
+                        // Translate selection box to match new stroke positions.
+                        lassoSelectionBox = lassoSelectionBox?.let { b ->
+                            RectF(b.left + dragDx, b.top + dragDy, b.right + dragDx, b.bottom + dragDy)
+                        }
+                        // Restore normal EPD update mode and commit pixels BEFORE firing callback.
+                        val origStrokes = dragOriginalStrokes
+                        dragBackingBitmap?.recycle(); dragBackingBitmap = null
+                        isDragMoveActive = false; dragThresholdMet = false
+                        dragDx = 0f; dragDy = 0f; dragOriginalStrokes = emptyList()
+                        EpdController.setViewDefaultUpdateMode(this, UpdateMode.GU)
+                        epd("DRAG_COMMIT A2_MODE_OFF")
+                        redrawCanvas(caller = "dragCommit")
+                        post {
+                            EpdController.handwritingRepaint(this, Rect(0, 0, width, height))
+                            epd("HANDWRITING_REPAINT caller=dragCommit")
+                        }
+                        onStrokesMoved?.invoke(origStrokes, movedStrokes)
+                    } else {
+                        // Below threshold — cancel silently, no move applied.
+                        dragBackingBitmap?.recycle(); dragBackingBitmap = null
+                        isDragMoveActive = false; dragThresholdMet = false
+                        dragDx = 0f; dragDy = 0f; dragOriginalStrokes = emptyList()
+                        epd("DRAG_CANCELLED threshold_not_met")
+                    }
+                    return true
+                }
                 val path  = lassoGesturePath       ?: return true
                 val start = lassoGestureStartPoint ?: return true
                 for (i in 0 until event.historySize) {
@@ -484,7 +578,7 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
                 epd("INVALIDATE caller=lassoUp")
                 val dx = event.x - start.x
                 val dy = event.y - start.y
-                if (Math.sqrt((dx * dx + dy * dy).toDouble()).toFloat() < tapThresholdPx) {
+                if (Math.sqrt((dx * dx + dy * dy).toDouble()).toFloat() < thresholdPx) {
                     onLassoTapToDismiss?.invoke()
                 } else {
                     onLassoComplete?.invoke(path, start)
@@ -496,6 +590,30 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
+
+        // Drag layer: non-selected backing + selected strokes translated by drag offset.
+        if (isDragMoveActive && dragThresholdMet) {
+            dragBackingBitmap?.let { canvas.drawBitmap(it, 0f, 0f, null) }
+                ?: canvas.drawColor(Color.WHITE)
+            val save = canvas.save()
+            canvas.translate(dragDx, dragDy)
+            for (stroke in dragOriginalStrokes) {
+                val pts = stroke.points; if (pts.size < 2) continue
+                val path = Path()
+                path.moveTo(pts[0].x, pts[0].y)
+                for (i in 1 until pts.size) path.lineTo(pts[i].x, pts[i].y)
+                canvas.drawPath(path, strokePaint)
+            }
+            canvas.restoreToCount(save)
+            lassoSelectionBox?.let { box ->
+                canvas.drawRect(
+                    RectF(box.left + dragDx, box.top + dragDy, box.right + dragDx, box.bottom + dragDy),
+                    lassoPaint,
+                )
+            }
+            return
+        }
+
         renderBitmap?.let { canvas.drawBitmap(it, 0f, 0f, null) } ?: canvas.drawColor(Color.WHITE)
 
         // Lasso overlay — drawn on top of everything.
@@ -554,6 +672,21 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
         }
     }
 
+    override fun setDragMoveMode(enabled: Boolean) {
+        if (!enabled && isDragMoveActive) {
+            epd("SET_DRAG_MOVE_MODE false — cancelling drag")
+            if (dragThresholdMet) {
+                EpdController.setViewDefaultUpdateMode(this, UpdateMode.GU)
+                epd("A2_MODE_OFF caller=setDragMoveMode_cancel")
+            }
+            dragBackingBitmap?.recycle(); dragBackingBitmap = null
+            isDragMoveActive = false; dragThresholdMet = false
+            dragDx = 0f; dragDy = 0f; dragOriginalStrokes = emptyList()
+            invalidate()
+            epd("INVALIDATE caller=setDragMoveMode_cancel")
+        }
+    }
+
     override fun setLassoMode(active: Boolean) {
         epd("SET_LASSO_MODE active=$active isSetup=$isSetup")
         isLassoMode = active
@@ -567,6 +700,8 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
                 epd("INVALIDATE caller=setLassoMode_active")
             }
         } else {
+            // Cancel any in-progress drag before clearing lasso state.
+            if (isDragMoveActive) setDragMoveMode(false)
             lassoOverlayPath       = null
             lassoSelectionBox      = null
             lassoGestureStartPoint = null
@@ -621,7 +756,7 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
     private fun handleLassoEraserTouch(event: MotionEvent): Boolean {
         if (event.getToolType(0) != MotionEvent.TOOL_TYPE_STYLUS) return false
 
-        val tapThresholdPx = 8f * resources.displayMetrics.density
+        val tapThresholdPx = DRAG_THRESHOLD_DP * resources.displayMetrics.density
 
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
@@ -954,6 +1089,8 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
         renderBitmap?.recycle()
         renderBitmap = null
         renderCanvas = null
+        dragBackingBitmap?.recycle()
+        dragBackingBitmap = null
     }
 
     // ── Private helpers ──────────────────────────────────────────────────────

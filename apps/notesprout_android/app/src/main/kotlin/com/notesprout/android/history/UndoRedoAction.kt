@@ -1,12 +1,14 @@
 package com.notesprout.android.history
 
+import com.notesprout.android.data.LiveStroke
 import kotlinx.serialization.Serializable
 
 /**
  * Discriminated union of every reversible user action in a notebook.
  *
- * Only IDs are stored — never stroke point data.  The database is the source of truth;
- * undo/redo operations restore or soft-delete rows by ID.
+ * Most actions store only IDs — the database is the source of truth and undo/redo
+ * operations restore or soft-delete rows by ID.  [StrokesMoved] is the exception:
+ * it carries full point arrays so undo/redo can reposition strokes without a DB round-trip.
  *
  * [layerId] is the parentId of the stroke row (= the content layer UUID) captured at
  * action-record time from DrawingActivity.currentLayerId.
@@ -112,5 +114,18 @@ sealed class UndoRedoAction {
     data class LassoErased(
         val strokeIds: List<String>,
         val pageId: String,
+    ) : UndoRedoAction()
+
+    /**
+     * User moved selected strokes via lasso drag — undo restores original positions;
+     * redo re-applies the moved positions.  Both lists carry complete [LiveStroke] objects
+     * (id + full point arrays) so the operation never needs a DB read to reconstruct state.
+     * All IDs in [originalStrokes] and [movedStrokes] are identical; only coordinates differ.
+     */
+    @Serializable
+    data class StrokesMoved(
+        val pageId: String,
+        val originalStrokes: List<LiveStroke>,
+        val movedStrokes: List<LiveStroke>,
     ) : UndoRedoAction()
 }

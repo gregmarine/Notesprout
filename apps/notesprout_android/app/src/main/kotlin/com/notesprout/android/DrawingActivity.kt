@@ -558,6 +558,7 @@ class DrawingActivity : AppCompatActivity() {
                     if (hitIds.isEmpty()) return@withContext  // nothing caught — stay in lasso mode idle
                     selectedObjectIds.clear()
                     selectedObjectIds.addAll(hitIds)
+                    drawingView.lassoSelectedIds = selectedObjectIds.toSet()
                     // Pad the bounding box slightly so the dashed rect doesn't sit on the ink.
                     val pad = 8f * resources.displayMetrics.density
                     unionBounds.inset(-pad, -pad)
@@ -569,6 +570,7 @@ class DrawingActivity : AppCompatActivity() {
         // Tap to dismiss: clear the selection visual but stay in lasso mode.
         drawingView.onLassoTapToDismiss = {
             selectedObjectIds.clear()
+            drawingView.lassoSelectedIds = emptySet()
             drawingView.setLassoOverlay(null, null)
         }
 
@@ -598,6 +600,36 @@ class DrawingActivity : AppCompatActivity() {
                             drawingView.loadStrokes(updatedStrokes)
                         }
                     }
+                }
+            }
+        }
+
+        // Lasso move gesture complete — persist translated stroke coordinates and push undo action.
+        drawingView.onStrokesMoved = { originalStrokes, movedStrokes ->
+            val pageId = currentPageId.takeIf { it.isNotEmpty() }
+            val db = soilDatabase
+            if (pageId != null && db != null) {
+                lifecycleScope.launch {
+                    val now = System.currentTimeMillis()
+                    withContext(Dispatchers.IO) {
+                        db.withTransaction {
+                            for (moved in movedStrokes) {
+                                val strokePoints = moved.points.map { pt ->
+                                    StrokePoint(x = pt.x, y = pt.y, pressure = null, tilt = null, timestamp = now)
+                                }
+                                val strokeData = StrokeData(
+                                    color = "#000000",
+                                    strokeWidth = 3.0f,
+                                    points = strokePoints,
+                                )
+                                db.notebookDao().updateStrokeData(moved.id, strokeData.toJson(), now)
+                            }
+                        }
+                    }
+                    undoRedoManager.push(
+                        UndoRedoAction.StrokesMoved(pageId, originalStrokes.toList(), movedStrokes.toList())
+                    )
+                    updateUndoRedoButtons()
                 }
             }
         }
@@ -1803,6 +1835,7 @@ class DrawingActivity : AppCompatActivity() {
             is UndoRedoAction.StrokeAdded     -> action.pageId
             is UndoRedoAction.StrokeErased    -> action.pageId
             is UndoRedoAction.LassoErased     -> action.pageId
+            is UndoRedoAction.StrokesMoved    -> action.pageId
             is UndoRedoAction.TemplateChanged -> action.pageId
             is UndoRedoAction.PageCleared     -> action.pageId
             else                              -> null
@@ -1874,6 +1907,69 @@ class DrawingActivity : AppCompatActivity() {
             } else {
                 drawingView.loadStrokes(updatedStrokes)
             }
+            return
+        }
+
+        // ── Cross-page StrokesMoved: two-phase display ────────────────────────
+        if (isCrossPage && action is UndoRedoAction.StrokesMoved) {
+            val snapshot      = drawingView.captureSnapshot()
+            val leavingPageId = currentPageId
+            withContext(Dispatchers.IO) {
+                if (snapshot != null && leavingPageId.isNotEmpty()) {
+                    persistSnapshot(db, leavingPageId, snapshot)
+                }
+                saveStrokes(db)
+            }
+            currentPageIndex = pages.indexOfFirst { it.id == action.pageId }.coerceAtLeast(0)
+
+            // Phase 1: load and display the target page in its pre-undo state.
+            val templateBmp: Bitmap?
+            val preUndoStrokes: List<LiveStroke>
+            withContext(Dispatchers.IO) {
+                setupPageIds(db)
+                templateBmp    = loadPageTemplateFromDb(db)
+                preUndoStrokes = deserializeStrokesFromDb(db)
+            }
+            val preUndobitmap = withContext(Dispatchers.IO) {
+                drawingView.buildRenderBitmap(preUndoStrokes, templateBmp)
+            }
+            if (preUndobitmap != null) {
+                drawingView.loadStrokesWithBitmap(preUndoStrokes, preUndobitmap, templateBmp)
+            } else {
+                drawingView.loadStrokes(preUndoStrokes)
+            }
+            currentTemplateBitmap = templateBmp
+            updatePageIndicator()
+            saveLastOpenedPage(currentPageId)
+
+            // Phase 2: apply DB update and rebuild with target positions.
+            val target = if (isUndo) action.originalStrokes else action.movedStrokes
+            withContext(Dispatchers.IO) {
+                val ts = System.currentTimeMillis()
+                db.withTransaction {
+                    for (stroke in target) {
+                        val strokePoints = stroke.points.map { pt ->
+                            StrokePoint(x = pt.x, y = pt.y, pressure = null, tilt = null, timestamp = ts)
+                        }
+                        val strokeData = StrokeData(color = "#000000", strokeWidth = 3.0f, points = strokePoints)
+                        dao.updateStrokeData(stroke.id, strokeData.toJson(), ts)
+                    }
+                }
+            }
+            val targetById = target.associateBy { it.id }
+            val updatedStrokes = preUndoStrokes.map { targetById[it.id] ?: it }
+            val bitmap = withContext(Dispatchers.IO) {
+                drawingView.buildRenderBitmap(updatedStrokes, templateBmp)
+            }
+            if (bitmap != null) {
+                drawingView.loadStrokesWithBitmap(updatedStrokes, bitmap, templateBmp)
+            } else {
+                drawingView.loadStrokes(updatedStrokes)
+            }
+            // No selection box update — user is no longer on the original page.
+            selectedObjectIds.clear()
+            drawingView.lassoSelectedIds = emptySet()
+            drawingView.setLassoOverlay(null, null)
             return
         }
 
@@ -2083,8 +2179,50 @@ class DrawingActivity : AppCompatActivity() {
                 if (isUndo) action.strokeIds.forEach { dao.restoreById(it, now) }
                 else        action.strokeIds.forEach { dao.softDeleteById(it, now) }
             }
+
+            is UndoRedoAction.StrokesMoved -> withContext(Dispatchers.IO) {
+                val target = if (isUndo) action.originalStrokes else action.movedStrokes
+                db.withTransaction {
+                    for (stroke in target) {
+                        val strokePoints = stroke.points.map { pt ->
+                            StrokePoint(x = pt.x, y = pt.y, pressure = null, tilt = null, timestamp = now)
+                        }
+                        val strokeData = StrokeData(color = "#000000", strokeWidth = 3.0f, points = strokePoints)
+                        dao.updateStrokeData(stroke.id, strokeData.toJson(), now)
+                    }
+                }
+            }
         }
         // After each when-branch we are back on the main thread.
+
+        // ── Step 3a-strokes-moved: Same-page StrokesMoved — optimised in-memory update ─
+        if (action is UndoRedoAction.StrokesMoved) {
+            val target = if (isUndo) action.originalStrokes else action.movedStrokes
+            val targetById = target.associateBy { it.id }
+            val updatedStrokes = drawingView.getStrokes().map { targetById[it.id] ?: it }
+            val templateBmp = currentTemplateBitmap
+            val bitmap = withContext(Dispatchers.IO) {
+                drawingView.buildRenderBitmap(updatedStrokes, templateBmp)
+            }
+            if (bitmap != null) {
+                drawingView.loadStrokesWithBitmap(updatedStrokes, bitmap, templateBmp)
+            } else {
+                drawingView.loadStrokes(updatedStrokes)
+            }
+            // If the moved strokes are the active selection, update the selection box.
+            val movedIds = action.originalStrokes.map { it.id }.toSet()
+            if (movedIds == selectedObjectIds) {
+                val unionBounds = RectF()
+                for (stroke in target) unionBounds.union(stroke.boundingBox)
+                val pad = 8f * resources.displayMetrics.density
+                unionBounds.inset(-pad, -pad)
+                drawingView.setLassoOverlay(null, unionBounds)
+                drawingView.lassoSelectedIds = movedIds
+            }
+            updatePageIndicator()
+            saveLastOpenedPage(currentPageId)
+            return
+        }
 
         // ── Step 3a-batch: Same-page LassoErased — optimised in-memory update ─
         if (action is UndoRedoAction.LassoErased) {

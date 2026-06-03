@@ -65,6 +65,36 @@ interface DrawingView {
      */
     fun setLassoMode(active: Boolean) {}
 
+    /**
+     * IDs of strokes currently selected by the lasso gesture.  Set by DrawingActivity
+     * in [onLassoComplete] after the hit test, and cleared in [onLassoTapToDismiss].
+     * The view uses this to identify which strokes participate in a lasso drag move.
+     */
+    var lassoSelectedIds: Set<String>
+        get() = emptySet()
+        @Suppress("UNUSED_PARAMETER")
+        set(value) {}
+
+    /**
+     * Enable or cancel an in-progress lasso drag move.  Passing false cancels any active
+     * drag without committing the move (no DB write, no undo push, no stroke update).
+     * Called by DrawingActivity when switching tools while a drag is in progress.
+     */
+    fun setDragMoveMode(enabled: Boolean) {}
+
+    /**
+     * Fired on the main thread when the stylus lifts after a lasso drag move that
+     * exceeded the distance threshold.
+     * [originalStrokes] — deep copies of the moved strokes at their positions before drag.
+     * [movedStrokes]    — the same strokes with all points translated by the drag offset.
+     * DrawingActivity wires this to persist the new coordinates and push a [StrokesMoved]
+     * undo action.
+     */
+    var onStrokesMoved: ((originalStrokes: List<LiveStroke>, movedStrokes: List<LiveStroke>) -> Unit)?
+        get() = null
+        @Suppress("UNUSED_PARAMETER")
+        set(value) {}
+
     // ── Lasso eraser ──────────────────────────────────────────────────────────
 
     /**

@@ -66,6 +66,17 @@ class GenericDrawingView(context: Context) : View(context), DrawingView {
     private val lassoEraserRandom = java.util.Random()
     private fun jitter() = (lassoEraserRandom.nextFloat() - 0.5f) * 8f
 
+    // ── Lasso drag move state ────────────────────────────────────────────────
+
+    private var isDragMoveActive = false
+    private var dragStartX = 0f
+    private var dragStartY = 0f
+    private var dragThresholdMet = false
+    private var dragDx = 0f
+    private var dragDy = 0f
+    private var dragOriginalStrokes: List<LiveStroke> = emptyList()
+    private var dragBackingBitmap: Bitmap? = null
+
     private val lassoPaint = Paint().apply {
         style = Paint.Style.STROKE
         color = Color.BLACK
@@ -92,6 +103,8 @@ class GenericDrawingView(context: Context) : View(context), DrawingView {
     override var onLassoComplete: ((Path, PointF) -> Unit)? = null
     override var onLassoTapToDismiss: (() -> Unit)? = null
     override var onLassoEraseComplete: ((List<String>) -> Unit)? = null
+    override var lassoSelectedIds: Set<String> = emptySet()
+    override var onStrokesMoved: ((List<LiveStroke>, List<LiveStroke>) -> Unit)? = null
 
     // ── Touch handling ───────────────────────────────────────────────────────
 
@@ -163,14 +176,28 @@ class GenericDrawingView(context: Context) : View(context), DrawingView {
             return true
         }
 
-        // Only stylus builds the lasso path; finger taps fall through to false.
+        // Only stylus builds the lasso path / drag; finger taps fall through to false.
         if (toolType != MotionEvent.TOOL_TYPE_STYLUS) return false
 
-        val tapThresholdPx = 8f * resources.displayMetrics.density
+        val thresholdPx = DRAG_THRESHOLD_DP * resources.displayMetrics.density
 
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
-                // Clear any existing selection so the user sees immediate feedback.
+                // Check if pen-down is inside the current selection box — if so, start a drag.
+                val box = lassoSelectionBox
+                if (box != null && lassoSelectedIds.isNotEmpty() && box.contains(event.x, event.y)) {
+                    isDragMoveActive = true
+                    dragStartX = event.x; dragStartY = event.y
+                    dragThresholdMet = false
+                    dragDx = 0f; dragDy = 0f
+                    dragOriginalStrokes = strokes
+                        .filter { it.id in lassoSelectedIds }
+                        .map { LiveStroke(it.id, it.points.map { pt -> PointF(pt.x, pt.y) }) }
+                    val nonSelected = strokes.filter { it.id !in lassoSelectedIds }
+                    dragBackingBitmap = buildRenderBitmap(nonSelected, templateBitmap)
+                    return true
+                }
+                // Normal lasso: clear any existing selection so the user sees immediate feedback.
                 lassoSelectionBox = null
                 lassoOverlayPath  = null
                 invalidate()
@@ -178,6 +205,23 @@ class GenericDrawingView(context: Context) : View(context), DrawingView {
                 lassoGestureStartPoint = PointF(event.x, event.y)
             }
             MotionEvent.ACTION_MOVE -> {
+                if (isDragMoveActive) {
+                    val dx = event.x - dragStartX
+                    val dy = event.y - dragStartY
+                    if (!dragThresholdMet) {
+                        val dist = Math.sqrt((dx * dx + dy * dy).toDouble()).toFloat()
+                        if (dist >= thresholdPx) dragThresholdMet = true
+                    }
+                    if (dragThresholdMet) {
+                        dragDx = dx; dragDy = dy
+                        val now = System.currentTimeMillis()
+                        if (now - lastLassoRefreshMs >= LASSO_REFRESH_INTERVAL_MS) {
+                            lastLassoRefreshMs = now
+                            invalidate()
+                        }
+                    }
+                    return true
+                }
                 val path = lassoGesturePath ?: return true
                 for (i in 0 until event.historySize) {
                     path.lineTo(event.getHistoricalX(i), event.getHistoricalY(i))
@@ -191,6 +235,32 @@ class GenericDrawingView(context: Context) : View(context), DrawingView {
                 }
             }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                if (isDragMoveActive) {
+                    if (dragThresholdMet) {
+                        val movedStrokes = dragOriginalStrokes.map { stroke ->
+                            LiveStroke(stroke.id, stroke.points.map { pt ->
+                                PointF(pt.x + dragDx, pt.y + dragDy)
+                            })
+                        }
+                        val movedById = movedStrokes.associateBy { it.id }
+                        val updated = strokes.map { movedById[it.id] ?: it }
+                        strokes.clear(); strokes.addAll(updated)
+                        lassoSelectionBox = lassoSelectionBox?.let { b ->
+                            RectF(b.left + dragDx, b.top + dragDy, b.right + dragDx, b.bottom + dragDy)
+                        }
+                        val origStrokes = dragOriginalStrokes
+                        dragBackingBitmap?.recycle(); dragBackingBitmap = null
+                        isDragMoveActive = false; dragThresholdMet = false
+                        dragDx = 0f; dragDy = 0f; dragOriginalStrokes = emptyList()
+                        redrawCanvas()
+                        onStrokesMoved?.invoke(origStrokes, movedStrokes)
+                    } else {
+                        dragBackingBitmap?.recycle(); dragBackingBitmap = null
+                        isDragMoveActive = false; dragThresholdMet = false
+                        dragDx = 0f; dragDy = 0f; dragOriginalStrokes = emptyList()
+                    }
+                    return true
+                }
                 val path = lassoGesturePath ?: return true
                 val start = lassoGestureStartPoint ?: return true
                 for (i in 0 until event.historySize) {
@@ -203,7 +273,7 @@ class GenericDrawingView(context: Context) : View(context), DrawingView {
                 invalidate()
                 val dx = event.x - start.x
                 val dy = event.y - start.y
-                if (Math.sqrt((dx * dx + dy * dy).toDouble()).toFloat() < tapThresholdPx) {
+                if (Math.sqrt((dx * dx + dy * dy).toDouble()).toFloat() < thresholdPx) {
                     onLassoTapToDismiss?.invoke()
                 } else {
                     onLassoComplete?.invoke(path, start)
@@ -215,6 +285,30 @@ class GenericDrawingView(context: Context) : View(context), DrawingView {
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
+
+        // Drag layer: non-selected backing + selected strokes translated by drag offset.
+        if (isDragMoveActive && dragThresholdMet) {
+            canvas.drawColor(Color.WHITE)
+            dragBackingBitmap?.let { canvas.drawBitmap(it, 0f, 0f, null) }
+            val save = canvas.save()
+            canvas.translate(dragDx, dragDy)
+            for (stroke in dragOriginalStrokes) {
+                val pts = stroke.points; if (pts.size < 2) continue
+                val path = Path()
+                path.moveTo(pts[0].x, pts[0].y)
+                for (i in 1 until pts.size) path.lineTo(pts[i].x, pts[i].y)
+                canvas.drawPath(path, strokePaint)
+            }
+            canvas.restoreToCount(save)
+            lassoSelectionBox?.let { box ->
+                canvas.drawRect(
+                    RectF(box.left + dragDx, box.top + dragDy, box.right + dragDx, box.bottom + dragDy),
+                    lassoPaint,
+                )
+            }
+            return
+        }
+
         canvas.drawColor(Color.WHITE)
         renderBitmap?.let { canvas.drawBitmap(it, 0f, 0f, null) }
 
@@ -355,9 +449,19 @@ class GenericDrawingView(context: Context) : View(context), DrawingView {
     override fun enableDrawing() {}
     override fun disableDrawing() {}
 
+    override fun setDragMoveMode(enabled: Boolean) {
+        if (!enabled && isDragMoveActive) {
+            dragBackingBitmap?.recycle(); dragBackingBitmap = null
+            isDragMoveActive = false; dragThresholdMet = false
+            dragDx = 0f; dragDy = 0f; dragOriginalStrokes = emptyList()
+            invalidate()
+        }
+    }
+
     override fun setLassoMode(active: Boolean) {
         isLassoMode = active
         if (!active) {
+            if (isDragMoveActive) setDragMoveMode(false)
             lassoOverlayPath = null
             lassoSelectionBox = null
             lassoGestureStartPoint = null
@@ -380,7 +484,7 @@ class GenericDrawingView(context: Context) : View(context), DrawingView {
     private fun handleLassoEraserTouch(event: MotionEvent): Boolean {
         if (event.getToolType(0) != MotionEvent.TOOL_TYPE_STYLUS) return false
 
-        val tapThresholdPx = 8f * resources.displayMetrics.density
+        val tapThresholdPx = DRAG_THRESHOLD_DP * resources.displayMetrics.density
 
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
@@ -607,5 +711,7 @@ class GenericDrawingView(context: Context) : View(context), DrawingView {
         renderBitmap?.recycle()
         renderBitmap = null
         renderCanvas = null
+        dragBackingBitmap?.recycle()
+        dragBackingBitmap = null
     }
 }

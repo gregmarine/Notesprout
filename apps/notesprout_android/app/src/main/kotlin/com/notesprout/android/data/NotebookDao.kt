@@ -155,6 +155,14 @@ interface NotebookDao {
     @Query("UPDATE notebook SET data = :data, updatedAt = :updatedAt WHERE id = :id")
     suspend fun updateData(id: String, data: String, updatedAt: Long)
 
+    /**
+     * Overwrite the serialized point array for a single stroke row.
+     * Used by the lasso-move commit path to persist translated stroke coordinates
+     * without re-inserting the row or changing any other columns.
+     */
+    @Query("UPDATE notebook SET data = :data, updatedAt = :updatedAt WHERE id = :id")
+    suspend fun updateStrokeData(id: String, data: String, updatedAt: Long)
+
     // ── Undo/redo restore operations ──────────────────────────────────────────
 
     /**
