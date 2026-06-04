@@ -94,9 +94,8 @@ class MainActivity : AppCompatActivity() {
 
     // ── Color cache ───────────────────────────────────────────────────────────
 
-    private val inkBlackColor  by lazy { ContextCompat.getColor(this, R.color.inkBlack) }
-    private val inkLightColor  by lazy { ContextCompat.getColor(this, R.color.inkLight) }
-    private val paperWhiteColor by lazy { ContextCompat.getColor(this, R.color.paperWhite) }
+    private val inkBlackColor by lazy { ContextCompat.getColor(this, R.color.inkBlack) }
+    private val inkLightColor by lazy { ContextCompat.getColor(this, R.color.inkLight) }
 
     // ── Cover load jobs (cancelled on each re-render) ─────────────────────────
 
@@ -401,10 +400,9 @@ class MainActivity : AppCompatActivity() {
     /**
      * Builds a single card group:
      * ```
-     * [card FrameLayout]
-     *   [imageContainer FrameLayout — paperWhite background, 1dp inset from border]
-     *     [coverImage — MATCH_PARENT, centerCrop; shown when a cover bitmap loads]
-     *     [icon — ic_notebook fallback, centered; shown when no cover is available]
+     * [card FrameLayout — shape_bordered, 1dp padding]
+     *   [coverImage — MATCH_PARENT, centerCrop; shown when a cover bitmap loads]
+     *   [icon — ic_notebook fallback, centered; shown when no cover is available]
      * [rowGap]
      * [label TextView — below the card, not inside it]
      * ```
@@ -426,23 +424,17 @@ class MainActivity : AppCompatActivity() {
         }
         group.addView(card, LinearLayout.LayoutParams(spec.cardWidthPx, spec.cardHeightPx))
 
-        // Inner container: paperWhite background; 1dp margin keeps card border visible.
-        val density  = resources.displayMetrics.density
-        val margin1dp = (density + 0.5f).toInt()
-        val imageContainer = FrameLayout(this).apply {
-            setBackgroundColor(paperWhiteColor)
-        }
-        card.addView(imageContainer, FrameLayout.LayoutParams(
-            FrameLayout.LayoutParams.MATCH_PARENT,
-            FrameLayout.LayoutParams.MATCH_PARENT,
-        ).also { it.setMargins(margin1dp, margin1dp, margin1dp, margin1dp) })
+        // 1dp padding insets children inside the border so they don't render over the rounded corners.
+        val density = resources.displayMetrics.density
+        val pad1dp  = (density + 0.5f).toInt()
+        card.setPadding(pad1dp, pad1dp, pad1dp, pad1dp)
 
-        // Cover image — fills the container, crops to fit; hidden until a bitmap loads.
+        // Cover image — fills the card, crops to fit; hidden until a bitmap loads.
         val coverImage = AppCompatImageView(this).apply {
             scaleType  = ImageView.ScaleType.CENTER_CROP
             visibility = View.GONE
         }
-        imageContainer.addView(coverImage, FrameLayout.LayoutParams(
+        card.addView(coverImage, FrameLayout.LayoutParams(
             FrameLayout.LayoutParams.MATCH_PARENT,
             FrameLayout.LayoutParams.MATCH_PARENT,
         ))
@@ -452,7 +444,7 @@ class MainActivity : AppCompatActivity() {
         val icon = AppCompatImageView(this).apply {
             setImageResource(R.drawable.ic_notebook)
         }
-        imageContainer.addView(icon, FrameLayout.LayoutParams(iconSize, iconSize, Gravity.CENTER))
+        card.addView(icon, FrameLayout.LayoutParams(iconSize, iconSize, Gravity.CENTER))
 
         // ── Label (below the card) ────────────────────────────────────────────
         val label = AppCompatTextView(this).apply {

@@ -419,7 +419,9 @@ Completed:
 
 - 🌱 New Branch: Lasso Delete Action — `ic_lasso_delete` Tabler trash VectorDrawable (lid bar, two inner vertical lines, rounded trapezoid body, handle cap); `UndoRedoAction.LassoDeleted(strokeIds, pageId, deletedAt, strokes)` — undo = restore by ID, redo = re-soft-delete by ID; clipboard never touched; `btnLassoDelete` added to `floatingSelectionToolbar` after `btnLassoCut` (Copy → Cut → Delete order); `performLassoDelete()` mirrors `performLassoCut()` minus all clipboard interaction — soft-deletes rows on IO with shared `deletedAt`, removes from in-memory stroke list, syncs `persistedStrokeIds`, pushes `LassoDeleted`, rebuilds canvas, clears selection visual, stays in lasso mode; `executeAction` handles `LassoDeleted` with same-page optimised path and cross-page two-phase path identical to `LassoErased`
 
+- ✂️ Pruning: Rounded corners on snapshot thumbnail cards — `MainActivity` notebook cards and `PageIndexActivity` page index cards were rendering cover/snapshot images with square-clipped corners; root cause was an intermediate `imageContainer` FrameLayout child with a flat `setBackgroundColor(paperWhite)` (rectangular, no shape) that painted over the 4dp corner arcs of the `shape_bordered` card; fix mirrors the working TemplateDialog pattern: remove `imageContainer`, add `card.setPadding(1dp)` (or 3dp for highlighted cards whose border is 3dp), add children directly to `card`; removed now-unused `paperWhiteColor` lazy field from both activities
+
 Next up: TBD — discuss before starting.
 
 ---
-*Last updated: 🌱 New Branch — Lasso Delete Action*
+*Last updated: ✂️ Pruning — Rounded corners on snapshot thumbnail cards*

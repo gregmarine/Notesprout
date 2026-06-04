@@ -87,8 +87,7 @@ class PageIndexActivity : AppCompatActivity() {
     private var currentGridPage: Int = 0    // 0-based pagination index
     private var gridSpec: GridSpec? = null
 
-    private val inkBlackColor   by lazy { ContextCompat.getColor(this, R.color.inkBlack) }
-    private val paperWhiteColor by lazy { ContextCompat.getColor(this, R.color.paperWhite) }
+    private val inkBlackColor by lazy { ContextCompat.getColor(this, R.color.inkBlack) }
 
     private val snapshotDecodeJobs = mutableListOf<Job>()
 
@@ -373,9 +372,8 @@ class PageIndexActivity : AppCompatActivity() {
     /**
      * Builds one card group:
      * ```
-     * [card FrameLayout — thick border if current page OR selected in action/move mode]
-     *   [imageContainer FrameLayout — paperWhite, inset]
-     *     [snapshotImage — GONE until bitmap decoded]
+     * [card FrameLayout — shape_bordered/bg_page_card_current, padding matches border width]
+     *   [snapshotImage — GONE until bitmap decoded]
      * [rowGap Space]
      * [label "Page N"]
      * ```
@@ -430,25 +428,19 @@ class PageIndexActivity : AppCompatActivity() {
         }
         group.addView(card, LinearLayout.LayoutParams(spec.cardWidthPx, spec.cardHeightPx))
 
-        // Inner container: white background; inset keeps border visible.
-        val density   = resources.displayMetrics.density
-        val margin1dp = (density + 0.5f).toInt()
-        val marginPx  = if (highlighted) (3 * density + 0.5f).toInt() else margin1dp
-
-        val imageContainer = FrameLayout(this).apply {
-            setBackgroundColor(paperWhiteColor)
-        }
-        card.addView(imageContainer, FrameLayout.LayoutParams(
-            FrameLayout.LayoutParams.MATCH_PARENT,
-            FrameLayout.LayoutParams.MATCH_PARENT,
-        ).also { it.setMargins(marginPx, marginPx, marginPx, marginPx) })
+        // Padding insets children inside the border so they don't render over the rounded corners.
+        // Match padding to border width: 3dp for the highlighted card, 1dp otherwise.
+        val density = resources.displayMetrics.density
+        val pad1dp  = (density + 0.5f).toInt()
+        val padPx   = if (highlighted) (3 * density + 0.5f).toInt() else pad1dp
+        card.setPadding(padPx, padPx, padPx, padPx)
 
         // Snapshot image — filled once the bitmap is decoded off the main thread.
         val snapshotImage = AppCompatImageView(this).apply {
             scaleType  = ImageView.ScaleType.CENTER_CROP
             visibility = android.view.View.GONE
         }
-        imageContainer.addView(snapshotImage, FrameLayout.LayoutParams(
+        card.addView(snapshotImage, FrameLayout.LayoutParams(
             FrameLayout.LayoutParams.MATCH_PARENT,
             FrameLayout.LayoutParams.MATCH_PARENT,
         ))
