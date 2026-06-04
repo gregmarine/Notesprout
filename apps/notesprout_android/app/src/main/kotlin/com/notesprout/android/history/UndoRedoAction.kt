@@ -128,4 +128,19 @@ sealed class UndoRedoAction {
         val originalStrokes: List<LiveStroke>,
         val movedStrokes: List<LiveStroke>,
     ) : UndoRedoAction()
+
+    /**
+     * User pasted strokes from the lasso clipboard onto the current page.
+     * Undo soft-deletes all [strokeIds]; redo restores them by ID.
+     *
+     * [insertedAt] is the timestamp used when the strokes were inserted into the DB.
+     * Not used for the undo/redo DB operations directly (those use per-call timestamps),
+     * but retained for future reference and cross-page disambiguation.
+     */
+    @Serializable
+    data class LassoPasted(
+        val strokeIds: List<String>,
+        val pageId: String,
+        val insertedAt: Long,
+    ) : UndoRedoAction()
 }

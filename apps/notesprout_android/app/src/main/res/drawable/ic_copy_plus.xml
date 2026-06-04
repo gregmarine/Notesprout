@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Tabler copy-plus style: two overlapping document outlines + plus in front doc body. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- Back document — visible as an L-shape behind the front doc -->
+    <path
+        android:fillColor="@android:color/transparent"
+        android:strokeColor="@color/inkBlack"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M7 7h-1a2 2 0 0 0 -2 2v9a2 2 0 0 0 2 2h9a2 2 0 0 0 2 -2v-1"/>
+    <!-- Front document body -->
+    <path
+        android:fillColor="@android:color/transparent"
+        android:strokeColor="@color/inkBlack"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M17 3h-6l-2 2v11a2 2 0 0 0 2 2h8a2 2 0 0 0 2 -2v-9l-4 -4z"/>
+    <!-- Fold corner of front document -->
+    <path
+        android:fillColor="@android:color/transparent"
+        android:strokeColor="@color/inkBlack"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M17 3v4h4"/>
+    <!-- Plus sign — horizontal bar centered in front document body -->
+    <path
+        android:fillColor="@android:color/transparent"
+        android:strokeColor="@color/inkBlack"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:pathData="M12.5 12 L17.5 12"/>
+    <!-- Plus sign — vertical bar -->
+    <path
+        android:fillColor="@android:color/transparent"
+        android:strokeColor="@color/inkBlack"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:pathData="M15 9.5 L15 14.5"/>
+</vector>

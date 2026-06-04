@@ -140,6 +140,10 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
 
     // ── DrawingView callbacks ────────────────────────────────────────────────
 
+    override var onLassoTap: ((Float, Float) -> Unit)? = null
+    override var onDragStarted: (() -> Unit)? = null
+    override var onLassoSelectionCleared: (() -> Unit)? = null
+
     override var onStrokeErased: ((String) -> Unit)? = null
 
     /**
@@ -482,10 +486,12 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
                     return true
                 }
                 // Normal lasso: clear any existing selection so the user sees immediate feedback.
+                val hadSelection = lassoSelectionBox != null
                 lassoSelectionBox  = null
                 lassoOverlayPath   = null
                 invalidate()
                 epd("INVALIDATE caller=lassoDown-clearSelection")
+                if (hadSelection) onLassoSelectionCleared?.invoke()
                 lassoGesturePath = Path().also { it.moveTo(event.x, event.y) }
                 lassoGestureStartPoint = PointF(event.x, event.y)
             }
@@ -497,6 +503,7 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
                         val dist = Math.sqrt((dx * dx + dy * dy).toDouble()).toFloat()
                         if (dist >= thresholdPx) {
                             dragThresholdMet = true
+                            onDragStarted?.invoke()
                             // Switch to A2 fast mode for responsive visual feedback during drag.
                             EpdController.setViewDefaultUpdateMode(this, UpdateMode.GU_FAST)
                             epd("DRAG_THRESHOLD_MET dist=$dist A2_MODE_ON")
@@ -580,6 +587,7 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
                 val dy = event.y - start.y
                 if (Math.sqrt((dx * dx + dy * dy).toDouble()).toFloat() < thresholdPx) {
                     onLassoTapToDismiss?.invoke()
+                    onLassoTap?.invoke(event.x, event.y)
                 } else {
                     onLassoComplete?.invoke(path, start)
                 }
@@ -857,6 +865,11 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
             }
         }
         return hitIds
+    }
+
+    override fun setLassoSelectedIds(ids: Set<String>, box: RectF) {
+        lassoSelectedIds = ids
+        setLassoOverlay(null, box)
     }
 
     override fun setLassoOverlay(path: Path?, selectionBox: RectF?) {

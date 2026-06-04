@@ -207,4 +207,46 @@
         android:textColor="@color/inkBlack"
         android:textSize="16sp" />
 
+    <!-- Floating selection context toolbar — appears below (or above) the lasso selection box.
+         Positioned programmatically in DrawingActivity.updateFloatingSelectionToolbar().
+         Contains actions that operate on the current lasso selection. -->
+    <LinearLayout
+        android:id="@+id/floatingSelectionToolbar"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:visibility="gone"
+        android:background="@drawable/shape_bordered"
+        android:padding="4dp"
+        android:elevation="0dp">
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnLassoCopy"
+            style="@style/Widget.NoteSprout.ToolbarButton"
+            android:src="@drawable/ic_copy_plus"
+            android:contentDescription="Copy selection" />
+
+    </LinearLayout>
+
+    <!-- Lasso button popup toolbar — anchored below btnLasso.
+         Appears when the user taps the active lasso button while the clipboard has content.
+         Dismissed on any tool switch, gesture start, paste, or outside tap. -->
+    <LinearLayout
+        android:id="@+id/lassoPopupToolbar"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:visibility="gone"
+        android:background="@drawable/shape_bordered"
+        android:padding="4dp"
+        android:elevation="0dp">
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnLassoClearClipboard"
+            style="@style/Widget.NoteSprout.ToolbarButton"
+            android:src="@drawable/ic_clipboard_x"
+            android:contentDescription="Clear lasso clipboard" />
+
+    </LinearLayout>
+
 </FrameLayout>

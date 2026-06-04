@@ -6,6 +6,7 @@ import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Path
+import android.graphics.PointF
 import android.graphics.Rect
 import android.graphics.RectF
 import android.graphics.Region
@@ -16,6 +17,7 @@ import android.util.Base64
 import android.util.Log
 import android.view.MotionEvent
 import android.view.VelocityTracker
+import android.view.View
 import android.view.ViewConfiguration
 import android.widget.FrameLayout
 import androidx.activity.OnBackPressedCallback
@@ -170,6 +172,11 @@ class DrawingActivity : AppCompatActivity() {
 
     /** Page ID waiting to be pasted. Null means clipboard is empty. */
     private var pendingCopyPageId: String? = null
+
+    // ── Lasso copy/paste toolbar state ───────────────────────────────────────
+
+    /** Anchor point (in root-view coordinates) below btnLasso — computed once after layout. */
+    private var lassoToolbarAnchor: PointF? = null
 
     // ── Page index launcher ───────────────────────────────────────────────────
 
@@ -373,6 +380,7 @@ class DrawingActivity : AppCompatActivity() {
 
         // Pen tool button — activates pen mode (default)
         binding.btnPen.setOnClickListener {
+            hideLassoPopupToolbar()
             if (isLassoMode) exitLassoMode()
             if (isLassoEraserMode) exitLassoEraserMode()
             if (isEraserActive) {
@@ -386,6 +394,7 @@ class DrawingActivity : AppCompatActivity() {
         }
 
         binding.btnEraser.setOnClickListener {
+            hideLassoPopupToolbar()
             if (isLassoMode) exitLassoMode()
             if (isLassoEraserMode) exitLassoEraserMode()
             isEraserActive = !isEraserActive
@@ -397,14 +406,26 @@ class DrawingActivity : AppCompatActivity() {
         }
 
         binding.btnLassoEraser.setOnClickListener {
+            hideLassoPopupToolbar()
             if (!isLassoEraserMode) enterLassoEraserMode()
             // Tapping the active lasso eraser button is a no-op.
         }
 
         binding.btnLasso.setOnClickListener {
             if (isLassoEraserMode) exitLassoEraserMode()
-            if (!isLassoMode) enterLassoMode()
-            // Tapping active lasso button is a no-op.
+            if (!isLassoMode) {
+                enterLassoMode()
+            } else {
+                // Already in lasso mode — toggle popup if clipboard has content.
+                if (NoteSproutClipboard.hasContent()) {
+                    if (binding.lassoPopupToolbar.visibility == View.VISIBLE) {
+                        hideLassoPopupToolbar()
+                    } else {
+                        updateLassoPopupToolbar()
+                    }
+                }
+                // Empty clipboard: silent no-op.
+            }
         }
 
         // TODO: implement toolbar show/hide UX
@@ -513,6 +534,9 @@ class DrawingActivity : AppCompatActivity() {
 
         // Lasso gesture complete — auto-close the path and run hit test off main thread.
         drawingView.onLassoComplete = { drawnPath, startPoint ->
+            // Dismiss popup whenever a lasso gesture completes.
+            hideLassoPopupToolbar()
+
             // Auto-close: straight line from end back to start, then close polygon.
             drawnPath.lineTo(startPoint.x, startPoint.y)
             drawnPath.close()
@@ -563,6 +587,7 @@ class DrawingActivity : AppCompatActivity() {
                     val pad = 8f * resources.displayMetrics.density
                     unionBounds.inset(-pad, -pad)
                     drawingView.setLassoOverlay(null, unionBounds)
+                    updateFloatingSelectionToolbar(unionBounds)
                 }
             }
         }
@@ -572,6 +597,25 @@ class DrawingActivity : AppCompatActivity() {
             selectedObjectIds.clear()
             drawingView.lassoSelectedIds = emptySet()
             drawingView.setLassoOverlay(null, null)
+            hideFloatingSelectionToolbar()
+        }
+
+        // Stylus tap in lasso mode — trigger paste if clipboard has content and no selection.
+        drawingView.onLassoTap = { tapX, tapY ->
+            if (selectedObjectIds.isEmpty() && NoteSproutClipboard.hasContent()) {
+                hideLassoPopupToolbar()
+                performLassoPaste(tapX, tapY)
+            }
+        }
+
+        // Drag threshold crossed — hide the floating toolbar during the drag move.
+        drawingView.onDragStarted = {
+            hideFloatingSelectionToolbar()
+        }
+
+        // Fresh lasso gesture started (cleared old selection) — hide the floating toolbar.
+        drawingView.onLassoSelectionCleared = {
+            hideFloatingSelectionToolbar()
         }
 
         // Lasso eraser gesture complete — soft-delete hit strokes and push undo action.
@@ -630,6 +674,12 @@ class DrawingActivity : AppCompatActivity() {
                         UndoRedoAction.StrokesMoved(pageId, originalStrokes.toList(), movedStrokes.toList())
                     )
                     updateUndoRedoButtons()
+                    // Reshow floating toolbar at the new selection box position after the move.
+                    val newBox = RectF()
+                    movedStrokes.forEach { newBox.union(it.boundingBox) }
+                    val pad = 8f * resources.displayMetrics.density
+                    newBox.inset(-pad, -pad)
+                    updateFloatingSelectionToolbar(newBox)
                 }
             }
         }
@@ -641,6 +691,23 @@ class DrawingActivity : AppCompatActivity() {
                 FrameLayout.LayoutParams.MATCH_PARENT,
             ),
         )
+
+        // Wire the floating selection toolbar Copy button.
+        binding.btnLassoCopy.setOnClickListener {
+            performLassoCopy()
+        }
+
+        // Wire the lasso popup Clear Clipboard button.
+        binding.btnLassoClearClipboard.setOnClickListener {
+            NoteSproutClipboard.clear()
+            updateLassoButtonIcon()
+            hideLassoPopupToolbar()
+        }
+
+        // Compute the lasso popup anchor point once the toolbar has been laid out.
+        binding.drawingToolbar.doOnLayout {
+            computeLassoToolbarAnchor()
+        }
 
         // Pass the toolbar's pixel height to the drawing view after layout so
         // BOOX can set the correct setLimitRect exclusion zone.
@@ -712,6 +779,7 @@ class DrawingActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         drawingView.enableDrawing()
+        updateLassoButtonIcon()
     }
 
     override fun onPause() {
@@ -742,6 +810,20 @@ class DrawingActivity : AppCompatActivity() {
     override fun dispatchTouchEvent(event: MotionEvent): Boolean {
         if (event.getToolType(0) == MotionEvent.TOOL_TYPE_FINGER) {
             handleTwoFingerPageSwipe(event)
+        }
+        // Dismiss the lasso popup toolbar on any touch outside its bounds.
+        if (event.actionMasked == MotionEvent.ACTION_DOWN
+            && binding.lassoPopupToolbar.visibility == View.VISIBLE) {
+            val loc = IntArray(2)
+            binding.lassoPopupToolbar.getLocationOnScreen(loc)
+            val popupRect = Rect(
+                loc[0], loc[1],
+                loc[0] + binding.lassoPopupToolbar.width,
+                loc[1] + binding.lassoPopupToolbar.height,
+            )
+            if (!popupRect.contains(event.rawX.toInt(), event.rawY.toInt())) {
+                hideLassoPopupToolbar()
+            }
         }
         return super.dispatchTouchEvent(event)
     }
@@ -1726,6 +1808,184 @@ class DrawingActivity : AppCompatActivity() {
         // No-op — buttons are statically enabled in the layout and never tinted.
     }
 
+    // ── Lasso copy/paste helpers ──────────────────────────────────────────────
+
+    /** Copy the currently selected strokes to [NoteSproutClipboard]. */
+    private fun performLassoCopy() {
+        val ids = drawingView.lassoSelectedIds
+        if (ids.isEmpty()) return
+        val strokes = drawingView.getStrokes().filter { it.id in ids }
+        if (strokes.isEmpty()) return
+        val box = RectF()
+        strokes.forEach { box.union(it.boundingBox) }
+        NoteSproutClipboard.content = NoteSproutClipboard.ClipboardContent(
+            strokes = strokes.map { LiveStroke(it.id, it.points.map { pt -> PointF(pt.x, pt.y) }) },
+            boundingBox = box,
+        )
+        updateLassoButtonIcon()
+    }
+
+    /**
+     * Paste clipboard strokes onto the current page, centered on [tapX], [tapY].
+     * Inserts new rows into the DB, adds to the in-memory stroke list, sets them as
+     * the active selection, and shows the floating toolbar at the new selection box.
+     */
+    private fun performLassoPaste(tapX: Float, tapY: Float) {
+        val clip = NoteSproutClipboard.content ?: return
+        val db = soilDatabase ?: return
+        val pageId  = currentPageId.takeIf  { it.isNotEmpty() } ?: return
+        val layerId = currentLayerId.takeIf { it.isNotEmpty() } ?: return
+
+        val cx = clip.boundingBox.centerX()
+        val cy = clip.boundingBox.centerY()
+        val dx = tapX - cx
+        val dy = tapY - cy
+
+        val insertedAt = System.currentTimeMillis()
+        val newStrokes = clip.strokes.map { stroke ->
+            LiveStroke(
+                id = java.util.UUID.randomUUID().toString(),
+                points = stroke.points.map { PointF(it.x + dx, it.y + dy) },
+            )
+        }
+
+        lifecycleScope.launch {
+            val existingStrokes = drawingView.getStrokes()
+            val baseOrder = existingStrokes.size
+            withContext(Dispatchers.IO) {
+                val now = insertedAt
+                val dao = db.notebookDao()
+                db.withTransaction {
+                    newStrokes.forEachIndexed { i, stroke ->
+                        val points = stroke.points
+                        if (points.size < 2) return@forEachIndexed
+                        val minX = points.minOf { it.x }
+                        val minY = points.minOf { it.y }
+                        val maxX = points.maxOf { it.x }
+                        val maxY = points.maxOf { it.y }
+                        val bboxJson = """{"x":$minX,"y":$minY,"width":${maxX - minX},"height":${maxY - minY}}"""
+                        val strokePoints = points.map { pt ->
+                            StrokePoint(x = pt.x, y = pt.y, pressure = null, tilt = null, timestamp = now)
+                        }
+                        val strokeData = StrokeData(color = "#000000", strokeWidth = 3.0f, points = strokePoints)
+                        dao.insertOrIgnore(
+                            NotebookObject(
+                                id          = stroke.id,
+                                type        = "stroke",
+                                parentId    = layerId,
+                                boundingBox = bboxJson,
+                                sortOrder   = baseOrder + i,
+                                createdAt   = now,
+                                updatedAt   = now,
+                                deletedAt   = null,
+                                data        = strokeData.toJson(),
+                            )
+                        )
+                    }
+                }
+            }
+
+            val allStrokes = existingStrokes + newStrokes
+            newStrokes.forEach { persistedStrokeIds.add(it.id) }
+
+            undoRedoManager.push(UndoRedoAction.LassoPasted(newStrokes.map { it.id }, pageId, insertedAt))
+            updateUndoRedoButtons()
+
+            val templateBmp = currentTemplateBitmap
+            val bitmap = withContext(Dispatchers.IO) {
+                drawingView.buildRenderBitmap(allStrokes, templateBmp)
+            }
+            if (bitmap != null) {
+                drawingView.loadStrokesWithBitmap(allStrokes, bitmap, templateBmp)
+            } else {
+                drawingView.loadStrokes(allStrokes)
+            }
+
+            // Set pasted strokes as the active selection.
+            val newBox = RectF()
+            newStrokes.forEach { newBox.union(it.boundingBox) }
+            val pad = 8f * resources.displayMetrics.density
+            newBox.inset(-pad, -pad)
+            selectedObjectIds.clear()
+            selectedObjectIds.addAll(newStrokes.map { it.id })
+            drawingView.setLassoSelectedIds(selectedObjectIds.toSet(), newBox)
+            updateFloatingSelectionToolbar(newBox)
+        }
+    }
+
+    /** Update btnLasso icon: ic_lasso_clipboard when clipboard has content, ic_lasso otherwise. */
+    private fun updateLassoButtonIcon() {
+        binding.btnLasso.setImageResource(
+            if (NoteSproutClipboard.hasContent()) R.drawable.ic_lasso_clipboard
+            else R.drawable.ic_lasso
+        )
+    }
+
+    // ── Floating toolbar helpers ──────────────────────────────────────────────
+
+    /**
+     * Position and show the floating selection toolbar relative to [selectionBox].
+     * Default: centered below the box with an 8dp gap.
+     * Fallback: centered above when the bottom edge would clip off screen.
+     */
+    private fun updateFloatingSelectionToolbar(selectionBox: RectF) {
+        binding.floatingSelectionToolbar.visibility = View.VISIBLE
+        binding.floatingSelectionToolbar.post {
+            val toolbarW = binding.floatingSelectionToolbar.measuredWidth.toFloat()
+            val toolbarH = binding.floatingSelectionToolbar.measuredHeight.toFloat()
+            val screenW  = binding.root.width.toFloat()
+            val screenH  = binding.root.height.toFloat()
+            val dpGap    = 8f * resources.displayMetrics.density
+            val minY     = binding.drawingToolbar.height + dpGap
+
+            var x = selectionBox.centerX() - toolbarW / 2f
+            var y = selectionBox.bottom + dpGap
+
+            // Fallback: above the selection box if clipped at the bottom.
+            if (y + toolbarH > screenH) {
+                y = selectionBox.top - dpGap - toolbarH
+            }
+            // Clamp to safe area (below main toolbar, above bottom edge).
+            y = y.coerceIn(minY, (screenH - toolbarH).coerceAtLeast(minY))
+            x = x.coerceIn(0f, (screenW - toolbarW).coerceAtLeast(0f))
+
+            binding.floatingSelectionToolbar.x = x
+            binding.floatingSelectionToolbar.y = y
+        }
+    }
+
+    private fun hideFloatingSelectionToolbar() {
+        binding.floatingSelectionToolbar.visibility = View.GONE
+    }
+
+    /** Compute and store the anchor point below btnLasso in root-view coordinates. */
+    private fun computeLassoToolbarAnchor() {
+        val btnLoc  = IntArray(2).also { binding.btnLasso.getLocationOnScreen(it) }
+        val rootLoc = IntArray(2).also { binding.root.getLocationOnScreen(it) }
+        lassoToolbarAnchor = PointF(
+            btnLoc[0] + binding.btnLasso.width  / 2f - rootLoc[0].toFloat(),
+            (btnLoc[1] + binding.btnLasso.height - rootLoc[1]).toFloat(),
+        )
+    }
+
+    /** Position and show the lasso popup toolbar anchored below btnLasso. */
+    private fun updateLassoPopupToolbar() {
+        val anchor = lassoToolbarAnchor ?: run { computeLassoToolbarAnchor(); lassoToolbarAnchor } ?: return
+        val dpGap  = 8f * resources.displayMetrics.density
+        binding.lassoPopupToolbar.visibility = View.VISIBLE
+        binding.lassoPopupToolbar.post {
+            val w = binding.lassoPopupToolbar.measuredWidth.toFloat()
+            val screenW = binding.root.width.toFloat()
+            val x = (anchor.x - w / 2f).coerceIn(0f, (screenW - w).coerceAtLeast(0f))
+            binding.lassoPopupToolbar.x = x
+            binding.lassoPopupToolbar.y = anchor.y + dpGap
+        }
+    }
+
+    private fun hideLassoPopupToolbar() {
+        binding.lassoPopupToolbar.visibility = View.GONE
+    }
+
     // ── Lasso mode helpers ────────────────────────────────────────────────────
 
     private fun enterLassoMode() {
@@ -1747,6 +2007,8 @@ class DrawingActivity : AppCompatActivity() {
         selectedObjectIds.clear()
         drawingView.setLassoMode(false)
         binding.btnLasso.isSelected = false
+        hideFloatingSelectionToolbar()
+        hideLassoPopupToolbar()
     }
 
     private fun enterLassoEraserMode() {
@@ -1835,6 +2097,7 @@ class DrawingActivity : AppCompatActivity() {
             is UndoRedoAction.StrokeAdded     -> action.pageId
             is UndoRedoAction.StrokeErased    -> action.pageId
             is UndoRedoAction.LassoErased     -> action.pageId
+            is UndoRedoAction.LassoPasted     -> action.pageId
             is UndoRedoAction.StrokesMoved    -> action.pageId
             is UndoRedoAction.TemplateChanged -> action.pageId
             is UndoRedoAction.PageCleared     -> action.pageId
@@ -1910,6 +2173,80 @@ class DrawingActivity : AppCompatActivity() {
             return
         }
 
+        // ── Cross-page LassoPasted: two-phase display (inverse of LassoErased) ─
+        // Undo paste = remove strokes (mirrors LassoErased redo).
+        // Redo paste = restore strokes (mirrors LassoErased undo).
+        if (isCrossPage && action is UndoRedoAction.LassoPasted) {
+            val snapshot      = drawingView.captureSnapshot()
+            val leavingPageId = currentPageId
+            withContext(Dispatchers.IO) {
+                if (snapshot != null && leavingPageId.isNotEmpty()) {
+                    persistSnapshot(db, leavingPageId, snapshot)
+                }
+                saveStrokes(db)
+            }
+            currentPageIndex = pages.indexOfFirst { it.id == action.pageId }.coerceAtLeast(0)
+
+            val templateBmp: Bitmap?
+            val preUndoStrokes: List<LiveStroke>
+            withContext(Dispatchers.IO) {
+                setupPageIds(db)
+                templateBmp    = loadPageTemplateFromDb(db)
+                preUndoStrokes = deserializeStrokesFromDb(db)
+            }
+            val preUndobitmap = withContext(Dispatchers.IO) {
+                drawingView.buildRenderBitmap(preUndoStrokes, templateBmp)
+            }
+            if (preUndobitmap != null) {
+                drawingView.loadStrokesWithBitmap(preUndoStrokes, preUndobitmap, templateBmp)
+            } else {
+                drawingView.loadStrokes(preUndoStrokes)
+            }
+            currentTemplateBitmap = templateBmp
+            updatePageIndicator()
+            saveLastOpenedPage(currentPageId)
+
+            withContext(Dispatchers.IO) {
+                if (isUndo) action.strokeIds.forEach { dao.softDeleteById(it, now) }
+                else        action.strokeIds.forEach { dao.restoreById(it, now) }
+            }
+
+            val idsSet = action.strokeIds.toSet()
+            val updatedStrokes: List<LiveStroke>
+            if (isUndo) {
+                // Undo paste → remove the pasted strokes.
+                updatedStrokes = preUndoStrokes.filter { it.id !in idsSet }
+                persistedStrokeIds.removeAll(idsSet)
+            } else {
+                // Redo paste → fetch restored strokes from DB and add to list.
+                val restoredStrokes = withContext(Dispatchers.IO) {
+                    action.strokeIds.mapNotNull { id ->
+                        dao.getObjectById(id)?.let { obj ->
+                            try { LiveStroke(id = obj.id, points = StrokeData.fromJson(obj.data).toPointFs()) }
+                            catch (e: Exception) {
+                                Log.e(TAG, "executeAction LassoPasted: failed to deserialize $id", e); null
+                            }
+                        }
+                    }
+                }
+                updatedStrokes = buildList { addAll(preUndoStrokes); addAll(restoredStrokes) }
+                restoredStrokes.forEach { persistedStrokeIds.add(it.id) }
+            }
+            val bitmap = withContext(Dispatchers.IO) {
+                drawingView.buildRenderBitmap(updatedStrokes, templateBmp)
+            }
+            if (bitmap != null) {
+                drawingView.loadStrokesWithBitmap(updatedStrokes, bitmap, templateBmp)
+            } else {
+                drawingView.loadStrokes(updatedStrokes)
+            }
+            selectedObjectIds.clear()
+            drawingView.lassoSelectedIds = emptySet()
+            drawingView.setLassoOverlay(null, null)
+            hideFloatingSelectionToolbar()
+            return
+        }
+
         // ── Cross-page StrokesMoved: two-phase display ────────────────────────
         if (isCrossPage && action is UndoRedoAction.StrokesMoved) {
             val snapshot      = drawingView.captureSnapshot()
@@ -1970,6 +2307,7 @@ class DrawingActivity : AppCompatActivity() {
             selectedObjectIds.clear()
             drawingView.lassoSelectedIds = emptySet()
             drawingView.setLassoOverlay(null, null)
+            hideFloatingSelectionToolbar()
             return
         }
 
@@ -2180,6 +2518,11 @@ class DrawingActivity : AppCompatActivity() {
                 else        action.strokeIds.forEach { dao.softDeleteById(it, now) }
             }
 
+            is UndoRedoAction.LassoPasted -> withContext(Dispatchers.IO) {
+                if (isUndo) action.strokeIds.forEach { dao.softDeleteById(it, now) }
+                else        action.strokeIds.forEach { dao.restoreById(it, now) }
+            }
+
             is UndoRedoAction.StrokesMoved -> withContext(Dispatchers.IO) {
                 val target = if (isUndo) action.originalStrokes else action.movedStrokes
                 db.withTransaction {
@@ -2218,6 +2561,7 @@ class DrawingActivity : AppCompatActivity() {
                 unionBounds.inset(-pad, -pad)
                 drawingView.setLassoOverlay(null, unionBounds)
                 drawingView.lassoSelectedIds = movedIds
+                updateFloatingSelectionToolbar(unionBounds)
             }
             updatePageIndicator()
             saveLastOpenedPage(currentPageId)
@@ -2256,6 +2600,47 @@ class DrawingActivity : AppCompatActivity() {
             } else {
                 drawingView.loadStrokes(updatedStrokes)
             }
+            updatePageIndicator()
+            saveLastOpenedPage(currentPageId)
+            return
+        }
+
+        // ── Step 3a-paste: Same-page LassoPasted — optimised in-memory update ──
+        if (action is UndoRedoAction.LassoPasted) {
+            val idsSet = action.strokeIds.toSet()
+            val updatedStrokes: List<LiveStroke>
+            if (isUndo) {
+                // Undo paste → remove the pasted strokes.
+                updatedStrokes = drawingView.getStrokes().filter { it.id !in idsSet }
+                persistedStrokeIds.removeAll(idsSet)
+            } else {
+                // Redo paste → fetch restored strokes from DB and append to list.
+                val restoredStrokes = withContext(Dispatchers.IO) {
+                    action.strokeIds.mapNotNull { id ->
+                        dao.getObjectById(id)?.let { obj ->
+                            try { LiveStroke(id = obj.id, points = StrokeData.fromJson(obj.data).toPointFs()) }
+                            catch (e: Exception) {
+                                Log.e(TAG, "executeAction LassoPasted: failed to deserialize $id", e); null
+                            }
+                        }
+                    }
+                }
+                updatedStrokes = buildList { addAll(drawingView.getStrokes()); addAll(restoredStrokes) }
+                restoredStrokes.forEach { persistedStrokeIds.add(it.id) }
+            }
+            val templateBmp = currentTemplateBitmap
+            val bitmap = withContext(Dispatchers.IO) {
+                drawingView.buildRenderBitmap(updatedStrokes, templateBmp)
+            }
+            if (bitmap != null) {
+                drawingView.loadStrokesWithBitmap(updatedStrokes, bitmap, templateBmp)
+            } else {
+                drawingView.loadStrokes(updatedStrokes)
+            }
+            selectedObjectIds.clear()
+            drawingView.lassoSelectedIds = emptySet()
+            drawingView.setLassoOverlay(null, null)
+            hideFloatingSelectionToolbar()
             updatePageIndicator()
             saveLastOpenedPage(currentPageId)
             return

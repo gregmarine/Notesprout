@@ -105,6 +105,9 @@ class GenericDrawingView(context: Context) : View(context), DrawingView {
     override var onLassoEraseComplete: ((List<String>) -> Unit)? = null
     override var lassoSelectedIds: Set<String> = emptySet()
     override var onStrokesMoved: ((List<LiveStroke>, List<LiveStroke>) -> Unit)? = null
+    override var onLassoTap: ((Float, Float) -> Unit)? = null
+    override var onDragStarted: (() -> Unit)? = null
+    override var onLassoSelectionCleared: (() -> Unit)? = null
 
     // ── Touch handling ───────────────────────────────────────────────────────
 
@@ -198,9 +201,11 @@ class GenericDrawingView(context: Context) : View(context), DrawingView {
                     return true
                 }
                 // Normal lasso: clear any existing selection so the user sees immediate feedback.
+                val hadSelection = lassoSelectionBox != null
                 lassoSelectionBox = null
                 lassoOverlayPath  = null
                 invalidate()
+                if (hadSelection) onLassoSelectionCleared?.invoke()
                 lassoGesturePath = Path().also { it.moveTo(event.x, event.y) }
                 lassoGestureStartPoint = PointF(event.x, event.y)
             }
@@ -210,7 +215,10 @@ class GenericDrawingView(context: Context) : View(context), DrawingView {
                     val dy = event.y - dragStartY
                     if (!dragThresholdMet) {
                         val dist = Math.sqrt((dx * dx + dy * dy).toDouble()).toFloat()
-                        if (dist >= thresholdPx) dragThresholdMet = true
+                        if (dist >= thresholdPx) {
+                            dragThresholdMet = true
+                            onDragStarted?.invoke()
+                        }
                     }
                     if (dragThresholdMet) {
                         dragDx = dx; dragDy = dy
@@ -275,6 +283,7 @@ class GenericDrawingView(context: Context) : View(context), DrawingView {
                 val dy = event.y - start.y
                 if (Math.sqrt((dx * dx + dy * dy).toDouble()).toFloat() < thresholdPx) {
                     onLassoTapToDismiss?.invoke()
+                    onLassoTap?.invoke(event.x, event.y)
                 } else {
                     onLassoComplete?.invoke(path, start)
                 }
@@ -573,6 +582,11 @@ class GenericDrawingView(context: Context) : View(context), DrawingView {
             }
         }
         return hitIds
+    }
+
+    override fun setLassoSelectedIds(ids: Set<String>, box: RectF) {
+        lassoSelectedIds = ids
+        setLassoOverlay(null, box)
     }
 
     override fun setLassoOverlay(path: Path?, selectionBox: RectF?) {

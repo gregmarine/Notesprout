@@ -137,6 +137,44 @@ interface DrawingView {
     var onLassoTapToDismiss: (() -> Unit)?
 
     /**
+     * Fired on the main thread when a stylus tap (below [DrawingConstants.DRAG_THRESHOLD_DP])
+     * occurs in lasso mode, regardless of whether a selection is active.
+     * DrawingActivity uses this to trigger lasso paste when the clipboard has content
+     * and no selection is currently active.
+     */
+    var onLassoTap: ((tapX: Float, tapY: Float) -> Unit)?
+        get() = null
+        @Suppress("UNUSED_PARAMETER")
+        set(value) {}
+
+    /**
+     * Fired on the main thread when the lasso drag threshold is crossed for the first
+     * time during an active drag move.  DrawingActivity uses this to hide the floating
+     * selection toolbar during the drag, reshowing it via [onStrokesMoved] on completion.
+     */
+    var onDragStarted: (() -> Unit)?
+        get() = null
+        @Suppress("UNUSED_PARAMETER")
+        set(value) {}
+
+    /**
+     * Fired on the main thread when an ACTION_DOWN in lasso mode starts a fresh gesture
+     * (clearing any existing selection box).  DrawingActivity uses this to hide the
+     * floating selection toolbar immediately rather than waiting for gesture completion.
+     */
+    var onLassoSelectionCleared: (() -> Unit)?
+        get() = null
+        @Suppress("UNUSED_PARAMETER")
+        set(value) {}
+
+    /**
+     * Inject a selection into the drawing view from outside (e.g., after paste).
+     * Sets [lassoSelectedIds] and calls [setLassoOverlay] with [box] in one step,
+     * triggering a full EPD handoff on Onyx devices so the selection box is visible.
+     */
+    fun setLassoSelectedIds(ids: Set<String>, box: RectF) {}
+
+    /**
      * Replace the in-memory stroke list with [strokes] loaded from the database,
      * then redraw the canvas bitmap immediately.
      * Must be called on the main thread (triggers invalidate).
