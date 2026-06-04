@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Tabler cut icon (outline/cut.svg): two handle circles at bottom, two blade lines
+     meeting near the top-center with a small gap/opening between the tips. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+
+    <!-- Left handle circle: cx=7, cy=17, r=3 -->
+    <path
+        android:fillColor="@android:color/transparent"
+        android:strokeColor="@color/inkBlack"
+        android:strokeWidth="1.5"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M4,17a3,3 0 1,0 6,0a3,3 0 1,0 -6,0"/>
+
+    <!-- Right handle circle: cx=17, cy=17, r=3 -->
+    <path
+        android:fillColor="@android:color/transparent"
+        android:strokeColor="@color/inkBlack"
+        android:strokeWidth="1.5"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M14,17a3,3 0 1,0 6,0a3,3 0 1,0 -6,0"/>
+
+    <!-- Right blade: from near left circle top-right, up to top-right corner -->
+    <path
+        android:fillColor="@android:color/transparent"
+        android:strokeColor="@color/inkBlack"
+        android:strokeWidth="1.5"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M9.15,14.85L18,4"/>
+
+    <!-- Left blade: from left edge of icon top, down to near left circle top-left -->
+    <path
+        android:fillColor="@android:color/transparent"
+        android:strokeColor="@color/inkBlack"
+        android:strokeWidth="1.5"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M6,4L14.85,14.85"/>
+
+</vector>

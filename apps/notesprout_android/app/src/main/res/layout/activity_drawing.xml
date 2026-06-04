@@ -226,6 +226,12 @@
             android:src="@drawable/ic_copy_plus"
             android:contentDescription="Copy selection" />
 
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnLassoCut"
+            style="@style/Widget.NoteSprout.ToolbarButton"
+            android:src="@drawable/ic_cut"
+            android:contentDescription="Cut selection" />
+
     </LinearLayout>
 
     <!-- Lasso button popup toolbar — anchored below btnLasso.

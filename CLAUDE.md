@@ -415,7 +415,9 @@ Completed:
 
 - ✂️ Pruning: Lasso context toolbar follows undo/redo — `StrokesMoved` same-page path calls `updateFloatingSelectionToolbar(unionBounds)` after restoring selection box so the floating toolbar tracks strokes back on undo; cross-page path calls `hideFloatingSelectionToolbar()` when clearing selection on page switch
 
+- 🌱 New Branch: Lasso Cut Action — `ic_cut` Tabler cut VectorDrawable (two circles at bottom for finger-hole handles + two blade lines rising to a small open gap at top-center, matching Tabler outline/cut.svg exactly); `UndoRedoAction.LassoCut(strokeIds, pageId, deletedAt, strokes)` — undo = restore by ID (does not touch clipboard), redo = re-soft-delete by ID + repopulate `NoteSproutClipboard` from `strokes` + union bounding box; `btnLassoCut` added to `floatingSelectionToolbar` after `btnLassoCopy`; `performLassoCut()` deep-copies selected strokes, populates clipboard (identical payload to lasso copy), soft-deletes rows on IO with a shared `deletedAt` timestamp, removes from in-memory stroke list, syncs `persistedStrokeIds`, pushes `LassoCut`, rebuilds canvas, clears selection visual, stays in lasso mode, updates lasso button icon to clipboard variant; `executeAction` handles `LassoCut` with same-page optimised path (undo = fetch from DB + append, redo = filter + clipboard repopulate + icon update) and cross-page two-phase path matching `LassoErased` pattern
+
 Next up: TBD — discuss before starting.
 
 ---
-*Last updated: 🌱 New Branch — Lasso Copy/Paste*
+*Last updated: 🌱 New Branch — Lasso Cut Action*

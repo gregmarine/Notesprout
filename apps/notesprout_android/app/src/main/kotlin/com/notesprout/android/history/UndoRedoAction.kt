@@ -143,4 +143,24 @@ sealed class UndoRedoAction {
         val pageId: String,
         val insertedAt: Long,
     ) : UndoRedoAction()
+
+    /**
+     * User cut selected strokes via the lasso cut tool — strokes are soft-deleted and
+     * simultaneously written to [NoteSproutClipboard].
+     *
+     * Undo: restores all [strokeIds] from the DB (does not touch the clipboard).
+     * Redo: re-soft-deletes [strokeIds] and repopulates [NoteSproutClipboard] with
+     *       [strokes] + their union bounding box.
+     *
+     * [deletedAt] is the timestamp used for all soft-delete calls during the original
+     * cut — stored for reference; undo/redo use restore-by-ID.
+     * [strokes] carries full point data so redo can rebuild the clipboard without a DB read.
+     */
+    @Serializable
+    data class LassoCut(
+        val strokeIds: List<String>,
+        val pageId: String,
+        val deletedAt: Long,
+        val strokes: List<LiveStroke>,
+    ) : UndoRedoAction()
 }
