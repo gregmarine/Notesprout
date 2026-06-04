@@ -701,6 +701,10 @@ class DrawingActivity : AppCompatActivity() {
             performLassoCut()
         }
 
+        binding.btnLassoDelete.setOnClickListener {
+            performLassoDelete()
+        }
+
         // Wire the lasso popup Clear Clipboard button.
         binding.btnLassoClearClipboard.setOnClickListener {
             NoteSproutClipboard.clear()
@@ -1976,6 +1980,53 @@ class DrawingActivity : AppCompatActivity() {
         }
     }
 
+    /**
+     * Delete the currently selected strokes: soft-delete them from the page.
+     * Unlike cut, the clipboard is never touched. Lasso mode stays active with no selection.
+     */
+    private fun performLassoDelete() {
+        val ids = drawingView.lassoSelectedIds
+        if (ids.isEmpty()) return
+        val pageId = currentPageId.takeIf { it.isNotEmpty() } ?: return
+
+        val allStrokes = drawingView.getStrokes()
+        val selectedStrokes = allStrokes.filter { it.id in ids }
+        if (selectedStrokes.isEmpty()) return
+
+        val strokeIds = selectedStrokes.map { it.id }
+        val capturedStrokes = selectedStrokes.map { s ->
+            LiveStroke(s.id, s.points.map { pt -> PointF(pt.x, pt.y) })
+        }
+
+        lifecycleScope.launch(Dispatchers.IO) {
+            val deletedAt = System.currentTimeMillis()
+            strokeIds.forEach { id ->
+                soilDatabase?.notebookDao()?.softDeleteById(id, deletedAt)
+            }
+            withContext(Dispatchers.Main) {
+                val erasedSet = strokeIds.toSet()
+                val updatedStrokes = drawingView.getStrokes().filter { it.id !in erasedSet }
+                persistedStrokeIds.removeAll(erasedSet)
+                drawingView.setStrokeListSilently(updatedStrokes)
+                undoRedoManager.push(UndoRedoAction.LassoDeleted(strokeIds, pageId, deletedAt, capturedStrokes))
+                updateUndoRedoButtons()
+                val templateBmp = currentTemplateBitmap
+                val bitmap = withContext(Dispatchers.IO) {
+                    drawingView.buildRenderBitmap(updatedStrokes, templateBmp)
+                }
+                if (bitmap != null) {
+                    drawingView.loadStrokesWithBitmap(updatedStrokes, bitmap, templateBmp)
+                } else {
+                    drawingView.loadStrokes(updatedStrokes)
+                }
+                selectedObjectIds.clear()
+                drawingView.lassoSelectedIds = emptySet()
+                drawingView.setLassoOverlay(null, null)
+                hideFloatingSelectionToolbar()
+            }
+        }
+    }
+
     /** Update btnLasso icon: ic_lasso_clipboard when clipboard has content, ic_lasso otherwise. */
     private fun updateLassoButtonIcon() {
         binding.btnLasso.setImageResource(
@@ -2162,6 +2213,7 @@ class DrawingActivity : AppCompatActivity() {
             is UndoRedoAction.LassoErased     -> action.pageId
             is UndoRedoAction.LassoPasted     -> action.pageId
             is UndoRedoAction.LassoCut        -> action.pageId
+            is UndoRedoAction.LassoDeleted    -> action.pageId
             is UndoRedoAction.StrokesMoved    -> action.pageId
             is UndoRedoAction.TemplateChanged -> action.pageId
             is UndoRedoAction.PageCleared     -> action.pageId
@@ -2294,6 +2346,74 @@ class DrawingActivity : AppCompatActivity() {
                             try { LiveStroke(id = obj.id, points = StrokeData.fromJson(obj.data).toPointFs()) }
                             catch (e: Exception) {
                                 Log.e(TAG, "executeAction LassoCut: failed to deserialize $id", e); null
+                            }
+                        }
+                    }
+                }
+                updatedStrokes = buildList { addAll(preUndoStrokes); addAll(restoredStrokes) }
+                restoredStrokes.forEach { persistedStrokeIds.add(it.id) }
+            }
+            val bitmap = withContext(Dispatchers.IO) {
+                drawingView.buildRenderBitmap(updatedStrokes, templateBmp)
+            }
+            if (bitmap != null) {
+                drawingView.loadStrokesWithBitmap(updatedStrokes, bitmap, templateBmp)
+            } else {
+                drawingView.loadStrokes(updatedStrokes)
+            }
+            return
+        }
+
+        // ── Cross-page LassoDeleted: two-phase display (identical to LassoErased — no clipboard) ─
+        if (isCrossPage && action is UndoRedoAction.LassoDeleted) {
+            val snapshot      = drawingView.captureSnapshot()
+            val leavingPageId = currentPageId
+            withContext(Dispatchers.IO) {
+                if (snapshot != null && leavingPageId.isNotEmpty()) {
+                    persistSnapshot(db, leavingPageId, snapshot)
+                }
+                saveStrokes(db)
+            }
+            currentPageIndex = pages.indexOfFirst { it.id == action.pageId }.coerceAtLeast(0)
+
+            val templateBmp: Bitmap?
+            val preUndoStrokes: List<LiveStroke>
+            withContext(Dispatchers.IO) {
+                setupPageIds(db)
+                templateBmp    = loadPageTemplateFromDb(db)
+                preUndoStrokes = deserializeStrokesFromDb(db)
+            }
+            val preUndobitmap = withContext(Dispatchers.IO) {
+                drawingView.buildRenderBitmap(preUndoStrokes, templateBmp)
+            }
+            if (preUndobitmap != null) {
+                drawingView.loadStrokesWithBitmap(preUndoStrokes, preUndobitmap, templateBmp)
+            } else {
+                drawingView.loadStrokes(preUndoStrokes)
+            }
+            currentTemplateBitmap = templateBmp
+            updatePageIndicator()
+            saveLastOpenedPage(currentPageId)
+
+            withContext(Dispatchers.IO) {
+                if (isUndo) action.strokeIds.forEach { dao.restoreById(it, now) }
+                else        action.strokeIds.forEach { dao.softDeleteById(it, now) }
+            }
+
+            val idsSet = action.strokeIds.toSet()
+            val updatedStrokes: List<LiveStroke>
+            if (!isUndo) {
+                // Redo delete: remove from in-memory list.
+                updatedStrokes = preUndoStrokes.filter { it.id !in idsSet }
+                persistedStrokeIds.removeAll(idsSet)
+            } else {
+                // Undo delete: fetch from DB and restore to in-memory list.
+                val restoredStrokes = withContext(Dispatchers.IO) {
+                    action.strokeIds.mapNotNull { id ->
+                        dao.getObjectById(id)?.let { obj ->
+                            try { LiveStroke(id = obj.id, points = StrokeData.fromJson(obj.data).toPointFs()) }
+                            catch (e: Exception) {
+                                Log.e(TAG, "executeAction LassoDeleted: failed to deserialize $id", e); null
                             }
                         }
                     }
@@ -2662,6 +2782,11 @@ class DrawingActivity : AppCompatActivity() {
                 else        action.strokeIds.forEach { dao.softDeleteById(it, now) }
             }
 
+            is UndoRedoAction.LassoDeleted -> withContext(Dispatchers.IO) {
+                if (isUndo) action.strokeIds.forEach { dao.restoreById(it, now) }
+                else        action.strokeIds.forEach { dao.softDeleteById(it, now) }
+            }
+
             is UndoRedoAction.LassoPasted -> withContext(Dispatchers.IO) {
                 if (isUndo) action.strokeIds.forEach { dao.softDeleteById(it, now) }
                 else        action.strokeIds.forEach { dao.restoreById(it, now) }
@@ -2772,6 +2897,43 @@ class DrawingActivity : AppCompatActivity() {
                             try { LiveStroke(id = obj.id, points = StrokeData.fromJson(obj.data).toPointFs()) }
                             catch (e: Exception) {
                                 Log.e(TAG, "executeAction LassoCut: failed to deserialize $id", e); null
+                            }
+                        }
+                    }
+                }
+                updatedStrokes = buildList { addAll(drawingView.getStrokes()); addAll(restoredStrokes) }
+                restoredStrokes.forEach { persistedStrokeIds.add(it.id) }
+            }
+            val templateBmp = currentTemplateBitmap
+            val bitmap = withContext(Dispatchers.IO) {
+                drawingView.buildRenderBitmap(updatedStrokes, templateBmp)
+            }
+            if (bitmap != null) {
+                drawingView.loadStrokesWithBitmap(updatedStrokes, bitmap, templateBmp)
+            } else {
+                drawingView.loadStrokes(updatedStrokes)
+            }
+            updatePageIndicator()
+            saveLastOpenedPage(currentPageId)
+            return
+        }
+
+        // ── Step 3a-delete: Same-page LassoDeleted — optimised in-memory update ─
+        if (action is UndoRedoAction.LassoDeleted) {
+            val idsSet = action.strokeIds.toSet()
+            val updatedStrokes: List<LiveStroke>
+            if (!isUndo) {
+                // Redo delete: remove from in-memory list.
+                updatedStrokes = drawingView.getStrokes().filter { it.id !in idsSet }
+                persistedStrokeIds.removeAll(idsSet)
+            } else {
+                // Undo delete: fetch restored strokes from DB and append to in-memory list.
+                val restoredStrokes = withContext(Dispatchers.IO) {
+                    action.strokeIds.mapNotNull { id ->
+                        dao.getObjectById(id)?.let { obj ->
+                            try { LiveStroke(id = obj.id, points = StrokeData.fromJson(obj.data).toPointFs()) }
+                            catch (e: Exception) {
+                                Log.e(TAG, "executeAction LassoDeleted: failed to deserialize $id", e); null
                             }
                         }
                     }

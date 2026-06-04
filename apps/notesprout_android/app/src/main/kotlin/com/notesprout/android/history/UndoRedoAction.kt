@@ -163,4 +163,21 @@ sealed class UndoRedoAction {
         val deletedAt: Long,
         val strokes: List<LiveStroke>,
     ) : UndoRedoAction()
+
+    /**
+     * User deleted selected strokes via the lasso delete action — strokes are soft-deleted
+     * but the clipboard is NOT touched.
+     *
+     * Undo: restores all [strokeIds] from the DB.
+     * Redo: re-soft-deletes [strokeIds] at a new timestamp.
+     *
+     * [strokes] carries full point data so undo can rebuild the canvas without a DB read.
+     */
+    @Serializable
+    data class LassoDeleted(
+        val strokeIds: List<String>,
+        val pageId: String,
+        val deletedAt: Long,
+        val strokes: List<LiveStroke>,
+    ) : UndoRedoAction()
 }

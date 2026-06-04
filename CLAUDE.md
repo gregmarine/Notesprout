@@ -417,7 +417,9 @@ Completed:
 
 - 🌱 New Branch: Lasso Cut Action — `ic_cut` Tabler cut VectorDrawable (two circles at bottom for finger-hole handles + two blade lines rising to a small open gap at top-center, matching Tabler outline/cut.svg exactly); `UndoRedoAction.LassoCut(strokeIds, pageId, deletedAt, strokes)` — undo = restore by ID (does not touch clipboard), redo = re-soft-delete by ID + repopulate `NoteSproutClipboard` from `strokes` + union bounding box; `btnLassoCut` added to `floatingSelectionToolbar` after `btnLassoCopy`; `performLassoCut()` deep-copies selected strokes, populates clipboard (identical payload to lasso copy), soft-deletes rows on IO with a shared `deletedAt` timestamp, removes from in-memory stroke list, syncs `persistedStrokeIds`, pushes `LassoCut`, rebuilds canvas, clears selection visual, stays in lasso mode, updates lasso button icon to clipboard variant; `executeAction` handles `LassoCut` with same-page optimised path (undo = fetch from DB + append, redo = filter + clipboard repopulate + icon update) and cross-page two-phase path matching `LassoErased` pattern
 
+- 🌱 New Branch: Lasso Delete Action — `ic_lasso_delete` Tabler trash VectorDrawable (lid bar, two inner vertical lines, rounded trapezoid body, handle cap); `UndoRedoAction.LassoDeleted(strokeIds, pageId, deletedAt, strokes)` — undo = restore by ID, redo = re-soft-delete by ID; clipboard never touched; `btnLassoDelete` added to `floatingSelectionToolbar` after `btnLassoCut` (Copy → Cut → Delete order); `performLassoDelete()` mirrors `performLassoCut()` minus all clipboard interaction — soft-deletes rows on IO with shared `deletedAt`, removes from in-memory stroke list, syncs `persistedStrokeIds`, pushes `LassoDeleted`, rebuilds canvas, clears selection visual, stays in lasso mode; `executeAction` handles `LassoDeleted` with same-page optimised path and cross-page two-phase path identical to `LassoErased`
+
 Next up: TBD — discuss before starting.
 
 ---
-*Last updated: 🌱 New Branch — Lasso Cut Action*
+*Last updated: 🌱 New Branch — Lasso Delete Action*
