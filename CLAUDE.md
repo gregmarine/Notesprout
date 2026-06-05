@@ -199,6 +199,60 @@ When asked to install on one or more devices:
 
 ---
 
+## Build Variants
+
+NoteSprout has two build variants:
+
+- **Debug** (`com.notesprout.android.dev`) — active development build, installs alongside stable
+- **Release** (`com.notesprout.android`) — stable build, never overwritten accidentally
+
+### Default behavior
+
+When asked to install without specifying a variant, **always build and install the debug APK**. Stable/release installs are always explicit.
+
+### Building
+
+**Debug APK:**
+```
+cd apps/notesprout_android
+JAVA_HOME=<temurin-17-path> ./gradlew assembleDebug
+```
+APK output: `apps/notesprout_android/app/build/outputs/apk/debug/app-debug.apk`
+
+**Release APK (unsigned, for local sideloading only):**
+```
+cd apps/notesprout_android
+JAVA_HOME=<temurin-17-path> ./gradlew assembleRelease
+```
+APK output: `apps/notesprout_android/app/build/outputs/apk/release/app-release-unsigned.apk`
+
+> Note: the release APK produced by `assembleRelease` is unsigned. Android rejects unsigned APKs — sign with the debug keystore before sideloading (see below). It cannot be submitted to the Play Store without a proper signing config — that is a separate future concern.
+
+### Installing
+
+Always build before installing — never install a stale APK.
+
+**Install debug to a device:**
+```
+adb -s <serial> install -r apps/notesprout_android/app/build/outputs/apk/debug/app-debug.apk
+```
+
+**Install release to a device (sign with debug keystore first):**
+```
+~/development/android-sdk/build-tools/35.0.0/apksigner sign \
+  --ks ~/.android/debug.keystore \
+  --ks-pass pass:android --key-pass pass:android \
+  --ks-key-alias androiddebugkey \
+  --out apps/notesprout_android/app/build/outputs/apk/release/app-release-signed.apk \
+  apps/notesprout_android/app/build/outputs/apk/release/app-release-unsigned.apk
+
+adb -s <serial> install -r apps/notesprout_android/app/build/outputs/apk/release/app-release-signed.apk
+```
+
+Use device serials from the ADB Device Serials table above.
+
+---
+
 ## Branch Strategy
 
 - main — stable releases only
