@@ -180,4 +180,25 @@ sealed class UndoRedoAction {
         val deletedAt: Long,
         val strokes: List<LiveStroke>,
     ) : UndoRedoAction()
+
+    /**
+     * User converted a lasso selection of strokes into a heading object.
+     *
+     * Undo: soft-delete the heading row, restore the original stroke rows.
+     * Redo: re-soft-delete the original strokes, re-insert the heading row.
+     *
+     * [deletedAt] is the timestamp used to soft-delete the original strokes — used by
+     * undo to restore them via [restoreChildrenDeletedSince] on the layer.
+     * [embeddedStrokes] carries full point data (with fresh UUIDs matching the heading's
+     * internal copy) so redo can rebuild the heading row without a DB read.
+     */
+    @Serializable
+    data class HeadingCreated(
+        val headingId: String,
+        val pageId: String,
+        val layerId: String,
+        val deletedAt: Long,
+        val originalStrokeIds: List<String>,
+        val embeddedStrokes: List<LiveStroke>,
+    ) : UndoRedoAction()
 }

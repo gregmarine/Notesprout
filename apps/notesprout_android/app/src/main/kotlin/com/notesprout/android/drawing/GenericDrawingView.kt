@@ -735,18 +735,29 @@ class GenericDrawingView(context: Context) : View(context), DrawingView {
     }
 
     /**
-     * Capture the current strokes as a base64-encoded PNG with a TRANSPARENT background.
-     * The template is intentionally excluded — at render time the stack is:
-     *   template → snapshot PNG → new strokes drawn this session.
-     * Returns null if there are no strokes or the view is not yet laid out.
+     * Capture the current strokes and heading backgrounds as a base64-encoded PNG with a
+     * TRANSPARENT background.  The template is intentionally excluded — at render time
+     * the stack is: template → snapshot PNG → new strokes drawn this session.
+     * Returns null if there are no strokes and no headings, or the view is not yet laid out.
      */
     override fun captureSnapshot(): String? {
-        if (strokes.isEmpty()) return null
+        if (strokes.isEmpty() && headings.isEmpty()) return null
         val w = width; val h = height
         if (w == 0 || h == 0) return null
         val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
         // Transparent base — do NOT fill with white, do NOT paint the template.
         val snapshotCanvas = Canvas(bmp)
+        for (heading in headings) {
+            snapshotCanvas.drawRect(heading.boundingBox, headingPaint)
+            for (liveStroke in heading.strokes) {
+                val points = liveStroke.points
+                if (points.size < 2) continue
+                val path = Path()
+                path.moveTo(points[0].x, points[0].y)
+                for (i in 1 until points.size) path.lineTo(points[i].x, points[i].y)
+                snapshotCanvas.drawPath(path, strokePaint)
+            }
+        }
         for (liveStroke in strokes) {
             val points = liveStroke.points
             if (points.size < 2) continue
