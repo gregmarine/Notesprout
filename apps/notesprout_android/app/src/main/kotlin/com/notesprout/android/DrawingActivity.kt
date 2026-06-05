@@ -2312,10 +2312,13 @@ class DrawingActivity : AppCompatActivity() {
                 drawingView.loadStrokes(updatedStrokes)
             }
 
+            val newSelection = setOf(headingId)
+            val pad = 8f * resources.displayMetrics.density
+            val selectionBox = RectF(boundingBox).also { it.inset(-pad, -pad) }
+            drawingView.setLassoSelectedIds(newSelection, selectionBox)
             selectedObjectIds.clear()
-            drawingView.lassoSelectedIds = emptySet()
-            drawingView.setLassoOverlay(null, null)
-            hideFloatingSelectionToolbar()
+            selectedObjectIds.addAll(newSelection)
+            updateFloatingSelectionToolbar(selectionBox)
         }
     }
 
