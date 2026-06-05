@@ -85,6 +85,7 @@ class GenericDrawingView(context: Context) : View(context), DrawingView {
     private var dragDx = 0f
     private var dragDy = 0f
     private var dragOriginalStrokes: List<LiveStroke> = emptyList()
+    private var dragOriginalHeadings: List<HeadingStroke> = emptyList()
     private var dragBackingBitmap: Bitmap? = null
 
     private val lassoPaint = Paint().apply {
@@ -115,7 +116,7 @@ class GenericDrawingView(context: Context) : View(context), DrawingView {
     override var onLassoTapToDismiss: (() -> Unit)? = null
     override var onLassoEraseComplete: ((List<String>) -> Unit)? = null
     override var lassoSelectedIds: Set<String> = emptySet()
-    override var onStrokesMoved: ((List<LiveStroke>, List<LiveStroke>) -> Unit)? = null
+    override var onStrokesMoved: ((List<LiveStroke>, List<LiveStroke>, List<HeadingStroke>, List<HeadingStroke>) -> Unit)? = null
     override var onLassoTap: ((Float, Float) -> Unit)? = null
     override var onDragStarted: (() -> Unit)? = null
     override var onLassoSelectionCleared: (() -> Unit)? = null
@@ -207,8 +208,13 @@ class GenericDrawingView(context: Context) : View(context), DrawingView {
                     dragOriginalStrokes = strokes
                         .filter { it.id in lassoSelectedIds }
                         .map { LiveStroke(it.id, it.points.map { pt -> PointF(pt.x, pt.y) }) }
-                    val nonSelected = strokes.filter { it.id !in lassoSelectedIds }
-                    dragBackingBitmap = buildRenderBitmap(nonSelected, templateBitmap, headings)
+                    dragOriginalHeadings = headings
+                        .filter { it.id in lassoSelectedIds }
+                        .map { h -> HeadingStroke(h.id, android.graphics.RectF(h.boundingBox),
+                            h.strokes.map { s -> LiveStroke(s.id, s.points.map { PointF(it.x, it.y) }) }) }
+                    val nonSelectedStrokes  = strokes.filter { it.id !in lassoSelectedIds }
+                    val nonSelectedHeadings = headings.filter { it.id !in lassoSelectedIds }
+                    dragBackingBitmap = buildRenderBitmap(nonSelectedStrokes, templateBitmap, nonSelectedHeadings)
                     return true
                 }
                 // Normal lasso: clear any existing selection so the user sees immediate feedback.
@@ -261,22 +267,39 @@ class GenericDrawingView(context: Context) : View(context), DrawingView {
                                 PointF(pt.x + dragDx, pt.y + dragDy)
                             })
                         }
+                        val movedHeadings = dragOriginalHeadings.map { h ->
+                            HeadingStroke(
+                                id = h.id,
+                                boundingBox = android.graphics.RectF(
+                                    h.boundingBox.left + dragDx, h.boundingBox.top + dragDy,
+                                    h.boundingBox.right + dragDx, h.boundingBox.bottom + dragDy,
+                                ),
+                                strokes = h.strokes.map { s ->
+                                    LiveStroke(s.id, s.points.map { PointF(it.x + dragDx, it.y + dragDy) })
+                                },
+                            )
+                        }
                         val movedById = movedStrokes.associateBy { it.id }
                         val updated = strokes.map { movedById[it.id] ?: it }
                         strokes.clear(); strokes.addAll(updated)
+                        val headingById = movedHeadings.associateBy { it.id }
+                        headings = headings.map { headingById[it.id] ?: it }
                         lassoSelectionBox = lassoSelectionBox?.let { b ->
                             RectF(b.left + dragDx, b.top + dragDy, b.right + dragDx, b.bottom + dragDy)
                         }
                         val origStrokes = dragOriginalStrokes
+                        val origHeadings = dragOriginalHeadings
                         dragBackingBitmap?.recycle(); dragBackingBitmap = null
                         isDragMoveActive = false; dragThresholdMet = false
-                        dragDx = 0f; dragDy = 0f; dragOriginalStrokes = emptyList()
+                        dragDx = 0f; dragDy = 0f
+                        dragOriginalStrokes = emptyList(); dragOriginalHeadings = emptyList()
                         redrawCanvas()
-                        onStrokesMoved?.invoke(origStrokes, movedStrokes)
+                        onStrokesMoved?.invoke(origStrokes, movedStrokes, origHeadings, movedHeadings)
                     } else {
                         dragBackingBitmap?.recycle(); dragBackingBitmap = null
                         isDragMoveActive = false; dragThresholdMet = false
-                        dragDx = 0f; dragDy = 0f; dragOriginalStrokes = emptyList()
+                        dragDx = 0f; dragDy = 0f
+                        dragOriginalStrokes = emptyList(); dragOriginalHeadings = emptyList()
                     }
                     return true
                 }
@@ -306,12 +329,22 @@ class GenericDrawingView(context: Context) : View(context), DrawingView {
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
 
-        // Drag layer: non-selected backing + selected strokes translated by drag offset.
+        // Drag layer: non-selected backing + selected headings + selected strokes translated.
         if (isDragMoveActive && dragThresholdMet) {
             canvas.drawColor(Color.WHITE)
             dragBackingBitmap?.let { canvas.drawBitmap(it, 0f, 0f, null) }
             val save = canvas.save()
             canvas.translate(dragDx, dragDy)
+            for (heading in dragOriginalHeadings) {
+                canvas.drawRect(heading.boundingBox, headingPaint)
+                for (stroke in heading.strokes) {
+                    val pts = stroke.points; if (pts.size < 2) continue
+                    val path = Path()
+                    path.moveTo(pts[0].x, pts[0].y)
+                    for (i in 1 until pts.size) path.lineTo(pts[i].x, pts[i].y)
+                    canvas.drawPath(path, strokePaint)
+                }
+            }
             for (stroke in dragOriginalStrokes) {
                 val pts = stroke.points; if (pts.size < 2) continue
                 val path = Path()
@@ -492,7 +525,8 @@ class GenericDrawingView(context: Context) : View(context), DrawingView {
         if (!enabled && isDragMoveActive) {
             dragBackingBitmap?.recycle(); dragBackingBitmap = null
             isDragMoveActive = false; dragThresholdMet = false
-            dragDx = 0f; dragDy = 0f; dragOriginalStrokes = emptyList()
+            dragDx = 0f; dragDy = 0f
+            dragOriginalStrokes = emptyList(); dragOriginalHeadings = emptyList()
             invalidate()
         }
     }

@@ -170,6 +170,14 @@ interface NotebookDao {
     @Query("UPDATE notebook SET data = :data, updatedAt = :updatedAt WHERE id = :id")
     suspend fun updateStrokeData(id: String, data: String, updatedAt: Long)
 
+    /**
+     * Overwrite both [boundingBox] and [data] for a heading row.
+     * Used by the lasso-move commit path to persist translated heading position
+     * and embedded stroke coordinates together in one SQL statement.
+     */
+    @Query("UPDATE notebook SET boundingBox = :boundingBox, data = :data, updatedAt = :updatedAt WHERE id = :id")
+    suspend fun updateHeadingData(id: String, boundingBox: String, data: String, updatedAt: Long)
+
     // ── Undo/redo restore operations ──────────────────────────────────────────
 
     /**

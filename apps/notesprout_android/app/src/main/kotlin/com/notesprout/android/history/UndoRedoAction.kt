@@ -1,5 +1,6 @@
 package com.notesprout.android.history
 
+import com.notesprout.android.data.HeadingStroke
 import com.notesprout.android.data.LiveStroke
 import kotlinx.serialization.Serializable
 
@@ -107,54 +108,66 @@ sealed class UndoRedoAction {
     ) : UndoRedoAction()
 
     /**
-     * User erased a batch of strokes via the lasso eraser tool — undo restores all of them;
+     * User erased a batch of strokes/headings via the lasso eraser tool — undo restores all;
      * redo soft-deletes them again as a single atomic batch.
+     *
+     * [strokeIds] contains ALL erased IDs (both strokes and heading IDs) for unified DB ops.
+     * [headingIds] is the heading subset of [strokeIds].
+     * [headings] carries full heading data so undo can rebuild the in-memory list without a
+     * DB round-trip for heading deserialization.
      */
     @Serializable
     data class LassoErased(
         val strokeIds: List<String>,
         val pageId: String,
+        val headingIds: List<String> = emptyList(),
+        val headings: List<HeadingStroke> = emptyList(),
     ) : UndoRedoAction()
 
     /**
-     * User moved selected strokes via lasso drag — undo restores original positions;
-     * redo re-applies the moved positions.  Both lists carry complete [LiveStroke] objects
-     * (id + full point arrays) so the operation never needs a DB read to reconstruct state.
-     * All IDs in [originalStrokes] and [movedStrokes] are identical; only coordinates differ.
+     * User moved selected strokes/headings via lasso drag — undo restores original positions;
+     * redo re-applies the moved positions.  Both lists carry complete objects
+     * (id + full data) so the operation never needs a DB read to reconstruct state.
+     * All IDs in the original and moved lists are identical; only coordinates differ.
+     *
+     * [originalHeadings]/[movedHeadings] carry full [HeadingStroke] objects including
+     * translated [boundingBox] and embedded stroke points.
      */
     @Serializable
     data class StrokesMoved(
         val pageId: String,
         val originalStrokes: List<LiveStroke>,
         val movedStrokes: List<LiveStroke>,
+        val originalHeadings: List<HeadingStroke> = emptyList(),
+        val movedHeadings: List<HeadingStroke> = emptyList(),
     ) : UndoRedoAction()
 
     /**
-     * User pasted strokes from the lasso clipboard onto the current page.
-     * Undo soft-deletes all [strokeIds]; redo restores them by ID.
+     * User pasted strokes/headings from the lasso clipboard onto the current page.
+     * Undo soft-deletes all [strokeIds] + [headingIds]; redo restores them by ID.
      *
-     * [insertedAt] is the timestamp used when the strokes were inserted into the DB.
-     * Not used for the undo/redo DB operations directly (those use per-call timestamps),
-     * but retained for future reference and cross-page disambiguation.
+     * [insertedAt] is the timestamp used when the objects were inserted into the DB.
+     * [headingIds] are the heading IDs pasted alongside strokes (may be empty for
+     * pure-stroke pastes).
      */
     @Serializable
     data class LassoPasted(
         val strokeIds: List<String>,
         val pageId: String,
         val insertedAt: Long,
+        val headingIds: List<String> = emptyList(),
     ) : UndoRedoAction()
 
     /**
-     * User cut selected strokes via the lasso cut tool — strokes are soft-deleted and
-     * simultaneously written to [NoteSproutClipboard].
+     * User cut selected strokes/headings via the lasso cut tool — objects are soft-deleted
+     * and simultaneously written to [NoteSproutClipboard].
      *
-     * Undo: restores all [strokeIds] from the DB (does not touch the clipboard).
-     * Redo: re-soft-deletes [strokeIds] and repopulates [NoteSproutClipboard] with
-     *       [strokes] + their union bounding box.
+     * Undo: restores all [strokeIds] + [headingIds] from the DB (does not touch clipboard).
+     * Redo: re-soft-deletes [strokeIds] + [headingIds] and repopulates [NoteSproutClipboard]
+     *       with [strokes] + [headings] + their union bounding box.
      *
-     * [deletedAt] is the timestamp used for all soft-delete calls during the original
-     * cut — stored for reference; undo/redo use restore-by-ID.
-     * [strokes] carries full point data so redo can rebuild the clipboard without a DB read.
+     * [deletedAt] is the timestamp used for all soft-delete calls during the original cut.
+     * [strokes]/[headings] carry full data so redo can rebuild the clipboard without a DB read.
      */
     @Serializable
     data class LassoCut(
@@ -162,16 +175,18 @@ sealed class UndoRedoAction {
         val pageId: String,
         val deletedAt: Long,
         val strokes: List<LiveStroke>,
+        val headingIds: List<String> = emptyList(),
+        val headings: List<HeadingStroke> = emptyList(),
     ) : UndoRedoAction()
 
     /**
-     * User deleted selected strokes via the lasso delete action — strokes are soft-deleted
-     * but the clipboard is NOT touched.
+     * User deleted selected strokes/headings via the lasso delete action — objects are
+     * soft-deleted but the clipboard is NOT touched.
      *
-     * Undo: restores all [strokeIds] from the DB.
-     * Redo: re-soft-deletes [strokeIds] at a new timestamp.
+     * Undo: restores all [strokeIds] + [headingIds] from the DB.
+     * Redo: re-soft-deletes [strokeIds] + [headingIds].
      *
-     * [strokes] carries full point data so undo can rebuild the canvas without a DB read.
+     * [strokes]/[headings] carry full data so undo can rebuild the canvas without a DB read.
      */
     @Serializable
     data class LassoDeleted(
@@ -179,6 +194,8 @@ sealed class UndoRedoAction {
         val pageId: String,
         val deletedAt: Long,
         val strokes: List<LiveStroke>,
+        val headingIds: List<String> = emptyList(),
+        val headings: List<HeadingStroke> = emptyList(),
     ) : UndoRedoAction()
 
     /**

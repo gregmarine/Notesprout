@@ -120,9 +120,10 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
     private var dragThresholdMet = false
     private var dragDx = 0f
     private var dragDy = 0f
-    // Deep copies of selected strokes captured at drag start (pre-move point data).
+    // Deep copies of selected strokes/headings captured at drag start (pre-move data).
     private var dragOriginalStrokes: List<LiveStroke> = emptyList()
-    // Backing bitmap: all non-selected strokes + template, built once at drag start.
+    private var dragOriginalHeadings: List<HeadingStroke> = emptyList()
+    // Backing bitmap: non-selected strokes/headings + template, built once at drag start.
     private var dragBackingBitmap: Bitmap? = null
 
     private val lassoPaint = Paint().apply {
@@ -175,7 +176,7 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
     override var onLassoTapToDismiss: (() -> Unit)? = null
     override var onLassoEraseComplete: ((List<String>) -> Unit)? = null
     override var lassoSelectedIds: Set<String> = emptySet()
-    override var onStrokesMoved: ((List<LiveStroke>, List<LiveStroke>) -> Unit)? = null
+    override var onStrokesMoved: ((List<LiveStroke>, List<LiveStroke>, List<HeadingStroke>, List<HeadingStroke>) -> Unit)? = null
 
     // ── Raw input callback ───────────────────────────────────────────────────
 
@@ -505,13 +506,18 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
                     dragStartX = event.x; dragStartY = event.y
                     dragThresholdMet = false
                     dragDx = 0f; dragDy = 0f
-                    // Deep-copy selected strokes — these are the original positions before any drag.
+                    // Deep-copy selected strokes/headings — original positions before any drag.
                     dragOriginalStrokes = strokes
                         .filter { it.id in lassoSelectedIds }
                         .map { LiveStroke(it.id, it.points.map { pt -> PointF(pt.x, pt.y) }) }
-                    // Build backing bitmap without selected strokes (held for duration of drag).
-                    val nonSelected = strokes.filter { it.id !in lassoSelectedIds }
-                    dragBackingBitmap = buildRenderBitmap(nonSelected, templateBitmap, headings)
+                    dragOriginalHeadings = headings
+                        .filter { it.id in lassoSelectedIds }
+                        .map { h -> HeadingStroke(h.id, android.graphics.RectF(h.boundingBox),
+                            h.strokes.map { s -> LiveStroke(s.id, s.points.map { PointF(it.x, it.y) }) }) }
+                    // Build backing bitmap without selected strokes/headings (held for drag).
+                    val nonSelectedStrokes  = strokes.filter { it.id !in lassoSelectedIds }
+                    val nonSelectedHeadings = headings.filter { it.id !in lassoSelectedIds }
+                    dragBackingBitmap = buildRenderBitmap(nonSelectedStrokes, templateBitmap, nonSelectedHeadings)
                     epd("DRAG_START selected=${lassoSelectedIds.size}")
                     return true
                 }
@@ -572,19 +578,37 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
                                 PointF(pt.x + dragDx, pt.y + dragDy)
                             })
                         }
+                        // Translate selected headings (boundingBox + embedded stroke points).
+                        val movedHeadings = dragOriginalHeadings.map { h ->
+                            HeadingStroke(
+                                id = h.id,
+                                boundingBox = android.graphics.RectF(
+                                    h.boundingBox.left + dragDx, h.boundingBox.top + dragDy,
+                                    h.boundingBox.right + dragDx, h.boundingBox.bottom + dragDy,
+                                ),
+                                strokes = h.strokes.map { s ->
+                                    LiveStroke(s.id, s.points.map { PointF(it.x + dragDx, it.y + dragDy) })
+                                },
+                            )
+                        }
                         // Update in-memory stroke list with translated positions.
                         val movedById = movedStrokes.associateBy { it.id }
                         val updated = strokes.map { movedById[it.id] ?: it }
                         strokes.clear(); strokes.addAll(updated)
-                        // Translate selection box to match new stroke positions.
+                        // Update in-memory heading list with translated positions.
+                        val headingById = movedHeadings.associateBy { it.id }
+                        headings = headings.map { headingById[it.id] ?: it }
+                        // Translate selection box to match new positions.
                         lassoSelectionBox = lassoSelectionBox?.let { b ->
                             RectF(b.left + dragDx, b.top + dragDy, b.right + dragDx, b.bottom + dragDy)
                         }
                         // Restore normal EPD update mode and commit pixels BEFORE firing callback.
                         val origStrokes = dragOriginalStrokes
+                        val origHeadings = dragOriginalHeadings
                         dragBackingBitmap?.recycle(); dragBackingBitmap = null
                         isDragMoveActive = false; dragThresholdMet = false
-                        dragDx = 0f; dragDy = 0f; dragOriginalStrokes = emptyList()
+                        dragDx = 0f; dragDy = 0f
+                        dragOriginalStrokes = emptyList(); dragOriginalHeadings = emptyList()
                         EpdController.setViewDefaultUpdateMode(this, UpdateMode.GU)
                         epd("DRAG_COMMIT A2_MODE_OFF")
                         redrawCanvas(caller = "dragCommit")
@@ -592,12 +616,13 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
                             EpdController.handwritingRepaint(this, Rect(0, 0, width, height))
                             epd("HANDWRITING_REPAINT caller=dragCommit")
                         }
-                        onStrokesMoved?.invoke(origStrokes, movedStrokes)
+                        onStrokesMoved?.invoke(origStrokes, movedStrokes, origHeadings, movedHeadings)
                     } else {
                         // Below threshold — cancel silently, no move applied.
                         dragBackingBitmap?.recycle(); dragBackingBitmap = null
                         isDragMoveActive = false; dragThresholdMet = false
-                        dragDx = 0f; dragDy = 0f; dragOriginalStrokes = emptyList()
+                        dragDx = 0f; dragDy = 0f
+                        dragOriginalStrokes = emptyList(); dragOriginalHeadings = emptyList()
                         epd("DRAG_CANCELLED threshold_not_met")
                     }
                     return true
@@ -629,12 +654,22 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
 
-        // Drag layer: non-selected backing + selected strokes translated by drag offset.
+        // Drag layer: non-selected backing + selected headings + selected strokes translated.
         if (isDragMoveActive && dragThresholdMet) {
             dragBackingBitmap?.let { canvas.drawBitmap(it, 0f, 0f, null) }
                 ?: canvas.drawColor(Color.WHITE)
             val save = canvas.save()
             canvas.translate(dragDx, dragDy)
+            for (heading in dragOriginalHeadings) {
+                canvas.drawRect(heading.boundingBox, headingPaint)
+                for (stroke in heading.strokes) {
+                    val pts = stroke.points; if (pts.size < 2) continue
+                    val path = Path()
+                    path.moveTo(pts[0].x, pts[0].y)
+                    for (i in 1 until pts.size) path.lineTo(pts[i].x, pts[i].y)
+                    canvas.drawPath(path, strokePaint)
+                }
+            }
             for (stroke in dragOriginalStrokes) {
                 val pts = stroke.points; if (pts.size < 2) continue
                 val path = Path()
@@ -719,7 +754,8 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
             }
             dragBackingBitmap?.recycle(); dragBackingBitmap = null
             isDragMoveActive = false; dragThresholdMet = false
-            dragDx = 0f; dragDy = 0f; dragOriginalStrokes = emptyList()
+            dragDx = 0f; dragDy = 0f
+            dragOriginalStrokes = emptyList(); dragOriginalHeadings = emptyList()
             invalidate()
             epd("INVALIDATE caller=setDragMoveMode_cancel")
         }

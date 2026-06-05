@@ -86,12 +86,17 @@ interface DrawingView {
     /**
      * Fired on the main thread when the stylus lifts after a lasso drag move that
      * exceeded the distance threshold.
-     * [originalStrokes] — deep copies of the moved strokes at their positions before drag.
-     * [movedStrokes]    — the same strokes with all points translated by the drag offset.
+     * [originalStrokes]/[originalHeadings] — deep copies at positions before drag.
+     * [movedStrokes]/[movedHeadings]       — same objects with all coordinates translated.
      * DrawingActivity wires this to persist the new coordinates and push a [StrokesMoved]
      * undo action.
      */
-    var onStrokesMoved: ((originalStrokes: List<LiveStroke>, movedStrokes: List<LiveStroke>) -> Unit)?
+    var onStrokesMoved: ((
+        originalStrokes: List<LiveStroke>,
+        movedStrokes: List<LiveStroke>,
+        originalHeadings: List<HeadingStroke>,
+        movedHeadings: List<HeadingStroke>,
+    ) -> Unit)?
         get() = null
         @Suppress("UNUSED_PARAMETER")
         set(value) {}
