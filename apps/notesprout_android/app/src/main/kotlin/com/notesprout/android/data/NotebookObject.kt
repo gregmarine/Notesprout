@@ -68,3 +68,5 @@ data class NotebookObject(
     @ColumnInfo(name = "data")
     val data: String,
 )
+
+const val TYPE_HEADING = "heading"

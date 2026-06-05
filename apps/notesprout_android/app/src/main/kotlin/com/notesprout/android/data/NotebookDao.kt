@@ -67,6 +67,13 @@ interface NotebookDao {
     suspend fun getStrokesForLayer(layerId: String): List<NotebookObject>
 
     /**
+     * All non-deleted heading objects belonging to [layerId], sorted by `order` ascending.
+     * Headings embed their strokes in the `data` JSON — they are NOT separate rows.
+     */
+    @Query("SELECT * FROM notebook WHERE parentId = :layerId AND type = 'heading' AND deletedAt IS NULL ORDER BY \"order\" ASC")
+    suspend fun getHeadingsForLayer(layerId: String): List<NotebookObject>
+
+    /**
      * First non-deleted row of [type], or null if none exist.
      * Useful for retrieving the single page or layer in a fresh notebook.
      */

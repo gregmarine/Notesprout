@@ -5,6 +5,7 @@ import android.graphics.Path
 import android.graphics.PointF
 import android.graphics.RectF
 import android.view.View
+import com.notesprout.android.data.HeadingStroke
 import com.notesprout.android.data.LiveStroke
 
 // Option B: buildRenderBitmap + loadStrokesWithBitmap — pre-build bitmap on IO thread
@@ -175,6 +176,27 @@ interface DrawingView {
     fun setLassoSelectedIds(ids: Set<String>, box: RectF) {}
 
     /**
+     * Replace the in-memory heading list with [headings] loaded from the database.
+     * Call before [loadStrokes] or [loadStrokesWithBitmap] so the heading backgrounds
+     * are included in the next canvas redraw.  Must be called on the main thread.
+     */
+    fun loadHeadings(headings: List<HeadingStroke>) {}
+
+    /**
+     * Return a snapshot of the current in-memory heading list.
+     */
+    fun getHeadings(): List<HeadingStroke> = emptyList()
+
+    /**
+     * Fired on the main thread when the eraser path intersects a heading's bounding box.
+     * DrawingActivity wires this to soft-delete the heading row from the DB.
+     */
+    var onHeadingErased: ((headingId: String) -> Unit)?
+        get() = null
+        @Suppress("UNUSED_PARAMETER")
+        set(value) {}
+
+    /**
      * Replace the in-memory stroke list with [strokes] loaded from the database,
      * then redraw the canvas bitmap immediately.
      * Must be called on the main thread (triggers invalidate).
@@ -206,15 +228,24 @@ interface DrawingView {
     // ── Option B: off-thread bitmap pre-build ─────────────────────────────────
 
     /**
-     * Build the full render bitmap (white → [templateBitmap] → all [strokes]) on
-     * a background thread and return it, or null if the view isn't laid out yet.
+     * Build the full render bitmap (white → [templateBitmap] → [headings] grey fills +
+     * embedded strokes → [strokes]) on a background thread and return it, or null if
+     * the view isn't laid out yet.
+     *
+     * [headings] defaults to empty — existing call sites that don't yet pass headings
+     * continue to work correctly.  Pass [getHeadings()] for calls that should include
+     * the currently loaded heading objects.
      *
      * Thread-safe: reads [View.width]/[View.height] only (stable after layout);
      * does NOT call invalidate or modify any view state.  The returned Bitmap is
      * not yet attached to the view — hand it to [loadStrokesWithBitmap] on the
      * main thread to swap it in.
      */
-    fun buildRenderBitmap(strokes: List<LiveStroke>, templateBitmap: Bitmap?): Bitmap?
+    fun buildRenderBitmap(
+        strokes: List<LiveStroke>,
+        templateBitmap: Bitmap?,
+        headings: List<HeadingStroke> = emptyList(),
+    ): Bitmap?
 
     /**
      * Swap in a [bitmap] pre-built by [buildRenderBitmap], update the in-memory

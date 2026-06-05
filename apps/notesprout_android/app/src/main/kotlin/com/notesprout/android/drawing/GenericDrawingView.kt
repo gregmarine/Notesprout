@@ -13,6 +13,7 @@ import android.util.Base64
 import android.graphics.Region
 import android.view.MotionEvent
 import android.view.View
+import com.notesprout.android.data.HeadingStroke
 import com.notesprout.android.data.LiveStroke
 import java.io.ByteArrayOutputStream
 import java.util.UUID
@@ -42,6 +43,15 @@ class GenericDrawingView(context: Context) : View(context), DrawingView {
 
     // Stroke store — LiveStroke carries the DB row UUID for incremental save / targeted erase.
     private val strokes = mutableListOf<LiveStroke>()
+
+    // Heading store — populated from type="heading" rows at page load time.
+    private var headings: List<HeadingStroke> = emptyList()
+
+    private val headingPaint = Paint().apply {
+        style = Paint.Style.FILL
+        color = HEADING_BACKGROUND_COLOR
+        isAntiAlias = false
+    }
 
     private val strokePaint = Paint().apply {
         isAntiAlias = true
@@ -98,6 +108,7 @@ class GenericDrawingView(context: Context) : View(context), DrawingView {
     // ── DrawingView callbacks ────────────────────────────────────────────────
 
     override var onStrokeErased: ((String) -> Unit)? = null
+    override var onHeadingErased: ((String) -> Unit)? = null
     override var onPenLifted: (() -> Unit)? = null
     override var onSnapshotReady: ((String) -> Unit)? = null
     override var onLassoComplete: ((Path, PointF) -> Unit)? = null
@@ -197,7 +208,7 @@ class GenericDrawingView(context: Context) : View(context), DrawingView {
                         .filter { it.id in lassoSelectedIds }
                         .map { LiveStroke(it.id, it.points.map { pt -> PointF(pt.x, pt.y) }) }
                     val nonSelected = strokes.filter { it.id !in lassoSelectedIds }
-                    dragBackingBitmap = buildRenderBitmap(nonSelected, templateBitmap)
+                    dragBackingBitmap = buildRenderBitmap(nonSelected, templateBitmap, headings)
                     return true
                 }
                 // Normal lasso: clear any existing selection so the user sees immediate feedback.
@@ -369,6 +380,15 @@ class GenericDrawingView(context: Context) : View(context), DrawingView {
             eMaxX + ERASER_RADIUS_PX, eMaxY + ERASER_RADIUS_PX
         )
 
+        // Heading hit-test: erase entire heading if eraser AABB intersects its bounding box.
+        val hitHeadings = headings.filter { RectF.intersects(eBounds, it.boundingBox) }
+        if (hitHeadings.isNotEmpty()) {
+            val hitIds = hitHeadings.mapTo(HashSet()) { it.id }
+            headings = headings.filter { it.id !in hitIds }
+            hitHeadings.forEach { onHeadingErased?.invoke(it.id) }
+            throttledEraseRedraw()
+        }
+
         val toRemove = strokes.filter { stroke ->
             // Fast AABB rejection — O(1) per stroke, eliminates ~95% of candidates.
             android.graphics.RectF.intersects(eBounds, stroke.boundingBox) &&
@@ -417,6 +437,16 @@ class GenericDrawingView(context: Context) : View(context), DrawingView {
         canvas.drawColor(Color.WHITE)
         templateBitmap?.let { tb ->
             canvas.drawBitmap(tb, null, RectF(0f, 0f, width.toFloat(), height.toFloat()), null)
+        }
+        for (heading in headings) {
+            canvas.drawRect(heading.boundingBox, headingPaint)
+            for (liveStroke in heading.strokes) {
+                val pts = liveStroke.points; if (pts.size < 2) continue
+                val path = Path()
+                path.moveTo(pts[0].x, pts[0].y)
+                for (i in 1 until pts.size) path.lineTo(pts[i].x, pts[i].y)
+                canvas.drawPath(path, strokePaint)
+            }
         }
         for (liveStroke in strokes) {
             val points = liveStroke.points
@@ -618,6 +648,7 @@ class GenericDrawingView(context: Context) : View(context), DrawingView {
     override fun clearCanvas() {
         activePoints.clear()
         strokes.clear()
+        headings = emptyList()
         // Clear to white then re-apply template so the template persists after clear.
         renderCanvas?.let { canvas ->
             canvas.drawColor(Color.WHITE)
@@ -627,6 +658,12 @@ class GenericDrawingView(context: Context) : View(context), DrawingView {
         }
         invalidate()
     }
+
+    override fun loadHeadings(headings: List<HeadingStroke>) {
+        this.headings = headings
+    }
+
+    override fun getHeadings(): List<HeadingStroke> = headings
 
     override fun loadStrokes(strokes: List<LiveStroke>) {
         this.strokes.clear()
@@ -639,13 +676,27 @@ class GenericDrawingView(context: Context) : View(context), DrawingView {
     // ── Option B: off-thread bitmap pre-build ─────────────────────────────────
 
     /** Build the render bitmap on a background thread. Safe to call from Dispatchers.IO. */
-    override fun buildRenderBitmap(strokes: List<LiveStroke>, templateBitmap: Bitmap?): Bitmap? {
+    override fun buildRenderBitmap(
+        strokes: List<LiveStroke>,
+        templateBitmap: Bitmap?,
+        headings: List<HeadingStroke>,
+    ): Bitmap? {
         val w = width; val h = height
         if (w == 0 || h == 0) return null
         val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bmp)
         canvas.drawColor(Color.WHITE)
         templateBitmap?.let { canvas.drawBitmap(it, null, RectF(0f, 0f, w.toFloat(), h.toFloat()), null) }
+        for (heading in headings) {
+            canvas.drawRect(heading.boundingBox, headingPaint)
+            for (liveStroke in heading.strokes) {
+                val pts = liveStroke.points; if (pts.size < 2) continue
+                val path = Path()
+                path.moveTo(pts[0].x, pts[0].y)
+                for (i in 1 until pts.size) path.lineTo(pts[i].x, pts[i].y)
+                canvas.drawPath(path, strokePaint)
+            }
+        }
         for (liveStroke in strokes) {
             val pts = liveStroke.points
             if (pts.size < 2) continue

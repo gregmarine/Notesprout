@@ -32,6 +32,8 @@ import androidx.lifecycle.lifecycleScope
 import androidx.room.Room
 import androidx.room.withTransaction
 import com.notesprout.android.data.copyPageAfter
+import com.notesprout.android.data.HeadingObject
+import com.notesprout.android.data.HeadingStroke
 import com.notesprout.android.data.LiveStroke
 import com.notesprout.android.data.NotebookDao
 import com.notesprout.android.data.NotebookMetadata
@@ -77,6 +79,7 @@ class DrawingActivity : AppCompatActivity() {
         val templateBitmap: Bitmap?,
         val displayBitmap: Bitmap?,
         val usedSnapshot: Boolean,
+        val headings: List<HeadingStroke> = emptyList(),
     )
 
     private lateinit var binding: ActivityDrawingBinding
@@ -494,6 +497,30 @@ class DrawingActivity : AppCompatActivity() {
                     if (pageId.isNotEmpty() && layerId.isNotEmpty()) {
                         undoRedoManager.push(UndoRedoAction.StrokeErased(pageId, layerId, strokeId))
                         updateUndoRedoButtons()
+                    }
+                }
+            }
+        }
+
+        // Heading erase callback — soft-delete the heading row (embedded strokes go with it).
+        // The view already removed the heading from its in-memory list in eraseAtPath;
+        // here we persist the delete and rebuild the bitmap so the EPD panel is refreshed.
+        drawingView.onHeadingErased = { headingId ->
+            val db = soilDatabase
+            if (db != null) {
+                lifecycleScope.launch(Dispatchers.IO) {
+                    db.notebookDao().softDeleteById(headingId, System.currentTimeMillis())
+                    withContext(Dispatchers.Main) {
+                        val strokes = drawingView.getStrokes()
+                        val templateBmp = currentTemplateBitmap
+                        val bitmap = withContext(Dispatchers.IO) {
+                            drawingView.buildRenderBitmap(strokes, templateBmp, drawingView.getHeadings())
+                        }
+                        if (bitmap != null) {
+                            drawingView.loadStrokesWithBitmap(strokes, bitmap, templateBmp)
+                        } else {
+                            drawingView.loadStrokes(strokes)
+                        }
                     }
                 }
             }
@@ -1135,13 +1162,43 @@ class DrawingActivity : AppCompatActivity() {
     private suspend fun loadCurrentPage(db: SoilDatabase): PageLoadResult {
         setupPageIds(db)
         val templateBitmap  = loadPageTemplateFromDb(db)
+        val headings        = loadHeadingsFromDb(db, currentLayerId)
         val snapshotBitmap  = tryLoadSnapshotBitmap(db, templateBitmap)
         return if (snapshotBitmap != null) {
-            PageLoadResult(emptyList(), templateBitmap, snapshotBitmap, usedSnapshot = true)
+            PageLoadResult(emptyList(), templateBitmap, snapshotBitmap, usedSnapshot = true, headings = headings)
         } else {
             val strokes      = deserializeStrokesFromDb(db)
-            val renderBitmap = drawingView.buildRenderBitmap(strokes, templateBitmap)
-            PageLoadResult(strokes, templateBitmap, renderBitmap, usedSnapshot = false)
+            val renderBitmap = drawingView.buildRenderBitmap(strokes, templateBitmap, headings)
+            PageLoadResult(strokes, templateBitmap, renderBitmap, usedSnapshot = false, headings = headings)
+        }
+    }
+
+    /**
+     * Load heading rows for [layerId] from [db] and convert them to render-time [HeadingStroke]s.
+     * Rows with missing or malformed `boundingBox` or `data` are silently skipped.
+     * Must be called on [Dispatchers.IO].
+     */
+    private suspend fun loadHeadingsFromDb(db: SoilDatabase, layerId: String): List<HeadingStroke> {
+        if (layerId.isEmpty()) return emptyList()
+        val rows = db.notebookDao().getHeadingsForLayer(layerId)
+        return rows.mapNotNull { row ->
+            val box = row.parseBoundingBox() ?: return@mapNotNull null
+            val headingObj = runCatching { HeadingObject.fromJson(row.data) }.getOrNull()
+                ?: return@mapNotNull null
+            HeadingStroke(id = row.id, boundingBox = box, strokes = headingObj.strokes)
+        }
+    }
+
+    private fun NotebookObject.parseBoundingBox(): android.graphics.RectF? {
+        return try {
+            val obj = org.json.JSONObject(boundingBox)
+            val x = obj.getDouble("x").toFloat()
+            val y = obj.getDouble("y").toFloat()
+            val w = obj.getDouble("width").toFloat()
+            val h = obj.getDouble("height").toFloat()
+            android.graphics.RectF(x, y, x + w, y + h)
+        } catch (e: Exception) {
+            null
         }
     }
 
@@ -1151,6 +1208,7 @@ class DrawingActivity : AppCompatActivity() {
      */
     private fun displayPage(result: PageLoadResult) {
         currentTemplateBitmap = result.templateBitmap
+        drawingView.loadHeadings(result.headings)
         val bitmap = result.displayBitmap
         if (bitmap != null) {
             drawingView.loadStrokesWithBitmap(result.strokes, bitmap, result.templateBitmap)

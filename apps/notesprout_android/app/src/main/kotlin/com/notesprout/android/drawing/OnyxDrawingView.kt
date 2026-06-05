@@ -16,6 +16,7 @@ import android.util.Log
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewTreeObserver
+import com.notesprout.android.data.HeadingStroke
 import com.notesprout.android.data.LiveStroke
 import com.onyx.android.sdk.api.device.epd.EpdController
 import com.onyx.android.sdk.api.device.epd.UpdateMode
@@ -77,6 +78,15 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
 
     // Stroke store — LiveStroke carries the DB row UUID for incremental save / targeted erase.
     private val strokes = mutableListOf<LiveStroke>()
+
+    // Heading store — populated from type="heading" rows at page load time.
+    private var headings: List<HeadingStroke> = emptyList()
+
+    private val headingPaint = Paint().apply {
+        style = Paint.Style.FILL
+        color = HEADING_BACKGROUND_COLOR
+        isAntiAlias = false
+    }
 
     // When true, drawing callbacks treat pen input as erasing.
     // Set by setEraserMode(); also fires via physical eraser hardware callbacks regardless of this flag.
@@ -145,6 +155,7 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
     override var onLassoSelectionCleared: (() -> Unit)? = null
 
     override var onStrokeErased: ((String) -> Unit)? = null
+    override var onHeadingErased: ((String) -> Unit)? = null
 
     /**
      * Invoked (on main thread) immediately after each pen lift (onEndRawDrawing).
@@ -302,6 +313,15 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
             eMaxX + ERASER_RADIUS_PX, eMaxY + ERASER_RADIUS_PX
         )
 
+        // Heading hit-test: erase entire heading if eraser AABB intersects its bounding box.
+        val hitHeadings = headings.filter { android.graphics.RectF.intersects(eBounds, it.boundingBox) }
+        if (hitHeadings.isNotEmpty()) {
+            val hitIds = hitHeadings.mapTo(HashSet()) { it.id }
+            headings = headings.filter { it.id !in hitIds }
+            hitHeadings.forEach { onHeadingErased?.invoke(it.id) }
+            throttledEraseRedraw()
+        }
+
         val toRemove = strokes.filter { stroke ->
             // Fast AABB rejection — O(1) per stroke, eliminates ~95% of candidates.
             android.graphics.RectF.intersects(eBounds, stroke.boundingBox) &&
@@ -357,6 +377,16 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
         canvas.drawColor(Color.WHITE)
         templateBitmap?.let { tb ->
             canvas.drawBitmap(tb, null, RectF(0f, 0f, width.toFloat(), height.toFloat()), null)
+        }
+        for (heading in headings) {
+            canvas.drawRect(heading.boundingBox, headingPaint)
+            for (liveStroke in heading.strokes) {
+                val pts = liveStroke.points; if (pts.size < 2) continue
+                val path = Path()
+                path.moveTo(pts[0].x, pts[0].y)
+                for (i in 1 until pts.size) path.lineTo(pts[i].x, pts[i].y)
+                canvas.drawPath(path, strokePaint)
+            }
         }
         for (liveStroke in strokes) {
             val points = liveStroke.points
@@ -481,7 +511,7 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
                         .map { LiveStroke(it.id, it.points.map { pt -> PointF(pt.x, pt.y) }) }
                     // Build backing bitmap without selected strokes (held for duration of drag).
                     val nonSelected = strokes.filter { it.id !in lassoSelectedIds }
-                    dragBackingBitmap = buildRenderBitmap(nonSelected, templateBitmap)
+                    dragBackingBitmap = buildRenderBitmap(nonSelected, templateBitmap, headings)
                     epd("DRAG_START selected=${lassoSelectedIds.size}")
                     return true
                 }
@@ -940,6 +970,7 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
     override fun clearCanvas() {
         epd("CLEAR_CANVAS_START isSetup=$isSetup strokeCountBefore=${strokes.size}")
         strokes.clear()
+        headings = emptyList()
         if (isSetup) {
             touchHelper.setRawDrawingRenderEnabled(false)
             epd("RENDER_DISABLED caller=clearCanvas")
@@ -966,6 +997,12 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
         }
     }
 
+    override fun loadHeadings(headings: List<HeadingStroke>) {
+        this.headings = headings
+    }
+
+    override fun getHeadings(): List<HeadingStroke> = headings
+
     override fun loadStrokes(strokes: List<LiveStroke>) {
         val loadStart = System.currentTimeMillis()
         epd("LOAD_STROKES_START strokeCount=${strokes.size}")
@@ -984,7 +1021,11 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
      * Build the render bitmap on a background thread.  Does NOT touch view state —
      * safe to call from Dispatchers.IO.
      */
-    override fun buildRenderBitmap(strokes: List<LiveStroke>, templateBitmap: Bitmap?): Bitmap? {
+    override fun buildRenderBitmap(
+        strokes: List<LiveStroke>,
+        templateBitmap: Bitmap?,
+        headings: List<HeadingStroke>,
+    ): Bitmap? {
         val buildStart = System.currentTimeMillis()
         epd("BUILD_RENDER_BITMAP_START strokeCount=${strokes.size} hasTemplate=${templateBitmap != null}")
         val w = width; val h = height
@@ -996,6 +1037,16 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
         val canvas = android.graphics.Canvas(bmp)
         canvas.drawColor(android.graphics.Color.WHITE)
         templateBitmap?.let { canvas.drawBitmap(it, null, RectF(0f, 0f, w.toFloat(), h.toFloat()), null) }
+        for (heading in headings) {
+            canvas.drawRect(heading.boundingBox, headingPaint)
+            for (liveStroke in heading.strokes) {
+                val pts = liveStroke.points; if (pts.size < 2) continue
+                val path = android.graphics.Path()
+                path.moveTo(pts[0].x, pts[0].y)
+                for (i in 1 until pts.size) path.lineTo(pts[i].x, pts[i].y)
+                canvas.drawPath(path, strokePaint)
+            }
+        }
         for (liveStroke in strokes) {
             val pts = liveStroke.points
             if (pts.size < 2) continue
