@@ -109,7 +109,7 @@ class GenericDrawingView(context: Context) : View(context), DrawingView {
     // ── DrawingView callbacks ────────────────────────────────────────────────
 
     override var onStrokeErased: ((String) -> Unit)? = null
-    override var onHeadingErased: ((String) -> Unit)? = null
+    override var onHeadingErased: ((HeadingStroke) -> Unit)? = null
     override var onPenLifted: (() -> Unit)? = null
     override var onSnapshotReady: ((String) -> Unit)? = null
     override var onLassoComplete: ((Path, PointF) -> Unit)? = null
@@ -418,7 +418,7 @@ class GenericDrawingView(context: Context) : View(context), DrawingView {
         if (hitHeadings.isNotEmpty()) {
             val hitIds = hitHeadings.mapTo(HashSet()) { it.id }
             headings = headings.filter { it.id !in hitIds }
-            hitHeadings.forEach { onHeadingErased?.invoke(it.id) }
+            hitHeadings.forEach { onHeadingErased?.invoke(it) }
             throttledEraseRedraw()
         }
 

@@ -503,15 +503,31 @@ class DrawingActivity : AppCompatActivity() {
             }
         }
 
-        // Heading erase callback — soft-delete the heading row (embedded strokes go with it).
-        // The view already removed the heading from its in-memory list in eraseAtPath;
-        // here we persist the delete and rebuild the bitmap so the EPD panel is refreshed.
-        drawingView.onHeadingErased = { headingId ->
+        // Heading erase callback — the view has already removed the heading from its in-memory
+        // list before this fires. Persist the delete, push an undo action, and rebuild the
+        // bitmap so the EPD panel reflects the erased heading.
+        drawingView.onHeadingErased = { heading ->
+            val deletedAt = System.currentTimeMillis()
             val db = soilDatabase
+            val pageId = currentPageId
             if (db != null) {
+                // Deep-copy before any async work so the undo action holds stable data.
+                val capturedHeading = HeadingStroke(
+                    heading.id, RectF(heading.boundingBox),
+                    heading.strokes.map { s -> LiveStroke(s.id, s.points.map { PointF(it.x, it.y) }) },
+                )
                 lifecycleScope.launch(Dispatchers.IO) {
-                    db.notebookDao().softDeleteById(headingId, System.currentTimeMillis())
+                    db.notebookDao().softDeleteById(heading.id, deletedAt)
                     withContext(Dispatchers.Main) {
+                        if (pageId.isNotEmpty()) {
+                            undoRedoManager.push(UndoRedoAction.LassoErased(
+                                strokeIds  = emptyList(),
+                                headingIds = listOf(heading.id),
+                                pageId     = pageId,
+                                headings   = listOf(capturedHeading),
+                            ))
+                            updateUndoRedoButtons()
+                        }
                         val strokes = drawingView.getStrokes()
                         val templateBmp = currentTemplateBitmap
                         val bitmap = withContext(Dispatchers.IO) {
@@ -3221,13 +3237,16 @@ class DrawingActivity : AppCompatActivity() {
             // for Phase 2's in-memory update.
             val templateBmp: Bitmap?
             val preUndoStrokes: List<LiveStroke>
+            val preUndoHeadings: List<HeadingStroke>
             withContext(Dispatchers.IO) {
                 setupPageIds(db)
-                templateBmp   = loadPageTemplateFromDb(db)
-                preUndoStrokes = deserializeStrokesFromDb(db)
+                templateBmp      = loadPageTemplateFromDb(db)
+                preUndoStrokes   = deserializeStrokesFromDb(db)
+                preUndoHeadings  = loadHeadingsFromDb(db, currentLayerId)
             }
+            drawingView.loadHeadings(preUndoHeadings)
             val preUndobitmap = withContext(Dispatchers.IO) {
-                drawingView.buildRenderBitmap(preUndoStrokes, templateBmp)
+                drawingView.buildRenderBitmap(preUndoStrokes, templateBmp, preUndoHeadings)
             }
             // Display: user now sees the target page with stroke in original state.
             if (preUndobitmap != null) {
@@ -3269,7 +3288,7 @@ class DrawingActivity : AppCompatActivity() {
                 if (restored != null) persistedStrokeIds.add(strokeId)
             }
             val bitmap = withContext(Dispatchers.IO) {
-                drawingView.buildRenderBitmap(updatedStrokes, templateBmp)
+                drawingView.buildRenderBitmap(updatedStrokes, templateBmp, preUndoHeadings)
             }
             if (bitmap != null) {
                 drawingView.loadStrokesWithBitmap(updatedStrokes, bitmap, templateBmp)
@@ -3840,8 +3859,9 @@ class DrawingActivity : AppCompatActivity() {
             }
 
             val templateBmp = currentTemplateBitmap
+            val currentHeadings = drawingView.getHeadings()
             val bitmap = withContext(Dispatchers.IO) {
-                drawingView.buildRenderBitmap(updatedStrokes, templateBmp)
+                drawingView.buildRenderBitmap(updatedStrokes, templateBmp, currentHeadings)
             }
             if (bitmap != null) {
                 drawingView.loadStrokesWithBitmap(updatedStrokes, bitmap, templateBmp)

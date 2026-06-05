@@ -156,7 +156,7 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
     override var onLassoSelectionCleared: (() -> Unit)? = null
 
     override var onStrokeErased: ((String) -> Unit)? = null
-    override var onHeadingErased: ((String) -> Unit)? = null
+    override var onHeadingErased: ((HeadingStroke) -> Unit)? = null
 
     /**
      * Invoked (on main thread) immediately after each pen lift (onEndRawDrawing).
@@ -319,7 +319,7 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
         if (hitHeadings.isNotEmpty()) {
             val hitIds = hitHeadings.mapTo(HashSet()) { it.id }
             headings = headings.filter { it.id !in hitIds }
-            hitHeadings.forEach { onHeadingErased?.invoke(it.id) }
+            hitHeadings.forEach { onHeadingErased?.invoke(it) }
             throttledEraseRedraw()
         }
 
@@ -789,6 +789,12 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
                     if (isSetup && !isLassoMode && !isLassoEraserMode) {
                         touchHelper.setRawDrawingEnabled(true)
                         epd("RAW_DRAWING_ENABLED true caller=setLassoMode_exit")
+                        // setRawDrawingEnabled may re-enable the SDK render path internally;
+                        // re-apply the render disable so the next eraser gesture stays clean.
+                        if (isEraserMode) {
+                            touchHelper.setRawDrawingRenderEnabled(false)
+                            epd("RENDER_DISABLED caller=setLassoMode_exit_eraserMode")
+                        }
                     }
                 }
             }
@@ -821,6 +827,10 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
                     if (isSetup && !isLassoMode && !isLassoEraserMode) {
                         touchHelper.setRawDrawingEnabled(true)
                         epd("RAW_DRAWING_ENABLED true caller=setLassoEraserMode_exit")
+                        if (isEraserMode) {
+                            touchHelper.setRawDrawingRenderEnabled(false)
+                            epd("RENDER_DISABLED caller=setLassoEraserMode_exit_eraserMode")
+                        }
                     }
                 }
             }
@@ -1012,6 +1022,10 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
                 if (isSetup && !isLassoMode && !isLassoEraserMode) {
                     touchHelper.setRawDrawingEnabled(true)
                     epd("RAW_DRAWING_ENABLED true caller=setTemplate")
+                    if (isEraserMode) {
+                        touchHelper.setRawDrawingRenderEnabled(false)
+                        epd("RENDER_DISABLED caller=setTemplate_eraserMode")
+                    }
                 }
             }
         }
@@ -1042,6 +1056,10 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
                 if (isSetup && !isLassoMode && !isLassoEraserMode) {
                     touchHelper.setRawDrawingEnabled(true)
                     epd("RAW_DRAWING_ENABLED true caller=clearCanvas")
+                    if (isEraserMode) {
+                        touchHelper.setRawDrawingRenderEnabled(false)
+                        epd("RENDER_DISABLED caller=clearCanvas_eraserMode")
+                    }
                 }
             }
         }
@@ -1147,6 +1165,10 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
                 if (isSetup && !isLassoMode && !isLassoEraserMode) {
                     touchHelper.setRawDrawingEnabled(true)
                     epd("RAW_DRAWING_ENABLED true caller=loadStrokesWithBitmap")
+                    if (isEraserMode) {
+                        touchHelper.setRawDrawingRenderEnabled(false)
+                        epd("RENDER_DISABLED caller=loadStrokesWithBitmap_eraserMode")
+                    }
                 }
             }
         }

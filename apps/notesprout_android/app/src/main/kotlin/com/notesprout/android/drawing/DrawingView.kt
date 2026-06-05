@@ -194,9 +194,11 @@ interface DrawingView {
 
     /**
      * Fired on the main thread when the eraser path intersects a heading's bounding box.
-     * DrawingActivity wires this to soft-delete the heading row from the DB.
+     * The heading has already been removed from the view's in-memory list before this fires.
+     * DrawingActivity wires this to soft-delete the heading row from the DB and push an
+     * undo action. The full [HeadingStroke] is passed so the caller has its data for undo.
      */
-    var onHeadingErased: ((headingId: String) -> Unit)?
+    var onHeadingErased: ((heading: HeadingStroke) -> Unit)?
         get() = null
         @Suppress("UNUSED_PARAMETER")
         set(value) {}
