@@ -483,7 +483,9 @@ Completed:
 
 - ✂️ Pruning: Lasso paste/dismiss and selection-on-page-turn fixes — three fixes: (1) Paste fired on tap even with an active selection: root cause was `lassoSelectionBox` already nulled at `ACTION_DOWN` (outside-box tap), so the `ACTION_UP` check saw no selection and paste fired; fix adds `lassoGestureHadSelection` flag captured at `ACTION_DOWN` and checked at `ACTION_UP` in both drawing views — `onLassoTap` is suppressed when the gesture started with an active selection. (2) Finger/palm touch cleared lasso selection: removed the non-stylus early-out block in `handleLassoTouch` from both drawing views; selection can now only be cleared by a stylus tap outside the box. (3) Lasso selection visual (dashed box + floating toolbar) persisted after page turn: `navigateToPageInternal` and the swipe-to-new-page path in `evaluatePageFling` now call `selectedObjectIds.clear()` + `drawingView.setLassoOverlay(null, null)` + `hideFloatingSelectionToolbar()` before `clearCanvas()`.
 
+- 🌱 New Branch: Dual-install build variants — `applicationIdSuffix = ".dev"` added to debug build type so debug (`com.notesprout.android.dev`) and release (`com.notesprout.android`) install side-by-side on the same device; `app/src/debug/res/values/strings.xml` overrides `app_name` to "NoteSprout Dev" for the launcher; CLAUDE.md updated with build variant instructions and corrected release signing steps (unsigned APKs must be signed with the debug keystore via `apksigner` before sideloading — `--bypass-verification` is not supported on BOOX devices)
+
 Next up: TBD — discuss before starting.
 
 ---
-*Last updated: ✂️ Pruning — Lasso Paste/Dismiss and Selection-on-Page-Turn Fixes*
+*Last updated: 🌱 New Branch — Dual-install Build Variants*
