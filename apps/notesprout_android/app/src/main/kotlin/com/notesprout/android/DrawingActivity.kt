@@ -1031,6 +1031,9 @@ class DrawingActivity : AppCompatActivity() {
                     }
                     undoRedoManager.push(UndoRedoAction.PageAdded(currentPageId, currentPageIndex))
                     updateUndoRedoButtons()
+                    selectedObjectIds.clear()
+                    drawingView.setLassoOverlay(null, null)
+                    hideFloatingSelectionToolbar()
                     drawingView.clearCanvas()
                     val result = withContext(Dispatchers.IO) { loadCurrentPage(db) }
                     displayPage(result)
@@ -1897,6 +1900,9 @@ class DrawingActivity : AppCompatActivity() {
         }
 
         currentPageIndex = newIndex
+        selectedObjectIds.clear()
+        drawingView.setLassoOverlay(null, null)
+        hideFloatingSelectionToolbar()
         drawingView.clearCanvas()
 
         val result = withContext(Dispatchers.IO) { loadCurrentPage(db) }

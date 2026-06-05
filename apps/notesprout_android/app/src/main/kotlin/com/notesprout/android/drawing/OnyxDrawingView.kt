@@ -105,6 +105,7 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
     private var lassoSelectionBox: RectF? = null
     private var lassoGestureStartPoint: PointF? = null
     private var lassoGesturePath: Path? = null
+    private var lassoGestureHadSelection = false
     private var lastLassoRefreshMs = 0L
 
     // Lasso eraser display path: jitter baked in at point-add time so the grain is
@@ -484,14 +485,6 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
     private fun handleLassoTouch(event: MotionEvent): Boolean {
         val toolType = event.getToolType(0)
 
-        // Finger tap with an active selection dismisses it.
-        if (toolType != MotionEvent.TOOL_TYPE_STYLUS
-            && lassoSelectionBox != null
-            && event.actionMasked == MotionEvent.ACTION_DOWN) {
-            onLassoTapToDismiss?.invoke()
-            return true
-        }
-
         // Only stylus builds the lasso path / drag; finger taps fall through.
         if (toolType != MotionEvent.TOOL_TYPE_STYLUS) return false
 
@@ -522,12 +515,12 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
                     return true
                 }
                 // Normal lasso: clear any existing selection so the user sees immediate feedback.
-                val hadSelection = lassoSelectionBox != null
+                lassoGestureHadSelection = lassoSelectionBox != null
                 lassoSelectionBox  = null
                 lassoOverlayPath   = null
                 invalidate()
                 epd("INVALIDATE caller=lassoDown-clearSelection")
-                if (hadSelection) onLassoSelectionCleared?.invoke()
+                if (lassoGestureHadSelection) onLassoSelectionCleared?.invoke()
                 lassoGesturePath = Path().also { it.moveTo(event.x, event.y) }
                 lassoGestureStartPoint = PointF(event.x, event.y)
             }
@@ -641,9 +634,12 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
                 val dx = event.x - start.x
                 val dy = event.y - start.y
                 if (Math.sqrt((dx * dx + dy * dy).toDouble()).toFloat() < thresholdPx) {
+                    val hadSelection = lassoGestureHadSelection
+                    lassoGestureHadSelection = false
                     onLassoTapToDismiss?.invoke()
-                    onLassoTap?.invoke(event.x, event.y)
+                    if (!hadSelection) onLassoTap?.invoke(event.x, event.y)
                 } else {
+                    lassoGestureHadSelection = false
                     onLassoComplete?.invoke(path, start)
                 }
             }

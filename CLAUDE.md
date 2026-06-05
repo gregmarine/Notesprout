@@ -427,7 +427,9 @@ Completed:
 
 - ✂️ Pruning: Keep heading selected after creation with correct selection padding — after `createHeadingFromStrokes` completes the newly created heading is now kept selected with the floating toolbar visible (Un-heading, Copy, Cut, Delete ready immediately); the selection box is padded by an additional 8dp outset (matching `val pad = 8f * resources.displayMetrics.density; RectF(boundingBox).also { it.inset(-pad, -pad) }`) to match the visual treatment applied when re-selecting an existing heading via lasso.
 
+- ✂️ Pruning: Lasso paste/dismiss and selection-on-page-turn fixes — three fixes: (1) Paste fired on tap even with an active selection: root cause was `lassoSelectionBox` already nulled at `ACTION_DOWN` (outside-box tap), so the `ACTION_UP` check saw no selection and paste fired; fix adds `lassoGestureHadSelection` flag captured at `ACTION_DOWN` and checked at `ACTION_UP` in both drawing views — `onLassoTap` is suppressed when the gesture started with an active selection. (2) Finger/palm touch cleared lasso selection: removed the non-stylus early-out block in `handleLassoTouch` from both drawing views; selection can now only be cleared by a stylus tap outside the box. (3) Lasso selection visual (dashed box + floating toolbar) persisted after page turn: `navigateToPageInternal` and the swipe-to-new-page path in `evaluatePageFling` now call `selectedObjectIds.clear()` + `drawingView.setLassoOverlay(null, null)` + `hideFloatingSelectionToolbar()` before `clearCanvas()`.
+
 Next up: TBD — discuss before starting.
 
 ---
-*Last updated: ✂️ Pruning — Keep Heading Selected After Creation*
+*Last updated: ✂️ Pruning — Lasso Paste/Dismiss and Selection-on-Page-Turn Fixes*
