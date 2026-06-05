@@ -201,4 +201,22 @@ sealed class UndoRedoAction {
         val originalStrokeIds: List<String>,
         val embeddedStrokes: List<LiveStroke>,
     ) : UndoRedoAction()
+
+    /**
+     * User removed a heading, dispersing its embedded strokes back onto the layer as
+     * individual live stroke rows with fresh UUIDs.
+     *
+     * Undo: soft-delete all [restoredStrokes] by ID, restore the heading row by ID.
+     * Redo: soft-delete the heading row, restore [restoredStrokes] by ID.
+     *
+     * [embeddedStrokes] carries the heading's original embedded stroke data so the heading's
+     * bounding box can be reconstructed in-memory on undo (same 8dp padding as creation).
+     */
+    @Serializable
+    data class HeadingRemoved(
+        val headingId: String,
+        val pageId: String,
+        val restoredStrokes: List<LiveStroke>,
+        val embeddedStrokes: List<LiveStroke>,
+    ) : UndoRedoAction()
 }

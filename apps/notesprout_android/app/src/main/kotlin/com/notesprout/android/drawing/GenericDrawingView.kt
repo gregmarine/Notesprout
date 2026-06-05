@@ -576,8 +576,9 @@ class GenericDrawingView(context: Context) : View(context), DrawingView {
         drawnPath.lineTo(startPoint.x, startPoint.y)
         drawnPath.close()
         val strokeSnapshot = strokes.toList()
+        val headingSnapshot = headings.toList()
         Thread {
-            val hitIds = runLassoHitTest(drawnPath, strokeSnapshot)
+            val hitIds = runLassoHitTest(drawnPath, strokeSnapshot, headingSnapshot)
             post {
                 lassoOverlayPath       = null
                 lassoEraserDisplayPath = null
@@ -589,7 +590,11 @@ class GenericDrawingView(context: Context) : View(context), DrawingView {
         }.start()
     }
 
-    private fun runLassoHitTest(path: Path, strokes: List<LiveStroke>): List<String> {
+    private fun runLassoHitTest(
+        path: Path,
+        strokes: List<LiveStroke>,
+        headings: List<HeadingStroke> = emptyList(),
+    ): List<String> {
         val bounds = RectF()
         path.computeBounds(bounds, true)
         if (bounds.width() < 10f || bounds.height() < 10f) return emptyList()
@@ -609,6 +614,15 @@ class GenericDrawingView(context: Context) : View(context), DrawingView {
                     hitIds.add(stroke.id)
                     break
                 }
+            }
+        }
+        // Heading hit-test: center-point containment within the lasso polygon.
+        for (heading in headings) {
+            if (!RectF.intersects(bounds, heading.boundingBox)) continue
+            val cx = heading.boundingBox.centerX().toInt()
+            val cy = heading.boundingBox.centerY().toInt()
+            if (region.contains(cx, cy)) {
+                hitIds.add(heading.id)
             }
         }
         return hitIds
