@@ -785,7 +785,7 @@ class DrawingActivity : AppCompatActivity() {
                             for (heading in movedHeadings) {
                                 val bboxJson = """{"x":${heading.boundingBox.left},"y":${heading.boundingBox.top},"width":${heading.boundingBox.width()},"height":${heading.boundingBox.height()}}"""
                                 db.notebookDao().updateHeadingData(
-                                    heading.id, bboxJson, HeadingObject(heading.strokes).toJson(), now
+                                    heading.id, bboxJson, HeadingObject(heading.strokes, heading.recognizedText).toJson(), now
                                 )
                             }
                         }
@@ -2018,7 +2018,8 @@ class DrawingActivity : AppCompatActivity() {
         NoteSproutClipboard.content = NoteSproutClipboard.ClipboardContent(
             strokes  = strokes.map { LiveStroke(it.id, it.points.map { pt -> PointF(pt.x, pt.y) }) },
             headings = headings.map { h -> HeadingStroke(h.id, RectF(h.boundingBox),
-                h.strokes.map { s -> LiveStroke(s.id, s.points.map { PointF(it.x, it.y) }) }) },
+                h.strokes.map { s -> LiveStroke(s.id, s.points.map { PointF(it.x, it.y) }) },
+                recognizedText = h.recognizedText) },
             boundingBox = box,
         )
         updateLassoButtonIcon()
@@ -2056,6 +2057,7 @@ class DrawingActivity : AppCompatActivity() {
                     LiveStroke(java.util.UUID.randomUUID().toString(),
                         s.points.map { PointF(it.x + dx, it.y + dy) })
                 },
+                recognizedText = h.recognizedText,
             )
         }
 
@@ -2104,7 +2106,7 @@ class DrawingActivity : AppCompatActivity() {
                                 createdAt   = now,
                                 updatedAt   = now,
                                 deletedAt   = null,
-                                data        = HeadingObject(heading.strokes).toJson(),
+                                data        = HeadingObject(heading.strokes, heading.recognizedText).toJson(),
                             )
                         )
                     }
@@ -2166,7 +2168,8 @@ class DrawingActivity : AppCompatActivity() {
         }
         val clipHeadings = selectedHeadings.map { h ->
             HeadingStroke(h.id, RectF(h.boundingBox),
-                h.strokes.map { s -> LiveStroke(s.id, s.points.map { PointF(it.x, it.y) }) })
+                h.strokes.map { s -> LiveStroke(s.id, s.points.map { PointF(it.x, it.y) }) },
+                recognizedText = h.recognizedText)
         }
         NoteSproutClipboard.content = NoteSproutClipboard.ClipboardContent(
             strokes  = clipStrokes,
@@ -2237,7 +2240,8 @@ class DrawingActivity : AppCompatActivity() {
         }
         val capturedHeadings = selectedHeadings.map { h ->
             HeadingStroke(h.id, RectF(h.boundingBox),
-                h.strokes.map { s -> LiveStroke(s.id, s.points.map { PointF(it.x, it.y) }) })
+                h.strokes.map { s -> LiveStroke(s.id, s.points.map { PointF(it.x, it.y) }) },
+                recognizedText = h.recognizedText)
         }
 
         lifecycleScope.launch(Dispatchers.IO) {
