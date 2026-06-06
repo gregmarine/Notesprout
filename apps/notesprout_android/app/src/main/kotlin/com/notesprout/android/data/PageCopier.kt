@@ -10,9 +10,9 @@ import java.util.UUID
 /**
  * Deep-copies [sourcePageId] and inserts the duplicate immediately after [targetPageId].
  *
- * Copies: the page row, its non-deleted layer, and all non-deleted strokes for that layer.
- * The `data` JSON (including any snapshot) is preserved verbatim — the snapshot is still
- * valid since the strokes are identical.
+ * Copies: the page row, its non-deleted layer, and all non-deleted content objects for that
+ * layer (strokes, headings, and any future types).  The `data` JSON (including any snapshot)
+ * is preserved verbatim — the snapshot is still valid since the content is identical.
  *
  * Soft-deleted objects are not copied.
  *
@@ -28,9 +28,9 @@ suspend fun copyPageAfter(
 ): String? {
     val dao = db.notebookDao()
 
-    val sourcePage   = dao.getObjectById(sourcePageId) ?: return null
-    val sourceLayer  = dao.getLayerForPage(sourcePageId) ?: return null
-    val sourceStrokes = dao.getStrokesForLayer(sourceLayer.id)
+    val sourcePage    = dao.getObjectById(sourcePageId) ?: return null
+    val sourceLayer   = dao.getLayerForPage(sourcePageId) ?: return null
+    val sourceObjects = dao.getObjectsByParent(sourceLayer.id)
 
     val allPages       = dao.getPagesSorted()
     val targetIdx      = allPages.indexOfFirst { it.id == targetPageId }
@@ -59,8 +59,8 @@ suspend fun copyPageAfter(
             updatedAt = now,
             deletedAt = null,
         ))
-        for (stroke in sourceStrokes) {
-            dao.insertObject(stroke.copy(
+        for (obj in sourceObjects) {
+            dao.insertObject(obj.copy(
                 id        = UUID.randomUUID().toString(),
                 parentId  = newLayerId,
                 createdAt = now,
@@ -120,13 +120,13 @@ suspend fun copyPageAfterRaw(
             arrayOf(sourcePageId)
         ).use { readRow(it) } ?: return@withContext null
 
-        data class StrokeRow(val bbox: String, val order: Int, val data: String)
-        val sourceStrokes: List<StrokeRow> = db.rawQuery(
-            "SELECT boundingBox, `order`, data FROM notebook WHERE type = 'stroke' AND parentId = ? AND deletedAt IS NULL ORDER BY `order` ASC",
+        data class ChildRow(val type: String, val bbox: String, val order: Int, val data: String)
+        val sourceObjects: List<ChildRow> = db.rawQuery(
+            "SELECT type, boundingBox, `order`, data FROM notebook WHERE parentId = ? AND deletedAt IS NULL ORDER BY `order` ASC",
             arrayOf(sourceLayer.id)
         ).use { c ->
-            val list = mutableListOf<StrokeRow>()
-            while (c.moveToNext()) list.add(StrokeRow(c.getString(0), c.getInt(1), c.getString(2)))
+            val list = mutableListOf<ChildRow>()
+            while (c.moveToNext()) list.add(ChildRow(c.getString(0), c.getString(1), c.getInt(2), c.getString(3)))
             list
         }
 
@@ -182,17 +182,17 @@ suspend fun copyPageAfterRaw(
                 put("data",        sourceLayer.data)
             })
 
-            for (stroke in sourceStrokes) {
+            for (obj in sourceObjects) {
                 db.insert("notebook", null, ContentValues().apply {
                     put("id",          UUID.randomUUID().toString())
                     put("parentId",    newLayerId)
-                    put("type",        "stroke")
-                    put("boundingBox", stroke.bbox)
-                    put("`order`",     stroke.order)
+                    put("type",        obj.type)
+                    put("boundingBox", obj.bbox)
+                    put("`order`",     obj.order)
                     put("createdAt",   now)
                     put("updatedAt",   now)
                     putNull("deletedAt")
-                    put("data",        stroke.data)
+                    put("data",        obj.data)
                 })
             }
 

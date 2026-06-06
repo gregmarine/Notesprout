@@ -505,7 +505,9 @@ Completed:
 
 - ✂️ Pruning: TOC perceived-load improvements — `TocDialog` no longer opens a second Room instance; `btnToc` handler pre-fetches `List<TocEntry>` on IO via the already-open `soilDatabase` before calling `show()`, eliminating the "Loading…" state entirely; `HeadingThumbnailView` caches `Path` objects in `setHeading()` (layout-independent) and the `Matrix` lazily on first draw (needs view width), so `onDraw()` does zero allocations; `tvTocPageNumber` bumped from 14sp/40dp to 20sp/52dp for legibility
 
+- ✂️ Pruning: Page Copy includes all object types — `copyPageAfter()` (Room) now calls `dao.getObjectsByParent(sourceLayer.id)` instead of `dao.getStrokesForLayer()`; `copyPageAfterRaw()` (raw SQLite) drops the `type = 'stroke'` filter and selects `type` from the source row so the INSERT preserves the original type rather than hardcoding `"stroke"`; headings (and any future layer-child types) are now faithfully copied alongside strokes
+
 Next up: TBD — discuss before starting.
 
 ---
-*Last updated: 🌱 New Branch — Table of Contents*
+*Last updated: ✂️ Pruning — Page Copy includes all object types*
