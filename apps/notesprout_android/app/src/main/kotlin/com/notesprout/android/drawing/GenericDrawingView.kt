@@ -10,6 +10,7 @@ import android.graphics.Path
 import android.graphics.PointF
 import android.graphics.RectF
 import android.util.Base64
+import android.util.TypedValue
 import android.graphics.Region
 import android.view.MotionEvent
 import android.view.View
@@ -51,6 +52,16 @@ class GenericDrawingView(context: Context) : View(context), DrawingView {
         style = Paint.Style.FILL
         color = HEADING_BACKGROUND_COLOR
         isAntiAlias = false
+    }
+
+    private val headingTextSizePx = TypedValue.applyDimension(
+        TypedValue.COMPLEX_UNIT_SP, 20f, resources.displayMetrics
+    )
+
+    private val headingTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.BLACK
+        textAlign = Paint.Align.LEFT
+        textSize = headingTextSizePx
     }
 
     private val strokePaint = Paint().apply {
@@ -333,12 +344,16 @@ class GenericDrawingView(context: Context) : View(context), DrawingView {
             canvas.translate(dragDx, dragDy)
             for (heading in dragOriginalHeadings) {
                 canvas.drawRect(heading.boundingBox, headingPaint)
-                for (stroke in heading.strokes) {
-                    val pts = stroke.points; if (pts.size < 2) continue
-                    val path = Path()
-                    path.moveTo(pts[0].x, pts[0].y)
-                    for (i in 1 until pts.size) path.lineTo(pts[i].x, pts[i].y)
-                    canvas.drawPath(path, strokePaint)
+                if (heading.recognizedText != null) {
+                    drawHeadingText(canvas, heading)
+                } else {
+                    for (stroke in heading.strokes) {
+                        val pts = stroke.points; if (pts.size < 2) continue
+                        val path = Path()
+                        path.moveTo(pts[0].x, pts[0].y)
+                        for (i in 1 until pts.size) path.lineTo(pts[i].x, pts[i].y)
+                        canvas.drawPath(path, strokePaint)
+                    }
                 }
             }
             for (stroke in dragOriginalStrokes) {
@@ -457,6 +472,19 @@ class GenericDrawingView(context: Context) : View(context), DrawingView {
         redrawCanvas()
     }
 
+    private fun drawHeadingText(canvas: Canvas, heading: HeadingStroke) {
+        val text = heading.recognizedText ?: return
+        val box = heading.boundingBox
+        canvas.save()
+        canvas.clipRect(box)
+        val fontMetrics = headingTextPaint.fontMetrics
+        val textHeight = fontMetrics.descent - fontMetrics.ascent
+        val y = box.top + (box.height() - textHeight) / 2f - fontMetrics.ascent
+        val paddingPx = 8f * resources.displayMetrics.density
+        canvas.drawText(text, box.left + paddingPx, y, headingTextPaint)
+        canvas.restore()
+    }
+
     /**
      * Redraws the render bitmap from scratch: white base → template → all current strokes.
      * Call whenever strokes are added/removed or the template changes.
@@ -469,12 +497,16 @@ class GenericDrawingView(context: Context) : View(context), DrawingView {
         }
         for (heading in headings) {
             canvas.drawRect(heading.boundingBox, headingPaint)
-            for (liveStroke in heading.strokes) {
-                val pts = liveStroke.points; if (pts.size < 2) continue
-                val path = Path()
-                path.moveTo(pts[0].x, pts[0].y)
-                for (i in 1 until pts.size) path.lineTo(pts[i].x, pts[i].y)
-                canvas.drawPath(path, strokePaint)
+            if (heading.recognizedText != null) {
+                drawHeadingText(canvas, heading)
+            } else {
+                for (liveStroke in heading.strokes) {
+                    val pts = liveStroke.points; if (pts.size < 2) continue
+                    val path = Path()
+                    path.moveTo(pts[0].x, pts[0].y)
+                    for (i in 1 until pts.size) path.lineTo(pts[i].x, pts[i].y)
+                    canvas.drawPath(path, strokePaint)
+                }
             }
         }
         for (liveStroke in strokes) {
@@ -733,12 +765,16 @@ class GenericDrawingView(context: Context) : View(context), DrawingView {
         templateBitmap?.let { canvas.drawBitmap(it, null, RectF(0f, 0f, w.toFloat(), h.toFloat()), null) }
         for (heading in headings) {
             canvas.drawRect(heading.boundingBox, headingPaint)
-            for (liveStroke in heading.strokes) {
-                val pts = liveStroke.points; if (pts.size < 2) continue
-                val path = Path()
-                path.moveTo(pts[0].x, pts[0].y)
-                for (i in 1 until pts.size) path.lineTo(pts[i].x, pts[i].y)
-                canvas.drawPath(path, strokePaint)
+            if (heading.recognizedText != null) {
+                drawHeadingText(canvas, heading)
+            } else {
+                for (liveStroke in heading.strokes) {
+                    val pts = liveStroke.points; if (pts.size < 2) continue
+                    val path = Path()
+                    path.moveTo(pts[0].x, pts[0].y)
+                    for (i in 1 until pts.size) path.lineTo(pts[i].x, pts[i].y)
+                    canvas.drawPath(path, strokePaint)
+                }
             }
         }
         for (liveStroke in strokes) {

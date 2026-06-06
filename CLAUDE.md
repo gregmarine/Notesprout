@@ -517,7 +517,9 @@ Completed:
 
 - ✂️ Pruning: HeadingObject text model + recognition wiring (Prompt 2) — `HeadingObject` gains `val recognizedText: String? = null` (nullable, default null so existing `.soil` rows deserialize without error); `HeadingStroke` gains matching `val recognizedText: String? = null`; all `HeadingStroke` construction sites that parse from `HeadingObject` now pass `recognizedText = headingObj.recognizedText`; `createHeadingFromStrokes` in `DrawingActivity` wires in `HandwritingRecognizerProvider.instance` — captures strokes and bounds before the async call, uses `suspendCancellableCoroutine` to bridge ML Kit's `onResult` callback into the coroutine, falls back to `HandwritingRecognizer.FALLBACK_TEXT` if recognizer is null or not ready; heading is committed to DB only after recognition completes with `recognizedText` stored in `HeadingObject.toJson()`
 
+- 🌱 New Branch: Heading canvas text rendering (Prompt 3) — `OnyxDrawingView` and `GenericDrawingView` now render `HeadingStroke.recognizedText` as inkBlack canvas text when non-null, falling back to the existing embedded stroke rendering when null; `headingTextSizePx` (20sp) and `headingTextPaint` added as view fields computed at init from `displayMetrics`; `drawHeadingText()` private helper clips to the heading bounding box and vertically centers text with 8dp left padding; the text/stroke switch is applied in `redrawCanvas()`, the drag section of `onDraw()`, and `buildRenderBitmap()` in both views; existing stroke rendering code is intact inside the else branch, ready for a future text/stroke toggle
+
 Next up: TBD — discuss before starting.
 
 ---
-*Last updated: ✂️ Pruning — HeadingObject text model + recognition wiring (Prompt 2)*
+*Last updated: 🌱 New Branch — Heading canvas text rendering (Prompt 3)*
