@@ -208,6 +208,8 @@ sealed class UndoRedoAction {
      * undo to restore them via [restoreChildrenDeletedSince] on the layer.
      * [embeddedStrokes] carries full point data (with fresh UUIDs matching the heading's
      * internal copy) so redo can rebuild the heading row without a DB read.
+     * [recognizedText] carries the heading's recognized text so redo can restore the
+     * heading with its text rendering intact (null for legacy headings).
      */
     @Serializable
     data class HeadingCreated(
@@ -217,6 +219,25 @@ sealed class UndoRedoAction {
         val deletedAt: Long,
         val originalStrokeIds: List<String>,
         val embeddedStrokes: List<LiveStroke>,
+        val recognizedText: String? = null,
+    ) : UndoRedoAction()
+
+    /**
+     * User edited the recognized text of a heading via the text edit dialog.
+     *
+     * Undo: restore [previousText] (may be null for the defensive edge case where a
+     * heading had no recognized text before editing).
+     * Redo: re-apply [newText].
+     *
+     * Both undo and redo update the DB row and rebuild the heading in-memory so the
+     * canvas reflects the change immediately.
+     */
+    @Serializable
+    data class HeadingTextEdited(
+        val headingId: String,
+        val pageId: String,
+        val previousText: String? = null,
+        val newText: String,
     ) : UndoRedoAction()
 
     /**

@@ -2376,6 +2376,7 @@ class DrawingActivity : AppCompatActivity() {
                     deletedAt         = deletedAt,
                     originalStrokeIds = originalStrokeIds,
                     embeddedStrokes   = embeddedStrokes,
+                    recognizedText    = recognizedText,
                 )
             )
             updateUndoRedoButtons()
@@ -2505,6 +2506,7 @@ class DrawingActivity : AppCompatActivity() {
 
     private fun updateHeadingText(heading: HeadingStroke, newText: String) {
         val db = soilDatabase ?: return
+        val previousText = heading.recognizedText
         // Measure new text width using the same 20sp paint used by the drawing views.
         val textPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
             textSize = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 20f, resources.displayMetrics)
@@ -2545,6 +2547,15 @@ class DrawingActivity : AppCompatActivity() {
             if (binding.floatingSelectionToolbar.visibility == View.VISIBLE) {
                 updateFloatingSelectionToolbar(selBox)
             }
+            undoRedoManager.push(
+                UndoRedoAction.HeadingTextEdited(
+                    headingId    = heading.id,
+                    pageId       = currentPageId,
+                    previousText = previousText,
+                    newText      = newText,
+                )
+            )
+            updateUndoRedoButtons()
         }
     }
 
@@ -2752,9 +2763,10 @@ class DrawingActivity : AppCompatActivity() {
             is UndoRedoAction.StrokesMoved    -> action.pageId
             is UndoRedoAction.TemplateChanged -> action.pageId
             is UndoRedoAction.PageCleared     -> action.pageId
-            is UndoRedoAction.HeadingCreated  -> action.pageId
-            is UndoRedoAction.HeadingRemoved  -> action.pageId
-            else                              -> null
+            is UndoRedoAction.HeadingCreated   -> action.pageId
+            is UndoRedoAction.HeadingRemoved   -> action.pageId
+            is UndoRedoAction.HeadingTextEdited -> action.pageId
+            else                               -> null
         }
         val isCrossPage = targetPageId != null && targetPageId != currentPageId
 
@@ -2901,7 +2913,8 @@ class DrawingActivity : AppCompatActivity() {
                 NoteSproutClipboard.content = NoteSproutClipboard.ClipboardContent(
                     strokes  = action.strokes.map { s -> LiveStroke(s.id, s.points.map { pt -> PointF(pt.x, pt.y) }) },
                     headings = action.headings.map { h -> HeadingStroke(h.id, RectF(h.boundingBox),
-                        h.strokes.map { s -> LiveStroke(s.id, s.points.map { PointF(it.x, it.y) }) }) },
+                        h.strokes.map { s -> LiveStroke(s.id, s.points.map { PointF(it.x, it.y) }) },
+                        recognizedText = h.recognizedText) },
                     boundingBox = clipBox,
                 )
                 updateLassoButtonIcon()
@@ -3184,7 +3197,7 @@ class DrawingActivity : AppCompatActivity() {
                 action.embeddedStrokes.forEach { headingBox.union(it.boundingBox) }
                 val pad = 8f * resources.displayMetrics.density
                 headingBox.inset(-pad, -pad)
-                val newHeading = HeadingStroke(id = action.headingId, boundingBox = headingBox, strokes = action.embeddedStrokes)
+                val newHeading = HeadingStroke(id = action.headingId, boundingBox = headingBox, strokes = action.embeddedStrokes, recognizedText = action.recognizedText)
                 updatedHeadings = preUndoHeadings + newHeading
             }
             drawingView.loadHeadings(updatedHeadings)
@@ -3289,6 +3302,79 @@ class DrawingActivity : AppCompatActivity() {
             return
         }
 
+        // ── Cross-page HeadingTextEdited: two-phase display ──────────────────
+        if (isCrossPage && action is UndoRedoAction.HeadingTextEdited) {
+            val targetText = if (isUndo) action.previousText else action.newText
+            val snapshot      = drawingView.captureSnapshot()
+            val leavingPageId = currentPageId
+            withContext(Dispatchers.IO) {
+                if (snapshot != null && leavingPageId.isNotEmpty()) {
+                    persistSnapshot(db, leavingPageId, snapshot)
+                }
+                saveStrokes(db)
+            }
+            currentPageIndex = pages.indexOfFirst { it.id == action.pageId }.coerceAtLeast(0)
+
+            val templateBmp: Bitmap?
+            val preUndoStrokes: List<LiveStroke>
+            val preUndoHeadings: List<HeadingStroke>
+            withContext(Dispatchers.IO) {
+                setupPageIds(db)
+                templateBmp     = loadPageTemplateFromDb(db)
+                preUndoStrokes  = deserializeStrokesFromDb(db)
+                preUndoHeadings = loadHeadingsFromDb(db, currentLayerId)
+            }
+            drawingView.loadHeadings(preUndoHeadings)
+            val preUndobitmap = withContext(Dispatchers.IO) {
+                drawingView.buildRenderBitmap(preUndoStrokes, templateBmp, preUndoHeadings)
+            }
+            if (preUndobitmap != null) {
+                drawingView.loadStrokesWithBitmap(preUndoStrokes, preUndobitmap, templateBmp)
+            } else {
+                drawingView.loadStrokes(preUndoStrokes)
+            }
+            currentTemplateBitmap = templateBmp
+            updatePageIndicator()
+            saveLastOpenedPage(currentPageId)
+
+            withContext(Dispatchers.IO) {
+                val row = dao.getObjectById(action.headingId) ?: return@withContext
+                val headingObj = HeadingObject.fromJson(row.data)
+                val updated = headingObj.copy(recognizedText = targetText)
+                if (targetText != null) {
+                    val textPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+                        textSize = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 20f, resources.displayMetrics)
+                    }
+                    val paddingPx = 8f * resources.displayMetrics.density
+                    val box = row.parseBoundingBox() ?: return@withContext
+                    val textWidth = textPaint.measureText(targetText)
+                    val newBox = RectF(box.left, box.top, box.left + textWidth + 2f * paddingPx, box.bottom)
+                    val bboxJson = """{"x":${newBox.left},"y":${newBox.top},"width":${newBox.width()},"height":${newBox.height()}}"""
+                    dao.updateHeadingData(action.headingId, bboxJson, updated.toJson(), now)
+                } else {
+                    dao.updateHeadingData(action.headingId, row.boundingBox, updated.toJson(), now)
+                }
+            }
+
+            val updatedHeadings = withContext(Dispatchers.IO) {
+                loadHeadingsFromDb(db, currentLayerId)
+            }
+            drawingView.loadHeadings(updatedHeadings)
+            val bitmap = withContext(Dispatchers.IO) {
+                drawingView.buildRenderBitmap(preUndoStrokes, templateBmp, updatedHeadings)
+            }
+            if (bitmap != null) {
+                drawingView.loadStrokesWithBitmap(preUndoStrokes, bitmap, templateBmp)
+            } else {
+                drawingView.loadStrokes(preUndoStrokes)
+            }
+            selectedObjectIds.clear()
+            drawingView.lassoSelectedIds = emptySet()
+            drawingView.setLassoOverlay(null, null)
+            hideFloatingSelectionToolbar()
+            return
+        }
+
         // ── Cross-page StrokesMoved: two-phase display ────────────────────────
         if (isCrossPage && action is UndoRedoAction.StrokesMoved) {
             val snapshot      = drawingView.captureSnapshot()
@@ -3339,7 +3425,7 @@ class DrawingActivity : AppCompatActivity() {
                     }
                     for (heading in targetHeadings) {
                         val bboxJson = """{"x":${heading.boundingBox.left},"y":${heading.boundingBox.top},"width":${heading.boundingBox.width()},"height":${heading.boundingBox.height()}}"""
-                        dao.updateHeadingData(heading.id, bboxJson, HeadingObject(heading.strokes).toJson(), ts)
+                        dao.updateHeadingData(heading.id, bboxJson, HeadingObject(heading.strokes, heading.recognizedText).toJson(), ts)
                     }
                 }
             }
@@ -3618,7 +3704,7 @@ class DrawingActivity : AppCompatActivity() {
                     for (heading in targetHeadings) {
                         val bb = heading.boundingBox
                         val bbJson = """{"x":${bb.left},"y":${bb.top},"width":${bb.width()},"height":${bb.height()}}"""
-                        val dataJson = HeadingObject(strokes = heading.strokes).toJson()
+                        val dataJson = HeadingObject(strokes = heading.strokes, recognizedText = heading.recognizedText).toJson()
                         dao.updateHeadingData(heading.id, bbJson, dataJson, now)
                     }
                 }
@@ -3643,6 +3729,27 @@ class DrawingActivity : AppCompatActivity() {
                     // Redo: soft-delete heading row, restore restored strokes.
                     dao.softDeleteById(action.headingId, now)
                     action.restoredStrokes.forEach { dao.restoreById(it.id, now) }
+                }
+            }
+
+            is UndoRedoAction.HeadingTextEdited -> withContext(Dispatchers.IO) {
+                val targetText = if (isUndo) action.previousText else action.newText
+                val row = dao.getObjectById(action.headingId) ?: return@withContext
+                val headingObj = HeadingObject.fromJson(row.data)
+                val updated = headingObj.copy(recognizedText = targetText)
+                if (targetText != null) {
+                    val textPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+                        textSize = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 20f, resources.displayMetrics)
+                    }
+                    val paddingPx = 8f * resources.displayMetrics.density
+                    val box = row.parseBoundingBox() ?: return@withContext
+                    val textWidth = textPaint.measureText(targetText)
+                    val newBox = RectF(box.left, box.top, box.left + textWidth + 2f * paddingPx, box.bottom)
+                    val bboxJson = """{"x":${newBox.left},"y":${newBox.top},"width":${newBox.width()},"height":${newBox.height()}}"""
+                    dao.updateHeadingData(action.headingId, bboxJson, updated.toJson(), now)
+                } else {
+                    // Restoring null: keep existing bounding box, just clear the text field.
+                    dao.updateHeadingData(action.headingId, row.boundingBox, updated.toJson(), now)
                 }
             }
         }
@@ -3759,7 +3866,8 @@ class DrawingActivity : AppCompatActivity() {
                 NoteSproutClipboard.content = NoteSproutClipboard.ClipboardContent(
                     strokes  = action.strokes.map { s -> LiveStroke(s.id, s.points.map { pt -> PointF(pt.x, pt.y) }) },
                     headings = action.headings.map { h -> HeadingStroke(h.id, RectF(h.boundingBox),
-                        h.strokes.map { s -> LiveStroke(s.id, s.points.map { PointF(it.x, it.y) }) }) },
+                        h.strokes.map { s -> LiveStroke(s.id, s.points.map { PointF(it.x, it.y) }) },
+                        recognizedText = h.recognizedText) },
                     boundingBox = clipBox,
                 )
                 updateLassoButtonIcon()
@@ -3864,7 +3972,7 @@ class DrawingActivity : AppCompatActivity() {
                 action.embeddedStrokes.forEach { headingBox.union(it.boundingBox) }
                 val pad = 8f * resources.displayMetrics.density
                 headingBox.inset(-pad, -pad)
-                val newHeading = HeadingStroke(id = action.headingId, boundingBox = headingBox, strokes = action.embeddedStrokes)
+                val newHeading = HeadingStroke(id = action.headingId, boundingBox = headingBox, strokes = action.embeddedStrokes, recognizedText = action.recognizedText)
                 updatedHeadings = drawingView.getHeadings() + newHeading
             }
             drawingView.loadHeadings(updatedHeadings)
@@ -3979,6 +4087,37 @@ class DrawingActivity : AppCompatActivity() {
             drawingView.lassoSelectedIds = emptySet()
             drawingView.setLassoOverlay(null, null)
             hideFloatingSelectionToolbar()
+            updatePageIndicator()
+            saveLastOpenedPage(currentPageId)
+            return
+        }
+
+        // ── Step 3a-text-edit: Same-page HeadingTextEdited — in-memory update ─
+        if (action is UndoRedoAction.HeadingTextEdited) {
+            val updatedHeadings = withContext(Dispatchers.IO) {
+                loadHeadingsFromDb(db, currentLayerId)
+            }
+            drawingView.loadHeadings(updatedHeadings)
+            val strokes = drawingView.getStrokes()
+            val templateBmp = currentTemplateBitmap
+            val bitmap = withContext(Dispatchers.IO) {
+                drawingView.buildRenderBitmap(strokes, templateBmp, updatedHeadings)
+            }
+            if (bitmap != null) {
+                drawingView.loadStrokesWithBitmap(strokes, bitmap, templateBmp)
+            } else {
+                drawingView.loadStrokes(strokes)
+            }
+            // Update selection box if the edited heading is still selected.
+            val updatedHeading = updatedHeadings.find { it.id == action.headingId }
+            if (updatedHeading != null && action.headingId in selectedObjectIds) {
+                val pad = 8f * resources.displayMetrics.density
+                val selBox = RectF(updatedHeading.boundingBox).also { it.inset(-pad, -pad) }
+                drawingView.setLassoOverlay(null, selBox)
+                if (binding.floatingSelectionToolbar.visibility == View.VISIBLE) {
+                    updateFloatingSelectionToolbar(selBox)
+                }
+            }
             updatePageIndicator()
             saveLastOpenedPage(currentPageId)
             return
