@@ -460,6 +460,7 @@ class DrawingActivity : AppCompatActivity() {
                 TocDialog(
                     context = this@DrawingActivity,
                     entries = entries,
+                    currentPageIndex = currentPageIndex,
                     onPageSelected = { pageId ->
                         val index = pages.indexOfFirst { it.id == pageId }
                         if (index >= 0 && index != currentPageIndex) navigateToPage(index)

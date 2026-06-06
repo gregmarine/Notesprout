@@ -12,7 +12,7 @@
         android:paddingTop="8dp"
         android:paddingBottom="8dp"
         android:paddingStart="4dp"
-        android:paddingEnd="4dp">
+        android:paddingEnd="12dp">
 
         <androidx.appcompat.widget.AppCompatTextView
             android:id="@+id/tvTocPageNumber"
@@ -41,8 +41,11 @@
     </LinearLayout>
 
     <View
+        android:id="@+id/tocItemSeparator"
         android:layout_width="match_parent"
         android:layout_height="1dp"
-        android:background="@color/borderGray" />
+        android:layout_marginStart="16dp"
+        android:layout_marginEnd="24dp"
+        android:background="@color/inkBlack" />
 
 </LinearLayout>

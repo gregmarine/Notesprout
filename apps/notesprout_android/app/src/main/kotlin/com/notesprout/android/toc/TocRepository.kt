@@ -39,7 +39,7 @@ class TocRepository(private val dao: NotebookDao) {
         return topmostByPageId.entries
             .mapNotNull { (pageId, heading) ->
                 val pageIndex = pageIndexById[pageId] ?: return@mapNotNull null
-                TocEntry(pageNumber = pageIndex + 1, pageId = pageId, heading = heading)
+                TocEntry(pageNumber = pageIndex + 1, pageIndex = pageIndex, pageId = pageId, heading = heading)
             }
             .sortedBy { it.pageNumber }
     }

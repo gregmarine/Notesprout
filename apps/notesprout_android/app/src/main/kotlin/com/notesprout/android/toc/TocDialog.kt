@@ -30,11 +30,13 @@ private const val SIDEBAR_WIDTH_FRACTION = 0.60f
 class TocDialog(
     private val context: Context,
     private val entries: List<TocEntry>,
+    private val currentPageIndex: Int = 0,
     private val onPageSelected: (pageId: String) -> Unit,
 ) {
     private val dialog = Dialog(context)
     private var tocEntries: List<TocEntry> = entries
     private var currentTocPage = 0
+    private var activeEntry: TocEntry? = null
 
     private lateinit var flTocRoot: FrameLayout
     private lateinit var llTocPanel: LinearLayout
@@ -149,6 +151,12 @@ class TocDialog(
             }
         }
 
+        activeEntry = entries
+            .filter { it.pageIndex <= currentPageIndex }
+            .maxByOrNull { it.pageIndex }
+        val activeIndex = activeEntry?.let { entries.indexOf(it) } ?: -1
+        currentTocPage = if (activeIndex >= 0) activeIndex / ITEMS_PER_PAGE else 0
+
         renderCurrentTocPage()
     }
 
@@ -197,6 +205,12 @@ class TocDialog(
                 setHeading(entry.heading, maxHeightPx)
             }
             flContainer.addView(thumbnail)
+
+            if (entry.pageIndex == activeEntry?.pageIndex) {
+                row.background = ContextCompat.getDrawable(context, R.drawable.bg_toc_active_entry)
+            } else {
+                row.background = null
+            }
 
             row.setOnClickListener {
                 dialog.dismiss()
