@@ -27,8 +27,8 @@
             <androidx.appcompat.widget.AppCompatImageButton
                 android:id="@+id/btnTocClose"
                 style="@style/Widget.NoteSprout.ToolbarButton"
-                android:src="@drawable/ic_close"
-                android:contentDescription="Close" />
+                android:src="@drawable/ic_arrow_left"
+                android:contentDescription="Back" />
 
             <androidx.appcompat.widget.AppCompatTextView
                 android:id="@+id/tvTocTitle"
