@@ -300,10 +300,13 @@ class GenericDrawingView(context: Context) : View(context), DrawingView {
                         redrawCanvas()
                         onStrokesMoved?.invoke(origStrokes, movedStrokes, origHeadings, movedHeadings)
                     } else {
+                        // Below threshold — treat as a tap inside the selection box.
+                        val tapX = event.x; val tapY = event.y
                         dragBackingBitmap?.recycle(); dragBackingBitmap = null
                         isDragMoveActive = false; dragThresholdMet = false
                         dragDx = 0f; dragDy = 0f
                         dragOriginalStrokes = emptyList(); dragOriginalHeadings = emptyList()
+                        onLassoTap?.invoke(tapX, tapY)
                     }
                     return true
                 }
