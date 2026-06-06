@@ -6,6 +6,7 @@ import kotlinx.serialization.json.Json
 @Serializable
 data class HeadingObject(
     val strokes: List<LiveStroke>,
+    val recognizedText: String? = null,
 ) {
     fun toJson(): String = Json.encodeToString(serializer(), this)
 

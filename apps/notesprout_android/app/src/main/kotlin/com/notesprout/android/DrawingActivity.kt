@@ -48,12 +48,16 @@ import com.notesprout.android.drawing.GenericDrawingView
 import com.notesprout.android.drawing.OnyxDrawingView
 import com.notesprout.android.history.UndoRedoAction
 import com.notesprout.android.history.UndoRedoManager
+import com.notesprout.android.recognition.HandwritingRecognizer
+import com.notesprout.android.recognition.HandwritingRecognizerProvider
 import com.notesprout.android.toc.TocDialog
 import com.notesprout.android.toc.TocRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
+import kotlin.coroutines.resume
 import org.json.JSONObject
 import java.io.File
 import java.util.Locale
@@ -1282,7 +1286,7 @@ class DrawingActivity : AppCompatActivity() {
             val box = row.parseBoundingBox() ?: return@mapNotNull null
             val headingObj = runCatching { HeadingObject.fromJson(row.data) }.getOrNull()
                 ?: return@mapNotNull null
-            HeadingStroke(id = row.id, boundingBox = box, strokes = headingObj.strokes)
+            HeadingStroke(id = row.id, boundingBox = box, strokes = headingObj.strokes, recognizedText = headingObj.recognizedText)
         }
     }
 
@@ -2271,13 +2275,29 @@ class DrawingActivity : AppCompatActivity() {
         val layerId = currentLayerId.takeIf { it.isNotEmpty() } ?: return
         val pageId  = currentPageId.takeIf  { it.isNotEmpty() } ?: return
 
+        val strokesToConvert = selectedStrokes.toList()
+        val boundsToConvert  = RectF(boundingBox)
+
+        val recognizer = HandwritingRecognizerProvider.instance
+        val recognizedText: String = if (recognizer != null && recognizer.isReady()) {
+            withContext(Dispatchers.Main) {
+                suspendCancellableCoroutine { cont ->
+                    recognizer.recognize(strokesToConvert, boundsToConvert) { result ->
+                        if (cont.isActive) cont.resume(result)
+                    }
+                }
+            }
+        } else {
+            HandwritingRecognizer.FALLBACK_TEXT
+        }
+
         val deletedAt  = System.currentTimeMillis()
         val headingId  = UUID.randomUUID().toString()
-        val originalStrokeIds = selectedStrokes.map { it.id }
+        val originalStrokeIds = strokesToConvert.map { it.id }
 
         // Fresh UUIDs for embedded strokes — the same instances go into both the
         // HeadingObject (DB) and the HeadingCreated undo action.
-        val embeddedStrokes = selectedStrokes.map { stroke ->
+        val embeddedStrokes = strokesToConvert.map { stroke ->
             LiveStroke(id = UUID.randomUUID().toString(), points = stroke.points.map { PointF(it.x, it.y) })
         }
 
@@ -2285,8 +2305,8 @@ class DrawingActivity : AppCompatActivity() {
             val dao = db.notebookDao()
             originalStrokeIds.forEach { dao.softDeleteById(it, deletedAt) }
             val now        = System.currentTimeMillis()
-            val bboxJson   = """{"x":${boundingBox.left},"y":${boundingBox.top},"width":${boundingBox.width()},"height":${boundingBox.height()}}"""
-            val headingObj = HeadingObject(strokes = embeddedStrokes)
+            val bboxJson   = """{"x":${boundsToConvert.left},"y":${boundsToConvert.top},"width":${boundsToConvert.width()},"height":${boundsToConvert.height()}}"""
+            val headingObj = HeadingObject(strokes = embeddedStrokes, recognizedText = recognizedText)
             dao.insertObject(
                 NotebookObject(
                     id          = headingId,
@@ -2312,7 +2332,7 @@ class DrawingActivity : AppCompatActivity() {
             val updatedStrokes = drawingView.getStrokes().filter { it.id !in erasedSet }
             persistedStrokeIds.removeAll(erasedSet)
 
-            val newHeading    = HeadingStroke(id = headingId, boundingBox = boundingBox, strokes = embeddedStrokes)
+            val newHeading    = HeadingStroke(id = headingId, boundingBox = boundsToConvert, strokes = embeddedStrokes, recognizedText = recognizedText)
             val updatedHeadings = drawingView.getHeadings() + newHeading
             drawingView.loadHeadings(updatedHeadings)
 
@@ -2340,7 +2360,7 @@ class DrawingActivity : AppCompatActivity() {
 
             val newSelection = setOf(headingId)
             val pad = 8f * resources.displayMetrics.density
-            val selectionBox = RectF(boundingBox).also { it.inset(-pad, -pad) }
+            val selectionBox = RectF(boundsToConvert).also { it.inset(-pad, -pad) }
             drawingView.setLassoSelectedIds(newSelection, selectionBox)
             selectedObjectIds.clear()
             selectedObjectIds.addAll(newSelection)
@@ -2697,7 +2717,7 @@ class DrawingActivity : AppCompatActivity() {
                     .mapNotNull { obj ->
                         val box = obj.parseBoundingBox() ?: return@mapNotNull null
                         val headingObj = runCatching { HeadingObject.fromJson(obj.data) }.getOrNull() ?: return@mapNotNull null
-                        HeadingStroke(id = obj.id, boundingBox = box, strokes = headingObj.strokes)
+                        HeadingStroke(id = obj.id, boundingBox = box, strokes = headingObj.strokes, recognizedText = headingObj.recognizedText)
                     }
                 updatedStrokes  = buildList { addAll(preUndoStrokes); addAll(restoredStrokes) }
                 updatedHeadings = preUndoHeadings + restoredHeadings
@@ -2958,7 +2978,7 @@ class DrawingActivity : AppCompatActivity() {
                             try {
                                 val ho = HeadingObject.fromJson(obj.data)
                                 val box = obj.parseBoundingBox() ?: return@mapNotNull null
-                                HeadingStroke(id = obj.id, boundingBox = box, strokes = ho.strokes)
+                                HeadingStroke(id = obj.id, boundingBox = box, strokes = ho.strokes, recognizedText = ho.recognizedText)
                             } catch (e: Exception) {
                                 Log.e(TAG, "executeAction LassoPasted redo: failed to deserialize heading $id", e); null
                             }
@@ -3591,7 +3611,7 @@ class DrawingActivity : AppCompatActivity() {
                             dao.getObjectById(id)?.let { obj ->
                                 val box = obj.parseBoundingBox() ?: return@mapNotNull null
                                 val headingObj = runCatching { HeadingObject.fromJson(obj.data) }.getOrNull() ?: return@mapNotNull null
-                                HeadingStroke(id = obj.id, boundingBox = box, strokes = headingObj.strokes)
+                                HeadingStroke(id = obj.id, boundingBox = box, strokes = headingObj.strokes, recognizedText = headingObj.recognizedText)
                             }
                         }
                     }
@@ -3828,7 +3848,7 @@ class DrawingActivity : AppCompatActivity() {
                         dao.getObjectById(id)?.let { obj ->
                             val box = obj.parseBoundingBox() ?: return@mapNotNull null
                             val hObj = runCatching { HeadingObject.fromJson(obj.data) }.getOrNull() ?: return@mapNotNull null
-                            HeadingStroke(id = obj.id, boundingBox = box, strokes = hObj.strokes)
+                            HeadingStroke(id = obj.id, boundingBox = box, strokes = hObj.strokes, recognizedText = hObj.recognizedText)
                         }
                     }
                 }
