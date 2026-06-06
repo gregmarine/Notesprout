@@ -829,13 +829,17 @@ class GenericDrawingView(context: Context) : View(context), DrawingView {
         val snapshotCanvas = Canvas(bmp)
         for (heading in headings) {
             snapshotCanvas.drawRect(heading.boundingBox, headingPaint)
-            for (liveStroke in heading.strokes) {
-                val points = liveStroke.points
-                if (points.size < 2) continue
-                val path = Path()
-                path.moveTo(points[0].x, points[0].y)
-                for (i in 1 until points.size) path.lineTo(points[i].x, points[i].y)
-                snapshotCanvas.drawPath(path, strokePaint)
+            if (heading.recognizedText != null) {
+                drawHeadingText(snapshotCanvas, heading)
+            } else {
+                for (liveStroke in heading.strokes) {
+                    val points = liveStroke.points
+                    if (points.size < 2) continue
+                    val path = Path()
+                    path.moveTo(points[0].x, points[0].y)
+                    for (i in 1 until points.size) path.lineTo(points[i].x, points[i].y)
+                    snapshotCanvas.drawPath(path, strokePaint)
+                }
             }
         }
         for (liveStroke in strokes) {

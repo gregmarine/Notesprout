@@ -5,6 +5,7 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.PointF
 import android.graphics.Rect
@@ -15,6 +16,7 @@ import android.os.Build
 import android.os.Bundle
 import android.util.Base64
 import android.util.Log
+import android.util.TypedValue
 import android.view.MotionEvent
 import android.view.VelocityTracker
 import android.view.View
@@ -2290,6 +2292,21 @@ class DrawingActivity : AppCompatActivity() {
         } else {
             HandwritingRecognizer.FALLBACK_TEXT
         }
+
+        // Resize bounding box to fit the recognized text (left/top anchor preserved).
+        val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            textSize = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 20f, resources.displayMetrics)
+        }
+        val textWidth = textPaint.measureText(recognizedText)
+        val fm = textPaint.fontMetrics
+        val textHeight = fm.descent - fm.ascent
+        val pad = 8f * resources.displayMetrics.density
+        boundsToConvert.set(
+            boundsToConvert.left,
+            boundsToConvert.top,
+            boundsToConvert.left + pad + textWidth + pad,
+            boundsToConvert.top + pad + textHeight + pad,
+        )
 
         val deletedAt  = System.currentTimeMillis()
         val headingId  = UUID.randomUUID().toString()
