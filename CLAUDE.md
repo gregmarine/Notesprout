@@ -485,7 +485,9 @@ Completed:
 
 - 🌱 New Branch: Dual-install build variants — `applicationIdSuffix = ".dev"` added to debug build type so debug (`com.notesprout.android.dev`) and release (`com.notesprout.android`) install side-by-side on the same device; `app/src/debug/res/values/strings.xml` overrides `app_name` to "NoteSprout Dev" for the launcher; CLAUDE.md updated with build variant instructions and corrected release signing steps (unsigned APKs must be signed with the debug keystore via `apksigner` before sideloading — `--bypass-verification` is not supported on BOOX devices)
 
+- 🌱 TOC Prompt 1/5: `ic_toc` VectorDrawable (Tabler list icon); `btnToc` added to DrawingActivity toolbar after close button with new separator; stub click handler wired
+
 Next up: TBD — discuss before starting.
 
 ---
-*Last updated: 🌱 New Branch — Dual-install Build Variants*
+*Last updated: 🌱 TOC Prompt 1/5 — icon, toolbar button, stub handler*

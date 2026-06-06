@@ -449,6 +449,10 @@ class DrawingActivity : AppCompatActivity() {
             ).show()
         }
 
+        binding.btnToc.setOnClickListener {
+            // TODO: open TOC panel (Prompt 5)
+        }
+
         binding.btnCover.setOnClickListener {
             openCoverDialog()
         }
