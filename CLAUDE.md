@@ -488,8 +488,9 @@ Completed:
 - 🌱 TOC Prompt 1/5: `ic_toc` VectorDrawable (Tabler list icon); `btnToc` added to DrawingActivity toolbar after close button with new separator; stub click handler wired
 - 🌱 TOC Prompt 2/5: TocEntry data class; NotebookDao queries for all headings and all pages; TocRepository picks topmost heading per page (min Y, X tiebreaker) and returns sorted List<TocEntry>
 - 🌱 TOC Prompt 3/5: activity_toc.xml layout (responsive full-screen/sidebar, header with btnTocClose, llTocList area, pagination row); shape_toc_panel_border drawable; TocActivity shell registered in manifest
+- 🌱 TOC Prompt 4/5: HeadingThumbnailView custom View (scale-to-fit with Matrix.setRectToRect START, inkBlack strokes, paperWhite background, width-clipped); item_toc_entry.xml row layout (page number label + vertical divider + heading container)
 
 Next up: TBD — discuss before starting.
 
 ---
-*Last updated: 🌱 TOC Prompt 3/5 — TOC panel layout, shell Activity, manifest registration*
+*Last updated: 🌱 TOC Prompt 4/5 — HeadingThumbnailView, item_toc_entry layout*
