@@ -513,7 +513,9 @@ Completed:
 
 - ✂️ Pruning: Page-turn swipe gesture — switched from two-finger to one-finger with three deliberate-swipe guards: distance ≥50% screen width (all devices); velocity ≥1.5× `scaledMinimumFlingVelocity`; displacement horizontal-dominant (`|dx| > |dy|`); a second finger cancels the gesture to block palm+finger combos
 
+- 🌱 New Branch: ML Kit handwriting recognition infrastructure (Prompt 1) — `recognition/HandwritingRecognizer.kt` (interface: `isReady()`, `recognize(strokes, bounds, onResult)`, `FALLBACK_TEXT` constant); `recognition/MlKitHandwritingRecognizer.kt` (ML Kit implementation: `initModel()` downloads en-US model on first run via `RemoteModelManager`, builds `DigitalInkRecognizer` client, `recognize()` converts `LiveStroke` point arrays to `Ink` objects + fires result on ML Kit callback thread); `recognition/HandwritingRecognizerProvider.kt` (app-level `object` singleton, `@Volatile` backing field, `internal fun init()`); `com.google.mlkit:digital-ink-recognition:18.1.0` added to `app/build.gradle.kts`; `NoteSproutApplication.onCreate` constructs `MlKitHandwritingRecognizer`, registers it with `HandwritingRecognizerProvider`, and calls `initModel` — shows a `Toast` on the main thread if model download fails. No callers yet; recognition entry point ready for Prompt 2.
+
 Next up: TBD — discuss before starting.
 
 ---
-*Last updated: ✂️ Pruning — Page-turn swipe gesture (one-finger, 50% screen width)*
+*Last updated: 🌱 New Branch — ML Kit handwriting recognition infrastructure (Prompt 1)*

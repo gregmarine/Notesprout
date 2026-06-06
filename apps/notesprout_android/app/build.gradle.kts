@@ -79,4 +79,7 @@ dependencies {
     // Code-generated at compile time (no reflection), significantly faster than org.json
     // for large point arrays.  Wire format is identical JSON so no DB migration is needed.
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
+
+    // ML Kit Digital Ink Recognition — general-purpose handwriting-to-text layer.
+    implementation("com.google.mlkit:digital-ink-recognition:18.1.0")
 }

@@ -11,5 +11,19 @@ class NoteSproutApplication : Application() {
         // SDK cannot bootstrap itself. This bypasses the enforcement at the JNI level
         // before any SDK code runs. Pattern ported directly from BOOXDemo.
         HiddenApiBypass.addHiddenApiExemptions("")
+
+        val mlKitRecognizer = com.notesprout.android.recognition.MlKitHandwritingRecognizer()
+        com.notesprout.android.recognition.HandwritingRecognizerProvider.init(mlKitRecognizer)
+        mlKitRecognizer.initModel { success ->
+            if (!success) {
+                android.os.Handler(android.os.Looper.getMainLooper()).post {
+                    android.widget.Toast.makeText(
+                        this,
+                        "Handwriting recognition model unavailable. Check your connection and relaunch the app.",
+                        android.widget.Toast.LENGTH_LONG
+                    ).show()
+                }
+            }
+        }
     }
 }
