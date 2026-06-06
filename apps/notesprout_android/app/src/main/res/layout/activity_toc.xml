@@ -1,0 +1,121 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- TOC panel — responsive: full-screen on narrow, left-anchored sidebar on wide.
+     Width and close-button visibility set in code; layout_width="match_parent" as default. -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/flTocRoot"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@android:color/transparent">
+
+    <LinearLayout
+        android:id="@+id/llTocPanel"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        android:background="@drawable/shape_toc_panel_border"
+        android:elevation="0dp">
+
+        <!-- Header row -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:paddingTop="8dp"
+            android:paddingBottom="8dp"
+            android:paddingStart="12dp"
+            android:paddingEnd="12dp">
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnTocClose"
+                style="@style/Widget.NoteSprout.ToolbarButton"
+                android:src="@drawable/ic_close"
+                android:contentDescription="Close" />
+
+            <androidx.appcompat.widget.AppCompatTextView
+                android:id="@+id/tvTocTitle"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="12dp"
+                android:text="Contents"
+                android:textColor="@color/inkBlack"
+                android:textSize="16sp"
+                android:textStyle="bold" />
+
+        </LinearLayout>
+
+        <!-- 1dp inkBlack divider below header -->
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="@color/inkBlack" />
+
+        <!-- List area: fills remaining space -->
+        <LinearLayout
+            android:id="@+id/llTocList"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:orientation="vertical"
+            android:background="@color/paperWhite"
+            android:paddingStart="8dp"
+            android:paddingEnd="8dp"
+            android:paddingTop="4dp"
+            android:paddingBottom="4dp" />
+
+        <!-- 1dp inkBlack divider above pagination -->
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="@color/inkBlack" />
+
+        <!-- Pagination row -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center"
+            android:padding="8dp"
+            android:background="@color/paperWhite">
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnTocFirst"
+                style="@style/Widget.NoteSprout.ToolbarButton"
+                android:src="@drawable/ic_page_first"
+                android:contentDescription="First page" />
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnTocPrev"
+                style="@style/Widget.NoteSprout.ToolbarButton"
+                android:layout_marginStart="4dp"
+                android:src="@drawable/ic_page_prev"
+                android:contentDescription="Previous page" />
+
+            <androidx.appcompat.widget.AppCompatTextView
+                android:id="@+id/tvTocPageIndicator"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:gravity="center"
+                android:textSize="16sp"
+                android:textColor="@color/inkBlack"
+                android:text="1/1" />
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnTocNext"
+                style="@style/Widget.NoteSprout.ToolbarButton"
+                android:layout_marginEnd="4dp"
+                android:src="@drawable/ic_page_next"
+                android:contentDescription="Next page" />
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnTocLast"
+                style="@style/Widget.NoteSprout.ToolbarButton"
+                android:src="@drawable/ic_page_last"
+                android:contentDescription="Last page" />
+
+        </LinearLayout>
+
+    </LinearLayout>
+
+</FrameLayout>
