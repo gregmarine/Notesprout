@@ -509,7 +509,9 @@ Completed:
 
 - 🌱 New Branch: TOC active entry indicator + separators — `TocEntry` gains `pageIndex: Int` (0-based); `TocRepository` populates it; `TocDialog` accepts `currentPageIndex: Int` and computes `activeEntry` (nearest heading at or before current page via `filter { it.pageIndex <= currentPageIndex }.maxByOrNull { it.pageIndex }`); initial `currentTocPage` derived from active entry position so TOC opens to the correct page; active row gets `bg_toc_active_entry` background (5dp inkBlack bar flush to right edge via `layer-list` + `android:gravity="right"`), non-active rows get `null`; `item_toc_entry.xml` bottom separator updated from `borderGray` to `inkBlack` with `marginStart="16dp"` / `marginEnd="24dp"`; `llTocList paddingEnd` removed and absorbed into item inner content `paddingEnd` (4dp → 12dp) so row roots reach the panel border and the active bar sits flush against it
 
+- ✂️ Pruning: TOC dynamic page size — replaced hardcoded `ITEMS_PER_PAGE = 6` with a `ViewTreeObserver.OnGlobalLayoutListener` on `llTocList` that fires after `dialog.show()` lays out the panel; reads `llTocList.height` directly in pixels (actual usable list area, no density or overhead guesswork), subtracts list padding, divides by real row height (`ROW_HEIGHT_DP = 68f` = 52dp thumbnail + 8dp paddingTop + 8dp paddingBottom from `item_toc_entry.xml`, plus `ROW_SEPARATOR_DP = 1f`); `activeEntry` and initial `currentTocPage` computed inside the callback after `itemsPerPage` is known
+
 Next up: TBD — discuss before starting.
 
 ---
-*Last updated: 🌱 New Branch — TOC active entry indicator + separators*
+*Last updated: ✂️ Pruning — TOC dynamic page size*

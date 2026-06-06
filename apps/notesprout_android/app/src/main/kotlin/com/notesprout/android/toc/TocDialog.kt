@@ -4,9 +4,8 @@ import android.app.Dialog
 import android.content.Context
 import android.graphics.Color
 import android.graphics.drawable.ColorDrawable
-import android.view.GestureDetector
-import android.view.MotionEvent
 import android.view.View
+import android.view.ViewTreeObserver
 import android.view.Window
 import android.view.WindowManager.LayoutParams
 import android.widget.FrameLayout
@@ -19,10 +18,12 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import com.notesprout.android.R
-import kotlin.math.abs
 import kotlin.math.ceil
+import kotlin.math.floor
 
-private const val ITEMS_PER_PAGE = 6
+// Row height = thumbnail max height (52dp) + paddingTop (8dp) + paddingBottom (8dp) from item_toc_entry.xml
+private const val ROW_HEIGHT_DP = 68f
+private const val ROW_SEPARATOR_DP = 1f
 private const val HEADING_MAX_HEIGHT_DP = 52
 private const val WIDE_SCREEN_THRESHOLD_DP = 480
 private const val SIDEBAR_WIDTH_FRACTION = 0.60f
@@ -37,6 +38,7 @@ class TocDialog(
     private var tocEntries: List<TocEntry> = entries
     private var currentTocPage = 0
     private var activeEntry: TocEntry? = null
+    private var itemsPerPage = 1
 
     private lateinit var flTocRoot: FrameLayout
     private lateinit var llTocPanel: LinearLayout
@@ -108,37 +110,31 @@ class TocDialog(
         btnTocPrev.setOnClickListener { currentTocPage--; renderCurrentTocPage() }
         btnTocNext.setOnClickListener { currentTocPage++; renderCurrentTocPage() }
         btnTocLast.setOnClickListener {
-            currentTocPage = ceil(tocEntries.size.toDouble() / ITEMS_PER_PAGE).toInt() - 1
+            currentTocPage = ceil(tocEntries.size.toDouble() / itemsPerPage).toInt() - 1
             renderCurrentTocPage()
         }
 
-        val gestureDetector = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
-            override fun onFling(
-                e1: MotionEvent?,
-                e2: MotionEvent,
-                velocityX: Float,
-                velocityY: Float
-            ): Boolean {
-                val absX = abs(velocityX)
-                val absY = abs(velocityY)
-                if (absX > absY && absX > 100f) {
-                    val totalTocPages = ceil(tocEntries.size.toDouble() / ITEMS_PER_PAGE).toInt()
-                    if (velocityX < 0 && currentTocPage < totalTocPages - 1) {
-                        currentTocPage++
-                        renderCurrentTocPage()
-                    } else if (velocityX > 0 && currentTocPage > 0) {
-                        currentTocPage--
-                        renderCurrentTocPage()
-                    }
-                    return true
-                }
-                return false
+        val density = context.resources.displayMetrics.density
+
+        // Measure the actual list height after layout to compute itemsPerPage accurately.
+        // This accounts for the real available space on any device without relying on density
+        // estimates or hardcoded overhead values.
+        llTocList.viewTreeObserver.addOnGlobalLayoutListener(object : ViewTreeObserver.OnGlobalLayoutListener {
+            override fun onGlobalLayout() {
+                llTocList.viewTreeObserver.removeOnGlobalLayoutListener(this)
+                val usableHeightPx = llTocList.height - llTocList.paddingTop - llTocList.paddingBottom
+                val rowHeightPx = (ROW_HEIGHT_DP + ROW_SEPARATOR_DP) * density
+                itemsPerPage = maxOf(1, floor(usableHeightPx / rowHeightPx).toInt())
+
+                activeEntry = entries
+                    .filter { it.pageIndex <= currentPageIndex }
+                    .maxByOrNull { it.pageIndex }
+                val activeIndex = activeEntry?.let { entries.indexOf(it) } ?: -1
+                currentTocPage = if (activeIndex >= 0) activeIndex / itemsPerPage else 0
+
+                renderCurrentTocPage()
             }
         })
-        llTocList.setOnTouchListener { _, event ->
-            gestureDetector.onTouchEvent(event)
-            false
-        }
 
         dialog.show()
 
@@ -150,14 +146,6 @@ class TocDialog(
                 systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
             }
         }
-
-        activeEntry = entries
-            .filter { it.pageIndex <= currentPageIndex }
-            .maxByOrNull { it.pageIndex }
-        val activeIndex = activeEntry?.let { entries.indexOf(it) } ?: -1
-        currentTocPage = if (activeIndex >= 0) activeIndex / ITEMS_PER_PAGE else 0
-
-        renderCurrentTocPage()
     }
 
     private fun renderCurrentTocPage() {
@@ -180,11 +168,11 @@ class TocDialog(
             return
         }
 
-        val totalTocPages = ceil(tocEntries.size.toDouble() / ITEMS_PER_PAGE).toInt()
+        val totalTocPages = ceil(tocEntries.size.toDouble() / itemsPerPage).toInt()
         currentTocPage = currentTocPage.coerceIn(0, totalTocPages - 1)
 
-        val start = currentTocPage * ITEMS_PER_PAGE
-        val end = minOf(start + ITEMS_PER_PAGE, tocEntries.size)
+        val start = currentTocPage * itemsPerPage
+        val end = minOf(start + itemsPerPage, tocEntries.size)
         val pageEntries = tocEntries.subList(start, end)
 
         val maxHeightPx = (HEADING_MAX_HEIGHT_DP * context.resources.displayMetrics.density).toInt()
