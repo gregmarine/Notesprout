@@ -1,21 +1,25 @@
 package com.notesprout.android.toc
 
+import android.app.Dialog
 import android.content.Context
-import android.content.Intent
 import android.graphics.Color
 import android.graphics.drawable.ColorDrawable
-import android.os.Bundle
 import android.view.GestureDetector
-import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
+import android.view.Window
+import android.view.WindowManager
+import android.view.WindowManager.LayoutParams
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
-import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.AppCompatImageButton
 import androidx.appcompat.widget.AppCompatTextView
 import androidx.core.content.ContextCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
+import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.lifecycleScope
 import androidx.room.Room
 import com.notesprout.android.R
@@ -30,22 +34,15 @@ private const val ITEMS_PER_PAGE = 6
 private const val HEADING_MAX_HEIGHT_DP = 52
 private const val WIDE_SCREEN_THRESHOLD_DP = 480
 private const val SIDEBAR_WIDTH_FRACTION = 0.60f
-private const val EXTRA_NOTEBOOK_PATH = "extra_notebook_path"
-private const val EXTRA_CURRENT_PAGE_ID = "extra_current_page_id"
-private const val RESULT_PAGE_ID = "result_page_id"
 
-class TocActivity : AppCompatActivity() {
-
-    companion object {
-        fun createIntent(context: Context, notebookPath: String, currentPageId: String): Intent {
-            return Intent(context, TocActivity::class.java).apply {
-                putExtra(EXTRA_NOTEBOOK_PATH, notebookPath)
-                putExtra(EXTRA_CURRENT_PAGE_ID, currentPageId)
-            }
-        }
-    }
-
-    private lateinit var tocEntries: List<TocEntry>
+class TocDialog(
+    private val context: Context,
+    private val lifecycleOwner: LifecycleOwner,
+    private val notebookPath: String,
+    private val onPageSelected: (pageId: String) -> Unit,
+) {
+    private val dialog = Dialog(context)
+    private var tocEntries: List<TocEntry> = emptyList()
     private var currentTocPage = 0
 
     private lateinit var flTocRoot: FrameLayout
@@ -58,47 +55,60 @@ class TocActivity : AppCompatActivity() {
     private lateinit var btnTocNext: AppCompatImageButton
     private lateinit var btnTocLast: AppCompatImageButton
 
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-        setContentView(R.layout.activity_toc)
+    fun show() {
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE)
+        dialog.setContentView(R.layout.activity_toc)
+        dialog.setCanceledOnTouchOutside(false)
+        dialog.window?.apply {
+            setLayout(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT)
+            setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+            setElevation(0f)
+            clearFlags(LayoutParams.FLAG_DIM_BEHIND)
+            // Apply immersive flags before show() so system bars never appear.
+            // decorView exists after setContentView; WindowInsetsController needs an attached view,
+            // so we use the legacy flags here and reinforce with the modern API after show().
+            @Suppress("DEPRECATION")
+            decorView.systemUiVisibility = (
+                View.SYSTEM_UI_FLAG_FULLSCREEN or
+                View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
+                View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or
+                View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or
+                View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION or
+                View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+            )
+        }
 
-        flTocRoot = findViewById(R.id.flTocRoot)
-        llTocPanel = findViewById(R.id.llTocPanel)
-        btnTocClose = findViewById(R.id.btnTocClose)
-        llTocList = findViewById(R.id.llTocList)
-        tvTocPageIndicator = findViewById(R.id.tvTocPageIndicator)
-        btnTocFirst = findViewById(R.id.btnTocFirst)
-        btnTocPrev = findViewById(R.id.btnTocPrev)
-        btnTocNext = findViewById(R.id.btnTocNext)
-        btnTocLast = findViewById(R.id.btnTocLast)
+        flTocRoot = dialog.findViewById(R.id.flTocRoot)
+        llTocPanel = dialog.findViewById(R.id.llTocPanel)
+        btnTocClose = dialog.findViewById(R.id.btnTocClose)
+        llTocList = dialog.findViewById(R.id.llTocList)
+        tvTocPageIndicator = dialog.findViewById(R.id.tvTocPageIndicator)
+        btnTocFirst = dialog.findViewById(R.id.btnTocFirst)
+        btnTocPrev = dialog.findViewById(R.id.btnTocPrev)
+        btnTocNext = dialog.findViewById(R.id.btnTocNext)
+        btnTocLast = dialog.findViewById(R.id.btnTocLast)
 
-        val screenWidthDp = resources.configuration.screenWidthDp
+        val screenWidthDp = context.resources.configuration.screenWidthDp
         val isFullScreen = screenWidthDp < WIDE_SCREEN_THRESHOLD_DP
 
         if (isFullScreen) {
+            flTocRoot.setBackgroundColor(Color.WHITE)
             llTocPanel.layoutParams = FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT,
                 FrameLayout.LayoutParams.MATCH_PARENT
             )
             btnTocClose.visibility = View.VISIBLE
-            btnTocClose.setOnClickListener {
-                finish()
-                overridePendingTransition(0, 0)
-            }
-            window.setBackgroundDrawable(ColorDrawable(Color.WHITE))
+            btnTocClose.setOnClickListener { dialog.dismiss() }
         } else {
-            val widthPx = (screenWidthDp * SIDEBAR_WIDTH_FRACTION * resources.displayMetrics.density).toInt()
+            flTocRoot.setBackgroundColor(Color.TRANSPARENT)
+            val widthPx = (screenWidthDp * SIDEBAR_WIDTH_FRACTION * context.resources.displayMetrics.density).toInt()
             llTocPanel.layoutParams = FrameLayout.LayoutParams(
                 widthPx,
                 FrameLayout.LayoutParams.MATCH_PARENT
             )
             btnTocClose.visibility = View.GONE
-            flTocRoot.setOnClickListener {
-                finish()
-                overridePendingTransition(0, 0)
-            }
-            llTocPanel.setOnClickListener { /* consume, don't bubble to root */ }
-            window.setBackgroundDrawable(ColorDrawable(Color.parseColor("#66000000")))
+            flTocRoot.setOnClickListener { dialog.dismiss() }
+            llTocPanel.setOnClickListener { /* consume — don't bubble to scrim */ }
         }
 
         btnTocFirst.setOnClickListener { currentTocPage = 0; renderCurrentTocPage() }
@@ -109,7 +119,7 @@ class TocActivity : AppCompatActivity() {
             renderCurrentTocPage()
         }
 
-        val gestureDetector = GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
+        val gestureDetector = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
             override fun onFling(
                 e1: MotionEvent?,
                 e2: MotionEvent,
@@ -138,12 +148,20 @@ class TocActivity : AppCompatActivity() {
         }
 
         showLoading()
+        dialog.show()
 
-        val notebookPath = intent.getStringExtra(EXTRA_NOTEBOOK_PATH) ?: run { finish(); return }
+        // Restore immersive fullscreen — Dialog has its own window and resets system bar visibility.
+        dialog.window?.let { w ->
+            WindowCompat.setDecorFitsSystemWindows(w, false)
+            WindowInsetsControllerCompat(w, w.decorView).apply {
+                hide(WindowInsetsCompat.Type.systemBars())
+                systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            }
+        }
 
-        lifecycleScope.launch {
+        lifecycleOwner.lifecycleScope.launch {
             val entries = withContext(Dispatchers.IO) {
-                val db = Room.databaseBuilder(applicationContext, SoilDatabase::class.java, notebookPath)
+                val db = Room.databaseBuilder(context, SoilDatabase::class.java, notebookPath)
                     .build()
                 try {
                     TocRepository(db.notebookDao()).buildTocEntries()
@@ -151,18 +169,20 @@ class TocActivity : AppCompatActivity() {
                     db.close()
                 }
             }
-            tocEntries = entries
-            renderCurrentTocPage()
+            if (dialog.isShowing) {
+                tocEntries = entries
+                renderCurrentTocPage()
+            }
         }
     }
 
     private fun showLoading() {
         llTocList.removeAllViews()
-        val loading = TextView(this).apply {
+        val loading = TextView(context).apply {
             text = "Loading…"
-            setTextColor(ContextCompat.getColor(this@TocActivity, R.color.inkBlack))
+            setTextColor(ContextCompat.getColor(context, R.color.inkBlack))
             textSize = 15f
-            gravity = Gravity.CENTER
+            gravity = android.view.Gravity.CENTER
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.MATCH_PARENT
@@ -175,11 +195,11 @@ class TocActivity : AppCompatActivity() {
         llTocList.removeAllViews()
 
         if (tocEntries.isEmpty()) {
-            val empty = TextView(this).apply {
+            val empty = TextView(context).apply {
                 text = "No headings available"
-                setTextColor(ContextCompat.getColor(this@TocActivity, R.color.inkBlack))
+                setTextColor(ContextCompat.getColor(context, R.color.inkBlack))
                 textSize = 15f
-                gravity = Gravity.CENTER
+                gravity = android.view.Gravity.CENTER
                 layoutParams = LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.MATCH_PARENT,
                     LinearLayout.LayoutParams.MATCH_PARENT
@@ -198,16 +218,17 @@ class TocActivity : AppCompatActivity() {
         val end = minOf(start + ITEMS_PER_PAGE, tocEntries.size)
         val pageEntries = tocEntries.subList(start, end)
 
-        val maxHeightPx = (HEADING_MAX_HEIGHT_DP * resources.displayMetrics.density).toInt()
+        val maxHeightPx = (HEADING_MAX_HEIGHT_DP * context.resources.displayMetrics.density).toInt()
+        val inflater = android.view.LayoutInflater.from(context)
 
         for (entry in pageEntries) {
-            val row = layoutInflater.inflate(R.layout.item_toc_entry, llTocList, false)
+            val row = inflater.inflate(R.layout.item_toc_entry, llTocList, false)
             val tvPageNumber = row.findViewById<TextView>(R.id.tvTocPageNumber)
             val flContainer = row.findViewById<FrameLayout>(R.id.flTocHeadingContainer)
 
             tvPageNumber.text = entry.pageNumber.toString()
 
-            val thumbnail = HeadingThumbnailView(this).apply {
+            val thumbnail = HeadingThumbnailView(context).apply {
                 layoutParams = FrameLayout.LayoutParams(
                     FrameLayout.LayoutParams.MATCH_PARENT,
                     maxHeightPx
@@ -217,12 +238,8 @@ class TocActivity : AppCompatActivity() {
             flContainer.addView(thumbnail)
 
             row.setOnClickListener {
-                val result = Intent().apply {
-                    putExtra(RESULT_PAGE_ID, entry.pageId)
-                }
-                setResult(RESULT_OK, result)
-                finish()
-                overridePendingTransition(0, 0)
+                dialog.dismiss()
+                onPageSelected(entry.pageId)
             }
             llTocList.addView(row)
         }

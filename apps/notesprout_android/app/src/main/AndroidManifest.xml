@@ -40,12 +40,6 @@
             android:configChanges="orientation|keyboardHidden|screenSize|smallestScreenSize|screenLayout|density"
             android:windowSoftInputMode="stateHidden" />
 
-        <!-- Table of contents panel -->
-        <activity
-            android:name=".toc.TocActivity"
-            android:theme="@style/Theme.NoteSprout"
-            android:windowSoftInputMode="stateHidden" />
-
     </application>
 
 </manifest>

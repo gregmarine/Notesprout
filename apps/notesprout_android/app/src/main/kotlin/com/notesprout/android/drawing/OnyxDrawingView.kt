@@ -715,9 +715,13 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
     }
 
     override fun enableDrawing() {
-        if (isSetup) {
+        if (isSetup && !isLassoMode && !isLassoEraserMode) {
             touchHelper.setRawDrawingEnabled(true)
             epd("RAW_DRAWING_ENABLED true caller=enableDrawing")
+            if (isEraserMode) {
+                touchHelper.setRawDrawingRenderEnabled(false)
+                epd("RENDER_DISABLED caller=enableDrawing_eraserMode")
+            }
         }
     }
 
@@ -1274,8 +1278,14 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
             touchHelper.restartRawDrawing()
             epd("RESTART_RAW_DRAWING caller=openRawDrawing_alreadySetup")
         }
-        touchHelper.setRawDrawingEnabled(true)
-        epd("RAW_DRAWING_ENABLED true caller=openRawDrawing")
+        if (!isLassoMode && !isLassoEraserMode) {
+            touchHelper.setRawDrawingEnabled(true)
+            epd("RAW_DRAWING_ENABLED true caller=openRawDrawing")
+            if (isEraserMode) {
+                touchHelper.setRawDrawingRenderEnabled(false)
+                epd("RENDER_DISABLED caller=openRawDrawing_eraserMode")
+            }
+        }
         EpdController.setUpdListSize(EPD_UPDATE_LIST_SIZE)
         epd("SET_UPD_LIST_SIZE value=$EPD_UPDATE_LIST_SIZE caller=openRawDrawing")
         Log.d(TAG, "openRawDrawing done — inputEnabled=${touchHelper.isRawDrawingInputEnabled}")

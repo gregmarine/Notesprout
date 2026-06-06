@@ -330,6 +330,22 @@ Use device serials from the ADB Device Serials table above.
 ### Race condition — strokes missing on notebook reopen
 - `loadStrokes()` is called in `onCreate()` before view layout. Fix: `onSizeChanged()` calls `redrawCanvas()` (not just white fill) to replay all currently-loaded strokes regardless of load order. Applied to both drawing views.
 
+### Tool-state invariants across window focus changes (OnyxDrawingView)
+
+When a Dialog is shown over DrawingActivity, the activity's window loses focus → `onWindowFocusChanged(false)` fires → `touchHelper.setRawDrawingEnabled(false)`. When the Dialog is dismissed, focus returns → `onWindowFocusChanged(true)` → `openRawDrawing()`. This is also triggered by `onResume()` → `enableDrawing()` when returning from any sub-Activity.
+
+**The invariants that must be restored in `openRawDrawing()` and `enableDrawing()`:**
+
+| Active tool | `setRawDrawingEnabled` | `setRawDrawingRenderEnabled` |
+|---|---|---|
+| Pen | `true` | `true` (default — SDK manages) |
+| Eraser | `true` | `false` (render off prevents phantom pen strokes on overlay) |
+| Lasso / Lasso Eraser | `false` | n/a |
+
+- `openRawDrawing()` and `enableDrawing()` must guard `setRawDrawingEnabled(true)` with `!isLassoMode && !isLassoEraserMode`. If that guard passes and `isEraserMode` is true, immediately follow with `setRawDrawingRenderEnabled(false)`.
+- Failing to restore these invariants causes phantom pen strokes to appear on the EPD overlay that are not captured by the app — they look real but are not persisted and vanish on the next EPD refresh.
+- Every other `setRawDrawingEnabled(true)` call site in `OnyxDrawingView` already carries these guards; `openRawDrawing()` and `enableDrawing()` are the two centralized re-entry points and must match.
+
 ---
 
 ## Page Snapshot System (Implemented)
