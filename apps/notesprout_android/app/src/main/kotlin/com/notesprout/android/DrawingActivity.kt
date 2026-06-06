@@ -2504,16 +2504,28 @@ class DrawingActivity : AppCompatActivity() {
 
     private fun updateHeadingText(heading: HeadingStroke, newText: String) {
         val db = soilDatabase ?: return
+        // Measure new text width using the same 20sp paint used by the drawing views.
+        val textPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+            textSize = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 20f, resources.displayMetrics)
+        }
+        val paddingPx = 8f * resources.displayMetrics.density
+        val textWidth = textPaint.measureText(newText)
+        val newBox = RectF(
+            heading.boundingBox.left,
+            heading.boundingBox.top,
+            heading.boundingBox.left + textWidth + 2f * paddingPx,
+            heading.boundingBox.bottom,
+        )
         lifecycleScope.launch {
             withContext(Dispatchers.IO) {
                 val row = db.notebookDao().getObjectById(heading.id) ?: return@withContext
                 val headingObj = HeadingObject.fromJson(row.data)
                 val updated = headingObj.copy(recognizedText = newText)
-                val bboxJson = """{"x":${heading.boundingBox.left},"y":${heading.boundingBox.top},"width":${heading.boundingBox.width()},"height":${heading.boundingBox.height()}}"""
+                val bboxJson = """{"x":${newBox.left},"y":${newBox.top},"width":${newBox.width()},"height":${newBox.height()}}"""
                 db.notebookDao().updateHeadingData(heading.id, bboxJson, updated.toJson(), System.currentTimeMillis())
             }
             val updatedHeadings = drawingView.getHeadings().map { h ->
-                if (h.id == heading.id) h.copy(recognizedText = newText) else h
+                if (h.id == heading.id) h.copy(recognizedText = newText, boundingBox = newBox) else h
             }
             drawingView.loadHeadings(updatedHeadings)
             val strokes = drawingView.getStrokes()
@@ -2528,8 +2540,8 @@ class DrawingActivity : AppCompatActivity() {
             }
             if (binding.floatingSelectionToolbar.visibility == View.VISIBLE) {
                 val pad = 8f * resources.displayMetrics.density
-                val box = RectF(heading.boundingBox).also { it.inset(-pad, -pad) }
-                updateFloatingSelectionToolbar(box)
+                val selBox = RectF(newBox).also { it.inset(-pad, -pad) }
+                updateFloatingSelectionToolbar(selBox)
             }
         }
     }
