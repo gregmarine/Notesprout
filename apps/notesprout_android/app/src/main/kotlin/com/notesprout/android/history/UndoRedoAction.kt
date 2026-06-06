@@ -228,6 +228,8 @@ sealed class UndoRedoAction {
      *
      * [embeddedStrokes] carries the heading's original embedded stroke data so the heading's
      * bounding box can be reconstructed in-memory on undo (same 8dp padding as creation).
+     * [recognizedText] carries the heading's recognized text so undo can restore the heading
+     * with its text rendering intact (null for legacy headings with no recognized text).
      */
     @Serializable
     data class HeadingRemoved(
@@ -235,5 +237,6 @@ sealed class UndoRedoAction {
         val pageId: String,
         val restoredStrokes: List<LiveStroke>,
         val embeddedStrokes: List<LiveStroke>,
+        val recognizedText: String? = null,
     ) : UndoRedoAction()
 }

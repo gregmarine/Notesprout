@@ -2441,10 +2441,11 @@ class DrawingActivity : AppCompatActivity() {
 
         withContext(Dispatchers.Main) {
             undoRedoManager.push(UndoRedoAction.HeadingRemoved(
-                headingId       = heading.id,
-                pageId          = pageId,
+                headingId      = heading.id,
+                pageId         = pageId,
                 restoredStrokes = restoredStrokes,
                 embeddedStrokes = heading.strokes,
+                recognizedText = heading.recognizedText,
             ))
             updateUndoRedoButtons()
 
@@ -3261,7 +3262,7 @@ class DrawingActivity : AppCompatActivity() {
                 action.embeddedStrokes.forEach { headingBox.union(it.boundingBox) }
                 val pad = 8f * resources.displayMetrics.density
                 headingBox.inset(-pad, -pad)
-                val heading = HeadingStroke(id = action.headingId, boundingBox = headingBox, strokes = action.embeddedStrokes)
+                val heading = HeadingStroke(id = action.headingId, boundingBox = headingBox, strokes = action.embeddedStrokes, recognizedText = action.recognizedText)
                 updatedHeadings = preUndoHeadings + heading
             } else {
                 // Redo: heading removed, strokes re-appear.
@@ -3898,7 +3899,7 @@ class DrawingActivity : AppCompatActivity() {
                 action.embeddedStrokes.forEach { headingBox.union(it.boundingBox) }
                 val pad = 8f * resources.displayMetrics.density
                 headingBox.inset(-pad, -pad)
-                val heading = HeadingStroke(id = action.headingId, boundingBox = headingBox, strokes = action.embeddedStrokes)
+                val heading = HeadingStroke(id = action.headingId, boundingBox = headingBox, strokes = action.embeddedStrokes, recognizedText = action.recognizedText)
                 updatedHeadings = drawingView.getHeadings() + heading
             } else {
                 // Redo: remove heading, add restored strokes back.
