@@ -278,7 +278,7 @@ Use device serials from the ADB Device Serials table above.
 - `drawing/DrawingView.kt` — interface: `asView()`, `setToolbarHeight(Int)`, `enableDrawing()`, `disableDrawing()`, `resetOverlay()`, `clearCanvas()`, `setEraserMode(Boolean)`, `releaseResources()`, `loadStrokes(List<LiveStroke>)`, `getStrokes(): List<LiveStroke>`, `buildRenderBitmap(List<LiveStroke>, Bitmap?): Bitmap?`, `loadStrokesWithBitmap(List<LiveStroke>, Bitmap, Bitmap?)`, `captureSnapshot(): String?`, `setStrokeListSilently(List<LiveStroke>)`, `onStrokeErased: ((String) -> Unit)?`, `onPenLifted: (() -> Unit)?`, `onSnapshotReady: ((String) -> Unit)?`
 - `drawing/OnyxDrawingView.kt` — BOOX path: TouchHelper, RawInputCallback. `onPenLifted` fires on `onEndRawDrawing`. `onBeginRawDrawing` re-enables render, guarded by `!isEraserMode`.
 - `drawing/GenericDrawingView.kt` — standard Android Canvas: two-layer Bitmap, stylus-only (`TOOL_TYPE_STYLUS` + `TOOL_TYPE_ERASER`), historical point capture. `onPenLifted` fires on `ACTION_UP`.
-- `DrawingActivity.kt` — fullscreen immersive, multi-page state, incremental save via `insertOrIgnore`, `onStrokeErased` callback for targeted soft-delete, two-finger swipe for page navigation.
+- `DrawingActivity.kt` — fullscreen immersive, multi-page state, incremental save via `insertOrIgnore`, `onStrokeErased` callback for targeted soft-delete, one-finger deliberate swipe for page navigation (three guards: distance ≥50% screen width, velocity ≥1.5× system fling threshold, horizontal dominance).
 - `MainActivity.kt` — notebook list screen, adaptive grid, pagination, swipe, empty state, bottom bar.
 
 ### Key Build Facts
@@ -444,7 +444,7 @@ Completed:
 - Notebook list screen (MainActivity) with adaptive grid, pagination, swipe
 - Open notebook → DrawingActivity + Room DB lifecycle
 - Multi-page support: LiveStroke, incremental save, add/delete/swipe pages
-- Swipe-left on last page inserts a new page; two-finger fling required (palm rejection)
+- Swipe-left on last page inserts a new page; one-finger deliberate swipe required (≥50% screen width, 1.5× fling velocity, horizontal-dominant displacement)
 - Clear page confirmation dialog
 - Notebook metadata row — title, cover, last_opened_page; restored on every open
 - Auto-open new notebook immediately after creation
@@ -511,7 +511,9 @@ Completed:
 
 - ✂️ Pruning: TOC dynamic page size — replaced hardcoded `ITEMS_PER_PAGE = 6` with a `ViewTreeObserver.OnGlobalLayoutListener` on `llTocList` that fires after `dialog.show()` lays out the panel; reads `llTocList.height` directly in pixels (actual usable list area, no density or overhead guesswork), subtracts list padding, divides by real row height (`ROW_HEIGHT_DP = 68f` = 52dp thumbnail + 8dp paddingTop + 8dp paddingBottom from `item_toc_entry.xml`, plus `ROW_SEPARATOR_DP = 1f`); `activeEntry` and initial `currentTocPage` computed inside the callback after `itemsPerPage` is known
 
+- ✂️ Pruning: Page-turn swipe gesture — switched from two-finger to one-finger with three deliberate-swipe guards: distance ≥50% screen width (all devices); velocity ≥1.5× `scaledMinimumFlingVelocity`; displacement horizontal-dominant (`|dx| > |dy|`); a second finger cancels the gesture to block palm+finger combos
+
 Next up: TBD — discuss before starting.
 
 ---
-*Last updated: ✂️ Pruning — TOC dynamic page size*
+*Last updated: ✂️ Pruning — Page-turn swipe gesture (one-finger, 50% screen width)*

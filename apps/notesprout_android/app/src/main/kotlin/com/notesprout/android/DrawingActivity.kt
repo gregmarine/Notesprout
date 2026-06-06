@@ -95,11 +95,14 @@ class DrawingActivity : AppCompatActivity() {
     /** IDs of objects selected by the most recent lasso gesture. */
     val selectedObjectIds = mutableSetOf<String>()
 
-    // ── Two-finger page swipe state ───────────────────────────────────────────
-    // GestureDetector is single-finger only.  We use a VelocityTracker + a
-    // simple state machine so that only genuine two-finger flings turn pages.
-    // This prevents accidental page turns from resting palms / pinkies.
-    private var twoFingerActive = false
+    // ── One-finger page swipe state ───────────────────────────────────────────
+    // Deliberate full-width horizontal swipe turns pages.  Three guards ensure
+    // only intentional gestures qualify: minimum distance (screen-width relative),
+    // minimum velocity (1.5× system fling threshold), and horizontal dominance.
+    // A second finger cancels the gesture so palm+finger combos never fire.
+    private var pageSwipeActive = false
+    private var pageSwipeStartX = 0f
+    private var pageSwipeStartY = 0f
     private var pageSwipeVelocityTracker: VelocityTracker? = null
 
     /** Room DB instance for the open notebook. Null before open and after close. */
@@ -844,20 +847,18 @@ class DrawingActivity : AppCompatActivity() {
             drawingView.setToolbarHeight(toolbar.height)
         }
 
-        // ── Page swipe gesture (two-finger) ──────────────────────────────────
-        // Page navigation requires a deliberate two-finger horizontal fling so
-        // that incidental contact (resting pinky, palm) never turns the page.
-        //
-        // GestureDetector is single-finger only, so we use a VelocityTracker +
-        // state machine instead.  Events are fed in dispatchTouchEvent() before
-        // any child dispatch, ensuring BOOX's TouchHelper cannot swallow them.
+        // ── Page swipe gesture (one-finger, deliberate) ──────────────────────
+        // Page navigation requires a deliberate full-width horizontal finger swipe.
+        // Three guards gate the gesture: minimum distance (screen-width relative),
+        // minimum velocity (1.5× system fling threshold), and horizontal dominance.
+        // A second finger cancels the gesture so palm+finger combos never fire.
         //
         // State machine:
-        //   ACTION_DOWN          → reset tracker; single-finger, not yet active
-        //   ACTION_POINTER_DOWN  → second finger arrived; arm twoFingerActive
-        //   ACTION_MOVE          → feed tracker while twoFingerActive
-        //   ACTION_POINTER_UP    → 2→1 lift; compute velocity and fire if valid
-        //   ACTION_UP / CANCEL   → reset (last finger gone or gesture cancelled)
+        //   ACTION_DOWN          → arm tracker; record start position
+        //   ACTION_POINTER_DOWN  → second finger → cancel gesture
+        //   ACTION_MOVE          → feed tracker while active
+        //   ACTION_UP            → compute velocity + displacement; evaluate
+        //   ACTION_CANCEL        → reset
         // No-op on init — handled entirely in dispatchTouchEvent / helpers below.
 
         // ── Open the Room DB ──────────────────────────────────────────────────
@@ -924,7 +925,7 @@ class DrawingActivity : AppCompatActivity() {
     }
 
     /**
-     * Feed every touch event to the two-finger page swipe detector before normal dispatch.
+     * Feed every touch event to the page swipe detector before normal dispatch.
      *
      * This is required because on BOOX the Onyx TouchHelper consumes stylus events
      * at the view level and never bubbles them back to a parent touch listener.
@@ -938,7 +939,7 @@ class DrawingActivity : AppCompatActivity() {
      */
     override fun dispatchTouchEvent(event: MotionEvent): Boolean {
         if (event.getToolType(0) == MotionEvent.TOOL_TYPE_FINGER) {
-            handleTwoFingerPageSwipe(event)
+            handlePageSwipe(event)
         }
         // Dismiss the lasso popup toolbar on any touch outside its bounds.
         if (event.actionMasked == MotionEvent.ACTION_DOWN
@@ -958,57 +959,52 @@ class DrawingActivity : AppCompatActivity() {
     }
 
     /**
-     * Two-finger horizontal fling detector for page navigation.
+     * One-finger deliberate page-turn detector.
      *
-     * Arms when a second finger touches down; fires when one of the two fingers
-     * lifts (ACTION_POINTER_UP with pointerCount == 2 → going to 1).  Uses a
-     * [VelocityTracker] so the fling threshold matches Android's standard minimum
-     * fling velocity — fast enough to be deliberate, not so fast it is tiring.
-     *
-     * Requiring two simultaneous fingers prevents accidental page turns from a
-     * resting pinky or palm that the stylus palm-rejection misses.
+     * Arms on the first finger down; fires at ACTION_UP if the gesture passes
+     * all three guards in [evaluatePageFling].  A second finger immediately
+     * cancels so palm+finger combos and pinch-style gestures never turn pages.
      */
-    private fun handleTwoFingerPageSwipe(event: MotionEvent) {
+    private fun handlePageSwipe(event: MotionEvent) {
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
-                // First finger — reset; not yet a two-finger gesture.
-                twoFingerActive = false
+                // Single finger down — arm and record the start position.
+                pageSwipeActive = true
+                pageSwipeStartX = event.x
+                pageSwipeStartY = event.y
+                pageSwipeVelocityTracker?.recycle()
+                pageSwipeVelocityTracker = VelocityTracker.obtain().also { it.addMovement(event) }
+            }
+            MotionEvent.ACTION_POINTER_DOWN -> {
+                // Second finger arrived — cancel the gesture entirely.
+                pageSwipeActive = false
                 pageSwipeVelocityTracker?.recycle()
                 pageSwipeVelocityTracker = null
             }
-            MotionEvent.ACTION_POINTER_DOWN -> {
-                if (event.pointerCount == 2) {
-                    // Second finger arrived — arm the tracker.
-                    twoFingerActive = true
-                    pageSwipeVelocityTracker?.recycle()
-                    pageSwipeVelocityTracker = VelocityTracker.obtain().also {
-                        it.addMovement(event)
-                    }
-                }
-            }
             MotionEvent.ACTION_MOVE -> {
-                if (twoFingerActive) {
+                if (pageSwipeActive) {
                     pageSwipeVelocityTracker?.addMovement(event)
                 }
             }
-            MotionEvent.ACTION_POINTER_UP -> {
-                // One of the two fingers just lifted (2 → 1).  Evaluate the fling.
-                if (twoFingerActive && event.pointerCount == 2) {
-                    val tracker = pageSwipeVelocityTracker ?: return
-                    tracker.addMovement(event)
-                    tracker.computeCurrentVelocity(1000)
-                    // Use pointer 0 for velocity (the anchor finger).
-                    val vx = tracker.getXVelocity(0)
-                    val vy = tracker.getYVelocity(0)
-                    evaluatePageFling(vx, vy)
-                    twoFingerActive = false
-                    tracker.recycle()
-                    pageSwipeVelocityTracker = null
+            MotionEvent.ACTION_UP -> {
+                if (pageSwipeActive) {
+                    val tracker = pageSwipeVelocityTracker
+                    if (tracker != null) {
+                        tracker.addMovement(event)
+                        tracker.computeCurrentVelocity(1000)
+                        val vx = tracker.getXVelocity(0)
+                        val vy = tracker.getYVelocity(0)
+                        val dx = event.x - pageSwipeStartX
+                        val dy = event.y - pageSwipeStartY
+                        evaluatePageFling(vx, vy, dx, dy)
+                        tracker.recycle()
+                        pageSwipeVelocityTracker = null
+                    }
                 }
+                pageSwipeActive = false
             }
-            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                // Last finger gone or gesture cancelled — clean up.
-                twoFingerActive = false
+            MotionEvent.ACTION_CANCEL -> {
+                pageSwipeActive = false
                 pageSwipeVelocityTracker?.recycle()
                 pageSwipeVelocityTracker = null
             }
@@ -1016,21 +1012,25 @@ class DrawingActivity : AppCompatActivity() {
     }
 
     /**
-     * Interprets a fling velocity pair and navigates pages if the gesture qualifies.
+     * Applies three guards and navigates pages if the gesture qualifies.
      *
-     * Qualifications:
-     * - Horizontal dominant (|vx| > |vy|)
-     * - At or above [ViewConfiguration.scaledMinimumFlingVelocity]
+     * Guard 1 — minimum distance: ≥50% of screen width.
+     * Guard 2 — minimum velocity: 1.5× [ViewConfiguration.scaledMinimumFlingVelocity].
+     * Guard 3 — horizontal dominance: |dx| > |dy|.
      *
-     * Swipe left (vx < 0) → next page (or insert new page on last page).
-     * Swipe right (vx > 0) → previous page.
+     * Swipe left (dx < 0) → next page (or insert new page on last page).
+     * Swipe right (dx > 0) → previous page.
      */
-    private fun evaluatePageFling(velocityX: Float, velocityY: Float) {
-        // Must be horizontal-dominant.
-        if (Math.abs(velocityX) < Math.abs(velocityY)) return
-        // Must meet the system minimum fling velocity.
-        val minVelocity = ViewConfiguration.get(this).scaledMinimumFlingVelocity.toFloat()
+    private fun evaluatePageFling(velocityX: Float, velocityY: Float, dx: Float, dy: Float) {
+        // Guard 3: displacement must be predominantly horizontal.
+        if (Math.abs(dx) <= Math.abs(dy)) return
+        // Guard 2: must meet 1.5× system minimum fling velocity.
+        val minVelocity = ViewConfiguration.get(this).scaledMinimumFlingVelocity * 1.5f
         if (Math.abs(velocityX) < minVelocity) return
+        // Guard 1: minimum distance relative to screen width.
+        val dm = resources.displayMetrics
+        val screenWidthPx = dm.widthPixels.toFloat()
+        if (Math.abs(dx) < 0.50f * screenWidthPx) return
 
         if (velocityX < 0) {
             // Swipe left → advance to next page.
