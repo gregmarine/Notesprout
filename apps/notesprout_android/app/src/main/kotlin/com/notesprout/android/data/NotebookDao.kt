@@ -226,6 +226,23 @@ interface NotebookDao {
     @Query("SELECT * FROM notebook WHERE id = :pageId AND deletedAt IS NULL LIMIT 1")
     suspend fun getLastOpenedPageSnapshot(pageId: String): NotebookObject?
 
+    // ── TOC queries ───────────────────────────────────────────────────────────
+
+    /**
+     * All non-deleted heading rows across the entire notebook, in insertion order.
+     * Each heading's parentId is a layer id; callers resolve layer→page via [getObjectsByType].
+     * Used by [TocRepository] to build the table of contents.
+     */
+    @Query("SELECT * FROM notebook WHERE type = 'heading' AND deletedAt IS NULL")
+    suspend fun getAllHeadingObjects(): List<NotebookObject>
+
+    /**
+     * All non-deleted page rows sorted by `order` ascending.
+     * Identical to [getPagesSorted] — exposed under this name for clarity in TOC code.
+     */
+    @Query("SELECT * FROM notebook WHERE type = 'page' AND deletedAt IS NULL ORDER BY `order` ASC")
+    suspend fun getAllPages(): List<NotebookObject>
+
     // ── Snapshot staleness check ──────────────────────────────────────────────
 
     /**

@@ -486,8 +486,9 @@ Completed:
 - 🌱 New Branch: Dual-install build variants — `applicationIdSuffix = ".dev"` added to debug build type so debug (`com.notesprout.android.dev`) and release (`com.notesprout.android`) install side-by-side on the same device; `app/src/debug/res/values/strings.xml` overrides `app_name` to "NoteSprout Dev" for the launcher; CLAUDE.md updated with build variant instructions and corrected release signing steps (unsigned APKs must be signed with the debug keystore via `apksigner` before sideloading — `--bypass-verification` is not supported on BOOX devices)
 
 - 🌱 TOC Prompt 1/5: `ic_toc` VectorDrawable (Tabler list icon); `btnToc` added to DrawingActivity toolbar after close button with new separator; stub click handler wired
+- 🌱 TOC Prompt 2/5: TocEntry data class; NotebookDao queries for all headings and all pages; TocRepository picks topmost heading per page (min Y, X tiebreaker) and returns sorted List<TocEntry>
 
 Next up: TBD — discuss before starting.
 
 ---
-*Last updated: 🌱 TOC Prompt 1/5 — icon, toolbar button, stub handler*
+*Last updated: 🌱 TOC Prompt 2/5 — data layer, TocEntry, TocRepository*
