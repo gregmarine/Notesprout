@@ -485,12 +485,9 @@ Completed:
 
 - 🌱 New Branch: Dual-install build variants — `applicationIdSuffix = ".dev"` added to debug build type so debug (`com.notesprout.android.dev`) and release (`com.notesprout.android`) install side-by-side on the same device; `app/src/debug/res/values/strings.xml` overrides `app_name` to "NoteSprout Dev" for the launcher; CLAUDE.md updated with build variant instructions and corrected release signing steps (unsigned APKs must be signed with the debug keystore via `apksigner` before sideloading — `--bypass-verification` is not supported on BOOX devices)
 
-- 🌱 TOC Prompt 1/5: `ic_toc` VectorDrawable (Tabler list icon); `btnToc` added to DrawingActivity toolbar after close button with new separator; stub click handler wired
-- 🌱 TOC Prompt 2/5: TocEntry data class; NotebookDao queries for all headings and all pages; TocRepository picks topmost heading per page (min Y, X tiebreaker) and returns sorted List<TocEntry>
-- 🌱 TOC Prompt 3/5: activity_toc.xml layout (responsive full-screen/sidebar, header with btnTocClose, llTocList area, pagination row); shape_toc_panel_border drawable; TocActivity shell registered in manifest
-- 🌱 TOC Prompt 4/5: HeadingThumbnailView custom View (scale-to-fit with Matrix.setRectToRect START, inkBlack strokes, paperWhite background, width-clipped); item_toc_entry.xml row layout (page number label + vertical divider + heading container)
+- 🌱 New Branch: Table of Contents — `ic_toc` VectorDrawable (Tabler list icon); `btnToc` in DrawingActivity toolbar (after close, new separator, before cover); `TocEntry` data class; `TocRepository` picks topmost heading per page (min boundingBox.top, left tiebreaker), returns sorted `List<TocEntry>`; `activity_toc.xml` responsive layout (full-screen < 480dp with btnTocClose, sidebar 60% width >= 480dp); `shape_toc_panel_border` right-border drawable; `HeadingThumbnailView` (Matrix.setRectToRect START scaling, inkBlack strokes, paperWhite background, width-clipped); `item_toc_entry.xml` row layout; `TocActivity`: paginated list (6 items/page, 52dp heading max height), swipe left/right to page, tap row navigates to page + closes, tap-outside dismisses (sidebar), empty state "No headings available", scrim background (sidebar), no animations; DrawingActivity `tocLauncher` wires result back to `navigateToPage`
 
 Next up: TBD — discuss before starting.
 
 ---
-*Last updated: 🌱 TOC Prompt 4/5 — HeadingThumbnailView, item_toc_entry layout*
+*Last updated: 🌱 New Branch — Table of Contents*

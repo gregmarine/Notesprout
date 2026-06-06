@@ -48,6 +48,7 @@ import com.notesprout.android.drawing.GenericDrawingView
 import com.notesprout.android.drawing.OnyxDrawingView
 import com.notesprout.android.history.UndoRedoAction
 import com.notesprout.android.history.UndoRedoManager
+import com.notesprout.android.toc.TocActivity
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
@@ -238,6 +239,20 @@ class DrawingActivity : AppCompatActivity() {
                 // No card tapped but session actions occurred — reload in place so the
                 // pages list, page count, and canvas reflect the paste/delete/move changes.
                 anySessionActions -> navigateToPage(currentPageIndex)
+            }
+        }
+    }
+
+    // ── TOC launcher ─────────────────────────────────────────────────────────
+
+    private val tocLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == RESULT_OK) {
+            val pageId = result.data?.getStringExtra("result_page_id") ?: return@registerForActivityResult
+            val index = pages.indexOfFirst { it.id == pageId }
+            if (index >= 0 && index != currentPageIndex) {
+                navigateToPage(index)
             }
         }
     }
@@ -450,7 +465,10 @@ class DrawingActivity : AppCompatActivity() {
         }
 
         binding.btnToc.setOnClickListener {
-            // TODO: open TOC panel (Prompt 5)
+            val path = intent.getStringExtra(EXTRA_NOTEBOOK_PATH) ?: return@setOnClickListener
+            val pageId = pages.getOrNull(currentPageIndex)?.id ?: return@setOnClickListener
+            tocLauncher.launch(TocActivity.createIntent(this, path, pageId))
+            overridePendingTransition(0, 0)
         }
 
         binding.btnCover.setOnClickListener {
