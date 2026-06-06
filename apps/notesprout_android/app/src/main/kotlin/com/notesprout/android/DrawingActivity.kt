@@ -17,19 +17,19 @@ import android.os.Bundle
 import android.util.Base64
 import android.util.Log
 import android.util.TypedValue
-import android.text.InputType
+import android.view.inputmethod.InputMethodManager
 import android.view.MotionEvent
 import android.view.VelocityTracker
 import android.view.View
 import android.view.ViewConfiguration
 import android.view.WindowManager
-import android.widget.EditText
 import android.widget.FrameLayout
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.WindowCompat
+import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.core.view.doOnLayout
@@ -48,6 +48,7 @@ import com.notesprout.android.data.SoilDatabase
 import com.notesprout.android.data.StrokeData
 import com.notesprout.android.data.StrokePoint
 import com.notesprout.android.databinding.ActivityDrawingBinding
+import com.notesprout.android.databinding.DialogEditHeadingTextBinding
 import com.notesprout.android.drawing.DrawingView
 import com.notesprout.android.drawing.GenericDrawingView
 import com.notesprout.android.drawing.OnyxDrawingView
@@ -2471,16 +2472,13 @@ class DrawingActivity : AppCompatActivity() {
     }
 
     private fun showHeadingTextEditDialog(heading: HeadingStroke) {
-        val editText = EditText(this).apply {
-            setText(heading.recognizedText)
-            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
-            setPadding(48, 32, 48, 32)
-        }
+        val dialogBinding = DialogEditHeadingTextBinding.inflate(layoutInflater)
+        dialogBinding.editHeadingText.setText(heading.recognizedText)
         val dialog = AlertDialog.Builder(this)
-            .setMessage("Edit heading text")
-            .setView(editText)
+            .setTitle("Edit Heading")
+            .setView(dialogBinding.root)
             .setPositiveButton("Save") { _, _ ->
-                val newText = editText.text.toString().trim()
+                val newText = dialogBinding.editHeadingText.text?.toString()?.trim().orEmpty()
                 if (newText.isNotBlank()) {
                     updateHeadingText(heading, newText)
                 }
@@ -2491,7 +2489,17 @@ class DrawingActivity : AppCompatActivity() {
         dialog.show()
         dialog.window?.setElevation(0f)
         dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
-        editText.selectAll()
+        dialogBinding.editHeadingText.requestFocus()
+        dialogBinding.editHeadingText.selectAll()
+        dialogBinding.editHeadingText.postDelayed({
+            ViewCompat.getWindowInsetsController(dialogBinding.editHeadingText)
+                ?.show(WindowInsetsCompat.Type.ime())
+                ?: run {
+                    val imm = getSystemService(InputMethodManager::class.java)
+                    @Suppress("DEPRECATION")
+                    imm.showSoftInput(dialogBinding.editHeadingText, InputMethodManager.SHOW_IMPLICIT)
+                }
+        }, 100)
     }
 
     private fun updateHeadingText(heading: HeadingStroke, newText: String) {
