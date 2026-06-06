@@ -1997,6 +1997,32 @@ class DrawingActivity : AppCompatActivity() {
 
     // ── Lasso copy/paste helpers ──────────────────────────────────────────────
 
+    /**
+     * Compute the bounding box for a text heading from its embedded stroke positions and
+     * recognized text, using the same 20sp paint + 8dp padding as [createHeadingFromStrokes].
+     * Falls back to stroke-based bounds when [recognizedText] is null.
+     */
+    private fun headingBoundingBox(embeddedStrokes: List<LiveStroke>, recognizedText: String?): RectF {
+        val strokeBox = RectF()
+        embeddedStrokes.forEach { strokeBox.union(it.boundingBox) }
+        val pad = 8f * resources.displayMetrics.density
+        if (recognizedText == null) {
+            strokeBox.inset(-pad, -pad)
+            return strokeBox
+        }
+        val textPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+            textSize = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 20f, resources.displayMetrics)
+        }
+        val textWidth  = textPaint.measureText(recognizedText)
+        val fm         = textPaint.fontMetrics
+        val textHeight = fm.descent - fm.ascent
+        return RectF(
+            strokeBox.left, strokeBox.top,
+            strokeBox.left + pad + textWidth + pad,
+            strokeBox.top  + pad + textHeight + pad,
+        )
+    }
+
     private fun computeUnionBoundingBox(
         strokes: List<LiveStroke>,
         headings: List<HeadingStroke>,
@@ -3197,10 +3223,7 @@ class DrawingActivity : AppCompatActivity() {
                 val idsSet = action.originalStrokeIds.toSet()
                 updatedStrokes = preUndoStrokes.filter { it.id !in idsSet }
                 persistedStrokeIds.removeAll(idsSet)
-                val headingBox = RectF()
-                action.embeddedStrokes.forEach { headingBox.union(it.boundingBox) }
-                val pad = 8f * resources.displayMetrics.density
-                headingBox.inset(-pad, -pad)
+                val headingBox = headingBoundingBox(action.embeddedStrokes, action.recognizedText)
                 val newHeading = HeadingStroke(id = action.headingId, boundingBox = headingBox, strokes = action.embeddedStrokes, recognizedText = action.recognizedText)
                 updatedHeadings = preUndoHeadings + newHeading
             }
@@ -3275,10 +3298,7 @@ class DrawingActivity : AppCompatActivity() {
                 val restoredIds = action.restoredStrokes.mapTo(mutableSetOf()) { it.id }
                 updatedStrokes = preUndoStrokes.filter { it.id !in restoredIds }
                 persistedStrokeIds.removeAll(restoredIds)
-                val headingBox = RectF()
-                action.embeddedStrokes.forEach { headingBox.union(it.boundingBox) }
-                val pad = 8f * resources.displayMetrics.density
-                headingBox.inset(-pad, -pad)
+                val headingBox = headingBoundingBox(action.embeddedStrokes, action.recognizedText)
                 val heading = HeadingStroke(id = action.headingId, boundingBox = headingBox, strokes = action.embeddedStrokes, recognizedText = action.recognizedText)
                 updatedHeadings = preUndoHeadings + heading
             } else {
@@ -3972,10 +3992,7 @@ class DrawingActivity : AppCompatActivity() {
                 val idsSet = action.originalStrokeIds.toSet()
                 updatedStrokes = drawingView.getStrokes().filter { it.id !in idsSet }
                 persistedStrokeIds.removeAll(idsSet)
-                val headingBox = RectF()
-                action.embeddedStrokes.forEach { headingBox.union(it.boundingBox) }
-                val pad = 8f * resources.displayMetrics.density
-                headingBox.inset(-pad, -pad)
+                val headingBox = headingBoundingBox(action.embeddedStrokes, action.recognizedText)
                 val newHeading = HeadingStroke(id = action.headingId, boundingBox = headingBox, strokes = action.embeddedStrokes, recognizedText = action.recognizedText)
                 updatedHeadings = drawingView.getHeadings() + newHeading
             }
@@ -4007,10 +4024,7 @@ class DrawingActivity : AppCompatActivity() {
                 val restoredIds = action.restoredStrokes.mapTo(mutableSetOf()) { it.id }
                 updatedStrokes = drawingView.getStrokes().filter { it.id !in restoredIds }
                 persistedStrokeIds.removeAll(restoredIds)
-                val headingBox = RectF()
-                action.embeddedStrokes.forEach { headingBox.union(it.boundingBox) }
-                val pad = 8f * resources.displayMetrics.density
-                headingBox.inset(-pad, -pad)
+                val headingBox = headingBoundingBox(action.embeddedStrokes, action.recognizedText)
                 val heading = HeadingStroke(id = action.headingId, boundingBox = headingBox, strokes = action.embeddedStrokes, recognizedText = action.recognizedText)
                 updatedHeadings = drawingView.getHeadings() + heading
             } else {

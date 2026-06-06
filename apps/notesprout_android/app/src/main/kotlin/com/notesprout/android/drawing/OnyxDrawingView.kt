@@ -534,7 +534,8 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
                     dragOriginalHeadings = headings
                         .filter { it.id in lassoSelectedIds }
                         .map { h -> HeadingStroke(h.id, android.graphics.RectF(h.boundingBox),
-                            h.strokes.map { s -> LiveStroke(s.id, s.points.map { PointF(it.x, it.y) }) }) }
+                            h.strokes.map { s -> LiveStroke(s.id, s.points.map { PointF(it.x, it.y) }) },
+                            recognizedText = h.recognizedText) }
                     // Build backing bitmap without selected strokes/headings (held for drag).
                     val nonSelectedStrokes  = strokes.filter { it.id !in lassoSelectedIds }
                     val nonSelectedHeadings = headings.filter { it.id !in lassoSelectedIds }
@@ -610,6 +611,7 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
                                 strokes = h.strokes.map { s ->
                                     LiveStroke(s.id, s.points.map { PointF(it.x + dragDx, it.y + dragDy) })
                                 },
+                                recognizedText = h.recognizedText,
                             )
                         }
                         // Update in-memory stroke list with translated positions.

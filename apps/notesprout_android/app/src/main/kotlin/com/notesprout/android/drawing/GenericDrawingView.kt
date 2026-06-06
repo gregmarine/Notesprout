@@ -215,7 +215,8 @@ class GenericDrawingView(context: Context) : View(context), DrawingView {
                     dragOriginalHeadings = headings
                         .filter { it.id in lassoSelectedIds }
                         .map { h -> HeadingStroke(h.id, android.graphics.RectF(h.boundingBox),
-                            h.strokes.map { s -> LiveStroke(s.id, s.points.map { PointF(it.x, it.y) }) }) }
+                            h.strokes.map { s -> LiveStroke(s.id, s.points.map { PointF(it.x, it.y) }) },
+                            recognizedText = h.recognizedText) }
                     val nonSelectedStrokes  = strokes.filter { it.id !in lassoSelectedIds }
                     val nonSelectedHeadings = headings.filter { it.id !in lassoSelectedIds }
                     dragBackingBitmap = buildRenderBitmap(nonSelectedStrokes, templateBitmap, nonSelectedHeadings)
@@ -281,6 +282,7 @@ class GenericDrawingView(context: Context) : View(context), DrawingView {
                                 strokes = h.strokes.map { s ->
                                     LiveStroke(s.id, s.points.map { PointF(it.x + dragDx, it.y + dragDy) })
                                 },
+                                recognizedText = h.recognizedText,
                             )
                         }
                         val movedById = movedStrokes.associateBy { it.id }
