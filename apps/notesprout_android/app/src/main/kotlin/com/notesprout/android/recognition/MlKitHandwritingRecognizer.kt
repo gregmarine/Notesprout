@@ -97,16 +97,16 @@ class MlKitHandwritingRecognizer : HandwritingRecognizer {
 
         val writingArea = WritingArea(bounds.width(), bounds.height())
         val recognitionContext = RecognitionContext.builder()
+            .setPreContext("")
             .setWritingArea(writingArea)
             .build()
 
         r.recognize(inkBuilder.build(), recognitionContext)
             .addOnSuccessListener { result ->
                 val text = result.candidates.firstOrNull()?.text
-                onResult(
-                    if (!text.isNullOrBlank()) text
-                    else HandwritingRecognizer.FALLBACK_TEXT
-                )
+                val recognized = if (!text.isNullOrBlank()) text else HandwritingRecognizer.FALLBACK_TEXT
+                Log.d(TAG, "Recognition result: \"$recognized\"")
+                onResult(recognized)
             }
             .addOnFailureListener { e ->
                 Log.e(TAG, "Recognition failed", e)
