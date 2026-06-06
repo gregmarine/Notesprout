@@ -17,10 +17,13 @@ import android.os.Bundle
 import android.util.Base64
 import android.util.Log
 import android.util.TypedValue
+import android.text.InputType
 import android.view.MotionEvent
 import android.view.VelocityTracker
 import android.view.View
 import android.view.ViewConfiguration
+import android.view.WindowManager
+import android.widget.EditText
 import android.widget.FrameLayout
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
@@ -686,7 +689,18 @@ class DrawingActivity : AppCompatActivity() {
         }
 
         // Stylus tap in lasso mode — trigger paste if clipboard has content and no selection.
-        drawingView.onLassoTap = { tapX, tapY ->
+        drawingView.onLassoTap = tap@{ tapX, tapY ->
+            // Heading text edit tap — checked first, before paste or dismiss logic.
+            if (selectedObjectIds.size == 1) {
+                val selectedId = selectedObjectIds.first()
+                val selectedHeading = drawingView.getHeadings().find {
+                    it.id == selectedId && it.recognizedText != null
+                }
+                if (selectedHeading != null && selectedHeading.boundingBox.contains(tapX, tapY)) {
+                    showHeadingTextEditDialog(selectedHeading)
+                    return@tap
+                }
+            }
             if (selectedObjectIds.isEmpty() && NoteSproutClipboard.hasContent()) {
                 hideLassoPopupToolbar()
                 performLassoPaste(tapX, tapY)
@@ -2452,6 +2466,62 @@ class DrawingActivity : AppCompatActivity() {
                 drawingView.loadStrokesWithBitmap(updatedStrokes, bitmap, templateBmp)
             } else {
                 drawingView.loadStrokes(updatedStrokes)
+            }
+        }
+    }
+
+    private fun showHeadingTextEditDialog(heading: HeadingStroke) {
+        val editText = EditText(this).apply {
+            setText(heading.recognizedText)
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
+            setPadding(48, 32, 48, 32)
+        }
+        val dialog = AlertDialog.Builder(this)
+            .setMessage("Edit heading text")
+            .setView(editText)
+            .setPositiveButton("Save") { _, _ ->
+                val newText = editText.text.toString().trim()
+                if (newText.isNotBlank()) {
+                    updateHeadingText(heading, newText)
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .create()
+        dialog.window?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE)
+        dialog.show()
+        dialog.window?.setElevation(0f)
+        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+        editText.selectAll()
+    }
+
+    private fun updateHeadingText(heading: HeadingStroke, newText: String) {
+        val db = soilDatabase ?: return
+        lifecycleScope.launch {
+            withContext(Dispatchers.IO) {
+                val row = db.notebookDao().getObjectById(heading.id) ?: return@withContext
+                val headingObj = HeadingObject.fromJson(row.data)
+                val updated = headingObj.copy(recognizedText = newText)
+                val bboxJson = """{"x":${heading.boundingBox.left},"y":${heading.boundingBox.top},"width":${heading.boundingBox.width()},"height":${heading.boundingBox.height()}}"""
+                db.notebookDao().updateHeadingData(heading.id, bboxJson, updated.toJson(), System.currentTimeMillis())
+            }
+            val updatedHeadings = drawingView.getHeadings().map { h ->
+                if (h.id == heading.id) h.copy(recognizedText = newText) else h
+            }
+            drawingView.loadHeadings(updatedHeadings)
+            val strokes = drawingView.getStrokes()
+            val templateBmp = currentTemplateBitmap
+            val bitmap = withContext(Dispatchers.IO) {
+                drawingView.buildRenderBitmap(strokes, templateBmp, updatedHeadings)
+            }
+            if (bitmap != null) {
+                drawingView.loadStrokesWithBitmap(strokes, bitmap, templateBmp)
+            } else {
+                drawingView.loadStrokes(strokes)
+            }
+            if (binding.floatingSelectionToolbar.visibility == View.VISIBLE) {
+                val pad = 8f * resources.displayMetrics.density
+                val box = RectF(heading.boundingBox).also { it.inset(-pad, -pad) }
+                updateFloatingSelectionToolbar(box)
             }
         }
     }

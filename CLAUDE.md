@@ -521,7 +521,9 @@ Completed:
 
 - ✂️ Pruning: TOC text rendering (Prompt 4) — `TocDialog` and `item_toc_entry.xml` updated to display `recognizedText` as a plain vertically-centered `TextView` (`tvHeadingText`, 20sp, inkBlack, 8dp horizontal padding, ellipsize end) when a heading has recognized text, falling back to `HeadingThumbnailView` stroke bitmap when `recognizedText` is null; `tvHeadingText` added to `flTocHeadingContainer` in the XML (52dp height, `visibility=gone` by default); row height and all other dimensions unchanged; `TocRepository` bug fixed — `HeadingStroke` construction was missing `recognizedText = headingObject.recognizedText`, causing the field to always default to null and the thumbnail path to always win
 
+- 🌱 New Branch: Heading text edit dialog (Prompt 5) — `showHeadingTextEditDialog(heading: HeadingStroke)` added to `DrawingActivity`: creates an `EditText` pre-filled with `recognizedText`, wraps it in a flat `AlertDialog` (elevation=0, `shape_bordered`, no title, message "Edit heading text", Save/Cancel buttons); Save rejects blank input; `editText.selectAll()` called after `show()` so the user can immediately overtype; `updateHeadingText(heading, newText)` loads the heading row from DB on IO, deserializes `HeadingObject`, copies with new `recognizedText`, writes back via `updateHeadingData`, then on main thread replaces the heading in the in-memory list, calls `loadHeadings`, rebuilds the render bitmap, and re-anchors the floating selection toolbar; `onLassoTap` in `DrawingActivity` now checks heading-edit first (single selected object, is a heading with non-null `recognizedText`, tap inside bounding box) before any paste or dismiss logic; legacy stroke-only headings (null `recognizedText`) are skipped silently; no undo/redo for text edits in this prompt
+
 Next up: TBD — discuss before starting.
 
 ---
-*Last updated: ✂️ Pruning — TOC text rendering (Prompt 4)*
+*Last updated: 🌱 New Branch — Heading text edit dialog (Prompt 5)*
