@@ -182,17 +182,24 @@ class TocDialog(
             val row = inflater.inflate(R.layout.item_toc_entry, llTocList, false)
             val tvPageNumber = row.findViewById<TextView>(R.id.tvTocPageNumber)
             val flContainer = row.findViewById<FrameLayout>(R.id.flTocHeadingContainer)
+            val tvHeadingText = row.findViewById<TextView>(R.id.tvHeadingText)
 
             tvPageNumber.text = entry.pageNumber.toString()
 
-            val thumbnail = HeadingThumbnailView(context).apply {
-                layoutParams = FrameLayout.LayoutParams(
-                    FrameLayout.LayoutParams.MATCH_PARENT,
-                    maxHeightPx
-                )
-                setHeading(entry.heading, maxHeightPx)
+            val recognizedText = entry.heading.recognizedText
+            if (recognizedText != null) {
+                tvHeadingText.text = recognizedText
+                tvHeadingText.visibility = View.VISIBLE
+            } else {
+                val thumbnail = HeadingThumbnailView(context).apply {
+                    layoutParams = FrameLayout.LayoutParams(
+                        FrameLayout.LayoutParams.MATCH_PARENT,
+                        maxHeightPx
+                    )
+                    setHeading(entry.heading, maxHeightPx)
+                }
+                flContainer.addView(thumbnail)
             }
-            flContainer.addView(thumbnail)
 
             if (entry.pageIndex == activeEntry?.pageIndex) {
                 row.background = ContextCompat.getDrawable(context, R.drawable.bg_toc_active_entry)

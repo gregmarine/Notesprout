@@ -36,7 +36,22 @@
             android:layout_height="wrap_content"
             android:layout_weight="1"
             android:clipChildren="true"
-            android:clipToPadding="true" />
+            android:clipToPadding="true">
+
+            <TextView
+                android:id="@+id/tvHeadingText"
+                android:layout_width="match_parent"
+                android:layout_height="52dp"
+                android:textColor="@color/inkBlack"
+                android:textSize="20sp"
+                android:gravity="center_vertical"
+                android:paddingStart="8dp"
+                android:paddingEnd="8dp"
+                android:visibility="gone"
+                android:ellipsize="end"
+                android:singleLine="true" />
+
+        </FrameLayout>
 
     </LinearLayout>
 
