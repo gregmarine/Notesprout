@@ -503,6 +503,8 @@ Completed:
 
 - 🌱 New Branch: Table of Contents — `ic_toc` VectorDrawable (Tabler list icon); `btnToc` in DrawingActivity toolbar (after close, new separator, before cover); `TocEntry` data class; `TocRepository` picks topmost heading per page (min boundingBox.top, left tiebreaker), returns sorted `List<TocEntry>`; `activity_toc.xml` responsive layout (full-screen < 480dp with btnTocClose, sidebar 60% width >= 480dp); `shape_toc_panel_border` right-border drawable; `HeadingThumbnailView` (Matrix.setRectToRect START scaling, inkBlack strokes, paperWhite background, width-clipped); `item_toc_entry.xml` row layout; `TocActivity`: paginated list (6 items/page, 52dp heading max height), swipe left/right to page, tap row navigates to page + closes, tap-outside dismisses (sidebar), empty state "No headings available", scrim background (sidebar), no animations; DrawingActivity `tocLauncher` wires result back to `navigateToPage`
 
+- ✂️ Pruning: TOC perceived-load improvements — `TocDialog` no longer opens a second Room instance; `btnToc` handler pre-fetches `List<TocEntry>` on IO via the already-open `soilDatabase` before calling `show()`, eliminating the "Loading…" state entirely; `HeadingThumbnailView` caches `Path` objects in `setHeading()` (layout-independent) and the `Matrix` lazily on first draw (needs view width), so `onDraw()` does zero allocations; `tvTocPageNumber` bumped from 14sp/40dp to 20sp/52dp for legibility
+
 Next up: TBD — discuss before starting.
 
 ---

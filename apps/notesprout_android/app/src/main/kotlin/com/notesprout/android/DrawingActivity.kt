@@ -49,6 +49,7 @@ import com.notesprout.android.drawing.OnyxDrawingView
 import com.notesprout.android.history.UndoRedoAction
 import com.notesprout.android.history.UndoRedoManager
 import com.notesprout.android.toc.TocDialog
+import com.notesprout.android.toc.TocRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
@@ -451,16 +452,20 @@ class DrawingActivity : AppCompatActivity() {
         }
 
         binding.btnToc.setOnClickListener {
-            val path = intent.getStringExtra(EXTRA_NOTEBOOK_PATH) ?: return@setOnClickListener
-            TocDialog(
-                context = this,
-                lifecycleOwner = this,
-                notebookPath = path,
-                onPageSelected = { pageId ->
-                    val index = pages.indexOfFirst { it.id == pageId }
-                    if (index >= 0 && index != currentPageIndex) navigateToPage(index)
+            val db = soilDatabase ?: return@setOnClickListener
+            lifecycleScope.launch {
+                val entries = withContext(Dispatchers.IO) {
+                    TocRepository(db.notebookDao()).buildTocEntries()
                 }
-            ).show()
+                TocDialog(
+                    context = this@DrawingActivity,
+                    entries = entries,
+                    onPageSelected = { pageId ->
+                        val index = pages.indexOfFirst { it.id == pageId }
+                        if (index >= 0 && index != currentPageIndex) navigateToPage(index)
+                    }
+                ).show()
+            }
         }
 
         binding.btnCover.setOnClickListener {

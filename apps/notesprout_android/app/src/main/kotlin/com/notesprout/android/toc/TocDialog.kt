@@ -8,7 +8,6 @@ import android.view.GestureDetector
 import android.view.MotionEvent
 import android.view.View
 import android.view.Window
-import android.view.WindowManager
 import android.view.WindowManager.LayoutParams
 import android.widget.FrameLayout
 import android.widget.LinearLayout
@@ -19,14 +18,7 @@ import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
-import androidx.lifecycle.LifecycleOwner
-import androidx.lifecycle.lifecycleScope
-import androidx.room.Room
 import com.notesprout.android.R
-import com.notesprout.android.data.SoilDatabase
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import kotlin.math.abs
 import kotlin.math.ceil
 
@@ -37,12 +29,11 @@ private const val SIDEBAR_WIDTH_FRACTION = 0.60f
 
 class TocDialog(
     private val context: Context,
-    private val lifecycleOwner: LifecycleOwner,
-    private val notebookPath: String,
+    private val entries: List<TocEntry>,
     private val onPageSelected: (pageId: String) -> Unit,
 ) {
     private val dialog = Dialog(context)
-    private var tocEntries: List<TocEntry> = emptyList()
+    private var tocEntries: List<TocEntry> = entries
     private var currentTocPage = 0
 
     private lateinit var flTocRoot: FrameLayout
@@ -147,7 +138,6 @@ class TocDialog(
             false
         }
 
-        showLoading()
         dialog.show()
 
         // Restore immersive fullscreen — Dialog has its own window and resets system bar visibility.
@@ -159,36 +149,7 @@ class TocDialog(
             }
         }
 
-        lifecycleOwner.lifecycleScope.launch {
-            val entries = withContext(Dispatchers.IO) {
-                val db = Room.databaseBuilder(context, SoilDatabase::class.java, notebookPath)
-                    .build()
-                try {
-                    TocRepository(db.notebookDao()).buildTocEntries()
-                } finally {
-                    db.close()
-                }
-            }
-            if (dialog.isShowing) {
-                tocEntries = entries
-                renderCurrentTocPage()
-            }
-        }
-    }
-
-    private fun showLoading() {
-        llTocList.removeAllViews()
-        val loading = TextView(context).apply {
-            text = "Loading…"
-            setTextColor(ContextCompat.getColor(context, R.color.inkBlack))
-            textSize = 15f
-            gravity = android.view.Gravity.CENTER
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.MATCH_PARENT
-            )
-        }
-        llTocList.addView(loading)
+        renderCurrentTocPage()
     }
 
     private fun renderCurrentTocPage() {
