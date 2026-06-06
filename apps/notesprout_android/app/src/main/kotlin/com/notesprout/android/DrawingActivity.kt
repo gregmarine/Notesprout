@@ -2538,9 +2538,10 @@ class DrawingActivity : AppCompatActivity() {
             } else {
                 drawingView.loadStrokes(strokes)
             }
+            val pad = 8f * resources.displayMetrics.density
+            val selBox = RectF(newBox).also { it.inset(-pad, -pad) }
+            drawingView.setLassoOverlay(null, selBox)
             if (binding.floatingSelectionToolbar.visibility == View.VISIBLE) {
-                val pad = 8f * resources.displayMetrics.density
-                val selBox = RectF(newBox).also { it.inset(-pad, -pad) }
                 updateFloatingSelectionToolbar(selBox)
             }
         }
