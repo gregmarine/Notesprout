@@ -16,6 +16,14 @@ A handwriting-first, meditative notes app. Think paper, but smarter underneath. 
 
 ---
 
+## Active Backlog
+
+- **Pruning backlog:** `apps/notesprout_android/PRUNING_BACKLOG.md` — hardening items from the
+  2026-06-07 vulnerability/quality scan, with stable IDs (C-1, M-3, …). Reference an item by ID
+  to work it; flip its Status checkbox and fill Notes/commit when done.
+
+---
+
 ## Core Philosophy — Never Violate These
 
 - Human-first: fixed screen-size pages, never infinite scroll
