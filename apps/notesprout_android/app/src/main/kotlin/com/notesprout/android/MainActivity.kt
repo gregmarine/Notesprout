@@ -50,6 +50,8 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
 import java.util.UUID
 
 class MainActivity : AppCompatActivity() {
@@ -511,6 +513,8 @@ class MainActivity : AppCompatActivity() {
 
     private fun showNewNotebookDialog() {
         val dialogBinding = DialogNewNotebookBinding.inflate(layoutInflater)
+        val defaultName = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"))
+        dialogBinding.editNotebookName.setText(defaultName)
         val dialog = AlertDialog.Builder(this)
             .setTitle("New Notebook")
             .setView(dialogBinding.root)

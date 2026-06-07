@@ -441,6 +441,7 @@ Never calls `clearCanvas()`. Updates the in-memory stroke list directly, rebuild
 **Core:**
 - `.soil` schema + Room setup, SoilDatabase lifecycle
 - Notebook list (MainActivity) — adaptive grid, pagination, cover images, Set Cover, Delete notebook
+- New-notebook dialog pre-fills filename with `YYYYMMDD_HHmmss` timestamp (`java.time.LocalDateTime`, editable before confirm)
 - DrawingActivity — fullscreen immersive, multi-page, incremental save, one-finger deliberate swipe
 - Dual-install build variants — debug (`.dev` suffix) + release side-by-side
 
@@ -470,4 +471,4 @@ Never calls `clearCanvas()`. Updates the in-memory stroke list directly, rebuild
 
 ---
 
-*Last updated: ✂️ Pruning — Un-heading restores stroke selection*
+*Last updated: feat: pre-fill new notebook filename with YYYYMMDD_HHmmss timestamp*
