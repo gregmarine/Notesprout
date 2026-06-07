@@ -13,6 +13,7 @@ import android.os.Environment
 import android.provider.Settings
 import android.text.TextUtils
 import android.util.Base64
+import android.util.Log
 import android.view.GestureDetector
 import android.view.Gravity
 import android.view.MotionEvent
@@ -40,6 +41,7 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.lifecycleScope
 import com.notesprout.android.data.NotebookMetadata
+import com.notesprout.android.data.checkpointTruncateAndClose
 import com.notesprout.android.data.loadNotebookCoverBitmap
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -825,41 +827,48 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    /** Loads the last-opened page snapshot from [file] read-only. Returns null on any error. */
+    /**
+     * Loads the last-opened page snapshot from [file]. Returns null on any error.
+     *
+     * Opens `OPEN_READWRITE` (not `OPEN_READONLY`) so [checkpointTruncateAndClose] can let SQLite
+     * unlink `-wal`/`-shm` on close — a read-only WAL connection strands those sidecars.
+     */
     private fun loadLastPageSnapshot(file: File): Bitmap? {
+        var db: android.database.sqlite.SQLiteDatabase? = null
         return try {
-            val db = android.database.sqlite.SQLiteDatabase.openDatabase(
+            db = android.database.sqlite.SQLiteDatabase.openDatabase(
                 file.absolutePath, null,
-                android.database.sqlite.SQLiteDatabase.OPEN_READONLY,
+                android.database.sqlite.SQLiteDatabase.OPEN_READWRITE,
             )
-            db.use {
-                val (notebookId, metaJson) = it.rawQuery(
-                    "SELECT id, data FROM notebook WHERE type = 'notebook' LIMIT 1", null
-                ).use { c ->
-                    if (!c.moveToFirst()) return null
-                    Pair(c.getString(0), c.getString(1))
-                }
-                val metadata = NotebookMetadata.fromJson(notebookId, metaJson)
-                val pageId = metadata.lastOpenedPage ?: return null
-                if (pageId.isEmpty()) return null
-
-                val pageJson = it.rawQuery(
-                    "SELECT data FROM notebook WHERE id = ? AND deletedAt IS NULL LIMIT 1",
-                    arrayOf(pageId)
-                ).use { c -> if (c.moveToFirst()) c.getString(0) else null } ?: return null
-
-                // Extract the snapshot field from the page data JSON.
-                val snapshotB64 = try {
-                    val element = kotlinx.serialization.json.Json.parseToJsonElement(pageJson)
-                    element.jsonObject["snapshot"]?.jsonPrimitive?.content ?: ""
-                } catch (_: Exception) { "" }
-                if (snapshotB64.isEmpty()) return null
-
-                val bytes = Base64.decode(snapshotB64, Base64.DEFAULT)
-                BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+            val (notebookId, metaJson) = db.rawQuery(
+                "SELECT id, data FROM notebook WHERE type = 'notebook' LIMIT 1", null
+            ).use { c ->
+                if (!c.moveToFirst()) return null
+                Pair(c.getString(0), c.getString(1))
             }
-        } catch (_: Exception) {
+            val metadata = NotebookMetadata.fromJson(notebookId, metaJson)
+            val pageId = metadata.lastOpenedPage ?: return null
+            if (pageId.isEmpty()) return null
+
+            val pageJson = db.rawQuery(
+                "SELECT data FROM notebook WHERE id = ? AND deletedAt IS NULL LIMIT 1",
+                arrayOf(pageId)
+            ).use { c -> if (c.moveToFirst()) c.getString(0) else null } ?: return null
+
+            // Extract the snapshot field from the page data JSON.
+            val snapshotB64 = try {
+                val element = kotlinx.serialization.json.Json.parseToJsonElement(pageJson)
+                element.jsonObject["snapshot"]?.jsonPrimitive?.content ?: ""
+            } catch (_: Exception) { "" }
+            if (snapshotB64.isEmpty()) return null
+
+            val bytes = Base64.decode(snapshotB64, Base64.DEFAULT)
+            BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+        } catch (e: Exception) {
+            Log.e("MainActivity", "Failed to load last-page snapshot for ${file.name}", e)
             null
+        } finally {
+            db?.checkpointTruncateAndClose("MainActivity", file)
         }
     }
 

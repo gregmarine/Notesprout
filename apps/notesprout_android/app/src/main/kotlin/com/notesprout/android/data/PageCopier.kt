@@ -2,10 +2,37 @@ package com.notesprout.android.data
 
 import android.content.ContentValues
 import android.database.sqlite.SQLiteDatabase
+import android.util.Log
 import androidx.room.withTransaction
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.io.File
 import java.util.UUID
+
+private const val TAG = "PageCopier"
+
+/**
+ * Mirrors the Room close path ([com.notesprout.android.DrawingActivity.closeNotebook]) for the
+ * raw [SQLiteDatabase] connections used by the `*Raw` helpers: flushes the WAL back into the
+ * `.soil` file and reclaims free pages so the file stays clean (CLAUDE.md "folder shows only
+ * `.soil` files" rule).
+ *
+ * PRAGMAs that return a result set must consume the cursor — never `execSQL`.
+ *
+ * Call this immediately before [SQLiteDatabase.close]. Only the leftover rollback `-journal`
+ * is deleted afterwards (see [cleanStrayJournal]); the `-wal`/`-shm` sidecars are NOT touched
+ * here because [com.notesprout.android.DrawingActivity] keeps its own Room connection open to
+ * the same file while these helpers run — SQLite removes those when that last connection closes.
+ */
+private fun SQLiteDatabase.checkpointAndVacuum() {
+    rawQuery("PRAGMA incremental_vacuum", null).use { it.moveToFirst() }
+    rawQuery("PRAGMA wal_checkpoint(TRUNCATE)", null).use { it.moveToFirst() }
+}
+
+/** Deletes the empty `-journal` artifact SQLite may leave next to [notebookPath]. */
+private fun cleanStrayJournal(notebookPath: String) {
+    File("$notebookPath-journal").takeIf { it.exists() }?.delete()
+}
 
 /**
  * Deep-copies [sourcePageId] and inserts the duplicate immediately after [targetPageId].
@@ -201,11 +228,14 @@ suspend fun copyPageAfterRaw(
             db.endTransaction()
         }
 
+        db.checkpointAndVacuum()
         newPageId
-    } catch (_: Exception) {
+    } catch (e: Exception) {
+        Log.e(TAG, "copyPageAfterRaw failed for source=$sourcePageId target=$targetPageId", e)
         null
     } finally {
         db?.close()
+        cleanStrayJournal(notebookPath)
     }
 }
 
@@ -260,11 +290,14 @@ suspend fun movePageAfterRaw(
             db.endTransaction()
         }
 
+        db.checkpointAndVacuum()
         previousAfterPageId ?: ""
-    } catch (_: Exception) {
+    } catch (e: Exception) {
+        Log.e(TAG, "movePageAfterRaw failed for page=$pageId target=$targetPageId", e)
         null
     } finally {
         db?.close()
+        cleanStrayJournal(notebookPath)
     }
 }
 
@@ -296,16 +329,27 @@ suspend fun deletePageRaw(
             put("deletedAt", deletedAt)
             put("updatedAt", deletedAt)
         }
-        db.update("notebook", cv, "id = ?", arrayOf(pageId))
-        db.update("notebook", cv, "parentId = ? AND deletedAt IS NULL", arrayOf(pageId))
-        if (layerId != null) {
-            db.update("notebook", cv, "parentId = ? AND deletedAt IS NULL", arrayOf(layerId))
+        // All three soft-deletes must be atomic — a failure between them would leave a
+        // half-deleted page (page row gone, children orphaned, or vice-versa).
+        db.beginTransaction()
+        try {
+            db.update("notebook", cv, "id = ?", arrayOf(pageId))
+            db.update("notebook", cv, "parentId = ? AND deletedAt IS NULL", arrayOf(pageId))
+            if (layerId != null) {
+                db.update("notebook", cv, "parentId = ? AND deletedAt IS NULL", arrayOf(layerId))
+            }
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
         }
 
+        db.checkpointAndVacuum()
         deletedAt
-    } catch (_: Exception) {
+    } catch (e: Exception) {
+        Log.e(TAG, "deletePageRaw failed for page=$pageId", e)
         null
     } finally {
         db?.close()
+        cleanStrayJournal(notebookPath)
     }
 }

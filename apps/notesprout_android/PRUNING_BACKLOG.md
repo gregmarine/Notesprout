@@ -14,7 +14,7 @@ from this file.
 **Severity legend:** 🔴 Critical (data loss / crash / security) · 🟡 Moderate (fix before
 wider release) · 🟢 Low / Informational.
 
-**Progress:** 2 / 9 tracked (C+M) · Low items tracked separately at the bottom.
+**Progress:** 5 / 10 tracked (C+M) · Low items tracked separately at the bottom.
 
 ---
 
@@ -72,7 +72,7 @@ wider release) · 🟢 Low / Informational.
 - **Notes/commit:** —
 
 ### M-2 · Raw read-write DB helpers leave WAL/journal artifacts & aren't transactional
-- **Status:** ☐ Open
+- **Status:** ☑ Done
 - **Severity:** 🟡 Moderate
 - **Files:** `data/PageCopier.kt:89-311` (`copyPageAfterRaw`, `movePageAfterRaw`, `deletePageRaw`)
 - **Problem:** These open `.soil` `OPEN_READWRITE`, write, then `db.close()` without
@@ -84,7 +84,14 @@ wider release) · 🟢 Low / Informational.
   run the same close-time PRAGMAs as the Room path; clean stray journal files on close.
 - **Verification:** After page copy/move/delete from `PageIndexActivity`, the folder shows only
   the `.soil` file (no `-wal`/`-shm`/`-journal`).
-- **Notes/commit:** —
+- **Notes/commit:** Added shared `checkpointAndVacuum()` (runs `PRAGMA incremental_vacuum` +
+  `wal_checkpoint(TRUNCATE)` via cursor) + `cleanStrayJournal()` helpers in `PageCopier.kt`,
+  mirroring the Room close path; all three raw helpers now checkpoint before `db.close()` and
+  delete the stray `-journal`. `-wal`/`-shm` are intentionally NOT deleted — DrawingActivity
+  keeps its own Room connection open to the same file during these calls, so SQLite removes
+  those sidecars when that last connection closes via `closeNotebook()`. Wrapped
+  `deletePageRaw`'s three soft-delete `update()` calls in `beginTransaction()` /
+  `setTransactionSuccessful()` / `endTransaction()`.
 
 ### M-3 · `runBlocking` on the main thread in the close path (incl. `onDestroy`)
 - **Status:** ☐ Open
@@ -137,7 +144,7 @@ wider release) · 🟢 Low / Informational.
 - **Notes/commit:** —
 
 ### M-7 · Silently swallowed exceptions hide corruption
-- **Status:** ☐ Open
+- **Status:** ☑ Done
 - **Severity:** 🟡 Moderate
 - **Files:** `data/PageCopier.kt:205,264,306`; `MainActivity.kt:825`;
   `data/CoverLoader.kt:56,76,81`
@@ -147,7 +154,36 @@ wider release) · 🟢 Low / Informational.
 - **Fix approach:** At minimum `Log.e` the exception; surface a user-visible failure for write ops.
 - **Verification:** Force a write failure (e.g. read-only file) → error is logged and the user is
   informed instead of a silent no-op.
-- **Notes/commit:** —
+- **Notes/commit:** Every `catch (_: Exception)` over a raw DB op now `Log.e`s the throwable —
+  `PageCopier.kt` (all 3 raw helpers), `CoverLoader.kt` (cover-decode, snapshot-decode, outer),
+  and `MainActivity.loadLastPageSnapshot`. Added user-visible failure for the write ops:
+  `PageIndexActivity` now Toasts "Couldn't move/paste/delete page" when the corresponding raw
+  helper returns `null` instead of silently no-oping.
+
+### M-8 · Read-only cover/snapshot loaders regenerate & strand `-wal`/`-shm`
+- **Status:** ☑ Done
+- **Severity:** 🟡 Moderate
+- **Files:** `data/CoverLoader.kt` (`loadNotebookCoverBitmap`); `MainActivity.kt`
+  (`loadLastPageSnapshot`)
+- **Problem:** Both open each `.soil` `OPEN_READONLY` to render the notebook-list thumbnails.
+  A read-only WAL connection **re-creates `-shm` on open** and **cannot unlink `-wal`/`-shm` on
+  close** (deletion needs write permission). So every return to the notebook list regenerates the
+  sidecars and can never clean them — violating the "folder shows only `.soil`" rule and masking
+  M-2's verification. Fingerprint on-device: all `-shm` files share the timestamp of the last
+  list render, with 0-byte `-wal` shells beside them. This is a separate path from M-2 (which
+  fixed the read-*write* page helpers).
+- **Fix approach:** Open these read paths `OPEN_READWRITE`; on close, `wal_checkpoint(TRUNCATE)`
+  then close as the last connection so SQLite removes both sidecars. Best-effort — if a notebook
+  is open concurrently the TRUNCATE is skipped (no corruption).
+- **Verification:** Open the notebook list (covers render), then check `/Documents/NoteSprout/` —
+  no `-wal`/`-shm` left beside closed notebooks. Pre-existing stranded sidecars are cleaned the
+  first time each notebook's cover is rendered by the fixed loader.
+- **Notes/commit:** Added shared `internal SQLiteDatabase.checkpointTruncateAndClose(tag, file)`
+  in `CoverLoader.kt`; both loaders now open `OPEN_READWRITE` and route close through it.
+  `loadLastPageSnapshot` restructured from `db.use {}` to `try/finally` so the checkpoint runs
+  before close. The helper also deletes the 0-byte `-journal` shell the read-write open leaves
+  (caught during NA5C device testing — checkpoint cleared `-wal`/`-shm` but stranded `-journal`).
+  Verified on NA5C: after a full cover scan the folder shows only `.soil` files + `Templates/`.
 
 ---
 

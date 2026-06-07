@@ -105,6 +105,9 @@ CREATE INDEX IF NOT EXISTS idx_notebook_parent_order
 - PRAGMAs that return a result set must use `rawQuery("PRAGMA ...", null).use { it.moveToFirst() }` — never `execSQL`, never bare `rawQuery` without consuming the cursor
 - Any raw SQL touching the `order` column must double-quote it: `"order"` — it is a SQLite reserved word. Room's generated DAO handles this automatically; only hand-written raw SQL is at risk
 - `closeNotebook()` must run `PRAGMA incremental_vacuum` + `PRAGMA wal_checkpoint(TRUNCATE)`, then `db.close()`, then delete any `-journal` artifact
+- **Any raw `SQLiteDatabase` opened on a `.soil` outside Room — even to only read — must open `OPEN_READWRITE`, not `OPEN_READONLY`.** A read-only WAL connection re-creates `-shm` on open and *cannot* unlink `-wal`/`-shm` on close (deletion needs write permission), so it permanently strands sidecars and violates the "folder shows only `.soil`" rule. Close such read connections via `SQLiteDatabase.checkpointTruncateAndClose(tag, file)` (`data/CoverLoader.kt`): it runs `wal_checkpoint(TRUNCATE)`, closes (so SQLite removes `-wal`/`-shm`), then deletes the empty `-journal` shell. Used by the cover/snapshot loaders (`CoverLoader.kt`, `MainActivity.loadLastPageSnapshot`).
+- Raw read-*write* helpers (`data/PageCopier.kt` `copyPageAfterRaw`/`movePageAfterRaw`/`deletePageRaw`) mirror the Room close path: `checkpointAndVacuum()` (incremental_vacuum + wal_checkpoint TRUNCATE) before `db.close()`, then `cleanStrayJournal()`. They must NOT delete `-wal`/`-shm` themselves — DrawingActivity keeps its Room connection open to the same file while these run; SQLite removes those when that last connection closes. Multi-step writes (e.g. `deletePageRaw`'s three soft-deletes) must be wrapped in `beginTransaction()`/`setTransactionSuccessful()`/`endTransaction()`.
+- Never silently swallow exceptions over raw DB ops — `Log.e` at minimum, and surface a user-visible failure (Toast) for write ops (see `PageIndexActivity` copy/move/delete).
 
 ---
 
@@ -490,4 +493,4 @@ Never calls `clearCanvas()`. Updates the in-memory stroke list directly, rebuild
 
 ---
 
-*Last updated: Pruning C-1 & C-2 — notebook name validation (path traversal + duplicate-name corruption)*
+*Last updated: Pruning M-2, M-7 & M-8 — raw-DB sidecar/transaction hardening, exception logging, and read-write cover/snapshot loaders (no stranded `-wal`/`-shm`/`-journal`)*

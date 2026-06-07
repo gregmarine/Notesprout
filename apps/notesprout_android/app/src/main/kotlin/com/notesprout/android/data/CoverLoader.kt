@@ -4,6 +4,7 @@ import android.database.sqlite.SQLiteDatabase
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.util.Base64
+import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
@@ -20,13 +21,18 @@ import java.io.File
  *    `snapshot` field (base64 transparent-background PNG).
  * 3. Returns null → caller shows the `ic_notebook` fallback icon.
  *
- * Opens the .soil file read-only with a plain [SQLiteDatabase]; closes it before
- * returning. Must be called on [Dispatchers.IO] (internally enforced via [withContext]).
+ * Opens the .soil file with a plain [SQLiteDatabase] and closes it before returning.
+ * Must be called on [Dispatchers.IO] (internally enforced via [withContext]).
+ *
+ * The connection is opened `OPEN_READWRITE` (not `OPEN_READONLY`) on purpose: a read-only WAL
+ * connection re-creates `-shm` on open and cannot unlink `-wal`/`-shm` on close (deletion needs
+ * write permission), stranding those sidecars in the notebook folder. [checkpointTruncateAndClose]
+ * checkpoint-truncates and closes so SQLite removes both, keeping the folder showing only `.soil`.
  */
 suspend fun loadNotebookCoverBitmap(file: File): Bitmap? = withContext(Dispatchers.IO) {
     var db: SQLiteDatabase? = null
     try {
-        db = SQLiteDatabase.openDatabase(file.absolutePath, null, SQLiteDatabase.OPEN_READONLY)
+        db = SQLiteDatabase.openDatabase(file.absolutePath, null, SQLiteDatabase.OPEN_READWRITE)
 
         // ── Step 1: read notebook metadata ───────────────────────────────────
         val (notebookId, metadataJson) = db.rawQuery(
@@ -53,7 +59,9 @@ suspend fun loadNotebookCoverBitmap(file: File): Bitmap? = withContext(Dispatche
                         BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
                             ?.let { return@withContext it }
                     }
-                } catch (_: Exception) { /* fall through to snapshot */ }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to decode cover object for ${file.name}; falling back to snapshot", e)
+                }
             }
         }
 
@@ -73,15 +81,44 @@ suspend fun loadNotebookCoverBitmap(file: File): Bitmap? = withContext(Dispatche
                         BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
                             ?.let { return@withContext it }
                     }
-                } catch (_: Exception) { /* fall through to null */ }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to decode page snapshot for ${file.name}", e)
+                }
             }
         }
 
         null
-    } catch (_: Exception) {
+    } catch (e: Exception) {
+        Log.e(TAG, "Failed to load cover bitmap for ${file.name}", e)
         null
     } finally {
-        db?.close()
+        db?.checkpointTruncateAndClose(TAG, file)
+    }
+}
+
+private const val TAG = "CoverLoader"
+
+/**
+ * Closes a connection opened on [file] for *reading* without stranding `-wal`/`-shm`/`-journal`
+ * sidecars in the notebook folder (CLAUDE.md "folder shows only `.soil` files" rule).
+ *
+ * Read paths must open the file `OPEN_READWRITE` (not `OPEN_READONLY`): a read-only WAL
+ * connection re-creates `-shm` on open and cannot unlink `-wal`/`-shm` on close, because
+ * deleting them requires write permission. This checkpoint-truncates the WAL and closes so
+ * SQLite removes both sidecars on the last-connection close, then deletes the empty `-journal`
+ * shell SQLite leaves behind (mirroring the Room/[PageCopier] close paths).
+ *
+ * Best-effort: if another connection holds a read lock the TRUNCATE is skipped without error;
+ * the close and journal cleanup still run.
+ */
+internal fun SQLiteDatabase.checkpointTruncateAndClose(tag: String, file: File) {
+    try {
+        rawQuery("PRAGMA wal_checkpoint(TRUNCATE)", null).use { it.moveToFirst() }
+    } catch (e: Exception) {
+        Log.e(tag, "WAL checkpoint failed for ${file.name}", e)
+    } finally {
+        close()
+        File("${file.absolutePath}-journal").takeIf { it.exists() }?.delete()
     }
 }
 

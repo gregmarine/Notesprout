@@ -555,7 +555,10 @@ class PageIndexActivity : AppCompatActivity() {
             val prevAfterResultRaw = withContext(Dispatchers.IO) {
                 com.notesprout.android.data.movePageAfterRaw(sourceId, targetId, path)
             }
-            if (prevAfterResultRaw == null) { cancelMoveMode(); return@launch }
+            if (prevAfterResultRaw == null) {
+                android.widget.Toast.makeText(this@PageIndexActivity, "Couldn't move page", android.widget.Toast.LENGTH_SHORT).show()
+                cancelMoveMode(); return@launch
+            }
 
             // "" = source was first page (no previous page); non-empty = UUID of previous page.
             val prevAfterId: String? = prevAfterResultRaw.ifEmpty { null }
@@ -596,7 +599,10 @@ class PageIndexActivity : AppCompatActivity() {
             val newPageId = withContext(Dispatchers.IO) {
                 com.notesprout.android.data.copyPageAfterRaw(sourcePageId, targetPageId, path)
             }
-            if (newPageId == null) return@launch
+            if (newPageId == null) {
+                android.widget.Toast.makeText(this@PageIndexActivity, "Couldn't paste page", android.widget.Toast.LENGTH_SHORT).show()
+                return@launch
+            }
 
             // Reload pages and record the paste for undo/redo on return.
             pages = withContext(Dispatchers.IO) { loadPagesFromSoil(path) }
@@ -631,7 +637,10 @@ class PageIndexActivity : AppCompatActivity() {
                     val deletedAt = withContext(kotlinx.coroutines.Dispatchers.IO) {
                         com.notesprout.android.data.deletePageRaw(pageId, path)
                     }
-                    if (deletedAt == null) return@launch
+                    if (deletedAt == null) {
+                        android.widget.Toast.makeText(this@PageIndexActivity, "Couldn't delete page", android.widget.Toast.LENGTH_SHORT).show()
+                        return@launch
+                    }
 
                     deletedActions.add(Triple(pageId, idx, deletedAt))
 
