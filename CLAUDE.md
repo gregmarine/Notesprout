@@ -296,6 +296,7 @@ Use device serials from the ADB Device Serials table above.
 - `minSdk = 29`
 - `android.enableJetifier=true` required — Onyx SDK bundles old support classes
 - `jniLibs.pickFirsts` for `libc++_shared.so`
+- `defaultConfig.ndk { abiFilters += "arm64-v8a" }` — every target device (BOOX, Wacom Movink, Supernote) is 64-bit ARM, so we ship only arm64-v8a. This drops the unused x86/x86_64/armeabi(-v7a) ABIs (smaller APK) and removes the only 4 KB-aligned native lib among them (mmkv's x86_64 `.so`) for Play 16 KB page-size compliance (M-5). **Do not** `exclude` the transitive `com.tencent:mmkv:1.0.19` — `onyxsdk-base` references it (`MMKVBuilder`, `DefaultSearchHistory`), so removing it risks a runtime `NoClassDefFoundError`; its arm64-v8a `libmmkv.so` is already 64 KB-aligned (16 KB-compliant). The lone remaining arm64 16 KB offender is ML Kit's `libdigitalink.so` — tracked as backlog L-10, deferred until Play distribution.
 - `org.gradle.java.home` in `gradle.properties` pins Temurin-17
 - `NoteSproutApplication.onCreate` calls `HiddenApiBypass.addHiddenApiExemptions("")` before any SDK init
 - `setStrokeColor(Color.BLACK)` required on TouchHelper init — NoteAir5C color panel defaults to non-black
@@ -500,4 +501,4 @@ Never calls `clearCanvas()`. Updates the in-memory stroke list directly, rebuild
 
 ---
 
-*Last updated: Pruning M-4 — stripped verbose logging from release builds. Added `core/Slog.kt` (`inline Slog.d(tag) { … }` gated on `BuildConfig.DEBUG`); enabled `buildConfig = true`; converted all `Log.d` call sites (and `OnyxDrawingView.epd()` → `inline fun epd(msg: () -> String)`) so the message lambda is never built and nothing leaks to logcat in release. `Log.e`/`Log.w` retained.*
+*Last updated: Pruning M-5 — pinned `defaultConfig.ndk { abiFilters += "arm64-v8a" }` so the APK ships only the 64-bit ARM ABI used by every target device. Confirmed the transitive `com.tencent:mmkv:1.0.19` (via `onyxsdk-base`) is already 16 KB-compliant on arm64 and is referenced by the Onyx SDK, so it is kept (not excluded). Dropping the x86/x86_64/armeabi ABIs removes the only 4 KB-aligned mmkv variant and shrinks the APK. Remaining arm64 16 KB offender (ML Kit `libdigitalink.so`) logged as backlog L-10, deferred until Play distribution.*

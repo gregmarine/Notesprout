@@ -14,7 +14,7 @@ from this file.
 **Severity legend:** 🔴 Critical (data loss / crash / security) · 🟡 Moderate (fix before
 wider release) · 🟢 Low / Informational.
 
-**Progress:** 7 / 10 tracked (C+M) · Low items tracked separately at the bottom.
+**Progress:** 8 / 10 tracked (C+M) · Low items tracked separately at the bottom.
 
 ---
 
@@ -146,7 +146,7 @@ wider release) · 🟢 Low / Informational.
   (DEBUG=true) and `assembleRelease` (DEBUG=false) build clean.
 
 ### M-5 · `mmkv` not excluded from `onyxsdk-pen` (16 KB page-size / Play compliance)
-- **Status:** ☐ Open
+- **Status:** ☑ Done
 - **Severity:** 🟡 Moderate
 - **Files:** `build.gradle.kts:62` (`onyxsdk-pen:1.5.4`)
 - **Problem:** No `exclude` for transitive `mmkv` and no jniLibs handling for it beyond
@@ -156,7 +156,22 @@ wider release) · 🟢 Low / Informational.
 - **Fix approach:** Add the documented `exclude(group=..., module="mmkv...")` on `onyxsdk-pen`,
   or confirm 1.5.4 no longer bundles mmkv.
 - **Verification:** `./gradlew :app:dependencies` shows mmkv excluded/absent; release APK aligns.
-- **Notes/commit:** —
+- **Notes/commit:** Manually confirmed the transitive tree (`releaseRuntimeClasspath`):
+  `onyxsdk-pen:1.5.4 → onyxsdk-base:1.8.5 → com.tencent:mmkv:1.0.19`. Two findings flipped the
+  premise:
+  1. **mmkv's arm64-v8a `libmmkv.so` is 64 KB-aligned** (ELF LOAD `p_align = 0x10000` ≥ 0x4000),
+     i.e. already 16 KB-compliant. Only its *x86_64* variant is 4 KB-aligned. So mmkv is **not** an
+     arm64/Play blocker.
+  2. **Excluding mmkv is unsafe** — `onyxsdk-base` references it directly (`MMKVBuilder`,
+     `DefaultSearchHistory`, `BaseSearchHistoryHelper`); dropping it risks a runtime
+     `NoClassDefFoundError`. So no `exclude` was added.
+  Action taken instead: pinned `defaultConfig.ndk { abiFilters += "arm64-v8a" }`. Every Tier-1/2
+  device is 64-bit ARM, so this drops the unused x86/x86_64/armeabi(-v7a) ABIs — including the only
+  4 KB-aligned native lib among them (mmkv x86_64) — and shrinks the APK. Verified the rebuilt
+  release APK ships **only** `lib/arm64-v8a/`, and every arm64 lib except one is ≥16 KB-aligned
+  (`libmmkv.so` 0x10000; `libc++_shared.so`/`libonyx_pen_touch_reader.so`/`libneopen_jni.so`
+  0x4000). The lone remaining arm64 16 KB offender is **`libdigitalink.so` from ML Kit** (not
+  mmkv/Onyx) — tracked as **L-10**.
 
 ### M-6 · `MANAGE_EXTERNAL_STORAGE` is broad and Play-restricted
 - **Status:** ☐ Open
@@ -240,7 +255,14 @@ Lightweight items; address opportunistically.
 - **L-9 · Compaction never runs** — `data/SoilDatabase.kt:45-48` `TODO(compaction)` unimplemented;
   soft-deleted rows + per-page base64 snapshots make `.soil` grow monotonically. Expected by
   design; long-term size concern.
+- **L-10 · ML Kit `libdigitalink.so` is not 16 KB-aligned** — `build.gradle.kts:88`
+  (`com.google.mlkit:digital-ink-recognition:18.1.0`). Its arm64-v8a `.so` has ELF LOAD
+  `p_align = 0x1000` (4 KB), the only remaining 16 KB-noncompliant native lib after M-5. Not a
+  problem today — the app is sideloaded onto 4 KB-page BOOX devices, not on Play (see M-6) — but it
+  would block a future Play upload targeting Android 15+. Fix when distributing: bump ML Kit to a
+  16 KB-aligned release if one exists, else gate the upload on it. Surfaced during M-5.
 
 ---
 
-*Source: full scan report, 2026-06-07. Last updated: 2026-06-07 (backlog created).*
+*Source: full scan report, 2026-06-07. Last updated: 2026-06-07 (M-5 done — ABI filtered to
+arm64-v8a; mmkv confirmed 16 KB-compliant & kept; ML Kit `libdigitalink.so` logged as L-10).*

@@ -15,6 +15,15 @@ android {
         targetSdk = 35
         versionCode = 1
         versionName = "1.0"
+
+        ndk {
+            // Every target device (BOOX, Wacom Movink, Supernote) is 64-bit ARM.
+            // Shipping only arm64-v8a drops the unused x86/x86_64/armeabi-v7a libs —
+            // including the one 4 KB-aligned native lib that fails Play's 16 KB
+            // page-size check (mmkv's x86_64 .so). The shipped arm64-v8a libs
+            // (mmkv 1.0.19, onyxsdk-pen 1.5.4) are already ≥16 KB-aligned. See M-5.
+            abiFilters += "arm64-v8a"
+        }
     }
 
     compileOptions {
