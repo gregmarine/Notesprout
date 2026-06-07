@@ -115,6 +115,12 @@ class DrawingActivity : AppCompatActivity() {
     private var pageSwipeStartY = 0f
     private var pageSwipeVelocityTracker: VelocityTracker? = null
 
+    // Two-finger horizontal swipe → insert a new page before/after the current page.
+    private var twoFingerSwipeActive = false
+    private var twoFingerSwipeStartX = 0f
+    private var twoFingerSwipeStartY = 0f
+    private var twoFingerSwipeVelocityTracker: VelocityTracker? = null
+
     /** Room DB instance for the open notebook. Null before open and after close. */
     private var soilDatabase: SoilDatabase? = null
 
@@ -279,48 +285,11 @@ class DrawingActivity : AppCompatActivity() {
         }
 
         binding.btnInsertPageBefore.setOnClickListener {
-            val db = soilDatabase ?: return@setOnClickListener
-            lifecycleScope.launch {
-                val snapshot = drawingView.captureSnapshot()
-                val leavingPageId = currentPageId
-                withContext(Dispatchers.IO) {
-                    if (snapshot != null && leavingPageId.isNotEmpty()) {
-                        persistSnapshot(db, leavingPageId, snapshot)
-                    }
-                    addPageBefore(db)
-                }
-                undoRedoManager.push(UndoRedoAction.PageAdded(currentPageId, currentPageIndex, insertedBefore = true))
-                updateUndoRedoButtons()
-                drawingView.clearCanvas()
-                val result = withContext(Dispatchers.IO) { loadCurrentPage(db) }
-                displayPage(result)
-                updatePageIndicator()
-                saveLastOpenedPage(currentPageId)
-                postDisplayWork(db, result)
-            }
+            insertPageBeforeCurrentAndNavigate()
         }
 
         binding.btnInsertPageAfter.setOnClickListener {
-            val db = soilDatabase ?: return@setOnClickListener
-            lifecycleScope.launch {
-                // Capture snapshot of the page we are leaving (main thread — before clearing).
-                val snapshot = drawingView.captureSnapshot()
-                val leavingPageId = currentPageId
-                withContext(Dispatchers.IO) {
-                    if (snapshot != null && leavingPageId.isNotEmpty()) {
-                        persistSnapshot(db, leavingPageId, snapshot)
-                    }
-                    addPage(db)
-                }
-                undoRedoManager.push(UndoRedoAction.PageAdded(currentPageId, currentPageIndex))
-                updateUndoRedoButtons()
-                drawingView.clearCanvas()
-                val result = withContext(Dispatchers.IO) { loadCurrentPage(db) }
-                displayPage(result)
-                updatePageIndicator()
-                saveLastOpenedPage(currentPageId)
-                postDisplayWork(db, result)
-            }
+            insertPageAfterCurrentAndNavigate()
         }
 
         binding.btnDeletePage.setOnClickListener {
@@ -1009,14 +978,51 @@ class DrawingActivity : AppCompatActivity() {
                 pageSwipeVelocityTracker = VelocityTracker.obtain().also { it.addMovement(event) }
             }
             MotionEvent.ACTION_POINTER_DOWN -> {
-                // Second finger arrived — cancel the gesture entirely.
+                // Cancel the 1-finger gesture unconditionally.
                 pageSwipeActive = false
                 pageSwipeVelocityTracker?.recycle()
                 pageSwipeVelocityTracker = null
+                // Arm 2-finger insert gesture when exactly two fingers are down.
+                if (event.pointerCount == 2) {
+                    twoFingerSwipeActive = true
+                    twoFingerSwipeStartX = (event.getX(0) + event.getX(1)) / 2f
+                    twoFingerSwipeStartY = (event.getY(0) + event.getY(1)) / 2f
+                    twoFingerSwipeVelocityTracker?.recycle()
+                    twoFingerSwipeVelocityTracker = VelocityTracker.obtain().also { it.addMovement(event) }
+                } else {
+                    // 3+ fingers — cancel.
+                    twoFingerSwipeActive = false
+                    twoFingerSwipeVelocityTracker?.recycle()
+                    twoFingerSwipeVelocityTracker = null
+                }
+            }
+            MotionEvent.ACTION_POINTER_UP -> {
+                // One finger lifted from a 2-finger gesture — evaluate and clean up.
+                if (twoFingerSwipeActive && event.pointerCount == 2) {
+                    val tracker = twoFingerSwipeVelocityTracker
+                    if (tracker != null) {
+                        tracker.addMovement(event)
+                        tracker.computeCurrentVelocity(1000)
+                        val remainingIndex = 1 - event.actionIndex
+                        val endX = event.getX(remainingIndex)
+                        val endY = event.getY(remainingIndex)
+                        val vx = tracker.getXVelocity(0)
+                        val vy = tracker.getYVelocity(0)
+                        val dx = endX - twoFingerSwipeStartX
+                        val dy = endY - twoFingerSwipeStartY
+                        evaluateTwoFingerInsertFling(vx, vy, dx, dy)
+                        tracker.recycle()
+                        twoFingerSwipeVelocityTracker = null
+                    }
+                    twoFingerSwipeActive = false
+                }
             }
             MotionEvent.ACTION_MOVE -> {
                 if (pageSwipeActive) {
                     pageSwipeVelocityTracker?.addMovement(event)
+                }
+                if (twoFingerSwipeActive && event.pointerCount >= 2) {
+                    twoFingerSwipeVelocityTracker?.addMovement(event)
                 }
             }
             MotionEvent.ACTION_UP -> {
@@ -1035,11 +1041,17 @@ class DrawingActivity : AppCompatActivity() {
                     }
                 }
                 pageSwipeActive = false
+                twoFingerSwipeActive = false
+                twoFingerSwipeVelocityTracker?.recycle()
+                twoFingerSwipeVelocityTracker = null
             }
             MotionEvent.ACTION_CANCEL -> {
                 pageSwipeActive = false
                 pageSwipeVelocityTracker?.recycle()
                 pageSwipeVelocityTracker = null
+                twoFingerSwipeActive = false
+                twoFingerSwipeVelocityTracker?.recycle()
+                twoFingerSwipeVelocityTracker = null
             }
         }
     }
@@ -1099,6 +1111,71 @@ class DrawingActivity : AppCompatActivity() {
             // Swipe right → go back to previous page.
             val prev = currentPageIndex - 1
             if (prev >= 0) navigateToPage(prev)
+        }
+    }
+
+    /**
+     * Applies the same three guards as [evaluatePageFling] and inserts a new page
+     * relative to the current one.
+     *
+     * Swipe left (dx < 0) → insert AFTER the current page, navigate to it.
+     * Swipe right (dx > 0) → insert BEFORE the current page, navigate to it.
+     */
+    private fun evaluateTwoFingerInsertFling(velocityX: Float, velocityY: Float, dx: Float, dy: Float) {
+        if (Math.abs(dx) <= Math.abs(dy)) return
+        val minVelocity = ViewConfiguration.get(this).scaledMinimumFlingVelocity * 1.5f
+        if (Math.abs(velocityX) < minVelocity) return
+        val screenWidthPx = resources.displayMetrics.widthPixels.toFloat()
+        if (Math.abs(dx) < 0.50f * screenWidthPx) return
+
+        if (dx < 0) {
+            insertPageAfterCurrentAndNavigate()
+        } else {
+            insertPageBeforeCurrentAndNavigate()
+        }
+    }
+
+    private fun insertPageAfterCurrentAndNavigate() {
+        val db = soilDatabase ?: return
+        lifecycleScope.launch {
+            val snapshot = drawingView.captureSnapshot()
+            val leavingPageId = currentPageId
+            withContext(Dispatchers.IO) {
+                if (snapshot != null && leavingPageId.isNotEmpty()) {
+                    persistSnapshot(db, leavingPageId, snapshot)
+                }
+                addPage(db)
+            }
+            undoRedoManager.push(UndoRedoAction.PageAdded(currentPageId, currentPageIndex))
+            updateUndoRedoButtons()
+            drawingView.clearCanvas()
+            val result = withContext(Dispatchers.IO) { loadCurrentPage(db) }
+            displayPage(result)
+            updatePageIndicator()
+            saveLastOpenedPage(currentPageId)
+            postDisplayWork(db, result)
+        }
+    }
+
+    private fun insertPageBeforeCurrentAndNavigate() {
+        val db = soilDatabase ?: return
+        lifecycleScope.launch {
+            val snapshot = drawingView.captureSnapshot()
+            val leavingPageId = currentPageId
+            withContext(Dispatchers.IO) {
+                if (snapshot != null && leavingPageId.isNotEmpty()) {
+                    persistSnapshot(db, leavingPageId, snapshot)
+                }
+                addPageBefore(db)
+            }
+            undoRedoManager.push(UndoRedoAction.PageAdded(currentPageId, currentPageIndex, insertedBefore = true))
+            updateUndoRedoButtons()
+            drawingView.clearCanvas()
+            val result = withContext(Dispatchers.IO) { loadCurrentPage(db) }
+            displayPage(result)
+            updatePageIndicator()
+            saveLastOpenedPage(currentPageId)
+            postDisplayWork(db, result)
         }
     }
 

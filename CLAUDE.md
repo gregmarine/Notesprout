@@ -277,7 +277,7 @@ Use device serials from the ADB Device Serials table above.
 - `drawing/DrawingView.kt` — interface implemented by both engines; all drawing, lasso, heading, and snapshot operations flow through it
 - `drawing/OnyxDrawingView.kt` — BOOX path: TouchHelper, RawInputCallback. `onPenLifted` fires on `onEndRawDrawing`. `onBeginRawDrawing` re-enables render, guarded by `!isEraserMode`.
 - `drawing/GenericDrawingView.kt` — standard Android Canvas: two-layer Bitmap, stylus-only (`TOOL_TYPE_STYLUS` + `TOOL_TYPE_ERASER`), historical point capture. `onPenLifted` fires on `ACTION_UP`.
-- `DrawingActivity.kt` — fullscreen immersive, multi-page state, incremental save via `insertOrIgnore`, one-finger deliberate swipe for page navigation (three guards: distance ≥50% screen width, velocity ≥1.5× system fling threshold, horizontal dominance).
+- `DrawingActivity.kt` — fullscreen immersive, multi-page state, incremental save via `insertOrIgnore`, one-finger deliberate swipe for page navigation (three guards: distance ≥50% screen width, velocity ≥1.5× system fling threshold, horizontal dominance); two-finger swipe left/right inserts a new page after/before the current page and navigates to it (same three guards).
 - `MainActivity.kt` — notebook list screen, adaptive grid (3/2 cols at 480dp), pagination, swipe, empty state, bottom bar.
 
 ### Key Build Facts
@@ -442,7 +442,7 @@ Never calls `clearCanvas()`. Updates the in-memory stroke list directly, rebuild
 - `.soil` schema + Room setup, SoilDatabase lifecycle
 - Notebook list (MainActivity) — adaptive grid, pagination, cover images, Set Cover, Delete notebook
 - New-notebook dialog pre-fills filename with `YYYYMMDD_HHmmss` timestamp (`java.time.LocalDateTime`, editable before confirm)
-- DrawingActivity — fullscreen immersive, multi-page, incremental save, one-finger deliberate swipe
+- DrawingActivity — fullscreen immersive, multi-page, incremental save, one-finger deliberate swipe, two-finger swipe to insert page before/after
 - Dual-install build variants — debug (`.dev` suffix) + release side-by-side
 
 **Drawing & Tools:**
@@ -453,6 +453,7 @@ Never calls `clearCanvas()`. Updates the in-memory stroke list directly, rebuild
 
 **Page Management:**
 - Add before/after, delete, clear (with confirmation + undo/redo)
+- Two-finger swipe left → insert after current page; two-finger swipe right → insert before current page (same guards as 1-finger nav swipe; silent, immediate navigation)
 - PageIndexActivity — snapshot grid, action mode (copy/paste/move/delete)
 
 **Lasso Tools:**
@@ -480,4 +481,4 @@ Never calls `clearCanvas()`. Updates the in-memory stroke list directly, rebuild
 
 ---
 
-*Last updated: Pruning: fix Google Drive share on NA5C — ClipData required for FileProvider URI permissions through createChooser*
+*Last updated: New Branch: two-finger swipe to insert page before/after in DrawingActivity*
