@@ -12,11 +12,11 @@ import android.graphics.Rect
 import android.graphics.RectF
 import android.graphics.Region
 import android.util.Base64
-import android.util.Log
 import android.util.TypedValue
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewTreeObserver
+import com.notesprout.android.core.Slog
 import com.notesprout.android.data.HeadingStroke
 import com.notesprout.android.data.LiveStroke
 import com.onyx.android.sdk.api.device.epd.EpdController
@@ -43,9 +43,13 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
 
     // ── EPD diagnostic helpers ───────────────────────────────────────────────
 
-    /** Emit a timestamped EPD_TIMING log line including the current thread name. */
-    private fun epd(msg: String) {
-        Log.d(EPD_TAG, "[${System.currentTimeMillis()}][${Thread.currentThread().name}] $msg")
+    /**
+     * Emit a timestamped EPD_TIMING log line including the current thread name.
+     * `inline` + lambda message: in release the message is never built (no cost on
+     * the per-stroke render hot path) and nothing reaches logcat (M-4).
+     */
+    private inline fun epd(msg: () -> String) {
+        Slog.d(EPD_TAG) { "[${System.currentTimeMillis()}][${Thread.currentThread().name}] ${msg()}" }
     }
 
     // Tracks the wall-clock time of the most recent onBeginRawDrawing so we can
@@ -194,31 +198,31 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
 
     private val rawInputCallback = object : RawInputCallback() {
         override fun onBeginRawDrawing(shortcutDrawing: Boolean, touchPoint: TouchPoint) {
-            epd("ON_BEGIN_RAW_DRAWING isEraserMode=$isEraserMode isLassoMode=$isLassoMode isLassoEraserMode=$isLassoEraserMode isSetup=$isSetup")
+            epd { "ON_BEGIN_RAW_DRAWING isEraserMode=$isEraserMode isLassoMode=$isLassoMode isLassoEraserMode=$isLassoEraserMode isSetup=$isSetup" }
             if (isLassoMode || isLassoEraserMode) return
             if (isSetup && !isEraserMode) {
                 touchHelper.setRawDrawingRenderEnabled(true)
-                epd("RENDER_ENABLED caller=onBeginRawDrawing")
+                epd { "RENDER_ENABLED caller=onBeginRawDrawing" }
             }
             beginRawDrawingTimeMs = System.currentTimeMillis()
             strokeRenderCount = 0
-            epd("ON_BEGIN_RAW_DRAWING_DONE beginTimeMs=$beginRawDrawingTimeMs")
+            epd { "ON_BEGIN_RAW_DRAWING_DONE beginTimeMs=$beginRawDrawingTimeMs" }
         }
 
         override fun onEndRawDrawing(shortcutDrawing: Boolean, touchPoint: TouchPoint) {
-            epd("ON_END_RAW_DRAWING isEraserMode=$isEraserMode isLassoMode=$isLassoMode isLassoEraserMode=$isLassoEraserMode")
+            epd { "ON_END_RAW_DRAWING isEraserMode=$isEraserMode isLassoMode=$isLassoMode isLassoEraserMode=$isLassoEraserMode" }
             if (isLassoMode || isLassoEraserMode) return
             if (isEraserMode) {
                 // Flush any throttled-but-not-yet-drawn erase removals before the EPD repaint.
                 finalizeEraseRedraw()
                 post {
                     EpdController.handwritingRepaint(this@OnyxDrawingView, Rect(0, 0, width, height))
-                    epd("HANDWRITING_REPAINT caller=onEndRawDrawing_eraser")
+                    epd { "HANDWRITING_REPAINT caller=onEndRawDrawing_eraser" }
                 }
             }
             // Persist new strokes immediately on pen lift.
             // The EPD overlay stays active — no handoff here.
-            epd("PEN_LIFTED caller=onEndRawDrawing")
+            epd { "PEN_LIFTED caller=onEndRawDrawing" }
             onPenLifted?.invoke()
         }
 
@@ -231,35 +235,35 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
             if (isLassoMode || isLassoEraserMode) return
             // When software eraser mode is active the SDK still routes pen-tip events here.
             if (isEraserMode) {
-                Log.d(TAG, "onRawDrawingTouchPointListReceived (eraser mode) count=${pointList.size()}")
+                Slog.d(TAG) { "onRawDrawingTouchPointListReceived (eraser mode) count=${pointList.size()}" }
                 eraseAtPath(pointList.toPointFs())
             } else {
-                Log.d(TAG, "onRawDrawingTouchPointListReceived count=${pointList.size()}")
+                Slog.d(TAG) { "onRawDrawingTouchPointListReceived count=${pointList.size()}" }
                 renderStroke(pointList)
             }
         }
 
         override fun onBeginRawErasing(shortcutErasing: Boolean, touchPoint: TouchPoint) {
-            epd("ON_BEGIN_RAW_ERASING isSetup=$isSetup")
+            epd { "ON_BEGIN_RAW_ERASING isSetup=$isSetup" }
             // Release the overlay render immediately so bitmap updates (erased strokes
             // disappearing) are visible right away — same issue as toolbar eraser toggle.
             // Without this the overlay obscures the updated bitmap.
             if (isSetup) {
                 touchHelper.setRawDrawingRenderEnabled(false)
-                epd("RENDER_DISABLED caller=onBeginRawErasing")
+                epd { "RENDER_DISABLED caller=onBeginRawErasing" }
                 invalidate()
-                epd("INVALIDATE caller=onBeginRawErasing")
+                epd { "INVALIDATE caller=onBeginRawErasing" }
             }
-            epd("ON_BEGIN_RAW_ERASING_DONE")
+            epd { "ON_BEGIN_RAW_ERASING_DONE" }
         }
 
         override fun onEndRawErasing(shortcutErasing: Boolean, touchPoint: TouchPoint) {
-            epd("ON_END_RAW_ERASING")
+            epd { "ON_END_RAW_ERASING" }
             // Flush any throttled-but-not-yet-drawn erase removals before the EPD repaint.
             finalizeEraseRedraw()
             post {
                 EpdController.handwritingRepaint(this@OnyxDrawingView, Rect(0, 0, width, height))
-                epd("HANDWRITING_REPAINT caller=onEndRawErasing")
+                epd { "HANDWRITING_REPAINT caller=onEndRawErasing" }
             }
         }
 
@@ -268,7 +272,7 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
         }
 
         override fun onRawErasingTouchPointListReceived(pointList: TouchPointList) {
-            Log.d(TAG, "onRawErasingTouchPointListReceived count=${pointList.size()}")
+            Slog.d(TAG) { "onRawErasingTouchPointListReceived count=${pointList.size()}" }
             eraseAtPath(pointList.toPointFs())
         }
     }
@@ -295,15 +299,15 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
         strokeRenderCount++
         val now = System.currentTimeMillis()
         if (strokeRenderCount == 1 && beginRawDrawingTimeMs > 0) {
-            epd("FIRST_STROKE_AFTER_BEGIN delta=${now - beginRawDrawingTimeMs}ms strokeId=${strokeId.take(8)}")
+            epd { "FIRST_STROKE_AFTER_BEGIN delta=${now - beginRawDrawingTimeMs}ms strokeId=${strokeId.take(8)}" }
         }
         if (strokeRenderCount % 10 == 0) {
-            epd("RENDER_STROKE_SAMPLE count=$strokeRenderCount strokeId=${strokeId.take(8)}")
+            epd { "RENDER_STROKE_SAMPLE count=$strokeRenderCount strokeId=${strokeId.take(8)}" }
         }
 
         invalidate()
         if (strokeRenderCount == 1 || strokeRenderCount % 10 == 0) {
-            epd("INVALIDATE caller=renderStroke count=$strokeRenderCount")
+            epd { "INVALIDATE caller=renderStroke count=$strokeRenderCount" }
         }
     }
 
@@ -395,9 +399,9 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
      */
     private fun redrawCanvas(caller: String = "unknown") {
         val redrawStart = System.currentTimeMillis()
-        epd("REDRAW_CANVAS_START caller=$caller strokeCount=${strokes.size}")
+        epd { "REDRAW_CANVAS_START caller=$caller strokeCount=${strokes.size}" }
         val canvas = renderCanvas ?: run {
-            epd("REDRAW_CANVAS_ABORT caller=$caller reason=nullCanvas")
+            epd { "REDRAW_CANVAS_ABORT caller=$caller reason=nullCanvas" }
             return
         }
         canvas.drawColor(Color.WHITE)
@@ -429,9 +433,9 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
             canvas.drawPath(path, strokePaint)
         }
         invalidate()
-        epd("INVALIDATE caller=redrawCanvas($caller)")
+        epd { "INVALIDATE caller=redrawCanvas($caller)" }
         val elapsed = System.currentTimeMillis() - redrawStart
-        epd("REDRAW_CANVAS_END caller=$caller elapsed=${elapsed}ms strokeCount=${strokes.size}")
+        epd { "REDRAW_CANVAS_END caller=$caller elapsed=${elapsed}ms strokeCount=${strokes.size}" }
     }
 
     // Minimum squared distance from point p to segment a→b.
@@ -462,7 +466,7 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
             override fun onGlobalLayout() {
                 if (width > 0 && height > 0) {
                     viewTreeObserver.removeOnGlobalLayoutListener(this)
-                    Log.d(TAG, "onGlobalLayout: ${width}x${height} — calling openRawDrawing")
+                    Slog.d(TAG) { "onGlobalLayout: ${width}x${height} — calling openRawDrawing" }
                     openRawDrawing()
                 }
             }
@@ -471,22 +475,22 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
 
     override fun onWindowFocusChanged(hasWindowFocus: Boolean) {
         super.onWindowFocusChanged(hasWindowFocus)
-        epd("WINDOW_FOCUS_CHANGED hasFocus=$hasWindowFocus isSetup=$isSetup")
-        Log.d(TAG, "onWindowFocusChanged hasFocus=$hasWindowFocus isSetup=$isSetup")
+        epd { "WINDOW_FOCUS_CHANGED hasFocus=$hasWindowFocus isSetup=$isSetup" }
+        Slog.d(TAG) { "onWindowFocusChanged hasFocus=$hasWindowFocus isSetup=$isSetup" }
         if (hasWindowFocus) {
             if (width > 0 && height > 0) {
                 openRawDrawing()
                 invalidate()
-                epd("INVALIDATE caller=onWindowFocusChanged_gained")
+                epd { "INVALIDATE caller=onWindowFocusChanged_gained" }
             }
         } else {
             // Capture snapshot when the app is backgrounded — non-writing transition boundary.
             captureSnapshot()?.let { onSnapshotReady?.invoke(it) }
             if (isSetup) {
                 invalidate()
-                epd("INVALIDATE caller=windowFocusLost")
+                epd { "INVALIDATE caller=windowFocusLost" }
                 touchHelper.setRawDrawingEnabled(false)
-                epd("RAW_DRAWING_ENABLED false caller=windowFocusLost")
+                epd { "RAW_DRAWING_ENABLED false caller=windowFocusLost" }
             }
         }
     }
@@ -540,7 +544,7 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
                     val nonSelectedStrokes  = strokes.filter { it.id !in lassoSelectedIds }
                     val nonSelectedHeadings = headings.filter { it.id !in lassoSelectedIds }
                     dragBackingBitmap = buildRenderBitmap(nonSelectedStrokes, templateBitmap, nonSelectedHeadings)
-                    epd("DRAG_START selected=${lassoSelectedIds.size}")
+                    epd { "DRAG_START selected=${lassoSelectedIds.size}" }
                     return true
                 }
                 // Normal lasso: clear any existing selection so the user sees immediate feedback.
@@ -548,7 +552,7 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
                 lassoSelectionBox  = null
                 lassoOverlayPath   = null
                 invalidate()
-                epd("INVALIDATE caller=lassoDown-clearSelection")
+                epd { "INVALIDATE caller=lassoDown-clearSelection" }
                 if (lassoGestureHadSelection) onLassoSelectionCleared?.invoke()
                 lassoGesturePath = Path().also { it.moveTo(event.x, event.y) }
                 lassoGestureStartPoint = PointF(event.x, event.y)
@@ -564,7 +568,7 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
                             onDragStarted?.invoke()
                             // Switch to A2 fast mode for responsive visual feedback during drag.
                             EpdController.setViewDefaultUpdateMode(this, UpdateMode.GU_FAST)
-                            epd("DRAG_THRESHOLD_MET dist=$dist A2_MODE_ON")
+                            epd { "DRAG_THRESHOLD_MET dist=$dist A2_MODE_ON" }
                         }
                     }
                     if (dragThresholdMet) {
@@ -573,7 +577,7 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
                         if (now - lastLassoRefreshMs >= LASSO_REFRESH_INTERVAL_MS) {
                             lastLassoRefreshMs = now
                             invalidate()
-                            epd("INVALIDATE caller=dragMove")
+                            epd { "INVALIDATE caller=dragMove" }
                         }
                     }
                     return true
@@ -588,7 +592,7 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
                     lastLassoRefreshMs = now
                     lassoOverlayPath = path
                     invalidate()
-                    epd("INVALIDATE caller=lassoMove")
+                    epd { "INVALIDATE caller=lassoMove" }
                 }
             }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
@@ -633,11 +637,11 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
                         dragDx = 0f; dragDy = 0f
                         dragOriginalStrokes = emptyList(); dragOriginalHeadings = emptyList()
                         EpdController.setViewDefaultUpdateMode(this, UpdateMode.GU)
-                        epd("DRAG_COMMIT A2_MODE_OFF")
+                        epd { "DRAG_COMMIT A2_MODE_OFF" }
                         redrawCanvas(caller = "dragCommit")
                         post {
                             EpdController.handwritingRepaint(this, Rect(0, 0, width, height))
-                            epd("HANDWRITING_REPAINT caller=dragCommit")
+                            epd { "HANDWRITING_REPAINT caller=dragCommit" }
                         }
                         onStrokesMoved?.invoke(origStrokes, movedStrokes, origHeadings, movedHeadings)
                     } else {
@@ -647,7 +651,7 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
                         isDragMoveActive = false; dragThresholdMet = false
                         dragDx = 0f; dragDy = 0f
                         dragOriginalStrokes = emptyList(); dragOriginalHeadings = emptyList()
-                        epd("DRAG_CANCELLED threshold_not_met -> onLassoTap")
+                        epd { "DRAG_CANCELLED threshold_not_met -> onLassoTap" }
                         onLassoTap?.invoke(tapX, tapY)
                     }
                     return true
@@ -662,7 +666,7 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
                 lassoGestureStartPoint = null
                 lassoOverlayPath       = null
                 invalidate()
-                epd("INVALIDATE caller=lassoUp")
+                epd { "INVALIDATE caller=lassoUp" }
                 val dx = event.x - start.x
                 val dy = event.y - start.y
                 if (Math.sqrt((dx * dx + dy * dy).toDouble()).toFloat() < thresholdPx) {
@@ -731,11 +735,11 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
     }
 
     override fun onDetachedFromWindow() {
-        epd("ON_DETACHED_FROM_WINDOW isSetup=$isSetup")
+        epd { "ON_DETACHED_FROM_WINDOW isSetup=$isSetup" }
         super.onDetachedFromWindow()
         if (isSetup) {
             touchHelper.closeRawDrawing()
-            epd("CLOSE_RAW_DRAWING caller=onDetachedFromWindow")
+            epd { "CLOSE_RAW_DRAWING caller=onDetachedFromWindow" }
             isSetup = false
         }
     }
@@ -746,17 +750,17 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
 
     override fun setToolbarHeight(heightPx: Int) {
         toolbarHeight = heightPx
-        Log.d(TAG, "setToolbarHeight toolbarHeight=$toolbarHeight")
+        Slog.d(TAG) { "setToolbarHeight toolbarHeight=$toolbarHeight" }
         if (isSetup) applyLimitRect()
     }
 
     override fun enableDrawing() {
         if (isSetup && !isLassoMode && !isLassoEraserMode) {
             touchHelper.setRawDrawingEnabled(true)
-            epd("RAW_DRAWING_ENABLED true caller=enableDrawing")
+            epd { "RAW_DRAWING_ENABLED true caller=enableDrawing" }
             if (isEraserMode) {
                 touchHelper.setRawDrawingRenderEnabled(false)
-                epd("RENDER_DISABLED caller=enableDrawing_eraserMode")
+                epd { "RENDER_DISABLED caller=enableDrawing_eraserMode" }
             }
         }
     }
@@ -764,50 +768,50 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
     override fun disableDrawing() {
         if (isSetup) {
             touchHelper.setRawDrawingEnabled(false)
-            epd("RAW_DRAWING_ENABLED false caller=disableDrawing")
+            epd { "RAW_DRAWING_ENABLED false caller=disableDrawing" }
         }
     }
 
     override fun resetOverlay() {
-        epd("RESET_OVERLAY_START isSetup=$isSetup")
+        epd { "RESET_OVERLAY_START isSetup=$isSetup" }
         if (!isSetup) return
         invalidate()
-        epd("INVALIDATE caller=resetOverlay")
+        epd { "INVALIDATE caller=resetOverlay" }
         touchHelper.setRawDrawingRenderEnabled(false)
-        epd("RENDER_DISABLED caller=resetOverlay")
+        epd { "RENDER_DISABLED caller=resetOverlay" }
         post {
             touchHelper.setRawDrawingRenderEnabled(true)
-            epd("RENDER_ENABLED caller=resetOverlay_post")
+            epd { "RENDER_ENABLED caller=resetOverlay_post" }
         }
     }
 
     override fun setDragMoveMode(enabled: Boolean) {
         if (!enabled && isDragMoveActive) {
-            epd("SET_DRAG_MOVE_MODE false — cancelling drag")
+            epd { "SET_DRAG_MOVE_MODE false — cancelling drag" }
             if (dragThresholdMet) {
                 EpdController.setViewDefaultUpdateMode(this, UpdateMode.GU)
-                epd("A2_MODE_OFF caller=setDragMoveMode_cancel")
+                epd { "A2_MODE_OFF caller=setDragMoveMode_cancel" }
             }
             dragBackingBitmap?.recycle(); dragBackingBitmap = null
             isDragMoveActive = false; dragThresholdMet = false
             dragDx = 0f; dragDy = 0f
             dragOriginalStrokes = emptyList(); dragOriginalHeadings = emptyList()
             invalidate()
-            epd("INVALIDATE caller=setDragMoveMode_cancel")
+            epd { "INVALIDATE caller=setDragMoveMode_cancel" }
         }
     }
 
     override fun setLassoMode(active: Boolean) {
-        epd("SET_LASSO_MODE active=$active isSetup=$isSetup")
+        epd { "SET_LASSO_MODE active=$active isSetup=$isSetup" }
         isLassoMode = active
         if (active) {
             if (isSetup) {
                 touchHelper.setRawDrawingEnabled(false)
-                epd("RAW_DRAWING_ENABLED false caller=setLassoMode_active")
+                epd { "RAW_DRAWING_ENABLED false caller=setLassoMode_active" }
                 touchHelper.setRawDrawingRenderEnabled(false)
-                epd("RENDER_DISABLED caller=setLassoMode_active")
+                epd { "RENDER_DISABLED caller=setLassoMode_active" }
                 invalidate()
-                epd("INVALIDATE caller=setLassoMode_active")
+                epd { "INVALIDATE caller=setLassoMode_active" }
             }
         } else {
             // Cancel any in-progress drag before clearing lasso state.
@@ -817,19 +821,19 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
             lassoGestureStartPoint = null
             lassoGesturePath       = null
             invalidate()
-            epd("INVALIDATE caller=setLassoMode_exit")
+            epd { "INVALIDATE caller=setLassoMode_exit" }
             post {
                 EpdController.handwritingRepaint(this, Rect(0, 0, width, height))
-                epd("HANDWRITING_REPAINT caller=setLassoMode_exit")
+                epd { "HANDWRITING_REPAINT caller=setLassoMode_exit" }
                 post {
                     if (isSetup && !isLassoMode && !isLassoEraserMode) {
                         touchHelper.setRawDrawingEnabled(true)
-                        epd("RAW_DRAWING_ENABLED true caller=setLassoMode_exit")
+                        epd { "RAW_DRAWING_ENABLED true caller=setLassoMode_exit" }
                         // setRawDrawingEnabled may re-enable the SDK render path internally;
                         // re-apply the render disable so the next eraser gesture stays clean.
                         if (isEraserMode) {
                             touchHelper.setRawDrawingRenderEnabled(false)
-                            epd("RENDER_DISABLED caller=setLassoMode_exit_eraserMode")
+                            epd { "RENDER_DISABLED caller=setLassoMode_exit_eraserMode" }
                         }
                     }
                 }
@@ -838,16 +842,16 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
     }
 
     override fun setLassoEraserMode(active: Boolean) {
-        epd("SET_LASSO_ERASER_MODE active=$active isSetup=$isSetup")
+        epd { "SET_LASSO_ERASER_MODE active=$active isSetup=$isSetup" }
         isLassoEraserMode = active
         if (active) {
             if (isSetup) {
                 touchHelper.setRawDrawingEnabled(false)
-                epd("RAW_DRAWING_ENABLED false caller=setLassoEraserMode_active")
+                epd { "RAW_DRAWING_ENABLED false caller=setLassoEraserMode_active" }
                 touchHelper.setRawDrawingRenderEnabled(false)
-                epd("RENDER_DISABLED caller=setLassoEraserMode_active")
+                epd { "RENDER_DISABLED caller=setLassoEraserMode_active" }
                 invalidate()
-                epd("INVALIDATE caller=setLassoEraserMode_active")
+                epd { "INVALIDATE caller=setLassoEraserMode_active" }
             }
         } else {
             lassoOverlayPath       = null
@@ -855,17 +859,17 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
             lassoGestureStartPoint = null
             lassoGesturePath       = null
             invalidate()
-            epd("INVALIDATE caller=setLassoEraserMode_exit")
+            epd { "INVALIDATE caller=setLassoEraserMode_exit" }
             post {
                 EpdController.handwritingRepaint(this, Rect(0, 0, width, height))
-                epd("HANDWRITING_REPAINT caller=setLassoEraserMode_exit")
+                epd { "HANDWRITING_REPAINT caller=setLassoEraserMode_exit" }
                 post {
                     if (isSetup && !isLassoMode && !isLassoEraserMode) {
                         touchHelper.setRawDrawingEnabled(true)
-                        epd("RAW_DRAWING_ENABLED true caller=setLassoEraserMode_exit")
+                        epd { "RAW_DRAWING_ENABLED true caller=setLassoEraserMode_exit" }
                         if (isEraserMode) {
                             touchHelper.setRawDrawingRenderEnabled(false)
-                            epd("RENDER_DISABLED caller=setLassoEraserMode_exit_eraserMode")
+                            epd { "RENDER_DISABLED caller=setLassoEraserMode_exit_eraserMode" }
                         }
                     }
                 }
@@ -882,7 +886,7 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
             MotionEvent.ACTION_DOWN -> {
                 lassoEraserDisplayPath = null
                 invalidate()
-                epd("INVALIDATE caller=lassoEraserDown")
+                epd { "INVALIDATE caller=lassoEraserDown" }
                 lassoGesturePath = Path().also { it.moveTo(event.x, event.y) }
                 lassoEraserDisplayPath = Path().also { it.moveTo(event.x, event.y) }
                 lassoGestureStartPoint = PointF(event.x, event.y)
@@ -902,7 +906,7 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
                 if (now - lastLassoRefreshMs >= LASSO_REFRESH_INTERVAL_MS) {
                     lastLassoRefreshMs = now
                     invalidate()
-                    epd("INVALIDATE caller=lassoEraserMove")
+                    epd { "INVALIDATE caller=lassoEraserMove" }
                 }
             }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
@@ -916,14 +920,14 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
                 lassoGestureStartPoint = null
                 lassoEraserDisplayPath = null
                 invalidate()
-                epd("INVALIDATE caller=lassoEraserUp")
+                epd { "INVALIDATE caller=lassoEraserUp" }
                 val dx = event.x - start.x
                 val dy = event.y - start.y
                 if (Math.sqrt((dx * dx + dy * dy).toDouble()).toFloat() < tapThresholdPx) {
                     // Tap: clear overlay, stay in lasso eraser mode.
                     post {
                         EpdController.handwritingRepaint(this, Rect(0, 0, width, height))
-                        epd("HANDWRITING_REPAINT caller=lassoEraserTap")
+                        epd { "HANDWRITING_REPAINT caller=lassoEraserTap" }
                     }
                 } else {
                     performLassoErase(path, start)
@@ -945,9 +949,9 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
                 lassoOverlayPath       = null
                 lassoEraserDisplayPath = null
                 invalidate()
-                epd("INVALIDATE caller=performLassoErase_result")
+                epd { "INVALIDATE caller=performLassoErase_result" }
                 EpdController.handwritingRepaint(this, Rect(0, 0, width, height))
-                epd("HANDWRITING_REPAINT caller=performLassoErase_result hitCount=${hitIds.size}")
+                epd { "HANDWRITING_REPAINT caller=performLassoErase_result hitCount=${hitIds.size}" }
                 if (hitIds.isNotEmpty()) {
                     onLassoEraseComplete?.invoke(hitIds)
                 }
@@ -1002,15 +1006,15 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
         lassoOverlayPath  = path
         lassoSelectionBox = selectionBox
         invalidate()
-        epd("INVALIDATE caller=setLassoOverlay")
+        epd { "INVALIDATE caller=setLassoOverlay" }
         post {
             EpdController.handwritingRepaint(this, Rect(0, 0, width, height))
-            epd("HANDWRITING_REPAINT caller=setLassoOverlay")
+            epd { "HANDWRITING_REPAINT caller=setLassoOverlay" }
         }
     }
 
     override fun setEraserMode(active: Boolean) {
-        epd("SET_ERASER_MODE active=$active isSetup=$isSetup")
+        epd { "SET_ERASER_MODE active=$active isSetup=$isSetup" }
         if (active) {
             // Capture snapshot BEFORE releasing the overlay so strokes are still in memory.
             // This is a non-writing transition boundary: the user is switching tools.
@@ -1025,9 +1029,9 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
                 // active during writing; dropping it here on tool switch is the correct
                 // non-writing handoff point.
                 touchHelper.setRawDrawingRenderEnabled(false)
-                epd("RENDER_DISABLED caller=setEraserMode_active")
+                epd { "RENDER_DISABLED caller=setEraserMode_active" }
                 invalidate()
-                epd("INVALIDATE caller=setEraserMode_active")
+                epd { "INVALIDATE caller=setEraserMode_active" }
             }
         }
     }
@@ -1041,26 +1045,26 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
      * e-ink pixels are not refreshed and the template change is invisible on screen.
      */
     override fun setTemplate(bitmap: Bitmap?) {
-        epd("SET_TEMPLATE_START hasTemplate=${bitmap != null} isSetup=$isSetup")
+        epd { "SET_TEMPLATE_START hasTemplate=${bitmap != null} isSetup=$isSetup" }
         // Capture snapshot BEFORE the template changes — snapshot is strokes-only so it
         // remains valid across template switches.  Must run before templateBitmap is updated.
         captureSnapshot()?.let { onSnapshotReady?.invoke(it) }
         templateBitmap = bitmap
         if (isSetup) {
             touchHelper.setRawDrawingRenderEnabled(false)
-            epd("RENDER_DISABLED caller=setTemplate")
+            epd { "RENDER_DISABLED caller=setTemplate" }
         }
         redrawCanvas(caller = "setTemplate")  // draws white → template → strokes, then calls invalidate()
         post {
             EpdController.handwritingRepaint(this, Rect(0, 0, width, height))
-            epd("HANDWRITING_REPAINT caller=setTemplate")
+            epd { "HANDWRITING_REPAINT caller=setTemplate" }
             post {
                 if (isSetup && !isLassoMode && !isLassoEraserMode) {
                     touchHelper.setRawDrawingEnabled(true)
-                    epd("RAW_DRAWING_ENABLED true caller=setTemplate")
+                    epd { "RAW_DRAWING_ENABLED true caller=setTemplate" }
                     if (isEraserMode) {
                         touchHelper.setRawDrawingRenderEnabled(false)
-                        epd("RENDER_DISABLED caller=setTemplate_eraserMode")
+                        epd { "RENDER_DISABLED caller=setTemplate_eraserMode" }
                     }
                 }
             }
@@ -1068,33 +1072,33 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
     }
 
     override fun clearCanvas() {
-        epd("CLEAR_CANVAS_START isSetup=$isSetup strokeCountBefore=${strokes.size}")
+        epd { "CLEAR_CANVAS_START isSetup=$isSetup strokeCountBefore=${strokes.size}" }
         strokes.clear()
         headings = emptyList()
         if (isSetup) {
             touchHelper.setRawDrawingRenderEnabled(false)
-            epd("RENDER_DISABLED caller=clearCanvas")
+            epd { "RENDER_DISABLED caller=clearCanvas" }
         }
         // Clear to white then re-apply template so the template persists after clear.
         renderCanvas?.let { canvas ->
             canvas.drawColor(Color.WHITE)
-            epd("WHITE_BITMAP_FILL caller=clearCanvas")
+            epd { "WHITE_BITMAP_FILL caller=clearCanvas" }
             templateBitmap?.let { tb ->
                 canvas.drawBitmap(tb, null, RectF(0f, 0f, width.toFloat(), height.toFloat()), null)
             }
         }
         invalidate()
-        epd("INVALIDATE caller=clearCanvas")
+        epd { "INVALIDATE caller=clearCanvas" }
         post {
             EpdController.handwritingRepaint(this, Rect(0, 0, width, height))
-            epd("HANDWRITING_REPAINT caller=clearCanvas")
+            epd { "HANDWRITING_REPAINT caller=clearCanvas" }
             post {
                 if (isSetup && !isLassoMode && !isLassoEraserMode) {
                     touchHelper.setRawDrawingEnabled(true)
-                    epd("RAW_DRAWING_ENABLED true caller=clearCanvas")
+                    epd { "RAW_DRAWING_ENABLED true caller=clearCanvas" }
                     if (isEraserMode) {
                         touchHelper.setRawDrawingRenderEnabled(false)
-                        epd("RENDER_DISABLED caller=clearCanvas_eraserMode")
+                        epd { "RENDER_DISABLED caller=clearCanvas_eraserMode" }
                     }
                 }
             }
@@ -1109,12 +1113,12 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
 
     override fun loadStrokes(strokes: List<LiveStroke>) {
         val loadStart = System.currentTimeMillis()
-        epd("LOAD_STROKES_START strokeCount=${strokes.size}")
+        epd { "LOAD_STROKES_START strokeCount=${strokes.size}" }
         this.strokes.clear()
         this.strokes.addAll(strokes)
         redrawCanvas(caller = "loadStrokes")
-        Log.d(TAG, "loadStrokes: loaded ${strokes.size} strokes")
-        epd("LOAD_STROKES_END elapsed=${System.currentTimeMillis() - loadStart}ms strokeCount=${strokes.size}")
+        Slog.d(TAG) { "loadStrokes: loaded ${strokes.size} strokes" }
+        epd { "LOAD_STROKES_END elapsed=${System.currentTimeMillis() - loadStart}ms strokeCount=${strokes.size}" }
     }
 
     override fun getStrokes(): List<LiveStroke> = strokes.toList()
@@ -1131,10 +1135,10 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
         headings: List<HeadingStroke>,
     ): Bitmap? {
         val buildStart = System.currentTimeMillis()
-        epd("BUILD_RENDER_BITMAP_START strokeCount=${strokes.size} hasTemplate=${templateBitmap != null}")
+        epd { "BUILD_RENDER_BITMAP_START strokeCount=${strokes.size} hasTemplate=${templateBitmap != null}" }
         val w = width; val h = height
         if (w == 0 || h == 0) {
-            epd("BUILD_RENDER_BITMAP_ABORT reason=zeroSize size=${w}x${h}")
+            epd { "BUILD_RENDER_BITMAP_ABORT reason=zeroSize size=${w}x${h}" }
             return null
         }
         val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
@@ -1163,7 +1167,7 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
             for (i in 1 until pts.size) path.lineTo(pts[i].x, pts[i].y)
             canvas.drawPath(path, strokePaint)
         }
-        epd("BUILD_RENDER_BITMAP_END elapsed=${System.currentTimeMillis() - buildStart}ms strokeCount=${strokes.size}")
+        epd { "BUILD_RENDER_BITMAP_END elapsed=${System.currentTimeMillis() - buildStart}ms strokeCount=${strokes.size}" }
         return bmp
     }
 
@@ -1179,7 +1183,7 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
         templateBitmap: Bitmap?,
     ) {
         val loadStart = System.currentTimeMillis()
-        epd("LOAD_STROKES_WITH_BITMAP_START strokeCount=${strokes.size} isSetup=$isSetup")
+        epd { "LOAD_STROKES_WITH_BITMAP_START strokeCount=${strokes.size} isSetup=$isSetup" }
         this.strokes.clear()
         this.strokes.addAll(strokes)
         this.templateBitmap = templateBitmap
@@ -1187,7 +1191,7 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
         // EPD overlay handoff — same pattern as setTemplate() / clearCanvas().
         if (isSetup) {
             touchHelper.setRawDrawingRenderEnabled(false)
-            epd("RENDER_DISABLED caller=loadStrokesWithBitmap")
+            epd { "RENDER_DISABLED caller=loadStrokesWithBitmap" }
         }
 
         // Swap in the pre-built bitmap and bind a new renderCanvas to it so future
@@ -1197,24 +1201,24 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
         renderCanvas = android.graphics.Canvas(bitmap)
 
         invalidate()
-        epd("INVALIDATE caller=loadStrokesWithBitmap")
+        epd { "INVALIDATE caller=loadStrokesWithBitmap" }
         post {
             EpdController.handwritingRepaint(this, Rect(0, 0, width, height))
-            epd("HANDWRITING_REPAINT caller=loadStrokesWithBitmap")
+            epd { "HANDWRITING_REPAINT caller=loadStrokesWithBitmap" }
             post {
                 if (isSetup && !isLassoMode && !isLassoEraserMode) {
                     touchHelper.setRawDrawingEnabled(true)
-                    epd("RAW_DRAWING_ENABLED true caller=loadStrokesWithBitmap")
+                    epd { "RAW_DRAWING_ENABLED true caller=loadStrokesWithBitmap" }
                     if (isEraserMode) {
                         touchHelper.setRawDrawingRenderEnabled(false)
-                        epd("RENDER_DISABLED caller=loadStrokesWithBitmap_eraserMode")
+                        epd { "RENDER_DISABLED caller=loadStrokesWithBitmap_eraserMode" }
                     }
                 }
             }
         }
 
-        Log.d(TAG, "loadStrokesWithBitmap: swapped bitmap, ${strokes.size} strokes")
-        epd("LOAD_STROKES_WITH_BITMAP_END elapsed=${System.currentTimeMillis() - loadStart}ms strokeCount=${strokes.size}")
+        Slog.d(TAG) { "loadStrokesWithBitmap: swapped bitmap, ${strokes.size} strokes" }
+        epd { "LOAD_STROKES_WITH_BITMAP_END elapsed=${System.currentTimeMillis() - loadStart}ms strokeCount=${strokes.size}" }
     }
 
     /**
@@ -1271,10 +1275,10 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
     }
 
     override fun releaseResources() {
-        epd("RELEASE_RESOURCES isSetup=$isSetup")
+        epd { "RELEASE_RESOURCES isSetup=$isSetup" }
         if (isSetup) {
             touchHelper.closeRawDrawing()
-            epd("CLOSE_RAW_DRAWING caller=releaseResources")
+            epd { "CLOSE_RAW_DRAWING caller=releaseResources" }
             isSetup = false
         }
         renderBitmap?.recycle()
@@ -1302,37 +1306,37 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
         } else {
             emptyList()
         }
-        Log.d(TAG, "applyLimitRect: limitRect=$limitRect exclusion=$exclusion")
+        Slog.d(TAG) { "applyLimitRect: limitRect=$limitRect exclusion=$exclusion" }
         touchHelper.setLimitRect(limitRect, exclusion)
     }
 
     private fun openRawDrawing() {
-        epd("OPEN_RAW_DRAWING_START isSetup=$isSetup size=${width}x${height} toolbarHeight=$toolbarHeight")
-        Log.d(TAG, "openRawDrawing isSetup=$isSetup toolbarHeight=$toolbarHeight size=${width}x${height}")
+        epd { "OPEN_RAW_DRAWING_START isSetup=$isSetup size=${width}x${height} toolbarHeight=$toolbarHeight" }
+        Slog.d(TAG) { "openRawDrawing isSetup=$isSetup toolbarHeight=$toolbarHeight size=${width}x${height}" }
         if (!isSetup) {
             applyLimitRect()
             touchHelper
                 .setStrokeWidth(3.0f)
                 .setStrokeColor(Color.BLACK)
                 .openRawDrawing()
-            epd("OPEN_RAW_DRAWING_SDK_CALL done")
+            epd { "OPEN_RAW_DRAWING_SDK_CALL done" }
             isSetup = true
         } else {
             applyLimitRect()
             touchHelper.restartRawDrawing()
-            epd("RESTART_RAW_DRAWING caller=openRawDrawing_alreadySetup")
+            epd { "RESTART_RAW_DRAWING caller=openRawDrawing_alreadySetup" }
         }
         if (!isLassoMode && !isLassoEraserMode) {
             touchHelper.setRawDrawingEnabled(true)
-            epd("RAW_DRAWING_ENABLED true caller=openRawDrawing")
+            epd { "RAW_DRAWING_ENABLED true caller=openRawDrawing" }
             if (isEraserMode) {
                 touchHelper.setRawDrawingRenderEnabled(false)
-                epd("RENDER_DISABLED caller=openRawDrawing_eraserMode")
+                epd { "RENDER_DISABLED caller=openRawDrawing_eraserMode" }
             }
         }
         EpdController.setUpdListSize(EPD_UPDATE_LIST_SIZE)
-        epd("SET_UPD_LIST_SIZE value=$EPD_UPDATE_LIST_SIZE caller=openRawDrawing")
-        Log.d(TAG, "openRawDrawing done — inputEnabled=${touchHelper.isRawDrawingInputEnabled}")
-        epd("OPEN_RAW_DRAWING_DONE isSetup=$isSetup")
+        epd { "SET_UPD_LIST_SIZE value=$EPD_UPDATE_LIST_SIZE caller=openRawDrawing" }
+        Slog.d(TAG) { "openRawDrawing done — inputEnabled=${touchHelper.isRawDrawingInputEnabled}" }
+        epd { "OPEN_RAW_DRAWING_DONE isSetup=$isSetup" }
     }
 }

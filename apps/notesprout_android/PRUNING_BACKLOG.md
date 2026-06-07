@@ -126,7 +126,7 @@ wider release) · 🟢 Low / Informational.
   (`assembleDebug`).
 
 ### M-4 · Verbose logging unconditional in release builds
-- **Status:** ☐ Open
+- **Status:** ☑ Done
 - **Severity:** 🟡 Moderate
 - **Files:** `drawing/OnyxDrawingView.kt:47-49` (`epd()`), 30+ `Log.d` in `DrawingActivity.kt`
   (e.g. `1282`, `1351`, `1582`); `build.gradle.kts:50-53` (`isMinifyEnabled = false`)
@@ -135,7 +135,15 @@ wider release) · 🟢 Low / Informational.
 - **Fix approach:** Guard with `BuildConfig.DEBUG`, or add a ProGuard `assumenosideeffects` rule
   to strip `Log` in release; silence the per-stroke `epd()` line specifically.
 - **Verification:** Release build produces no NoteSprout `Log.d` output during draw/navigate.
-- **Notes/commit:** —
+- **Notes/commit:** Enabled `buildConfig = true` (R8 stripping is unavailable — `isMinifyEnabled`
+  is false — so `BuildConfig.DEBUG` is the actual gate). Added `core/Slog.kt`: an `object` with a
+  single `inline fun d(tag) { msg() }` that no-ops in release; the lambda + `inline` means the
+  message string is never built on the e-ink hot path. Converted all 32 `Log.d` call sites across
+  `OnyxDrawingView`, `DrawingActivity`, `TemplateDialog`, `MlKitHandwritingRecognizer` to
+  `Slog.d(tag) { … }`. `epd()` is now `private inline fun epd(msg: () -> String)` delegating to
+  `Slog.d` (104 call sites converted to `epd { … }`). `Log.e`/`Log.w` (37 sites) deliberately
+  kept — errors/warnings must survive into release (raw-DB logging rule). Both `assembleDebug`
+  (DEBUG=true) and `assembleRelease` (DEBUG=false) build clean.
 
 ### M-5 · `mmkv` not excluded from `onyxsdk-pen` (16 KB page-size / Play compliance)
 - **Status:** ☐ Open

@@ -28,6 +28,10 @@ android {
 
     buildFeatures {
         viewBinding = true
+        // Generates BuildConfig.DEBUG — used by core/Slog to strip verbose logging
+        // from release builds (M-4). isMinifyEnabled is false, so R8 cannot strip
+        // Log calls; the BuildConfig.DEBUG guard is the actual stripping mechanism.
+        buildConfig = true
     }
 
     packaging {

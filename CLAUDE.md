@@ -338,6 +338,12 @@ Use device serials from the ADB Device Serials table above.
 - `throttledEraseRedraw()` — redraws at most once per 60ms during active erasing; strokes are removed from the list immediately
 - `finalizeEraseRedraw()` forces one clean redraw on gesture end before `handwritingRepaint` commits pixels
 
+**Logging (verbose/debug only):**
+- Never call `Log.d` directly. Route all verbose/debug logging through `core/Slog.kt` — `Slog.d(tag) { "msg" }`. It is an `inline fun` gated on `BuildConfig.DEBUG`, so in release builds the message lambda is never evaluated (zero string-building cost on the e-ink per-stroke hot path) and nothing leaks to logcat (page UUIDs / layer IDs / sizes).
+- This is the actual stripping mechanism: `isMinifyEnabled = false`, so R8 cannot strip `Log` calls and a ProGuard `assumenosideeffects` rule would not fire. `buildConfig = true` is enabled in `build.gradle.kts` to generate `BuildConfig.DEBUG`.
+- `OnyxDrawingView.epd()` is `private inline fun epd(msg: () -> String)` delegating to `Slog.d` — all EPD-timing diagnostics are debug-only and free in release.
+- `Log.e` / `Log.w` are kept (they must survive into release — see the raw-DB logging rule). Only verbose `Log.d` moves to `Slog`.
+
 ### Race condition — strokes missing on notebook reopen
 - `loadStrokes()` is called in `onCreate()` before view layout. Fix: `onSizeChanged()` calls `redrawCanvas()` (not just white fill) to replay all currently-loaded strokes regardless of load order. Applied to both drawing views.
 
@@ -494,4 +500,4 @@ Never calls `clearCanvas()`. Updates the in-memory stroke list directly, rebuild
 
 ---
 
-*Last updated: Pruning M-3 — moved the notebook close-path seal off the UI thread (`suspend sealNotebook()` on `NoteSproutApplication.appScope`, user close `finish()`es immediately; `onDestroy` keeps a `blocking` safety net), eliminating the `runBlocking` ANR risk on large notebooks*
+*Last updated: Pruning M-4 — stripped verbose logging from release builds. Added `core/Slog.kt` (`inline Slog.d(tag) { … }` gated on `BuildConfig.DEBUG`); enabled `buildConfig = true`; converted all `Log.d` call sites (and `OnyxDrawingView.epd()` → `inline fun epd(msg: () -> String)`) so the message lambda is never built and nothing leaks to logcat in release. `Log.e`/`Log.w` retained.*

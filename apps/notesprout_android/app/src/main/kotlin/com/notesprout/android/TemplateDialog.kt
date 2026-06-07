@@ -23,6 +23,7 @@ import androidx.appcompat.widget.AppCompatImageView
 import androidx.appcompat.widget.AppCompatTextView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.LifecycleCoroutineScope
+import com.notesprout.android.core.Slog
 import com.notesprout.android.data.NotebookObject
 import com.notesprout.android.data.SoilDatabase
 import kotlinx.coroutines.Dispatchers
@@ -465,14 +466,14 @@ class TemplateDialog(
             // Use readBytes() + decodeByteArray instead of decodeFile — consistent with
             // insertTemplateFromFile; decodeFile can silently return null on some Android paths.
             val bytes = file.readBytes()
-            Log.d(TAG, "loadScaledBitmap: read ${bytes.size} bytes from ${file.name}")
+            Slog.d(TAG) { "loadScaledBitmap: read ${bytes.size} bytes from ${file.name}" }
             val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
             BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)
-            Log.d(TAG, "loadScaledBitmap: bounds ${opts.outWidth}x${opts.outHeight}")
+            Slog.d(TAG) { "loadScaledBitmap: bounds ${opts.outWidth}x${opts.outHeight}" }
             opts.inSampleSize = computeInSampleSize(opts.outWidth, opts.outHeight, maxSize)
             opts.inJustDecodeBounds = false
             val bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)
-            Log.d(TAG, "loadScaledBitmap: decoded bitmap=${bmp?.width}x${bmp?.height} (null=${bmp == null})")
+            Slog.d(TAG) { "loadScaledBitmap: decoded bitmap=${bmp?.width}x${bmp?.height} (null=${bmp == null})" }
             bmp
         } catch (e: Exception) {
             Log.e(TAG, "loadScaledBitmap failed for ${file.name}", e)
@@ -485,14 +486,14 @@ class TemplateDialog(
             val dataObj = JSONObject(data)
             val b64 = dataObj.getString("image")
             val bytes = Base64.decode(b64, Base64.DEFAULT)
-            Log.d(TAG, "decodeBase64Thumb: decoded ${bytes.size} bytes from base64")
+            Slog.d(TAG) { "decodeBase64Thumb: decoded ${bytes.size} bytes from base64" }
             val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
             BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)
-            Log.d(TAG, "decodeBase64Thumb: bounds ${opts.outWidth}x${opts.outHeight}")
+            Slog.d(TAG) { "decodeBase64Thumb: bounds ${opts.outWidth}x${opts.outHeight}" }
             opts.inSampleSize = computeInSampleSize(opts.outWidth, opts.outHeight, maxSize)
             opts.inJustDecodeBounds = false
             val bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)
-            Log.d(TAG, "decodeBase64Thumb: decoded bitmap=${bmp?.width}x${bmp?.height} (null=${bmp == null})")
+            Slog.d(TAG) { "decodeBase64Thumb: decoded bitmap=${bmp?.width}x${bmp?.height} (null=${bmp == null})" }
             bmp
         } catch (e: Exception) {
             Log.e(TAG, "decodeBase64Thumb failed", e)

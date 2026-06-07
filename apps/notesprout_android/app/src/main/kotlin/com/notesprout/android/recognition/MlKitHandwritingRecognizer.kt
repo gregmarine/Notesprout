@@ -11,6 +11,7 @@ import com.google.mlkit.vision.digitalink.RecognitionContext
 import com.google.mlkit.vision.digitalink.WritingArea
 import com.google.mlkit.common.model.DownloadConditions
 import com.google.mlkit.common.model.RemoteModelManager
+import com.notesprout.android.core.Slog
 import com.notesprout.android.data.LiveStroke
 
 class MlKitHandwritingRecognizer : HandwritingRecognizer {
@@ -40,17 +41,17 @@ class MlKitHandwritingRecognizer : HandwritingRecognizer {
         remoteModelManager.isModelDownloaded(model)
             .addOnSuccessListener { downloaded ->
                 if (downloaded) {
-                    Log.d(TAG, "en-US model already downloaded")
+                    Slog.d(TAG) { "en-US model already downloaded" }
                     buildRecognizer(model)
                     onComplete(true)
                 } else {
-                    Log.d(TAG, "Downloading en-US model...")
+                    Slog.d(TAG) { "Downloading en-US model..." }
                     remoteModelManager.download(
                         model,
                         DownloadConditions.Builder().build()
                     )
                         .addOnSuccessListener {
-                            Log.d(TAG, "en-US model download complete")
+                            Slog.d(TAG) { "en-US model download complete" }
                             buildRecognizer(model)
                             onComplete(true)
                         }
@@ -105,7 +106,7 @@ class MlKitHandwritingRecognizer : HandwritingRecognizer {
             .addOnSuccessListener { result ->
                 val text = result.candidates.firstOrNull()?.text
                 val recognized = if (!text.isNullOrBlank()) text else HandwritingRecognizer.FALLBACK_TEXT
-                Log.d(TAG, "Recognition result: \"$recognized\"")
+                Slog.d(TAG) { "Recognition result: \"$recognized\"" }
                 onResult(recognized)
             }
             .addOnFailureListener { e ->

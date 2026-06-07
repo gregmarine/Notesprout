@@ -37,6 +37,7 @@ import androidx.lifecycle.lifecycleScope
 import androidx.room.Room
 import androidx.room.withTransaction
 import com.notesprout.android.core.BitmapDecode
+import com.notesprout.android.core.Slog
 import com.notesprout.android.data.copyPageAfter
 import com.notesprout.android.data.HeadingObject
 import com.notesprout.android.data.HeadingStroke
@@ -1301,14 +1302,14 @@ class DrawingActivity : AppCompatActivity() {
         currentPageIndex = currentPageIndex.coerceIn(0, pages.lastIndex)
         val page = pages[currentPageIndex]
         currentPageId = page.id
-        Log.d(TAG, "setupPageIds: page $currentPageId (${currentPageIndex + 1}/${pages.size})")
+        Slog.d(TAG) { "setupPageIds: page $currentPageId (${currentPageIndex + 1}/${pages.size})" }
         val layer = dao.getLayerForPage(currentPageId)
         if (layer == null) {
             Log.w(TAG, "setupPageIds: no layer for page $currentPageId")
             currentLayerId = ""; return
         }
         currentLayerId = layer.id
-        Log.d(TAG, "setupPageIds: layerId=$currentLayerId")
+        Slog.d(TAG) { "setupPageIds: layerId=$currentLayerId" }
     }
 
     /**
@@ -1319,7 +1320,7 @@ class DrawingActivity : AppCompatActivity() {
     private suspend fun deserializeStrokesFromDb(db: SoilDatabase): List<LiveStroke> {
         val layerId = currentLayerId.takeIf { it.isNotEmpty() } ?: return emptyList()
         val strokeObjects = db.notebookDao().getStrokesForLayer(layerId)
-        Log.d(TAG, "deserializeStrokesFromDb: found ${strokeObjects.size} rows")
+        Slog.d(TAG) { "deserializeStrokesFromDb: found ${strokeObjects.size} rows" }
         val result = strokeObjects.mapNotNull { obj ->
             try {
                 LiveStroke(id = obj.id, points = StrokeData.fromJson(obj.data).toPointFs())
@@ -1351,7 +1352,7 @@ class DrawingActivity : AppCompatActivity() {
         // Soft-deleted rows have updatedAt = deletedAt, so erased strokes are also detected.
         val maxStroke = db.notebookDao().getMaxStrokeUpdatedAt(layerId) ?: 0L
         if (maxStroke > page.updatedAt) {
-            Log.d(TAG, "tryLoadSnapshotBitmap: stale (maxStroke=$maxStroke > page=${page.updatedAt})")
+            Slog.d(TAG) { "tryLoadSnapshotBitmap: stale (maxStroke=$maxStroke > page=${page.updatedAt})" }
             return null
         }
 
@@ -1371,7 +1372,7 @@ class DrawingActivity : AppCompatActivity() {
         c.drawBitmap(snapshotBmp, null, RectF(0f, 0f, w.toFloat(), h.toFloat()), null)
         snapshotBmp.recycle()
 
-        Log.d(TAG, "tryLoadSnapshotBitmap: hit for page $pageId")
+        Slog.d(TAG) { "tryLoadSnapshotBitmap: hit for page $pageId" }
         return composite
     }
 
@@ -1465,7 +1466,7 @@ class DrawingActivity : AppCompatActivity() {
             val pageId = currentPageId
             lifecycleScope.launch {
                 val strokes = withContext(Dispatchers.IO) { deserializeStrokesFromDb(db) }
-                Log.d(TAG, "postDisplayWork(snapshot): silently loaded ${strokes.size} strokes for $pageId")
+                Slog.d(TAG) { "postDisplayWork(snapshot): silently loaded ${strokes.size} strokes for $pageId" }
                 drawingView.setStrokeListSilently(strokes)
             }
         } else {
@@ -1475,7 +1476,7 @@ class DrawingActivity : AppCompatActivity() {
             if (snapshot != null && pageId.isNotEmpty()) {
                 lifecycleScope.launch {
                     withContext(Dispatchers.IO) { persistSnapshot(db, pageId, snapshot) }
-                    Log.d(TAG, "postDisplayWork(full): persisted snapshot for $pageId")
+                    Slog.d(TAG) { "postDisplayWork(full): persisted snapshot for $pageId" }
                 }
             }
         }
@@ -1541,7 +1542,7 @@ class DrawingActivity : AppCompatActivity() {
         val alreadyPersisted = persistedStrokeIds.toHashSet()
         val newStrokes = currentStrokes.filter { it.id !in alreadyPersisted }
 
-        Log.d(TAG, "saveStrokes: ${newStrokes.size} new / ${currentStrokes.size} total strokes")
+        Slog.d(TAG) { "saveStrokes: ${newStrokes.size} new / ${currentStrokes.size} total strokes" }
 
         if (newStrokes.isEmpty()) {
             // Nothing to write — return immediately without touching the DB at all.
@@ -1606,7 +1607,7 @@ class DrawingActivity : AppCompatActivity() {
         val dataObj = try { org.json.JSONObject(page.data) } catch (e: Exception) { org.json.JSONObject() }
         dataObj.put("snapshot", snapshot)
         db.notebookDao().updateData(pageId, dataObj.toString(), System.currentTimeMillis())
-        Log.d(TAG, "persistSnapshot: saved for page $pageId (${snapshot.length} chars)")
+        Slog.d(TAG) { "persistSnapshot: saved for page $pageId (${snapshot.length} chars)" }
     }
 
     // ── Template operations ───────────────────────────────────────────────────
@@ -4406,7 +4407,7 @@ class DrawingActivity : AppCompatActivity() {
         if (!dataObj.has("snapshot")) return   // nothing to remove
         dataObj.remove("snapshot")
         db.notebookDao().updateData(pageId, dataObj.toString(), System.currentTimeMillis())
-        Log.d(TAG, "invalidatePageSnapshot: cleared for page $pageId")
+        Slog.d(TAG) { "invalidatePageSnapshot: cleared for page $pageId" }
     }
 
     /**
