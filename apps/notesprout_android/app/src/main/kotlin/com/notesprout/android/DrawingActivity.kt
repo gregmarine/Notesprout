@@ -367,24 +367,31 @@ class DrawingActivity : AppCompatActivity() {
                     // Snapshot the page/layer IDs now — they may change before the coroutine runs.
                     val clearedPageId  = currentPageId
                     val clearedLayerId = currentLayerId
-                    // Capture the stroke IDs before clearing so we can soft-delete their DB rows.
-                    val strokesToDelete = drawingView.getStrokes()
+                    val clearedHeadingIds = drawingView.getHeadings().map { it.id }
+                    val hasContent = drawingView.getStrokes().isNotEmpty() ||
+                                     clearedHeadingIds.isNotEmpty()
                     drawingView.clearCanvas()
-                    // All strokes removed from memory and will be soft-deleted from DB.
+                    drawingView.loadHeadings(emptyList())
+                    // All content removed from memory and will be soft-deleted from DB.
                     // Clear the persisted-ID registry; no snapshot needed for a user-initiated clear.
                     persistedStrokeIds.clear()
-                    if (db != null && strokesToDelete.isNotEmpty()) {
+                    if (db != null && hasContent) {
                         lifecycleScope.launch {
                             val deletedAt = System.currentTimeMillis()
                             withContext(Dispatchers.IO) {
-                                val dao = db.notebookDao()
-                                for (stroke in strokesToDelete) {
-                                    dao.softDeleteById(stroke.id, deletedAt)
-                                }
+                                // Soft-delete all layer children (strokes, headings, any future types)
+                                // with a shared timestamp so restoreChildrenDeletedSince recovers everything atomically.
+                                db.notebookDao().softDeleteByParentId(clearedLayerId, deletedAt)
+                                // Invalidate the snapshot: tryLoadSnapshotBitmap checks only type='stroke' rows
+                                // for staleness, so a heading-only clear would leave the old snapshot live.
+                                // Removing it forces the full render path on next navigation back.
+                                invalidatePageSnapshot(db, clearedPageId)
                             }
                             // Record the clear as a single undoable action after the DB writes succeed.
+                            // headingIds stored so undo can restore them explicitly by ID (belt-and-suspenders
+                            // alongside restoreChildrenDeletedSince which uses a timestamp filter).
                             undoRedoManager.push(
-                                UndoRedoAction.PageCleared(clearedPageId, clearedLayerId, deletedAt)
+                                UndoRedoAction.PageCleared(clearedPageId, clearedLayerId, deletedAt, clearedHeadingIds)
                             )
                             updateUndoRedoButtons()
                         }
@@ -3636,10 +3643,14 @@ class DrawingActivity : AppCompatActivity() {
 
             is UndoRedoAction.PageCleared -> withContext(Dispatchers.IO) {
                 if (isUndo) {
-                    // Restore every stroke that was soft-deleted at the clear's timestamp.
+                    // Restore all content soft-deleted by the clear (timestamp-based, type-agnostic).
                     dao.restoreChildrenDeletedSince(action.layerId, action.deletedAt, now)
+                    // Belt-and-suspenders: restore heading rows explicitly by ID.
+                    // restoreChildrenDeletedSince filters by deletedAt >= since, which should cover
+                    // these rows, but explicit ID restore ensures headings are never silently skipped.
+                    action.headingIds.forEach { dao.restoreById(it, now) }
                 } else {
-                    // Redo: soft-delete all surviving strokes on this layer.
+                    // Redo: soft-delete all surviving content on this layer.
                     dao.softDeleteByParentId(action.layerId, now)
                 }
             }

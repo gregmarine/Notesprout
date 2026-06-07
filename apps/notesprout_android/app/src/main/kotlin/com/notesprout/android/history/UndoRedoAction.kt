@@ -75,6 +75,7 @@ sealed class UndoRedoAction {
         val pageId: String,
         val layerId: String,
         val deletedAt: Long,
+        val headingIds: List<String> = emptyList(),
     ) : UndoRedoAction()
 
     /**

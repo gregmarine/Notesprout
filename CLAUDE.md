@@ -529,7 +529,9 @@ Completed:
 
 - 🌲 New Branch: Heading Text Recognition — Google ML Kit digital ink recognition infrastructure added as a general-purpose handwriting-to-text layer (`recognition/HandwritingRecognizer.kt` interface, `recognition/MlKitHandwritingRecognizer.kt` implementation, `recognition/HandwritingRecognizerProvider.kt` app-level singleton); en-US model downloaded at app launch with offline toast fallback; `HeadingObject` and `HeadingStroke` gain `recognizedText: String?` (null = legacy, renders strokes; non-null = renders inkBlack canvas text at 20sp); recognition runs before heading is committed to DB — no placeholder state; canvas and TOC both switch between text and stroke rendering via a clean logic switch ready for a future toggle; stylus tap inside a selected heading opens an edit dialog to correct recognition errors, persisted immediately to DB; un-heading discards `recognizedText` and restores original strokes with fresh UUIDs; full undo/redo support via `UndoRedoAction.HeadingTextEdited` plus audit of all heading-carrying actions for `recognizedText` round-trip correctness
 
+- ✂️ Pruning: Clear-page heading bugs — two fixes: (1) Heading-only clear: `tryLoadSnapshotBitmap` staleness check uses `getMaxStrokeUpdatedAt` (type=`stroke` only), so clearing headings with no strokes left the old snapshot live — navigation back displayed the pre-clear snapshot with headings visible; fix: call `invalidatePageSnapshot` in the clear handler immediately after `softDeleteByParentId` so the snapshot is removed and the full render path is forced on next load. (2) Undo not restoring headings: `PageCleared` now carries `headingIds: List<String>` (heading IDs captured before the clear); undo calls `restoreById` for each heading ID explicitly in addition to the existing `restoreChildrenDeletedSince` (timestamp-based, type-agnostic) — belt-and-suspenders so headings are never silently skipped; `softDeleteByParentId` in the clear handler already covered headings at delete time.
+
 Next up: TBD — discuss before starting.
 
 ---
-*Last updated: 🌲 New Branch — Heading Text Recognition*
+*Last updated: ✂️ Pruning — Clear-page heading bugs*
