@@ -14,7 +14,7 @@ from this file.
 **Severity legend:** 🔴 Critical (data loss / crash / security) · 🟡 Moderate (fix before
 wider release) · 🟢 Low / Informational.
 
-**Progress:** 6 / 10 tracked (C+M) · Low items tracked separately at the bottom.
+**Progress:** 7 / 10 tracked (C+M) · Low items tracked separately at the bottom.
 
 ---
 
@@ -103,7 +103,7 @@ wider release) · 🟢 Low / Informational.
   `setTransactionSuccessful()` / `endTransaction()`.
 
 ### M-3 · `runBlocking` on the main thread in the close path (incl. `onDestroy`)
-- **Status:** ☐ Open
+- **Status:** ☑ Done
 - **Severity:** 🟡 Moderate
 - **Files:** `DrawingActivity.kt:1197-1230` (`closeNotebook`), called from `onDestroy()` `921-927`
 - **Problem:** `saveStrokes` + `persistSnapshot` + `incremental_vacuum` + `wal_checkpoint` run
@@ -113,7 +113,17 @@ wider release) · 🟢 Low / Informational.
   foreground task) while keeping the file seal guarantee; keep only the lightweight close on UI.
 - **Verification:** Close a large notebook (many strokes) → no ANR/jank; reopening shows all
   strokes and a clean file.
-- **Notes/commit:** —
+- **Notes/commit:** Split `closeNotebook()` into a lightweight main-thread head (snapshot capture +
+  history clear) and a `suspend sealNotebook()` (`withContext(Dispatchers.IO)`: persist snapshot,
+  `saveStrokes`, `incremental_vacuum` + `wal_checkpoint(TRUNCATE)`, `db.close()`, `-journal` delete).
+  Added `blocking` param: user-initiated close (btnClose/back) launches the seal on a new
+  application-scoped `NoteSproutApplication.appScope` (`SupervisorJob + Dispatchers.IO`, never
+  cancelled) and `finish()`es immediately — no UI-thread block, and the seal outlives the activity
+  (unlike `lifecycleScope`, which `onDestroy` would cancel). The `onDestroy` safety net calls
+  `closeNotebook(blocking = true)` → `runBlocking` (only fires on abnormal teardown; the normal path
+  already nulled `soilDatabase`, so it no-ops). Reading strokes off-thread is safe: `getStrokes()`
+  returns a copy and `releaseResources()` never mutates the stroke list. Builds clean
+  (`assembleDebug`).
 
 ### M-4 · Verbose logging unconditional in release builds
 - **Status:** ☐ Open

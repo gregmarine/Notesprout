@@ -923,8 +923,10 @@ class DrawingActivity : AppCompatActivity() {
         super.onDestroy()
         drawingView.releaseResources()
         // Safety net: if the activity is destroyed without the user tapping Close
-        // (e.g. system kill), ensure the DB is still closed cleanly.
-        closeNotebook()
+        // (e.g. system kill), ensure the DB is still closed cleanly. Seal synchronously
+        // (blocking) here — there's no surviving UI to defer to and the process may be
+        // dying. In the normal close path soilDatabase is already null, so this no-ops.
+        closeNotebook(blocking = true)
     }
 
     /**
@@ -1183,19 +1185,26 @@ class DrawingActivity : AppCompatActivity() {
     // ── Notebook DB lifecycle ─────────────────────────────────────────────────
 
     /**
-     * Saves strokes, captures a final snapshot, runs housekeeping PRAGMAs, then closes
-     * the Room database.
+     * Tears down the open notebook: captures a final snapshot, then seals the file
+     * (save strokes, housekeeping PRAGMAs, close the Room DB, delete the stray -journal).
      *
      * Snapshot is captured here on the main thread (before [soilDatabase] is cleared) so
      * the close button and back-press paths always persist the current page state.
      * [onWindowFocusChanged] fires AFTER [finish], so its [onSnapshotReady] callback would
      * find [soilDatabase] already null — capturing here is the only reliable close-path hook.
      *
-     * Blocking — all IO runs on [Dispatchers.IO] via [runBlocking]; [SoilDatabase.close]
-     * is called on the main thread after the coroutine completes so [finish] only fires
-     * once the file is fully sealed. Idempotent — guarded by a null check.
+     * The heavy seal ([sealNotebook]) runs on [Dispatchers.IO]:
+     * - [blocking] = false (user-initiated close): launched on [NoteSproutApplication.appScope]
+     *   so it outlives this activity. [finish] fires immediately, off the seal — no ANR/jank
+     *   on large notebooks. The null-guard below makes the later [onDestroy] call a no-op, so
+     *   exactly one seal runs per notebook instance.
+     * - [blocking] = true ([onDestroy] safety net on an abnormal teardown): sealed synchronously
+     *   via [runBlocking] so the file is sealed before the process can die. Only reached when no
+     *   user-initiated close ran first (otherwise [soilDatabase] is already null → early return).
+     *
+     * Idempotent — guarded by a null check.
      */
-    private fun closeNotebook() {
+    private fun closeNotebook(blocking: Boolean = false) {
         val db = soilDatabase ?: return
         soilDatabase = null   // mark as closed before any potentially-throwing work
 
@@ -1205,29 +1214,41 @@ class DrawingActivity : AppCompatActivity() {
         if (nbPath != null) undoRedoPersistenceFile(nbPath).takeIf { it.exists() }?.delete()
 
         // Capture snapshot on the main thread — View operations must run here.
-        // Must happen before the runBlocking block so the bitmap data is ready for IO.
+        // Reading the strokes for the seal is thread-safe: getStrokes() returns a copy and
+        // releaseResources() never mutates the stroke list, so the async seal can read it
+        // even after onDestroy has run.
         val snapshot = drawingView.captureSnapshot()
         val pageId   = currentPageId
 
-        runBlocking {
-            withContext(Dispatchers.IO) {
-                // Persist snapshot for the page we are closing (mirrors navigateToPage).
-                if (snapshot != null && pageId.isNotEmpty()) {
-                    persistSnapshot(db, pageId, snapshot)
-                }
-                saveStrokes(db)
-                db.openHelper.writableDatabase.apply {
-                    query("PRAGMA incremental_vacuum").use { it.moveToFirst() }
-                    query("PRAGMA wal_checkpoint(TRUNCATE)").use { it.moveToFirst() }
-                }
-            }
+        if (blocking) {
+            runBlocking { sealNotebook(db, snapshot, pageId, nbPath) }
+        } else {
+            NoteSproutApplication.appScope.launch { sealNotebook(db, snapshot, pageId, nbPath) }
         }
+    }
 
+    /**
+     * Heavy file-seal: persist the page snapshot + any new strokes, run housekeeping PRAGMAs,
+     * close the Room database, and delete the stray -journal Android leaves during DB init.
+     * All IO — runs on [Dispatchers.IO] regardless of the calling dispatcher.
+     */
+    private suspend fun sealNotebook(
+        db: SoilDatabase,
+        snapshot: String?,
+        pageId: String,
+        nbPath: String?,
+    ) = withContext(Dispatchers.IO) {
+        // Persist snapshot for the page we are closing (mirrors navigateToPage).
+        if (snapshot != null && pageId.isNotEmpty()) {
+            persistSnapshot(db, pageId, snapshot)
+        }
+        saveStrokes(db)
+        db.openHelper.writableDatabase.apply {
+            query("PRAGMA incremental_vacuum").use { it.moveToFirst() }
+            query("PRAGMA wal_checkpoint(TRUNCATE)").use { it.moveToFirst() }
+        }
         db.close()
-
-        // Delete the empty -journal file Android leaves during DB initialisation.
-        val path = intent.getStringExtra(EXTRA_NOTEBOOK_PATH) ?: return
-        File("$path-journal").takeIf { it.exists() }?.delete()
+        if (nbPath != null) File("$nbPath-journal").takeIf { it.exists() }?.delete()
     }
 
     // ── Persistence ───────────────────────────────────────────────────────────

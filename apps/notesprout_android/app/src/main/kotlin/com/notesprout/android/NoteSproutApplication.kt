@@ -1,9 +1,23 @@
 package com.notesprout.android
 
 import android.app.Application
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import org.lsposed.hiddenapibypass.HiddenApiBypass
 
 class NoteSproutApplication : Application() {
+    companion object {
+        /**
+         * Application-scoped coroutine scope for IO work that must outlive an Activity —
+         * notably the notebook file-seal in [DrawingActivity.closeNotebook], which finishes
+         * the activity immediately and lets the heavy save/checkpoint complete here instead
+         * of blocking the UI thread. SupervisorJob so one failed seal can't cancel others;
+         * never cancelled (lives as long as the process).
+         */
+        val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    }
+
     override fun onCreate() {
         super.onCreate()
         // BOOX SDK uses reflection to call hidden Android system APIs (VMRuntime,
