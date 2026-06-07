@@ -450,6 +450,7 @@ Never calls `clearCanvas()`. Updates the in-memory stroke list directly, rebuild
 - `.soil` schema + Room setup, SoilDatabase lifecycle
 - Notebook list (MainActivity) — adaptive grid, pagination, cover images, Set Cover, Delete notebook
 - New-notebook dialog pre-fills filename with `YYYYMMDD_HHmmss` timestamp (`java.time.LocalDateTime`, editable before confirm)
+- New-notebook name validation (`MainActivity.validateNotebookName()`) — shared gate enforced at the dialog and re-checked defensively inside `createNotebook` before any file is opened. Whitelists `[^a-zA-Z0-9_\-. ]` (excludes `/` `\`) + explicit `.`/`..` reject to block path traversal (C-2); rejects a name whose `.soil` file already `exists()` to prevent reopening an existing notebook and inserting a duplicate `type='notebook'` row (C-1). Notes live only under `/Documents/NoteSprout/` via `notesDir()`
 - DrawingActivity — fullscreen immersive, multi-page, incremental save, one-finger deliberate swipe, two-finger swipe to insert page before/after
 - Dual-install build variants — debug (`.dev` suffix) + release side-by-side
 
@@ -489,4 +490,4 @@ Never calls `clearCanvas()`. Updates the in-memory stroke list directly, rebuild
 
 ---
 
-*Last updated: New Branch: two-finger swipe to insert page before/after in DrawingActivity*
+*Last updated: Pruning C-1 & C-2 — notebook name validation (path traversal + duplicate-name corruption)*

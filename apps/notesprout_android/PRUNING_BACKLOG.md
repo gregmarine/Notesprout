@@ -14,14 +14,14 @@ from this file.
 **Severity legend:** 🔴 Critical (data loss / crash / security) · 🟡 Moderate (fix before
 wider release) · 🟢 Low / Informational.
 
-**Progress:** 0 / 9 tracked (C+M) · Low items tracked separately at the bottom.
+**Progress:** 2 / 9 tracked (C+M) · Low items tracked separately at the bottom.
 
 ---
 
 ## 🔴 Critical
 
 ### C-1 · Creating a notebook with an existing name corrupts the existing notebook
-- **Status:** ☐ Open
+- **Status:** ☑ Done
 - **Severity:** 🔴 Critical
 - **Files:** `MainActivity.kt:555-650` (`createNotebook`)
 - **Problem:** `openOrCreateDatabase` + `CREATE TABLE IF NOT EXISTS` + unconditional insert of a
@@ -34,10 +34,11 @@ wider release) · 🟢 Low / Informational.
 - **Verification:** Create a notebook named `X`; create another `X` → second attempt is
   rejected (or suffixed), and opening the original `X` shows exactly one notebook row and its
   original pages.
-- **Notes/commit:** —
+- **Notes/commit:** Added shared `validateNotebookName()` gate in `MainActivity.kt`; rejects a
+  name whose `.soil` file already `exists()`. Same helper backs C-2.
 
 ### C-2 · Notebook name not sanitized → path traversal on write
-- **Status:** ☐ Open
+- **Status:** ☑ Done
 - **Severity:** 🔴 Critical
 - **Files:** `MainActivity.kt:522-563` (name capture → `File(notesDir, "$name.soil")`)
 - **Problem:** Only `isBlank()` is checked. Names with `/` or `../` write outside
@@ -48,7 +49,9 @@ wider release) · 🟢 Low / Informational.
   `Regex("[^a-zA-Z0-9_\\-. ]")`).
 - **Verification:** Names like `../x`, `a/b`, `..` are rejected with a message; valid names still
   create files only under `/Documents/NoteSprout/`.
-- **Notes/commit:** —
+- **Notes/commit:** `validateNotebookName()` whitelists `[^a-zA-Z0-9_\-. ]` (excludes `/` `\`) plus
+  an explicit `.`/`..` reject. Enforced at the dialog and re-checked defensively in
+  `createNotebook` before any file is opened.
 
 ---
 

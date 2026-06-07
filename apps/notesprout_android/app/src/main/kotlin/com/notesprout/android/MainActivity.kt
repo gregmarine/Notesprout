@@ -520,8 +520,9 @@ class MainActivity : AppCompatActivity() {
             .setView(dialogBinding.root)
             .setPositiveButton("Create") { _, _ ->
                 val name = dialogBinding.editNotebookName.text?.toString()?.trim().orEmpty()
-                if (name.isBlank()) {
-                    Toast.makeText(this, "Notebook name cannot be empty", Toast.LENGTH_SHORT).show()
+                val error = validateNotebookName(name)
+                if (error != null) {
+                    Toast.makeText(this, error, Toast.LENGTH_SHORT).show()
                 } else {
                     createNotebook(name)
                 }
@@ -552,10 +553,45 @@ class MainActivity : AppCompatActivity() {
         }, 100)
     }
 
+    /** Notebooks live only under /Documents/NoteSprout/ — single source of the dir. */
+    private fun notesDir(): File =
+        File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS), "NoteSprout")
+
+    /**
+     * Validates a proposed notebook name, returning a user-facing error message
+     * or null if the name is safe to use. Shared gate for both creation hazards:
+     *
+     *  - **C-2 (path traversal):** a name containing `/`, `\`, or `..` would write
+     *    the `.soil` file outside /Documents/NoteSprout/. We whitelist the same
+     *    safe filename charset as [NotebookExporter] (`[^a-zA-Z0-9_\-. ]`), which
+     *    already excludes both separators; the explicit `.`/`..` check covers the
+     *    dot-only names the charset would otherwise allow.
+     *  - **C-1 (corruption):** reusing an existing name reopens that `.soil` and
+     *    inserts a *second* `type='notebook'` row plus an orphan page/layer, mixing
+     *    two logical notebooks in one file. Reject if the target file already exists.
+     */
+    private fun validateNotebookName(name: String): String? {
+        if (name.isBlank()) return "Notebook name cannot be empty"
+        if (name == "." || name == "..") return "Invalid notebook name"
+        if (name.contains(Regex("[^a-zA-Z0-9_\\-. ]"))) {
+            return "Name may only contain letters, numbers, spaces, and _ - ."
+        }
+        if (File(notesDir(), "$name.soil").exists()) {
+            return "A notebook named \"$name\" already exists"
+        }
+        return null
+    }
+
     private fun createNotebook(name: String) {
         try {
-            val docsDir   = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS)
-            val notesDir  = File(docsDir, "NoteSprout")
+            // Defensive re-validation: this is the actual write path, so never trust
+            // that the caller validated. Bail before opening/creating any file.
+            validateNotebookName(name)?.let { error ->
+                Toast.makeText(this, error, Toast.LENGTH_SHORT).show()
+                return
+            }
+
+            val notesDir  = notesDir()
             if (!notesDir.exists()) {
                 check(notesDir.mkdirs()) { "Failed to create NoteSprout directory at ${notesDir.absolutePath}" }
             }
