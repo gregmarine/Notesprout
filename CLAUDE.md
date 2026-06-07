@@ -474,9 +474,10 @@ Never calls `clearCanvas()`. Updates the in-memory stroke list directly, rebuild
 - Cover page from `type="cover"` row becomes PDF page 1 (if present)
 - Page dimensions from each page row's `boundingBox` → `PdfDocument.PageInfo`
 - Output to `context.cacheDir/<title>.pdf`, exposed via `FileProvider` (`res/xml/file_paths.xml`, `${applicationId}.fileprovider`) with `Intent.ACTION_SEND` share sheet
+- Share intent **must** include `clipData = ClipData.newRawUri("", uri)` alongside `FLAG_GRANT_READ_URI_PERMISSION` — on Android 12+ the chooser intermediary does not forward URI permissions to the final target app without `ClipData` (causes silent Google Drive upload failure on NA5C)
 - Progress dialog (non-cancellable, `shape_bordered`, no animation): "Exporting page X of N…" via `Handler(Looper.getMainLooper())`
 - Entry points: DrawingActivity toolbar (`btnExport`, after Cover) and MainActivity long-press context menu (Export as first item, opens Room DB read-only, closes after export)
 
 ---
 
-*Last updated: feat: Export to PDF*
+*Last updated: Pruning: fix Google Drive share on NA5C — ClipData required for FileProvider URI permissions through createChooser*
