@@ -72,6 +72,7 @@ A handwriting-first, meditative notes app. Think paper, but smarter underneath. 
 - **Single table.** Everything — pages, layers, strokes, images, text, metadata — is a row in one `notebook` table. No exceptions without explicit discussion.
 - **Everything is an object.** There is no special-casing of types at the schema level. Type behavior lives in Kotlin, not in the database schema.
 - **Assets are base64 strings.** No external files, no file references. Images and other binary assets are stored inline as base64 in the `data` TEXT column.
+- **Decode embedded images bounded — never at full resolution.** `.soil` files are portable user documents; a crafted/oversized embedded image can OOM the app (low threshold on e-ink). All embedded-asset decodes route through `core/BitmapDecode.decodeSampled(bytes, reqW, reqH)` (bounds-first + `inSampleSize`, capped to the target view/page dims; `MAX_DIMENSION=4096` fallback when there's no natural target, e.g. a cover sizing a PDF page). Do not call `BitmapFactory.decodeByteArray` directly on `.soil`-sourced bytes.
 - **SQLite must stay clean.** The folder view in a file browser should show only `.soil` files — no WAL files, no SHM files, no journals left behind.
   - `PRAGMA journal_mode = WAL`
   - `PRAGMA wal_autocheckpoint = 100`
@@ -493,4 +494,4 @@ Never calls `clearCanvas()`. Updates the in-memory stroke list directly, rebuild
 
 ---
 
-*Last updated: Pruning M-2, M-7 & M-8 — raw-DB sidecar/transaction hardening, exception logging, and read-write cover/snapshot loaders (no stranded `-wal`/`-shm`/`-journal`)*
+*Last updated: Pruning M-1 — bounded base64 image decode (`core/BitmapDecode.decodeSampled`) for all embedded `.soil` assets (template/snapshot/cover), preventing OOM/DoS from crafted or oversized images*

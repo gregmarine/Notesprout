@@ -14,7 +14,7 @@ from this file.
 **Severity legend:** 🔴 Critical (data loss / crash / security) · 🟡 Moderate (fix before
 wider release) · 🟢 Low / Informational.
 
-**Progress:** 5 / 10 tracked (C+M) · Low items tracked separately at the bottom.
+**Progress:** 6 / 10 tracked (C+M) · Low items tracked separately at the bottom.
 
 ---
 
@@ -58,7 +58,7 @@ wider release) · 🟢 Low / Informational.
 ## 🟡 Moderate
 
 ### M-1 · Unbounded base64 image decode → OOM / DoS via crafted or large `.soil`
-- **Status:** ☐ Open
+- **Status:** ☑ Done
 - **Severity:** 🟡 Moderate
 - **Files:** `DrawingActivity.kt:1476-1485` (template), `DrawingActivity.kt:1336-1337` (snapshot),
   `NotebookExporter.kt:59-60` & `166-167` (cover/template in export)
@@ -69,7 +69,16 @@ wider release) · 🟢 Low / Informational.
   `inSampleSize`. Mirror the working sampling in `CoverDialog.kt:388-394`.
 - **Verification:** Open/export a notebook with a deliberately huge embedded template/snapshot →
   no OOM; image is downsampled to fit.
-- **Notes/commit:** —
+- **Notes/commit:** Added shared `core/BitmapDecode.decodeSampled(bytes, reqW, reqH)` — decodes
+  bounds-first (`inJustDecodeBounds`) then applies a power-of-two `inSampleSize` so decode memory
+  is capped to ~target dims (mirrors `CoverDialog.encodeImageFromUri`). Routed all unbounded
+  embedded-asset decodes through it: DrawingActivity snapshot (capped to view size; view-dim read
+  reordered before decode) + template (`loadPageTemplateFromDb`), `NotebookExporter` cover (capped
+  to `MAX_DIMENSION=4096`, since the cover sizes the PDF page) + `loadTemplate` (capped to page
+  dims). Also fixed a duplicate template path the scan missed —
+  `DrawingActivity.loadTemplateBitmapById` (`:4396`). Left the self-captured snapshot decode in
+  `openCoverDialog` (`:1684`) untouched: it decodes a PNG the app just captured from its own view,
+  so it's already view-sized and not untrusted file input. Builds clean (`assembleDebug`).
 
 ### M-2 · Raw read-write DB helpers leave WAL/journal artifacts & aren't transactional
 - **Status:** ☑ Done

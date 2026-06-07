@@ -36,6 +36,7 @@ import androidx.core.view.doOnLayout
 import androidx.lifecycle.lifecycleScope
 import androidx.room.Room
 import androidx.room.withTransaction
+import com.notesprout.android.core.BitmapDecode
 import com.notesprout.android.data.copyPageAfter
 import com.notesprout.android.data.HeadingObject
 import com.notesprout.android.data.HeadingStroke
@@ -1333,12 +1334,13 @@ class DrawingActivity : AppCompatActivity() {
             return null
         }
 
-        val bytes       = try { Base64.decode(b64, Base64.DEFAULT) } catch (e: Exception) { return null }
-        val snapshotBmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: return null
-
         val w = drawingView.asView().width
         val h = drawingView.asView().height
-        if (w == 0 || h == 0) { snapshotBmp.recycle(); return null }
+        if (w == 0 || h == 0) return null
+
+        val bytes       = try { Base64.decode(b64, Base64.DEFAULT) } catch (e: Exception) { return null }
+        // Bounded decode (M-1): cap to the view size so a crafted/oversized snapshot can't OOM.
+        val snapshotBmp = BitmapDecode.decodeSampled(bytes, w, h) ?: return null
 
         // Build composite: white → template → strokes-only snapshot (transparent PNG)
         val composite = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
@@ -1477,7 +1479,11 @@ class DrawingActivity : AppCompatActivity() {
             val dataObj = JSONObject(templateObj.data)
             val b64 = dataObj.getString("image")
             val bytes = Base64.decode(b64, android.util.Base64.DEFAULT)
-            BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+            // Bounded decode (M-1): cap to the view size (fall back to MAX_DIMENSION before layout).
+            val view = drawingView.asView()
+            val reqW = view.width.takeIf  { it > 0 } ?: BitmapDecode.MAX_DIMENSION
+            val reqH = view.height.takeIf { it > 0 } ?: BitmapDecode.MAX_DIMENSION
+            BitmapDecode.decodeSampled(bytes, reqW, reqH)
         } catch (e: Exception) {
             Log.e(TAG, "loadPageTemplateFromDb: failed to decode template bitmap", e)
             null
@@ -4393,7 +4399,11 @@ class DrawingActivity : AppCompatActivity() {
             val dataObj = org.json.JSONObject(templateObj.data)
             val b64 = dataObj.getString("image")
             val bytes = Base64.decode(b64, Base64.DEFAULT)
-            BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+            // Bounded decode (M-1): cap to the view size (fall back to MAX_DIMENSION before layout).
+            val view = drawingView.asView()
+            val reqW = view.width.takeIf  { it > 0 } ?: BitmapDecode.MAX_DIMENSION
+            val reqH = view.height.takeIf { it > 0 } ?: BitmapDecode.MAX_DIMENSION
+            BitmapDecode.decodeSampled(bytes, reqW, reqH)
         } catch (e: Exception) {
             Log.e(TAG, "loadTemplateBitmapById: failed to decode template $templateId", e)
             null

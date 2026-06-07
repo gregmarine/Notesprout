@@ -2,7 +2,6 @@ package com.notesprout.android
 
 import android.content.Context
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
@@ -12,6 +11,7 @@ import android.graphics.RectF
 import android.graphics.pdf.PdfDocument
 import android.util.Base64
 import android.util.TypedValue
+import com.notesprout.android.core.BitmapDecode
 import com.notesprout.android.data.CoverObject
 import com.notesprout.android.data.HeadingObject
 import com.notesprout.android.data.HeadingStroke
@@ -57,7 +57,8 @@ object NotebookExporter {
                 runCatching {
                     val co = Json.decodeFromString<CoverObject>(row.data)
                     val bytes = Base64.decode(co.image, Base64.DEFAULT)
-                    BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                    // Bounded decode (M-1): the cover sizes the PDF page, so cap to MAX_DIMENSION.
+                    BitmapDecode.decodeSampled(bytes, BitmapDecode.MAX_DIMENSION, BitmapDecode.MAX_DIMENSION)
                 }.getOrNull()
             }
         } else null
@@ -164,7 +165,8 @@ object NotebookExporter {
             val dataObj = JSONObject(templateRow.data)
             val b64 = dataObj.getString("image")
             val bytes = Base64.decode(b64, Base64.DEFAULT)
-            BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+            // Bounded decode (M-1): cap to the page size this template renders into.
+            BitmapDecode.decodeSampled(bytes, pageWidth, pageHeight)
         }.getOrNull()
     }
 
