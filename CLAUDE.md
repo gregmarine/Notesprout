@@ -469,6 +469,14 @@ Never calls `clearCanvas()`. Updates the in-memory stroke list directly, rebuild
 - Text edit dialog (stylus tap on selected heading) + `HeadingTextEdited` undo/redo
 - TOC (`TocDialog`) — topmost heading per page, paginated list, active entry indicator, dynamic page size
 
+**Export to PDF:**
+- `NotebookExporter` object — renders all pages off-screen on `Dispatchers.IO` using same white→template→headings→strokes pipeline as drawing views
+- Cover page from `type="cover"` row becomes PDF page 1 (if present)
+- Page dimensions from each page row's `boundingBox` → `PdfDocument.PageInfo`
+- Output to `context.cacheDir/<title>.pdf`, exposed via `FileProvider` (`res/xml/file_paths.xml`, `${applicationId}.fileprovider`) with `Intent.ACTION_SEND` share sheet
+- Progress dialog (non-cancellable, `shape_bordered`, no animation): "Exporting page X of N…" via `Handler(Looper.getMainLooper())`
+- Entry points: DrawingActivity toolbar (`btnExport`, after Cover) and MainActivity long-press context menu (Export as first item, opens Room DB read-only, closes after export)
+
 ---
 
-*Last updated: feat: pre-fill new notebook filename with YYYYMMDD_HHmmss timestamp*
+*Last updated: feat: Export to PDF*

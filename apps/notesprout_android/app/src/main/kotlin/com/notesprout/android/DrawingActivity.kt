@@ -493,6 +493,11 @@ class DrawingActivity : AppCompatActivity() {
             openCoverDialog()
         }
 
+        binding.btnExport.setOnClickListener {
+            val db = soilDatabase ?: return@setOnClickListener
+            startExport(db)
+        }
+
         binding.btnPageIndex.setOnClickListener { openPageIndex() }
         binding.tvPageIndicator.setOnClickListener { openPageIndex() }
 
@@ -1610,6 +1615,66 @@ class DrawingActivity : AppCompatActivity() {
                 android.widget.Toast.makeText(this, "Cover updated", android.widget.Toast.LENGTH_SHORT).show()
             },
         ).show()
+    }
+
+    private fun startExport(db: SoilDatabase) {
+        // Save current page strokes before reading from DB so the export sees the latest content.
+        lifecycleScope.launch {
+            withContext(Dispatchers.IO) { saveStrokes(db) }
+            runExport(db)
+        }
+    }
+
+    private fun runExport(db: SoilDatabase) {
+        val tvMessage = android.widget.TextView(this).apply {
+            text = "Exporting…"
+            setPadding(64, 48, 64, 48)
+            setTextColor(android.graphics.Color.BLACK)
+            textSize = 16f
+        }
+        val dialog = androidx.appcompat.app.AlertDialog.Builder(this)
+            .setView(tvMessage)
+            .setCancelable(false)
+            .create()
+        dialog.show()
+        dialog.window?.setElevation(0f)
+        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+
+        val handler = android.os.Handler(android.os.Looper.getMainLooper())
+
+        lifecycleScope.launch {
+            val pdfFile = try {
+                withContext(Dispatchers.IO) {
+                    NotebookExporter.export(
+                        context = this@DrawingActivity,
+                        db = db,
+                        onProgress = { current, total ->
+                            handler.post { tvMessage.text = "Exporting page $current of $total…" }
+                        },
+                    )
+                }
+            } catch (e: Exception) {
+                dialog.dismiss()
+                android.widget.Toast.makeText(this@DrawingActivity, "Export failed: ${e.message}", android.widget.Toast.LENGTH_LONG).show()
+                return@launch
+            }
+            dialog.dismiss()
+            sharePdf(pdfFile)
+        }
+    }
+
+    private fun sharePdf(file: java.io.File) {
+        val uri = androidx.core.content.FileProvider.getUriForFile(
+            this,
+            "$packageName.fileprovider",
+            file,
+        )
+        val intent = Intent(Intent.ACTION_SEND).apply {
+            type = "application/pdf"
+            putExtra(Intent.EXTRA_STREAM, uri)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        startActivity(Intent.createChooser(intent, "Share PDF"))
     }
 
     /**

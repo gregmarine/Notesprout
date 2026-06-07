@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Notebook with right-exit arrow: export icon (mirror of ic_close.xml) -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+
+    <!-- Notebook body outline (shifted left to x=3–15) -->
+    <path
+        android:fillColor="@android:color/transparent"
+        android:strokeColor="@color/inkBlack"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M15,3 L3,3 Q2,3 2,4 L2,20 Q2,21 3,21 L15,21"/>
+
+    <!-- Spine line at x=15 -->
+    <path
+        android:fillColor="@android:color/transparent"
+        android:strokeColor="@color/inkBlack"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:pathData="M15,3 L15,21"/>
+
+    <!-- Right border of spine (arc from x=15 to x=17) -->
+    <path
+        android:fillColor="@android:color/transparent"
+        android:strokeColor="@color/inkBlack"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M15,3 Q17,3 17,5 L17,19 Q17,21 15,21"/>
+
+    <!-- Arrow shaft: exits from spine area, tip at far right -->
+    <path
+        android:fillColor="@android:color/transparent"
+        android:strokeColor="@color/inkBlack"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:pathData="M17,12 L23,12"/>
+
+    <!-- Arrowhead: tip at x=23, wings at x=20 — clear gap from spine at x=17 -->
+    <path
+        android:fillColor="@android:color/transparent"
+        android:strokeColor="@color/inkBlack"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M20,9 L23,12 L20,15"/>
+
+</vector>
