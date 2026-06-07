@@ -2493,11 +2493,6 @@ class DrawingActivity : AppCompatActivity() {
             drawingView.setStrokeListSilently(updatedStrokes)
             restoredStrokes.forEach { persistedStrokeIds.add(it.id) }
 
-            selectedObjectIds.clear()
-            drawingView.lassoSelectedIds = emptySet()
-            drawingView.setLassoOverlay(null, null)
-            hideFloatingSelectionToolbar()
-
             val templateBmp = currentTemplateBitmap
             val bitmap = withContext(Dispatchers.IO) {
                 drawingView.buildRenderBitmap(updatedStrokes, templateBmp, updatedHeadings)
@@ -2507,6 +2502,15 @@ class DrawingActivity : AppCompatActivity() {
             } else {
                 drawingView.loadStrokes(updatedStrokes)
             }
+
+            // Select the restored strokes so the user can act on them immediately.
+            val selBox = computeUnionBoundingBox(restoredStrokes, emptyList())
+            val pad = 8f * resources.displayMetrics.density
+            selBox.inset(-pad, -pad)
+            selectedObjectIds.clear()
+            selectedObjectIds.addAll(restoredStrokes.map { it.id })
+            drawingView.setLassoSelectedIds(selectedObjectIds.toSet(), selBox)
+            updateFloatingSelectionToolbar(selBox)
         }
     }
 

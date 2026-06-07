@@ -531,7 +531,9 @@ Completed:
 
 - ✂️ Pruning: Clear-page heading bugs — two fixes: (1) Heading-only clear: `tryLoadSnapshotBitmap` staleness check uses `getMaxStrokeUpdatedAt` (type=`stroke` only), so clearing headings with no strokes left the old snapshot live — navigation back displayed the pre-clear snapshot with headings visible; fix: call `invalidatePageSnapshot` in the clear handler immediately after `softDeleteByParentId` so the snapshot is removed and the full render path is forced on next load. (2) Undo not restoring headings: `PageCleared` now carries `headingIds: List<String>` (heading IDs captured before the clear); undo calls `restoreById` for each heading ID explicitly in addition to the existing `restoreChildrenDeletedSince` (timestamp-based, type-agnostic) — belt-and-suspenders so headings are never silently skipped; `softDeleteByParentId` in the clear handler already covered headings at delete time.
 
+- ✂️ Pruning: Un-heading restores stroke selection — after `removeHeading()` completes, the restored strokes are now selected automatically (matching the behavior of lasso paste and heading creation); `selectedObjectIds` is populated with the new stroke IDs, the selection box is computed via `computeUnionBoundingBox(restoredStrokes, emptyList())` with the standard 8dp outset padding (reflecting the actual stroke bounds, not the heading background fill area), and the floating selection toolbar is re-anchored; the old selection-clear block (`setLassoOverlay(null, null)` + `hideFloatingSelectionToolbar()`) is replaced by the selection-set block placed after the canvas rebuild so the overlay renders on top of real content.
+
 Next up: TBD — discuss before starting.
 
 ---
-*Last updated: ✂️ Pruning — Clear-page heading bugs*
+*Last updated: ✂️ Pruning — Un-heading restores stroke selection*
