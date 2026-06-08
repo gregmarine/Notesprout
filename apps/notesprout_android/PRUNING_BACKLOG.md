@@ -244,8 +244,9 @@ Lightweight items; address opportunistically.
 - **L-2 · FileProvider scope is whole cache dir** ☑ Done — Narrowed `file_paths.xml` from
   `path="."` to `path="exported_pdfs/"`. Updated `NotebookExporter` to write into
   `cacheDir/exported_pdfs/` (creates dir on first export). Builds clean.
-- **L-3 · Exported PDFs accumulate in cacheDir** — `NotebookExporter.kt:123-124`. Never cleaned;
-  consider deleting old exports.
+- **L-3 · Exported PDFs accumulate in cacheDir** ☑ Done — `NotebookExporter` now calls
+  `deleteRecursively()` on `exported_pdfs/` before each export, then recreates the dir. Stale
+  exports from prior runs are purged automatically. Builds clean.
 - **L-4 · ML Kit model downloads over any network** — `MlKitHandwritingRecognizer.kt:48-51`,
   default `DownloadConditions`. Consider `requireWifi()`.
 - **L-5 · Recognizer never closed** — `MlKitHandwritingRecognizer.close()` exists (`:117`) but

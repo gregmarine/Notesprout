@@ -121,7 +121,7 @@ object NotebookExporter {
             templateBitmap?.recycle()
         }
 
-        val outDir = File(context.cacheDir, "exported_pdfs").also { it.mkdirs() }
+        val outDir = File(context.cacheDir, "exported_pdfs").also { it.deleteRecursively(); it.mkdirs() }
         val outFile = File(outDir, "$safeTitle.pdf")
         FileOutputStream(outFile).use { pdf.writeTo(it) }
         pdf.close()
