@@ -17,7 +17,7 @@ interface DrawingView {
     fun disableDrawing()
     fun resetOverlay() {}
 
-    fun clearCanvas()
+    fun eraseAll()
     fun setEraserMode(active: Boolean) {}
     fun releaseResources()
 

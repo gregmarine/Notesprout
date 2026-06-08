@@ -64,14 +64,14 @@ sealed class UndoRedoAction {
     ) : UndoRedoAction()
 
     /**
-     * User cleared all strokes from a page — undo restores every stroke soft-deleted
+     * User erased all strokes from a page — undo restores every stroke soft-deleted
      * at [deletedAt]; redo soft-deletes all surviving strokes on [layerId] again.
      *
-     * [deletedAt] is the single timestamp used for all soft-delete calls during the clear,
+     * [deletedAt] is the single timestamp used for all soft-delete calls during the erase,
      * allowing [restoreChildrenDeletedSince] to identify exactly which rows to bring back.
      */
     @Serializable
-    data class PageCleared(
+    data class PageEraseAll(
         val pageId: String,
         val layerId: String,
         val deletedAt: Long,

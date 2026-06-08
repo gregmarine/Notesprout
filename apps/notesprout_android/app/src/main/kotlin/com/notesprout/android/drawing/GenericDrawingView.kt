@@ -726,11 +726,11 @@ class GenericDrawingView(context: Context) : View(context), DrawingView {
         redrawCanvas()
     }
 
-    override fun clearCanvas() {
+    override fun eraseAll() {
         activePoints.clear()
         strokes.clear()
         headings = emptyList()
-        // Clear to white then re-apply template so the template persists after clear.
+        // Clear to white then re-apply template so the template persists after erase.
         renderCanvas?.let { canvas ->
             canvas.drawColor(Color.WHITE)
             templateBitmap?.let { tb ->

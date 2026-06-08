@@ -34,7 +34,7 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
         private const val TAG = "Notesprout"
         private const val EPD_TAG = "EPD_TIMING"
         // Suppresses EPD hardware auto-GC16 refresh mid-session; we control quality
-        // refreshes explicitly via handwritingRepaint in clearCanvas() and after erasing.
+        // refreshes explicitly via handwritingRepaint in eraseAll() and after erasing.
         private const val EPD_UPDATE_LIST_SIZE = 512
         private const val ERASER_RADIUS_PX = 15f
         private const val ERASE_REDRAW_INTERVAL_MS = 60L
@@ -1040,7 +1040,7 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
      * Set the template bitmap to use as the page background.
      * Null = plain white. Redraws the canvas immediately (strokes on top of new template).
      *
-     * Uses the same EPD handoff pattern as clearCanvas(): disable overlay render → draw to bitmap
+     * Uses the same EPD handoff pattern as eraseAll(): disable overlay render → draw to bitmap
      * → invalidate → handwritingRepaint → re-enable drawing.  Without handwritingRepaint the
      * e-ink pixels are not refreshed and the template change is invisible on screen.
      */
@@ -1071,34 +1071,34 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
         }
     }
 
-    override fun clearCanvas() {
-        epd { "CLEAR_CANVAS_START isSetup=$isSetup strokeCountBefore=${strokes.size}" }
+    override fun eraseAll() {
+        epd { "ERASE_ALL_START isSetup=$isSetup strokeCountBefore=${strokes.size}" }
         strokes.clear()
         headings = emptyList()
         if (isSetup) {
             touchHelper.setRawDrawingRenderEnabled(false)
-            epd { "RENDER_DISABLED caller=clearCanvas" }
+            epd { "RENDER_DISABLED caller=eraseAll" }
         }
-        // Clear to white then re-apply template so the template persists after clear.
+        // Clear to white then re-apply template so the template persists after erase.
         renderCanvas?.let { canvas ->
             canvas.drawColor(Color.WHITE)
-            epd { "WHITE_BITMAP_FILL caller=clearCanvas" }
+            epd { "WHITE_BITMAP_FILL caller=eraseAll" }
             templateBitmap?.let { tb ->
                 canvas.drawBitmap(tb, null, RectF(0f, 0f, width.toFloat(), height.toFloat()), null)
             }
         }
         invalidate()
-        epd { "INVALIDATE caller=clearCanvas" }
+        epd { "INVALIDATE caller=eraseAll" }
         post {
             EpdController.handwritingRepaint(this, Rect(0, 0, width, height))
-            epd { "HANDWRITING_REPAINT caller=clearCanvas" }
+            epd { "HANDWRITING_REPAINT caller=eraseAll" }
             post {
                 if (isSetup && !isLassoMode && !isLassoEraserMode) {
                     touchHelper.setRawDrawingEnabled(true)
-                    epd { "RAW_DRAWING_ENABLED true caller=clearCanvas" }
+                    epd { "RAW_DRAWING_ENABLED true caller=eraseAll" }
                     if (isEraserMode) {
                         touchHelper.setRawDrawingRenderEnabled(false)
-                        epd { "RENDER_DISABLED caller=clearCanvas_eraserMode" }
+                        epd { "RENDER_DISABLED caller=eraseAll_eraserMode" }
                     }
                 }
             }
@@ -1173,7 +1173,7 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
 
     /**
      * Swap in a pre-built bitmap on the main thread.  Replicates the EPD overlay
-     * handoff pattern of [setTemplate] / [clearCanvas] so e-ink pixels are committed
+     * handoff pattern of [setTemplate] / [eraseAll] so e-ink pixels are committed
      * cleanly: disable overlay render → swap bitmap → invalidate → handwritingRepaint
      * → re-enable drawing.
      */
@@ -1188,7 +1188,7 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
         this.strokes.addAll(strokes)
         this.templateBitmap = templateBitmap
 
-        // EPD overlay handoff — same pattern as setTemplate() / clearCanvas().
+        // EPD overlay handoff — same pattern as setTemplate() / eraseAll().
         if (isSetup) {
             touchHelper.setRawDrawingRenderEnabled(false)
             epd { "RENDER_DISABLED caller=loadStrokesWithBitmap" }

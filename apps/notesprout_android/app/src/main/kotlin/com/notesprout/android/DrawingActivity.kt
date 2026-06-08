@@ -327,7 +327,7 @@ class DrawingActivity : AppCompatActivity() {
                             UndoRedoAction.PageDeleted(deletedPageId, deletedPageIndex, deletedAt)
                         )
                         updateUndoRedoButtons()
-                        drawingView.clearCanvas()
+                        drawingView.eraseAll()
                         val result = withContext(Dispatchers.IO) { loadCurrentPage(db) }
                         displayPage(result)
                         updatePageIndicator()
@@ -342,22 +342,22 @@ class DrawingActivity : AppCompatActivity() {
             dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
         }
 
-        binding.btnClear.setOnClickListener {
+        binding.btnEraseAll.setOnClickListener {
             val db = soilDatabase
             val dialog = AlertDialog.Builder(this)
-                .setMessage("Clear this page?")
+                .setMessage("Erase this page?")
                 .setNegativeButton("Cancel", null)
-                .setPositiveButton("Clear") { _, _ ->
+                .setPositiveButton("Erase") { _, _ ->
                     // Snapshot the page/layer IDs now — they may change before the coroutine runs.
-                    val clearedPageId  = currentPageId
-                    val clearedLayerId = currentLayerId
-                    val clearedHeadingIds = drawingView.getHeadings().map { it.id }
+                    val eraseAllPageId  = currentPageId
+                    val eraseAllLayerId = currentLayerId
+                    val eraseAllHeadingIds = drawingView.getHeadings().map { it.id }
                     val hasContent = drawingView.getStrokes().isNotEmpty() ||
-                                     clearedHeadingIds.isNotEmpty()
-                    drawingView.clearCanvas()
+                                     eraseAllHeadingIds.isNotEmpty()
+                    drawingView.eraseAll()
                     drawingView.loadHeadings(emptyList())
                     // All content removed from memory and will be soft-deleted from DB.
-                    // Clear the persisted-ID registry; no snapshot needed for a user-initiated clear.
+                    // Clear the persisted-ID registry; no snapshot needed for a user-initiated erase.
                     persistedStrokeIds.clear()
                     if (db != null && hasContent) {
                         lifecycleScope.launch {
@@ -365,17 +365,17 @@ class DrawingActivity : AppCompatActivity() {
                             withContext(Dispatchers.IO) {
                                 // Soft-delete all layer children (strokes, headings, any future types)
                                 // with a shared timestamp so restoreChildrenDeletedSince recovers everything atomically.
-                                db.notebookDao().softDeleteByParentId(clearedLayerId, deletedAt)
+                                db.notebookDao().softDeleteByParentId(eraseAllLayerId, deletedAt)
                                 // Invalidate the snapshot: tryLoadSnapshotBitmap checks only type='stroke' rows
-                                // for staleness, so a heading-only clear would leave the old snapshot live.
+                                // for staleness, so a heading-only erase would leave the old snapshot live.
                                 // Removing it forces the full render path on next navigation back.
-                                invalidatePageSnapshot(db, clearedPageId)
+                                invalidatePageSnapshot(db, eraseAllPageId)
                             }
-                            // Record the clear as a single undoable action after the DB writes succeed.
+                            // Record the erase as a single undoable action after the DB writes succeed.
                             // headingIds stored so undo can restore them explicitly by ID (belt-and-suspenders
                             // alongside restoreChildrenDeletedSince which uses a timestamp filter).
                             undoRedoManager.push(
-                                UndoRedoAction.PageCleared(clearedPageId, clearedLayerId, deletedAt, clearedHeadingIds)
+                                UndoRedoAction.PageEraseAll(eraseAllPageId, eraseAllLayerId, deletedAt, eraseAllHeadingIds)
                             )
                             updateUndoRedoButtons()
                         }
@@ -1121,7 +1121,7 @@ class DrawingActivity : AppCompatActivity() {
                     selectedObjectIds.clear()
                     drawingView.setLassoOverlay(null, null)
                     hideFloatingSelectionToolbar()
-                    drawingView.clearCanvas()
+                    drawingView.eraseAll()
                     val result = withContext(Dispatchers.IO) { loadCurrentPage(db) }
                     displayPage(result)
                     updatePageIndicator()
@@ -1170,7 +1170,7 @@ class DrawingActivity : AppCompatActivity() {
             }
             undoRedoManager.push(UndoRedoAction.PageAdded(currentPageId, currentPageIndex))
             updateUndoRedoButtons()
-            drawingView.clearCanvas()
+            drawingView.eraseAll()
             val result = withContext(Dispatchers.IO) { loadCurrentPage(db) }
             displayPage(result)
             updatePageIndicator()
@@ -1192,7 +1192,7 @@ class DrawingActivity : AppCompatActivity() {
             }
             undoRedoManager.push(UndoRedoAction.PageAdded(currentPageId, currentPageIndex, insertedBefore = true))
             updateUndoRedoButtons()
-            drawingView.clearCanvas()
+            drawingView.eraseAll()
             val result = withContext(Dispatchers.IO) { loadCurrentPage(db) }
             displayPage(result)
             updatePageIndicator()
@@ -1701,7 +1701,7 @@ class DrawingActivity : AppCompatActivity() {
             updateCopyPasteButtons()
             undoRedoManager.push(UndoRedoAction.PagePasted(currentPageId, currentPageIndex))
             updateUndoRedoButtons()
-            drawingView.clearCanvas()
+            drawingView.eraseAll()
             val result = withContext(Dispatchers.IO) { loadCurrentPage(db) }
             displayPage(result)
             updatePageIndicator()
@@ -2147,7 +2147,7 @@ class DrawingActivity : AppCompatActivity() {
         selectedObjectIds.clear()
         drawingView.setLassoOverlay(null, null)
         hideFloatingSelectionToolbar()
-        drawingView.clearCanvas()
+        drawingView.eraseAll()
 
         val result = withContext(Dispatchers.IO) { loadCurrentPage(db) }
         displayPage(result)
@@ -2179,7 +2179,7 @@ class DrawingActivity : AppCompatActivity() {
             saveStrokes(db)
         }
         currentPageIndex = newIndex
-        drawingView.clearCanvas()
+        drawingView.eraseAll()
     }
 
     /** Refresh the page indicator overlay text. Call on the main thread. */
@@ -2984,7 +2984,7 @@ class DrawingActivity : AppCompatActivity() {
      *
      * Flow — page / template actions:
      *   [saveAndSwitchPage] if cross-page → DB op → snapshot invalidation →
-     *   [clearCanvas] → [loadCurrentPage] → [displayPage]
+     *   [eraseAll] → [loadCurrentPage] → [displayPage]
      */
     private suspend fun executeAction(db: SoilDatabase, action: UndoRedoAction, isUndo: Boolean) {
         val now = System.currentTimeMillis()
@@ -2999,7 +2999,7 @@ class DrawingActivity : AppCompatActivity() {
             is UndoRedoAction.LassoDeleted    -> action.pageId
             is UndoRedoAction.StrokesMoved    -> action.pageId
             is UndoRedoAction.TemplateChanged -> action.pageId
-            is UndoRedoAction.PageCleared     -> action.pageId
+            is UndoRedoAction.PageEraseAll     -> action.pageId
             is UndoRedoAction.HeadingCreated   -> action.pageId
             is UndoRedoAction.HeadingRemoved   -> action.pageId
             is UndoRedoAction.HeadingTextEdited -> action.pageId
@@ -3841,7 +3841,7 @@ class DrawingActivity : AppCompatActivity() {
                 // Visual update is handled by the full page reload in step 3b below.
             }
 
-            is UndoRedoAction.PageCleared -> withContext(Dispatchers.IO) {
+            is UndoRedoAction.PageEraseAll -> withContext(Dispatchers.IO) {
                 if (isUndo) {
                     // Restore all content soft-deleted by the clear (timestamp-based, type-agnostic).
                     dao.restoreChildrenDeletedSince(action.layerId, action.deletedAt, now)
@@ -4353,7 +4353,7 @@ class DrawingActivity : AppCompatActivity() {
         }
 
         // ── Step 3a: Same-page stroke — optimised in-memory update ────────────
-        // No clearCanvas(); one EPD handoff via loadStrokesWithBitmap.
+        // No eraseAll(); one EPD handoff via loadStrokesWithBitmap.
         // The snapshot stale-check uses MAX(stroke.updatedAt) > page.updatedAt,
         // which the DB op above already guarantees — no explicit invalidation needed.
         if (action is UndoRedoAction.StrokeAdded || action is UndoRedoAction.StrokeErased) {
@@ -4405,7 +4405,7 @@ class DrawingActivity : AppCompatActivity() {
             is UndoRedoAction.PageDeleted     -> if (isUndo) action.pageId else null
             is UndoRedoAction.PageAdded       -> if (!isUndo) action.pageId else null
             is UndoRedoAction.PagePasted      -> if (!isUndo) action.pageId else null  // redo restores strokes
-            is UndoRedoAction.PageCleared     -> action.pageId  // strokes change on both undo and redo
+            is UndoRedoAction.PageEraseAll     -> action.pageId  // strokes change on both undo and redo
             else                              -> null
         }
         if (snapshotPageId != null) {
@@ -4413,7 +4413,7 @@ class DrawingActivity : AppCompatActivity() {
         }
 
         persistedStrokeIds.clear()
-        drawingView.clearCanvas()
+        drawingView.eraseAll()
         val result = withContext(Dispatchers.IO) { loadCurrentPage(db) }
         displayPage(result)
         updatePageIndicator()
