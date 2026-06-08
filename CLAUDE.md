@@ -16,14 +16,6 @@ A handwriting-first, meditative notes app. Think paper, but smarter underneath. 
 
 ---
 
-## Active Backlog
-
-- **Pruning backlog:** `apps/notesprout_android/PRUNING_BACKLOG.md` — hardening items from the
-  2026-06-07 vulnerability/quality scan, with stable IDs (C-1, M-3, …). Reference an item by ID
-  to work it; flip its Status checkbox and fill Notes/commit when done.
-
----
-
 ## Core Philosophy — Never Violate These
 
 - Human-first: fixed screen-size pages, never infinite scroll
@@ -296,7 +288,7 @@ Use device serials from the ADB Device Serials table above.
 - `minSdk = 29`
 - `android.enableJetifier=true` required — Onyx SDK bundles old support classes
 - `jniLibs.pickFirsts` for `libc++_shared.so`
-- `defaultConfig.ndk { abiFilters += "arm64-v8a" }` — every target device (BOOX, Wacom Movink, Supernote) is 64-bit ARM, so we ship only arm64-v8a. This drops the unused x86/x86_64/armeabi(-v7a) ABIs (smaller APK) and removes the only 4 KB-aligned native lib among them (mmkv's x86_64 `.so`) for Play 16 KB page-size compliance (M-5). **Do not** `exclude` the transitive `com.tencent:mmkv:1.0.19` — `onyxsdk-base` references it (`MMKVBuilder`, `DefaultSearchHistory`), so removing it risks a runtime `NoClassDefFoundError`; its arm64-v8a `libmmkv.so` is already 64 KB-aligned (16 KB-compliant). The lone remaining arm64 16 KB offender is ML Kit's `libdigitalink.so` — tracked as backlog L-10, deferred until Play distribution.
+- `defaultConfig.ndk { abiFilters += "arm64-v8a" }` — every target device (BOOX, Wacom Movink, Supernote) is 64-bit ARM, so we ship only arm64-v8a. This drops the unused x86/x86_64/armeabi(-v7a) ABIs (smaller APK) and removes the only 4 KB-aligned native lib among them (mmkv's x86_64 `.so`) for Play 16 KB page-size compliance (M-5). **Do not** `exclude` the transitive `com.tencent:mmkv:1.0.19` — `onyxsdk-base` references it (`MMKVBuilder`, `DefaultSearchHistory`), so removing it risks a runtime `NoClassDefFoundError`; its arm64-v8a `libmmkv.so` is already 64 KB-aligned (16 KB-compliant). ML Kit `libdigitalink.so` is 16 KB-aligned as of `digital-ink-recognition:19.0.0` — no remaining arm64 16 KB offenders.
 - `org.gradle.java.home` in `gradle.properties` pins Temurin-17
 - `NoteSproutApplication.onCreate` calls `HiddenApiBypass.addHiddenApiExemptions("")` before any SDK init
 - `setStrokeColor(Color.BLACK)` required on TouchHelper init — NoteAir5C color panel defaults to non-black
@@ -485,7 +477,8 @@ Never calls `clearCanvas()`. Updates the in-memory stroke list directly, rebuild
 
 **Headings & Text:**
 - HeadingObject (`type="heading"` rows) — grey-fill background + embedded strokes
-- ML Kit digital ink recognition (en-US, `com.google.mlkit:digital-ink-recognition:18.1.0`) — `recognizedText` stored in `HeadingObject`
+- ML Kit digital ink recognition (en-US, `com.google.mlkit:digital-ink-recognition:19.0.0`) — `recognizedText` stored in `HeadingObject`
+- **Model download conditions:** currently downloads on any network (~20–30 MB, one-time). Revisit when building user configuration options — this should be a user-facing setting (Wi-Fi only vs. any network). See `MlKitHandwritingRecognizer.initModel()` → `DownloadConditions.Builder()`.
 - Canvas text rendering (20sp inkBlack) when `recognizedText` non-null, else stroke render
 - Text edit dialog (stylus tap on selected heading) + `HeadingTextEdited` undo/redo
 - TOC (`TocDialog`) — topmost heading per page, paginated list, active entry indicator, dynamic page size
