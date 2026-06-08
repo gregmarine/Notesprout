@@ -1,8 +1,8 @@
-# NoteSprout
+# Notesprout
 
 > Where thoughts have a place to grow 🌱
 
-NoteSprout is an open source, handwriting-first notes app built for people who think on paper. Designed around the meditative experience of writing by hand, NoteSprout gives you fixed screen-size pages — no infinite scrolling, no clutter — backed by an intelligent document model that understands what you write. Built first for BOOX e-ink devices, expanding to Android tablets, Wacom devices, iPad, and web.
+Notesprout is an open source, handwriting-first notes app built for people who think on paper. Designed around the meditative experience of writing by hand, Notesprout gives you fixed screen-size pages — no infinite scrolling, no clutter — backed by an intelligent document model that understands what you write. Built first for BOOX e-ink devices, expanding to Android tablets, Wacom devices, iPad, and web.
 
 ---
 
@@ -43,7 +43,7 @@ NoteSprout is an open source, handwriting-first notes app built for people who t
 
 ## Philosophy
 
-NoteSprout is built around a single idea: writing by hand should feel like writing on paper, not fighting software. Read more in [docs/THE_SOIL.md](docs/THE_SOIL.md).
+Notesprout is built around a single idea: writing by hand should feel like writing on paper, not fighting software. Read more in [docs/THE_SOIL.md](docs/THE_SOIL.md).
 
 ---
 
@@ -55,4 +55,4 @@ Contributions are welcome. We call our contributors **Gardeners**. Whether you'r
 
 ## License
 
-MIT © NoteSprout contributors
+MIT © Notesprout contributors
