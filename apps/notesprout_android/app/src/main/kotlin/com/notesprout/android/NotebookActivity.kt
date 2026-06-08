@@ -1821,6 +1821,7 @@ class NotebookActivity : AppCompatActivity() {
         val pageId = currentPageId.takeIf { it.isNotEmpty() } ?: return
 
         // Apply to drawing view immediately (before DB write so the user sees it at once).
+        currentTemplateBitmap = bitmap
         drawingView.setTemplate(bitmap)
 
         // Persist the page's template property and record the undo action in the background.

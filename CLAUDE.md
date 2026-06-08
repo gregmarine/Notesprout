@@ -494,4 +494,4 @@ Never calls `eraseAll()`. Updates the in-memory stroke list directly, rebuilds b
 
 ---
 
-*Last updated: Renamed Drawing → Notebook throughout (NotebookActivity, NotebookView, OnyxNotebookView, GenericNotebookView, notebook/ package, activity_notebook.xml).
+*Last updated: Fix template disappearing after heading creation — `applyTemplateToCurrentPage` now updates `currentTemplateBitmap` alongside `drawingView.setTemplate()` so all subsequent operations (heading creation, undo/redo, erasing) receive the correct template bitmap. Affected both OnyxNotebookView and GenericNotebookView via the shared `loadStrokesWithBitmap` contract.*
