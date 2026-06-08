@@ -253,8 +253,9 @@ Lightweight items; address opportunistically.
   `AutoCloseable`; `MlKitHandwritingRecognizer.close()` marked `override`. Added
   `HandwritingRecognizerProvider.shutdown()` which closes and nulls the instance. Wired into
   `NoteSproutApplication.onTerminate()`. Builds clean.
-- **L-6 · Clipboard retains content process-wide** — `NoteSproutClipboard.kt`. No `Context` held
-  (no leak), just retention until overwritten; consider clearing on notebook close.
+- **L-6 · Clipboard retains content process-wide** ☑ Done — `closeNotebook()` in
+  `DrawingActivity` now calls `NoteSproutClipboard.clear()` alongside `undoRedoManager.clear()`.
+  Clipboard is wiped on both normal close and abnormal teardown paths. Builds clean.
 - **L-7 · `http://` BOOX Maven repo** — `settings.gradle.kts:14-17`. Build-time only, documented
   as required. Accepted; noted for completeness.
 - **L-8 · Snapshot staleness ignores headings** — `data/NotebookDao.kt:260`

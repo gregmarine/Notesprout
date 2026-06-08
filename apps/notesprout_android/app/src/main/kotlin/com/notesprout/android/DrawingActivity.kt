@@ -1225,8 +1225,9 @@ class DrawingActivity : AppCompatActivity() {
         val db = soilDatabase ?: return
         soilDatabase = null   // mark as closed before any potentially-throwing work
 
-        // Clear history and remove any on-disk persistence file — notebook is done.
+        // Clear history, clipboard, and remove any on-disk persistence file — notebook is done.
         undoRedoManager.clear()
+        NoteSproutClipboard.clear()
         val nbPath = intent.getStringExtra(EXTRA_NOTEBOOK_PATH)
         if (nbPath != null) undoRedoPersistenceFile(nbPath).takeIf { it.exists() }?.delete()
 
