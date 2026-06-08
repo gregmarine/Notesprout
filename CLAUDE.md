@@ -494,4 +494,4 @@ Never calls `clearCanvas()`. Updates the in-memory stroke list directly, rebuild
 
 ---
 
-*Last updated: Storage architecture migration — notebooks moved to `getExternalFilesDir(null)` (app-private external storage, no permissions required, Google Play compliant). Templates moved to `getExternalFilesDir("Templates")` with user-initiated import via `ACTION_OPEN_DOCUMENT` file picker; overwrite prompt if a template with the same name exists. `MANAGE_EXTERNAL_STORAGE` and `WRITE_EXTERNAL_STORAGE` removed from the manifest entirely.*
+*Last updated: Pruning pass complete — all C/M/L hardening items resolved. ML Kit bumped to `digital-ink-recognition:19.0.0` (16 KB page-size aligned). Soft-delete compaction added to seal path. Model download conditions (L-4) deferred to user configuration options feature.*
