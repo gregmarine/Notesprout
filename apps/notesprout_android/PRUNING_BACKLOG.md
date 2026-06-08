@@ -249,8 +249,10 @@ Lightweight items; address opportunistically.
   exports from prior runs are purged automatically. Builds clean.
 - **L-4 · ML Kit model downloads over any network** — `MlKitHandwritingRecognizer.kt:48-51`,
   default `DownloadConditions`. Consider `requireWifi()`.
-- **L-5 · Recognizer never closed** — `MlKitHandwritingRecognizer.close()` exists (`:117`) but
-  `HandwritingRecognizerProvider` has no shutdown hook.
+- **L-5 · Recognizer never closed** ☑ Done — `HandwritingRecognizer` interface now extends
+  `AutoCloseable`; `MlKitHandwritingRecognizer.close()` marked `override`. Added
+  `HandwritingRecognizerProvider.shutdown()` which closes and nulls the instance. Wired into
+  `NoteSproutApplication.onTerminate()`. Builds clean.
 - **L-6 · Clipboard retains content process-wide** — `NoteSproutClipboard.kt`. No `Context` held
   (no leak), just retention until overwritten; consider clearing on notebook close.
 - **L-7 · `http://` BOOX Maven repo** — `settings.gradle.kts:14-17`. Build-time only, documented

@@ -19,4 +19,10 @@ object HandwritingRecognizerProvider {
     internal fun init(recognizer: HandwritingRecognizer) {
         _instance = recognizer
     }
+
+    /** Called from NoteSproutApplication.onTerminate(). */
+    internal fun shutdown() {
+        _instance?.close()
+        _instance = null
+    }
 }

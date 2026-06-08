@@ -12,7 +12,7 @@ import com.notesprout.android.data.LiveStroke
  *   - MlKitHandwritingRecognizer (Google ML Kit, all devices)
  *   - Future: OnyxHwrHandwritingRecognizer (BOOX firmware AIDL bridge)
  */
-interface HandwritingRecognizer {
+interface HandwritingRecognizer : AutoCloseable {
 
     /**
      * Returns true if this recognizer is ready to process strokes.

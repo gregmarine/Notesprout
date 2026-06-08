@@ -18,6 +18,11 @@ class NoteSproutApplication : Application() {
         val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     }
 
+    override fun onTerminate() {
+        super.onTerminate()
+        com.notesprout.android.recognition.HandwritingRecognizerProvider.shutdown()
+    }
+
     override fun onCreate() {
         super.onCreate()
         // BOOX SDK uses reflection to call hidden Android system APIs (VMRuntime,

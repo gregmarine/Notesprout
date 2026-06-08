@@ -115,7 +115,7 @@ class MlKitHandwritingRecognizer : HandwritingRecognizer {
             }
     }
 
-    fun close() {
+    override fun close() {
         recognizer?.close()
         recognizer = null
         modelReady = false
