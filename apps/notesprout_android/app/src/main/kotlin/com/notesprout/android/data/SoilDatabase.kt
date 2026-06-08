@@ -42,9 +42,9 @@ abstract class SoilDatabase : RoomDatabase() {
             }
         }
 
-        // TODO(compaction): Future cleanup pass — when the user triggers "Compact Notebook",
-        // this is where we will: (1) hard-delete all soft-deleted objects, (2) strip stale
-        // snapshots from non-current pages or rebuild them fresh, (3) run PRAGMA incremental_vacuum
-        // + PRAGMA wal_checkpoint(TRUNCATE) to reclaim disk space. Do not implement now.
+        // Soft-delete compaction runs automatically at seal time (DrawingActivity.sealNotebook):
+        // rows soft-deleted before the current session are hard-deleted before incremental_vacuum,
+        // so SQLite can actually reclaim those pages. Snapshots are kept indefinitely by design
+        // (fast page-load on e-ink outweighs file-size cost).
     }
 }

@@ -259,4 +259,12 @@ interface NotebookDao {
      */
     @Query("SELECT MAX(updatedAt) FROM notebook WHERE type IN ('stroke', 'heading') AND parentId = :layerId")
     suspend fun getMaxContentUpdatedAt(layerId: String): Long?
+
+    /**
+     * Hard-delete all soft-deleted rows whose [NotebookObject.deletedAt] predates [before].
+     * Called at seal time with the session-start timestamp so only rows soft-deleted in
+     * previous sessions are purged — current-session deletes (still undoable) are left intact.
+     */
+    @Query("DELETE FROM notebook WHERE deletedAt IS NOT NULL AND deletedAt < :before")
+    suspend fun hardDeleteOldSoftDeleted(before: Long)
 }

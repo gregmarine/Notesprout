@@ -126,6 +126,7 @@ class DrawingActivity : AppCompatActivity() {
 
     /** Room DB instance for the open notebook. Null before open and after close. */
     private var soilDatabase: SoilDatabase? = null
+    private var sessionStartTime: Long = 0L
 
     /**
      * In-memory notebook metadata row.  Loaded once when the notebook is opened.
@@ -884,6 +885,7 @@ class DrawingActivity : AppCompatActivity() {
         // ── Open the Room DB ──────────────────────────────────────────────────
         val notebookPath = intent.getStringExtra(EXTRA_NOTEBOOK_PATH)
         if (notebookPath != null) {
+            sessionStartTime = System.currentTimeMillis()
             soilDatabase = Room.databaseBuilder(
                 applicationContext,
                 SoilDatabase::class.java,
@@ -1238,10 +1240,11 @@ class DrawingActivity : AppCompatActivity() {
         val snapshot = drawingView.captureSnapshot()
         val pageId   = currentPageId
 
+        val sessionStart = sessionStartTime
         if (blocking) {
-            runBlocking { sealNotebook(db, snapshot, pageId, nbPath) }
+            runBlocking { sealNotebook(db, snapshot, pageId, nbPath, sessionStart) }
         } else {
-            NoteSproutApplication.appScope.launch { sealNotebook(db, snapshot, pageId, nbPath) }
+            NoteSproutApplication.appScope.launch { sealNotebook(db, snapshot, pageId, nbPath, sessionStart) }
         }
     }
 
@@ -1255,12 +1258,17 @@ class DrawingActivity : AppCompatActivity() {
         snapshot: String?,
         pageId: String,
         nbPath: String?,
+        sessionStart: Long,
     ) = withContext(Dispatchers.IO) {
         // Persist snapshot for the page we are closing (mirrors navigateToPage).
         if (snapshot != null && pageId.isNotEmpty()) {
             persistSnapshot(db, pageId, snapshot)
         }
         saveStrokes(db)
+        // Hard-delete rows soft-deleted before this session — they predate the undo stack
+        // and can never be restored, so they are dead weight. Current-session soft-deletes
+        // (deletedAt >= sessionStart) are kept for undo/redo safety on abnormal teardown.
+        db.notebookDao().hardDeleteOldSoftDeleted(before = sessionStart)
         db.openHelper.writableDatabase.apply {
             query("PRAGMA incremental_vacuum").use { it.moveToFirst() }
             query("PRAGMA wal_checkpoint(TRUNCATE)").use { it.moveToFirst() }

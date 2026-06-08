@@ -261,9 +261,12 @@ Lightweight items; address opportunistically.
 - **L-8 · Snapshot staleness ignores headings** ☑ Done — Renamed `getMaxStrokeUpdatedAt` →
   `getMaxContentUpdatedAt`; query now uses `type IN ('stroke', 'heading')` so heading mutations
   are detected. Updated the one caller in `DrawingActivity`. Builds clean.
-- **L-9 · Compaction never runs** — `data/SoilDatabase.kt:45-48` `TODO(compaction)` unimplemented;
-  soft-deleted rows + per-page base64 snapshots make `.soil` grow monotonically. Expected by
-  design; long-term size concern.
+- **L-9 · Compaction never runs** ☑ Done (soft-deletes) — `DrawingActivity` captures
+  `sessionStartTime` on notebook open. `sealNotebook()` calls
+  `NotebookDao.hardDeleteOldSoftDeleted(before = sessionStart)` before `incremental_vacuum`,
+  purging rows soft-deleted in prior sessions (which can never be undone). Current-session
+  soft-deletes are preserved for undo safety. Snapshots kept indefinitely by design — fast
+  page-load on e-ink outweighs file-size cost. Builds clean.
 - **L-10 · ML Kit `libdigitalink.so` is not 16 KB-aligned** — `build.gradle.kts:88`
   (`com.google.mlkit:digital-ink-recognition:18.1.0`). Its arm64-v8a `.so` has ELF LOAD
   `p_align = 0x1000` (4 KB), the only remaining 16 KB-noncompliant native lib after M-5. Not a
