@@ -50,11 +50,11 @@ import com.notesprout.android.data.NotebookObject
 import com.notesprout.android.data.SoilDatabase
 import com.notesprout.android.data.StrokeData
 import com.notesprout.android.data.StrokePoint
-import com.notesprout.android.databinding.ActivityDrawingBinding
+import com.notesprout.android.databinding.ActivityNotebookBinding
 import com.notesprout.android.databinding.DialogEditHeadingTextBinding
-import com.notesprout.android.drawing.DrawingView
-import com.notesprout.android.drawing.GenericDrawingView
-import com.notesprout.android.drawing.OnyxDrawingView
+import com.notesprout.android.notebook.NotebookView
+import com.notesprout.android.notebook.GenericNotebookView
+import com.notesprout.android.notebook.OnyxNotebookView
 import com.notesprout.android.history.UndoRedoAction
 import com.notesprout.android.history.UndoRedoManager
 import com.notesprout.android.recognition.HandwritingRecognizer
@@ -72,7 +72,7 @@ import java.io.File
 import java.util.Locale
 import java.util.UUID
 
-class DrawingActivity : AppCompatActivity() {
+class NotebookActivity : AppCompatActivity() {
 
     companion object {
         private const val TAG = "Notesprout"
@@ -98,8 +98,8 @@ class DrawingActivity : AppCompatActivity() {
         val headings: List<HeadingStroke> = emptyList(),
     )
 
-    private lateinit var binding: ActivityDrawingBinding
-    private lateinit var drawingView: DrawingView
+    private lateinit var binding: ActivityNotebookBinding
+    private lateinit var drawingView: NotebookView
     private var isEraserActive = false
 
     // ── Lasso selection state ─────────────────────────────────────────────────
@@ -290,7 +290,7 @@ class DrawingActivity : AppCompatActivity() {
         controller.systemBarsBehavior =
             WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
 
-        binding = ActivityDrawingBinding.inflate(layoutInflater)
+        binding = ActivityNotebookBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
         // ── Toolbar ───────────────────────────────────────────────────────────
@@ -466,7 +466,7 @@ class DrawingActivity : AppCompatActivity() {
                     TocRepository(db.notebookDao()).buildTocEntries()
                 }
                 TocDialog(
-                    context = this@DrawingActivity,
+                    context = this@NotebookActivity,
                     entries = entries,
                     currentPageIndex = currentPageIndex,
                     onPageSelected = { pageId ->
@@ -512,7 +512,7 @@ class DrawingActivity : AppCompatActivity() {
         })
 
         // ── Drawing view ──────────────────────────────────────────────────────
-        drawingView = if (isBooxDevice()) OnyxDrawingView(this) else GenericDrawingView(this)
+        drawingView = if (isBooxDevice()) OnyxNotebookView(this) else GenericNotebookView(this)
 
         // Erase callback — soft-delete the stroke's DB row as soon as it leaves memory.
         drawingView.onStrokeErased = { strokeId ->
@@ -1655,7 +1655,7 @@ class DrawingActivity : AppCompatActivity() {
                 }
                 saveStrokes(db)
             }
-            val i = Intent(this@DrawingActivity, PageIndexActivity::class.java).apply {
+            val i = Intent(this@NotebookActivity, PageIndexActivity::class.java).apply {
                 putExtra(PageIndexActivity.EXTRA_NOTEBOOK_PATH, notebookPath)
                 putExtra(PageIndexActivity.EXTRA_CURRENT_PAGE_INDEX, currentPageIndex)
             }
@@ -1776,7 +1776,7 @@ class DrawingActivity : AppCompatActivity() {
             val pdfFile = try {
                 withContext(Dispatchers.IO) {
                     NotebookExporter.export(
-                        context = this@DrawingActivity,
+                        context = this@NotebookActivity,
                         db = db,
                         onProgress = { current, total ->
                             handler.post { tvMessage.text = "Exporting page $current of $total…" }
@@ -1785,7 +1785,7 @@ class DrawingActivity : AppCompatActivity() {
                 }
             } catch (e: Exception) {
                 dialog.dismiss()
-                android.widget.Toast.makeText(this@DrawingActivity, "Export failed: ${e.message}", android.widget.Toast.LENGTH_LONG).show()
+                android.widget.Toast.makeText(this@NotebookActivity, "Export failed: ${e.message}", android.widget.Toast.LENGTH_LONG).show()
                 return@launch
             }
             dialog.dismiss()
@@ -4493,7 +4493,7 @@ class DrawingActivity : AppCompatActivity() {
             val destFile = File(destDir, displayName)
 
             if (destFile.exists()) {
-                val dialog = AlertDialog.Builder(this@DrawingActivity)
+                val dialog = AlertDialog.Builder(this@NotebookActivity)
                     .setTitle("Template already exists")
                     .setMessage("\"${destFile.nameWithoutExtension}\" already exists. Overwrite it?")
                     .setPositiveButton("Overwrite") { _, _ ->

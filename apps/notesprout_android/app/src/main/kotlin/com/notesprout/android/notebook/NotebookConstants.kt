@@ -1,4 +1,4 @@
-package com.notesprout.android.drawing
+package com.notesprout.android.notebook
 
 const val DRAG_THRESHOLD_DP = 8f
 

@@ -19,7 +19,7 @@ import com.notesprout.android.data.LiveStroke
 import com.notesprout.android.data.NotebookMetadata
 import com.notesprout.android.data.SoilDatabase
 import com.notesprout.android.data.StrokeData
-import com.notesprout.android.drawing.HEADING_BACKGROUND_COLOR
+import com.notesprout.android.notebook.HEADING_BACKGROUND_COLOR
 import kotlinx.serialization.json.Json
 import org.json.JSONObject
 import java.io.File

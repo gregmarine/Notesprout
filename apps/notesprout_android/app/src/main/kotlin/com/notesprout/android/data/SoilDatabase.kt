@@ -7,7 +7,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 /**
  * Room database for a single `.soil` notebook file.
  *
- * **One instance per open notebook.** DrawingActivity owns the lifecycle:
+ * **One instance per open notebook.** NotebookActivity owns the lifecycle:
  * it opens this database when the notebook is entered and calls [close] when
  * the user leaves. Do NOT use a singleton pattern here.
  *
@@ -42,7 +42,7 @@ abstract class SoilDatabase : RoomDatabase() {
             }
         }
 
-        // Soft-delete compaction runs automatically at seal time (DrawingActivity.sealNotebook):
+        // Soft-delete compaction runs automatically at seal time (NotebookActivity.sealNotebook):
         // rows soft-deleted before the current session are hard-deleted before incremental_vacuum,
         // so SQLite can actually reclaim those pages. Snapshots are kept indefinitely by design
         // (fast page-load on e-ink outweighs file-size cost).

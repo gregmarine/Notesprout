@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Drawing screen — native equivalent of DrawingScreen in Flutter.
+<!-- Notebook screen — native equivalent of DrawingScreen in Flutter.
      Root FrameLayout: drawing container fills the entire screen; toolbar and page
      indicator overlay on top.
      z-order: drawingContainer (bottom) → toolbar → tvPageIndicator (top). -->
@@ -231,7 +231,7 @@
         android:textSize="16sp" />
 
     <!-- Floating selection context toolbar — appears below (or above) the lasso selection box.
-         Positioned programmatically in DrawingActivity.updateFloatingSelectionToolbar().
+         Positioned programmatically in NotebookActivity.updateFloatingSelectionToolbar().
          Contains actions that operate on the current lasso selection. -->
     <LinearLayout
         android:id="@+id/floatingSelectionToolbar"

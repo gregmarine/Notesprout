@@ -1,4 +1,4 @@
-package com.notesprout.android.drawing
+package com.notesprout.android.notebook
 
 import android.graphics.Bitmap
 import android.graphics.Path
@@ -10,7 +10,7 @@ import com.notesprout.android.data.LiveStroke
 
 // Option B: buildRenderBitmap + loadStrokesWithBitmap — pre-build bitmap on IO thread
 
-interface DrawingView {
+interface NotebookView {
     fun asView(): View
     fun setToolbarHeight(heightPx: Int)
     fun enableDrawing()
@@ -50,7 +50,7 @@ interface DrawingView {
     /**
      * Fired on the main thread when a snapshot has been captured at a non-writing
      * transition boundary (eraser mode, template change, window focus loss).
-     * DrawingActivity wires this to [persistSnapshot] so the snapshot is written to
+     * NotebookActivity wires this to [persistSnapshot] so the snapshot is written to
      * the page's `data` JSON in the DB.
      * Set this in onCreate; null by default.
      */
@@ -67,7 +67,7 @@ interface DrawingView {
     fun setLassoMode(active: Boolean) {}
 
     /**
-     * IDs of strokes currently selected by the lasso gesture.  Set by DrawingActivity
+     * IDs of strokes currently selected by the lasso gesture.  Set by NotebookActivity
      * in [onLassoComplete] after the hit test, and cleared in [onLassoTapToDismiss].
      * The view uses this to identify which strokes participate in a lasso drag move.
      */
@@ -88,7 +88,7 @@ interface DrawingView {
      * exceeded the distance threshold.
      * [originalStrokes]/[originalHeadings] — deep copies at positions before drag.
      * [movedStrokes]/[movedHeadings]       — same objects with all coordinates translated.
-     * DrawingActivity wires this to persist the new coordinates and push a [StrokesMoved]
+     * NotebookActivity wires this to persist the new coordinates and push a [StrokesMoved]
      * undo action.
      */
     var onStrokesMoved: ((
@@ -115,7 +115,7 @@ interface DrawingView {
     /**
      * Fired on the main thread when the lasso eraser gesture completes and at least one
      * stroke was hit.  [erasedIds] is the list of stroke IDs that intersect the closed
-     * lasso path.  DrawingActivity wires this to soft-delete those rows, update the
+     * lasso path.  NotebookActivity wires this to soft-delete those rows, update the
      * in-memory stroke list, and push a [UndoRedoAction.LassoErased] action.
      */
     var onLassoEraseComplete: ((erasedIds: List<String>) -> Unit)?
@@ -143,7 +143,7 @@ interface DrawingView {
     var onLassoTapToDismiss: (() -> Unit)?
 
     /**
-     * Fired on the main thread when a stylus tap (below [DrawingConstants.DRAG_THRESHOLD_DP])
+     * Fired on the main thread when a stylus tap (below [DRAG_THRESHOLD_DP])
      * occurs in lasso mode, regardless of whether a selection is active.
      * DrawingActivity uses this to trigger lasso paste when the clipboard has content
      * and no selection is currently active.
@@ -195,7 +195,7 @@ interface DrawingView {
     /**
      * Fired on the main thread when the eraser path intersects a heading's bounding box.
      * The heading has already been removed from the view's in-memory list before this fires.
-     * DrawingActivity wires this to soft-delete the heading row from the DB and push an
+     * NotebookActivity wires this to soft-delete the heading row from the DB and push an
      * undo action. The full [HeadingStroke] is passed so the caller has its data for undo.
      */
     var onHeadingErased: ((heading: HeadingStroke) -> Unit)?

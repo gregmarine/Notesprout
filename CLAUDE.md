@@ -99,7 +99,7 @@ CREATE INDEX IF NOT EXISTS idx_notebook_parent_order
 - Any raw SQL touching the `order` column must double-quote it: `"order"` — it is a SQLite reserved word. Room's generated DAO handles this automatically; only hand-written raw SQL is at risk
 - `closeNotebook()` must run `PRAGMA incremental_vacuum` + `PRAGMA wal_checkpoint(TRUNCATE)`, then `db.close()`, then delete any `-journal` artifact. This heavy seal lives in `suspend sealNotebook()` (`withContext(Dispatchers.IO)`) — **never `runBlocking` on the UI thread** (ANR risk scaling with stroke/snapshot size). User-initiated close (close button / back press) captures the snapshot on the main thread, launches `sealNotebook()` on `NotesproutApplication.appScope` (a never-cancelled `SupervisorJob + Dispatchers.IO` scope that outlives the activity — `lifecycleScope` would be cancelled by `onDestroy` mid-seal), and `finish()`es immediately. The `onDestroy()` safety net calls `closeNotebook(blocking = true)` (`runBlocking`) for abnormal teardown only; the normal path already nulled `soilDatabase`, so it no-ops. Reading strokes off-thread is safe: `getStrokes()` returns a copy and `releaseResources()` never mutates the stroke list.
 - **Any raw `SQLiteDatabase` opened on a `.soil` outside Room — even to only read — must open `OPEN_READWRITE`, not `OPEN_READONLY`.** A read-only WAL connection re-creates `-shm` on open and *cannot* unlink `-wal`/`-shm` on close (deletion needs write permission), so it permanently strands sidecars and violates the "folder shows only `.soil`" rule. Close such read connections via `SQLiteDatabase.checkpointTruncateAndClose(tag, file)` (`data/CoverLoader.kt`): it runs `wal_checkpoint(TRUNCATE)`, closes (so SQLite removes `-wal`/`-shm`), then deletes the empty `-journal` shell. Used by the cover/snapshot loaders (`CoverLoader.kt`, `MainActivity.loadLastPageSnapshot`).
-- Raw read-*write* helpers (`data/PageCopier.kt` `copyPageAfterRaw`/`movePageAfterRaw`/`deletePageRaw`) mirror the Room close path: `checkpointAndVacuum()` (incremental_vacuum + wal_checkpoint TRUNCATE) before `db.close()`, then `cleanStrayJournal()`. They must NOT delete `-wal`/`-shm` themselves — DrawingActivity keeps its Room connection open to the same file while these run; SQLite removes those when that last connection closes. Multi-step writes (e.g. `deletePageRaw`'s three soft-deletes) must be wrapped in `beginTransaction()`/`setTransactionSuccessful()`/`endTransaction()`.
+- Raw read-*write* helpers (`data/PageCopier.kt` `copyPageAfterRaw`/`movePageAfterRaw`/`deletePageRaw`) mirror the Room close path: `checkpointAndVacuum()` (incremental_vacuum + wal_checkpoint TRUNCATE) before `db.close()`, then `cleanStrayJournal()`. They must NOT delete `-wal`/`-shm` themselves — NotebookActivity keeps its Room connection open to the same file while these run; SQLite removes those when that last connection closes. Multi-step writes (e.g. `deletePageRaw`'s three soft-deletes) must be wrapped in `beginTransaction()`/`setTransactionSuccessful()`/`endTransaction()`.
 - Never silently swallow exceptions over raw DB ops — `Log.e` at minimum, and surface a user-visible failure (Toast) for write ops (see `PageIndexActivity` copy/move/delete).
 
 ---
@@ -278,10 +278,10 @@ Use device serials from the ADB Device Serials table above.
 ## Drawing Engine Architecture
 
 ### Files (package: `com.notesprout.android`)
-- `drawing/DrawingView.kt` — interface implemented by both engines; all drawing, lasso, heading, and snapshot operations flow through it
-- `drawing/OnyxDrawingView.kt` — BOOX path: TouchHelper, RawInputCallback. `onPenLifted` fires on `onEndRawDrawing`. `onBeginRawDrawing` re-enables render, guarded by `!isEraserMode`.
-- `drawing/GenericDrawingView.kt` — standard Android Canvas: two-layer Bitmap, stylus-only (`TOOL_TYPE_STYLUS` + `TOOL_TYPE_ERASER`), historical point capture. `onPenLifted` fires on `ACTION_UP`.
-- `DrawingActivity.kt` — fullscreen immersive, multi-page state, incremental save via `insertOrIgnore`, one-finger deliberate swipe for page navigation (three guards: distance ≥50% screen width, velocity ≥1.5× system fling threshold, horizontal dominance); two-finger swipe left/right inserts a new page after/before the current page and navigates to it (same three guards).
+- `notebook/NotebookView.kt` — interface implemented by both engines; all drawing, lasso, heading, and snapshot operations flow through it
+- `notebook/OnyxNotebookView.kt` — BOOX path: TouchHelper, RawInputCallback. `onPenLifted` fires on `onEndRawDrawing`. `onBeginRawDrawing` re-enables render, guarded by `!isEraserMode`.
+- `notebook/GenericNotebookView.kt` — standard Android Canvas: two-layer Bitmap, stylus-only (`TOOL_TYPE_STYLUS` + `TOOL_TYPE_ERASER`), historical point capture. `onPenLifted` fires on `ACTION_UP`.
+- `NotebookActivity.kt` — fullscreen immersive, multi-page state, incremental save via `insertOrIgnore`, one-finger deliberate swipe for page navigation (three guards: distance ≥50% screen width, velocity ≥1.5× system fling threshold, horizontal dominance); two-finger swipe left/right inserts a new page after/before the current page and navigates to it (same three guards).
 - `MainActivity.kt` — notebook list screen, adaptive grid (3/2 cols at 480dp), pagination, swipe, empty state, bottom bar.
 
 ### Key Build Facts
@@ -312,7 +312,7 @@ Use device serials from the ADB Device Serials table above.
 - `handwritingRepaint` after erase gesture ends only — NEVER during move events (causes full EPD flash per stroke).
 - `onBeginRawDrawing` re-enables render guarded by `!isEraserMode`.
 
-**setTemplate() EPD handoff (OnyxDrawingView):**
+**setTemplate() EPD handoff (OnyxNotebookView):**
 - `setRawDrawingRenderEnabled(false)` → `redrawCanvas()` → `EpdController.handwritingRepaint()` → `setRawDrawingEnabled(true)`. Without `handwritingRepaint`, the template change is invisible on e-ink until the next physical refresh.
 
 ### Performance Rules (Do Not Regress)
@@ -334,15 +334,15 @@ Use device serials from the ADB Device Serials table above.
 **Logging (verbose/debug only):**
 - Never call `Log.d` directly. Route all verbose/debug logging through `core/Slog.kt` — `Slog.d(tag) { "msg" }`. It is an `inline fun` gated on `BuildConfig.DEBUG`, so in release builds the message lambda is never evaluated (zero string-building cost on the e-ink per-stroke hot path) and nothing leaks to logcat (page UUIDs / layer IDs / sizes).
 - This is the actual stripping mechanism: `isMinifyEnabled = false`, so R8 cannot strip `Log` calls and a ProGuard `assumenosideeffects` rule would not fire. `buildConfig = true` is enabled in `build.gradle.kts` to generate `BuildConfig.DEBUG`.
-- `OnyxDrawingView.epd()` is `private inline fun epd(msg: () -> String)` delegating to `Slog.d` — all EPD-timing diagnostics are debug-only and free in release.
+- `OnyxNotebookView.epd()` is `private inline fun epd(msg: () -> String)` delegating to `Slog.d` — all EPD-timing diagnostics are debug-only and free in release.
 - `Log.e` / `Log.w` are kept (they must survive into release — see the raw-DB logging rule). Only verbose `Log.d` moves to `Slog`.
 
 ### Race condition — strokes missing on notebook reopen
 - `loadStrokes()` is called in `onCreate()` before view layout. Fix: `onSizeChanged()` calls `redrawCanvas()` (not just white fill) to replay all currently-loaded strokes regardless of load order. Applied to both drawing views.
 
-### Tool-state invariants across window focus changes (OnyxDrawingView)
+### Tool-state invariants across window focus changes (OnyxNotebookView)
 
-When a Dialog is shown over DrawingActivity, the activity's window loses focus → `onWindowFocusChanged(false)` fires → `touchHelper.setRawDrawingEnabled(false)`. When the Dialog is dismissed, focus returns → `onWindowFocusChanged(true)` → `openRawDrawing()`. This is also triggered by `onResume()` → `enableDrawing()` when returning from any sub-Activity.
+When a Dialog is shown over NotebookActivity, the activity's window loses focus → `onWindowFocusChanged(false)` fires → `touchHelper.setRawDrawingEnabled(false)`. When the Dialog is dismissed, focus returns → `onWindowFocusChanged(true)` → `openRawDrawing()`. This is also triggered by `onResume()` → `enableDrawing()` when returning from any sub-Activity.
 
 **The invariants that must be restored in `openRawDrawing()` and `enableDrawing()`:**
 
@@ -354,7 +354,7 @@ When a Dialog is shown over DrawingActivity, the activity's window loses focus �
 
 - `openRawDrawing()` and `enableDrawing()` must guard `setRawDrawingEnabled(true)` with `!isLassoMode && !isLassoEraserMode`. If that guard passes and `isEraserMode` is true, immediately follow with `setRawDrawingRenderEnabled(false)`.
 - Failing to restore these invariants causes phantom pen strokes to appear on the EPD overlay that are not captured by the app — they look real but are not persisted and vanish on the next EPD refresh.
-- Every other `setRawDrawingEnabled(true)` call site in `OnyxDrawingView` already carries these guards; `openRawDrawing()` and `enableDrawing()` are the two centralized re-entry points and must match.
+- Every other `setRawDrawingEnabled(true)` call site in `OnyxNotebookView` already carries these guards; `openRawDrawing()` and `enableDrawing()` are the two centralized re-entry points and must match.
 
 ---
 
@@ -384,7 +384,7 @@ When a Dialog is shown over DrawingActivity, the activity's window loses focus �
 - If `maxStroke > page.updatedAt`, the snapshot is stale — full render runs and a fresh snapshot is captured.
 - `persistSnapshot()` bumps `page.updatedAt` — this is the timestamp the stale check compares against.
 
-**Two-phase page load (`DrawingActivity.loadCurrentPage`):**
+**Two-phase page load (`NotebookActivity.loadCurrentPage`):**
 1. `setupPageIds(db)` — resolves `currentPageId` / `currentLayerId`
 2. `loadPageTemplateFromDb(db)` — decodes template bitmap (or null for blank)
 3. `tryLoadSnapshotBitmap(db, templateBitmap)` — staleness check + composite build. Returns null on miss.
@@ -412,7 +412,7 @@ When a Dialog is shown over DrawingActivity, the activity's window loses focus �
 
 ## Undo/Redo System
 
-- Unlimited undo/redo stack, scoped to a single `DrawingActivity` session (not persisted across process death).
+- Unlimited undo/redo stack, scoped to a single `NotebookActivity` session (not persisted across process death).
 - `history/UndoRedoAction.kt` — sealed class covering all action types: stroke add/erase, page add/delete/clear/copy/paste/move, lasso erase/cut/delete/paste/move, heading create/remove/text-edit.
 - `history/UndoRedoManager.kt` — `undoStack` / `redoStack` as `ArrayDeque`. Redo stack cleared on any new user action.
 
@@ -423,7 +423,7 @@ Do NOT call `saveAndSwitchPage()` for cross-page undo/redo — it calls `eraseAl
 Never calls `eraseAll()`. Updates the in-memory stroke list directly, rebuilds bitmap off-thread with `currentTemplateBitmap`, swaps via `loadStrokesWithBitmap`. Keep `persistedStrokeIds` in sync.
 
 **`currentTemplateBitmap` field:**
-`DrawingActivity` holds `private var currentTemplateBitmap: Bitmap?` set in `displayPage()`. Used by the same-page path to avoid re-reading the DB.
+`NotebookActivity` holds `private var currentTemplateBitmap: Bitmap?` set in `displayPage()`. Used by the same-page path to avoid re-reading the DB.
 
 ---
 
@@ -454,11 +454,11 @@ Never calls `eraseAll()`. Updates the in-memory stroke list directly, rebuilds b
 - Notebook list (MainActivity) — adaptive grid, pagination, cover images, Set Cover, Delete notebook
 - New-notebook dialog pre-fills filename with `YYYYMMDD_HHmmss` timestamp (`java.time.LocalDateTime`, editable before confirm)
 - New-notebook name validation (`MainActivity.validateNotebookName()`) — shared gate enforced at the dialog and re-checked defensively inside `createNotebook` before any file is opened. Whitelists `[^a-zA-Z0-9_\-. ]` (excludes `/` `\`) + explicit `.`/`..` reject to block path traversal (C-2); rejects a name whose `.soil` file already `exists()` to prevent reopening an existing notebook and inserting a duplicate `type='notebook'` row (C-1). Notebooks live in `getExternalFilesDir(null)` via `notesDir()` — no storage permissions required
-- DrawingActivity — fullscreen immersive, multi-page, incremental save, one-finger deliberate swipe, two-finger swipe to insert page before/after
+- NotebookActivity — fullscreen immersive, multi-page, incremental save, one-finger deliberate swipe, two-finger swipe to insert page before/after
 - Dual-install build variants — debug (`.dev` suffix) + release side-by-side
 
 **Drawing & Tools:**
-- OnyxDrawingView (BOOX/TouchHelper) + GenericDrawingView (standard Canvas)
+- OnyxNotebookView (BOOX/TouchHelper) + GenericNotebookView (standard Canvas)
 - Template system — filesystem scan, per-notebook storage, inherit on new page
 - Page Snapshot System — transparent PNG in page `data`, two-phase load, staleness detection
 - Undo/Redo — session-scoped, all action types
@@ -490,8 +490,8 @@ Never calls `eraseAll()`. Updates the in-memory stroke list directly, rebuilds b
 - Output to `context.cacheDir/<title>.pdf`, exposed via `FileProvider` (`res/xml/file_paths.xml`, `${applicationId}.fileprovider`) with `Intent.ACTION_SEND` share sheet
 - Share intent **must** include `clipData = ClipData.newRawUri("", uri)` alongside `FLAG_GRANT_READ_URI_PERMISSION` — on Android 12+ the chooser intermediary does not forward URI permissions to the final target app without `ClipData` (causes silent Google Drive upload failure on NA5C)
 - Progress dialog (non-cancellable, `shape_bordered`, no animation): "Exporting page X of N…" via `Handler(Looper.getMainLooper())`
-- Entry points: DrawingActivity toolbar (`btnExport`, after Cover) and MainActivity long-press context menu (Export as first item, opens Room DB read-only, closes after export)
+- Entry points: NotebookActivity toolbar (`btnExport`, after Cover) and MainActivity long-press context menu (Export as first item, opens Room DB read-only, closes after export)
 
 ---
 
-*Last updated: Rebranded NoteSprout → Notesprout throughout (identifiers, strings, styles, comments, CLAUDE.md). GitHub repo and local folder renamed to Notesprout.*
+*Last updated: Renamed Drawing → Notebook throughout (NotebookActivity, NotebookView, OnyxNotebookView, GenericNotebookView, notebook/ package, activity_notebook.xml).

@@ -14,7 +14,7 @@ import kotlinx.serialization.json.Json
  * The database is the source of truth; [UndoRedoAction] carries only the IDs needed to
  * soft-delete or restore rows.
  *
- * Thread safety: all public methods are called from the main thread inside DrawingActivity.
+ * Thread safety: all public methods are called from the main thread inside NotebookActivity.
  * No synchronisation needed.
  */
 class UndoRedoManager {

@@ -105,15 +105,15 @@ class PageIndexActivity : AppCompatActivity() {
     /** ID of the page being moved (set when move mode is entered). */
     private var moveModeSourcePageId: String? = null
 
-    /** Stable ID of the currently-open page in DrawingActivity — used to recompute
+    /** Stable ID of the currently-open page in NotebookActivity — used to recompute
      *  [currentPageIndex] after a move reshuffles the pages list. */
     private var currentPageId: String? = null
 
-    /** Paste operations performed this session — returned to DrawingActivity for undo/redo. */
+    /** Paste operations performed this session — returned to NotebookActivity for undo/redo. */
     private val pastedActions  = mutableListOf<Pair<String, Int>>()          // (pageId, pageIndex)
-    /** Delete operations performed this session — returned to DrawingActivity for undo/redo. */
+    /** Delete operations performed this session — returned to NotebookActivity for undo/redo. */
     private val deletedActions = mutableListOf<Triple<String, Int, Long>>()  // (pageId, pageIndex, deletedAt)
-    /** Move operations performed this session — returned to DrawingActivity for undo/redo. */
+    /** Move operations performed this session — returned to NotebookActivity for undo/redo. */
     private val movedActions   = mutableListOf<Triple<String, String?, String>>() // (pageId, prevAfterId, targetId)
 
     // ── Swipe gesture (left/right to paginate) ────────────────────────────────
@@ -165,7 +165,7 @@ class PageIndexActivity : AppCompatActivity() {
         binding.btnDeletePage.setOnClickListener { executeDelete() }
         binding.btnMovePage.setOnClickListener  { enterMoveMode() }
 
-        // Back gesture exits move/action mode; if already in normal mode, return to DrawingActivity.
+        // Back gesture exits move/action mode; if already in normal mode, return to NotebookActivity.
         onBackPressedDispatcher.addCallback(this, object : androidx.activity.OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
                 when {

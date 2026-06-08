@@ -12,7 +12,7 @@ import java.util.UUID
 private const val TAG = "PageCopier"
 
 /**
- * Mirrors the Room close path ([com.notesprout.android.DrawingActivity.closeNotebook]) for the
+ * Mirrors the Room close path ([com.notesprout.android.NotebookActivity.closeNotebook]) for the
  * raw [SQLiteDatabase] connections used by the `*Raw` helpers: flushes the WAL back into the
  * `.soil` file and reclaims free pages so the file stays clean (CLAUDE.md "folder shows only
  * `.soil` files" rule).
@@ -21,7 +21,7 @@ private const val TAG = "PageCopier"
  *
  * Call this immediately before [SQLiteDatabase.close]. Only the leftover rollback `-journal`
  * is deleted afterwards (see [cleanStrayJournal]); the `-wal`/`-shm` sidecars are NOT touched
- * here because [com.notesprout.android.DrawingActivity] keeps its own Room connection open to
+ * here because [com.notesprout.android.NotebookActivity] keeps its own Room connection open to
  * the same file while these helpers run — SQLite removes those when that last connection closes.
  */
 private fun SQLiteDatabase.checkpointAndVacuum() {
@@ -46,7 +46,7 @@ private fun cleanStrayJournal(notebookPath: String) {
  * Returns the new page's UUID, or null if the source page or its layer cannot be found.
  * Must be called on [Dispatchers.IO] (enforced internally by [withTransaction]).
  *
- * Used by [com.notesprout.android.DrawingActivity] which holds the Room connection.
+ * Used by [com.notesprout.android.NotebookActivity] which holds the Room connection.
  */
 suspend fun copyPageAfter(
     sourcePageId: String,
@@ -105,8 +105,8 @@ suspend fun copyPageAfter(
  * instead of Room.
  *
  * Used by [com.notesprout.android.PageIndexActivity], which operates without a Room
- * instance so DrawingActivity's open connection is not disturbed.  SQLite WAL mode
- * safely permits this single-writer access while DrawingActivity is paused.
+ * instance so NotebookActivity's open connection is not disturbed.  SQLite WAL mode
+ * safely permits this single-writer access while NotebookActivity is paused.
  *
  * Opens [notebookPath] as a writable database, performs the copy in one transaction,
  * then closes the connection.  Returns the new page's UUID, or null on any failure.
@@ -303,7 +303,7 @@ suspend fun movePageAfterRaw(
 
 /**
  * Soft-deletes [pageId] and all its descendants (layer + strokes) using a single shared
- * timestamp, matching the pattern used by DrawingActivity's deletePage().
+ * timestamp, matching the pattern used by NotebookActivity's deletePage().
  *
  * All three soft-delete calls use the same [deletedAt] so [restoreChildrenDeletedSince]
  * can recover exactly those rows on undo.

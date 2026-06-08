@@ -10,7 +10,7 @@ class NotesproutApplication : Application() {
     companion object {
         /**
          * Application-scoped coroutine scope for IO work that must outlive an Activity —
-         * notably the notebook file-seal in [DrawingActivity.closeNotebook], which finishes
+         * notably the notebook file-seal in [NotebookActivity.closeNotebook], which finishes
          * the activity immediately and lets the heavy save/checkpoint complete here instead
          * of blocking the UI thread. SupervisorJob so one failed seal can't cancel others;
          * never cancelled (lives as long as the process).

@@ -140,7 +140,7 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Fullscreen immersive — same pattern as DrawingActivity.
+        // Fullscreen immersive — same pattern as NotebookActivity.
         WindowCompat.setDecorFitsSystemWindows(window, false)
         val controller = WindowInsetsControllerCompat(window, window.decorView)
         controller.hide(WindowInsetsCompat.Type.systemBars())
@@ -383,7 +383,7 @@ class MainActivity : AppCompatActivity() {
      * [rowGap]
      * [label TextView — below the card, not inside it]
      * ```
-     * Tapping anywhere on the group opens the notebook in DrawingActivity.
+     * Tapping anywhere on the group opens the notebook in NotebookActivity.
      * A cover-load coroutine is launched immediately; its job is tracked in
      * [coverLoadJobs] so it can be cancelled when the grid is re-rendered.
      */
@@ -454,8 +454,8 @@ class MainActivity : AppCompatActivity() {
     // ── Notebook opening ──────────────────────────────────────────────────────
 
     private fun openNotebook(file: File) {
-        val intent = Intent(this, DrawingActivity::class.java).apply {
-            putExtra(DrawingActivity.EXTRA_NOTEBOOK_PATH, file.absolutePath)
+        val intent = Intent(this, NotebookActivity::class.java).apply {
+            putExtra(NotebookActivity.EXTRA_NOTEBOOK_PATH, file.absolutePath)
         }
         startActivity(intent)
     }
@@ -673,8 +673,8 @@ class MainActivity : AppCompatActivity() {
             }
 
             // Open the new notebook immediately — no need to tap it in the list.
-            val intent = Intent(this, DrawingActivity::class.java).apply {
-                putExtra(DrawingActivity.EXTRA_NOTEBOOK_PATH, soilFile.absolutePath)
+            val intent = Intent(this, NotebookActivity::class.java).apply {
+                putExtra(NotebookActivity.EXTRA_NOTEBOOK_PATH, soilFile.absolutePath)
             }
             startActivity(intent)
 
@@ -881,11 +881,11 @@ class MainActivity : AppCompatActivity() {
      * (e.g. name.soil-wal, name.soil-shm, name.soil-journal) on the IO dispatcher,
      * then refreshes the grid on the main thread.
      *
-     * Guard note: DrawingActivity manages its own Room instance; there is no shared
+     * Guard note: NotebookActivity manages its own Room instance; there is no shared
      * database handle in MainActivity.  If a user somehow reaches this path while the
-     * notebook is open in DrawingActivity (which the normal back-stack makes impossible),
+     * notebook is open in NotebookActivity (which the normal back-stack makes impossible),
      * deleting the file while Room holds it open is safe on Android — the process-level
-     * file handle keeps data intact until DrawingActivity closes its instance.
+     * file handle keeps data intact until NotebookActivity closes its instance.
      */
     private fun deleteNotebook(file: File) {
         lifecycleScope.launch {

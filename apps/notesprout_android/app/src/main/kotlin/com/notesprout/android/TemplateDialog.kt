@@ -32,7 +32,7 @@ import org.json.JSONObject
 import java.io.File
 
 /**
- * Template selection dialog for DrawingActivity.
+ * Template selection dialog for NotebookActivity.
  *
  * Two tabs:
  *   All      — scans getExternalFilesDir("Templates") for .png files + "Blank" entry.

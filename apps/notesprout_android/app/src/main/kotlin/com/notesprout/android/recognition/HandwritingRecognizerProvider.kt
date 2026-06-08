@@ -4,7 +4,7 @@ package com.notesprout.android.recognition
  * App-level singleton that holds the active HandwritingRecognizer.
  *
  * Initialized once in NotesproutApplication.onCreate().
- * All callers (DrawingActivity, future text box logic, etc.) use
+ * All callers (NotebookActivity, future text box logic, etc.) use
  * HandwritingRecognizerProvider.instance to access recognition.
  */
 object HandwritingRecognizerProvider {

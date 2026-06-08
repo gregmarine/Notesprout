@@ -12,7 +12,7 @@ import kotlinx.serialization.Serializable
  * it carries full point arrays so undo/redo can reposition strokes without a DB round-trip.
  *
  * [layerId] is the parentId of the stroke row (= the content layer UUID) captured at
- * action-record time from DrawingActivity.currentLayerId.
+ * action-record time from NotebookActivity.currentLayerId.
  */
 @Serializable
 sealed class UndoRedoAction {

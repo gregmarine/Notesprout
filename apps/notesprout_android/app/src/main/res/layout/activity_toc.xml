@@ -15,7 +15,7 @@
         android:background="@drawable/shape_toc_panel_border"
         android:elevation="0dp">
 
-        <!-- Header row — 56dp to match DrawingActivity toolbar -->
+        <!-- Header row — 56dp to match NotebookActivity toolbar -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="56dp"

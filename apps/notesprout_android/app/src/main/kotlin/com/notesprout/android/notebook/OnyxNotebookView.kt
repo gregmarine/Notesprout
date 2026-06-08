@@ -1,4 +1,4 @@
-package com.notesprout.android.drawing
+package com.notesprout.android.notebook
 
 import android.content.Context
 import android.graphics.Bitmap
@@ -28,7 +28,7 @@ import com.onyx.android.sdk.pen.data.TouchPointList
 import java.io.ByteArrayOutputStream
 import java.util.UUID
 
-class OnyxDrawingView(context: Context) : View(context), DrawingView {
+class OnyxNotebookView(context: Context) : View(context), NotebookView {
 
     companion object {
         private const val TAG = "Notesprout"
@@ -165,7 +165,7 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
 
     private fun jitter() = (lassoEraserRandom.nextFloat() - 0.5f) * 8f  // ±4px
 
-    // ── DrawingView callbacks ────────────────────────────────────────────────
+    // ── NotebookView callbacks ────────────────────────────────────────────────
 
     override var onLassoTap: ((Float, Float) -> Unit)? = null
     override var onDragStarted: (() -> Unit)? = null
@@ -184,7 +184,7 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
 
     /**
      * Invoked (on main thread) at non-writing transition boundaries when a snapshot
-     * of the current strokes has been captured.  DrawingActivity wires this to persist
+     * of the current strokes has been captured.  NotebookActivity wires this to persist
      * the snapshot to the page's data JSON in the database.
      */
     override var onSnapshotReady: ((String) -> Unit)? = null
@@ -216,7 +216,7 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
                 // Flush any throttled-but-not-yet-drawn erase removals before the EPD repaint.
                 finalizeEraseRedraw()
                 post {
-                    EpdController.handwritingRepaint(this@OnyxDrawingView, Rect(0, 0, width, height))
+                    EpdController.handwritingRepaint(this@OnyxNotebookView, Rect(0, 0, width, height))
                     epd { "HANDWRITING_REPAINT caller=onEndRawDrawing_eraser" }
                 }
             }
@@ -262,7 +262,7 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
             // Flush any throttled-but-not-yet-drawn erase removals before the EPD repaint.
             finalizeEraseRedraw()
             post {
-                EpdController.handwritingRepaint(this@OnyxDrawingView, Rect(0, 0, width, height))
+                EpdController.handwritingRepaint(this@OnyxNotebookView, Rect(0, 0, width, height))
                 epd { "HANDWRITING_REPAINT caller=onEndRawErasing" }
             }
         }
@@ -744,7 +744,7 @@ class OnyxDrawingView(context: Context) : View(context), DrawingView {
         }
     }
 
-    // ── DrawingView interface ────────────────────────────────────────────────
+    // ── NotebookView interface ────────────────────────────────────────────────
 
     override fun asView(): View = this
 

@@ -1,4 +1,4 @@
-package com.notesprout.android.drawing
+package com.notesprout.android.notebook
 
 import android.content.Context
 import android.graphics.Bitmap
@@ -24,7 +24,7 @@ import java.util.UUID
 // Two-layer approach mirrors the Flutter implementation:
 //   committed layer — Bitmap accumulates finished strokes (redrawn only on stroke commit or clear)
 //   active layer    — current in-progress stroke drawn directly in onDraw per touch event
-class GenericDrawingView(context: Context) : View(context), DrawingView {
+class GenericNotebookView(context: Context) : View(context), NotebookView {
 
     companion object {
         private const val ERASER_RADIUS_PX = 15f
@@ -118,7 +118,7 @@ class GenericDrawingView(context: Context) : View(context), DrawingView {
         isAntiAlias = false
     }
 
-    // ── DrawingView callbacks ────────────────────────────────────────────────
+    // ── NotebookView callbacks ────────────────────────────────────────────────
 
     override var onStrokeErased: ((String) -> Unit)? = null
     override var onHeadingErased: ((HeadingStroke) -> Unit)? = null
@@ -547,7 +547,7 @@ class GenericDrawingView(context: Context) : View(context), DrawingView {
         return dx * dx + dy * dy
     }
 
-    // ── DrawingView interface ────────────────────────────────────────────────
+    // ── NotebookView interface ────────────────────────────────────────────────
 
     override fun asView(): View = this
     override fun setToolbarHeight(heightPx: Int) {}
@@ -810,7 +810,7 @@ class GenericDrawingView(context: Context) : View(context), DrawingView {
 
     /**
      * Capture snapshot when the app loses window focus — equivalent non-writing transition
-     * boundary to OnyxDrawingView.onWindowFocusChanged(false).
+     * boundary to OnyxNotebookView.onWindowFocusChanged(false).
      */
     override fun onWindowFocusChanged(hasWindowFocus: Boolean) {
         super.onWindowFocusChanged(hasWindowFocus)

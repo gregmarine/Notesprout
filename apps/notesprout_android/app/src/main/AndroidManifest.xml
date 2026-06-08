@@ -22,9 +22,9 @@
             </intent-filter>
         </activity>
 
-        <!-- Drawing screen — prevent recreation on rotation/resize so bitmap survives -->
+        <!-- Notebook screen — prevent recreation on rotation/resize so bitmap survives -->
         <activity
-            android:name=".DrawingActivity"
+            android:name=".NotebookActivity"
             android:exported="false"
             android:configChanges="orientation|keyboardHidden|screenSize|smallestScreenSize|screenLayout|density"
             android:windowSoftInputMode="stateHidden" />
