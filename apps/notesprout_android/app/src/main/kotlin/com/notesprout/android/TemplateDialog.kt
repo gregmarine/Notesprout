@@ -8,7 +8,6 @@ import android.graphics.Paint
 import android.graphics.PixelFormat
 import android.graphics.Rect
 import android.graphics.drawable.Drawable
-import android.os.Environment
 import android.util.Base64
 import android.util.Log
 import android.view.Gravity
@@ -36,7 +35,7 @@ import java.io.File
  * Template selection dialog for DrawingActivity.
  *
  * Two tabs:
- *   All      — scans /Documents/NoteSprout/Templates/ for .png files + "Blank" entry.
+ *   All      — scans getExternalFilesDir("Templates") for .png files + "Blank" entry.
  *   Notebook — lists type="template" rows already stored in the open notebook.
  *
  * Tapping an item immediately confirms the selection and dismisses the dialog.
@@ -58,6 +57,12 @@ class TemplateDialog(
     /** Called on the main thread when a template is confirmed.
      *  [templateId] is "" for Blank; [bitmap] is null for Blank. */
     private val onConfirm: (templateId: String, bitmap: Bitmap?) -> Unit,
+    /**
+     * Called when the user taps "Import Template". Caller should launch a file picker and, when
+     * a file is imported, invoke [onDone] on the main thread so the list can refresh.
+     * Null = import button is hidden.
+     */
+    private val onRequestImport: ((onDone: () -> Unit) -> Unit)? = null,
 ) {
 
     // ── Internal item models ─────────────────────────────────────────────────
@@ -78,26 +83,21 @@ class TemplateDialog(
 
     // ── Data loading (IO thread) ─────────────────────────────────────────────
 
+    private fun templatesDir(): File = activity.getExternalFilesDir("Templates")!!
+
+    private fun scanFileItems(): List<FileItem> {
+        val dir = templatesDir().also { it.mkdirs() }
+        val pngFiles = dir.listFiles { f -> f.isFile && f.name.lowercase().endsWith(".png") }
+            ?.sortedBy { it.name.lowercase() } ?: emptyList()
+        return pngFiles.map { file -> FileItem(file, loadScaledBitmap(file, THUMB_PX)) }
+    }
+
     private suspend fun loadData(): Triple<List<FileItem>, List<NotebookItem>, String> {
         // Current page template id
         val page = db.notebookDao().getObjectById(pageId)
         val currentTemplateId = page?.let { parseTemplateId(it.data) } ?: ""
 
-        // Scan /Documents/NoteSprout/Templates/
-        val templatesDir = File(
-            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS),
-            "NoteSprout/Templates",
-        )
-        val pngFiles: List<File> = if (templatesDir.exists()) {
-            templatesDir.listFiles { f ->
-                f.isFile && f.name.lowercase().endsWith(".png")
-            }?.sortedBy { it.name.lowercase() } ?: emptyList()
-        } else {
-            emptyList()
-        }
-        val fileItems = pngFiles.map { file ->
-            FileItem(file, loadScaledBitmap(file, THUMB_PX))
-        }
+        val fileItems = scanFileItems()
 
         // Notebook templates
         val nbObjects = db.notebookDao().getTemplatesSorted()
@@ -127,6 +127,9 @@ class TemplateDialog(
         val hasNotebookTemplates = notebookItems.isNotEmpty()
         // 4 columns on large-screen devices (NA5C: 1860px); 2 on smaller (P2P, GC7: ≤1264px).
         val numColumns = if (ctx.resources.displayMetrics.widthPixels >= 1500) 4 else 2
+
+        // Mutable so it can be refreshed after a template import.
+        val currentFileItems = fileItems.toMutableList()
 
         // Default tab: "Notebook" if it has content; otherwise "All"
         var activeTab = if (hasNotebookTemplates) TAB_NOTEBOOK else TAB_ALL
@@ -170,11 +173,35 @@ class TemplateDialog(
             ),
         )
 
+        // ── Import bar (All tab only) ─────────────────────────────────────────
+        val padV = (6 * density).toInt()
+        val importBar = LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(gapPx, padV, gapPx, padV)
+            visibility = android.view.View.GONE
+        }
+        val importBtn = androidx.appcompat.widget.AppCompatTextView(ctx).apply {
+            text = "Import Template…"
+            textSize = 13f
+            setTextColor(ContextCompat.getColor(ctx, R.color.inkBlack))
+            setPadding(
+                (10 * density).toInt(), (6 * density).toInt(),
+                (10 * density).toInt(), (6 * density).toInt(),
+            )
+            setBackgroundResource(R.drawable.shape_bordered)
+        }
+        importBar.addView(importBtn, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT,
+        ))
+
         root.addView(tabRow, LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT,
         ))
         root.addView(divider, LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT, (1 * density).toInt(),
+        ))
+        root.addView(importBar, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT,
         ))
         root.addView(scrollView, LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f,
@@ -207,12 +234,14 @@ class TemplateDialog(
         )
 
         fun populateTab(tab: Int) {
+            importBar.visibility = if (tab == TAB_ALL && onRequestImport != null)
+                android.view.View.VISIBLE else android.view.View.GONE
             gridContainer.removeAllViews()
 
             val cells: List<Cell> = when (tab) {
                 TAB_ALL -> buildList {
                     add(Cell("Blank", null, currentTemplateId.isEmpty()) { onItemClicked("", null) })
-                    for (item in fileItems) {
+                    for (item in currentFileItems) {
                         add(Cell(item.file.nameWithoutExtension, item.thumbnail, isSelected = false) {
                             lifecycleScope.launch {
                                 val (newId, fullBitmap) = withContext(Dispatchers.IO) {
@@ -266,6 +295,18 @@ class TemplateDialog(
 
                 gridContainer.addView(row, rowLp)
                 i += numColumns
+            }
+        }
+
+        // Wire import button now that populateTab is in scope.
+        importBtn.setOnClickListener {
+            onRequestImport?.invoke {
+                lifecycleScope.launch {
+                    val newItems = withContext(Dispatchers.IO) { scanFileItems() }
+                    currentFileItems.clear()
+                    currentFileItems.addAll(newItems)
+                    if (activeTab == TAB_ALL) populateTab(TAB_ALL)
+                }
             }
         }
 

@@ -1,16 +1,12 @@
 package com.notesprout.android
 
-import android.Manifest
 import android.content.Intent
-import android.content.pm.PackageManager
 import android.database.sqlite.SQLiteDatabase
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
-import android.os.Environment
-import android.provider.Settings
 import android.text.TextUtils
 import android.util.Base64
 import android.util.Log
@@ -139,27 +135,6 @@ class MainActivity : AppCompatActivity() {
         if (uri != null) onCoverImagePicked?.invoke(uri)
     }
 
-    // ── Storage permission launchers ──────────────────────────────────────────
-
-    /** API 29: request WRITE_EXTERNAL_STORAGE at runtime. */
-    private val writeStorageLauncher = registerForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { granted ->
-        if (granted) showNewNotebookDialog()
-        else Toast.makeText(this, "Storage permission is required to create notebooks", Toast.LENGTH_LONG).show()
-    }
-
-    /** API 30+: send user to the All Files Access settings screen. */
-    private val manageStorageLauncher = registerForActivityResult(
-        ActivityResultContracts.StartActivityForResult()
-    ) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && Environment.isExternalStorageManager()) {
-            showNewNotebookDialog()
-        } else {
-            Toast.makeText(this, "Storage access is required to create notebooks", Toast.LENGTH_LONG).show()
-        }
-    }
-
     // ── Lifecycle ─────────────────────────────────────────────────────────────
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -218,8 +193,7 @@ class MainActivity : AppCompatActivity() {
         binding.btnLastPage.setOnClickListener  { navigatePage(totalPages() - 1) }
 
         binding.btnNewNotebook.setOnClickListener {
-            if (hasStoragePermission()) showNewNotebookDialog()
-            else requestStoragePermission()
+            showNewNotebookDialog()
         }
     }
 
@@ -286,10 +260,9 @@ class MainActivity : AppCompatActivity() {
 
     // ── Notebook scanning ─────────────────────────────────────────────────────
 
-    /** Rescans the NoteSprout directory then renders the current page. */
+    /** Rescans the notebooks directory then renders the current page. */
     private fun scanAndRender() {
-        val docsDir   = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS)
-        val notesDir  = File(docsDir, "NoteSprout")
+        val notesDir = notesDir()
         notebooks = if (notesDir.exists()) {
             notesDir.listFiles { f -> f.isFile && f.extension == "soil" }
                 ?.sortedBy { it.nameWithoutExtension.lowercase() }
@@ -555,16 +528,15 @@ class MainActivity : AppCompatActivity() {
         }, 100)
     }
 
-    /** Notebooks live only under /Documents/NoteSprout/ — single source of the dir. */
-    private fun notesDir(): File =
-        File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS), "NoteSprout")
+    /** Notebooks live in the app's private external storage — no permissions required. */
+    private fun notesDir(): File = getExternalFilesDir(null)!!
 
     /**
      * Validates a proposed notebook name, returning a user-facing error message
      * or null if the name is safe to use. Shared gate for both creation hazards:
      *
      *  - **C-2 (path traversal):** a name containing `/`, `\`, or `..` would write
-     *    the `.soil` file outside /Documents/NoteSprout/. We whitelist the same
+     *    the `.soil` file outside the notebooks directory. We whitelist the same
      *    safe filename charset as [NotebookExporter] (`[^a-zA-Z0-9_\-. ]`), which
      *    already excludes both separators; the explicit `.`/`..` check covers the
      *    dot-only names the charset would otherwise allow.
@@ -929,28 +901,4 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // ── Storage permissions ───────────────────────────────────────────────────
-
-    private fun hasStoragePermission(): Boolean =
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            Environment.isExternalStorageManager()
-        } else {
-            ContextCompat.checkSelfPermission(this, Manifest.permission.WRITE_EXTERNAL_STORAGE) ==
-                PackageManager.PERMISSION_GRANTED
-        }
-
-    private fun requestStoragePermission() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            try {
-                val intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION).apply {
-                    data = Uri.parse("package:$packageName")
-                }
-                manageStorageLauncher.launch(intent)
-            } catch (e: Exception) {
-                manageStorageLauncher.launch(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION))
-            }
-        } else {
-            writeStorageLauncher.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE)
-        }
-    }
 }

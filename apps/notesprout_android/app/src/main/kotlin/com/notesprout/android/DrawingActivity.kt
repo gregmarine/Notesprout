@@ -13,6 +13,7 @@ import android.graphics.RectF
 import android.graphics.Region
 import android.net.Uri
 import android.os.Build
+import android.provider.OpenableColumns
 import android.os.Bundle
 import android.util.Base64
 import android.util.Log
@@ -193,6 +194,17 @@ class DrawingActivity : AppCompatActivity() {
         ActivityResultContracts.GetContent()
     ) { uri ->
         if (uri != null) onCoverImagePicked?.invoke(uri)
+    }
+
+    // ── Template import launcher ──────────────────────────────────────────────
+
+    /** Invoked on the main thread after a template file has been successfully imported. */
+    private var onTemplateImportDone: (() -> Unit)? = null
+
+    private val templateImportLauncher = registerForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) performTemplateImport(uri)
     }
 
     // ── Copy/paste clipboard ──────────────────────────────────────────────────
@@ -438,6 +450,10 @@ class DrawingActivity : AppCompatActivity() {
                 notebookId      = notebookId,
                 onConfirm       = { templateId, bitmap ->
                     applyTemplateToCurrentPage(templateId, bitmap)
+                },
+                onRequestImport = { onDone ->
+                    onTemplateImportDone = onDone
+                    templateImportLauncher.launch(arrayOf("image/png"))
                 },
             ).show()
         }
@@ -4454,4 +4470,44 @@ class DrawingActivity : AppCompatActivity() {
 
     private fun isBooxDevice() =
         Build.MANUFACTURER.lowercase(Locale.ROOT).contains("onyx")
+
+    // ── Template import ───────────────────────────────────────────────────────
+
+    private fun performTemplateImport(uri: Uri) {
+        lifecycleScope.launch {
+            val displayName = withContext(Dispatchers.IO) {
+                contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
+                    ?.use { c -> if (c.moveToFirst()) c.getString(0) else null }
+            } ?: "template.png"
+
+            val destDir = getExternalFilesDir("Templates")!!.also { it.mkdirs() }
+            val destFile = File(destDir, displayName)
+
+            if (destFile.exists()) {
+                val dialog = AlertDialog.Builder(this@DrawingActivity)
+                    .setTitle("Template already exists")
+                    .setMessage("\"${destFile.nameWithoutExtension}\" already exists. Overwrite it?")
+                    .setPositiveButton("Overwrite") { _, _ ->
+                        lifecycleScope.launch {
+                            withContext(Dispatchers.IO) { copyUriToFile(uri, destFile) }
+                            onTemplateImportDone?.invoke()
+                        }
+                    }
+                    .setNegativeButton("Cancel", null)
+                    .create()
+                dialog.show()
+                dialog.window?.setElevation(0f)
+                dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+            } else {
+                withContext(Dispatchers.IO) { copyUriToFile(uri, destFile) }
+                onTemplateImportDone?.invoke()
+            }
+        }
+    }
+
+    private fun copyUriToFile(uri: Uri, dest: File) {
+        contentResolver.openInputStream(uri)?.use { input ->
+            dest.outputStream().use { output -> input.copyTo(output) }
+        }
+    }
 }

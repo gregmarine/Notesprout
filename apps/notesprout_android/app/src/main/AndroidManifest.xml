@@ -1,13 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- API 29: legacy external storage write access -->
-    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
-    <!-- API 30+: unrestricted file manager access for /Documents/NoteSprout/ -->
-    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
-
     <application
-        android:requestLegacyExternalStorage="true"
         android:name=".NoteSproutApplication"
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
