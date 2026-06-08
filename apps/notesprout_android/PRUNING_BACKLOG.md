@@ -237,8 +237,10 @@ wider release) · 🟢 Low / Informational.
 
 Lightweight items; address opportunistically.
 
-- **L-1 · `allowBackup="true"` no rules** — `AndroidManifest.xml:12`. Undo-persistence files +
-  cached PDFs are backup-eligible. Add `dataExtractionRules`/`fullBackupContent` or set false.
+- **L-1 · `allowBackup="true"` no rules** ☑ Done — Added `res/xml/backup_rules.xml`
+  (`dataExtractionRules`, Android 12+) and `res/xml/backup_descriptor.xml` (`fullBackupContent`,
+  pre-12); both exclude `domain="cache"`. `.soil`/template files are in `getExternalFilesDir`
+  (OS-excluded from backup already). Wired into `AndroidManifest.xml`. Builds clean.
 - **L-2 · FileProvider scope is whole cache dir** — `res/xml/file_paths.xml:3` exposes
   `cache-path "."`. Not directly exploitable (per-URI grant, `exported=false`), but tighten to an
   `exported_pdfs/` subdir.
