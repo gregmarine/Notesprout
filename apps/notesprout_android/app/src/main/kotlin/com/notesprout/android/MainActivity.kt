@@ -567,7 +567,7 @@ class MainActivity : AppCompatActivity() {
 
             val notesDir  = notesDir()
             if (!notesDir.exists()) {
-                check(notesDir.mkdirs()) { "Failed to create NoteSprout directory at ${notesDir.absolutePath}" }
+                check(notesDir.mkdirs()) { "Failed to create Notesprout directory at ${notesDir.absolutePath}" }
             }
 
             val soilFile = File(notesDir, "$name.soil")

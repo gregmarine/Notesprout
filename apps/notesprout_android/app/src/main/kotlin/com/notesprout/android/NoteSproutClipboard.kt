@@ -4,7 +4,7 @@ import android.graphics.RectF
 import com.notesprout.android.data.HeadingStroke
 import com.notesprout.android.data.LiveStroke
 
-object NoteSproutClipboard {
+object NotesproutClipboard {
     data class ClipboardContent(
         val strokes: List<LiveStroke>,
         val headings: List<HeadingStroke>,

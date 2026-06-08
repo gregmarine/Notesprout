@@ -26,7 +26,7 @@
 
             <androidx.appcompat.widget.AppCompatImageButton
                 android:id="@+id/btnTocClose"
-                style="@style/Widget.NoteSprout.ToolbarButton"
+                style="@style/Widget.Notesprout.ToolbarButton"
                 android:src="@drawable/ic_arrow_left"
                 android:contentDescription="Back" />
 
@@ -76,13 +76,13 @@
 
             <androidx.appcompat.widget.AppCompatImageButton
                 android:id="@+id/btnTocFirst"
-                style="@style/Widget.NoteSprout.ToolbarButton"
+                style="@style/Widget.Notesprout.ToolbarButton"
                 android:src="@drawable/ic_page_first"
                 android:contentDescription="First page" />
 
             <androidx.appcompat.widget.AppCompatImageButton
                 android:id="@+id/btnTocPrev"
-                style="@style/Widget.NoteSprout.ToolbarButton"
+                style="@style/Widget.Notesprout.ToolbarButton"
                 android:layout_marginStart="4dp"
                 android:src="@drawable/ic_page_prev"
                 android:contentDescription="Previous page" />
@@ -99,14 +99,14 @@
 
             <androidx.appcompat.widget.AppCompatImageButton
                 android:id="@+id/btnTocNext"
-                style="@style/Widget.NoteSprout.ToolbarButton"
+                style="@style/Widget.Notesprout.ToolbarButton"
                 android:layout_marginEnd="4dp"
                 android:src="@drawable/ic_page_next"
                 android:contentDescription="Next page" />
 
             <androidx.appcompat.widget.AppCompatImageButton
                 android:id="@+id/btnTocLast"
-                style="@style/Widget.NoteSprout.ToolbarButton"
+                style="@style/Widget.Notesprout.ToolbarButton"
                 android:src="@drawable/ic_page_last"
                 android:contentDescription="Last page" />
 

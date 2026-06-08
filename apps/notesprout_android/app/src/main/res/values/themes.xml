@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
 
-    <style name="Theme.NoteSprout" parent="Theme.AppCompat.Light.NoActionBar">
+    <style name="Theme.Notesprout" parent="Theme.AppCompat.Light.NoActionBar">
         <!-- Brand palette — AppCompat-compatible attributes only -->
         <item name="colorPrimary">@color/inkBlack</item>
         <item name="colorPrimaryDark">@color/inkBlack</item>

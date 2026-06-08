@@ -46,13 +46,13 @@
 
             <androidx.appcompat.widget.AppCompatImageButton
                 android:id="@+id/btnFirstPage"
-                style="@style/Widget.NoteSprout.ToolbarButton"
+                style="@style/Widget.Notesprout.ToolbarButton"
                 android:src="@drawable/ic_page_first"
                 android:contentDescription="First page" />
 
             <androidx.appcompat.widget.AppCompatImageButton
                 android:id="@+id/btnPrevPage"
-                style="@style/Widget.NoteSprout.ToolbarButton"
+                style="@style/Widget.Notesprout.ToolbarButton"
                 android:layout_marginStart="4dp"
                 android:src="@drawable/ic_page_prev"
                 android:contentDescription="Previous page" />
@@ -72,13 +72,13 @@
 
             <androidx.appcompat.widget.AppCompatImageButton
                 android:id="@+id/btnNextPage"
-                style="@style/Widget.NoteSprout.ToolbarButton"
+                style="@style/Widget.Notesprout.ToolbarButton"
                 android:src="@drawable/ic_page_next"
                 android:contentDescription="Next page" />
 
             <androidx.appcompat.widget.AppCompatImageButton
                 android:id="@+id/btnLastPage"
-                style="@style/Widget.NoteSprout.ToolbarButton"
+                style="@style/Widget.Notesprout.ToolbarButton"
                 android:layout_marginStart="4dp"
                 android:src="@drawable/ic_page_last"
                 android:contentDescription="Last page" />
@@ -88,7 +88,7 @@
         <!-- New notebook button: right-aligned, vertically centred -->
         <androidx.appcompat.widget.AppCompatImageButton
             android:id="@+id/btnNewNotebook"
-            style="@style/Widget.NoteSprout.ToolbarButton"
+            style="@style/Widget.Notesprout.ToolbarButton"
             android:layout_alignParentEnd="true"
             android:layout_centerVertical="true"
             android:layout_marginEnd="16dp"

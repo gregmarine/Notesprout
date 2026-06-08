@@ -4,60 +4,60 @@
     <!-- ── Typography ── -->
 
     <!-- Base required by AAPT2 for dot-notation implicit parent chain -->
-    <style name="TextAppearance.NoteSprout" parent="@android:style/TextAppearance">
+    <style name="TextAppearance.Notesprout" parent="@android:style/TextAppearance">
         <item name="android:textColor">@color/inkBlack</item>
     </style>
 
-    <style name="TextAppearance.NoteSprout.DisplayLarge">
+    <style name="TextAppearance.Notesprout.DisplayLarge">
         <item name="android:textSize">57sp</item>
         <item name="android:textStyle">normal</item>
         <item name="android:textColor">@color/inkBlack</item>
         <item name="android:letterSpacing">-0.015</item>
     </style>
 
-    <style name="TextAppearance.NoteSprout.HeadlineLarge">
+    <style name="TextAppearance.Notesprout.HeadlineLarge">
         <item name="android:textSize">32sp</item>
         <item name="android:textStyle">normal</item>
         <item name="android:textColor">@color/inkBlack</item>
     </style>
 
-    <style name="TextAppearance.NoteSprout.HeadlineMedium">
+    <style name="TextAppearance.Notesprout.HeadlineMedium">
         <item name="android:textSize">28sp</item>
         <item name="android:textStyle">normal</item>
         <item name="android:textColor">@color/inkBlack</item>
     </style>
 
-    <style name="TextAppearance.NoteSprout.TitleLarge">
+    <style name="TextAppearance.Notesprout.TitleLarge">
         <item name="android:textSize">22sp</item>
         <item name="android:textStyle">bold</item>
         <item name="android:textColor">@color/inkBlack</item>
     </style>
 
-    <style name="TextAppearance.NoteSprout.TitleMedium">
+    <style name="TextAppearance.Notesprout.TitleMedium">
         <item name="android:textSize">16sp</item>
         <item name="android:textStyle">bold</item>
         <item name="android:textColor">@color/inkBlack</item>
     </style>
 
-    <style name="TextAppearance.NoteSprout.BodyLarge">
+    <style name="TextAppearance.Notesprout.BodyLarge">
         <item name="android:textSize">16sp</item>
         <item name="android:textStyle">normal</item>
         <item name="android:textColor">@color/inkBlack</item>
     </style>
 
-    <style name="TextAppearance.NoteSprout.BodyMedium">
+    <style name="TextAppearance.Notesprout.BodyMedium">
         <item name="android:textSize">14sp</item>
         <item name="android:textStyle">normal</item>
         <item name="android:textColor">@color/inkBlack</item>
     </style>
 
-    <style name="TextAppearance.NoteSprout.BodySmall">
+    <style name="TextAppearance.Notesprout.BodySmall">
         <item name="android:textSize">12sp</item>
         <item name="android:textStyle">normal</item>
         <item name="android:textColor">@color/inkLight</item>
     </style>
 
-    <style name="TextAppearance.NoteSprout.LabelLarge">
+    <style name="TextAppearance.Notesprout.LabelLarge">
         <item name="android:textSize">14sp</item>
         <item name="android:textStyle">normal</item>
         <item name="android:textColor">@color/inkBlack</item>
@@ -66,7 +66,7 @@
     <!-- ── Buttons ── -->
 
     <!-- Black fill, white text, 4dp radius, no elevation, no press effect -->
-    <style name="Widget.NoteSprout.ElevatedButton" parent="Widget.AppCompat.Button">
+    <style name="Widget.Notesprout.ElevatedButton" parent="Widget.AppCompat.Button">
         <item name="android:background">@drawable/btn_elevated_background</item>
         <item name="android:textColor">@color/paperWhite</item>
         <item name="android:textSize">14sp</item>
@@ -79,7 +79,7 @@
     </style>
 
     <!-- White fill, black text, 1dp black stroke, 4dp radius, no press effect -->
-    <style name="Widget.NoteSprout.OutlinedButton" parent="Widget.AppCompat.Button">
+    <style name="Widget.Notesprout.OutlinedButton" parent="Widget.AppCompat.Button">
         <item name="android:background">@drawable/shape_bordered</item>
         <item name="android:textColor">@color/inkBlack</item>
         <item name="android:textSize">14sp</item>
@@ -93,7 +93,7 @@
 
     <!-- Toolbar icon button — 44dp square, bg_toolbar_button StateListDrawable,
          10dp padding so the icon has breathing room. Selected state shows border. -->
-    <style name="Widget.NoteSprout.ToolbarButton" parent="">
+    <style name="Widget.Notesprout.ToolbarButton" parent="">
         <item name="android:layout_width">44dp</item>
         <item name="android:layout_height">44dp</item>
         <item name="android:background">@drawable/bg_toolbar_button</item>
@@ -103,7 +103,7 @@
     </style>
 
     <!-- Transparent background, black text, no press effect -->
-    <style name="Widget.NoteSprout.TextButton" parent="Widget.AppCompat.Button">
+    <style name="Widget.Notesprout.TextButton" parent="Widget.AppCompat.Button">
         <item name="android:background">@android:color/transparent</item>
         <item name="android:textColor">@color/inkBlack</item>
         <item name="android:textSize">14sp</item>

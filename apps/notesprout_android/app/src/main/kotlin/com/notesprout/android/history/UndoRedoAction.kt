@@ -161,10 +161,10 @@ sealed class UndoRedoAction {
 
     /**
      * User cut selected strokes/headings via the lasso cut tool — objects are soft-deleted
-     * and simultaneously written to [NoteSproutClipboard].
+     * and simultaneously written to [NotesproutClipboard].
      *
      * Undo: restores all [strokeIds] + [headingIds] from the DB (does not touch clipboard).
-     * Redo: re-soft-deletes [strokeIds] + [headingIds] and repopulates [NoteSproutClipboard]
+     * Redo: re-soft-deletes [strokeIds] + [headingIds] and repopulates [NotesproutClipboard]
      *       with [strokes] + [headings] + their union bounding box.
      *
      * [deletedAt] is the timestamp used for all soft-delete calls during the original cut.

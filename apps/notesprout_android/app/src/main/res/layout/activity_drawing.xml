@@ -34,7 +34,7 @@
         <!-- Close button: exits the notebook -->
         <androidx.appcompat.widget.AppCompatImageButton
             android:id="@+id/btnClose"
-            style="@style/Widget.NoteSprout.ToolbarButton"
+            style="@style/Widget.Notesprout.ToolbarButton"
             android:src="@drawable/ic_close"
             android:contentDescription="Close notebook" />
 
@@ -49,14 +49,14 @@
         <!-- Table of Contents button -->
         <androidx.appcompat.widget.AppCompatImageButton
             android:id="@+id/btnToc"
-            style="@style/Widget.NoteSprout.ToolbarButton"
+            style="@style/Widget.Notesprout.ToolbarButton"
             android:src="@drawable/ic_toc"
             android:contentDescription="Table of Contents" />
 
         <!-- Cover button: set notebook cover image -->
         <androidx.appcompat.widget.AppCompatImageButton
             android:id="@+id/btnCover"
-            style="@style/Widget.NoteSprout.ToolbarButton"
+            style="@style/Widget.Notesprout.ToolbarButton"
             android:layout_marginStart="4dp"
             android:src="@drawable/ic_polaroid"
             android:contentDescription="Set cover" />
@@ -64,7 +64,7 @@
         <!-- Export button: export notebook to PDF -->
         <androidx.appcompat.widget.AppCompatImageButton
             android:id="@+id/btnExport"
-            style="@style/Widget.NoteSprout.ToolbarButton"
+            style="@style/Widget.Notesprout.ToolbarButton"
             android:layout_marginStart="4dp"
             android:src="@drawable/ic_export"
             android:contentDescription="Export notebook" />
@@ -80,14 +80,14 @@
         <!-- Pen tool -->
         <androidx.appcompat.widget.AppCompatImageButton
             android:id="@+id/btnPen"
-            style="@style/Widget.NoteSprout.ToolbarButton"
+            style="@style/Widget.Notesprout.ToolbarButton"
             android:src="@drawable/ic_pen"
             android:contentDescription="Pen tool" />
 
         <!-- Eraser tool -->
         <androidx.appcompat.widget.AppCompatImageButton
             android:id="@+id/btnEraser"
-            style="@style/Widget.NoteSprout.ToolbarButton"
+            style="@style/Widget.Notesprout.ToolbarButton"
             android:layout_marginStart="4dp"
             android:src="@drawable/ic_eraser"
             android:contentDescription="Eraser tool" />
@@ -95,7 +95,7 @@
         <!-- Lasso eraser tool -->
         <androidx.appcompat.widget.AppCompatImageButton
             android:id="@+id/btnLassoEraser"
-            style="@style/Widget.NoteSprout.ToolbarButton"
+            style="@style/Widget.Notesprout.ToolbarButton"
             android:layout_marginStart="4dp"
             android:src="@drawable/ic_lasso_eraser"
             android:contentDescription="Lasso eraser" />
@@ -103,7 +103,7 @@
         <!-- Clear page -->
         <androidx.appcompat.widget.AppCompatImageButton
             android:id="@+id/btnClear"
-            style="@style/Widget.NoteSprout.ToolbarButton"
+            style="@style/Widget.Notesprout.ToolbarButton"
             android:layout_marginStart="4dp"
             android:src="@drawable/ic_clear"
             android:contentDescription="Clear page" />
@@ -111,7 +111,7 @@
         <!-- Lasso selection tool -->
         <androidx.appcompat.widget.AppCompatImageButton
             android:id="@+id/btnLasso"
-            style="@style/Widget.NoteSprout.ToolbarButton"
+            style="@style/Widget.Notesprout.ToolbarButton"
             android:layout_marginStart="4dp"
             android:src="@drawable/ic_lasso"
             android:contentDescription="Lasso selection" />
@@ -127,14 +127,14 @@
         <!-- Undo -->
         <androidx.appcompat.widget.AppCompatImageButton
             android:id="@+id/btnUndo"
-            style="@style/Widget.NoteSprout.ToolbarButton"
+            style="@style/Widget.Notesprout.ToolbarButton"
             android:src="@drawable/ic_undo"
             android:contentDescription="Undo" />
 
         <!-- Redo -->
         <androidx.appcompat.widget.AppCompatImageButton
             android:id="@+id/btnRedo"
-            style="@style/Widget.NoteSprout.ToolbarButton"
+            style="@style/Widget.Notesprout.ToolbarButton"
             android:layout_marginStart="4dp"
             android:src="@drawable/ic_redo"
             android:contentDescription="Redo" />
@@ -150,14 +150,14 @@
         <!-- Template picker -->
         <androidx.appcompat.widget.AppCompatImageButton
             android:id="@+id/btnTemplate"
-            style="@style/Widget.NoteSprout.ToolbarButton"
+            style="@style/Widget.Notesprout.ToolbarButton"
             android:src="@drawable/ic_template"
             android:contentDescription="Template" />
 
         <!-- Page index — same group as template, no separator -->
         <androidx.appcompat.widget.AppCompatImageButton
             android:id="@+id/btnPageIndex"
-            style="@style/Widget.NoteSprout.ToolbarButton"
+            style="@style/Widget.Notesprout.ToolbarButton"
             android:layout_marginStart="4dp"
             android:src="@drawable/ic_files"
             android:contentDescription="Page index" />
@@ -179,14 +179,14 @@
         <!-- Insert page before current -->
         <androidx.appcompat.widget.AppCompatImageButton
             android:id="@+id/btnInsertPageBefore"
-            style="@style/Widget.NoteSprout.ToolbarButton"
+            style="@style/Widget.Notesprout.ToolbarButton"
             android:src="@drawable/ic_insert_page_before"
             android:contentDescription="Insert page before" />
 
         <!-- Insert page after current -->
         <androidx.appcompat.widget.AppCompatImageButton
             android:id="@+id/btnInsertPageAfter"
-            style="@style/Widget.NoteSprout.ToolbarButton"
+            style="@style/Widget.Notesprout.ToolbarButton"
             android:layout_marginStart="4dp"
             android:src="@drawable/ic_insert_page_after"
             android:contentDescription="Insert page after" />
@@ -194,7 +194,7 @@
         <!-- Delete page -->
         <androidx.appcompat.widget.AppCompatImageButton
             android:id="@+id/btnDeletePage"
-            style="@style/Widget.NoteSprout.ToolbarButton"
+            style="@style/Widget.Notesprout.ToolbarButton"
             android:layout_marginStart="4dp"
             android:src="@drawable/ic_page_delete"
             android:contentDescription="Delete page" />
@@ -202,7 +202,7 @@
         <!-- Copy page — same group as page management controls -->
         <androidx.appcompat.widget.AppCompatImageButton
             android:id="@+id/btnCopyPage"
-            style="@style/Widget.NoteSprout.ToolbarButton"
+            style="@style/Widget.Notesprout.ToolbarButton"
             android:layout_marginStart="4dp"
             android:src="@drawable/ic_copy_page"
             android:contentDescription="Copy page" />
@@ -210,7 +210,7 @@
         <!-- Paste page — same group -->
         <androidx.appcompat.widget.AppCompatImageButton
             android:id="@+id/btnPastePage"
-            style="@style/Widget.NoteSprout.ToolbarButton"
+            style="@style/Widget.Notesprout.ToolbarButton"
             android:layout_marginStart="4dp"
             android:src="@drawable/ic_paste_page"
             android:contentDescription="Paste page" />
@@ -245,19 +245,19 @@
 
         <androidx.appcompat.widget.AppCompatImageButton
             android:id="@+id/btnLassoCopy"
-            style="@style/Widget.NoteSprout.ToolbarButton"
+            style="@style/Widget.Notesprout.ToolbarButton"
             android:src="@drawable/ic_copy_plus"
             android:contentDescription="Copy selection" />
 
         <androidx.appcompat.widget.AppCompatImageButton
             android:id="@+id/btnLassoCut"
-            style="@style/Widget.NoteSprout.ToolbarButton"
+            style="@style/Widget.Notesprout.ToolbarButton"
             android:src="@drawable/ic_cut"
             android:contentDescription="Cut selection" />
 
         <androidx.appcompat.widget.AppCompatImageButton
             android:id="@+id/btnLassoDelete"
-            style="@style/Widget.NoteSprout.ToolbarButton"
+            style="@style/Widget.Notesprout.ToolbarButton"
             android:src="@drawable/ic_lasso_delete"
             android:contentDescription="Delete selection" />
 
@@ -272,14 +272,14 @@
 
         <androidx.appcompat.widget.AppCompatImageButton
             android:id="@+id/btnMakeHeading"
-            style="@style/Widget.NoteSprout.ToolbarButton"
+            style="@style/Widget.Notesprout.ToolbarButton"
             android:src="@drawable/ic_h_1"
             android:contentDescription="Make Heading"
             android:visibility="gone" />
 
         <androidx.appcompat.widget.AppCompatImageButton
             android:id="@+id/btnUnheading"
-            style="@style/Widget.NoteSprout.ToolbarButton"
+            style="@style/Widget.Notesprout.ToolbarButton"
             android:src="@drawable/ic_heading_off"
             android:contentDescription="Remove Heading"
             android:visibility="gone" />
@@ -301,7 +301,7 @@
 
         <androidx.appcompat.widget.AppCompatImageButton
             android:id="@+id/btnLassoClearClipboard"
-            style="@style/Widget.NoteSprout.ToolbarButton"
+            style="@style/Widget.Notesprout.ToolbarButton"
             android:src="@drawable/ic_clipboard_x"
             android:contentDescription="Clear lasso clipboard" />
 

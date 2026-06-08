@@ -330,7 +330,7 @@ class TemplateDialog(
         populateTab(activeTab)
 
         dialog.show()
-        // Flat NoteSprout styling — applied after show() because window only exists then.
+        // Flat Notesprout styling — applied after show() because window only exists then.
         dialog.window?.setElevation(0f)
         dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
         // Constrain width to 90% of screen and height to 70% so the list is scrollable.
@@ -553,7 +553,7 @@ class TemplateDialog(
     // ── Shared helpers ────────────────────────────────────────────────────────
 
     companion object {
-        private const val TAG = "NoteSprout"
+        private const val TAG = "Notesprout"
         private const val TAB_ALL = 0
         private const val TAB_NOTEBOOK = 1
         // Grid thumbnail height in dp. Each cell takes half the dialog width; height is fixed so

@@ -1,11 +1,11 @@
-# NoteSprout — Claude Code Project Intelligence
+# Notesprout — Claude Code Project Intelligence
 
-## What is NoteSprout?
+## What is Notesprout?
 A handwriting-first, meditative notes app. Think paper, but smarter underneath. Built for e-ink devices first (BOOX), expanding to iPad, Android tablets, phones, and web.
 
 **Slogan:** "Where thoughts have a place to grow 🌱"
 **License:** MIT
-**Monorepo root:** ~/git/NoteSprout
+**Monorepo root:** ~/git/Notesprout
 
 ---
 
@@ -34,7 +34,7 @@ A handwriting-first, meditative notes app. Think paper, but smarter underneath. 
 - Drawing engine: abstracted — OnyxDrawingEngine (BOOX) and GenericDrawingEngine (all others)
 - Onyx SDK: onyxsdk-device:1.3.3 + onyxsdk-pen:1.5.4
 - Onyx SDK repo: `http://repo.boox.com/repository/maven-public/` (insecure protocol — required, do not change)
-- hiddenapibypass:4.3 from JitPack — required for Android 14+ BOOX devices (applied in `NoteSproutApplication.onCreate`)
+- hiddenapibypass:4.3 from JitPack — required for Android 14+ BOOX devices (applied in `NotesproutApplication.onCreate`)
 - Database: Room/SQLite (`.soil` files)
 - KSP: 2.2.20-2.0.4 (required for Room annotation processing with Kotlin 2.2.x)
 - AGP 8.11.1 + Kotlin 2.2.20 + Gradle 8.14
@@ -97,7 +97,7 @@ CREATE INDEX IF NOT EXISTS idx_notebook_parent_order
 - `wal_autocheckpoint` is connection-level only — must be re-applied in `SoilDatabase.openCallback()` every open via `SupportSQLiteDatabase.query(...).use { it.moveToFirst() }`
 - PRAGMAs that return a result set must use `rawQuery("PRAGMA ...", null).use { it.moveToFirst() }` — never `execSQL`, never bare `rawQuery` without consuming the cursor
 - Any raw SQL touching the `order` column must double-quote it: `"order"` — it is a SQLite reserved word. Room's generated DAO handles this automatically; only hand-written raw SQL is at risk
-- `closeNotebook()` must run `PRAGMA incremental_vacuum` + `PRAGMA wal_checkpoint(TRUNCATE)`, then `db.close()`, then delete any `-journal` artifact. This heavy seal lives in `suspend sealNotebook()` (`withContext(Dispatchers.IO)`) — **never `runBlocking` on the UI thread** (ANR risk scaling with stroke/snapshot size). User-initiated close (close button / back press) captures the snapshot on the main thread, launches `sealNotebook()` on `NoteSproutApplication.appScope` (a never-cancelled `SupervisorJob + Dispatchers.IO` scope that outlives the activity — `lifecycleScope` would be cancelled by `onDestroy` mid-seal), and `finish()`es immediately. The `onDestroy()` safety net calls `closeNotebook(blocking = true)` (`runBlocking`) for abnormal teardown only; the normal path already nulled `soilDatabase`, so it no-ops. Reading strokes off-thread is safe: `getStrokes()` returns a copy and `releaseResources()` never mutates the stroke list.
+- `closeNotebook()` must run `PRAGMA incremental_vacuum` + `PRAGMA wal_checkpoint(TRUNCATE)`, then `db.close()`, then delete any `-journal` artifact. This heavy seal lives in `suspend sealNotebook()` (`withContext(Dispatchers.IO)`) — **never `runBlocking` on the UI thread** (ANR risk scaling with stroke/snapshot size). User-initiated close (close button / back press) captures the snapshot on the main thread, launches `sealNotebook()` on `NotesproutApplication.appScope` (a never-cancelled `SupervisorJob + Dispatchers.IO` scope that outlives the activity — `lifecycleScope` would be cancelled by `onDestroy` mid-seal), and `finish()`es immediately. The `onDestroy()` safety net calls `closeNotebook(blocking = true)` (`runBlocking`) for abnormal teardown only; the normal path already nulled `soilDatabase`, so it no-ops. Reading strokes off-thread is safe: `getStrokes()` returns a copy and `releaseResources()` never mutates the stroke list.
 - **Any raw `SQLiteDatabase` opened on a `.soil` outside Room — even to only read — must open `OPEN_READWRITE`, not `OPEN_READONLY`.** A read-only WAL connection re-creates `-shm` on open and *cannot* unlink `-wal`/`-shm` on close (deletion needs write permission), so it permanently strands sidecars and violates the "folder shows only `.soil`" rule. Close such read connections via `SQLiteDatabase.checkpointTruncateAndClose(tag, file)` (`data/CoverLoader.kt`): it runs `wal_checkpoint(TRUNCATE)`, closes (so SQLite removes `-wal`/`-shm`), then deletes the empty `-journal` shell. Used by the cover/snapshot loaders (`CoverLoader.kt`, `MainActivity.loadLastPageSnapshot`).
 - Raw read-*write* helpers (`data/PageCopier.kt` `copyPageAfterRaw`/`movePageAfterRaw`/`deletePageRaw`) mirror the Room close path: `checkpointAndVacuum()` (incremental_vacuum + wal_checkpoint TRUNCATE) before `db.close()`, then `cleanStrayJournal()`. They must NOT delete `-wal`/`-shm` themselves — DrawingActivity keeps its Room connection open to the same file while these run; SQLite removes those when that last connection closes. Multi-step writes (e.g. `deletePageRaw`'s three soft-deletes) must be wrapped in `beginTransaction()`/`setTransactionSuccessful()`/`endTransaction()`.
 - Never silently swallow exceptions over raw DB ops — `Log.e` at minimum, and surface a user-visible failure (Toast) for write ops (see `PageIndexActivity` copy/move/delete).
@@ -106,7 +106,7 @@ CREATE INDEX IF NOT EXISTS idx_notebook_parent_order
 
 ## Design System — E-Ink First (Never Violate These)
 
-NoteSprout's visual language is designed for e-ink displays first. All other platforms inherit this aesthetic.
+Notesprout's visual language is designed for e-ink displays first. All other platforms inherit this aesthetic.
 
 **Palette (UI Chrome Only):**
 - `inkBlack` = `#000000`
@@ -132,7 +132,7 @@ NoteSprout's visual language is designed for e-ink displays first. All other pla
 **What NOT To Do (Design):**
 - No color in any UI chrome element
 - No shadows or elevation on any widget
-- No decorative animations — including activity/screen transitions. `android:windowAnimationStyle="@null"` is set in `Theme.NoteSprout` to suppress all system-default slide/fade transitions globally.
+- No decorative animations — including activity/screen transitions. `android:windowAnimationStyle="@null"` is set in `Theme.Notesprout` to suppress all system-default slide/fade transitions globally.
 - No pill-shaped buttons or fully sharp corners
 - Do not use Material Components — theme is `Theme.AppCompat.Light.NoActionBar`, buttons are `AppCompatButton` with explicit drawable backgrounds. `com.google.android.material` is not a dependency — do not add it.
 
@@ -146,7 +146,7 @@ NoteSprout's visual language is designed for e-ink displays first. All other pla
 
 - Icons: Tabler Icons, stroke-based, `@color/inkBlack`, 24dp VectorDrawables in `res/drawable/ic_*.xml`
 - `bg_toolbar_button` StateListDrawable: default = white fill, no border; selected/activated/pressed = white fill + 1.5dp black border
-- `Widget.NoteSprout.ToolbarButton` style: 44dp, `bg_toolbar_button`, 10dp padding; overridden to 36dp/7dp in `res/values-sw360dp/` for Palma2 Pro
+- `Widget.Notesprout.ToolbarButton` style: 44dp, `bg_toolbar_button`, 10dp padding; overridden to 36dp/7dp in `res/values-sw360dp/` for Palma2 Pro
 - Pen/eraser buttons: `isSelected = true` for persistent active-tool state
 - Dividers: `@color/inkBlack`, 1dp × 28dp
 - Undo/Redo buttons: statically always-enabled — tapping an empty stack silently does nothing (matches native BOOX behavior). Do not add alpha/tinting state.
@@ -204,7 +204,7 @@ When asked to install on one or more devices:
 
 ## Build Variants
 
-NoteSprout has two build variants:
+Notesprout has two build variants:
 
 - **Debug** (`com.notesprout.android.dev`) — active development build, installs alongside stable
 - **Release** (`com.notesprout.android`) — stable build, never overwritten accidentally
@@ -290,7 +290,7 @@ Use device serials from the ADB Device Serials table above.
 - `jniLibs.pickFirsts` for `libc++_shared.so`
 - `defaultConfig.ndk { abiFilters += "arm64-v8a" }` — every target device (BOOX, Wacom Movink, Supernote) is 64-bit ARM, so we ship only arm64-v8a. This drops the unused x86/x86_64/armeabi(-v7a) ABIs (smaller APK) and removes the only 4 KB-aligned native lib among them (mmkv's x86_64 `.so`) for Play 16 KB page-size compliance (M-5). **Do not** `exclude` the transitive `com.tencent:mmkv:1.0.19` — `onyxsdk-base` references it (`MMKVBuilder`, `DefaultSearchHistory`), so removing it risks a runtime `NoClassDefFoundError`; its arm64-v8a `libmmkv.so` is already 64 KB-aligned (16 KB-compliant). ML Kit `libdigitalink.so` is 16 KB-aligned as of `digital-ink-recognition:19.0.0` — no remaining arm64 16 KB offenders.
 - `org.gradle.java.home` in `gradle.properties` pins Temurin-17
-- `NoteSproutApplication.onCreate` calls `HiddenApiBypass.addHiddenApiExemptions("")` before any SDK init
+- `NotesproutApplication.onCreate` calls `HiddenApiBypass.addHiddenApiExemptions("")` before any SDK init
 - `setStrokeColor(Color.BLACK)` required on TouchHelper init — NoteAir5C color panel defaults to non-black
 - Toolbar z-order: toolbar must overlay the drawing container in a `FrameLayout` — native SurfaceView occludes siblings below it
 
@@ -472,7 +472,7 @@ Never calls `clearCanvas()`. Updates the in-memory stroke list directly, rebuild
 - Lasso selection — draw to select strokes + headings, drag to move, stay-until-switched
 - Lasso eraser — closed-path erase gesture with jitter overlay
 - Floating selection toolbar: Copy, Cut, Delete, Create/Remove Heading
-- Clipboard (`NoteSproutClipboard` singleton) — paste by stylus tap in lasso mode
+- Clipboard (`NotesproutClipboard` singleton) — paste by stylus tap in lasso mode
 - All lasso actions fully undo/redo with same-page optimized and cross-page two-phase paths
 
 **Headings & Text:**

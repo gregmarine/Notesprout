@@ -31,7 +31,7 @@ import java.util.UUID
 class OnyxDrawingView(context: Context) : View(context), DrawingView {
 
     companion object {
-        private const val TAG = "NoteSprout"
+        private const val TAG = "Notesprout"
         private const val EPD_TAG = "EPD_TIMING"
         // Suppresses EPD hardware auto-GC16 refresh mid-session; we control quality
         // refreshes explicitly via handwritingRepaint in clearCanvas() and after erasing.

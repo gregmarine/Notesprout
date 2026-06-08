@@ -6,7 +6,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import org.lsposed.hiddenapibypass.HiddenApiBypass
 
-class NoteSproutApplication : Application() {
+class NotesproutApplication : Application() {
     companion object {
         /**
          * Application-scoped coroutine scope for IO work that must outlive an Activity —

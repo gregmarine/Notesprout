@@ -75,7 +75,7 @@ import java.util.UUID
 class DrawingActivity : AppCompatActivity() {
 
     companion object {
-        private const val TAG = "NoteSprout"
+        private const val TAG = "Notesprout"
 
         /** Intent extra key — the absolute path to the `.soil` notebook file. */
         const val EXTRA_NOTEBOOK_PATH = "notebook_path"
@@ -309,7 +309,7 @@ class DrawingActivity : AppCompatActivity() {
 
         binding.btnDeletePage.setOnClickListener {
             val db = soilDatabase ?: return@setOnClickListener
-            // Confirmation dialog — flat NoteSprout style (elevation=0, shape_bordered).
+            // Confirmation dialog — flat Notesprout style (elevation=0, shape_bordered).
             val dialog = AlertDialog.Builder(this)
                 .setMessage("Delete this page?")
                 .setNegativeButton("Cancel", null)
@@ -427,7 +427,7 @@ class DrawingActivity : AppCompatActivity() {
                 enterLassoMode()
             } else {
                 // Already in lasso mode — toggle popup if clipboard has content.
-                if (NoteSproutClipboard.hasContent()) {
+                if (NotesproutClipboard.hasContent()) {
                     if (binding.lassoPopupToolbar.visibility == View.VISIBLE) {
                         hideLassoPopupToolbar()
                     } else {
@@ -702,7 +702,7 @@ class DrawingActivity : AppCompatActivity() {
                     return@tap
                 }
             }
-            if (selectedObjectIds.isEmpty() && NoteSproutClipboard.hasContent()) {
+            if (selectedObjectIds.isEmpty() && NotesproutClipboard.hasContent()) {
                 hideLassoPopupToolbar()
                 performLassoPaste(tapX, tapY)
             }
@@ -852,7 +852,7 @@ class DrawingActivity : AppCompatActivity() {
 
         // Wire the lasso popup Clear Clipboard button.
         binding.btnLassoClearClipboard.setOnClickListener {
-            NoteSproutClipboard.clear()
+            NotesproutClipboard.clear()
             updateLassoButtonIcon()
             hideLassoPopupToolbar()
         }
@@ -1213,7 +1213,7 @@ class DrawingActivity : AppCompatActivity() {
      * find [soilDatabase] already null — capturing here is the only reliable close-path hook.
      *
      * The heavy seal ([sealNotebook]) runs on [Dispatchers.IO]:
-     * - [blocking] = false (user-initiated close): launched on [NoteSproutApplication.appScope]
+     * - [blocking] = false (user-initiated close): launched on [NotesproutApplication.appScope]
      *   so it outlives this activity. [finish] fires immediately, off the seal — no ANR/jank
      *   on large notebooks. The null-guard below makes the later [onDestroy] call a no-op, so
      *   exactly one seal runs per notebook instance.
@@ -1229,7 +1229,7 @@ class DrawingActivity : AppCompatActivity() {
 
         // Clear history, clipboard, and remove any on-disk persistence file — notebook is done.
         undoRedoManager.clear()
-        NoteSproutClipboard.clear()
+        NotesproutClipboard.clear()
         val nbPath = intent.getStringExtra(EXTRA_NOTEBOOK_PATH)
         if (nbPath != null) undoRedoPersistenceFile(nbPath).takeIf { it.exists() }?.delete()
 
@@ -1244,7 +1244,7 @@ class DrawingActivity : AppCompatActivity() {
         if (blocking) {
             runBlocking { sealNotebook(db, snapshot, pageId, nbPath, sessionStart) }
         } else {
-            NoteSproutApplication.appScope.launch { sealNotebook(db, snapshot, pageId, nbPath, sessionStart) }
+            NotesproutApplication.appScope.launch { sealNotebook(db, snapshot, pageId, nbPath, sessionStart) }
         }
     }
 
@@ -2236,7 +2236,7 @@ class DrawingActivity : AppCompatActivity() {
         return union
     }
 
-    /** Copy the currently selected strokes/headings to [NoteSproutClipboard]. */
+    /** Copy the currently selected strokes/headings to [NotesproutClipboard]. */
     private fun performLassoCopy() {
         val ids = drawingView.lassoSelectedIds
         if (ids.isEmpty()) return
@@ -2244,7 +2244,7 @@ class DrawingActivity : AppCompatActivity() {
         val headings = drawingView.getHeadings().filter { it.id in ids }
         if (strokes.isEmpty() && headings.isEmpty()) return
         val box = computeUnionBoundingBox(strokes, headings)
-        NoteSproutClipboard.content = NoteSproutClipboard.ClipboardContent(
+        NotesproutClipboard.content = NotesproutClipboard.ClipboardContent(
             strokes  = strokes.map { LiveStroke(it.id, it.points.map { pt -> PointF(pt.x, pt.y) }) },
             headings = headings.map { h -> HeadingStroke(h.id, RectF(h.boundingBox),
                 h.strokes.map { s -> LiveStroke(s.id, s.points.map { PointF(it.x, it.y) }) },
@@ -2260,7 +2260,7 @@ class DrawingActivity : AppCompatActivity() {
      * selection, and shows the floating toolbar at the new selection box.
      */
     private fun performLassoPaste(tapX: Float, tapY: Float) {
-        val clip = NoteSproutClipboard.content ?: return
+        val clip = NotesproutClipboard.content ?: return
         val db = soilDatabase ?: return
         val pageId  = currentPageId.takeIf  { it.isNotEmpty() } ?: return
         val layerId = currentLayerId.takeIf { it.isNotEmpty() } ?: return
@@ -2379,7 +2379,7 @@ class DrawingActivity : AppCompatActivity() {
 
     /**
      * Cut the currently selected strokes/headings: soft-delete them and populate
-     * [NoteSproutClipboard].  Lasso mode stays active so the user can immediately paste.
+     * [NotesproutClipboard].  Lasso mode stays active so the user can immediately paste.
      */
     private fun performLassoCut() {
         val ids = drawingView.lassoSelectedIds
@@ -2400,7 +2400,7 @@ class DrawingActivity : AppCompatActivity() {
                 h.strokes.map { s -> LiveStroke(s.id, s.points.map { PointF(it.x, it.y) }) },
                 recognizedText = h.recognizedText)
         }
-        NoteSproutClipboard.content = NoteSproutClipboard.ClipboardContent(
+        NotesproutClipboard.content = NotesproutClipboard.ClipboardContent(
             strokes  = clipStrokes,
             headings = clipHeadings,
             boundingBox = box,
@@ -2799,7 +2799,7 @@ class DrawingActivity : AppCompatActivity() {
     /** Update btnLasso icon: ic_lasso_clipboard when clipboard has content, ic_lasso otherwise. */
     private fun updateLassoButtonIcon() {
         binding.btnLasso.setImageResource(
-            if (NoteSproutClipboard.hasContent()) R.drawable.ic_lasso_clipboard
+            if (NotesproutClipboard.hasContent()) R.drawable.ic_lasso_clipboard
             else R.drawable.ic_lasso
         )
     }
@@ -3147,7 +3147,7 @@ class DrawingActivity : AppCompatActivity() {
                 updatedHeadings = preUndoHeadings.filter { it.id !in headingIdsSet }
                 persistedStrokeIds.removeAll(idsSet)
                 val clipBox = computeUnionBoundingBox(action.strokes, action.headings)
-                NoteSproutClipboard.content = NoteSproutClipboard.ClipboardContent(
+                NotesproutClipboard.content = NotesproutClipboard.ClipboardContent(
                     strokes  = action.strokes.map { s -> LiveStroke(s.id, s.points.map { pt -> PointF(pt.x, pt.y) }) },
                     headings = action.headings.map { h -> HeadingStroke(h.id, RectF(h.boundingBox),
                         h.strokes.map { s -> LiveStroke(s.id, s.points.map { PointF(it.x, it.y) }) },
@@ -4098,7 +4098,7 @@ class DrawingActivity : AppCompatActivity() {
                 updatedHeadings = drawingView.getHeadings().filter { it.id !in headingIdsSet }
                 persistedStrokeIds.removeAll(idsSet)
                 val clipBox = computeUnionBoundingBox(action.strokes, action.headings)
-                NoteSproutClipboard.content = NoteSproutClipboard.ClipboardContent(
+                NotesproutClipboard.content = NotesproutClipboard.ClipboardContent(
                     strokes  = action.strokes.map { s -> LiveStroke(s.id, s.points.map { pt -> PointF(pt.x, pt.y) }) },
                     headings = action.headings.map { h -> HeadingStroke(h.id, RectF(h.boundingBox),
                         h.strokes.map { s -> LiveStroke(s.id, s.points.map { PointF(it.x, it.y) }) },
