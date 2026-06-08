@@ -494,4 +494,4 @@ Never calls `clearCanvas()`. Updates the in-memory stroke list directly, rebuild
 
 ---
 
-*Last updated: Pruning pass complete — all C/M/L hardening items resolved. ML Kit bumped to `digital-ink-recognition:19.0.0` (16 KB page-size aligned). Soft-delete compaction added to seal path. Model download conditions (L-4) deferred to user configuration options feature.*
+*Last updated: Rebranded NoteSprout → Notesprout throughout (identifiers, strings, styles, comments, CLAUDE.md). GitHub repo and local folder renamed to Notesprout.*
