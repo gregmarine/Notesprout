@@ -2,13 +2,13 @@ package com.notesprout.android.recognition
 
 import android.graphics.RectF
 import android.util.Log
-import com.google.mlkit.vision.digitalink.DigitalInkRecognition
-import com.google.mlkit.vision.digitalink.DigitalInkRecognitionModel
-import com.google.mlkit.vision.digitalink.DigitalInkRecognitionModelIdentifier
-import com.google.mlkit.vision.digitalink.DigitalInkRecognizerOptions
-import com.google.mlkit.vision.digitalink.Ink
-import com.google.mlkit.vision.digitalink.RecognitionContext
-import com.google.mlkit.vision.digitalink.WritingArea
+import com.google.mlkit.vision.digitalink.recognition.DigitalInkRecognition
+import com.google.mlkit.vision.digitalink.recognition.DigitalInkRecognitionModel
+import com.google.mlkit.vision.digitalink.recognition.DigitalInkRecognitionModelIdentifier
+import com.google.mlkit.vision.digitalink.recognition.DigitalInkRecognizerOptions
+import com.google.mlkit.vision.digitalink.recognition.Ink
+import com.google.mlkit.vision.digitalink.recognition.RecognitionContext
+import com.google.mlkit.vision.digitalink.recognition.WritingArea
 import com.google.mlkit.common.model.DownloadConditions
 import com.google.mlkit.common.model.RemoteModelManager
 import com.notesprout.android.core.Slog
@@ -16,7 +16,7 @@ import com.notesprout.android.data.LiveStroke
 
 class MlKitHandwritingRecognizer : HandwritingRecognizer {
 
-    private var recognizer: com.google.mlkit.vision.digitalink.DigitalInkRecognizer? = null
+    private var recognizer: com.google.mlkit.vision.digitalink.recognition.DigitalInkRecognizer? = null
     private var modelReady = false
 
     /** Called by HandwritingRecognizerProvider during app startup. */

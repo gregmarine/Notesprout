@@ -267,12 +267,12 @@ Lightweight items; address opportunistically.
   purging rows soft-deleted in prior sessions (which can never be undone). Current-session
   soft-deletes are preserved for undo safety. Snapshots kept indefinitely by design — fast
   page-load on e-ink outweighs file-size cost. Builds clean.
-- **L-10 · ML Kit `libdigitalink.so` is not 16 KB-aligned** — `build.gradle.kts:88`
-  (`com.google.mlkit:digital-ink-recognition:18.1.0`). Its arm64-v8a `.so` has ELF LOAD
-  `p_align = 0x1000` (4 KB), the only remaining 16 KB-noncompliant native lib after M-5. Not a
-  problem today — the app is sideloaded onto 4 KB-page BOOX devices, not on Play (see M-6) — but it
-  would block a future Play upload targeting Android 15+. Fix when distributing: bump ML Kit to a
-  16 KB-aligned release if one exists, else gate the upload on it. Surfaced during M-5.
+- **L-10 · ML Kit `libdigitalink.so` is not 16 KB-aligned** ☑ Done — Bumped
+  `com.google.mlkit:digital-ink-recognition` 18.1.0 → 19.0.0 (released Aug 2025, explicitly
+  targets 16 KB page-size support). Updated imports in `MlKitHandwritingRecognizer.kt` from
+  `digitalink.*` → `digitalink.recognition.*` (Google reorganized the package;
+  `RemoteModelManager`/`DownloadConditions` unchanged). Verified arm64-v8a `libdigitalink.so`
+  in the built APK: all PT_LOAD segments now `p_align = 0x4000` (16 KB). Builds clean.
 
 ---
 
