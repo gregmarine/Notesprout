@@ -1,5 +1,4 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Pre-API-31 full-backup rules. Mirrors backup_rules.xml. -->
+<!-- Pre-API-31 full-backup rules. Cache dir is auto-excluded by the OS in this format. -->
 <full-backup-content>
-    <exclude domain="cache" path="." />
 </full-backup-content>
