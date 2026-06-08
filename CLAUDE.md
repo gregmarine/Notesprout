@@ -12,7 +12,6 @@ A handwriting-first, meditative notes app. Think paper, but smarter underneath. 
 ## Monorepo Structure
 
 - apps/notesprout_android — Native Android app (primary active codebase)
-- apps/notesprout_flutter — Flutter app (reference only — do not add features here)
 
 ---
 
@@ -494,4 +493,4 @@ Never calls `eraseAll()`. Updates the in-memory stroke list directly, rebuilds b
 
 ---
 
-*Last updated: Fix template disappearing after heading creation — `applyTemplateToCurrentPage` now updates `currentTemplateBitmap` alongside `drawingView.setTemplate()` so all subsequent operations (heading creation, undo/redo, erasing) receive the correct template bitmap. Affected both OnyxNotebookView and GenericNotebookView via the shared `loadStrokesWithBitmap` contract.*
+*Last updated: Pruning — removed apps/notesprout_flutter (Flutter reference app, no longer needed; preserved in git history).*
