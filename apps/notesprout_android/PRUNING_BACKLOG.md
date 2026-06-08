@@ -174,7 +174,7 @@ wider release) · 🟢 Low / Informational.
   mmkv/Onyx) — tracked as **L-10**.
 
 ### M-6 · `MANAGE_EXTERNAL_STORAGE` is broad and Play-restricted
-- **Status:** ☐ Open
+- **Status:** ☑ Done
 - **Severity:** 🟡 Moderate
 - **Files:** `AndroidManifest.xml:7`
 - **Problem:** All-files access is the widest storage permission, needs special Play
@@ -183,7 +183,11 @@ wider release) · 🟢 Low / Informational.
 - **Fix approach:** Scope to MediaStore/SAF where feasible, or document the Play justification.
   (May stay as-is for sideloaded BOOX dev; revisit before distribution.)
 - **Verification:** App functions with the narrower permission, or a written justification exists.
-- **Notes/commit:** —
+- **Notes/commit:** Architectural migration to scoped storage — notebooks moved to
+  `getExternalFilesDir(null)`, templates to `getExternalFilesDir("Templates")` with
+  user-initiated import via `ACTION_OPEN_DOCUMENT`. `MANAGE_EXTERNAL_STORAGE`,
+  `WRITE_EXTERNAL_STORAGE`, and `requestLegacyExternalStorage` all removed from the
+  manifest. Zero storage permissions required. Commit `15e7980`.
 
 ### M-7 · Silently swallowed exceptions hide corruption
 - **Status:** ☑ Done
