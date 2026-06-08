@@ -246,17 +246,17 @@ interface NotebookDao {
     // ── Snapshot staleness check ──────────────────────────────────────────────
 
     /**
-     * The maximum [updatedAt] across ALL stroke rows (including soft-deleted) under
-     * [layerId].  Soft-deleted rows have [NotebookObject.updatedAt] set to their
-     * deletion timestamp, so this query detects both new strokes and erased strokes
-     * that occurred after the last snapshot.
+     * The maximum [updatedAt] across ALL stroke and heading rows (including soft-deleted)
+     * under [layerId].  Soft-deleted rows have [NotebookObject.updatedAt] set to their
+     * deletion timestamp, so this query detects new content, erased strokes, and mutated
+     * headings that occurred after the last snapshot.
      *
-     * Returns null if no stroke rows exist for the layer (blank page).
+     * Returns null if no content rows exist for the layer (blank page).
      *
      * Used in stale-snapshot detection: if the result exceeds the page row's
-     * [NotebookObject.updatedAt], the stored snapshot pre-dates a stroke change and
+     * [NotebookObject.updatedAt], the stored snapshot pre-dates a content change and
      * must be discarded in favour of a full re-render.
      */
-    @Query("SELECT MAX(updatedAt) FROM notebook WHERE type = 'stroke' AND parentId = :layerId")
-    suspend fun getMaxStrokeUpdatedAt(layerId: String): Long?
+    @Query("SELECT MAX(updatedAt) FROM notebook WHERE type IN ('stroke', 'heading') AND parentId = :layerId")
+    suspend fun getMaxContentUpdatedAt(layerId: String): Long?
 }

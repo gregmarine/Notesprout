@@ -258,10 +258,9 @@ Lightweight items; address opportunistically.
   Clipboard is wiped on both normal close and abnormal teardown paths. Builds clean.
 - **L-7 · `http://` BOOX Maven repo** — `settings.gradle.kts:14-17`. Build-time only, documented
   as required. Accepted; noted for completeness.
-- **L-8 · Snapshot staleness ignores headings** — `data/NotebookDao.kt:260`
-  (`getMaxStrokeUpdatedAt` filters `type='stroke'`). Masked today because DrawingActivity
-  re-snapshots on page-leave; latent if a future path mutates headings without re-snapshotting.
-  Add a comment / guard.
+- **L-8 · Snapshot staleness ignores headings** ☑ Done — Renamed `getMaxStrokeUpdatedAt` →
+  `getMaxContentUpdatedAt`; query now uses `type IN ('stroke', 'heading')` so heading mutations
+  are detected. Updated the one caller in `DrawingActivity`. Builds clean.
 - **L-9 · Compaction never runs** — `data/SoilDatabase.kt:45-48` `TODO(compaction)` unimplemented;
   soft-deleted rows + per-page base64 snapshots make `.soil` grow monotonically. Expected by
   design; long-term size concern.

@@ -1367,7 +1367,7 @@ class DrawingActivity : AppCompatActivity() {
 
         // Stale check: any stroke (including soft-deleted) updated after the snapshot?
         // Soft-deleted rows have updatedAt = deletedAt, so erased strokes are also detected.
-        val maxStroke = db.notebookDao().getMaxStrokeUpdatedAt(layerId) ?: 0L
+        val maxStroke = db.notebookDao().getMaxContentUpdatedAt(layerId) ?: 0L
         if (maxStroke > page.updatedAt) {
             Slog.d(TAG) { "tryLoadSnapshotBitmap: stale (maxStroke=$maxStroke > page=${page.updatedAt})" }
             return null
