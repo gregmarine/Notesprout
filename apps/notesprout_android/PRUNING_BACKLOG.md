@@ -241,9 +241,9 @@ Lightweight items; address opportunistically.
   (`dataExtractionRules`, Android 12+) and `res/xml/backup_descriptor.xml` (`fullBackupContent`,
   pre-12); both exclude `domain="cache"`. `.soil`/template files are in `getExternalFilesDir`
   (OS-excluded from backup already). Wired into `AndroidManifest.xml`. Builds clean.
-- **L-2 · FileProvider scope is whole cache dir** — `res/xml/file_paths.xml:3` exposes
-  `cache-path "."`. Not directly exploitable (per-URI grant, `exported=false`), but tighten to an
-  `exported_pdfs/` subdir.
+- **L-2 · FileProvider scope is whole cache dir** ☑ Done — Narrowed `file_paths.xml` from
+  `path="."` to `path="exported_pdfs/"`. Updated `NotebookExporter` to write into
+  `cacheDir/exported_pdfs/` (creates dir on first export). Builds clean.
 - **L-3 · Exported PDFs accumulate in cacheDir** — `NotebookExporter.kt:123-124`. Never cleaned;
   consider deleting old exports.
 - **L-4 · ML Kit model downloads over any network** — `MlKitHandwritingRecognizer.kt:48-51`,
