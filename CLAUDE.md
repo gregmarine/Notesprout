@@ -3,7 +3,7 @@
 ## What is Notesprout?
 A handwriting-first, meditative notes app. Think paper, but smarter underneath. Built for e-ink devices first (BOOX), expanding to iPad, Android tablets, phones, and web.
 
-**Slogan:** "Where thoughts have a place to grow 🌱"
+**Slogan:** "Where thought has a place to grow 🌱"
 **License:** MIT
 **Monorepo root:** ~/git/Notesprout
 
