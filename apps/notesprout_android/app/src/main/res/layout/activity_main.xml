@@ -6,6 +6,62 @@
     android:background="@color/paperWhite">
 
     <!--
+        Breadcrumb bar: always visible for consistent layout.
+        Back button and chips are hidden at root; chips populate when navigated into a subfolder.
+    -->
+    <LinearLayout
+        android:id="@+id/breadcrumbBar"
+        android:layout_width="match_parent"
+        android:layout_height="56dp"
+        android:orientation="horizontal"
+        android:background="@color/paperWhite"
+        android:gravity="center_vertical">
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnBreadcrumbBack"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:src="@drawable/ic_arrow_left"
+            android:contentDescription="Go up one folder"
+            android:visibility="invisible" />
+
+        <!-- 1dp vertical divider between back button and breadcrumb chips -->
+        <View
+            android:id="@+id/breadcrumbBackDivider"
+            android:layout_width="1dp"
+            android:layout_height="28dp"
+            android:background="@color/inkBlack"
+            android:visibility="invisible" />
+
+        <HorizontalScrollView
+            android:id="@+id/breadcrumbScrollView"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:scrollbars="none">
+
+            <LinearLayout
+                android:id="@+id/breadcrumbContainer"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:paddingStart="8dp"
+                android:paddingEnd="8dp"
+                android:paddingTop="4dp"
+                android:paddingBottom="4dp"
+                android:gravity="center_vertical" />
+
+        </HorizontalScrollView>
+
+    </LinearLayout>
+
+    <!-- 1dp separator below breadcrumb bar — always visible since the bar is always visible -->
+    <View
+        android:id="@+id/breadcrumbDivider"
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="@color/inkBlack" />
+
+    <!--
         Grid area: fills all vertical space above the bottom bar.
         Cards and the empty-state message are added programmatically.
     -->
@@ -16,13 +72,13 @@
         android:layout_weight="1" />
 
     <!--
-        Bottom bar: 1dp inkBlack top border, pagination centred, + button right-aligned.
-        Height 72dp — fits 44dp icon buttons with comfortable vertical padding.
+        Bottom bar: 1dp inkBlack top border, pagination centred, action buttons right-aligned.
+        Height 56dp — matches the notebook activity toolbar for uniformity.
     -->
     <RelativeLayout
         android:id="@+id/bottomBar"
         android:layout_width="match_parent"
-        android:layout_height="72dp"
+        android:layout_height="56dp"
         android:background="@color/paperWhite">
 
         <!-- Top border (1dp inkBlack) -->
@@ -85,15 +141,31 @@
 
         </LinearLayout>
 
-        <!-- New notebook button: right-aligned, vertically centred -->
-        <androidx.appcompat.widget.AppCompatImageButton
-            android:id="@+id/btnNewNotebook"
-            style="@style/Widget.Notesprout.ToolbarButton"
+        <!-- Right-side action buttons: New Notebook + New Folder, right-aligned -->
+        <LinearLayout
+            android:id="@+id/actionButtonsGroup"
+            android:layout_width="wrap_content"
+            android:layout_height="match_parent"
+            android:orientation="horizontal"
             android:layout_alignParentEnd="true"
             android:layout_centerVertical="true"
             android:layout_marginEnd="16dp"
-            android:src="@drawable/ic_new_notebook"
-            android:contentDescription="New notebook" />
+            android:gravity="center_vertical">
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnNewNotebook"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:src="@drawable/ic_new_notebook"
+                android:contentDescription="New notebook" />
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnNewFolder"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:layout_marginStart="4dp"
+                android:src="@drawable/ic_folder_plus"
+                android:contentDescription="New folder" />
+
+        </LinearLayout>
 
     </RelativeLayout>
 

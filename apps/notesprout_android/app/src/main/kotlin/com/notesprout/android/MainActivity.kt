@@ -24,6 +24,7 @@ import android.widget.PopupMenu
 import android.widget.Space
 import android.widget.TextView
 import android.widget.Toast
+import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
@@ -85,12 +86,24 @@ class MainActivity : AppCompatActivity() {
     // ── State ─────────────────────────────────────────────────────────────────
 
     private lateinit var binding: ActivityMainBinding
-    private var notebooks: List<File> = emptyList()
+
+    /** Unified list of folders then notebooks for the current directory, sorted alphabetically. */
+    private var items: List<NotebookListItem> = emptyList()
+
     private var currentPage = 0
     private var gridSpec: GridSpec? = null
 
     /** True when onResume fired before gridSpec was ready; renderPage deferred. */
     private var pendingScan = false
+
+    /**
+     * Navigation stack — root is always notesDir(). Navigating into a folder
+     * pushes onto this list; going back pops from it.
+     */
+    private val directoryStack: MutableList<File> = mutableListOf()
+
+    /** The directory currently being displayed. */
+    private val currentDirectory: File get() = directoryStack.last()
 
     // ── Color cache ───────────────────────────────────────────────────────────
 
@@ -150,8 +163,12 @@ class MainActivity : AppCompatActivity() {
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
+        // Root of the directory stack is always the notebooks directory.
+        directoryStack.add(notesDir())
+
         setupBottomBar()
         setupGridGestures()
+        setupBackNavigation()
 
         // Compute the grid specification once the gridContainer has been laid out
         // (width/height are 0 until the first layout pass).
@@ -184,6 +201,31 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    // ── Back navigation ───────────────────────────────────────────────────────
+
+    private fun navigateUpOneLevel() {
+        if (directoryStack.size > 1) {
+            directoryStack.removeLast()
+            currentPage = 0
+            scanAndRender()
+        }
+    }
+
+    private fun setupBackNavigation() {
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                if (directoryStack.size > 1) {
+                    navigateUpOneLevel()
+                } else {
+                    // At root — let the system handle it (finish / go to home).
+                    isEnabled = false
+                    onBackPressedDispatcher.onBackPressed()
+                    isEnabled = true
+                }
+            }
+        })
+    }
+
     // ── Bottom bar wiring ─────────────────────────────────────────────────────
 
     private fun setupBottomBar() {
@@ -192,9 +234,9 @@ class MainActivity : AppCompatActivity() {
         binding.btnNextPage.setOnClickListener  { navigatePage(currentPage + 1) }
         binding.btnLastPage.setOnClickListener  { navigatePage(totalPages() - 1) }
 
-        binding.btnNewNotebook.setOnClickListener {
-            showNewNotebookDialog()
-        }
+        binding.btnNewNotebook.setOnClickListener    { showNewNotebookDialog() }
+        binding.btnNewFolder.setOnClickListener      { showNewFolderDialog() }
+        binding.btnBreadcrumbBack.setOnClickListener { navigateUpOneLevel() }
     }
 
     // ── Grid gesture wiring ───────────────────────────────────────────────────
@@ -258,32 +300,105 @@ class MainActivity : AppCompatActivity() {
         )
     }
 
-    // ── Notebook scanning ─────────────────────────────────────────────────────
+    // ── Directory scanning ────────────────────────────────────────────────────
 
-    /** Rescans the notebooks directory then renders the current page. */
+    /** Rescans the current directory then renders the current page and breadcrumbs. */
     private fun scanAndRender() {
-        val notesDir = notesDir()
-        notebooks = if (notesDir.exists()) {
-            notesDir.listFiles { f -> f.isFile && f.extension == "soil" }
+        val dir = currentDirectory
+        val folders: List<NotebookListItem.Folder>
+        val notebooks: List<NotebookListItem.Notebook>
+        if (dir.exists()) {
+            folders = dir.listFiles { f -> f.isDirectory && !f.name.startsWith(".") }
+                ?.sortedBy { it.name.lowercase() }
+                ?.map { NotebookListItem.Folder(it.name, it) }
+                ?: emptyList()
+            notebooks = dir.listFiles { f -> f.isFile && f.extension == "soil" }
                 ?.sortedBy { it.nameWithoutExtension.lowercase() }
+                ?.map { NotebookListItem.Notebook(it) }
                 ?: emptyList()
         } else {
-            emptyList()
+            folders = emptyList()
+            notebooks = emptyList()
         }
+        items = folders + notebooks
 
         // Clamp currentPage to valid range after a rescan.
         val total = totalPages()
         currentPage = currentPage.coerceIn(0, (total - 1).coerceAtLeast(0))
 
+        buildBreadcrumbs()
         renderPage()
+    }
+
+    // ── Folder navigation ─────────────────────────────────────────────────────
+
+    private fun navigateIntoFolder(dir: File) {
+        directoryStack.add(dir)
+        currentPage = 0
+        scanAndRender()
+    }
+
+    // ── Breadcrumb bar ────────────────────────────────────────────────────────
+
+    private fun buildBreadcrumbs() {
+        val container = binding.breadcrumbContainer
+        container.removeAllViews()
+
+        val atRoot = directoryStack.size <= 1
+        val navVisibility = if (atRoot) View.INVISIBLE else View.VISIBLE
+        binding.btnBreadcrumbBack.visibility = navVisibility
+        binding.breadcrumbBackDivider.visibility = navVisibility
+
+        if (atRoot) return
+
+        val density = resources.displayMetrics.density
+        val padH = (12 * density).toInt()
+        val padV = (12 * density).toInt()
+        val sepPad = (6 * density).toInt()
+
+        directoryStack.forEachIndexed { index, dir ->
+            if (index > 0) {
+                val separator = AppCompatTextView(this).apply {
+                    text = "›"
+                    setTextColor(inkLightColor)
+                    textSize = 18f
+                    setPadding(sepPad, 0, sepPad, 0)
+                }
+                container.addView(separator)
+            }
+
+            val label = if (index == 0) "Notebooks" else dir.name
+            val chip = AppCompatTextView(this).apply {
+                text = label
+                setTextColor(inkBlackColor)
+                textSize = 18f
+                setPadding(padH, padV, padH, padV)
+                isClickable = true
+                isFocusable = true
+                // Pop the stack back to this depth, then reload.
+                setOnClickListener {
+                    while (directoryStack.size > index + 1) {
+                        directoryStack.removeLast()
+                    }
+                    currentPage = 0
+                    scanAndRender()
+                }
+            }
+            container.addView(chip)
+        }
+
+        // Auto-scroll so the deepest (rightmost) entry is visible.
+        binding.breadcrumbScrollView.post {
+            binding.breadcrumbScrollView.fullScroll(View.FOCUS_RIGHT)
+        }
     }
 
     // ── Rendering ─────────────────────────────────────────────────────────────
 
     private fun totalPages(): Int {
         val perPage = gridSpec?.itemsPerPage ?: return 1
-        if (perPage == 0 || notebooks.isEmpty()) return 1
-        return (notebooks.size + perPage - 1) / perPage
+        if (perPage == 0 || items.isEmpty()) return 1
+        return (items.size + perPage - 1) / perPage
     }
 
     /** Clears the grid container and populates it with the current page's cards. */
@@ -294,7 +409,7 @@ class MainActivity : AppCompatActivity() {
         val spec = gridSpec ?: return
         binding.gridContainer.removeAllViews()
 
-        if (notebooks.isEmpty()) {
+        if (items.isEmpty()) {
             renderEmptyState()
         } else {
             renderGrid(spec)
@@ -304,8 +419,13 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun renderEmptyState() {
+        val msg = if (directoryStack.size > 1) {
+            "Empty folder."
+        } else {
+            "No notebooks yet. Tap + to create one."
+        }
         val tv = AppCompatTextView(this).apply {
-            text = "No notebooks yet. Tap + to create one."
+            text = msg
             setTextColor(inkLightColor)
             textSize = 14f
             gravity = Gravity.CENTER
@@ -320,8 +440,8 @@ class MainActivity : AppCompatActivity() {
 
     private fun renderGrid(spec: GridSpec) {
         val start     = currentPage * spec.itemsPerPage
-        val end       = minOf(start + spec.itemsPerPage, notebooks.size)
-        val pageItems = notebooks.subList(start, end)
+        val end       = minOf(start + spec.itemsPerPage, items.size)
+        val pageItems = items.subList(start, end)
 
         // Outer container: vertically stacked rows, centred inside gridContainer.
         val gridLayout = LinearLayout(this).apply {
@@ -375,24 +495,32 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * Builds a single card group:
+     * Builds a single card group for a [NotebookListItem].
+     *
+     * Folder cards show the folder icon centred; no cover load is attempted.
+     * Notebook cards show the notebook icon as a fallback and async-load the cover.
+     *
      * ```
      * [card FrameLayout — shape_bordered, 1dp padding]
-     *   [coverImage — MATCH_PARENT, centerCrop; shown when a cover bitmap loads]
-     *   [icon — ic_notebook fallback, centered; shown when no cover is available]
+     *   [icon — centred; for notebooks, replaced by cover when one loads]
+     *   [coverImage — MATCH_PARENT, centerCrop; notebook only, shown when bitmap loads]
      * [rowGap]
-     * [label TextView — below the card, not inside it]
+     * [label TextView — below the card]
      * ```
-     * Tapping anywhere on the group opens the notebook in NotebookActivity.
-     * A cover-load coroutine is launched immediately; its job is tracked in
-     * [coverLoadJobs] so it can be cancelled when the grid is re-rendered.
      */
-    private fun buildCardGroup(file: File, spec: GridSpec): LinearLayout {
+    private fun buildCardGroup(item: NotebookListItem, spec: GridSpec): LinearLayout {
         val group = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity     = Gravity.CENTER_HORIZONTAL
-            setOnClickListener { openNotebook(file) }
-            setOnLongClickListener { showNotebookContextMenu(file, this); true }
+            when (item) {
+                is NotebookListItem.Folder -> {
+                    setOnClickListener { navigateIntoFolder(item.file) }
+                }
+                is NotebookListItem.Notebook -> {
+                    setOnClickListener { openNotebook(item.file) }
+                    setOnLongClickListener { showNotebookContextMenu(item.file, this); true }
+                }
+            }
         }
 
         // ── Card ─────────────────────────────────────────────────────────────
@@ -406,26 +534,52 @@ class MainActivity : AppCompatActivity() {
         val pad1dp  = (density + 0.5f).toInt()
         card.setPadding(pad1dp, pad1dp, pad1dp, pad1dp)
 
-        // Cover image — fills the card, crops to fit; hidden until a bitmap loads.
-        val coverImage = AppCompatImageView(this).apply {
-            scaleType  = ImageView.ScaleType.CENTER_CROP
-            visibility = View.GONE
-        }
-        card.addView(coverImage, FrameLayout.LayoutParams(
-            FrameLayout.LayoutParams.MATCH_PARENT,
-            FrameLayout.LayoutParams.MATCH_PARENT,
-        ))
-
-        // Fallback icon — centered, visible until a cover image is available.
         val iconSize = (minOf(spec.cardWidthPx, spec.cardHeightPx) * 0.45f).toInt()
-        val icon = AppCompatImageView(this).apply {
-            setImageResource(R.drawable.ic_notebook)
+
+        when (item) {
+            is NotebookListItem.Folder -> {
+                val icon = AppCompatImageView(this).apply {
+                    setImageResource(R.drawable.ic_folder)
+                }
+                card.addView(icon, FrameLayout.LayoutParams(iconSize, iconSize, Gravity.CENTER))
+            }
+            is NotebookListItem.Notebook -> {
+                // Cover image — fills the card, crops to fit; hidden until a bitmap loads.
+                val coverImage = AppCompatImageView(this).apply {
+                    scaleType  = ImageView.ScaleType.CENTER_CROP
+                    visibility = View.GONE
+                }
+                card.addView(coverImage, FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                ))
+
+                // Fallback icon — centered, visible until a cover image is available.
+                val icon = AppCompatImageView(this).apply {
+                    setImageResource(R.drawable.ic_notebook)
+                }
+                card.addView(icon, FrameLayout.LayoutParams(iconSize, iconSize, Gravity.CENTER))
+
+                // Async cover load.
+                val job = lifecycleScope.launch {
+                    val bitmap = loadNotebookCoverBitmap(item.file)
+                    if (bitmap != null) {
+                        coverImage.setImageBitmap(bitmap)
+                        coverImage.visibility = View.VISIBLE
+                        icon.visibility       = View.GONE
+                    }
+                }
+                coverLoadJobs.add(job)
+            }
         }
-        card.addView(icon, FrameLayout.LayoutParams(iconSize, iconSize, Gravity.CENTER))
 
         // ── Label (below the card) ────────────────────────────────────────────
+        val labelText = when (item) {
+            is NotebookListItem.Folder   -> item.name
+            is NotebookListItem.Notebook -> item.file.nameWithoutExtension
+        }
         val label = AppCompatTextView(this).apply {
-            text      = file.nameWithoutExtension
+            text      = labelText
             maxLines  = 1
             ellipsize = TextUtils.TruncateAt.END
             gravity   = Gravity.CENTER
@@ -435,18 +589,6 @@ class MainActivity : AppCompatActivity() {
         group.addView(label, LinearLayout.LayoutParams(spec.cardWidthPx, spec.labelHeightPx).also {
             it.topMargin = spec.rowGapPx
         })
-
-        // ── Cover load coroutine ──────────────────────────────────────────────
-        val job = lifecycleScope.launch {
-            val bitmap = loadNotebookCoverBitmap(file)
-            if (bitmap != null) {
-                coverImage.setImageBitmap(bitmap)
-                coverImage.visibility = View.VISIBLE
-                icon.visibility       = View.GONE
-            }
-            // No-cover branch: icon is already visible — nothing to update.
-        }
-        coverLoadJobs.add(job)
 
         return group
     }
@@ -528,8 +670,52 @@ class MainActivity : AppCompatActivity() {
         }, 100)
     }
 
-    /** Notebooks live in the app's private external storage — no permissions required. */
-    private fun notesDir(): File = getExternalFilesDir(null)!!
+    // ── New folder dialog ─────────────────────────────────────────────────────
+
+    private fun showNewFolderDialog() {
+        val dialogBinding = DialogNewNotebookBinding.inflate(layoutInflater)
+        dialogBinding.editNotebookName.setText("")
+        dialogBinding.editNotebookName.hint = "Folder name"
+
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("New Folder")
+            .setView(dialogBinding.root)
+            .setPositiveButton("Create") { _, _ ->
+                val name = dialogBinding.editNotebookName.text?.toString()?.trim().orEmpty()
+                val error = validateFolderName(name)
+                if (error != null) {
+                    Toast.makeText(this, error, Toast.LENGTH_SHORT).show()
+                } else {
+                    val dir = File(currentDirectory, name)
+                    if (!dir.mkdirs()) {
+                        Toast.makeText(this, "Failed to create folder", Toast.LENGTH_SHORT).show()
+                    } else {
+                        navigateIntoFolder(dir)
+                    }
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .create()
+
+        dialog.window?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE)
+        dialog.show()
+        dialog.window?.setElevation(0f)
+        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+
+        dialogBinding.editNotebookName.requestFocus()
+        dialogBinding.editNotebookName.postDelayed({
+            ViewCompat.getWindowInsetsController(dialogBinding.editNotebookName)
+                ?.show(WindowInsetsCompat.Type.ime())
+                ?: run {
+                    val imm = getSystemService(InputMethodManager::class.java)
+                    @Suppress("DEPRECATION")
+                    imm.showSoftInput(dialogBinding.editNotebookName, InputMethodManager.SHOW_IMPLICIT)
+                }
+        }, 100)
+    }
+
+    /** Notebooks live in a dedicated "Notebooks" subdirectory of the app's private external storage. */
+    private fun notesDir(): File = File(getExternalFilesDir(null)!!, "Notebooks")
 
     /**
      * Validates a proposed notebook name, returning a user-facing error message
@@ -550,8 +736,20 @@ class MainActivity : AppCompatActivity() {
         if (name.contains(Regex("[^a-zA-Z0-9_\\-. ]"))) {
             return "Name may only contain letters, numbers, spaces, and _ - ."
         }
-        if (File(notesDir(), "$name.soil").exists()) {
+        if (File(currentDirectory, "$name.soil").exists()) {
             return "A notebook named \"$name\" already exists"
+        }
+        return null
+    }
+
+    private fun validateFolderName(name: String): String? {
+        if (name.isBlank()) return "Folder name cannot be empty"
+        if (name == "." || name == "..") return "Invalid folder name"
+        if (name.contains(Regex("[^a-zA-Z0-9_\\-. ]"))) {
+            return "Name may only contain letters, numbers, spaces, and _ - ."
+        }
+        if (File(currentDirectory, name).exists()) {
+            return "A folder named \"$name\" already exists"
         }
         return null
     }
@@ -565,12 +763,12 @@ class MainActivity : AppCompatActivity() {
                 return
             }
 
-            val notesDir  = notesDir()
-            if (!notesDir.exists()) {
-                check(notesDir.mkdirs()) { "Failed to create Notesprout directory at ${notesDir.absolutePath}" }
+            val currentDir = currentDirectory
+            if (!currentDir.exists()) {
+                check(currentDir.mkdirs()) { "Failed to create directory at ${currentDir.absolutePath}" }
             }
 
-            val soilFile = File(notesDir, "$name.soil")
+            val soilFile = File(currentDir, "$name.soil")
 
             val db = SQLiteDatabase.openOrCreateDatabase(soilFile, null)
             try {
@@ -668,7 +866,9 @@ class MainActivity : AppCompatActivity() {
             scanAndRender()
             val spec = gridSpec
             if (spec != null && spec.itemsPerPage > 0) {
-                val idx = notebooks.indexOfFirst { it.nameWithoutExtension == name }
+                val idx = items.indexOfFirst {
+                    it is NotebookListItem.Notebook && it.file.nameWithoutExtension == name
+                }
                 if (idx >= 0) navigatePage(idx / spec.itemsPerPage)
             }
 

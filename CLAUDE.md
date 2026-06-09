@@ -493,6 +493,23 @@ Never calls `eraseAll()`. Updates the in-memory stroke list directly, rebuilds b
 - Progress dialog (non-cancellable, `shape_bordered`, no animation): "Exporting page X of N…" via `Handler(Looper.getMainLooper())`
 - Entry points: NotebookActivity toolbar (`btnExport`, after Cover) and MainActivity long-press context menu (Export as first item, opens Room DB read-only, closes after export)
 
+**Folder Navigation (MainActivity):**
+- Notebooks live in `getExternalFilesDir(null)/Notebooks/`. `notesDir()` returns `File(getExternalFilesDir(null)!!, "Notebooks")` — the "Notebooks" subdirectory is the root for all notebooks and user-created folders. Nothing else in `getExternalFilesDir(null)` (e.g. "Templates") is ever shown in the UI.
+- `NotebookListItem` — sealed class in `NotebookListItem.kt`:
+  - `NotebookListItem.Folder(name: String, file: File)` — a subdirectory
+  - `NotebookListItem.Notebook(file: File)` — a `.soil` file
+- `MainActivity.directoryStack: MutableList<File>` — navigation stack; root = `[notesDir()]`. `currentDirectory` is `directoryStack.last()`.
+- Scan order: folders first (alphabetical, case-insensitive), notebooks second (alphabetical). Dotfiles/hidden dirs are excluded.
+- Pagination applies to the combined `items: List<NotebookListItem>` list for `currentDirectory`.
+- Folder card: `ic_folder` icon centred, folder name label; tap pushes into folder. No cover image, no long-press menu. Creating a new folder automatically navigates into it.
+- Breadcrumb bar (`breadcrumbBar` LinearLayout, 56dp, always visible): back button (`btnBreadcrumbBack`) + vertical divider (`breadcrumbBackDivider`) are `INVISIBLE` at root and become visible when navigated into a subfolder. One `TextView` chip per stack entry at 18sp, separated by `›` (`inkLight`). Tapping a chip pops the stack to that depth. Auto-scrolls right to show the deepest entry.
+- Breadcrumb divider: 1dp inkBlack `View` (id `breadcrumbDivider`) below the bar — always visible since the bar is always visible.
+- Both the breadcrumb bar and bottom bar are 56dp — matching the notebook activity toolbar height.
+- New Folder button (`btnNewFolder`, `ic_folder_plus`) sits after `btnNewNotebook` in the bottom bar; `validateFolderName()` applies the same whitelist as `validateNotebookName()` plus a directory-exists check.
+- Android back button / gesture: if `directoryStack.size > 1`, calls `navigateUpOneLevel()` (pops stack, reloads); at root, default system behavior.
+- `validateNotebookName()` and `createNotebook()` use `currentDirectory` instead of `notesDir()` so new notebooks land in the directory the user is browsing.
+- Icons: `ic_folder.xml`, `ic_folder_plus.xml` — Tabler stroke-based, `@color/inkBlack`, strokeWidth 2, 24dp.
+
 ---
 
-*Last updated: Pruning — removed apps/notesprout_flutter (Flutter reference app, no longer needed; preserved in git history).*
+*Last updated: New Branches — filesystem folder support (directory stack, NotebookListItem sealed class, breadcrumb bar, New Folder button, uniform 56dp toolbar heights).*
