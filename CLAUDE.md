@@ -501,7 +501,7 @@ Never calls `eraseAll()`. Updates the in-memory stroke list directly, rebuilds b
 - `MainActivity.directoryStack: MutableList<File>` — navigation stack; root = `[notesDir()]`. `currentDirectory` is `directoryStack.last()`.
 - Scan order: folders first (alphabetical, case-insensitive), notebooks second (alphabetical). Dotfiles/hidden dirs are excluded.
 - Pagination applies to the combined `items: List<NotebookListItem>` list for `currentDirectory`.
-- Folder card: `ic_folder` icon centred, folder name label; tap pushes into folder. No cover image, no long-press menu. Creating a new folder automatically navigates into it.
+- Folder card: `ic_folder` icon centred, folder name label; tap pushes into folder. No cover image. Long-press opens an `ActionSheetDialog` with a Delete action. Creating a new folder automatically navigates into it.
 - Breadcrumb bar (`breadcrumbBar` LinearLayout, 56dp, always visible): back button (`btnBreadcrumbBack`) + vertical divider (`breadcrumbBackDivider`) are `INVISIBLE` at root and become visible when navigated into a subfolder. One `TextView` chip per stack entry at 18sp, separated by `›` (`inkLight`). Tapping a chip pops the stack to that depth. Auto-scrolls right to show the deepest entry.
 - Breadcrumb divider: 1dp inkBlack `View` (id `breadcrumbDivider`) below the bar — always visible since the bar is always visible.
 - Both the breadcrumb bar and bottom bar are 56dp — matching the notebook activity toolbar height.
@@ -512,4 +512,18 @@ Never calls `eraseAll()`. Updates the in-memory stroke list directly, rebuilds b
 
 ---
 
-*Last updated: New Branches — filesystem folder support (directory stack, NotebookListItem sealed class, breadcrumb bar, New Folder button, uniform 56dp toolbar heights).*
+**ActionSheetDialog (`ActionSheetDialog.kt`):**
+- Reusable flat action sheet dialog. No Material Components, no elevation, no shadow, no animation.
+- Builder API: `.title(String)` (optional) → `.addAction(iconRes?, label, onClick)` → `.show()`
+- `shape_bordered` window background applied after `show()`. 1dp inkBlack dividers between rows.
+- When a title is provided, an `ic_x` (Tabler X) close button appears in the upper-right of the title row. Tapping outside also dismisses (AlertDialog default). No bottom Cancel row.
+- Icon slot is a `Space` placeholder when `iconRes` is null, keeping labels aligned.
+- Used for notebook long-press (Export / Set Cover / Delete Notebook) and folder long-press (Delete).
+
+**Folder delete:**
+- Long-press on a folder card → `ActionSheetDialog` with a single Delete action (icon: `ic_delete_notebook`).
+- Confirmation `AlertDialog` shows exact message: `Delete "[name]"? This will permanently remove all notebooks and subfolders inside it. This cannot be undone.`
+- On confirm: `file.deleteRecursively()` on `Dispatchers.IO`; if it returns false, shows Toast "Some files could not be deleted."
+- Reloads `currentDirectory` via `scanAndRender()` after deletion.
+
+*Last updated: New Branches — ActionSheetDialog, folder long-press delete (Iteration 2 of folder support).*

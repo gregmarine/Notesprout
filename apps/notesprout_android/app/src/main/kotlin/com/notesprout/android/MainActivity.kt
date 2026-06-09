@@ -20,7 +20,6 @@ import android.view.inputmethod.InputMethodManager
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
-import android.widget.PopupMenu
 import android.widget.Space
 import android.widget.TextView
 import android.widget.Toast
@@ -515,10 +514,11 @@ class MainActivity : AppCompatActivity() {
             when (item) {
                 is NotebookListItem.Folder -> {
                     setOnClickListener { navigateIntoFolder(item.file) }
+                    setOnLongClickListener { showFolderContextMenu(item.file); true }
                 }
                 is NotebookListItem.Notebook -> {
                     setOnClickListener { openNotebook(item.file) }
-                    setOnLongClickListener { showNotebookContextMenu(item.file, this); true }
+                    setOnLongClickListener { showNotebookContextMenu(item.file); true }
                 }
             }
         }
@@ -885,33 +885,43 @@ class MainActivity : AppCompatActivity() {
 
     // ── Notebook context menu ─────────────────────────────────────────────────
 
-    /**
-     * Shows a PopupMenu anchored to [anchor] with two groups:
-     *   Group 1 (notebook actions): Set Cover
-     *   Group 2 (destructive): Delete Notebook
-     */
-    private fun showNotebookContextMenu(file: File, anchor: View) {
-        val popup = PopupMenu(this, anchor)
-        popup.menuInflater.inflate(R.menu.menu_notebook_context, popup.menu)
+    private fun showNotebookContextMenu(file: File) {
+        ActionSheetDialog(this)
+            .title(file.nameWithoutExtension)
+            .addAction(R.drawable.ic_export, "Export") { startExportFromMain(file) }
+            .addAction(R.drawable.ic_polaroid, "Set Cover") { openCoverDialog(file) }
+            .addAction(R.drawable.ic_delete_notebook, "Delete Notebook") { showDeleteNotebookConfirmation(file) }
+            .show()
+    }
 
-        popup.setOnMenuItemClickListener { item ->
-            when (item.itemId) {
-                R.id.action_export_notebook -> {
-                    startExportFromMain(file)
-                    true
-                }
-                R.id.action_set_cover -> {
-                    openCoverDialog(file)
-                    true
-                }
-                R.id.action_delete_notebook -> {
-                    showDeleteNotebookConfirmation(file)
-                    true
-                }
-                else -> false
+    // ── Folder context menu ───────────────────────────────────────────────────
+
+    private fun showFolderContextMenu(file: File) {
+        ActionSheetDialog(this)
+            .title(file.name)
+            .addAction(R.drawable.ic_folder_minus, "Delete") { showDeleteFolderConfirmation(file) }
+            .show()
+    }
+
+    private fun showDeleteFolderConfirmation(file: File) {
+        val dialog = AlertDialog.Builder(this)
+            .setMessage("Delete \"${file.name}\"? This will permanently remove all notebooks and subfolders inside it. This cannot be undone.")
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Delete") { _, _ -> deleteFolder(file) }
+            .create()
+        dialog.show()
+        dialog.window?.setElevation(0f)
+        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+    }
+
+    private fun deleteFolder(file: File) {
+        lifecycleScope.launch {
+            val success = withContext(Dispatchers.IO) { file.deleteRecursively() }
+            if (!success) {
+                Toast.makeText(this@MainActivity, "Some files could not be deleted.", Toast.LENGTH_SHORT).show()
             }
+            scanAndRender()
         }
-        popup.show()
     }
 
     /**
