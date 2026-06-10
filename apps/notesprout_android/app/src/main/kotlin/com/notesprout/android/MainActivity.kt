@@ -39,6 +39,9 @@ import androidx.lifecycle.lifecycleScope
 import com.notesprout.android.data.NotebookMetadata
 import com.notesprout.android.data.checkpointTruncateAndClose
 import com.notesprout.android.data.loadNotebookCoverBitmap
+import com.notesprout.android.search.SearchDialog
+import com.notesprout.android.search.SearchEngine
+import com.notesprout.android.search.SearchResult
 import com.notesprout.android.sort.FolderSort
 import com.notesprout.android.sort.SortDialog
 import com.notesprout.android.sort.SortField
@@ -112,6 +115,12 @@ class MainActivity : AppCompatActivity() {
     private val currentDirectory: File get() = directoryStack.last()
 
     private var sortPrefs: SortPreferences = SortPreferences()
+
+    private var isSearchMode = false
+    private var currentSearchQuery: String = ""
+
+    /** In search mode, holds the current ranked results so cards can access folderLabel. */
+    private var searchResults: List<SearchResult> = emptyList()
 
     // ── Color cache ───────────────────────────────────────────────────────────
 
@@ -189,6 +198,19 @@ class MainActivity : AppCompatActivity() {
             }.show()
         }
 
+        binding.btnSearch.setOnClickListener {
+            SearchDialog.show(
+                context = this,
+                initialQuery = if (isSearchMode) currentSearchQuery else "",
+                onSearch = { query -> enterSearchMode(query) },
+                onCancel = { }
+            )
+        }
+
+        binding.btnClearSearch.setOnClickListener {
+            exitSearchMode()
+        }
+
         // Compute the grid specification once the gridContainer has been laid out
         // (width/height are 0 until the first layout pass).
         binding.gridContainer.viewTreeObserver.addOnGlobalLayoutListener(
@@ -230,9 +252,45 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun enterSearchMode(query: String) {
+        isSearchMode = true
+        currentSearchQuery = query
+        currentPage = 0
+        binding.btnClearSearch.visibility = View.VISIBLE
+        binding.btnSort.visibility = View.GONE
+        scanAndRender()
+    }
+
+    private fun exitSearchMode() {
+        isSearchMode = false
+        currentSearchQuery = ""
+        searchResults = emptyList()
+        currentPage = 0
+        binding.btnClearSearch.visibility = View.GONE
+        binding.btnSort.visibility = View.VISIBLE
+        scanAndRender()
+    }
+
+    private fun navigateStackToDirectory(targetDir: File) {
+        val notes = notesDir()
+        val segments = mutableListOf<File>()
+        var current: File? = targetDir
+        while (current != null) {
+            segments.add(0, current)
+            if (current == notes) break
+            current = current.parentFile
+        }
+        directoryStack.clear()
+        directoryStack.addAll(segments)
+    }
+
     private fun setupBackNavigation() {
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
+                if (isSearchMode) {
+                    exitSearchMode()
+                    return
+                }
                 if (directoryStack.size > 1) {
                     navigateUpOneLevel()
                 } else {
@@ -321,26 +379,32 @@ class MainActivity : AppCompatActivity() {
 
     // ── Directory scanning ────────────────────────────────────────────────────
 
-    /** Rescans the current directory then renders the current page and breadcrumbs. */
+    /** Rescans the current directory (or runs a search) then renders the current page and breadcrumbs. */
     private fun scanAndRender() {
-        val dir = currentDirectory
-        val folders: List<NotebookListItem.Folder>
-        val notebooks: List<NotebookListItem.Notebook>
-        if (dir.exists()) {
-            folders = dir.listFiles { f -> f.isDirectory && !f.name.startsWith(".") }
-                ?.map { NotebookListItem.Folder(it.name, it) }
-                ?: emptyList()
-            notebooks = dir.listFiles { f -> f.isFile && f.extension == "soil" }
-                ?.map { NotebookListItem.Notebook(it) }
-                ?: emptyList()
+        if (isSearchMode) {
+            searchResults = SearchEngine.search(currentSearchQuery, currentDirectory, notesDir())
+            items = searchResults.map { NotebookListItem.Notebook(it.file) }
         } else {
-            folders = emptyList()
-            notebooks = emptyList()
-        }
-        items = when (sortPrefs.folderSort) {
-            FolderSort.FOLDERS_FIRST  -> sortItems(folders) + sortItems(notebooks)
-            FolderSort.NOTEBOOKS_FIRST -> sortItems(notebooks) + sortItems(folders)
-            FolderSort.MIXED          -> sortItems(folders + notebooks)
+            searchResults = emptyList()
+            val dir = currentDirectory
+            val folders: List<NotebookListItem.Folder>
+            val notebooks: List<NotebookListItem.Notebook>
+            if (dir.exists()) {
+                folders = dir.listFiles { f -> f.isDirectory && !f.name.startsWith(".") }
+                    ?.map { NotebookListItem.Folder(it.name, it) }
+                    ?: emptyList()
+                notebooks = dir.listFiles { f -> f.isFile && f.extension == "soil" }
+                    ?.map { NotebookListItem.Notebook(it) }
+                    ?: emptyList()
+            } else {
+                folders = emptyList()
+                notebooks = emptyList()
+            }
+            items = when (sortPrefs.folderSort) {
+                FolderSort.FOLDERS_FIRST   -> sortItems(folders) + sortItems(notebooks)
+                FolderSort.NOTEBOOKS_FIRST -> sortItems(notebooks) + sortItems(folders)
+                FolderSort.MIXED           -> sortItems(folders + notebooks)
+            }
         }
 
         // Clamp currentPage to valid range after a rescan.
@@ -457,10 +521,10 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun renderEmptyState() {
-        val msg = if (directoryStack.size > 1) {
-            "Empty folder."
-        } else {
-            "No notebooks yet. Tap + to create one."
+        val msg = when {
+            isSearchMode -> "No notebooks found for \"$currentSearchQuery\""
+            directoryStack.size > 1 -> "Empty folder."
+            else -> "No notebooks yet. Tap + to create one."
         }
         val tv = AppCompatTextView(this).apply {
             text = msg
@@ -625,7 +689,13 @@ class MainActivity : AppCompatActivity() {
             val modified = Date(file.lastModified())
             val dateStr = android.text.format.DateFormat.getMediumDateFormat(this).format(modified)
             val timeStr = android.text.format.DateFormat.getTimeFormat(this).format(modified)
-            "$displayName ($dateStr, $timeStr)"
+            if (isSearchMode && item is NotebookListItem.Notebook) {
+                val result = searchResults.find { it.file == item.file }
+                val parentName = result?.file?.parentFile?.name ?: ""
+                if (result != null) "$parentName › ${result.displayName}" else "$displayName ($dateStr, $timeStr)"
+            } else {
+                "$displayName ($dateStr, $timeStr)"
+            }
         }
         val label = AppCompatTextView(this).apply {
             text      = labelText
@@ -645,6 +715,17 @@ class MainActivity : AppCompatActivity() {
     // ── Notebook opening ──────────────────────────────────────────────────────
 
     private fun openNotebook(file: File) {
+        if (isSearchMode) {
+            // Navigate the directory stack to the notebook's parent folder so that
+            // when the user returns from NotebookActivity they land in the right folder.
+            val parent = file.parentFile ?: notesDir()
+            navigateStackToDirectory(parent)
+            isSearchMode = false
+            currentSearchQuery = ""
+            searchResults = emptyList()
+            binding.btnClearSearch.visibility = View.GONE
+            binding.btnSort.visibility = View.VISIBLE
+        }
         val intent = Intent(this, NotebookActivity::class.java).apply {
             putExtra(NotebookActivity.EXTRA_NOTEBOOK_PATH, file.absolutePath)
         }

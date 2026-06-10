@@ -539,4 +539,14 @@ Never calls `eraseAll()`. Updates the in-memory stroke list directly, rebuilds b
 - `scanAndRender()` applies `sortPrefs` via `sortItems()` helper — sort key is `file.lastModified()` (DATE_MODIFIED) or `name.lowercase()` (NAME); `FolderSort` controls grouping (FOLDERS_FIRST / NOTEBOOKS_FIRST / MIXED); `SortOrder.DESCENDING` reverses the comparator
 - Card labels show `"$displayName ($dateStr, $timeStr)"` using `DateFormat.getMediumDateFormat` + `DateFormat.getTimeFormat` (locale-aware)
 
-*Last updated: New Branches — Notebook/folder sorting with SortDialog (Prompts 1–3 complete).*
+**Notebook Search (`search/SearchEngine.kt`, `search/SearchDialog.kt`):**
+- `btnSearch` (breadcrumb bar, `ic_search`) opens `SearchDialog` — a plain `EditText` with ranked fuzzy matching
+- `btnClearSearch` (`ic_search_off`, visible only in search mode) exits search and restores normal browse
+- `SearchEngine.search(query, root, notesDir)` — recursive `.soil` scan from `currentDirectory` with scoring: substring (3) > all words present (2) > prefix/initials (1); sorted by score desc, name asc
+- Search mode replaces the normal directory scan in `scanAndRender()`; results shown as notebook cards with `"FolderLabel › NotebookName"` labels (no date/time in search mode)
+- Back press while in search mode exits search (checked before the directory-stack back logic)
+- Opening a notebook from search results rebuilds `directoryStack` to the notebook's parent folder (`navigateStackToDirectory`) so returning from NotebookActivity lands in the correct folder
+- Empty search results show `No notebooks found for "query"` instead of the generic empty-state copy
+- No new Gradle dependencies
+
+*Last updated: New Branches — Notebook search with ranked fuzzy matching.*

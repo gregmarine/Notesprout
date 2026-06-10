@@ -53,6 +53,19 @@
         </HorizontalScrollView>
 
         <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnSearch"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:src="@drawable/ic_search"
+            android:contentDescription="Search notebooks" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnClearSearch"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:src="@drawable/ic_x"
+            android:contentDescription="Clear search"
+            android:visibility="gone" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
             android:id="@+id/btnSort"
             style="@style/Widget.Notesprout.ToolbarButton"
             android:src="@drawable/ic_filter"
