@@ -1,0 +1,162 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:padding="16dp">
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Sort"
+        android:textSize="18sp"
+        android:textColor="@color/inkBlack"
+        android:textStyle="bold"
+        android:layout_marginBottom="8dp" />
+
+    <!-- Sort by -->
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Sort by"
+        android:textSize="14sp"
+        android:textColor="@color/inkBlack"
+        android:textStyle="bold"
+        android:layout_marginTop="4dp"
+        android:layout_marginBottom="2dp" />
+
+    <RadioGroup
+        android:id="@+id/rgSortField"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical">
+
+        <androidx.appcompat.widget.AppCompatRadioButton
+            android:id="@+id/rbSortName"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Name"
+            android:textSize="14sp"
+            android:textColor="@color/inkBlack"
+            android:buttonTint="@color/inkBlack" />
+
+        <androidx.appcompat.widget.AppCompatRadioButton
+            android:id="@+id/rbSortDateModified"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Date Modified"
+            android:textSize="14sp"
+            android:textColor="@color/inkBlack"
+            android:buttonTint="@color/inkBlack" />
+
+    </RadioGroup>
+
+    <!-- Order -->
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Order"
+        android:textSize="14sp"
+        android:textColor="@color/inkBlack"
+        android:textStyle="bold"
+        android:layout_marginTop="4dp"
+        android:layout_marginBottom="2dp" />
+
+    <RadioGroup
+        android:id="@+id/rgSortOrder"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical">
+
+        <androidx.appcompat.widget.AppCompatRadioButton
+            android:id="@+id/rbOrderAscending"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Ascending"
+            android:textSize="14sp"
+            android:textColor="@color/inkBlack"
+            android:buttonTint="@color/inkBlack" />
+
+        <androidx.appcompat.widget.AppCompatRadioButton
+            android:id="@+id/rbOrderDescending"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Descending"
+            android:textSize="14sp"
+            android:textColor="@color/inkBlack"
+            android:buttonTint="@color/inkBlack" />
+
+    </RadioGroup>
+
+    <!-- Folders & Notebooks -->
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Folders &amp; Notebooks"
+        android:textSize="14sp"
+        android:textColor="@color/inkBlack"
+        android:textStyle="bold"
+        android:layout_marginTop="4dp"
+        android:layout_marginBottom="2dp" />
+
+    <RadioGroup
+        android:id="@+id/rgFolderSort"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical">
+
+        <androidx.appcompat.widget.AppCompatRadioButton
+            android:id="@+id/rbFolderFirst"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Folders first"
+            android:textSize="14sp"
+            android:textColor="@color/inkBlack"
+            android:buttonTint="@color/inkBlack" />
+
+        <androidx.appcompat.widget.AppCompatRadioButton
+            android:id="@+id/rbNotebooksFirst"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Notebooks first"
+            android:textSize="14sp"
+            android:textColor="@color/inkBlack"
+            android:buttonTint="@color/inkBlack" />
+
+        <androidx.appcompat.widget.AppCompatRadioButton
+            android:id="@+id/rbMixed"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Mixed"
+            android:textSize="14sp"
+            android:textColor="@color/inkBlack"
+            android:buttonTint="@color/inkBlack" />
+
+    </RadioGroup>
+
+    <!-- Buttons -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="end"
+        android:layout_marginTop="8dp">
+
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/btnSortCancel"
+            style="@style/Widget.Notesprout.OutlinedButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginEnd="8dp"
+            android:text="Cancel" />
+
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/btnSortApply"
+            style="@style/Widget.Notesprout.OutlinedButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Apply" />
+
+    </LinearLayout>
+
+</LinearLayout>

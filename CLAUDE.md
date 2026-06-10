@@ -526,4 +526,17 @@ Never calls `eraseAll()`. Updates the in-memory stroke list directly, rebuilds b
 - On confirm: `file.deleteRecursively()` on `Dispatchers.IO`; if it returns false, shows Toast "Some files could not be deleted."
 - Reloads `currentDirectory` via `scanAndRender()` after deletion.
 
-*Last updated: New Branches — ActionSheetDialog, folder long-press delete (Iteration 2 of folder support).*
+**Sorting:**
+- `sort/SortField.kt` — `enum class SortField { NAME, DATE_MODIFIED }`
+- `sort/SortOrder.kt` — `enum class SortOrder { ASCENDING, DESCENDING }`
+- `sort/FolderSort.kt` — `enum class FolderSort { FOLDERS_FIRST, NOTEBOOKS_FIRST, MIXED }`
+- `sort/SortPreferences.kt` — data class bundling all three with defaults (NAME, ASCENDING, FOLDERS_FIRST)
+- `sort/SortPreferencesManager.kt` — `object` with `load(context)` / `save(context, prefs)`; persists to `SharedPreferences("notesprout_sort_prefs")`; each enum stored as `.name` string; `runCatching` guards against unknown stored values falling back to defaults
+- `sort/SortDialog.kt` — `AlertDialog.Builder` with `dialog_sort.xml` layout; three `RadioGroup` sections (Sort by / Order / Folders & Notebooks); pre-selects from `current: SortPreferences`; Cancel dismisses, Apply calls `onApply` then dismisses; styled with `setElevation(0f)` + `shape_bordered` after `show()`
+- Icon: `ic_filter.xml` — Tabler `filter-2` (three decreasing horizontal lines), strokeWidth 2, `@color/inkBlack`, 24dp
+- `btnSort` (`AppCompatImageButton`, `Widget.Notesprout.ToolbarButton`) sits at the right end of the breadcrumb bar in `activity_main.xml`
+- `MainActivity` loads prefs on `onCreate` via `SortPreferencesManager.load`; `btnSort` click opens `SortDialog` which saves and calls `scanAndRender()`
+- `scanAndRender()` applies `sortPrefs` via `sortItems()` helper — sort key is `file.lastModified()` (DATE_MODIFIED) or `name.lowercase()` (NAME); `FolderSort` controls grouping (FOLDERS_FIRST / NOTEBOOKS_FIRST / MIXED); `SortOrder.DESCENDING` reverses the comparator
+- Card labels show `"$displayName ($dateStr, $timeStr)"` using `DateFormat.getMediumDateFormat` + `DateFormat.getTimeFormat` (locale-aware)
+
+*Last updated: New Branches — Notebook/folder sorting with SortDialog (Prompts 1–3 complete).*

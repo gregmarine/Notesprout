@@ -39,6 +39,12 @@ import androidx.lifecycle.lifecycleScope
 import com.notesprout.android.data.NotebookMetadata
 import com.notesprout.android.data.checkpointTruncateAndClose
 import com.notesprout.android.data.loadNotebookCoverBitmap
+import com.notesprout.android.sort.FolderSort
+import com.notesprout.android.sort.SortDialog
+import com.notesprout.android.sort.SortField
+import com.notesprout.android.sort.SortOrder
+import com.notesprout.android.sort.SortPreferences
+import com.notesprout.android.sort.SortPreferencesManager
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import com.notesprout.android.databinding.ActivityMainBinding
@@ -50,6 +56,7 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
+import java.util.Date
 import java.util.UUID
 
 class MainActivity : AppCompatActivity() {
@@ -103,6 +110,8 @@ class MainActivity : AppCompatActivity() {
 
     /** The directory currently being displayed. */
     private val currentDirectory: File get() = directoryStack.last()
+
+    private var sortPrefs: SortPreferences = SortPreferences()
 
     // ── Color cache ───────────────────────────────────────────────────────────
 
@@ -165,9 +174,20 @@ class MainActivity : AppCompatActivity() {
         // Root of the directory stack is always the notebooks directory.
         directoryStack.add(notesDir())
 
+        sortPrefs = SortPreferencesManager.load(this)
+
         setupBottomBar()
         setupGridGestures()
         setupBackNavigation()
+
+        binding.btnSort.setOnClickListener {
+            SortDialog(this, sortPrefs) { newPrefs ->
+                sortPrefs = newPrefs
+                SortPreferencesManager.save(this, newPrefs)
+                currentPage = 0
+                scanAndRender()
+            }.show()
+        }
 
         // Compute the grid specification once the gridContainer has been laid out
         // (width/height are 0 until the first layout pass).
@@ -308,18 +328,20 @@ class MainActivity : AppCompatActivity() {
         val notebooks: List<NotebookListItem.Notebook>
         if (dir.exists()) {
             folders = dir.listFiles { f -> f.isDirectory && !f.name.startsWith(".") }
-                ?.sortedBy { it.name.lowercase() }
                 ?.map { NotebookListItem.Folder(it.name, it) }
                 ?: emptyList()
             notebooks = dir.listFiles { f -> f.isFile && f.extension == "soil" }
-                ?.sortedBy { it.nameWithoutExtension.lowercase() }
                 ?.map { NotebookListItem.Notebook(it) }
                 ?: emptyList()
         } else {
             folders = emptyList()
             notebooks = emptyList()
         }
-        items = folders + notebooks
+        items = when (sortPrefs.folderSort) {
+            FolderSort.FOLDERS_FIRST  -> sortItems(folders) + sortItems(notebooks)
+            FolderSort.NOTEBOOKS_FIRST -> sortItems(notebooks) + sortItems(folders)
+            FolderSort.MIXED          -> sortItems(folders + notebooks)
+        }
 
         // Clamp currentPage to valid range after a rescan.
         val total = totalPages()
@@ -327,6 +349,23 @@ class MainActivity : AppCompatActivity() {
 
         buildBreadcrumbs()
         renderPage()
+    }
+
+    private fun sortItems(items: List<NotebookListItem>): List<NotebookListItem> {
+        fun nameOf(item: NotebookListItem): String = when (item) {
+            is NotebookListItem.Folder   -> item.name.lowercase()
+            is NotebookListItem.Notebook -> item.file.nameWithoutExtension.lowercase()
+        }
+        fun dateOf(item: NotebookListItem): Long = when (item) {
+            is NotebookListItem.Folder   -> item.file.lastModified()
+            is NotebookListItem.Notebook -> item.file.lastModified()
+        }
+        val comparator: Comparator<NotebookListItem> = when (sortPrefs.field) {
+            SortField.NAME          -> Comparator { a, b -> nameOf(a).compareTo(nameOf(b)) }
+            SortField.DATE_MODIFIED -> Comparator { a, b -> dateOf(a).compareTo(dateOf(b)) }
+        }
+        val ordered = if (sortPrefs.order == SortOrder.DESCENDING) comparator.reversed() else comparator
+        return items.sortedWith(ordered)
     }
 
     // ── Folder navigation ─────────────────────────────────────────────────────
@@ -574,9 +613,19 @@ class MainActivity : AppCompatActivity() {
         }
 
         // ── Label (below the card) ────────────────────────────────────────────
-        val labelText = when (item) {
-            is NotebookListItem.Folder   -> item.name
-            is NotebookListItem.Notebook -> item.file.nameWithoutExtension
+        val labelText = run {
+            val file = when (item) {
+                is NotebookListItem.Folder   -> item.file
+                is NotebookListItem.Notebook -> item.file
+            }
+            val displayName = when (item) {
+                is NotebookListItem.Folder   -> item.name
+                is NotebookListItem.Notebook -> item.file.nameWithoutExtension
+            }
+            val modified = Date(file.lastModified())
+            val dateStr = android.text.format.DateFormat.getMediumDateFormat(this).format(modified)
+            val timeStr = android.text.format.DateFormat.getTimeFormat(this).format(modified)
+            "$displayName ($dateStr, $timeStr)"
         }
         val label = AppCompatTextView(this).apply {
             text      = labelText

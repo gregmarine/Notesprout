@@ -52,6 +52,12 @@
 
         </HorizontalScrollView>
 
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnSort"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:src="@drawable/ic_filter"
+            android:contentDescription="Sort" />
+
     </LinearLayout>
 
     <!-- 1dp separator below breadcrumb bar — always visible since the bar is always visible -->
