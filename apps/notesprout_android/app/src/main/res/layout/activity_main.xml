@@ -6,6 +6,65 @@
     android:background="@color/paperWhite">
 
     <!--
+        Picker toolbar: shown only in destination picker mode (Copy/Move notebook or folder).
+        Hidden by default; VISIBLE when destinationPickerState != None.
+    -->
+    <LinearLayout
+        android:id="@+id/pickerToolbar"
+        android:layout_width="match_parent"
+        android:layout_height="56dp"
+        android:orientation="horizontal"
+        android:background="@color/paperWhite"
+        android:gravity="center_vertical"
+        android:visibility="gone">
+
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/btnPickerCancel"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center_vertical"
+            android:text="Cancel"
+            android:textSize="18sp"
+            android:textColor="@color/inkBlack"
+            android:background="@null"
+            android:stateListAnimator="@null"
+            android:paddingStart="16dp"
+            android:paddingEnd="16dp" />
+
+        <TextView
+            android:id="@+id/pickerTitle"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_gravity="center_vertical"
+            android:textSize="18sp"
+            android:textColor="@color/inkBlack"
+            android:gravity="center" />
+
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/btnPickerConfirm"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center_vertical"
+            android:text="Copy here"
+            android:textSize="18sp"
+            android:textColor="@color/inkBlack"
+            android:textStyle="bold"
+            android:background="@null"
+            android:stateListAnimator="@null"
+            android:paddingStart="16dp"
+            android:paddingEnd="16dp" />
+
+    </LinearLayout>
+
+    <View
+        android:id="@+id/pickerToolbarDivider"
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="@color/inkBlack"
+        android:visibility="gone" />
+
+    <!--
         Breadcrumb bar: always visible for consistent layout.
         Back button and chips are hidden at root; chips populate when navigated into a subfolder.
     -->

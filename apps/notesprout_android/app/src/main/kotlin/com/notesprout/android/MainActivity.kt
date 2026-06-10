@@ -48,6 +48,7 @@ import com.notesprout.android.sort.SortField
 import com.notesprout.android.sort.SortOrder
 import com.notesprout.android.sort.SortPreferences
 import com.notesprout.android.sort.SortPreferencesManager
+import com.notesprout.android.ui.DestinationPickerState
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import com.notesprout.android.databinding.ActivityMainBinding
@@ -122,6 +123,8 @@ class MainActivity : AppCompatActivity() {
     /** In search mode, holds the current ranked results so cards can access folderLabel. */
     private var searchResults: List<SearchResult> = emptyList()
 
+    private var destinationPickerState: DestinationPickerState = DestinationPickerState.None
+
     // ── Color cache ───────────────────────────────────────────────────────────
 
     private val inkBlackColor by lazy { ContextCompat.getColor(this, R.color.inkBlack) }
@@ -188,6 +191,9 @@ class MainActivity : AppCompatActivity() {
         setupBottomBar()
         setupGridGestures()
         setupBackNavigation()
+
+        binding.btnPickerCancel.setOnClickListener { exitPickerMode() }
+        binding.btnPickerConfirm.setOnClickListener { confirmPickerDestination() }
 
         binding.btnSort.setOnClickListener {
             SortDialog(this, sortPrefs) { newPrefs ->
@@ -287,6 +293,10 @@ class MainActivity : AppCompatActivity() {
     private fun setupBackNavigation() {
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
+                if (destinationPickerState != DestinationPickerState.None) {
+                    exitPickerMode()
+                    return
+                }
                 if (isSearchMode) {
                     exitSearchMode()
                     return
@@ -400,10 +410,27 @@ class MainActivity : AppCompatActivity() {
                 folders = emptyList()
                 notebooks = emptyList()
             }
-            items = when (sortPrefs.folderSort) {
-                FolderSort.FOLDERS_FIRST   -> sortItems(folders) + sortItems(notebooks)
-                FolderSort.NOTEBOOKS_FIRST -> sortItems(notebooks) + sortItems(folders)
-                FolderSort.MIXED           -> sortItems(folders + notebooks)
+
+            val pickerState = destinationPickerState
+            if (pickerState != DestinationPickerState.None) {
+                // Picker mode: folders only, filtered by self-exclusion for folder operations.
+                val excludedCanonical: String? = when (pickerState) {
+                    is DestinationPickerState.CopyFolder -> pickerState.source.canonicalPath
+                    is DestinationPickerState.MoveFolder -> pickerState.source.canonicalPath
+                    else -> null
+                }
+                val filtered = if (excludedCanonical != null) {
+                    folders.filter { it.file.canonicalPath != excludedCanonical }
+                } else {
+                    folders
+                }
+                items = sortItems(filtered)
+            } else {
+                items = when (sortPrefs.folderSort) {
+                    FolderSort.FOLDERS_FIRST   -> sortItems(folders) + sortItems(notebooks)
+                    FolderSort.NOTEBOOKS_FIRST -> sortItems(notebooks) + sortItems(folders)
+                    FolderSort.MIXED           -> sortItems(folders + notebooks)
+                }
             }
         }
 
@@ -522,6 +549,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun renderEmptyState() {
         val msg = when {
+            destinationPickerState != DestinationPickerState.None -> "No folders here. Create one below."
             isSearchMode -> "No notebooks found for \"$currentSearchQuery\""
             directoryStack.size > 1 -> "Empty folder."
             else -> "No notebooks yet. Tap + to create one."
@@ -1019,6 +1047,8 @@ class MainActivity : AppCompatActivity() {
         ActionSheetDialog(this)
             .title(file.nameWithoutExtension)
             .addAction(R.drawable.ic_export, "Export") { startExportFromMain(file) }
+            .addAction(R.drawable.ic_copy_page, "Copy Notebook") { enterPickerMode(DestinationPickerState.CopyNotebook(file)) }
+            .addAction(R.drawable.ic_move_page, "Move Notebook") { enterPickerMode(DestinationPickerState.MoveNotebook(file)) }
             .addAction(R.drawable.ic_polaroid, "Set Cover") { openCoverDialog(file) }
             .addAction(R.drawable.ic_delete_notebook, "Delete Notebook") { showDeleteNotebookConfirmation(file) }
             .show()
@@ -1029,8 +1059,171 @@ class MainActivity : AppCompatActivity() {
     private fun showFolderContextMenu(file: File) {
         ActionSheetDialog(this)
             .title(file.name)
+            .addAction(R.drawable.ic_copy_plus, "Copy Folder") { enterPickerMode(DestinationPickerState.CopyFolder(file)) }
+            .addAction(R.drawable.ic_move_page, "Move Folder") { enterPickerMode(DestinationPickerState.MoveFolder(file)) }
             .addAction(R.drawable.ic_folder_minus, "Delete") { showDeleteFolderConfirmation(file) }
             .show()
+    }
+
+    // ── Destination picker mode ───────────────────────────────────────────────
+
+    private fun enterPickerMode(state: DestinationPickerState) {
+        if (isSearchMode) {
+            isSearchMode = false
+            currentSearchQuery = ""
+            searchResults = emptyList()
+        }
+        destinationPickerState = state
+        applyPickerModeUI()
+        currentPage = 0
+        scanAndRender()
+    }
+
+    private fun exitPickerMode() {
+        destinationPickerState = DestinationPickerState.None
+        currentPage = 0
+        applyPickerModeUI()
+        scanAndRender()
+    }
+
+    private fun applyPickerModeUI() {
+        val inPicker = destinationPickerState != DestinationPickerState.None
+        binding.pickerToolbar.visibility = if (inPicker) View.VISIBLE else View.GONE
+        binding.pickerToolbarDivider.visibility = if (inPicker) View.VISIBLE else View.GONE
+        if (inPicker) {
+            updatePickerTitle()
+            binding.btnNewNotebook.visibility = View.GONE
+            binding.btnSearch.visibility = View.GONE
+            binding.btnClearSearch.visibility = View.GONE
+            binding.btnSort.visibility = View.GONE
+        } else {
+            binding.btnNewNotebook.visibility = View.VISIBLE
+            binding.btnSearch.visibility = View.VISIBLE
+            binding.btnClearSearch.visibility = View.GONE
+            binding.btnSort.visibility = View.VISIBLE
+        }
+    }
+
+    private fun updatePickerTitle() {
+        val (title, confirmLabel) = when (destinationPickerState) {
+            is DestinationPickerState.CopyNotebook -> "Copy notebook here" to "Copy here"
+            is DestinationPickerState.MoveNotebook -> "Move notebook here" to "Move here"
+            is DestinationPickerState.CopyFolder   -> "Copy folder here" to "Copy here"
+            is DestinationPickerState.MoveFolder   -> "Move folder here" to "Move here"
+            DestinationPickerState.None            -> "" to ""
+        }
+        binding.pickerTitle.text = title
+        binding.btnPickerConfirm.text = confirmLabel
+    }
+
+    private fun confirmPickerDestination() {
+        val state = destinationPickerState
+        if (state == DestinationPickerState.None) return
+
+        val source: File = when (state) {
+            is DestinationPickerState.CopyNotebook -> state.source
+            is DestinationPickerState.MoveNotebook -> state.source
+            is DestinationPickerState.CopyFolder   -> state.source
+            is DestinationPickerState.MoveFolder   -> state.source
+            DestinationPickerState.None            -> return
+        }
+        val destDir = currentDirectory
+
+        // Validate destination before proceeding.
+        when (state) {
+            is DestinationPickerState.CopyNotebook,
+            is DestinationPickerState.MoveNotebook -> {
+                if (destDir.canonicalPath == source.parentFile?.canonicalPath) {
+                    Toast.makeText(this, "Already in this folder", Toast.LENGTH_SHORT).show()
+                    return
+                }
+            }
+            is DestinationPickerState.CopyFolder,
+            is DestinationPickerState.MoveFolder -> {
+                val sourceCanonical = source.canonicalPath
+                if (destDir.canonicalPath == sourceCanonical ||
+                    destDir.canonicalPath.startsWith(sourceCanonical + File.separator)) {
+                    val verb = if (state is DestinationPickerState.CopyFolder) "copy" else "move"
+                    Toast.makeText(this, "Cannot $verb a folder into itself", Toast.LENGTH_SHORT).show()
+                    return
+                }
+            }
+            DestinationPickerState.None -> return
+        }
+
+        val destFile = File(destDir, source.name)
+        if (destFile.exists()) {
+            val itemType = when (state) {
+                is DestinationPickerState.CopyNotebook,
+                is DestinationPickerState.MoveNotebook -> "notebook"
+                else -> "folder"
+            }
+            val displayName = when (state) {
+                is DestinationPickerState.CopyNotebook,
+                is DestinationPickerState.MoveNotebook -> source.nameWithoutExtension
+                else -> source.name
+            }
+            val dialog = AlertDialog.Builder(this)
+                .setMessage("A $itemType named \"$displayName\" already exists here. Replace it?")
+                .setNegativeButton("Cancel", null)
+                .setPositiveButton("Replace") { _, _ -> executePickerOperation(state, source, destFile) }
+                .create()
+            dialog.show()
+            dialog.window?.setElevation(0f)
+            dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+        } else {
+            executePickerOperation(state, source, destFile)
+        }
+    }
+
+    private fun executePickerOperation(
+        state: DestinationPickerState,
+        source: File,
+        dest: File,
+    ) {
+        val isCopy = state is DestinationPickerState.CopyNotebook ||
+                state is DestinationPickerState.CopyFolder
+        lifecycleScope.launch {
+            val success = withContext(Dispatchers.IO) {
+                try {
+                    when (state) {
+                        is DestinationPickerState.MoveNotebook -> {
+                            if (dest.exists()) dest.delete()
+                            source.renameTo(dest)
+                        }
+                        is DestinationPickerState.CopyNotebook -> {
+                            source.copyTo(dest, overwrite = true)
+                            true
+                        }
+                        is DestinationPickerState.MoveFolder -> {
+                            if (dest.exists()) dest.deleteRecursively()
+                            source.renameTo(dest)
+                        }
+                        is DestinationPickerState.CopyFolder -> {
+                            source.copyRecursively(dest, overwrite = true)
+                            true
+                        }
+                        DestinationPickerState.None -> false
+                    }
+                } catch (e: Exception) {
+                    Log.e("MainActivity", "Picker operation failed", e)
+                    false
+                }
+            }
+            if (success) {
+                destinationPickerState = DestinationPickerState.None
+                applyPickerModeUI()
+                currentPage = 0
+                scanAndRender()
+                Toast.makeText(this@MainActivity, if (isCopy) "Copied." else "Moved.", Toast.LENGTH_SHORT).show()
+            } else {
+                Toast.makeText(
+                    this@MainActivity,
+                    if (isCopy) "Copy failed." else "Move failed.",
+                    Toast.LENGTH_SHORT,
+                ).show()
+            }
+        }
     }
 
     private fun showDeleteFolderConfirmation(file: File) {

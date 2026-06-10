@@ -518,7 +518,7 @@ Never calls `eraseAll()`. Updates the in-memory stroke list directly, rebuilds b
 - `shape_bordered` window background applied after `show()`. 1dp inkBlack dividers between rows.
 - When a title is provided, an `ic_x` (Tabler X) close button appears in the upper-right of the title row. Tapping outside also dismisses (AlertDialog default). No bottom Cancel row.
 - Icon slot is a `Space` placeholder when `iconRes` is null, keeping labels aligned.
-- Used for notebook long-press (Export / Set Cover / Delete Notebook) and folder long-press (Delete).
+- Used for notebook long-press (Export / Copy Notebook / Move Notebook / Set Cover / Delete Notebook) and folder long-press (Copy Folder / Move Folder / Delete).
 
 **Folder delete:**
 - Long-press on a folder card → `ActionSheetDialog` with a single Delete action (icon: `ic_delete_notebook`).
@@ -549,4 +549,27 @@ Never calls `eraseAll()`. Updates the in-memory stroke list directly, rebuilds b
 - Empty search results show `No notebooks found for "query"` instead of the generic empty-state copy
 - No new Gradle dependencies
 
-*Last updated: New Branches — Notebook search with ranked fuzzy matching.*
+**Copy/Move Notebooks and Folders (`ui/DestinationPickerState.kt`, `MainActivity.kt`):**
+- Long-press notebook → ActionSheet: Export / Copy Notebook / Move Notebook / Set Cover / Delete Notebook
+- Long-press folder → ActionSheet: Copy Folder / Move Folder / Delete
+- `DestinationPickerState` — sealed class in `ui/`: `None`, `CopyNotebook(source)`, `MoveNotebook(source)`, `CopyFolder(source)`, `MoveFolder(source)`
+- `MainActivity.destinationPickerState` — tracks active picker operation
+- Entering picker mode: force-exits search mode, sets state, calls `scanAndRender()`
+- Picker toolbar (`pickerToolbar`, 56dp LinearLayout, `GONE` by default) sits above the breadcrumb bar in `activity_main.xml`: Cancel button (left), title TextView (center, weight=1), Confirm button (right, bold). Shown via `applyPickerModeUI()` when state ≠ None.
+- `pickerToolbarDivider` (1dp inkBlack View, `GONE` by default) sits below `pickerToolbar`.
+- Title/confirm label: "Copy notebook here" / "Move notebook here" / "Copy folder here" / "Move folder here"; confirm reads "Copy here" or "Move here".
+- Bottom bar in picker mode: `btnNewNotebook`, `btnSearch`, `btnClearSearch`, `btnSort` all hidden; `btnNewFolder` and pagination remain active.
+- `scanAndRender()` in picker mode: shows folders only; for CopyFolder/MoveFolder, filters out the source folder by `canonicalPath` at any depth.
+- Empty state in picker mode: "No folders here. Create one below."
+- Back press while in picker mode: exits picker mode (checked before search mode check, before directory-stack pop).
+- Cancel button (`btnPickerCancel`): calls `exitPickerMode()` — resets state, restores UI, calls `scanAndRender()`.
+- Confirm button (`btnPickerConfirm`): calls `confirmPickerDestination()`.
+  - MoveNotebook/CopyNotebook: rejects if `currentDirectory == source.parentFile` ("Already in this folder").
+  - CopyFolder/MoveFolder: rejects if `currentDirectory` is the source folder or a descendant of it ("Cannot copy/move a folder into itself").
+  - Conflict check: if `File(currentDirectory, source.name).exists()`, shows AlertDialog "A [notebook/folder] named '[name]' already exists here. Replace it?" → Replace proceeds, Cancel stays in picker mode.
+  - Operations on `Dispatchers.IO`: MoveNotebook/MoveFolder use `renameTo` (deletes conflicting dest first); CopyNotebook uses `copyTo(overwrite=true)`; CopyFolder uses `copyRecursively(overwrite=true)`.
+  - On success: reset state, restore UI, `scanAndRender()`, Toast "Copied." or "Moved.".
+  - On failure: Toast "Copy failed." or "Move failed." — stays in picker mode.
+- Creating a new folder while in picker mode navigates into it and stays in picker mode (normal `navigateIntoFolder` path, no extra logic needed).
+
+*Last updated: New Branches — Copy/Move notebooks and folders with destination picker.*
