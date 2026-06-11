@@ -101,5 +101,20 @@ class IndexRepository(private val dao: ObjectDao) {
     suspend fun getNotebooks(parentId: String?): List<ObjectEntity> =
         dao.getChildren(parentId, type = ObjectType.NOTEBOOK)
 
+    suspend fun getAllNotebooks(): List<ObjectEntity> =
+        dao.getAllNotDeleted().filter { it.type == ObjectType.NOTEBOOK }
+
+    suspend fun getAllFolders(): List<ObjectEntity> =
+        dao.getAllNotDeleted().filter { it.type == ObjectType.FOLDER }
+
+    // endregion
+
+    // region Object movement
+
+    suspend fun moveObject(id: String, newParentId: String?) {
+        val entity = dao.getById(id) ?: return
+        dao.update(entity.copy(parentId = newParentId, updatedAt = System.currentTimeMillis()))
+    }
+
     // endregion
 }

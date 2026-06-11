@@ -1,8 +1,8 @@
 package com.notesprout.android
 
-import java.io.File
+import com.notesprout.android.data.index.ObjectEntity
 
 sealed class NotebookListItem {
-    data class Folder(val name: String, val file: File) : NotebookListItem()
-    data class Notebook(val file: File) : NotebookListItem()
+    data class Folder(val entity: ObjectEntity) : NotebookListItem()
+    data class Notebook(val entity: ObjectEntity) : NotebookListItem()
 }

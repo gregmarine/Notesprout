@@ -1,9 +1,10 @@
 package com.notesprout.android.search
 
-import java.io.File
+import com.notesprout.android.data.index.IndexRepository
+import com.notesprout.android.data.index.ObjectEntity
 
 data class SearchResult(
-    val file: File,
+    val entity: ObjectEntity,
     val displayName: String,
     val folderLabel: String,
     val score: Int
@@ -12,16 +13,27 @@ data class SearchResult(
 object SearchEngine {
 
     /**
-     * Recursively searches [root] for .soil files whose display names match [query].
+     * Queries the index for all notebooks matching [query].
      * Results are ranked: exact substring (score 3) > all words present (score 2) > prefix/initials (score 1).
-     * [notesDir] is the root Notebooks directory — used to build the folderLabel breadcrumb.
      */
-    fun search(query: String, root: File, notesDir: File): List<SearchResult> {
+    suspend fun search(query: String, repository: IndexRepository): List<SearchResult> {
         val trimmed = query.trim()
         if (trimmed.isBlank()) return emptyList()
 
-        val results = mutableListOf<SearchResult>()
-        collectSoilFiles(root, notesDir, results, trimmed)
+        val allNotebooks = repository.getAllNotebooks()
+        val allFolders   = repository.getAllFolders()
+
+        val results = allNotebooks.mapNotNull { entity ->
+            val s = score(trimmed, entity.name)
+            if (s > 0) {
+                SearchResult(
+                    entity      = entity,
+                    displayName = entity.name,
+                    folderLabel = buildFolderLabel(entity.parentId, allFolders),
+                    score       = s,
+                )
+            } else null
+        }
 
         return results.sortedWith(
             compareByDescending<SearchResult> { it.score }
@@ -29,33 +41,20 @@ object SearchEngine {
         )
     }
 
-    private fun collectSoilFiles(
-        dir: File,
-        notesDir: File,
-        results: MutableList<SearchResult>,
-        query: String
-    ) {
-        dir.listFiles()?.forEach { file ->
-            when {
-                file.isDirectory && !file.name.startsWith(".") -> {
-                    collectSoilFiles(file, notesDir, results, query)
-                }
-                file.isFile && file.extension == "soil" -> {
-                    val displayName = file.nameWithoutExtension
-                    val score = score(query, displayName)
-                    if (score > 0) {
-                        results.add(
-                            SearchResult(
-                                file = file,
-                                displayName = displayName,
-                                folderLabel = buildFolderLabel(file.parentFile!!, notesDir),
-                                score = score
-                            )
-                        )
-                    }
-                }
-            }
+    /**
+     * Builds a breadcrumb label such as "Notebooks" or "Notebooks › Work › Projects"
+     * by walking up the parentId chain using the already-fetched [folders] list.
+     */
+    private fun buildFolderLabel(parentId: String?, folders: List<ObjectEntity>): String {
+        val segments = mutableListOf<String>()
+        var currentId = parentId
+        while (currentId != null) {
+            val folder = folders.find { it.id == currentId } ?: break
+            segments.add(0, folder.name)
+            currentId = folder.parentId
         }
+        segments.add(0, "Notebooks")
+        return segments.joinToString(" › ")
     }
 
     /**
@@ -72,7 +71,7 @@ object SearchEngine {
         if (n.contains(q)) return 3
 
         val queryWords = q.split(Regex("\\s+")).filter { it.isNotEmpty() }
-        val nameWords = n.split(Regex("[\\s_\\-]+")).filter { it.isNotEmpty() }
+        val nameWords  = n.split(Regex("[\\s_\\-]+")).filter { it.isNotEmpty() }
         if (queryWords.size > 1 && queryWords.all { qw -> nameWords.any { nw -> nw.contains(qw) } }) return 2
 
         val initials = nameWords.map { it.first() }.joinToString("")
@@ -80,20 +79,5 @@ object SearchEngine {
         if (nameWords.any { it.startsWith(q) }) return 1
 
         return 0
-    }
-
-    /**
-     * Builds a breadcrumb label like "Notebooks" or "Notebooks › Work › Projects".
-     * [notesDir] is the root — its name is always the first segment ("Notebooks").
-     */
-    private fun buildFolderLabel(folder: File, notesDir: File): String {
-        val segments = mutableListOf<String>()
-        var current: File? = folder
-        while (current != null && current != notesDir.parentFile) {
-            segments.add(0, current.name)
-            if (current == notesDir) break
-            current = current.parentFile
-        }
-        return segments.joinToString(" › ")
     }
 }
