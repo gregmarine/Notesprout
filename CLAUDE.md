@@ -221,6 +221,7 @@ Notesprout's visual language is designed for e-ink displays first. All other pla
 | BOOX NoteAir5C (NA5C) | `92c16533` |
 | BOOX Note Max (MAX) | `6325773d` |
 | BOOX Go 10.3 (G10) | `34E517F9` |
+| BOOX Go 7 (G7) | `17845014` |
 | BOOX Palma2 Pro (P2P) | `287d2364` |
 | BOOX Go Color 7 (GC7) | `98d56306` |
 | BOOX NoteAir4C (NA4C) | `1d36f870` |
