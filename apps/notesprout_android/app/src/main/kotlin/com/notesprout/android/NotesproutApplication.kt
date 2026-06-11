@@ -31,6 +31,8 @@ class NotesproutApplication : Application() {
         // before any SDK code runs.
         HiddenApiBypass.addHiddenApiExemptions("")
 
+        com.notesprout.android.data.index.NotesproutIndex.open(this)
+
         val mlKitRecognizer = com.notesprout.android.recognition.MlKitHandwritingRecognizer()
         com.notesprout.android.recognition.HandwritingRecognizerProvider.init(mlKitRecognizer)
         mlKitRecognizer.initModel { success ->
