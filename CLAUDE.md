@@ -157,6 +157,7 @@ Notesprout's visual language is designed for e-ink displays first. All other pla
 **Tier 1 — Daily drivers:**
 - BOOX NoteAir5C (EMR stylus, e-ink color) — flagship
 - BOOX Note Max (EMR stylus, large-format e-ink)
+- BOOX Go 10.3 (EMR stylus, large e-ink)
 - BOOX Palma2 Pro (USI 2.0 stylus, Android phone form factor)
 - BOOX Go Color 7 Gen II
 - Wacom Movink Pad 11 & 14 (Android, GenericDrawingEngine)
@@ -175,6 +176,7 @@ Notesprout's visual language is designed for e-ink displays first. All other pla
 |---|---|
 | BOOX NoteAir5C (NA5C) | `92c16533` |
 | BOOX Note Max (MAX) | `6325773d` |
+| BOOX Go 10.3 (G10) | `34E517F9` |
 | BOOX Palma2 Pro (P2P) | `287d2364` |
 | BOOX Go Color 7 (GC7) | `98d56306` |
 | BOOX NoteAir4C (NA4C) | `1d36f870` |

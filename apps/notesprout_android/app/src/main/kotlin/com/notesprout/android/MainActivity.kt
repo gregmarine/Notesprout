@@ -110,7 +110,7 @@ class MainActivity : AppCompatActivity() {
      * Navigation stack — root is always notesDir(). Navigating into a folder
      * pushes onto this list; going back pops from it.
      */
-    private val directoryStack: MutableList<File> = mutableListOf()
+    private val directoryStack: ArrayDeque<File> = ArrayDeque()
 
     /** The directory currently being displayed. */
     private val currentDirectory: File get() = directoryStack.last()
