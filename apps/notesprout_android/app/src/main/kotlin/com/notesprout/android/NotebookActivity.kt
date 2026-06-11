@@ -50,6 +50,9 @@ import com.notesprout.android.data.NotebookObject
 import com.notesprout.android.data.SoilDatabase
 import com.notesprout.android.data.StrokeData
 import com.notesprout.android.data.StrokePoint
+import com.notesprout.android.data.index.IndexRepository
+import com.notesprout.android.data.index.NotesproutIndex
+import com.notesprout.android.data.soilFile
 import com.notesprout.android.databinding.ActivityNotebookBinding
 import com.notesprout.android.databinding.DialogEditHeadingTextBinding
 import com.notesprout.android.notebook.NotebookView
@@ -77,8 +80,10 @@ class NotebookActivity : AppCompatActivity() {
     companion object {
         private const val TAG = "Notesprout"
 
-        /** Intent extra key — the absolute path to the `.soil` notebook file. */
-        const val EXTRA_NOTEBOOK_PATH = "notebook_path"
+        /** Intent extra key — the index UUID for the notebook (ObjectEntity id). */
+        const val EXTRA_NOTEBOOK_ID   = "notebook_id"
+        /** Intent extra key — the display name for the notebook. */
+        const val EXTRA_NOTEBOOK_NAME = "notebook_name"
     }
 
     /**
@@ -123,6 +128,21 @@ class NotebookActivity : AppCompatActivity() {
     private var twoFingerSwipeStartX = 0f
     private var twoFingerSwipeStartY = 0f
     private var twoFingerSwipeVelocityTracker: VelocityTracker? = null
+
+    /** Index UUID of the open notebook — set once in onCreate from EXTRA_NOTEBOOK_ID. */
+    private var notebookId: String = ""
+
+    /** Derived absolute path to the .soil file — set once in onCreate. */
+    private var notebookSoilPath: String? = null
+
+    /** Display name from EXTRA_NOTEBOOK_NAME — used for the activity title. */
+    private var notebookDisplayName: String = ""
+
+    /** Lazy access to the index repository for snapshot/page-count/updatedAt sync. */
+    private val indexRepo: IndexRepository by lazy { IndexRepository(NotesproutIndex.dao()) }
+
+    /** Last page count pushed to the index; -1 = not yet synced. */
+    private var lastSyncedPageCount: Int = -1
 
     /** Room DB instance for the open notebook. Null before open and after close. */
     private var soilDatabase: SoilDatabase? = null
@@ -882,8 +902,16 @@ class NotebookActivity : AppCompatActivity() {
         //   ACTION_CANCEL        → reset
         // No-op on init — handled entirely in dispatchTouchEvent / helpers below.
 
+        // ── Resolve notebook identity ─────────────────────────────────────────
+        notebookId          = intent.getStringExtra(EXTRA_NOTEBOOK_ID) ?: ""
+        notebookDisplayName = intent.getStringExtra(EXTRA_NOTEBOOK_NAME) ?: ""
+        if (notebookId.isNotEmpty()) {
+            notebookSoilPath = soilFile(this, notebookId).absolutePath
+            title = notebookDisplayName
+        }
+
         // ── Open the Room DB ──────────────────────────────────────────────────
-        val notebookPath = intent.getStringExtra(EXTRA_NOTEBOOK_PATH)
+        val notebookPath = notebookSoilPath
         if (notebookPath != null) {
             sessionStartTime = System.currentTimeMillis()
             soilDatabase = Room.databaseBuilder(
@@ -901,7 +929,7 @@ class NotebookActivity : AppCompatActivity() {
     override fun onStart() {
         super.onStart()
         // Restore undo/redo state if the app was backgrounded with a non-empty history.
-        val path = intent.getStringExtra(EXTRA_NOTEBOOK_PATH) ?: return
+        val path = notebookSoilPath ?: return
         val file = undoRedoPersistenceFile(path)
         if (file.exists()) {
             try {
@@ -919,7 +947,7 @@ class NotebookActivity : AppCompatActivity() {
         super.onStop()
         // Persist undo/redo stacks so they survive process death when the app is backgrounded.
         if (!undoRedoManager.isEmpty()) {
-            val path = intent.getStringExtra(EXTRA_NOTEBOOK_PATH) ?: return
+            val path = notebookSoilPath ?: return
             try {
                 undoRedoPersistenceFile(path).writeText(undoRedoManager.toJson())
             } catch (e: Exception) {
@@ -1230,7 +1258,7 @@ class NotebookActivity : AppCompatActivity() {
         // Clear history, clipboard, and remove any on-disk persistence file — notebook is done.
         undoRedoManager.clear()
         NotesproutClipboard.clear()
-        val nbPath = intent.getStringExtra(EXTRA_NOTEBOOK_PATH)
+        val nbPath = notebookSoilPath
         if (nbPath != null) undoRedoPersistenceFile(nbPath).takeIf { it.exists() }?.delete()
 
         // Capture snapshot on the main thread — View operations must run here.
@@ -1240,11 +1268,12 @@ class NotebookActivity : AppCompatActivity() {
         val snapshot = drawingView.captureSnapshot()
         val pageId   = currentPageId
 
+        val nbId         = notebookId
         val sessionStart = sessionStartTime
         if (blocking) {
-            runBlocking { sealNotebook(db, snapshot, pageId, nbPath, sessionStart) }
+            runBlocking { sealNotebook(db, snapshot, pageId, nbPath, nbId, sessionStart) }
         } else {
-            NotesproutApplication.appScope.launch { sealNotebook(db, snapshot, pageId, nbPath, sessionStart) }
+            NotesproutApplication.appScope.launch { sealNotebook(db, snapshot, pageId, nbPath, nbId, sessionStart) }
         }
     }
 
@@ -1258,11 +1287,16 @@ class NotebookActivity : AppCompatActivity() {
         snapshot: String?,
         pageId: String,
         nbPath: String?,
+        nbId: String,
         sessionStart: Long,
     ) = withContext(Dispatchers.IO) {
         // Persist snapshot for the page we are closing (mirrors navigateToPage).
         if (snapshot != null && pageId.isNotEmpty()) {
             persistSnapshot(db, pageId, snapshot)
+            // Keep the index cover current so MainActivity grid doesn't need to open the .soil.
+            if (nbId.isNotEmpty()) {
+                runCatching { indexRepo.updateNotebookSnapshot(nbId, snapshot) }
+            }
         }
         saveStrokes(db)
         // Hard-delete rows soft-deleted before this session — they predate the undo stack
@@ -1275,6 +1309,8 @@ class NotebookActivity : AppCompatActivity() {
         }
         db.close()
         if (nbPath != null) File("$nbPath-journal").takeIf { it.exists() }?.delete()
+        // Update the index updatedAt so sort-by-date stays correct in MainActivity.
+        if (nbId.isNotEmpty()) runCatching { indexRepo.touchNotebook(nbId) }
     }
 
     // ── Persistence ───────────────────────────────────────────────────────────
@@ -1644,8 +1680,8 @@ class NotebookActivity : AppCompatActivity() {
      * Snapshot is persisted first so PageIndexActivity reads the freshest state.
      */
     private fun openPageIndex() {
-        val db           = soilDatabase ?: return
-        val notebookPath = intent.getStringExtra(EXTRA_NOTEBOOK_PATH) ?: return
+        val db = soilDatabase ?: return
+        if (notebookId.isEmpty()) return
         lifecycleScope.launch {
             val snapshot = drawingView.captureSnapshot()
             val pageId   = currentPageId
@@ -1656,8 +1692,9 @@ class NotebookActivity : AppCompatActivity() {
                 saveStrokes(db)
             }
             val i = Intent(this@NotebookActivity, PageIndexActivity::class.java).apply {
-                putExtra(PageIndexActivity.EXTRA_NOTEBOOK_PATH, notebookPath)
-                putExtra(PageIndexActivity.EXTRA_CURRENT_PAGE_INDEX, currentPageIndex)
+                putExtra(PageIndexActivity.EXTRA_NOTEBOOK_ID,           notebookId)
+                putExtra(PageIndexActivity.EXTRA_NOTEBOOK_NAME,         notebookDisplayName)
+                putExtra(PageIndexActivity.EXTRA_CURRENT_PAGE_INDEX,    currentPageIndex)
             }
             pageIndexLauncher.launch(i)
         }
@@ -1723,7 +1760,7 @@ class NotebookActivity : AppCompatActivity() {
      * shows the freshest possible preview.
      */
     private fun openCoverDialog() {
-        val notebookPath = intent.getStringExtra(EXTRA_NOTEBOOK_PATH) ?: return
+        val notebookPath = notebookSoilPath ?: return
         val snapshot = drawingView.captureSnapshot()
         val snapshotBitmap: Bitmap? = snapshot?.let { b64 ->
             try {
@@ -2186,6 +2223,13 @@ class NotebookActivity : AppCompatActivity() {
     /** Refresh the page indicator overlay text. Call on the main thread. */
     private fun updatePageIndicator() {
         binding.tvPageIndicator.text = "${currentPageIndex + 1} / ${pages.size.coerceAtLeast(1)}"
+        val count = pages.size
+        if (notebookId.isNotEmpty() && count != lastSyncedPageCount) {
+            lastSyncedPageCount = count
+            lifecycleScope.launch(Dispatchers.IO) {
+                runCatching { indexRepo.updateNotebookPageCount(notebookId, count) }
+            }
+        }
     }
 
     // ── Undo/redo execution ───────────────────────────────────────────────────

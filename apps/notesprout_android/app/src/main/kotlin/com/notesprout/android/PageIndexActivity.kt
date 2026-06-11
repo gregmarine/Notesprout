@@ -20,6 +20,7 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.lifecycleScope
+import com.notesprout.android.data.soilFile
 import com.notesprout.android.databinding.ActivityPageIndexBinding
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -33,7 +34,8 @@ import android.view.ViewTreeObserver
 class PageIndexActivity : AppCompatActivity() {
 
     companion object {
-        const val EXTRA_NOTEBOOK_PATH         = "notebook_path"
+        const val EXTRA_NOTEBOOK_ID           = "notebook_id"
+        const val EXTRA_NOTEBOOK_NAME         = "notebook_name"
         const val EXTRA_CURRENT_PAGE_INDEX    = "current_page_index"
         const val EXTRA_SELECTED_PAGE_INDEX   = "selected_page_index"
         /** Comma-separated UUIDs of pages pasted during this session (may be empty). */
@@ -80,6 +82,9 @@ class PageIndexActivity : AppCompatActivity() {
     private val pageCodec = Json { ignoreUnknownKeys = true }
 
     // ── State ─────────────────────────────────────────────────────────────────
+
+    private var notebookId: String = ""
+    private var notebookSoilPath: String? = null
 
     private lateinit var binding: ActivityPageIndexBinding
     private var pages: List<PageEntry> = emptyList()
@@ -150,6 +155,9 @@ class PageIndexActivity : AppCompatActivity() {
         binding = ActivityPageIndexBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
+        notebookId       = intent.getStringExtra(EXTRA_NOTEBOOK_ID) ?: ""
+        notebookSoilPath = if (notebookId.isNotEmpty()) soilFile(this, notebookId).absolutePath else null
+
         currentPageIndex = intent.getIntExtra(EXTRA_CURRENT_PAGE_INDEX, 0)
 
         binding.btnBack.setOnClickListener {
@@ -205,7 +213,7 @@ class PageIndexActivity : AppCompatActivity() {
     // ── Data loading ──────────────────────────────────────────────────────────
 
     private fun loadPagesAsync() {
-        val path = intent.getStringExtra(EXTRA_NOTEBOOK_PATH) ?: return
+        val path = notebookSoilPath ?: return
         lifecycleScope.launch {
             pages = withContext(Dispatchers.IO) { loadPagesFromSoil(path) }
             currentPageId = pages.getOrNull(currentPageIndex)?.id
@@ -549,7 +557,7 @@ class PageIndexActivity : AppCompatActivity() {
         val sourceId = moveModeSourcePageId ?: return
         val targetId = pages.getOrNull(destinationIndex)?.id ?: return
         if (sourceId == targetId) { cancelMoveMode(); return }
-        val path = intent.getStringExtra(EXTRA_NOTEBOOK_PATH) ?: return
+        val path = notebookSoilPath ?: return
 
         lifecycleScope.launch {
             val prevAfterResultRaw = withContext(Dispatchers.IO) {
@@ -593,7 +601,7 @@ class PageIndexActivity : AppCompatActivity() {
         val sourcePageId = pendingCopyPageId ?: return
         val targetIdx    = actionModePageIndex ?: return
         val targetPageId = pages.getOrNull(targetIdx)?.id ?: return
-        val path         = intent.getStringExtra(EXTRA_NOTEBOOK_PATH) ?: return
+        val path         = notebookSoilPath ?: return
 
         lifecycleScope.launch {
             val newPageId = withContext(Dispatchers.IO) {
@@ -621,7 +629,7 @@ class PageIndexActivity : AppCompatActivity() {
     private fun executeDelete() {
         val idx      = actionModePageIndex ?: return
         val pageId   = pages.getOrNull(idx)?.id ?: return
-        val path     = intent.getStringExtra(EXTRA_NOTEBOOK_PATH) ?: return
+        val path     = notebookSoilPath ?: return
         val pageNum  = pages.getOrNull(idx)?.pageNumber ?: return
 
         if (pages.size <= 1) {

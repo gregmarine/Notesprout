@@ -117,4 +117,13 @@ class IndexRepository(private val dao: ObjectDao) {
     }
 
     // endregion
+
+    // region Timestamp
+
+    suspend fun touchNotebook(id: String) {
+        val entity = dao.getById(id) ?: return
+        dao.update(entity.copy(updatedAt = System.currentTimeMillis()))
+    }
+
+    // endregion
 }

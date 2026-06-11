@@ -720,9 +720,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun launchNotebookActivity(entity: ObjectEntity) {
-        val file = soilFile(this, entity.id)
         val intent = Intent(this, NotebookActivity::class.java).apply {
-            putExtra(NotebookActivity.EXTRA_NOTEBOOK_PATH, file.absolutePath)
+            putExtra(NotebookActivity.EXTRA_NOTEBOOK_ID,   entity.id)
+            putExtra(NotebookActivity.EXTRA_NOTEBOOK_NAME, entity.name)
         }
         startActivity(intent)
     }
