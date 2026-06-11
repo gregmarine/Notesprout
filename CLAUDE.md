@@ -45,13 +45,57 @@ A handwriting-first, meditative notes app. Think paper, but smarter underneath. 
 ## Architecture — Foundational Decisions
 
 - Notebook = a `.soil` file (SQLite database with `.soil` extension)
-- Notebook files live in the app's private external storage: `getExternalFilesDir(null)` → `Android/data/com.notesprout.android/files/<name>.soil` — no other location, no permissions required
+- Notebook files live in the app's private external storage: `getExternalFilesDir(null)/Garden/<uuid>.soil` — flat directory, UUID filenames, no other location, no permissions required
+- Folder/notebook structure is maintained exclusively in the global index (`notesprout.db`) — never derived from the filesystem directory hierarchy
+- `soilFile(context, notebookId)` is the single canonical way to derive a `.soil` file path — no other code constructs a path to a `.soil` file
 - Hierarchy: Notebook → Pages → Layers → Content Objects
 - Layers: base layer (template, locked) and content layers
 - Every object carries: id, parentId, boundingBox, order, createdAt, updatedAt, deletedAt, data
 - Stroke data: proprietary point arrays (x, y, pressure, tilt, timestamp), stored as JSON in the `data` TEXT column
 - Soft deletes with cleanup process
 - Stable UUIDs everywhere
+
+---
+
+## Global Index (`notesprout.db`)
+
+The global index is a Room/SQLite database at `getExternalFilesDir(null)/notesprout.db`. It owns the entire folder/notebook tree — the filesystem `Garden/` directory is just flat blob storage, not a source of structure.
+
+### Schema (`objects` table)
+
+```sql
+CREATE TABLE objects (
+    id         TEXT    PRIMARY KEY NOT NULL,
+    type       TEXT    NOT NULL,
+    name       TEXT    NOT NULL,
+    parentId   TEXT,
+    createdAt  INTEGER NOT NULL,
+    updatedAt  INTEGER NOT NULL,
+    deletedAt  INTEGER,
+    data       TEXT    NOT NULL DEFAULT '{}'
+);
+
+CREATE INDEX idx_objects_parent_type_deleted
+    ON objects(parentId, type, deletedAt);
+```
+
+### Key classes
+
+- `ObjectEntity` (`data/index/ObjectEntity.kt`) — Room entity; the universal index row for both folders and notebooks
+- `ObjectType` (`data/index/ObjectType.kt`) — constants: `FOLDER = "folder"`, `NOTEBOOK = "notebook"`
+- `FolderObject` (`data/index/FolderObject.kt`) — `@Serializable` data class stored in `data` column for folder rows
+- `NotebookObject` (`data/index/NotebookObject.kt`) — `@Serializable` data class stored in `data` column for notebook rows; carries `snapshot: String?` (cover bitmap, base64) and `pageCount: Int`
+- `ObjectDao` (`data/index/ObjectDao.kt`) — Room DAO; all index queries and mutations
+- `IndexRepository` (`data/index/IndexRepository.kt`) — higher-level API over `ObjectDao`; create/rename/softDelete/move operations for folders and notebooks
+- `NotesproutIndex` (`data/index/NotesproutIndex.kt`) — singleton that opens and manages `notesprout.db`; call `open(context)` once in `Application.onCreate`, `seal()` on shutdown
+- `soilFile(context, notebookId)` (`data/SoilFile.kt`) — **the single canonical function** for resolving a notebook's `.soil` path: `Garden/<notebookId>.soil`. No other code constructs a `.soil` path.
+
+### Rules
+
+- `parentId = null` means root (direct child of the notebook list root)
+- Soft-deletes only — set `deletedAt`; never hard-delete index rows without deliberate garbage collection
+- All writes go through `IndexRepository`; direct DAO use is limited to reads inside `MainActivity` load paths
+- `NotesproutIndex` must be opened before any Activity accesses it; `NotesproutApplication.onCreate` is the correct place
 
 ---
 
@@ -221,14 +265,14 @@ When asked to install without specifying a variant, **always build and install t
 **Debug APK:**
 ```
 cd apps/notesprout_android
-JAVA_HOME=<temurin-17-path> ./gradlew assembleDebug
+./gradlew assembleDebug
 ```
 APK output: `apps/notesprout_android/app/build/outputs/apk/debug/app-debug.apk`
 
 **Release APK (unsigned, for local sideloading only):**
 ```
 cd apps/notesprout_android
-JAVA_HOME=<temurin-17-path> ./gradlew assembleRelease
+./gradlew assembleRelease
 ```
 APK output: `apps/notesprout_android/app/build/outputs/apk/release/app-release-unsigned.apk`
 
@@ -454,9 +498,11 @@ Never calls `eraseAll()`. Updates the in-memory stroke list directly, rebuilds b
 
 **Core:**
 - `.soil` schema + Room setup, SoilDatabase lifecycle
+- Global index (`notesprout.db`) — `NotesproutIndex` singleton, `IndexRepository`, `ObjectEntity`, `ObjectType`
+- `soilFile(context, notebookId)` — single canonical path resolver for `Garden/<uuid>.soil`
 - Notebook list (MainActivity) — adaptive grid, pagination, cover images, Set Cover, Delete notebook
-- New-notebook dialog pre-fills filename with `YYYYMMDD_HHmmss` timestamp (`java.time.LocalDateTime`, editable before confirm)
-- New-notebook name validation (`MainActivity.validateNotebookName()`) — shared gate enforced at the dialog and re-checked defensively inside `createNotebook` before any file is opened. Whitelists `[^a-zA-Z0-9_\-. ]` (excludes `/` `\`) + explicit `.`/`..` reject to block path traversal (C-2); rejects a name whose `.soil` file already `exists()` to prevent reopening an existing notebook and inserting a duplicate `type='notebook'` row (C-1). Notebooks live in `getExternalFilesDir(null)` via `notesDir()` — no storage permissions required
+- New-notebook dialog pre-fills name with `YYYYMMDD_HHmmss` timestamp (`java.time.LocalDateTime`, editable before confirm)
+- New-notebook name validation (`MainActivity.validateNotebookName()`) — whitelists `[^a-zA-Z0-9_\-. ]` + rejects `.`/`..`; checks index for duplicate name in current folder; no storage permissions required
 - NotebookActivity — fullscreen immersive, multi-page, incremental save, one-finger deliberate swipe, two-finger swipe to insert page before/after
 - Dual-install build variants — debug (`.dev` suffix) + release side-by-side
 
@@ -496,20 +542,20 @@ Never calls `eraseAll()`. Updates the in-memory stroke list directly, rebuilds b
 - Entry points: NotebookActivity toolbar (`btnExport`, after Cover) and MainActivity long-press context menu (Export as first item, opens Room DB read-only, closes after export)
 
 **Folder Navigation (MainActivity):**
-- Notebooks live in `getExternalFilesDir(null)/Notebooks/`. `notesDir()` returns `File(getExternalFilesDir(null)!!, "Notebooks")` — the "Notebooks" subdirectory is the root for all notebooks and user-created folders. Nothing else in `getExternalFilesDir(null)` (e.g. "Templates") is ever shown in the UI.
+- Folder/notebook tree lives exclusively in the global index (`notesprout.db`). The filesystem `Garden/` directory is flat blob storage — structure is never derived from it.
 - `NotebookListItem` — sealed class in `NotebookListItem.kt`:
-  - `NotebookListItem.Folder(name: String, file: File)` — a subdirectory
-  - `NotebookListItem.Notebook(file: File)` — a `.soil` file
-- `MainActivity.directoryStack: MutableList<File>` — navigation stack; root = `[notesDir()]`. `currentDirectory` is `directoryStack.last()`.
-- Scan order: folders first (alphabetical, case-insensitive), notebooks second (alphabetical). Dotfiles/hidden dirs are excluded.
-- Pagination applies to the combined `items: List<NotebookListItem>` list for `currentDirectory`.
-- Folder card: `ic_folder` icon centred, folder name label; tap pushes into folder. No cover image. Long-press opens an `ActionSheetDialog` with a Delete action. Creating a new folder automatically navigates into it.
+  - `NotebookListItem.Folder(entity: ObjectEntity)` — a folder row from the index
+  - `NotebookListItem.Notebook(entity: ObjectEntity)` — a notebook row from the index
+- `MainActivity.directoryStack: ArrayDeque<ObjectEntity?>` — navigation stack; `null` = root. `currentFolder` is `directoryStack.last()`; `currentParentId` is `currentFolder?.id`.
+- `scanAndRender()` calls `repository.getChildren(currentParentId)` to load the current level from the index; applies sort preferences; calls `renderPage()` to update the UI.
+- Pagination applies to the combined `items: List<NotebookListItem>` list for the current parent.
+- Folder card: `ic_folder` icon centred, folder name label; tap pushes `ObjectEntity` onto `directoryStack`. No cover image. Long-press opens an `ActionSheetDialog`. Creating a new folder automatically navigates into it.
 - Breadcrumb bar (`breadcrumbBar` LinearLayout, 56dp, always visible): back button (`btnBreadcrumbBack`) + vertical divider (`breadcrumbBackDivider`) are `INVISIBLE` at root and become visible when navigated into a subfolder. One `TextView` chip per stack entry at 18sp, separated by `›` (`inkLight`). Tapping a chip pops the stack to that depth. Auto-scrolls right to show the deepest entry.
 - Breadcrumb divider: 1dp inkBlack `View` (id `breadcrumbDivider`) below the bar — always visible since the bar is always visible.
 - Both the breadcrumb bar and bottom bar are 56dp — matching the notebook activity toolbar height.
-- New Folder button (`btnNewFolder`, `ic_folder_plus`) sits after `btnNewNotebook` in the bottom bar; `validateFolderName()` applies the same whitelist as `validateNotebookName()` plus a directory-exists check.
+- New Folder button (`btnNewFolder`, `ic_folder_plus`) sits after `btnNewNotebook` in the bottom bar; `validateFolderName()` applies the same whitelist as `validateNotebookName()` plus a duplicate-name-in-index check.
 - Android back button / gesture: if `directoryStack.size > 1`, calls `navigateUpOneLevel()` (pops stack, reloads); at root, default system behavior.
-- `validateNotebookName()` and `createNotebook()` use `currentDirectory` instead of `notesDir()` so new notebooks land in the directory the user is browsing.
+- Activities receive notebook identity as `EXTRA_NOTEBOOK_ID` (entity UUID) + `EXTRA_NOTEBOOK_NAME` — never a `File` object.
 - Icons: `ic_folder.xml`, `ic_folder_plus.xml` — Tabler stroke-based, `@color/inkBlack`, strokeWidth 2, 24dp.
 
 ---
@@ -525,8 +571,8 @@ Never calls `eraseAll()`. Updates the in-memory stroke list directly, rebuilds b
 **Folder delete:**
 - Long-press on a folder card → `ActionSheetDialog` with a single Delete action (icon: `ic_delete_notebook`).
 - Confirmation `AlertDialog` shows exact message: `Delete "[name]"? This will permanently remove all notebooks and subfolders inside it. This cannot be undone.`
-- On confirm: `file.deleteRecursively()` on `Dispatchers.IO`; if it returns false, shows Toast "Some files could not be deleted."
-- Reloads `currentDirectory` via `scanAndRender()` after deletion.
+- On confirm (on `Dispatchers.IO`): recursively soft-deletes the folder entity and all descendant entities in the index; deletes corresponding `.soil` files from `Garden/` via `soilFile()`; cleans up WAL sidecars.
+- Reloads the current level via `scanAndRender()` after deletion.
 
 **Sorting:**
 - `sort/SortField.kt` — `enum class SortField { NAME, DATE_MODIFIED }`
@@ -538,40 +584,42 @@ Never calls `eraseAll()`. Updates the in-memory stroke list directly, rebuilds b
 - Icon: `ic_filter.xml` — Tabler `filter-2` (three decreasing horizontal lines), strokeWidth 2, `@color/inkBlack`, 24dp
 - `btnSort` (`AppCompatImageButton`, `Widget.Notesprout.ToolbarButton`) sits at the right end of the breadcrumb bar in `activity_main.xml`
 - `MainActivity` loads prefs on `onCreate` via `SortPreferencesManager.load`; `btnSort` click opens `SortDialog` which saves and calls `scanAndRender()`
-- `scanAndRender()` applies `sortPrefs` via `sortItems()` helper — sort key is `file.lastModified()` (DATE_MODIFIED) or `name.lowercase()` (NAME); `FolderSort` controls grouping (FOLDERS_FIRST / NOTEBOOKS_FIRST / MIXED); `SortOrder.DESCENDING` reverses the comparator
+- `scanAndRender()` applies `sortPrefs` via `sortItems()` helper — sort key is `entity.updatedAt` (DATE_MODIFIED) or `entity.name.lowercase()` (NAME); `FolderSort` controls grouping (FOLDERS_FIRST / NOTEBOOKS_FIRST / MIXED); `SortOrder.DESCENDING` reverses the comparator
 - Card labels show `"$displayName ($dateStr, $timeStr)"` using `DateFormat.getMediumDateFormat` + `DateFormat.getTimeFormat` (locale-aware)
 
 **Notebook Search (`search/SearchEngine.kt`, `search/SearchDialog.kt`):**
 - `btnSearch` (breadcrumb bar, `ic_search`) opens `SearchDialog` — a plain `EditText` with ranked fuzzy matching
 - `btnClearSearch` (`ic_search_off`, visible only in search mode) exits search and restores normal browse
-- `SearchEngine.search(query, root, notesDir)` — recursive `.soil` scan from `currentDirectory` with scoring: substring (3) > all words present (2) > prefix/initials (1); sorted by score desc, name asc
-- Search mode replaces the normal directory scan in `scanAndRender()`; results shown as notebook cards with `"FolderLabel › NotebookName"` labels (no date/time in search mode)
+- `SearchEngine.search(query, allNotebooks)` — queries all notebooks from the index via `repository.getAllNotebooks()`, scores by name: substring (3) > all words present (2) > prefix/initials (1); sorted by score desc, name asc
+- Search mode replaces the normal index scan in `scanAndRender()`; results shown as notebook cards with `"FolderLabel › NotebookName"` breadcrumb labels (built by walking `parentId` chains; no date/time in search mode)
 - Back press while in search mode exits search (checked before the directory-stack back logic)
-- Opening a notebook from search results rebuilds `directoryStack` to the notebook's parent folder (`navigateStackToDirectory`) so returning from NotebookActivity lands in the correct folder
+- Opening a notebook from search results rebuilds `directoryStack` by walking `parentId` chain from the result's parent to root (`navigateStackToDirectory`) so returning from NotebookActivity lands in the correct folder
 - Empty search results show `No notebooks found for "query"` instead of the generic empty-state copy
 - No new Gradle dependencies
 
 **Copy/Move Notebooks and Folders (`ui/DestinationPickerState.kt`, `MainActivity.kt`):**
 - Long-press notebook → ActionSheet: Export / Copy Notebook / Move Notebook / Set Cover / Delete Notebook
 - Long-press folder → ActionSheet: Copy Folder / Move Folder / Delete
-- `DestinationPickerState` — sealed class in `ui/`: `None`, `CopyNotebook(source)`, `MoveNotebook(source)`, `CopyFolder(source)`, `MoveFolder(source)`
+- `DestinationPickerState` — sealed class in `ui/`: `None`, `CopyNotebook(source: ObjectEntity)`, `MoveNotebook(source: ObjectEntity)`, `CopyFolder(source: ObjectEntity)`, `MoveFolder(source: ObjectEntity)`
 - `MainActivity.destinationPickerState` — tracks active picker operation
 - Entering picker mode: force-exits search mode, sets state, calls `scanAndRender()`
 - Picker toolbar (`pickerToolbar`, 56dp LinearLayout, `GONE` by default) sits above the breadcrumb bar in `activity_main.xml`: Cancel button (left), title TextView (center, weight=1), Confirm button (right, bold). Shown via `applyPickerModeUI()` when state ≠ None.
 - `pickerToolbarDivider` (1dp inkBlack View, `GONE` by default) sits below `pickerToolbar`.
 - Title/confirm label: "Copy notebook here" / "Move notebook here" / "Copy folder here" / "Move folder here"; confirm reads "Copy here" or "Move here".
 - Bottom bar in picker mode: `btnNewNotebook`, `btnSearch`, `btnClearSearch`, `btnSort` all hidden; `btnNewFolder` and pagination remain active.
-- `scanAndRender()` in picker mode: shows folders only; for CopyFolder/MoveFolder, filters out the source folder by `canonicalPath` at any depth.
+- `scanAndRender()` in picker mode: shows folders only (from index); for CopyFolder/MoveFolder, filters out the source entity id and any descendant ids.
 - Empty state in picker mode: "No folders here. Create one below."
 - Back press while in picker mode: exits picker mode (checked before search mode check, before directory-stack pop).
 - Cancel button (`btnPickerCancel`): calls `exitPickerMode()` — resets state, restores UI, calls `scanAndRender()`.
 - Confirm button (`btnPickerConfirm`): calls `confirmPickerDestination()`.
-  - MoveNotebook/CopyNotebook: rejects if `currentDirectory == source.parentFile` ("Already in this folder").
-  - CopyFolder/MoveFolder: rejects if `currentDirectory` is the source folder or a descendant of it ("Cannot copy/move a folder into itself").
-  - Conflict check: if `File(currentDirectory, source.name).exists()`, shows AlertDialog "A [notebook/folder] named '[name]' already exists here. Replace it?" → Replace proceeds, Cancel stays in picker mode.
-  - Operations on `Dispatchers.IO`: MoveNotebook/MoveFolder use `renameTo` (deletes conflicting dest first); CopyNotebook uses `copyTo(overwrite=true)`; CopyFolder uses `copyRecursively(overwrite=true)`.
+  - MoveNotebook/CopyNotebook: rejects if `currentParentId == source.parentId` ("Already in this folder").
+  - CopyFolder/MoveFolder: rejects if destination is the source entity or a descendant in the index.
+  - Conflict check: if a sibling with the same name already exists in the index at the destination, shows AlertDialog "A [notebook/folder] named '[name]' already exists here. Replace it?" → Replace proceeds, Cancel stays in picker mode.
+  - MoveNotebook/MoveFolder: `repository.moveObject(source.id, currentParentId)` — index update only; `.soil` file stays at `Garden/<id>.soil` (UUID doesn't change).
+  - CopyNotebook: creates a new `ObjectEntity` via `repository.createNotebook`, then copies the `.soil` file to the new UUID path via `soilFile()`.
+  - CopyFolder: recursively creates new index entries and copies all descendant `.soil` files.
   - On success: reset state, restore UI, `scanAndRender()`, Toast "Copied." or "Moved.".
   - On failure: Toast "Copy failed." or "Move failed." — stays in picker mode.
 - Creating a new folder while in picker mode navigates into it and stays in picker mode (normal `navigateIntoFolder` path, no extra logic needed).
 
-*Last updated: New Branches — Copy/Move notebooks and folders with destination picker.*
+*Last updated: New Branches — cleanup dead filesystem logic, Garden/ flat directory fully adopted, CLAUDE.md updated.*
