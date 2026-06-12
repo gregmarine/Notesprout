@@ -126,4 +126,91 @@ class IndexRepository(private val dao: ObjectDao) {
     }
 
     // endregion
+
+    // region List operations
+
+    suspend fun ensurePinnedListExists() {
+        // TODO: This only checks for the single known Pinned list. When
+        // user-defined lists are introduced, revisit this bootstrap to handle
+        // multiple lists / a general "ensure system lists exist" pass.
+        val existing = dao.getById(PINNED_LIST_ID)
+        if (existing == null || existing.deletedAt != null) {
+            val now = System.currentTimeMillis()
+            dao.insert(
+                ObjectEntity(
+                    id = PINNED_LIST_ID,
+                    type = ObjectType.LIST,
+                    name = "Pinned",
+                    parentId = null,
+                    createdAt = now,
+                    updatedAt = now,
+                    deletedAt = null,
+                    data = Json.encodeToString(ListObject())
+                )
+            )
+        }
+    }
+
+    suspend fun getPinnedList(): ObjectEntity? = dao.getById(PINNED_LIST_ID)
+
+    suspend fun addNotebookToList(listId: String, notebookId: String) {
+        val entity = dao.getById(listId) ?: return
+        val listObj = Json.decodeFromString<ListObject>(entity.data)
+        if (notebookId in listObj.notebookIds) return
+        dao.update(
+            entity.copy(
+                data = Json.encodeToString(listObj.copy(notebookIds = listObj.notebookIds + notebookId)),
+                updatedAt = System.currentTimeMillis()
+            )
+        )
+    }
+
+    suspend fun removeNotebookFromList(listId: String, notebookId: String) {
+        val entity = dao.getById(listId) ?: return
+        val listObj = Json.decodeFromString<ListObject>(entity.data)
+        if (notebookId !in listObj.notebookIds) return
+        dao.update(
+            entity.copy(
+                data = Json.encodeToString(listObj.copy(notebookIds = listObj.notebookIds - notebookId)),
+                updatedAt = System.currentTimeMillis()
+            )
+        )
+    }
+
+    suspend fun reorderList(listId: String, newOrder: List<String>) {
+        val entity = dao.getById(listId) ?: return
+        val listObj = Json.decodeFromString<ListObject>(entity.data)
+        dao.update(
+            entity.copy(
+                data = Json.encodeToString(listObj.copy(notebookIds = newOrder)),
+                updatedAt = System.currentTimeMillis()
+            )
+        )
+    }
+
+    suspend fun getNotebooksInList(listId: String): List<ObjectEntity> {
+        val entity = dao.getById(listId) ?: return emptyList()
+        val listObj = Json.decodeFromString<ListObject>(entity.data)
+        return listObj.notebookIds.mapNotNull { id ->
+            val e = dao.getById(id)
+            if (e == null || e.deletedAt != null || e.type != ObjectType.NOTEBOOK) null else e
+        }
+    }
+
+    suspend fun scrubNotebookFromAllLists(notebookId: String) {
+        val lists = dao.getAllNotDeleted().filter { it.type == ObjectType.LIST }
+        for (listEntity in lists) {
+            val listObj = Json.decodeFromString<ListObject>(listEntity.data)
+            if (notebookId in listObj.notebookIds) {
+                dao.update(
+                    listEntity.copy(
+                        data = Json.encodeToString(listObj.copy(notebookIds = listObj.notebookIds - notebookId)),
+                        updatedAt = System.currentTimeMillis()
+                    )
+                )
+            }
+        }
+    }
+
+    // endregion
 }

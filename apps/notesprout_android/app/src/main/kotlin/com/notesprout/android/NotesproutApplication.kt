@@ -4,6 +4,7 @@ import android.app.Application
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import org.lsposed.hiddenapibypass.HiddenApiBypass
 
 class NotesproutApplication : Application() {
@@ -32,6 +33,11 @@ class NotesproutApplication : Application() {
         HiddenApiBypass.addHiddenApiExemptions("")
 
         com.notesprout.android.data.index.NotesproutIndex.open(this)
+
+        val repository = com.notesprout.android.data.index.IndexRepository(
+            com.notesprout.android.data.index.NotesproutIndex.dao()
+        )
+        appScope.launch { repository.ensurePinnedListExists() }
 
         val mlKitRecognizer = com.notesprout.android.recognition.MlKitHandwritingRecognizer()
         com.notesprout.android.recognition.HandwritingRecognizerProvider.init(mlKitRecognizer)

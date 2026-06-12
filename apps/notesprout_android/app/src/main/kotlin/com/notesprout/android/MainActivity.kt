@@ -1215,6 +1215,7 @@ class MainActivity : AppCompatActivity() {
         for (child in children) {
             when (child.type) {
                 ObjectType.NOTEBOOK -> {
+                    repository.scrubNotebookFromAllLists(child.id)
                     repository.softDeleteNotebook(child.id)
                     soilFile(this, child.id).delete()
                 }
@@ -1423,6 +1424,7 @@ class MainActivity : AppCompatActivity() {
     private fun deleteNotebook(entity: ObjectEntity) {
         lifecycleScope.launch {
             withContext(Dispatchers.IO) {
+                repository.scrubNotebookFromAllLists(entity.id)
                 repository.softDeleteNotebook(entity.id)
                 val file = soilFile(this@MainActivity, entity.id)
                 // Delete .soil and any sibling artefacts (-wal, -shm, -journal).

@@ -82,11 +82,13 @@ CREATE INDEX idx_objects_parent_type_deleted
 ### Key classes
 
 - `ObjectEntity` (`data/index/ObjectEntity.kt`) — Room entity; the universal index row for both folders and notebooks
-- `ObjectType` (`data/index/ObjectType.kt`) — constants: `FOLDER = "folder"`, `NOTEBOOK = "notebook"`
+- `ObjectType` (`data/index/ObjectType.kt`) — constants: `FOLDER = "folder"`, `NOTEBOOK = "notebook"`, `LIST = "list"`
 - `FolderObject` (`data/index/FolderObject.kt`) — `@Serializable` data class stored in `data` column for folder rows
 - `NotebookObject` (`data/index/NotebookObject.kt`) — `@Serializable` data class stored in `data` column for notebook rows; carries `snapshot: String?` (cover bitmap, base64) and `pageCount: Int`
+- `ListObject` (`data/index/ListObject.kt`) — `@Serializable` data class stored in `data` column for list rows; carries `notebookIds: List<String>` (ordered array of notebook UUIDs; array order = display order)
+- `ListIds` (`data/index/ListIds.kt`) — well-known list IDs; `PINNED_LIST_ID = "00000000-0000-0000-0000-70696e6e6564"` ("pinned" in hex)
 - `ObjectDao` (`data/index/ObjectDao.kt`) — Room DAO; all index queries and mutations
-- `IndexRepository` (`data/index/IndexRepository.kt`) — higher-level API over `ObjectDao`; create/rename/softDelete/move operations for folders and notebooks
+- `IndexRepository` (`data/index/IndexRepository.kt`) — higher-level API over `ObjectDao`; create/rename/softDelete/move operations for folders and notebooks; list operations: `ensurePinnedListExists`, `getPinnedList`, `addNotebookToList`, `removeNotebookFromList`, `reorderList`, `getNotebooksInList`, `scrubNotebookFromAllLists`
 - `NotesproutIndex` (`data/index/NotesproutIndex.kt`) — singleton that opens and manages `notesprout.db`; call `open(context)` once in `Application.onCreate`, `seal()` on shutdown
 - `soilFile(context, notebookId)` (`data/SoilFile.kt`) — **the single canonical function** for resolving a notebook's `.soil` path: `Garden/<notebookId>.soil`. No other code constructs a `.soil` path.
 
@@ -96,6 +98,9 @@ CREATE INDEX idx_objects_parent_type_deleted
 - Soft-deletes only — set `deletedAt`; never hard-delete index rows without deliberate garbage collection
 - All writes go through `IndexRepository`; direct DAO use is limited to reads inside `MainActivity` load paths
 - `NotesproutIndex` must be opened before any Activity accesses it; `NotesproutApplication.onCreate` is the correct place
+- **List bootstrap:** `NotesproutApplication.onCreate` launches `repository.ensurePinnedListExists()` on `appScope` after `NotesproutIndex.open()`. This is idempotent — safe to call on every launch.
+- **Scrub-on-delete:** `MainActivity.deleteNotebook()` and `deleteFolderRecursively()` call `repository.scrubNotebookFromAllLists(notebookId)` before soft-deleting each notebook, so list rows never contain dangling references. Written generically over all lists — no changes needed when user-defined lists are added.
+- **`notesprout.db` ADB pull path (G10):** `adb -s 34E517F9 pull /sdcard/Android/data/com.notesprout.android.dev/files/notesprout.db /tmp/notesprout.db`
 
 ---
 
@@ -499,7 +504,7 @@ Never calls `eraseAll()`. Updates the in-memory stroke list directly, rebuilds b
 
 **Core:**
 - `.soil` schema + Room setup, SoilDatabase lifecycle
-- Global index (`notesprout.db`) — `NotesproutIndex` singleton, `IndexRepository`, `ObjectEntity`, `ObjectType`
+- Global index (`notesprout.db`) — `NotesproutIndex` singleton, `IndexRepository`, `ObjectEntity`, `ObjectType`; list system: `ListObject`, `ListIds` (`PINNED_LIST_ID`), Pinned list bootstrap on every launch
 - `soilFile(context, notebookId)` — single canonical path resolver for `Garden/<uuid>.soil`
 - Notebook list (MainActivity) — adaptive grid, pagination, cover images, Set Cover, Delete notebook
 - New-notebook dialog pre-fills name with `YYYYMMDD_HHmmss` timestamp (`java.time.LocalDateTime`, editable before confirm)
@@ -623,4 +628,4 @@ Never calls `eraseAll()`. Updates the in-memory stroke list directly, rebuilds b
   - On failure: Toast "Copy failed." or "Move failed." — stays in picker mode.
 - Creating a new folder while in picker mode navigates into it and stays in picker mode (normal `navigateIntoFolder` path, no extra logic needed).
 
-*Last updated: New Branches — cleanup dead filesystem logic, Garden/ flat directory fully adopted, CLAUDE.md updated.*
+*Last updated: New Branches — List object data layer + Pinned list bootstrap (1/3)*
