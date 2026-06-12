@@ -39,6 +39,7 @@ import com.notesprout.android.data.NotebookMetadata
 import com.notesprout.android.data.SoilDatabase
 import com.notesprout.android.data.checkpointTruncateAndClose
 import com.notesprout.android.data.index.IndexRepository
+import com.notesprout.android.data.index.PINNED_LIST_ID
 import com.notesprout.android.data.index.NotebookObject
 import com.notesprout.android.data.index.NotesproutIndex
 import com.notesprout.android.data.index.ObjectEntity
@@ -129,6 +130,10 @@ class MainActivity : AppCompatActivity() {
 
     private var destinationPickerState: DestinationPickerState = DestinationPickerState.None
 
+    private var isPinnedMode = false
+    private var pinnedResults: List<SearchResult> = emptyList()
+    private var pinnedListName: String = "Pinned"
+
     // ── Color cache ───────────────────────────────────────────────────────────
 
     private val inkBlackColor by lazy { ContextCompat.getColor(this, R.color.inkBlack) }
@@ -194,6 +199,9 @@ class MainActivity : AppCompatActivity() {
         binding.btnPickerCancel.setOnClickListener { exitPickerMode() }
         binding.btnPickerConfirm.setOnClickListener { confirmPickerDestination() }
 
+        binding.btnPinned.setOnClickListener { enterPinnedMode() }
+        binding.btnPinnedCancel.setOnClickListener { exitPinnedMode() }
+
         binding.btnSort.setOnClickListener {
             SortDialog(this, sortPrefs) { newPrefs ->
                 sortPrefs = newPrefs
@@ -224,7 +232,11 @@ class MainActivity : AppCompatActivity() {
                     gridSpec = computeGridSpec(w, h)
                     if (pendingScan) {
                         pendingScan = false
-                        scanAndRender()
+                        if (isPinnedMode) {
+                            lifecycleScope.launch { renderPinnedList() }
+                        } else {
+                            scanAndRender()
+                        }
                     } else {
                         renderPage()
                     }
@@ -236,7 +248,11 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         if (gridSpec != null) {
-            scanAndRender()
+            if (isPinnedMode) {
+                lifecycleScope.launch { renderPinnedList() }
+            } else {
+                scanAndRender()
+            }
         } else {
             pendingScan = true
         }
@@ -257,6 +273,7 @@ class MainActivity : AppCompatActivity() {
         currentSearchQuery = query
         currentPage = 0
         binding.btnClearSearch.visibility = View.VISIBLE
+        binding.btnPinned.visibility = View.GONE
         binding.btnSort.visibility = View.GONE
         scanAndRender()
     }
@@ -267,8 +284,83 @@ class MainActivity : AppCompatActivity() {
         searchResults = emptyList()
         currentPage = 0
         binding.btnClearSearch.visibility = View.GONE
+        binding.btnPinned.visibility = View.VISIBLE
         binding.btnSort.visibility = View.VISIBLE
         scanAndRender()
+    }
+
+    private fun enterPinnedMode() {
+        if (isSearchMode) {
+            isSearchMode = false
+            currentSearchQuery = ""
+            searchResults = emptyList()
+        }
+        isPinnedMode = true
+        currentPage = 0
+        applyPinnedModeUI()
+        lifecycleScope.launch { renderPinnedList() }
+    }
+
+    private fun exitPinnedMode() {
+        isPinnedMode = false
+        pinnedResults = emptyList()
+        currentPage = 0
+        applyPinnedModeUI()
+        scanAndRender()
+    }
+
+    private fun applyPinnedModeUI() {
+        val inPinned = isPinnedMode
+        binding.pinnedToolbar.visibility        = if (inPinned) View.VISIBLE else View.GONE
+        binding.pinnedToolbarDivider.visibility = if (inPinned) View.VISIBLE else View.GONE
+        binding.breadcrumbBar.visibility        = if (inPinned) View.GONE   else View.VISIBLE
+        binding.breadcrumbDivider.visibility    = if (inPinned) View.GONE   else View.VISIBLE
+        if (inPinned) {
+            binding.btnNewNotebook.visibility   = View.GONE
+            binding.btnNewFolder.visibility     = View.GONE
+            binding.btnSearch.visibility        = View.GONE
+            binding.btnClearSearch.visibility   = View.GONE
+            binding.btnSort.visibility          = View.GONE
+            binding.btnPinned.visibility        = View.GONE
+        } else {
+            binding.btnNewNotebook.visibility   = View.VISIBLE
+            binding.btnNewFolder.visibility     = View.VISIBLE
+            binding.btnSearch.visibility        = View.VISIBLE
+            binding.btnClearSearch.visibility   = View.GONE
+            binding.btnSort.visibility          = View.VISIBLE
+            binding.btnPinned.visibility        = View.VISIBLE
+        }
+    }
+
+    private suspend fun renderPinnedList() {
+        val (listName, notebooks, allFolders) = withContext(Dispatchers.IO) {
+            val listEntity = repository.getPinnedList()
+            val name = listEntity?.name ?: "Pinned"
+            val nbs = repository.getNotebooksInList(PINNED_LIST_ID)
+            val folders = repository.getAllFolders()
+            Triple(name, nbs, folders)
+        }
+        pinnedListName = listName
+        pinnedResults = notebooks.map { entity ->
+            val segments = mutableListOf<String>()
+            var currentId: String? = entity.parentId
+            while (currentId != null) {
+                val folder = allFolders.find { it.id == currentId } ?: break
+                segments.add(0, folder.name)
+                currentId = folder.parentId
+            }
+            segments.add(0, "Notebooks")
+            SearchResult(
+                entity      = entity,
+                displayName = entity.name,
+                folderLabel = segments.joinToString(" › "),
+                score       = 0,
+            )
+        }
+        items = pinnedResults.map { NotebookListItem.Notebook(it.entity) }
+        val total = totalPages()
+        currentPage = currentPage.coerceIn(0, (total - 1).coerceAtLeast(0))
+        renderPage()
     }
 
     /**
@@ -296,6 +388,9 @@ class MainActivity : AppCompatActivity() {
     private fun setupBackNavigation() {
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
+                if (isPinnedMode) {
+                    exitPinnedMode(); return
+                }
                 if (destinationPickerState != DestinationPickerState.None) {
                     exitPickerMode(); return
                 }
@@ -527,6 +622,7 @@ class MainActivity : AppCompatActivity() {
         val msg = when {
             destinationPickerState != DestinationPickerState.None -> "No folders here. Create one below."
             isSearchMode -> "No notebooks found for \"$currentSearchQuery\""
+            isPinnedMode -> "$pinnedListName is currently empty"
             directoryStack.size > 1 -> "Empty folder."
             else -> "No notebooks yet. Tap + to create one."
         }
@@ -676,7 +772,16 @@ class MainActivity : AppCompatActivity() {
             val displayName = entity.name
             if (isSearchMode && item is NotebookListItem.Notebook) {
                 val result = searchResults.find { it.entity.id == entity.id }
-                if (result != null) "${result.folderLabel} › ${result.displayName}" else displayName
+                if (result != null) {
+                    val parent = result.folderLabel.substringAfterLast(" › ")
+                    "$parent › ${result.displayName}"
+                } else displayName
+            } else if (isPinnedMode && item is NotebookListItem.Notebook) {
+                val result = pinnedResults.find { it.entity.id == entity.id }
+                if (result != null) {
+                    val parent = result.folderLabel.substringAfterLast(" › ")
+                    "$parent › ${result.displayName}"
+                } else displayName
             } else {
                 val modified = Date(entity.updatedAt)
                 val dateStr = android.text.format.DateFormat.getMediumDateFormat(this).format(modified)
@@ -993,6 +1098,7 @@ class MainActivity : AppCompatActivity() {
                         Toast.makeText(this@MainActivity,
                             if (nowPinned) "Pinned." else "Unpinned.",
                             Toast.LENGTH_SHORT).show()
+                        if (isPinnedMode) renderPinnedList()
                     }
                 }
                 .addAction(R.drawable.ic_export,          "Export")          { startExportFromMain(entity) }
@@ -1046,11 +1152,13 @@ class MainActivity : AppCompatActivity() {
             binding.btnSearch.visibility        = View.GONE
             binding.btnClearSearch.visibility   = View.GONE
             binding.btnSort.visibility          = View.GONE
+            binding.btnPinned.visibility        = View.GONE
         } else {
             binding.btnNewNotebook.visibility   = View.VISIBLE
             binding.btnSearch.visibility        = View.VISIBLE
             binding.btnClearSearch.visibility   = View.GONE
             binding.btnSort.visibility          = View.VISIBLE
+            binding.btnPinned.visibility        = View.VISIBLE
         }
     }
 

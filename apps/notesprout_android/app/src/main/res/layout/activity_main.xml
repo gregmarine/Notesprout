@@ -65,6 +65,46 @@
         android:visibility="gone" />
 
     <!--
+        Pinned toolbar: shown only in pinned browse mode.
+        Hidden by default; VISIBLE when isPinnedMode is true.
+    -->
+    <LinearLayout
+        android:id="@+id/pinnedToolbar"
+        android:layout_width="match_parent"
+        android:layout_height="56dp"
+        android:orientation="horizontal"
+        android:background="@color/paperWhite"
+        android:gravity="center_vertical"
+        android:visibility="gone">
+
+        <TextView
+            android:id="@+id/pinnedTitle"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_gravity="center_vertical"
+            android:text="Pinned"
+            android:textSize="18sp"
+            android:textColor="@color/inkBlack"
+            android:paddingStart="16dp"
+            android:paddingEnd="16dp" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnPinnedCancel"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:src="@drawable/ic_x"
+            android:contentDescription="Exit pinned view" />
+
+    </LinearLayout>
+
+    <View
+        android:id="@+id/pinnedToolbarDivider"
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="@color/inkBlack"
+        android:visibility="gone" />
+
+    <!--
         Breadcrumb bar: always visible for consistent layout.
         Back button and chips are hidden at root; chips populate when navigated into a subfolder.
     -->
@@ -110,6 +150,12 @@
                 android:gravity="center_vertical" />
 
         </HorizontalScrollView>
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnPinned"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:src="@drawable/ic_pinned"
+            android:contentDescription="Pinned notebooks" />
 
         <androidx.appcompat.widget.AppCompatImageButton
             android:id="@+id/btnSearch"

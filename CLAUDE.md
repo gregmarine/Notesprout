@@ -552,7 +552,22 @@ Never calls `eraseAll()`. Updates the in-memory stroke list directly, rebuilds b
 - `btnPin` (`AppCompatImageButton`, `Widget.Notesprout.ToolbarButton`) sits immediately after `btnExport` in the NotebookActivity toolbar
 - On `onCreate`: checks `indexRepo.isNotebookPinned(notebookId)` on `Dispatchers.IO`; sets icon to `ic_pinned_off` (pinned) or `ic_pinned` (not pinned)
 - On tap: calls `indexRepo.togglePin(notebookId)` on `Dispatchers.IO`; swaps icon on main thread (no Toast — icon swap is the feedback)
-- MainActivity notebook long-press: checks `repository.isNotebookPinned` async before showing the `ActionSheetDialog`; adds "Pin Notebook" / "Unpin Notebook" as the **first** action; calls `repository.togglePin` on tap; shows Toast "Pinned." / "Unpinned."
+- MainActivity notebook long-press: checks `repository.isNotebookPinned` async before showing the `ActionSheetDialog`; adds "Pin Notebook" / "Unpin Notebook" as the **first** action; calls `repository.togglePin` on tap; shows Toast "Pinned." / "Unpinned."; if `isPinnedMode` is true, immediately calls `renderPinnedList()` so the unpinned notebook disappears without exiting the view
+
+**Pinned Browse View (MainActivity):**
+- `btnPinned` (`AppCompatImageButton`, `Widget.Notesprout.ToolbarButton`, icon `ic_pinned`) sits in the breadcrumb bar immediately before `btnSearch`; hidden during search mode and picker mode
+- `isPinnedMode: Boolean` — tracks whether the Pinned browse view is active
+- `pinnedResults: List<SearchResult>` — holds the ordered list of pinned notebooks with folder labels for the current render; `pinnedListName: String` — stores the list entity's `name` field (default "Pinned") for the empty-state message
+- **Entering pinned mode** (`enterPinnedMode()`): force-exits search mode if active; sets `isPinnedMode = true`; calls `applyPinnedModeUI()` then `renderPinnedList()`. `directoryStack` is NOT touched — folder position is preserved underneath.
+- **Exiting pinned mode** (`exitPinnedMode()`): sets `isPinnedMode = false`; calls `applyPinnedModeUI()` then `scanAndRender()` — restores the exact folder position.
+- **`applyPinnedModeUI()`**: hides `breadcrumbBar`/`breadcrumbDivider`; shows `pinnedToolbar`/`pinnedToolbarDivider` (and vice-versa). In pinned mode hides `btnNewNotebook`, `btnNewFolder`, `btnSearch`, `btnClearSearch`, `btnSort`, `btnPinned`; leaves pagination active.
+- **`pinnedToolbar`** (LinearLayout, 56dp, `GONE` by default): title `TextView` "Pinned" (18sp, weight=1, left) + `btnPinnedCancel` (`ic_x`, right). `pinnedToolbarDivider` (1dp inkBlack View) sits below it.
+- **`renderPinnedList()`** (suspend): calls `repository.getPinnedList()` for the list name, `repository.getNotebooksInList(PINNED_LIST_ID)` for notebooks in stored pin order, and `repository.getAllFolders()` for label building — all on `Dispatchers.IO`. Builds `pinnedResults` with `folderLabel` by walking each notebook's `parentId` chain. No sort prefs applied — pin order is preserved. Applies existing pagination mechanism.
+- **Card labels** in pinned mode (and search mode): show only the immediate parent folder name via `folderLabel.substringAfterLast(" › ")`, e.g. "Projects › Notebook Name" not the full path. Root-level notebooks show "Notebooks › Notebook Name".
+- **Empty state**: `"$pinnedListName is currently empty"` — uses the list entity's `name` field so this generalises naturally when user-defined lists exist.
+- **`onResume()`**: if `isPinnedMode` is true, calls `renderPinnedList()` instead of `scanAndRender()` — returning from a notebook opened in pinned mode lands back in the pinned view (re-fetches in case notebook was unpinned or deleted while open).
+- **Back press priority**: `isPinnedMode` is checked first (before picker mode, search mode, directory stack) — back exits pinned mode.
+- **Mutual exclusivity**: entering pinned mode force-exits search mode; entering picker mode hides `btnPinned`; entering search mode hides `btnPinned`.
 
 **Folder Navigation (MainActivity):**
 - Folder/notebook tree lives exclusively in the global index (`notesprout.db`). The filesystem `Garden/` directory is flat blob storage — structure is never derived from it.
@@ -604,7 +619,7 @@ Never calls `eraseAll()`. Updates the in-memory stroke list directly, rebuilds b
 - `btnSearch` (breadcrumb bar, `ic_search`) opens `SearchDialog` — a plain `EditText` with ranked fuzzy matching
 - `btnClearSearch` (`ic_search_off`, visible only in search mode) exits search and restores normal browse
 - `SearchEngine.search(query, allNotebooks)` — queries all notebooks from the index via `repository.getAllNotebooks()`, scores by name: substring (3) > all words present (2) > prefix/initials (1); sorted by score desc, name asc
-- Search mode replaces the normal index scan in `scanAndRender()`; results shown as notebook cards with `"FolderLabel › NotebookName"` breadcrumb labels (built by walking `parentId` chains; no date/time in search mode)
+- Search mode replaces the normal index scan in `scanAndRender()`; results shown as notebook cards with `"ParentFolder › NotebookName"` labels — only the immediate parent folder is shown (via `folderLabel.substringAfterLast(" › ")`), not the full path; no date/time in search mode
 - Back press while in search mode exits search (checked before the directory-stack back logic)
 - Opening a notebook from search results rebuilds `directoryStack` by walking `parentId` chain from the result's parent to root (`navigateStackToDirectory`) so returning from NotebookActivity lands in the correct folder
 - Empty search results show `No notebooks found for "query"` instead of the generic empty-state copy
@@ -635,4 +650,4 @@ Never calls `eraseAll()`. Updates the in-memory stroke list directly, rebuilds b
   - On failure: Toast "Copy failed." or "Move failed." — stays in picker mode.
 - Creating a new folder while in picker mode navigates into it and stays in picker mode (normal `navigateIntoFolder` path, no extra logic needed).
 
-*Last updated: New Branches — Pin/unpin actions + Tabler pinned icons (2/3)*
+*Last updated: New Branches — Pinned notebooks browse view (3/3)*
