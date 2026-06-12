@@ -69,7 +69,15 @@
             android:src="@drawable/ic_export"
             android:contentDescription="Export notebook" />
 
-        <!-- Divider after close/cover/export group -->
+        <!-- Pin button: pin/unpin this notebook -->
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnPin"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:layout_marginStart="4dp"
+            android:src="@drawable/ic_pinned"
+            android:contentDescription="Pin notebook" />
+
+        <!-- Divider after close/cover/export/pin group -->
         <View
             android:layout_width="1dp"
             android:layout_height="28dp"

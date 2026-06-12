@@ -88,7 +88,7 @@ CREATE INDEX idx_objects_parent_type_deleted
 - `ListObject` (`data/index/ListObject.kt`) — `@Serializable` data class stored in `data` column for list rows; carries `notebookIds: List<String>` (ordered array of notebook UUIDs; array order = display order)
 - `ListIds` (`data/index/ListIds.kt`) — well-known list IDs; `PINNED_LIST_ID = "00000000-0000-0000-0000-70696e6e6564"` ("pinned" in hex)
 - `ObjectDao` (`data/index/ObjectDao.kt`) — Room DAO; all index queries and mutations
-- `IndexRepository` (`data/index/IndexRepository.kt`) — higher-level API over `ObjectDao`; create/rename/softDelete/move operations for folders and notebooks; list operations: `ensurePinnedListExists`, `getPinnedList`, `addNotebookToList`, `removeNotebookFromList`, `reorderList`, `getNotebooksInList`, `scrubNotebookFromAllLists`
+- `IndexRepository` (`data/index/IndexRepository.kt`) — higher-level API over `ObjectDao`; create/rename/softDelete/move operations for folders and notebooks; list operations: `ensurePinnedListExists`, `getPinnedList`, `addNotebookToList`, `removeNotebookFromList`, `reorderList`, `getNotebooksInList`, `scrubNotebookFromAllLists`; pin helpers: `isNotebookPinned(notebookId)`, `togglePin(notebookId)` (single round-trip, returns new pinned state)
 - `NotesproutIndex` (`data/index/NotesproutIndex.kt`) — singleton that opens and manages `notesprout.db`; call `open(context)` once in `Application.onCreate`, `seal()` on shutdown
 - `soilFile(context, notebookId)` (`data/SoilFile.kt`) — **the single canonical function** for resolving a notebook's `.soil` path: `Garden/<notebookId>.soil`. No other code constructs a `.soil` path.
 
@@ -504,7 +504,7 @@ Never calls `eraseAll()`. Updates the in-memory stroke list directly, rebuilds b
 
 **Core:**
 - `.soil` schema + Room setup, SoilDatabase lifecycle
-- Global index (`notesprout.db`) — `NotesproutIndex` singleton, `IndexRepository`, `ObjectEntity`, `ObjectType`; list system: `ListObject`, `ListIds` (`PINNED_LIST_ID`), Pinned list bootstrap on every launch
+- Global index (`notesprout.db`) — `NotesproutIndex` singleton, `IndexRepository`, `ObjectEntity`, `ObjectType`; list system: `ListObject`, `ListIds` (`PINNED_LIST_ID`), Pinned list bootstrap on every launch; pin/unpin: `isNotebookPinned`, `togglePin` in `IndexRepository`
 - `soilFile(context, notebookId)` — single canonical path resolver for `Garden/<uuid>.soil`
 - Notebook list (MainActivity) — adaptive grid, pagination, cover images, Set Cover, Delete notebook
 - New-notebook dialog pre-fills name with `YYYYMMDD_HHmmss` timestamp (`java.time.LocalDateTime`, editable before confirm)
@@ -547,6 +547,13 @@ Never calls `eraseAll()`. Updates the in-memory stroke list directly, rebuilds b
 - Progress dialog (non-cancellable, `shape_bordered`, no animation): "Exporting page X of N…" via `Handler(Looper.getMainLooper())`
 - Entry points: NotebookActivity toolbar (`btnExport`, after Cover) and MainActivity long-press context menu (Export as first item, opens Room DB read-only, closes after export)
 
+**Pin/Unpin Notebook:**
+- Icons: `ic_pinned.xml`, `ic_pinned_off.xml` — Tabler stroke-based, `@color/inkBlack`, strokeWidth 2, 24dp
+- `btnPin` (`AppCompatImageButton`, `Widget.Notesprout.ToolbarButton`) sits immediately after `btnExport` in the NotebookActivity toolbar
+- On `onCreate`: checks `indexRepo.isNotebookPinned(notebookId)` on `Dispatchers.IO`; sets icon to `ic_pinned_off` (pinned) or `ic_pinned` (not pinned)
+- On tap: calls `indexRepo.togglePin(notebookId)` on `Dispatchers.IO`; swaps icon on main thread (no Toast — icon swap is the feedback)
+- MainActivity notebook long-press: checks `repository.isNotebookPinned` async before showing the `ActionSheetDialog`; adds "Pin Notebook" / "Unpin Notebook" as the **first** action; calls `repository.togglePin` on tap; shows Toast "Pinned." / "Unpinned."
+
 **Folder Navigation (MainActivity):**
 - Folder/notebook tree lives exclusively in the global index (`notesprout.db`). The filesystem `Garden/` directory is flat blob storage — structure is never derived from it.
 - `NotebookListItem` — sealed class in `NotebookListItem.kt`:
@@ -572,7 +579,7 @@ Never calls `eraseAll()`. Updates the in-memory stroke list directly, rebuilds b
 - `shape_bordered` window background applied after `show()`. 1dp inkBlack dividers between rows.
 - When a title is provided, an `ic_x` (Tabler X) close button appears in the upper-right of the title row. Tapping outside also dismisses (AlertDialog default). No bottom Cancel row.
 - Icon slot is a `Space` placeholder when `iconRes` is null, keeping labels aligned.
-- Used for notebook long-press (Export / Copy Notebook / Move Notebook / Set Cover / Delete Notebook) and folder long-press (Copy Folder / Move Folder / Delete).
+- Used for notebook long-press (Pin/Unpin Notebook / Export / Copy Notebook / Move Notebook / Set Cover / Delete Notebook) and folder long-press (Copy Folder / Move Folder / Delete).
 
 **Folder delete:**
 - Long-press on a folder card → `ActionSheetDialog` with a single Delete action (icon: `ic_delete_notebook`).
@@ -604,7 +611,7 @@ Never calls `eraseAll()`. Updates the in-memory stroke list directly, rebuilds b
 - No new Gradle dependencies
 
 **Copy/Move Notebooks and Folders (`ui/DestinationPickerState.kt`, `MainActivity.kt`):**
-- Long-press notebook → ActionSheet: Export / Copy Notebook / Move Notebook / Set Cover / Delete Notebook
+- Long-press notebook → ActionSheet: Pin/Unpin Notebook (first) / Export / Copy Notebook / Move Notebook / Set Cover / Delete Notebook
 - Long-press folder → ActionSheet: Copy Folder / Move Folder / Delete
 - `DestinationPickerState` — sealed class in `ui/`: `None`, `CopyNotebook(source: ObjectEntity)`, `MoveNotebook(source: ObjectEntity)`, `CopyFolder(source: ObjectEntity)`, `MoveFolder(source: ObjectEntity)`
 - `MainActivity.destinationPickerState` — tracks active picker operation
@@ -628,4 +635,4 @@ Never calls `eraseAll()`. Updates the in-memory stroke list directly, rebuilds b
   - On failure: Toast "Copy failed." or "Move failed." — stays in picker mode.
 - Creating a new folder while in picker mode navigates into it and stays in picker mode (normal `navigateIntoFolder` path, no extra logic needed).
 
-*Last updated: New Branches — List object data layer + Pinned list bootstrap (1/3)*
+*Last updated: New Branches — Pin/unpin actions + Tabler pinned icons (2/3)*

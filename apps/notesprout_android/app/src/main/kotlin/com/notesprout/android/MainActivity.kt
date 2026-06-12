@@ -981,14 +981,27 @@ class MainActivity : AppCompatActivity() {
     // ── Notebook context menu ─────────────────────────────────────────────────
 
     private fun showNotebookContextMenu(entity: ObjectEntity) {
-        ActionSheetDialog(this)
-            .title(entity.name)
-            .addAction(R.drawable.ic_export,          "Export")          { startExportFromMain(entity) }
-            .addAction(R.drawable.ic_copy_page,       "Copy Notebook")   { enterPickerMode(DestinationPickerState.CopyNotebook(entity)) }
-            .addAction(R.drawable.ic_move_page,       "Move Notebook")   { enterPickerMode(DestinationPickerState.MoveNotebook(entity)) }
-            .addAction(R.drawable.ic_polaroid,        "Set Cover")       { openCoverDialog(entity) }
-            .addAction(R.drawable.ic_delete_notebook, "Delete Notebook") { showDeleteNotebookConfirmation(entity) }
-            .show()
+        lifecycleScope.launch {
+            val pinned = withContext(Dispatchers.IO) { repository.isNotebookPinned(entity.id) }
+            val pinIcon  = if (pinned) R.drawable.ic_pinned_off else R.drawable.ic_pinned
+            val pinLabel = if (pinned) "Unpin Notebook" else "Pin Notebook"
+            ActionSheetDialog(this@MainActivity)
+                .title(entity.name)
+                .addAction(pinIcon,                       pinLabel)          {
+                    lifecycleScope.launch {
+                        val nowPinned = withContext(Dispatchers.IO) { repository.togglePin(entity.id) }
+                        Toast.makeText(this@MainActivity,
+                            if (nowPinned) "Pinned." else "Unpinned.",
+                            Toast.LENGTH_SHORT).show()
+                    }
+                }
+                .addAction(R.drawable.ic_export,          "Export")          { startExportFromMain(entity) }
+                .addAction(R.drawable.ic_copy_page,       "Copy Notebook")   { enterPickerMode(DestinationPickerState.CopyNotebook(entity)) }
+                .addAction(R.drawable.ic_move_page,       "Move Notebook")   { enterPickerMode(DestinationPickerState.MoveNotebook(entity)) }
+                .addAction(R.drawable.ic_polaroid,        "Set Cover")       { openCoverDialog(entity) }
+                .addAction(R.drawable.ic_delete_notebook, "Delete Notebook") { showDeleteNotebookConfirmation(entity) }
+                .show()
+        }
     }
 
     // ── Folder context menu ───────────────────────────────────────────────────

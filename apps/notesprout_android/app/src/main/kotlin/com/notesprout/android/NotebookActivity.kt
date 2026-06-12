@@ -506,6 +506,16 @@ class NotebookActivity : AppCompatActivity() {
             startExport(db)
         }
 
+        binding.btnPin.setOnClickListener {
+            val nbId = notebookId.takeIf { it.isNotEmpty() } ?: return@setOnClickListener
+            lifecycleScope.launch {
+                val nowPinned = withContext(Dispatchers.IO) { indexRepo.togglePin(nbId) }
+                binding.btnPin.setImageResource(
+                    if (nowPinned) R.drawable.ic_pinned_off else R.drawable.ic_pinned
+                )
+            }
+        }
+
         binding.btnPageIndex.setOnClickListener { openPageIndex() }
         binding.tvPageIndicator.setOnClickListener { openPageIndex() }
 
@@ -908,6 +918,13 @@ class NotebookActivity : AppCompatActivity() {
         if (notebookId.isNotEmpty()) {
             notebookSoilPath = soilFile(this, notebookId).absolutePath
             title = notebookDisplayName
+            val nbId = notebookId
+            lifecycleScope.launch {
+                val pinned = withContext(Dispatchers.IO) { indexRepo.isNotebookPinned(nbId) }
+                binding.btnPin.setImageResource(
+                    if (pinned) R.drawable.ic_pinned_off else R.drawable.ic_pinned
+                )
+            }
         }
 
         // ── Open the Room DB ──────────────────────────────────────────────────

@@ -197,6 +197,31 @@ class IndexRepository(private val dao: ObjectDao) {
         }
     }
 
+    suspend fun isNotebookPinned(notebookId: String): Boolean {
+        val entity = dao.getById(PINNED_LIST_ID) ?: return false
+        val listObj = Json.decodeFromString<ListObject>(entity.data)
+        return notebookId in listObj.notebookIds
+    }
+
+    /**
+     * Toggles the pin state of a notebook in a single DB round-trip.
+     * Returns true if the notebook is now pinned, false if now unpinned.
+     */
+    suspend fun togglePin(notebookId: String): Boolean {
+        val entity = dao.getById(PINNED_LIST_ID) ?: return false
+        val listObj = Json.decodeFromString<ListObject>(entity.data)
+        val nowPinned = notebookId !in listObj.notebookIds
+        val newIds = if (nowPinned) listObj.notebookIds + notebookId
+                     else listObj.notebookIds - notebookId
+        dao.update(
+            entity.copy(
+                data = Json.encodeToString(listObj.copy(notebookIds = newIds)),
+                updatedAt = System.currentTimeMillis()
+            )
+        )
+        return nowPinned
+    }
+
     suspend fun scrubNotebookFromAllLists(notebookId: String) {
         val lists = dao.getAllNotDeleted().filter { it.type == ObjectType.LIST }
         for (listEntity in lists) {
