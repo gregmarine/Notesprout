@@ -201,8 +201,9 @@
         android:layout_weight="1" />
 
     <!--
-        Bottom bar: 1dp inkBlack top border, pagination centred, action buttons right-aligned.
-        Height 56dp — matches the notebook activity toolbar for uniformity.
+        Bottom bar (sw360dp variant): pagination anchored to start, action buttons right-aligned.
+        On narrow screens (e.g. Palma2 Pro) there is not enough room to centre the pagination
+        group when the action buttons are also present, so we left-anchor it instead.
     -->
     <RelativeLayout
         android:id="@+id/bottomBar"
@@ -219,14 +220,14 @@
 
         <!--
             Pagination group: |<  <  n/n  >  >|
-            Centered horizontally and vertically inside the bar.
+            Left-anchored on narrow screens so it does not overlap the action buttons.
         -->
         <LinearLayout
             android:id="@+id/paginationGroup"
             android:layout_width="wrap_content"
             android:layout_height="match_parent"
             android:orientation="horizontal"
-            android:layout_centerInParent="true"
+            android:layout_alignParentStart="true"
             android:gravity="center_vertical">
 
             <androidx.appcompat.widget.AppCompatImageButton
