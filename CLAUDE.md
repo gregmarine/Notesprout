@@ -791,7 +791,9 @@ Never calls `eraseAll()`. Updates the in-memory stroke list directly, rebuilds b
 - Any finger `ACTION_DOWN` in the toolbar while `isTextPlacementMode` is true calls `exitTextPlacementMode()`, UNLESS the touch is on `btnInsertText` itself (the button's click listener handles toggle).
 
 **Canvas tap in placement mode:**
-- `setTextPlacementMode(active: Boolean)` in the drawing views intercepts the next stylus `ACTION_DOWN`, fires `onTextPlacementTap(tapX, tapY)`, and exits placement mode internally.
+- `handleTextPlacementTouch` in the drawing views captures tap coordinates on `ACTION_DOWN` but does **not** exit placement mode or fire the callback until `ACTION_UP`. This is critical: exiting on DOWN would route the subsequent MOVE/UP events to the normal drawing path, creating a tiny persisted stroke from the placement tap.
+- `onTextPlacementTap(tapX, tapY)` fires on `ACTION_UP` (stylus already leaving the screen); `isTextPlacementMode` is set to `false` at that point.
+- The Activity `onTextPlacementTap` callback must **not** call `enableDrawing()`; drawing is restored by the dialog's focus cycle (`onWindowFocusChanged(true)` → `openRawDrawing()`) after the stylus is gone. Calling `enableDrawing()` before the stylus lifts (i.e., from the callback) would re-enable the Onyx SDK raw input while the pen is still touching the screen, causing `onBeginRawDrawing` → `onEndRawDrawing` → `onPenLifted` → a phantom stroke persisted to the database.
 - Only stylus tool type is accepted — finger touches are ignored.
 
 **Insert flow (`insertTextObject(markdown, tapX, tapY)`):**

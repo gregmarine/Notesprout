@@ -91,6 +91,11 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
     private var isTextPlacementMode = false
     override var onTextPlacementTap: ((Float, Float) -> Unit)? = null
 
+    // Coordinates captured on ACTION_DOWN; callback fires on ACTION_UP so the full
+    // tap gesture is consumed by placement mode and not leaked to the drawing path.
+    private var textPlacementTapX = 0f
+    private var textPlacementTapY = 0f
+
     // ── Lasso state ──────────────────────────────────────────────────────────
 
     private var isLassoMode = false
@@ -214,9 +219,17 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
 
     private fun handleTextPlacementTouch(event: MotionEvent): Boolean {
         if (event.getToolType(0) != MotionEvent.TOOL_TYPE_STYLUS) return false
-        if (event.actionMasked == MotionEvent.ACTION_DOWN) {
-            isTextPlacementMode = false
-            onTextPlacementTap?.invoke(event.x, event.y)
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                // Record the press point but stay in placement mode so MOVE/UP are
+                // also consumed here — not leaked to the normal stroke-drawing path.
+                textPlacementTapX = event.x
+                textPlacementTapY = event.y
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                isTextPlacementMode = false
+                onTextPlacementTap?.invoke(textPlacementTapX, textPlacementTapY)
+            }
         }
         return true
     }

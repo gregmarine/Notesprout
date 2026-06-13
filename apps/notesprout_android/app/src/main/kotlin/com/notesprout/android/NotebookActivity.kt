@@ -891,11 +891,12 @@ class NotebookActivity : AppCompatActivity() {
 
         // Canvas tap in text placement mode — open editor dialog and insert on confirm.
         drawingView.onTextPlacementTap = { tapX, tapY ->
-            // Placement mode already exited inside the view's handleTextPlacementTouch.
-            // Sync Activity-side state and restore raw drawing.
+            // Placement mode already exited inside the view's handleTextPlacementTouch
+            // (fires on ACTION_UP, after the stylus has left the screen).
+            // Do NOT call enableDrawing() here: the dialog's focus cycle does it safely —
+            // onWindowFocusChanged(true) → openRawDrawing() — after the stylus is gone.
             isTextPlacementMode = false
             binding.btnInsertText.isSelected = false
-            drawingView.enableDrawing()
             val tap = PointF(tapX, tapY)
             TextEditDialog(
                 context = this,
