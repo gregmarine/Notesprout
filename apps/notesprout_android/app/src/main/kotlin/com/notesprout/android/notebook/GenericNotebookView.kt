@@ -146,6 +146,7 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
 
     override var onStrokeErased: ((String) -> Unit)? = null
     override var onHeadingErased: ((HeadingStroke) -> Unit)? = null
+    override var onScribbleEraseComplete: ((List<String>, List<HeadingStroke>, List<TextRender>) -> Unit)? = null
     override var onPenLifted: (() -> Unit)? = null
     override var onSnapshotReady: ((String) -> Unit)? = null
     override var onLassoComplete: ((Path, PointF) -> Unit)? = null
@@ -205,13 +206,15 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
                 if (erasing) {
                     eraseAtPath(listOf(PointF(event.x, event.y)))
                     finalizeEraseRedraw()
+                    activePoints.clear()
+                    invalidate()
                 } else {
                     activePoints.add(PointF(event.x, event.y))
                     commitActiveStroke()
-                    onPenLifted?.invoke()
+                    activePoints.clear()
+                    invalidate()
+                    checkAndRunScribble()
                 }
-                activePoints.clear()
-                invalidate()
             }
         }
         return true
@@ -630,6 +633,147 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
         val dx = a.x - b.x
         val dy = a.y - b.y
         return dx * dx + dy * dy
+    }
+
+    // ── Scribble-to-Erase detection ──────────────────────────────────────────
+
+    /**
+     * Called after [commitActiveStroke] on every non-eraser pen lift. Checks if the
+     * last stroke is a scribble candidate; if so, runs a hit test off the main thread.
+     * Fires [onScribbleEraseComplete] on a confirmed scribble hit, or [onPenLifted]
+     * for normal (non-scribble or no-hit) strokes.
+     */
+    private fun checkAndRunScribble() {
+        val lastStroke = strokes.lastOrNull()
+        if (lastStroke == null || !isScribbleCandidate(lastStroke.points)) {
+            onPenLifted?.invoke()
+            return
+        }
+
+        val strokeSnapshot  = strokes.toList()
+        val headingSnapshot = headings.toList()
+        val textSnapshot    = textObjects.toList()
+        val density         = resources.displayMetrics.density
+        val scribbleId      = lastStroke.id
+
+        Thread {
+            val hitIds = scribbleHitTest(
+                lastStroke.points,
+                strokeSnapshot.filter { it.id != scribbleId },
+                headingSnapshot,
+                textSnapshot,
+                density,
+            )
+            post {
+                if (hitIds.isEmpty()) {
+                    onPenLifted?.invoke()
+                } else {
+                    // Confirmed scribble erase: the gesture stroke is not page content —
+                    // remove it from in-memory before the activity rebuilds the bitmap.
+                    strokes.removeAll { it.id == scribbleId }
+                    val hitSet         = hitIds.toSet()
+                    val erasedHeadings = headingSnapshot.filter { it.id in hitSet }
+                    val erasedTexts    = textSnapshot.filter { it.id in hitSet }
+                    onScribbleEraseComplete?.invoke(hitIds, erasedHeadings, erasedTexts)
+                }
+            }
+        }.start()
+    }
+
+    private fun isScribbleCandidate(points: List<PointF>): Boolean {
+        if (points.size < 4) return false
+        var pathLength = 0f
+        var minX = points[0].x; var minY = points[0].y
+        var maxX = minX;        var maxY = minY
+        for (i in 1 until points.size) {
+            val dx = points[i].x - points[i - 1].x
+            val dy = points[i].y - points[i - 1].y
+            pathLength += Math.sqrt((dx * dx + dy * dy).toDouble()).toFloat()
+            if (points[i].x < minX) minX = points[i].x else if (points[i].x > maxX) maxX = points[i].x
+            if (points[i].y < minY) minY = points[i].y else if (points[i].y > maxY) maxY = points[i].y
+        }
+        val dw = maxX - minX; val dh = maxY - minY
+        val diagonal = Math.sqrt((dw * dw + dh * dh).toDouble()).toFloat()
+        if (diagonal < 10f) return false
+        if (pathLength / diagonal < SCRIBBLE_DENSITY_RATIO) return false
+        val filtered = mutableListOf(points[0])
+        for (p in points) {
+            val last = filtered.last()
+            val dx = p.x - last.x; val dy = p.y - last.y
+            if (dx * dx + dy * dy >= 4f) filtered.add(p)
+        }
+        if (filtered.size < 3) return false
+        var reversals = 0
+        for (i in 2 until filtered.size) {
+            val ax = filtered[i - 1].x - filtered[i - 2].x
+            val ay = filtered[i - 1].y - filtered[i - 2].y
+            val bx = filtered[i].x - filtered[i - 1].x
+            val by = filtered[i].y - filtered[i - 1].y
+            if (ax * bx + ay * by < 0f) reversals++
+        }
+        return reversals >= SCRIBBLE_MIN_DIRECTION_REVERSALS
+    }
+
+    private fun scribbleHitTest(
+        scribblePoints: List<PointF>,
+        strokes: List<LiveStroke>,
+        headings: List<HeadingStroke>,
+        textObjects: List<TextRender>,
+        density: Float,
+    ): List<String> {
+        if (scribblePoints.size < 2) return emptyList()
+        val touchRadiusPx = SCRIBBLE_STROKE_TOUCH_RADIUS_DP * density
+        val touchRadiusSq = touchRadiusPx * touchRadiusPx
+        val penetrationPx = SCRIBBLE_BBOX_PENETRATION_DP * density
+        var sMinX = scribblePoints[0].x; var sMinY = scribblePoints[0].y
+        var sMaxX = sMinX;               var sMaxY = sMinY
+        for (sp in scribblePoints) {
+            if (sp.x < sMinX) sMinX = sp.x else if (sp.x > sMaxX) sMaxX = sp.x
+            if (sp.y < sMinY) sMinY = sp.y else if (sp.y > sMaxY) sMaxY = sp.y
+        }
+        val scribbleBounds = RectF(
+            sMinX - touchRadiusPx, sMinY - touchRadiusPx,
+            sMaxX + touchRadiusPx, sMaxY + touchRadiusPx,
+        )
+        val rawBounds = RectF(sMinX, sMinY, sMaxX, sMaxY)
+        val hitIds = mutableListOf<String>()
+        for (stroke in strokes) {
+            if (!RectF.intersects(scribbleBounds, stroke.boundingBox)) continue
+            var hit = false
+            outer@ for (sp in stroke.points) {
+                for (i in 1 until scribblePoints.size) {
+                    if (pointToSegmentDistSq(sp, scribblePoints[i - 1], scribblePoints[i]) <= touchRadiusSq) {
+                        hit = true; break@outer
+                    }
+                }
+            }
+            if (hit) hitIds.add(stroke.id)
+        }
+        for (heading in headings) {
+            if (!RectF.intersects(rawBounds, heading.boundingBox)) continue
+            if (scribblePathPenetration(scribblePoints, heading.boundingBox) >= penetrationPx) {
+                hitIds.add(heading.id)
+            }
+        }
+        for (textObj in textObjects) {
+            if (!RectF.intersects(rawBounds, textObj.boundingBox)) continue
+            if (scribblePathPenetration(scribblePoints, textObj.boundingBox) >= penetrationPx) {
+                hitIds.add(textObj.id)
+            }
+        }
+        return hitIds
+    }
+
+    private fun scribblePathPenetration(points: List<PointF>, box: RectF): Float {
+        var total = 0f
+        for (i in 1 until points.size) {
+            val p1 = points[i - 1]; val p2 = points[i]
+            if (box.contains(p1.x, p1.y) || box.contains(p2.x, p2.y)) {
+                val dx = p2.x - p1.x; val dy = p2.y - p1.y
+                total += Math.sqrt((dx * dx + dy * dy).toDouble()).toFloat()
+            }
+        }
+        return total
     }
 
     // ── NotebookView interface ────────────────────────────────────────────────

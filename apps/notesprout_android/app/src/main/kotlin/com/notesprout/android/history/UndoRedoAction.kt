@@ -336,6 +336,33 @@ sealed class UndoRedoAction {
     ) : UndoRedoAction()
 
     /**
+     * User drew a scribble gesture (high density, zigzag path) that erased all content
+     * objects it crossed over.  The scribble stroke itself is a pure gesture — it is never
+     * persisted to the DB and does not appear on undo.
+     *
+     * Undo: restore all [erasedObjectIds] (clear deletedAt); add erased content back to canvas.
+     * Redo: re-soft-delete all [erasedObjectIds].
+     *
+     * [erasedObjectIds] contains ALL erased IDs (strokes, heading IDs, text IDs).
+     * [headingIds]/[headings] are the heading subset of [erasedObjectIds], with full data
+     *   for in-memory restoration on undo without a DB round-trip.
+     * [textIds]/[textObjects] are the text-object subset, similarly with full data.
+     * [deletedAt] is the single timestamp used for all soft-delete calls during the erase,
+     *   allowing targeted restoration on undo via [restoreById].
+     */
+    @Serializable
+    data class ScribbleErased(
+        val erasedObjectIds: List<String>,
+        val pageId: String,
+        val layerId: String,
+        val deletedAt: Long,
+        val headingIds: List<String> = emptyList(),
+        val headings: List<HeadingStroke> = emptyList(),
+        val textIds: List<String> = emptyList(),
+        val textObjects: List<TextRender> = emptyList(),
+    ) : UndoRedoAction()
+
+    /**
      * User converted a lasso selection of strokes into a type="text" object via the
      * floating "Text" toolbar button.
      *

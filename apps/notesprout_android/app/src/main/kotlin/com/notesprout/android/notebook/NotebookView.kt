@@ -243,6 +243,32 @@ interface NotebookView {
     fun compositeTextObjects(bitmap: Bitmap) {}
 
     /**
+     * Fired on the main thread when a pen stroke is judged a scribble AND its path
+     * crosses at least one existing object (stroke, heading, or text object) on the page.
+     * Fires INSTEAD OF [onPenLifted] for confirmed scribble-erase gestures.
+     *
+     * The scribble stroke itself is a pure gesture — it is removed from the in-memory
+     * stroke list by the view before this fires and is NEVER saved to the DB.
+     *
+     * [erasedObjectIds] — IDs of all content objects the scribble path touched.
+     * [erasedHeadings] — full [HeadingStroke] data for the heading subset of [erasedObjectIds],
+     *   captured at gesture time for undo restoration without a DB round-trip.
+     * [erasedTextObjects] — full [TextRender] data for the text-object subset, likewise.
+     *
+     * On Onyx devices the EPD overlay render is already released before this fires.
+     * The activity must rebuild the bitmap via [buildRenderBitmap] + [loadStrokesWithBitmap]
+     * to commit the erasure to the screen.
+     */
+    var onScribbleEraseComplete: ((
+        erasedObjectIds: List<String>,
+        erasedHeadings: List<com.notesprout.android.data.HeadingStroke>,
+        erasedTextObjects: List<com.notesprout.android.data.TextRender>,
+    ) -> Unit)?
+        get() = null
+        @Suppress("UNUSED_PARAMETER")
+        set(value) {}
+
+    /**
      * Fired on the main thread when the eraser path intersects a heading's bounding box.
      * The heading has already been removed from the view's in-memory list before this fires.
      * NotebookActivity wires this to soft-delete the heading row from the DB and push an

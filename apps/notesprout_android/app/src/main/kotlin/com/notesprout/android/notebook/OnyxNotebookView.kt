@@ -198,6 +198,12 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
 
     override var onStrokeErased: ((String) -> Unit)? = null
     override var onHeadingErased: ((HeadingStroke) -> Unit)? = null
+    override var onScribbleEraseComplete: ((List<String>, List<HeadingStroke>, List<TextRender>) -> Unit)? = null
+
+    // Points and stroke IDs accumulated between onBeginRawDrawing and onEndRawDrawing.
+    // Used for per-gesture scribble candidate detection after all points are collected.
+    private val currentGesturePoints    = mutableListOf<PointF>()
+    private val currentGestureStrokeIds = mutableListOf<String>()
 
     /**
      * Invoked (on main thread) immediately after each pen lift (onEndRawDrawing).
@@ -229,6 +235,8 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
                 touchHelper.setRawDrawingRenderEnabled(true)
                 epd { "RENDER_ENABLED caller=onBeginRawDrawing" }
             }
+            currentGesturePoints.clear()
+            currentGestureStrokeIds.clear()
             beginRawDrawingTimeMs = System.currentTimeMillis()
             strokeRenderCount = 0
             epd { "ON_BEGIN_RAW_DRAWING_DONE beginTimeMs=$beginRawDrawingTimeMs" }
@@ -244,11 +252,14 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
                     EpdController.handwritingRepaint(this@OnyxNotebookView, Rect(0, 0, width, height))
                     epd { "HANDWRITING_REPAINT caller=onEndRawDrawing_eraser" }
                 }
+                // Eraser mode: normal pen-lift path (no scribble detection).
+                epd { "PEN_LIFTED caller=onEndRawDrawing_eraser" }
+                onPenLifted?.invoke()
+            } else {
+                // Pen mode: check for scribble-to-erase before deciding to persist.
+                epd { "PEN_LIFTED caller=onEndRawDrawing_pen scribbleCheck" }
+                checkAndRunScribble()
             }
-            // Persist new strokes immediately on pen lift.
-            // The EPD overlay stays active — no handoff here.
-            epd { "PEN_LIFTED caller=onEndRawDrawing" }
-            onPenLifted?.invoke()
         }
 
         override fun onRawDrawingTouchPointMoveReceived(touchPoint: TouchPoint) {
@@ -314,6 +325,9 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
         val strokeId = UUID.randomUUID().toString()
         val strokePoints = points.map { PointF(it.x, it.y) }
         strokes.add(LiveStroke(strokeId, strokePoints))
+        // Accumulate for end-of-gesture scribble detection.
+        currentGesturePoints.addAll(strokePoints)
+        currentGestureStrokeIds.add(strokeId)
         val path = Path()
         path.moveTo(strokePoints[0].x, strokePoints[0].y)
         for (i in 1 until strokePoints.size) {
@@ -506,6 +520,195 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
         val dx = a.x - b.x
         val dy = a.y - b.y
         return dx * dx + dy * dy
+    }
+
+    // ── Scribble-to-Erase detection ──────────────────────────────────────────
+
+    /**
+     * Called at the end of every non-eraser pen gesture. Checks if the accumulated
+     * gesture points form a scribble candidate; if so, runs a hit test off-thread.
+     * Fires [onScribbleEraseComplete] when the scribble hits at least one object,
+     * or [onPenLifted] for normal (non-scribble or no-hit) gestures.
+     */
+    private fun checkAndRunScribble() {
+        val gesturePoints    = currentGesturePoints.toList()
+        val gestureStrokeIds = currentGestureStrokeIds.toList()
+        currentGesturePoints.clear()
+        currentGestureStrokeIds.clear()
+
+        if (gesturePoints.isEmpty() || gestureStrokeIds.isEmpty() || !isScribbleCandidate(gesturePoints)) {
+            onPenLifted?.invoke()
+            return
+        }
+
+        // Candidate detected — run spatial hit test on a background thread.
+        val strokeSnapshot  = strokes.toList()
+        val headingSnapshot = headings.toList()
+        val textSnapshot    = textObjects.toList()
+        val density         = resources.displayMetrics.density
+        val gestureIdSet    = gestureStrokeIds.toSet()
+
+        Thread {
+            val hitIds = scribbleHitTest(
+                gesturePoints,
+                strokeSnapshot.filter { it.id !in gestureIdSet },
+                headingSnapshot,
+                textSnapshot,
+                density,
+            )
+            post {
+                if (hitIds.isEmpty()) {
+                    // Scribble candidate but nothing hit — persist as a normal stroke.
+                    onPenLifted?.invoke()
+                } else {
+                    // Confirmed scribble erase: the gesture stroke is not page content —
+                    // remove it from in-memory before releasing the overlay.
+                    strokes.removeAll { it.id in gestureIdSet }
+                    if (isSetup) {
+                        touchHelper.setRawDrawingRenderEnabled(false)
+                        epd { "RENDER_DISABLED caller=scribbleErase" }
+                        invalidate()
+                        epd { "INVALIDATE caller=scribbleErase" }
+                    }
+                    val hitSet         = hitIds.toSet()
+                    val erasedHeadings = headingSnapshot.filter { it.id in hitSet }
+                    val erasedTexts    = textSnapshot.filter { it.id in hitSet }
+                    onScribbleEraseComplete?.invoke(hitIds, erasedHeadings, erasedTexts)
+                }
+            }
+        }.start()
+    }
+
+    /**
+     * Returns true when [points] satisfy both scribble heuristics:
+     *  1. pathLength / boundingBoxDiagonal ≥ [SCRIBBLE_DENSITY_RATIO]
+     *  2. At least [SCRIBBLE_MIN_DIRECTION_REVERSALS] significant direction reversals
+     *     (consecutive movement vectors with a negative dot product, on noise-filtered points).
+     */
+    private fun isScribbleCandidate(points: List<PointF>): Boolean {
+        if (points.size < 4) return false
+
+        // Compute total path length and bounding box in one pass.
+        var pathLength = 0f
+        var minX = points[0].x; var minY = points[0].y
+        var maxX = minX;        var maxY = minY
+        for (i in 1 until points.size) {
+            val dx = points[i].x - points[i - 1].x
+            val dy = points[i].y - points[i - 1].y
+            pathLength += Math.sqrt((dx * dx + dy * dy).toDouble()).toFloat()
+            if (points[i].x < minX) minX = points[i].x else if (points[i].x > maxX) maxX = points[i].x
+            if (points[i].y < minY) minY = points[i].y else if (points[i].y > maxY) maxY = points[i].y
+        }
+        val dw = maxX - minX; val dh = maxY - minY
+        val diagonal = Math.sqrt((dw * dw + dh * dh).toDouble()).toFloat()
+        if (diagonal < 10f) return false
+        if (pathLength / diagonal < SCRIBBLE_DENSITY_RATIO) return false
+
+        // Noise-filter: only keep points more than 2 px apart to reduce stylus jitter.
+        val filtered = mutableListOf(points[0])
+        for (p in points) {
+            val last = filtered.last()
+            val dx = p.x - last.x; val dy = p.y - last.y
+            if (dx * dx + dy * dy >= 4f) filtered.add(p)
+        }
+        if (filtered.size < 3) return false
+
+        // Count direction reversals on the filtered path.
+        var reversals = 0
+        for (i in 2 until filtered.size) {
+            val ax = filtered[i - 1].x - filtered[i - 2].x
+            val ay = filtered[i - 1].y - filtered[i - 2].y
+            val bx = filtered[i].x - filtered[i - 1].x
+            val by = filtered[i].y - filtered[i - 1].y
+            if (ax * bx + ay * by < 0f) reversals++
+        }
+        return reversals >= SCRIBBLE_MIN_DIRECTION_REVERSALS
+    }
+
+    /**
+     * Returns the IDs of all objects on the page touched by the scribble path.
+     * Safe to call off the main thread (reads only the supplied snapshots).
+     *
+     * Strokes: AABB pre-filter then per-point segment-proximity within [SCRIBBLE_STROKE_TOUCH_RADIUS_DP].
+     * Headings/text: the scribble path must travel at least [SCRIBBLE_BBOX_PENETRATION_DP] dp
+     *   INSIDE the object's bounding box (prevents corner-grazes from triggering).
+     */
+    private fun scribbleHitTest(
+        scribblePoints: List<PointF>,
+        strokes: List<LiveStroke>,
+        headings: List<HeadingStroke>,
+        textObjects: List<TextRender>,
+        density: Float,
+    ): List<String> {
+        if (scribblePoints.size < 2) return emptyList()
+
+        val touchRadiusPx = SCRIBBLE_STROKE_TOUCH_RADIUS_DP * density
+        val touchRadiusSq = touchRadiusPx * touchRadiusPx
+        val penetrationPx = SCRIBBLE_BBOX_PENETRATION_DP * density
+
+        // Build expanded AABB of the scribble path (matches eraseAtPath pre-filter pattern).
+        var sMinX = scribblePoints[0].x; var sMinY = scribblePoints[0].y
+        var sMaxX = sMinX;               var sMaxY = sMinY
+        for (sp in scribblePoints) {
+            if (sp.x < sMinX) sMinX = sp.x else if (sp.x > sMaxX) sMaxX = sp.x
+            if (sp.y < sMinY) sMinY = sp.y else if (sp.y > sMaxY) sMaxY = sp.y
+        }
+        val scribbleBounds = android.graphics.RectF(
+            sMinX - touchRadiusPx, sMinY - touchRadiusPx,
+            sMaxX + touchRadiusPx, sMaxY + touchRadiusPx,
+        )
+
+        val hitIds = mutableListOf<String>()
+
+        // Stroke hit-test: any stroke point within touchRadius of any scribble segment.
+        for (stroke in strokes) {
+            if (!android.graphics.RectF.intersects(scribbleBounds, stroke.boundingBox)) continue
+            var hit = false
+            outer@ for (sp in stroke.points) {
+                for (i in 1 until scribblePoints.size) {
+                    if (pointToSegmentDistSq(sp, scribblePoints[i - 1], scribblePoints[i]) <= touchRadiusSq) {
+                        hit = true; break@outer
+                    }
+                }
+            }
+            if (hit) hitIds.add(stroke.id)
+        }
+
+        // Heading hit-test: path must penetrate bbox by more than penetrationPx.
+        val rawBounds = android.graphics.RectF(sMinX, sMinY, sMaxX, sMaxY)
+        for (heading in headings) {
+            if (!android.graphics.RectF.intersects(rawBounds, heading.boundingBox)) continue
+            if (scribblePathPenetration(scribblePoints, heading.boundingBox) >= penetrationPx) {
+                hitIds.add(heading.id)
+            }
+        }
+
+        // Text object hit-test: same penetration rule.
+        for (textObj in textObjects) {
+            if (!android.graphics.RectF.intersects(rawBounds, textObj.boundingBox)) continue
+            if (scribblePathPenetration(scribblePoints, textObj.boundingBox) >= penetrationPx) {
+                hitIds.add(textObj.id)
+            }
+        }
+
+        return hitIds
+    }
+
+    /**
+     * Sums the length of all scribble path segments that have at least one endpoint
+     * inside [box]. Used to measure how far the scribble actually travels within the
+     * bounding box, distinguishing deep crossings from edge-grazes.
+     */
+    private fun scribblePathPenetration(points: List<PointF>, box: android.graphics.RectF): Float {
+        var total = 0f
+        for (i in 1 until points.size) {
+            val p1 = points[i - 1]; val p2 = points[i]
+            if (box.contains(p1.x, p1.y) || box.contains(p2.x, p2.y)) {
+                val dx = p2.x - p1.x; val dy = p2.y - p1.y
+                total += Math.sqrt((dx * dx + dy * dy).toDouble()).toFloat()
+            }
+        }
+        return total
     }
 
     // ── View lifecycle ───────────────────────────────────────────────────────

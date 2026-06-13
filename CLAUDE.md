@@ -317,10 +317,62 @@ Rendering order: white → template → snapshot PNG → new content drawn this 
 
 ---
 
+## Scribble to Erase
+
+Always-active in pen mode (no toggle). A rapid scribble across existing content erases it silently — no confirmation.
+
+### Detection heuristic (both drawing engines)
+
+A completed stroke is a **scribble candidate** when BOTH hold:
+1. **High ink density:** `pathLength / boundingBoxDiagonal ≥ SCRIBBLE_DENSITY_RATIO` (4.0). Both values are computed from the stroke's point array.
+2. **Zigzag tightness:** at least `SCRIBBLE_MIN_DIRECTION_REVERSALS` (3) direction reversals on the noise-filtered path (consecutive movement vectors whose dot product is negative). Points < 2 px apart are collapsed before counting.
+
+Detection runs at **pen lift** (`onEndRawDrawing` on Onyx, `ACTION_UP` on Generic), after the full stroke is captured. On Onyx, all points from the gesture are accumulated in `currentGesturePoints / currentGestureStrokeIds` (cleared on `onBeginRawDrawing`). On Generic, `commitActiveStroke()` supplies the last stroke.
+
+### Hit-testing
+
+For a scribble candidate, a background thread runs `scribbleHitTest` against all non-deleted content on the layer:
+
+- **Strokes:** AABB pre-filter (`SCRIBBLE_STROKE_TOUCH_RADIUS_DP` expansion), then per-stroke-point to nearest scribble segment segment distance ≤ `SCRIBBLE_STROKE_TOUCH_RADIUS_DP` px. Whole-stroke erase on any touch (matches eraser tool behavior).
+- **Headings / text objects:** `scribblePathPenetration` sums the length of all scribble segments with at least one endpoint inside the object's bounding box. The object is hit only when this sum ≥ `SCRIBBLE_BBOX_PENETRATION_DP` px, preventing corner-grazes from triggering an erase.
+
+If the hit test returns **empty** the scribble is treated as a normal stroke and `onPenLifted` fires. If any objects are hit, `onScribbleEraseComplete` fires instead.
+
+### Constants (`notebook/NotebookConstants.kt`)
+
+| Constant | Default | Purpose |
+|---|---|---|
+| `SCRIBBLE_DENSITY_RATIO` | `4.0f` | Minimum pathLength / diagonal ratio |
+| `SCRIBBLE_MIN_DIRECTION_REVERSALS` | `3` | Minimum zigzag reversals |
+| `SCRIBBLE_BBOX_PENETRATION_DP` | `14f` | Minimum travel inside heading/text bbox (dp) |
+| `SCRIBBLE_STROKE_TOUCH_RADIUS_DP` | `8f` | Proximity radius for stroke-to-stroke touch (dp) |
+
+### New undo action: `ScribbleErased`
+
+`history/UndoRedoAction.ScribbleErased(scribbleStrokeIds, erasedObjectIds, pageId, layerId, deletedAt, headingIds, headings, textIds, textObjects)`.
+
+- `scribbleStrokeIds` — IDs of the gesture stroke row(s); saved to DB then immediately soft-deleted.
+- `erasedObjectIds` — IDs of all erased content (strokes, headings, text objects); does NOT include scribble strokes.
+- `headings / textObjects` — full render data for in-memory restoration on undo without a DB round-trip.
+- **Undo:** restore all `scribbleStrokeIds` + `erasedObjectIds` (clear `deletedAt`); rebuild canvas. Scribble stroke reappears along with erased content.
+- **Redo:** re-soft-delete all `scribbleStrokeIds` + `erasedObjectIds`.
+
+Cross-page undo/redo uses the same two-phase approach as `LassoErased`.
+
+### EPD / overlay handoff (OnyxNotebookView)
+
+When hit test confirms a scribble erase (fires on main thread from `post {}`):
+1. `touchHelper.setRawDrawingRenderEnabled(false)` + `invalidate()` — releases hardware buffer before DB/bitmap work.
+2. Activity (`onScribbleEraseComplete`): calls `saveStrokes(db)` to insert scribble stroke rows, then soft-deletes scribble + erased objects in a transaction, invalidates page snapshot.
+3. Rebuilds render bitmap off-thread (`buildRenderBitmap`) without scribble or erased objects.
+4. `loadStrokesWithBitmap` swaps bitmap, runs `handwritingRepaint`, re-enables raw drawing — identical to the `eraseAll` / `setTemplate` handoff sequence.
+
+---
+
 ## Undo/Redo System
 
 - Session-scoped (not persisted across process death)
-- `history/UndoRedoAction.kt` — sealed class: stroke add/erase, page add/delete/clear/copy/paste/move, lasso erase/cut/delete/paste/move, heading create/remove/text-edit, text insert/edit/remove/convert
+- `history/UndoRedoAction.kt` — sealed class: stroke add/erase, page add/delete/clear/copy/paste/move, lasso erase/cut/delete/paste/move, heading create/remove/text-edit, text insert/edit/remove/convert, **scribble erase**
 - `history/UndoRedoManager.kt` — `undoStack` / `redoStack` as `ArrayDeque`. Redo stack cleared on any new user action.
 
 **Cross-page actions:** Never call `saveAndSwitchPage()` — it calls `eraseAll()` which wipes in-memory strokes. Use the two-phase approach: save/snapshot the leaving page inline → navigate → load from DB → apply the action → rebuild bitmap.

@@ -841,6 +841,67 @@ class NotebookActivity : AppCompatActivity() {
             }
         }
 
+        // Scribble-to-Erase: soft-delete all touched objects. The scribble stroke itself
+        // is a gesture — the view already removed it from in-memory; it is never saved to DB.
+        drawingView.onScribbleEraseComplete = { erasedObjectIds, erasedHeadings, erasedTextObjects ->
+            val db     = soilDatabase
+            val pageId = currentPageId.takeIf { it.isNotEmpty() }
+            val layerId = currentLayerId
+            if (db != null && pageId != null && layerId.isNotEmpty() && erasedObjectIds.isNotEmpty()) {
+                lifecycleScope.launch {
+                    val deletedAt = System.currentTimeMillis()
+                    withContext(Dispatchers.IO) {
+                        db.withTransaction {
+                            erasedObjectIds.forEach { db.notebookDao().softDeleteById(it, deletedAt) }
+                        }
+                        invalidatePageSnapshot(db, pageId)
+                    }
+                    val erasedHeadingIds = erasedHeadings.mapTo(mutableSetOf()) { it.id }
+                    val capturedHeadings = erasedHeadings.map { h ->
+                        HeadingStroke(
+                            id             = h.id,
+                            boundingBox    = RectF(h.boundingBox),
+                            strokes        = h.strokes.map { s -> LiveStroke(s.id, s.points.map { PointF(it.x, it.y) }) },
+                            recognizedText = h.recognizedText,
+                        )
+                    }
+                    val erasedTextIds = erasedTextObjects.mapTo(mutableSetOf()) { it.id }
+                    val erasedSet     = erasedObjectIds.toSet()
+
+                    // View already removed the scribble stroke; only remove erased content here.
+                    val updatedStrokes  = drawingView.getStrokes().filter { it.id !in erasedSet }
+                    val updatedHeadings = drawingView.getHeadings().filter { it.id !in erasedHeadingIds }
+                    val updatedTexts    = drawingView.getTextObjects().filter { it.id !in erasedTextIds }
+                    persistedStrokeIds.removeAll(erasedSet - erasedHeadingIds - erasedTextIds)
+                    drawingView.setStrokeListSilently(updatedStrokes)
+                    drawingView.loadHeadings(updatedHeadings)
+                    drawingView.loadTextObjects(updatedTexts)
+
+                    undoRedoManager.push(UndoRedoAction.ScribbleErased(
+                        erasedObjectIds = erasedObjectIds,
+                        pageId          = pageId,
+                        layerId         = layerId,
+                        deletedAt       = deletedAt,
+                        headingIds      = erasedHeadingIds.toList(),
+                        headings        = capturedHeadings,
+                        textIds         = erasedTextIds.toList(),
+                        textObjects     = erasedTextObjects,
+                    ))
+                    updateUndoRedoButtons()
+
+                    val templateBmp = currentTemplateBitmap
+                    val bitmap = withContext(Dispatchers.IO) {
+                        drawingView.buildRenderBitmap(updatedStrokes, templateBmp, updatedHeadings, updatedTexts)
+                    }
+                    if (bitmap != null) {
+                        drawingView.loadStrokesWithBitmap(updatedStrokes, bitmap, templateBmp)
+                    } else {
+                        drawingView.loadStrokes(updatedStrokes)
+                    }
+                }
+            }
+        }
+
         // Lasso move gesture complete — persist translated coordinates and push undo action.
         drawingView.onStrokesMoved = { originalStrokes, movedStrokes, originalHeadings, movedHeadings, originalTextObjects, movedTextObjects ->
             val pageId = currentPageId.takeIf { it.isNotEmpty() }
@@ -3736,6 +3797,7 @@ class NotebookActivity : AppCompatActivity() {
             is UndoRedoAction.TextEdited        -> action.pageId
             is UndoRedoAction.TextRemoved       -> action.pageId
             is UndoRedoAction.TextConverted     -> action.pageId
+            is UndoRedoAction.ScribbleErased    -> action.pageId
             else                               -> null
         }
         val isCrossPage = targetPageId != null && targetPageId != currentPageId
@@ -3818,6 +3880,93 @@ class NotebookActivity : AppCompatActivity() {
                     }
                 updatedStrokes  = buildList { addAll(preUndoStrokes); addAll(restoredStrokes) }
                 updatedHeadings = preUndoHeadings + restoredHeadings
+                updatedTexts    = preUndoTexts + action.textObjects
+                restoredStrokes.forEach { persistedStrokeIds.add(it.id) }
+            }
+            drawingView.loadHeadings(updatedHeadings)
+            drawingView.loadTextObjects(updatedTexts)
+            val bitmap = withContext(Dispatchers.IO) {
+                drawingView.buildRenderBitmap(updatedStrokes, templateBmp, updatedHeadings, updatedTexts)
+            }
+            if (bitmap != null) {
+                drawingView.loadStrokesWithBitmap(updatedStrokes, bitmap, templateBmp)
+            } else {
+                drawingView.loadStrokes(updatedStrokes)
+            }
+            return
+        }
+
+        // ── Cross-page ScribbleErased: two-phase display (mirrors LassoErased) ──────────────
+        if (isCrossPage && action is UndoRedoAction.ScribbleErased) {
+            val snapshot      = drawingView.captureSnapshot()
+            val leavingPageId = currentPageId
+            withContext(Dispatchers.IO) {
+                if (snapshot != null && leavingPageId.isNotEmpty()) {
+                    persistSnapshot(db, leavingPageId, snapshot)
+                }
+                saveStrokes(db)
+            }
+            currentPageIndex = pages.indexOfFirst { it.id == action.pageId }.coerceAtLeast(0)
+
+            val templateBmp: Bitmap?
+            val preUndoStrokes: List<LiveStroke>
+            val preUndoHeadings: List<HeadingStroke>
+            val preUndoTexts: List<TextRender>
+            withContext(Dispatchers.IO) {
+                setupPageIds(db)
+                templateBmp     = loadPageTemplateFromDb(db)
+                preUndoStrokes  = deserializeStrokesFromDb(db)
+                preUndoHeadings = loadHeadingsFromDb(db, currentLayerId)
+                preUndoTexts    = loadTextObjectsFromDb(db, currentLayerId)
+            }
+            drawingView.loadHeadings(preUndoHeadings)
+            drawingView.loadTextObjects(preUndoTexts)
+            val preUndobitmap = withContext(Dispatchers.IO) {
+                drawingView.buildRenderBitmap(preUndoStrokes, templateBmp, preUndoHeadings, preUndoTexts)
+            }
+            if (preUndobitmap != null) {
+                drawingView.loadStrokesWithBitmap(preUndoStrokes, preUndobitmap, templateBmp)
+            } else {
+                drawingView.loadStrokes(preUndoStrokes)
+            }
+            currentTemplateBitmap = templateBmp
+            updatePageIndicator()
+            saveLastOpenedPage(currentPageId)
+
+            withContext(Dispatchers.IO) {
+                if (isUndo) {
+                    action.erasedObjectIds.forEach { dao.restoreById(it, now) }
+                } else {
+                    action.erasedObjectIds.forEach { dao.softDeleteById(it, now) }
+                }
+            }
+
+            val erasedIdsSet  = action.erasedObjectIds.toSet()
+            val headingIdsSet = action.headingIds.toSet()
+            val textIdsSet    = action.textIds.toSet()
+            val updatedStrokes: List<LiveStroke>
+            val updatedHeadings: List<HeadingStroke>
+            val updatedTexts: List<TextRender>
+            if (!isUndo) {
+                // Redo: re-erase → remove erased objects from in-memory lists.
+                updatedStrokes  = preUndoStrokes.filter { it.id !in erasedIdsSet }
+                updatedHeadings = preUndoHeadings.filter { it.id !in headingIdsSet }
+                updatedTexts    = preUndoTexts.filter { it.id !in textIdsSet }
+                persistedStrokeIds.removeAll(erasedIdsSet - headingIdsSet - textIdsSet)
+            } else {
+                // Undo: restore erased content from DB / action snapshot.
+                val pureStrokeIdsSet = erasedIdsSet - headingIdsSet - textIdsSet
+                val restoredStrokeRows = withContext(Dispatchers.IO) {
+                    pureStrokeIdsSet.mapNotNull { id -> dao.getObjectById(id) }
+                }
+                val restoredStrokes = restoredStrokeRows.mapNotNull { obj ->
+                    try { LiveStroke(id = obj.id, points = StrokeData.fromJson(obj.data).toPointFs()) }
+                    catch (e: Exception) {
+                        Log.e(TAG, "executeAction ScribbleErased: failed to deserialize ${obj.id}", e); null
+                    }
+                }
+                updatedStrokes  = buildList { addAll(preUndoStrokes); addAll(restoredStrokes) }
+                updatedHeadings = preUndoHeadings + action.headings
                 updatedTexts    = preUndoTexts + action.textObjects
                 restoredStrokes.forEach { persistedStrokeIds.add(it.id) }
             }
@@ -4947,6 +5096,15 @@ class NotebookActivity : AppCompatActivity() {
                 }
                 invalidatePageSnapshot(db, action.pageId)
             }
+
+            is UndoRedoAction.ScribbleErased -> withContext(Dispatchers.IO) {
+                if (isUndo) {
+                    action.erasedObjectIds.forEach { dao.restoreById(it, now) }
+                } else {
+                    action.erasedObjectIds.forEach { dao.softDeleteById(it, now) }
+                }
+                invalidatePageSnapshot(db, action.pageId)
+            }
         }
         // After each when-branch we are back on the main thread.
 
@@ -5046,6 +5204,69 @@ class NotebookActivity : AppCompatActivity() {
                 updatedHeadings = drawingView.getHeadings() + restoredHeadings
                 updatedTexts    = drawingView.getTextObjects() + action.textObjects
                 restoredStrokes.forEach { persistedStrokeIds.add(it.id) }
+            }
+            drawingView.loadHeadings(updatedHeadings)
+            drawingView.loadTextObjects(updatedTexts)
+            val templateBmp = currentTemplateBitmap
+            val bitmap = withContext(Dispatchers.IO) {
+                drawingView.buildRenderBitmap(updatedStrokes, templateBmp, updatedHeadings, updatedTexts)
+            }
+            if (bitmap != null) {
+                drawingView.loadStrokesWithBitmap(updatedStrokes, bitmap, templateBmp)
+            } else {
+                drawingView.loadStrokes(updatedStrokes)
+            }
+            updatePageIndicator()
+            saveLastOpenedPage(currentPageId)
+            return
+        }
+
+        // ── Step 3a-scribble: Same-page ScribbleErased — optimised in-memory update ─
+        if (action is UndoRedoAction.ScribbleErased) {
+            val erasedIdsSet     = action.erasedObjectIds.toSet()
+            val headingIdsSet    = action.headingIds.toSet()
+            val textIdsSet       = action.textIds.toSet()
+            val pureStrokeIdsSet = erasedIdsSet - headingIdsSet - textIdsSet
+            val updatedStrokes: List<LiveStroke>
+            val updatedHeadings: List<HeadingStroke>
+            val updatedTexts: List<TextRender>
+            if (!isUndo) {
+                // Redo: re-erase → remove erased objects from in-memory (scribble was already gone).
+                updatedStrokes  = drawingView.getStrokes().filter { it.id !in erasedIdsSet }
+                updatedHeadings = drawingView.getHeadings().filter { it.id !in headingIdsSet }
+                updatedTexts    = drawingView.getTextObjects().filter { it.id !in textIdsSet }
+                persistedStrokeIds.removeAll(pureStrokeIdsSet)
+            } else {
+                // Undo: restore all erased objects from DB / action snapshot.
+                val erasedStrokeRows = withContext(Dispatchers.IO) {
+                    pureStrokeIdsSet.mapNotNull { id -> dao.getObjectById(id) }
+                }
+                val restoredErasedStrokes = erasedStrokeRows.mapNotNull { obj ->
+                    try { LiveStroke(id = obj.id, points = StrokeData.fromJson(obj.data).toPointFs()) }
+                    catch (e: Exception) {
+                        Log.e(TAG, "executeAction ScribbleErased undo: failed to deserialize ${obj.id}", e); null
+                    }
+                }
+                val restoredHeadings: List<HeadingStroke> = if (action.headings.isNotEmpty()) {
+                    action.headings
+                } else if (headingIdsSet.isNotEmpty()) {
+                    withContext(Dispatchers.IO) {
+                        headingIdsSet.mapNotNull { id ->
+                            dao.getObjectById(id)?.let { obj ->
+                                val box = obj.parseBoundingBox() ?: return@mapNotNull null
+                                val ho = runCatching { HeadingObject.fromJson(obj.data) }.getOrNull() ?: return@mapNotNull null
+                                HeadingStroke(id = obj.id, boundingBox = box, strokes = ho.strokes, recognizedText = ho.recognizedText)
+                            }
+                        }
+                    }
+                } else emptyList()
+                updatedStrokes  = buildList {
+                    addAll(drawingView.getStrokes())
+                    addAll(restoredErasedStrokes)
+                }
+                updatedHeadings = drawingView.getHeadings() + restoredHeadings
+                updatedTexts    = drawingView.getTextObjects() + action.textObjects
+                restoredErasedStrokes.forEach { persistedStrokeIds.add(it.id) }
             }
             drawingView.loadHeadings(updatedHeadings)
             drawingView.loadTextObjects(updatedTexts)
