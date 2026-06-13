@@ -2,6 +2,7 @@ package com.notesprout.android.history
 
 import com.notesprout.android.data.HeadingStroke
 import com.notesprout.android.data.LiveStroke
+import com.notesprout.android.data.TextRender
 import kotlinx.serialization.Serializable
 
 /**
@@ -141,6 +142,8 @@ sealed class UndoRedoAction {
         val movedStrokes: List<LiveStroke>,
         val originalHeadings: List<HeadingStroke> = emptyList(),
         val movedHeadings: List<HeadingStroke> = emptyList(),
+        val originalTextObjects: List<TextRender> = emptyList(),
+        val movedTextObjects: List<TextRender> = emptyList(),
     ) : UndoRedoAction()
 
     /**
@@ -197,6 +200,8 @@ sealed class UndoRedoAction {
         val strokes: List<LiveStroke>,
         val headingIds: List<String> = emptyList(),
         val headings: List<HeadingStroke> = emptyList(),
+        val textIds: List<String> = emptyList(),
+        val textObjects: List<TextRender> = emptyList(),
     ) : UndoRedoAction()
 
     /**
@@ -260,5 +265,22 @@ sealed class UndoRedoAction {
         val restoredStrokes: List<LiveStroke>,
         val embeddedStrokes: List<LiveStroke>,
         val recognizedText: String? = null,
+    ) : UndoRedoAction()
+
+    /**
+     * User inserted a text object via text placement mode.
+     *
+     * Undo: soft-deletes the text row, clears selection, redraws canvas.
+     * Redo: restores the text row, re-selects the object, redraws canvas.
+     *
+     * [textRender] carries the full render data (id, boundingBox, text) so redo
+     * can rebuild the in-memory list and restore selection without a DB read.
+     */
+    @Serializable
+    data class TextInserted(
+        val textId: String,
+        val pageId: String,
+        val layerId: String,
+        val textRender: TextRender,
     ) : UndoRedoAction()
 }

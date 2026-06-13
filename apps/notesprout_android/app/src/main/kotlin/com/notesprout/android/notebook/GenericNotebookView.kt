@@ -86,6 +86,11 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
         strokeWidth = 2.5f
     }
 
+    // ── Text placement mode ───────────────────────────────────────────────────
+
+    private var isTextPlacementMode = false
+    override var onTextPlacementTap: ((Float, Float) -> Unit)? = null
+
     // ── Lasso state ──────────────────────────────────────────────────────────
 
     private var isLassoMode = false
@@ -111,6 +116,7 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
     private var dragDy = 0f
     private var dragOriginalStrokes: List<LiveStroke> = emptyList()
     private var dragOriginalHeadings: List<HeadingStroke> = emptyList()
+    private var dragOriginalTextObjects: List<TextRender> = emptyList()
     private var dragBackingBitmap: Bitmap? = null
 
     private val lassoPaint = Paint().apply {
@@ -141,7 +147,7 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
     override var onLassoTapToDismiss: (() -> Unit)? = null
     override var onLassoEraseComplete: ((List<String>) -> Unit)? = null
     override var lassoSelectedIds: Set<String> = emptySet()
-    override var onStrokesMoved: ((List<LiveStroke>, List<LiveStroke>, List<HeadingStroke>, List<HeadingStroke>) -> Unit)? = null
+    override var onStrokesMoved: ((List<LiveStroke>, List<LiveStroke>, List<HeadingStroke>, List<HeadingStroke>, List<TextRender>, List<TextRender>) -> Unit)? = null
     override var onLassoTap: ((Float, Float) -> Unit)? = null
     override var onDragStarted: (() -> Unit)? = null
     override var onLassoSelectionCleared: (() -> Unit)? = null
@@ -162,6 +168,7 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
+        if (isTextPlacementMode) return handleTextPlacementTouch(event)
         if (isLassoMode) return handleLassoTouch(event)
         if (isLassoEraserMode) return handleLassoEraserTouch(event)
 
@@ -205,6 +212,15 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
         return true
     }
 
+    private fun handleTextPlacementTouch(event: MotionEvent): Boolean {
+        if (event.getToolType(0) != MotionEvent.TOOL_TYPE_STYLUS) return false
+        if (event.actionMasked == MotionEvent.ACTION_DOWN) {
+            isTextPlacementMode = false
+            onTextPlacementTap?.invoke(event.x, event.y)
+        }
+        return true
+    }
+
     private fun handleLassoTouch(event: MotionEvent): Boolean {
         val toolType = event.getToolType(0)
 
@@ -230,9 +246,13 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
                         .map { h -> HeadingStroke(h.id, android.graphics.RectF(h.boundingBox),
                             h.strokes.map { s -> LiveStroke(s.id, s.points.map { PointF(it.x, it.y) }) },
                             recognizedText = h.recognizedText) }
+                    dragOriginalTextObjects = textObjects
+                        .filter { it.id in lassoSelectedIds }
+                        .map { TextRender(it.id, RectF(it.boundingBox), it.text) }
                     val nonSelectedStrokes  = strokes.filter { it.id !in lassoSelectedIds }
                     val nonSelectedHeadings = headings.filter { it.id !in lassoSelectedIds }
-                    dragBackingBitmap = buildRenderBitmap(nonSelectedStrokes, templateBitmap, nonSelectedHeadings)
+                    val nonSelectedTexts    = textObjects.filter { it.id !in lassoSelectedIds }
+                    dragBackingBitmap = buildRenderBitmap(nonSelectedStrokes, templateBitmap, nonSelectedHeadings, nonSelectedTexts)
                     return true
                 }
                 // Normal lasso: clear any existing selection so the user sees immediate feedback.
@@ -298,22 +318,32 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
                                 recognizedText = h.recognizedText,
                             )
                         }
+                        val movedTextObjects = dragOriginalTextObjects.map { t ->
+                            TextRender(t.id, RectF(
+                                t.boundingBox.left + dragDx, t.boundingBox.top + dragDy,
+                                t.boundingBox.right + dragDx, t.boundingBox.bottom + dragDy,
+                            ), t.text)
+                        }
                         val movedById = movedStrokes.associateBy { it.id }
                         val updated = strokes.map { movedById[it.id] ?: it }
                         strokes.clear(); strokes.addAll(updated)
                         val headingById = movedHeadings.associateBy { it.id }
                         headings = headings.map { headingById[it.id] ?: it }
+                        val textById = movedTextObjects.associateBy { it.id }
+                        textObjects = textObjects.map { textById[it.id] ?: it }
                         lassoSelectionBox = lassoSelectionBox?.let { b ->
                             RectF(b.left + dragDx, b.top + dragDy, b.right + dragDx, b.bottom + dragDy)
                         }
                         val origStrokes = dragOriginalStrokes
                         val origHeadings = dragOriginalHeadings
+                        val origTextObjects = dragOriginalTextObjects
                         dragBackingBitmap?.recycle(); dragBackingBitmap = null
                         isDragMoveActive = false; dragThresholdMet = false
                         dragDx = 0f; dragDy = 0f
                         dragOriginalStrokes = emptyList(); dragOriginalHeadings = emptyList()
+                        dragOriginalTextObjects = emptyList()
                         redrawCanvas()
-                        onStrokesMoved?.invoke(origStrokes, movedStrokes, origHeadings, movedHeadings)
+                        onStrokesMoved?.invoke(origStrokes, movedStrokes, origHeadings, movedHeadings, origTextObjects, movedTextObjects)
                     } else {
                         // Below threshold — treat as a tap inside the selection box.
                         val tapX = event.x; val tapY = event.y
@@ -321,6 +351,7 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
                         isDragMoveActive = false; dragThresholdMet = false
                         dragDx = 0f; dragDy = 0f
                         dragOriginalStrokes = emptyList(); dragOriginalHeadings = emptyList()
+                        dragOriginalTextObjects = emptyList()
                         onLassoTap?.invoke(tapX, tapY)
                     }
                     return true
@@ -354,7 +385,7 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
 
-        // Drag layer: non-selected backing + selected headings + selected strokes translated.
+        // Drag layer: non-selected backing + selected headings/textObjects/strokes translated.
         if (isDragMoveActive && dragThresholdMet) {
             canvas.drawColor(Color.WHITE)
             dragBackingBitmap?.let { canvas.drawBitmap(it, 0f, 0f, null) }
@@ -373,6 +404,9 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
                         canvas.drawPath(path, strokePaint)
                     }
                 }
+            }
+            for (textObj in dragOriginalTextObjects) {
+                TextObjectRenderer.draw(canvas, textObj, width, textObjectPaint, resources.displayMetrics.density)
             }
             for (stroke in dragOriginalStrokes) {
                 val pts = stroke.points; if (pts.size < 2) continue
@@ -570,12 +604,17 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
     override fun enableDrawing() {}
     override fun disableDrawing() {}
 
+    override fun setTextPlacementMode(active: Boolean) {
+        isTextPlacementMode = active
+    }
+
     override fun setDragMoveMode(enabled: Boolean) {
         if (!enabled && isDragMoveActive) {
             dragBackingBitmap?.recycle(); dragBackingBitmap = null
             isDragMoveActive = false; dragThresholdMet = false
             dragDx = 0f; dragDy = 0f
             dragOriginalStrokes = emptyList(); dragOriginalHeadings = emptyList()
+            dragOriginalTextObjects = emptyList()
             invalidate()
         }
     }

@@ -455,8 +455,9 @@ When a Dialog is shown over NotebookActivity, the activity's window loses focus 
 | Pen | `true` | `true` (default — SDK manages) |
 | Eraser | `true` | `false` (render off prevents phantom pen strokes on overlay) |
 | Lasso / Lasso Eraser | `false` | n/a |
+| Text placement | `false` | n/a |
 
-- `openRawDrawing()` and `enableDrawing()` must guard `setRawDrawingEnabled(true)` with `!isLassoMode && !isLassoEraserMode`. If that guard passes and `isEraserMode` is true, immediately follow with `setRawDrawingRenderEnabled(false)`.
+- `openRawDrawing()` and `enableDrawing()` must guard `setRawDrawingEnabled(true)` with `!isLassoMode && !isLassoEraserMode && !isTextPlacementMode`. If that guard passes and `isEraserMode` is true, immediately follow with `setRawDrawingRenderEnabled(false)`.
 - Failing to restore these invariants causes phantom pen strokes to appear on the EPD overlay that are not captured by the app — they look real but are not persisted and vanish on the next EPD refresh.
 - Every other `setRawDrawingEnabled(true)` call site in `OnyxNotebookView` already carries these guards; `openRawDrawing()` and `enableDrawing()` are the two centralized re-entry points and must match.
 
@@ -761,8 +762,6 @@ Never calls `eraseAll()`. Updates the in-memory stroke list directly, rebuilds b
 
 **WYSIWYG regex safety:** inline patterns (`boldDoubleStarPattern`, `boldDoubleUnderPattern`, `strikePattern`) do NOT use `RegexOption.DOT_MATCHES_ALL` — patterns use `[^*\n]` and `[^~\n]` exclusion classes so they never match across line boundaries.
 
-**Dialog wiring (Prompt 2 temporary):** `btnInsertText` (`ic_text_recognition.xml`, Tabler text-recognition icon — letter T inside a scan frame) sits between EraseAll and Lasso in the NotebookActivity toolbar. Tapping it opens `TextEditDialog` with empty text; on Save, logs the markdown via `Slog.d("TextEditDialog")` and shows a Toast of the first 40 chars. **Prompt 3 replaces this wiring with the real text-object insert + placement flow.**
-
 **Icon:** `ic_text_recognition.xml` — Tabler `text-recognition`, strokeWidth 2, `@color/inkBlack`, 24dp. 4 corner L-brackets + vertical bar + horizontal bar (T shape inside scan frame).
 
 **AlertDialog pattern:**
@@ -770,4 +769,69 @@ Never calls `eraseAll()`. Updates the in-memory stroke list directly, rebuilds b
 - `setElevation(0f)` + `setBackgroundDrawableResource(R.drawable.shape_bordered)` after `show()`
 - IME hidden in both Save and Cancel click handlers via `editMarkdown.windowToken` (dialog's own window token — not the activity's)
 
-*Last updated: New Branch — TextEditDialog — Markdown WYSIWYG/source editor (Prompt 2)*
+---
+
+## Text Placement Mode and Insert Flow
+
+`btnInsertText` (`ic_text_recognition.xml`) sits between EraseAll and Lasso in the NotebookActivity toolbar. It is a persistent toggle (like the pen/eraser buttons) that enters **text placement mode**.
+
+**Entering placement mode (`enterTextPlacementMode()`):**
+- Exits any active lasso or lasso-eraser mode.
+- Sets `isTextPlacementMode = true`.
+- Calls `drawingView.setTextPlacementMode(true)` → on Onyx: `setRawDrawingEnabled(false)` immediately so the EPD overlay does not capture the next pen contact.
+- Calls `drawingView.releaseRender()` to flush the EPD layer.
+- Sets `btnInsertText.isSelected = true`; deselects pen/eraser/lasso buttons.
+
+**Exiting placement mode (`exitTextPlacementMode()`):**
+- Sets `isTextPlacementMode = false`.
+- Calls `drawingView.setTextPlacementMode(false)` and `drawingView.enableDrawing()` to restore the prior tool's raw-drawing state.
+- Sets `btnInsertText.isSelected = false`; restores pen/eraser selected state.
+
+**`dispatchTouchEvent` cancels placement mode on toolbar touch:**
+- Any finger `ACTION_DOWN` in the toolbar while `isTextPlacementMode` is true calls `exitTextPlacementMode()`, UNLESS the touch is on `btnInsertText` itself (the button's click listener handles toggle).
+
+**Canvas tap in placement mode:**
+- `setTextPlacementMode(active: Boolean)` in the drawing views intercepts the next stylus `ACTION_DOWN`, fires `onTextPlacementTap(tapX, tapY)`, and exits placement mode internally.
+- Only stylus tool type is accepted — finger touches are ignored.
+
+**Insert flow (`insertTextObject(markdown, tapX, tapY)`):**
+1. Measures the markdown via `TextObjectRenderer.measure()` on `Dispatchers.Default`.
+2. Computes a bounding box centered on the tap, clamped to page bounds.
+3. Inserts a `type="text"` row via `dao.insertObject(NotebookObject(...))` on `Dispatchers.IO`.
+4. Calls `invalidatePageSnapshot(db, pageId)`.
+5. Appends the new `TextRender` to `drawingView.getTextObjects()` and calls `drawingView.loadTextObjects(...)`.
+6. Rebuilds the render bitmap off-thread and swaps it via `loadStrokesWithBitmap`.
+7. Enters lasso mode and selects the new object (sets `lassoSelectedIds`, `setLassoOverlay`, shows floating toolbar).
+8. Pushes `UndoRedoAction.TextInserted` onto the undo stack.
+
+**`onWindowFocusChanged` during the dialog:**
+- When `TextEditDialog` opens, the activity loses window focus → `onWindowFocusChanged(false)` → raw drawing disabled. When the dialog closes → `onWindowFocusChanged(true)` → `openRawDrawing()` → drawing restored (since `isTextPlacementMode` is already false by this point). This is the standard dialog focus cycle — no special handling needed.
+
+**OnyxNotebookView tool-state invariants (updated):**
+
+| Active tool | `setRawDrawingEnabled` | `setRawDrawingRenderEnabled` |
+|---|---|---|
+| Pen | `true` | `true` (default — SDK manages) |
+| Eraser | `true` | `false` |
+| Lasso / Lasso Eraser | `false` | n/a |
+| Text placement | `false` | n/a |
+
+`openRawDrawing()` and `enableDrawing()` guard `setRawDrawingEnabled(true)` with `!isLassoMode && !isLassoEraserMode && !isTextPlacementMode`.
+
+**TextInserted undo/redo:**
+- `UndoRedoAction.TextInserted(textId, pageId, layerId, textRender)` — carries full `TextRender` so redo can rebuild the in-memory list without a DB read.
+- **Undo:** `dao.softDeleteById(textId)`, removes from `drawingView.getTextObjects()`, clears selection.
+- **Redo:** `dao.restoreById(textId)`, adds `textRender` back to in-memory list, re-selects the object.
+
+**Lasso actions for `type="text"` objects — Prompt 3 status:**
+
+| Action | Status |
+|---|---|
+| Selection (lasso draw) | ✅ Center-point containment hit test |
+| Drag to move | ✅ Translates bounding box; persists via `updateHeadingData`; `StrokesMoved` undo |
+| Delete (floating toolbar Delete) | ✅ `performLassoDelete` — soft-delete + `LassoDeleted` undo |
+| Highlight/selection visual | ✅ Dashed overlay box |
+| Copy / Cut / Paste | ❌ Deferred — `NotesproutClipboard` does not yet carry text objects |
+| Lasso eraser | ❌ Deferred — lasso eraser only hits strokes/headings currently |
+
+*Last updated: New Branch — Text object placement mode and insert flow (Prompt 3)*

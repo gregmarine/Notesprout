@@ -102,6 +102,8 @@ interface NotebookView {
         movedStrokes: List<LiveStroke>,
         originalHeadings: List<HeadingStroke>,
         movedHeadings: List<HeadingStroke>,
+        originalTextObjects: List<TextRender>,
+        movedTextObjects: List<TextRender>,
     ) -> Unit)?
         get() = null
         @Suppress("UNUSED_PARAMETER")
@@ -155,6 +157,26 @@ interface NotebookView {
      * and no selection is currently active.
      */
     var onLassoTap: ((tapX: Float, tapY: Float) -> Unit)?
+        get() = null
+        @Suppress("UNUSED_PARAMETER")
+        set(value) {}
+
+    /**
+     * Activate or cancel text placement mode.  While active, the view intercepts the
+     * next stylus ACTION_DOWN on the canvas, fires [onTextPlacementTap] with the tap
+     * coordinates (in view/page space), and consumes the event so no stroke begins.
+     * On Onyx devices, [setRawDrawingEnabled(false)] is called immediately so the EPD
+     * overlay does not capture the next pen contact.
+     */
+    fun setTextPlacementMode(active: Boolean) {}
+
+    /**
+     * Fired on the main thread when a stylus ACTION_DOWN occurs while text placement
+     * mode is active.  The coordinates are in view/page space.  The view exits placement
+     * mode internally before firing — the caller is responsible for opening the editor
+     * dialog and, on confirm, inserting the text object.
+     */
+    var onTextPlacementTap: ((tapX: Float, tapY: Float) -> Unit)?
         get() = null
         @Suppress("UNUSED_PARAMETER")
         set(value) {}

@@ -46,6 +46,9 @@ import com.notesprout.android.data.LiveStroke
 import com.notesprout.android.data.TextObject
 import com.notesprout.android.data.TextRender
 import com.notesprout.android.data.TYPE_HEADING
+import com.notesprout.android.data.TYPE_TEXT
+import com.notesprout.android.core.markdown.TextObjectRenderer
+import android.text.TextPaint
 import com.notesprout.android.data.NotebookDao
 import com.notesprout.android.data.NotebookMetadata
 import com.notesprout.android.data.NotebookObject
@@ -114,6 +117,10 @@ class NotebookActivity : AppCompatActivity() {
     /** True while we're waiting for ACTION_UP to close the overflow menu after a button tap. */
     private var overflowCloseOnUp = false
     private var isEraserActive = false
+
+    // ── Text placement mode ───────────────────────────────────────────────────
+    /** True while placement mode is active (waiting for next canvas stylus tap). */
+    private var isTextPlacementMode = false
 
     // ── Lasso selection state ─────────────────────────────────────────────────
     private var isLassoMode = false
@@ -449,21 +456,12 @@ class NotebookActivity : AppCompatActivity() {
             // Tapping the active lasso eraser button is a no-op.
         }
 
-        // Prompt 2: temporary wiring — opens TextEditDialog with empty text for verification.
-        // Prompt 3 will replace this with the real text-object insert + placement flow.
         binding.btnInsertText.setOnClickListener {
-            TextEditDialog(
-                context = this,
-                initialMarkdown = "",
-                onConfirm = { markdown ->
-                    Slog.d("TextEditDialog") { "Confirmed markdown: $markdown" }
-                    android.widget.Toast.makeText(
-                        this,
-                        markdown.take(40),
-                        android.widget.Toast.LENGTH_SHORT,
-                    ).show()
-                },
-            ).show()
+            if (!isTextPlacementMode) {
+                enterTextPlacementMode()
+            } else {
+                exitTextPlacementMode()
+            }
         }
 
         binding.btnLasso.setOnClickListener {
@@ -676,6 +674,7 @@ class NotebookActivity : AppCompatActivity() {
             selectedObjectIds.clear()
             val strokeSnapshot  = drawingView.getStrokes()
             val headingSnapshot = drawingView.getHeadings()
+            val textSnapshot    = drawingView.getTextObjects()
             lifecycleScope.launch(Dispatchers.Default) {
                 val lassoBounds = RectF()
                 drawnPath.computeBounds(lassoBounds, true)
@@ -719,6 +718,17 @@ class NotebookActivity : AppCompatActivity() {
                     if (lassoRegion.contains(cx, cy)) {
                         hitIds.add(heading.id)
                         unionBounds.union(heading.boundingBox)
+                    }
+                }
+
+                // Text object hit-test: center-point containment within the lasso polygon.
+                for (textObj in textSnapshot) {
+                    if (!RectF.intersects(lassoBounds, textObj.boundingBox)) continue
+                    val cx = textObj.boundingBox.centerX().toInt()
+                    val cy = textObj.boundingBox.centerY().toInt()
+                    if (lassoRegion.contains(cx, cy)) {
+                        hitIds.add(textObj.id)
+                        unionBounds.union(textObj.boundingBox)
                     }
                 }
 
@@ -818,7 +828,7 @@ class NotebookActivity : AppCompatActivity() {
         }
 
         // Lasso move gesture complete — persist translated coordinates and push undo action.
-        drawingView.onStrokesMoved = { originalStrokes, movedStrokes, originalHeadings, movedHeadings ->
+        drawingView.onStrokesMoved = { originalStrokes, movedStrokes, originalHeadings, movedHeadings, originalTextObjects, movedTextObjects ->
             val pageId = currentPageId.takeIf { it.isNotEmpty() }
             val db = soilDatabase
             if (pageId != null && db != null) {
@@ -843,6 +853,12 @@ class NotebookActivity : AppCompatActivity() {
                                     heading.id, bboxJson, HeadingObject(heading.strokes, heading.recognizedText).toJson(), now
                                 )
                             }
+                            for (textObj in movedTextObjects) {
+                                val bboxJson = """{"x":${textObj.boundingBox.left},"y":${textObj.boundingBox.top},"width":${textObj.boundingBox.width()},"height":${textObj.boundingBox.height()}}"""
+                                db.notebookDao().updateHeadingData(
+                                    textObj.id, bboxJson, TextObject(textObj.text).toJson(), now
+                                )
+                            }
                         }
                     }
                     undoRedoManager.push(
@@ -852,16 +868,38 @@ class NotebookActivity : AppCompatActivity() {
                             movedStrokes.toList(),
                             originalHeadings = originalHeadings.toList(),
                             movedHeadings = movedHeadings.toList(),
+                            originalTextObjects = originalTextObjects.toList(),
+                            movedTextObjects = movedTextObjects.toList(),
                         )
                     )
                     updateUndoRedoButtons()
-                    // Reshow floating toolbar at the new selection box position after the move.
+                    // Reshow floating toolbar at new selection box position after the move.
                     val newBox = computeUnionBoundingBox(movedStrokes, movedHeadings)
+                    movedTextObjects.forEach { newBox.union(it.boundingBox) }
                     val pad = 8f * resources.displayMetrics.density
                     newBox.inset(-pad, -pad)
                     updateFloatingSelectionToolbar(newBox)
                 }
             }
+        }
+
+        // Canvas tap in text placement mode — open editor dialog and insert on confirm.
+        drawingView.onTextPlacementTap = { tapX, tapY ->
+            // Placement mode already exited inside the view's handleTextPlacementTouch.
+            // Sync Activity-side state and restore raw drawing.
+            isTextPlacementMode = false
+            binding.btnInsertText.isSelected = false
+            drawingView.enableDrawing()
+            val tap = PointF(tapX, tapY)
+            TextEditDialog(
+                context = this,
+                initialMarkdown = "",
+                onConfirm = { markdown ->
+                    if (markdown.isNotBlank()) {
+                        insertTextObject(markdown, tap.x, tap.y)
+                    }
+                },
+            ).show()
         }
 
         binding.drawingContainer.addView(
@@ -1111,6 +1149,15 @@ class NotebookActivity : AppCompatActivity() {
                         if (isFinger) return true
                     }
                 }
+            }
+        }
+
+        // Cancel text placement mode on any toolbar touch (except btnInsertText, which toggles
+        // placement mode via its own click listener and would re-enter if cancelled here).
+        if (event.actionMasked == MotionEvent.ACTION_DOWN && isTextPlacementMode) {
+            val inToolbar = event.y < binding.drawingToolbar.bottom
+            if (inToolbar && !isTouchInView(event, binding.btnInsertText)) {
+                exitTextPlacementMode()
             }
         }
 
@@ -2674,10 +2721,12 @@ class NotebookActivity : AppCompatActivity() {
 
         val selectedStrokes  = drawingView.getStrokes().filter { it.id in ids }
         val selectedHeadings = drawingView.getHeadings().filter { it.id in ids }
-        if (selectedStrokes.isEmpty() && selectedHeadings.isEmpty()) return
+        val selectedTexts    = drawingView.getTextObjects().filter { it.id in ids }
+        if (selectedStrokes.isEmpty() && selectedHeadings.isEmpty() && selectedTexts.isEmpty()) return
 
         val strokeIds  = selectedStrokes.map { it.id }
         val headingIds = selectedHeadings.map { it.id }
+        val textIds    = selectedTexts.map { it.id }
         val capturedStrokes  = selectedStrokes.map { s ->
             LiveStroke(s.id, s.points.map { pt -> PointF(pt.x, pt.y) })
         }
@@ -2689,17 +2738,20 @@ class NotebookActivity : AppCompatActivity() {
 
         lifecycleScope.launch(Dispatchers.IO) {
             val deletedAt = System.currentTimeMillis()
-            (strokeIds + headingIds).forEach { id ->
+            (strokeIds + headingIds + textIds).forEach { id ->
                 soilDatabase?.notebookDao()?.softDeleteById(id, deletedAt)
             }
             withContext(Dispatchers.Main) {
                 val erasedStrokeSet  = strokeIds.toSet()
                 val erasedHeadingSet = headingIds.toSet()
+                val erasedTextSet    = textIds.toSet()
                 val updatedStrokes  = drawingView.getStrokes().filter { it.id !in erasedStrokeSet }
                 val updatedHeadings = drawingView.getHeadings().filter { it.id !in erasedHeadingSet }
+                val updatedTexts    = drawingView.getTextObjects().filter { it.id !in erasedTextSet }
                 persistedStrokeIds.removeAll(erasedStrokeSet)
                 drawingView.setStrokeListSilently(updatedStrokes)
                 drawingView.loadHeadings(updatedHeadings)
+                drawingView.loadTextObjects(updatedTexts)
                 undoRedoManager.push(UndoRedoAction.LassoDeleted(
                     strokeIds  = strokeIds,
                     pageId     = pageId,
@@ -2707,11 +2759,13 @@ class NotebookActivity : AppCompatActivity() {
                     strokes    = capturedStrokes,
                     headingIds = headingIds,
                     headings   = capturedHeadings,
+                    textIds    = textIds,
+                    textObjects = selectedTexts,
                 ))
                 updateUndoRedoButtons()
                 val templateBmp = currentTemplateBitmap
                 val bitmap = withContext(Dispatchers.IO) {
-                    drawingView.buildRenderBitmap(updatedStrokes, templateBmp, updatedHeadings)
+                    drawingView.buildRenderBitmap(updatedStrokes, templateBmp, updatedHeadings, updatedTexts)
                 }
                 if (bitmap != null) {
                     drawingView.loadStrokesWithBitmap(updatedStrokes, bitmap, templateBmp)
@@ -3148,6 +3202,113 @@ class NotebookActivity : AppCompatActivity() {
         binding.btnLassoEraser.isSelected = false
     }
 
+    // ── Text placement mode helpers ───────────────────────────────────────────
+
+    private fun enterTextPlacementMode() {
+        if (isLassoMode) exitLassoMode()
+        if (isLassoEraserMode) exitLassoEraserMode()
+        isTextPlacementMode = true
+        drawingView.setTextPlacementMode(true)
+        drawingView.releaseRender()
+        binding.btnInsertText.isSelected = true
+        binding.btnPen.isSelected    = false
+        binding.btnEraser.isSelected = false
+        binding.btnLasso.isSelected  = false
+        binding.btnLassoEraser.isSelected = false
+    }
+
+    private fun exitTextPlacementMode() {
+        isTextPlacementMode = false
+        drawingView.setTextPlacementMode(false)
+        drawingView.enableDrawing()
+        binding.btnInsertText.isSelected = false
+        binding.btnPen.isSelected    = !isEraserActive
+        binding.btnEraser.isSelected = isEraserActive
+    }
+
+    /**
+     * Measure [markdown], compute a bounding box centered on ([tapX], [tapY]) clamped
+     * to the page, insert a new type="text" row, update the canvas, select the new
+     * object, and push a [UndoRedoAction.TextInserted] undo entry.
+     * Switches the activity into lasso mode so drag-move and Delete are immediately available.
+     */
+    private fun insertTextObject(markdown: String, tapX: Float, tapY: Float) {
+        val db      = soilDatabase ?: return
+        val layerId = currentLayerId.takeIf { it.isNotEmpty() } ?: return
+        val pageId  = currentPageId.takeIf { it.isNotEmpty() } ?: return
+        val pageW   = drawingView.asView().width
+        val pageH   = drawingView.asView().height
+
+        lifecycleScope.launch {
+            val paint = TextPaint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+                color    = android.graphics.Color.BLACK
+                textSize = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 16f, resources.displayMetrics)
+            }
+            val (measuredW, measuredH) = withContext(Dispatchers.Default) {
+                TextObjectRenderer.measure(markdown, pageW, paint, resources.displayMetrics.density)
+            }
+
+            val objW  = measuredW.toFloat().coerceAtMost(pageW.toFloat())
+            val objH  = measuredH.toFloat()
+            val left  = (tapX - objW / 2f).coerceIn(0f, (pageW - objW).coerceAtLeast(0f))
+            val top   = (tapY - objH / 2f).coerceIn(0f, (pageH - objH).coerceAtLeast(0f))
+            val bbox  = RectF(left, top, left + objW, top + objH)
+
+            val textId  = UUID.randomUUID().toString()
+            val now     = System.currentTimeMillis()
+            val bboxJson = """{"x":${bbox.left},"y":${bbox.top},"width":${bbox.width()},"height":${bbox.height()}}"""
+
+            withContext(Dispatchers.IO) {
+                db.notebookDao().insertObject(
+                    NotebookObject(
+                        id          = textId,
+                        parentId    = layerId,
+                        type        = TYPE_TEXT,
+                        boundingBox = bboxJson,
+                        sortOrder   = 0,
+                        createdAt   = now,
+                        updatedAt   = now,
+                        deletedAt   = null,
+                        data        = TextObject(text = markdown).toJson(),
+                    )
+                )
+                invalidatePageSnapshot(db, pageId)
+            }
+
+            val textRender     = TextRender(id = textId, boundingBox = bbox, text = markdown)
+            val updatedTexts   = drawingView.getTextObjects() + textRender
+            drawingView.loadTextObjects(updatedTexts)
+
+            val templateBmp    = currentTemplateBitmap
+            val currentStrokes = drawingView.getStrokes()
+            val currentHeadings = drawingView.getHeadings()
+            val bitmap = withContext(Dispatchers.IO) {
+                drawingView.buildRenderBitmap(currentStrokes, templateBmp, currentHeadings, updatedTexts)
+            }
+            if (bitmap != null) {
+                drawingView.loadStrokesWithBitmap(currentStrokes, bitmap, templateBmp)
+            }
+
+            // Select the new text object and show the floating toolbar.
+            if (!isLassoMode) enterLassoMode()
+            selectedObjectIds.clear()
+            selectedObjectIds.add(textId)
+            drawingView.lassoSelectedIds = selectedObjectIds.toSet()
+            val pad = 8f * resources.displayMetrics.density
+            val selBox = RectF(bbox).apply { inset(-pad, -pad) }
+            drawingView.setLassoOverlay(null, selBox)
+            updateFloatingSelectionToolbar(selBox)
+
+            undoRedoManager.push(UndoRedoAction.TextInserted(
+                textId     = textId,
+                pageId     = pageId,
+                layerId    = layerId,
+                textRender = textRender,
+            ))
+            updateUndoRedoButtons()
+        }
+    }
+
     private fun performUndo() {
         val db = soilDatabase ?: return
         val action = undoRedoManager.undo() ?: return
@@ -3223,6 +3384,7 @@ class NotebookActivity : AppCompatActivity() {
             is UndoRedoAction.HeadingCreated   -> action.pageId
             is UndoRedoAction.HeadingRemoved   -> action.pageId
             is UndoRedoAction.HeadingTextEdited -> action.pageId
+            is UndoRedoAction.TextInserted      -> action.pageId
             else                               -> null
         }
         val isCrossPage = targetPageId != null && targetPageId != currentPageId
@@ -4129,9 +4291,11 @@ class NotebookActivity : AppCompatActivity() {
                 if (isUndo) {
                     action.strokeIds.forEach { dao.restoreById(it, now) }
                     action.headingIds.forEach { dao.restoreById(it, now) }
+                    action.textIds.forEach { dao.restoreById(it, now) }
                 } else {
                     action.strokeIds.forEach { dao.softDeleteById(it, now) }
                     action.headingIds.forEach { dao.softDeleteById(it, now) }
+                    action.textIds.forEach { dao.softDeleteById(it, now) }
                 }
             }
 
@@ -4148,6 +4312,7 @@ class NotebookActivity : AppCompatActivity() {
             is UndoRedoAction.StrokesMoved -> withContext(Dispatchers.IO) {
                 val targetStrokes  = if (isUndo) action.originalStrokes  else action.movedStrokes
                 val targetHeadings = if (isUndo) action.originalHeadings else action.movedHeadings
+                val targetTexts    = if (isUndo) action.originalTextObjects else action.movedTextObjects
                 db.withTransaction {
                     for (stroke in targetStrokes) {
                         val strokePoints = stroke.points.map { pt ->
@@ -4161,6 +4326,11 @@ class NotebookActivity : AppCompatActivity() {
                         val bbJson = """{"x":${bb.left},"y":${bb.top},"width":${bb.width()},"height":${bb.height()}}"""
                         val dataJson = HeadingObject(strokes = heading.strokes, recognizedText = heading.recognizedText).toJson()
                         dao.updateHeadingData(heading.id, bbJson, dataJson, now)
+                    }
+                    for (textObj in targetTexts) {
+                        val bb = textObj.boundingBox
+                        val bbJson = """{"x":${bb.left},"y":${bb.top},"width":${bb.width()},"height":${bb.height()}}"""
+                        dao.updateHeadingData(textObj.id, bbJson, TextObject(text = textObj.text).toJson(), now)
                     }
                 }
             }
@@ -4207,6 +4377,15 @@ class NotebookActivity : AppCompatActivity() {
                     dao.updateHeadingData(action.headingId, row.boundingBox, updated.toJson(), now)
                 }
             }
+
+            is UndoRedoAction.TextInserted -> withContext(Dispatchers.IO) {
+                if (isUndo) {
+                    dao.softDeleteById(action.textId, now)
+                } else {
+                    dao.restoreById(action.textId, now)
+                }
+                invalidatePageSnapshot(db, action.pageId)
+            }
         }
         // After each when-branch we are back on the main thread.
 
@@ -4214,6 +4393,7 @@ class NotebookActivity : AppCompatActivity() {
         if (action is UndoRedoAction.StrokesMoved) {
             val targetStrokes  = if (isUndo) action.originalStrokes else action.movedStrokes
             val targetHeadings = if (isUndo) action.originalHeadings else action.movedHeadings
+            val targetTexts    = if (isUndo) action.originalTextObjects else action.movedTextObjects
             val strokeById = targetStrokes.associateBy { it.id }
             val updatedStrokes = drawingView.getStrokes().map { strokeById[it.id] ?: it }
             val updatedHeadings = if (targetHeadings.isNotEmpty()) {
@@ -4222,10 +4402,17 @@ class NotebookActivity : AppCompatActivity() {
             } else {
                 drawingView.getHeadings()
             }
+            val updatedTexts = if (targetTexts.isNotEmpty()) {
+                val textById = targetTexts.associateBy { it.id }
+                drawingView.getTextObjects().map { textById[it.id] ?: it }
+            } else {
+                drawingView.getTextObjects()
+            }
             drawingView.loadHeadings(updatedHeadings)
+            drawingView.loadTextObjects(updatedTexts)
             val templateBmp = currentTemplateBitmap
             val bitmap = withContext(Dispatchers.IO) {
-                drawingView.buildRenderBitmap(updatedStrokes, templateBmp, updatedHeadings)
+                drawingView.buildRenderBitmap(updatedStrokes, templateBmp, updatedHeadings, updatedTexts)
             }
             if (bitmap != null) {
                 drawingView.loadStrokesWithBitmap(updatedStrokes, bitmap, templateBmp)
@@ -4233,9 +4420,12 @@ class NotebookActivity : AppCompatActivity() {
                 drawingView.loadStrokes(updatedStrokes)
             }
             // If the moved objects are the active selection, update the selection box.
-            val movedIds = (action.originalStrokes.map { it.id } + action.originalHeadings.map { it.id }).toSet()
+            val movedIds = (action.originalStrokes.map { it.id } +
+                action.originalHeadings.map { it.id } +
+                action.originalTextObjects.map { it.id }).toSet()
             if (movedIds == selectedObjectIds) {
                 val unionBounds = computeUnionBoundingBox(targetStrokes, targetHeadings)
+                targetTexts.forEach { unionBounds.union(it.boundingBox) }
                 val pad = 8f * resources.displayMetrics.density
                 unionBounds.inset(-pad, -pad)
                 drawingView.setLassoOverlay(null, unionBounds)
@@ -4361,15 +4551,18 @@ class NotebookActivity : AppCompatActivity() {
         if (action is UndoRedoAction.LassoDeleted) {
             val idsSet        = action.strokeIds.toSet()
             val headingIdsSet = action.headingIds.toSet()
+            val textIdsSet    = action.textIds.toSet()
             val updatedStrokes: List<LiveStroke>
             val updatedHeadings: List<HeadingStroke>
+            val updatedTexts: List<TextRender>
             if (!isUndo) {
                 // Redo delete: remove from in-memory lists.
                 updatedStrokes  = drawingView.getStrokes().filter { it.id !in idsSet }
                 updatedHeadings = drawingView.getHeadings().filter { it.id !in headingIdsSet }
+                updatedTexts    = drawingView.getTextObjects().filter { it.id !in textIdsSet }
                 persistedStrokeIds.removeAll(idsSet)
             } else {
-                // Undo delete: fetch restored strokes from DB; use action.headings for headings.
+                // Undo delete: fetch restored strokes from DB; use action.headings/textObjects for others.
                 val restoredStrokes = withContext(Dispatchers.IO) {
                     action.strokeIds.mapNotNull { id ->
                         dao.getObjectById(id)?.let { obj ->
@@ -4382,12 +4575,14 @@ class NotebookActivity : AppCompatActivity() {
                 }
                 updatedStrokes  = buildList { addAll(drawingView.getStrokes()); addAll(restoredStrokes) }
                 updatedHeadings = drawingView.getHeadings() + action.headings
+                updatedTexts    = drawingView.getTextObjects() + action.textObjects
                 restoredStrokes.forEach { persistedStrokeIds.add(it.id) }
             }
             drawingView.loadHeadings(updatedHeadings)
+            drawingView.loadTextObjects(updatedTexts)
             val templateBmp = currentTemplateBitmap
             val bitmap = withContext(Dispatchers.IO) {
-                drawingView.buildRenderBitmap(updatedStrokes, templateBmp, updatedHeadings)
+                drawingView.buildRenderBitmap(updatedStrokes, templateBmp, updatedHeadings, updatedTexts)
             }
             if (bitmap != null) {
                 drawingView.loadStrokesWithBitmap(updatedStrokes, bitmap, templateBmp)
@@ -4566,6 +4761,49 @@ class NotebookActivity : AppCompatActivity() {
                 if (binding.floatingSelectionToolbar.visibility == View.VISIBLE) {
                     updateFloatingSelectionToolbar(selBox)
                 }
+            }
+            updatePageIndicator()
+            saveLastOpenedPage(currentPageId)
+            return
+        }
+
+        // ── Step 3a-text-insert: Same-page TextInserted — in-memory update ─────
+        if (action is UndoRedoAction.TextInserted) {
+            val updatedTexts: List<TextRender>
+            if (isUndo) {
+                // Undo: remove the text object.
+                updatedTexts = drawingView.getTextObjects().filter { it.id != action.textId }
+            } else {
+                // Redo: re-add the text object (it was already restored in DB branch above).
+                updatedTexts = drawingView.getTextObjects() + action.textRender
+            }
+            drawingView.loadTextObjects(updatedTexts)
+            val currentStrokes = drawingView.getStrokes()
+            val currentHeadings = drawingView.getHeadings()
+            val templateBmp = currentTemplateBitmap
+            val bitmap = withContext(Dispatchers.IO) {
+                drawingView.buildRenderBitmap(currentStrokes, templateBmp, currentHeadings, updatedTexts)
+            }
+            if (bitmap != null) {
+                drawingView.loadStrokesWithBitmap(currentStrokes, bitmap, templateBmp)
+            } else {
+                drawingView.loadStrokes(currentStrokes)
+            }
+            // Undo clears selection; redo re-selects the inserted object.
+            if (isUndo) {
+                selectedObjectIds.clear()
+                drawingView.lassoSelectedIds = emptySet()
+                drawingView.setLassoOverlay(null, null)
+                hideFloatingSelectionToolbar()
+            } else {
+                if (!isLassoMode) enterLassoMode()
+                selectedObjectIds.clear()
+                selectedObjectIds.add(action.textId)
+                drawingView.lassoSelectedIds = selectedObjectIds.toSet()
+                val pad = 8f * resources.displayMetrics.density
+                val selBox = RectF(action.textRender.boundingBox).apply { inset(-pad, -pad) }
+                drawingView.setLassoOverlay(null, selBox)
+                updateFloatingSelectionToolbar(selBox)
             }
             updatePageIndicator()
             saveLastOpenedPage(currentPageId)
