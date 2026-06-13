@@ -15,7 +15,13 @@ abstract class NotesproutDatabase : RoomDatabase() {
                 super.onOpen(db)
                 db.query("PRAGMA journal_mode = WAL").use { it.moveToFirst() }
                 db.query("PRAGMA wal_autocheckpoint = 100").use { it.moveToFirst() }
-                db.query("PRAGMA auto_vacuum = INCREMENTAL").use { it.moveToFirst() }
+                val autoVacuumMode = db.query("PRAGMA auto_vacuum").use { c ->
+                    if (c.moveToFirst()) c.getInt(0) else 0
+                }
+                if (autoVacuumMode != 2) {
+                    db.query("PRAGMA auto_vacuum = INCREMENTAL").use { it.moveToFirst() }
+                    db.execSQL("VACUUM")
+                }
             }
         }
     }

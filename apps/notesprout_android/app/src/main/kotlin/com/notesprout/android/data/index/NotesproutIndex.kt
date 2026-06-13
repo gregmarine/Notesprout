@@ -1,6 +1,7 @@
 package com.notesprout.android.data.index
 
 import android.content.Context
+import android.util.Log
 import androidx.room.Room
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -30,6 +31,16 @@ object NotesproutIndex {
         instance ?: throw IllegalStateException("NotesproutIndex is not open — call open() first")
 
     fun dao(): ObjectDao = db().objectDao()
+
+    suspend fun checkpointAndVacuum() = withContext(Dispatchers.IO) {
+        try {
+            val raw = db().openHelper.writableDatabase
+            raw.query("PRAGMA incremental_vacuum").use { it.moveToFirst() }
+            raw.query("PRAGMA wal_checkpoint(TRUNCATE)").use { it.moveToFirst() }
+        } catch (e: Exception) {
+            Log.e("NotesproutIndex", "checkpointAndVacuum failed", e)
+        }
+    }
 
     suspend fun seal() = withContext(Dispatchers.IO) {
         val db = db()

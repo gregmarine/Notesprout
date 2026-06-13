@@ -102,6 +102,14 @@ CREATE INDEX idx_objects_parent_type_deleted
 - **Scrub-on-delete:** `MainActivity.deleteNotebook()` and `deleteFolderRecursively()` call `repository.scrubNotebookFromAllLists(notebookId)` before soft-deleting each notebook, so list rows never contain dangling references. Written generically over all lists — no changes needed when user-defined lists are added.
 - **`notesprout.db` ADB pull path (G10):** `adb -s 34E517F9 pull /sdcard/Android/data/com.notesprout.android.dev/files/notesprout.db /tmp/notesprout.db`
 
+### Global Index — WAL Maintenance
+
+- `NotesproutDatabase.openCallback()` runs on every DB open and sets: `journal_mode = WAL`, `wal_autocheckpoint = 100`.
+- **One-time `auto_vacuum` migration:** `openCallback` reads `PRAGMA auto_vacuum`. If the mode is not `2` (INCREMENTAL), it sets `PRAGMA auto_vacuum = INCREMENTAL` and runs `VACUUM` once. Subsequent launches skip the `VACUUM` because the mode is already correct.
+- `NotesproutIndex.checkpointAndVacuum()` — `suspend fun` running on `Dispatchers.IO`. Runs `PRAGMA incremental_vacuum` + `PRAGMA wal_checkpoint(TRUNCATE)` via `rawQuery(...).use { it.moveToFirst() }`, never `execSQL`. `Log.e` on failure, no crash.
+- Called from `MainActivity.onStop()` on `NotesproutApplication.appScope` (fire-and-forget, no UI feedback).
+- **Sidecar note:** because `notesprout.db` stays open for the full app lifetime, its `-wal` and `-shm` sidecars remain present on disk. This is normal and healthy WAL behaviour — the checkpoint keeps them near-empty. Full sidecar cleanup happens only when the connection is completely closed (e.g. `NotesproutIndex.seal()` on process exit). This is distinct from the "no stray files" rule for `.soil` files, which are opened and closed per-notebook session.
+
 ---
 
 ## Data Layer — `.soil` Files
@@ -592,6 +600,15 @@ Never calls `eraseAll()`. Updates the in-memory stroke list directly, rebuilds b
 - Activities receive notebook identity as `EXTRA_NOTEBOOK_ID` (entity UUID) + `EXTRA_NOTEBOOK_NAME` — never a `File` object.
 - Icons: `ic_folder.xml`, `ic_folder_plus.xml` — Tabler stroke-based, `@color/inkBlack`, strokeWidth 2, 24dp.
 
+**Browse State Persistence (`state/AppStateManager.kt`):**
+- `data class AppViewState(val folderId: String?, val pinnedMode: Boolean)` — `folderId == null` means root.
+- `object AppStateManager` — SharedPreferences file `notesprout_view_state`; `load(context)` / `save(context, state)`.
+- State is persisted at every browse-context change: `navigateIntoFolder()`, `navigateUpOneLevel()`, breadcrumb chip tap, `enterPinnedMode()`, `exitPinnedMode()`, and after `navigateStackToFolder()` when opening a notebook from search results.
+- Search mode itself is never persisted; opening a notebook from search saves the notebook's parent folder, so returning always lands on the correct folder.
+- **Restore on launch:** `MainActivity.onCreate` loads `AppViewState` synchronously. If non-default state is found, it sets `isStateRestored = false` and launches a coroutine (`lifecycleScope`) that calls `navigateStackToFolder(folderId)` (walks parentId chain via index) then, if `pinnedMode`, calls `enterPinnedMode()`. The coroutine sets `isStateRestored = true` and triggers the first render.
+- **Race guard:** the layout listener and `onResume` both check `isStateRestored`; if false they defer the scan to the restore coroutine. The layout listener always sets `gridSpec` and removes itself regardless — it only skips the scan call.
+- **Stale folder handling:** if `folderId` is set but `navigateStackToFolder` resolves to root (folder deleted), the stale entry is cleared via `AppStateManager.save(context, AppViewState(null, false))` so the next launch goes straight to root.
+
 ---
 
 **ActionSheetDialog (`ActionSheetDialog.kt`):**
@@ -656,4 +673,4 @@ Never calls `eraseAll()`. Updates the in-memory stroke list directly, rebuilds b
   - On failure: Toast "Copy failed." or "Move failed." — stays in picker mode.
 - Creating a new folder while in picker mode navigates into it and stays in picker mode (normal `navigateIntoFolder` path, no extra logic needed).
 
-*Last updated: New Branches — Pinned notebooks browse view (3/3)*
+*Last updated: New Branch — Browse state persistence + Pruning — notesprout.db WAL maintenance*

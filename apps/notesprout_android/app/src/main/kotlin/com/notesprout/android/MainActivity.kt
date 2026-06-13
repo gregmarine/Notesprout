@@ -49,6 +49,8 @@ import com.notesprout.android.search.SearchDialog
 import com.notesprout.android.search.SearchEngine
 import com.notesprout.android.search.SearchResult
 import com.notesprout.android.sort.FolderSort
+import com.notesprout.android.state.AppStateManager
+import com.notesprout.android.state.AppViewState
 import com.notesprout.android.sort.SortDialog
 import com.notesprout.android.sort.SortField
 import com.notesprout.android.sort.SortOrder
@@ -134,6 +136,10 @@ class MainActivity : AppCompatActivity() {
     private var pinnedResults: List<SearchResult> = emptyList()
     private var pinnedListName: String = "Pinned"
 
+    // false while the async state-restore coroutine is running on first launch; guards the layout
+    // listener and onResume from triggering a premature scan before the stack is rebuilt.
+    private var isStateRestored = true
+
     // ── Color cache ───────────────────────────────────────────────────────────
 
     private val inkBlackColor by lazy { ContextCompat.getColor(this, R.color.inkBlack) }
@@ -192,6 +198,12 @@ class MainActivity : AppCompatActivity() {
 
         sortPrefs = SortPreferencesManager.load(this)
 
+        val savedViewState = AppStateManager.load(this)
+        if (savedViewState.folderId != null || savedViewState.pinnedMode) {
+            isStateRestored = false
+            lifecycleScope.launch { restoreSavedBrowseState(savedViewState) }
+        }
+
         setupBottomBar()
         setupGridGestures()
         setupBackNavigation()
@@ -230,6 +242,10 @@ class MainActivity : AppCompatActivity() {
                     if (w <= 0 || h <= 0) return
                     binding.gridContainer.viewTreeObserver.removeOnGlobalLayoutListener(this)
                     gridSpec = computeGridSpec(w, h)
+                    if (!isStateRestored) {
+                        // State restore coroutine will trigger the render when complete.
+                        return
+                    }
                     if (pendingScan) {
                         pendingScan = false
                         if (isPinnedMode) {
@@ -247,6 +263,10 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        if (!isStateRestored) {
+            pendingScan = true
+            return
+        }
         if (gridSpec != null) {
             if (isPinnedMode) {
                 lifecycleScope.launch { renderPinnedList() }
@@ -258,12 +278,20 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    override fun onStop() {
+        super.onStop()
+        NotesproutApplication.appScope.launch {
+            NotesproutIndex.checkpointAndVacuum()
+        }
+    }
+
     // ── Back navigation ───────────────────────────────────────────────────────
 
     private fun navigateUpOneLevel() {
         if (directoryStack.size > 1) {
             directoryStack.removeLast()
             currentPage = 0
+            AppStateManager.save(this, AppViewState(currentParentId, false))
             scanAndRender()
         }
     }
@@ -297,6 +325,7 @@ class MainActivity : AppCompatActivity() {
         }
         isPinnedMode = true
         currentPage = 0
+        AppStateManager.save(this, AppViewState(currentParentId, true))
         applyPinnedModeUI()
         lifecycleScope.launch { renderPinnedList() }
     }
@@ -305,6 +334,7 @@ class MainActivity : AppCompatActivity() {
         isPinnedMode = false
         pinnedResults = emptyList()
         currentPage = 0
+        AppStateManager.save(this, AppViewState(currentParentId, false))
         applyPinnedModeUI()
         scanAndRender()
     }
@@ -383,6 +413,24 @@ class MainActivity : AppCompatActivity() {
         directoryStack.clear()
         directoryStack.add(null)
         directoryStack.addAll(path)
+    }
+
+    private suspend fun restoreSavedBrowseState(state: AppViewState) {
+        navigateStackToFolder(state.folderId)
+        if (state.folderId != null && currentParentId != state.folderId) {
+            // Folder was deleted — clear the stale entry so we don't retry next launch.
+            AppStateManager.save(this@MainActivity, AppViewState(null, false))
+        }
+        if (state.pinnedMode) {
+            isPinnedMode = true
+            applyPinnedModeUI()
+        }
+        isStateRestored = true
+        if (gridSpec != null) {
+            if (isPinnedMode) renderPinnedList() else scanAndRender()
+        }
+        // If gridSpec is still null, the layout listener will handle the render now that
+        // isStateRestored is true.
     }
 
     private fun setupBackNavigation() {
@@ -540,6 +588,7 @@ class MainActivity : AppCompatActivity() {
     private fun navigateIntoFolder(entity: ObjectEntity) {
         directoryStack.add(entity)
         currentPage = 0
+        AppStateManager.save(this, AppViewState(entity.id, false))
         scanAndRender()
     }
 
@@ -583,6 +632,7 @@ class MainActivity : AppCompatActivity() {
                 setOnClickListener {
                     while (directoryStack.size > index + 1) directoryStack.removeLast()
                     currentPage = 0
+                    AppStateManager.save(this@MainActivity, AppViewState(currentParentId, false))
                     scanAndRender()
                 }
             }
@@ -812,6 +862,7 @@ class MainActivity : AppCompatActivity() {
             // NotebookActivity lands in the correct folder.
             lifecycleScope.launch {
                 navigateStackToFolder(entity.parentId)
+                AppStateManager.save(this@MainActivity, AppViewState(entity.parentId, false))
                 isSearchMode = false
                 currentSearchQuery = ""
                 searchResults = emptyList()
