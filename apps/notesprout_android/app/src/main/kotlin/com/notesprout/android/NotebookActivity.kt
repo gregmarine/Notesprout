@@ -766,6 +766,12 @@ class NotebookActivity : AppCompatActivity() {
                     showHeadingTextEditDialog(selectedHeading)
                     return@tap
                 }
+                // Text object edit tap — same single-selection + bounds-check pattern as headings.
+                val selectedText = drawingView.getTextObjects().find { it.id == selectedId }
+                if (selectedText != null && selectedText.boundingBox.contains(tapX, tapY)) {
+                    showTextEditDialogForTextObject(selectedText)
+                    return@tap
+                }
             }
             if (selectedObjectIds.isEmpty() && NotesproutClipboard.hasContent()) {
                 hideLassoPopupToolbar()
@@ -3309,6 +3315,150 @@ class NotebookActivity : AppCompatActivity() {
         }
     }
 
+    /**
+     * Opens [TextEditDialog] pre-filled with [textRender]'s current markdown.
+     * Non-empty confirm → [updateTextObject]; empty confirm → [deleteTextObjectFromEdit].
+     */
+    private fun showTextEditDialogForTextObject(textRender: TextRender) {
+        TextEditDialog(
+            context = this,
+            initialMarkdown = textRender.text,
+            onConfirm = { markdown ->
+                if (markdown.isNotBlank()) {
+                    updateTextObject(textRender, markdown)
+                } else {
+                    deleteTextObjectFromEdit(textRender)
+                }
+            },
+        ).show()
+    }
+
+    /**
+     * Persists [newMarkdown] and a resized bounding box (top-left fixed, clamped to page) for
+     * [textRender], rebuilds the canvas, refreshes the selection highlight, and pushes a
+     * [UndoRedoAction.TextEdited] undo entry.
+     */
+    private fun updateTextObject(textRender: TextRender, newMarkdown: String) {
+        val db     = soilDatabase ?: return
+        val pageId = currentPageId.takeIf { it.isNotEmpty() } ?: return
+        val pageW  = drawingView.asView().width
+        val pageH  = drawingView.asView().height
+
+        lifecycleScope.launch {
+            val paint = TextPaint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+                color    = android.graphics.Color.BLACK
+                textSize = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 16f, resources.displayMetrics)
+            }
+            val (measuredW, measuredH) = withContext(Dispatchers.Default) {
+                TextObjectRenderer.measure(newMarkdown, pageW, paint, resources.displayMetrics.density)
+            }
+
+            val objW    = measuredW.toFloat().coerceAtMost(pageW.toFloat())
+            val objH    = measuredH.toFloat()
+            // Keep top-left fixed; clamp if new size would overflow the page edge.
+            val newLeft = textRender.boundingBox.left.coerceIn(0f, (pageW - objW).coerceAtLeast(0f))
+            val newTop  = textRender.boundingBox.top.coerceIn(0f, (pageH - objH).coerceAtLeast(0f))
+            val newBbox = RectF(newLeft, newTop, newLeft + objW, newTop + objH)
+
+            val now      = System.currentTimeMillis()
+            val bboxJson = """{"x":${newBbox.left},"y":${newBbox.top},"width":${newBbox.width()},"height":${newBbox.height()}}"""
+
+            withContext(Dispatchers.IO) {
+                db.notebookDao().updateHeadingData(
+                    textRender.id, bboxJson, TextObject(text = newMarkdown).toJson(), now
+                )
+                invalidatePageSnapshot(db, pageId)
+            }
+
+            val newTextRender = TextRender(id = textRender.id, boundingBox = newBbox, text = newMarkdown)
+            val updatedTexts  = drawingView.getTextObjects().map { t ->
+                if (t.id == textRender.id) newTextRender else t
+            }
+            drawingView.loadTextObjects(updatedTexts)
+
+            val currentStrokes  = drawingView.getStrokes()
+            val currentHeadings = drawingView.getHeadings()
+            val templateBmp     = currentTemplateBitmap
+            val bitmap = withContext(Dispatchers.IO) {
+                drawingView.buildRenderBitmap(currentStrokes, templateBmp, currentHeadings, updatedTexts)
+            }
+            if (bitmap != null) {
+                drawingView.loadStrokesWithBitmap(currentStrokes, bitmap, templateBmp)
+            } else {
+                drawingView.loadStrokes(currentStrokes)
+            }
+
+            // Refresh selection overlay to match new bounding box.
+            if (textRender.id in selectedObjectIds) {
+                val pad    = 8f * resources.displayMetrics.density
+                val selBox = RectF(newBbox).apply { inset(-pad, -pad) }
+                drawingView.setLassoOverlay(null, selBox)
+                if (binding.floatingSelectionToolbar.visibility == View.VISIBLE) {
+                    updateFloatingSelectionToolbar(selBox)
+                }
+            }
+
+            undoRedoManager.push(UndoRedoAction.TextEdited(
+                textId       = textRender.id,
+                pageId       = pageId,
+                oldTextRender = textRender,
+                newTextRender = newTextRender,
+            ))
+            updateUndoRedoButtons()
+        }
+    }
+
+    /**
+     * Soft-deletes [textRender] (triggered by an empty-confirm in [TextEditDialog]), clears its
+     * selection, rebuilds the canvas, and pushes a [UndoRedoAction.TextRemoved] undo entry.
+     *
+     * NOTE (Prompt 5): When type="text" objects can have non-null strokes, an empty-text confirm
+     * should fall back to stroke rendering rather than deleting the row. This method is correct
+     * only for insert-flow objects where strokes == null. Prompt 5 must revisit this path.
+     */
+    private fun deleteTextObjectFromEdit(textRender: TextRender) {
+        val db     = soilDatabase ?: return
+        val pageId = currentPageId.takeIf { it.isNotEmpty() } ?: return
+
+        lifecycleScope.launch {
+            val deletedAt = System.currentTimeMillis()
+            withContext(Dispatchers.IO) {
+                db.notebookDao().softDeleteById(textRender.id, deletedAt)
+                invalidatePageSnapshot(db, pageId)
+            }
+
+            val updatedTexts    = drawingView.getTextObjects().filter { it.id != textRender.id }
+            drawingView.loadTextObjects(updatedTexts)
+
+            val currentStrokes  = drawingView.getStrokes()
+            val currentHeadings = drawingView.getHeadings()
+            val templateBmp     = currentTemplateBitmap
+            val bitmap = withContext(Dispatchers.IO) {
+                drawingView.buildRenderBitmap(currentStrokes, templateBmp, currentHeadings, updatedTexts)
+            }
+            if (bitmap != null) {
+                drawingView.loadStrokesWithBitmap(currentStrokes, bitmap, templateBmp)
+            } else {
+                drawingView.loadStrokes(currentStrokes)
+            }
+
+            selectedObjectIds.remove(textRender.id)
+            drawingView.lassoSelectedIds = selectedObjectIds.toSet()
+            if (selectedObjectIds.isEmpty()) {
+                drawingView.setLassoOverlay(null, null)
+                hideFloatingSelectionToolbar()
+            }
+
+            undoRedoManager.push(UndoRedoAction.TextRemoved(
+                textId    = textRender.id,
+                pageId    = pageId,
+                textRender = textRender,
+                deletedAt = deletedAt,
+            ))
+            updateUndoRedoButtons()
+        }
+    }
+
     private fun performUndo() {
         val db = soilDatabase ?: return
         val action = undoRedoManager.undo() ?: return
@@ -3385,6 +3535,8 @@ class NotebookActivity : AppCompatActivity() {
             is UndoRedoAction.HeadingRemoved   -> action.pageId
             is UndoRedoAction.HeadingTextEdited -> action.pageId
             is UndoRedoAction.TextInserted      -> action.pageId
+            is UndoRedoAction.TextEdited        -> action.pageId
+            is UndoRedoAction.TextRemoved       -> action.pageId
             else                               -> null
         }
         val isCrossPage = targetPageId != null && targetPageId != currentPageId
@@ -3988,6 +4140,55 @@ class NotebookActivity : AppCompatActivity() {
             return
         }
 
+        // ── Cross-page TextEdited / TextRemoved: two-phase display ───────────
+        if (isCrossPage && (action is UndoRedoAction.TextEdited || action is UndoRedoAction.TextRemoved)) {
+            val snapshot      = drawingView.captureSnapshot()
+            val leavingPageId = currentPageId
+            withContext(Dispatchers.IO) {
+                if (snapshot != null && leavingPageId.isNotEmpty()) {
+                    persistSnapshot(db, leavingPageId, snapshot)
+                }
+                saveStrokes(db)
+            }
+            val targetPage = when (action) {
+                is UndoRedoAction.TextEdited  -> action.pageId
+                is UndoRedoAction.TextRemoved -> action.pageId
+                else -> error("unreachable")
+            }
+            currentPageIndex = pages.indexOfFirst { it.id == targetPage }.coerceAtLeast(0)
+
+            val templateBmp: Bitmap?
+            val loadedStrokes: List<LiveStroke>
+            val loadedHeadings: List<HeadingStroke>
+            withContext(Dispatchers.IO) {
+                setupPageIds(db)
+                templateBmp     = loadPageTemplateFromDb(db)
+                loadedStrokes   = deserializeStrokesFromDb(db)
+                loadedHeadings  = loadHeadingsFromDb(db, currentLayerId)
+            }
+            val loadedTexts = withContext(Dispatchers.IO) {
+                loadTextObjectsFromDb(db, currentLayerId)
+            }
+            drawingView.loadHeadings(loadedHeadings)
+            drawingView.loadTextObjects(loadedTexts)
+            val bitmap = withContext(Dispatchers.IO) {
+                drawingView.buildRenderBitmap(loadedStrokes, templateBmp, loadedHeadings, loadedTexts)
+            }
+            if (bitmap != null) {
+                drawingView.loadStrokesWithBitmap(loadedStrokes, bitmap, templateBmp)
+            } else {
+                drawingView.loadStrokes(loadedStrokes)
+            }
+            currentTemplateBitmap = templateBmp
+            selectedObjectIds.clear()
+            drawingView.lassoSelectedIds = emptySet()
+            drawingView.setLassoOverlay(null, null)
+            hideFloatingSelectionToolbar()
+            updatePageIndicator()
+            saveLastOpenedPage(currentPageId)
+            return
+        }
+
         // ── Cross-page StrokesMoved: two-phase display ────────────────────────
         if (isCrossPage && action is UndoRedoAction.StrokesMoved) {
             val snapshot      = drawingView.captureSnapshot()
@@ -4383,6 +4584,23 @@ class NotebookActivity : AppCompatActivity() {
                     dao.softDeleteById(action.textId, now)
                 } else {
                     dao.restoreById(action.textId, now)
+                }
+                invalidatePageSnapshot(db, action.pageId)
+            }
+
+            is UndoRedoAction.TextEdited -> withContext(Dispatchers.IO) {
+                val target = if (isUndo) action.oldTextRender else action.newTextRender
+                val bb = target.boundingBox
+                val bboxJson = """{"x":${bb.left},"y":${bb.top},"width":${bb.width()},"height":${bb.height()}}"""
+                dao.updateHeadingData(action.textId, bboxJson, TextObject(text = target.text).toJson(), now)
+                invalidatePageSnapshot(db, action.pageId)
+            }
+
+            is UndoRedoAction.TextRemoved -> withContext(Dispatchers.IO) {
+                if (isUndo) {
+                    dao.restoreById(action.textId, now)
+                } else {
+                    dao.softDeleteById(action.textId, action.deletedAt)
                 }
                 invalidatePageSnapshot(db, action.pageId)
             }
@@ -4804,6 +5022,82 @@ class NotebookActivity : AppCompatActivity() {
                 val selBox = RectF(action.textRender.boundingBox).apply { inset(-pad, -pad) }
                 drawingView.setLassoOverlay(null, selBox)
                 updateFloatingSelectionToolbar(selBox)
+            }
+            updatePageIndicator()
+            saveLastOpenedPage(currentPageId)
+            return
+        }
+
+        // ── Step 3a-text-edit: Same-page TextEdited — in-memory update ─────────
+        if (action is UndoRedoAction.TextEdited) {
+            val target = if (isUndo) action.oldTextRender else action.newTextRender
+            val updatedTexts = drawingView.getTextObjects().map { t ->
+                if (t.id == action.textId) target else t
+            }
+            drawingView.loadTextObjects(updatedTexts)
+            val currentStrokes  = drawingView.getStrokes()
+            val currentHeadings = drawingView.getHeadings()
+            val templateBmp     = currentTemplateBitmap
+            val bitmap = withContext(Dispatchers.IO) {
+                drawingView.buildRenderBitmap(currentStrokes, templateBmp, currentHeadings, updatedTexts)
+            }
+            if (bitmap != null) {
+                drawingView.loadStrokesWithBitmap(currentStrokes, bitmap, templateBmp)
+            } else {
+                drawingView.loadStrokes(currentStrokes)
+            }
+            // Refresh selection highlight to match the target bounding box.
+            if (action.textId in selectedObjectIds) {
+                val pad    = 8f * resources.displayMetrics.density
+                val selBox = RectF(target.boundingBox).apply { inset(-pad, -pad) }
+                drawingView.setLassoOverlay(null, selBox)
+                if (binding.floatingSelectionToolbar.visibility == View.VISIBLE) {
+                    updateFloatingSelectionToolbar(selBox)
+                }
+            }
+            updatePageIndicator()
+            saveLastOpenedPage(currentPageId)
+            return
+        }
+
+        // ── Step 3a-text-remove: Same-page TextRemoved — in-memory update ──────
+        if (action is UndoRedoAction.TextRemoved) {
+            val updatedTexts: List<TextRender>
+            if (isUndo) {
+                // Undo: restore the text object, re-select it.
+                updatedTexts = drawingView.getTextObjects() + action.textRender
+            } else {
+                // Redo: remove the text object, clear selection.
+                updatedTexts = drawingView.getTextObjects().filter { it.id != action.textId }
+            }
+            drawingView.loadTextObjects(updatedTexts)
+            val currentStrokes  = drawingView.getStrokes()
+            val currentHeadings = drawingView.getHeadings()
+            val templateBmp     = currentTemplateBitmap
+            val bitmap = withContext(Dispatchers.IO) {
+                drawingView.buildRenderBitmap(currentStrokes, templateBmp, currentHeadings, updatedTexts)
+            }
+            if (bitmap != null) {
+                drawingView.loadStrokesWithBitmap(currentStrokes, bitmap, templateBmp)
+            } else {
+                drawingView.loadStrokes(currentStrokes)
+            }
+            if (isUndo) {
+                if (!isLassoMode) enterLassoMode()
+                selectedObjectIds.clear()
+                selectedObjectIds.add(action.textId)
+                drawingView.lassoSelectedIds = selectedObjectIds.toSet()
+                val pad    = 8f * resources.displayMetrics.density
+                val selBox = RectF(action.textRender.boundingBox).apply { inset(-pad, -pad) }
+                drawingView.setLassoOverlay(null, selBox)
+                updateFloatingSelectionToolbar(selBox)
+            } else {
+                selectedObjectIds.remove(action.textId)
+                drawingView.lassoSelectedIds = selectedObjectIds.toSet()
+                if (selectedObjectIds.isEmpty()) {
+                    drawingView.setLassoOverlay(null, null)
+                    hideFloatingSelectionToolbar()
+                }
             }
             updatePageIndicator()
             saveLastOpenedPage(currentPageId)

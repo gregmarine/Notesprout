@@ -823,15 +823,46 @@ Never calls `eraseAll()`. Updates the in-memory stroke list directly, rebuilds b
 - **Undo:** `dao.softDeleteById(textId)`, removes from `drawingView.getTextObjects()`, clears selection.
 - **Redo:** `dao.restoreById(textId)`, adds `textRender` back to in-memory list, re-selects the object.
 
-**Lasso actions for `type="text"` objects — Prompt 3 status:**
+**Tap-to-edit (Prompt 4):**
+- While a `type="text"` object is selected (single-selection in lasso mode) and the user performs a stylus tap within its `boundingBox`, `showTextEditDialogForTextObject(textRender)` is called from `onLassoTap` — identical tap-vs-drag detection logic as heading tap-to-edit (checked in the same `onLassoTap` block, immediately after the heading check).
+- `TextEditDialog` is opened pre-filled with `textRender.text` (the raw Markdown source).
+- `TextEditDialog.onConfirm` is **always** called (including with empty text) — callers guard `isNotBlank()` themselves for insert; the edit flow dispatches on empty vs non-empty.
+
+**Non-empty confirm — `updateTextObject(textRender, newMarkdown)`:**
+- Measures `newMarkdown` via `TextObjectRenderer.measure()` on `Dispatchers.Default`.
+- New `boundingBox`: keeps existing top-left fixed; width = min(measuredW, pageW); height = measuredH. If the resized box would overflow the page's right or bottom edge, top-left is clamped so the full box stays within page bounds.
+- Persists: `dao.updateHeadingData(id, bboxJson, TextObject(text=...).toJson(), now)` + `invalidatePageSnapshot`.
+- Updates in-memory `drawingView.getTextObjects()` list, rebuilds bitmap off-thread, swaps via `loadStrokesWithBitmap`.
+- If the object is selected, refreshes the dashed selection overlay to the new `boundingBox`.
+- Pushes `UndoRedoAction.TextEdited(textId, pageId, oldTextRender, newTextRender)`.
+
+**TextEdited undo/redo:**
+- `UndoRedoAction.TextEdited(textId, pageId, oldTextRender, newTextRender)` — both `TextRender` carry (id, boundingBox, text).
+- **Undo:** persist `oldTextRender` (text + bbox) → DB; swap in-memory; refresh selection overlay to `oldBoundingBox`.
+- **Redo:** persist `newTextRender` → DB; swap in-memory; refresh selection overlay to `newBoundingBox`.
+
+**Empty confirm — `deleteTextObjectFromEdit(textRender)`:**
+- Soft-deletes the row (`dao.softDeleteById(id, deletedAt)`) + `invalidatePageSnapshot`.
+- Removes from in-memory list, rebuilds bitmap.
+- Clears this object from `selectedObjectIds`; if selection becomes empty, hides the floating toolbar.
+- Pushes `UndoRedoAction.TextRemoved(textId, pageId, textRender, deletedAt)`.
+- **NOTE (Prompt 5):** When `type="text"` objects can have non-null strokes (lasso stroke→text conversion), empty-confirm should fall back to stroke rendering rather than soft-deleting the row. `TextRemoved` is correct only for insert-flow objects (strokes == null). Prompt 5 must revisit `deleteTextObjectFromEdit` for this case.
+
+**TextRemoved undo/redo:**
+- `UndoRedoAction.TextRemoved(textId, pageId, textRender, deletedAt)`.
+- **Undo:** `dao.restoreById(textId)`, add `textRender` back to in-memory list, re-select the object, show floating toolbar.
+- **Redo:** `dao.softDeleteById(textId, deletedAt)`, remove from in-memory list, clear selection.
+
+**Lasso actions for `type="text"` objects — Prompt 4 status:**
 
 | Action | Status |
 |---|---|
 | Selection (lasso draw) | ✅ Center-point containment hit test |
 | Drag to move | ✅ Translates bounding box; persists via `updateHeadingData`; `StrokesMoved` undo |
 | Delete (floating toolbar Delete) | ✅ `performLassoDelete` — soft-delete + `LassoDeleted` undo |
+| Tap-to-edit (selected object) | ✅ `showTextEditDialogForTextObject` — `TextEdited` / `TextRemoved` undo |
 | Highlight/selection visual | ✅ Dashed overlay box |
 | Copy / Cut / Paste | ❌ Deferred — `NotesproutClipboard` does not yet carry text objects |
 | Lasso eraser | ❌ Deferred — lasso eraser only hits strokes/headings currently |
 
-*Last updated: New Branch — Text object placement mode and insert flow (Prompt 3)*
+*Last updated: New Branch — Edit and delete existing text objects (Prompt 4)*

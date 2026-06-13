@@ -283,4 +283,40 @@ sealed class UndoRedoAction {
         val layerId: String,
         val textRender: TextRender,
     ) : UndoRedoAction()
+
+    /**
+     * User edited a text object via the TextEditDialog (non-empty confirm path).
+     *
+     * Undo: restore [oldTextRender] (text + boundingBox) to the DB row; update in-memory list;
+     *       refresh selection highlight to [oldTextRender.boundingBox].
+     * Redo: restore [newTextRender] (text + boundingBox) to the DB row; update in-memory list;
+     *       refresh selection highlight to [newTextRender.boundingBox].
+     */
+    @Serializable
+    data class TextEdited(
+        val textId: String,
+        val pageId: String,
+        val oldTextRender: TextRender,
+        val newTextRender: TextRender,
+    ) : UndoRedoAction()
+
+    /**
+     * User confirmed an empty edit on a text object, triggering soft-delete.
+     *
+     * Undo: un-soft-delete the row; add [textRender] back to the canvas; re-select the object
+     *       and show the floating toolbar.
+     * Redo: re-soft-delete the row; remove from canvas; clear selection.
+     *
+     * NOTE (Prompt 5): When type="text" objects can have non-null strokes (lasso stroke→text
+     * conversion), the empty-confirm path should NOT soft-delete — instead it should fall back
+     * to rendering strokes only. TextRemoved is correct only for objects where strokes == null
+     * (all objects created by Prompt 3's insert flow). Prompt 5 must revisit this distinction.
+     */
+    @Serializable
+    data class TextRemoved(
+        val textId: String,
+        val pageId: String,
+        val textRender: TextRender,
+        val deletedAt: Long,
+    ) : UndoRedoAction()
 }

@@ -92,7 +92,7 @@ class TextEditDialog(
                 val imm = context.getSystemService(InputMethodManager::class.java)
                 imm?.hideSoftInputFromWindow(binding.editMarkdown.windowToken, 0)
                 val text = binding.editMarkdown.text?.toString().orEmpty()
-                if (text.isNotEmpty()) onConfirm(text)
+                onConfirm(text)
             }
             .setNegativeButton("Cancel") { _, _ ->
                 val imm = context.getSystemService(InputMethodManager::class.java)
