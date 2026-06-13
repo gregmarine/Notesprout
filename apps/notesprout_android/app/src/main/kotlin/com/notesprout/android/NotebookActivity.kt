@@ -2787,17 +2787,23 @@ class NotebookActivity : AppCompatActivity() {
             .setTitle("Edit Heading")
             .setView(dialogBinding.root)
             .setPositiveButton("Save") { _, _ ->
+                val imm = getSystemService(InputMethodManager::class.java)
+                imm.hideSoftInputFromWindow(dialogBinding.editHeadingText.windowToken, 0)
                 val newText = dialogBinding.editHeadingText.text?.toString()?.trim().orEmpty()
                 if (newText.isNotBlank()) {
                     updateHeadingText(heading, newText)
                 }
             }
-            .setNegativeButton("Cancel", null)
+            .setNegativeButton("Cancel") { _, _ ->
+                val imm = getSystemService(InputMethodManager::class.java)
+                imm.hideSoftInputFromWindow(dialogBinding.editHeadingText.windowToken, 0)
+            }
             .create()
         dialog.window?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE)
         dialog.show()
         dialog.window?.setElevation(0f)
         dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+
         dialogBinding.editHeadingText.requestFocus()
         dialogBinding.editHeadingText.selectAll()
         dialogBinding.editHeadingText.postDelayed({

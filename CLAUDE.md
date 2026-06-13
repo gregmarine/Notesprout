@@ -196,6 +196,12 @@ Notesprout's visual language is designed for e-ink displays first. All other pla
 - `dialog.window?.setSoftInputMode(...)` before `show()`
 - `dialog.window?.setElevation(0f)` and `dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)` after `show()` — window only exists once shown
 
+**Keyboard (IME) dismissal in dialogs:**
+- On some BOOX devices (Go 10.3, Go 7), the IME does not auto-dismiss when a dialog closes. Always explicitly hide it inside the button click handlers — **not** in `setOnDismissListener`.
+- Use `imm.hideSoftInputFromWindow(editText.windowToken, 0)` while the dialog is still alive (the click listener fires before auto-dismiss). The dialog's window token is valid here; after dismiss it is gone and the call is ignored.
+- `setNegativeButton("Cancel", null)` must become a real listener that also calls `hideSoftInputFromWindow` — `null` means no hide happens on cancel.
+- Never use the activity's `window.decorView.windowToken` for this — the IME is bound to the dialog's window, not the activity's, and will ignore a hide request from the wrong token.
+
 ---
 
 ## Toolbar System

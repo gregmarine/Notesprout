@@ -917,6 +917,8 @@ class MainActivity : AppCompatActivity() {
             .setTitle("New Notebook")
             .setView(dialogBinding.root)
             .setPositiveButton("Create") { _, _ ->
+                val imm = getSystemService(InputMethodManager::class.java)
+                imm.hideSoftInputFromWindow(dialogBinding.editNotebookName.windowToken, 0)
                 val name = dialogBinding.editNotebookName.text?.toString()?.trim().orEmpty()
                 val error = validateNotebookName(name)
                 if (error != null) {
@@ -925,7 +927,10 @@ class MainActivity : AppCompatActivity() {
                     createNotebook(name)
                 }
             }
-            .setNegativeButton("Cancel", null)
+            .setNegativeButton("Cancel") { _, _ ->
+                val imm = getSystemService(InputMethodManager::class.java)
+                imm.hideSoftInputFromWindow(dialogBinding.editNotebookName.windowToken, 0)
+            }
             .create()
 
         dialog.window?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE)
@@ -956,6 +961,8 @@ class MainActivity : AppCompatActivity() {
             .setTitle("New Folder")
             .setView(dialogBinding.root)
             .setPositiveButton("Create") { _, _ ->
+                val imm = getSystemService(InputMethodManager::class.java)
+                imm.hideSoftInputFromWindow(dialogBinding.editNotebookName.windowToken, 0)
                 val name = dialogBinding.editNotebookName.text?.toString()?.trim().orEmpty()
                 lifecycleScope.launch {
                     val error = validateFolderName(name)
@@ -969,7 +976,10 @@ class MainActivity : AppCompatActivity() {
                     }
                 }
             }
-            .setNegativeButton("Cancel", null)
+            .setNegativeButton("Cancel") { _, _ ->
+                val imm = getSystemService(InputMethodManager::class.java)
+                imm.hideSoftInputFromWindow(dialogBinding.editNotebookName.windowToken, 0)
+            }
             .create()
 
         dialog.window?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE)
