@@ -7,10 +7,6 @@ A handwriting-first, meditative notes app. Think paper, but smarter underneath. 
 **License:** MIT
 **Monorepo root:** ~/git/Notesprout
 
----
-
-## Monorepo Structure
-
 - apps/notesprout_android — Native Android app (primary active codebase)
 
 ---
@@ -25,41 +21,37 @@ A handwriting-first, meditative notes app. Think paper, but smarter underneath. 
 
 ---
 
-## Tech Decisions — Already Made, Do Not Revisit Without Discussion
+## Standard Constraints
 
-- Language: Kotlin (Java 17 target — use Temurin-17 JDK)
-- Package name: com.notesprout.android
-- Primary test device: BOOX e-ink Android devices
-- Drawing engine: abstracted — OnyxDrawingEngine (BOOX) and GenericDrawingEngine (all others)
-- Onyx SDK: onyxsdk-device:1.3.3 + onyxsdk-pen:1.5.4
-- Onyx SDK repo: `http://repo.boox.com/repository/maven-public/` (insecure protocol — required, do not change)
-- hiddenapibypass:4.3 from JitPack — required for Android 14+ BOOX devices (applied in `NotesproutApplication.onCreate`)
-- Database: Room/SQLite (`.soil` files)
-- KSP: 2.2.20-2.0.4 (required for Room annotation processing with Kotlin 2.2.x)
-- AGP 8.11.1 + Kotlin 2.2.20 + Gradle 8.14
-- JSON serialization: `kotlinx.serialization` (code-generated, zero reflection — do not use `org.json`)
-- Icons: **Tabler Icons (MIT)** — stroke-based SVGs converted to Android VectorDrawables, `@color/inkBlack`, 24dp. New icons must come from Tabler or be hand-crafted to match the Tabler stroke style. Do not use filled/solid icon sets.
+These apply everywhere — do not repeat them in feature sections.
+
+- **Language:** Kotlin (Java 17 target — use Temurin-17 JDK; `org.gradle.java.home` in `gradle.properties` pins Temurin-17)
+- **JSON serialization:** `kotlinx.serialization` only — zero reflection, code-generated. Never use `org.json`. Use `toJson()` / `fromJson()`.
+- **No new Gradle dependencies** without explicit discussion.
+- **No Material Components** — `com.google.android.material` is not a dependency; do not add it.
+- **Never `runBlocking` on the UI thread** — ANR risk, especially on large stroke/snapshot data.
+- **No `Log.d` directly** — use `Slog.d(tag) { "msg" }` (`core/Slog.kt`, `inline fun` gated on `BuildConfig.DEBUG`). Release builds pay zero cost (lambda never evaluated). `Log.e` / `Log.w` survive into release.
 
 ---
 
 ## Architecture — Foundational Decisions
 
 - Notebook = a `.soil` file (SQLite database with `.soil` extension)
-- Notebook files live in the app's private external storage: `getExternalFilesDir(null)/Garden/<uuid>.soil` — flat directory, UUID filenames, no other location, no permissions required
-- Folder/notebook structure is maintained exclusively in the global index (`notesprout.db`) — never derived from the filesystem directory hierarchy
-- `soilFile(context, notebookId)` is the single canonical way to derive a `.soil` file path — no other code constructs a path to a `.soil` file
+- Notebook files live in `getExternalFilesDir(null)/Garden/<uuid>.soil` — flat directory, UUID filenames, no permissions required
+- Folder/notebook structure is maintained exclusively in the global index (`notesprout.db`) — never derived from the filesystem
+- **`soilFile(context, notebookId)` (`data/SoilFile.kt`)** is the single canonical way to derive a `.soil` path. No other code constructs a `.soil` path.
 - Hierarchy: Notebook → Pages → Layers → Content Objects
 - Layers: base layer (template, locked) and content layers
 - Every object carries: id, parentId, boundingBox, order, createdAt, updatedAt, deletedAt, data
 - Stroke data: proprietary point arrays (x, y, pressure, tilt, timestamp), stored as JSON in the `data` TEXT column
-- Soft deletes with cleanup process
-- Stable UUIDs everywhere
+- Soft deletes with cleanup process; stable UUIDs everywhere
+- Activities receive notebook identity as `EXTRA_NOTEBOOK_ID` (entity UUID) + `EXTRA_NOTEBOOK_NAME` — never a `File` object
 
 ---
 
 ## Global Index (`notesprout.db`)
 
-The global index is a Room/SQLite database at `getExternalFilesDir(null)/notesprout.db`. It owns the entire folder/notebook tree — the filesystem `Garden/` directory is just flat blob storage, not a source of structure.
+Room/SQLite at `getExternalFilesDir(null)/notesprout.db`. Owns the entire folder/notebook tree — the `Garden/` directory is flat blob storage, not a source of structure.
 
 ### Schema (`objects` table)
 
@@ -79,36 +71,31 @@ CREATE INDEX idx_objects_parent_type_deleted
     ON objects(parentId, type, deletedAt);
 ```
 
-### Key classes
+### Key Classes
 
-- `ObjectEntity` (`data/index/ObjectEntity.kt`) — Room entity; the universal index row for both folders and notebooks
-- `ObjectType` (`data/index/ObjectType.kt`) — constants: `FOLDER = "folder"`, `NOTEBOOK = "notebook"`, `LIST = "list"`
-- `FolderObject` (`data/index/FolderObject.kt`) — `@Serializable` data class stored in `data` column for folder rows
-- `NotebookObject` (`data/index/NotebookObject.kt`) — `@Serializable` data class stored in `data` column for notebook rows; carries `snapshot: String?` (cover bitmap, base64) and `pageCount: Int`
-- `ListObject` (`data/index/ListObject.kt`) — `@Serializable` data class stored in `data` column for list rows; carries `notebookIds: List<String>` (ordered array of notebook UUIDs; array order = display order)
-- `ListIds` (`data/index/ListIds.kt`) — well-known list IDs; `PINNED_LIST_ID = "00000000-0000-0000-0000-70696e6e6564"` ("pinned" in hex)
-- `ObjectDao` (`data/index/ObjectDao.kt`) — Room DAO; all index queries and mutations
-- `IndexRepository` (`data/index/IndexRepository.kt`) — higher-level API over `ObjectDao`; create/rename/softDelete/move operations for folders and notebooks; list operations: `ensurePinnedListExists`, `getPinnedList`, `addNotebookToList`, `removeNotebookFromList`, `reorderList`, `getNotebooksInList`, `scrubNotebookFromAllLists`; pin helpers: `isNotebookPinned(notebookId)`, `togglePin(notebookId)` (single round-trip, returns new pinned state)
-- `NotesproutIndex` (`data/index/NotesproutIndex.kt`) — singleton that opens and manages `notesprout.db`; call `open(context)` once in `Application.onCreate`, `seal()` on shutdown
-- `soilFile(context, notebookId)` (`data/SoilFile.kt`) — **the single canonical function** for resolving a notebook's `.soil` path: `Garden/<notebookId>.soil`. No other code constructs a `.soil` path.
+- `ObjectEntity` (`data/index/ObjectEntity.kt`) — Room entity; universal index row
+- `ObjectType` (`data/index/ObjectType.kt`) — `FOLDER`, `NOTEBOOK`, `LIST`
+- `FolderObject`, `NotebookObject`, `ListObject` — `@Serializable` data classes in `data` column. `NotebookObject` carries `snapshot: String?` + `pageCount: Int`. `ListObject` carries `notebookIds: List<String>` (array order = display order).
+- `ListIds` (`data/index/ListIds.kt`) — `PINNED_LIST_ID = "00000000-0000-0000-0000-70696e6e6564"`
+- `ObjectDao` (`data/index/ObjectDao.kt`) — Room DAO for all index queries and mutations
+- `IndexRepository` (`data/index/IndexRepository.kt`) — higher-level API: create/rename/softDelete/move for folders and notebooks; list ops: `ensurePinnedListExists`, `getPinnedList`, `addNotebookToList`, `removeNotebookFromList`, `reorderList`, `getNotebooksInList`, `scrubNotebookFromAllLists`; pin helpers: `isNotebookPinned(notebookId)`, `togglePin(notebookId)`
+- `NotesproutIndex` (`data/index/NotesproutIndex.kt`) — singleton managing `notesprout.db`; `open(context)` in `Application.onCreate`, `seal()` on shutdown
 
 ### Rules
 
-- `parentId = null` means root (direct child of the notebook list root)
-- Soft-deletes only — set `deletedAt`; never hard-delete index rows without deliberate garbage collection
-- All writes go through `IndexRepository`; direct DAO use is limited to reads inside `MainActivity` load paths
+- `parentId = null` means root
+- Soft-deletes only — set `deletedAt`; never hard-delete without deliberate GC
+- All writes go through `IndexRepository`; direct DAO use limited to reads in `MainActivity` load paths
 - `NotesproutIndex` must be opened before any Activity accesses it; `NotesproutApplication.onCreate` is the correct place
-- **List bootstrap:** `NotesproutApplication.onCreate` launches `repository.ensurePinnedListExists()` on `appScope` after `NotesproutIndex.open()`. This is idempotent — safe to call on every launch.
-- **Scrub-on-delete:** `MainActivity.deleteNotebook()` and `deleteFolderRecursively()` call `repository.scrubNotebookFromAllLists(notebookId)` before soft-deleting each notebook, so list rows never contain dangling references. Written generically over all lists — no changes needed when user-defined lists are added.
-- **`notesprout.db` ADB pull path (G10):** `adb -s 34E517F9 pull /sdcard/Android/data/com.notesprout.android.dev/files/notesprout.db /tmp/notesprout.db`
+- **List bootstrap:** `NotesproutApplication.onCreate` calls `repository.ensurePinnedListExists()` on `appScope` after `NotesproutIndex.open()` — idempotent, safe every launch
+- **Scrub-on-delete:** `deleteNotebook()` and `deleteFolderRecursively()` call `repository.scrubNotebookFromAllLists(notebookId)` before soft-deleting, so list rows never contain dangling references
+- **G10 ADB pull:** `adb -s 34E517F9 pull /sdcard/Android/data/com.notesprout.android.dev/files/notesprout.db /tmp/notesprout.db`
 
-### Global Index — WAL Maintenance
+### WAL Maintenance
 
-- `NotesproutDatabase.openCallback()` runs on every DB open and sets: `journal_mode = WAL`, `wal_autocheckpoint = 100`.
-- **One-time `auto_vacuum` migration:** `openCallback` reads `PRAGMA auto_vacuum`. If the mode is not `2` (INCREMENTAL), it sets `PRAGMA auto_vacuum = INCREMENTAL` and runs `VACUUM` once. Subsequent launches skip the `VACUUM` because the mode is already correct.
-- `NotesproutIndex.checkpointAndVacuum()` — `suspend fun` running on `Dispatchers.IO`. Runs `PRAGMA incremental_vacuum` + `PRAGMA wal_checkpoint(TRUNCATE)` via `rawQuery(...).use { it.moveToFirst() }`, never `execSQL`. `Log.e` on failure, no crash.
-- Called from `MainActivity.onStop()` on `NotesproutApplication.appScope` (fire-and-forget, no UI feedback).
-- **Sidecar note:** because `notesprout.db` stays open for the full app lifetime, its `-wal` and `-shm` sidecars remain present on disk. This is normal and healthy WAL behaviour — the checkpoint keeps them near-empty. Full sidecar cleanup happens only when the connection is completely closed (e.g. `NotesproutIndex.seal()` on process exit). This is distinct from the "no stray files" rule for `.soil` files, which are opened and closed per-notebook session.
+- `NotesproutDatabase.openCallback()` sets `journal_mode = WAL`, `wal_autocheckpoint = 100`, and runs a one-time `auto_vacuum = INCREMENTAL` + `VACUUM` migration on first open (skipped when already `INCREMENTAL`).
+- `NotesproutIndex.checkpointAndVacuum()` — `suspend fun` on `Dispatchers.IO`: `PRAGMA incremental_vacuum` + `PRAGMA wal_checkpoint(TRUNCATE)` via `rawQuery(...).use { it.moveToFirst() }`, never `execSQL`. Called from `MainActivity.onStop()` on `appScope`.
+- `notesprout.db` stays open the full app lifetime — its `-wal`/`-shm` sidecars remain on disk (normal WAL behaviour; checkpoint keeps them near-empty). Full cleanup only on `NotesproutIndex.seal()`. This is distinct from the "no stray files" rule for `.soil` files.
 
 ---
 
@@ -117,15 +104,13 @@ CREATE INDEX idx_objects_parent_type_deleted
 ### Core Rules — Never Violate These
 
 - **One file per notebook.** Each `.soil` file is a self-contained SQLite database.
-- **Single table.** Everything — pages, layers, strokes, images, text, metadata — is a row in one `notebook` table. No exceptions without explicit discussion.
-- **Everything is an object.** There is no special-casing of types at the schema level. Type behavior lives in Kotlin, not in the database schema.
-- **Assets are base64 strings.** No external files, no file references. Images and other binary assets are stored inline as base64 in the `data` TEXT column.
-- **Decode embedded images bounded — never at full resolution.** `.soil` files are portable user documents; a crafted/oversized embedded image can OOM the app (low threshold on e-ink). All embedded-asset decodes route through `core/BitmapDecode.decodeSampled(bytes, reqW, reqH)` (bounds-first + `inSampleSize`, capped to the target view/page dims; `MAX_DIMENSION=4096` fallback when there's no natural target, e.g. a cover sizing a PDF page). Do not call `BitmapFactory.decodeByteArray` directly on `.soil`-sourced bytes.
-- **SQLite must stay clean.** The folder view in a file browser should show only `.soil` files — no WAL files, no SHM files, no journals left behind.
-  - `PRAGMA journal_mode = WAL`
-  - `PRAGMA wal_autocheckpoint = 100`
-  - `PRAGMA auto_vacuum = INCREMENTAL`
-  - Run `PRAGMA incremental_vacuum` and `PRAGMA wal_checkpoint(TRUNCATE)` on clean database close
+- **Single table.** Everything — pages, layers, strokes, images, text, metadata — is a row in one `notebook` table.
+- **Everything is an object.** No type special-casing at the schema level — type behavior lives in Kotlin.
+- **Assets are base64 strings.** No external files. Images stored inline in the `data` TEXT column.
+- **Decode embedded images bounded.** Route all embedded-asset decodes through `core/BitmapDecode.decodeSampled(bytes, reqW, reqH)` — never `BitmapFactory.decodeByteArray` directly on `.soil`-sourced bytes (OOM risk on e-ink). `MAX_DIMENSION=4096` fallback when there's no natural target.
+- **SQLite must stay clean.** A file browser should show only `.soil` files — no WAL/SHM/journal sidecars.
+  - `PRAGMA journal_mode = WAL`; `PRAGMA wal_autocheckpoint = 100`; `PRAGMA auto_vacuum = INCREMENTAL`
+  - Run `PRAGMA incremental_vacuum` + `PRAGMA wal_checkpoint(TRUNCATE)` on clean close
 
 ### Object Schema
 
@@ -149,121 +134,396 @@ CREATE INDEX IF NOT EXISTS idx_notebook_parent_order
 ### Room Setup Rules
 
 - Open `.soil` files by absolute path: `Room.databaseBuilder(context, SoilDatabase::class.java, absolutePath)`
-- Each open notebook gets its own Room database instance; close and release it when the notebook is closed
-- `wal_autocheckpoint` is connection-level only — must be re-applied in `SoilDatabase.openCallback()` every open via `SupportSQLiteDatabase.query(...).use { it.moveToFirst() }`
-- PRAGMAs that return a result set must use `rawQuery("PRAGMA ...", null).use { it.moveToFirst() }` — never `execSQL`, never bare `rawQuery` without consuming the cursor
-- Any raw SQL touching the `order` column must double-quote it: `"order"` — it is a SQLite reserved word. Room's generated DAO handles this automatically; only hand-written raw SQL is at risk
-- `closeNotebook()` must run `PRAGMA incremental_vacuum` + `PRAGMA wal_checkpoint(TRUNCATE)`, then `db.close()`, then delete any `-journal` artifact. This heavy seal lives in `suspend sealNotebook()` (`withContext(Dispatchers.IO)`) — **never `runBlocking` on the UI thread** (ANR risk scaling with stroke/snapshot size). User-initiated close (close button / back press) captures the snapshot on the main thread, launches `sealNotebook()` on `NotesproutApplication.appScope` (a never-cancelled `SupervisorJob + Dispatchers.IO` scope that outlives the activity — `lifecycleScope` would be cancelled by `onDestroy` mid-seal), and `finish()`es immediately. The `onDestroy()` safety net calls `closeNotebook(blocking = true)` (`runBlocking`) for abnormal teardown only; the normal path already nulled `soilDatabase`, so it no-ops. Reading strokes off-thread is safe: `getStrokes()` returns a copy and `releaseResources()` never mutates the stroke list.
-- **Any raw `SQLiteDatabase` opened on a `.soil` outside Room — even to only read — must open `OPEN_READWRITE`, not `OPEN_READONLY`.** A read-only WAL connection re-creates `-shm` on open and *cannot* unlink `-wal`/`-shm` on close (deletion needs write permission), so it permanently strands sidecars and violates the "folder shows only `.soil`" rule. Close such read connections via `SQLiteDatabase.checkpointTruncateAndClose(tag, file)` (`data/CoverLoader.kt`): it runs `wal_checkpoint(TRUNCATE)`, closes (so SQLite removes `-wal`/`-shm`), then deletes the empty `-journal` shell. Used by the cover/snapshot loaders (`CoverLoader.kt`, `MainActivity.loadLastPageSnapshot`).
-- Raw read-*write* helpers (`data/PageCopier.kt` `copyPageAfterRaw`/`movePageAfterRaw`/`deletePageRaw`) mirror the Room close path: `checkpointAndVacuum()` (incremental_vacuum + wal_checkpoint TRUNCATE) before `db.close()`, then `cleanStrayJournal()`. They must NOT delete `-wal`/`-shm` themselves — NotebookActivity keeps its Room connection open to the same file while these run; SQLite removes those when that last connection closes. Multi-step writes (e.g. `deletePageRaw`'s three soft-deletes) must be wrapped in `beginTransaction()`/`setTransactionSuccessful()`/`endTransaction()`.
-- Never silently swallow exceptions over raw DB ops — `Log.e` at minimum, and surface a user-visible failure (Toast) for write ops (see `PageIndexActivity` copy/move/delete).
+- Each open notebook gets its own Room instance; close and release when the notebook is closed
+- `wal_autocheckpoint` is connection-level — re-apply in `SoilDatabase.openCallback()` via `SupportSQLiteDatabase.query(...).use { it.moveToFirst() }`
+- PRAGMAs returning a result set: always `rawQuery("PRAGMA ...", null).use { it.moveToFirst() }` — never `execSQL`, never unconsumed cursor
+- Any raw SQL touching `order` must double-quote it: `"order"` — it is a SQLite reserved word. Room-generated DAO handles this; only hand-written SQL is at risk. `ContentValues` keys use backtick quoting: `` "`order`" ``.
+- `closeNotebook()` runs incremental_vacuum + wal_checkpoint(TRUNCATE), then `db.close()`, then deletes any `-journal` artifact. Lives in `suspend sealNotebook()` (`withContext(Dispatchers.IO)`). User-initiated close: capture snapshot on main thread → launch `sealNotebook()` on `NotesproutApplication.appScope` (a never-cancelled `SupervisorJob + Dispatchers.IO` scope that outlives the Activity) → `finish()` immediately. `onDestroy()` safety net calls `closeNotebook(blocking = true)` for abnormal teardown only (normal path already nulled `soilDatabase`, so it no-ops).
+- **Raw `SQLiteDatabase` on `.soil` outside Room must use `OPEN_READWRITE`, not `OPEN_READONLY`.** A read-only WAL connection re-creates `-shm` and cannot unlink `-wal`/`-shm` on close — permanently stranding sidecars. Close via `SQLiteDatabase.checkpointTruncateAndClose(tag, file)` (`data/CoverLoader.kt`): checkpoint → close → delete empty `-journal`.
+- Raw read-write helpers (`data/PageCopier.kt`) run `checkpointAndVacuum()` before `db.close()`, then `cleanStrayJournal()`. They must NOT delete `-wal`/`-shm` — NotebookActivity's Room connection is still open to the same file; SQLite removes those when that last connection closes. Multi-step writes must use transactions.
+- Never silently swallow exceptions over raw DB ops — `Log.e` at minimum; surface a Toast for write ops.
 
 ---
 
 ## Design System — E-Ink First (Never Violate These)
 
-Notesprout's visual language is designed for e-ink displays first. All other platforms inherit this aesthetic.
-
 **Palette (UI Chrome Only):**
 - `inkBlack` = `#000000`
 - `paperWhite` = `#FFFFFF`
-- `inkLight` = `#888888` — disabled / secondary text only
+- `inkLight` = `#888888` — disabled/secondary text only
 - `borderGray` = `#CCCCCC` — subtle dividers only (**invisible on e-ink** — use inkBlack for any visible border)
-- No color in UI chrome — ever. Color belongs to content only.
+- No color in UI chrome — ever.
 
 **Visual Rules:**
-- No shadows, no elevation, no gradients, no blur
-- No Material splash or ripple effects (`rippleColor=transparent`, `stateListAnimator=null`)
-- Animations: none or minimum required — never decorative
-- Borders: 1dp solid inkBlack
-- Corner radius: 4dp — slightly rounded, not pill, not sharp
+- No shadows, elevation, gradients, or blur
+- No Material splash or ripple (`rippleColor=transparent`, `stateListAnimator=null`)
+- Animations: none or minimum — never decorative. `android:windowAnimationStyle="@null"` in `Theme.Notesprout` suppresses all system slide/fade transitions globally.
+- Borders: 1dp solid inkBlack; corner radius: 4dp
 - Typography: clear, high-contrast, black on white
 
 **Source of Truth:**
 - Colors: `app/src/main/res/values/colors.xml`
 - Styles/typography: `app/src/main/res/values/styles.xml`
 - Theme: `app/src/main/res/values/themes.xml`
-- Do not hardcode colors or styles on views — always reference named resources
+- Do not hardcode colors or styles — always reference named resources
 
-**What NOT To Do (Design):**
-- No color in any UI chrome element
-- No shadows or elevation on any widget
-- No decorative animations — including activity/screen transitions. `android:windowAnimationStyle="@null"` is set in `Theme.Notesprout` to suppress all system-default slide/fade transitions globally.
-- No pill-shaped buttons or fully sharp corners
-- Do not use Material Components — theme is `Theme.AppCompat.Light.NoActionBar`, buttons are `AppCompatButton` with explicit drawable backgrounds. `com.google.android.material` is not a dependency — do not add it.
+**What NOT To Do:**
+- No color in UI chrome; no shadows/elevation; no decorative animations; no pill-shaped or fully sharp buttons
+- Do not use Material Components — theme is `Theme.AppCompat.Light.NoActionBar`; buttons are `AppCompatButton` with explicit drawable backgrounds
 
 **AlertDialog styling pattern:**
 - `dialog.window?.setSoftInputMode(...)` before `show()`
-- `dialog.window?.setElevation(0f)` and `dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)` after `show()` — window only exists once shown
+- `dialog.window?.setElevation(0f)` and `setBackgroundDrawableResource(R.drawable.shape_bordered)` after `show()` — window only exists once shown
 
 **Keyboard (IME) dismissal in dialogs:**
-- On some BOOX devices (Go 10.3, Go 7), the IME does not auto-dismiss when a dialog closes. Always explicitly hide it inside the button click handlers — **not** in `setOnDismissListener`.
-- Use `imm.hideSoftInputFromWindow(editText.windowToken, 0)` while the dialog is still alive (the click listener fires before auto-dismiss). The dialog's window token is valid here; after dismiss it is gone and the call is ignored.
-- `setNegativeButton("Cancel", null)` must become a real listener that also calls `hideSoftInputFromWindow` — `null` means no hide happens on cancel.
-- Never use the activity's `window.decorView.windowToken` for this — the IME is bound to the dialog's window, not the activity's, and will ignore a hide request from the wrong token.
+- On some BOOX devices the IME does not auto-dismiss on dialog close. Always explicitly hide in button click handlers — **not** `setOnDismissListener`.
+- Use `imm.hideSoftInputFromWindow(editText.windowToken, 0)` while the dialog is still alive. `setNegativeButton("Cancel", null)` must become a real listener that also hides the IME.
+- Never use the activity's `window.decorView.windowToken` — the IME is bound to the dialog's window and ignores hide requests from the wrong token.
 
 ---
 
 ## Toolbar System
 
-- Icons: Tabler Icons, stroke-based, `@color/inkBlack`, 24dp VectorDrawables in `res/drawable/ic_*.xml`
+- Icons: Tabler Icons, stroke-based, `@color/inkBlack`, 24dp VectorDrawables in `res/drawable/ic_*.xml`. New icons must come from Tabler or match the Tabler stroke style — no filled/solid icon sets.
 - `bg_toolbar_button` StateListDrawable: default = white fill, no border; selected/activated/pressed = white fill + 1.5dp black border
 - `Widget.Notesprout.ToolbarButton` style: 44dp, `bg_toolbar_button`, 10dp padding; overridden to 36dp/7dp in `res/values-sw360dp/` for Palma2 Pro
 - Pen/eraser buttons: `isSelected = true` for persistent active-tool state
 - Dividers: `@color/inkBlack`, 1dp × 28dp
-- Undo/Redo buttons: statically always-enabled — tapping an empty stack silently does nothing (matches native BOOX behavior). Do not add alpha/tinting state.
+- Undo/Redo: statically always-enabled — empty stack silently does nothing (matches native BOOX behavior)
 
-### Toolbar Overflow System
+### Toolbar Overflow System (`notebook/ToolbarOverflowManager.kt`)
 
-Implemented in `notebook/ToolbarOverflowManager.kt`, wired from `NotebookActivity.onCreate`.
+- If all buttons + dividers fit, `btnOverflow`/`dividerOverflow` stay `GONE`. Otherwise `btnOverflow` (Tabler "dots") appears at the far right; overflowed buttons move into `overflowMenu` — a vertical `LinearLayout` below the toolbar with `shape_bordered` background.
+- **Move-not-clone:** actual `View` instances are moved (no cloning) — `isSelected` state, icon state, and click listeners are preserved with zero extra wiring.
+- **Cut-point:** sums natural widths left-to-right; finds the largest prefix fitting in `availableWidth - overflow controls`; if the last visible item is a divider, steps back one to prevent a double-divider. Greedy row packing in the overflow menu.
+- **Recalc triggers:** `doOnLayout` (first layout) + `addOnLayoutChangeListener` on the toolbar (fires on rotation, closes menu first).
+- **Dismiss rules (in `dispatchTouchEvent`):** touch on `btnOverflow` → toggle; inside overflow menu → close, do NOT consume; inside toolbar → close, do NOT consume; anywhere else → close AND consume (must not start a stroke).
+- `releaseRender()` called on any finger `ACTION_DOWN` in the toolbar or the open overflow menu.
 
-**Behaviour:**
-- If all buttons + dividers fit within the toolbar width, everything renders as-is and `btnOverflow`/`dividerOverflow` stay `GONE`.
-- If they don't fit, `btnOverflow` (Tabler "dots", `ic_dots.xml`) and `dividerOverflow` become visible at the far right. Overflowed buttons (rightmost items that don't fit) move into `overflowMenu` — a vertical `LinearLayout` pinned directly below the toolbar (`layout_marginTop="56dp"`, `shape_bordered` background).
-- Tapping `btnOverflow` toggles `overflowMenu` visibility.
+---
 
-**Move-not-clone:** `ToolbarOverflowManager` moves actual `View` instances between the toolbar and overflow rows (no cloning), so `isSelected` state, icon swap state, and click listeners are preserved with zero extra wiring.
+## Drawing Engine Architecture
 
-**Cut-point algorithm:**
-1. `originalOrder` = all toolbar children except the `weight=1` Space, `dividerOverflow`, and `btnOverflow`, captured once at `initialize()`.
-2. `recalc()` sums natural widths (LayoutParams.width + margins, valid even for `GONE` views) left-to-right.
-3. If total fits in `toolbar.width - paddingStart - paddingEnd`: full-fit path — no overflow.
-4. Otherwise: find the largest prefix of `originalOrder` that fits within `availableWidth - naturalWidth(dividerOverflow) - naturalWidth(btnOverflow)`. If the last item in that prefix is a plain-View divider, move the cut one step back (prevents double-divider at the junction).
-5. Items before the cut stay in the toolbar; items at/after go into overflow rows. The `Space` (weight=1) always stays in the toolbar between the last visible button and `dividerOverflow`, keeping `btnOverflow` pinned to the right edge.
+### Files
 
-**Overflow rows:** greedy left-to-right packing — add items to the current row until the next item won't fit, then start a new row. Group dividers between items are preserved.
+- `notebook/NotebookView.kt` — interface for both engines; all drawing, lasso, heading, snapshot ops
+- `notebook/OnyxNotebookView.kt` — BOOX: TouchHelper, RawInputCallback. `onPenLifted` fires on `onEndRawDrawing`. `onBeginRawDrawing` re-enables render guarded by `!isEraserMode`.
+- `notebook/GenericNotebookView.kt` — standard Canvas: two-layer Bitmap, stylus-only (`TOOL_TYPE_STYLUS` + `TOOL_TYPE_ERASER`), historical point capture. `onPenLifted` fires on `ACTION_UP`.
+- `NotebookActivity.kt` — fullscreen immersive, multi-page state, incremental save via `insertOrIgnore`. One-finger deliberate swipe for page navigation (three guards: distance ≥50% screen width, velocity ≥1.5× fling threshold, horizontal dominance). Two-finger swipe left/right inserts a page after/before current and navigates to it (same guards).
+- `MainActivity.kt` — notebook list, adaptive grid (3/2 cols at 480dp), pagination, empty state, bottom bar.
 
-**Recalc triggers:**
-- `doOnLayout` on the toolbar (first layout).
-- `addOnLayoutChangeListener` on the toolbar — fires when the toolbar width changes (rotation). Closes the menu first.
+### Key Build Facts
 
-**Dismiss rules (in `dispatchTouchEvent`):**
-- Touch on `btnOverflow`: toggle handled by its own click listener; `dispatchTouchEvent` does not intervene.
-- Touch inside overflow menu: close menu, do NOT consume — let the tapped button's click fire.
-- Touch inside toolbar (not on `btnOverflow`): close menu, do NOT consume — let the tapped button's click fire.
-- Touch anywhere else: close menu AND consume the event — dismiss-only, must not start a stroke.
-- EPD `releaseRender()` is called on any finger `ACTION_DOWN` in the toolbar OR the open overflow menu.
+- `minSdk = 29`; `android.enableJetifier=true` (Onyx SDK bundles old support classes)
+- `jniLibs.pickFirsts` for `libc++_shared.so`
+- `defaultConfig.ndk { abiFilters += "arm64-v8a" }` — all target devices are 64-bit ARM. Do NOT `exclude com.tencent:mmkv:1.0.19` — `onyxsdk-base` references it; removing it risks `NoClassDefFoundError`. ML Kit `libdigitalink.so` is 16 KB-aligned at `digital-ink-recognition:19.0.0`.
+- `NotesproutApplication.onCreate` calls `HiddenApiBypass.addHiddenApiExemptions("")` before any SDK init
+- `setStrokeColor(Color.BLACK)` required on TouchHelper init — NoteAir5C color panel defaults to non-black
+- Toolbar z-order: toolbar must overlay the drawing container in a `FrameLayout` — native SurfaceView occludes siblings below it
+- `onSizeChanged()` calls `redrawCanvas()` (not just white fill) in both drawing views — handles the case where `loadStrokes()` runs before view layout
+
+### EPD Rules — Never Violate These
+
+**Overlay lifetime:**
+- The overlay ("writing mode") stays active indefinitely while the user writes. No idle-release timer.
+- Legitimate handoff points: `setEraserMode(true)`, `eraseAll()`, `setTemplate()`, `loadStrokesWithBitmap()`, `onWindowFocusChanged(false)`, toolbar finger touch.
+- `onPenLifted` is a DB-save trigger only — does NOT touch the overlay.
+
+**Toolbar touch → overlay release:**
+- Any finger `ACTION_DOWN` within `drawingToolbar.bottom` (intercepted in `NotebookActivity.dispatchTouchEvent`) calls `drawingView.releaseRender()` before the child button handles the event.
+- `releaseRender()`: `setRawDrawingRenderEnabled(false)` → `invalidate()`. No `handwritingRepaint` needed.
+- Overlay re-enables automatically via `onBeginRawDrawing` on the next pen stroke.
+- Must use `dispatchTouchEvent` (not `setOnTouchListener`) — button children always consume touches, so `setOnTouchListener` on the ViewGroup never fires.
+
+**Overlay handoff (`eraseAll()`):**
+- `setRawDrawingRenderEnabled(false)` → white bitmap → `invalidate()` → `EpdController.handwritingRepaint(view, Rect(0,0,w,h))` → re-enable
+- **`handwritingRepaint` is required.** `setRawDrawingRenderEnabled` is a lightweight toggle; it does NOT clear the hardware buffer. Without it: gray residue + black flash.
+- `EpdController.setUpdListSize(512)` in `openRawDrawing()` suppresses mid-session GC16 refresh — do not remove.
+- `renderStroke` calls `invalidate()` on every stroke so the Android canvas stays continuously current with the overlay.
+
+**Eraser overlay:**
+- On eraser start: `setRawDrawingRenderEnabled(false)` + `invalidate()` — immediately, before any erase logic. If not released first, the overlay hides the bitmap erase result (phantom strokes remain visible).
+- `handwritingRepaint` after erase gesture ends only — NEVER during move events (causes full EPD flash per stroke).
+- `onBeginRawDrawing` re-enables render guarded by `!isEraserMode`.
+
+**setTemplate() EPD handoff:**
+- `setRawDrawingRenderEnabled(false)` → `redrawCanvas()` → `EpdController.handwritingRepaint()` → `setRawDrawingEnabled(true)`. Without `handwritingRepaint`, the template change is invisible on e-ink.
+
+### Tool-State Invariants (OnyxNotebookView)
+
+When a Dialog is shown over NotebookActivity, focus changes trigger `onWindowFocusChanged(false)` → `setRawDrawingEnabled(false)`. On return: `onWindowFocusChanged(true)` → `openRawDrawing()`. Also triggered by `onResume()` → `enableDrawing()`.
+
+| Active tool | `setRawDrawingEnabled` | `setRawDrawingRenderEnabled` |
+|---|---|---|
+| Pen | `true` | `true` (SDK manages) |
+| Eraser | `true` | `false` (prevents phantom pen strokes on overlay) |
+| Lasso / Lasso Eraser | `false` | n/a |
+| Text placement | `false` | n/a |
+
+`openRawDrawing()` and `enableDrawing()` must guard `setRawDrawingEnabled(true)` with `!isLassoMode && !isLassoEraserMode && !isTextPlacementMode`. If the guard passes and `isEraserMode` is true, immediately follow with `setRawDrawingRenderEnabled(false)`. Failing this causes phantom pen strokes on the EPD overlay — they look real but vanish on the next EPD refresh.
+
+### Performance Rules (Do Not Regress)
+
+**Save path:** Wrap INSERT OR IGNORE loops in `db.withTransaction {}`; track `persistedStrokeIds` set and skip `toJson()` for already-persisted strokes.
+
+**Load path:** `buildRenderBitmap()` on `Dispatchers.IO` — pre-builds white → template → strokes off the main thread; `loadStrokesWithBitmap()` on main thread swaps the pre-built bitmap (~12ms cost).
+
+**Erase path:** `LiveStroke.boundingBox: RectF` pre-computed at creation; `eraseAtPath` builds an AABB and rejects non-intersecting strokes in O(4 floats). `throttledEraseRedraw()` redraws at most once per 60ms; `finalizeEraseRedraw()` forces one clean redraw on gesture end before `handwritingRepaint`.
+
+---
+
+## Page Snapshot System
+
+Each page row's `data` JSON carries an optional `"snapshot"` field — a base64-encoded transparent-background PNG of all content (no schema change).
+
+Rendering order: white → template → snapshot PNG → new content drawn this session.
+
+**Snapshot rules:**
+- Transparent background only — do NOT fill white or draw the template.
+- `captureSnapshot()` returns `null` if strokes/headings/textObjects are all empty, or view isn't laid out (w=0/h=0).
+
+**When snapshots are captured:**
+- `setEraserMode(true)` — BEFORE `isEraserActive = true`
+- `setTemplate(bitmap)` — BEFORE `templateBitmap = bitmap`
+- `onWindowFocusChanged(false)` — backgrounded or dialog overlay
+- Page navigation — BEFORE `eraseAll()`
+- Close/back — synchronously in `closeNotebook()` on the main thread BEFORE `sealNotebook()` is dispatched to IO
+
+**Critical:** `onWindowFocusChanged(false)` fires AFTER `finish()` — `soilDatabase` is already null. Any path that calls `closeNotebook()` must capture the snapshot itself. Never rely on `onWindowFocusChanged` as the close-path snapshot trigger.
+
+**NOT on:** user-initiated `eraseAll()` or page delete — content is being discarded.
+
+**Stale detection:** `NotebookDao.getMaxStrokeUpdatedAt(layerId)` — `SELECT MAX(updatedAt)` with **no** `deletedAt IS NULL` filter. Soft-deleted strokes have `updatedAt = deletedAt`, so erasures are detected as changes. If `maxStroke > page.updatedAt`, snapshot is stale. `persistSnapshot()` bumps `page.updatedAt`.
+
+**Two-phase page load (`NotebookActivity.loadCurrentPage`):**
+1. `setupPageIds(db)` — resolves `currentPageId` / `currentLayerId`
+2. `loadPageTemplateFromDb(db)` — decodes template bitmap (or null for blank)
+3. `tryLoadSnapshotBitmap(db, templateBitmap)` — staleness check + composite. Returns null on miss.
+4. **Fast path** (hit): display composite immediately; deserialize strokes in background via `setStrokeListSilently()`.
+5. **Full path** (miss): deserialize + `buildRenderBitmap` off-thread; capture and persist snapshot for next load.
+
+---
+
+## Template System
+
+- Templates are `type = "template"` rows stored in the `.soil` notebook database
+- Template PNG files stored in `getExternalFilesDir("Templates")` — imported via `ACTION_OPEN_DOCUMENT`
+- `data` JSON: `{ "width": Int, "height": Int, "name": String, "image": String (base64) }`
+- `parseTemplateId(data)` reads `data.template` from a page row to get the active template UUID (empty = Blank)
+
+**TemplateDialog:** Two-tab (All / Notebook), adaptive grid — 4 columns on NA5C (≥1500px), 2 on P2P/GC7. `thumbFrame` uses `shape_bordered` + **1dp padding** to inset the `ImageView` so it cannot render over the border stroke. Do NOT use `clipToOutline` — it clips the border itself at rounded corners.
+
+**Template inheritance on new page:** `addPage()` reads the current page **fresh from DB** via `dao.getObjectById(currentPageId)`. Do NOT read from the stale in-memory `pages` list — it is not refreshed after `applyTemplateToCurrentPage()` writes to DB.
+
+---
+
+## Undo/Redo System
+
+- Session-scoped (not persisted across process death)
+- `history/UndoRedoAction.kt` — sealed class: stroke add/erase, page add/delete/clear/copy/paste/move, lasso erase/cut/delete/paste/move, heading create/remove/text-edit, text insert/edit/remove/convert
+- `history/UndoRedoManager.kt` — `undoStack` / `redoStack` as `ArrayDeque`. Redo stack cleared on any new user action.
+
+**Cross-page actions:** Never call `saveAndSwitchPage()` — it calls `eraseAll()` which wipes in-memory strokes. Use the two-phase approach: save/snapshot the leaving page inline → navigate → load from DB → apply the action → rebuild bitmap.
+
+**Same-page stroke path:** Never calls `eraseAll()`. Updates in-memory stroke list directly, rebuilds bitmap off-thread with `currentTemplateBitmap` (`NotebookActivity` field set in `displayPage()`), swaps via `loadStrokesWithBitmap`. Keep `persistedStrokeIds` in sync.
+
+---
+
+## Heading Objects
+
+- `type = "heading"` rows in `.soil`; `HeadingObject` serialized to `data`; `HeadingStroke` is the in-memory representation
+- Headings render as grey-fill backgrounds with embedded strokes, or 20sp inkBlack canvas text when `recognizedText` is non-null
+- `recognizedText: String?` — null = render strokes; non-null = canvas text (populated by ML Kit at creation)
+- All lasso actions (move, copy, cut, paste, delete, eraser) treat headings as first-class participants
+- `copyPageAfter()` and `copyPageAfterRaw()` copy all object types, not just strokes
+
+---
+
+## Text Object System
+
+### Data Model
+
+- `type = "text"` rows in `.soil`; `TextObject` (`data/TextObject.kt`) serialized to `data`; `TextRender` (`data/TextRender.kt`) is the in-memory representation
+- `@Serializable data class TextObject(val text: String = "", val strokes: List<LiveStroke>? = null)` — raw Markdown source + optional embedded strokes (for lasso-converted objects where ML Kit failed or recognition was not run)
+- `data class TextRender(val id: String, val boundingBox: RectF, val text: String, val strokes: List<LiveStroke>? = null)` — built at page load from `type = "text"` rows
+
+**Bounding box width rule:** width = natural content width (max line width from `StaticLayout`), capped at page width only when content genuinely needs it. Never set `boundingBox.width = pageWidth` unconditionally. `TextObjectRenderer.measure()` returns this natural width; `availableWidthPx` is the layout constraint (wrapping ceiling), not the assigned width. Applies to all write paths: insert, edit, and lasso conversion. For unrecognized objects (blank text + strokes), bbox derives from the stroke union bounding box.
+
+**`strokes` preservation rule:** All write paths (`updateTextObject`, `TextEdited` DB handler, `StrokesMoved` DB handler) preserve `strokes` in the serialized JSON — `TextObject(text = ..., strokes = target.strokes).toJson()`. Never construct `TextObject(text = ...)` alone for existing objects that may carry strokes.
+
+### Render Dispatch
+
+Text objects render after headings, before strokes — transparent background (no white fill, no template draw).
+
+Dispatch is centralized in `drawTextObject(canvas, textRender, widthPx)` in each drawing view. All render sites (redrawCanvas, buildRenderBitmap, compositeTextObjects, drag layer) call this helper — never `TextObjectRenderer.draw()` directly:
+- `text.isNotBlank()` → `TextObjectRenderer.draw()` (markdown engine)
+- `text.isBlank()` AND `strokes` non-empty → render embedded strokes (unrecognized state)
+- `text.isBlank()` AND `strokes` null/empty → render nothing
+
+Rendering: `StaticLayout` + `TextPaint` at 16sp `Color.BLACK`. Entry point: `TextObjectRenderer.draw(canvas, textRender, widthPx, paint, density)`.
+
+### Markdown Engine (`core/markdown/`)
+
+- `MarkdownParser` — hand-rolled, no dependencies. Block types: `Heading(1–6)`, `Paragraph`, `ListItem`, `Blockquote`, `HorizontalRule`. Inline types: `Text`, `Bold`, `Italic`, `Strikethrough`, `Link(displayText, url)`.
+- `MarkdownRenderer` — `List<Block>` → `SpannableStringBuilder` using Android text spans.
+- `TextObjectRenderer` — wraps parser + renderer + `StaticLayout` for canvas drawing and measurement.
+
+**Supported subset:**
+- Headers h1–h6 (`#` … `######`)
+- Bold (`**text**` / `__text__`), italic (`*text*` / `_text_`), strikethrough (`~~text~~`)
+- Links (`[text](url)`) — underlined, not clickable
+- Unordered lists, 3-level nesting, bullet glyphs: `• ◦ ▪`
+- Ordered lists with auto-renumbering; nesting supported
+- Task checkboxes (`- [ ]` → `☐`, `- [x]` → `☑`)
+- Blockquotes (`>`) — left bar via `QuoteSpan`
+- Horizontal rules (`---` / `***` / `___`) via `HorizontalRuleSpan : ReplacementSpan`
+
+**Out of scope (do not add without discussion):** inline code, fenced code blocks, tables, embedded images, raw HTML.
+
+**WYSIWYG regex safety:** inline patterns do NOT use `RegexOption.DOT_MATCHES_ALL` — use `[^*\n]` / `[^~\n]` exclusion classes to prevent cross-line matches.
+
+### TextEditDialog (`notebook/TextEditDialog.kt`)
+
+Markdown WYSIWYG/source editor. Two modes: **WYSIWYG** (live formatting spans) and **Markdown** (raw source). Mode toggle is two `AppCompatButton` (weight=1 each) with `bg_toolbar_button` — switching is instant (spans only, text unchanged).
+
+Formatting toolbar (HorizontalScrollView): B, I, S̶, H▾ (H1–H6/Normal), •, 1., ☐ (task checkbox toggle), ❝, —, [⊞] (link). `shape_bordered` background, 36dp height, 10dp H padding.
+
+Auto-renumbering: ordered list blocks renumbered on every `afterTextChanged`. Auto-continue: Enter at end of a numbered list line inserts the next number prefix.
+
+AlertDialog pattern: `setSoftInputMode(SOFT_INPUT_STATE_VISIBLE | SOFT_INPUT_ADJUST_RESIZE)` before `show()`; `setElevation(0f)` + `shape_bordered` after `show()`. IME hidden in both Save and Cancel handlers via `editMarkdown.windowToken` (dialog's window token, not the activity's).
+
+### Text Placement Mode
+
+`btnInsertText` (`ic_text_recognition.xml`) — persistent toggle between EraseAll and Lasso in the NotebookActivity toolbar.
+
+**Entering:** exits lasso/lasso-eraser; sets `isTextPlacementMode = true`; calls `drawingView.setTextPlacementMode(true)` → on Onyx: `setRawDrawingEnabled(false)`; calls `releaseRender()`. Sets `btnInsertText.isSelected = true`.
+
+**Exiting:** sets `isTextPlacementMode = false`; calls `setTextPlacementMode(false)` + `enableDrawing()` to restore drawing state.
+
+**Canvas tap:** `handleTextPlacementTouch` captures coordinates on `ACTION_DOWN` but does NOT fire the callback or exit until `ACTION_UP`. Exiting on DOWN would route subsequent MOVE/UP events to the normal drawing path, creating a phantom stroke persisted to DB. `onTextPlacementTap(tapX, tapY)` fires on `ACTION_UP`. The callback must NOT call `enableDrawing()` — drawing is restored by the dialog focus cycle (`onWindowFocusChanged(true)` → `openRawDrawing()`) after the stylus lifts. Calling `enableDrawing()` before the stylus lifts re-enables Onyx raw input mid-contact → `onBeginRawDrawing` → `onEndRawDrawing` → `onPenLifted` → phantom stroke persisted to DB. Stylus tool type only — finger touches ignored.
+
+**`dispatchTouchEvent`** cancels placement mode on any toolbar touch, UNLESS the touch is on `btnInsertText` itself.
+
+### Insert Flow (`insertTextObject`)
+
+1. Measure markdown via `TextObjectRenderer.measure()` on `Dispatchers.Default`
+2. Compute bounding box centered on tap, clamped to page bounds
+3. Insert `type="text"` row + `invalidatePageSnapshot(db, pageId)` on `Dispatchers.IO`
+4. Append `TextRender` to `drawingView.getTextObjects()` + `loadTextObjects(...)`
+5. Rebuild render bitmap off-thread → swap via `loadStrokesWithBitmap`
+6. Enter lasso mode, select new object, show floating toolbar
+7. Push `UndoRedoAction.TextInserted(textId, pageId, layerId, textRender)`
+
+### Tap-to-Edit
+
+While a text object is selected (single selection in lasso mode), a stylus tap within `boundingBox` opens `TextEditDialog` pre-filled with raw Markdown. **Gated on `text.isNotBlank()`** — unrecognized objects (blank text + embedded strokes) ignore the tap.
+
+- **Non-empty confirm → `updateTextObject`:** remeasures, keeps top-left fixed, clamps resized box to page bounds, persists, rebuilds bitmap, refreshes dashed selection overlay. Pushes `UndoRedoAction.TextEdited(textId, pageId, oldTextRender, newTextRender)`.
+- **Empty confirm → `deleteTextObjectFromEdit`:** soft-deletes row, removes from in-memory list, clears selection. Pushes `UndoRedoAction.TextRemoved`. Embedded strokes are intentionally discarded — the user explicitly cleared the text.
+
+### Lasso stroke-to-text Conversion (`convertLassoToText`)
+
+"Text" button (`btnConvertText`, `ic_text_recognition`) in the floating lasso toolbar — visible only when `selectionIsPureStrokes`.
+
+1. Run ML Kit recognition on selected strokes
+2. **Success:** measure text, resize bbox (left/top anchored); `data.text = recognizedText`
+3. **Failure:** keep original bbox; `data.text = ""`
+4. Both cases: `data.strokes = embeddedStrokes` (fresh-UUID copies of selected stroke data)
+5. Soft-delete original stroke rows + insert `type="text"` row in one transaction; invalidate snapshot; select new text object
+
+Undo: `UndoRedoAction.TextConverted(textId, pageId, layerId, deletedAt, originalStrokeIds, textRender)` — undo restores original strokes and soft-deletes text row; redo reverses.
+
+### Lasso Actions (text objects are full first-class participants)
+
+All lasso actions work for text objects alongside strokes and headings with full undo/redo support:
+
+- **Selection:** center-point containment hit test
+- **Drag to move:** translates bbox; persisted via `updateHeadingData`; `StrokesMoved` undo; `strokes` field preserved
+- **Delete:** `performLassoDelete` — soft-delete + `LassoDeleted` undo
+- **Copy/Cut/Paste:** `NotesproutClipboard.ClipboardContent.textObjects: List<TextRender>` carries both `text` + `strokes`. Paste: new UUID, translated bbox. `LassoCut`/`LassoPasted` undo actions carry `textIds`/`textObjects`. Cross-page paste survives the round trip via the undo action.
+- **Lasso eraser:** `runLassoHitTest` — center-point containment; `LassoErased.strokeIds` contains ALL erased IDs; `textIds` is the text-object subset stored separately for in-memory partitioning on undo.
+
+### Canvas Integration
+
+- `NotebookDao.getTextObjectsForLayer(layerId)` — `WHERE type = 'text'`; included in `getMaxContentUpdatedAt` staleness check
+- `buildRenderBitmap` default parameter `textObjects: List<TextRender>? = null` — null = use stored field; non-null overrides (page load path, undo/redo call sites pass null)
+- Snapshot fast-path: `compositeTextObjects(bitmap)` paints text objects onto the snapshot bitmap after `loadTextObjects()`, before `loadStrokesWithBitmap()`
+- PDF export: `NotebookExporter.renderPage()` loads text objects via `getTextObjectsForLayer()` and renders after headings, before strokes
+
+---
+
+## MainActivity Feature Systems
+
+### Notebook & Folder Management
+
+- New-notebook name validation: whitelist `[^a-zA-Z0-9_\-. ]`, reject `.`/`..`, check index for duplicate name in current folder. New-notebook dialog pre-fills with `YYYYMMDD_HHmmss` timestamp (editable before confirm).
+- **Move:** index update only — `.soil` file stays at `Garden/<id>.soil` (UUID unchanged).
+- **Copy notebook:** new `ObjectEntity` + copy `.soil` to new UUID path via `soilFile()`.
+- **Copy folder:** recursively create new index entries and copy all descendant `.soil` files.
+- **Conflict check:** if a sibling with the same name exists at the destination, show AlertDialog "A [notebook/folder] named '[name]' already exists here. Replace it?" Replace proceeds; Cancel stays in picker mode.
+- **Folder delete:** recursively soft-deletes all descendants in the index; deletes `.soil` files via `soilFile()`; cleans up WAL sidecars. Confirmation dialog message: `Delete "[name]"? This will permanently remove all notebooks and subfolders inside it. This cannot be undone.`
+
+### ActionSheetDialog (`ActionSheetDialog.kt`)
+
+Reusable flat action sheet. Builder: `.title(String)` (optional) → `.addAction(iconRes?, label, onClick)` → `.show()`. `shape_bordered` window background after `show()`. 1dp inkBlack dividers between rows. Optional title row has an `ic_x` close button. No bottom Cancel row. Icon slot is a `Space` when `iconRes` is null, keeping labels aligned.
+
+### Browse State Persistence (`state/AppStateManager.kt`)
+
+`data class AppViewState(val folderId: String?, val pinnedMode: Boolean)` persisted in `SharedPreferences("notesprout_view_state")`. Saved at every browse-context change. Search mode is never persisted.
+
+**Restore on launch:** `onCreate` loads state synchronously. Non-default state: set `isStateRestored = false`, launch coroutine to `navigateStackToFolder(folderId)` then optionally `enterPinnedMode()`, set `isStateRestored = true`, trigger first render. Layout listener and `onResume` check `isStateRestored` — if false, defer scan to the restore coroutine. **Stale folder:** if `navigateStackToFolder` resolves to root (folder deleted), clear via `AppStateManager.save(context, AppViewState(null, false))`.
+
+### Pinned Browse View
+
+- Back press priority: `isPinnedMode` is checked first (before picker mode, search mode, directory stack)
+- `directoryStack` is NOT touched when entering/exiting pinned mode — folder position is preserved underneath
+- `onResume()` calls `renderPinnedList()` when `isPinnedMode` — re-fetches in case notebook was unpinned while open
+- Pinned mode, search mode, and picker mode are mutually exclusive; each hides the other's toolbar controls
+- Card labels in pinned and search modes: immediate parent folder only — `folderLabel.substringAfterLast(" › ")`; root-level notebooks show "Notebooks › Name"
+
+### Search (`search/SearchEngine.kt`)
+
+Fuzzy match against all notebooks: substring (3) > all words present (2) > prefix/initials (1). Opening a notebook from search results rebuilds `directoryStack` by walking the `parentId` chain (`navigateStackToDirectory`) so returning lands in the correct folder.
+
+### Sorting (`sort/`)
+
+`SortPreferences`: `SortField` (NAME / DATE_MODIFIED), `SortOrder` (ASC / DESC), `FolderSort` (FOLDERS_FIRST / NOTEBOOKS_FIRST / MIXED). Persisted in `SharedPreferences("notesprout_sort_prefs")`. Card labels (normal mode): `"$displayName ($dateStr, $timeStr)"` via `DateFormat.getMediumDateFormat` + `DateFormat.getTimeFormat`.
+
+### PDF Export
+
+- `NotebookExporter` renders all pages off-screen on `Dispatchers.IO` using white→template→headings→text→strokes pipeline
+- Output to `context.cacheDir/<title>.pdf`, shared via `FileProvider` (`${applicationId}.fileprovider`) + `Intent.ACTION_SEND`
+- Share intent **must** include `clipData = ClipData.newRawUri("", uri)` alongside `FLAG_GRANT_READ_URI_PERMISSION` — on Android 12+, the chooser intermediary does not forward URI permissions without `ClipData` (causes silent Google Drive upload failure on NA5C)
+- Progress dialog: "Exporting page X of N…" via `Handler(Looper.getMainLooper())`
+
+### ML Kit
+
+- `com.google.mlkit:digital-ink-recognition:19.0.0` — en-US model; `recognizedText` stored in `HeadingObject`
+- Model downloads on any network (~20–30 MB, one-time). **TODO:** make this a user-facing setting (Wi-Fi only vs. any). See `MlKitHandwritingRecognizer.initModel()` → `DownloadConditions.Builder()`.
+
+---
+
+## Future Work — Wacom & Generic Android Stylus
+
+Wacom barrel buttons set `BUTTON_STYLUS_PRIMARY`/`BUTTON_STYLUS_SECONDARY` on `MotionEvent` — they do not change `getToolType()`. Fix: check `event.isButtonPressed(MotionEvent.BUTTON_STYLUS_PRIMARY)` in `onTouchEvent` and treat as eraser for that stroke. Low priority — do not let it block BOOX-first progress.
 
 ---
 
 ## Device Target Tiers
 
-**Tier 1 — Primary devices (always-tested, daily drivers):**
-- BOOX Go 10.3 (EMR stylus, large e-ink) — FLAGSHIP
+**Tier 1 — Primary (always-tested, daily drivers):**
+- BOOX Go 10.3 (EMR stylus, large e-ink) — **FLAGSHIP**
 - BOOX Note Max (EMR stylus, large-format e-ink)
 - BOOX Go 7 (EMR stylus, compact e-ink)
-- BOOX Palma2 Pro (USI 2.0 stylus, Android phone form factor)
+- BOOX Palma2 Pro (USI 2.0 stylus, phone form factor)
 
 **Tier 2 — Testing/QA:**
-- BOOX NoteAir5C (EMR stylus, e-ink color)
-- BOOX NoteAir4C
-- BOOX Tab XC
-- BOOX Go Color 7 Gen II
+- BOOX NoteAir5C, NoteAir4C, Tab XC, Go Color 7 Gen II
 - Wacom Movink Pad 11 & 14 (Android, GenericDrawingEngine)
 - iPad Air + Apple Pencil — future
 - iPhone 14 (touch-only) — future
 - MacBook / Web — future
-- Supernote Nomad & Manta (GenericDrawingEngine fallback) — future
+- Supernote Nomad & Manta (GenericDrawingEngine) — future
 
 ## ADB Device Serials
 
@@ -280,90 +540,53 @@ Implemented in `notebook/ToolbarOverflowManager.kt`, wired from `NotebookActivit
 | Wacom Movink Pad 11 (MIP11) | `5HL21V5007384` |
 | Supernote Nomad (SNN) | `SN078D10012852` |
 
-## Installing on Devices
-
-When asked to install on one or more devices:
-
-1. **Trust the user.** If they say the devices are ready, skip `adb devices` — go straight to build and install.
-2. **Build** the debug APK from the Android project root:
-   ```
-   cd apps/notesprout_android
-   ./gradlew assembleDebug
-   ```
-3. **APK path:** `apps/notesprout_android/app/build/outputs/apk/debug/app-debug.apk`
-4. **Install** on each requested device using its serial from the table above:
-   ```
-   adb -s <serial> install -r <apk-path>
-   ```
-5. Install on all requested devices in a single shell block — no need to do them one at a time.
-
-**Do not** look for a project skill, run `adb devices`, or ask whether devices are plugged in. The user will say which devices to use by nickname (e.g. "NA5C", "P2P") — look up the serial in the table above.
-
 ---
 
-## Build Variants
+## Build Variants & Install
 
-Notesprout has two build variants:
+**Variants:**
+- **Debug** (`com.notesprout.android.dev`) — active development; installs alongside stable
+- **Release** (`com.notesprout.android`) — stable; release installs are always explicit
 
-- **Debug** (`com.notesprout.android.dev`) — active development build, installs alongside stable
-- **Release** (`com.notesprout.android`) — stable build, never overwritten accidentally
+Default: always build and install **debug** unless explicitly told otherwise.
 
-### Default behavior
-
-When asked to install without specifying a variant, **always build and install the debug APK**. Stable/release installs are always explicit.
-
-### Building
-
-**Debug APK:**
+**Build debug:**
 ```
 cd apps/notesprout_android
 ./gradlew assembleDebug
 ```
-APK output: `apps/notesprout_android/app/build/outputs/apk/debug/app-debug.apk`
+APK: `apps/notesprout_android/app/build/outputs/apk/debug/app-debug.apk`
 
-**Release APK (unsigned, for local sideloading only):**
+**Build release (unsigned — must sign before sideloading):**
 ```
 cd apps/notesprout_android
 ./gradlew assembleRelease
-```
-APK output: `apps/notesprout_android/app/build/outputs/apk/release/app-release-unsigned.apk`
-
-> Note: the release APK produced by `assembleRelease` is unsigned. Android rejects unsigned APKs — sign with the debug keystore before sideloading (see below). It cannot be submitted to the Play Store without a proper signing config — that is a separate future concern.
-
-### Installing
-
-Always build before installing — never install a stale APK.
-
-**Install debug to a device:**
-```
-adb -s <serial> install -r apps/notesprout_android/app/build/outputs/apk/debug/app-debug.apk
-```
-
-**Install release to a device (sign with debug keystore first):**
-```
 ~/development/android-sdk/build-tools/35.0.0/apksigner sign \
   --ks ~/.android/debug.keystore \
   --ks-pass pass:android --key-pass pass:android \
   --ks-key-alias androiddebugkey \
   --out apps/notesprout_android/app/build/outputs/apk/release/app-release-signed.apk \
   apps/notesprout_android/app/build/outputs/apk/release/app-release-unsigned.apk
-
-adb -s <serial> install -r apps/notesprout_android/app/build/outputs/apk/release/app-release-signed.apk
 ```
 
-Use device serials from the ADB Device Serials table above.
+**Install:**
+```
+adb -s <serial> install -r <apk-path>
+```
+
+Install all requested devices in a single shell block. If the user says devices are ready, **skip `adb devices`** — go straight to build and install. User refers to devices by nickname (e.g. "G10", "P2P") — look up serial in the table above.
 
 ---
 
 ## Branch Strategy
 
-- main — stable releases only
-- germination — previous post-MVP feature branch (reference, not active)
-- seed — current active development (clean restart, lessons learned)
+- `main` — stable releases only
+- `germination` — previous post-MVP feature branch (reference, not active)
+- `seed` — current active development
 
 ---
 
-## Community Nomenclature — Use These Consistently
+## Community Nomenclature
 
 - Release notes → Growth Logs
 - Bug fixes → Pruning
@@ -371,540 +594,3 @@ Use device serials from the ADB Device Serials table above.
 - Contributors → Gardeners
 - README → The Soil
 - CLAUDE.md → The Soil for Claude Code
-
----
-
-## Drawing Engine Architecture
-
-### Files (package: `com.notesprout.android`)
-- `notebook/NotebookView.kt` — interface implemented by both engines; all drawing, lasso, heading, and snapshot operations flow through it
-- `notebook/OnyxNotebookView.kt` — BOOX path: TouchHelper, RawInputCallback. `onPenLifted` fires on `onEndRawDrawing`. `onBeginRawDrawing` re-enables render, guarded by `!isEraserMode`.
-- `notebook/GenericNotebookView.kt` — standard Android Canvas: two-layer Bitmap, stylus-only (`TOOL_TYPE_STYLUS` + `TOOL_TYPE_ERASER`), historical point capture. `onPenLifted` fires on `ACTION_UP`.
-- `NotebookActivity.kt` — fullscreen immersive, multi-page state, incremental save via `insertOrIgnore`, one-finger deliberate swipe for page navigation (three guards: distance ≥50% screen width, velocity ≥1.5× system fling threshold, horizontal dominance); two-finger swipe left/right inserts a new page after/before the current page and navigates to it (same three guards).
-- `MainActivity.kt` — notebook list screen, adaptive grid (3/2 cols at 480dp), pagination, swipe, empty state, bottom bar.
-
-### Key Build Facts
-- `minSdk = 29`
-- `android.enableJetifier=true` required — Onyx SDK bundles old support classes
-- `jniLibs.pickFirsts` for `libc++_shared.so`
-- `defaultConfig.ndk { abiFilters += "arm64-v8a" }` — every target device (BOOX, Wacom Movink, Supernote) is 64-bit ARM, so we ship only arm64-v8a. This drops the unused x86/x86_64/armeabi(-v7a) ABIs (smaller APK) and removes the only 4 KB-aligned native lib among them (mmkv's x86_64 `.so`) for Play 16 KB page-size compliance (M-5). **Do not** `exclude` the transitive `com.tencent:mmkv:1.0.19` — `onyxsdk-base` references it (`MMKVBuilder`, `DefaultSearchHistory`), so removing it risks a runtime `NoClassDefFoundError`; its arm64-v8a `libmmkv.so` is already 64 KB-aligned (16 KB-compliant). ML Kit `libdigitalink.so` is 16 KB-aligned as of `digital-ink-recognition:19.0.0` — no remaining arm64 16 KB offenders.
-- `org.gradle.java.home` in `gradle.properties` pins Temurin-17
-- `NotesproutApplication.onCreate` calls `HiddenApiBypass.addHiddenApiExemptions("")` before any SDK init
-- `setStrokeColor(Color.BLACK)` required on TouchHelper init — NoteAir5C color panel defaults to non-black
-- Toolbar z-order: toolbar must overlay the drawing container in a `FrameLayout` — native SurfaceView occludes siblings below it
-
-### EPD Rules — Never Violate These
-
-**Overlay lifetime:**
-- The overlay is "writing mode" — stays active indefinitely while the user writes. No idle-release timer.
-- Legitimate handoff points: `setEraserMode(true)`, `eraseAll()`, `setTemplate()`, `loadStrokesWithBitmap()`, `onWindowFocusChanged(false)`, any toolbar finger touch (see below).
-- `onPenLifted` is a DB-save trigger only — it does NOT touch the overlay.
-
-**Toolbar touch → overlay release (`releaseRender()`):**
-- Any finger `ACTION_DOWN` within `drawingToolbar.bottom` (checked in `NotebookActivity.dispatchTouchEvent`) calls `drawingView.releaseRender()` before the child button handles the event.
-- `releaseRender()` in `OnyxNotebookView`: `setRawDrawingRenderEnabled(false)` → `invalidate()`. No `handwritingRepaint` needed — just releasing the overlay lets the Android bitmap (including updated button icons/states) become visible on e-ink.
-- **Why `dispatchTouchEvent` and not `setOnTouchListener` on the toolbar:** `setOnTouchListener` on a `ViewGroup` fires only when no child consumes the touch. Button children always consume. `dispatchTouchEvent` on the Activity fires before any view processes the event — guaranteed intercept.
-- The overlay is re-enabled automatically by `onBeginRawDrawing` → `setRawDrawingRenderEnabled(true)` on the next pen stroke. No explicit re-enable needed in `releaseRender()`.
-
-**Overlay handoff sequence (`eraseAll()`):**
-- `setRawDrawingRenderEnabled(false)` → white bitmap → `invalidate()` → `EpdController.handwritingRepaint(view, Rect(0,0,w,h))` → re-enable
-- **`handwritingRepaint` is required.** `setRawDrawingRenderEnabled` is a lightweight toggle; it does NOT clear the hardware buffer. Without `handwritingRepaint`: gray residue + black flash.
-- `EpdController.setUpdListSize(512)` in `openRawDrawing()` suppresses mid-session GC16 refresh — do not remove.
-- `renderStroke` calls `invalidate()` on every stroke so the Android canvas stays continuously current with the overlay, making handoff seamless.
-
-**Eraser overlay:**
-- On eraser start: `setRawDrawingRenderEnabled(false)`, `invalidate()` — immediately, before any erase logic. If not released first, the overlay hides the bitmap erase result (phantom strokes).
-- `handwritingRepaint` after erase gesture ends only — NEVER during move events (causes full EPD flash per stroke).
-- `onBeginRawDrawing` re-enables render guarded by `!isEraserMode`.
-
-**setTemplate() EPD handoff (OnyxNotebookView):**
-- `setRawDrawingRenderEnabled(false)` → `redrawCanvas()` → `EpdController.handwritingRepaint()` → `setRawDrawingEnabled(true)`. Without `handwritingRepaint`, the template change is invisible on e-ink until the next physical refresh.
-
-### Performance Rules (Do Not Regress)
-
-**Save path:**
-- Wrap INSERT OR IGNORE loops in `db.withTransaction {}`
-- Track `persistedStrokeIds` set; skip `toJson()` entirely for already-persisted strokes
-- Use `kotlinx.serialization` — not `org.json`
-
-**Load path:**
-- `buildRenderBitmap()` on `Dispatchers.IO` — pre-builds white → template → strokes bitmap off the main thread
-- `loadStrokesWithBitmap()` on main thread swaps the pre-built bitmap (~12ms main-thread cost)
-
-**Erase path:**
-- `LiveStroke.boundingBox: RectF` pre-computed at stroke creation; `eraseAtPath` builds an AABB of the eraser path and rejects non-intersecting strokes in O(4 floats) before any per-point geometry
-- `throttledEraseRedraw()` — redraws at most once per 60ms during active erasing; strokes are removed from the list immediately
-- `finalizeEraseRedraw()` forces one clean redraw on gesture end before `handwritingRepaint` commits pixels
-
-**Logging (verbose/debug only):**
-- Never call `Log.d` directly. Route all verbose/debug logging through `core/Slog.kt` — `Slog.d(tag) { "msg" }`. It is an `inline fun` gated on `BuildConfig.DEBUG`, so in release builds the message lambda is never evaluated (zero string-building cost on the e-ink per-stroke hot path) and nothing leaks to logcat (page UUIDs / layer IDs / sizes).
-- This is the actual stripping mechanism: `isMinifyEnabled = false`, so R8 cannot strip `Log` calls and a ProGuard `assumenosideeffects` rule would not fire. `buildConfig = true` is enabled in `build.gradle.kts` to generate `BuildConfig.DEBUG`.
-- `OnyxNotebookView.epd()` is `private inline fun epd(msg: () -> String)` delegating to `Slog.d` — all EPD-timing diagnostics are debug-only and free in release.
-- `Log.e` / `Log.w` are kept (they must survive into release — see the raw-DB logging rule). Only verbose `Log.d` moves to `Slog`.
-
-### Race condition — strokes missing on notebook reopen
-- `loadStrokes()` is called in `onCreate()` before view layout. Fix: `onSizeChanged()` calls `redrawCanvas()` (not just white fill) to replay all currently-loaded strokes regardless of load order. Applied to both drawing views.
-
-### Tool-state invariants across window focus changes (OnyxNotebookView)
-
-When a Dialog is shown over NotebookActivity, the activity's window loses focus → `onWindowFocusChanged(false)` fires → `touchHelper.setRawDrawingEnabled(false)`. When the Dialog is dismissed, focus returns → `onWindowFocusChanged(true)` → `openRawDrawing()`. This is also triggered by `onResume()` → `enableDrawing()` when returning from any sub-Activity.
-
-**The invariants that must be restored in `openRawDrawing()` and `enableDrawing()`:**
-
-| Active tool | `setRawDrawingEnabled` | `setRawDrawingRenderEnabled` |
-|---|---|---|
-| Pen | `true` | `true` (default — SDK manages) |
-| Eraser | `true` | `false` (render off prevents phantom pen strokes on overlay) |
-| Lasso / Lasso Eraser | `false` | n/a |
-| Text placement | `false` | n/a |
-
-- `openRawDrawing()` and `enableDrawing()` must guard `setRawDrawingEnabled(true)` with `!isLassoMode && !isLassoEraserMode && !isTextPlacementMode`. If that guard passes and `isEraserMode` is true, immediately follow with `setRawDrawingRenderEnabled(false)`.
-- Failing to restore these invariants causes phantom pen strokes to appear on the EPD overlay that are not captured by the app — they look real but are not persisted and vanish on the next EPD refresh.
-- Every other `setRawDrawingEnabled(true)` call site in `OnyxNotebookView` already carries these guards; `openRawDrawing()` and `enableDrawing()` are the two centralized re-entry points and must match.
-
----
-
-## Page Snapshot System
-
-- Each page row's `data` JSON carries an optional `"snapshot"` field — a base64-encoded transparent-background PNG of all strokes.
-- **No schema change** — snapshots live in the existing `data` TEXT column.
-- Rendering order at load time: white → template → snapshot PNG → new strokes drawn this session.
-
-**Snapshot content rules:**
-- Transparent background only — do NOT fill with white or draw the template.
-- `captureSnapshot()` returns `null` if `strokes` is empty or view isn't laid out (w=0/h=0).
-
-**When snapshots are captured:**
-- `setEraserMode(true)` — BEFORE `isEraserActive = true`
-- `setTemplate(bitmap)` — BEFORE `templateBitmap = bitmap`
-- `onWindowFocusChanged(false)` — app backgrounded or dialog overlay
-- Page navigation — in `navigateToPage()` and add-page paths, BEFORE `eraseAll()`
-- Close/back — in `closeNotebook()`, captured on the main thread BEFORE the seal (`sealNotebook()`) is dispatched to IO
-- **NOT on** user-initiated `eraseAll()` or page delete — content is being discarded
-
-**Critical: close path must capture snapshot synchronously.**
-`onWindowFocusChanged(false)` fires AFTER `finish()` — `soilDatabase` is already null. Any path that calls `closeNotebook()` must capture the snapshot itself. Never rely on `onWindowFocusChanged` as the close-path snapshot trigger.
-
-**Stale detection:**
-- `NotebookDao.getMaxStrokeUpdatedAt(layerId)` — `SELECT MAX(updatedAt)` with **no** `deletedAt IS NULL` filter. Soft-deleted (erased) strokes have `updatedAt = deletedAt`, so erasures are detected as changes.
-- If `maxStroke > page.updatedAt`, the snapshot is stale — full render runs and a fresh snapshot is captured.
-- `persistSnapshot()` bumps `page.updatedAt` — this is the timestamp the stale check compares against.
-
-**Two-phase page load (`NotebookActivity.loadCurrentPage`):**
-1. `setupPageIds(db)` — resolves `currentPageId` / `currentLayerId`
-2. `loadPageTemplateFromDb(db)` — decodes template bitmap (or null for blank)
-3. `tryLoadSnapshotBitmap(db, templateBitmap)` — staleness check + composite build. Returns null on miss.
-4. **Fast path** (snapshot hit): display composite immediately; deserialize strokes in background via `setStrokeListSilently()` — no visual redraw.
-5. **Full path** (miss): `deserializeStrokesFromDb` + `buildRenderBitmap` off-thread; capture and persist snapshot for next load.
-
----
-
-## Template System
-
-- Templates are `type = "template"` rows stored in the `.soil` notebook database
-- Template PNG files are stored in `getExternalFilesDir("Templates")` — imported by the user via system file picker (`ACTION_OPEN_DOCUMENT`)
-- `data` JSON: `{ "width": Int, "height": Int, "name": String, "image": String (base64) }`
-- `parseTemplateId(data)` reads `data.template` from a page row to get the active template UUID (empty = Blank)
-
-**TemplateDialog (`TemplateDialog.kt`):**
-- Two-tab dialog (All / Notebook), adaptive grid layout
-- Grid columns: `if (widthPixels >= 1500) 4 else 2` — 4 on NA5C (1860px), 2 on P2P/GC7 (≤1264px)
-- `thumbFrame` FrameLayout: `shape_bordered` background + **1dp padding** — padding insets the `ImageView` so it cannot render over the border stroke. Do NOT use `clipToOutline` here — it clips the border itself at rounded corners.
-
-**Template inheritance on new page:**
-- `addPage()` reads the current page **fresh from DB** via `dao.getObjectById(currentPageId)`. Do NOT read from the stale in-memory `pages` list — it is not refreshed after `applyTemplateToCurrentPage()` writes to DB.
-
----
-
-## Undo/Redo System
-
-- Unlimited undo/redo stack, scoped to a single `NotebookActivity` session (not persisted across process death).
-- `history/UndoRedoAction.kt` — sealed class covering all action types: stroke add/erase, page add/delete/clear/copy/paste/move, lasso erase/cut/delete/paste/move, heading create/remove/text-edit.
-- `history/UndoRedoManager.kt` — `undoStack` / `redoStack` as `ArrayDeque`. Redo stack cleared on any new user action.
-
-**Key rule — cross-page actions:**
-Do NOT call `saveAndSwitchPage()` for cross-page undo/redo — it calls `eraseAll()` which wipes in-memory strokes. Use a two-phase approach: save/snapshot the leaving page inline → navigate → load from DB → apply the action → rebuild bitmap.
-
-**Same-page stroke path:**
-Never calls `eraseAll()`. Updates the in-memory stroke list directly, rebuilds bitmap off-thread with `currentTemplateBitmap`, swaps via `loadStrokesWithBitmap`. Keep `persistedStrokeIds` in sync.
-
-**`currentTemplateBitmap` field:**
-`NotebookActivity` holds `private var currentTemplateBitmap: Bitmap?` set in `displayPage()`. Used by the same-page path to avoid re-reading the DB.
-
----
-
-## Heading Objects
-
-- `type = "heading"` rows in `.soil`; `HeadingObject` serialized to `data` column; `HeadingStroke` is the in-memory render representation.
-- Headings render as grey-fill backgrounds with embedded strokes (or 20sp inkBlack canvas text when `recognizedText` is non-null).
-- `recognizedText: String?` — null for legacy headings (renders strokes); non-null populated by ML Kit digital ink recognition at creation time.
-- All lasso actions (move, copy, cut, paste, delete, eraser) treat headings as first-class participants alongside strokes.
-- `ContentValues` keys for the `order` column in raw SQLite must use backtick quoting: `` "`order`" `` — `ContentValues` embeds column names verbatim.
-- `copyPageAfter()` (Room) and `copyPageAfterRaw()` (raw SQLite) copy all layer-child object types, not just strokes — headings are included.
-
----
-
-## Text Objects
-
-- `type = "text"` rows in `.soil`; `TextObject` (`data/TextObject.kt`) serialized to `data` column; `TextRender` (`data/TextRender.kt`) is the in-memory render representation.
-- `@Serializable data class TextObject(val text: String = "", val strokes: List<LiveStroke>? = null)` — stores raw Markdown source text and, for lasso-converted objects, the embedded original strokes. Use `toJson()` / `fromJson()` (kotlinx.serialization, never `org.json`).
-- `data class TextRender(val id: String, val boundingBox: RectF, val text: String, val strokes: List<LiveStroke>? = null)` — built at page load from `type = "text"` rows via `loadTextObjectsFromDb()` in `NotebookActivity`. `strokes` is populated from `TextObject.strokes`.
-- Text objects render after headings, before strokes in both drawing views and the PDF exporter — transparent background only (no white fill, no template draw).
-- **Bounding box width rule:** the bounding box width is the *natural content width* — the maximum line width across all lines in the `StaticLayout`, capped at page width only when content genuinely needs that full width. Never set `boundingBox.width = pageWidth` unconditionally. `TextObjectRenderer.measure()` returns this natural width; `availableWidthPx` is the layout constraint (wrapping ceiling), not the assigned width. This applies to all three write paths: insert (`insertTextObject`), edit (`updateTextObject`), and conversion (`convertLassoToText`). For unrecognized text objects (blank text, strokes rendered), the bounding box is derived from the stroke data's union bounding box.
-
-**Canvas render dispatch for type="text" objects (both drawing views):**
-- `text.isNotBlank()` → `TextObjectRenderer.draw()` (markdown engine path).
-- `text.isBlank()` AND `strokes != null && strokes.isNotEmpty()` → render embedded strokes directly (same path as unrecognized headings). This is the "unrecognized" state produced by lasso conversion when ML Kit fails.
-- `text.isBlank()` AND `strokes` null/empty → render nothing (should not occur in practice).
-- Dispatch is centralised in `drawTextObject(canvas, textRender, widthPx)` private helper in each drawing view. All render sites (redrawCanvas, buildRenderBitmap, compositeTextObjects, drag layer) call this helper — never `TextObjectRenderer.draw()` directly for text objects.
-
-- Rendering uses `StaticLayout` + `TextPaint` at 16sp `Color.BLACK`. Entry point: `TextObjectRenderer.draw(canvas, textRender, widthPx, paint, density)`.
-
-**Markdown engine (`core/markdown/`):**
-- `MarkdownParser` — hand-rolled, no dependencies. Parses Markdown source to `List<Block>`. Block types: `Heading(level 1–6, inlines)`, `Paragraph(inlines)`, `ListItem(ordered, depth, displayNumber, isTask, checked, inlines)`, `Blockquote(inlines)`, `HorizontalRule`. Inline types: `Text`, `Bold`, `Italic`, `Strikethrough`, `Link(displayText, url)`.
-- `MarkdownRenderer` — converts `List<Block>` to `SpannableStringBuilder` using Android text spans. No new Gradle dependencies.
-- `TextObjectRenderer` — wraps parser + renderer + `StaticLayout` for canvas drawing and measurement.
-
-**Supported Markdown subset:**
-- Headers h1–h6 (`#` … `######`)
-- Bold (`**text**` or `__text__`), italic (`*text*` or `_text_`), strikethrough (`~~text~~`)
-- Links (`[text](url)`) — rendered underlined, not clickable
-- Unordered lists with 3-level nesting (`-`, `*`, `+`), bullet glyphs: `• ◦ ▪` cycling by depth
-- Ordered lists with auto-renumbering (input all `1.`, output 1. 2. 3.); nesting supported
-- Task checkboxes (`- [ ]` unchecked `☐`, `- [x]` checked `☑`)
-- Blockquotes (`>`) — left bar via `QuoteSpan`
-- Horizontal rules (`---` / `***` / `___` — 3+ chars, any whitespace between) via `HorizontalRuleSpan : ReplacementSpan`
-
-**Out of scope (do not add without discussion):** inline code, fenced code blocks, tables, embedded images, raw HTML.
-
-**Canvas integration rules:**
-- `NotebookDao.getTextObjectsForLayer(layerId)` — `SELECT ... WHERE type = 'text'`; included in `getMaxContentUpdatedAt` staleness check.
-- `buildRenderBitmap` default parameter `textObjects: List<TextRender>? = null` — null means use the stored field (undo/redo call sites unchanged); non-null overrides (page load path).
-- Snapshot fast-path: `compositeTextObjects(bitmap)` paints text objects onto the snapshot bitmap immediately after `loadTextObjects()`, before `loadStrokesWithBitmap()`.
-- `captureSnapshot()` returns null if `strokes.isEmpty() && headings.isEmpty() && textObjects.isEmpty()`.
-- PDF export: `NotebookExporter.renderPage()` loads text objects from `getTextObjectsForLayer()` and renders them via `TextObjectRenderer.draw()` after headings, before strokes.
-
----
-
-## Future Work — Wacom & Generic Android Stylus
-
-**Wacom barrel button (MIP11 and other non-BOOX devices):**
-- Barrel buttons set `BUTTON_STYLUS_PRIMARY` / `BUTTON_STYLUS_SECONDARY` flags on `MotionEvent` — they do not change `getToolType()`.
-- Fix direction: check `event.isButtonPressed(MotionEvent.BUTTON_STYLUS_PRIMARY)` in `onTouchEvent` and treat as eraser mode for the duration of that stroke.
-- Low priority — do not let it block BOOX-first progress.
-
----
-
-## Implemented Systems
-
-**Core:**
-- `.soil` schema + Room setup, SoilDatabase lifecycle
-- Global index (`notesprout.db`) — `NotesproutIndex` singleton, `IndexRepository`, `ObjectEntity`, `ObjectType`; list system: `ListObject`, `ListIds` (`PINNED_LIST_ID`), Pinned list bootstrap on every launch; pin/unpin: `isNotebookPinned`, `togglePin` in `IndexRepository`
-- `soilFile(context, notebookId)` — single canonical path resolver for `Garden/<uuid>.soil`
-- Notebook list (MainActivity) — adaptive grid, pagination, cover images, Set Cover, Delete notebook
-- New-notebook dialog pre-fills name with `YYYYMMDD_HHmmss` timestamp (`java.time.LocalDateTime`, editable before confirm)
-- New-notebook name validation (`MainActivity.validateNotebookName()`) — whitelists `[^a-zA-Z0-9_\-. ]` + rejects `.`/`..`; checks index for duplicate name in current folder; no storage permissions required
-- NotebookActivity — fullscreen immersive, multi-page, incremental save, one-finger deliberate swipe, two-finger swipe to insert page before/after
-- Dual-install build variants — debug (`.dev` suffix) + release side-by-side
-
-**Drawing & Tools:**
-- OnyxNotebookView (BOOX/TouchHelper) + GenericNotebookView (standard Canvas)
-- Template system — filesystem scan, per-notebook storage, inherit on new page
-- Page Snapshot System — transparent PNG in page `data`, two-phase load, staleness detection
-- Undo/Redo — session-scoped, all action types
-
-**Page Management:**
-- Add before/after, delete, erase all (with confirmation + undo/redo)
-- Two-finger swipe left → insert after current page; two-finger swipe right → insert before current page (same guards as 1-finger nav swipe; silent, immediate navigation)
-- PageIndexActivity — snapshot grid, action mode (copy/paste/move/delete)
-
-**Lasso Tools:**
-- Lasso selection — draw to select strokes + headings, drag to move, stay-until-switched
-- Lasso eraser — closed-path erase gesture with jitter overlay
-- Floating selection toolbar: Copy, Cut, Delete, Create/Remove Heading
-- Clipboard (`NotesproutClipboard` singleton) — paste by stylus tap in lasso mode
-- All lasso actions fully undo/redo with same-page optimized and cross-page two-phase paths
-
-**Headings & Text:**
-- HeadingObject (`type="heading"` rows) — grey-fill background + embedded strokes
-- ML Kit digital ink recognition (en-US, `com.google.mlkit:digital-ink-recognition:19.0.0`) — `recognizedText` stored in `HeadingObject`
-- **Model download conditions:** currently downloads on any network (~20–30 MB, one-time). Revisit when building user configuration options — this should be a user-facing setting (Wi-Fi only vs. any network). See `MlKitHandwritingRecognizer.initModel()` → `DownloadConditions.Builder()`.
-- Canvas text rendering (20sp inkBlack) when `recognizedText` non-null, else stroke render
-- Text edit dialog (stylus tap on selected heading) + `HeadingTextEdited` undo/redo
-- TOC (`TocDialog`) — topmost heading per page, paginated list, active entry indicator, dynamic page size
-
-**Export to PDF:**
-- `NotebookExporter` object — renders all pages off-screen on `Dispatchers.IO` using same white→template→headings→strokes pipeline as drawing views
-- Cover page from `type="cover"` row becomes PDF page 1 (if present)
-- Page dimensions from each page row's `boundingBox` → `PdfDocument.PageInfo`
-- Output to `context.cacheDir/<title>.pdf`, exposed via `FileProvider` (`res/xml/file_paths.xml`, `${applicationId}.fileprovider`) with `Intent.ACTION_SEND` share sheet
-- Share intent **must** include `clipData = ClipData.newRawUri("", uri)` alongside `FLAG_GRANT_READ_URI_PERMISSION` — on Android 12+ the chooser intermediary does not forward URI permissions to the final target app without `ClipData` (causes silent Google Drive upload failure on NA5C)
-- Progress dialog (non-cancellable, `shape_bordered`, no animation): "Exporting page X of N…" via `Handler(Looper.getMainLooper())`
-- Entry points: NotebookActivity toolbar (`btnExport`, after Cover) and MainActivity long-press context menu (Export as first item, opens Room DB read-only, closes after export)
-
-**Pin/Unpin Notebook:**
-- Icons: `ic_pinned.xml`, `ic_pinned_off.xml` — Tabler stroke-based, `@color/inkBlack`, strokeWidth 2, 24dp
-- `btnPin` (`AppCompatImageButton`, `Widget.Notesprout.ToolbarButton`) sits immediately after `btnExport` in the NotebookActivity toolbar
-- On `onCreate`: checks `indexRepo.isNotebookPinned(notebookId)` on `Dispatchers.IO`; sets icon to `ic_pinned_off` (pinned) or `ic_pinned` (not pinned)
-- On tap: calls `indexRepo.togglePin(notebookId)` on `Dispatchers.IO`; swaps icon on main thread (no Toast — icon swap is the feedback)
-- MainActivity notebook long-press: checks `repository.isNotebookPinned` async before showing the `ActionSheetDialog`; adds "Pin Notebook" / "Unpin Notebook" as the **first** action; calls `repository.togglePin` on tap; shows Toast "Pinned." / "Unpinned."; if `isPinnedMode` is true, immediately calls `renderPinnedList()` so the unpinned notebook disappears without exiting the view
-
-**Pinned Browse View (MainActivity):**
-- `btnPinned` (`AppCompatImageButton`, `Widget.Notesprout.ToolbarButton`, icon `ic_pinned`) sits in the breadcrumb bar immediately before `btnSearch`; hidden during search mode and picker mode
-- `isPinnedMode: Boolean` — tracks whether the Pinned browse view is active
-- `pinnedResults: List<SearchResult>` — holds the ordered list of pinned notebooks with folder labels for the current render; `pinnedListName: String` — stores the list entity's `name` field (default "Pinned") for the empty-state message
-- **Entering pinned mode** (`enterPinnedMode()`): force-exits search mode if active; sets `isPinnedMode = true`; calls `applyPinnedModeUI()` then `renderPinnedList()`. `directoryStack` is NOT touched — folder position is preserved underneath.
-- **Exiting pinned mode** (`exitPinnedMode()`): sets `isPinnedMode = false`; calls `applyPinnedModeUI()` then `scanAndRender()` — restores the exact folder position.
-- **`applyPinnedModeUI()`**: hides `breadcrumbBar`/`breadcrumbDivider`; shows `pinnedToolbar`/`pinnedToolbarDivider` (and vice-versa). In pinned mode hides `btnNewNotebook`, `btnNewFolder`, `btnSearch`, `btnClearSearch`, `btnSort`, `btnPinned`; leaves pagination active.
-- **`pinnedToolbar`** (LinearLayout, 56dp, `GONE` by default): title `TextView` "Pinned" (18sp, weight=1, left) + `btnPinnedCancel` (`ic_x`, right). `pinnedToolbarDivider` (1dp inkBlack View) sits below it.
-- **`renderPinnedList()`** (suspend): calls `repository.getPinnedList()` for the list name, `repository.getNotebooksInList(PINNED_LIST_ID)` for notebooks in stored pin order, and `repository.getAllFolders()` for label building — all on `Dispatchers.IO`. Builds `pinnedResults` with `folderLabel` by walking each notebook's `parentId` chain. No sort prefs applied — pin order is preserved. Applies existing pagination mechanism.
-- **Card labels** in pinned mode (and search mode): show only the immediate parent folder name via `folderLabel.substringAfterLast(" › ")`, e.g. "Projects › Notebook Name" not the full path. Root-level notebooks show "Notebooks › Notebook Name".
-- **Empty state**: `"$pinnedListName is currently empty"` — uses the list entity's `name` field so this generalises naturally when user-defined lists exist.
-- **`onResume()`**: if `isPinnedMode` is true, calls `renderPinnedList()` instead of `scanAndRender()` — returning from a notebook opened in pinned mode lands back in the pinned view (re-fetches in case notebook was unpinned or deleted while open).
-- **Back press priority**: `isPinnedMode` is checked first (before picker mode, search mode, directory stack) — back exits pinned mode.
-- **Mutual exclusivity**: entering pinned mode force-exits search mode; entering picker mode hides `btnPinned`; entering search mode hides `btnPinned`.
-
-**Folder Navigation (MainActivity):**
-- Folder/notebook tree lives exclusively in the global index (`notesprout.db`). The filesystem `Garden/` directory is flat blob storage — structure is never derived from it.
-- `NotebookListItem` — sealed class in `NotebookListItem.kt`:
-  - `NotebookListItem.Folder(entity: ObjectEntity)` — a folder row from the index
-  - `NotebookListItem.Notebook(entity: ObjectEntity)` — a notebook row from the index
-- `MainActivity.directoryStack: ArrayDeque<ObjectEntity?>` — navigation stack; `null` = root. `currentFolder` is `directoryStack.last()`; `currentParentId` is `currentFolder?.id`.
-- `scanAndRender()` calls `repository.getChildren(currentParentId)` to load the current level from the index; applies sort preferences; calls `renderPage()` to update the UI.
-- Pagination applies to the combined `items: List<NotebookListItem>` list for the current parent.
-- Folder card: `ic_folder` icon centred, folder name label; tap pushes `ObjectEntity` onto `directoryStack`. No cover image. Long-press opens an `ActionSheetDialog`. Creating a new folder automatically navigates into it.
-- Breadcrumb bar (`breadcrumbBar` LinearLayout, 56dp, always visible): back button (`btnBreadcrumbBack`) + vertical divider (`breadcrumbBackDivider`) are `INVISIBLE` at root and become visible when navigated into a subfolder. One `TextView` chip per stack entry at 18sp, separated by `›` (`inkLight`). Tapping a chip pops the stack to that depth. Auto-scrolls right to show the deepest entry.
-- Breadcrumb divider: 1dp inkBlack `View` (id `breadcrumbDivider`) below the bar — always visible since the bar is always visible.
-- Both the breadcrumb bar and bottom bar are 56dp — matching the notebook activity toolbar height.
-- New Folder button (`btnNewFolder`, `ic_folder_plus`) sits after `btnNewNotebook` in the bottom bar; `validateFolderName()` applies the same whitelist as `validateNotebookName()` plus a duplicate-name-in-index check.
-- Android back button / gesture: if `directoryStack.size > 1`, calls `navigateUpOneLevel()` (pops stack, reloads); at root, default system behavior.
-- Activities receive notebook identity as `EXTRA_NOTEBOOK_ID` (entity UUID) + `EXTRA_NOTEBOOK_NAME` — never a `File` object.
-- Icons: `ic_folder.xml`, `ic_folder_plus.xml` — Tabler stroke-based, `@color/inkBlack`, strokeWidth 2, 24dp.
-
-**Browse State Persistence (`state/AppStateManager.kt`):**
-- `data class AppViewState(val folderId: String?, val pinnedMode: Boolean)` — `folderId == null` means root.
-- `object AppStateManager` — SharedPreferences file `notesprout_view_state`; `load(context)` / `save(context, state)`.
-- State is persisted at every browse-context change: `navigateIntoFolder()`, `navigateUpOneLevel()`, breadcrumb chip tap, `enterPinnedMode()`, `exitPinnedMode()`, and after `navigateStackToFolder()` when opening a notebook from search results.
-- Search mode itself is never persisted; opening a notebook from search saves the notebook's parent folder, so returning always lands on the correct folder.
-- **Restore on launch:** `MainActivity.onCreate` loads `AppViewState` synchronously. If non-default state is found, it sets `isStateRestored = false` and launches a coroutine (`lifecycleScope`) that calls `navigateStackToFolder(folderId)` (walks parentId chain via index) then, if `pinnedMode`, calls `enterPinnedMode()`. The coroutine sets `isStateRestored = true` and triggers the first render.
-- **Race guard:** the layout listener and `onResume` both check `isStateRestored`; if false they defer the scan to the restore coroutine. The layout listener always sets `gridSpec` and removes itself regardless — it only skips the scan call.
-- **Stale folder handling:** if `folderId` is set but `navigateStackToFolder` resolves to root (folder deleted), the stale entry is cleared via `AppStateManager.save(context, AppViewState(null, false))` so the next launch goes straight to root.
-
----
-
-**ActionSheetDialog (`ActionSheetDialog.kt`):**
-- Reusable flat action sheet dialog. No Material Components, no elevation, no shadow, no animation.
-- Builder API: `.title(String)` (optional) → `.addAction(iconRes?, label, onClick)` → `.show()`
-- `shape_bordered` window background applied after `show()`. 1dp inkBlack dividers between rows.
-- When a title is provided, an `ic_x` (Tabler X) close button appears in the upper-right of the title row. Tapping outside also dismisses (AlertDialog default). No bottom Cancel row.
-- Icon slot is a `Space` placeholder when `iconRes` is null, keeping labels aligned.
-- Used for notebook long-press (Pin/Unpin Notebook / Export / Copy Notebook / Move Notebook / Set Cover / Delete Notebook) and folder long-press (Copy Folder / Move Folder / Delete).
-
-**Folder delete:**
-- Long-press on a folder card → `ActionSheetDialog` with a single Delete action (icon: `ic_delete_notebook`).
-- Confirmation `AlertDialog` shows exact message: `Delete "[name]"? This will permanently remove all notebooks and subfolders inside it. This cannot be undone.`
-- On confirm (on `Dispatchers.IO`): recursively soft-deletes the folder entity and all descendant entities in the index; deletes corresponding `.soil` files from `Garden/` via `soilFile()`; cleans up WAL sidecars.
-- Reloads the current level via `scanAndRender()` after deletion.
-
-**Sorting:**
-- `sort/SortField.kt` — `enum class SortField { NAME, DATE_MODIFIED }`
-- `sort/SortOrder.kt` — `enum class SortOrder { ASCENDING, DESCENDING }`
-- `sort/FolderSort.kt` — `enum class FolderSort { FOLDERS_FIRST, NOTEBOOKS_FIRST, MIXED }`
-- `sort/SortPreferences.kt` — data class bundling all three with defaults (NAME, ASCENDING, FOLDERS_FIRST)
-- `sort/SortPreferencesManager.kt` — `object` with `load(context)` / `save(context, prefs)`; persists to `SharedPreferences("notesprout_sort_prefs")`; each enum stored as `.name` string; `runCatching` guards against unknown stored values falling back to defaults
-- `sort/SortDialog.kt` — `AlertDialog.Builder` with `dialog_sort.xml` layout; three `RadioGroup` sections (Sort by / Order / Folders & Notebooks); pre-selects from `current: SortPreferences`; Cancel dismisses, Apply calls `onApply` then dismisses; styled with `setElevation(0f)` + `shape_bordered` after `show()`
-- Icon: `ic_filter.xml` — Tabler `filter-2` (three decreasing horizontal lines), strokeWidth 2, `@color/inkBlack`, 24dp
-- `btnSort` (`AppCompatImageButton`, `Widget.Notesprout.ToolbarButton`) sits at the right end of the breadcrumb bar in `activity_main.xml`
-- `MainActivity` loads prefs on `onCreate` via `SortPreferencesManager.load`; `btnSort` click opens `SortDialog` which saves and calls `scanAndRender()`
-- `scanAndRender()` applies `sortPrefs` via `sortItems()` helper — sort key is `entity.updatedAt` (DATE_MODIFIED) or `entity.name.lowercase()` (NAME); `FolderSort` controls grouping (FOLDERS_FIRST / NOTEBOOKS_FIRST / MIXED); `SortOrder.DESCENDING` reverses the comparator
-- Card labels show `"$displayName ($dateStr, $timeStr)"` using `DateFormat.getMediumDateFormat` + `DateFormat.getTimeFormat` (locale-aware)
-
-**Notebook Search (`search/SearchEngine.kt`, `search/SearchDialog.kt`):**
-- `btnSearch` (breadcrumb bar, `ic_search`) opens `SearchDialog` — a plain `EditText` with ranked fuzzy matching
-- `btnClearSearch` (`ic_search_off`, visible only in search mode) exits search and restores normal browse
-- `SearchEngine.search(query, allNotebooks)` — queries all notebooks from the index via `repository.getAllNotebooks()`, scores by name: substring (3) > all words present (2) > prefix/initials (1); sorted by score desc, name asc
-- Search mode replaces the normal index scan in `scanAndRender()`; results shown as notebook cards with `"ParentFolder › NotebookName"` labels — only the immediate parent folder is shown (via `folderLabel.substringAfterLast(" › ")`), not the full path; no date/time in search mode
-- Back press while in search mode exits search (checked before the directory-stack back logic)
-- Opening a notebook from search results rebuilds `directoryStack` by walking `parentId` chain from the result's parent to root (`navigateStackToDirectory`) so returning from NotebookActivity lands in the correct folder
-- Empty search results show `No notebooks found for "query"` instead of the generic empty-state copy
-- No new Gradle dependencies
-
-**Copy/Move Notebooks and Folders (`ui/DestinationPickerState.kt`, `MainActivity.kt`):**
-- Long-press notebook → ActionSheet: Pin/Unpin Notebook (first) / Export / Copy Notebook / Move Notebook / Set Cover / Delete Notebook
-- Long-press folder → ActionSheet: Copy Folder / Move Folder / Delete
-- `DestinationPickerState` — sealed class in `ui/`: `None`, `CopyNotebook(source: ObjectEntity)`, `MoveNotebook(source: ObjectEntity)`, `CopyFolder(source: ObjectEntity)`, `MoveFolder(source: ObjectEntity)`
-- `MainActivity.destinationPickerState` — tracks active picker operation
-- Entering picker mode: force-exits search mode, sets state, calls `scanAndRender()`
-- Picker toolbar (`pickerToolbar`, 56dp LinearLayout, `GONE` by default) sits above the breadcrumb bar in `activity_main.xml`: Cancel button (left), title TextView (center, weight=1), Confirm button (right, bold). Shown via `applyPickerModeUI()` when state ≠ None.
-- `pickerToolbarDivider` (1dp inkBlack View, `GONE` by default) sits below `pickerToolbar`.
-- Title/confirm label: "Copy notebook here" / "Move notebook here" / "Copy folder here" / "Move folder here"; confirm reads "Copy here" or "Move here".
-- Bottom bar in picker mode: `btnNewNotebook`, `btnSearch`, `btnClearSearch`, `btnSort` all hidden; `btnNewFolder` and pagination remain active.
-- `scanAndRender()` in picker mode: shows folders only (from index); for CopyFolder/MoveFolder, filters out the source entity id and any descendant ids.
-- Empty state in picker mode: "No folders here. Create one below."
-- Back press while in picker mode: exits picker mode (checked before search mode check, before directory-stack pop).
-- Cancel button (`btnPickerCancel`): calls `exitPickerMode()` — resets state, restores UI, calls `scanAndRender()`.
-- Confirm button (`btnPickerConfirm`): calls `confirmPickerDestination()`.
-  - MoveNotebook/CopyNotebook: rejects if `currentParentId == source.parentId` ("Already in this folder").
-  - CopyFolder/MoveFolder: rejects if destination is the source entity or a descendant in the index.
-  - Conflict check: if a sibling with the same name already exists in the index at the destination, shows AlertDialog "A [notebook/folder] named '[name]' already exists here. Replace it?" → Replace proceeds, Cancel stays in picker mode.
-  - MoveNotebook/MoveFolder: `repository.moveObject(source.id, currentParentId)` — index update only; `.soil` file stays at `Garden/<id>.soil` (UUID doesn't change).
-  - CopyNotebook: creates a new `ObjectEntity` via `repository.createNotebook`, then copies the `.soil` file to the new UUID path via `soilFile()`.
-  - CopyFolder: recursively creates new index entries and copies all descendant `.soil` files.
-  - On success: reset state, restore UI, `scanAndRender()`, Toast "Copied." or "Moved.".
-  - On failure: Toast "Copy failed." or "Move failed." — stays in picker mode.
-- Creating a new folder while in picker mode navigates into it and stays in picker mode (normal `navigateIntoFolder` path, no extra logic needed).
-
----
-
-## Text Object Editor (`TextEditDialog`)
-
-`TextEditDialog` (`notebook/TextEditDialog.kt`) — Markdown WYSIWYG/source editor dialog for creating and editing text objects.
-
-**Dual mode:**
-- **WYSIWYG** (default): formatting spans are applied live as the user types — headings get larger and bold, `**text**` markers are de-emphasized (inkLight), inline bold/italic/strikethrough rendered. Toggle button has `isSelected=true` border.
-- **Markdown**: all spans stripped; raw Markdown source visible as plain text. Toggle button has `isSelected=true` border.
-- Mode toggle is two `AppCompatButton` (weight=1 each) using `bg_toolbar_button` background; switching is instant with no re-render of the underlying text (spans only, text unchanged).
-
-**Formatting toolbar** (HorizontalScrollView): B, I, S̶ (strikethrough), H▾ (PopupMenu H1–H6/Normal), •, 1., ☐ (task checkbox toggle: unchecked → checked → removed), ❝ (blockquote), — (horizontal rule), [⊞] (link). Buttons use `shape_bordered` background, 36dp height, 10dp H padding. All fit without scrolling on P2P (824px); scroll kicks in on narrower screens.
-
-**Auto-renumbering:** ordered list blocks are renumbered 1, 2, 3… on every `afterTextChanged`. Block counter resets on any non-list line. Auto-continue: pressing Enter at the end of a numbered list line inserts the next number prefix.
-
-**WYSIWYG regex safety:** inline patterns (`boldDoubleStarPattern`, `boldDoubleUnderPattern`, `strikePattern`) do NOT use `RegexOption.DOT_MATCHES_ALL` — patterns use `[^*\n]` and `[^~\n]` exclusion classes so they never match across line boundaries.
-
-**Icon:** `ic_text_recognition.xml` — Tabler `text-recognition`, strokeWidth 2, `@color/inkBlack`, 24dp. 4 corner L-brackets + vertical bar + horizontal bar (T shape inside scan frame).
-
-**AlertDialog pattern:**
-- `setSoftInputMode(SOFT_INPUT_STATE_VISIBLE | SOFT_INPUT_ADJUST_RESIZE)` before `show()`
-- `setElevation(0f)` + `setBackgroundDrawableResource(R.drawable.shape_bordered)` after `show()`
-- IME hidden in both Save and Cancel click handlers via `editMarkdown.windowToken` (dialog's own window token — not the activity's)
-
----
-
-## Text Placement Mode and Insert Flow
-
-`btnInsertText` (`ic_text_recognition.xml`) sits between EraseAll and Lasso in the NotebookActivity toolbar. It is a persistent toggle (like the pen/eraser buttons) that enters **text placement mode**.
-
-**Entering placement mode (`enterTextPlacementMode()`):**
-- Exits any active lasso or lasso-eraser mode.
-- Sets `isTextPlacementMode = true`.
-- Calls `drawingView.setTextPlacementMode(true)` → on Onyx: `setRawDrawingEnabled(false)` immediately so the EPD overlay does not capture the next pen contact.
-- Calls `drawingView.releaseRender()` to flush the EPD layer.
-- Sets `btnInsertText.isSelected = true`; deselects pen/eraser/lasso buttons.
-
-**Exiting placement mode (`exitTextPlacementMode()`):**
-- Sets `isTextPlacementMode = false`.
-- Calls `drawingView.setTextPlacementMode(false)` and `drawingView.enableDrawing()` to restore the prior tool's raw-drawing state.
-- Sets `btnInsertText.isSelected = false`; restores pen/eraser selected state.
-
-**`dispatchTouchEvent` cancels placement mode on toolbar touch:**
-- Any finger `ACTION_DOWN` in the toolbar while `isTextPlacementMode` is true calls `exitTextPlacementMode()`, UNLESS the touch is on `btnInsertText` itself (the button's click listener handles toggle).
-
-**Canvas tap in placement mode:**
-- `handleTextPlacementTouch` in the drawing views captures tap coordinates on `ACTION_DOWN` but does **not** exit placement mode or fire the callback until `ACTION_UP`. This is critical: exiting on DOWN would route the subsequent MOVE/UP events to the normal drawing path, creating a tiny persisted stroke from the placement tap.
-- `onTextPlacementTap(tapX, tapY)` fires on `ACTION_UP` (stylus already leaving the screen); `isTextPlacementMode` is set to `false` at that point.
-- The Activity `onTextPlacementTap` callback must **not** call `enableDrawing()`; drawing is restored by the dialog's focus cycle (`onWindowFocusChanged(true)` → `openRawDrawing()`) after the stylus is gone. Calling `enableDrawing()` before the stylus lifts (i.e., from the callback) would re-enable the Onyx SDK raw input while the pen is still touching the screen, causing `onBeginRawDrawing` → `onEndRawDrawing` → `onPenLifted` → a phantom stroke persisted to the database.
-- Only stylus tool type is accepted — finger touches are ignored.
-
-**Insert flow (`insertTextObject(markdown, tapX, tapY)`):**
-1. Measures the markdown via `TextObjectRenderer.measure()` on `Dispatchers.Default`.
-2. Computes a bounding box centered on the tap, clamped to page bounds.
-3. Inserts a `type="text"` row via `dao.insertObject(NotebookObject(...))` on `Dispatchers.IO`.
-4. Calls `invalidatePageSnapshot(db, pageId)`.
-5. Appends the new `TextRender` to `drawingView.getTextObjects()` and calls `drawingView.loadTextObjects(...)`.
-6. Rebuilds the render bitmap off-thread and swaps it via `loadStrokesWithBitmap`.
-7. Enters lasso mode and selects the new object (sets `lassoSelectedIds`, `setLassoOverlay`, shows floating toolbar).
-8. Pushes `UndoRedoAction.TextInserted` onto the undo stack.
-
-**`onWindowFocusChanged` during the dialog:**
-- When `TextEditDialog` opens, the activity loses window focus → `onWindowFocusChanged(false)` → raw drawing disabled. When the dialog closes → `onWindowFocusChanged(true)` → `openRawDrawing()` → drawing restored (since `isTextPlacementMode` is already false by this point). This is the standard dialog focus cycle — no special handling needed.
-
-**OnyxNotebookView tool-state invariants (updated):**
-
-| Active tool | `setRawDrawingEnabled` | `setRawDrawingRenderEnabled` |
-|---|---|---|
-| Pen | `true` | `true` (default — SDK manages) |
-| Eraser | `true` | `false` |
-| Lasso / Lasso Eraser | `false` | n/a |
-| Text placement | `false` | n/a |
-
-`openRawDrawing()` and `enableDrawing()` guard `setRawDrawingEnabled(true)` with `!isLassoMode && !isLassoEraserMode && !isTextPlacementMode`.
-
-**TextInserted undo/redo:**
-- `UndoRedoAction.TextInserted(textId, pageId, layerId, textRender)` — carries full `TextRender` so redo can rebuild the in-memory list without a DB read.
-- **Undo:** `dao.softDeleteById(textId)`, removes from `drawingView.getTextObjects()`, clears selection.
-- **Redo:** `dao.restoreById(textId)`, adds `textRender` back to in-memory list, re-selects the object.
-
-**Tap-to-edit:**
-- While a `type="text"` object is selected (single-selection in lasso mode) and the user performs a stylus tap within its `boundingBox`, `showTextEditDialogForTextObject(textRender)` is called from `onLassoTap` — identical tap-vs-drag detection logic as heading tap-to-edit (checked in the same `onLassoTap` block, immediately after the heading check).
-- **GATED on `text.isNotBlank()`**: the dialog only opens for recognized-text objects. Unrecognized objects (`text == ""`, showing embedded strokes) ignore the tap — they cannot be edited via the dialog.
-- `TextEditDialog` is opened pre-filled with `textRender.text` (the raw Markdown source).
-- `TextEditDialog.onConfirm` is **always** called (including with empty text) — callers guard `isNotBlank()` themselves for insert; the edit flow dispatches on empty vs non-empty.
-
-**Non-empty confirm — `updateTextObject(textRender, newMarkdown)`:**
-- Measures `newMarkdown` via `TextObjectRenderer.measure()` on `Dispatchers.Default`.
-- New `boundingBox`: keeps existing top-left fixed; width = min(measuredW, pageW); height = measuredH. If the resized box would overflow the page's right or bottom edge, top-left is clamped so the full box stays within page bounds.
-- Persists: `dao.updateHeadingData(id, bboxJson, TextObject(text=...).toJson(), now)` + `invalidatePageSnapshot`.
-- Updates in-memory `drawingView.getTextObjects()` list, rebuilds bitmap off-thread, swaps via `loadStrokesWithBitmap`.
-- If the object is selected, refreshes the dashed selection overlay to the new `boundingBox`.
-- Pushes `UndoRedoAction.TextEdited(textId, pageId, oldTextRender, newTextRender)`.
-
-**TextEdited undo/redo:**
-- `UndoRedoAction.TextEdited(textId, pageId, oldTextRender, newTextRender)` — both `TextRender` carry (id, boundingBox, text).
-- **Undo:** persist `oldTextRender` (text + bbox) → DB; swap in-memory; refresh selection overlay to `oldBoundingBox`.
-- **Redo:** persist `newTextRender` → DB; swap in-memory; refresh selection overlay to `newBoundingBox`.
-
-**Empty confirm — `deleteTextObjectFromEdit(textRender)`:**
-- Soft-deletes the row (`dao.softDeleteById(id, deletedAt)`) + `invalidatePageSnapshot`.
-- Removes from in-memory list, rebuilds bitmap.
-- Clears this object from `selectedObjectIds`; if selection becomes empty, hides the floating toolbar.
-- Pushes `UndoRedoAction.TextRemoved(textId, pageId, textRender, deletedAt)`.
-- **Tap-to-edit is GATED on `text.isNotBlank()`** (see below), so this path is only reached for recognized text objects. Soft-deleting the entire row — including any embedded `strokes` — is intentional: the user explicitly cleared the text. This is NOT a bug; the embedded original strokes are intentionally discarded.
-
-**TextRemoved undo/redo:**
-- `UndoRedoAction.TextRemoved(textId, pageId, textRender, deletedAt)`.
-- **Undo:** `dao.restoreById(textId)`, add `textRender` back to in-memory list, re-select the object, show floating toolbar.
-- **Redo:** `dao.softDeleteById(textId, deletedAt)`, remove from in-memory list, clear selection.
-
-**Lasso actions for `type="text"` objects:**
-
-`type="text"` objects are fully first-class lasso participants — all lasso actions treat them alongside strokes and headings with complete undo/redo support.
-
-| Action | Status |
-|---|---|
-| Selection (lasso draw) | ✅ Center-point containment hit test |
-| Drag to move | ✅ Translates bounding box; persists via `updateHeadingData`; `StrokesMoved` undo; preserves `strokes` field |
-| Delete (floating toolbar Delete) | ✅ `performLassoDelete` — soft-delete + `LassoDeleted` undo |
-| Tap-to-edit (selected, text non-blank) | ✅ `showTextEditDialogForTextObject` — `TextEdited` / `TextRemoved` undo |
-| Tap on selected unrecognized object | ✅ No-op (gated: blank text → dialog not opened) |
-| Highlight/selection visual | ✅ Dashed overlay box |
-| Convert strokes → text (lasso "Text" btn) | ✅ `convertLassoToText` — ML Kit + `TextConverted` undo |
-| Copy | ✅ `performLassoCopy` — included in `NotesproutClipboard.ClipboardContent.textObjects`; preserves `text` + `strokes` |
-| Cut | ✅ `performLassoCut` — clipboard + soft-delete; `LassoCut` undo carries `textIds`/`textObjects` |
-| Paste (same-page and cross-page) | ✅ `performLassoPaste` — new UUID, translated bbox, inserts `type="text"` row; `LassoPasted` undo carries `textIds`/`textObjects` |
-| Lasso eraser | ✅ `runLassoHitTest` — center-point containment; atomic removal; `LassoErased` undo carries `textIds`/`textObjects` |
-
-**Key clipboard invariants for text objects:**
-- `NotesproutClipboard.ClipboardContent.textObjects: List<TextRender>` carries both `text` (markdown, may be empty) and `strokes` (may be non-null for unrecognized conversion objects). Paste reproduces the correct render branch: markdown if `text.isNotBlank()`, embedded strokes if blank+strokes present.
-- Cross-page paste: `textObjects` survives the cross-page round trip via `LassoPasted.textObjects` stored in the undo action.
-- `LassoErased.strokeIds` contains ALL erased IDs (strokes + heading IDs + text IDs). `textIds` is the text-object subset stored separately for in-memory partitioning on undo.
-
-*Last updated: Text object polish pass + device tier update (Prompt 7)*
-
----
-
-**Lasso stroke-to-text conversion:**
-
-- **"Text" button** (`btnConvertText`, icon `ic_text_recognition`) appears in the floating lasso selection toolbar immediately after Create/Remove Heading buttons. Visible only when `selectionIsPureStrokes` (same condition as "Create Heading").
-- **`convertLassoToText(selectedStrokes, selectionBox)`** — suspend function called on `Dispatchers.IO`:
-  1. Runs ML Kit recognition on selected strokes (same recognizer + `DownloadConditions` as heading conversion).
-  2. **Success** (`result != FALLBACK_TEXT`): measures text via `TextObjectRenderer.measure()`, resizes bbox to fit text (left/top anchored, same pattern as heading). Sets `data.text = recognizedText`.
-  3. **Failure** (`FALLBACK_TEXT` or recognizer not ready): keeps original selection bbox. Sets `data.text = ""`.
-  4. In both cases: `data.strokes = embeddedStrokes` (fresh-UUID copies of selected stroke data).
-  5. Soft-deletes original stroke rows + inserts new `type="text"` row in a single transaction.
-  6. Invalidates page snapshot, selects the new text object in lasso mode.
-- **`TextConverted` undo/redo action**: `UndoRedoAction.TextConverted(textId, pageId, layerId, deletedAt, originalStrokeIds, textRender)`.
-  - `textRender` carries full state (id, boundingBox, text, strokes) so redo can rebuild in-memory list without a DB read.
-  - **Undo**: soft-delete text row + restore original stroke rows + clear selection.
-  - **Redo**: re-soft-delete original strokes + restore text row + re-select it.
-  - Same-page and cross-page paths implemented (mirrors `HeadingCreated` structure).
-- **`strokes` preservation rule**: All `TextObject`/`TextRender` write paths (`updateTextObject`, `TextEdited` DB handler, `StrokesMoved` DB handler) preserve `strokes` in the serialized JSON — `TextObject(text = ..., strokes = target.strokes).toJson()`. Never construct `TextObject(text = ...)` alone for existing objects that may carry strokes.
