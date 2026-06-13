@@ -7,6 +7,7 @@ import android.graphics.RectF
 import android.view.View
 import com.notesprout.android.data.HeadingStroke
 import com.notesprout.android.data.LiveStroke
+import com.notesprout.android.data.TextRender
 
 // Option B: buildRenderBitmap + loadStrokesWithBitmap — pre-build bitmap on IO thread
 
@@ -198,6 +199,28 @@ interface NotebookView {
     fun getHeadings(): List<HeadingStroke> = emptyList()
 
     /**
+     * Replace the in-memory text object list with [textObjects] loaded from the database.
+     * Call before [loadStrokes] or [loadStrokesWithBitmap] so text objects are included
+     * in the next canvas redraw.  Must be called on the main thread.
+     */
+    fun loadTextObjects(textObjects: List<TextRender>) {}
+
+    /**
+     * Return the current in-memory text object list.
+     * Safe to call from any thread — text objects are replaced atomically and the list
+     * itself is immutable, so a stale reference is still safe to read.
+     */
+    fun getTextObjects(): List<TextRender> = emptyList()
+
+    /**
+     * Paint the current [textObjects] onto [bitmap] using the view's text paint.
+     * Called from displayPage on the snapshot fast-path: the snapshot bitmap contains
+     * strokes and headings but NOT text objects (which are always loaded fresh from DB).
+     * Must be called on the main thread after [loadTextObjects].
+     */
+    fun compositeTextObjects(bitmap: Bitmap) {}
+
+    /**
      * Fired on the main thread when the eraser path intersects a heading's bounding box.
      * The heading has already been removed from the view's in-memory list before this fires.
      * NotebookActivity wires this to soft-delete the heading row from the DB and push an
@@ -253,10 +276,20 @@ interface NotebookView {
      * not yet attached to the view — hand it to [loadStrokesWithBitmap] on the
      * main thread to swap it in.
      */
+    /**
+     * Build the full render bitmap on a background thread.
+     *
+     * [textObjects]: when non-null, render these text objects. When null (the default),
+     * implementations fall back to the stored field set by [loadTextObjects] — this lets
+     * existing undo/redo call sites omit the argument and still render text objects
+     * correctly (the field is set once by [displayPage] and doesn't change during a
+     * stroke-only undo/redo operation).
+     */
     fun buildRenderBitmap(
         strokes: List<LiveStroke>,
         templateBitmap: Bitmap?,
         headings: List<HeadingStroke> = emptyList(),
+        textObjects: List<TextRender>? = null,
     ): Bitmap?
 
     /**

@@ -9,13 +9,17 @@ import android.graphics.Path
 import android.graphics.PointF
 import android.graphics.RectF
 import android.graphics.pdf.PdfDocument
+import android.text.TextPaint
 import android.util.Base64
 import android.util.TypedValue
 import com.notesprout.android.core.BitmapDecode
 import com.notesprout.android.data.CoverObject
+import com.notesprout.android.core.markdown.TextObjectRenderer
 import com.notesprout.android.data.HeadingObject
 import com.notesprout.android.data.HeadingStroke
 import com.notesprout.android.data.LiveStroke
+import com.notesprout.android.data.TextObject
+import com.notesprout.android.data.TextRender
 import com.notesprout.android.data.NotebookMetadata
 import com.notesprout.android.data.SoilDatabase
 import com.notesprout.android.data.StrokeData
@@ -102,6 +106,15 @@ object NotebookExporter {
                 }
             } else emptyList()
 
+            val textObjects: List<TextRender> = if (layer != null) {
+                dao.getTextObjectsForLayer(layer.id).mapNotNull { row ->
+                    val box = parseBoundingBox(row.boundingBox) ?: return@mapNotNull null
+                    val to = runCatching { TextObject.fromJson(row.data) }.getOrNull()
+                        ?: return@mapNotNull null
+                    TextRender(id = row.id, boundingBox = box, text = to.text)
+                }
+            } else emptyList()
+
             val strokes: List<LiveStroke> = if (layer != null) {
                 dao.getStrokesForLayer(layer.id).mapNotNull { row ->
                     val sd = runCatching { StrokeData.fromJson(row.data) }.getOrNull()
@@ -110,7 +123,7 @@ object NotebookExporter {
                 }
             } else emptyList()
 
-            val bitmap = renderPage(pw, ph, templateBitmap, headings, strokes, context)
+            val bitmap = renderPage(pw, ph, templateBitmap, headings, textObjects, strokes, context)
 
             val pageInfo = PdfDocument.PageInfo.Builder(pw, ph, pdfPageNumber++).create()
             val pdfPage = pdf.startPage(pageInfo)
@@ -176,6 +189,7 @@ object NotebookExporter {
         h: Int,
         templateBitmap: Bitmap?,
         headings: List<HeadingStroke>,
+        textObjects: List<TextRender>,
         strokes: List<LiveStroke>,
         context: Context,
     ): Bitmap {
@@ -232,6 +246,17 @@ object NotebookExporter {
                     canvas.drawPath(path, strokePaint)
                 }
             }
+        }
+
+        val textObjectTextSizePx = TypedValue.applyDimension(
+            TypedValue.COMPLEX_UNIT_SP, 16f, context.resources.displayMetrics
+        )
+        val textObjectPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.BLACK
+            textSize = textObjectTextSizePx
+        }
+        for (textObj in textObjects) {
+            TextObjectRenderer.draw(canvas, textObj, w, textObjectPaint, densityDp)
         }
 
         for (liveStroke in strokes) {

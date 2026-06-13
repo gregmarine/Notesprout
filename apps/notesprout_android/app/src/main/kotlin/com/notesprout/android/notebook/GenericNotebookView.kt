@@ -14,8 +14,10 @@ import android.util.TypedValue
 import android.graphics.Region
 import android.view.MotionEvent
 import android.view.View
+import com.notesprout.android.core.markdown.TextObjectRenderer
 import com.notesprout.android.data.HeadingStroke
 import com.notesprout.android.data.LiveStroke
+import com.notesprout.android.data.TextRender
 import java.io.ByteArrayOutputStream
 import java.util.UUID
 
@@ -47,6 +49,17 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
 
     // Heading store — populated from type="heading" rows at page load time.
     private var headings: List<HeadingStroke> = emptyList()
+
+    // Text object store — populated from type="text" rows at page load time.
+    private var textObjects: List<TextRender> = emptyList()
+
+    private val textObjectTextSizePx = android.util.TypedValue.applyDimension(
+        android.util.TypedValue.COMPLEX_UNIT_SP, 16f, resources.displayMetrics
+    )
+    private val textObjectPaint = android.text.TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.BLACK
+        textSize = textObjectTextSizePx
+    }
 
     private val headingPaint = Paint().apply {
         style = Paint.Style.FILL
@@ -514,6 +527,9 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
                 }
             }
         }
+        for (textObj in textObjects) {
+            TextObjectRenderer.draw(canvas, textObj, width, textObjectPaint, resources.displayMetrics.density)
+        }
         for (liveStroke in strokes) {
             val points = liveStroke.points
             if (points.size < 2) continue
@@ -746,6 +762,21 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
 
     override fun getHeadings(): List<HeadingStroke> = headings
 
+    override fun loadTextObjects(textObjects: List<TextRender>) {
+        this.textObjects = textObjects
+    }
+
+    override fun getTextObjects(): List<TextRender> = textObjects
+
+    override fun compositeTextObjects(bitmap: Bitmap) {
+        if (textObjects.isEmpty()) return
+        val canvas = Canvas(bitmap)
+        val density = resources.displayMetrics.density
+        for (textObj in textObjects) {
+            TextObjectRenderer.draw(canvas, textObj, bitmap.width, textObjectPaint, density)
+        }
+    }
+
     override fun loadStrokes(strokes: List<LiveStroke>) {
         this.strokes.clear()
         this.strokes.addAll(strokes)
@@ -761,9 +792,12 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
         strokes: List<LiveStroke>,
         templateBitmap: Bitmap?,
         headings: List<HeadingStroke>,
+        textObjects: List<TextRender>?,
     ): Bitmap? {
         val w = width; val h = height
         if (w == 0 || h == 0) return null
+        // null = fall back to stored field (undo/redo paths); non-null = explicit list (page load)
+        val effectiveTextObjects = textObjects ?: this.textObjects
         val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bmp)
         canvas.drawColor(Color.WHITE)
@@ -781,6 +815,9 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
                     canvas.drawPath(path, strokePaint)
                 }
             }
+        }
+        for (textObj in effectiveTextObjects) {
+            TextObjectRenderer.draw(canvas, textObj, w, textObjectPaint, resources.displayMetrics.density)
         }
         for (liveStroke in strokes) {
             val pts = liveStroke.points
@@ -826,7 +863,7 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
      * Returns null if there are no strokes and no headings, or the view is not yet laid out.
      */
     override fun captureSnapshot(): String? {
-        if (strokes.isEmpty() && headings.isEmpty()) return null
+        if (strokes.isEmpty() && headings.isEmpty() && textObjects.isEmpty()) return null
         val w = width; val h = height
         if (w == 0 || h == 0) return null
         val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)

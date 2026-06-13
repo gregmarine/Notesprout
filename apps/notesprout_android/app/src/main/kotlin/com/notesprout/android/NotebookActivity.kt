@@ -43,6 +43,8 @@ import com.notesprout.android.data.copyPageAfter
 import com.notesprout.android.data.HeadingObject
 import com.notesprout.android.data.HeadingStroke
 import com.notesprout.android.data.LiveStroke
+import com.notesprout.android.data.TextObject
+import com.notesprout.android.data.TextRender
 import com.notesprout.android.data.TYPE_HEADING
 import com.notesprout.android.data.NotebookDao
 import com.notesprout.android.data.NotebookMetadata
@@ -102,6 +104,7 @@ class NotebookActivity : AppCompatActivity() {
         val displayBitmap: Bitmap?,
         val usedSnapshot: Boolean,
         val headings: List<HeadingStroke> = emptyList(),
+        val textObjects: List<TextRender> = emptyList(),
     )
 
     private lateinit var binding: ActivityNotebookBinding
@@ -1584,13 +1587,14 @@ class NotebookActivity : AppCompatActivity() {
         setupPageIds(db)
         val templateBitmap  = loadPageTemplateFromDb(db)
         val headings        = loadHeadingsFromDb(db, currentLayerId)
+        val textObjects     = loadTextObjectsFromDb(db, currentLayerId)
         val snapshotBitmap  = tryLoadSnapshotBitmap(db, templateBitmap)
         return if (snapshotBitmap != null) {
-            PageLoadResult(emptyList(), templateBitmap, snapshotBitmap, usedSnapshot = true, headings = headings)
+            PageLoadResult(emptyList(), templateBitmap, snapshotBitmap, usedSnapshot = true, headings = headings, textObjects = textObjects)
         } else {
             val strokes      = deserializeStrokesFromDb(db)
-            val renderBitmap = drawingView.buildRenderBitmap(strokes, templateBitmap, headings)
-            PageLoadResult(strokes, templateBitmap, renderBitmap, usedSnapshot = false, headings = headings)
+            val renderBitmap = drawingView.buildRenderBitmap(strokes, templateBitmap, headings, textObjects)
+            PageLoadResult(strokes, templateBitmap, renderBitmap, usedSnapshot = false, headings = headings, textObjects = textObjects)
         }
     }
 
@@ -1607,6 +1611,17 @@ class NotebookActivity : AppCompatActivity() {
             val headingObj = runCatching { HeadingObject.fromJson(row.data) }.getOrNull()
                 ?: return@mapNotNull null
             HeadingStroke(id = row.id, boundingBox = box, strokes = headingObj.strokes, recognizedText = headingObj.recognizedText)
+        }
+    }
+
+    private suspend fun loadTextObjectsFromDb(db: SoilDatabase, layerId: String): List<TextRender> {
+        if (layerId.isEmpty()) return emptyList()
+        val rows = db.notebookDao().getTextObjectsForLayer(layerId)
+        return rows.mapNotNull { row ->
+            val box = row.parseBoundingBox() ?: return@mapNotNull null
+            val textObj = runCatching { TextObject.fromJson(row.data) }.getOrNull()
+                ?: return@mapNotNull null
+            TextRender(id = row.id, boundingBox = box, text = textObj.text)
         }
     }
 
@@ -1630,8 +1645,15 @@ class NotebookActivity : AppCompatActivity() {
     private fun displayPage(result: PageLoadResult) {
         currentTemplateBitmap = result.templateBitmap
         drawingView.loadHeadings(result.headings)
+        drawingView.loadTextObjects(result.textObjects)
         val bitmap = result.displayBitmap
         if (bitmap != null) {
+            // On the snapshot fast-path the snapshot bitmap contains strokes + headings but
+            // NOT text objects (which are always loaded fresh from DB). Composite them now so
+            // the user sees text objects as soon as the page displays.
+            if (result.usedSnapshot) {
+                drawingView.compositeTextObjects(bitmap)
+            }
             drawingView.loadStrokesWithBitmap(result.strokes, bitmap, result.templateBitmap)
         } else {
             drawingView.setTemplate(result.templateBitmap)

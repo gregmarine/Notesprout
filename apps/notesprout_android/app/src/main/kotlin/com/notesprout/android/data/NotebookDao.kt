@@ -74,6 +74,14 @@ interface NotebookDao {
     suspend fun getHeadingsForLayer(layerId: String): List<NotebookObject>
 
     /**
+     * All non-deleted text objects belonging to [layerId], sorted by `order` ascending.
+     * Each row's [NotebookObject.data] is a serialized [com.notesprout.android.data.TextObject]
+     * carrying the markdown source.
+     */
+    @Query("SELECT * FROM notebook WHERE parentId = :layerId AND type = 'text' AND deletedAt IS NULL ORDER BY \"order\" ASC")
+    suspend fun getTextObjectsForLayer(layerId: String): List<NotebookObject>
+
+    /**
      * First non-deleted row of [type], or null if none exist.
      * Useful for retrieving the single page or layer in a fresh notebook.
      */
@@ -257,7 +265,7 @@ interface NotebookDao {
      * [NotebookObject.updatedAt], the stored snapshot pre-dates a content change and
      * must be discarded in favour of a full re-render.
      */
-    @Query("SELECT MAX(updatedAt) FROM notebook WHERE type IN ('stroke', 'heading') AND parentId = :layerId")
+    @Query("SELECT MAX(updatedAt) FROM notebook WHERE type IN ('stroke', 'heading', 'text') AND parentId = :layerId")
     suspend fun getMaxContentUpdatedAt(layerId: String): Long?
 
     /**

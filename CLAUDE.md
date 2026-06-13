@@ -542,6 +542,40 @@ Never calls `eraseAll()`. Updates the in-memory stroke list directly, rebuilds b
 
 ---
 
+## Text Objects
+
+- `type = "text"` rows in `.soil`; `TextObject` (`data/TextObject.kt`) serialized to `data` column; `TextRender` (`data/TextRender.kt`) is the in-memory render representation.
+- `@Serializable data class TextObject(val text: String = "")` — stores raw Markdown source text. Use `toJson()` / `fromJson()` (kotlinx.serialization, never `org.json`).
+- `data class TextRender(val id: String, val boundingBox: RectF, val text: String)` — built at page load from `type = "text"` rows via `loadTextObjectsFromDb()` in `NotebookActivity`.
+- Text objects render after headings, before strokes in both drawing views and the PDF exporter — transparent background only (no white fill, no template draw).
+- Rendering uses `StaticLayout` + `TextPaint` at 16sp `Color.BLACK`. Entry point: `TextObjectRenderer.draw(canvas, textRender, widthPx, paint, density)`.
+
+**Markdown engine (`core/markdown/`):**
+- `MarkdownParser` — hand-rolled, no dependencies. Parses Markdown source to `List<Block>`. Block types: `Heading(level 1–6, inlines)`, `Paragraph(inlines)`, `ListItem(ordered, depth, displayNumber, isTask, checked, inlines)`, `Blockquote(inlines)`, `HorizontalRule`. Inline types: `Text`, `Bold`, `Italic`, `Strikethrough`, `Link(displayText, url)`.
+- `MarkdownRenderer` — converts `List<Block>` to `SpannableStringBuilder` using Android text spans. No new Gradle dependencies.
+- `TextObjectRenderer` — wraps parser + renderer + `StaticLayout` for canvas drawing and measurement.
+
+**Supported Markdown subset:**
+- Headers h1–h6 (`#` … `######`)
+- Bold (`**text**` or `__text__`), italic (`*text*` or `_text_`), strikethrough (`~~text~~`)
+- Links (`[text](url)`) — rendered underlined, not clickable
+- Unordered lists with 3-level nesting (`-`, `*`, `+`), bullet glyphs: `• ◦ ▪` cycling by depth
+- Ordered lists with auto-renumbering (input all `1.`, output 1. 2. 3.); nesting supported
+- Task checkboxes (`- [ ]` unchecked `☐`, `- [x]` checked `☑`)
+- Blockquotes (`>`) — left bar via `QuoteSpan`
+- Horizontal rules (`---` / `***` / `___` — 3+ chars, any whitespace between) via `HorizontalRuleSpan : ReplacementSpan`
+
+**Out of scope (do not add without discussion):** inline code, fenced code blocks, tables, embedded images, raw HTML.
+
+**Canvas integration rules:**
+- `NotebookDao.getTextObjectsForLayer(layerId)` — `SELECT ... WHERE type = 'text'`; included in `getMaxContentUpdatedAt` staleness check.
+- `buildRenderBitmap` default parameter `textObjects: List<TextRender>? = null` — null means use the stored field (undo/redo call sites unchanged); non-null overrides (page load path).
+- Snapshot fast-path: `compositeTextObjects(bitmap)` paints text objects onto the snapshot bitmap immediately after `loadTextObjects()`, before `loadStrokesWithBitmap()`.
+- `captureSnapshot()` returns null if `strokes.isEmpty() && headings.isEmpty() && textObjects.isEmpty()`.
+- PDF export: `NotebookExporter.renderPage()` loads text objects from `getTextObjectsForLayer()` and renders them via `TextObjectRenderer.draw()` after headings, before strokes.
+
+---
+
 ## Future Work — Wacom & Generic Android Stylus
 
 **Wacom barrel button (MIP11 and other non-BOOX devices):**
@@ -710,4 +744,4 @@ Never calls `eraseAll()`. Updates the in-memory stroke list directly, rebuilds b
   - On failure: Toast "Copy failed." or "Move failed." — stays in picker mode.
 - Creating a new folder while in picker mode navigates into it and stays in picker mode (normal `navigateIntoFolder` path, no extra logic needed).
 
-*Last updated: New Branch — Toolbar Overflow System*
+*Last updated: New Branch — Text object data model, Markdown engine, and canvas rendering (Prompt 1)*
