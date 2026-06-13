@@ -307,10 +307,12 @@ sealed class UndoRedoAction {
      *       and show the floating toolbar.
      * Redo: re-soft-delete the row; remove from canvas; clear selection.
      *
-     * NOTE (Prompt 5): When type="text" objects can have non-null strokes (lasso stroke→text
-     * conversion), the empty-confirm path should NOT soft-delete — instead it should fall back
-     * to rendering strokes only. TextRemoved is correct only for objects where strokes == null
-     * (all objects created by Prompt 3's insert flow). Prompt 5 must revisit this distinction.
+     * NOTE: For type="text" objects produced by lasso stroke→text conversion (which carry
+     * non-null [TextRender.strokes]), tap-to-edit is GATED: the dialog only opens when text
+     * is non-blank. So if a recognized text object (non-blank text) is edited down to empty
+     * via the dialog, soft-deleting the entire row (including embedded strokes) is intentional —
+     * the user chose to clear it. This action is correct for all text objects regardless of
+     * whether they carry embedded strokes.
      */
     @Serializable
     data class TextRemoved(
@@ -318,5 +320,28 @@ sealed class UndoRedoAction {
         val pageId: String,
         val textRender: TextRender,
         val deletedAt: Long,
+    ) : UndoRedoAction()
+
+    /**
+     * User converted a lasso selection of strokes into a type="text" object via the
+     * floating "Text" toolbar button.
+     *
+     * Undo: soft-delete the text row, restore the original stroke rows, clear selection.
+     * Redo: re-soft-delete the original strokes, restore the text row, re-select it.
+     *
+     * [deletedAt] is the timestamp used to soft-delete the original strokes — used by undo
+     * to identify which rows to restore.
+     * [textRender] carries the full render state of the new text row (id, boundingBox,
+     * text = recognised string or "", strokes = embedded originals with fresh UUIDs) so redo
+     * can rebuild the in-memory list and selection without a DB read.
+     */
+    @Serializable
+    data class TextConverted(
+        val textId: String,
+        val pageId: String,
+        val layerId: String,
+        val deletedAt: Long,
+        val originalStrokeIds: List<String>,
+        val textRender: TextRender,
     ) : UndoRedoAction()
 }

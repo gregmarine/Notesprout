@@ -419,6 +419,28 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
     }
 
     /**
+     * Render a type="text" object onto [canvas].
+     * - Non-blank text → markdown path via TextObjectRenderer.
+     * - Blank text + non-empty strokes → render embedded strokes (unrecognized conversion state).
+     * - Blank text + no strokes → nothing rendered.
+     */
+    private fun drawTextObject(canvas: Canvas, textObj: TextRender, widthPx: Int) {
+        when {
+            textObj.text.isNotBlank() ->
+                TextObjectRenderer.draw(canvas, textObj, widthPx, textObjectPaint, resources.displayMetrics.density)
+            !textObj.strokes.isNullOrEmpty() -> {
+                for (liveStroke in textObj.strokes) {
+                    val pts = liveStroke.points; if (pts.size < 2) continue
+                    val path = Path()
+                    path.moveTo(pts[0].x, pts[0].y)
+                    for (i in 1 until pts.size) path.lineTo(pts[i].x, pts[i].y)
+                    canvas.drawPath(path, strokePaint)
+                }
+            }
+        }
+    }
+
+    /**
      * Redraws the render bitmap from scratch: white base → template → all current strokes.
      * Call whenever strokes are added/removed or the template changes.
      */
@@ -448,7 +470,7 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
             }
         }
         for (textObj in textObjects) {
-            TextObjectRenderer.draw(canvas, textObj, width, textObjectPaint, resources.displayMetrics.density)
+            drawTextObject(canvas, textObj, width)
         }
         for (liveStroke in strokes) {
             val points = liveStroke.points
@@ -775,7 +797,7 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
                 }
             }
             for (textObj in dragOriginalTextObjects) {
-                TextObjectRenderer.draw(canvas, textObj, width, textObjectPaint, resources.displayMetrics.density)
+                drawTextObject(canvas, textObj, width)
             }
             for (stroke in dragOriginalStrokes) {
                 val pts = stroke.points; if (pts.size < 2) continue
@@ -1208,9 +1230,8 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
     override fun compositeTextObjects(bitmap: Bitmap) {
         if (textObjects.isEmpty()) return
         val canvas = android.graphics.Canvas(bitmap)
-        val density = resources.displayMetrics.density
         for (textObj in textObjects) {
-            TextObjectRenderer.draw(canvas, textObj, bitmap.width, textObjectPaint, density)
+            drawTextObject(canvas, textObj, bitmap.width)
         }
     }
 
@@ -1266,7 +1287,7 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
             }
         }
         for (textObj in effectiveTextObjects) {
-            TextObjectRenderer.draw(canvas, textObj, w, textObjectPaint, resources.displayMetrics.density)
+            drawTextObject(canvas, textObj, w)
         }
         for (liveStroke in strokes) {
             val pts = liveStroke.points

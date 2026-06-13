@@ -766,9 +766,10 @@ class NotebookActivity : AppCompatActivity() {
                     showHeadingTextEditDialog(selectedHeading)
                     return@tap
                 }
-                // Text object edit tap — same single-selection + bounds-check pattern as headings.
+                // Text object edit tap — only for non-blank text (recognized state).
+                // Unrecognized objects (blank text, strokes rendered) are not editable via dialog.
                 val selectedText = drawingView.getTextObjects().find { it.id == selectedId }
-                if (selectedText != null && selectedText.boundingBox.contains(tapX, tapY)) {
+                if (selectedText != null && selectedText.text.isNotBlank() && selectedText.boundingBox.contains(tapX, tapY)) {
                     showTextEditDialogForTextObject(selectedText)
                     return@tap
                 }
@@ -947,6 +948,19 @@ class NotebookActivity : AppCompatActivity() {
             val heading = selectedHeadings.firstOrNull() ?: return@setOnClickListener
             lifecycleScope.launch(Dispatchers.IO) {
                 removeHeading(heading)
+            }
+        }
+
+        binding.btnConvertText.setOnClickListener {
+            val ids = drawingView.lassoSelectedIds
+            val selectedStrokes = drawingView.getStrokes().filter { it.id in ids }
+            if (selectedStrokes.isEmpty()) return@setOnClickListener
+            val box = RectF()
+            selectedStrokes.forEach { box.union(it.boundingBox) }
+            val pad = 8f * resources.displayMetrics.density
+            box.inset(-pad, -pad)
+            lifecycleScope.launch(Dispatchers.IO) {
+                convertLassoToText(selectedStrokes, box)
             }
         }
 
@@ -1693,7 +1707,7 @@ class NotebookActivity : AppCompatActivity() {
             val box = row.parseBoundingBox() ?: return@mapNotNull null
             val textObj = runCatching { TextObject.fromJson(row.data) }.getOrNull()
                 ?: return@mapNotNull null
-            TextRender(id = row.id, boundingBox = box, text = textObj.text)
+            TextRender(id = row.id, boundingBox = box, text = textObj.text, strokes = textObj.strokes)
         }
     }
 
@@ -2910,6 +2924,133 @@ class NotebookActivity : AppCompatActivity() {
     }
 
     /**
+     * Convert the [selectedStrokes] lasso selection into a type="text" object.
+     * [selectionBox] is the padded selection RectF used as the initial bounding box.
+     * On recognition success the box is resized to fit the text; on failure it stays as-is.
+     * Must be called on [Dispatchers.IO]; switches to Main for in-memory + UI updates.
+     */
+    private suspend fun convertLassoToText(
+        selectedStrokes: List<LiveStroke>,
+        selectionBox: RectF,
+    ) {
+        val db      = soilDatabase ?: return
+        val layerId = currentLayerId.takeIf { it.isNotEmpty() } ?: return
+        val pageId  = currentPageId.takeIf  { it.isNotEmpty() } ?: return
+
+        val strokesToConvert = selectedStrokes.toList()
+        var boundsToConvert  = RectF(selectionBox)
+
+        // Attempt ML Kit recognition, same path as heading conversion.
+        val recognizer = HandwritingRecognizerProvider.instance
+        val rawResult: String = if (recognizer != null && recognizer.isReady()) {
+            withContext(Dispatchers.Main) {
+                suspendCancellableCoroutine { cont ->
+                    recognizer.recognize(strokesToConvert, boundsToConvert) { result ->
+                        if (cont.isActive) cont.resume(result)
+                    }
+                }
+            }
+        } else {
+            HandwritingRecognizer.FALLBACK_TEXT
+        }
+
+        // Treat FALLBACK_TEXT ("unrecognized") as failure — store blank text, render strokes.
+        val isRecognized = rawResult != HandwritingRecognizer.FALLBACK_TEXT
+        val textForObject = if (isRecognized) rawResult else ""
+
+        if (isRecognized) {
+            // Resize bounding box to fit the recognised text (same approach as heading conversion).
+            val paint = TextPaint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+                color    = android.graphics.Color.BLACK
+                textSize = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 16f, resources.displayMetrics)
+            }
+            val pageW = drawingView.asView().width
+            val (measuredW, measuredH) = withContext(Dispatchers.Default) {
+                TextObjectRenderer.measure(textForObject, pageW, paint, resources.displayMetrics.density)
+            }
+            val objW = measuredW.toFloat().coerceAtMost(pageW.toFloat())
+            val objH = measuredH.toFloat()
+            val newLeft = boundsToConvert.left.coerceIn(0f, (pageW - objW).coerceAtLeast(0f))
+            val newTop  = boundsToConvert.top
+            boundsToConvert = RectF(newLeft, newTop, newLeft + objW, newTop + objH)
+        }
+
+        val deletedAt   = System.currentTimeMillis()
+        val textId      = UUID.randomUUID().toString()
+        val originalStrokeIds = strokesToConvert.map { it.id }
+
+        // Fresh UUIDs for embedded strokes (same pattern as heading conversion).
+        val embeddedStrokes = strokesToConvert.map { stroke ->
+            LiveStroke(id = UUID.randomUUID().toString(), points = stroke.points.map { PointF(it.x, it.y) })
+        }
+
+        val now      = System.currentTimeMillis()
+        val bboxJson = """{"x":${boundsToConvert.left},"y":${boundsToConvert.top},"width":${boundsToConvert.width()},"height":${boundsToConvert.height()}}"""
+        val textObj  = TextObject(text = textForObject, strokes = embeddedStrokes)
+
+        db.withTransaction {
+            val dao = db.notebookDao()
+            originalStrokeIds.forEach { dao.softDeleteById(it, deletedAt) }
+            dao.insertObject(
+                NotebookObject(
+                    id          = textId,
+                    parentId    = layerId,
+                    type        = TYPE_TEXT,
+                    boundingBox = bboxJson,
+                    sortOrder   = 0,
+                    createdAt   = now,
+                    updatedAt   = now,
+                    deletedAt   = null,
+                    data        = textObj.toJson(),
+                )
+            )
+        }
+
+        invalidatePageSnapshot(db, pageId)
+
+        withContext(Dispatchers.Main) {
+            val erasedSet      = originalStrokeIds.toSet()
+            val updatedStrokes = drawingView.getStrokes().filter { it.id !in erasedSet }
+            persistedStrokeIds.removeAll(erasedSet)
+
+            val newTextRender  = TextRender(id = textId, boundingBox = boundsToConvert, text = textForObject, strokes = embeddedStrokes)
+            val updatedTexts   = drawingView.getTextObjects() + newTextRender
+            drawingView.loadTextObjects(updatedTexts)
+
+            undoRedoManager.push(
+                UndoRedoAction.TextConverted(
+                    textId            = textId,
+                    pageId            = pageId,
+                    layerId           = layerId,
+                    deletedAt         = deletedAt,
+                    originalStrokeIds = originalStrokeIds,
+                    textRender        = newTextRender,
+                )
+            )
+            updateUndoRedoButtons()
+
+            val templateBmp = currentTemplateBitmap
+            val currentHeadings = drawingView.getHeadings()
+            val bitmap = withContext(Dispatchers.IO) {
+                drawingView.buildRenderBitmap(updatedStrokes, templateBmp, currentHeadings, updatedTexts)
+            }
+            if (bitmap != null) {
+                drawingView.loadStrokesWithBitmap(updatedStrokes, bitmap, templateBmp)
+            } else {
+                drawingView.loadStrokes(updatedStrokes)
+            }
+
+            if (!isLassoMode) enterLassoMode()
+            val pad = 8f * resources.displayMetrics.density
+            val selBox = RectF(boundsToConvert).apply { inset(-pad, -pad) }
+            drawingView.setLassoSelectedIds(setOf(textId), selBox)
+            selectedObjectIds.clear()
+            selectedObjectIds.add(textId)
+            updateFloatingSelectionToolbar(selBox)
+        }
+    }
+
+    /**
      * Remove a heading, re-inserting its embedded strokes as individual live rows on the
      * current layer.  Must be called on [Dispatchers.IO]; switches to Main for UI updates.
      */
@@ -3107,6 +3248,8 @@ class NotebookActivity : AppCompatActivity() {
         binding.btnUnheading.visibility   = if (selectionIsSingleHeading) View.VISIBLE else View.GONE
         binding.headingDivider.visibility =
             if (selectionIsPureStrokes || selectionIsSingleHeading) View.VISIBLE else View.GONE
+        binding.btnConvertText.visibility   = if (selectionIsPureStrokes) View.VISIBLE else View.GONE
+        binding.textConvertDivider.visibility = if (selectionIsPureStrokes) View.VISIBLE else View.GONE
         binding.floatingSelectionToolbar.visibility = View.VISIBLE
         binding.floatingSelectionToolbar.post {
             val toolbarW = binding.floatingSelectionToolbar.measuredWidth.toFloat()
@@ -3366,12 +3509,12 @@ class NotebookActivity : AppCompatActivity() {
 
             withContext(Dispatchers.IO) {
                 db.notebookDao().updateHeadingData(
-                    textRender.id, bboxJson, TextObject(text = newMarkdown).toJson(), now
+                    textRender.id, bboxJson, TextObject(text = newMarkdown, strokes = textRender.strokes).toJson(), now
                 )
                 invalidatePageSnapshot(db, pageId)
             }
 
-            val newTextRender = TextRender(id = textRender.id, boundingBox = newBbox, text = newMarkdown)
+            val newTextRender = TextRender(id = textRender.id, boundingBox = newBbox, text = newMarkdown, strokes = textRender.strokes)
             val updatedTexts  = drawingView.getTextObjects().map { t ->
                 if (t.id == textRender.id) newTextRender else t
             }
@@ -3413,9 +3556,9 @@ class NotebookActivity : AppCompatActivity() {
      * Soft-deletes [textRender] (triggered by an empty-confirm in [TextEditDialog]), clears its
      * selection, rebuilds the canvas, and pushes a [UndoRedoAction.TextRemoved] undo entry.
      *
-     * NOTE (Prompt 5): When type="text" objects can have non-null strokes, an empty-text confirm
-     * should fall back to stroke rendering rather than deleting the row. This method is correct
-     * only for insert-flow objects where strokes == null. Prompt 5 must revisit this path.
+     * Tap-to-edit is GATED on [TextRender.text].isNotBlank(), so this path is only reached
+     * for recognized text objects (non-blank text). Soft-deleting the entire row — including
+     * any embedded [TextRender.strokes] — is intentional: the user explicitly cleared the text.
      */
     private fun deleteTextObjectFromEdit(textRender: TextRender) {
         val db     = soilDatabase ?: return
@@ -3538,6 +3681,7 @@ class NotebookActivity : AppCompatActivity() {
             is UndoRedoAction.TextInserted      -> action.pageId
             is UndoRedoAction.TextEdited        -> action.pageId
             is UndoRedoAction.TextRemoved       -> action.pageId
+            is UndoRedoAction.TextConverted     -> action.pageId
             else                               -> null
         }
         val isCrossPage = targetPageId != null && targetPageId != currentPageId
@@ -4141,6 +4285,93 @@ class NotebookActivity : AppCompatActivity() {
             return
         }
 
+        // ── Cross-page TextConverted: two-phase display ──────────────────────
+        // Undo: text row soft-deleted, original strokes restored — page shows strokes, no text obj.
+        // Redo: original strokes soft-deleted, text row restored — page shows text obj, no strokes.
+        if (isCrossPage && action is UndoRedoAction.TextConverted) {
+            val snapshot      = drawingView.captureSnapshot()
+            val leavingPageId = currentPageId
+            withContext(Dispatchers.IO) {
+                if (snapshot != null && leavingPageId.isNotEmpty()) {
+                    persistSnapshot(db, leavingPageId, snapshot)
+                }
+                saveStrokes(db)
+            }
+            currentPageIndex = pages.indexOfFirst { it.id == action.pageId }.coerceAtLeast(0)
+
+            val templateBmp: Bitmap?
+            val preUndoStrokes: List<LiveStroke>
+            val preUndoHeadings: List<HeadingStroke>
+            withContext(Dispatchers.IO) {
+                setupPageIds(db)
+                templateBmp     = loadPageTemplateFromDb(db)
+                preUndoStrokes  = deserializeStrokesFromDb(db)
+                preUndoHeadings = loadHeadingsFromDb(db, currentLayerId)
+            }
+            val preUndoTexts = withContext(Dispatchers.IO) { loadTextObjectsFromDb(db, currentLayerId) }
+            drawingView.loadHeadings(preUndoHeadings)
+            drawingView.loadTextObjects(preUndoTexts)
+            val preUndobitmap = withContext(Dispatchers.IO) {
+                drawingView.buildRenderBitmap(preUndoStrokes, templateBmp, preUndoHeadings, preUndoTexts)
+            }
+            if (preUndobitmap != null) {
+                drawingView.loadStrokesWithBitmap(preUndoStrokes, preUndobitmap, templateBmp)
+            } else {
+                drawingView.loadStrokes(preUndoStrokes)
+            }
+            currentTemplateBitmap = templateBmp
+            updatePageIndicator()
+            saveLastOpenedPage(currentPageId)
+
+            withContext(Dispatchers.IO) {
+                if (isUndo) {
+                    dao.softDeleteById(action.textId, now)
+                    action.originalStrokeIds.forEach { dao.restoreById(it, now) }
+                } else {
+                    action.originalStrokeIds.forEach { dao.softDeleteById(it, now) }
+                    dao.restoreById(action.textId, now)
+                }
+                invalidatePageSnapshot(db, action.pageId)
+            }
+
+            val updatedStrokes: List<LiveStroke>
+            val updatedTexts: List<TextRender>
+            if (isUndo) {
+                val restoredStrokes = withContext(Dispatchers.IO) {
+                    action.originalStrokeIds.mapNotNull { id ->
+                        dao.getObjectById(id)?.let { obj ->
+                            try { LiveStroke(id = obj.id, points = StrokeData.fromJson(obj.data).toPointFs()) }
+                            catch (e: Exception) {
+                                Log.e(TAG, "executeAction TextConverted: failed to deserialize $id", e); null
+                            }
+                        }
+                    }
+                }
+                updatedStrokes = buildList { addAll(preUndoStrokes); addAll(restoredStrokes) }
+                updatedTexts   = preUndoTexts.filter { it.id != action.textId }
+                restoredStrokes.forEach { persistedStrokeIds.add(it.id) }
+            } else {
+                val idsSet = action.originalStrokeIds.toSet()
+                updatedStrokes = preUndoStrokes.filter { it.id !in idsSet }
+                persistedStrokeIds.removeAll(idsSet)
+                updatedTexts = preUndoTexts + action.textRender
+            }
+            drawingView.loadTextObjects(updatedTexts)
+            val bitmap = withContext(Dispatchers.IO) {
+                drawingView.buildRenderBitmap(updatedStrokes, templateBmp, preUndoHeadings, updatedTexts)
+            }
+            if (bitmap != null) {
+                drawingView.loadStrokesWithBitmap(updatedStrokes, bitmap, templateBmp)
+            } else {
+                drawingView.loadStrokes(updatedStrokes)
+            }
+            selectedObjectIds.clear()
+            drawingView.lassoSelectedIds = emptySet()
+            drawingView.setLassoOverlay(null, null)
+            hideFloatingSelectionToolbar()
+            return
+        }
+
         // ── Cross-page TextEdited / TextRemoved: two-phase display ───────────
         if (isCrossPage && (action is UndoRedoAction.TextEdited || action is UndoRedoAction.TextRemoved)) {
             val snapshot      = drawingView.captureSnapshot()
@@ -4532,7 +4763,7 @@ class NotebookActivity : AppCompatActivity() {
                     for (textObj in targetTexts) {
                         val bb = textObj.boundingBox
                         val bbJson = """{"x":${bb.left},"y":${bb.top},"width":${bb.width()},"height":${bb.height()}}"""
-                        dao.updateHeadingData(textObj.id, bbJson, TextObject(text = textObj.text).toJson(), now)
+                        dao.updateHeadingData(textObj.id, bbJson, TextObject(text = textObj.text, strokes = textObj.strokes).toJson(), now)
                     }
                 }
             }
@@ -4593,7 +4824,7 @@ class NotebookActivity : AppCompatActivity() {
                 val target = if (isUndo) action.oldTextRender else action.newTextRender
                 val bb = target.boundingBox
                 val bboxJson = """{"x":${bb.left},"y":${bb.top},"width":${bb.width()},"height":${bb.height()}}"""
-                dao.updateHeadingData(action.textId, bboxJson, TextObject(text = target.text).toJson(), now)
+                dao.updateHeadingData(action.textId, bboxJson, TextObject(text = target.text, strokes = target.strokes).toJson(), now)
                 invalidatePageSnapshot(db, action.pageId)
             }
 
@@ -4602,6 +4833,17 @@ class NotebookActivity : AppCompatActivity() {
                     dao.restoreById(action.textId, now)
                 } else {
                     dao.softDeleteById(action.textId, action.deletedAt)
+                }
+                invalidatePageSnapshot(db, action.pageId)
+            }
+
+            is UndoRedoAction.TextConverted -> withContext(Dispatchers.IO) {
+                if (isUndo) {
+                    dao.softDeleteById(action.textId, now)
+                    action.originalStrokeIds.forEach { dao.restoreById(it, now) }
+                } else {
+                    action.originalStrokeIds.forEach { dao.softDeleteById(it, now) }
+                    dao.restoreById(action.textId, now)
                 }
                 invalidatePageSnapshot(db, action.pageId)
             }
@@ -5099,6 +5341,64 @@ class NotebookActivity : AppCompatActivity() {
                     drawingView.setLassoOverlay(null, null)
                     hideFloatingSelectionToolbar()
                 }
+            }
+            updatePageIndicator()
+            saveLastOpenedPage(currentPageId)
+            return
+        }
+
+        // ── Step 3a-text-converted: Same-page TextConverted — in-memory update ─
+        if (action is UndoRedoAction.TextConverted) {
+            val updatedStrokes: List<LiveStroke>
+            val updatedTexts: List<TextRender>
+            if (isUndo) {
+                // Undo: text row soft-deleted, original strokes restored.
+                updatedTexts = drawingView.getTextObjects().filter { it.id != action.textId }
+                val restoredStrokes = withContext(Dispatchers.IO) {
+                    action.originalStrokeIds.mapNotNull { id ->
+                        dao.getObjectById(id)?.let { obj ->
+                            try { LiveStroke(id = obj.id, points = StrokeData.fromJson(obj.data).toPointFs()) }
+                            catch (e: Exception) {
+                                Log.e(TAG, "executeAction TextConverted: failed to deserialize $id", e); null
+                            }
+                        }
+                    }
+                }
+                updatedStrokes = buildList { addAll(drawingView.getStrokes()); addAll(restoredStrokes) }
+                restoredStrokes.forEach { persistedStrokeIds.add(it.id) }
+            } else {
+                // Redo: original strokes soft-deleted, text row restored.
+                val idsSet = action.originalStrokeIds.toSet()
+                updatedStrokes = drawingView.getStrokes().filter { it.id !in idsSet }
+                persistedStrokeIds.removeAll(idsSet)
+                updatedTexts = drawingView.getTextObjects() + action.textRender
+            }
+            drawingView.loadTextObjects(updatedTexts)
+            val templateBmp = currentTemplateBitmap
+            val currentHeadings = drawingView.getHeadings()
+            val bitmap = withContext(Dispatchers.IO) {
+                drawingView.buildRenderBitmap(updatedStrokes, templateBmp, currentHeadings, updatedTexts)
+            }
+            if (bitmap != null) {
+                drawingView.loadStrokesWithBitmap(updatedStrokes, bitmap, templateBmp)
+            } else {
+                drawingView.loadStrokes(updatedStrokes)
+            }
+            // Undo clears selection; redo re-selects the converted text object.
+            if (isUndo) {
+                selectedObjectIds.clear()
+                drawingView.lassoSelectedIds = emptySet()
+                drawingView.setLassoOverlay(null, null)
+                hideFloatingSelectionToolbar()
+            } else {
+                if (!isLassoMode) enterLassoMode()
+                selectedObjectIds.clear()
+                selectedObjectIds.add(action.textId)
+                drawingView.lassoSelectedIds = selectedObjectIds.toSet()
+                val pad = 8f * resources.displayMetrics.density
+                val selBox = RectF(action.textRender.boundingBox).apply { inset(-pad, -pad) }
+                drawingView.setLassoOverlay(null, selBox)
+                updateFloatingSelectionToolbar(selBox)
             }
             updatePageIndicator()
             saveLastOpenedPage(currentPageId)

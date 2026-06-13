@@ -6,6 +6,8 @@ import kotlinx.serialization.json.Json
 @Serializable
 data class TextObject(
     val text: String = "",
+    // Embedded original strokes from lasso stroke→text conversion. Null for insert-flow objects.
+    val strokes: List<LiveStroke>? = null,
 ) {
     fun toJson(): String = Json.encodeToString(serializer(), this)
 

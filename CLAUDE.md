@@ -546,9 +546,16 @@ Never calls `eraseAll()`. Updates the in-memory stroke list directly, rebuilds b
 ## Text Objects
 
 - `type = "text"` rows in `.soil`; `TextObject` (`data/TextObject.kt`) serialized to `data` column; `TextRender` (`data/TextRender.kt`) is the in-memory render representation.
-- `@Serializable data class TextObject(val text: String = "")` — stores raw Markdown source text. Use `toJson()` / `fromJson()` (kotlinx.serialization, never `org.json`).
-- `data class TextRender(val id: String, val boundingBox: RectF, val text: String)` — built at page load from `type = "text"` rows via `loadTextObjectsFromDb()` in `NotebookActivity`.
+- `@Serializable data class TextObject(val text: String = "", val strokes: List<LiveStroke>? = null)` — stores raw Markdown source text and, for lasso-converted objects, the embedded original strokes. Use `toJson()` / `fromJson()` (kotlinx.serialization, never `org.json`).
+- `data class TextRender(val id: String, val boundingBox: RectF, val text: String, val strokes: List<LiveStroke>? = null)` — built at page load from `type = "text"` rows via `loadTextObjectsFromDb()` in `NotebookActivity`. `strokes` is populated from `TextObject.strokes`.
 - Text objects render after headings, before strokes in both drawing views and the PDF exporter — transparent background only (no white fill, no template draw).
+
+**Canvas render dispatch for type="text" objects (both drawing views):**
+- `text.isNotBlank()` → `TextObjectRenderer.draw()` (markdown engine path).
+- `text.isBlank()` AND `strokes != null && strokes.isNotEmpty()` → render embedded strokes directly (same path as unrecognized headings). This is the "unrecognized" state produced by lasso conversion when ML Kit fails.
+- `text.isBlank()` AND `strokes` null/empty → render nothing (should not occur in practice).
+- Dispatch is centralised in `drawTextObject(canvas, textRender, widthPx)` private helper in each drawing view. All render sites (redrawCanvas, buildRenderBitmap, compositeTextObjects, drag layer) call this helper — never `TextObjectRenderer.draw()` directly for text objects.
+
 - Rendering uses `StaticLayout` + `TextPaint` at 16sp `Color.BLACK`. Entry point: `TextObjectRenderer.draw(canvas, textRender, widthPx, paint, density)`.
 
 **Markdown engine (`core/markdown/`):**
@@ -825,8 +832,9 @@ Never calls `eraseAll()`. Updates the in-memory stroke list directly, rebuilds b
 - **Undo:** `dao.softDeleteById(textId)`, removes from `drawingView.getTextObjects()`, clears selection.
 - **Redo:** `dao.restoreById(textId)`, adds `textRender` back to in-memory list, re-selects the object.
 
-**Tap-to-edit (Prompt 4):**
+**Tap-to-edit:**
 - While a `type="text"` object is selected (single-selection in lasso mode) and the user performs a stylus tap within its `boundingBox`, `showTextEditDialogForTextObject(textRender)` is called from `onLassoTap` — identical tap-vs-drag detection logic as heading tap-to-edit (checked in the same `onLassoTap` block, immediately after the heading check).
+- **GATED on `text.isNotBlank()`**: the dialog only opens for recognized-text objects. Unrecognized objects (`text == ""`, showing embedded strokes) ignore the tap — they cannot be edited via the dialog.
 - `TextEditDialog` is opened pre-filled with `textRender.text` (the raw Markdown source).
 - `TextEditDialog.onConfirm` is **always** called (including with empty text) — callers guard `isNotBlank()` themselves for insert; the edit flow dispatches on empty vs non-empty.
 
@@ -848,23 +856,44 @@ Never calls `eraseAll()`. Updates the in-memory stroke list directly, rebuilds b
 - Removes from in-memory list, rebuilds bitmap.
 - Clears this object from `selectedObjectIds`; if selection becomes empty, hides the floating toolbar.
 - Pushes `UndoRedoAction.TextRemoved(textId, pageId, textRender, deletedAt)`.
-- **NOTE (Prompt 5):** When `type="text"` objects can have non-null strokes (lasso stroke→text conversion), empty-confirm should fall back to stroke rendering rather than soft-deleting the row. `TextRemoved` is correct only for insert-flow objects (strokes == null). Prompt 5 must revisit `deleteTextObjectFromEdit` for this case.
+- **Tap-to-edit is GATED on `text.isNotBlank()`** (see below), so this path is only reached for recognized text objects. Soft-deleting the entire row — including any embedded `strokes` — is intentional: the user explicitly cleared the text. This is NOT a bug; the embedded original strokes are intentionally discarded.
 
 **TextRemoved undo/redo:**
 - `UndoRedoAction.TextRemoved(textId, pageId, textRender, deletedAt)`.
 - **Undo:** `dao.restoreById(textId)`, add `textRender` back to in-memory list, re-select the object, show floating toolbar.
 - **Redo:** `dao.softDeleteById(textId, deletedAt)`, remove from in-memory list, clear selection.
 
-**Lasso actions for `type="text"` objects — Prompt 4 status:**
+**Lasso actions for `type="text"` objects:**
 
 | Action | Status |
 |---|---|
 | Selection (lasso draw) | ✅ Center-point containment hit test |
 | Drag to move | ✅ Translates bounding box; persists via `updateHeadingData`; `StrokesMoved` undo |
 | Delete (floating toolbar Delete) | ✅ `performLassoDelete` — soft-delete + `LassoDeleted` undo |
-| Tap-to-edit (selected object) | ✅ `showTextEditDialogForTextObject` — `TextEdited` / `TextRemoved` undo |
+| Tap-to-edit (selected, text non-blank) | ✅ `showTextEditDialogForTextObject` — `TextEdited` / `TextRemoved` undo |
+| Tap on selected unrecognized object | ✅ No-op (gated: blank text → dialog not opened) |
 | Highlight/selection visual | ✅ Dashed overlay box |
+| Convert strokes → text (lasso "Text" btn) | ✅ `convertLassoToText` — ML Kit + `TextConverted` undo |
 | Copy / Cut / Paste | ❌ Deferred — `NotesproutClipboard` does not yet carry text objects |
 | Lasso eraser | ❌ Deferred — lasso eraser only hits strokes/headings currently |
 
-*Last updated: New Branch — Edit and delete existing text objects (Prompt 4)*
+*Last updated: New Branch — Lasso stroke-to-text conversion, ML Kit (Prompt 5)*
+
+---
+
+**Lasso stroke-to-text conversion (Prompt 5):**
+
+- **"Text" button** (`btnConvertText`, icon `ic_text_recognition`) appears in the floating lasso selection toolbar immediately after Create/Remove Heading buttons. Visible only when `selectionIsPureStrokes` (same condition as "Create Heading").
+- **`convertLassoToText(selectedStrokes, selectionBox)`** — suspend function called on `Dispatchers.IO`:
+  1. Runs ML Kit recognition on selected strokes (same recognizer + `DownloadConditions` as heading conversion).
+  2. **Success** (`result != FALLBACK_TEXT`): measures text via `TextObjectRenderer.measure()`, resizes bbox to fit text (left/top anchored, same pattern as heading). Sets `data.text = recognizedText`.
+  3. **Failure** (`FALLBACK_TEXT` or recognizer not ready): keeps original selection bbox. Sets `data.text = ""`.
+  4. In both cases: `data.strokes = embeddedStrokes` (fresh-UUID copies of selected stroke data).
+  5. Soft-deletes original stroke rows + inserts new `type="text"` row in a single transaction.
+  6. Invalidates page snapshot, selects the new text object in lasso mode.
+- **`TextConverted` undo/redo action**: `UndoRedoAction.TextConverted(textId, pageId, layerId, deletedAt, originalStrokeIds, textRender)`.
+  - `textRender` carries full state (id, boundingBox, text, strokes) so redo can rebuild in-memory list without a DB read.
+  - **Undo**: soft-delete text row + restore original stroke rows + clear selection.
+  - **Redo**: re-soft-delete original strokes + restore text row + re-select it.
+  - Same-page and cross-page paths implemented (mirrors `HeadingCreated` structure).
+- **`strokes` preservation rule**: All `TextObject`/`TextRender` write paths (`updateTextObject`, `TextEdited` DB handler, `StrokesMoved` DB handler) preserve `strokes` in the serialized JSON — `TextObject(text = ..., strokes = target.strokes).toJson()`. Never construct `TextObject(text = ...)` alone for existing objects that may carry strokes.
