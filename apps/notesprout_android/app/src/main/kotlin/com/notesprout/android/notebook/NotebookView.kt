@@ -17,6 +17,11 @@ interface NotebookView {
     fun disableDrawing()
     fun resetOverlay() {}
 
+    // Release the EPD writing overlay so the next screen refresh shows toolbar changes.
+    // Called on any toolbar touch. BOOX: disables overlay render + invalidates.
+    // Generic devices: no-op. The overlay is re-enabled by the next pen-down event.
+    fun releaseRender() {}
+
     fun eraseAll()
     fun setEraserMode(active: Boolean) {}
     fun releaseResources()

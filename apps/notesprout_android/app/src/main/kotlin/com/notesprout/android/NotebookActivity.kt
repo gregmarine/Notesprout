@@ -1010,6 +1010,14 @@ class NotebookActivity : AppCompatActivity() {
         if (event.getToolType(0) == MotionEvent.TOOL_TYPE_FINGER) {
             handlePageSwipe(event)
         }
+        // Release the EPD writing overlay on any finger touch within the toolbar so
+        // button state changes (icon swaps, isSelected) are visible immediately on e-ink.
+        // The overlay re-enables on the next pen-down in onBeginRawDrawing.
+        if (event.actionMasked == MotionEvent.ACTION_DOWN
+            && event.getToolType(0) == MotionEvent.TOOL_TYPE_FINGER
+            && event.y < binding.drawingToolbar.bottom) {
+            drawingView.releaseRender()
+        }
         // Dismiss the lasso popup toolbar on any touch outside its bounds.
         if (event.actionMasked == MotionEvent.ACTION_DOWN
             && binding.lassoPopupToolbar.visibility == View.VISIBLE) {

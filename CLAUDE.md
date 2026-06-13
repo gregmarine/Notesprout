@@ -351,8 +351,14 @@ Use device serials from the ADB Device Serials table above.
 
 **Overlay lifetime:**
 - The overlay is "writing mode" — stays active indefinitely while the user writes. No idle-release timer.
-- Legitimate handoff points ONLY: `setEraserMode(true)`, `eraseAll()`, `setTemplate()`, `loadStrokesWithBitmap()`, `onWindowFocusChanged(false)`.
+- Legitimate handoff points: `setEraserMode(true)`, `eraseAll()`, `setTemplate()`, `loadStrokesWithBitmap()`, `onWindowFocusChanged(false)`, any toolbar finger touch (see below).
 - `onPenLifted` is a DB-save trigger only — it does NOT touch the overlay.
+
+**Toolbar touch → overlay release (`releaseRender()`):**
+- Any finger `ACTION_DOWN` within `drawingToolbar.bottom` (checked in `NotebookActivity.dispatchTouchEvent`) calls `drawingView.releaseRender()` before the child button handles the event.
+- `releaseRender()` in `OnyxNotebookView`: `setRawDrawingRenderEnabled(false)` → `invalidate()`. No `handwritingRepaint` needed — just releasing the overlay lets the Android bitmap (including updated button icons/states) become visible on e-ink.
+- **Why `dispatchTouchEvent` and not `setOnTouchListener` on the toolbar:** `setOnTouchListener` on a `ViewGroup` fires only when no child consumes the touch. Button children always consume. `dispatchTouchEvent` on the Activity fires before any view processes the event — guaranteed intercept.
+- The overlay is re-enabled automatically by `onBeginRawDrawing` → `setRawDrawingRenderEnabled(true)` on the next pen stroke. No explicit re-enable needed in `releaseRender()`.
 
 **Overlay handoff sequence (`eraseAll()`):**
 - `setRawDrawingRenderEnabled(false)` → white bitmap → `invalidate()` → `EpdController.handwritingRepaint(view, Rect(0,0,w,h))` → re-enable

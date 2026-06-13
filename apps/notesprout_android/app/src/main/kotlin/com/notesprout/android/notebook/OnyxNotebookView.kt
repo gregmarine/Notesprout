@@ -772,6 +772,14 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
         }
     }
 
+    override fun releaseRender() {
+        if (!isSetup) return
+        touchHelper.setRawDrawingRenderEnabled(false)
+        epd { "RENDER_DISABLED caller=releaseRender" }
+        invalidate()
+        epd { "INVALIDATE caller=releaseRender" }
+    }
+
     override fun resetOverlay() {
         epd { "RESET_OVERLAY_START isSetup=$isSetup" }
         if (!isSetup) return
