@@ -744,4 +744,30 @@ Never calls `eraseAll()`. Updates the in-memory stroke list directly, rebuilds b
   - On failure: Toast "Copy failed." or "Move failed." — stays in picker mode.
 - Creating a new folder while in picker mode navigates into it and stays in picker mode (normal `navigateIntoFolder` path, no extra logic needed).
 
-*Last updated: New Branch — Text object data model, Markdown engine, and canvas rendering (Prompt 1)*
+---
+
+## Text Object Editor (`TextEditDialog`)
+
+`TextEditDialog` (`notebook/TextEditDialog.kt`) — Markdown WYSIWYG/source editor dialog for creating and editing text objects.
+
+**Dual mode:**
+- **WYSIWYG** (default): formatting spans are applied live as the user types — headings get larger and bold, `**text**` markers are de-emphasized (inkLight), inline bold/italic/strikethrough rendered. Toggle button has `isSelected=true` border.
+- **Markdown**: all spans stripped; raw Markdown source visible as plain text. Toggle button has `isSelected=true` border.
+- Mode toggle is two `AppCompatButton` (weight=1 each) using `bg_toolbar_button` background; switching is instant with no re-render of the underlying text (spans only, text unchanged).
+
+**Formatting toolbar** (HorizontalScrollView): B, I, S̶ (strikethrough), H▾ (PopupMenu H1–H6/Normal), •, 1., ☐ (task checkbox toggle: unchecked → checked → removed), ❝ (blockquote), — (horizontal rule), [⊞] (link). Buttons use `shape_bordered` background, 36dp height, 10dp H padding. All fit without scrolling on P2P (824px); scroll kicks in on narrower screens.
+
+**Auto-renumbering:** ordered list blocks are renumbered 1, 2, 3… on every `afterTextChanged`. Block counter resets on any non-list line. Auto-continue: pressing Enter at the end of a numbered list line inserts the next number prefix.
+
+**WYSIWYG regex safety:** inline patterns (`boldDoubleStarPattern`, `boldDoubleUnderPattern`, `strikePattern`) do NOT use `RegexOption.DOT_MATCHES_ALL` — patterns use `[^*\n]` and `[^~\n]` exclusion classes so they never match across line boundaries.
+
+**Dialog wiring (Prompt 2 temporary):** `btnInsertText` (`ic_text_recognition.xml`, Tabler text-recognition icon — letter T inside a scan frame) sits between EraseAll and Lasso in the NotebookActivity toolbar. Tapping it opens `TextEditDialog` with empty text; on Save, logs the markdown via `Slog.d("TextEditDialog")` and shows a Toast of the first 40 chars. **Prompt 3 replaces this wiring with the real text-object insert + placement flow.**
+
+**Icon:** `ic_text_recognition.xml` — Tabler `text-recognition`, strokeWidth 2, `@color/inkBlack`, 24dp. 4 corner L-brackets + vertical bar + horizontal bar (T shape inside scan frame).
+
+**AlertDialog pattern:**
+- `setSoftInputMode(SOFT_INPUT_STATE_VISIBLE | SOFT_INPUT_ADJUST_RESIZE)` before `show()`
+- `setElevation(0f)` + `setBackgroundDrawableResource(R.drawable.shape_bordered)` after `show()`
+- IME hidden in both Save and Cancel click handlers via `editMarkdown.windowToken` (dialog's own window token — not the activity's)
+
+*Last updated: New Branch — TextEditDialog — Markdown WYSIWYG/source editor (Prompt 2)*

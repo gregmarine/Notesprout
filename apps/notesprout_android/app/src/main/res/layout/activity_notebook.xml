@@ -116,6 +116,14 @@
             android:src="@drawable/ic_erase_all"
             android:contentDescription="Erase all" />
 
+        <!-- Insert text object (Prompt 2: temporary wiring; Prompt 3 replaces with real insert flow) -->
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnInsertText"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:layout_marginStart="4dp"
+            android:src="@drawable/ic_text_recognition"
+            android:contentDescription="Insert text" />
+
         <!-- Lasso selection tool -->
         <androidx.appcompat.widget.AppCompatImageButton
             android:id="@+id/btnLasso"

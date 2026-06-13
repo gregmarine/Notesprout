@@ -60,6 +60,7 @@ import com.notesprout.android.databinding.DialogEditHeadingTextBinding
 import com.notesprout.android.notebook.NotebookView
 import com.notesprout.android.notebook.GenericNotebookView
 import com.notesprout.android.notebook.OnyxNotebookView
+import com.notesprout.android.notebook.TextEditDialog
 import com.notesprout.android.notebook.ToolbarOverflowManager
 import com.notesprout.android.history.UndoRedoAction
 import com.notesprout.android.history.UndoRedoManager
@@ -446,6 +447,23 @@ class NotebookActivity : AppCompatActivity() {
             hideLassoPopupToolbar()
             if (!isLassoEraserMode) enterLassoEraserMode()
             // Tapping the active lasso eraser button is a no-op.
+        }
+
+        // Prompt 2: temporary wiring — opens TextEditDialog with empty text for verification.
+        // Prompt 3 will replace this with the real text-object insert + placement flow.
+        binding.btnInsertText.setOnClickListener {
+            TextEditDialog(
+                context = this,
+                initialMarkdown = "",
+                onConfirm = { markdown ->
+                    Slog.d("TextEditDialog") { "Confirmed markdown: $markdown" }
+                    android.widget.Toast.makeText(
+                        this,
+                        markdown.take(40),
+                        android.widget.Toast.LENGTH_SHORT,
+                    ).show()
+                },
+            ).show()
         }
 
         binding.btnLasso.setOnClickListener {
