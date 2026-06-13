@@ -58,6 +58,7 @@ import com.notesprout.android.databinding.DialogEditHeadingTextBinding
 import com.notesprout.android.notebook.NotebookView
 import com.notesprout.android.notebook.GenericNotebookView
 import com.notesprout.android.notebook.OnyxNotebookView
+import com.notesprout.android.notebook.ToolbarOverflowManager
 import com.notesprout.android.history.UndoRedoAction
 import com.notesprout.android.history.UndoRedoManager
 import com.notesprout.android.recognition.HandwritingRecognizer
@@ -105,6 +106,9 @@ class NotebookActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityNotebookBinding
     private lateinit var drawingView: NotebookView
+    private lateinit var overflowManager: ToolbarOverflowManager
+    /** True while we're waiting for ACTION_UP to close the overflow menu after a button tap. */
+    private var overflowCloseOnUp = false
     private var isEraserActive = false
 
     // ── Lasso selection state ─────────────────────────────────────────────────
@@ -898,6 +902,31 @@ class NotebookActivity : AppCompatActivity() {
             drawingView.setToolbarHeight(toolbar.height)
         }
 
+        // ── Toolbar overflow ──────────────────────────────────────────────────
+        overflowManager = ToolbarOverflowManager(
+            toolbar        = binding.drawingToolbar,
+            overflowMenu   = binding.overflowMenu,
+            dividerOverflow = binding.dividerOverflow,
+            btnOverflow    = binding.btnOverflow,
+        )
+        binding.drawingToolbar.doOnLayout {
+            overflowManager.initialize()
+            overflowManager.recalc()
+        }
+        binding.drawingToolbar.addOnLayoutChangeListener { _, left, _, right, _, oldLeft, _, oldRight, _ ->
+            val newWidth = right - left
+            val oldWidth = oldRight - oldLeft
+            if (newWidth != oldWidth) {
+                closeOverflowMenu() // restore exclusion zone if menu was open
+                overflowManager.recalc()
+            }
+        }
+        binding.btnOverflow.setOnClickListener {
+            drawingView.releaseRender()
+            if (overflowManager.isOverflowMenuOpen()) closeOverflowMenu()
+            else openOverflowMenu()
+        }
+
         // ── Page swipe gesture (one-finger, deliberate) ──────────────────────
         // Page navigation requires a deliberate full-width horizontal finger swipe.
         // Three guards gate the gesture: minimum distance (screen-width relative),
@@ -1010,14 +1039,60 @@ class NotebookActivity : AppCompatActivity() {
         if (event.getToolType(0) == MotionEvent.TOOL_TYPE_FINGER) {
             handlePageSwipe(event)
         }
-        // Release the EPD writing overlay on any finger touch within the toolbar so
-        // button state changes (icon swaps, isSelected) are visible immediately on e-ink.
-        // The overlay re-enables on the next pen-down in onBeginRawDrawing.
-        if (event.actionMasked == MotionEvent.ACTION_DOWN
-            && event.getToolType(0) == MotionEvent.TOOL_TYPE_FINGER
-            && event.y < binding.drawingToolbar.bottom) {
-            drawingView.releaseRender()
+
+        // ── Overflow: deferred close after button UP (fixes finger click + stylus click) ──
+        // overflowCloseOnUp is set when a DOWN lands inside an open overflow menu.
+        // We defer the close until ACTION_UP so the button receives the UP and fires its
+        // click listener before the menu is hidden.
+        if (overflowCloseOnUp
+            && (event.actionMasked == MotionEvent.ACTION_UP
+                || event.actionMasked == MotionEvent.ACTION_CANCEL)) {
+            overflowCloseOnUp = false
+            val result = super.dispatchTouchEvent(event) // button gets UP → click fires
+            closeOverflowMenu()                          // then hide the menu + restore EPD zone
+            return result
         }
+
+        if (event.actionMasked == MotionEvent.ACTION_DOWN) {
+            val isFinger = event.getToolType(0) == MotionEvent.TOOL_TYPE_FINGER
+            val inToolbar = event.y < binding.drawingToolbar.bottom
+            val inOverflowMenu = overflowManager.isOverflowMenuOpen() && run {
+                val m = binding.overflowMenu
+                event.x >= m.left && event.x < m.right && event.y >= m.top && event.y < m.bottom
+            }
+
+            // Release the EPD writing overlay on any finger touch within the toolbar or
+            // overflow menu so button state changes are visible immediately on e-ink.
+            if (isFinger && (inToolbar || inOverflowMenu)) {
+                drawingView.releaseRender()
+            }
+
+            // Overflow menu dismiss logic (handled for both finger and stylus).
+            if (overflowManager.isOverflowMenuOpen()) {
+                when {
+                    isTouchInView(event, binding.btnOverflow) -> {
+                        // btnOverflow's own click listener handles the toggle; don't intervene.
+                    }
+                    inOverflowMenu -> {
+                        // Tapped an overflow button — defer close until ACTION_UP so the
+                        // click listener fires before the menu is hidden.
+                        overflowCloseOnUp = true
+                    }
+                    inToolbar -> {
+                        // Tapped a regular toolbar button — close immediately (no click timing issue).
+                        closeOverflowMenu()
+                    }
+                    else -> {
+                        // Outside toolbar and overflow — dismiss-only.
+                        closeOverflowMenu()
+                        // Consume finger taps to avoid accidental canvas interaction; let
+                        // stylus events through so a drawing stroke can start immediately.
+                        if (isFinger) return true
+                    }
+                }
+            }
+        }
+
         // Dismiss the lasso popup toolbar on any touch outside its bounds.
         if (event.actionMasked == MotionEvent.ACTION_DOWN
             && binding.lassoPopupToolbar.visibility == View.VISIBLE) {
@@ -1033,6 +1108,35 @@ class NotebookActivity : AppCompatActivity() {
             }
         }
         return super.dispatchTouchEvent(event)
+    }
+
+    /** Returns true if the touch event's screen-absolute coordinates land within [view]'s bounds. */
+    private fun isTouchInView(event: MotionEvent, view: View): Boolean {
+        val loc = IntArray(2)
+        view.getLocationOnScreen(loc)
+        return event.rawX.toInt() in loc[0] until loc[0] + view.width
+            && event.rawY.toInt() in loc[1] until loc[1] + view.height
+    }
+
+    /**
+     * Opens the overflow menu and extends the BOOX stylus exclusion zone to cover it,
+     * preventing the drawing engine from capturing stylus events in the menu area.
+     */
+    private fun openOverflowMenu() {
+        overflowManager.openOverflowMenu()
+        // Compute expected height synchronously from row count × button height — no layout pass
+        // needed.  Using overflowMenu.height here would be 0 until wrap_content measurement runs,
+        // which is too late: a stylus tap could land before the post/layout fires.
+        val menuHeight = overflowManager.expectedOverflowMenuHeight()
+        drawingView.setToolbarHeight(binding.drawingToolbar.height + menuHeight)
+    }
+
+    /**
+     * Closes the overflow menu and restores the BOOX stylus exclusion zone to the toolbar only.
+     */
+    private fun closeOverflowMenu() {
+        overflowManager.closeOverflowMenu()
+        drawingView.setToolbarHeight(binding.drawingToolbar.height)
     }
 
     /**

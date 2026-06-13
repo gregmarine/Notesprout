@@ -1,0 +1,208 @@
+package com.notesprout.android.notebook
+
+import android.view.View
+import android.view.ViewGroup
+import android.widget.LinearLayout
+
+/**
+ * Manages toolbar overflow for NotebookActivity.
+ *
+ * When all buttons + dividers fit within the toolbar, the toolbar renders exactly as
+ * defined in XML with btnOverflow/dividerOverflow hidden.  When they don't fit, the
+ * rightmost items that exceed the available width are moved into an overflow menu that
+ * opens below the toolbar.
+ *
+ * Views are MOVED (not cloned), so isSelected state, icon state, and click listeners
+ * are all preserved automatically across toolbar ↔ overflow transitions.
+ *
+ * Call [initialize] from the toolbar's first doOnLayout, then [recalc] whenever the
+ * toolbar width changes (e.g. rotation).
+ */
+class ToolbarOverflowManager(
+    private val toolbar: LinearLayout,
+    private val overflowMenu: LinearLayout,
+    private val dividerOverflow: View,
+    private val btnOverflow: View,
+) {
+    /** All moveable toolbar items (buttons + group dividers) in original left-to-right order.
+     *  Does NOT include the flexible Space, dividerOverflow, or btnOverflow. */
+    private var originalOrder: List<View> = emptyList()
+
+    /** The weight=1 Space view that pushes page controls to the right edge.
+     *  Always kept in the toolbar; never moved to the overflow menu. */
+    private var spaceView: View? = null
+
+    /** Actual button height in pixels, captured from child.height during initialize()
+     *  when the toolbar has been laid out and children are fully measured. */
+    private var cachedButtonHeightPx: Int = 0
+
+    private var initialized = false
+
+    // ── Public API ────────────────────────────────────────────────────────────
+
+    fun initialize() {
+        if (initialized) return
+        val moveable = mutableListOf<View>()
+        var space: View? = null
+        for (i in 0 until toolbar.childCount) {
+            val child = toolbar.getChildAt(i)
+            if (child === dividerOverflow || child === btnOverflow) continue
+            val lp = child.layoutParams as? LinearLayout.LayoutParams
+            if ((lp?.weight ?: 0f) > 0f) {
+                space = child
+            } else {
+                moveable.add(child)
+            }
+        }
+        originalOrder = moveable
+        spaceView = space
+        // Capture actual measured height while views are still in the toolbar and laid out.
+        // child.height is the real px value from the completed layout pass; more reliable than
+        // reading lp.height (which can be WRAP_CONTENT if set via minHeight/padding rather than
+        // an explicit layout_height attr that survived reparenting).
+        for (child in moveable) {
+            if (!isDivider(child) && child.height > 0) {
+                cachedButtonHeightPx = child.height
+                break
+            }
+        }
+        // Fall back to LayoutParams if somehow height is still 0 (e.g., called before layout).
+        if (cachedButtonHeightPx <= 0) {
+            for (child in moveable) {
+                if (!isDivider(child)) {
+                    val h = (child.layoutParams as? ViewGroup.MarginLayoutParams)?.height ?: -1
+                    if (h > 0) { cachedButtonHeightPx = h; break }
+                }
+            }
+        }
+        initialized = true
+    }
+
+    /**
+     * Recalculates which buttons stay in the toolbar and which overflow.
+     * Safe to call on every toolbar-width change; closes the overflow menu first.
+     */
+    fun recalc() {
+        if (!initialized) initialize()
+        val availableWidth = toolbar.width - toolbar.paddingStart - toolbar.paddingEnd
+        if (availableWidth <= 0) return
+
+        val overflowReserve = naturalWidth(dividerOverflow) + naturalWidth(btnOverflow)
+        val capacity = availableWidth - overflowReserve
+        val naturalTotal = originalOrder.sumOf { naturalWidth(it) }
+
+        if (naturalTotal <= availableWidth) {
+            rebuildAll(inToolbar = originalOrder, inOverflow = emptyList(), showOverflow = false)
+            return
+        }
+
+        // Find the largest prefix of originalOrder that fits within capacity.
+        var cumulative = 0
+        var cutIndex = originalOrder.size
+        for (i in originalOrder.indices) {
+            val w = naturalWidth(originalOrder[i])
+            if (cumulative + w > capacity) {
+                cutIndex = i
+                break
+            }
+            cumulative += w
+        }
+
+        // Don't leave a group divider as the last visible item in the toolbar —
+        // it would sit immediately before dividerOverflow, doubling the visual separator.
+        if (cutIndex > 0 && isDivider(originalOrder[cutIndex - 1])) {
+            cutIndex--
+        }
+
+        rebuildAll(
+            inToolbar  = originalOrder.subList(0, cutIndex),
+            inOverflow = originalOrder.subList(cutIndex, originalOrder.size),
+            showOverflow = true,
+        )
+    }
+
+    fun openOverflowMenu()  { overflowMenu.visibility = View.VISIBLE }
+    fun closeOverflowMenu() { overflowMenu.visibility = View.GONE }
+    fun isOverflowMenuOpen() = overflowMenu.visibility == View.VISIBLE
+
+    /**
+     * Returns the expected pixel height of the overflow menu content — number of rows times
+     * button height — computed synchronously without a layout pass.  Use this to extend the
+     * BOOX exclusion zone immediately when the menu opens, before wrap_content measurement runs.
+     */
+    fun expectedOverflowMenuHeight(): Int = overflowMenu.childCount * toolbar.height
+
+    // ── Private helpers ───────────────────────────────────────────────────────
+
+    private fun rebuildAll(inToolbar: List<View>, inOverflow: List<View>, showOverflow: Boolean) {
+        // Detach all moveable views from wherever they currently live (toolbar or overflow rows).
+        for (child in originalOrder) (child.parent as? ViewGroup)?.removeView(child)
+        spaceView?.let { (it.parent as? ViewGroup)?.removeView(it) }
+
+        // Clear whatever remains in the toolbar (dividerOverflow + btnOverflow).
+        toolbar.removeAllViews()
+        // Clear overflow row containers.
+        overflowMenu.removeAllViews()
+
+        // Rebuild toolbar: [in-toolbar items] [Space] [dividerOverflow] [btnOverflow]
+        for (child in inToolbar) toolbar.addView(child)
+        spaceView?.let { toolbar.addView(it) }
+        toolbar.addView(dividerOverflow)
+        toolbar.addView(btnOverflow)
+
+        dividerOverflow.visibility = if (showOverflow) View.VISIBLE else View.GONE
+        btnOverflow.visibility     = if (showOverflow) View.VISIBLE else View.GONE
+        overflowMenu.visibility    = View.GONE // always collapsed after a recalc
+
+        if (showOverflow) buildOverflowRows(inOverflow)
+    }
+
+    /**
+     * Packs [items] into one or more horizontal rows inside [overflowMenu], greedy
+     * left-to-right.  Group dividers between items are preserved exactly as in the toolbar.
+     */
+    private fun buildOverflowRows(items: List<View>) {
+        if (items.isEmpty()) return
+        val rowCapacity = toolbar.width - toolbar.paddingStart - toolbar.paddingEnd
+        var row = newRow()
+        overflowMenu.addView(row)
+        var rowUsed = 0
+        for (item in items) {
+            val w = naturalWidth(item)
+            if (rowUsed > 0 && rowUsed + w > rowCapacity) {
+                row = newRow()
+                overflowMenu.addView(row)
+                rowUsed = 0
+            }
+            row.addView(item)
+            rowUsed += w
+        }
+    }
+
+    private fun newRow() = LinearLayout(toolbar.context).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = android.view.Gravity.CENTER_VERTICAL
+        layoutParams = LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            toolbar.height,
+        )
+    }
+
+    /** Height of a toolbar button in pixels, from the value cached during initialize(). */
+    private fun buttonHeightPx(): Int =
+        if (cachedButtonHeightPx > 0) cachedButtonHeightPx else ViewGroup.LayoutParams.WRAP_CONTENT
+
+    /**
+     * Returns the total horizontal space a view occupies in a LinearLayout:
+     * its LayoutParams width (in px) plus left and right margins.
+     * Works correctly for GONE views whose measuredWidth is 0.
+     */
+    private fun naturalWidth(view: View): Int {
+        val lp = view.layoutParams as? ViewGroup.MarginLayoutParams ?: return 0
+        val w = if (lp.width >= 0) lp.width else 0 // exact px; skip WRAP_CONTENT / MATCH_PARENT
+        return w + lp.leftMargin + lp.rightMargin
+    }
+
+    /** True for plain View dividers (1dp black lines), false for buttons and Space. */
+    private fun isDivider(view: View): Boolean = view.javaClass == View::class.java
+}

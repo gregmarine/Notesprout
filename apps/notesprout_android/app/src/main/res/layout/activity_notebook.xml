@@ -223,7 +223,40 @@
             android:src="@drawable/ic_paste_page"
             android:contentDescription="Paste page" />
 
+        <!-- Overflow group divider — visible only when overflow button is shown -->
+        <View
+            android:id="@+id/dividerOverflow"
+            android:layout_width="1dp"
+            android:layout_height="28dp"
+            android:background="@color/inkBlack"
+            android:layout_marginStart="4dp"
+            android:layout_marginEnd="4dp"
+            android:visibility="gone"/>
+
+        <!-- Overflow button — shows overflowed toolbar items in a menu below the toolbar -->
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnOverflow"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:src="@drawable/ic_dots"
+            android:contentDescription="More actions"
+            android:visibility="gone"/>
+
     </LinearLayout>
+
+    <!-- Overflow menu — appears directly below the toolbar when overflow is active.
+         Built dynamically by ToolbarOverflowManager: one or more horizontal rows of
+         overflowed buttons, wrapped to fit the toolbar width.
+         Pinned to top via layout_gravity + layout_marginTop matching the toolbar height. -->
+    <LinearLayout
+        android:id="@+id/overflowMenu"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top"
+        android:layout_marginTop="56dp"
+        android:orientation="vertical"
+        android:visibility="gone"
+        android:background="@drawable/shape_bordered"
+        android:elevation="0dp"/>
 
     <!-- Page indicator — overlay in the lower-right corner of the drawing surface.
          Not inside the toolbar; rendered above the canvas via FrameLayout z-order. -->

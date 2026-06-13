@@ -213,6 +213,37 @@ Notesprout's visual language is designed for e-ink displays first. All other pla
 - Dividers: `@color/inkBlack`, 1dp × 28dp
 - Undo/Redo buttons: statically always-enabled — tapping an empty stack silently does nothing (matches native BOOX behavior). Do not add alpha/tinting state.
 
+### Toolbar Overflow System
+
+Implemented in `notebook/ToolbarOverflowManager.kt`, wired from `NotebookActivity.onCreate`.
+
+**Behaviour:**
+- If all buttons + dividers fit within the toolbar width, everything renders as-is and `btnOverflow`/`dividerOverflow` stay `GONE`.
+- If they don't fit, `btnOverflow` (Tabler "dots", `ic_dots.xml`) and `dividerOverflow` become visible at the far right. Overflowed buttons (rightmost items that don't fit) move into `overflowMenu` — a vertical `LinearLayout` pinned directly below the toolbar (`layout_marginTop="56dp"`, `shape_bordered` background).
+- Tapping `btnOverflow` toggles `overflowMenu` visibility.
+
+**Move-not-clone:** `ToolbarOverflowManager` moves actual `View` instances between the toolbar and overflow rows (no cloning), so `isSelected` state, icon swap state, and click listeners are preserved with zero extra wiring.
+
+**Cut-point algorithm:**
+1. `originalOrder` = all toolbar children except the `weight=1` Space, `dividerOverflow`, and `btnOverflow`, captured once at `initialize()`.
+2. `recalc()` sums natural widths (LayoutParams.width + margins, valid even for `GONE` views) left-to-right.
+3. If total fits in `toolbar.width - paddingStart - paddingEnd`: full-fit path — no overflow.
+4. Otherwise: find the largest prefix of `originalOrder` that fits within `availableWidth - naturalWidth(dividerOverflow) - naturalWidth(btnOverflow)`. If the last item in that prefix is a plain-View divider, move the cut one step back (prevents double-divider at the junction).
+5. Items before the cut stay in the toolbar; items at/after go into overflow rows. The `Space` (weight=1) always stays in the toolbar between the last visible button and `dividerOverflow`, keeping `btnOverflow` pinned to the right edge.
+
+**Overflow rows:** greedy left-to-right packing — add items to the current row until the next item won't fit, then start a new row. Group dividers between items are preserved.
+
+**Recalc triggers:**
+- `doOnLayout` on the toolbar (first layout).
+- `addOnLayoutChangeListener` on the toolbar — fires when the toolbar width changes (rotation). Closes the menu first.
+
+**Dismiss rules (in `dispatchTouchEvent`):**
+- Touch on `btnOverflow`: toggle handled by its own click listener; `dispatchTouchEvent` does not intervene.
+- Touch inside overflow menu: close menu, do NOT consume — let the tapped button's click fire.
+- Touch inside toolbar (not on `btnOverflow`): close menu, do NOT consume — let the tapped button's click fire.
+- Touch anywhere else: close menu AND consume the event — dismiss-only, must not start a stroke.
+- EPD `releaseRender()` is called on any finger `ACTION_DOWN` in the toolbar OR the open overflow menu.
+
 ---
 
 ## Device Target Tiers
@@ -679,4 +710,4 @@ Never calls `eraseAll()`. Updates the in-memory stroke list directly, rebuilds b
   - On failure: Toast "Copy failed." or "Move failed." — stays in picker mode.
 - Creating a new folder while in picker mode navigates into it and stays in picker mode (normal `navigateIntoFolder` path, no extra logic needed).
 
-*Last updated: New Branch — Browse state persistence + Pruning — notesprout.db WAL maintenance*
+*Last updated: New Branch — Toolbar Overflow System*
