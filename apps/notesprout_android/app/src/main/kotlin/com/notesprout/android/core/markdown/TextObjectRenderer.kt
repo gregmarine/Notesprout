@@ -45,8 +45,13 @@ object TextObjectRenderer {
 
     /**
      * Compute the (width, height) in pixels that [text] occupies when rendered at
-     * [availableWidthPx]. Width returned by [StaticLayout] may be narrower than
-     * [availableWidthPx] for short content.
+     * [availableWidthPx].
+     *
+     * Width is the natural content width — the maximum line width across all lines in the
+     * StaticLayout, capped at [availableWidthPx]. This is narrower than [availableWidthPx]
+     * for short content (e.g. "Hello world" returns ~text-measurement-width, not page width).
+     * [StaticLayout.width] always equals the constraint passed to the builder, so we cannot
+     * use it directly for bounding-box sizing.
      *
      * Thread-safe — does not access any View state.
      */
@@ -58,7 +63,10 @@ object TextObjectRenderer {
     ): Pair<Int, Int> {
         if (text.isBlank()) return Pair(0, 0)
         val layout = buildLayout(text, availableWidthPx, paint, density)
-        return Pair(layout.width, layout.height)
+        val naturalWidth = (0 until layout.lineCount)
+            .maxOfOrNull { i -> kotlin.math.ceil(layout.getLineWidth(i).toDouble()).toInt() }
+            ?: 0
+        return Pair(naturalWidth.coerceAtMost(availableWidthPx), layout.height)
     }
 
     private fun buildLayout(
@@ -69,6 +77,12 @@ object TextObjectRenderer {
     ): StaticLayout {
         val blocks = MarkdownParser.parse(text)
         val spannable = MarkdownRenderer.render(blocks, widthPx, paint, density)
+        // MarkdownRenderer appends '\n' after every block. The final trailing newline
+        // makes StaticLayout produce a spurious empty line, inflating the measured height.
+        // Trim it before building the layout so height matches actual content.
+        var end = spannable.length
+        while (end > 0 && spannable[end - 1] == '\n') end--
+        if (end < spannable.length) spannable.delete(end, spannable.length)
         return StaticLayout.Builder
             .obtain(spannable, 0, spannable.length, paint, widthPx)
             .build()

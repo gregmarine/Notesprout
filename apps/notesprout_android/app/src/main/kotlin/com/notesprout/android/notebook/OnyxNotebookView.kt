@@ -223,8 +223,8 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
 
     private val rawInputCallback = object : RawInputCallback() {
         override fun onBeginRawDrawing(shortcutDrawing: Boolean, touchPoint: TouchPoint) {
-            epd { "ON_BEGIN_RAW_DRAWING isEraserMode=$isEraserMode isLassoMode=$isLassoMode isLassoEraserMode=$isLassoEraserMode isSetup=$isSetup" }
-            if (isLassoMode || isLassoEraserMode) return
+            epd { "ON_BEGIN_RAW_DRAWING isEraserMode=$isEraserMode isLassoMode=$isLassoMode isLassoEraserMode=$isLassoEraserMode isTextPlacementMode=$isTextPlacementMode isSetup=$isSetup" }
+            if (isLassoMode || isLassoEraserMode || isTextPlacementMode) return
             if (isSetup && !isEraserMode) {
                 touchHelper.setRawDrawingRenderEnabled(true)
                 epd { "RENDER_ENABLED caller=onBeginRawDrawing" }
@@ -235,8 +235,8 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
         }
 
         override fun onEndRawDrawing(shortcutDrawing: Boolean, touchPoint: TouchPoint) {
-            epd { "ON_END_RAW_DRAWING isEraserMode=$isEraserMode isLassoMode=$isLassoMode isLassoEraserMode=$isLassoEraserMode" }
-            if (isLassoMode || isLassoEraserMode) return
+            epd { "ON_END_RAW_DRAWING isEraserMode=$isEraserMode isLassoMode=$isLassoMode isLassoEraserMode=$isLassoEraserMode isTextPlacementMode=$isTextPlacementMode" }
+            if (isLassoMode || isLassoEraserMode || isTextPlacementMode) return
             if (isEraserMode) {
                 // Flush any throttled-but-not-yet-drawn erase removals before the EPD repaint.
                 finalizeEraseRedraw()
@@ -252,12 +252,12 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
         }
 
         override fun onRawDrawingTouchPointMoveReceived(touchPoint: TouchPoint) {
-            if (isLassoMode || isLassoEraserMode) return
+            if (isLassoMode || isLassoEraserMode || isTextPlacementMode) return
             if (isEraserMode) eraseAtPath(listOf(PointF(touchPoint.x, touchPoint.y)))
         }
 
         override fun onRawDrawingTouchPointListReceived(pointList: TouchPointList) {
-            if (isLassoMode || isLassoEraserMode) return
+            if (isLassoMode || isLassoEraserMode || isTextPlacementMode) return
             // When software eraser mode is active the SDK still routes pen-tip events here.
             if (isEraserMode) {
                 Slog.d(TAG) { "onRawDrawingTouchPointListReceived (eraser mode) count=${pointList.size()}" }
@@ -1389,6 +1389,9 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
                     snapshotCanvas.drawPath(path, strokePaint)
                 }
             }
+        }
+        for (textObj in textObjects) {
+            drawTextObject(snapshotCanvas, textObj, w)
         }
         for (liveStroke in strokes) {
             val points = liveStroke.points

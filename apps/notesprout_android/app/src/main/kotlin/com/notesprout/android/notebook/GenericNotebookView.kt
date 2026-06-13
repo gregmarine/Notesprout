@@ -968,6 +968,9 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
                 }
             }
         }
+        for (textObj in textObjects) {
+            drawTextObject(snapshotCanvas, textObj, w)
+        }
         for (liveStroke in strokes) {
             val points = liveStroke.points
             if (points.size < 2) continue

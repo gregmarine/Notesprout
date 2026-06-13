@@ -248,20 +248,21 @@ Implemented in `notebook/ToolbarOverflowManager.kt`, wired from `NotebookActivit
 
 ## Device Target Tiers
 
-**Tier 1 — Daily drivers:**
-- BOOX NoteAir5C (EMR stylus, e-ink color) — flagship
+**Tier 1 — Primary devices (always-tested, daily drivers):**
+- BOOX Go 10.3 (EMR stylus, large e-ink) — FLAGSHIP
 - BOOX Note Max (EMR stylus, large-format e-ink)
-- BOOX Go 10.3 (EMR stylus, large e-ink)
+- BOOX Go 7 (EMR stylus, compact e-ink)
 - BOOX Palma2 Pro (USI 2.0 stylus, Android phone form factor)
-- BOOX Go Color 7 Gen II
-- Wacom Movink Pad 11 & 14 (Android, GenericDrawingEngine)
-- iPhone 14 (touch-only) — future
-- MacBook / Web — future
 
 **Tier 2 — Testing/QA:**
+- BOOX NoteAir5C (EMR stylus, e-ink color)
 - BOOX NoteAir4C
 - BOOX Tab XC
+- BOOX Go Color 7 Gen II
+- Wacom Movink Pad 11 & 14 (Android, GenericDrawingEngine)
 - iPad Air + Apple Pencil — future
+- iPhone 14 (touch-only) — future
+- MacBook / Web — future
 - Supernote Nomad & Manta (GenericDrawingEngine fallback) — future
 
 ## ADB Device Serials
@@ -549,6 +550,7 @@ Never calls `eraseAll()`. Updates the in-memory stroke list directly, rebuilds b
 - `@Serializable data class TextObject(val text: String = "", val strokes: List<LiveStroke>? = null)` — stores raw Markdown source text and, for lasso-converted objects, the embedded original strokes. Use `toJson()` / `fromJson()` (kotlinx.serialization, never `org.json`).
 - `data class TextRender(val id: String, val boundingBox: RectF, val text: String, val strokes: List<LiveStroke>? = null)` — built at page load from `type = "text"` rows via `loadTextObjectsFromDb()` in `NotebookActivity`. `strokes` is populated from `TextObject.strokes`.
 - Text objects render after headings, before strokes in both drawing views and the PDF exporter — transparent background only (no white fill, no template draw).
+- **Bounding box width rule:** the bounding box width is the *natural content width* — the maximum line width across all lines in the `StaticLayout`, capped at page width only when content genuinely needs that full width. Never set `boundingBox.width = pageWidth` unconditionally. `TextObjectRenderer.measure()` returns this natural width; `availableWidthPx` is the layout constraint (wrapping ceiling), not the assigned width. This applies to all three write paths: insert (`insertTextObject`), edit (`updateTextObject`), and conversion (`convertLassoToText`). For unrecognized text objects (blank text, strokes rendered), the bounding box is derived from the stroke data's union bounding box.
 
 **Canvas render dispatch for type="text" objects (both drawing views):**
 - `text.isNotBlank()` → `TextObjectRenderer.draw()` (markdown engine path).
@@ -882,15 +884,15 @@ Never calls `eraseAll()`. Updates the in-memory stroke list directly, rebuilds b
 | Lasso eraser | ✅ `runLassoHitTest` — center-point containment; atomic removal; `LassoErased` undo carries `textIds`/`textObjects` |
 
 **Key clipboard invariants for text objects:**
-- `NotesproutClipboard.ClipboardContent.textObjects: List<TextRender>` carries both `text` (markdown, may be empty) and `strokes` (may be non-null for unrecognized conversion objects). Paste reproduces the correct render branch: markdown if `text.isNotBlank()`, embedded strokes if blank+strokes present (per Prompt 5 rules).
+- `NotesproutClipboard.ClipboardContent.textObjects: List<TextRender>` carries both `text` (markdown, may be empty) and `strokes` (may be non-null for unrecognized conversion objects). Paste reproduces the correct render branch: markdown if `text.isNotBlank()`, embedded strokes if blank+strokes present.
 - Cross-page paste: `textObjects` survives the cross-page round trip via `LassoPasted.textObjects` stored in the undo action.
 - `LassoErased.strokeIds` contains ALL erased IDs (strokes + heading IDs + text IDs). `textIds` is the text-object subset stored separately for in-memory partitioning on undo.
 
-*Last updated: New Branch — Full lasso integration for text objects (Prompt 6)*
+*Last updated: Text object polish pass + device tier update (Prompt 7)*
 
 ---
 
-**Lasso stroke-to-text conversion (Prompt 5):**
+**Lasso stroke-to-text conversion:**
 
 - **"Text" button** (`btnConvertText`, icon `ic_text_recognition`) appears in the floating lasso selection toolbar immediately after Create/Remove Heading buttons. Visible only when `selectionIsPureStrokes` (same condition as "Create Heading").
 - **`convertLassoToText(selectedStrokes, selectionBox)`** — suspend function called on `Dispatchers.IO`:
