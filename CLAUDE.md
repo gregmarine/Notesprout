@@ -865,19 +865,28 @@ Never calls `eraseAll()`. Updates the in-memory stroke list directly, rebuilds b
 
 **Lasso actions for `type="text"` objects:**
 
+`type="text"` objects are fully first-class lasso participants — all lasso actions treat them alongside strokes and headings with complete undo/redo support.
+
 | Action | Status |
 |---|---|
 | Selection (lasso draw) | ✅ Center-point containment hit test |
-| Drag to move | ✅ Translates bounding box; persists via `updateHeadingData`; `StrokesMoved` undo |
+| Drag to move | ✅ Translates bounding box; persists via `updateHeadingData`; `StrokesMoved` undo; preserves `strokes` field |
 | Delete (floating toolbar Delete) | ✅ `performLassoDelete` — soft-delete + `LassoDeleted` undo |
 | Tap-to-edit (selected, text non-blank) | ✅ `showTextEditDialogForTextObject` — `TextEdited` / `TextRemoved` undo |
 | Tap on selected unrecognized object | ✅ No-op (gated: blank text → dialog not opened) |
 | Highlight/selection visual | ✅ Dashed overlay box |
 | Convert strokes → text (lasso "Text" btn) | ✅ `convertLassoToText` — ML Kit + `TextConverted` undo |
-| Copy / Cut / Paste | ❌ Deferred — `NotesproutClipboard` does not yet carry text objects |
-| Lasso eraser | ❌ Deferred — lasso eraser only hits strokes/headings currently |
+| Copy | ✅ `performLassoCopy` — included in `NotesproutClipboard.ClipboardContent.textObjects`; preserves `text` + `strokes` |
+| Cut | ✅ `performLassoCut` — clipboard + soft-delete; `LassoCut` undo carries `textIds`/`textObjects` |
+| Paste (same-page and cross-page) | ✅ `performLassoPaste` — new UUID, translated bbox, inserts `type="text"` row; `LassoPasted` undo carries `textIds`/`textObjects` |
+| Lasso eraser | ✅ `runLassoHitTest` — center-point containment; atomic removal; `LassoErased` undo carries `textIds`/`textObjects` |
 
-*Last updated: New Branch — Lasso stroke-to-text conversion, ML Kit (Prompt 5)*
+**Key clipboard invariants for text objects:**
+- `NotesproutClipboard.ClipboardContent.textObjects: List<TextRender>` carries both `text` (markdown, may be empty) and `strokes` (may be non-null for unrecognized conversion objects). Paste reproduces the correct render branch: markdown if `text.isNotBlank()`, embedded strokes if blank+strokes present (per Prompt 5 rules).
+- Cross-page paste: `textObjects` survives the cross-page round trip via `LassoPasted.textObjects` stored in the undo action.
+- `LassoErased.strokeIds` contains ALL erased IDs (strokes + heading IDs + text IDs). `textIds` is the text-object subset stored separately for in-memory partitioning on undo.
+
+*Last updated: New Branch — Full lasso integration for text objects (Prompt 6)*
 
 ---
 

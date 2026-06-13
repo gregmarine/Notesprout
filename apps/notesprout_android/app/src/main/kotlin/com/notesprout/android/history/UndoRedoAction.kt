@@ -110,13 +110,16 @@ sealed class UndoRedoAction {
     ) : UndoRedoAction()
 
     /**
-     * User erased a batch of strokes/headings via the lasso eraser tool — undo restores all;
-     * redo soft-deletes them again as a single atomic batch.
+     * User erased a batch of strokes/headings/text objects via the lasso eraser tool — undo
+     * restores all; redo soft-deletes them again as a single atomic batch.
      *
-     * [strokeIds] contains ALL erased IDs (both strokes and heading IDs) for unified DB ops.
+     * [strokeIds] contains ALL erased IDs (strokes, heading IDs, and text IDs) for unified DB ops.
      * [headingIds] is the heading subset of [strokeIds].
      * [headings] carries full heading data so undo can rebuild the in-memory list without a
      * DB round-trip for heading deserialization.
+     * [textIds] is the text-object subset of [strokeIds].
+     * [textObjects] carries full TextRender data so undo can rebuild the in-memory list without
+     * a DB round-trip.
      */
     @Serializable
     data class LassoErased(
@@ -124,6 +127,8 @@ sealed class UndoRedoAction {
         val pageId: String,
         val headingIds: List<String> = emptyList(),
         val headings: List<HeadingStroke> = emptyList(),
+        val textIds: List<String> = emptyList(),
+        val textObjects: List<TextRender> = emptyList(),
     ) : UndoRedoAction()
 
     /**
@@ -147,12 +152,14 @@ sealed class UndoRedoAction {
     ) : UndoRedoAction()
 
     /**
-     * User pasted strokes/headings from the lasso clipboard onto the current page.
-     * Undo soft-deletes all [strokeIds] + [headingIds]; redo restores them by ID.
+     * User pasted strokes/headings/text objects from the lasso clipboard onto the current page.
+     * Undo soft-deletes all [strokeIds] + [headingIds] + [textIds]; redo restores them by ID.
      *
      * [insertedAt] is the timestamp used when the objects were inserted into the DB.
-     * [headingIds] are the heading IDs pasted alongside strokes (may be empty for
-     * pure-stroke pastes).
+     * [headingIds] are the heading IDs pasted alongside strokes (may be empty).
+     * [textIds] are the text-object IDs pasted (may be empty).
+     * [textObjects] carries full TextRender data so redo can rebuild the in-memory list without
+     * a DB round-trip.
      */
     @Serializable
     data class LassoPasted(
@@ -160,18 +167,22 @@ sealed class UndoRedoAction {
         val pageId: String,
         val insertedAt: Long,
         val headingIds: List<String> = emptyList(),
+        val textIds: List<String> = emptyList(),
+        val textObjects: List<TextRender> = emptyList(),
     ) : UndoRedoAction()
 
     /**
-     * User cut selected strokes/headings via the lasso cut tool — objects are soft-deleted
-     * and simultaneously written to [NotesproutClipboard].
+     * User cut selected strokes/headings/text objects via the lasso cut tool — objects are
+     * soft-deleted and simultaneously written to [NotesproutClipboard].
      *
-     * Undo: restores all [strokeIds] + [headingIds] from the DB (does not touch clipboard).
-     * Redo: re-soft-deletes [strokeIds] + [headingIds] and repopulates [NotesproutClipboard]
-     *       with [strokes] + [headings] + their union bounding box.
+     * Undo: restores all [strokeIds] + [headingIds] + [textIds] from the DB (does not touch
+     *       clipboard).
+     * Redo: re-soft-deletes all three sets and repopulates [NotesproutClipboard] with
+     *       [strokes] + [headings] + [textObjects] + their union bounding box.
      *
      * [deletedAt] is the timestamp used for all soft-delete calls during the original cut.
-     * [strokes]/[headings] carry full data so redo can rebuild the clipboard without a DB read.
+     * [strokes]/[headings]/[textObjects] carry full data so redo can rebuild the clipboard
+     * without a DB read.
      */
     @Serializable
     data class LassoCut(
@@ -181,6 +192,8 @@ sealed class UndoRedoAction {
         val strokes: List<LiveStroke>,
         val headingIds: List<String> = emptyList(),
         val headings: List<HeadingStroke> = emptyList(),
+        val textIds: List<String> = emptyList(),
+        val textObjects: List<TextRender> = emptyList(),
     ) : UndoRedoAction()
 
     /**

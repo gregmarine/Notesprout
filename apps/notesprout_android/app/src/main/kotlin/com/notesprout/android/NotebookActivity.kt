@@ -790,7 +790,7 @@ class NotebookActivity : AppCompatActivity() {
             hideFloatingSelectionToolbar()
         }
 
-        // Lasso eraser gesture complete — soft-delete hit strokes/headings and push undo action.
+        // Lasso eraser gesture complete — soft-delete hit strokes/headings/text objects and push undo.
         drawingView.onLassoEraseComplete = { erasedIds ->
             val pageId = currentPageId.takeIf { it.isNotEmpty() }
             if (erasedIds.isNotEmpty() && pageId != null) {
@@ -801,28 +801,35 @@ class NotebookActivity : AppCompatActivity() {
                     }
                     withContext(Dispatchers.Main) {
                         val erasedSet = erasedIds.toSet()
-                        // Partition into heading IDs vs stroke IDs.
-                        val erasedHeadings = drawingView.getHeadings().filter { it.id in erasedSet }
-                        val erasedHeadingIds = erasedHeadings.mapTo(mutableSetOf()) { it.id }
-                        val capturedHeadings = erasedHeadings.map { h ->
+                        // Partition into heading IDs, text IDs, and pure stroke IDs.
+                        val erasedHeadings    = drawingView.getHeadings().filter { it.id in erasedSet }
+                        val erasedHeadingIds  = erasedHeadings.mapTo(mutableSetOf()) { it.id }
+                        val capturedHeadings  = erasedHeadings.map { h ->
                             HeadingStroke(h.id, RectF(h.boundingBox),
-                                h.strokes.map { s -> LiveStroke(s.id, s.points.map { PointF(it.x, it.y) }) })
+                                h.strokes.map { s -> LiveStroke(s.id, s.points.map { PointF(it.x, it.y) }) },
+                                recognizedText = h.recognizedText)
                         }
+                        val erasedTexts    = drawingView.getTextObjects().filter { it.id in erasedSet }
+                        val erasedTextIds  = erasedTexts.mapTo(mutableSetOf()) { it.id }
                         val updatedStrokes  = drawingView.getStrokes().filter { it.id !in erasedSet }
                         val updatedHeadings = drawingView.getHeadings().filter { it.id !in erasedHeadingIds }
-                        persistedStrokeIds.removeAll(erasedSet - erasedHeadingIds)
+                        val updatedTexts    = drawingView.getTextObjects().filter { it.id !in erasedTextIds }
+                        persistedStrokeIds.removeAll(erasedSet - erasedHeadingIds - erasedTextIds)
                         drawingView.setStrokeListSilently(updatedStrokes)
                         drawingView.loadHeadings(updatedHeadings)
+                        drawingView.loadTextObjects(updatedTexts)
                         undoRedoManager.push(UndoRedoAction.LassoErased(
-                            strokeIds  = erasedIds.toList(),
-                            pageId     = pageId,
-                            headingIds = erasedHeadingIds.toList(),
-                            headings   = capturedHeadings,
+                            strokeIds   = erasedIds.toList(),
+                            pageId      = pageId,
+                            headingIds  = erasedHeadingIds.toList(),
+                            headings    = capturedHeadings,
+                            textIds     = erasedTextIds.toList(),
+                            textObjects = erasedTexts,
                         ))
                         updateUndoRedoButtons()
                         val templateBmp = currentTemplateBitmap
                         val bitmap = withContext(Dispatchers.IO) {
-                            drawingView.buildRenderBitmap(updatedStrokes, templateBmp, updatedHeadings)
+                            drawingView.buildRenderBitmap(updatedStrokes, templateBmp, updatedHeadings, updatedTexts)
                         }
                         if (bitmap != null) {
                             drawingView.loadStrokesWithBitmap(updatedStrokes, bitmap, templateBmp)
@@ -863,7 +870,7 @@ class NotebookActivity : AppCompatActivity() {
                             for (textObj in movedTextObjects) {
                                 val bboxJson = """{"x":${textObj.boundingBox.left},"y":${textObj.boundingBox.top},"width":${textObj.boundingBox.width()},"height":${textObj.boundingBox.height()}}"""
                                 db.notebookDao().updateHeadingData(
-                                    textObj.id, bboxJson, TextObject(textObj.text).toJson(), now
+                                    textObj.id, bboxJson, TextObject(text = textObj.text, strokes = textObj.strokes).toJson(), now
                                 )
                             }
                         }
@@ -2518,28 +2525,31 @@ class NotebookActivity : AppCompatActivity() {
         return union
     }
 
-    /** Copy the currently selected strokes/headings to [NotesproutClipboard]. */
+    /** Copy the currently selected strokes/headings/text objects to [NotesproutClipboard]. */
     private fun performLassoCopy() {
         val ids = drawingView.lassoSelectedIds
         if (ids.isEmpty()) return
-        val strokes  = drawingView.getStrokes().filter { it.id in ids }
-        val headings = drawingView.getHeadings().filter { it.id in ids }
-        if (strokes.isEmpty() && headings.isEmpty()) return
+        val strokes      = drawingView.getStrokes().filter { it.id in ids }
+        val headings     = drawingView.getHeadings().filter { it.id in ids }
+        val textObjects  = drawingView.getTextObjects().filter { it.id in ids }
+        if (strokes.isEmpty() && headings.isEmpty() && textObjects.isEmpty()) return
         val box = computeUnionBoundingBox(strokes, headings)
+        textObjects.forEach { box.union(it.boundingBox) }
         NotesproutClipboard.content = NotesproutClipboard.ClipboardContent(
             strokes  = strokes.map { LiveStroke(it.id, it.points.map { pt -> PointF(pt.x, pt.y) }) },
             headings = headings.map { h -> HeadingStroke(h.id, RectF(h.boundingBox),
                 h.strokes.map { s -> LiveStroke(s.id, s.points.map { PointF(it.x, it.y) }) },
                 recognizedText = h.recognizedText) },
             boundingBox = box,
+            textObjects = textObjects.map { t -> TextRender(t.id, RectF(t.boundingBox), t.text, t.strokes) },
         )
         updateLassoButtonIcon()
     }
 
     /**
-     * Paste clipboard strokes/headings onto the current page, centered on [tapX], [tapY].
-     * Inserts new rows into the DB, updates in-memory lists, sets them as the active
-     * selection, and shows the floating toolbar at the new selection box.
+     * Paste clipboard strokes/headings/text objects onto the current page, centered on
+     * [tapX], [tapY].  Inserts new rows into the DB, updates in-memory lists, sets them
+     * as the active selection, and shows the floating toolbar at the new selection box.
      */
     private fun performLassoPaste(tapX: Float, tapY: Float) {
         val clip = NotesproutClipboard.content ?: return
@@ -2569,6 +2579,15 @@ class NotebookActivity : AppCompatActivity() {
                         s.points.map { PointF(it.x + dx, it.y + dy) })
                 },
                 recognizedText = h.recognizedText,
+            )
+        }
+        val newTextObjects = clip.textObjects.map { t ->
+            TextRender(
+                id = java.util.UUID.randomUUID().toString(),
+                boundingBox = RectF(t.boundingBox.left + dx, t.boundingBox.top + dy,
+                                    t.boundingBox.right + dx, t.boundingBox.bottom + dy),
+                text = t.text,
+                strokes = t.strokes,
             )
         }
 
@@ -2621,25 +2640,46 @@ class NotebookActivity : AppCompatActivity() {
                             )
                         )
                     }
+                    newTextObjects.forEach { textObj ->
+                        val bb = textObj.boundingBox
+                        val bboxJson = """{"x":${bb.left},"y":${bb.top},"width":${bb.width()},"height":${bb.height()}}"""
+                        dao.insertOrIgnore(
+                            NotebookObject(
+                                id          = textObj.id,
+                                type        = TYPE_TEXT,
+                                parentId    = layerId,
+                                boundingBox = bboxJson,
+                                sortOrder   = 0,
+                                createdAt   = now,
+                                updatedAt   = now,
+                                deletedAt   = null,
+                                data        = TextObject(text = textObj.text, strokes = textObj.strokes).toJson(),
+                            )
+                        )
+                    }
                 }
             }
 
-            val allStrokes  = existingStrokes + newStrokes
-            val allHeadings = drawingView.getHeadings() + newHeadings
+            val allStrokes   = existingStrokes + newStrokes
+            val allHeadings  = drawingView.getHeadings() + newHeadings
+            val allTexts     = drawingView.getTextObjects() + newTextObjects
             newStrokes.forEach { persistedStrokeIds.add(it.id) }
             drawingView.loadHeadings(allHeadings)
+            drawingView.loadTextObjects(allTexts)
 
             undoRedoManager.push(UndoRedoAction.LassoPasted(
-                strokeIds  = newStrokes.map { it.id },
-                pageId     = pageId,
-                insertedAt = insertedAt,
-                headingIds = newHeadings.map { it.id },
+                strokeIds   = newStrokes.map { it.id },
+                pageId      = pageId,
+                insertedAt  = insertedAt,
+                headingIds  = newHeadings.map { it.id },
+                textIds     = newTextObjects.map { it.id },
+                textObjects = newTextObjects,
             ))
             updateUndoRedoButtons()
 
             val templateBmp = currentTemplateBitmap
             val bitmap = withContext(Dispatchers.IO) {
-                drawingView.buildRenderBitmap(allStrokes, templateBmp, allHeadings)
+                drawingView.buildRenderBitmap(allStrokes, templateBmp, allHeadings, allTexts)
             }
             if (bitmap != null) {
                 drawingView.loadStrokesWithBitmap(allStrokes, bitmap, templateBmp)
@@ -2649,18 +2689,20 @@ class NotebookActivity : AppCompatActivity() {
 
             // Set pasted content as the active selection.
             val newBox = computeUnionBoundingBox(newStrokes, newHeadings)
+            newTextObjects.forEach { newBox.union(it.boundingBox) }
             val pad = 8f * resources.displayMetrics.density
             newBox.inset(-pad, -pad)
             selectedObjectIds.clear()
             selectedObjectIds.addAll(newStrokes.map { it.id })
             selectedObjectIds.addAll(newHeadings.map { it.id })
+            selectedObjectIds.addAll(newTextObjects.map { it.id })
             drawingView.setLassoSelectedIds(selectedObjectIds.toSet(), newBox)
             updateFloatingSelectionToolbar(newBox)
         }
     }
 
     /**
-     * Cut the currently selected strokes/headings: soft-delete them and populate
+     * Cut the currently selected strokes/headings/text objects: soft-delete them and populate
      * [NotesproutClipboard].  Lasso mode stays active so the user can immediately paste.
      */
     private fun performLassoCut() {
@@ -2668,11 +2710,13 @@ class NotebookActivity : AppCompatActivity() {
         if (ids.isEmpty()) return
         val pageId = currentPageId.takeIf { it.isNotEmpty() } ?: return
 
-        val selectedStrokes  = drawingView.getStrokes().filter { it.id in ids }
-        val selectedHeadings = drawingView.getHeadings().filter { it.id in ids }
-        if (selectedStrokes.isEmpty() && selectedHeadings.isEmpty()) return
+        val selectedStrokes     = drawingView.getStrokes().filter { it.id in ids }
+        val selectedHeadings    = drawingView.getHeadings().filter { it.id in ids }
+        val selectedTextObjects = drawingView.getTextObjects().filter { it.id in ids }
+        if (selectedStrokes.isEmpty() && selectedHeadings.isEmpty() && selectedTextObjects.isEmpty()) return
 
         val box = computeUnionBoundingBox(selectedStrokes, selectedHeadings)
+        selectedTextObjects.forEach { box.union(it.boundingBox) }
 
         val clipStrokes  = selectedStrokes.map { s ->
             LiveStroke(s.id, s.points.map { pt -> PointF(pt.x, pt.y) })
@@ -2682,40 +2726,50 @@ class NotebookActivity : AppCompatActivity() {
                 h.strokes.map { s -> LiveStroke(s.id, s.points.map { PointF(it.x, it.y) }) },
                 recognizedText = h.recognizedText)
         }
+        val clipTextObjects = selectedTextObjects.map { t ->
+            TextRender(t.id, RectF(t.boundingBox), t.text, t.strokes)
+        }
         NotesproutClipboard.content = NotesproutClipboard.ClipboardContent(
-            strokes  = clipStrokes,
-            headings = clipHeadings,
+            strokes     = clipStrokes,
+            headings    = clipHeadings,
             boundingBox = box,
+            textObjects = clipTextObjects,
         )
 
         val strokeIds  = selectedStrokes.map { it.id }
         val headingIds = selectedHeadings.map { it.id }
+        val textIds    = selectedTextObjects.map { it.id }
 
         lifecycleScope.launch(Dispatchers.IO) {
             val deletedAt = System.currentTimeMillis()
-            (strokeIds + headingIds).forEach { id ->
+            (strokeIds + headingIds + textIds).forEach { id ->
                 soilDatabase?.notebookDao()?.softDeleteById(id, deletedAt)
             }
             withContext(Dispatchers.Main) {
                 val erasedStrokeSet  = strokeIds.toSet()
                 val erasedHeadingSet = headingIds.toSet()
+                val erasedTextSet    = textIds.toSet()
                 val updatedStrokes  = drawingView.getStrokes().filter { it.id !in erasedStrokeSet }
                 val updatedHeadings = drawingView.getHeadings().filter { it.id !in erasedHeadingSet }
+                val updatedTexts    = drawingView.getTextObjects().filter { it.id !in erasedTextSet }
                 persistedStrokeIds.removeAll(erasedStrokeSet)
                 drawingView.setStrokeListSilently(updatedStrokes)
                 drawingView.loadHeadings(updatedHeadings)
+                drawingView.loadTextObjects(updatedTexts)
                 undoRedoManager.push(UndoRedoAction.LassoCut(
-                    strokeIds  = strokeIds,
-                    pageId     = pageId,
-                    deletedAt  = deletedAt,
-                    strokes    = clipStrokes,
-                    headingIds = headingIds,
-                    headings   = clipHeadings,
+                    strokeIds   = strokeIds,
+                    pageId      = pageId,
+                    deletedAt   = deletedAt,
+                    strokes     = clipStrokes,
+                    headingIds  = headingIds,
+                    headings    = clipHeadings,
+                    textIds     = textIds,
+                    textObjects = clipTextObjects,
                 ))
                 updateUndoRedoButtons()
                 val templateBmp = currentTemplateBitmap
                 val bitmap = withContext(Dispatchers.IO) {
-                    drawingView.buildRenderBitmap(updatedStrokes, templateBmp, updatedHeadings)
+                    drawingView.buildRenderBitmap(updatedStrokes, templateBmp, updatedHeadings, updatedTexts)
                 }
                 if (bitmap != null) {
                     drawingView.loadStrokesWithBitmap(updatedStrokes, bitmap, templateBmp)
@@ -3686,8 +3740,8 @@ class NotebookActivity : AppCompatActivity() {
         }
         val isCrossPage = targetPageId != null && targetPageId != currentPageId
 
-        // ── Cross-page LassoErased: two-phase display (mixed stroke + heading batch) ──
-        // strokeIds may contain both stroke IDs and heading IDs.
+        // ── Cross-page LassoErased: two-phase display (stroke + heading + text batch) ──
+        // strokeIds may contain stroke IDs, heading IDs, and text object IDs.
         if (isCrossPage && action is UndoRedoAction.LassoErased) {
             val snapshot      = drawingView.captureSnapshot()
             val leavingPageId = currentPageId
@@ -3702,15 +3756,18 @@ class NotebookActivity : AppCompatActivity() {
             val templateBmp: Bitmap?
             val preUndoStrokes: List<LiveStroke>
             val preUndoHeadings: List<HeadingStroke>
+            val preUndoTexts: List<TextRender>
             withContext(Dispatchers.IO) {
                 setupPageIds(db)
                 templateBmp     = loadPageTemplateFromDb(db)
                 preUndoStrokes  = deserializeStrokesFromDb(db)
                 preUndoHeadings = loadHeadingsFromDb(db, currentLayerId)
+                preUndoTexts    = loadTextObjectsFromDb(db, currentLayerId)
             }
             drawingView.loadHeadings(preUndoHeadings)
+            drawingView.loadTextObjects(preUndoTexts)
             val preUndobitmap = withContext(Dispatchers.IO) {
-                drawingView.buildRenderBitmap(preUndoStrokes, templateBmp, preUndoHeadings)
+                drawingView.buildRenderBitmap(preUndoStrokes, templateBmp, preUndoHeadings, preUndoTexts)
             }
             if (preUndobitmap != null) {
                 drawingView.loadStrokesWithBitmap(preUndoStrokes, preUndobitmap, templateBmp)
@@ -3726,23 +3783,26 @@ class NotebookActivity : AppCompatActivity() {
                 else        action.strokeIds.forEach { dao.softDeleteById(it, now) }
             }
 
-            val idsSet = action.strokeIds.toSet()
+            val idsSet        = action.strokeIds.toSet()
+            val textIdsSet    = action.textIds.toSet()
             val updatedStrokes: List<LiveStroke>
             val updatedHeadings: List<HeadingStroke>
+            val updatedTexts: List<TextRender>
             if (!isUndo) {
-                // Redo: re-erase → remove from in-memory stroke and heading lists.
+                // Redo: re-erase → remove from in-memory stroke, heading, and text lists.
                 val preUndoHeadingIds = preUndoHeadings.mapTo(mutableSetOf()) { it.id }
                 val erasedHeadingIds  = idsSet.intersect(preUndoHeadingIds)
                 updatedStrokes  = preUndoStrokes.filter { it.id !in idsSet }
                 updatedHeadings = preUndoHeadings.filter { it.id !in erasedHeadingIds }
-                persistedStrokeIds.removeAll(idsSet - erasedHeadingIds)
+                updatedTexts    = preUndoTexts.filter { it.id !in textIdsSet }
+                persistedStrokeIds.removeAll(idsSet - erasedHeadingIds - textIdsSet)
             } else {
                 // Undo: restore → fetch from DB, partition by type.
                 val restoredRows = withContext(Dispatchers.IO) {
                     action.strokeIds.mapNotNull { id -> dao.getObjectById(id) }
                 }
                 val restoredStrokes = restoredRows
-                    .filter { it.type != TYPE_HEADING }
+                    .filter { it.type != TYPE_HEADING && it.type != TYPE_TEXT }
                     .mapNotNull { obj ->
                         try { LiveStroke(id = obj.id, points = StrokeData.fromJson(obj.data).toPointFs()) }
                         catch (e: Exception) {
@@ -3758,11 +3818,13 @@ class NotebookActivity : AppCompatActivity() {
                     }
                 updatedStrokes  = buildList { addAll(preUndoStrokes); addAll(restoredStrokes) }
                 updatedHeadings = preUndoHeadings + restoredHeadings
+                updatedTexts    = preUndoTexts + action.textObjects
                 restoredStrokes.forEach { persistedStrokeIds.add(it.id) }
             }
             drawingView.loadHeadings(updatedHeadings)
+            drawingView.loadTextObjects(updatedTexts)
             val bitmap = withContext(Dispatchers.IO) {
-                drawingView.buildRenderBitmap(updatedStrokes, templateBmp, updatedHeadings)
+                drawingView.buildRenderBitmap(updatedStrokes, templateBmp, updatedHeadings, updatedTexts)
             }
             if (bitmap != null) {
                 drawingView.loadStrokesWithBitmap(updatedStrokes, bitmap, templateBmp)
@@ -3787,15 +3849,18 @@ class NotebookActivity : AppCompatActivity() {
             val templateBmp: Bitmap?
             val preUndoStrokes: List<LiveStroke>
             val preUndoHeadings: List<HeadingStroke>
+            val preUndoTexts: List<TextRender>
             withContext(Dispatchers.IO) {
                 setupPageIds(db)
                 templateBmp     = loadPageTemplateFromDb(db)
                 preUndoStrokes  = deserializeStrokesFromDb(db)
                 preUndoHeadings = loadHeadingsFromDb(db, currentLayerId)
+                preUndoTexts    = loadTextObjectsFromDb(db, currentLayerId)
             }
             drawingView.loadHeadings(preUndoHeadings)
+            drawingView.loadTextObjects(preUndoTexts)
             val preUndobitmap = withContext(Dispatchers.IO) {
-                drawingView.buildRenderBitmap(preUndoStrokes, templateBmp, preUndoHeadings)
+                drawingView.buildRenderBitmap(preUndoStrokes, templateBmp, preUndoHeadings, preUndoTexts)
             }
             if (preUndobitmap != null) {
                 drawingView.loadStrokesWithBitmap(preUndoStrokes, preUndobitmap, templateBmp)
@@ -3810,32 +3875,39 @@ class NotebookActivity : AppCompatActivity() {
                 if (isUndo) {
                     action.strokeIds.forEach { dao.restoreById(it, now) }
                     action.headingIds.forEach { dao.restoreById(it, now) }
+                    action.textIds.forEach { dao.restoreById(it, now) }
                 } else {
                     action.strokeIds.forEach { dao.softDeleteById(it, now) }
                     action.headingIds.forEach { dao.softDeleteById(it, now) }
+                    action.textIds.forEach { dao.softDeleteById(it, now) }
                 }
             }
 
             val idsSet        = action.strokeIds.toSet()
             val headingIdsSet = action.headingIds.toSet()
+            val textIdsSet    = action.textIds.toSet()
             val updatedStrokes: List<LiveStroke>
             val updatedHeadings: List<HeadingStroke>
+            val updatedTexts: List<TextRender>
             if (!isUndo) {
                 // Redo cut: remove from in-memory lists and repopulate clipboard.
                 updatedStrokes  = preUndoStrokes.filter { it.id !in idsSet }
                 updatedHeadings = preUndoHeadings.filter { it.id !in headingIdsSet }
+                updatedTexts    = preUndoTexts.filter { it.id !in textIdsSet }
                 persistedStrokeIds.removeAll(idsSet)
                 val clipBox = computeUnionBoundingBox(action.strokes, action.headings)
+                action.textObjects.forEach { clipBox.union(it.boundingBox) }
                 NotesproutClipboard.content = NotesproutClipboard.ClipboardContent(
-                    strokes  = action.strokes.map { s -> LiveStroke(s.id, s.points.map { pt -> PointF(pt.x, pt.y) }) },
-                    headings = action.headings.map { h -> HeadingStroke(h.id, RectF(h.boundingBox),
+                    strokes     = action.strokes.map { s -> LiveStroke(s.id, s.points.map { pt -> PointF(pt.x, pt.y) }) },
+                    headings    = action.headings.map { h -> HeadingStroke(h.id, RectF(h.boundingBox),
                         h.strokes.map { s -> LiveStroke(s.id, s.points.map { PointF(it.x, it.y) }) },
                         recognizedText = h.recognizedText) },
                     boundingBox = clipBox,
+                    textObjects = action.textObjects.map { t -> TextRender(t.id, RectF(t.boundingBox), t.text, t.strokes) },
                 )
                 updateLassoButtonIcon()
             } else {
-                // Undo cut: fetch strokes from DB; use action.headings for headings.
+                // Undo cut: fetch strokes from DB; use action.headings/textObjects.
                 val restoredStrokes = withContext(Dispatchers.IO) {
                     action.strokeIds.mapNotNull { id ->
                         dao.getObjectById(id)?.let { obj ->
@@ -3848,11 +3920,13 @@ class NotebookActivity : AppCompatActivity() {
                 }
                 updatedStrokes  = buildList { addAll(preUndoStrokes); addAll(restoredStrokes) }
                 updatedHeadings = preUndoHeadings + action.headings
+                updatedTexts    = preUndoTexts + action.textObjects
                 restoredStrokes.forEach { persistedStrokeIds.add(it.id) }
             }
             drawingView.loadHeadings(updatedHeadings)
+            drawingView.loadTextObjects(updatedTexts)
             val bitmap = withContext(Dispatchers.IO) {
-                drawingView.buildRenderBitmap(updatedStrokes, templateBmp, updatedHeadings)
+                drawingView.buildRenderBitmap(updatedStrokes, templateBmp, updatedHeadings, updatedTexts)
             }
             if (bitmap != null) {
                 drawingView.loadStrokesWithBitmap(updatedStrokes, bitmap, templateBmp)
@@ -3877,15 +3951,18 @@ class NotebookActivity : AppCompatActivity() {
             val templateBmp: Bitmap?
             val preUndoStrokes: List<LiveStroke>
             val preUndoHeadings: List<HeadingStroke>
+            val preUndoTexts: List<TextRender>
             withContext(Dispatchers.IO) {
                 setupPageIds(db)
                 templateBmp     = loadPageTemplateFromDb(db)
                 preUndoStrokes  = deserializeStrokesFromDb(db)
                 preUndoHeadings = loadHeadingsFromDb(db, currentLayerId)
+                preUndoTexts    = loadTextObjectsFromDb(db, currentLayerId)
             }
             drawingView.loadHeadings(preUndoHeadings)
+            drawingView.loadTextObjects(preUndoTexts)
             val preUndobitmap = withContext(Dispatchers.IO) {
-                drawingView.buildRenderBitmap(preUndoStrokes, templateBmp, preUndoHeadings)
+                drawingView.buildRenderBitmap(preUndoStrokes, templateBmp, preUndoHeadings, preUndoTexts)
             }
             if (preUndobitmap != null) {
                 drawingView.loadStrokesWithBitmap(preUndoStrokes, preUndobitmap, templateBmp)
@@ -3900,23 +3977,28 @@ class NotebookActivity : AppCompatActivity() {
                 if (isUndo) {
                     action.strokeIds.forEach { dao.restoreById(it, now) }
                     action.headingIds.forEach { dao.restoreById(it, now) }
+                    action.textIds.forEach { dao.restoreById(it, now) }
                 } else {
                     action.strokeIds.forEach { dao.softDeleteById(it, now) }
                     action.headingIds.forEach { dao.softDeleteById(it, now) }
+                    action.textIds.forEach { dao.softDeleteById(it, now) }
                 }
             }
 
             val idsSet        = action.strokeIds.toSet()
             val headingIdsSet = action.headingIds.toSet()
+            val textIdsSet    = action.textIds.toSet()
             val updatedStrokes: List<LiveStroke>
             val updatedHeadings: List<HeadingStroke>
+            val updatedTexts: List<TextRender>
             if (!isUndo) {
                 // Redo delete: remove from in-memory lists.
                 updatedStrokes  = preUndoStrokes.filter { it.id !in idsSet }
                 updatedHeadings = preUndoHeadings.filter { it.id !in headingIdsSet }
+                updatedTexts    = preUndoTexts.filter { it.id !in textIdsSet }
                 persistedStrokeIds.removeAll(idsSet)
             } else {
-                // Undo delete: fetch strokes from DB; use action.headings for headings.
+                // Undo delete: fetch strokes from DB; use action.headings/textObjects.
                 val restoredStrokes = withContext(Dispatchers.IO) {
                     action.strokeIds.mapNotNull { id ->
                         dao.getObjectById(id)?.let { obj ->
@@ -3929,11 +4011,13 @@ class NotebookActivity : AppCompatActivity() {
                 }
                 updatedStrokes  = buildList { addAll(preUndoStrokes); addAll(restoredStrokes) }
                 updatedHeadings = preUndoHeadings + action.headings
+                updatedTexts    = preUndoTexts + action.textObjects
                 restoredStrokes.forEach { persistedStrokeIds.add(it.id) }
             }
             drawingView.loadHeadings(updatedHeadings)
+            drawingView.loadTextObjects(updatedTexts)
             val bitmap = withContext(Dispatchers.IO) {
-                drawingView.buildRenderBitmap(updatedStrokes, templateBmp, updatedHeadings)
+                drawingView.buildRenderBitmap(updatedStrokes, templateBmp, updatedHeadings, updatedTexts)
             }
             if (bitmap != null) {
                 drawingView.loadStrokesWithBitmap(updatedStrokes, bitmap, templateBmp)
@@ -3944,8 +4028,8 @@ class NotebookActivity : AppCompatActivity() {
         }
 
         // ── Cross-page LassoPasted: two-phase display (inverse of LassoErased) ─
-        // Undo paste = remove strokes/headings (mirrors LassoErased redo).
-        // Redo paste = restore strokes/headings (mirrors LassoErased undo).
+        // Undo paste = remove strokes/headings/text objects (mirrors LassoErased redo).
+        // Redo paste = restore strokes/headings/text objects (mirrors LassoErased undo).
         if (isCrossPage && action is UndoRedoAction.LassoPasted) {
             val snapshot      = drawingView.captureSnapshot()
             val leavingPageId = currentPageId
@@ -3960,15 +4044,18 @@ class NotebookActivity : AppCompatActivity() {
             val templateBmp: Bitmap?
             val preUndoStrokes: List<LiveStroke>
             val preUndoHeadings: List<HeadingStroke>
+            val preUndoTexts: List<TextRender>
             withContext(Dispatchers.IO) {
                 setupPageIds(db)
                 templateBmp     = loadPageTemplateFromDb(db)
                 preUndoStrokes  = deserializeStrokesFromDb(db)
                 preUndoHeadings = loadHeadingsFromDb(db, currentLayerId)
+                preUndoTexts    = loadTextObjectsFromDb(db, currentLayerId)
             }
             drawingView.loadHeadings(preUndoHeadings)
+            drawingView.loadTextObjects(preUndoTexts)
             val preUndobitmap = withContext(Dispatchers.IO) {
-                drawingView.buildRenderBitmap(preUndoStrokes, templateBmp, preUndoHeadings)
+                drawingView.buildRenderBitmap(preUndoStrokes, templateBmp, preUndoHeadings, preUndoTexts)
             }
             if (preUndobitmap != null) {
                 drawingView.loadStrokesWithBitmap(preUndoStrokes, preUndobitmap, templateBmp)
@@ -3983,23 +4070,28 @@ class NotebookActivity : AppCompatActivity() {
                 if (isUndo) {
                     action.strokeIds.forEach { dao.softDeleteById(it, now) }
                     action.headingIds.forEach { dao.softDeleteById(it, now) }
+                    action.textIds.forEach { dao.softDeleteById(it, now) }
                 } else {
                     action.strokeIds.forEach { dao.restoreById(it, now) }
                     action.headingIds.forEach { dao.restoreById(it, now) }
+                    action.textIds.forEach { dao.restoreById(it, now) }
                 }
             }
 
             val idsSet        = action.strokeIds.toSet()
             val headingIdsSet = action.headingIds.toSet()
+            val textIdsSet    = action.textIds.toSet()
             val updatedStrokes: List<LiveStroke>
             val updatedHeadings: List<HeadingStroke>
+            val updatedTexts: List<TextRender>
             if (isUndo) {
-                // Undo paste → remove the pasted strokes and headings.
+                // Undo paste → remove the pasted strokes, headings, and text objects.
                 updatedStrokes  = preUndoStrokes.filter { it.id !in idsSet }
                 updatedHeadings = preUndoHeadings.filter { it.id !in headingIdsSet }
+                updatedTexts    = preUndoTexts.filter { it.id !in textIdsSet }
                 persistedStrokeIds.removeAll(idsSet)
             } else {
-                // Redo paste → fetch restored strokes from DB; reload headings from DB.
+                // Redo paste → fetch restored strokes/headings from DB; use action.textObjects.
                 val restoredStrokes = withContext(Dispatchers.IO) {
                     action.strokeIds.mapNotNull { id ->
                         dao.getObjectById(id)?.let { obj ->
@@ -4025,11 +4117,13 @@ class NotebookActivity : AppCompatActivity() {
                 }
                 updatedStrokes  = buildList { addAll(preUndoStrokes); addAll(restoredStrokes) }
                 updatedHeadings = preUndoHeadings + restoredHeadings
+                updatedTexts    = preUndoTexts + action.textObjects
                 restoredStrokes.forEach { persistedStrokeIds.add(it.id) }
             }
             drawingView.loadHeadings(updatedHeadings)
+            drawingView.loadTextObjects(updatedTexts)
             val bitmap = withContext(Dispatchers.IO) {
-                drawingView.buildRenderBitmap(updatedStrokes, templateBmp, updatedHeadings)
+                drawingView.buildRenderBitmap(updatedStrokes, templateBmp, updatedHeadings, updatedTexts)
             }
             if (bitmap != null) {
                 drawingView.loadStrokesWithBitmap(updatedStrokes, bitmap, templateBmp)
@@ -4706,6 +4800,8 @@ class NotebookActivity : AppCompatActivity() {
             }
 
             is UndoRedoAction.LassoErased -> withContext(Dispatchers.IO) {
+                // strokeIds already contains heading + text IDs; textIds is a redundant subset
+                // stored for undo/redo partitioning. All three sets are covered by strokeIds.
                 if (isUndo) action.strokeIds.forEach { dao.restoreById(it, now) }
                 else        action.strokeIds.forEach { dao.softDeleteById(it, now) }
             }
@@ -4714,9 +4810,11 @@ class NotebookActivity : AppCompatActivity() {
                 if (isUndo) {
                     action.strokeIds.forEach { dao.restoreById(it, now) }
                     action.headingIds.forEach { dao.restoreById(it, now) }
+                    action.textIds.forEach { dao.restoreById(it, now) }
                 } else {
                     action.strokeIds.forEach { dao.softDeleteById(it, now) }
                     action.headingIds.forEach { dao.softDeleteById(it, now) }
+                    action.textIds.forEach { dao.softDeleteById(it, now) }
                 }
             }
 
@@ -4736,9 +4834,11 @@ class NotebookActivity : AppCompatActivity() {
                 if (isUndo) {
                     action.strokeIds.forEach { dao.softDeleteById(it, now) }
                     action.headingIds.forEach { dao.softDeleteById(it, now) }
+                    action.textIds.forEach { dao.softDeleteById(it, now) }
                 } else {
                     action.strokeIds.forEach { dao.restoreById(it, now) }
                     action.headingIds.forEach { dao.restoreById(it, now) }
+                    action.textIds.forEach { dao.restoreById(it, now) }
                 }
             }
 
@@ -4899,20 +4999,24 @@ class NotebookActivity : AppCompatActivity() {
         }
 
         // ── Step 3a-batch: Same-page LassoErased — optimised in-memory update ─
-        // strokeIds contains ALL erased IDs (strokes + headings); headingIds is the subset.
+        // strokeIds contains ALL erased IDs (strokes + headings + text objects);
+        // headingIds and textIds are the respective subsets.
         if (action is UndoRedoAction.LassoErased) {
-            val idsSet = action.strokeIds.toSet()
+            val idsSet        = action.strokeIds.toSet()
             val headingIdsSet = action.headingIds.toSet()
-            val pureStrokeIdsSet = idsSet - headingIdsSet
+            val textIdsSet    = action.textIds.toSet()
+            val pureStrokeIdsSet = idsSet - headingIdsSet - textIdsSet
             val updatedStrokes: List<LiveStroke>
             val updatedHeadings: List<HeadingStroke>
+            val updatedTexts: List<TextRender>
             if (!isUndo) {
                 // Redo: re-erase → remove from in-memory lists.
                 updatedStrokes  = drawingView.getStrokes().filter { it.id !in idsSet }
                 updatedHeadings = drawingView.getHeadings().filter { it.id !in headingIdsSet }
+                updatedTexts    = drawingView.getTextObjects().filter { it.id !in textIdsSet }
                 persistedStrokeIds.removeAll(pureStrokeIdsSet)
             } else {
-                // Undo: restore strokes from DB; use action.headings for headings (no DB fetch).
+                // Undo: restore strokes from DB; use action.headings/textObjects (no DB fetch).
                 val restoredStrokes = withContext(Dispatchers.IO) {
                     pureStrokeIdsSet.mapNotNull { id ->
                         dao.getObjectById(id)?.let { obj ->
@@ -4940,12 +5044,14 @@ class NotebookActivity : AppCompatActivity() {
                 } else emptyList()
                 updatedStrokes  = buildList { addAll(drawingView.getStrokes()); addAll(restoredStrokes) }
                 updatedHeadings = drawingView.getHeadings() + restoredHeadings
+                updatedTexts    = drawingView.getTextObjects() + action.textObjects
                 restoredStrokes.forEach { persistedStrokeIds.add(it.id) }
             }
             drawingView.loadHeadings(updatedHeadings)
+            drawingView.loadTextObjects(updatedTexts)
             val templateBmp = currentTemplateBitmap
             val bitmap = withContext(Dispatchers.IO) {
-                drawingView.buildRenderBitmap(updatedStrokes, templateBmp, updatedHeadings)
+                drawingView.buildRenderBitmap(updatedStrokes, templateBmp, updatedHeadings, updatedTexts)
             }
             if (bitmap != null) {
                 drawingView.loadStrokesWithBitmap(updatedStrokes, bitmap, templateBmp)
@@ -4961,24 +5067,29 @@ class NotebookActivity : AppCompatActivity() {
         if (action is UndoRedoAction.LassoCut) {
             val idsSet        = action.strokeIds.toSet()
             val headingIdsSet = action.headingIds.toSet()
+            val textIdsSet    = action.textIds.toSet()
             val updatedStrokes: List<LiveStroke>
             val updatedHeadings: List<HeadingStroke>
+            val updatedTexts: List<TextRender>
             if (!isUndo) {
                 // Redo cut: remove from in-memory lists and repopulate clipboard.
                 updatedStrokes  = drawingView.getStrokes().filter { it.id !in idsSet }
                 updatedHeadings = drawingView.getHeadings().filter { it.id !in headingIdsSet }
+                updatedTexts    = drawingView.getTextObjects().filter { it.id !in textIdsSet }
                 persistedStrokeIds.removeAll(idsSet)
                 val clipBox = computeUnionBoundingBox(action.strokes, action.headings)
+                action.textObjects.forEach { clipBox.union(it.boundingBox) }
                 NotesproutClipboard.content = NotesproutClipboard.ClipboardContent(
-                    strokes  = action.strokes.map { s -> LiveStroke(s.id, s.points.map { pt -> PointF(pt.x, pt.y) }) },
-                    headings = action.headings.map { h -> HeadingStroke(h.id, RectF(h.boundingBox),
+                    strokes     = action.strokes.map { s -> LiveStroke(s.id, s.points.map { pt -> PointF(pt.x, pt.y) }) },
+                    headings    = action.headings.map { h -> HeadingStroke(h.id, RectF(h.boundingBox),
                         h.strokes.map { s -> LiveStroke(s.id, s.points.map { PointF(it.x, it.y) }) },
                         recognizedText = h.recognizedText) },
                     boundingBox = clipBox,
+                    textObjects = action.textObjects.map { t -> TextRender(t.id, RectF(t.boundingBox), t.text, t.strokes) },
                 )
                 updateLassoButtonIcon()
             } else {
-                // Undo cut: fetch restored strokes from DB; use action.headings for headings.
+                // Undo cut: fetch restored strokes from DB; use action.headings/textObjects.
                 val restoredStrokes = withContext(Dispatchers.IO) {
                     action.strokeIds.mapNotNull { id ->
                         dao.getObjectById(id)?.let { obj ->
@@ -4991,12 +5102,14 @@ class NotebookActivity : AppCompatActivity() {
                 }
                 updatedStrokes  = buildList { addAll(drawingView.getStrokes()); addAll(restoredStrokes) }
                 updatedHeadings = drawingView.getHeadings() + action.headings
+                updatedTexts    = drawingView.getTextObjects() + action.textObjects
                 restoredStrokes.forEach { persistedStrokeIds.add(it.id) }
             }
             drawingView.loadHeadings(updatedHeadings)
+            drawingView.loadTextObjects(updatedTexts)
             val templateBmp = currentTemplateBitmap
             val bitmap = withContext(Dispatchers.IO) {
-                drawingView.buildRenderBitmap(updatedStrokes, templateBmp, updatedHeadings)
+                drawingView.buildRenderBitmap(updatedStrokes, templateBmp, updatedHeadings, updatedTexts)
             }
             if (bitmap != null) {
                 drawingView.loadStrokesWithBitmap(updatedStrokes, bitmap, templateBmp)
@@ -5146,15 +5259,18 @@ class NotebookActivity : AppCompatActivity() {
         if (action is UndoRedoAction.LassoPasted) {
             val idsSet        = action.strokeIds.toSet()
             val headingIdsSet = action.headingIds.toSet()
+            val textIdsSet    = action.textIds.toSet()
             val updatedStrokes: List<LiveStroke>
             val updatedHeadings: List<HeadingStroke>
+            val updatedTexts: List<TextRender>
             if (isUndo) {
-                // Undo paste → remove the pasted strokes and headings.
+                // Undo paste → remove the pasted strokes, headings, and text objects.
                 updatedStrokes  = drawingView.getStrokes().filter { it.id !in idsSet }
                 updatedHeadings = drawingView.getHeadings().filter { it.id !in headingIdsSet }
+                updatedTexts    = drawingView.getTextObjects().filter { it.id !in textIdsSet }
                 persistedStrokeIds.removeAll(idsSet)
             } else {
-                // Redo paste → fetch restored strokes and headings from DB and append.
+                // Redo paste → fetch restored strokes/headings from DB; use action.textObjects.
                 val restoredStrokes = withContext(Dispatchers.IO) {
                     action.strokeIds.mapNotNull { id ->
                         dao.getObjectById(id)?.let { obj ->
@@ -5176,12 +5292,14 @@ class NotebookActivity : AppCompatActivity() {
                 }
                 updatedStrokes  = buildList { addAll(drawingView.getStrokes()); addAll(restoredStrokes) }
                 updatedHeadings = drawingView.getHeadings() + restoredHeadings
+                updatedTexts    = drawingView.getTextObjects() + action.textObjects
                 restoredStrokes.forEach { persistedStrokeIds.add(it.id) }
             }
             drawingView.loadHeadings(updatedHeadings)
+            drawingView.loadTextObjects(updatedTexts)
             val templateBmp = currentTemplateBitmap
             val bitmap = withContext(Dispatchers.IO) {
-                drawingView.buildRenderBitmap(updatedStrokes, templateBmp, updatedHeadings)
+                drawingView.buildRenderBitmap(updatedStrokes, templateBmp, updatedHeadings, updatedTexts)
             }
             if (bitmap != null) {
                 drawingView.loadStrokesWithBitmap(updatedStrokes, bitmap, templateBmp)

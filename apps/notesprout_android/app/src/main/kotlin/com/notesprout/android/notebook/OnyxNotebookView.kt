@@ -1050,10 +1050,11 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
     private fun performLassoErase(drawnPath: Path, startPoint: PointF) {
         drawnPath.lineTo(startPoint.x, startPoint.y)
         drawnPath.close()
-        val strokeSnapshot = strokes.toList()
+        val strokeSnapshot  = strokes.toList()
         val headingSnapshot = headings.toList()
+        val textSnapshot    = textObjects.toList()
         Thread {
-            val hitIds = runLassoHitTest(drawnPath, strokeSnapshot, headingSnapshot)
+            val hitIds = runLassoHitTest(drawnPath, strokeSnapshot, headingSnapshot, textSnapshot)
             post {
                 // Clear overlay regardless of result.
                 lassoOverlayPath       = null
@@ -1073,6 +1074,7 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
         path: Path,
         strokes: List<LiveStroke>,
         headings: List<HeadingStroke> = emptyList(),
+        textObjects: List<TextRender> = emptyList(),
     ): List<String> {
         val bounds = RectF()
         path.computeBounds(bounds, true)
@@ -1102,6 +1104,15 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
             val cy = heading.boundingBox.centerY().toInt()
             if (region.contains(cx, cy)) {
                 hitIds.add(heading.id)
+            }
+        }
+        // Text object hit-test: center-point containment (treated atomically like headings).
+        for (textObj in textObjects) {
+            if (!RectF.intersects(bounds, textObj.boundingBox)) continue
+            val cx = textObj.boundingBox.centerX().toInt()
+            val cy = textObj.boundingBox.centerY().toInt()
+            if (region.contains(cx, cy)) {
+                hitIds.add(textObj.id)
             }
         }
         return hitIds
