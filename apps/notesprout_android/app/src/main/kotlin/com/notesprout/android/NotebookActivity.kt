@@ -751,13 +751,15 @@ class NotebookActivity : AppCompatActivity() {
 
         // Tap to dismiss: clear the selection visual but stay in lasso mode.
         drawingView.onLassoTapToDismiss = {
+            // Capture before clearing — a "no selection" tap (e.g. tap-to-paste after cut)
+            // must NOT exit smart-lasso; that would tear down lasso mode before paste runs.
+            val hadActiveSelection = selectedObjectIds.isNotEmpty()
             selectedObjectIds.clear()
             drawingView.lassoSelectedIds = emptySet()
             drawingView.setLassoOverlay(null, null)
             hideFloatingSelectionToolbar()
-            if (isSmartLassoSession) {
-                // Smart-lasso sessions return to pen mode on dismiss, not lasso mode.
-                isSmartLassoSession = false
+            if (isSmartLassoSession && hadActiveSelection) {
+                // Smart-lasso sessions return to pen mode when a real selection is dismissed.
                 exitLassoMode()
                 drawingView.enableDrawing()
                 binding.btnPen.isSelected = true
@@ -2951,6 +2953,11 @@ class NotebookActivity : AppCompatActivity() {
                 drawingView.lassoSelectedIds = emptySet()
                 drawingView.setLassoOverlay(null, null)
                 hideFloatingSelectionToolbar()
+                if (isSmartLassoSession) {
+                    exitLassoMode()
+                    drawingView.enableDrawing()
+                    binding.btnPen.isSelected = true
+                }
             }
         }
     }
