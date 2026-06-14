@@ -422,7 +422,12 @@ The user remains in lasso mode after any lasso action (move, copy, delete, etc.)
 
 ## Snap-to-Guide System
 
-Always-active during lasso drag. When a selected object is dragged close to a snap region, a dashed guideline appears and the object snaps to it. Dragging past the threshold releases the snap — no hard clamping.
+User-toggleable during lasso drag. A snap toggle button (`btnSnapToggle`) sits at the end of the floating selection toolbar, always visible. Default: **off**. State persists across app loads via `SnapPreferences` (`notesprout_snap_prefs` / `snap_enabled`).
+
+- Off → icon: `ic_snap_on` (Tabler `template`)
+- On → icon: `ic_snap_off` (Tabler `template-off`)
+
+When enabled, a dashed guideline appears and the object snaps to the nearest snap region during drag. Dragging past the threshold releases the snap — no hard clamping. When disabled, drag moves freely with no guidelines.
 
 ### Snap Regions
 

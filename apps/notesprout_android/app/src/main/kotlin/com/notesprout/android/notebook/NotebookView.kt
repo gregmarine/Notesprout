@@ -82,6 +82,11 @@ interface NotebookView {
         @Suppress("UNUSED_PARAMETER")
         set(value) {}
 
+    var isSnapEnabled: Boolean
+        get() = false
+        @Suppress("UNUSED_PARAMETER")
+        set(value) {}
+
     /**
      * Enable or cancel an in-progress lasso drag move.  Passing false cancels any active
      * drag without committing the move (no DB write, no undo push, no stroke update).

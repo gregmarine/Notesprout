@@ -63,6 +63,7 @@ import com.notesprout.android.databinding.DialogEditHeadingTextBinding
 import com.notesprout.android.notebook.NotebookView
 import com.notesprout.android.notebook.GenericNotebookView
 import com.notesprout.android.notebook.OnyxNotebookView
+import com.notesprout.android.notebook.SnapPreferences
 import com.notesprout.android.notebook.TextEditDialog
 import com.notesprout.android.notebook.ToolbarOverflowManager
 import com.notesprout.android.history.UndoRedoAction
@@ -117,6 +118,9 @@ class NotebookActivity : AppCompatActivity() {
     /** True while we're waiting for ACTION_UP to close the overflow menu after a button tap. */
     private var overflowCloseOnUp = false
     private var isEraserActive = false
+
+    // ── Snap-to-guide mode ────────────────────────────────────────────────────
+    private var isSnapEnabled = false
 
     // ── Text placement mode ───────────────────────────────────────────────────
     /** True while placement mode is active (waiting for next canvas stylus tap). */
@@ -568,6 +572,8 @@ class NotebookActivity : AppCompatActivity() {
 
         // ── Drawing view ──────────────────────────────────────────────────────
         drawingView = if (isBooxDevice()) OnyxNotebookView(this) else GenericNotebookView(this)
+        isSnapEnabled = SnapPreferences.load(this)
+        drawingView.isSnapEnabled = isSnapEnabled
 
         // Erase callback — soft-delete the stroke's DB row as soon as it leaves memory.
         drawingView.onStrokeErased = { strokeId ->
@@ -1079,6 +1085,14 @@ class NotebookActivity : AppCompatActivity() {
         binding.btnAlignTop.setOnClickListener {
             lifecycleScope.launch { performAlign(alignVertical = false) }
         }
+
+        binding.btnSnapToggle.setOnClickListener {
+            isSnapEnabled = !isSnapEnabled
+            drawingView.isSnapEnabled = isSnapEnabled
+            SnapPreferences.save(this, isSnapEnabled)
+            updateSnapToggleIcon()
+        }
+        updateSnapToggleIcon()
 
         // Wire the lasso popup Clear Clipboard button.
         binding.btnLassoClearClipboard.setOnClickListener {
@@ -3450,6 +3464,12 @@ class NotebookActivity : AppCompatActivity() {
 
     private fun hideFloatingSelectionToolbar() {
         binding.floatingSelectionToolbar.visibility = View.GONE
+    }
+
+    private fun updateSnapToggleIcon() {
+        binding.btnSnapToggle.setImageResource(
+            if (isSnapEnabled) R.drawable.ic_snap_off else R.drawable.ic_snap_on
+        )
     }
 
     /**
