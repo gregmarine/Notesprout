@@ -477,6 +477,31 @@ Object snap targets are captured into `snapObjectTargets: List<RectF>` at drag s
 
 ---
 
+## Align & Distribute
+
+Available in the floating selection toolbar when ≥2 non-stroke objects (headings and/or text objects) are selected and no strokes are in the selection. Two buttons appear at the end of the toolbar:
+
+| Button | Icon | Behavior |
+|---|---|---|
+| Align left + distribute vertically | `ic_box_align_left` | Snaps all left edges to the selection bbox left; redistributes objects top-to-bottom with equal vertical gaps. |
+| Align top + distribute horizontally | `ic_box_align_top` | Snaps all top edges to the selection bbox top; redistributes objects left-to-right with equal horizontal gaps. |
+
+**"Left" and "top" are relative to the current selection bounding box, not the page.**
+
+### Implementation (`NotebookActivity.performAlign`)
+
+1. Capture original `HeadingStroke` and `TextRender` lists from the selection.
+2. Sort by center-Y (vertical) or center-X (horizontal).
+3. Compute new bounding boxes: first object anchored to `selBbox.left`/`selBbox.top`; last object's far edge at `selBbox.right`/`selBbox.bottom`; equal gaps between.
+4. Persist via `updateHeadingData` in a single `db.withTransaction {}`; call `invalidatePageSnapshot` after.
+5. Update in-memory heading/text lists, rebuild render bitmap off-thread, swap via `loadStrokesWithBitmap`.
+6. Refresh lasso overlay and floating toolbar position.
+7. Push `UndoRedoAction.StrokesMoved` with empty stroke lists and the before/after heading + text object snapshots — undo/redo is handled by the existing `StrokesMoved` path at no extra cost.
+
+**Visibility condition:** `selStrokes.isEmpty() && (selHeadings.size + selTextObjects.size) >= 2` — computed fresh in `updateFloatingSelectionToolbar` alongside the existing heading/stroke visibility checks.
+
+---
+
 ## Undo/Redo System
 
 - Session-scoped (not persisted across process death)

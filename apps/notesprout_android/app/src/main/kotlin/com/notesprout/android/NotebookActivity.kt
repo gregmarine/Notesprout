@@ -1072,6 +1072,14 @@ class NotebookActivity : AppCompatActivity() {
             }
         }
 
+        binding.btnAlignLeft.setOnClickListener {
+            lifecycleScope.launch { performAlign(alignVertical = true) }
+        }
+
+        binding.btnAlignTop.setOnClickListener {
+            lifecycleScope.launch { performAlign(alignVertical = false) }
+        }
+
         // Wire the lasso popup Clear Clipboard button.
         binding.btnLassoClearClipboard.setOnClickListener {
             NotesproutClipboard.clear()
@@ -3402,14 +3410,19 @@ class NotebookActivity : AppCompatActivity() {
     private fun updateFloatingSelectionToolbar(selectionBox: RectF) {
         val selHeadings = selectedHeadings
         val selStrokes  = selectedStrokes
+        val selTextObjects = drawingView.getTextObjects().filter { it.id in drawingView.lassoSelectedIds }
         val selectionIsSingleHeading = selHeadings.size == 1 && selStrokes.isEmpty()
         val selectionIsPureStrokes   = selStrokes.isNotEmpty() && selHeadings.isEmpty()
+        val selectionIsNonStrokeGroup = selStrokes.isEmpty() && (selHeadings.size + selTextObjects.size) >= 2
         binding.btnMakeHeading.visibility = if (selectionIsPureStrokes)   View.VISIBLE else View.GONE
         binding.btnUnheading.visibility   = if (selectionIsSingleHeading) View.VISIBLE else View.GONE
         binding.headingDivider.visibility =
             if (selectionIsPureStrokes || selectionIsSingleHeading) View.VISIBLE else View.GONE
         binding.btnConvertText.visibility   = if (selectionIsPureStrokes) View.VISIBLE else View.GONE
         binding.textConvertDivider.visibility = if (selectionIsPureStrokes) View.VISIBLE else View.GONE
+        binding.alignDivider.visibility = if (selectionIsNonStrokeGroup) View.VISIBLE else View.GONE
+        binding.btnAlignLeft.visibility = if (selectionIsNonStrokeGroup) View.VISIBLE else View.GONE
+        binding.btnAlignTop.visibility  = if (selectionIsNonStrokeGroup) View.VISIBLE else View.GONE
         binding.floatingSelectionToolbar.visibility = View.VISIBLE
         binding.floatingSelectionToolbar.post {
             val toolbarW = binding.floatingSelectionToolbar.measuredWidth.toFloat()
@@ -3437,6 +3450,123 @@ class NotebookActivity : AppCompatActivity() {
 
     private fun hideFloatingSelectionToolbar() {
         binding.floatingSelectionToolbar.visibility = View.GONE
+    }
+
+    /**
+     * Align and distribute all selected non-stroke objects.
+     *
+     * [alignVertical] = true  → align left edges to selection bbox left, distribute vertically.
+     * [alignVertical] = false → align top edges to selection bbox top, distribute horizontally.
+     *
+     * Undo/redo reuses [UndoRedoAction.StrokesMoved] with empty stroke lists.
+     */
+    private suspend fun performAlign(alignVertical: Boolean) {
+        val db     = soilDatabase ?: return
+        val pageId = currentPageId.takeIf { it.isNotEmpty() } ?: return
+
+        val ids             = drawingView.lassoSelectedIds
+        val origHeadings    = drawingView.getHeadings().filter { it.id in ids }
+        val origTextObjects = drawingView.getTextObjects().filter { it.id in ids }
+        if (origHeadings.size + origTextObjects.size < 2) return
+
+        // Union bounding box of the entire selection.
+        val selBbox = RectF()
+        origHeadings.forEach { selBbox.union(it.boundingBox) }
+        origTextObjects.forEach { selBbox.union(it.boundingBox) }
+
+        // Unified items for sorting — (id, current bbox, isHeading).
+        data class AlignItem(val id: String, val bbox: RectF, val isHeading: Boolean)
+        val items = origHeadings.map { AlignItem(it.id, RectF(it.boundingBox), true) } +
+                    origTextObjects.map { AlignItem(it.id, RectF(it.boundingBox), false) }
+
+        val sorted = if (alignVertical) items.sortedBy { it.bbox.centerY() }
+                     else               items.sortedBy { it.bbox.centerX() }
+
+        // Compute new bounding box for each item.
+        val newBboxMap = mutableMapOf<String, RectF>()
+        if (alignVertical) {
+            val sumHeights = sorted.sumOf { it.bbox.height().toDouble() }.toFloat()
+            val gap = if (sorted.size > 1) (selBbox.height() - sumHeights) / (sorted.size - 1) else 0f
+            var y = selBbox.top
+            for (item in sorted) {
+                newBboxMap[item.id] = RectF(selBbox.left, y, selBbox.left + item.bbox.width(), y + item.bbox.height())
+                y += item.bbox.height() + gap
+            }
+        } else {
+            val sumWidths = sorted.sumOf { it.bbox.width().toDouble() }.toFloat()
+            val gap = if (sorted.size > 1) (selBbox.width() - sumWidths) / (sorted.size - 1) else 0f
+            var x = selBbox.left
+            for (item in sorted) {
+                newBboxMap[item.id] = RectF(x, selBbox.top, x + item.bbox.width(), selBbox.top + item.bbox.height())
+                x += item.bbox.width() + gap
+            }
+        }
+
+        val movedHeadings    = origHeadings.map { h -> h.copy(boundingBox = newBboxMap[h.id] ?: h.boundingBox) }
+        val movedTextObjects = origTextObjects.map { t -> t.copy(boundingBox = newBboxMap[t.id] ?: t.boundingBox) }
+
+        val now = System.currentTimeMillis()
+        withContext(Dispatchers.IO) {
+            db.withTransaction {
+                for (heading in movedHeadings) {
+                    val bb = heading.boundingBox
+                    val bboxJson = """{"x":${bb.left},"y":${bb.top},"width":${bb.width()},"height":${bb.height()}}"""
+                    db.notebookDao().updateHeadingData(
+                        heading.id, bboxJson, HeadingObject(heading.strokes, heading.recognizedText).toJson(), now
+                    )
+                }
+                for (textObj in movedTextObjects) {
+                    val bb = textObj.boundingBox
+                    val bboxJson = """{"x":${bb.left},"y":${bb.top},"width":${bb.width()},"height":${bb.height()}}"""
+                    db.notebookDao().updateHeadingData(
+                        textObj.id, bboxJson, TextObject(text = textObj.text, strokes = textObj.strokes).toJson(), now
+                    )
+                }
+            }
+            invalidatePageSnapshot(db, pageId)
+        }
+
+        // Update in-memory state.
+        val movedHeadingIds = movedHeadings.associateBy { it.id }
+        val movedTextIds    = movedTextObjects.associateBy { it.id }
+        val allHeadings = drawingView.getHeadings().map { movedHeadingIds[it.id] ?: it }
+        val allTexts    = drawingView.getTextObjects().map { movedTextIds[it.id] ?: it }
+        drawingView.loadHeadings(allHeadings)
+        drawingView.loadTextObjects(allTexts)
+
+        // Rebuild render bitmap off-thread.
+        val strokes     = drawingView.getStrokes()
+        val templateBmp = currentTemplateBitmap
+        val bitmap = withContext(Dispatchers.IO) {
+            drawingView.buildRenderBitmap(strokes, templateBmp, allHeadings, allTexts)
+        }
+        if (bitmap != null) {
+            drawingView.loadStrokesWithBitmap(strokes, bitmap, templateBmp)
+        } else {
+            drawingView.loadStrokes(strokes)
+        }
+
+        // Refresh selection overlay and floating toolbar.
+        val newSelBox = RectF()
+        movedHeadings.forEach { newSelBox.union(it.boundingBox) }
+        movedTextObjects.forEach { newSelBox.union(it.boundingBox) }
+        val pad = 8f * resources.displayMetrics.density
+        newSelBox.inset(-pad, -pad)
+        drawingView.setLassoOverlay(null, newSelBox)
+        updateFloatingSelectionToolbar(newSelBox)
+
+        undoRedoManager.push(
+            UndoRedoAction.StrokesMoved(
+                pageId             = pageId,
+                originalStrokes    = emptyList(),
+                movedStrokes       = emptyList(),
+                originalHeadings   = origHeadings,
+                movedHeadings      = movedHeadings,
+                originalTextObjects = origTextObjects,
+                movedTextObjects   = movedTextObjects,
+            )
+        )
+        updateUndoRedoButtons()
     }
 
     /** Compute and store the anchor point below btnLasso in root-view coordinates. */

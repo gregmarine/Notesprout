@@ -349,6 +349,29 @@
             android:contentDescription="Convert to Text"
             android:visibility="gone" />
 
+        <!-- Separator before align actions — visible only for multi-object non-stroke selections -->
+        <View
+            android:id="@+id/alignDivider"
+            android:layout_width="1dp"
+            android:layout_height="28dp"
+            android:layout_marginHorizontal="2dp"
+            android:background="@color/inkBlack"
+            android:visibility="gone" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnAlignLeft"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:src="@drawable/ic_box_align_left"
+            android:contentDescription="Align left and distribute vertically"
+            android:visibility="gone" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnAlignTop"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:src="@drawable/ic_box_align_top"
+            android:contentDescription="Align top and distribute horizontally"
+            android:visibility="gone" />
+
     </LinearLayout>
 
     <!-- Lasso button popup toolbar — anchored below btnLasso.
