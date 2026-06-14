@@ -597,6 +597,17 @@ Fuzzy match against all notebooks: substring (3) > all words present (2) > prefi
 - Share intent **must** include `clipData = ClipData.newRawUri("", uri)` alongside `FLAG_GRANT_READ_URI_PERMISSION` — on Android 12+, the chooser intermediary does not forward URI permissions without `ClipData` (causes silent Google Drive upload failure on NA5C)
 - Progress dialog: "Exporting page X of N…" via `Handler(Looper.getMainLooper())`
 
+### Page Export (PNG)
+
+- Entry point: long-press a page in `PageIndexActivity` → tap the export button (`ic_export`) in the action-mode toolbar
+- `NotebookExporter.exportPage(context, soilPath, pageId, pageNumber, notebookTitle)` — opens a transient Room instance for the given `.soil` path; does NOT checkpoint on close (NotebookActivity's canonical connection is still live)
+- Render pipeline: identical to PDF — white → template → headings → text objects → strokes; full-quality, no snapshot shortcut
+- Filename format: `<safeTitle>_page<N>.png` where N is the 1-based page number. Same sanitization regex as PDF: `[^a-zA-Z0-9_\\-. ]` → `_`.
+- Output to `context.cacheDir/exported_pngs/`; FileProvider path entry `name="exported_pngs"` in `res/xml/file_paths.xml`
+- Share intent: `type = "image/png"`, same `ClipData` + `FLAG_GRANT_READ_URI_PERMISSION` pattern as PDF export
+- Progress: non-cancellable `AlertDialog` ("Exporting…") matching the PDF export pattern; dismissed on success or failure
+- Selection is cleared via `exitActionMode()` after the share chooser launches
+
 ### ML Kit
 
 - `com.google.mlkit:digital-ink-recognition:19.0.0` — en-US model; `recognizedText` stored in `HeadingObject`

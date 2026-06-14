@@ -12,6 +12,7 @@ import android.graphics.pdf.PdfDocument
 import android.text.TextPaint
 import android.util.Base64
 import android.util.TypedValue
+import androidx.room.Room
 import com.notesprout.android.core.BitmapDecode
 import com.notesprout.android.data.CoverObject
 import com.notesprout.android.core.markdown.TextObjectRenderer
@@ -269,5 +270,80 @@ object NotebookExporter {
         }
 
         return bmp
+    }
+
+    /**
+     * Renders a single page to a PNG and writes it to [context.cacheDir/exported_pngs/].
+     * Opens a transient Room instance for [soilPath]; does not checkpoint on close since
+     * NotebookActivity's canonical connection is still live.
+     * [pageNumber] is the 1-based display index used in the filename.
+     * Returns the written PNG [File].
+     */
+    suspend fun exportPage(
+        context: Context,
+        soilPath: String,
+        pageId: String,
+        pageNumber: Int,
+        notebookTitle: String,
+    ): File {
+        val safeTitle = notebookTitle.replace(Regex("[^a-zA-Z0-9_\\-. ]"), "_").trim('_', ' ')
+            .ifBlank { "notebook" }
+
+        val db = Room.databaseBuilder(
+            context.applicationContext,
+            SoilDatabase::class.java,
+            soilPath,
+        )
+            .addCallback(SoilDatabase.openCallback())
+            .build()
+
+        try {
+            val dao = db.notebookDao()
+            val pageRow = dao.getObjectById(pageId)
+                ?: throw IllegalStateException("Page not found: $pageId")
+
+            val (pw, ph) = parseDimensions(pageRow.boundingBox)
+            val templateBitmap = loadTemplate(dao, pageRow.data, pw, ph)
+
+            val layer = dao.getLayerForPage(pageId)
+
+            val headings: List<HeadingStroke> = if (layer != null) {
+                dao.getHeadingsForLayer(layer.id).mapNotNull { row ->
+                    val box = parseBoundingBox(row.boundingBox) ?: return@mapNotNull null
+                    val ho = runCatching { HeadingObject.fromJson(row.data) }.getOrNull()
+                        ?: return@mapNotNull null
+                    HeadingStroke(id = row.id, boundingBox = box, strokes = ho.strokes, recognizedText = ho.recognizedText)
+                }
+            } else emptyList()
+
+            val textObjects: List<TextRender> = if (layer != null) {
+                dao.getTextObjectsForLayer(layer.id).mapNotNull { row ->
+                    val box = parseBoundingBox(row.boundingBox) ?: return@mapNotNull null
+                    val to = runCatching { TextObject.fromJson(row.data) }.getOrNull()
+                        ?: return@mapNotNull null
+                    TextRender(id = row.id, boundingBox = box, text = to.text)
+                }
+            } else emptyList()
+
+            val strokes: List<LiveStroke> = if (layer != null) {
+                dao.getStrokesForLayer(layer.id).mapNotNull { row ->
+                    val sd = runCatching { StrokeData.fromJson(row.data) }.getOrNull()
+                        ?: return@mapNotNull null
+                    LiveStroke(id = row.id, points = sd.toPointFs())
+                }
+            } else emptyList()
+
+            val bitmap = renderPage(pw, ph, templateBitmap, headings, textObjects, strokes, context)
+            templateBitmap?.recycle()
+
+            val outDir = File(context.cacheDir, "exported_pngs").also { it.deleteRecursively(); it.mkdirs() }
+            val outFile = File(outDir, "${safeTitle}_page${pageNumber}.png")
+            FileOutputStream(outFile).use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+            bitmap.recycle()
+
+            return outFile
+        } finally {
+            db.close()
+        }
     }
 }

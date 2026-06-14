@@ -1,5 +1,6 @@
 package com.notesprout.android
 
+import android.content.ClipData
 import android.content.Intent
 import android.database.sqlite.SQLiteDatabase
 import android.graphics.Bitmap
@@ -16,6 +17,7 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.AppCompatImageView
 import androidx.appcompat.widget.AppCompatTextView
 import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
@@ -172,6 +174,7 @@ class PageIndexActivity : AppCompatActivity() {
         binding.btnPastePage.setOnClickListener { executePaste() }
         binding.btnDeletePage.setOnClickListener { executeDelete() }
         binding.btnMovePage.setOnClickListener  { enterMoveMode() }
+        binding.btnExportPage.setOnClickListener { executeExport() }
 
         // Back gesture exits move/action mode; if already in normal mode, return to NotebookActivity.
         onBackPressedDispatcher.addCallback(this, object : androidx.activity.OnBackPressedCallback(true) {
@@ -502,6 +505,7 @@ class PageIndexActivity : AppCompatActivity() {
         binding.btnPastePage.isEnabled   = pendingCopyPageId != null
         binding.btnDeletePage.visibility = android.view.View.VISIBLE
         binding.btnMovePage.visibility   = android.view.View.VISIBLE
+        binding.btnExportPage.visibility = android.view.View.VISIBLE
         renderGridPage()
     }
 
@@ -511,6 +515,7 @@ class PageIndexActivity : AppCompatActivity() {
         binding.btnPastePage.visibility  = android.view.View.GONE
         binding.btnDeletePage.visibility = android.view.View.GONE
         binding.btnMovePage.visibility   = android.view.View.GONE
+        binding.btnExportPage.visibility = android.view.View.GONE
         renderGridPage()
     }
 
@@ -525,6 +530,7 @@ class PageIndexActivity : AppCompatActivity() {
         binding.btnPastePage.visibility  = android.view.View.GONE
         binding.btnDeletePage.visibility = android.view.View.GONE
         binding.btnMovePage.visibility   = android.view.View.GONE
+        binding.btnExportPage.visibility = android.view.View.GONE
         binding.tvTopBarTitle.text = "Move to…"
         renderGridPage()
     }
@@ -540,6 +546,7 @@ class PageIndexActivity : AppCompatActivity() {
             binding.btnPastePage.isEnabled   = pendingCopyPageId != null
             binding.btnDeletePage.visibility = android.view.View.VISIBLE
             binding.btnMovePage.visibility   = android.view.View.VISIBLE
+            binding.btnExportPage.visibility = android.view.View.VISIBLE
         }
         renderGridPage()
     }
@@ -666,6 +673,59 @@ class PageIndexActivity : AppCompatActivity() {
         dialog.show()
         dialog.window?.setElevation(0f)
         dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+    }
+
+    private fun executeExport() {
+        val idx = actionModePageIndex ?: return
+        val pageEntry = pages.getOrNull(idx) ?: return
+        val path = notebookSoilPath ?: return
+        val notebookName = intent.getStringExtra(EXTRA_NOTEBOOK_NAME) ?: "notebook"
+
+        val tvMessage = android.widget.TextView(this).apply {
+            text = "Exporting…"
+            setPadding(64, 48, 64, 48)
+            setTextColor(android.graphics.Color.BLACK)
+            textSize = 16f
+        }
+        val dialog = androidx.appcompat.app.AlertDialog.Builder(this)
+            .setView(tvMessage)
+            .setCancelable(false)
+            .create()
+        dialog.show()
+        dialog.window?.setElevation(0f)
+        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+
+        lifecycleScope.launch {
+            val pngFile = try {
+                withContext(Dispatchers.IO) {
+                    NotebookExporter.exportPage(
+                        context = this@PageIndexActivity,
+                        soilPath = path,
+                        pageId = pageEntry.id,
+                        pageNumber = pageEntry.pageNumber,
+                        notebookTitle = notebookName,
+                    )
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("PageIndexActivity", "PNG export failed", e)
+                dialog.dismiss()
+                android.widget.Toast.makeText(this@PageIndexActivity, "Export failed: ${e.message}", android.widget.Toast.LENGTH_LONG).show()
+                return@launch
+            }
+
+            dialog.dismiss()
+
+            val uri = FileProvider.getUriForFile(this@PageIndexActivity, "$packageName.fileprovider", pngFile)
+            val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                type = "image/png"
+                putExtra(Intent.EXTRA_STREAM, uri)
+                clipData = ClipData.newRawUri("", uri)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            startActivity(Intent.createChooser(shareIntent, "Share page"))
+
+            exitActionMode()
+        }
     }
 
     /** Encode all session paste/delete/move actions into the result and finish. */

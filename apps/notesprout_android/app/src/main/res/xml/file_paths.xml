@@ -1,4 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <paths>
     <cache-path name="exported_pdfs" path="exported_pdfs/" />
+    <cache-path name="exported_pngs" path="exported_pngs/" />
 </paths>
