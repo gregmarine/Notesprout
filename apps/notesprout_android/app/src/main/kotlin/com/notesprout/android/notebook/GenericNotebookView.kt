@@ -123,6 +123,18 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
     private var dragOriginalHeadings: List<HeadingStroke> = emptyList()
     private var dragOriginalTextObjects: List<TextRender> = emptyList()
     private var dragBackingBitmap: Bitmap? = null
+    private var activeSnapGuides: List<SnapGuide> = emptyList()
+
+    private val snapGuidePaint: Paint by lazy {
+        val density = resources.displayMetrics.density
+        Paint().apply {
+            style       = Paint.Style.STROKE
+            color       = Color.BLACK
+            strokeWidth = density
+            pathEffect  = DashPathEffect(floatArrayOf(12f * density, 6f * density), 0f)
+            isAntiAlias = false
+        }
+    }
 
     private val lassoPaint = Paint().apply {
         style = Paint.Style.STROKE
@@ -298,7 +310,16 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
                         }
                     }
                     if (dragThresholdMet) {
-                        dragDx = dx; dragDy = dy
+                        val density = resources.displayMetrics.density
+                        val snap = SnapEngine.computeSnap(
+                            lassoSelectionBox ?: RectF(),
+                            dx, dy,
+                            width.toFloat(), height.toFloat(),
+                            SNAP_MARGIN_DP * density,
+                            SNAP_THRESHOLD_DP * density,
+                        )
+                        dragDx = snap.snappedDx; dragDy = snap.snappedDy
+                        activeSnapGuides = snap.activeGuides
                         val now = System.currentTimeMillis()
                         if (now - lastLassoRefreshMs >= LASSO_REFRESH_INTERVAL_MS) {
                             lastLassoRefreshMs = now
@@ -361,7 +382,7 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
                         val origTextObjects = dragOriginalTextObjects
                         dragBackingBitmap?.recycle(); dragBackingBitmap = null
                         isDragMoveActive = false; dragThresholdMet = false
-                        dragDx = 0f; dragDy = 0f
+                        dragDx = 0f; dragDy = 0f; activeSnapGuides = emptyList()
                         dragOriginalStrokes = emptyList(); dragOriginalHeadings = emptyList()
                         dragOriginalTextObjects = emptyList()
                         redrawCanvas()
@@ -371,7 +392,7 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
                         val tapX = event.x; val tapY = event.y
                         dragBackingBitmap?.recycle(); dragBackingBitmap = null
                         isDragMoveActive = false; dragThresholdMet = false
-                        dragDx = 0f; dragDy = 0f
+                        dragDx = 0f; dragDy = 0f; activeSnapGuides = emptyList()
                         dragOriginalStrokes = emptyList(); dragOriginalHeadings = emptyList()
                         dragOriginalTextObjects = emptyList()
                         onLassoTap?.invoke(tapX, tapY)
@@ -444,6 +465,7 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
                     lassoPaint,
                 )
             }
+            drawSnapGuides(canvas)
             return
         }
 
@@ -585,6 +607,16 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
      * Redraws the render bitmap from scratch: white base → template → all current strokes.
      * Call whenever strokes are added/removed or the template changes.
      */
+    private fun drawSnapGuides(canvas: Canvas) {
+        if (activeSnapGuides.isEmpty()) return
+        for (guide in activeSnapGuides) {
+            when (guide) {
+                is SnapGuide.Vertical   -> canvas.drawLine(guide.x, 0f, guide.x, height.toFloat(), snapGuidePaint)
+                is SnapGuide.Horizontal -> canvas.drawLine(0f, guide.y, width.toFloat(), guide.y, snapGuidePaint)
+            }
+        }
+    }
+
     private fun redrawCanvas() {
         val canvas = renderCanvas ?: return
         canvas.drawColor(Color.WHITE)
@@ -867,7 +899,7 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
         if (!enabled && isDragMoveActive) {
             dragBackingBitmap?.recycle(); dragBackingBitmap = null
             isDragMoveActive = false; dragThresholdMet = false
-            dragDx = 0f; dragDy = 0f
+            dragDx = 0f; dragDy = 0f; activeSnapGuides = emptyList()
             dragOriginalStrokes = emptyList(); dragOriginalHeadings = emptyList()
             dragOriginalTextObjects = emptyList()
             invalidate()

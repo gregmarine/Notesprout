@@ -166,6 +166,18 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
     private var dragOriginalTextObjects: List<TextRender> = emptyList()
     // Backing bitmap: non-selected strokes/headings/textObjects + template, built once at drag start.
     private var dragBackingBitmap: Bitmap? = null
+    private var activeSnapGuides: List<SnapGuide> = emptyList()
+
+    private val snapGuidePaint: Paint by lazy {
+        val density = resources.displayMetrics.density
+        Paint().apply {
+            style       = Paint.Style.STROKE
+            color       = Color.BLACK
+            strokeWidth = density
+            pathEffect  = DashPathEffect(floatArrayOf(12f * density, 6f * density), 0f)
+            isAntiAlias = false
+        }
+    }
 
     private val lassoPaint = Paint().apply {
         style = Paint.Style.STROKE
@@ -452,6 +464,16 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
                     for (i in 1 until pts.size) path.lineTo(pts[i].x, pts[i].y)
                     canvas.drawPath(path, strokePaint)
                 }
+            }
+        }
+    }
+
+    private fun drawSnapGuides(canvas: Canvas) {
+        if (activeSnapGuides.isEmpty()) return
+        for (guide in activeSnapGuides) {
+            when (guide) {
+                is SnapGuide.Vertical   -> canvas.drawLine(guide.x, 0f, guide.x, height.toFloat(), snapGuidePaint)
+                is SnapGuide.Horizontal -> canvas.drawLine(0f, guide.y, width.toFloat(), guide.y, snapGuidePaint)
             }
         }
     }
@@ -946,7 +968,16 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
                         }
                     }
                     if (dragThresholdMet) {
-                        dragDx = dx; dragDy = dy
+                        val density = resources.displayMetrics.density
+                        val snap = SnapEngine.computeSnap(
+                            lassoSelectionBox ?: RectF(),
+                            dx, dy,
+                            width.toFloat(), height.toFloat(),
+                            SNAP_MARGIN_DP * density,
+                            SNAP_THRESHOLD_DP * density,
+                        )
+                        dragDx = snap.snappedDx; dragDy = snap.snappedDy
+                        activeSnapGuides = snap.activeGuides
                         val now = System.currentTimeMillis()
                         if (now - lastLassoRefreshMs >= LASSO_REFRESH_INTERVAL_MS) {
                             lastLassoRefreshMs = now
@@ -1019,7 +1050,7 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
                         val origTextObjects = dragOriginalTextObjects
                         dragBackingBitmap?.recycle(); dragBackingBitmap = null
                         isDragMoveActive = false; dragThresholdMet = false
-                        dragDx = 0f; dragDy = 0f
+                        dragDx = 0f; dragDy = 0f; activeSnapGuides = emptyList()
                         dragOriginalStrokes = emptyList(); dragOriginalHeadings = emptyList()
                         dragOriginalTextObjects = emptyList()
                         EpdController.setViewDefaultUpdateMode(this, UpdateMode.GU)
@@ -1035,7 +1066,7 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
                         val tapX = event.x; val tapY = event.y
                         dragBackingBitmap?.recycle(); dragBackingBitmap = null
                         isDragMoveActive = false; dragThresholdMet = false
-                        dragDx = 0f; dragDy = 0f
+                        dragDx = 0f; dragDy = 0f; activeSnapGuides = emptyList()
                         dragOriginalStrokes = emptyList(); dragOriginalHeadings = emptyList()
                         dragOriginalTextObjects = emptyList()
                         epd { "DRAG_CANCELLED threshold_not_met -> onLassoTap" }
@@ -1110,6 +1141,7 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
                     lassoPaint,
                 )
             }
+            drawSnapGuides(canvas)
             return
         }
 
@@ -1200,7 +1232,7 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
             }
             dragBackingBitmap?.recycle(); dragBackingBitmap = null
             isDragMoveActive = false; dragThresholdMet = false
-            dragDx = 0f; dragDy = 0f
+            dragDx = 0f; dragDy = 0f; activeSnapGuides = emptyList()
             dragOriginalStrokes = emptyList(); dragOriginalHeadings = emptyList()
             dragOriginalTextObjects = emptyList()
             invalidate()

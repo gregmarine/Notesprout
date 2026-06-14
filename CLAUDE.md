@@ -420,6 +420,44 @@ The user remains in lasso mode after any lasso action (move, copy, delete, etc.)
 
 ---
 
+## Snap-to-Guide System
+
+Always-active during lasso drag. When a selected object is dragged close to a snap region, a dashed guideline appears and the object snaps to it. Dragging past the threshold releases the snap — no hard clamping.
+
+### Snap Regions
+
+Two guide types — vertical (dashed vertical line, snaps X) and horizontal (dashed horizontal line, snaps Y):
+
+| Guide | Position |
+|---|---|
+| Left / Right edge | x = 0 / x = pageWidth |
+| Left / Right margin | x = SNAP_MARGIN_DP / x = pageWidth − SNAP_MARGIN_DP |
+| Vertical center | x = pageWidth / 2 |
+| Top / Bottom edge | y = 0 / y = pageHeight |
+| Top / Bottom margin | y = SNAP_MARGIN_DP / y = pageHeight − SNAP_MARGIN_DP |
+| Horizontal center | y = pageHeight / 2 |
+
+`SNAP_MARGIN_DP = 44f` — matches the standard toolbar button size.
+
+### Snap Logic
+
+Each selection bbox has 3 anchors per axis (left/center-x/right for X; top/center-y/bottom for Y). During drag, the nearest (anchor, guide) pair within `SNAP_THRESHOLD_DP` (20dp) wins per axis. X and Y snap independently. The raw drag offset is adjusted by `guide − anchor` to pull the anchor flush to the guide.
+
+### Constants (`notebook/NotebookConstants.kt`)
+
+| Constant | Default | Purpose |
+|---|---|---|
+| `SNAP_MARGIN_DP` | `44f` | Margin guide inset from each page edge (dp) |
+| `SNAP_THRESHOLD_DP` | `20f` | Max distance for snap to engage (dp) |
+
+### Implementation Files
+
+- `notebook/SnapGuide.kt` — `sealed class SnapGuide { Vertical(x), Horizontal(y) }` + `SnapResult(snappedDx, snappedDy, activeGuides)`
+- `notebook/SnapEngine.kt` — `computeSnap(originalBox, rawDx, rawDy, pageWidth, pageHeight, marginPx, thresholdPx): SnapResult`
+- Both drawing views — `activeSnapGuides: List<SnapGuide>` field; `snapGuidePaint` (1dp, black, `DashPathEffect([12dp, 6dp])`); `drawSnapGuides(canvas)` called in the drag layer of `onDraw` after the selection box, before `return`; cleared on all drag commit/cancel/mode-exit paths alongside `dragDx = 0f`
+
+---
+
 ## Undo/Redo System
 
 - Session-scoped (not persisted across process death)
