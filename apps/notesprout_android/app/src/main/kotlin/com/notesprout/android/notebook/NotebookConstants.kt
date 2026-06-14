@@ -34,3 +34,21 @@ const val SCRIBBLE_BBOX_PENETRATION_DP = 14f
  * Chosen to be close to the eraser radius used in eraseAtPath().
  */
 const val SCRIBBLE_STROKE_TOUCH_RADIUS_DP = 8f
+
+// ── Smart Lasso detection constants ──────────────────────────────────────────
+
+/**
+ * Minimum gesture velocity (px/ms) for a stroke to qualify as a smart-lasso candidate.
+ * A typical purposeful quick-select circle (~600px circumference) drawn in 1.2 s gives
+ * 0.5 px/ms; casual note-taking strokes at similar lengths are usually slower.
+ * Tunable — lower to accept slower circles, raise to demand faster gestures.
+ */
+const val SMART_LASSO_MIN_VELOCITY = 0.5f
+
+/**
+ * Maximum distance (dp) between the first and last point of a gesture for it to be
+ * considered "closed" and therefore a smart-lasso candidate.
+ * Deliberately larger than [SCRIBBLE_STROKE_TOUCH_RADIUS_DP] — it measures intentional
+ * path closure, not eraser proximity.
+ */
+const val SMART_LASSO_CLOSURE_DISTANCE_DP = 50f

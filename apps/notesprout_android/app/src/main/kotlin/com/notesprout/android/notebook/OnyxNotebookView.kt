@@ -199,6 +199,7 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
     override var onStrokeErased: ((String) -> Unit)? = null
     override var onHeadingErased: ((HeadingStroke) -> Unit)? = null
     override var onScribbleEraseComplete: ((List<String>, List<HeadingStroke>, List<TextRender>) -> Unit)? = null
+    override var onSmartLassoComplete: ((List<String>, RectF) -> Unit)? = null
 
     // Points and stroke IDs accumulated between onBeginRawDrawing and onEndRawDrawing.
     // Used for per-gesture scribble candidate detection after all points are collected.
@@ -256,9 +257,10 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
                 epd { "PEN_LIFTED caller=onEndRawDrawing_eraser" }
                 onPenLifted?.invoke()
             } else {
-                // Pen mode: check for scribble-to-erase before deciding to persist.
-                epd { "PEN_LIFTED caller=onEndRawDrawing_pen scribbleCheck" }
-                checkAndRunScribble()
+                // Pen mode: smart-lasso → scribble-to-erase → normal stroke.
+                epd { "PEN_LIFTED caller=onEndRawDrawing_pen gestureCheck" }
+                val durationMs = System.currentTimeMillis() - beginRawDrawingTimeMs
+                checkAndDispatchGesture(durationMs)
             }
         }
 
@@ -522,33 +524,84 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
         return dx * dx + dy * dy
     }
 
-    // ── Scribble-to-Erase detection ──────────────────────────────────────────
+    // ── Gesture detection at pen lift (smart-lasso → scribble-to-erase → normal) ───────────
 
     /**
-     * Called at the end of every non-eraser pen gesture. Checks if the accumulated
-     * gesture points form a scribble candidate; if so, runs a hit test off-thread.
-     * Fires [onScribbleEraseComplete] when the scribble hits at least one object,
-     * or [onPenLifted] for normal (non-scribble or no-hit) gestures.
+     * Called at the end of every non-eraser pen gesture.  Runs the detection gate chain
+     * in priority order on a single background thread:
+     *   Gate 1 — Smart lasso: fast closed circle enclosing ≥1 object → enter lasso selection.
+     *   Gate 2 — Scribble-to-erase: dense back-and-forth crossing ≥1 object → erase.
+     *   Default — Normal stroke: fire [onPenLifted] so the activity saves the stroke to DB.
      */
-    private fun checkAndRunScribble() {
+    private fun checkAndDispatchGesture(durationMs: Long) {
         val gesturePoints    = currentGesturePoints.toList()
         val gestureStrokeIds = currentGestureStrokeIds.toList()
         currentGesturePoints.clear()
         currentGestureStrokeIds.clear()
 
-        if (gesturePoints.isEmpty() || gestureStrokeIds.isEmpty() || !isScribbleCandidate(gesturePoints)) {
+        if (gesturePoints.isEmpty() || gestureStrokeIds.isEmpty()) {
             onPenLifted?.invoke()
             return
         }
 
-        // Candidate detected — run spatial hit test on a background thread.
+        val density      = resources.displayMetrics.density
+        val gestureIdSet = gestureStrokeIds.toSet()
+
+        // Cheap synchronous geometry checks — avoid thread spawn for the common case.
+        val isSmartLasso = isSmartLassoCandidate(gesturePoints, durationMs, density)
+        val isScribble   = !isSmartLasso && isScribbleCandidate(gesturePoints)
+        if (!isSmartLasso && !isScribble) {
+            onPenLifted?.invoke()
+            return
+        }
+
         val strokeSnapshot  = strokes.toList()
         val headingSnapshot = headings.toList()
         val textSnapshot    = textObjects.toList()
-        val density         = resources.displayMetrics.density
-        val gestureIdSet    = gestureStrokeIds.toSet()
 
         Thread {
+            // ── Gate 1: Smart lasso ────────────────────────────────────────────────
+            if (isSmartLasso) {
+                val path = Path().also { p ->
+                    p.moveTo(gesturePoints[0].x, gesturePoints[0].y)
+                    for (i in 1 until gesturePoints.size) p.lineTo(gesturePoints[i].x, gesturePoints[i].y)
+                    p.lineTo(gesturePoints[0].x, gesturePoints[0].y)
+                    p.close()
+                }
+                val hitIds = runLassoHitTest(
+                    path,
+                    strokeSnapshot.filter { it.id !in gestureIdSet },
+                    headingSnapshot,
+                    textSnapshot,
+                )
+                if (hitIds.isNotEmpty()) {
+                    val hitSet      = hitIds.toSet()
+                    val unionBounds = RectF()
+                    for (s in strokeSnapshot) { if (s.id in hitSet) unionBounds.union(s.boundingBox) }
+                    for (h in headingSnapshot) { if (h.id in hitSet) unionBounds.union(h.boundingBox) }
+                    for (t in textSnapshot)    { if (t.id in hitSet) unionBounds.union(t.boundingBox) }
+                    post {
+                        // Discard the gesture stroke — it is never page content.
+                        strokes.removeAll { it.id in gestureIdSet }
+                        if (isSetup) {
+                            touchHelper.setRawDrawingRenderEnabled(false)
+                            epd { "RENDER_DISABLED caller=smartLasso" }
+                            invalidate()
+                            epd { "INVALIDATE caller=smartLasso" }
+                        }
+                        onSmartLassoComplete?.invoke(hitIds, unionBounds)
+                    }
+                    return@Thread
+                }
+                // Smart-lasso geometry passed but no objects enclosed — fall through to
+                // scribble check (a fast circle over empty space is an unusual but valid stroke).
+                if (!isScribbleCandidate(gesturePoints)) {
+                    post { onPenLifted?.invoke() }
+                    return@Thread
+                }
+            }
+
+            // ── Gate 2: Scribble-to-erase ──────────────────────────────────────────
             val hitIds = scribbleHitTest(
                 gesturePoints,
                 strokeSnapshot.filter { it.id !in gestureIdSet },
@@ -558,11 +611,8 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
             )
             post {
                 if (hitIds.isEmpty()) {
-                    // Scribble candidate but nothing hit — persist as a normal stroke.
                     onPenLifted?.invoke()
                 } else {
-                    // Confirmed scribble erase: the gesture stroke is not page content —
-                    // remove it from in-memory before releasing the overlay.
                     strokes.removeAll { it.id in gestureIdSet }
                     if (isSetup) {
                         touchHelper.setRawDrawingRenderEnabled(false)
@@ -577,6 +627,28 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
                 }
             }
         }.start()
+    }
+
+    /**
+     * Returns true when [points] form a smart-lasso candidate:
+     *  1. pathLength / durationMs ≥ [SMART_LASSO_MIN_VELOCITY] px/ms.
+     *  2. Distance from first to last point ≤ [SMART_LASSO_CLOSURE_DISTANCE_DP] dp.
+     */
+    private fun isSmartLassoCandidate(points: List<PointF>, durationMs: Long, density: Float): Boolean {
+        if (points.size < 4 || durationMs <= 0L) return false
+
+        var pathLength = 0f
+        for (i in 1 until points.size) {
+            val dx = points[i].x - points[i - 1].x
+            val dy = points[i].y - points[i - 1].y
+            pathLength += Math.sqrt((dx * dx + dy * dy).toDouble()).toFloat()
+        }
+        if (pathLength / durationMs < SMART_LASSO_MIN_VELOCITY) return false
+
+        val closureThresholdPx = SMART_LASSO_CLOSURE_DISTANCE_DP * density
+        val first = points[0]; val last = points[points.size - 1]
+        val dx = last.x - first.x; val dy = last.y - first.y
+        return Math.sqrt((dx * dx + dy * dy).toDouble()).toFloat() <= closureThresholdPx
     }
 
     /**

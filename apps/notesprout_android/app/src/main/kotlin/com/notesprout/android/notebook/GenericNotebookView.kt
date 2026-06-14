@@ -147,7 +147,11 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
     override var onStrokeErased: ((String) -> Unit)? = null
     override var onHeadingErased: ((HeadingStroke) -> Unit)? = null
     override var onScribbleEraseComplete: ((List<String>, List<HeadingStroke>, List<TextRender>) -> Unit)? = null
+    override var onSmartLassoComplete: ((List<String>, RectF) -> Unit)? = null
     override var onPenLifted: (() -> Unit)? = null
+
+    // Wall-clock time of the last ACTION_DOWN, used to compute gesture duration for smart-lasso velocity.
+    private var strokeStartTimeMs = 0L
     override var onSnapshotReady: ((String) -> Unit)? = null
     override var onLassoComplete: ((Path, PointF) -> Unit)? = null
     override var onLassoTapToDismiss: (() -> Unit)? = null
@@ -187,6 +191,7 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
             MotionEvent.ACTION_DOWN -> {
                 activePoints.clear()
                 activePoints.add(PointF(event.x, event.y))
+                strokeStartTimeMs = System.currentTimeMillis()
                 invalidate()
             }
             MotionEvent.ACTION_MOVE -> {
@@ -213,7 +218,8 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
                     commitActiveStroke()
                     activePoints.clear()
                     invalidate()
-                    checkAndRunScribble()
+                    val durationMs = (System.currentTimeMillis() - strokeStartTimeMs).coerceAtLeast(1L)
+                    checkAndDispatchGesture(durationMs)
                 }
             }
         }
@@ -635,42 +641,68 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
         return dx * dx + dy * dy
     }
 
-    // ── Scribble-to-Erase detection ──────────────────────────────────────────
+    // ── Gesture detection at pen lift (smart-lasso → scribble-to-erase → normal) ──────────
 
     /**
-     * Called after [commitActiveStroke] on every non-eraser pen lift. Checks if the
-     * last stroke is a scribble candidate; if so, runs a hit test off the main thread.
-     * Fires [onScribbleEraseComplete] on a confirmed scribble hit, or [onPenLifted]
-     * for normal (non-scribble or no-hit) strokes.
+     * Called after [commitActiveStroke] on every non-eraser pen lift. Runs the detection
+     * gate chain in priority order on a single background thread:
+     *   Gate 1 — Smart lasso: fast closed circle enclosing ≥1 object → enter lasso selection.
+     *   Gate 2 — Scribble-to-erase: dense back-and-forth crossing ≥1 object → erase.
+     *   Default — Normal stroke: fire [onPenLifted] so the activity saves the stroke to DB.
      */
-    private fun checkAndRunScribble() {
+    private fun checkAndDispatchGesture(durationMs: Long) {
         val lastStroke = strokes.lastOrNull()
-        if (lastStroke == null || !isScribbleCandidate(lastStroke.points)) {
-            onPenLifted?.invoke()
-            return
-        }
+        if (lastStroke == null) { onPenLifted?.invoke(); return }
 
-        val strokeSnapshot  = strokes.toList()
+        val points    = lastStroke.points
+        val density   = resources.displayMetrics.density
+        val strokeId  = lastStroke.id
+
+        val isSmartLasso = isSmartLassoCandidate(points, durationMs, density)
+        val isScribble   = !isSmartLasso && isScribbleCandidate(points)
+        if (!isSmartLasso && !isScribble) { onPenLifted?.invoke(); return }
+
+        val strokeSnapshot  = strokes.filter { it.id != strokeId }.toList()
         val headingSnapshot = headings.toList()
         val textSnapshot    = textObjects.toList()
-        val density         = resources.displayMetrics.density
-        val scribbleId      = lastStroke.id
 
         Thread {
-            val hitIds = scribbleHitTest(
-                lastStroke.points,
-                strokeSnapshot.filter { it.id != scribbleId },
-                headingSnapshot,
-                textSnapshot,
-                density,
-            )
+            // ── Gate 1: Smart lasso ────────────────────────────────────────────────
+            if (isSmartLasso) {
+                val path = Path().also { p ->
+                    p.moveTo(points[0].x, points[0].y)
+                    for (i in 1 until points.size) p.lineTo(points[i].x, points[i].y)
+                    p.lineTo(points[0].x, points[0].y)
+                    p.close()
+                }
+                val hitIds = runLassoHitTest(path, strokeSnapshot, headingSnapshot, textSnapshot)
+                if (hitIds.isNotEmpty()) {
+                    val hitSet      = hitIds.toSet()
+                    val unionBounds = RectF()
+                    for (s in strokeSnapshot) { if (s.id in hitSet) unionBounds.union(s.boundingBox) }
+                    for (h in headingSnapshot) { if (h.id in hitSet) unionBounds.union(h.boundingBox) }
+                    for (t in textSnapshot)    { if (t.id in hitSet) unionBounds.union(t.boundingBox) }
+                    post {
+                        strokes.removeAll { it.id == strokeId }
+                        onSmartLassoComplete?.invoke(hitIds, unionBounds)
+                    }
+                    return@Thread
+                }
+                // Smart-lasso geometry passed but no objects enclosed — fall through to
+                // scribble check (a fast circle over empty space is an unusual but valid stroke).
+                if (!isScribbleCandidate(points)) {
+                    post { onPenLifted?.invoke() }
+                    return@Thread
+                }
+            }
+
+            // ── Gate 2: Scribble-to-erase ──────────────────────────────────────────
+            val hitIds = scribbleHitTest(points, strokeSnapshot, headingSnapshot, textSnapshot, density)
             post {
                 if (hitIds.isEmpty()) {
                     onPenLifted?.invoke()
                 } else {
-                    // Confirmed scribble erase: the gesture stroke is not page content —
-                    // remove it from in-memory before the activity rebuilds the bitmap.
-                    strokes.removeAll { it.id == scribbleId }
+                    strokes.removeAll { it.id == strokeId }
                     val hitSet         = hitIds.toSet()
                     val erasedHeadings = headingSnapshot.filter { it.id in hitSet }
                     val erasedTexts    = textSnapshot.filter { it.id in hitSet }
@@ -678,6 +710,28 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
                 }
             }
         }.start()
+    }
+
+    /**
+     * Returns true when [points] form a smart-lasso candidate:
+     *  1. pathLength / durationMs ≥ [SMART_LASSO_MIN_VELOCITY] px/ms.
+     *  2. Distance from first to last point ≤ [SMART_LASSO_CLOSURE_DISTANCE_DP] dp.
+     */
+    private fun isSmartLassoCandidate(points: List<PointF>, durationMs: Long, density: Float): Boolean {
+        if (points.size < 4 || durationMs <= 0L) return false
+
+        var pathLength = 0f
+        for (i in 1 until points.size) {
+            val dx = points[i].x - points[i - 1].x
+            val dy = points[i].y - points[i - 1].y
+            pathLength += Math.sqrt((dx * dx + dy * dy).toDouble()).toFloat()
+        }
+        if (pathLength / durationMs < SMART_LASSO_MIN_VELOCITY) return false
+
+        val closureThresholdPx = SMART_LASSO_CLOSURE_DISTANCE_DP * density
+        val first = points[0]; val last = points[points.size - 1]
+        val dx = last.x - first.x; val dy = last.y - first.y
+        return Math.sqrt((dx * dx + dy * dy).toDouble()).toFloat() <= closureThresholdPx
     }
 
     private fun isScribbleCandidate(points: List<PointF>): Boolean {

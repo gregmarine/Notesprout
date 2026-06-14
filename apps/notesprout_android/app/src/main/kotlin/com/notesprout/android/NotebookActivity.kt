@@ -125,6 +125,9 @@ class NotebookActivity : AppCompatActivity() {
     // ── Lasso selection state ─────────────────────────────────────────────────
     private var isLassoMode = false
     private var isLassoEraserMode = false
+    /** True when lasso mode was entered via a smart-lasso gesture (not by tapping the lasso button).
+     *  Dismissing the selection exits lasso mode and returns to pen mode instead of staying in lasso. */
+    private var isSmartLassoSession = false
     /** IDs of objects selected by the most recent lasso gesture. */
     val selectedObjectIds = mutableSetOf<String>()
 
@@ -752,6 +755,13 @@ class NotebookActivity : AppCompatActivity() {
             drawingView.lassoSelectedIds = emptySet()
             drawingView.setLassoOverlay(null, null)
             hideFloatingSelectionToolbar()
+            if (isSmartLassoSession) {
+                // Smart-lasso sessions return to pen mode on dismiss, not lasso mode.
+                isSmartLassoSession = false
+                exitLassoMode()
+                drawingView.enableDrawing()
+                binding.btnPen.isSelected = true
+            }
         }
 
         // Stylus tap in lasso mode — trigger paste if clipboard has content and no selection.
@@ -899,6 +909,35 @@ class NotebookActivity : AppCompatActivity() {
                         drawingView.loadStrokes(updatedStrokes)
                     }
                 }
+            }
+        }
+
+        // Smart-lasso gesture complete — the view already discarded the gesture stroke.
+        // Enter lasso mode, show the selection, rebuild the bitmap to remove the gesture circle.
+        drawingView.onSmartLassoComplete = { hitIds, unionBounds ->
+            if (!isLassoMode) {
+                enterLassoMode()
+                isSmartLassoSession = true
+            }
+            selectedObjectIds.clear()
+            selectedObjectIds.addAll(hitIds)
+            drawingView.lassoSelectedIds = selectedObjectIds.toSet()
+            val pad          = 8f * resources.displayMetrics.density
+            val paddedBounds = RectF(unionBounds).also { it.inset(-pad, -pad) }
+            // Rebuild bitmap off-thread to drop the gesture circle (already removed from strokes).
+            val currentStrokes  = drawingView.getStrokes()
+            val currentHeadings = drawingView.getHeadings()
+            val currentTexts    = drawingView.getTextObjects()
+            val templateBmp     = currentTemplateBitmap
+            lifecycleScope.launch {
+                val bitmap = withContext(Dispatchers.IO) {
+                    drawingView.buildRenderBitmap(currentStrokes, templateBmp, currentHeadings, currentTexts)
+                }
+                if (bitmap != null) {
+                    drawingView.loadStrokesWithBitmap(currentStrokes, bitmap, templateBmp)
+                }
+                drawingView.setLassoOverlay(null, paddedBounds)
+                updateFloatingSelectionToolbar(paddedBounds)
             }
         }
 
@@ -3440,6 +3479,7 @@ class NotebookActivity : AppCompatActivity() {
     /** Exit lasso mode, clearing all selection state. The caller is responsible for activating the desired tool. */
     private fun exitLassoMode() {
         isLassoMode = false
+        isSmartLassoSession = false
         selectedObjectIds.clear()
         drawingView.setLassoMode(false)
         binding.btnLasso.isSelected = false

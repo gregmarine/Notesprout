@@ -243,6 +243,27 @@ interface NotebookView {
     fun compositeTextObjects(bitmap: Bitmap) {}
 
     /**
+     * Fired on the main thread when a fast, closed pen gesture in pen mode encloses or
+     * crosses at least one object on the current layer (smart-lasso detection).
+     * Fires INSTEAD OF [onPenLifted] or [onScribbleEraseComplete] — it is the first gate
+     * in the pen-lift detection chain (smart-lasso → scribble-to-erase → normal stroke).
+     *
+     * The gesture stroke itself is NOT saved to the DB — it is removed from the in-memory
+     * stroke list by the view before this fires and is never persisted.
+     *
+     * [hitIds] — IDs of all objects enclosed by the gesture path.
+     * [unionBounds] — union of the bounding boxes of all hit objects (un-padded).
+     *
+     * On Onyx devices the EPD overlay render is already released before this fires.
+     * The activity must enter lasso mode, set [lassoSelectedIds], show the selection
+     * overlay, and display the floating selection toolbar — do NOT call [onPenLifted].
+     */
+    var onSmartLassoComplete: ((hitIds: List<String>, unionBounds: android.graphics.RectF) -> Unit)?
+        get() = null
+        @Suppress("UNUSED_PARAMETER")
+        set(value) {}
+
+    /**
      * Fired on the main thread when a pen stroke is judged a scribble AND its path
      * crosses at least one existing object (stroke, heading, or text object) on the page.
      * Fires INSTEAD OF [onPenLifted] for confirmed scribble-erase gestures.

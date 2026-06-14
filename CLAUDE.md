@@ -369,6 +369,55 @@ When hit test confirms a scribble erase (fires on main thread from `post {}`):
 
 ---
 
+## Smart Lasso
+
+Always-active in pen mode (no toggle). A quick, closed pen gesture (circle or loop) around existing content enters lasso selection mode with all enclosed objects selected — exactly as if the user had switched to the lasso tool and drawn that path manually.
+
+### Detection gate order at pen lift
+
+All three checks run in the same background thread, in priority order:
+1. **Smart lasso** — fast + closed + encloses ≥1 object → enters lasso mode with selection.
+2. **Scribble-to-erase** — dense + zigzag + crosses ≥1 object → erases hit objects.
+3. **Normal stroke** — fire `onPenLifted`; activity saves to DB.
+
+### Detection heuristics (both drawing engines)
+
+A completed stroke is a **smart-lasso candidate** when BOTH hold:
+1. **Velocity:** `pathLength / durationMs ≥ SMART_LASSO_MIN_VELOCITY` (0.5 px/ms). `durationMs` is from `beginRawDrawingTimeMs` on Onyx; from `strokeStartTimeMs` (set on `ACTION_DOWN`) on Generic.
+2. **Closure:** distance from first to last point of the gesture ≤ `SMART_LASSO_CLOSURE_DISTANCE_DP` (50 dp).
+
+If both conditions hold, `runLassoHitTest` is called against all non-deleted content on the layer (strokes, headings, text objects — same function used by the lasso eraser). If ≥1 object is hit, smart lasso triggers. If 0 objects are hit, falls through to the scribble check.
+
+### Constants (`notebook/NotebookConstants.kt`)
+
+| Constant | Default | Purpose |
+|---|---|---|
+| `SMART_LASSO_MIN_VELOCITY` | `0.5f` | Minimum pathLength / durationMs (px/ms) |
+| `SMART_LASSO_CLOSURE_DISTANCE_DP` | `50f` | Maximum first-to-last distance for "closed" path (dp) |
+
+### On trigger
+
+1. **Discard gesture stroke:** removed from in-memory stroke list before the callback fires. Never saved to DB, never added to `persistedStrokeIds`.
+2. **EPD overlay released** (Onyx only): `setRawDrawingRenderEnabled(false)` + `invalidate()` before the callback.
+3. **Activity enters lasso mode:** `enterLassoMode()` is called first, making the mode switch persistent. `drawingView.isLassoMode = true`, `btnLasso.isSelected = true`, `btnPen.isSelected = false`.
+4. **Selection state set:** `selectedObjectIds` and `drawingView.lassoSelectedIds` populated with hit IDs.
+5. **Bitmap rebuilt off-thread** via `buildRenderBitmap` + `loadStrokesWithBitmap` to drop the gesture circle from the render bitmap before the EPD repaint.
+6. **Selection overlay + floating toolbar shown** via `setLassoOverlay(null, paddedBounds)` + `updateFloatingSelectionToolbar(paddedBounds)`.
+
+### Persistent mode switch
+
+The user remains in lasso mode after any lasso action (move, copy, delete, etc.) until the pen tool is explicitly tapped — the same behavior as a toolbar-initiated lasso selection. Smart lasso does NOT auto-return to pen mode.
+
+### Implementation files
+
+- `notebook/NotebookConstants.kt` — constants
+- `notebook/OnyxNotebookView.kt` — `checkAndDispatchGesture()`, `isSmartLassoCandidate()`; replaces the former `checkAndRunScribble()`
+- `notebook/GenericNotebookView.kt` — same pattern; `strokeStartTimeMs` tracked on `ACTION_DOWN`
+- `notebook/NotebookView.kt` — `onSmartLassoComplete` callback declaration
+- `NotebookActivity.kt` — `drawingView.onSmartLassoComplete` wiring
+
+---
+
 ## Undo/Redo System
 
 - Session-scoped (not persisted across process death)
