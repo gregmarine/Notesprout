@@ -23,6 +23,7 @@ object SnapEngine {
         pageHeight: Float,
         marginPx: Float,
         thresholdPx: Float,
+        objectTargets: List<RectF> = emptyList(),
     ): SnapResult {
         // Current visual positions of each selection anchor after raw drag.
         val movedLeft    = originalBox.left    + rawDx
@@ -33,8 +34,14 @@ object SnapEngine {
         val movedCenterY = originalBox.centerY() + rawDy
         val movedBottom  = originalBox.bottom  + rawDy
 
-        val vGuides = listOf(0f, marginPx, pageWidth / 2f, pageWidth - marginPx, pageWidth)
-        val hGuides = listOf(0f, marginPx, pageHeight / 2f, pageHeight - marginPx, pageHeight)
+        val vGuides = buildList {
+            addAll(listOf(0f, marginPx, pageWidth / 2f, pageWidth - marginPx, pageWidth))
+            for (t in objectTargets) { add(t.left - marginPx); add(t.left); add(t.centerX()); add(t.right); add(t.right + marginPx) }
+        }
+        val hGuides = buildList {
+            addAll(listOf(0f, marginPx, pageHeight / 2f, pageHeight - marginPx, pageHeight))
+            for (t in objectTargets) { add(t.top - marginPx); add(t.top); add(t.centerY()); add(t.bottom); add(t.bottom + marginPx) }
+        }
 
         val xAnchors = listOf(movedLeft, movedCenterX, movedRight)
         val yAnchors = listOf(movedTop,  movedCenterY, movedBottom)

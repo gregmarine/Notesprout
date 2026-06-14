@@ -124,6 +124,7 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
     private var dragOriginalTextObjects: List<TextRender> = emptyList()
     private var dragBackingBitmap: Bitmap? = null
     private var activeSnapGuides: List<SnapGuide> = emptyList()
+    private var snapObjectTargets: List<RectF> = emptyList()
 
     private val snapGuidePaint: Paint by lazy {
         val density = resources.displayMetrics.density
@@ -287,6 +288,7 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
                     val nonSelectedHeadings = headings.filter { it.id !in lassoSelectedIds }
                     val nonSelectedTexts    = textObjects.filter { it.id !in lassoSelectedIds }
                     dragBackingBitmap = buildRenderBitmap(nonSelectedStrokes, templateBitmap, nonSelectedHeadings, nonSelectedTexts)
+                    snapObjectTargets = (nonSelectedHeadings.map { RectF(it.boundingBox) } + nonSelectedTexts.map { RectF(it.boundingBox) })
                     return true
                 }
                 // Normal lasso: clear any existing selection so the user sees immediate feedback.
@@ -317,6 +319,7 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
                             width.toFloat(), height.toFloat(),
                             SNAP_MARGIN_DP * density,
                             SNAP_THRESHOLD_DP * density,
+                            snapObjectTargets,
                         )
                         dragDx = snap.snappedDx; dragDy = snap.snappedDy
                         activeSnapGuides = snap.activeGuides
@@ -382,7 +385,7 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
                         val origTextObjects = dragOriginalTextObjects
                         dragBackingBitmap?.recycle(); dragBackingBitmap = null
                         isDragMoveActive = false; dragThresholdMet = false
-                        dragDx = 0f; dragDy = 0f; activeSnapGuides = emptyList()
+                        dragDx = 0f; dragDy = 0f; activeSnapGuides = emptyList(); snapObjectTargets = emptyList()
                         dragOriginalStrokes = emptyList(); dragOriginalHeadings = emptyList()
                         dragOriginalTextObjects = emptyList()
                         redrawCanvas()
@@ -392,7 +395,7 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
                         val tapX = event.x; val tapY = event.y
                         dragBackingBitmap?.recycle(); dragBackingBitmap = null
                         isDragMoveActive = false; dragThresholdMet = false
-                        dragDx = 0f; dragDy = 0f; activeSnapGuides = emptyList()
+                        dragDx = 0f; dragDy = 0f; activeSnapGuides = emptyList(); snapObjectTargets = emptyList()
                         dragOriginalStrokes = emptyList(); dragOriginalHeadings = emptyList()
                         dragOriginalTextObjects = emptyList()
                         onLassoTap?.invoke(tapX, tapY)
