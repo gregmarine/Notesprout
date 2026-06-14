@@ -52,3 +52,11 @@ const val SMART_LASSO_MIN_VELOCITY = 0.5f
  * path closure, not eraser proximity.
  */
 const val SMART_LASSO_CLOSURE_DISTANCE_DP = 50f
+
+/**
+ * Minimum total signed angular sweep (degrees) that a gesture must accumulate around
+ * its own centroid to qualify as a smart-lasso candidate.
+ * A full circle sweeps ±360°; requiring ≥270° accepts quick/imperfect loops while
+ * rejecting letters and non-circular strokes that never wind around a central point.
+ */
+const val SMART_LASSO_MIN_WINDING_DEGREES = 270f

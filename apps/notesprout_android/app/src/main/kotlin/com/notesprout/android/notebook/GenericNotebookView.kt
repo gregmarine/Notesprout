@@ -713,9 +713,11 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
     }
 
     /**
-     * Returns true when [points] form a smart-lasso candidate:
+     * Returns true when [points] form a smart-lasso candidate — all three gates must pass:
      *  1. pathLength / durationMs ≥ [SMART_LASSO_MIN_VELOCITY] px/ms.
      *  2. Distance from first to last point ≤ [SMART_LASSO_CLOSURE_DISTANCE_DP] dp.
+     *  3. The path winds ≥ [SMART_LASSO_MIN_WINDING_DEGREES]° around its centroid —
+     *     i.e. the pen actually traced a loop, not a letter or open arc.
      */
     private fun isSmartLassoCandidate(points: List<PointF>, durationMs: Long, density: Float): Boolean {
         if (points.size < 4 || durationMs <= 0L) return false
@@ -730,8 +732,28 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
 
         val closureThresholdPx = SMART_LASSO_CLOSURE_DISTANCE_DP * density
         val first = points[0]; val last = points[points.size - 1]
-        val dx = last.x - first.x; val dy = last.y - first.y
-        return Math.sqrt((dx * dx + dy * dy).toDouble()).toFloat() <= closureThresholdPx
+        val cdx = last.x - first.x; val cdy = last.y - first.y
+        if (Math.sqrt((cdx * cdx + cdy * cdy).toDouble()).toFloat() > closureThresholdPx) return false
+
+        // Winding check: accumulate signed angular change around the gesture centroid.
+        // Letters and open arcs never wind 270°+ around a central point; loops always do.
+        var cx = 0f; var cy = 0f
+        for (p in points) { cx += p.x; cy += p.y }
+        cx /= points.size; cy /= points.size
+
+        var totalAngle = 0.0
+        var prevAngle = Math.atan2((points[0].y - cy).toDouble(), (points[0].x - cx).toDouble())
+        for (i in 1 until points.size) {
+            val angle = Math.atan2((points[i].y - cy).toDouble(), (points[i].x - cx).toDouble())
+            var delta = angle - prevAngle
+            // Unwrap to [-π, π] so we measure true incremental rotation, not jumps.
+            while (delta > Math.PI)  delta -= 2.0 * Math.PI
+            while (delta < -Math.PI) delta += 2.0 * Math.PI
+            totalAngle += delta
+            prevAngle = angle
+        }
+        val windingDegrees = Math.abs(Math.toDegrees(totalAngle)).toFloat()
+        return windingDegrees >= SMART_LASSO_MIN_WINDING_DEGREES
     }
 
     private fun isScribbleCandidate(points: List<PointF>): Boolean {

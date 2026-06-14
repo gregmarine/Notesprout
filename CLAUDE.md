@@ -382,11 +382,12 @@ All three checks run in the same background thread, in priority order:
 
 ### Detection heuristics (both drawing engines)
 
-A completed stroke is a **smart-lasso candidate** when BOTH hold:
+A completed stroke is a **smart-lasso candidate** when ALL THREE hold:
 1. **Velocity:** `pathLength / durationMs ≥ SMART_LASSO_MIN_VELOCITY` (0.5 px/ms). `durationMs` is from `beginRawDrawingTimeMs` on Onyx; from `strokeStartTimeMs` (set on `ACTION_DOWN`) on Generic.
 2. **Closure:** distance from first to last point of the gesture ≤ `SMART_LASSO_CLOSURE_DISTANCE_DP` (50 dp).
+3. **Winding:** the path accumulates ≥ `SMART_LASSO_MIN_WINDING_DEGREES` (270°) of signed angular change around the gesture's centroid. This is the circularity gate — letters and open arcs never wind 270°+ around a central point; loops always do. Computed by summing per-step `atan2` deltas (unwrapped to [−π, π]) over all gesture points.
 
-If both conditions hold, `runLassoHitTest` is called against all non-deleted content on the layer (strokes, headings, text objects — same function used by the lasso eraser). If ≥1 object is hit, smart lasso triggers. If 0 objects are hit, falls through to the scribble check.
+If all three conditions hold, `runLassoHitTest` is called against all non-deleted content on the layer (strokes, headings, text objects — same function used by the lasso eraser). If ≥1 object is hit, smart lasso triggers. If 0 objects are hit (e.g. writing the letter "o" or "0" over empty space), falls through to the scribble check as a normal stroke.
 
 ### Constants (`notebook/NotebookConstants.kt`)
 
@@ -394,6 +395,7 @@ If both conditions hold, `runLassoHitTest` is called against all non-deleted con
 |---|---|---|
 | `SMART_LASSO_MIN_VELOCITY` | `0.5f` | Minimum pathLength / durationMs (px/ms) |
 | `SMART_LASSO_CLOSURE_DISTANCE_DP` | `50f` | Maximum first-to-last distance for "closed" path (dp) |
+| `SMART_LASSO_MIN_WINDING_DEGREES` | `270f` | Minimum angular sweep around centroid for circularity (degrees) |
 
 ### On trigger
 
