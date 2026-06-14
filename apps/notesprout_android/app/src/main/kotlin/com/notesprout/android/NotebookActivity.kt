@@ -543,7 +543,6 @@ class NotebookActivity : AppCompatActivity() {
         }
 
         binding.btnPageIndex.setOnClickListener { openPageIndex() }
-        binding.tvPageIndicator.setOnClickListener { openPageIndex() }
 
         binding.btnCopyPage.setOnClickListener { copyCurrentPage() }
         binding.btnPastePage.setOnClickListener { pasteCopiedPage() }
