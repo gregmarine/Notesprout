@@ -18,12 +18,17 @@ import com.notesprout.android.data.CoverObject
 import com.notesprout.android.core.markdown.TextObjectRenderer
 import com.notesprout.android.data.HeadingObject
 import com.notesprout.android.data.HeadingStroke
+import com.notesprout.android.data.LineObject
+import com.notesprout.android.data.LineOrientation
+import com.notesprout.android.data.LineRender
+import com.notesprout.android.data.LineStyle
 import com.notesprout.android.data.LiveStroke
 import com.notesprout.android.data.TextObject
 import com.notesprout.android.data.TextRender
 import com.notesprout.android.data.NotebookMetadata
 import com.notesprout.android.data.SoilDatabase
 import com.notesprout.android.data.StrokeData
+import com.notesprout.android.R
 import com.notesprout.android.notebook.HEADING_BACKGROUND_COLOR
 import kotlinx.serialization.json.Json
 import org.json.JSONObject
@@ -116,6 +121,15 @@ object NotebookExporter {
                 }
             } else emptyList()
 
+            val lineObjects: List<LineRender> = if (layer != null) {
+                dao.getLineObjectsForLayer(layer.id).mapNotNull { row ->
+                    val box = parseBoundingBox(row.boundingBox) ?: return@mapNotNull null
+                    val lo = runCatching { LineObject.fromJson(row.data) }.getOrNull()
+                        ?: return@mapNotNull null
+                    parseLineRender(row.id, box, lo, context.resources.displayMetrics.density)
+                }
+            } else emptyList()
+
             val strokes: List<LiveStroke> = if (layer != null) {
                 dao.getStrokesForLayer(layer.id).mapNotNull { row ->
                     val sd = runCatching { StrokeData.fromJson(row.data) }.getOrNull()
@@ -124,7 +138,7 @@ object NotebookExporter {
                 }
             } else emptyList()
 
-            val bitmap = renderPage(pw, ph, templateBitmap, headings, textObjects, strokes, context)
+            val bitmap = renderPage(pw, ph, templateBitmap, headings, textObjects, lineObjects, strokes, context)
 
             val pageInfo = PdfDocument.PageInfo.Builder(pw, ph, pdfPageNumber++).create()
             val pdfPage = pdf.startPage(pageInfo)
@@ -141,6 +155,21 @@ object NotebookExporter {
         pdf.close()
 
         return outFile
+    }
+
+    private fun parseLineRender(id: String, box: RectF, lo: LineObject, densityDp: Float): LineRender {
+        val startX: Float; val startY: Float; val endX: Float; val endY: Float
+        when (lo.orientation) {
+            com.notesprout.android.data.LineOrientation.HORIZONTAL -> {
+                startX = box.left; endX = box.right
+                startY = box.centerY(); endY = box.centerY()
+            }
+            com.notesprout.android.data.LineOrientation.VERTICAL -> {
+                startY = box.top; endY = box.bottom
+                startX = box.centerX(); endX = box.centerX()
+            }
+        }
+        return LineRender(id, box, startX, startY, endX, endY, lo.style, lo.orientation, lo.strokeWidthDp, lo.dotSpacingDp * densityDp)
     }
 
     private fun parseDimensions(boundingBoxJson: String): Pair<Int, Int> {
@@ -191,6 +220,7 @@ object NotebookExporter {
         templateBitmap: Bitmap?,
         headings: List<HeadingStroke>,
         textObjects: List<TextRender>,
+        lineObjects: List<LineRender>,
         strokes: List<LiveStroke>,
         context: Context,
     ): Bitmap {
@@ -260,6 +290,42 @@ object NotebookExporter {
             TextObjectRenderer.draw(canvas, textObj, w, textObjectPaint, densityDp)
         }
 
+        for (lineObj in lineObjects) {
+            val sw = lineObj.strokeWidthDp * densityDp
+            val linePaint = Paint().apply {
+                isAntiAlias = true
+                color = context.getColor(R.color.inkLight)
+                strokeCap = Paint.Cap.ROUND
+                strokeWidth = sw
+            }
+            when (lineObj.style) {
+                LineStyle.SOLID -> {
+                    linePaint.style = Paint.Style.STROKE
+                    canvas.drawLine(lineObj.startX, lineObj.startY, lineObj.endX, lineObj.endY, linePaint)
+                }
+                LineStyle.DASHED -> {
+                    linePaint.style = Paint.Style.STROKE
+                    linePaint.pathEffect = android.graphics.DashPathEffect(floatArrayOf(12f * densityDp, 8f * densityDp), 0f)
+                    canvas.drawLine(lineObj.startX, lineObj.startY, lineObj.endX, lineObj.endY, linePaint)
+                }
+                LineStyle.DOTTED -> {
+                    linePaint.style = Paint.Style.FILL
+                    val spacing = lineObj.dotSpacingPx.takeIf { it > 0f } ?: (sw * 4f)
+                    val r = sw / 2f
+                    when (lineObj.orientation) {
+                        LineOrientation.HORIZONTAL -> {
+                            var x = lineObj.startX
+                            while (x <= lineObj.endX) { canvas.drawCircle(x, lineObj.startY, r, linePaint); x += spacing }
+                        }
+                        LineOrientation.VERTICAL -> {
+                            var y = lineObj.startY
+                            while (y <= lineObj.endY) { canvas.drawCircle(lineObj.startX, y, r, linePaint); y += spacing }
+                        }
+                    }
+                }
+            }
+        }
+
         for (liveStroke in strokes) {
             val pts = liveStroke.points
             if (pts.size < 2) continue
@@ -325,6 +391,15 @@ object NotebookExporter {
                 }
             } else emptyList()
 
+            val lineObjects: List<LineRender> = if (layer != null) {
+                dao.getLineObjectsForLayer(layer.id).mapNotNull { row ->
+                    val box = parseBoundingBox(row.boundingBox) ?: return@mapNotNull null
+                    val lo = runCatching { LineObject.fromJson(row.data) }.getOrNull()
+                        ?: return@mapNotNull null
+                    parseLineRender(row.id, box, lo, context.resources.displayMetrics.density)
+                }
+            } else emptyList()
+
             val strokes: List<LiveStroke> = if (layer != null) {
                 dao.getStrokesForLayer(layer.id).mapNotNull { row ->
                     val sd = runCatching { StrokeData.fromJson(row.data) }.getOrNull()
@@ -333,7 +408,7 @@ object NotebookExporter {
                 }
             } else emptyList()
 
-            val bitmap = renderPage(pw, ph, templateBitmap, headings, textObjects, strokes, context)
+            val bitmap = renderPage(pw, ph, templateBitmap, headings, textObjects, lineObjects, strokes, context)
             templateBitmap?.recycle()
 
             val outDir = File(context.cacheDir, "exported_pngs").also { it.deleteRecursively(); it.mkdirs() }

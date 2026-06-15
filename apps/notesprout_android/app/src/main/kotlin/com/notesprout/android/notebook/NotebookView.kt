@@ -6,6 +6,7 @@ import android.graphics.PointF
 import android.graphics.RectF
 import android.view.View
 import com.notesprout.android.data.HeadingStroke
+import com.notesprout.android.data.LineRender
 import com.notesprout.android.data.LiveStroke
 import com.notesprout.android.data.TextRender
 
@@ -109,6 +110,8 @@ interface NotebookView {
         movedHeadings: List<HeadingStroke>,
         originalTextObjects: List<TextRender>,
         movedTextObjects: List<TextRender>,
+        originalLineObjects: List<LineRender>,
+        movedLineObjects: List<LineRender>,
     ) -> Unit)?
         get() = null
         @Suppress("UNUSED_PARAMETER")
@@ -248,6 +251,26 @@ interface NotebookView {
     fun compositeTextObjects(bitmap: Bitmap) {}
 
     /**
+     * Replace the in-memory line object list with [lineObjects] loaded from the database.
+     * Call before [loadStrokes] or [loadStrokesWithBitmap] so lines are included in the
+     * next canvas redraw.  Must be called on the main thread.
+     */
+    fun loadLineObjects(lineObjects: List<LineRender>) {}
+
+    /**
+     * Return the current in-memory line object list.
+     * Safe to call from any thread — line objects are replaced atomically.
+     */
+    fun getLineObjects(): List<LineRender> = emptyList()
+
+    /**
+     * Paint the current [lineObjects] onto [bitmap].
+     * Called from displayPage on the snapshot fast-path: lines are always loaded fresh from DB
+     * (identical reason to text objects).  Must be called on the main thread after [loadLineObjects].
+     */
+    fun compositeLineObjects(bitmap: Bitmap) {}
+
+    /**
      * Fired on the main thread when a fast, closed pen gesture in pen mode encloses or
      * crosses at least one object on the current layer (smart-lasso detection).
      * Fires INSTEAD OF [onPenLifted] or [onScribbleEraseComplete] — it is the first gate
@@ -287,8 +310,9 @@ interface NotebookView {
      */
     var onScribbleEraseComplete: ((
         erasedObjectIds: List<String>,
-        erasedHeadings: List<com.notesprout.android.data.HeadingStroke>,
-        erasedTextObjects: List<com.notesprout.android.data.TextRender>,
+        erasedHeadings: List<HeadingStroke>,
+        erasedTextObjects: List<TextRender>,
+        erasedLineObjects: List<LineRender>,
     ) -> Unit)?
         get() = null
         @Suppress("UNUSED_PARAMETER")
@@ -364,6 +388,7 @@ interface NotebookView {
         templateBitmap: Bitmap?,
         headings: List<HeadingStroke> = emptyList(),
         textObjects: List<TextRender>? = null,
+        lineObjects: List<LineRender>? = null,
     ): Bitmap?
 
     /**

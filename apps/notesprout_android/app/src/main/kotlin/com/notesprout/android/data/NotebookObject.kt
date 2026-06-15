@@ -71,3 +71,4 @@ data class NotebookObject(
 
 const val TYPE_HEADING = "heading"
 const val TYPE_TEXT = "text"
+const val TYPE_LINE = "line"

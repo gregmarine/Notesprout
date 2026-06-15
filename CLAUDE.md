@@ -642,6 +642,61 @@ All lasso actions work for text objects alongside strokes and headings with full
 
 ---
 
+## Line Object System
+
+### Data Model
+
+- `type = "line"` rows in `.soil`; `LineObject` (`data/LineObject.kt`) serialized to `data`; `LineRender` (`data/LineRender.kt`) is the in-memory representation
+- `@Serializable data class LineObject(val style: LineStyle, val orientation: LineOrientation, val strokeWidthDp: Float = 1f, val dotSpacingDp: Float = 0f)`
+- `data class LineRender(val id, val boundingBox, val startX, startY, endX, endY, val style, val orientation, val strokeWidthDp, val dotSpacingPx)` — built at page load from `type = "line"` rows
+- `LineStyle`: `SOLID`, `DASHED`, `DOTTED`. `LineOrientation`: `HORIZONTAL`, `VERTICAL`.
+- `dotSpacingDp` persisted in `LineObject`; converted to `dotSpacingPx` at load time via `lo.dotSpacingDp * density` in `parseLineRender`.
+
+**Bounding box:** exact line extent, inflated by `max(strokeWidth/2, 4dp)` on the perpendicular axis so center-point lasso hit tests work correctly.
+
+### Insertion (`LineObjectDialog`)
+
+`btnInsertLines` (`ic_density_small`) in the NotebookActivity toolbar. Opens `LineObjectDialog` — style toggle (Solid / Dashed / Dotted), orientation toggle (Horizontal / Vertical), editable fields for stroke width, line count, and margins (top/bottom/left/right, defaulting to `SNAP_MARGIN_DP`).
+
+`buildLines()` computes all `LineRender` positions and dot spacing, then calls `onInsert(lines)` on confirm.
+
+**Dot spacing rule:** spacing = line-to-line gap so the dot grid is square (equal gaps in both axes):
+- Horizontal lines: `dotSpacingPx = usableHeight / (count - 1)`
+- Vertical lines: `dotSpacingPx = usableWidth / (count - 1)`
+
+This means the count of dots per row is determined by how many fit at that spacing, not forced to equal the line count.
+
+### Rendering (`drawLineObject`)
+
+Centralized in `drawLineObject(canvas, lineObj)` in each drawing view and `NotebookExporter.renderPage()`.
+
+- `SOLID`: `canvas.drawLine(...)` with no path effect
+- `DASHED`: `canvas.drawLine(...)` with `DashPathEffect([12dp, 8dp])`
+- `DOTTED`: individual `canvas.drawCircle()` calls at `dotSpacingPx` intervals along the line. Dot radius = `strokeWidth / 2`. Fallback spacing `sw * 4f` when `dotSpacingPx` is zero (legacy rows).
+
+Line color: `R.color.inkLight` (`#888888`) — intentionally lighter than strokes to feel like a page guide, not content.
+
+### Lasso Integration
+
+Lines participate in lasso selection (center-point containment hit test), move (via `updateHeadingData`), copy/cut/paste, delete, and lasso-eraser — identical to headings and text objects. All lasso actions carry lines through `StrokesMoved`, `LassoDeleted`, `LassoCut`, `LassoPasted`, `LassoErased` undo actions alongside strokes, headings, and text objects.
+
+`NotesproutClipboard.ClipboardContent` carries `lineObjects: List<LineRender>`. Paste assigns new UUIDs and translates the bounding box.
+
+### Undo/Redo
+
+`UndoRedoAction.LineInserted(lineIds, pageId, layerId, lineObjects)` — undo soft-deletes all inserted line rows; redo re-inserts them. Cross-page undo/redo uses the same two-phase approach as other object types.
+
+### Implementation Files
+
+- `data/LineObject.kt` — `LineStyle`, `LineOrientation`, `LineObject` (DB/serialized)
+- `data/LineRender.kt` — `LineRender` (in-memory render-time)
+- `notebook/LineObjectDialog.kt` — insertion dialog
+- `res/drawable/ic_density_small.xml` — toolbar icon (Tabler `density-small`)
+- `res/layout/dialog_insert_lines.xml` — dialog layout
+- Both drawing views + `NotebookExporter` — `drawLineObject` / `renderPage` line rendering
+
+---
+
 ## MainActivity Feature Systems
 
 ### Notebook & Folder Management

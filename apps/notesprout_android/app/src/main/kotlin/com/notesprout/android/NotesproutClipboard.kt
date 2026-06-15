@@ -2,6 +2,7 @@ package com.notesprout.android
 
 import android.graphics.RectF
 import com.notesprout.android.data.HeadingStroke
+import com.notesprout.android.data.LineRender
 import com.notesprout.android.data.LiveStroke
 import com.notesprout.android.data.TextRender
 
@@ -11,6 +12,7 @@ object NotesproutClipboard {
         val headings: List<HeadingStroke>,
         val boundingBox: RectF,
         val textObjects: List<TextRender> = emptyList(),
+        val lineObjects: List<LineRender> = emptyList(),
     )
     var content: ClipboardContent? = null
     fun hasContent(): Boolean = content != null

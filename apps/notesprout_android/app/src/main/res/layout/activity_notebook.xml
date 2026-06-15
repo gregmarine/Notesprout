@@ -124,6 +124,14 @@
             android:src="@drawable/ic_text_recognition"
             android:contentDescription="Insert text" />
 
+        <!-- Insert line objects -->
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnInsertLines"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:layout_marginStart="4dp"
+            android:src="@drawable/ic_density_small"
+            android:contentDescription="Insert lines" />
+
         <!-- Lasso selection tool -->
         <androidx.appcompat.widget.AppCompatImageButton
             android:id="@+id/btnLasso"

@@ -1,6 +1,7 @@
 package com.notesprout.android.history
 
 import com.notesprout.android.data.HeadingStroke
+import com.notesprout.android.data.LineRender
 import com.notesprout.android.data.LiveStroke
 import com.notesprout.android.data.TextRender
 import kotlinx.serialization.Serializable
@@ -129,6 +130,8 @@ sealed class UndoRedoAction {
         val headings: List<HeadingStroke> = emptyList(),
         val textIds: List<String> = emptyList(),
         val textObjects: List<TextRender> = emptyList(),
+        val lineIds: List<String> = emptyList(),
+        val lines: List<LineRender> = emptyList(),
     ) : UndoRedoAction()
 
     /**
@@ -149,6 +152,8 @@ sealed class UndoRedoAction {
         val movedHeadings: List<HeadingStroke> = emptyList(),
         val originalTextObjects: List<TextRender> = emptyList(),
         val movedTextObjects: List<TextRender> = emptyList(),
+        val originalLineObjects: List<LineRender> = emptyList(),
+        val movedLineObjects: List<LineRender> = emptyList(),
     ) : UndoRedoAction()
 
     /**
@@ -169,6 +174,8 @@ sealed class UndoRedoAction {
         val headingIds: List<String> = emptyList(),
         val textIds: List<String> = emptyList(),
         val textObjects: List<TextRender> = emptyList(),
+        val lineIds: List<String> = emptyList(),
+        val lines: List<LineRender> = emptyList(),
     ) : UndoRedoAction()
 
     /**
@@ -194,6 +201,8 @@ sealed class UndoRedoAction {
         val headings: List<HeadingStroke> = emptyList(),
         val textIds: List<String> = emptyList(),
         val textObjects: List<TextRender> = emptyList(),
+        val lineIds: List<String> = emptyList(),
+        val lines: List<LineRender> = emptyList(),
     ) : UndoRedoAction()
 
     /**
@@ -215,6 +224,8 @@ sealed class UndoRedoAction {
         val headings: List<HeadingStroke> = emptyList(),
         val textIds: List<String> = emptyList(),
         val textObjects: List<TextRender> = emptyList(),
+        val lineIds: List<String> = emptyList(),
+        val lines: List<LineRender> = emptyList(),
     ) : UndoRedoAction()
 
     /**
@@ -360,6 +371,39 @@ sealed class UndoRedoAction {
         val headings: List<HeadingStroke> = emptyList(),
         val textIds: List<String> = emptyList(),
         val textObjects: List<TextRender> = emptyList(),
+        val lineIds: List<String> = emptyList(),
+        val lines: List<LineRender> = emptyList(),
+    ) : UndoRedoAction()
+
+    /**
+     * User inserted one or more line objects via the line creation dialog.
+     *
+     * Undo: soft-deletes all [lineIds]; removes from in-memory list; rebuilds bitmap.
+     * Redo: restores all [lineIds]; re-adds [lines] to in-memory list; rebuilds bitmap.
+     *
+     * [lines] carries full render data so redo can rebuild the in-memory list without a DB read.
+     */
+    @Serializable
+    data class LinesInserted(
+        val lineIds: List<String>,
+        val pageId: String,
+        val layerId: String,
+        val lines: List<LineRender>,
+        val deletedAt: Long = 0,
+    ) : UndoRedoAction()
+
+    /**
+     * User deleted line objects (single or batch outside the lasso path).
+     *
+     * Undo: restores all [lineIds]; re-adds [lines] to in-memory list; rebuilds bitmap.
+     * Redo: soft-deletes all [lineIds]; removes from in-memory list; rebuilds bitmap.
+     */
+    @Serializable
+    data class LinesRemoved(
+        val lineIds: List<String>,
+        val pageId: String,
+        val lines: List<LineRender>,
+        val deletedAt: Long,
     ) : UndoRedoAction()
 
     /**

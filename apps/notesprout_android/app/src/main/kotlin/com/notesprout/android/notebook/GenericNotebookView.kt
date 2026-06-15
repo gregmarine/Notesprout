@@ -3,6 +3,7 @@ package com.notesprout.android.notebook
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
+import com.notesprout.android.R
 import android.graphics.Color
 import android.graphics.DashPathEffect
 import android.graphics.Paint
@@ -16,6 +17,10 @@ import android.view.MotionEvent
 import android.view.View
 import com.notesprout.android.core.markdown.TextObjectRenderer
 import com.notesprout.android.data.HeadingStroke
+import com.notesprout.android.data.LineObject
+import com.notesprout.android.data.LineOrientation
+import com.notesprout.android.data.LineRender
+import com.notesprout.android.data.LineStyle
 import com.notesprout.android.data.LiveStroke
 import com.notesprout.android.data.TextRender
 import java.io.ByteArrayOutputStream
@@ -52,6 +57,9 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
 
     // Text object store — populated from type="text" rows at page load time.
     private var textObjects: List<TextRender> = emptyList()
+
+    // Line object store — populated from type="line" rows at page load time.
+    private var lineObjects: List<LineRender> = emptyList()
 
     private val textObjectTextSizePx = android.util.TypedValue.applyDimension(
         android.util.TypedValue.COMPLEX_UNIT_SP, 16f, resources.displayMetrics
@@ -122,6 +130,7 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
     private var dragOriginalStrokes: List<LiveStroke> = emptyList()
     private var dragOriginalHeadings: List<HeadingStroke> = emptyList()
     private var dragOriginalTextObjects: List<TextRender> = emptyList()
+    private var dragOriginalLineObjects: List<LineRender> = emptyList()
     private var dragBackingBitmap: Bitmap? = null
     private var activeSnapGuides: List<SnapGuide> = emptyList()
     private var snapObjectTargets: List<RectF> = emptyList()
@@ -160,7 +169,7 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
 
     override var onStrokeErased: ((String) -> Unit)? = null
     override var onHeadingErased: ((HeadingStroke) -> Unit)? = null
-    override var onScribbleEraseComplete: ((List<String>, List<HeadingStroke>, List<TextRender>) -> Unit)? = null
+    override var onScribbleEraseComplete: ((List<String>, List<HeadingStroke>, List<TextRender>, List<LineRender>) -> Unit)? = null
     override var onSmartLassoComplete: ((List<String>, RectF) -> Unit)? = null
     override var onPenLifted: (() -> Unit)? = null
 
@@ -171,7 +180,7 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
     override var onLassoTapToDismiss: (() -> Unit)? = null
     override var onLassoEraseComplete: ((List<String>) -> Unit)? = null
     override var lassoSelectedIds: Set<String> = emptySet()
-    override var onStrokesMoved: ((List<LiveStroke>, List<LiveStroke>, List<HeadingStroke>, List<HeadingStroke>, List<TextRender>, List<TextRender>) -> Unit)? = null
+    override var onStrokesMoved: ((List<LiveStroke>, List<LiveStroke>, List<HeadingStroke>, List<HeadingStroke>, List<TextRender>, List<TextRender>, List<LineRender>, List<LineRender>) -> Unit)? = null
     override var onLassoTap: ((Float, Float) -> Unit)? = null
     override var onDragStarted: (() -> Unit)? = null
     override var onLassoSelectionCleared: (() -> Unit)? = null
@@ -285,11 +294,15 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
                     dragOriginalTextObjects = textObjects
                         .filter { it.id in lassoSelectedIds }
                         .map { TextRender(it.id, RectF(it.boundingBox), it.text) }
+                    dragOriginalLineObjects = lineObjects
+                        .filter { it.id in lassoSelectedIds }
+                        .map { it.copy(boundingBox = RectF(it.boundingBox)) }
                     val nonSelectedStrokes  = strokes.filter { it.id !in lassoSelectedIds }
                     val nonSelectedHeadings = headings.filter { it.id !in lassoSelectedIds }
                     val nonSelectedTexts    = textObjects.filter { it.id !in lassoSelectedIds }
-                    dragBackingBitmap = buildRenderBitmap(nonSelectedStrokes, templateBitmap, nonSelectedHeadings, nonSelectedTexts)
-                    snapObjectTargets = if (isSnapEnabled) (nonSelectedHeadings.map { RectF(it.boundingBox) } + nonSelectedTexts.map { RectF(it.boundingBox) }) else emptyList()
+                    val nonSelectedLines    = lineObjects.filter { it.id !in lassoSelectedIds }
+                    dragBackingBitmap = buildRenderBitmap(nonSelectedStrokes, templateBitmap, nonSelectedHeadings, nonSelectedTexts, nonSelectedLines)
+                    snapObjectTargets = if (isSnapEnabled) (nonSelectedHeadings.map { RectF(it.boundingBox) } + nonSelectedTexts.map { RectF(it.boundingBox) } + nonSelectedLines.map { RectF(it.boundingBox) }) else emptyList()
                     return true
                 }
                 // Normal lasso: clear any existing selection so the user sees immediate feedback.
@@ -376,6 +389,16 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
                                 t.boundingBox.right + dragDx, t.boundingBox.bottom + dragDy,
                             ), t.text)
                         }
+                        val movedLineObjects = dragOriginalLineObjects.map { l ->
+                            l.copy(
+                                boundingBox = RectF(
+                                    l.boundingBox.left + dragDx, l.boundingBox.top + dragDy,
+                                    l.boundingBox.right + dragDx, l.boundingBox.bottom + dragDy,
+                                ),
+                                startX = l.startX + dragDx, startY = l.startY + dragDy,
+                                endX   = l.endX   + dragDx, endY   = l.endY   + dragDy,
+                            )
+                        }
                         val movedById = movedStrokes.associateBy { it.id }
                         val updated = strokes.map { movedById[it.id] ?: it }
                         strokes.clear(); strokes.addAll(updated)
@@ -383,19 +406,22 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
                         headings = headings.map { headingById[it.id] ?: it }
                         val textById = movedTextObjects.associateBy { it.id }
                         textObjects = textObjects.map { textById[it.id] ?: it }
+                        val lineById = movedLineObjects.associateBy { it.id }
+                        lineObjects = lineObjects.map { lineById[it.id] ?: it }
                         lassoSelectionBox = lassoSelectionBox?.let { b ->
                             RectF(b.left + dragDx, b.top + dragDy, b.right + dragDx, b.bottom + dragDy)
                         }
                         val origStrokes = dragOriginalStrokes
                         val origHeadings = dragOriginalHeadings
                         val origTextObjects = dragOriginalTextObjects
+                        val origLineObjects = dragOriginalLineObjects
                         dragBackingBitmap?.recycle(); dragBackingBitmap = null
                         isDragMoveActive = false; dragThresholdMet = false
                         dragDx = 0f; dragDy = 0f; activeSnapGuides = emptyList(); snapObjectTargets = emptyList()
                         dragOriginalStrokes = emptyList(); dragOriginalHeadings = emptyList()
-                        dragOriginalTextObjects = emptyList()
+                        dragOriginalTextObjects = emptyList(); dragOriginalLineObjects = emptyList()
                         redrawCanvas()
-                        onStrokesMoved?.invoke(origStrokes, movedStrokes, origHeadings, movedHeadings, origTextObjects, movedTextObjects)
+                        onStrokesMoved?.invoke(origStrokes, movedStrokes, origHeadings, movedHeadings, origTextObjects, movedTextObjects, origLineObjects, movedLineObjects)
                     } else {
                         // Below threshold — treat as a tap inside the selection box.
                         val tapX = event.x; val tapY = event.y
@@ -403,7 +429,7 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
                         isDragMoveActive = false; dragThresholdMet = false
                         dragDx = 0f; dragDy = 0f; activeSnapGuides = emptyList(); snapObjectTargets = emptyList()
                         dragOriginalStrokes = emptyList(); dragOriginalHeadings = emptyList()
-                        dragOriginalTextObjects = emptyList()
+                        dragOriginalTextObjects = emptyList(); dragOriginalLineObjects = emptyList()
                         onLassoTap?.invoke(tapX, tapY)
                     }
                     return true
@@ -459,6 +485,9 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
             }
             for (textObj in dragOriginalTextObjects) {
                 drawTextObject(canvas, textObj, width)
+            }
+            for (lineObj in dragOriginalLineObjects) {
+                drawLineObject(canvas, lineObj)
             }
             for (stroke in dragOriginalStrokes) {
                 val pts = stroke.points; if (pts.size < 2) continue
@@ -613,6 +642,47 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
     }
 
     /**
+     * Render a type="line" object onto [canvas].
+     * Line style (solid/dashed/dotted) is applied via PathEffect on a transient Paint.
+     */
+    private fun drawLineObject(canvas: Canvas, lineObj: LineRender) {
+        val density = resources.displayMetrics.density
+        val sw = lineObj.strokeWidthDp * density
+        val paint = Paint().apply {
+            isAntiAlias = true
+            color = context.getColor(R.color.inkLight)
+            strokeCap = Paint.Cap.ROUND
+            strokeWidth = sw
+        }
+        when (lineObj.style) {
+            com.notesprout.android.data.LineStyle.SOLID -> {
+                paint.style = Paint.Style.STROKE
+                canvas.drawLine(lineObj.startX, lineObj.startY, lineObj.endX, lineObj.endY, paint)
+            }
+            com.notesprout.android.data.LineStyle.DASHED -> {
+                paint.style = Paint.Style.STROKE
+                paint.pathEffect = DashPathEffect(floatArrayOf(12f * density, 8f * density), 0f)
+                canvas.drawLine(lineObj.startX, lineObj.startY, lineObj.endX, lineObj.endY, paint)
+            }
+            com.notesprout.android.data.LineStyle.DOTTED -> {
+                paint.style = Paint.Style.FILL
+                val spacing = lineObj.dotSpacingPx.takeIf { it > 0f } ?: (sw * 4f)
+                val r = sw / 2f
+                when (lineObj.orientation) {
+                    com.notesprout.android.data.LineOrientation.HORIZONTAL -> {
+                        var x = lineObj.startX
+                        while (x <= lineObj.endX) { canvas.drawCircle(x, lineObj.startY, r, paint); x += spacing }
+                    }
+                    com.notesprout.android.data.LineOrientation.VERTICAL -> {
+                        var y = lineObj.startY
+                        while (y <= lineObj.endY) { canvas.drawCircle(lineObj.startX, y, r, paint); y += spacing }
+                    }
+                }
+            }
+        }
+    }
+
+    /**
      * Redraws the render bitmap from scratch: white base → template → all current strokes.
      * Call whenever strokes are added/removed or the template changes.
      */
@@ -648,6 +718,9 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
         }
         for (textObj in textObjects) {
             drawTextObject(canvas, textObj, width)
+        }
+        for (lineObj in lineObjects) {
+            drawLineObject(canvas, lineObj)
         }
         for (liveStroke in strokes) {
             val points = liveStroke.points
@@ -706,6 +779,7 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
         val strokeSnapshot  = strokes.filter { it.id != strokeId }.toList()
         val headingSnapshot = headings.toList()
         val textSnapshot    = textObjects.toList()
+        val lineSnapshot    = lineObjects.toList()
 
         Thread {
             // ── Gate 1: Smart lasso ────────────────────────────────────────────────
@@ -716,13 +790,14 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
                     p.lineTo(points[0].x, points[0].y)
                     p.close()
                 }
-                val hitIds = runLassoHitTest(path, strokeSnapshot, headingSnapshot, textSnapshot)
+                val hitIds = runLassoHitTest(path, strokeSnapshot, headingSnapshot, textSnapshot, lineSnapshot)
                 if (hitIds.isNotEmpty()) {
                     val hitSet      = hitIds.toSet()
                     val unionBounds = RectF()
                     for (s in strokeSnapshot) { if (s.id in hitSet) unionBounds.union(s.boundingBox) }
                     for (h in headingSnapshot) { if (h.id in hitSet) unionBounds.union(h.boundingBox) }
                     for (t in textSnapshot)    { if (t.id in hitSet) unionBounds.union(t.boundingBox) }
+                    for (l in lineSnapshot)    { if (l.id in hitSet) unionBounds.union(l.boundingBox) }
                     post {
                         strokes.removeAll { it.id == strokeId }
                         onSmartLassoComplete?.invoke(hitIds, unionBounds)
@@ -738,7 +813,7 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
             }
 
             // ── Gate 2: Scribble-to-erase ──────────────────────────────────────────
-            val hitIds = scribbleHitTest(points, strokeSnapshot, headingSnapshot, textSnapshot, density)
+            val hitIds = scribbleHitTest(points, strokeSnapshot, headingSnapshot, textSnapshot, lineSnapshot, density)
             post {
                 if (hitIds.isEmpty()) {
                     onPenLifted?.invoke()
@@ -747,7 +822,8 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
                     val hitSet         = hitIds.toSet()
                     val erasedHeadings = headingSnapshot.filter { it.id in hitSet }
                     val erasedTexts    = textSnapshot.filter { it.id in hitSet }
-                    onScribbleEraseComplete?.invoke(hitIds, erasedHeadings, erasedTexts)
+                    val erasedLines    = lineSnapshot.filter { it.id in hitSet }
+                    onScribbleEraseComplete?.invoke(hitIds, erasedHeadings, erasedTexts, erasedLines)
                 }
             }
         }.start()
@@ -836,6 +912,7 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
         strokes: List<LiveStroke>,
         headings: List<HeadingStroke>,
         textObjects: List<TextRender>,
+        lineObjects: List<LineRender>,
         density: Float,
     ): List<String> {
         if (scribblePoints.size < 2) return emptyList()
@@ -878,6 +955,12 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
                 hitIds.add(textObj.id)
             }
         }
+        for (lineObj in lineObjects) {
+            if (!RectF.intersects(rawBounds, lineObj.boundingBox)) continue
+            if (scribblePathPenetration(scribblePoints, lineObj.boundingBox) >= penetrationPx) {
+                hitIds.add(lineObj.id)
+            }
+        }
         return hitIds
     }
 
@@ -910,7 +993,7 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
             isDragMoveActive = false; dragThresholdMet = false
             dragDx = 0f; dragDy = 0f; activeSnapGuides = emptyList()
             dragOriginalStrokes = emptyList(); dragOriginalHeadings = emptyList()
-            dragOriginalTextObjects = emptyList()
+            dragOriginalTextObjects = emptyList(); dragOriginalLineObjects = emptyList()
             invalidate()
         }
     }
@@ -996,8 +1079,9 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
         val strokeSnapshot  = strokes.toList()
         val headingSnapshot = headings.toList()
         val textSnapshot    = textObjects.toList()
+        val lineSnapshot    = lineObjects.toList()
         Thread {
-            val hitIds = runLassoHitTest(drawnPath, strokeSnapshot, headingSnapshot, textSnapshot)
+            val hitIds = runLassoHitTest(drawnPath, strokeSnapshot, headingSnapshot, textSnapshot, lineSnapshot)
             post {
                 lassoOverlayPath       = null
                 lassoEraserDisplayPath = null
@@ -1014,6 +1098,7 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
         strokes: List<LiveStroke>,
         headings: List<HeadingStroke> = emptyList(),
         textObjects: List<TextRender> = emptyList(),
+        lineObjects: List<LineRender> = emptyList(),
     ): List<String> {
         val bounds = RectF()
         path.computeBounds(bounds, true)
@@ -1054,6 +1139,15 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
                 hitIds.add(textObj.id)
             }
         }
+        // Line object hit-test: center-point containment on the inflated bounding box midpoint.
+        for (lineObj in lineObjects) {
+            if (!RectF.intersects(bounds, lineObj.boundingBox)) continue
+            val cx = lineObj.boundingBox.centerX().toInt()
+            val cy = lineObj.boundingBox.centerY().toInt()
+            if (region.contains(cx, cy)) {
+                hitIds.add(lineObj.id)
+            }
+        }
         return hitIds
     }
 
@@ -1092,6 +1186,8 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
         activePoints.clear()
         strokes.clear()
         headings = emptyList()
+        textObjects = emptyList()
+        lineObjects = emptyList()
         // Clear to white then re-apply template so the template persists after erase.
         renderCanvas?.let { canvas ->
             canvas.drawColor(Color.WHITE)
@@ -1122,6 +1218,20 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
         }
     }
 
+    override fun loadLineObjects(lineObjects: List<LineRender>) {
+        this.lineObjects = lineObjects
+    }
+
+    override fun getLineObjects(): List<LineRender> = lineObjects
+
+    override fun compositeLineObjects(bitmap: Bitmap) {
+        if (lineObjects.isEmpty()) return
+        val canvas = Canvas(bitmap)
+        for (lineObj in lineObjects) {
+            drawLineObject(canvas, lineObj)
+        }
+    }
+
     override fun loadStrokes(strokes: List<LiveStroke>) {
         this.strokes.clear()
         this.strokes.addAll(strokes)
@@ -1138,11 +1248,13 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
         templateBitmap: Bitmap?,
         headings: List<HeadingStroke>,
         textObjects: List<TextRender>?,
+        lineObjects: List<LineRender>?,
     ): Bitmap? {
         val w = width; val h = height
         if (w == 0 || h == 0) return null
         // null = fall back to stored field (undo/redo paths); non-null = explicit list (page load)
         val effectiveTextObjects = textObjects ?: this.textObjects
+        val effectiveLineObjects = lineObjects ?: this.lineObjects
         val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bmp)
         canvas.drawColor(Color.WHITE)
@@ -1163,6 +1275,9 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
         }
         for (textObj in effectiveTextObjects) {
             drawTextObject(canvas, textObj, w)
+        }
+        for (lineObj in effectiveLineObjects) {
+            drawLineObject(canvas, lineObj)
         }
         for (liveStroke in strokes) {
             val pts = liveStroke.points
@@ -1208,7 +1323,7 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
      * Returns null if there are no strokes and no headings, or the view is not yet laid out.
      */
     override fun captureSnapshot(): String? {
-        if (strokes.isEmpty() && headings.isEmpty() && textObjects.isEmpty()) return null
+        if (strokes.isEmpty() && headings.isEmpty() && textObjects.isEmpty() && lineObjects.isEmpty()) return null
         val w = width; val h = height
         if (w == 0 || h == 0) return null
         val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
@@ -1231,6 +1346,9 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
         }
         for (textObj in textObjects) {
             drawTextObject(snapshotCanvas, textObj, w)
+        }
+        for (lineObj in lineObjects) {
+            drawLineObject(snapshotCanvas, lineObj)
         }
         for (liveStroke in strokes) {
             val points = liveStroke.points
