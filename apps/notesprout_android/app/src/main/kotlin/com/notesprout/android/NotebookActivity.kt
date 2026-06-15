@@ -426,7 +426,9 @@ class NotebookActivity : AppCompatActivity() {
                     val eraseAllLayerId = currentLayerId
                     val eraseAllHeadingIds = drawingView.getHeadings().map { it.id }
                     val hasContent = drawingView.getStrokes().isNotEmpty() ||
-                                     eraseAllHeadingIds.isNotEmpty()
+                                     eraseAllHeadingIds.isNotEmpty() ||
+                                     drawingView.getTextObjects().isNotEmpty() ||
+                                     drawingView.getLineObjects().isNotEmpty()
                     drawingView.eraseAll()
                     drawingView.loadHeadings(emptyList())
                     // All content removed from memory and will be soft-deleted from DB.
