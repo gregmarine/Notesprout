@@ -188,7 +188,7 @@ class TocDialog(
 
             val recognizedText = entry.heading.recognizedText
             if (recognizedText != null) {
-                tvHeadingText.text = recognizedText
+                tvHeadingText.text = recognizedText.removePrefix("# ")
                 tvHeadingText.visibility = View.VISIBLE
             } else {
                 val thumbnail = HeadingThumbnailView(context).apply {

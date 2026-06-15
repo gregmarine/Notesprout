@@ -246,27 +246,23 @@ object NotebookExporter {
             strokeJoin = Paint.Join.ROUND
             strokeWidth = 2.5f
         }
-        val headingTextSizePx = TypedValue.applyDimension(
-            TypedValue.COMPLEX_UNIT_SP, 20f, context.resources.displayMetrics
-        )
-        val headingTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.BLACK
-            textAlign = Paint.Align.LEFT
-            textSize = headingTextSizePx
-        }
         val densityDp = context.resources.displayMetrics.density
+        val textObjectTextSizePx = TypedValue.applyDimension(
+            TypedValue.COMPLEX_UNIT_SP, 16f, context.resources.displayMetrics
+        )
+        val textObjectPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.BLACK
+            textSize = textObjectTextSizePx
+        }
 
         for (heading in headings) {
             canvas.drawRect(heading.boundingBox, headingPaint)
             if (heading.recognizedText != null) {
                 val box = heading.boundingBox
-                canvas.save()
-                canvas.clipRect(box)
-                val fm = headingTextPaint.fontMetrics
-                val textHeight = fm.descent - fm.ascent
-                val y = box.top + (box.height() - textHeight) / 2f - fm.ascent
-                canvas.drawText(heading.recognizedText, box.left + 8f * densityDp, y, headingTextPaint)
-                canvas.restore()
+                val paddingPx = 8f * densityDp
+                val innerBox = android.graphics.RectF(box.left + paddingPx, box.top + paddingPx, box.right - paddingPx, box.bottom - paddingPx)
+                val widthPx = innerBox.width().toInt().coerceAtLeast(1)
+                TextObjectRenderer.draw(canvas, TextRender(heading.id, innerBox, heading.recognizedText), widthPx, textObjectPaint, densityDp)
             } else {
                 for (liveStroke in heading.strokes) {
                     val pts = liveStroke.points
@@ -279,13 +275,6 @@ object NotebookExporter {
             }
         }
 
-        val textObjectTextSizePx = TypedValue.applyDimension(
-            TypedValue.COMPLEX_UNIT_SP, 16f, context.resources.displayMetrics
-        )
-        val textObjectPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.BLACK
-            textSize = textObjectTextSizePx
-        }
         for (textObj in textObjects) {
             TextObjectRenderer.draw(canvas, textObj, w, textObjectPaint, densityDp)
         }

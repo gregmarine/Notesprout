@@ -2699,16 +2699,14 @@ class NotebookActivity : AppCompatActivity() {
             strokeBox.inset(-pad, -pad)
             return strokeBox
         }
-        val textPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
-            textSize = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 20f, resources.displayMetrics)
+        val textPaint = TextPaint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+            textSize = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 16f, resources.displayMetrics)
         }
-        val textWidth  = textPaint.measureText(recognizedText)
-        val fm         = textPaint.fontMetrics
-        val textHeight = fm.descent - fm.ascent
+        val (measuredW, measuredH) = TextObjectRenderer.measure(recognizedText, resources.displayMetrics.widthPixels, textPaint, resources.displayMetrics.density)
         return RectF(
             strokeBox.left, strokeBox.top,
-            strokeBox.left + pad + textWidth + pad,
-            strokeBox.top  + pad + textHeight + pad,
+            strokeBox.left + pad + measuredW + pad,
+            strokeBox.top  + pad + measuredH + pad,
         )
     }
 
@@ -3138,20 +3136,22 @@ class NotebookActivity : AppCompatActivity() {
             HandwritingRecognizer.FALLBACK_TEXT
         }
 
-        // Resize bounding box to fit the recognized text (left/top anchor preserved).
-        val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            textSize = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 20f, resources.displayMetrics)
-        }
-        val textWidth = textPaint.measureText(recognizedText)
-        val fm = textPaint.fontMetrics
-        val textHeight = fm.descent - fm.ascent
+        val isRecognized = recognizedText != HandwritingRecognizer.FALLBACK_TEXT
+        val storedText: String? = if (isRecognized) "# $recognizedText" else null
         val pad = 8f * resources.displayMetrics.density
-        boundsToConvert.set(
-            boundsToConvert.left,
-            boundsToConvert.top,
-            boundsToConvert.left + pad + textWidth + pad,
-            boundsToConvert.top + pad + textHeight + pad,
-        )
+        if (storedText != null) {
+            val textPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+                textSize = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 16f, resources.displayMetrics)
+            }
+            val (measuredW, measuredH) = TextObjectRenderer.measure(storedText, resources.displayMetrics.widthPixels, textPaint, resources.displayMetrics.density)
+            boundsToConvert.set(
+                boundsToConvert.left, boundsToConvert.top,
+                boundsToConvert.left + pad + measuredW + pad,
+                boundsToConvert.top + pad + measuredH + pad,
+            )
+        } else {
+            boundsToConvert.inset(-pad, -pad)
+        }
 
         val deletedAt  = System.currentTimeMillis()
         val headingId  = UUID.randomUUID().toString()
@@ -3168,7 +3168,7 @@ class NotebookActivity : AppCompatActivity() {
             originalStrokeIds.forEach { dao.softDeleteById(it, deletedAt) }
             val now        = System.currentTimeMillis()
             val bboxJson   = """{"x":${boundsToConvert.left},"y":${boundsToConvert.top},"width":${boundsToConvert.width()},"height":${boundsToConvert.height()}}"""
-            val headingObj = HeadingObject(strokes = embeddedStrokes, recognizedText = recognizedText)
+            val headingObj = HeadingObject(strokes = embeddedStrokes, recognizedText = storedText)
             dao.insertObject(
                 NotebookObject(
                     id          = headingId,
@@ -3194,7 +3194,7 @@ class NotebookActivity : AppCompatActivity() {
             val updatedStrokes = drawingView.getStrokes().filter { it.id !in erasedSet }
             persistedStrokeIds.removeAll(erasedSet)
 
-            val newHeading    = HeadingStroke(id = headingId, boundingBox = boundsToConvert, strokes = embeddedStrokes, recognizedText = recognizedText)
+            val newHeading    = HeadingStroke(id = headingId, boundingBox = boundsToConvert, strokes = embeddedStrokes, recognizedText = storedText)
             val updatedHeadings = drawingView.getHeadings() + newHeading
             drawingView.loadHeadings(updatedHeadings)
 
@@ -3206,7 +3206,7 @@ class NotebookActivity : AppCompatActivity() {
                     deletedAt         = deletedAt,
                     originalStrokeIds = originalStrokeIds,
                     embeddedStrokes   = embeddedStrokes,
-                    recognizedText    = recognizedText,
+                    recognizedText    = storedText,
                 )
             )
             updateUndoRedoButtons()
@@ -3474,17 +3474,17 @@ class NotebookActivity : AppCompatActivity() {
     private fun updateHeadingText(heading: HeadingStroke, newText: String) {
         val db = soilDatabase ?: return
         val previousText = heading.recognizedText
-        // Measure new text width using the same 20sp paint used by the drawing views.
-        val textPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
-            textSize = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 20f, resources.displayMetrics)
+        val textPaint = TextPaint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+            textSize = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 16f, resources.displayMetrics)
         }
         val paddingPx = 8f * resources.displayMetrics.density
-        val textWidth = textPaint.measureText(newText)
+        val pageWidth = resources.displayMetrics.widthPixels
+        val (measuredW, measuredH) = TextObjectRenderer.measure(newText, pageWidth, textPaint, resources.displayMetrics.density)
         val newBox = RectF(
             heading.boundingBox.left,
             heading.boundingBox.top,
-            heading.boundingBox.left + textWidth + 2f * paddingPx,
-            heading.boundingBox.bottom,
+            heading.boundingBox.left + measuredW + 2f * paddingPx,
+            heading.boundingBox.top + measuredH + 2f * paddingPx,
         )
         lifecycleScope.launch {
             withContext(Dispatchers.IO) {
@@ -5007,18 +5007,19 @@ class NotebookActivity : AppCompatActivity() {
             updatePageIndicator()
             saveLastOpenedPage(currentPageId)
 
+            val pageWidthForHeading = resources.displayMetrics.widthPixels
             withContext(Dispatchers.IO) {
                 val row = dao.getObjectById(action.headingId) ?: return@withContext
                 val headingObj = HeadingObject.fromJson(row.data)
                 val updated = headingObj.copy(recognizedText = targetText)
                 if (targetText != null) {
-                    val textPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
-                        textSize = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 20f, resources.displayMetrics)
+                    val textPaint = TextPaint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+                        textSize = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 16f, resources.displayMetrics)
                     }
                     val paddingPx = 8f * resources.displayMetrics.density
                     val box = row.parseBoundingBox() ?: return@withContext
-                    val textWidth = textPaint.measureText(targetText)
-                    val newBox = RectF(box.left, box.top, box.left + textWidth + 2f * paddingPx, box.bottom)
+                    val (measuredW, measuredH) = TextObjectRenderer.measure(targetText, pageWidthForHeading, textPaint, resources.displayMetrics.density)
+                    val newBox = RectF(box.left, box.top, box.left + measuredW + 2f * paddingPx, box.top + measuredH + 2f * paddingPx)
                     val bboxJson = """{"x":${newBox.left},"y":${newBox.top},"width":${newBox.width()},"height":${newBox.height()}}"""
                     dao.updateHeadingData(action.headingId, bboxJson, updated.toJson(), now)
                 } else {
@@ -5597,26 +5598,28 @@ class NotebookActivity : AppCompatActivity() {
                 }
             }
 
-            is UndoRedoAction.HeadingTextEdited -> withContext(Dispatchers.IO) {
+            is UndoRedoAction.HeadingTextEdited -> {
+                val pageWidthForEdit = resources.displayMetrics.widthPixels
+                withContext(Dispatchers.IO) {
                 val targetText = if (isUndo) action.previousText else action.newText
                 val row = dao.getObjectById(action.headingId) ?: return@withContext
                 val headingObj = HeadingObject.fromJson(row.data)
                 val updated = headingObj.copy(recognizedText = targetText)
                 if (targetText != null) {
-                    val textPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
-                        textSize = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 20f, resources.displayMetrics)
+                    val textPaint = TextPaint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+                        textSize = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 16f, resources.displayMetrics)
                     }
                     val paddingPx = 8f * resources.displayMetrics.density
                     val box = row.parseBoundingBox() ?: return@withContext
-                    val textWidth = textPaint.measureText(targetText)
-                    val newBox = RectF(box.left, box.top, box.left + textWidth + 2f * paddingPx, box.bottom)
+                    val (measuredW, measuredH) = TextObjectRenderer.measure(targetText, pageWidthForEdit, textPaint, resources.displayMetrics.density)
+                    val newBox = RectF(box.left, box.top, box.left + measuredW + 2f * paddingPx, box.top + measuredH + 2f * paddingPx)
                     val bboxJson = """{"x":${newBox.left},"y":${newBox.top},"width":${newBox.width()},"height":${newBox.height()}}"""
                     dao.updateHeadingData(action.headingId, bboxJson, updated.toJson(), now)
                 } else {
                     // Restoring null: keep existing bounding box, just clear the text field.
                     dao.updateHeadingData(action.headingId, row.boundingBox, updated.toJson(), now)
                 }
-            }
+            }}
 
             is UndoRedoAction.TextInserted -> withContext(Dispatchers.IO) {
                 if (isUndo) {

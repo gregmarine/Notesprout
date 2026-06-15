@@ -113,15 +113,6 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
         isAntiAlias = false
     }
 
-    private val headingTextSizePx = TypedValue.applyDimension(
-        TypedValue.COMPLEX_UNIT_SP, 20f, resources.displayMetrics
-    )
-
-    private val headingTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.BLACK
-        textAlign = Paint.Align.LEFT
-        textSize = headingTextSizePx
-    }
 
     // When true, drawing callbacks treat pen input as erasing.
     // Set by setEraserMode(); also fires via physical eraser hardware callbacks regardless of this flag.
@@ -446,14 +437,10 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
     private fun drawHeadingText(canvas: Canvas, heading: HeadingStroke) {
         val text = heading.recognizedText ?: return
         val box = heading.boundingBox
-        canvas.save()
-        canvas.clipRect(box)
-        val fontMetrics = headingTextPaint.fontMetrics
-        val textHeight = fontMetrics.descent - fontMetrics.ascent
-        val y = box.top + (box.height() - textHeight) / 2f - fontMetrics.ascent
         val paddingPx = 8f * resources.displayMetrics.density
-        canvas.drawText(text, box.left + paddingPx, y, headingTextPaint)
-        canvas.restore()
+        val innerBox = android.graphics.RectF(box.left + paddingPx, box.top + paddingPx, box.right - paddingPx, box.bottom - paddingPx)
+        val widthPx = innerBox.width().toInt().coerceAtLeast(1)
+        TextObjectRenderer.draw(canvas, TextRender(heading.id, innerBox, text), widthPx, textObjectPaint, resources.displayMetrics.density)
     }
 
     /**
