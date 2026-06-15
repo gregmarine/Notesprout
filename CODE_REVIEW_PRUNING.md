@@ -13,7 +13,11 @@
 
 ## 🔴 Critical
 
-### C1 — Path-traversal in template import (data-corruption vulnerability)
+### C1 — Path-traversal in template import (data-corruption vulnerability) ✅ DONE
+- **Resolution:** Added `sanitizeTemplateFileName()` in `NotebookActivity` — strips directory
+  components, applies the `[^a-zA-Z0-9_\-. ]` whitelist, rejects `.`/`..`, and forces a `.png`
+  extension. `performTemplateImport()` now routes `DISPLAY_NAME` through it before building the
+  destination `File`, so an imported template can only ever land inside `getExternalFilesDir("Templates")`.
 - **Where:** `NotebookActivity.performTemplateImport()` → `copyUriToFile()`
   ([NotebookActivity.kt:6601-6637](apps/notesprout_android/app/src/main/kotlin/com/notesprout/android/NotebookActivity.kt#L6601-L6637)).
 - **Root cause:** The destination filename comes straight from the picked document's

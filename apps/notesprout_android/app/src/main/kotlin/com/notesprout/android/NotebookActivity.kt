@@ -6606,7 +6606,11 @@ class NotebookActivity : AppCompatActivity() {
             } ?: "template.png"
 
             val destDir = getExternalFilesDir("Templates")!!.also { it.mkdirs() }
-            val destFile = File(destDir, displayName)
+            // C1: never trust the provider's DISPLAY_NAME — a malicious/buggy document
+            // provider can return "../notesprout.db" and escape the Templates dir,
+            // overwriting the global index or a .soil notebook. Sanitize to a flat,
+            // whitelisted .png filename before building the destination path.
+            val destFile = File(destDir, sanitizeTemplateFileName(displayName))
 
             if (destFile.exists()) {
                 val dialog = AlertDialog.Builder(this@NotebookActivity)
@@ -6634,5 +6638,24 @@ class NotebookActivity : AppCompatActivity() {
         contentResolver.openInputStream(uri)?.use { input ->
             dest.outputStream().use { output -> input.copyTo(output) }
         }
+    }
+
+    /**
+     * C1: Produce a safe, flat filename for an imported template.
+     *
+     * Defends against path-traversal from an untrusted document provider's
+     * `DISPLAY_NAME`. Strips any directory components, applies the project's
+     * filename whitelist (mirrors `MainActivity.validateNotebookName`), rejects
+     * `.`/`..`, and forces a `.png` extension so the result can only ever land
+     * inside the Templates directory.
+     */
+    private fun sanitizeTemplateFileName(rawName: String): String {
+        // Drop any directory components a provider may inject ("../", absolute paths).
+        val baseName = rawName.substringAfterLast('/').substringAfterLast('\\')
+        val stem = baseName.substringBeforeLast('.', baseName)
+            .replace(Regex("[^a-zA-Z0-9_\\-. ]"), "_")
+            .trim()
+        val safeStem = if (stem.isBlank() || stem == "." || stem == "..") "template" else stem
+        return "$safeStem.png"
     }
 }
