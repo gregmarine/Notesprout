@@ -313,6 +313,9 @@ Rendering order: white → template → snapshot PNG → new content drawn this 
 
 **TemplateDialog:** Two-tab (All / Notebook), adaptive grid — 4 columns on NA5C (≥1500px), 2 on P2P/GC7. `thumbFrame` uses `shape_bordered` + **1dp padding** to inset the `ImageView` so it cannot render over the border stroke. Do NOT use `clipToOutline` — it clips the border itself at rounded corners.
 
+- **Title bar:** custom title view (`setCustomTitle`) — "Template" label (bold 18sp, weight=1) + "Import…" bordered button on the right. The import button lives here (not inside the scrollable content area) so it never causes clipping at the bottom of the dialog.
+- **Delete from All tab:** each non-Blank file item shows an `ic_trash` (Tabler `trash`) button overlaid at the top-right corner of its cell (32dp, 6dp internal padding, 6dp margin from edge). Tapping it shows a confirmation AlertDialog; confirming deletes the PNG from `getExternalFilesDir("Templates")`, rescans, and repopulates the All tab without closing the dialog.
+
 **Template inheritance on new page:** `addPage()` reads the current page **fresh from DB** via `dao.getObjectById(currentPageId)`. Do NOT read from the stale in-memory `pages` list — it is not refreshed after `applyTemplateToCurrentPage()` writes to DB.
 
 ---

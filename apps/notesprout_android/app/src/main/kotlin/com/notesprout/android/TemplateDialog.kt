@@ -6,7 +6,7 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.PixelFormat
-import android.graphics.Rect
+import android.graphics.Typeface
 import android.graphics.drawable.Drawable
 import android.util.Base64
 import android.util.Log
@@ -128,11 +128,42 @@ class TemplateDialog(
         // 4 columns on large-screen devices (NA5C: 1860px); 2 on smaller (P2P, GC7: ≤1264px).
         val numColumns = if (ctx.resources.displayMetrics.widthPixels >= 1500) 4 else 2
 
-        // Mutable so it can be refreshed after a template import.
+        // Mutable so it can be refreshed after a template import or deletion.
         val currentFileItems = fileItems.toMutableList()
 
         // Default tab: "Notebook" if it has content; otherwise "All"
         var activeTab = if (hasNotebookTemplates) TAB_NOTEBOOK else TAB_ALL
+
+        // ── Custom title: "Template" label + Import button ───────────────────
+        val titleView = LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            val padH = (16 * density).toInt()
+            val padV = (12 * density).toInt()
+            setPadding(padH, padV, padH, padV)
+        }
+        val titleText = AppCompatTextView(ctx).apply {
+            text = "Template"
+            textSize = 18f
+            setTypeface(null, Typeface.BOLD)
+            setTextColor(ContextCompat.getColor(ctx, R.color.inkBlack))
+        }
+        val importTitleBtn = AppCompatTextView(ctx).apply {
+            text = "Import…"
+            textSize = 13f
+            setTextColor(ContextCompat.getColor(ctx, R.color.inkBlack))
+            val padH2 = (10 * density).toInt()
+            val padV2 = (6 * density).toInt()
+            setPadding(padH2, padV2, padH2, padV2)
+            setBackgroundResource(R.drawable.shape_bordered)
+            visibility = if (onRequestImport != null) View.VISIBLE else View.GONE
+        }
+        titleView.addView(titleText, LinearLayout.LayoutParams(
+            0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f,
+        ))
+        titleView.addView(importTitleBtn, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT,
+        ))
 
         // ── Root container ───────────────────────────────────────────────────
         val root = LinearLayout(ctx).apply {
@@ -156,7 +187,7 @@ class TemplateDialog(
             setBackgroundColor(ContextCompat.getColor(ctx, R.color.inkBlack))
         }
 
-        // ── Scrollable 2-column grid ──────────────────────────────────────────
+        // ── Scrollable grid ───────────────────────────────────────────────────
         val gapPx = (8 * density).toInt()
         val thumbHeightPx = (THUMB_HEIGHT_DP * density).toInt()
 
@@ -173,35 +204,11 @@ class TemplateDialog(
             ),
         )
 
-        // ── Import bar (All tab only) ─────────────────────────────────────────
-        val padV = (6 * density).toInt()
-        val importBar = LinearLayout(ctx).apply {
-            orientation = LinearLayout.HORIZONTAL
-            setPadding(gapPx, padV, gapPx, padV)
-            visibility = android.view.View.GONE
-        }
-        val importBtn = androidx.appcompat.widget.AppCompatTextView(ctx).apply {
-            text = "Import Template…"
-            textSize = 13f
-            setTextColor(ContextCompat.getColor(ctx, R.color.inkBlack))
-            setPadding(
-                (10 * density).toInt(), (6 * density).toInt(),
-                (10 * density).toInt(), (6 * density).toInt(),
-            )
-            setBackgroundResource(R.drawable.shape_bordered)
-        }
-        importBar.addView(importBtn, LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT,
-        ))
-
         root.addView(tabRow, LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT,
         ))
         root.addView(divider, LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT, (1 * density).toInt(),
-        ))
-        root.addView(importBar, LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT,
         ))
         root.addView(scrollView, LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f,
@@ -209,7 +216,7 @@ class TemplateDialog(
 
         // ── Build and show the AlertDialog ────────────────────────────────────
         val dialog = AlertDialog.Builder(ctx)
-            .setTitle("Template")
+            .setCustomTitle(titleView)
             .setView(root)
             .create()
 
@@ -225,31 +232,56 @@ class TemplateDialog(
             dialog.dismiss()
         }
 
-        // ── Populate 2-column grid for a tab ─────────────────────────────────
+        // ── Populate grid for a tab ───────────────────────────────────────────
         data class Cell(
             val label: String,
             val thumbnail: Bitmap?,
             val isSelected: Boolean,
+            val onDelete: (() -> Unit)? = null,
             val onClick: () -> Unit,
         )
 
         fun populateTab(tab: Int) {
-            importBar.visibility = if (tab == TAB_ALL && onRequestImport != null)
-                android.view.View.VISIBLE else android.view.View.GONE
             gridContainer.removeAllViews()
 
             val cells: List<Cell> = when (tab) {
                 TAB_ALL -> buildList {
                     add(Cell("Blank", null, currentTemplateId.isEmpty()) { onItemClicked("", null) })
                     for (item in currentFileItems) {
-                        add(Cell(item.file.nameWithoutExtension, item.thumbnail, isSelected = false) {
-                            lifecycleScope.launch {
-                                val (newId, fullBitmap) = withContext(Dispatchers.IO) {
-                                    insertTemplateFromFile(item.file)
+                        add(Cell(
+                            label = item.file.nameWithoutExtension,
+                            thumbnail = item.thumbnail,
+                            isSelected = false,
+                            onDelete = {
+                                AlertDialog.Builder(ctx)
+                                    .setTitle("Delete template?")
+                                    .setMessage("Delete \"${item.file.nameWithoutExtension}\" from library? This cannot be undone.")
+                                    .setPositiveButton("Delete") { _, _ ->
+                                        item.file.delete()
+                                        lifecycleScope.launch {
+                                            val newItems = withContext(Dispatchers.IO) { scanFileItems() }
+                                            currentFileItems.clear()
+                                            currentFileItems.addAll(newItems)
+                                            populateTab(TAB_ALL)
+                                        }
+                                    }
+                                    .setNegativeButton("Cancel", null)
+                                    .create()
+                                    .also { d ->
+                                        d.show()
+                                        d.window?.setElevation(0f)
+                                        d.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+                                    }
+                            },
+                            onClick = {
+                                lifecycleScope.launch {
+                                    val (newId, fullBitmap) = withContext(Dispatchers.IO) {
+                                        insertTemplateFromFile(item.file)
+                                    }
+                                    onItemClicked(newId, fullBitmap)
                                 }
-                                onItemClicked(newId, fullBitmap)
-                            }
-                        })
+                            },
+                        ))
                     }
                 }
                 TAB_NOTEBOOK -> buildList {
@@ -284,7 +316,7 @@ class TemplateDialog(
                     val c = cells.getOrNull(i + col)
                     if (c != null) {
                         row.addView(
-                            buildGridCell(c.label, c.thumbnail, c.isSelected, thumbHeightPx, density) { c.onClick() },
+                            buildGridCell(c.label, c.thumbnail, c.isSelected, thumbHeightPx, density, c.onDelete) { c.onClick() },
                             lp,
                         )
                     } else {
@@ -298,8 +330,8 @@ class TemplateDialog(
             }
         }
 
-        // Wire import button now that populateTab is in scope.
-        importBtn.setOnClickListener {
+        // Wire import button in the title bar.
+        importTitleBtn.setOnClickListener {
             onRequestImport?.invoke {
                 lifecycleScope.launch {
                     val newItems = withContext(Dispatchers.IO) { scanFileItems() }
@@ -396,6 +428,9 @@ class TemplateDialog(
     }
 
     // ── Helper: build a single grid cell (thumbnail above, label below) ──────
+    //
+    // When [onDelete] is non-null, a small × button is overlaid at the top-right
+    // corner of the cell so the user can remove the template from the library.
 
     private fun buildGridCell(
         label: String,
@@ -403,12 +438,13 @@ class TemplateDialog(
         isSelected: Boolean,
         thumbHeightPx: Int,
         density: Float,
+        onDelete: (() -> Unit)? = null,
         onClick: () -> Unit,
     ): View {
         val ctx = activity
         val pad = (6 * density).toInt()
 
-        // Outer cell: vertical layout, click target, selection indicator.
+        // Inner cell: vertical layout, click target, selection indicator.
         val cell = LinearLayout(ctx).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(pad, pad, pad, pad)
@@ -417,11 +453,9 @@ class TemplateDialog(
         }
 
         // Thumbnail frame — always bordered.
-        // 1dp padding insets the ImageView inside the border stroke so the image doesn't
-        // render on top of (and hide) the border at the top/bottom edges.
         val thumbFrame = FrameLayout(ctx).apply {
             setBackgroundResource(R.drawable.shape_bordered)
-            val borderPx = (density + 0.5f).toInt()   // 1dp in pixels
+            val borderPx = (density + 0.5f).toInt()
             setPadding(borderPx, borderPx, borderPx, borderPx)
         }
         if (thumbnail != null) {
@@ -438,7 +472,7 @@ class TemplateDialog(
             LinearLayout.LayoutParams.MATCH_PARENT, thumbHeightPx,
         ))
 
-        // Label below thumbnail — centred, smaller text for grid layout.
+        // Label below thumbnail.
         val tv = AppCompatTextView(ctx).apply {
             text = label
             textSize = 12f
@@ -452,7 +486,28 @@ class TemplateDialog(
             LinearLayout.LayoutParams.WRAP_CONTENT,
         ))
 
-        return cell
+        if (onDelete == null) return cell
+
+        // Wrap in a FrameLayout so the trash button can be overlaid at top-right.
+        val deleteBtnSize = (32 * density).toInt()
+        val deletePad = (6 * density).toInt()
+        val deleteBtn = AppCompatImageView(ctx).apply {
+            setImageResource(R.drawable.ic_trash)
+            setPadding(deletePad, deletePad, deletePad, deletePad)
+            setOnClickListener { onDelete() }
+        }
+        val deleteLp = FrameLayout.LayoutParams(deleteBtnSize, deleteBtnSize, Gravity.TOP or Gravity.END).also {
+            it.topMargin = deletePad
+            it.marginEnd = deletePad
+        }
+
+        return FrameLayout(ctx).apply {
+            addView(cell, FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.WRAP_CONTENT,
+            ))
+            addView(deleteBtn, deleteLp)
+        }
     }
 
     // ── Helper: build a tab TextView ─────────────────────────────────────────
@@ -479,7 +534,7 @@ class TemplateDialog(
     private fun bottomBorderDrawable(): Drawable = object : Drawable() {
         private val paint = Paint().apply {
             color = Color.BLACK
-            strokeWidth = activity.resources.displayMetrics.density   // 1dp in pixels
+            strokeWidth = activity.resources.displayMetrics.density
             style = Paint.Style.STROKE
             isAntiAlias = false
         }
@@ -504,8 +559,6 @@ class TemplateDialog(
 
     private fun loadScaledBitmap(file: File, maxSize: Int): Bitmap? {
         return try {
-            // Use readBytes() + decodeByteArray instead of decodeFile — consistent with
-            // insertTemplateFromFile; decodeFile can silently return null on some Android paths.
             val bytes = file.readBytes()
             Slog.d(TAG) { "loadScaledBitmap: read ${bytes.size} bytes from ${file.name}" }
             val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
@@ -560,8 +613,6 @@ class TemplateDialog(
         // grid rows are uniform. 200dp gives a tall-enough preview for portrait templates.
         private const val THUMB_HEIGHT_DP = 200
         // Target inSampleSize=2 for e-ink templates (1860×2480 → 930×1240 intermediate).
-        // 1px template lines alias out at any thumbnail scale; larger cells at least make the
-        // overall page shape visible.
         private const val THUMB_PX = 1300
 
         fun parseTemplateId(data: String): String =
