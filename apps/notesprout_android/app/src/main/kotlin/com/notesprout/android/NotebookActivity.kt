@@ -327,6 +327,30 @@ class NotebookActivity : AppCompatActivity() {
         }
     }
 
+    // ── Export save-to-device launcher ───────────────────────────────────────
+
+    private var pendingExportFile: java.io.File? = null
+
+    private val savePdfLauncher = registerForActivityResult(
+        ActivityResultContracts.CreateDocument("application/pdf")
+    ) { uri ->
+        val file = pendingExportFile ?: return@registerForActivityResult
+        if (uri == null) return@registerForActivityResult
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                contentResolver.openOutputStream(uri)?.use { out ->
+                    file.inputStream().use { it.copyTo(out) }
+                }
+            } catch (e: Exception) {
+                android.os.Handler(android.os.Looper.getMainLooper()).post {
+                    android.widget.Toast.makeText(
+                        this@NotebookActivity, "Save failed: ${e.message}", android.widget.Toast.LENGTH_LONG
+                    ).show()
+                }
+            }
+        }
+    }
+
     // ── Activity lifecycle ────────────────────────────────────────────────────
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -2267,8 +2291,24 @@ class NotebookActivity : AppCompatActivity() {
                 return@launch
             }
             dialog.dismiss()
-            sharePdf(pdfFile)
+            showExportChoice(pdfFile)
         }
+    }
+
+    private fun showExportChoice(file: java.io.File) {
+        val d = AlertDialog.Builder(this)
+            .setTitle("Export PDF")
+            .setPositiveButton("Save to device") { _, _ ->
+                pendingExportFile = file
+                savePdfLauncher.launch(file.name)
+            }
+            .setNegativeButton("Share") { _, _ ->
+                sharePdf(file)
+            }
+            .create()
+        d.show()
+        d.window?.setElevation(0f)
+        d.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
     }
 
     private fun sharePdf(file: java.io.File) {

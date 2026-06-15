@@ -737,9 +737,10 @@ Fuzzy match against all notebooks: substring (3) > all words present (2) > prefi
 ### PDF Export
 
 - `NotebookExporter` renders all pages off-screen on `Dispatchers.IO` using white→template→headings→text→strokes pipeline
-- Output to `context.cacheDir/<title>.pdf`, shared via `FileProvider` (`${applicationId}.fileprovider`) + `Intent.ACTION_SEND`
+- Output to `context.cacheDir/<title>.pdf`; FileProvider (`${applicationId}.fileprovider`) used for both save and share paths
 - Share intent **must** include `clipData = ClipData.newRawUri("", uri)` alongside `FLAG_GRANT_READ_URI_PERMISSION` — on Android 12+, the chooser intermediary does not forward URI permissions without `ClipData` (causes silent Google Drive upload failure on NA5C)
 - Progress dialog: "Exporting page X of N…" via `Handler(Looper.getMainLooper())`
+- After export: `showExportChoice(file)` presents an `AlertDialog` with "Save to device" (`ACTION_CREATE_DOCUMENT` via `savePdfLauncher`) or "Share" (existing `ACTION_SEND` flow). Available from both `NotebookActivity` (toolbar export button) and `MainActivity` (long-press action sheet).
 
 ### Page Export (PNG)
 
@@ -750,7 +751,7 @@ Fuzzy match against all notebooks: substring (3) > all words present (2) > prefi
 - Output to `context.cacheDir/exported_pngs/`; FileProvider path entry `name="exported_pngs"` in `res/xml/file_paths.xml`
 - Share intent: `type = "image/png"`, same `ClipData` + `FLAG_GRANT_READ_URI_PERMISSION` pattern as PDF export
 - Progress: non-cancellable `AlertDialog` ("Exporting…") matching the PDF export pattern; dismissed on success or failure
-- Selection is cleared via `exitActionMode()` after the share chooser launches
+- After export: `exitActionMode()` then `showExportChoice(file)` — same "Save to device" / "Share" pattern as PDF; `savePngLauncher` uses `CreateDocument("image/png")`
 
 ### ML Kit
 

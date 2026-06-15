@@ -2,6 +2,8 @@ package com.notesprout.android
 
 import android.content.ClipData
 import android.content.Intent
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AlertDialog
 import android.database.sqlite.SQLiteDatabase
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -122,6 +124,30 @@ class PageIndexActivity : AppCompatActivity() {
     private val deletedActions = mutableListOf<Triple<String, Int, Long>>()  // (pageId, pageIndex, deletedAt)
     /** Move operations performed this session — returned to NotebookActivity for undo/redo. */
     private val movedActions   = mutableListOf<Triple<String, String?, String>>() // (pageId, prevAfterId, targetId)
+
+    // ── Export save-to-device launcher ───────────────────────────────────────
+
+    private var pendingExportFile: java.io.File? = null
+
+    private val savePngLauncher = registerForActivityResult(
+        ActivityResultContracts.CreateDocument("image/png")
+    ) { uri ->
+        val file = pendingExportFile ?: return@registerForActivityResult
+        if (uri == null) return@registerForActivityResult
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                contentResolver.openOutputStream(uri)?.use { out ->
+                    file.inputStream().use { it.copyTo(out) }
+                }
+            } catch (e: Exception) {
+                android.os.Handler(android.os.Looper.getMainLooper()).post {
+                    android.widget.Toast.makeText(
+                        this@PageIndexActivity, "Save failed: ${e.message}", android.widget.Toast.LENGTH_LONG
+                    ).show()
+                }
+            }
+        }
+    }
 
     // ── Swipe gesture (left/right to paginate) ────────────────────────────────
 
@@ -714,18 +740,32 @@ class PageIndexActivity : AppCompatActivity() {
             }
 
             dialog.dismiss()
-
-            val uri = FileProvider.getUriForFile(this@PageIndexActivity, "$packageName.fileprovider", pngFile)
-            val shareIntent = Intent(Intent.ACTION_SEND).apply {
-                type = "image/png"
-                putExtra(Intent.EXTRA_STREAM, uri)
-                clipData = ClipData.newRawUri("", uri)
-                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            }
-            startActivity(Intent.createChooser(shareIntent, "Share page"))
-
             exitActionMode()
+            showExportChoice(pngFile)
         }
+    }
+
+    private fun showExportChoice(file: java.io.File) {
+        val d = AlertDialog.Builder(this)
+            .setTitle("Export page")
+            .setPositiveButton("Save to device") { _, _ ->
+                pendingExportFile = file
+                savePngLauncher.launch(file.name)
+            }
+            .setNegativeButton("Share") { _, _ ->
+                val uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", file)
+                val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                    type = "image/png"
+                    putExtra(Intent.EXTRA_STREAM, uri)
+                    clipData = ClipData.newRawUri("", uri)
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+                startActivity(Intent.createChooser(shareIntent, "Share page"))
+            }
+            .create()
+        d.show()
+        d.window?.setElevation(0f)
+        d.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
     }
 
     /** Encode all session paste/delete/move actions into the result and finish. */

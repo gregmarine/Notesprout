@@ -177,6 +177,28 @@ class MainActivity : AppCompatActivity() {
         if (uri != null) onCoverImagePicked?.invoke(uri)
     }
 
+    // ── Export save-to-device launcher ───────────────────────────────────────
+
+    private var pendingExportFile: java.io.File? = null
+
+    private val savePdfLauncher = registerForActivityResult(
+        ActivityResultContracts.CreateDocument("application/pdf")
+    ) { uri ->
+        val file = pendingExportFile ?: return@registerForActivityResult
+        if (uri == null) return@registerForActivityResult
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                contentResolver.openOutputStream(uri)?.use { out ->
+                    file.inputStream().use { it.copyTo(out) }
+                }
+            } catch (e: Exception) {
+                android.os.Handler(android.os.Looper.getMainLooper()).post {
+                    Toast.makeText(this@MainActivity, "Save failed: ${e.message}", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+    }
+
     // ── Lifecycle ─────────────────────────────────────────────────────────────
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -1665,18 +1687,32 @@ class MainActivity : AppCompatActivity() {
                 return@launch
             }
             dialog.dismiss()
-            val uri = androidx.core.content.FileProvider.getUriForFile(
-                this@MainActivity,
-                "$packageName.fileprovider",
-                pdfFile,
-            )
-            val shareIntent = Intent(Intent.ACTION_SEND).apply {
-                type = "application/pdf"
-                putExtra(Intent.EXTRA_STREAM, uri)
-                clipData = android.content.ClipData.newRawUri("", uri)
-                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            }
-            startActivity(Intent.createChooser(shareIntent, "Share PDF"))
+            showExportChoice(pdfFile)
         }
+    }
+
+    private fun showExportChoice(file: java.io.File) {
+        val d = AlertDialog.Builder(this)
+            .setTitle("Export PDF")
+            .setPositiveButton("Save to device") { _, _ ->
+                pendingExportFile = file
+                savePdfLauncher.launch(file.name)
+            }
+            .setNegativeButton("Share") { _, _ ->
+                val uri = androidx.core.content.FileProvider.getUriForFile(
+                    this, "$packageName.fileprovider", file
+                )
+                val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                    type = "application/pdf"
+                    putExtra(Intent.EXTRA_STREAM, uri)
+                    clipData = android.content.ClipData.newRawUri("", uri)
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+                startActivity(Intent.createChooser(shareIntent, "Share PDF"))
+            }
+            .create()
+        d.show()
+        d.window?.setElevation(0f)
+        d.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
     }
 }
