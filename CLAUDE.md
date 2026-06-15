@@ -11,6 +11,16 @@ A handwriting-first, meditative notes app. Think paper, but smarter underneath. 
 
 ---
 
+## Code Review Pruning List
+
+`CODE_REVIEW_PRUNING.md` (monorepo root) is the standing pruning backlog from a full-codebase
+review. Items are IDed by severity: **C**ritical / **M**oderate / **L**ow (e.g. `C1`, `M3`, `L2`).
+When the user says "Let's prune C1" (or any ID), open `CODE_REVIEW_PRUNING.md`, read that item's
+entry (it carries files, line numbers, root cause, and suggested fix), and resolve it. Mark resolved
+items `✅ DONE` in place — never renumber. Add new findings with the next free ID in their severity tier.
+
+---
+
 ## Core Philosophy — Never Violate These
 
 - Human-first: fixed screen-size pages, never infinite scroll
