@@ -1934,7 +1934,7 @@ class NotebookActivity : AppCompatActivity() {
                     startX = box.centerX(); endX = box.centerX(); startY = box.top; endY = box.bottom
                 }
             }
-            LineRender(row.id, box, startX, startY, endX, endY, lineObj.style, lineObj.orientation, lineObj.strokeWidthDp)
+            LineRender(row.id, box, startX, startY, endX, endY, lineObj.style, lineObj.orientation, lineObj.strokeWidthDp, lineObj.dotSpacingDp * resources.displayMetrics.density)
         }
     }
 
