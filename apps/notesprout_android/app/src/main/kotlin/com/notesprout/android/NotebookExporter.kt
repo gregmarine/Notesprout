@@ -134,7 +134,7 @@ object NotebookExporter {
                 dao.getStrokesForLayer(layer.id).mapNotNull { row ->
                     val sd = runCatching { StrokeData.fromJson(row.data) }.getOrNull()
                         ?: return@mapNotNull null
-                    LiveStroke(id = row.id, points = sd.toPointFs())
+                    LiveStroke.fromStrokeData(row.id, sd)
                 }
             } else emptyList()
 
@@ -393,7 +393,7 @@ object NotebookExporter {
                 dao.getStrokesForLayer(layer.id).mapNotNull { row ->
                     val sd = runCatching { StrokeData.fromJson(row.data) }.getOrNull()
                         ?: return@mapNotNull null
-                    LiveStroke(id = row.id, points = sd.toPointFs())
+                    LiveStroke.fromStrokeData(row.id, sd)
                 }
             } else emptyList()
 

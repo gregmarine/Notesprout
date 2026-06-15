@@ -357,7 +357,7 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
                 if (isDragMoveActive) {
                     if (dragThresholdMet) {
                         val movedStrokes = dragOriginalStrokes.map { stroke ->
-                            LiveStroke(stroke.id, stroke.points.map { pt ->
+                            stroke.copy(points = stroke.points.map { pt ->
                                 PointF(pt.x + dragDx, pt.y + dragDy)
                             })
                         }
@@ -369,7 +369,7 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
                                     h.boundingBox.right + dragDx, h.boundingBox.bottom + dragDy,
                                 ),
                                 strokes = h.strokes.map { s ->
-                                    LiveStroke(s.id, s.points.map { PointF(it.x + dragDx, it.y + dragDy) })
+                                    s.copy(points = s.points.map { PointF(it.x + dragDx, it.y + dragDy) })
                                 },
                                 recognizedText = h.recognizedText,
                             )

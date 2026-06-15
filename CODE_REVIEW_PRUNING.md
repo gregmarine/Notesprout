@@ -40,7 +40,15 @@
 
 ## 🟠 Moderate
 
-### M1 — Stroke re-serialization discards color / width / pressure / tilt / timestamp
+### M1 — Stroke re-serialization discards color / width / pressure / tilt / timestamp ✅ DONE
+- **Resolved:** `LiveStroke` now carries `color`, `strokeWidth`, and `srcPoints: List<StrokePoint>?`
+  (the original captured samples). `LiveStroke.fromStrokeData(id, sd)` populates them on every load;
+  `liveStroke.toStrokeData(fallbackTs)` re-serializes from the preserved data — x/y from (possibly
+  translated) `points`, pressure/tilt/timestamp from `srcPoints` when index-aligned, fabricating only
+  for freshly drawn strokes that never had a source. All six re-save sites now call `toStrokeData`;
+  all load sites use `fromStrokeData`; move/copy/paste/convert/drag clone via `.copy(points = …)` so
+  the preserved fields flow through. Display-only stroke reconstructions (heading/undo bitmap rebuilds)
+  still drop colour — that surfaces as a render concern under M8, not a persistence loss.
 - **Where:** Every stroke re-write hardcodes style and stamps a fresh `ts`:
   [NotebookActivity.kt:1033](apps/notesprout_android/app/src/main/kotlin/com/notesprout/android/NotebookActivity.kt#L1033),
   [:2096-2103](apps/notesprout_android/app/src/main/kotlin/com/notesprout/android/NotebookActivity.kt#L2096-L2103),

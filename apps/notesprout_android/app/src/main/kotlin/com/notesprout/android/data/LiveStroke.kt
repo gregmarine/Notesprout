@@ -35,6 +35,25 @@ data class LiveStroke(
     /** Ordered (x, y) points in drawing-view coordinates. */
     @Serializable(with = PointFListSerializer::class)
     val points: List<PointF>,
+
+    /**
+     * Stroke colour as a `#RRGGBB`/`#AARRGGBB` string. Preserved verbatim across
+     * moves/copies/conversions so a re-save never fabricates a colour. Defaults to
+     * [DEFAULT_COLOR] for freshly drawn strokes (the only path with no prior data).
+     */
+    val color: String = DEFAULT_COLOR,
+
+    /** Stroke width in px. Preserved across re-serialization. */
+    val strokeWidth: Float = DEFAULT_STROKE_WIDTH,
+
+    /**
+     * The original captured samples (x/y/pressure/tilt/timestamp) this stroke was
+     * loaded from, or null for strokes created this session with no persisted source.
+     * Carries pressure/tilt/timestamp through moves so they are not destroyed on
+     * re-save. [toStrokeData] reads x/y from [points] (which may have been translated)
+     * and pressure/tilt/timestamp from here when the two are index-aligned.
+     */
+    val srcPoints: List<StrokePoint>? = null,
 ) {
     /**
      * Axis-aligned bounding box of all stroke points, computed once at construction.
@@ -51,6 +70,43 @@ data class LiveStroke(
             if (p.y < minY) minY = p.y else if (p.y > maxY) maxY = p.y
         }
         RectF(minX, minY, maxX, maxY)
+    }
+
+    /**
+     * Re-serialize this stroke to its persisted form, preserving colour, width, and
+     * per-point pressure/tilt/timestamp from [srcPoints] when available. Current x/y
+     * always come from [points] (so translated strokes save their new position).
+     *
+     * [fallbackTimestamp] is stamped only on points with no preserved source — i.e.
+     * freshly drawn strokes that have never been persisted.
+     */
+    fun toStrokeData(fallbackTimestamp: Long): StrokeData {
+        val src = srcPoints
+        val outPoints = if (src != null && src.size == points.size) {
+            points.mapIndexed { i, p ->
+                StrokePoint(x = p.x, y = p.y, pressure = src[i].pressure, tilt = src[i].tilt, timestamp = src[i].timestamp)
+            }
+        } else {
+            points.map { p -> StrokePoint(x = p.x, y = p.y, pressure = null, tilt = null, timestamp = fallbackTimestamp) }
+        }
+        return StrokeData(color = color, strokeWidth = strokeWidth, points = outPoints)
+    }
+
+    companion object {
+        const val DEFAULT_COLOR = "#000000"
+        const val DEFAULT_STROKE_WIDTH = 3.0f
+
+        /**
+         * Build an in-memory stroke from a persisted [StrokeData], preserving colour,
+         * width, and the original sample list so subsequent re-saves do not fabricate data.
+         */
+        fun fromStrokeData(id: String, sd: StrokeData): LiveStroke = LiveStroke(
+            id = id,
+            points = sd.toPointFs(),
+            color = sd.color,
+            strokeWidth = sd.strokeWidth,
+            srcPoints = sd.points,
+        )
     }
 }
 
