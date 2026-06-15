@@ -33,7 +33,9 @@ import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.lifecycleScope
+import com.notesprout.android.data.BoundingBox
 import com.notesprout.android.data.NotebookMetadata
+import com.notesprout.android.data.PageData
 import com.notesprout.android.data.SoilDatabase
 import com.notesprout.android.data.checkpointTruncateAndClose
 import com.notesprout.android.data.index.IndexRepository
@@ -62,8 +64,6 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
 import java.io.ByteArrayOutputStream
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
@@ -1104,7 +1104,7 @@ class MainActivity : AppCompatActivity() {
                         }
                         val screenW = screenBounds.width().toFloat()
                         val screenH = screenBounds.height().toFloat()
-                        val bboxJson = """{"x":0.0,"y":0.0,"width":$screenW,"height":$screenH}"""
+                        val bboxJson = BoundingBox(0f, 0f, screenW, screenH).toJson()
                         val now = System.currentTimeMillis()
 
                         val insertSql =
@@ -1126,7 +1126,7 @@ class MainActivity : AppCompatActivity() {
 
                         db.execSQL(insertSql, arrayOf(
                             pageId, notebookId, bboxJson, now, now, "page",
-                            """{"width":$screenW,"height":$screenH,"template":""}"""
+                            PageData(width = screenW, height = screenH, template = "").toJson()
                         ))
 
                         val layerId = UUID.randomUUID().toString()
@@ -1540,10 +1540,7 @@ class MainActivity : AppCompatActivity() {
                 arrayOf(pageId)
             ).use { c -> if (c.moveToFirst()) c.getString(0) else null } ?: return null
 
-            val snapshotB64 = try {
-                val el = kotlinx.serialization.json.Json.parseToJsonElement(pageJson)
-                el.jsonObject["snapshot"]?.jsonPrimitive?.content ?: ""
-            } catch (_: Exception) { "" }
+            val snapshotB64 = PageData.fromJson(pageJson).snapshot ?: ""
             if (snapshotB64.isEmpty()) return null
 
             repository.updateNotebookSnapshot(entity.id, snapshotB64)

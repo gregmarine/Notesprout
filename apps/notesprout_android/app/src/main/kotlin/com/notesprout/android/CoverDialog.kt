@@ -16,6 +16,7 @@ import androidx.appcompat.widget.AppCompatTextView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.LifecycleCoroutineScope
 import androidx.room.Room
+import com.notesprout.android.data.BoundingBox
 import com.notesprout.android.data.CoverObject
 import com.notesprout.android.data.NotebookMetadata
 import com.notesprout.android.data.NotebookObject
@@ -447,7 +448,7 @@ class CoverDialog(
                         NotebookObject(
                             id          = newCoverId,
                             parentId    = nbId,
-                            boundingBox = """{"x":0.0,"y":0.0,"width":0.0,"height":0.0}""",
+                            boundingBox = BoundingBox().toJson(),
                             sortOrder   = 0,
                             createdAt   = now,
                             updatedAt   = now,

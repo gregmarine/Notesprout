@@ -5,7 +5,7 @@ import com.notesprout.android.data.HeadingObject
 import com.notesprout.android.data.HeadingStroke
 import com.notesprout.android.data.NotebookDao
 import com.notesprout.android.data.NotebookObject
-import org.json.JSONObject
+import com.notesprout.android.data.parseBoundingBox
 
 class TocRepository(private val dao: NotebookDao) {
 
@@ -48,14 +48,5 @@ class TocRepository(private val dao: NotebookDao) {
     private fun isHigher(candidate: RectF, current: RectF): Boolean =
         candidate.top < current.top || (candidate.top == current.top && candidate.left < current.left)
 
-    private fun NotebookObject.parseBoundingBox(): RectF? = try {
-        val obj = JSONObject(boundingBox)
-        val x = obj.getDouble("x").toFloat()
-        val y = obj.getDouble("y").toFloat()
-        val w = obj.getDouble("width").toFloat()
-        val h = obj.getDouble("height").toFloat()
-        RectF(x, y, x + w, y + h)
-    } catch (e: Exception) {
-        null
-    }
+    private fun NotebookObject.parseBoundingBox(): RectF? = parseBoundingBox(boundingBox)
 }

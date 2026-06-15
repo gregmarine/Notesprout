@@ -28,7 +28,9 @@ import com.notesprout.android.data.SoilDatabase
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import org.json.JSONObject
+import com.notesprout.android.data.BoundingBox
+import com.notesprout.android.data.PageData
+import com.notesprout.android.data.TemplateData
 import java.io.File
 
 /**
@@ -103,12 +105,8 @@ class TemplateDialog(
         val nbObjects = db.notebookDao().getTemplatesSorted()
         val notebookItems = nbObjects.mapIndexed { index, obj ->
             val thumb = decodeBase64Thumb(obj.data, THUMB_PX)
-            val name = try {
-                JSONObject(obj.data).optString("name", "").takeIf { it.isNotEmpty() }
-                    ?: "Template ${index + 1}"
-            } catch (e: Exception) {
-                "Template ${index + 1}"
-            }
+            val name = TemplateData.fromJson(obj.data)?.name?.takeIf { it.isNotEmpty() }
+                ?: "Template ${index + 1}"
             NotebookItem(obj, thumb, name)
         }
 
@@ -389,14 +387,9 @@ class TemplateDialog(
 
         val newId = java.util.UUID.randomUUID().toString()
         val now = System.currentTimeMillis()
-        val dataJson = JSONObject().apply {
-            put("width", width)
-            put("height", height)
-            put("name", file.nameWithoutExtension)
-            put("image", base64)
-        }.toString()
+        val dataJson = TemplateData(width, height, file.nameWithoutExtension, base64).toJson()
 
-        val fullScreenBounds = """{"x":0.0,"y":0.0,"width":${width.toFloat()},"height":${height.toFloat()}}"""
+        val fullScreenBounds = BoundingBox(0f, 0f, width.toFloat(), height.toFloat()).toJson()
 
         db.notebookDao().insertObject(
             com.notesprout.android.data.NotebookObject(
@@ -418,8 +411,7 @@ class TemplateDialog(
 
     private fun decodeFullBitmap(data: String): Bitmap? {
         return try {
-            val dataObj = JSONObject(data)
-            val b64 = dataObj.getString("image")
+            val b64 = TemplateData.fromJson(data)?.image?.takeIf { it.isNotEmpty() } ?: return null
             val bytes = Base64.decode(b64, Base64.DEFAULT)
             BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
         } catch (e: Exception) {
@@ -577,8 +569,7 @@ class TemplateDialog(
 
     private fun decodeBase64Thumb(data: String, maxSize: Int): Bitmap? {
         return try {
-            val dataObj = JSONObject(data)
-            val b64 = dataObj.getString("image")
+            val b64 = TemplateData.fromJson(data)?.image?.takeIf { it.isNotEmpty() } ?: return null
             val bytes = Base64.decode(b64, Base64.DEFAULT)
             Slog.d(TAG) { "decodeBase64Thumb: decoded ${bytes.size} bytes from base64" }
             val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
@@ -615,7 +606,6 @@ class TemplateDialog(
         // Target inSampleSize=2 for e-ink templates (1860×2480 → 930×1240 intermediate).
         private const val THUMB_PX = 1300
 
-        fun parseTemplateId(data: String): String =
-            try { JSONObject(data).optString("template", "") } catch (e: Exception) { "" }
+        fun parseTemplateId(data: String): String = PageData.fromJson(data).template
     }
 }

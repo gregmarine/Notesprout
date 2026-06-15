@@ -69,7 +69,19 @@
   instead of fabricating it. Note the renderer/exporter also hardcode black — see M8.
 - **Effort:** Medium (touches the in-memory model + every save site + both views' render paths).
 
-### M2 — `org.json` + string-interpolated JSON for boundingBox / page data (rule violation + fragility)
+### M2 — `org.json` + string-interpolated JSON for boundingBox / page data (rule violation + fragility) ✅ DONE
+- **Resolution:** Added `data/ObjectData.kt` with three `@Serializable` shapes — `BoundingBox(x,y,width,height)`,
+  `PageData(width,height,template,snapshot)`, `TemplateData(width,height,name,image)` — sharing one
+  `Json { encodeDefaults = true; explicitNulls = false; ignoreUnknownKeys = true }` codec. Wire format is
+  byte-compatible (encodeDefaults keeps `{"x":0.0,…}` explicit; explicitNulls omits absent `snapshot`), so no
+  migration. Helpers: `RectF.toBoundingBoxJson()`, top-level `parseBoundingBox(json): RectF?`,
+  `BoundingBox.fromRectF/toRectF`. Removed every `org.json.JSONObject` import/use (NotebookActivity,
+  NotebookExporter, TocRepository, TemplateDialog) and all ~30 string-interpolated boundingBox/page-data
+  literals across NotebookActivity, MainActivity, TemplateDialog, CoverDialog. The 3 duplicate `parseBoundingBox`
+  parsers + `parseDimensions` now delegate to the shared code; `TemplateDialog.parseTemplateId` reads
+  `PageData.fromJson(data).template`. `org.json` no longer appears outside doc comments. Build green.
+  - **Out of scope (left as-is):** the constant `{"label":"Content",…}` layer-data literal (no `LayerObject`
+    model exists; M2 scoped to boundingBox/page data) and `StrokeData`/`NotebookMetadata` (already kotlinx).
 - **Where:** `org.json.JSONObject` import/use in
   [NotebookActivity.kt:1835,1945,2135,6547,6562](apps/notesprout_android/app/src/main/kotlin/com/notesprout/android/NotebookActivity.kt#L1835),
   [NotebookExporter.kt:177,188,209](apps/notesprout_android/app/src/main/kotlin/com/notesprout/android/NotebookExporter.kt#L175),
@@ -180,6 +192,34 @@
   export paths (and reusable by M3's loader). When M1 lands, read color/width from `StrokeData`.
 - **Effort:** Small-to-medium.
 
+### M9 — Notebook-close path clobbers the grid cover with the page thumbnail ✅ DONE
+- **Resolution:** The index `notebook.snapshot` field is overloaded as both the grid card's cover
+  image and the page thumbnail, and the close path overwrote it unconditionally. `sealNotebook` now
+  guards the index write with `notebookMetadata?.cover.isNullOrEmpty()`
+  ([NotebookActivity.kt:1714-1722](apps/notesprout_android/app/src/main/kotlin/com/notesprout/android/NotebookActivity.kt#L1714)):
+  when an explicit cover exists it already owns the index snapshot (written by
+  `MainActivity.reloadCoverForNotebook`), so the page thumbnail no longer clobbers it on close.
+  **Second path:** setting a cover from the in-notebook toolbar (`NotebookActivity.openCoverDialog`)
+  only wrote the cover to the `.soil` — it never synced the cover to the index snapshot the card reads
+  and left the in-memory `notebookMetadata.cover` stale (so the close-path guard above clobbered it).
+  Added `NotebookActivity.syncCoverToIndex()`, called from `onCoverChanged`: re-reads metadata + the
+  cover row from the open `.soil`, refreshes `notebookMetadata`, and pushes the cover image (or the
+  current page snapshot when the cover was removed) to `indexRepo.updateNotebookSnapshot`. Gave
+  `CoverObject` a `fromJson`. **The toolbar path is still not fully correct** — a residual issue
+  remains (the long-press/list path works); tracked separately as **L10**. Current code is no worse
+  than before, so it is left in place.
+- **Root cause:** `sealNotebook` called `indexRepo.updateNotebookSnapshot(nbId, snapshot)` with the
+  current page snapshot every close. Covers showed immediately after being set (via
+  `reloadCoverForNotebook`) but reverted to the page image the next time the notebook was opened and
+  closed. The card reader ([MainActivity.kt:816](apps/notesprout_android/app/src/main/kotlin/com/notesprout/android/MainActivity.kt#L816))
+  reads that single field with no cover-vs-page priority, unlike `CoverLoader` (cover > snapshot),
+  which is why PDF export still showed the cover.
+- **Discovered:** during M2 regression testing on G10. Pre-existing — unrelated to M2.
+- **Residual (not fixed):** cold-start with a covered notebook whose index snapshot is null — the card
+  shows the page thumbnail until a cover is re-set, because `MainActivity.loadAndCacheSnapshot` caches
+  only the page snapshot, not the cover. Low impact; revisit if it surfaces.
+- **Effort:** Small (one-line guard).
+
 ---
 
 ## 🟡 Low
@@ -231,6 +271,23 @@
 - **Where:** `MlKitHandwritingRecognizer.initModel()` (`DownloadConditions.Builder()` with no
   Wi-Fi constraint). Already a documented TODO in CLAUDE.md. Add a user setting (Wi-Fi-only vs any)
   before broad release — a ~20-30 MB download on cellular is surprising.
+
+### L10 — Setting a cover from the in-notebook toolbar still doesn't display correctly
+- **Where:** `NotebookActivity.openCoverDialog()` / `syncCoverToIndex()`
+  ([NotebookActivity.kt](apps/notesprout_android/app/src/main/kotlin/com/notesprout/android/NotebookActivity.kt));
+  `CoverDialog` ([CoverDialog.kt](apps/notesprout_android/app/src/main/kotlin/com/notesprout/android/CoverDialog.kt)).
+- **Status:** The long-press/list path (`MainActivity.reloadCoverForNotebook`) works correctly (see M9).
+  The in-notebook toolbar path was given `syncCoverToIndex()` under M9 to mirror it, but a cover set
+  from the toolbar still doesn't display correctly on the grid card. Not yet root-caused.
+- **Suspected:** WAL visibility between `CoverDialog`'s separate Room connection (writes + closes) and
+  `NotebookActivity`'s already-open Room connection (the re-read in `syncCoverToIndex` may not see the
+  just-committed cover row/metadata), and/or e-ink card repaint timing. Worth verifying with the same
+  `CoverDbg`-style logging used during M9 (log `metadata.cover` + cover length + index length read back
+  *inside* `syncCoverToIndex`).
+- **Impact:** Low — the list path is a complete workaround; current code is no worse than before M9.
+- **Effort:** Small-to-medium (likely route the in-notebook write through `NotebookActivity`'s own
+  Room connection instead of a second `CoverDialog` connection, or have `CoverDialog` return the chosen
+  cover bytes to the callback rather than re-reading from disk).
 
 ---
 

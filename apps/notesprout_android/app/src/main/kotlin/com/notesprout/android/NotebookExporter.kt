@@ -31,7 +31,7 @@ import com.notesprout.android.data.StrokeData
 import com.notesprout.android.R
 import com.notesprout.android.notebook.HEADING_BACKGROUND_COLOR
 import kotlinx.serialization.json.Json
-import org.json.JSONObject
+import com.notesprout.android.data.parseBoundingBox
 import java.io.File
 import java.io.FileOutputStream
 
@@ -173,27 +173,9 @@ object NotebookExporter {
     }
 
     private fun parseDimensions(boundingBoxJson: String): Pair<Int, Int> {
-        return try {
-            val obj = JSONObject(boundingBoxJson)
-            val w = obj.getDouble("width").toInt().coerceAtLeast(1)
-            val h = obj.getDouble("height").toInt().coerceAtLeast(1)
-            Pair(w, h)
-        } catch (e: Exception) {
-            Pair(1404, 1872) // safe fallback
-        }
-    }
-
-    private fun parseBoundingBox(boundingBoxJson: String): RectF? {
-        return try {
-            val obj = JSONObject(boundingBoxJson)
-            val x = obj.getDouble("x").toFloat()
-            val y = obj.getDouble("y").toFloat()
-            val w = obj.getDouble("width").toFloat()
-            val h = obj.getDouble("height").toFloat()
-            RectF(x, y, x + w, y + h)
-        } catch (e: Exception) {
-            null
-        }
+        val box = com.notesprout.android.data.BoundingBox.fromJson(boundingBoxJson)
+            ?: return Pair(1404, 1872) // safe fallback
+        return Pair(box.width.toInt().coerceAtLeast(1), box.height.toInt().coerceAtLeast(1))
     }
 
     private suspend fun loadTemplate(
@@ -206,8 +188,8 @@ object NotebookExporter {
             ?: return null
         val templateRow = dao.getTemplateById(templateId) ?: return null
         return runCatching {
-            val dataObj = JSONObject(templateRow.data)
-            val b64 = dataObj.getString("image")
+            val b64 = com.notesprout.android.data.TemplateData.fromJson(templateRow.data)?.image
+                ?.takeIf { it.isNotEmpty() } ?: return@runCatching null
             val bytes = Base64.decode(b64, Base64.DEFAULT)
             // Bounded decode (M-1): cap to the page size this template renders into.
             BitmapDecode.decodeSampled(bytes, pageWidth, pageHeight)
