@@ -676,29 +676,79 @@ class NotebookActivity : AppCompatActivity() {
                 val capturedHeading = HeadingStroke(
                     heading.id, RectF(heading.boundingBox),
                     heading.strokes.map { s -> LiveStroke(s.id, s.points.map { PointF(it.x, it.y) }) },
+                    recognizedText = heading.recognizedText,
                 )
                 lifecycleScope.launch(Dispatchers.IO) {
                     db.notebookDao().softDeleteById(heading.id, deletedAt)
                     withContext(Dispatchers.Main) {
                         if (pageId.isNotEmpty()) {
+                            // strokeIds is the union of ALL erased IDs (executeActionDb restores
+                            // them from the DB via this field); headingIds is the typed subset.
                             undoRedoManager.push(UndoRedoAction.LassoErased(
-                                strokeIds  = emptyList(),
+                                strokeIds  = listOf(heading.id),
                                 headingIds = listOf(heading.id),
                                 pageId     = pageId,
                                 headings   = listOf(capturedHeading),
                             ))
                             updateUndoRedoButtons()
                         }
-                        val strokes = drawingView.getStrokes()
-                        val templateBmp = currentTemplateBitmap
-                        val bitmap = withContext(Dispatchers.IO) {
-                            drawingView.buildRenderBitmap(strokes, templateBmp, drawingView.getHeadings())
+                        rebuildBitmapAfterErase()
+                    }
+                }
+            }
+        }
+
+        // Text-object erase callback — the view has already removed the text object from its
+        // in-memory list. Persist the delete, push an undo action, and rebuild the bitmap.
+        drawingView.onTextErased = { textObject ->
+            val deletedAt = System.currentTimeMillis()
+            val db = soilDatabase
+            val pageId = currentPageId
+            if (db != null) {
+                // Deep-copy before any async work so the undo action holds stable data.
+                val captured = TextRender(
+                    textObject.id, RectF(textObject.boundingBox), textObject.text, textObject.strokes,
+                )
+                lifecycleScope.launch(Dispatchers.IO) {
+                    db.notebookDao().softDeleteById(textObject.id, deletedAt)
+                    withContext(Dispatchers.Main) {
+                        if (pageId.isNotEmpty()) {
+                            // strokeIds is the union of ALL erased IDs; textIds is the typed subset.
+                            undoRedoManager.push(UndoRedoAction.LassoErased(
+                                strokeIds   = listOf(textObject.id),
+                                pageId      = pageId,
+                                textIds     = listOf(textObject.id),
+                                textObjects = listOf(captured),
+                            ))
+                            updateUndoRedoButtons()
                         }
-                        if (bitmap != null) {
-                            drawingView.loadStrokesWithBitmap(strokes, bitmap, templateBmp)
-                        } else {
-                            drawingView.loadStrokes(strokes)
+                        rebuildBitmapAfterErase()
+                    }
+                }
+            }
+        }
+
+        // Line-object erase callback — same pattern as text objects.
+        drawingView.onLineErased = { lineObject ->
+            val deletedAt = System.currentTimeMillis()
+            val db = soilDatabase
+            val pageId = currentPageId
+            if (db != null) {
+                val captured = lineObject.copy(boundingBox = RectF(lineObject.boundingBox))
+                lifecycleScope.launch(Dispatchers.IO) {
+                    db.notebookDao().softDeleteById(lineObject.id, deletedAt)
+                    withContext(Dispatchers.Main) {
+                        if (pageId.isNotEmpty()) {
+                            // strokeIds is the union of ALL erased IDs; lineIds is the typed subset.
+                            undoRedoManager.push(UndoRedoAction.LassoErased(
+                                strokeIds = listOf(lineObject.id),
+                                pageId    = pageId,
+                                lineIds   = listOf(lineObject.id),
+                                lines     = listOf(captured),
+                            ))
+                            updateUndoRedoButtons()
                         }
+                        rebuildBitmapAfterErase()
                     }
                 }
             }
@@ -2089,6 +2139,26 @@ class NotebookActivity : AppCompatActivity() {
      * Called from: page navigation (before switch), [closeNotebook], [onPenLifted].
      * Must be called on [Dispatchers.IO].
      */
+    /**
+     * Rebuild the render bitmap off-thread after an eraser-tool object deletion and swap it in,
+     * so the EPD panel reflects the erased heading / text object / line. Shared by the
+     * [DrawingView.onHeadingErased], [DrawingView.onTextErased], and [DrawingView.onLineErased]
+     * callbacks. Must be called on the main thread; the view's in-memory object lists have
+     * already had the erased object removed before this runs.
+     */
+    private suspend fun rebuildBitmapAfterErase() {
+        val strokes = drawingView.getStrokes()
+        val templateBmp = currentTemplateBitmap
+        val bitmap = withContext(Dispatchers.IO) {
+            drawingView.buildRenderBitmap(strokes, templateBmp, drawingView.getHeadings())
+        }
+        if (bitmap != null) {
+            drawingView.loadStrokesWithBitmap(strokes, bitmap, templateBmp)
+        } else {
+            drawingView.loadStrokes(strokes)
+        }
+    }
+
     private suspend fun saveStrokes(db: SoilDatabase): List<String> {
         val layerId = currentLayerId
         if (layerId.isEmpty()) {

@@ -330,6 +330,28 @@ interface NotebookView {
         set(value) {}
 
     /**
+     * Fired on the main thread when the eraser path intersects a text object's bounding box.
+     * The text object has already been removed from the view's in-memory list before this fires.
+     * NotebookActivity wires this to soft-delete the row from the DB and push an undo action.
+     * The full [TextRender] is passed so the caller has its data for undo restoration.
+     */
+    var onTextErased: ((textObject: TextRender) -> Unit)?
+        get() = null
+        @Suppress("UNUSED_PARAMETER")
+        set(value) {}
+
+    /**
+     * Fired on the main thread when the eraser path intersects a line object's bounding box.
+     * The line has already been removed from the view's in-memory list before this fires.
+     * NotebookActivity wires this to soft-delete the row from the DB and push an undo action.
+     * The full [LineRender] is passed so the caller has its data for undo restoration.
+     */
+    var onLineErased: ((lineObject: LineRender) -> Unit)?
+        get() = null
+        @Suppress("UNUSED_PARAMETER")
+        set(value) {}
+
+    /**
      * Replace the in-memory stroke list with [strokes] loaded from the database,
      * then redraw the canvas bitmap immediately.
      * Must be called on the main thread (triggers invalidate).

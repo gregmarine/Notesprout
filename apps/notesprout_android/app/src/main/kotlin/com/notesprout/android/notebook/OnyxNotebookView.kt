@@ -211,6 +211,8 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
 
     override var onStrokeErased: ((String) -> Unit)? = null
     override var onHeadingErased: ((HeadingStroke) -> Unit)? = null
+    override var onTextErased: ((TextRender) -> Unit)? = null
+    override var onLineErased: ((LineRender) -> Unit)? = null
     override var onScribbleEraseComplete: ((List<String>, List<HeadingStroke>, List<TextRender>, List<LineRender>) -> Unit)? = null
     override var onSmartLassoComplete: ((List<String>, RectF) -> Unit)? = null
 
@@ -390,6 +392,24 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
             val hitIds = hitHeadings.mapTo(HashSet()) { it.id }
             headings = headings.filter { it.id !in hitIds }
             hitHeadings.forEach { onHeadingErased?.invoke(it) }
+            throttledEraseRedraw()
+        }
+
+        // Text-object hit-test: erase entire text object if eraser AABB intersects its box.
+        val hitTexts = textObjects.filter { android.graphics.RectF.intersects(eBounds, it.boundingBox) }
+        if (hitTexts.isNotEmpty()) {
+            val hitIds = hitTexts.mapTo(HashSet()) { it.id }
+            textObjects = textObjects.filter { it.id !in hitIds }
+            hitTexts.forEach { onTextErased?.invoke(it) }
+            throttledEraseRedraw()
+        }
+
+        // Line-object hit-test: erase entire line if eraser AABB intersects its box.
+        val hitLines = lineObjects.filter { android.graphics.RectF.intersects(eBounds, it.boundingBox) }
+        if (hitLines.isNotEmpty()) {
+            val hitIds = hitLines.mapTo(HashSet()) { it.id }
+            lineObjects = lineObjects.filter { it.id !in hitIds }
+            hitLines.forEach { onLineErased?.invoke(it) }
             throttledEraseRedraw()
         }
 
