@@ -716,6 +716,7 @@ Lines participate in lasso selection (center-point containment hit test), move (
 
 - New-notebook name validation: whitelist `[^a-zA-Z0-9_\-. ]`, reject `.`/`..`, check index for duplicate name in current folder. New-notebook dialog pre-fills with `YYYYMMDD_HHmmss` timestamp (editable before confirm).
 - **Move:** index update only — `.soil` file stays at `Garden/<id>.soil` (UUID unchanged).
+- **Rename:** index update only via `repository.renameNotebook` / `renameFolder` (`.soil` file/UUID untouched, same as Move). Context-menu actions use `ic_edit` (Tabler `edit`): "Rename Notebook" between Move Notebook and Set Cover; "Rename Folder" between Move Folder and Delete. Dialog reuses `DialogNewNotebookBinding`, pre-filled with the current name (cursor at end). Notebook rename runs `validateNotebookName`; folder rename runs `validateFolderRename` — same whitelist + `.`/`..` reject, but duplicate check is against the folder's own `parentId` (not the current browse folder) and excludes itself. No-op when name is unchanged. After rename, `refreshActiveView()` re-renders the active mode (normal/search via `scanAndRender`, pinned, or recents).
 - **Copy notebook:** new `ObjectEntity` + copy `.soil` to new UUID path via `soilFile()`.
 - **Copy folder:** recursively create new index entries and copy all descendant `.soil` files.
 - **Conflict check:** if a sibling with the same name exists at the destination, show AlertDialog "A [notebook/folder] named '[name]' already exists here. Replace it?" Replace proceeds; Cancel stays in picker mode.

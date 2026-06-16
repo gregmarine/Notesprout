@@ -1202,6 +1202,110 @@ class MainActivity : AppCompatActivity() {
         }, 100)
     }
 
+    // ── Rename notebook dialog ────────────────────────────────────────────────
+
+    private fun showRenameNotebookDialog(entity: ObjectEntity) {
+        val dialogBinding = DialogNewNotebookBinding.inflate(layoutInflater)
+        dialogBinding.editNotebookName.setText(entity.name)
+        dialogBinding.editNotebookName.setSelection(entity.name.length)
+
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("Rename Notebook")
+            .setView(dialogBinding.root)
+            .setPositiveButton("Rename") { _, _ ->
+                val imm = getSystemService(InputMethodManager::class.java)
+                imm.hideSoftInputFromWindow(dialogBinding.editNotebookName.windowToken, 0)
+                val name = dialogBinding.editNotebookName.text?.toString()?.trim().orEmpty()
+                val error = validateNotebookName(name)
+                if (error != null) {
+                    Toast.makeText(this, error, Toast.LENGTH_SHORT).show()
+                } else if (name != entity.name) {
+                    lifecycleScope.launch {
+                        withContext(Dispatchers.IO) { repository.renameNotebook(entity.id, name) }
+                        refreshActiveView()
+                    }
+                }
+            }
+            .setNegativeButton("Cancel") { _, _ ->
+                val imm = getSystemService(InputMethodManager::class.java)
+                imm.hideSoftInputFromWindow(dialogBinding.editNotebookName.windowToken, 0)
+            }
+            .create()
+
+        dialog.window?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE)
+        dialog.show()
+        dialog.window?.setElevation(0f)
+        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+
+        dialogBinding.editNotebookName.requestFocus()
+        dialogBinding.editNotebookName.postDelayed({
+            ViewCompat.getWindowInsetsController(dialogBinding.editNotebookName)
+                ?.show(WindowInsetsCompat.Type.ime())
+                ?: run {
+                    val imm = getSystemService(InputMethodManager::class.java)
+                    @Suppress("DEPRECATION")
+                    imm.showSoftInput(dialogBinding.editNotebookName, InputMethodManager.SHOW_IMPLICIT)
+                }
+        }, 100)
+    }
+
+    // ── Rename folder dialog ──────────────────────────────────────────────────
+
+    private fun showRenameFolderDialog(entity: ObjectEntity) {
+        val dialogBinding = DialogNewNotebookBinding.inflate(layoutInflater)
+        dialogBinding.editNotebookName.hint = "Folder name"
+        dialogBinding.editNotebookName.setText(entity.name)
+        dialogBinding.editNotebookName.setSelection(entity.name.length)
+
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("Rename Folder")
+            .setView(dialogBinding.root)
+            .setPositiveButton("Rename") { _, _ ->
+                val imm = getSystemService(InputMethodManager::class.java)
+                imm.hideSoftInputFromWindow(dialogBinding.editNotebookName.windowToken, 0)
+                val name = dialogBinding.editNotebookName.text?.toString()?.trim().orEmpty()
+                lifecycleScope.launch {
+                    val error = validateFolderRename(name, entity)
+                    if (error != null) {
+                        Toast.makeText(this@MainActivity, error, Toast.LENGTH_SHORT).show()
+                    } else if (name != entity.name) {
+                        withContext(Dispatchers.IO) { repository.renameFolder(entity.id, name) }
+                        refreshActiveView()
+                    }
+                }
+            }
+            .setNegativeButton("Cancel") { _, _ ->
+                val imm = getSystemService(InputMethodManager::class.java)
+                imm.hideSoftInputFromWindow(dialogBinding.editNotebookName.windowToken, 0)
+            }
+            .create()
+
+        dialog.window?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE)
+        dialog.show()
+        dialog.window?.setElevation(0f)
+        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+
+        dialogBinding.editNotebookName.requestFocus()
+        dialogBinding.editNotebookName.postDelayed({
+            ViewCompat.getWindowInsetsController(dialogBinding.editNotebookName)
+                ?.show(WindowInsetsCompat.Type.ime())
+                ?: run {
+                    val imm = getSystemService(InputMethodManager::class.java)
+                    @Suppress("DEPRECATION")
+                    imm.showSoftInput(dialogBinding.editNotebookName, InputMethodManager.SHOW_IMPLICIT)
+                }
+        }, 100)
+    }
+
+    /** Re-renders whichever browse view is currently active after a mutation. */
+    private fun refreshActiveView() {
+        when {
+            isRecentsMode -> renderRecentsList()
+            isPinnedMode  -> lifecycleScope.launch { renderPinnedList() }
+            else          -> scanAndRender()
+        }
+    }
+
     // ── Validation ────────────────────────────────────────────────────────────
 
     /**
@@ -1225,6 +1329,23 @@ class MainActivity : AppCompatActivity() {
         }
         val siblings = withContext(Dispatchers.IO) { repository.getFolders(currentParentId) }
         if (siblings.any { it.name.equals(name, ignoreCase = true) }) {
+            return "A folder named \"$name\" already exists"
+        }
+        return null
+    }
+
+    /**
+     * Validates a folder rename. Checks duplicates against the folder's own siblings (its actual
+     * parent, which may differ from the current browse folder) and excludes the folder itself.
+     */
+    private suspend fun validateFolderRename(name: String, entity: ObjectEntity): String? {
+        if (name.isBlank()) return "Folder name cannot be empty"
+        if (name == "." || name == "..") return "Invalid folder name"
+        if (name.contains(Regex("[^a-zA-Z0-9_\\-. ]"))) {
+            return "Name may only contain letters, numbers, spaces, and _ - ."
+        }
+        val siblings = withContext(Dispatchers.IO) { repository.getFolders(entity.parentId) }
+        if (siblings.any { it.id != entity.id && it.name.equals(name, ignoreCase = true) }) {
             return "A folder named \"$name\" already exists"
         }
         return null
@@ -1368,6 +1489,7 @@ class MainActivity : AppCompatActivity() {
                 .addAction(R.drawable.ic_export,          "Export")          { startExportFromMain(entity) }
                 .addAction(R.drawable.ic_copy_page,       "Copy Notebook")   { enterPickerMode(DestinationPickerState.CopyNotebook(entity)) }
                 .addAction(R.drawable.ic_move_page,       "Move Notebook")   { enterPickerMode(DestinationPickerState.MoveNotebook(entity)) }
+                .addAction(R.drawable.ic_edit,            "Rename Notebook") { showRenameNotebookDialog(entity) }
                 .addAction(R.drawable.ic_polaroid,        "Set Cover")       { openCoverDialog(entity) }
                 .addAction(R.drawable.ic_delete_notebook, "Delete Notebook") { showDeleteNotebookConfirmation(entity) }
                 .show()
@@ -1381,6 +1503,7 @@ class MainActivity : AppCompatActivity() {
             .title(entity.name)
             .addAction(R.drawable.ic_copy_plus,       "Copy Folder") { enterPickerMode(DestinationPickerState.CopyFolder(entity)) }
             .addAction(R.drawable.ic_move_page,       "Move Folder") { enterPickerMode(DestinationPickerState.MoveFolder(entity)) }
+            .addAction(R.drawable.ic_edit,            "Rename Folder") { showRenameFolderDialog(entity) }
             .addAction(R.drawable.ic_folder_minus,    "Delete")      { showDeleteFolderConfirmation(entity) }
             .show()
     }
