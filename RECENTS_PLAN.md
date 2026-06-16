@@ -203,7 +203,7 @@ sits atop recents and A's timestamp updated; close B → land in B's folder. Rep
 
 ---
 
-## Session 6 — Full Feature Validation + Docs ⬜
+## Session 6 — Full Feature Validation + Docs ✅
 **Goal:** end-to-end sign-off, documentation, ship.
 
 **Work:**

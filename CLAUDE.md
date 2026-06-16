@@ -773,6 +773,73 @@ Fuzzy match against all notebooks: substring (3) > all words present (2) > prefi
 
 ---
 
+## Recents System
+
+Device-local list of the most recently opened notebooks, surfaced in two places with different UI:
+a **MainActivity recents browse mode** (notebook cards) and a **NotebookActivity recents dialog**
+(TOC-style paginated switch list).
+
+### Store (`data/recents/`)
+
+- `RecentEntry` — `@Serializable data class RecentEntry(notebookId: String, timestamp: Long)`.
+- `RecentsManager` — `object` over `SharedPreferences("notesprout_recents")`, single key `entries`
+  holding a JSON-serialized `List<RecentEntry>` via `kotlinx.serialization`. Mirrors
+  `AppStateManager` / `SortPreferencesManager` — **not** in `notesprout.db`, **not** in any `.soil`.
+  - `MAX_ENTRIES = 20`. On overflow the oldest (furthest-back timestamp) is dropped.
+  - **Identity:** a notebook appears at most once. `recordOpen` drops any existing entry, prepends a
+    fresh one stamped *now*, caps to 20.
+  - **Timestamp:** set to *now* on open; *updated* to *now* on close. List is always ordered by
+    `timestamp` descending (newest-first). `load()` is tolerant of malformed/absent JSON → empty.
+  - `recordClose` is a no-op if the id is blank or not currently listed; `remove` backs the prune.
+- `ResolvedRecent(notebookId, notebookName, folderPath, timestamp)` — display model produced by
+  `RecentsManager.resolve(context)` (`suspend`, `Dispatchers.IO`). Resolves each stored entry
+  against the index; **skips and prunes** (single re-loaded write) any notebook that is missing,
+  soft-deleted, or not a `NOTEBOOK` — self-healing store. `folderPath` is the full breadcrumb
+  (`"Notebooks › A › B"`), matching the search/pinned convention; immediate parent is
+  `folderPath.substringAfterLast(" › ")`.
+
+### Record points (`NotebookActivity`)
+
+- **Open:** `RecentsManager.recordOpen(this, notebookId)` in `onCreate` right after `notebookId`
+  resolves from `EXTRA_NOTEBOOK_ID`.
+- **Close:** `RecentsManager.recordClose(applicationContext, nbId)` in `sealNotebook()` (the seal runs
+  on `appScope` while the Activity may be finishing — use `applicationContext`).
+
+### MainActivity recents mode
+
+- `btnRecents` (`ic_clock`) sits after `btnSearch`, before `btnSort`; visible only when not pinned
+  and not in search. `isRecentsMode` is mutually exclusive with pinned/search/picker and is **never**
+  persisted to `AppStateManager` (same as search mode). Back-press handles `isRecentsMode` first.
+- Chrome: title "Recent Notebooks" + X close; bottom bar shows pagination only (new-notebook /
+  new-folder hidden). `renderRecentsList()` resolves off-thread, renders notebook cards (reusing the
+  pinned/search card builder) with folder name + notebook name + date/time (`getMediumDateFormat` +
+  `getTimeFormat`), paginated over the resolved list; empty state "No recent notebooks".
+- **Tap → open** reuses the search-mode pattern: `navigateStackToFolder(parentId)` +
+  `AppStateManager.save(AppViewState(parentId, false))` + exit recents + `launchNotebookActivity` —
+  so closing the notebook returns to its folder.
+
+### NotebookActivity recents dialog (`notebook/RecentsDialog.kt`)
+
+- `btnRecents` (`ic_clock`) after `btnClose`, before the divider preceding `btnToc`. Modeled on
+  `TocDialog`: paginated (measure row height → `itemsPerPage`; first/prev/next/last + indicator).
+  Each row: notebook name (TOC heading style) / date-time (smaller) / folder path (smaller).
+  Layouts: `dialog_recents.xml`, `item_recent_entry.xml`. Empty state "No recent notebooks".
+- Data: `RecentsManager.resolve(context)` then **exclude the currently-open notebook** (filter by id).
+
+### Switch flow + return-to-folder
+
+- `switchToRecentNotebook(selectedId)`: resolve the selected `ObjectEntity` (abort if pruned) →
+  `AppStateManager.save(AppViewState(selected.parentId, false))` → `closeNotebook()` (seals current,
+  fires `recordClose`) → launch the selected notebook directly (new `NotebookActivity` with its
+  `EXTRA_NOTEBOOK_ID`/`NAME`, **not** via MainActivity) → `finish()`. The new Activity's `onCreate`
+  fires `recordOpen` for the open side.
+- **Return-to-folder sync** lives in `MainActivity.resumeNormalBrowse()` (called from `onResume`):
+  when no special mode is active and the persisted browse folder differs from the current one,
+  re-navigate the stack to the persisted folder before rendering. Narrow by design — the normal close
+  path leaves persisted == current, so it no-ops and just scans.
+
+---
+
 ## Future Work — Wacom & Generic Android Stylus
 
 Wacom barrel buttons set `BUTTON_STYLUS_PRIMARY`/`BUTTON_STYLUS_SECONDARY` on `MotionEvent` — they do not change `getToolType()`. Fix: check `event.isButtonPressed(MotionEvent.BUTTON_STYLUS_PRIMARY)` in `onTouchEvent` and treat as eraser for that stroke. Low priority — do not let it block BOOX-first progress.
