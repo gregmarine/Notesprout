@@ -1,6 +1,12 @@
 package com.notesprout.android.data.recents
 
 import android.content.Context
+import com.notesprout.android.data.index.IndexRepository
+import com.notesprout.android.data.index.NotesproutIndex
+import com.notesprout.android.data.index.ObjectEntity
+import com.notesprout.android.data.index.ObjectType
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
 
@@ -67,6 +73,54 @@ object RecentsManager {
         val existing = load(context)
         if (existing.none { it.notebookId == notebookId }) return
         persist(context, existing.filter { it.notebookId != notebookId })
+    }
+
+    /**
+     * Resolve the stored entries against the index into display-ready [ResolvedRecent] models,
+     * newest-first. Any entry whose notebook is missing or soft-deleted is skipped and pruned
+     * from the store in a single write (self-healing). Runs on [Dispatchers.IO].
+     */
+    suspend fun resolve(context: Context): List<ResolvedRecent> = withContext(Dispatchers.IO) {
+        val entries = load(context)
+        if (entries.isEmpty()) return@withContext emptyList()
+
+        val repo = IndexRepository(NotesproutIndex.dao())
+        val allFolders = repo.getAllFolders()
+        val missing = mutableListOf<String>()
+
+        val resolved = entries.mapNotNull { entry ->
+            val entity = repo.getNotebook(entry.notebookId)
+            if (entity == null || entity.deletedAt != null || entity.type != ObjectType.NOTEBOOK) {
+                missing.add(entry.notebookId)
+                null
+            } else {
+                ResolvedRecent(
+                    notebookId   = entity.id,
+                    notebookName = entity.name,
+                    folderPath   = buildFolderPath(entity.parentId, allFolders),
+                    timestamp    = entry.timestamp,
+                )
+            }
+        }
+
+        if (missing.isNotEmpty()) {
+            // Re-load before pruning so a concurrent open/close isn't clobbered.
+            persist(context, load(context).filter { it.notebookId !in missing })
+        }
+        resolved
+    }
+
+    /** Full breadcrumb for [parentId], e.g. `"Notebooks › A › B"` (root → `"Notebooks"`). */
+    private fun buildFolderPath(parentId: String?, allFolders: List<ObjectEntity>): String {
+        val segments = mutableListOf<String>()
+        var currentId: String? = parentId
+        while (currentId != null) {
+            val folder = allFolders.find { it.id == currentId } ?: break
+            segments.add(0, folder.name)
+            currentId = folder.parentId
+        }
+        segments.add(0, "Notebooks")
+        return segments.joinToString(" › ")
     }
 
     private fun persist(context: Context, entries: List<RecentEntry>) {

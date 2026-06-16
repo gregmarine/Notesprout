@@ -115,7 +115,7 @@ mutually exclusive.
 
 ---
 
-## Session 3 — MainActivity Recents Cards (+ shared resolver) ⬜
+## Session 3 — MainActivity Recents Cards (+ shared resolver) ✅
 **Goal:** real recents content as notebook cards, with tap-to-open + return-to-folder.
 
 **Work:**

@@ -44,6 +44,8 @@ import com.notesprout.android.data.index.NotebookObject
 import com.notesprout.android.data.index.NotesproutIndex
 import com.notesprout.android.data.index.ObjectEntity
 import com.notesprout.android.data.index.ObjectType
+import com.notesprout.android.data.recents.RecentsManager
+import com.notesprout.android.data.recents.ResolvedRecent
 import com.notesprout.android.data.soilFile
 import com.notesprout.android.search.SearchDialog
 import com.notesprout.android.search.SearchEngine
@@ -137,6 +139,7 @@ class MainActivity : AppCompatActivity() {
     // Recents browse mode — peer of pinned/search/picker, mutually exclusive with all of them.
     // Never persisted to AppStateManager (same as search mode).
     private var isRecentsMode = false
+    private var recentsResults: List<ResolvedRecent> = emptyList()
 
     // false while the async state-restore coroutine is running on first launch; guards the layout
     // listener and onResume from triggering a premature scan before the stack is rebuilt.
@@ -486,14 +489,24 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * Session 2 placeholder: real recents cards + the shared resolver land in Session 3.
-     * For now the list is always empty, exercising the "No recent notebooks" empty state.
+     * Resolves the recents store against the index (newest-first, stale entries pruned) and
+     * renders the results as notebook cards. Self-launches a coroutine so the synchronous call
+     * sites (layout listener, onResume, enterRecentsMode) need no change.
      */
     private fun renderRecentsList() {
-        items = emptyList()
-        val total = totalPages()
-        currentPage = currentPage.coerceIn(0, (total - 1).coerceAtLeast(0))
-        renderPage()
+        lifecycleScope.launch {
+            val resolved = RecentsManager.resolve(this@MainActivity)
+            val entities = withContext(Dispatchers.IO) {
+                resolved.mapNotNull { repository.getNotebook(it.notebookId) }
+            }
+            // The user may have left recents mode while we were resolving off-thread.
+            if (!isRecentsMode) return@launch
+            recentsResults = resolved
+            items = entities.map { NotebookListItem.Notebook(it) }
+            val total = totalPages()
+            currentPage = currentPage.coerceIn(0, (total - 1).coerceAtLeast(0))
+            renderPage()
+        }
     }
 
     /**
@@ -921,6 +934,20 @@ class MainActivity : AppCompatActivity() {
         }
 
         // ── Label ─────────────────────────────────────────────────────────────
+        // Recents cards stack two lines: "folder › notebook" over the last-opened date/time.
+        val recentsResult = if (isRecentsMode && item is NotebookListItem.Notebook) {
+            recentsResults.find { it.notebookId == item.entity.id }
+        } else null
+        if (recentsResult != null) {
+            group.addView(
+                buildRecentsLabel(recentsResult, spec),
+                LinearLayout.LayoutParams(spec.cardWidthPx, spec.labelHeightPx).also {
+                    it.topMargin = spec.rowGapPx
+                },
+            )
+            return group
+        }
+
         val labelText = run {
             val entity = when (item) {
                 is NotebookListItem.Folder   -> item.entity
@@ -961,6 +988,38 @@ class MainActivity : AppCompatActivity() {
         return group
     }
 
+    /**
+     * Two-line label for a recents card: "folder › notebook" over the last-opened date/time.
+     * Both lines are single-line + ellipsized to stay within [GridSpec.labelHeightPx].
+     */
+    private fun buildRecentsLabel(result: ResolvedRecent, spec: GridSpec): LinearLayout {
+        val parent = result.folderPath.substringAfterLast(" › ")
+        val opened = Date(result.timestamp)
+        val dateStr = android.text.format.DateFormat.getMediumDateFormat(this).format(opened)
+        val timeStr = android.text.format.DateFormat.getTimeFormat(this).format(opened)
+
+        return LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity     = Gravity.CENTER
+            addView(AppCompatTextView(this@MainActivity).apply {
+                text      = "$parent › ${result.notebookName}"
+                maxLines  = 1
+                ellipsize = TextUtils.TruncateAt.END
+                gravity   = Gravity.CENTER
+                textSize  = 13f
+                setTextColor(inkBlackColor)
+            })
+            addView(AppCompatTextView(this@MainActivity).apply {
+                text      = "$dateStr, $timeStr"
+                maxLines  = 1
+                ellipsize = TextUtils.TruncateAt.END
+                gravity   = Gravity.CENTER
+                textSize  = 11f
+                setTextColor(inkLightColor)
+            })
+        }
+    }
+
     // ── Notebook opening ──────────────────────────────────────────────────────
 
     private fun openNotebook(entity: ObjectEntity) {
@@ -975,6 +1034,18 @@ class MainActivity : AppCompatActivity() {
                 searchResults = emptyList()
                 binding.btnClearSearch.visibility = View.GONE
                 binding.btnSort.visibility = View.VISIBLE
+                launchNotebookActivity(entity)
+            }
+            return
+        }
+        if (isRecentsMode) {
+            // Same return-to-folder contract as search: land back in the notebook's folder on close.
+            lifecycleScope.launch {
+                navigateStackToFolder(entity.parentId)
+                AppStateManager.save(this@MainActivity, AppViewState(entity.parentId, false))
+                isRecentsMode = false
+                currentPage = 0
+                applyRecentsModeUI()
                 launchNotebookActivity(entity)
             }
             return
