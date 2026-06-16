@@ -68,6 +68,8 @@ import com.notesprout.android.data.index.IndexRepository
 import com.notesprout.android.data.index.NotesproutIndex
 import com.notesprout.android.data.recents.RecentsManager
 import com.notesprout.android.notebook.RecentsDialog
+import com.notesprout.android.state.AppStateManager
+import com.notesprout.android.state.AppViewState
 import com.notesprout.android.data.soilFile
 import com.notesprout.android.databinding.ActivityNotebookBinding
 import com.notesprout.android.databinding.DialogEditHeadingTextBinding
@@ -586,9 +588,7 @@ class NotebookActivity : AppCompatActivity() {
                 RecentsDialog(
                     context = this@NotebookActivity,
                     entries = resolved,
-                    onRecentSelected = { _ ->
-                        // Switch flow lands in Session 5 — dialog already dismissed itself.
-                    }
+                    onRecentSelected = { selectedId -> switchToRecentNotebook(selectedId) }
                 ).show()
             }
         }
@@ -1714,6 +1714,39 @@ class NotebookActivity : AppCompatActivity() {
             runBlocking { sealNotebook(db, snapshot, pageId, nbPath, nbId, sessionStart) }
         } else {
             NotesproutApplication.appScope.launch { sealNotebook(db, snapshot, pageId, nbPath, nbId, sessionStart) }
+        }
+    }
+
+    /**
+     * Switch directly from this notebook to another one chosen from the recents dialog —
+     * without bouncing through MainActivity.
+     *
+     * Order of operations:
+     * 1. Resolve the selected notebook's [ObjectEntity] (name + parentId) from the index. If it
+     *    no longer exists, abort — [RecentsManager.resolve] should already have pruned it.
+     * 2. Persist the selected notebook's folder as the browse state so that closing *it* later
+     *    lands MainActivity in that folder (return-to-folder contract — see MainActivity.onResume).
+     * 3. Close the current notebook: [closeNotebook] captures the snapshot on the main thread and
+     *    seals on [NotesproutApplication.appScope] (the seal fires [RecentsManager.recordClose] for
+     *    the leaving notebook). [finish] this activity.
+     * 4. Launch the selected notebook directly; its [onCreate] fires [RecentsManager.recordOpen].
+     */
+    private fun switchToRecentNotebook(selectedId: String) {
+        lifecycleScope.launch {
+            val entity = withContext(Dispatchers.IO) { indexRepo.getNotebook(selectedId) } ?: return@launch
+
+            // Return-to-folder: closing the switched notebook should land in *its* folder.
+            AppStateManager.save(this@NotebookActivity, AppViewState(entity.parentId, false))
+
+            // Seal the current notebook (records close), then open the selected one directly.
+            closeNotebook()
+            startActivity(
+                Intent(this@NotebookActivity, NotebookActivity::class.java).apply {
+                    putExtra(EXTRA_NOTEBOOK_ID,   entity.id)
+                    putExtra(EXTRA_NOTEBOOK_NAME, entity.name)
+                }
+            )
+            finish()
         }
     }
 

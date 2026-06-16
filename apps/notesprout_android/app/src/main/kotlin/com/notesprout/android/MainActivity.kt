@@ -303,10 +303,35 @@ class MainActivity : AppCompatActivity() {
             when {
                 isRecentsMode -> renderRecentsList()
                 isPinnedMode  -> lifecycleScope.launch { renderPinnedList() }
-                else          -> scanAndRender()
+                else          -> resumeNormalBrowse()
             }
         } else {
             pendingScan = true
+        }
+    }
+
+    /**
+     * Normal-mode resume render, with a return-to-folder sync for the NotebookActivity recents
+     * switch flow: that flow persists the *switched* notebook's folder while this activity is still
+     * sitting in the original folder, so when the switched notebook closes we must re-navigate the
+     * stack to the persisted folder before rendering.
+     *
+     * Narrow by design — only fires when no special mode is active and the persisted browse folder
+     * actually differs from the current one (the normal close path leaves them equal → plain scan).
+     */
+    private fun resumeNormalBrowse() {
+        val persisted = AppStateManager.load(this).folderId
+        if (destinationPickerState == DestinationPickerState.None &&
+            !isSearchMode &&
+            persisted != currentParentId
+        ) {
+            lifecycleScope.launch {
+                navigateStackToFolder(persisted)
+                currentPage = 0
+                scanAndRender()
+            }
+        } else {
+            scanAndRender()
         }
     }
 

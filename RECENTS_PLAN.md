@@ -174,7 +174,7 @@ absent, pagination matches TOC feel, empty state when no other recents.
 
 ---
 
-## Session 5 — NotebookActivity Switch Flow + Return-to-Folder ⬜
+## Session 5 — NotebookActivity Switch Flow + Return-to-Folder ✅
 **Goal:** tapping a recents row closes the current notebook properly and opens the selected one,
 without bouncing through the notebook list; closing the switched notebook returns to *its* folder.
 
