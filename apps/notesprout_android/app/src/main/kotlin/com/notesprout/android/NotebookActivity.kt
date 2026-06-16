@@ -67,6 +67,7 @@ import com.notesprout.android.data.toBoundingBoxJson
 import com.notesprout.android.data.index.IndexRepository
 import com.notesprout.android.data.index.NotesproutIndex
 import com.notesprout.android.data.recents.RecentsManager
+import com.notesprout.android.notebook.RecentsDialog
 import com.notesprout.android.data.soilFile
 import com.notesprout.android.databinding.ActivityNotebookBinding
 import com.notesprout.android.databinding.DialogEditHeadingTextBinding
@@ -572,6 +573,21 @@ class NotebookActivity : AppCompatActivity() {
                     onPageSelected = { pageId ->
                         val index = pages.indexOfFirst { it.id == pageId }
                         if (index >= 0 && index != currentPageIndex) navigateToPage(index)
+                    }
+                ).show()
+            }
+        }
+
+        binding.btnRecents.setOnClickListener {
+            lifecycleScope.launch {
+                // Resolve recents off-thread, then drop the currently-open notebook from the list.
+                val resolved = RecentsManager.resolve(this@NotebookActivity)
+                    .filter { it.notebookId != notebookId }
+                RecentsDialog(
+                    context = this@NotebookActivity,
+                    entries = resolved,
+                    onRecentSelected = { _ ->
+                        // Switch flow lands in Session 5 — dialog already dismissed itself.
                     }
                 ).show()
             }

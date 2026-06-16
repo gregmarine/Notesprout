@@ -146,7 +146,7 @@ closing returns to that notebook's folder, deleted notebooks never appear.
 
 ---
 
-## Session 4 — NotebookActivity RecentsDialog (reuses shared resolver) ⬜
+## Session 4 — NotebookActivity RecentsDialog (reuses shared resolver) ✅
 **Goal:** a TOC-style paginated "Recent Notebooks" dialog, openable from a new toolbar button.
 Tap behavior is stubbed (no switch yet) — switch flow lands in Session 5.
 
