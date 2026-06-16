@@ -81,6 +81,8 @@ import com.notesprout.android.notebook.LassoGeometry
 import com.notesprout.android.notebook.LineObjectDialog
 import com.notesprout.android.notebook.TextEditDialog
 import com.notesprout.android.notebook.ToolbarOverflowManager
+import com.notesprout.android.notebook.ToolbarLayoutManager
+import com.notesprout.android.data.toolbar.ToolbarPreferencesManager
 import com.notesprout.android.history.UndoRedoAction
 import com.notesprout.android.history.UndoRedoManager
 import com.notesprout.android.recognition.HandwritingRecognizer
@@ -130,6 +132,7 @@ class NotebookActivity : AppCompatActivity() {
     private lateinit var binding: ActivityNotebookBinding
     private lateinit var drawingView: NotebookView
     private lateinit var overflowManager: ToolbarOverflowManager
+    private lateinit var toolbarLayoutManager: ToolbarLayoutManager
     /** True while we're waiting for ACTION_UP to close the overflow menu after a button tap. */
     private var overflowCloseOnUp = false
     private var isEraserActive = false
@@ -1245,6 +1248,18 @@ class NotebookActivity : AppCompatActivity() {
         binding.drawingToolbar.doOnLayout { toolbar ->
             drawingView.setToolbarHeight(toolbar.height)
         }
+
+        // ── Toolbar layout (order / visibility / dividers per ToolbarConfig) ───
+        // Arrange the existing button views per the persisted global config before overflow
+        // runs. Default config reproduces today's bar (full set, top) except the page controls
+        // now pack left with the rest; the overflow button stays pinned right via an internal
+        // weighted spacer. Runs synchronously so the first layout already reflects it.
+        toolbarLayoutManager = ToolbarLayoutManager(
+            toolbar         = binding.drawingToolbar,
+            dividerOverflow = binding.dividerOverflow,
+            btnOverflow     = binding.btnOverflow,
+        )
+        toolbarLayoutManager.apply(ToolbarPreferencesManager.load(this))
 
         // ── Toolbar overflow ──────────────────────────────────────────────────
         overflowManager = ToolbarOverflowManager(

@@ -19,7 +19,10 @@
          On BOOX, setLimitRect excludes this region from pen input.
          Height is 56dp to comfortably fit 44dp icon buttons + padding.
          toolbar_background drawable provides the 1dp inkBlack bottom border.
-         Order left to right: close | recents | divider | toc | cover | divider | pen | eraser | lasso eraser | erase all | lasso | divider | undo | redo | divider | template | page index | divider | insert before | insert after | delete | copy | paste -->
+         Buttons are declared here once; ToolbarLayoutManager arranges them per ToolbarConfig
+         (order, visibility, auto-dividers, and the trailing weighted spacer before the overflow
+         controls). Group dividers and the spacer are generated in code — not declared here. Only
+         dividerOverflow + btnOverflow remain inline, as the overflow manager references them. -->
     <LinearLayout
         android:id="@+id/drawingToolbar"
         android:layout_width="match_parent"
@@ -45,14 +48,6 @@
             android:layout_marginStart="4dp"
             android:src="@drawable/ic_clock"
             android:contentDescription="Recent notebooks" />
-
-        <!-- Divider after close button -->
-        <View
-            android:layout_width="1dp"
-            android:layout_height="28dp"
-            android:background="@color/inkBlack"
-            android:layout_marginStart="4dp"
-            android:layout_marginEnd="4dp"/>
 
         <!-- Table of Contents button -->
         <androidx.appcompat.widget.AppCompatImageButton
@@ -84,14 +79,6 @@
             android:layout_marginStart="4dp"
             android:src="@drawable/ic_pinned"
             android:contentDescription="Pin notebook" />
-
-        <!-- Divider after close/cover/export/pin group -->
-        <View
-            android:layout_width="1dp"
-            android:layout_height="28dp"
-            android:background="@color/inkBlack"
-            android:layout_marginStart="4dp"
-            android:layout_marginEnd="4dp"/>
 
         <!-- Pen tool -->
         <androidx.appcompat.widget.AppCompatImageButton
@@ -148,14 +135,6 @@
             android:src="@drawable/ic_lasso"
             android:contentDescription="Lasso selection" />
 
-        <!-- Divider before undo/redo -->
-        <View
-            android:layout_width="1dp"
-            android:layout_height="28dp"
-            android:background="@color/inkBlack"
-            android:layout_marginStart="4dp"
-            android:layout_marginEnd="4dp"/>
-
         <!-- Undo -->
         <androidx.appcompat.widget.AppCompatImageButton
             android:id="@+id/btnUndo"
@@ -171,14 +150,6 @@
             android:src="@drawable/ic_redo"
             android:contentDescription="Redo" />
 
-        <!-- Divider before template -->
-        <View
-            android:layout_width="1dp"
-            android:layout_height="28dp"
-            android:background="@color/inkBlack"
-            android:layout_marginStart="4dp"
-            android:layout_marginEnd="4dp"/>
-
         <!-- Template picker -->
         <androidx.appcompat.widget.AppCompatImageButton
             android:id="@+id/btnTemplate"
@@ -193,20 +164,6 @@
             android:layout_marginStart="4dp"
             android:src="@drawable/ic_files"
             android:contentDescription="Page index" />
-
-        <!-- Flexible spacer pushes page controls to the right edge -->
-        <Space
-            android:layout_width="0dp"
-            android:layout_height="0dp"
-            android:layout_weight="1" />
-
-        <!-- Divider before page controls -->
-        <View
-            android:layout_width="1dp"
-            android:layout_height="28dp"
-            android:background="@color/inkBlack"
-            android:layout_marginStart="4dp"
-            android:layout_marginEnd="4dp"/>
 
         <!-- Insert page before current -->
         <androidx.appcompat.widget.AppCompatImageButton
