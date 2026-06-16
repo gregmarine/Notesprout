@@ -53,7 +53,7 @@ surfaced in two places with very different UI:
 
 ---
 
-## Session 1 — Recents Data Core (shared) ⬜
+## Session 1 — Recents Data Core (shared) ✅
 **Goal:** the store exists and is correctly maintained on every open/close. No user-facing UI.
 
 **Work:**

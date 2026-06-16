@@ -66,6 +66,7 @@ import com.notesprout.android.data.TemplateData
 import com.notesprout.android.data.toBoundingBoxJson
 import com.notesprout.android.data.index.IndexRepository
 import com.notesprout.android.data.index.NotesproutIndex
+import com.notesprout.android.data.recents.RecentsManager
 import com.notesprout.android.data.soilFile
 import com.notesprout.android.databinding.ActivityNotebookBinding
 import com.notesprout.android.databinding.DialogEditHeadingTextBinding
@@ -1230,6 +1231,8 @@ class NotebookActivity : AppCompatActivity() {
         if (notebookId.isNotEmpty()) {
             notebookSoilPath = soilFile(this, notebookId).absolutePath
             title = notebookDisplayName
+            // Record this open in the device-local recents store (see RecentsManager).
+            RecentsManager.recordOpen(this, notebookId)
             val nbId = notebookId
             lifecycleScope.launch {
                 val pinned = withContext(Dispatchers.IO) { indexRepo.isNotebookPinned(nbId) }
@@ -1735,6 +1738,9 @@ class NotebookActivity : AppCompatActivity() {
         if (nbPath != null) File("$nbPath-journal").takeIf { it.exists() }?.delete()
         // Update the index updatedAt so sort-by-date stays correct in MainActivity.
         if (nbId.isNotEmpty()) runCatching { indexRepo.touchNotebook(nbId) }
+        // Bump this notebook's recents timestamp to close-time (newest-first ordering).
+        // applicationContext — the Activity may be finishing while this seal runs on appScope.
+        if (nbId.isNotEmpty()) RecentsManager.recordClose(applicationContext, nbId)
     }
 
     // ── Persistence ───────────────────────────────────────────────────────────
