@@ -1162,9 +1162,12 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
                 lassoOverlayPath       = null
                 invalidate()
                 epd { "INVALIDATE caller=lassoUp" }
-                val dx = event.x - start.x
-                val dy = event.y - start.y
-                if (Math.sqrt((dx * dx + dy * dy).toDouble()).toFloat() < thresholdPx) {
+                // Tap vs lasso: use the gesture's overall extent, not net start→end displacement.
+                // A small circular lasso returns near its origin (tiny net displacement) but spans
+                // a real bounding box — displacement alone would misclassify it as a tap and paste.
+                val gestureBounds = RectF()
+                path.computeBounds(gestureBounds, true)
+                if (gestureBounds.width() < thresholdPx && gestureBounds.height() < thresholdPx) {
                     val hadSelection = lassoGestureHadSelection
                     lassoGestureHadSelection = false
                     onLassoTapToDismiss?.invoke()
@@ -1440,9 +1443,11 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
                 lassoEraserDisplayPath = null
                 invalidate()
                 epd { "INVALIDATE caller=lassoEraserUp" }
-                val dx = event.x - start.x
-                val dy = event.y - start.y
-                if (Math.sqrt((dx * dx + dy * dy).toDouble()).toFloat() < tapThresholdPx) {
+                // Tap vs lasso: classify by gesture extent, not net displacement, so a small
+                // circular erase gesture (returns near its origin) is not mistaken for a tap.
+                val gestureBounds = RectF()
+                path.computeBounds(gestureBounds, true)
+                if (gestureBounds.width() < tapThresholdPx && gestureBounds.height() < tapThresholdPx) {
                     // Tap: clear overlay, stay in lasso eraser mode.
                     post {
                         EpdController.handwritingRepaint(this, Rect(0, 0, width, height))
@@ -1508,30 +1513,23 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
                 }
             }
         }
-        // Heading hit-test: center-point containment within the lasso polygon.
+        // Heading / text / line hit-test: select if the lasso overlaps any part of the object's
+        // bounding box (touch semantics, matching strokes) — not just its center point.
         for (heading in headings) {
             if (!RectF.intersects(bounds, heading.boundingBox)) continue
-            val cx = heading.boundingBox.centerX().toInt()
-            val cy = heading.boundingBox.centerY().toInt()
-            if (region.contains(cx, cy)) {
+            if (LassoGeometry.regionIntersectsBox(region, heading.boundingBox)) {
                 hitIds.add(heading.id)
             }
         }
-        // Text object hit-test: center-point containment (treated atomically like headings).
         for (textObj in textObjects) {
             if (!RectF.intersects(bounds, textObj.boundingBox)) continue
-            val cx = textObj.boundingBox.centerX().toInt()
-            val cy = textObj.boundingBox.centerY().toInt()
-            if (region.contains(cx, cy)) {
+            if (LassoGeometry.regionIntersectsBox(region, textObj.boundingBox)) {
                 hitIds.add(textObj.id)
             }
         }
-        // Line object hit-test: center-point containment (bbox midpoint = line midpoint).
         for (lineObj in lineObjects) {
             if (!RectF.intersects(bounds, lineObj.boundingBox)) continue
-            val cx = lineObj.boundingBox.centerX().toInt()
-            val cy = lineObj.boundingBox.centerY().toInt()
-            if (region.contains(cx, cy)) {
+            if (LassoGeometry.regionIntersectsBox(region, lineObj.boundingBox)) {
                 hitIds.add(lineObj.id)
             }
         }

@@ -77,6 +77,7 @@ import com.notesprout.android.notebook.NotebookView
 import com.notesprout.android.notebook.GenericNotebookView
 import com.notesprout.android.notebook.OnyxNotebookView
 import com.notesprout.android.notebook.SnapPreferences
+import com.notesprout.android.notebook.LassoGeometry
 import com.notesprout.android.notebook.LineObjectDialog
 import com.notesprout.android.notebook.TextEditDialog
 import com.notesprout.android.notebook.ToolbarOverflowManager
@@ -785,34 +786,27 @@ class NotebookActivity : AppCompatActivity() {
                     }
                 }
 
-                // Heading hit-test: center-point containment within the lasso polygon.
+                // Heading / text / line hit-test: select if the lasso overlaps any part of the
+                // object's bounding box (touch semantics, matching strokes) — not just its center.
                 for (heading in headingSnapshot) {
                     if (!RectF.intersects(lassoBounds, heading.boundingBox)) continue
-                    val cx = heading.boundingBox.centerX().toInt()
-                    val cy = heading.boundingBox.centerY().toInt()
-                    if (lassoRegion.contains(cx, cy)) {
+                    if (LassoGeometry.regionIntersectsBox(lassoRegion, heading.boundingBox)) {
                         hitIds.add(heading.id)
                         unionBounds.union(heading.boundingBox)
                     }
                 }
 
-                // Text object hit-test: center-point containment within the lasso polygon.
                 for (textObj in textSnapshot) {
                     if (!RectF.intersects(lassoBounds, textObj.boundingBox)) continue
-                    val cx = textObj.boundingBox.centerX().toInt()
-                    val cy = textObj.boundingBox.centerY().toInt()
-                    if (lassoRegion.contains(cx, cy)) {
+                    if (LassoGeometry.regionIntersectsBox(lassoRegion, textObj.boundingBox)) {
                         hitIds.add(textObj.id)
                         unionBounds.union(textObj.boundingBox)
                     }
                 }
 
-                // Line object hit-test: center-point containment within the lasso polygon.
                 for (lineObj in lineSnapshot) {
                     if (!RectF.intersects(lassoBounds, lineObj.boundingBox)) continue
-                    val cx = lineObj.boundingBox.centerX().toInt()
-                    val cy = lineObj.boundingBox.centerY().toInt()
-                    if (lassoRegion.contains(cx, cy)) {
+                    if (LassoGeometry.regionIntersectsBox(lassoRegion, lineObj.boundingBox)) {
                         hitIds.add(lineObj.id)
                         unionBounds.union(lineObj.boundingBox)
                     }
