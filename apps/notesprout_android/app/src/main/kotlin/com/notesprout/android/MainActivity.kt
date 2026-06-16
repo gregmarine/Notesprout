@@ -134,6 +134,10 @@ class MainActivity : AppCompatActivity() {
     private var pinnedResults: List<SearchResult> = emptyList()
     private var pinnedListName: String = "Pinned"
 
+    // Recents browse mode — peer of pinned/search/picker, mutually exclusive with all of them.
+    // Never persisted to AppStateManager (same as search mode).
+    private var isRecentsMode = false
+
     // false while the async state-restore coroutine is running on first launch; guards the layout
     // listener and onResume from triggering a premature scan before the stack is rebuilt.
     private var isStateRestored = true
@@ -236,6 +240,9 @@ class MainActivity : AppCompatActivity() {
         binding.btnPinned.setOnClickListener { enterPinnedMode() }
         binding.btnPinnedCancel.setOnClickListener { exitPinnedMode() }
 
+        binding.btnRecents.setOnClickListener { enterRecentsMode() }
+        binding.btnRecentsCancel.setOnClickListener { exitRecentsMode() }
+
         binding.btnSort.setOnClickListener {
             SortDialog(this, sortPrefs) { newPrefs ->
                 sortPrefs = newPrefs
@@ -270,10 +277,10 @@ class MainActivity : AppCompatActivity() {
                     }
                     if (pendingScan) {
                         pendingScan = false
-                        if (isPinnedMode) {
-                            lifecycleScope.launch { renderPinnedList() }
-                        } else {
-                            scanAndRender()
+                        when {
+                            isRecentsMode -> renderRecentsList()
+                            isPinnedMode  -> lifecycleScope.launch { renderPinnedList() }
+                            else          -> scanAndRender()
                         }
                     } else {
                         renderPage()
@@ -290,10 +297,10 @@ class MainActivity : AppCompatActivity() {
             return
         }
         if (gridSpec != null) {
-            if (isPinnedMode) {
-                lifecycleScope.launch { renderPinnedList() }
-            } else {
-                scanAndRender()
+            when {
+                isRecentsMode -> renderRecentsList()
+                isPinnedMode  -> lifecycleScope.launch { renderPinnedList() }
+                else          -> scanAndRender()
             }
         } else {
             pendingScan = true
@@ -319,11 +326,13 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun enterSearchMode(query: String) {
+        clearRecentsMode()
         isSearchMode = true
         currentSearchQuery = query
         currentPage = 0
         binding.btnClearSearch.visibility = View.VISIBLE
         binding.btnPinned.visibility = View.GONE
+        binding.btnRecents.visibility = View.GONE
         binding.btnSort.visibility = View.GONE
         scanAndRender()
     }
@@ -335,11 +344,13 @@ class MainActivity : AppCompatActivity() {
         currentPage = 0
         binding.btnClearSearch.visibility = View.GONE
         binding.btnPinned.visibility = View.VISIBLE
+        binding.btnRecents.visibility = View.VISIBLE
         binding.btnSort.visibility = View.VISIBLE
         scanAndRender()
     }
 
     private fun enterPinnedMode() {
+        clearRecentsMode()
         if (isSearchMode) {
             isSearchMode = false
             currentSearchQuery = ""
@@ -374,6 +385,7 @@ class MainActivity : AppCompatActivity() {
             binding.btnClearSearch.visibility   = View.GONE
             binding.btnSort.visibility          = View.GONE
             binding.btnPinned.visibility        = View.GONE
+            binding.btnRecents.visibility       = View.GONE
         } else {
             binding.btnNewNotebook.visibility   = View.VISIBLE
             binding.btnNewFolder.visibility     = View.VISIBLE
@@ -381,6 +393,7 @@ class MainActivity : AppCompatActivity() {
             binding.btnClearSearch.visibility   = View.GONE
             binding.btnSort.visibility          = View.VISIBLE
             binding.btnPinned.visibility        = View.VISIBLE
+            binding.btnRecents.visibility       = View.VISIBLE
         }
     }
 
@@ -410,6 +423,74 @@ class MainActivity : AppCompatActivity() {
             )
         }
         items = pinnedResults.map { NotebookListItem.Notebook(it.entity) }
+        val total = totalPages()
+        currentPage = currentPage.coerceIn(0, (total - 1).coerceAtLeast(0))
+        renderPage()
+    }
+
+    // ── Recents mode ──────────────────────────────────────────────────────────
+
+    private fun enterRecentsMode() {
+        if (isSearchMode) {
+            isSearchMode = false
+            currentSearchQuery = ""
+            searchResults = emptyList()
+        }
+        isRecentsMode = true
+        currentPage = 0
+        // Recents mode is intentionally never persisted to AppStateManager (same as search).
+        applyRecentsModeUI()
+        renderRecentsList()
+    }
+
+    private fun exitRecentsMode() {
+        isRecentsMode = false
+        currentPage = 0
+        applyRecentsModeUI()
+        scanAndRender()
+    }
+
+    /** Silently drops recents mode when transitioning into another exclusive mode. */
+    private fun clearRecentsMode() {
+        if (!isRecentsMode) return
+        isRecentsMode = false
+        binding.recentsToolbar.visibility        = View.GONE
+        binding.recentsToolbarDivider.visibility = View.GONE
+        binding.breadcrumbBar.visibility         = View.VISIBLE
+        binding.breadcrumbDivider.visibility     = View.VISIBLE
+    }
+
+    private fun applyRecentsModeUI() {
+        val inRecents = isRecentsMode
+        binding.recentsToolbar.visibility        = if (inRecents) View.VISIBLE else View.GONE
+        binding.recentsToolbarDivider.visibility = if (inRecents) View.VISIBLE else View.GONE
+        binding.breadcrumbBar.visibility         = if (inRecents) View.GONE   else View.VISIBLE
+        binding.breadcrumbDivider.visibility     = if (inRecents) View.GONE   else View.VISIBLE
+        if (inRecents) {
+            binding.btnNewNotebook.visibility = View.GONE
+            binding.btnNewFolder.visibility   = View.GONE
+            binding.btnSearch.visibility      = View.GONE
+            binding.btnClearSearch.visibility = View.GONE
+            binding.btnSort.visibility        = View.GONE
+            binding.btnPinned.visibility      = View.GONE
+            binding.btnRecents.visibility     = View.GONE
+        } else {
+            binding.btnNewNotebook.visibility = View.VISIBLE
+            binding.btnNewFolder.visibility   = View.VISIBLE
+            binding.btnSearch.visibility      = View.VISIBLE
+            binding.btnClearSearch.visibility = View.GONE
+            binding.btnSort.visibility        = View.VISIBLE
+            binding.btnPinned.visibility      = View.VISIBLE
+            binding.btnRecents.visibility     = View.VISIBLE
+        }
+    }
+
+    /**
+     * Session 2 placeholder: real recents cards + the shared resolver land in Session 3.
+     * For now the list is always empty, exercising the "No recent notebooks" empty state.
+     */
+    private fun renderRecentsList() {
+        items = emptyList()
         val total = totalPages()
         currentPage = currentPage.coerceIn(0, (total - 1).coerceAtLeast(0))
         renderPage()
@@ -458,6 +539,9 @@ class MainActivity : AppCompatActivity() {
     private fun setupBackNavigation() {
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
+                if (isRecentsMode) {
+                    exitRecentsMode(); return
+                }
                 if (isPinnedMode) {
                     exitPinnedMode(); return
                 }
@@ -693,6 +777,7 @@ class MainActivity : AppCompatActivity() {
     private fun renderEmptyState() {
         val msg = when {
             destinationPickerState != DestinationPickerState.None -> "No folders here. Create one below."
+            isRecentsMode -> "No recent notebooks"
             isSearchMode -> "No notebooks found for \"$currentSearchQuery\""
             isPinnedMode -> "$pinnedListName is currently empty"
             directoryStack.size > 1 -> "Empty folder."
@@ -1207,6 +1292,7 @@ class MainActivity : AppCompatActivity() {
     // ── Destination picker mode ───────────────────────────────────────────────
 
     private fun enterPickerMode(state: DestinationPickerState) {
+        clearRecentsMode()
         if (isSearchMode) {
             isSearchMode = false
             currentSearchQuery = ""
@@ -1236,12 +1322,14 @@ class MainActivity : AppCompatActivity() {
             binding.btnClearSearch.visibility   = View.GONE
             binding.btnSort.visibility          = View.GONE
             binding.btnPinned.visibility        = View.GONE
+            binding.btnRecents.visibility       = View.GONE
         } else {
             binding.btnNewNotebook.visibility   = View.VISIBLE
             binding.btnSearch.visibility        = View.VISIBLE
             binding.btnClearSearch.visibility   = View.GONE
             binding.btnSort.visibility          = View.VISIBLE
             binding.btnPinned.visibility        = View.VISIBLE
+            binding.btnRecents.visibility       = View.VISIBLE
         }
     }
 

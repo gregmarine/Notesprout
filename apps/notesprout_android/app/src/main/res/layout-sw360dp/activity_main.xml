@@ -110,6 +110,46 @@
         android:visibility="gone" />
 
     <!--
+        Recents toolbar: shown only in recents browse mode.
+        Hidden by default; VISIBLE when isRecentsMode is true.
+    -->
+    <LinearLayout
+        android:id="@+id/recentsToolbar"
+        android:layout_width="match_parent"
+        android:layout_height="56dp"
+        android:orientation="horizontal"
+        android:background="@color/paperWhite"
+        android:gravity="center_vertical"
+        android:visibility="gone">
+
+        <TextView
+            android:id="@+id/recentsTitle"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_gravity="center_vertical"
+            android:text="Recent Notebooks"
+            android:textSize="18sp"
+            android:textColor="@color/inkBlack"
+            android:paddingStart="16dp"
+            android:paddingEnd="16dp" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnRecentsCancel"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:src="@drawable/ic_x"
+            android:contentDescription="Exit recents view" />
+
+    </LinearLayout>
+
+    <View
+        android:id="@+id/recentsToolbarDivider"
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="@color/inkBlack"
+        android:visibility="gone" />
+
+    <!--
         Breadcrumb bar: always visible for consistent layout.
         Back button and chips are hidden at root; chips populate when navigated into a subfolder.
     -->
@@ -174,6 +214,12 @@
             android:src="@drawable/ic_x"
             android:contentDescription="Clear search"
             android:visibility="gone" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnRecents"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:src="@drawable/ic_clock"
+            android:contentDescription="Recent notebooks" />
 
         <androidx.appcompat.widget.AppCompatImageButton
             android:id="@+id/btnSort"

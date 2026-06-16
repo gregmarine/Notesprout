@@ -86,7 +86,7 @@ surfaced in two places with very different UI:
 
 ---
 
-## Session 2 — MainActivity Recents Mode Scaffolding ⬜
+## Session 2 — MainActivity Recents Mode Scaffolding ✅
 **Goal:** the recents *mode* exists with correct chrome and navigation — rendered list can be a
 temporary placeholder/empty view (cards come in Session 3).
 
