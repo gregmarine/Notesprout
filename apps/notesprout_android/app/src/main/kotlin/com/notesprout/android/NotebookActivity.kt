@@ -176,6 +176,21 @@ class NotebookActivity : AppCompatActivity() {
     private var twoFingerSwipeStartY = 0f
     private var twoFingerSwipeVelocityTracker: VelocityTracker? = null
 
+    // ── Toolbar hide/show double-tap gesture (Session 7) ──────────────────────
+    // A one-finger double-tap on the canvas collapses/restores the toolbar. Finger-only and
+    // tap-vs-drag gated (short, near-stationary, single-pointer) so it never collides with the
+    // page-swipe / two-finger page-insert gestures, both of which are large/multi-touch. Stylus
+    // events never reach the detector, so writing/erasing are untouched.
+    private var toggleTapDownTime = 0L
+    private var toggleTapDownX = 0f
+    private var toggleTapDownY = 0f
+    private var toggleTapMoved = false
+    private var toggleFirstTapTime = 0L
+    private var toggleFirstTapX = 0f
+    private var toggleFirstTapY = 0f
+    private val toggleTouchSlopPx by lazy { ViewConfiguration.get(this).scaledTouchSlop }
+    private val toggleDoubleTapSlopPx by lazy { ViewConfiguration.get(this).scaledDoubleTapSlop }
+
     /** Index UUID of the open notebook — set once in onCreate from EXTRA_NOTEBOOK_ID. */
     private var notebookId: String = ""
 
@@ -1322,6 +1337,14 @@ class NotebookActivity : AppCompatActivity() {
             true
         }
 
+        // ── Toolbar hide state (Session 7) ────────────────────────────────────
+        // Restore a persisted collapsed state. Registered after the overflow init doOnLayout so that
+        // pass runs with the bar still visible (correct fit) before we hide it here. A one-finger
+        // double-tap on the canvas (handleToolbarToggleGesture) brings it back.
+        if (toolbarConfig.collapsed) {
+            binding.root.doOnLayout { applyCollapsedState() }
+        }
+
         // ── Page swipe gesture (one-finger, deliberate) ──────────────────────
         // Page navigation requires a deliberate full-width horizontal finger swipe.
         // Three guards gate the gesture: minimum distance (screen-width relative),
@@ -1435,6 +1458,7 @@ class NotebookActivity : AppCompatActivity() {
     override fun dispatchTouchEvent(event: MotionEvent): Boolean {
         if (event.getToolType(0) == MotionEvent.TOOL_TYPE_FINGER) {
             handlePageSwipe(event)
+            handleToolbarToggleGesture(event)
         }
 
         // ── Overflow: deferred close after button UP (fixes finger click + stylus click) ──
@@ -1561,6 +1585,8 @@ class NotebookActivity : AppCompatActivity() {
      * edge (down for a top bar, up for a bottom bar, right for a left bar, left for a right bar).
      */
     private fun computeToolbarExclusionRect(): Rect {
+        // Collapsed: the bar is hidden, so nothing is excluded — the whole canvas is writable.
+        if (toolbarConfig.collapsed) return Rect()
         val tb = binding.drawingToolbar
         val ext =
             if (overflowManager.isOverflowMenuOpen()) overflowManager.expectedOverflowMenuExtent() else 0
@@ -1701,6 +1727,112 @@ class NotebookActivity : AppCompatActivity() {
             }
         }
         binding.tvPageIndicator.layoutParams = lp
+    }
+
+    /**
+     * One-finger double-tap on the canvas toggles the toolbar collapsed/expanded. Always active —
+     * the double-tap is the only way to hide the bar and the only way to bring it back, so it never
+     * strands the user. Finger-only. A "tap" is a short, near-stationary, single-pointer touch that
+     * doesn't land on any toolbar chrome; two such taps within the platform double-tap window (and
+     * slop) fire the toggle. The movement + single-pointer guards keep it clear of the page-swipe
+     * and two-finger page-insert gestures (large / multi-touch).
+     */
+    private fun handleToolbarToggleGesture(event: MotionEvent) {
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                toggleTapDownTime = event.eventTime
+                toggleTapDownX = event.rawX
+                toggleTapDownY = event.rawY
+                toggleTapMoved = false
+            }
+            MotionEvent.ACTION_POINTER_DOWN -> {
+                // A second finger → this is a multi-touch gesture, never a tap.
+                toggleTapMoved = true
+                toggleFirstTapTime = 0L
+            }
+            MotionEvent.ACTION_MOVE -> {
+                if (!toggleTapMoved) {
+                    val dx = event.rawX - toggleTapDownX
+                    val dy = event.rawY - toggleTapDownY
+                    if (Math.hypot(dx.toDouble(), dy.toDouble()) > toggleTouchSlopPx) toggleTapMoved = true
+                }
+            }
+            MotionEvent.ACTION_UP -> {
+                val duration = event.eventTime - toggleTapDownTime
+                val isTap = !toggleTapMoved
+                    && event.pointerCount == 1
+                    && duration <= ViewConfiguration.getLongPressTimeout()
+                    && !isPointInToolbarChrome(event)
+                if (!isTap) {
+                    toggleFirstTapTime = 0L
+                    return
+                }
+                val now = event.eventTime
+                val withinTime = toggleFirstTapTime != 0L
+                    && now - toggleFirstTapTime <= ViewConfiguration.getDoubleTapTimeout()
+                val withinSlop = Math.hypot(
+                    (event.rawX - toggleFirstTapX).toDouble(),
+                    (event.rawY - toggleFirstTapY).toDouble(),
+                ) <= toggleDoubleTapSlopPx
+                if (withinTime && withinSlop) {
+                    toggleFirstTapTime = 0L
+                    toggleToolbarCollapsed()
+                } else {
+                    toggleFirstTapTime = now
+                    toggleFirstTapX = event.rawX
+                    toggleFirstTapY = event.rawY
+                }
+            }
+            MotionEvent.ACTION_CANCEL -> {
+                toggleTapMoved = true
+                toggleFirstTapTime = 0L
+            }
+        }
+    }
+
+    /**
+     * True if the touch lands on any visible toolbar chrome (the bar itself, an open overflow menu,
+     * or the floating selection / lasso popup toolbars) — places where a double-tap must NOT
+     * collapse the toolbar.
+     */
+    private fun isPointInToolbarChrome(event: MotionEvent): Boolean {
+        if (binding.drawingToolbar.visibility == View.VISIBLE && isTouchInToolbar(event)) return true
+        if (overflowManager.isOverflowMenuOpen()) {
+            val m = binding.overflowMenu
+            if (event.x >= m.left && event.x < m.right && event.y >= m.top && event.y < m.bottom) return true
+        }
+        for (v in arrayOf(binding.floatingSelectionToolbar, binding.lassoPopupToolbar)) {
+            if (v.visibility == View.VISIBLE && isTouchInView(event, v)) return true
+        }
+        return false
+    }
+
+    /** Flip the toolbar between collapsed (hidden, peek tab showing) and expanded, persisting the
+     *  new state so it survives a notebook reopen. */
+    private fun toggleToolbarCollapsed() {
+        toolbarConfig = toolbarConfig.copy(collapsed = !toolbarConfig.collapsed)
+        ToolbarPreferencesManager.save(this, toolbarConfig)
+        applyCollapsedState()
+    }
+
+    /**
+     * Apply [ToolbarConfig.collapsed] to the live views. Collapsed: hide the bar (closing any open
+     * overflow menu first) and clear the pen-exclusion rect so the whole canvas is writable.
+     * Expanded: show the bar and restore the exclusion rect once it relays out. Releases the EPD
+     * overlay either way so the change paints immediately on e-ink.
+     */
+    private fun applyCollapsedState() {
+        if (toolbarConfig.collapsed) {
+            if (overflowManager.isOverflowMenuOpen()) overflowManager.closeOverflowMenu()
+            binding.drawingToolbar.visibility = View.GONE
+            pushToolbarExclusion()
+        } else {
+            binding.drawingToolbar.visibility = View.VISIBLE
+            // The bar's bounds are stale (0) until it relays out from GONE → VISIBLE; push the real
+            // exclusion rect once that pass completes.
+            binding.drawingToolbar.doOnLayout { pushToolbarExclusion() }
+        }
+        drawingView.releaseRender()
     }
 
     /**

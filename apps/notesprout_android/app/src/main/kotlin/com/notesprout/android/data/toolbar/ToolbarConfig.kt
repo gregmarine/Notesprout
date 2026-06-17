@@ -19,8 +19,9 @@ import kotlinx.serialization.Serializable
  * - [miniEnabled] — on/off mini toggle; **only takes effect when [placement] is FLOAT**.
  * - [floatX]/[floatY] — last persisted float position; -1 means uninitialised → center on first show.
  * - [floatAxis] — orientation of the floating bar.
- * - [toggleGestureEnabled] — whether the one-finger double-tap hide/show gesture is active.
- * - [collapsed] — whether the toolbar is currently hidden (peek tab showing).
+ * - [collapsed] — whether the toolbar is currently hidden. A one-finger double-tap on the canvas
+ *   (always active) toggles this; a second double-tap brings the bar back. Persisted so the state
+ *   survives a notebook reopen.
  */
 @Serializable
 data class ToolbarConfig(
@@ -32,6 +33,5 @@ data class ToolbarConfig(
     val floatX: Float = -1f,
     val floatY: Float = -1f,
     val floatAxis: ToolbarAxis = ToolbarAxis.HORIZONTAL,
-    val toggleGestureEnabled: Boolean = true,
     val collapsed: Boolean = false,
 )
