@@ -3319,7 +3319,7 @@ class NotebookActivity : AppCompatActivity() {
         val textPaint = TextPaint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
             textSize = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 16f, resources.displayMetrics)
         }
-        val (measuredW, measuredH) = TextObjectRenderer.measure(recognizedText, resources.displayMetrics.widthPixels, textPaint, resources.displayMetrics.density)
+        val (measuredW, measuredH) = TextObjectRenderer.measure(recognizedText, resources.displayMetrics.widthPixels, textPaint, resources.displayMetrics.density, singleLine = true)
         return RectF(
             strokeBox.left, strokeBox.top,
             strokeBox.left + pad + measuredW + pad,
@@ -3759,7 +3759,7 @@ class NotebookActivity : AppCompatActivity() {
             val textPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
                 textSize = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 16f, resources.displayMetrics)
             }
-            val (measuredW, measuredH) = TextObjectRenderer.measure(storedText, resources.displayMetrics.widthPixels, textPaint, resources.displayMetrics.density)
+            val (measuredW, measuredH) = TextObjectRenderer.measure(storedText, resources.displayMetrics.widthPixels, textPaint, resources.displayMetrics.density, singleLine = true)
             boundsToConvert.set(
                 boundsToConvert.left, boundsToConvert.top,
                 boundsToConvert.left + pad + measuredW + pad,
@@ -4092,7 +4092,7 @@ class NotebookActivity : AppCompatActivity() {
         }
         val paddingPx = 8f * resources.displayMetrics.density
         val pageWidth = resources.displayMetrics.widthPixels
-        val (measuredW, measuredH) = TextObjectRenderer.measure(newText, pageWidth, textPaint, resources.displayMetrics.density)
+        val (measuredW, measuredH) = TextObjectRenderer.measure(newText, pageWidth, textPaint, resources.displayMetrics.density, singleLine = true)
         val newBox = RectF(
             heading.boundingBox.left,
             heading.boundingBox.top,
@@ -5660,7 +5660,7 @@ class NotebookActivity : AppCompatActivity() {
                     }
                     val paddingPx = 8f * resources.displayMetrics.density
                     val box = row.parseBoundingBox() ?: return@withContext
-                    val (measuredW, measuredH) = TextObjectRenderer.measure(targetText, pageWidthForHeading, textPaint, resources.displayMetrics.density)
+                    val (measuredW, measuredH) = TextObjectRenderer.measure(targetText, pageWidthForHeading, textPaint, resources.displayMetrics.density, singleLine = true)
                     val newBox = RectF(box.left, box.top, box.left + measuredW + 2f * paddingPx, box.top + measuredH + 2f * paddingPx)
                     val bboxJson = newBox.toBoundingBoxJson()
                     dao.updateHeadingData(action.headingId, bboxJson, updated.toJson(), now)
@@ -6245,7 +6245,7 @@ class NotebookActivity : AppCompatActivity() {
                     }
                     val paddingPx = 8f * resources.displayMetrics.density
                     val box = row.parseBoundingBox() ?: return@withContext
-                    val (measuredW, measuredH) = TextObjectRenderer.measure(targetText, pageWidthForEdit, textPaint, resources.displayMetrics.density)
+                    val (measuredW, measuredH) = TextObjectRenderer.measure(targetText, pageWidthForEdit, textPaint, resources.displayMetrics.density, singleLine = true)
                     val newBox = RectF(box.left, box.top, box.left + measuredW + 2f * paddingPx, box.top + measuredH + 2f * paddingPx)
                     val bboxJson = newBox.toBoundingBoxJson()
                     dao.updateHeadingData(action.headingId, bboxJson, updated.toJson(), now)

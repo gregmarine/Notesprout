@@ -460,8 +460,11 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
         val box = heading.boundingBox
         val paddingPx = 8f * resources.displayMetrics.density
         val innerBox = android.graphics.RectF(box.left + paddingPx, box.top + paddingPx, box.right - paddingPx, box.bottom - paddingPx)
-        val widthPx = innerBox.width().toInt().coerceAtLeast(1)
-        TextObjectRenderer.draw(canvas, TextRender(heading.id, innerBox, text), widthPx, textObjectPaint, resources.displayMetrics.density)
+        val widthPx = kotlin.math.ceil(innerBox.width().toDouble()).toInt().coerceAtLeast(1)
+        canvas.save()
+        canvas.clipRect(box)
+        TextObjectRenderer.draw(canvas, TextRender(heading.id, innerBox, text), widthPx, textObjectPaint, resources.displayMetrics.density, maxLines = 1)
+        canvas.restore()
     }
 
     /**

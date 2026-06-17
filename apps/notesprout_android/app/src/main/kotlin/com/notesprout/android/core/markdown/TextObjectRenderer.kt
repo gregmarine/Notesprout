@@ -3,6 +3,7 @@ package com.notesprout.android.core.markdown
 import android.graphics.Canvas
 import android.text.StaticLayout
 import android.text.TextPaint
+import android.text.TextUtils
 import com.notesprout.android.data.TextRender
 
 /**
@@ -34,9 +35,10 @@ object TextObjectRenderer {
         widthPx: Int,
         paint: TextPaint,
         density: Float,
+        maxLines: Int = Int.MAX_VALUE,
     ) {
         if (textRender.text.isBlank()) return
-        val layout = buildLayout(textRender.text, widthPx, paint, density)
+        val layout = buildLayout(textRender.text, widthPx, paint, density, maxLines)
         canvas.save()
         canvas.translate(textRender.boundingBox.left, textRender.boundingBox.top)
         layout.draw(canvas)
@@ -55,14 +57,21 @@ object TextObjectRenderer {
      *
      * Thread-safe — does not access any View state.
      */
+    /**
+     * @param singleLine  when true, caps layout to one line with END ellipsis — use for headings
+     *                    so the bbox height is always a single line tall. Default preserves existing
+     *                    text-object wrapping behaviour.
+     */
     fun measure(
         text: String,
         availableWidthPx: Int,
         paint: TextPaint,
         density: Float,
+        singleLine: Boolean = false,
     ): Pair<Int, Int> {
         if (text.isBlank()) return Pair(0, 0)
-        val layout = buildLayout(text, availableWidthPx, paint, density)
+        val maxLines = if (singleLine) 1 else Int.MAX_VALUE
+        val layout = buildLayout(text, availableWidthPx, paint, density, maxLines)
         val naturalWidth = (0 until layout.lineCount)
             .maxOfOrNull { i -> kotlin.math.ceil(layout.getLineWidth(i).toDouble()).toInt() }
             ?: 0
@@ -74,6 +83,7 @@ object TextObjectRenderer {
         widthPx: Int,
         paint: TextPaint,
         density: Float,
+        maxLines: Int = Int.MAX_VALUE,
     ): StaticLayout {
         val blocks = MarkdownParser.parse(text)
         val spannable = MarkdownRenderer.render(blocks, widthPx, paint, density)
@@ -83,8 +93,11 @@ object TextObjectRenderer {
         var end = spannable.length
         while (end > 0 && spannable[end - 1] == '\n') end--
         if (end < spannable.length) spannable.delete(end, spannable.length)
-        return StaticLayout.Builder
+        val builder = StaticLayout.Builder
             .obtain(spannable, 0, spannable.length, paint, widthPx)
-            .build()
+        if (maxLines < Int.MAX_VALUE) {
+            builder.setMaxLines(maxLines).setEllipsize(TextUtils.TruncateAt.END)
+        }
+        return builder.build()
     }
 }

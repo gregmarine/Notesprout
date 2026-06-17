@@ -243,8 +243,11 @@ object NotebookExporter {
                 val box = heading.boundingBox
                 val paddingPx = 8f * densityDp
                 val innerBox = android.graphics.RectF(box.left + paddingPx, box.top + paddingPx, box.right - paddingPx, box.bottom - paddingPx)
-                val widthPx = innerBox.width().toInt().coerceAtLeast(1)
-                TextObjectRenderer.draw(canvas, TextRender(heading.id, innerBox, heading.recognizedText), widthPx, textObjectPaint, densityDp)
+                val widthPx = kotlin.math.ceil(innerBox.width().toDouble()).toInt().coerceAtLeast(1)
+                canvas.save()
+                canvas.clipRect(box)
+                TextObjectRenderer.draw(canvas, TextRender(heading.id, innerBox, heading.recognizedText), widthPx, textObjectPaint, densityDp, maxLines = 1)
+                canvas.restore()
             } else {
                 for (liveStroke in heading.strokes) {
                     val pts = liveStroke.points
