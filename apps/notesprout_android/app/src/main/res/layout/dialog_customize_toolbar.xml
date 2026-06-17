@@ -143,6 +143,63 @@
 
     </LinearLayout>
 
+    <!-- Mini toolbar — float-only. Shown only while Float is the selected placement. When On, only the
+         buttons marked "Mini" (up to 5) plus Close and the gear appear. Mark membership with the
+         "Mini" toggle in the list below (visible only in Float). -->
+    <LinearLayout
+        android:id="@+id/miniSection"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:visibility="gone">
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Mini toolbar"
+            android:textColor="@color/inkBlack"
+            android:textSize="12sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="6dp" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginBottom="12dp">
+
+            <androidx.appcompat.widget.AppCompatButton
+                android:id="@+id/btnMiniOff"
+                android:layout_width="0dp"
+                android:layout_height="36dp"
+                android:layout_weight="1"
+                android:background="@drawable/bg_toolbar_button"
+                android:text="Full"
+                android:textColor="@color/inkBlack"
+                android:textSize="12sp"
+                android:textAllCaps="false"
+                android:stateListAnimator="@null"
+                android:padding="2dp" />
+
+            <Space android:layout_width="6dp" android:layout_height="0dp" />
+
+            <androidx.appcompat.widget.AppCompatButton
+                android:id="@+id/btnMiniOn"
+                android:layout_width="0dp"
+                android:layout_height="36dp"
+                android:layout_weight="1"
+                android:background="@drawable/bg_toolbar_button"
+                android:text="Mini"
+                android:textColor="@color/inkBlack"
+                android:textSize="12sp"
+                android:textAllCaps="false"
+                android:stateListAnimator="@null"
+                android:padding="2dp" />
+
+        </LinearLayout>
+
+    </LinearLayout>
+
     <View
         android:layout_width="match_parent"
         android:layout_height="1dp"
@@ -152,7 +209,7 @@
     <TextView
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="Drag the handle to reorder. Tap a row to show or hide it."
+        android:text="Drag the handle to reorder. Tap a row to show or hide it. In Float, use the Mini toggle to pick up to 5 buttons for the mini toolbar (Close and Customize are always included)."
         android:textColor="@color/inkBlack"
         android:textSize="12sp"
         android:layout_marginBottom="12dp" />

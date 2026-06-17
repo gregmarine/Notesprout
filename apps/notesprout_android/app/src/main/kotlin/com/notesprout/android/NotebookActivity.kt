@@ -1313,6 +1313,14 @@ class NotebookActivity : AppCompatActivity() {
                 onApply = { updated -> applyToolbarConfig(updated) },
             ).show()
         }
+        // Long-press the gear: a fast Full↔Mini switch without opening the dialog. Mini is float-only,
+        // so the shortcut is a no-op for edge-anchored placements (let the touch fall through).
+        binding.btnToolbarSettings.setOnLongClickListener {
+            if (toolbarConfig.placement != ToolbarPlacement.FLOAT) return@setOnLongClickListener false
+            drawingView.releaseRender()
+            applyToolbarConfig(toolbarConfig.copy(miniEnabled = !toolbarConfig.miniEnabled))
+            true
+        }
 
         // ── Page swipe gesture (one-finger, deliberate) ──────────────────────
         // Page navigation requires a deliberate full-width horizontal finger swipe.

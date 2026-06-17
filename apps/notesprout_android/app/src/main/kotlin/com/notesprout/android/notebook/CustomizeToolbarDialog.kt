@@ -9,6 +9,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.LinearLayout
 import android.widget.ScrollView
+import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.core.content.ContextCompat
 import androidx.appcompat.widget.AppCompatButton
@@ -38,6 +39,15 @@ class CustomizeToolbarDialog(
     private val onApply: (ToolbarConfig) -> Unit,
 ) {
     private val hidden: MutableSet<String> = current.hidden.toMutableSet()
+
+    /** Live mini on/off; committed to the config on Save. */
+    private var miniEnabled: Boolean = current.miniEnabled
+
+    /** Live mini-set membership — the up-to-[MINI_MAX] *extra* buttons (Close and the gear are always
+     *  in mini and are excluded here). The saved [ToolbarConfig.miniSet] preserves the full-list
+     *  order — this is just the chosen subset. */
+    private val miniSelection: MutableSet<String> = current.miniSet
+        .filterTo(mutableSetOf()) { it != ToolbarButtonRegistry.PINNED_KEY && it != ToolbarButtonRegistry.SETTINGS_KEY }
 
     /** Live placement selection; committed to the config on Save. */
     private var placement: ToolbarPlacement = current.placement
@@ -82,6 +92,7 @@ class CustomizeToolbarDialog(
         scrollView = binding.rowScroll
         container = binding.rowContainer
         bindPlacementControl(binding)
+        bindMiniControl(binding)
         populateRows(binding.rowContainer, workingOrder(current.order))
 
         val dialog = AlertDialog.Builder(context)
@@ -112,20 +123,49 @@ class CustomizeToolbarDialog(
             hidden.clear()
             placement = ToolbarPlacement.TOP
             floatAxis = ToolbarAxis.HORIZONTAL
+            miniEnabled = false
+            miniSelection.clear()
+            miniSelection.addAll(ToolbarButtonRegistry.DEFAULT_MINI)
             refreshPlacementButtons(binding)
+            refreshMiniButtons(binding)
             populateRows(binding.rowContainer, ToolbarButtonRegistry.DEFAULT_ORDER)
         }
 
         dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
             val newOrder = readOrder(binding.rowContainer)
+            // miniSet preserves the full-list order, filtered to the chosen membership.
+            val newMiniSet = newOrder.filter { it in miniSelection }
             onApply(current.copy(
                 order = newOrder,
                 hidden = hidden.toSet(),
                 placement = placement,
                 floatAxis = floatAxis,
+                miniEnabled = miniEnabled,
+                miniSet = newMiniSet,
             ))
             dialog.dismiss()
         }
+    }
+
+    /**
+     * Wire the Full/Mini on/off toggle. There is no minimum extra-button count — mini can be just
+     * Close + the gear — so enabling never needs to seed a set.
+     */
+    private fun bindMiniControl(binding: DialogCustomizeToolbarBinding) {
+        binding.btnMiniOff.setOnClickListener {
+            miniEnabled = false
+            refreshMiniButtons(binding)
+        }
+        binding.btnMiniOn.setOnClickListener {
+            miniEnabled = true
+            refreshMiniButtons(binding)
+        }
+        refreshMiniButtons(binding)
+    }
+
+    private fun refreshMiniButtons(binding: DialogCustomizeToolbarBinding) {
+        binding.btnMiniOff.isSelected = !miniEnabled
+        binding.btnMiniOn.isSelected = miniEnabled
     }
 
     /**
@@ -153,9 +193,26 @@ class CustomizeToolbarDialog(
             binding.btnPlaceFloat to ToolbarPlacement.FLOAT,
         )
         for ((button, value) in map) button.isSelected = value == placement
-        binding.axisRow.visibility = if (placement == ToolbarPlacement.FLOAT) View.VISIBLE else View.GONE
+        val isFloat = placement == ToolbarPlacement.FLOAT
+        binding.axisRow.visibility = if (isFloat) View.VISIBLE else View.GONE
         binding.btnAxisHorizontal.isSelected = floatAxis == ToolbarAxis.HORIZONTAL
         binding.btnAxisVertical.isSelected = floatAxis == ToolbarAxis.VERTICAL
+        // Mini is a float-only feature — its control and the per-row Mini toggles only show in Float.
+        binding.miniSection.visibility = if (isFloat) View.VISIBLE else View.GONE
+        refreshMiniRowVisibility(isFloat)
+    }
+
+    /** Show the per-row Mini toggles only in Float; Close and the gear never show one (they're always
+     *  in mini, so there's nothing to choose). Safe to call before the rows are populated. */
+    private fun refreshMiniRowVisibility(isFloat: Boolean) {
+        if (!this::container.isInitialized) return
+        for (i in 0 until container.childCount) {
+            val child = container.getChildAt(i)
+            val key = child.tag as? String ?: continue
+            val alwaysInMini = key == ToolbarButtonRegistry.PINNED_KEY || key == ToolbarButtonRegistry.SETTINGS_KEY
+            child.findViewById<View>(R.id.miniToggle)?.visibility =
+                if (isFloat && !alwaysInMini) View.VISIBLE else View.GONE
+        }
     }
 
     /**
@@ -187,9 +244,32 @@ class CustomizeToolbarDialog(
                     bindVisibility(row, spec)
                 }
             }
+
+            // Mini-set membership toggle (float-only). Close and the gear are always in mini and don't
+            // count against the budget, so they show no toggle at all. Everyone else is a free choice,
+            // capped at MINI_MAX extras; there is no minimum. Visibility is set by
+            // refreshMiniRowVisibility once placement is known.
+            val alwaysInMini = key == ToolbarButtonRegistry.PINNED_KEY || key == ToolbarButtonRegistry.SETTINGS_KEY
+            if (alwaysInMini) {
+                row.miniToggle.visibility = View.GONE
+            } else {
+                row.miniToggle.isSelected = key in miniSelection
+                row.miniToggle.setOnClickListener {
+                    if (key in miniSelection) {
+                        miniSelection.remove(key)
+                    } else if (miniSelection.size >= MINI_MAX) {
+                        Toast.makeText(context, "Mini toolbar holds at most $MINI_MAX extra buttons", Toast.LENGTH_SHORT).show()
+                    } else {
+                        miniSelection.add(key)
+                    }
+                    row.miniToggle.isSelected = key in miniSelection
+                }
+            }
+
             attachDragHandle(container, row)
             container.addView(row.root)
         }
+        refreshMiniRowVisibility(placement == ToolbarPlacement.FLOAT)
     }
 
     private fun bindVisibility(row: ItemToolbarCustomizeRowBinding, spec: ToolbarButtonRegistry.ButtonSpec) {
@@ -329,4 +409,9 @@ class CustomizeToolbarDialog(
 
     private fun readOrder(container: LinearLayout): List<String> =
         (0 until container.childCount).mapNotNull { container.getChildAt(it).tag as? String }
+
+    companion object {
+        /** Max *extra* buttons in the mini set (Close + the gear are always present on top of this). */
+        const val MINI_MAX = 5
+    }
 }

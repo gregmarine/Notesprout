@@ -254,7 +254,7 @@ Lasso/floating toolbar positions sane.
 
 ---
 
-### Session 5/7 — Float mode
+### Session 5/7 — Float mode ✅ DONE
 
 **Goal:** A draggable floating bar at ~75% of the matching screen dimension; position persists.
 
@@ -277,22 +277,28 @@ under the floating bar (and its overflow). Both axes work.
 
 ---
 
-### Session 6/7 — Mini toolbar
+### Session 6/7 — Mini toolbar ✅ DONE
 
-**Goal:** An independent mini toggle showing only the user's 3–5 chosen buttons, at any placement.
+**Goal:** A mini toggle showing a compact button set. **Revised during the session:** mini is
+**float-only** (not "any placement") and the count rule changed — **Close + the gear are always
+present and don't count; the user picks up to 5 extra buttons (7 max total), no minimum.**
 
-**Steps**
-1. Mini-set picker in the customize dialog: choose 3–5 keys (enforce min/max). Persist `miniSet`.
-2. A quick **mini on/off toggle** — both in the dialog and (proposed) a long-press on the gear
-   button for a fast switch. `miniEnabled` persists.
-3. `ToolbarLayoutManager`: when `miniEnabled`, active visible list = `miniSet` (Close still
-   force-included if not chosen? — **decision:** Close is *not* force-added in mini; the peek
-   tab + gesture guarantee recovery, and mini is meant to be tiny. Confirm during impl).
-4. Mini composes with every placement (top/right/bottom/left/float) — it's just a shorter
-   visible list; overflow rarely triggers.
+**What shipped**
+1. Mini-set picker in the customize dialog: per-row **Mini** toggle marks membership, capped at 5
+   extras (no minimum). Close/gear show no toggle (always in mini). Persists `miniSet` (extras only,
+   excludes Close/gear; saved in full-list order).
+2. **Mini on/off toggle** in the dialog (Full/Mini) **plus** a long-press on the gear for a fast
+   switch. Both are **float-only** — the dialog section + per-row toggles only appear when Float is
+   the selected placement, and the long-press is a no-op when anchored. `miniEnabled` persists.
+3. `ToolbarLayoutManager.resolveVisibleKeys`: when `miniEnabled` **and** `placement == FLOAT`, the
+   visible list is **Close (leading) → up to 5 chosen → gear (trailing)**. Close is force-included
+   here (kept as the way out); the gear is force-included as the only path back to the dialog.
+4. A mini float **hugs its content** — `WRAP_CONTENT` on the main axis instead of the 75% length, so
+   no trailing blank space. The weighted overflow spacer collapses to zero in a wrap-content bar.
 
-**Test on G10:** Pick a mini set, toggle mini on at top, then at float, then at left. Only the
-chosen buttons show. Toggle back to full restores the configured full bar.
+**Test on G10:** ✅ Float + Mini hugs its buttons and drags/persists; pick up to 5 extras (7 total),
+6th blocked; deselect all → just Close + gear; anchored placements show no mini UI and ignore the
+flag; long-press gear flips Full↔Mini in Float.
 
 **Commit:** `🌱 Customizable toolbar: mini toolbar mode (Session 6/7)`
 
@@ -345,6 +351,8 @@ here as they come up so none are lost, then triage into concrete steps before im
     target slots, reflow); still hand-rolled (no RecyclerView); how Close/gear pinning reads in a grid
     (locked cells?); how the mini-set picker (Session 6) composes with this layout; cross-panel drag
     must preserve the move-not-clone + key-stability contracts.
+- **Remove the toolbar dividers.** Revisit whether the auto-managed group dividers earn their keep —
+  consider dropping them entirely for a cleaner, calmer bar. Just an idea to evaluate; not yet decided.
 
 **Process:** Each idea gets a short note now; we discuss + scope before building. May split into
 multiple commits. Same session protocol (build → install on G10 → verify → commit, no push).

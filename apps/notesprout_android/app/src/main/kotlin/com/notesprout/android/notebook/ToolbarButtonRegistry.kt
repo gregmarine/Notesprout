@@ -34,6 +34,13 @@ object ToolbarButtonRegistry {
     /** The stable key of the pinned Close button — always present, never hideable. */
     const val PINNED_KEY = "close"
 
+    /**
+     * The stable key of the Customize-Toolbar gear. Force-included in mini mode (see
+     * [ToolbarLayoutManager.resolveVisibleKeys]) so the user can always reopen the dialog and toggle
+     * mini back off — the customize dialog is the only entry point to that toggle.
+     */
+    const val SETTINGS_KEY = "toolbarSettings"
+
     data class ButtonSpec(
         val key: String,
         @IdRes val viewId: Int,

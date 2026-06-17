@@ -14,8 +14,9 @@ import kotlinx.serialization.Serializable
  * - [order] — the full button order as stable [ToolbarButtonRegistry] keys, first-to-last.
  *   There is no user-facing spacer; buttons pack against the leading edge.
  * - [hidden] — keys the user has hidden. The pinned Close button can never be hidden.
- * - [miniSet] — the 3–5 keys shown when [miniEnabled] is on (full picker lands in a later session).
- * - [miniEnabled] — independent on/off mini toggle layered on top of [placement].
+ * - [miniSet] — the up-to-5 *extra* keys shown when [miniEnabled] is on; Close and the gear are
+ *   always added on top of these, for a 7-button maximum. Excludes Close/gear.
+ * - [miniEnabled] — on/off mini toggle; **only takes effect when [placement] is FLOAT**.
  * - [floatX]/[floatY] — last persisted float position; -1 means uninitialised → center on first show.
  * - [floatAxis] — orientation of the floating bar.
  * - [toggleGestureEnabled] — whether the one-finger double-tap hide/show gesture is active.

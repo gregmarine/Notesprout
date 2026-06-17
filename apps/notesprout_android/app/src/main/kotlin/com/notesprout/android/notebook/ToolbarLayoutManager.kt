@@ -158,15 +158,26 @@ class ToolbarLayoutManager(
                 toolbar.orientation = if (horizontal) LinearLayout.HORIZONTAL else LinearLayout.VERTICAL
                 toolbar.gravity = if (horizontal) Gravity.CENTER_VERTICAL else Gravity.CENTER_HORIZONTAL
                 lp.gravity = Gravity.TOP or Gravity.START
+                // Mini floats hug their content (only as long as the buttons need); full floats span a
+                // fixed FLOAT_LENGTH_FRACTION of the matching screen dimension on their main axis.
+                val mainSize = if (config.miniEnabled) {
+                    FrameLayout.LayoutParams.WRAP_CONTENT
+                } else if (horizontal) {
+                    (dm.widthPixels * FLOAT_LENGTH_FRACTION).toInt()
+                } else {
+                    (dm.heightPixels * FLOAT_LENGTH_FRACTION).toInt()
+                }
                 if (horizontal) {
-                    lp.width = (dm.widthPixels * FLOAT_LENGTH_FRACTION).toInt()
+                    lp.width = mainSize
                     lp.height = barThicknessPx
                 } else {
                     lp.width = barThicknessPx
-                    lp.height = (dm.heightPixels * FLOAT_LENGTH_FRACTION).toInt()
+                    lp.height = mainSize
                 }
-                val maxX = (dm.widthPixels - lp.width).coerceAtLeast(0)
-                val maxY = (dm.heightPixels - lp.height).coerceAtLeast(0)
+                // WRAP_CONTENT (-2) has no measured extent yet; clamp against the full screen and let
+                // the drag handler re-clamp using the real measured size on the first move.
+                val maxX = if (lp.width >= 0) (dm.widthPixels - lp.width).coerceAtLeast(0) else dm.widthPixels
+                val maxY = if (lp.height >= 0) (dm.heightPixels - lp.height).coerceAtLeast(0) else dm.heightPixels
                 val x = if (config.floatX < 0f) maxX / 2 else config.floatX.toInt()
                 val y = if (config.floatY < 0f) maxY / 2 else config.floatY.toInt()
                 lp.leftMargin = x.coerceIn(0, maxX)
@@ -229,15 +240,33 @@ class ToolbarLayoutManager(
     }
 
     /**
-     * order − hidden, in config order, keeping only keys with a registered spec. The pinned Close
-     * is always retained (even if listed in `hidden`) and force-prepended if missing from `order`.
+     * The active visible key list for [config].
      *
-     * Keys are append-only: a config persisted before a button shipped won't list that key. Any
-     * registered key missing from `order` (and not hidden) is appended at the end so new buttons
-     * always surface — otherwise, e.g., the gear that opens the customize dialog could vanish for
-     * users with an older saved config.
+     * **Mini mode** (`miniEnabled` *and* FLOAT placement — mini is a float-only feature): a tight bar
+     * of **Close + up to 5 chosen buttons + the gear**.
+     * Close always leads and the gear always trails — both are mandatory (Close keeps the way out of
+     * the notebook; the gear is the only way back into the dialog to switch mini off), so neither
+     * counts against the user's 5-button budget. The chosen `miniSet` (already excludes Close/gear)
+     * sits between them, in its own order, filtered to keys with a registered spec.
+     *
+     * **Full mode** (default): `order − hidden`, in config order, keeping only keys with a registered
+     * spec. The pinned Close is always retained (even if listed in `hidden`) and force-prepended if
+     * missing from `order`. Keys are append-only: a config persisted before a button shipped won't
+     * list that key, so any registered key missing from `order` (and not hidden) is appended at the
+     * end — otherwise, e.g., a newly added button could vanish for users with an older saved config.
      */
     private fun resolveVisibleKeys(config: ToolbarConfig): List<String> {
+        if (config.miniEnabled && config.placement == ToolbarPlacement.FLOAT) {
+            val close = ToolbarButtonRegistry.PINNED_KEY
+            val gear = ToolbarButtonRegistry.SETTINGS_KEY
+            val result = mutableListOf<String>()
+            if (ToolbarButtonRegistry.spec(close) != null) result.add(close)
+            config.miniSet.filterTo(result) { key ->
+                key != close && key != gear && ToolbarButtonRegistry.spec(key) != null
+            }
+            if (ToolbarButtonRegistry.spec(gear) != null) result.add(gear)
+            return result
+        }
         val pinned = ToolbarButtonRegistry.PINNED_KEY
         val result = config.order.filterTo(mutableListOf()) { key ->
             ToolbarButtonRegistry.spec(key) != null && (key == pinned || key !in config.hidden)
