@@ -101,6 +101,7 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlin.coroutines.resume
+import kotlin.math.abs
 import java.io.File
 import java.util.Locale
 import java.util.UUID
@@ -114,6 +115,11 @@ class NotebookActivity : AppCompatActivity() {
         const val EXTRA_NOTEBOOK_ID   = "notebook_id"
         /** Intent extra key — the display name for the notebook. */
         const val EXTRA_NOTEBOOK_NAME = "notebook_name"
+
+        // One-finger page-turn gesture thresholds.
+        private const val PAGE_SWIPE_MIN_DISTANCE_FRAC  = 0.30f  // min |dx| to qualify at all
+        private const val PAGE_SWIPE_LONG_DISTANCE_FRAC = 0.50f  // |dx| that qualifies regardless of velocity
+        private const val PAGE_SWIPE_MIN_VELOCITY_MULT  = 1.0f   // x scaledMinimumFlingVelocity
     }
 
     /**
@@ -1967,7 +1973,26 @@ class NotebookActivity : AppCompatActivity() {
                 pageSwipeVelocityTracker = VelocityTracker.obtain().also { it.addMovement(event) }
             }
             MotionEvent.ACTION_POINTER_DOWN -> {
-                // Cancel the 1-finger gesture unconditionally.
+                // If the one-finger swipe already covers qualifying distance, commit it now
+                // before the second finger lands — a palm mid-swipe must not kill a valid turn.
+                if (pageSwipeActive) {
+                    val tracker = pageSwipeVelocityTracker
+                    val dx = event.getX(0) - pageSwipeStartX
+                    val dy = event.getY(0) - pageSwipeStartY
+                    if (tracker != null && pageSwipeQualifies(dx, dy)) {
+                        tracker.addMovement(event)
+                        tracker.computeCurrentVelocity(1000)
+                        val vx = tracker.getXVelocity(0)
+                        val vy = tracker.getYVelocity(0)
+                        evaluatePageFling(vx, vy, dx, dy)
+                        tracker.recycle()
+                        pageSwipeVelocityTracker = null
+                        pageSwipeActive = false
+                        // Do NOT arm the two-finger insert — one-finger turn was committed.
+                        return
+                    }
+                }
+                // Cancel the 1-finger gesture.
                 pageSwipeActive = false
                 pageSwipeVelocityTracker?.recycle()
                 pageSwipeVelocityTracker = null
@@ -2046,27 +2071,60 @@ class NotebookActivity : AppCompatActivity() {
     }
 
     /**
-     * Applies three guards and navigates pages if the gesture qualifies.
+     * Returns true if the displacement is horizontal-dominant and covers the minimum
+     * qualifying distance. Used to commit a page turn early when a second finger lands.
+     */
+    private fun pageSwipeQualifies(dx: Float, dy: Float): Boolean {
+        val absDx = abs(dx)
+        val absDy = abs(dy)
+        if (absDx <= absDy) return false
+        val minDist = PAGE_SWIPE_MIN_DISTANCE_FRAC * resources.displayMetrics.widthPixels.toFloat()
+        return absDx >= minDist
+    }
+
+    /**
+     * Navigates pages if the gesture qualifies.
      *
-     * Guard 1 — minimum distance: ≥50% of screen width.
-     * Guard 2 — minimum velocity: 1.5× [ViewConfiguration.scaledMinimumFlingVelocity].
-     * Guard 3 — horizontal dominance: |dx| > |dy|.
+     * Distance is the primary gate: ≥30% of screen width is required; ≥50% qualifies
+     * regardless of velocity. A quick flick covering ≥30% also qualifies. Direction
+     * is derived from displacement (dx), never from velocity, to avoid sign flips when
+     * the finger decelerates at lift-off.
      *
      * Swipe left (dx < 0) → next page (or insert new page on last page).
      * Swipe right (dx > 0) → previous page.
      */
     private fun evaluatePageFling(velocityX: Float, velocityY: Float, dx: Float, dy: Float) {
-        // Guard 3: displacement must be predominantly horizontal.
-        if (Math.abs(dx) <= Math.abs(dy)) return
-        // Guard 2: must meet 1.5× system minimum fling velocity.
-        val minVelocity = ViewConfiguration.get(this).scaledMinimumFlingVelocity * 1.5f
-        if (Math.abs(velocityX) < minVelocity) return
-        // Guard 1: minimum distance relative to screen width.
-        val dm = resources.displayMetrics
-        val screenWidthPx = dm.widthPixels.toFloat()
-        if (Math.abs(dx) < 0.50f * screenWidthPx) return
+        val absDx = abs(dx)
+        val absDy = abs(dy)
+        val width  = resources.displayMetrics.widthPixels.toFloat()
+        val minDist = PAGE_SWIPE_MIN_DISTANCE_FRAC  * width
+        val minVel  = ViewConfiguration.get(this).scaledMinimumFlingVelocity * PAGE_SWIPE_MIN_VELOCITY_MULT
+        val fastEnough = abs(velocityX) >= minVel
+        val longEnough = absDx >= PAGE_SWIPE_LONG_DISTANCE_FRAC * width
 
-        if (velocityX < 0) {
+        Slog.d(TAG) {
+            "evaluatePageFling dx=$dx dy=$dy vx=$velocityX vy=$velocityY " +
+            "width=$width minDist=$minDist minVel=$minVel " +
+            "fastEnough=$fastEnough longEnough=$longEnough"
+        }
+
+        if (absDx <= absDy) {
+            Slog.d(TAG) { "evaluatePageFling rejected: not horizontal (absDx=$absDx absDy=$absDy)" }
+            return
+        }
+        if (absDx < minDist) {
+            Slog.d(TAG) { "evaluatePageFling rejected: too short (absDx=$absDx minDist=$minDist)" }
+            return
+        }
+        if (!fastEnough && !longEnough) {
+            Slog.d(TAG) { "evaluatePageFling rejected: neither fast nor long" }
+            return
+        }
+
+        val goNext = dx < 0
+        Slog.d(TAG) { "evaluatePageFling accepted: ${if (goNext) "next" else "prev"}" }
+
+        if (goNext) {
             // Swipe left → advance to next page.
             val next = currentPageIndex + 1
             if (next <= pages.lastIndex) {
