@@ -85,6 +85,7 @@ import com.notesprout.android.notebook.TextEditDialog
 import com.notesprout.android.notebook.CustomizeToolbarDialog
 import com.notesprout.android.notebook.ToolbarOverflowManager
 import com.notesprout.android.notebook.ToolbarLayoutManager
+import com.notesprout.android.data.toolbar.ToolbarAxis
 import com.notesprout.android.data.toolbar.ToolbarConfig
 import com.notesprout.android.data.toolbar.ToolbarPlacement
 import com.notesprout.android.data.toolbar.ToolbarPreferencesManager
@@ -1266,16 +1267,23 @@ class NotebookActivity : AppCompatActivity() {
         )
         toolbarConfig = ToolbarPreferencesManager.load(this)
         toolbarLayoutManager.apply(toolbarConfig)
-        positionOverflowMenu()
-        positionPageIndicator()
 
         // ── Toolbar overflow ──────────────────────────────────────────────────
+        // Constructed before positionOverflowMenu()/positionPageIndicator(): those read the overflow
+        // manager (FLOAT's menu anchoring asks it for the menu extent), so it must exist first.
         overflowManager = ToolbarOverflowManager(
             toolbar        = binding.drawingToolbar,
             overflowMenu   = binding.overflowMenu,
             dividerOverflow = binding.dividerOverflow,
             btnOverflow    = binding.btnOverflow,
         )
+        // FLOAT mode: pin the drag handle in the overflow manager + wire its long-drag behaviour.
+        overflowManager.setLeadingPinned(toolbarLayoutManager.dragHandle)
+        wireFloatDragHandle()
+
+        positionOverflowMenu()
+        positionPageIndicator()
+
         binding.drawingToolbar.doOnLayout {
             overflowManager.initialize()
             overflowManager.recalc()
@@ -1552,6 +1560,18 @@ class NotebookActivity : AppCompatActivity() {
             ToolbarPlacement.BOTTOM -> Rect(tb.left, tb.top - ext, tb.right, tb.bottom)
             ToolbarPlacement.LEFT   -> Rect(tb.left, tb.top, tb.right + ext, tb.bottom)
             ToolbarPlacement.RIGHT  -> Rect(tb.left - ext, tb.top, tb.right, tb.bottom)
+            ToolbarPlacement.FLOAT  -> {
+                // The floating bar sits at its margins inside the root; its laid-out bounds ARE the
+                // rect. Overflow grows below a horizontal bar / right of a vertical bar — or flips to
+                // the leading side near the far screen edge (matching positionOverflowMenu).
+                val before = floatOverflowOpensBefore()
+                if (toolbarConfig.floatAxis == ToolbarAxis.HORIZONTAL)
+                    if (before) Rect(tb.left, tb.top - ext, tb.right, tb.bottom)
+                    else Rect(tb.left, tb.top, tb.right, tb.bottom + ext)
+                else
+                    if (before) Rect(tb.left - ext, tb.top, tb.right, tb.bottom)
+                    else Rect(tb.left, tb.top, tb.right + ext, tb.bottom)
+            }
             else                    -> Rect(tb.left, tb.top, tb.right, tb.bottom + ext) // TOP
         }
     }
@@ -1559,6 +1579,30 @@ class NotebookActivity : AppCompatActivity() {
     /** Push the current toolbar exclusion rect to the drawing view (BOOX pen layer). */
     private fun pushToolbarExclusion() {
         drawingView.setToolbarExclusion(computeToolbarExclusionRect())
+    }
+
+    /**
+     * For FLOAT only: should the overflow menu open on the bar's *leading* side — above a horizontal
+     * bar / left of a vertical bar — instead of the default trailing side? True only when the trailing
+     * side can't fit the menu AND the leading side has more room, so a bar dragged near the far screen
+     * edge keeps its overflow on-screen. Both [positionOverflowMenu] and [computeToolbarExclusionRect]
+     * consult this so the menu and the pen-exclusion rect always agree.
+     */
+    private fun floatOverflowOpensBefore(): Boolean {
+        if (toolbarConfig.placement != ToolbarPlacement.FLOAT) return false
+        // positionOverflowMenu() runs once in onCreate before overflowManager is constructed; there's
+        // no overflow content yet, so the menu can't open on the leading side.
+        if (!::overflowManager.isInitialized) return false
+        val tbLp = binding.drawingToolbar.layoutParams as FrameLayout.LayoutParams
+        val ext = overflowManager.expectedOverflowMenuExtent()
+        if (ext <= 0) return false
+        return if (toolbarConfig.floatAxis == ToolbarAxis.HORIZONTAL) {
+            val roomAfter = binding.root.height - (tbLp.topMargin + tbLp.height)
+            roomAfter < ext && tbLp.topMargin > roomAfter
+        } else {
+            val roomAfter = binding.root.width - (tbLp.leftMargin + tbLp.width)
+            roomAfter < ext && tbLp.leftMargin > roomAfter
+        }
     }
 
     /**
@@ -1591,6 +1635,26 @@ class NotebookActivity : AppCompatActivity() {
                 lp.gravity = Gravity.BOTTOM
                 lp.width = match; lp.height = wrap
                 lp.bottomMargin = thick
+            }
+            ToolbarPlacement.FLOAT -> {
+                // The menu tracks the floating bar's position (top-left margins), not a screen edge,
+                // and matches the bar's main-axis extent so its packing lines line up with the bar.
+                // Near the far screen edge it flips to the leading side (above / left of the bar).
+                val tbLp = binding.drawingToolbar.layoutParams as FrameLayout.LayoutParams
+                val before = floatOverflowOpensBefore()
+                val ext = overflowManager.expectedOverflowMenuExtent()
+                lp.gravity = Gravity.TOP or Gravity.START
+                if (toolbarConfig.floatAxis == ToolbarAxis.HORIZONTAL) {
+                    menu.orientation = LinearLayout.VERTICAL
+                    lp.width = tbLp.width; lp.height = wrap
+                    lp.leftMargin = tbLp.leftMargin
+                    lp.topMargin = if (before) tbLp.topMargin - ext else tbLp.topMargin + thick
+                } else {
+                    menu.orientation = LinearLayout.HORIZONTAL
+                    lp.width = wrap; lp.height = tbLp.height
+                    lp.leftMargin = if (before) tbLp.leftMargin - ext else tbLp.leftMargin + thick
+                    lp.topMargin = tbLp.topMargin
+                }
             }
             else -> {
                 menu.orientation = LinearLayout.VERTICAL
@@ -1642,7 +1706,9 @@ class NotebookActivity : AppCompatActivity() {
         ToolbarPreferencesManager.save(this, config)
         closeOverflowMenu()
         toolbarLayoutManager.apply(config)
+        overflowManager.setLeadingPinned(toolbarLayoutManager.dragHandle)
         overflowManager.reset()
+        wireFloatDragHandle()
         positionOverflowMenu()
         positionPageIndicator()
         // Placement may have moved the bar; the cached lasso anchor must be recomputed against the
@@ -1674,7 +1740,65 @@ class NotebookActivity : AppCompatActivity() {
     private fun recalcOverflowAfterLayout() {
         binding.drawingToolbar.post {
             overflowManager.recalc()
+            // recalc may have changed the overflow line count; re-anchor the menu (FLOAT's open-side
+            // decision reads that count) before pushing the matching exclusion rect.
+            positionOverflowMenu()
             pushToolbarExclusion()
+        }
+    }
+
+    /**
+     * Wire (or no-op) the long-drag behaviour on the FLOAT bar's grip handle. A finger drag on the
+     * handle repositions the floating bar within the screen; on release the new `{floatX, floatY}`
+     * are persisted and the pen exclusion rect + overflow menu anchor are refreshed for the new spot.
+     *
+     * Cancels any armed page-swipe on touch-down so dragging the bar across the screen never turns a
+     * page. No-op for edge-anchored placements (the handle only exists in FLOAT). Re-called after each
+     * [toolbarLayoutManager] apply, since FLOAT re-entry creates a fresh handle.
+     */
+    private fun wireFloatDragHandle() {
+        val handle = toolbarLayoutManager.dragHandle ?: return
+        var startRawX = 0f
+        var startRawY = 0f
+        var startMarginL = 0
+        var startMarginT = 0
+        handle.setOnTouchListener { _, event ->
+            val lp = binding.drawingToolbar.layoutParams as FrameLayout.LayoutParams
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    // dispatchTouchEvent armed the page-swipe on this same finger DOWN; disarm it so a
+                    // long bar drag can't satisfy the swipe distance and turn a page.
+                    pageSwipeActive = false
+                    drawingView.releaseRender()
+                    startRawX = event.rawX
+                    startRawY = event.rawY
+                    startMarginL = lp.leftMargin
+                    startMarginT = lp.topMargin
+                    true
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    val maxX = (binding.root.width - binding.drawingToolbar.width).coerceAtLeast(0)
+                    val maxY = (binding.root.height - binding.drawingToolbar.height).coerceAtLeast(0)
+                    lp.leftMargin = (startMarginL + (event.rawX - startRawX).toInt()).coerceIn(0, maxX)
+                    lp.topMargin  = (startMarginT + (event.rawY - startRawY).toInt()).coerceIn(0, maxY)
+                    binding.drawingToolbar.layoutParams = lp
+                    true
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    toolbarConfig = toolbarConfig.copy(
+                        floatX = lp.leftMargin.toFloat(),
+                        floatY = lp.topMargin.toFloat(),
+                    )
+                    ToolbarPreferencesManager.save(this, toolbarConfig)
+                    // Re-anchor pen exclusion + overflow menu to the bar's new resting position.
+                    binding.drawingToolbar.doOnLayout {
+                        pushToolbarExclusion()
+                        positionOverflowMenu()
+                    }
+                    true
+                }
+                else -> false
+            }
         }
     }
 

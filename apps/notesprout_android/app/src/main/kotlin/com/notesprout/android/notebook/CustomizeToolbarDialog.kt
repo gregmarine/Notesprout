@@ -13,6 +13,7 @@ import androidx.appcompat.app.AlertDialog
 import androidx.core.content.ContextCompat
 import androidx.appcompat.widget.AppCompatButton
 import com.notesprout.android.R
+import com.notesprout.android.data.toolbar.ToolbarAxis
 import com.notesprout.android.data.toolbar.ToolbarConfig
 import com.notesprout.android.data.toolbar.ToolbarPlacement
 import com.notesprout.android.databinding.DialogCustomizeToolbarBinding
@@ -40,6 +41,9 @@ class CustomizeToolbarDialog(
 
     /** Live placement selection; committed to the config on Save. */
     private var placement: ToolbarPlacement = current.placement
+
+    /** Live float-axis selection; only meaningful when [placement] is FLOAT. */
+    private var floatAxis: ToolbarAxis = current.floatAxis
 
     private val density = context.resources.displayMetrics.density
 
@@ -107,30 +111,36 @@ class CustomizeToolbarDialog(
         dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener {
             hidden.clear()
             placement = ToolbarPlacement.TOP
+            floatAxis = ToolbarAxis.HORIZONTAL
             refreshPlacementButtons(binding)
             populateRows(binding.rowContainer, ToolbarButtonRegistry.DEFAULT_ORDER)
         }
 
         dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
             val newOrder = readOrder(binding.rowContainer)
-            onApply(current.copy(order = newOrder, hidden = hidden.toSet(), placement = placement))
+            onApply(current.copy(
+                order = newOrder,
+                hidden = hidden.toSet(),
+                placement = placement,
+                floatAxis = floatAxis,
+            ))
             dialog.dismiss()
         }
     }
 
     /**
-     * Wire the placement segmented control. Top/Bottom/Left/Right are live; Float is disabled until
-     * a later session (greyed, non-tappable) but shown so the full model is visible. The selected
-     * placement is indicated with `isSelected` (border via `bg_toolbar_button`).
+     * Wire the placement segmented control (all five placements live) and the float-axis toggle. The
+     * axis row is shown only while Float is selected. Selected state is indicated with `isSelected`
+     * (border via `bg_toolbar_button`).
      */
     private fun bindPlacementControl(binding: DialogCustomizeToolbarBinding) {
         binding.btnPlaceTop.setOnClickListener { placement = ToolbarPlacement.TOP; refreshPlacementButtons(binding) }
         binding.btnPlaceBottom.setOnClickListener { placement = ToolbarPlacement.BOTTOM; refreshPlacementButtons(binding) }
         binding.btnPlaceLeft.setOnClickListener { placement = ToolbarPlacement.LEFT; refreshPlacementButtons(binding) }
         binding.btnPlaceRight.setOnClickListener { placement = ToolbarPlacement.RIGHT; refreshPlacementButtons(binding) }
-        // Float arrives in a later session.
-        binding.btnPlaceFloat.isEnabled = false
-        binding.btnPlaceFloat.alpha = 0.4f
+        binding.btnPlaceFloat.setOnClickListener { placement = ToolbarPlacement.FLOAT; refreshPlacementButtons(binding) }
+        binding.btnAxisHorizontal.setOnClickListener { floatAxis = ToolbarAxis.HORIZONTAL; refreshPlacementButtons(binding) }
+        binding.btnAxisVertical.setOnClickListener { floatAxis = ToolbarAxis.VERTICAL; refreshPlacementButtons(binding) }
         refreshPlacementButtons(binding)
     }
 
@@ -143,6 +153,9 @@ class CustomizeToolbarDialog(
             binding.btnPlaceFloat to ToolbarPlacement.FLOAT,
         )
         for ((button, value) in map) button.isSelected = value == placement
+        binding.axisRow.visibility = if (placement == ToolbarPlacement.FLOAT) View.VISIBLE else View.GONE
+        binding.btnAxisHorizontal.isSelected = floatAxis == ToolbarAxis.HORIZONTAL
+        binding.btnAxisVertical.isSelected = floatAxis == ToolbarAxis.VERTICAL
     }
 
     /**

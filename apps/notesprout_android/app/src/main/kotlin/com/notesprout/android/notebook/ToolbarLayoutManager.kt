@@ -6,8 +6,10 @@ import android.view.ViewGroup
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.Space
+import androidx.appcompat.widget.AppCompatImageView
 import androidx.core.content.ContextCompat
 import com.notesprout.android.R
+import com.notesprout.android.data.toolbar.ToolbarAxis
 import com.notesprout.android.data.toolbar.ToolbarConfig
 import com.notesprout.android.data.toolbar.ToolbarPlacement
 
@@ -60,16 +62,34 @@ class ToolbarLayoutManager(
     private var buttonViews: Map<String, View>? = null
 
     /**
+     * The manager-owned grip view that leads a FLOAT bar; the user long-press-drags it to reposition
+     * the bar (drag behaviour is wired by the Activity, which owns the float position + persistence).
+     * Null for every edge-anchored placement. Like the trailing weighted [Space], it is never part of
+     * `order`, never a registry button, and is kept pinned at the leading edge — [ToolbarOverflowManager]
+     * is told to skip + preserve it so it never overflows. Re-created on each entry into FLOAT.
+     */
+    var dragHandle: View? = null
+        private set
+
+    /**
      * Rebuild [toolbar]'s children from [config]: visible buttons in order, auto-dividers between
      * group boundaries, then the internal trailing weight + overflow controls. Idempotent — safe
      * to re-apply when the config changes.
      */
     fun apply(config: ToolbarConfig) {
-        applyPlacement(config.placement)
+        applyPlacement(config)
 
         val views = captureButtonViews()
 
         toolbar.removeAllViews()
+
+        if (config.placement == ToolbarPlacement.FLOAT) {
+            // Rebuilt every apply so an axis change updates its rotation + main-axis sizing. The
+            // Activity re-wires the drag listener after each apply, so a fresh instance is fine.
+            toolbar.addView(makeDragHandle(config.floatAxis).also { dragHandle = it })
+        } else {
+            dragHandle = null
+        }
 
         var prevGroup: String? = null
         var first = true
@@ -87,20 +107,27 @@ class ToolbarLayoutManager(
         toolbar.addView(makeWeightSpace())
         (dividerOverflow.parent as? ViewGroup)?.removeView(dividerOverflow)
         (btnOverflow.parent as? ViewGroup)?.removeView(btnOverflow)
+        // The XML overflow divider is authored vertical (1dp × 28dp); re-shape it to match the bar's
+        // current orientation so it reads as a horizontal rule in a vertical bar.
+        dividerOverflow.layoutParams = dividerLayoutParams()
         toolbar.addView(dividerOverflow)
         toolbar.addView(btnOverflow)
     }
 
     /**
-     * Anchor the bar to an edge, set its orientation + size, and select the matching edge-aware
-     * background (border on the inner edge). TOP/BOTTOM are horizontal (match_parent × thickness);
-     * LEFT/RIGHT are vertical (thickness × match_parent). FLOAT arrives in a later session; until
-     * then it falls back to the top layout so the bar is never lost.
+     * Anchor the bar to an edge (or float it), set its orientation + size, and select the matching
+     * background. TOP/BOTTOM are horizontal (match_parent × thickness); LEFT/RIGHT are vertical
+     * (thickness × match_parent) — both with an edge-aware border on the inner edge. FLOAT is a
+     * detached bar: a fixed length of [FLOAT_LENGTH_FRACTION] × the matching screen dimension on its
+     * main axis, [barThicknessPx] on the cross axis, positioned via margins from `floatX`/`floatY`
+     * (centered on -1), with a full `shape_bordered` border all around.
      */
-    private fun applyPlacement(placement: ToolbarPlacement) {
+    private fun applyPlacement(config: ToolbarConfig) {
         val lp = toolbar.layoutParams as FrameLayout.LayoutParams
         val match = FrameLayout.LayoutParams.MATCH_PARENT
-        when (placement) {
+        // Reset float margins; only the FLOAT branch re-applies them. Edge placements sit flush.
+        lp.leftMargin = 0; lp.topMargin = 0; lp.rightMargin = 0; lp.bottomMargin = 0
+        when (config.placement) {
             ToolbarPlacement.LEFT -> {
                 toolbar.orientation = LinearLayout.VERTICAL
                 toolbar.gravity = Gravity.CENTER_HORIZONTAL
@@ -125,6 +152,27 @@ class ToolbarLayoutManager(
                 lp.height = barThicknessPx
                 toolbar.setBackgroundResource(R.drawable.toolbar_background_bottom)
             }
+            ToolbarPlacement.FLOAT -> {
+                val horizontal = config.floatAxis == ToolbarAxis.HORIZONTAL
+                val dm = context.resources.displayMetrics
+                toolbar.orientation = if (horizontal) LinearLayout.HORIZONTAL else LinearLayout.VERTICAL
+                toolbar.gravity = if (horizontal) Gravity.CENTER_VERTICAL else Gravity.CENTER_HORIZONTAL
+                lp.gravity = Gravity.TOP or Gravity.START
+                if (horizontal) {
+                    lp.width = (dm.widthPixels * FLOAT_LENGTH_FRACTION).toInt()
+                    lp.height = barThicknessPx
+                } else {
+                    lp.width = barThicknessPx
+                    lp.height = (dm.heightPixels * FLOAT_LENGTH_FRACTION).toInt()
+                }
+                val maxX = (dm.widthPixels - lp.width).coerceAtLeast(0)
+                val maxY = (dm.heightPixels - lp.height).coerceAtLeast(0)
+                val x = if (config.floatX < 0f) maxX / 2 else config.floatX.toInt()
+                val y = if (config.floatY < 0f) maxY / 2 else config.floatY.toInt()
+                lp.leftMargin = x.coerceIn(0, maxX)
+                lp.topMargin = y.coerceIn(0, maxY)
+                toolbar.setBackgroundResource(R.drawable.shape_bordered)
+            }
             else -> {
                 toolbar.orientation = LinearLayout.HORIZONTAL
                 toolbar.gravity = Gravity.CENTER_VERTICAL
@@ -134,7 +182,35 @@ class ToolbarLayoutManager(
                 toolbar.setBackgroundResource(R.drawable.toolbar_background_top)
             }
         }
+        // Keep buttons off the bar's main-axis end borders so their white fill never paints over the
+        // border stroke. A horizontal bar packs along x (pad start/end); a vertical bar along y (pad
+        // top/bottom). The cross axis is handled by the bar's centering gravity.
+        val pad = dp(4)
+        if (toolbar.orientation == LinearLayout.VERTICAL) {
+            toolbar.setPadding(pad, pad, pad, pad)
+        } else {
+            toolbar.setPadding(pad, 0, pad, 0)
+        }
         toolbar.layoutParams = lp
+    }
+
+    /**
+     * Build the FLOAT drag handle: a grip icon filling the bar's cross axis with a fixed main-axis
+     * span (so [ToolbarOverflowManager] can reserve its width). Rotated 90° for a vertical bar so the
+     * grip dots read across the bar's short edge.
+     */
+    private fun makeDragHandle(axis: ToolbarAxis): View {
+        val horizontal = axis == ToolbarAxis.HORIZONTAL
+        return AppCompatImageView(context).apply {
+            setImageResource(R.drawable.ic_grip_vertical)
+            setColorFilter(ContextCompat.getColor(context, R.color.inkBlack))
+            rotation = if (horizontal) 0f else 90f
+            layoutParams = if (horizontal) {
+                LinearLayout.LayoutParams(dp(28), LinearLayout.LayoutParams.MATCH_PARENT)
+            } else {
+                LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(28))
+            }
+        }
     }
 
     /**
@@ -173,11 +249,17 @@ class ToolbarLayoutManager(
         return result
     }
 
-    /** A plain inkBlack group divider, orientation-aware: 1dp × 28dp for a horizontal bar, 28dp × 1dp
-     *  for a vertical bar, with margins on the main axis. Must be a bare [View] so
-     *  [ToolbarOverflowManager.isDivider] recognises it. */
+    /** A plain inkBlack group divider, orientation-aware via [dividerLayoutParams]. Must be a bare
+     *  [View] so [ToolbarOverflowManager.isDivider] recognises it. */
     private fun makeDivider(): View = View(context).apply {
-        layoutParams = if (toolbar.orientation == LinearLayout.VERTICAL) {
+        layoutParams = dividerLayoutParams()
+        setBackgroundColor(ContextCompat.getColor(context, R.color.inkBlack))
+    }
+
+    /** Divider sizing for the bar's current orientation: 1dp × 28dp (vertical rule) for a horizontal
+     *  bar, 28dp × 1dp (horizontal rule) for a vertical bar, with margins on the main axis. */
+    private fun dividerLayoutParams(): LinearLayout.LayoutParams =
+        if (toolbar.orientation == LinearLayout.VERTICAL) {
             LinearLayout.LayoutParams(dp(28), dp(1)).apply {
                 topMargin = dp(4)
                 bottomMargin = dp(4)
@@ -188,8 +270,6 @@ class ToolbarLayoutManager(
                 marginEnd = dp(4)
             }
         }
-        setBackgroundColor(ContextCompat.getColor(context, R.color.inkBlack))
-    }
 
     /** The weight=1 [Space] that pushes the overflow controls to the trailing edge.
      *  [ToolbarOverflowManager] detects this via its positive weight and preserves it. */
@@ -198,4 +278,9 @@ class ToolbarLayoutManager(
     }
 
     private fun dp(value: Int): Int = (value * density).toInt()
+
+    companion object {
+        /** A floating bar spans this fraction of the matching screen dimension on its main axis. */
+        const val FLOAT_LENGTH_FRACTION = 0.75f
+    }
 }
