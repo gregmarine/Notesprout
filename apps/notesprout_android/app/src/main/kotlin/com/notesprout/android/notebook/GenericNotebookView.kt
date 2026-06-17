@@ -9,6 +9,7 @@ import android.graphics.DashPathEffect
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.PointF
+import android.graphics.Rect
 import android.graphics.RectF
 import android.util.Base64
 import android.util.TypedValue
@@ -989,7 +990,8 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
     // ── NotebookView interface ────────────────────────────────────────────────
 
     override fun asView(): View = this
-    override fun setToolbarHeight(heightPx: Int) {}
+    // No-op: the toolbar overlay consumes its own touches; the generic engine only sees stylus.
+    override fun setToolbarExclusion(rect: Rect?) {}
     override fun enableDrawing() {}
     override fun disableDrawing() {}
 

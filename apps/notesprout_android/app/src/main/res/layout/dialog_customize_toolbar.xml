@@ -15,6 +15,105 @@
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
+            android:text="Placement"
+            android:textColor="@color/inkBlack"
+            android:textSize="12sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="6dp" />
+
+        <!-- Placement segmented control. Top/Bottom are live this session; Left/Right/Float are
+             disabled until later sessions. The active placement shows the bg_toolbar_button border
+             via isSelected. -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginBottom="12dp">
+
+            <androidx.appcompat.widget.AppCompatButton
+                android:id="@+id/btnPlaceTop"
+                android:layout_width="0dp"
+                android:layout_height="36dp"
+                android:layout_weight="1"
+                android:background="@drawable/bg_toolbar_button"
+                android:text="Top"
+                android:textColor="@color/inkBlack"
+                android:textSize="12sp"
+                android:textAllCaps="false"
+                android:stateListAnimator="@null"
+                android:padding="2dp" />
+
+            <Space android:layout_width="6dp" android:layout_height="0dp" />
+
+            <androidx.appcompat.widget.AppCompatButton
+                android:id="@+id/btnPlaceBottom"
+                android:layout_width="0dp"
+                android:layout_height="36dp"
+                android:layout_weight="1"
+                android:background="@drawable/bg_toolbar_button"
+                android:text="Bottom"
+                android:textColor="@color/inkBlack"
+                android:textSize="12sp"
+                android:textAllCaps="false"
+                android:stateListAnimator="@null"
+                android:padding="2dp" />
+
+            <Space android:layout_width="6dp" android:layout_height="0dp" />
+
+            <androidx.appcompat.widget.AppCompatButton
+                android:id="@+id/btnPlaceLeft"
+                android:layout_width="0dp"
+                android:layout_height="36dp"
+                android:layout_weight="1"
+                android:background="@drawable/bg_toolbar_button"
+                android:text="Left"
+                android:textColor="@color/inkBlack"
+                android:textSize="12sp"
+                android:textAllCaps="false"
+                android:stateListAnimator="@null"
+                android:padding="2dp" />
+
+            <Space android:layout_width="6dp" android:layout_height="0dp" />
+
+            <androidx.appcompat.widget.AppCompatButton
+                android:id="@+id/btnPlaceRight"
+                android:layout_width="0dp"
+                android:layout_height="36dp"
+                android:layout_weight="1"
+                android:background="@drawable/bg_toolbar_button"
+                android:text="Right"
+                android:textColor="@color/inkBlack"
+                android:textSize="12sp"
+                android:textAllCaps="false"
+                android:stateListAnimator="@null"
+                android:padding="2dp" />
+
+            <Space android:layout_width="6dp" android:layout_height="0dp" />
+
+            <androidx.appcompat.widget.AppCompatButton
+                android:id="@+id/btnPlaceFloat"
+                android:layout_width="0dp"
+                android:layout_height="36dp"
+                android:layout_weight="1"
+                android:background="@drawable/bg_toolbar_button"
+                android:text="Float"
+                android:textColor="@color/inkBlack"
+                android:textSize="12sp"
+                android:textAllCaps="false"
+                android:stateListAnimator="@null"
+                android:padding="2dp" />
+
+        </LinearLayout>
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="@color/inkBlack"
+            android:layout_marginBottom="12dp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
             android:text="Drag the handle to reorder. Tap a row to show or hide it."
             android:textColor="@color/inkBlack"
             android:textSize="12sp"

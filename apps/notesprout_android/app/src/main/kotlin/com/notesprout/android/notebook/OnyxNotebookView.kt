@@ -70,7 +70,8 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
 
     private var renderBitmap: Bitmap? = null
     private var renderCanvas: Canvas? = null
-    private var toolbarHeight = 0
+    /** Toolbar exclusion zone in view coords; the BOOX pen layer never captures inside it. */
+    private var toolbarExclusion: Rect? = null
 
     /** Template bitmap — drawn as the base layer behind all strokes. Null = white background. */
     private var templateBitmap: Bitmap? = null
@@ -1273,9 +1274,9 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
 
     override fun asView(): View = this
 
-    override fun setToolbarHeight(heightPx: Int) {
-        toolbarHeight = heightPx
-        Slog.d(TAG) { "setToolbarHeight toolbarHeight=$toolbarHeight" }
+    override fun setToolbarExclusion(rect: Rect?) {
+        toolbarExclusion = rect?.takeUnless { it.isEmpty }?.let { Rect(it) }
+        Slog.d(TAG) { "setToolbarExclusion rect=$toolbarExclusion" }
         if (isSetup) applyLimitRect()
     }
 
@@ -1907,18 +1908,14 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
             frame.right - loc[0],
             frame.bottom - loc[1]
         )
-        val exclusion = if (toolbarHeight > 0) {
-            listOf(Rect(0, 0, width, toolbarHeight))
-        } else {
-            emptyList()
-        }
+        val exclusion = toolbarExclusion?.let { listOf(Rect(it)) } ?: emptyList()
         Slog.d(TAG) { "applyLimitRect: limitRect=$limitRect exclusion=$exclusion" }
         touchHelper.setLimitRect(limitRect, exclusion)
     }
 
     private fun openRawDrawing() {
-        epd { "OPEN_RAW_DRAWING_START isSetup=$isSetup size=${width}x${height} toolbarHeight=$toolbarHeight" }
-        Slog.d(TAG) { "openRawDrawing isSetup=$isSetup toolbarHeight=$toolbarHeight size=${width}x${height}" }
+        epd { "OPEN_RAW_DRAWING_START isSetup=$isSetup size=${width}x${height} toolbarExclusion=$toolbarExclusion" }
+        Slog.d(TAG) { "openRawDrawing isSetup=$isSetup toolbarExclusion=$toolbarExclusion size=${width}x${height}" }
         if (!isSetup) {
             applyLimitRect()
             touchHelper

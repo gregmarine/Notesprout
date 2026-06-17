@@ -1,12 +1,15 @@
 package com.notesprout.android.notebook
 
+import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
+import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.Space
 import androidx.core.content.ContextCompat
 import com.notesprout.android.R
 import com.notesprout.android.data.toolbar.ToolbarConfig
+import com.notesprout.android.data.toolbar.ToolbarPlacement
 
 /**
  * Arranges the *existing* toolbar button views (declared once in XML, listeners wired in
@@ -50,6 +53,8 @@ class ToolbarLayoutManager(
      * to re-apply when the config changes.
      */
     fun apply(config: ToolbarConfig) {
+        applyPlacement(config.placement)
+
         val views = captureButtonViews()
 
         toolbar.removeAllViews()
@@ -72,6 +77,26 @@ class ToolbarLayoutManager(
         (btnOverflow.parent as? ViewGroup)?.removeView(btnOverflow)
         toolbar.addView(dividerOverflow)
         toolbar.addView(btnOverflow)
+    }
+
+    /**
+     * Anchor the (still horizontal) bar to the top or bottom edge and select the matching
+     * edge-aware background (border on the inner edge). LEFT / RIGHT / FLOAT arrive in later
+     * sessions; until then they fall back to the top layout so the bar is never lost.
+     */
+    private fun applyPlacement(placement: ToolbarPlacement) {
+        val lp = toolbar.layoutParams as FrameLayout.LayoutParams
+        when (placement) {
+            ToolbarPlacement.BOTTOM -> {
+                lp.gravity = Gravity.BOTTOM
+                toolbar.setBackgroundResource(R.drawable.toolbar_background_bottom)
+            }
+            else -> {
+                lp.gravity = Gravity.TOP
+                toolbar.setBackgroundResource(R.drawable.toolbar_background_top)
+            }
+        }
+        toolbar.layoutParams = lp
     }
 
     /**

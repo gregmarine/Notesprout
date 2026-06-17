@@ -151,7 +151,7 @@ appended exploration session.
 
 ---
 
-### Session 1/7 — Foundations: prefs store, button registry, layout manager (parity)
+### Session 1/7 — Foundations: prefs store, button registry, layout manager (parity) ✅ DONE
 
 **Goal:** Introduce the data model and the layout manager driving the *existing* top bar.
 Default config reproduces today's toolbar exactly. No new UI yet.
@@ -179,7 +179,7 @@ button is still right-aligned. Overflow works on rotation; writing/erase/lasso u
 
 ---
 
-### Session 2/7 — Customize Toolbar dialog: reorder + show/hide
+### Session 2/7 — Customize Toolbar dialog: reorder + show/hide ✅ DONE
 
 **Goal:** Make order + visibility user-editable and persistent.
 
@@ -204,7 +204,7 @@ across notebook reopen. Close can't be hidden. Overflow still correct after reor
 
 ---
 
-### Session 3/7 — Anchoring: top & bottom
+### Session 3/7 — Anchoring: top & bottom ✅ DONE
 
 **Goal:** Let the bar anchor to the bottom edge (still horizontal). Establishes the
 placement plumbing without the orientation flip.

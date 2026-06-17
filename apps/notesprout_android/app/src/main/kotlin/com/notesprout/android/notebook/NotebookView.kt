@@ -3,6 +3,7 @@ package com.notesprout.android.notebook
 import android.graphics.Bitmap
 import android.graphics.Path
 import android.graphics.PointF
+import android.graphics.Rect
 import android.graphics.RectF
 import android.view.View
 import com.notesprout.android.data.HeadingStroke
@@ -14,7 +15,15 @@ import com.notesprout.android.data.TextRender
 
 interface NotebookView {
     fun asView(): View
-    fun setToolbarHeight(heightPx: Int)
+
+    /**
+     * Set the toolbar exclusion zone, in drawing-view coordinates, that the BOOX pen layer must not
+     * capture (so the stylus never draws under the bar). Null or empty ⇒ no exclusion. The toolbar
+     * and the drawing view share the same origin/size inside the root FrameLayout, so the toolbar's
+     * bounds *are* the exclusion rect; placement (top/bottom), an open overflow menu, etc. just pass
+     * a different rect. Generic devices ignore this (the toolbar consumes its own touches).
+     */
+    fun setToolbarExclusion(rect: Rect?)
     fun enableDrawing()
     fun disableDrawing()
     fun resetOverlay() {}

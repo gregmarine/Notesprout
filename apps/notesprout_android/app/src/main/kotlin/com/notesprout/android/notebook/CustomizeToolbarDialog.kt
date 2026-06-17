@@ -11,8 +11,10 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import androidx.appcompat.app.AlertDialog
 import androidx.core.content.ContextCompat
+import androidx.appcompat.widget.AppCompatButton
 import com.notesprout.android.R
 import com.notesprout.android.data.toolbar.ToolbarConfig
+import com.notesprout.android.data.toolbar.ToolbarPlacement
 import com.notesprout.android.databinding.DialogCustomizeToolbarBinding
 import com.notesprout.android.databinding.ItemToolbarCustomizeRowBinding
 
@@ -35,6 +37,9 @@ class CustomizeToolbarDialog(
     private val onApply: (ToolbarConfig) -> Unit,
 ) {
     private val hidden: MutableSet<String> = current.hidden.toMutableSet()
+
+    /** Live placement selection; committed to the config on Save. */
+    private var placement: ToolbarPlacement = current.placement
 
     private val density = context.resources.displayMetrics.density
 
@@ -72,6 +77,7 @@ class CustomizeToolbarDialog(
         val binding = DialogCustomizeToolbarBinding.inflate(LayoutInflater.from(context))
         scrollView = binding.root
         container = binding.rowContainer
+        bindPlacementControl(binding)
         populateRows(binding.rowContainer, workingOrder(current.order))
 
         val dialog = AlertDialog.Builder(context)
@@ -89,14 +95,43 @@ class CustomizeToolbarDialog(
         // Reset rebuilds the list in place (defaults) without closing — user still confirms via Save.
         dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener {
             hidden.clear()
+            placement = ToolbarPlacement.TOP
+            refreshPlacementButtons(binding)
             populateRows(binding.rowContainer, ToolbarButtonRegistry.DEFAULT_ORDER)
         }
 
         dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
             val newOrder = readOrder(binding.rowContainer)
-            onApply(current.copy(order = newOrder, hidden = hidden.toSet()))
+            onApply(current.copy(order = newOrder, hidden = hidden.toSet(), placement = placement))
             dialog.dismiss()
         }
+    }
+
+    /**
+     * Wire the placement segmented control. Top/Bottom are live; Left/Right/Float are disabled until
+     * later sessions (greyed, non-tappable) but shown so the full model is visible. The selected
+     * placement is indicated with `isSelected` (border via `bg_toolbar_button`).
+     */
+    private fun bindPlacementControl(binding: DialogCustomizeToolbarBinding) {
+        binding.btnPlaceTop.setOnClickListener { placement = ToolbarPlacement.TOP; refreshPlacementButtons(binding) }
+        binding.btnPlaceBottom.setOnClickListener { placement = ToolbarPlacement.BOTTOM; refreshPlacementButtons(binding) }
+        // Disabled this session.
+        for (b in listOf(binding.btnPlaceLeft, binding.btnPlaceRight, binding.btnPlaceFloat)) {
+            b.isEnabled = false
+            b.alpha = 0.4f
+        }
+        refreshPlacementButtons(binding)
+    }
+
+    private fun refreshPlacementButtons(binding: DialogCustomizeToolbarBinding) {
+        val map: List<Pair<AppCompatButton, ToolbarPlacement>> = listOf(
+            binding.btnPlaceTop to ToolbarPlacement.TOP,
+            binding.btnPlaceBottom to ToolbarPlacement.BOTTOM,
+            binding.btnPlaceLeft to ToolbarPlacement.LEFT,
+            binding.btnPlaceRight to ToolbarPlacement.RIGHT,
+            binding.btnPlaceFloat to ToolbarPlacement.FLOAT,
+        )
+        for ((button, value) in map) button.isSelected = value == placement
     }
 
     /**
