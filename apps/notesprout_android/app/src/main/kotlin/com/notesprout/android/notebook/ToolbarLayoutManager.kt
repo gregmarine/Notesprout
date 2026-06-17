@@ -18,11 +18,12 @@ import com.notesprout.android.data.toolbar.ToolbarPlacement
  * Move-not-clone, exactly like [ToolbarOverflowManager]: button views are reparented, never
  * recreated, so `isSelected` state, icon state, and click listeners all survive untouched.
  *
- * Responsibilities (this session — horizontal top only):
+ * Responsibilities:
  * - Resolve the active visible key list = `order` minus `hidden`, with the pinned Close always
  *   present, filtered to keys whose views exist.
- * - Insert **auto-dividers** (1dp × 28dp inkBlack) between consecutive visible buttons whose
- *   [ToolbarButtonRegistry.ButtonSpec.group] differs.
+ * - Anchor + orient the bar per placement: TOP/BOTTOM horizontal, LEFT/RIGHT vertical.
+ * - Insert orientation-aware **auto-dividers** (1dp × 28dp horizontal, 28dp × 1dp vertical, inkBlack)
+ *   between consecutive visible buttons whose [ToolbarButtonRegistry.ButtonSpec.group] differs.
  * - Append a manager-owned **internal weighted [Space]** then [dividerOverflow] + [btnOverflow]
  *   so the overflow button stays pinned to the trailing (right) edge. This is the only spacer in
  *   the system — never user-facing, never part of `order`.
@@ -37,6 +38,17 @@ class ToolbarLayoutManager(
 ) {
     private val context = toolbar.context
     private val density = context.resources.displayMetrics.density
+
+    /**
+     * The bar's fixed cross-axis thickness in px (56dp), captured once from the inflated layout
+     * params before any placement flips them. For a horizontal bar this is its height; for a
+     * vertical bar its width. The Activity reads it via [barThickness] to position the overflow
+     * menu, page indicator, and floating selection toolbar without assuming a placement.
+     */
+    private val barThicknessPx: Int = (toolbar.layoutParams as FrameLayout.LayoutParams).height
+
+    /** Fixed cross-axis thickness of the bar in px — see [barThicknessPx]. */
+    fun barThickness(): Int = barThicknessPx
 
     /**
      * Cached references to every button view, captured once from the inflated hierarchy. Views are
@@ -80,19 +92,45 @@ class ToolbarLayoutManager(
     }
 
     /**
-     * Anchor the (still horizontal) bar to the top or bottom edge and select the matching
-     * edge-aware background (border on the inner edge). LEFT / RIGHT / FLOAT arrive in later
-     * sessions; until then they fall back to the top layout so the bar is never lost.
+     * Anchor the bar to an edge, set its orientation + size, and select the matching edge-aware
+     * background (border on the inner edge). TOP/BOTTOM are horizontal (match_parent × thickness);
+     * LEFT/RIGHT are vertical (thickness × match_parent). FLOAT arrives in a later session; until
+     * then it falls back to the top layout so the bar is never lost.
      */
     private fun applyPlacement(placement: ToolbarPlacement) {
         val lp = toolbar.layoutParams as FrameLayout.LayoutParams
+        val match = FrameLayout.LayoutParams.MATCH_PARENT
         when (placement) {
+            ToolbarPlacement.LEFT -> {
+                toolbar.orientation = LinearLayout.VERTICAL
+                toolbar.gravity = Gravity.CENTER_HORIZONTAL
+                lp.gravity = Gravity.START
+                lp.width = barThicknessPx
+                lp.height = match
+                toolbar.setBackgroundResource(R.drawable.toolbar_background_left)
+            }
+            ToolbarPlacement.RIGHT -> {
+                toolbar.orientation = LinearLayout.VERTICAL
+                toolbar.gravity = Gravity.CENTER_HORIZONTAL
+                lp.gravity = Gravity.END
+                lp.width = barThicknessPx
+                lp.height = match
+                toolbar.setBackgroundResource(R.drawable.toolbar_background_right)
+            }
             ToolbarPlacement.BOTTOM -> {
+                toolbar.orientation = LinearLayout.HORIZONTAL
+                toolbar.gravity = Gravity.CENTER_VERTICAL
                 lp.gravity = Gravity.BOTTOM
+                lp.width = match
+                lp.height = barThicknessPx
                 toolbar.setBackgroundResource(R.drawable.toolbar_background_bottom)
             }
             else -> {
+                toolbar.orientation = LinearLayout.HORIZONTAL
+                toolbar.gravity = Gravity.CENTER_VERTICAL
                 lp.gravity = Gravity.TOP
+                lp.width = match
+                lp.height = barThicknessPx
                 toolbar.setBackgroundResource(R.drawable.toolbar_background_top)
             }
         }
@@ -135,12 +173,20 @@ class ToolbarLayoutManager(
         return result
     }
 
-    /** A plain 1dp × 28dp inkBlack divider, matching the former inline XML dividers exactly.
-     *  Must be a bare [View] so [ToolbarOverflowManager.isDivider] recognises it. */
+    /** A plain inkBlack group divider, orientation-aware: 1dp × 28dp for a horizontal bar, 28dp × 1dp
+     *  for a vertical bar, with margins on the main axis. Must be a bare [View] so
+     *  [ToolbarOverflowManager.isDivider] recognises it. */
     private fun makeDivider(): View = View(context).apply {
-        layoutParams = LinearLayout.LayoutParams(dp(1), dp(28)).apply {
-            marginStart = dp(4)
-            marginEnd = dp(4)
+        layoutParams = if (toolbar.orientation == LinearLayout.VERTICAL) {
+            LinearLayout.LayoutParams(dp(28), dp(1)).apply {
+                topMargin = dp(4)
+                bottomMargin = dp(4)
+            }
+        } else {
+            LinearLayout.LayoutParams(dp(1), dp(28)).apply {
+                marginStart = dp(4)
+                marginEnd = dp(4)
+            }
         }
         setBackgroundColor(ContextCompat.getColor(context, R.color.inkBlack))
     }

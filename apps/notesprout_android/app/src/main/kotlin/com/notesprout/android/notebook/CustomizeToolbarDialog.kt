@@ -75,7 +75,7 @@ class CustomizeToolbarDialog(
 
     fun show() {
         val binding = DialogCustomizeToolbarBinding.inflate(LayoutInflater.from(context))
-        scrollView = binding.root
+        scrollView = binding.rowScroll
         container = binding.rowContainer
         bindPlacementControl(binding)
         populateRows(binding.rowContainer, workingOrder(current.order))
@@ -91,6 +91,17 @@ class CustomizeToolbarDialog(
         dialog.show()
         dialog.window?.setElevation(0f)
         dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+
+        // Cap the scrolling list height so the fixed header + the AlertDialog's title + button bar
+        // always have room. With a wrap_content ScrollView, a tall list can squeeze the Save/Cancel
+        // buttons off the bottom; bounding it makes only the list scroll, deterministically.
+        scrollView.post {
+            val maxH = (context.resources.displayMetrics.heightPixels * 0.5f).toInt()
+            if (scrollView.height > maxH) {
+                scrollView.layoutParams = scrollView.layoutParams.apply { height = maxH }
+                scrollView.requestLayout()
+            }
+        }
 
         // Reset rebuilds the list in place (defaults) without closing — user still confirms via Save.
         dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener {
@@ -108,18 +119,18 @@ class CustomizeToolbarDialog(
     }
 
     /**
-     * Wire the placement segmented control. Top/Bottom are live; Left/Right/Float are disabled until
-     * later sessions (greyed, non-tappable) but shown so the full model is visible. The selected
+     * Wire the placement segmented control. Top/Bottom/Left/Right are live; Float is disabled until
+     * a later session (greyed, non-tappable) but shown so the full model is visible. The selected
      * placement is indicated with `isSelected` (border via `bg_toolbar_button`).
      */
     private fun bindPlacementControl(binding: DialogCustomizeToolbarBinding) {
         binding.btnPlaceTop.setOnClickListener { placement = ToolbarPlacement.TOP; refreshPlacementButtons(binding) }
         binding.btnPlaceBottom.setOnClickListener { placement = ToolbarPlacement.BOTTOM; refreshPlacementButtons(binding) }
-        // Disabled this session.
-        for (b in listOf(binding.btnPlaceLeft, binding.btnPlaceRight, binding.btnPlaceFloat)) {
-            b.isEnabled = false
-            b.alpha = 0.4f
-        }
+        binding.btnPlaceLeft.setOnClickListener { placement = ToolbarPlacement.LEFT; refreshPlacementButtons(binding) }
+        binding.btnPlaceRight.setOnClickListener { placement = ToolbarPlacement.RIGHT; refreshPlacementButtons(binding) }
+        // Float arrives in a later session.
+        binding.btnPlaceFloat.isEnabled = false
+        binding.btnPlaceFloat.alpha = 0.4f
         refreshPlacementButtons(binding)
     }
 

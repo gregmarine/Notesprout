@@ -229,7 +229,7 @@ right direction. Page indicator / lasso toolbar don't collide with the bar.
 
 ---
 
-### Session 4/7 — Vertical anchoring: left & right (+ vertical overflow)
+### Session 4/7 — Vertical anchoring: left & right (+ vertical overflow) ✅ DONE
 
 **Goal:** Anchor to left/right as a vertical bar; generalize overflow to vertical.
 

@@ -26,6 +26,7 @@ import android.view.View
 import android.view.ViewConfiguration
 import android.view.WindowManager
 import android.widget.FrameLayout
+import android.widget.LinearLayout
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
@@ -280,8 +281,9 @@ class NotebookActivity : AppCompatActivity() {
 
     // ── Lasso copy/paste toolbar state ───────────────────────────────────────
 
-    /** Anchor point (in root-view coordinates) below btnLasso — computed once after layout. */
-    private var lassoToolbarAnchor: PointF? = null
+    /** btnLasso's bounds in root-view coordinates — computed after layout; the lasso popup is
+     *  anchored to whichever edge faces away from the bar. */
+    private var lassoToolbarAnchor: RectF? = null
 
     // ── Page index launcher ───────────────────────────────────────────────────
 
@@ -1278,12 +1280,14 @@ class NotebookActivity : AppCompatActivity() {
             overflowManager.initialize()
             overflowManager.recalc()
         }
-        binding.drawingToolbar.addOnLayoutChangeListener { _, left, _, right, _, oldLeft, _, oldRight, _ ->
-            val newWidth = right - left
-            val oldWidth = oldRight - oldLeft
-            if (newWidth != oldWidth) {
+        binding.drawingToolbar.addOnLayoutChangeListener { _, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom ->
+            // Recalc on either dimension change: a horizontal bar overflows by width, a vertical bar
+            // by height (e.g. rotation). Either edge moving can change the available main-axis extent.
+            val sizeChanged = (right - left) != (oldRight - oldLeft) || (bottom - top) != (oldBottom - oldTop)
+            if (sizeChanged) {
                 closeOverflowMenu() // restore exclusion zone if menu was open
-                overflowManager.recalc()
+                // Defer the reparenting recalc out of this layout traversal — see recalcOverflowAfterLayout.
+                recalcOverflowAfterLayout()
             }
         }
         binding.btnOverflow.setOnClickListener {
@@ -1538,16 +1542,17 @@ class NotebookActivity : AppCompatActivity() {
      * Compute the toolbar's exclusion rect in drawing-view coordinates for the current placement and
      * overflow state. The toolbar and drawing view share the root FrameLayout's origin, so the
      * toolbar's bounds *are* the rect. An open overflow menu extends the rect away from the anchored
-     * edge (downward for a top bar, upward for a bottom bar).
+     * edge (down for a top bar, up for a bottom bar, right for a left bar, left for a right bar).
      */
     private fun computeToolbarExclusionRect(): Rect {
         val tb = binding.drawingToolbar
-        val menuHeight =
-            if (overflowManager.isOverflowMenuOpen()) overflowManager.expectedOverflowMenuHeight() else 0
-        return if (toolbarConfig.placement == ToolbarPlacement.BOTTOM) {
-            Rect(tb.left, tb.top - menuHeight, tb.right, tb.bottom)
-        } else {
-            Rect(tb.left, tb.top, tb.right, tb.bottom + menuHeight)
+        val ext =
+            if (overflowManager.isOverflowMenuOpen()) overflowManager.expectedOverflowMenuExtent() else 0
+        return when (toolbarConfig.placement) {
+            ToolbarPlacement.BOTTOM -> Rect(tb.left, tb.top - ext, tb.right, tb.bottom)
+            ToolbarPlacement.LEFT   -> Rect(tb.left, tb.top, tb.right + ext, tb.bottom)
+            ToolbarPlacement.RIGHT  -> Rect(tb.left - ext, tb.top, tb.right, tb.bottom)
+            else                    -> Rect(tb.left, tb.top, tb.right, tb.bottom + ext) // TOP
         }
     }
 
@@ -1557,41 +1562,72 @@ class NotebookActivity : AppCompatActivity() {
     }
 
     /**
-     * Anchor the overflow menu so it opens away from the bar: hanging below a top bar, rising above a
-     * bottom bar. The menu margins match the toolbar height so it sits flush against the bar.
+     * Anchor + orient the overflow menu so it opens away from the bar and mirrors its axis:
+     * below a top bar / above a bottom bar (vertical stack of rows), or beside a left/right bar
+     * (horizontal run of columns). Margins match the bar thickness so it sits flush against the bar.
      */
     private fun positionOverflowMenu() {
-        val lp = binding.overflowMenu.layoutParams as FrameLayout.LayoutParams
-        val tbH = binding.drawingToolbar.height.takeIf { it > 0 }
-            ?: (56f * resources.displayMetrics.density).toInt()
-        if (toolbarConfig.placement == ToolbarPlacement.BOTTOM) {
-            lp.gravity = Gravity.BOTTOM
-            lp.topMargin = 0
-            lp.bottomMargin = tbH
-        } else {
-            lp.gravity = Gravity.TOP
-            lp.topMargin = tbH
-            lp.bottomMargin = 0
+        val menu = binding.overflowMenu
+        val lp = menu.layoutParams as FrameLayout.LayoutParams
+        val thick = toolbarLayoutManager.barThickness()
+        val match = FrameLayout.LayoutParams.MATCH_PARENT
+        val wrap = FrameLayout.LayoutParams.WRAP_CONTENT
+        lp.topMargin = 0; lp.bottomMargin = 0; lp.leftMargin = 0; lp.rightMargin = 0
+        when (toolbarConfig.placement) {
+            ToolbarPlacement.LEFT -> {
+                menu.orientation = LinearLayout.HORIZONTAL
+                lp.gravity = Gravity.START
+                lp.width = wrap; lp.height = match
+                lp.leftMargin = thick
+            }
+            ToolbarPlacement.RIGHT -> {
+                menu.orientation = LinearLayout.HORIZONTAL
+                lp.gravity = Gravity.END
+                lp.width = wrap; lp.height = match
+                lp.rightMargin = thick
+            }
+            ToolbarPlacement.BOTTOM -> {
+                menu.orientation = LinearLayout.VERTICAL
+                lp.gravity = Gravity.BOTTOM
+                lp.width = match; lp.height = wrap
+                lp.bottomMargin = thick
+            }
+            else -> {
+                menu.orientation = LinearLayout.VERTICAL
+                lp.gravity = Gravity.TOP
+                lp.width = match; lp.height = wrap
+                lp.topMargin = thick
+            }
         }
-        binding.overflowMenu.layoutParams = lp
+        menu.layoutParams = lp
     }
 
-    /** Keep the page indicator on the edge opposite the toolbar so they never collide. */
+    /** Keep the page indicator clear of the toolbar so they never collide: opposite a top/bottom bar,
+     *  and on the leading side away from a right bar. */
     private fun positionPageIndicator() {
         val lp = binding.tvPageIndicator.layoutParams as FrameLayout.LayoutParams
         val gap = (8f * resources.displayMetrics.density).toInt()
-        val tbH = binding.drawingToolbar.height.takeIf { it > 0 }
-            ?: (56f * resources.displayMetrics.density).toInt()
-        if (toolbarConfig.placement == ToolbarPlacement.BOTTOM) {
-            lp.gravity = Gravity.TOP or Gravity.END
-            lp.topMargin = tbH + gap
-            lp.bottomMargin = 0
-        } else {
-            lp.gravity = Gravity.BOTTOM or Gravity.END
-            lp.bottomMargin = gap
-            lp.topMargin = 0
+        val thick = toolbarLayoutManager.barThickness()
+        lp.topMargin = 0; lp.bottomMargin = 0; lp.marginStart = 0; lp.marginEnd = 0
+        when (toolbarConfig.placement) {
+            ToolbarPlacement.BOTTOM -> {
+                lp.gravity = Gravity.TOP or Gravity.END
+                lp.topMargin = thick + gap
+                lp.marginEnd = gap
+            }
+            ToolbarPlacement.RIGHT -> {
+                // Bottom-right would sit under the right bar; pin to bottom-left instead.
+                lp.gravity = Gravity.BOTTOM or Gravity.START
+                lp.bottomMargin = gap
+                lp.marginStart = gap
+            }
+            else -> {
+                // TOP and LEFT: bottom-right is clear of both.
+                lp.gravity = Gravity.BOTTOM or Gravity.END
+                lp.bottomMargin = gap
+                lp.marginEnd = gap
+            }
         }
-        lp.marginEnd = gap
         binding.tvPageIndicator.layoutParams = lp
     }
 
@@ -1612,14 +1648,33 @@ class NotebookActivity : AppCompatActivity() {
         // Placement may have moved the bar; the cached lasso anchor must be recomputed against the
         // new position.
         lassoToolbarAnchor = null
-        // Children just changed; the toolbar width is unchanged so addOnLayoutChangeListener won't
-        // fire. recalc() reads layout-param widths (not a fresh measure), so call it directly.
-        overflowManager.recalc()
-        // A placement change re-anchors the bar (layout_gravity), so push the exclusion + recompute
-        // the lasso anchor after the pending layout pass settles.
+        // A placement change can flip the bar's orientation + size (top/bottom ↔ left/right). recalc()
+        // and the exclusion rect both read the toolbar's *measured* extent, which stays stale until
+        // the relayout triggered by the new orientation/layoutParams runs. Wait for that pass (so the
+        // fit is computed against real dimensions), then post the recalc so its view reparenting +
+        // requestLayout land *outside* the layout traversal — see [recalcOverflowAfterLayout].
+        binding.drawingToolbar.requestLayout()
         binding.drawingToolbar.doOnLayout {
-            pushToolbarExclusion()
             computeLassoToolbarAnchor()
+            recalcOverflowAfterLayout()
+        }
+    }
+
+    /**
+     * Recompute overflow + push the exclusion rect, deferred to *after* the current layout traversal.
+     *
+     * [ToolbarOverflowManager.recalc] reparents button views and calls `requestLayout()`. Running it
+     * synchronously from inside a layout callback (`doOnLayout` / `addOnLayoutChangeListener`, both
+     * dispatched during `View.layout()`) hits the "requestLayout during layout" trap: the re-shown
+     * overflow button isn't laid out until some later unrelated pass, so it appears to vanish on a
+     * same-size placement switch (e.g. top↔bottom). Posting runs the mutation cleanly after the
+     * traversal, giving it its own layout pass. Call only from contexts where the toolbar is already
+     * laid out at its current size, so recalc reads fresh dimensions.
+     */
+    private fun recalcOverflowAfterLayout() {
+        binding.drawingToolbar.post {
+            overflowManager.recalc()
+            pushToolbarExclusion()
         }
     }
 
@@ -3866,10 +3921,16 @@ class NotebookActivity : AppCompatActivity() {
             val screenH  = binding.root.height.toFloat()
             val dpGap    = 8f * resources.displayMetrics.density
             // Keep the floating toolbar clear of the main bar, whichever edge it's anchored to.
-            val tbH      = binding.drawingToolbar.height.toFloat()
-            val isBottomBar = toolbarConfig.placement == ToolbarPlacement.BOTTOM
-            val minY     = if (isBottomBar) dpGap else tbH + dpGap
-            val maxY     = if (isBottomBar) screenH - tbH - toolbarH - dpGap else screenH - toolbarH
+            // Use the fixed bar thickness, not drawingToolbar.height — a vertical bar's height is the
+            // full screen, which would push the safe area off-screen.
+            val barThick = toolbarLayoutManager.barThickness().toFloat()
+            val place    = toolbarConfig.placement
+            val minY     = if (place == ToolbarPlacement.TOP)    barThick + dpGap else dpGap
+            val maxY     = if (place == ToolbarPlacement.BOTTOM) screenH - barThick - toolbarH - dpGap
+                           else screenH - toolbarH
+            val minX     = if (place == ToolbarPlacement.LEFT)   barThick + dpGap else 0f
+            val maxX     = if (place == ToolbarPlacement.RIGHT)  screenW - barThick - toolbarW - dpGap
+                           else screenW - toolbarW
 
             var x = selectionBox.centerX() - toolbarW / 2f
             var y = selectionBox.bottom + dpGap
@@ -3878,9 +3939,9 @@ class NotebookActivity : AppCompatActivity() {
             if (y + toolbarH > screenH) {
                 y = selectionBox.top - dpGap - toolbarH
             }
-            // Clamp to the safe area between the two edges (clear of the main bar).
+            // Clamp to the safe area, clear of the main bar on whichever edge it sits.
             y = y.coerceIn(minY, maxY.coerceAtLeast(minY))
-            x = x.coerceIn(0f, (screenW - toolbarW).coerceAtLeast(0f))
+            x = x.coerceIn(minX, maxX.coerceAtLeast(minX))
 
             binding.floatingSelectionToolbar.x = x
             binding.floatingSelectionToolbar.y = y
@@ -4040,39 +4101,46 @@ class NotebookActivity : AppCompatActivity() {
         updateUndoRedoButtons()
     }
 
-    /**
-     * Compute and store the lasso popup anchor in root-view coordinates: the X centre of btnLasso,
-     * and the Y edge of the button the popup grows from — the button's bottom for a top bar (popup
-     * below), or its top for a bottom bar (popup above).
-     */
+    /** Compute and store btnLasso's bounds in root-view coordinates. The lasso popup grows from
+     *  whichever edge of the button faces the canvas, away from the bar. */
     private fun computeLassoToolbarAnchor() {
         val btnLoc  = IntArray(2).also { binding.btnLasso.getLocationOnScreen(it) }
         val rootLoc = IntArray(2).also { binding.root.getLocationOnScreen(it) }
-        val anchorY = if (toolbarConfig.placement == ToolbarPlacement.BOTTOM) {
-            (btnLoc[1] - rootLoc[1]).toFloat()                          // top of button
-        } else {
-            (btnLoc[1] + binding.btnLasso.height - rootLoc[1]).toFloat() // bottom of button
-        }
-        lassoToolbarAnchor = PointF(
-            btnLoc[0] + binding.btnLasso.width / 2f - rootLoc[0].toFloat(),
-            anchorY,
+        val left = (btnLoc[0] - rootLoc[0]).toFloat()
+        val top  = (btnLoc[1] - rootLoc[1]).toFloat()
+        lassoToolbarAnchor = RectF(
+            left, top,
+            left + binding.btnLasso.width,
+            top + binding.btnLasso.height,
         )
     }
 
-    /** Position and show the lasso popup toolbar anchored to btnLasso (below a top bar, above a bottom bar). */
+    /**
+     * Position and show the lasso popup anchored to btnLasso, growing away from the bar: below a top
+     * bar, above a bottom bar, right of a left bar, left of a right bar. The popup is centred on the
+     * button along the bar's main axis and clamped to the screen.
+     */
     private fun updateLassoPopupToolbar() {
-        val anchor = lassoToolbarAnchor ?: run { computeLassoToolbarAnchor(); lassoToolbarAnchor } ?: return
+        val btn = lassoToolbarAnchor ?: run { computeLassoToolbarAnchor(); lassoToolbarAnchor } ?: return
         val dpGap  = 8f * resources.displayMetrics.density
         binding.lassoPopupToolbar.visibility = View.VISIBLE
         binding.lassoPopupToolbar.post {
             val w = binding.lassoPopupToolbar.measuredWidth.toFloat()
             val h = binding.lassoPopupToolbar.measuredHeight.toFloat()
             val screenW = binding.root.width.toFloat()
-            val x = (anchor.x - w / 2f).coerceIn(0f, (screenW - w).coerceAtLeast(0f))
-            binding.lassoPopupToolbar.x = x
-            binding.lassoPopupToolbar.y =
-                if (toolbarConfig.placement == ToolbarPlacement.BOTTOM) anchor.y - dpGap - h
-                else anchor.y + dpGap
+            val screenH = binding.root.height.toFloat()
+            val (px, py) = when (toolbarConfig.placement) {
+                ToolbarPlacement.LEFT ->
+                    (btn.right + dpGap) to (btn.centerY() - h / 2f)
+                ToolbarPlacement.RIGHT ->
+                    (btn.left - dpGap - w) to (btn.centerY() - h / 2f)
+                ToolbarPlacement.BOTTOM ->
+                    (btn.centerX() - w / 2f) to (btn.top - dpGap - h)
+                else ->
+                    (btn.centerX() - w / 2f) to (btn.bottom + dpGap)
+            }
+            binding.lassoPopupToolbar.x = px.coerceIn(0f, (screenW - w).coerceAtLeast(0f))
+            binding.lassoPopupToolbar.y = py.coerceIn(0f, (screenH - h).coerceAtLeast(0f))
         }
     }
 
