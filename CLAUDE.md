@@ -212,6 +212,98 @@ CREATE INDEX IF NOT EXISTS idx_notebook_parent_order
 
 ---
 
+## Toolbar Customization System
+
+The notebook toolbar is fully user-customizable: button order, show/hide, edge anchoring, a draggable
+floating bar, a mini bar, and a double-tap hide gesture. **Scope is global** — one config for every
+notebook. The XML (`activity_notebook.xml`) still declares every button **once**; `NotebookActivity`
+wires the listeners; the customization layer only **rearranges the existing views** (move-not-clone),
+so `isSelected` state, icon state, and listeners always survive.
+
+> The `TOOLBAR_CUSTOMIZATION_PLAN.md` backlog (Session 8 UI/UX polish) is still open. Don't delete it
+> until Session 8 closes; this section is the shipped reference for sessions 1–7.
+
+### Prefs store + config (`data/toolbar/`)
+
+- **`ToolbarPreferencesManager`** — `object` over `SharedPreferences("notesprout_toolbar_prefs")`,
+  single key `config` holding `kotlinx.serialization` JSON of one `ToolbarConfig`. Mirrors
+  `RecentsManager` / `SortPreferencesManager` — **not** in `notesprout.db`, **not** in any `.soil`.
+  `load()` is tolerant (malformed/absent → defaults); `Json { ignoreUnknownKeys = true }` so a removed
+  field never breaks an old saved config.
+- **`ToolbarConfig`** (`@Serializable`): `placement` (`TOP/RIGHT/BOTTOM/LEFT/FLOAT`), `order`
+  (full button order as stable keys), `hidden` (Set), `miniSet` (≤5 *extra* keys), `miniEnabled`,
+  `floatX`/`floatY` (-1 = uninitialised → center), `floatAxis` (`HORIZONTAL/VERTICAL`), `collapsed`.
+  The default value reproduces today's full top bar.
+
+### Registry + layout manager split (`notebook/`)
+
+- **`ToolbarButtonRegistry`** — single source of truth: each `ButtonSpec` maps a **stable string key**
+  → `R.id`, icon, label, **group** (consecutive buttons whose group differs get an auto-divider), and
+  a `pinned` flag. `PINNED_KEY = "close"` (always present, never hideable); `SETTINGS_KEY =
+  "toolbarSettings"` (the gear; force-included in mini so the dialog is always reachable).
+  **KEY STABILITY RULE:** keys are persisted → append-only, never rename/reorder. `DEFAULT_ORDER` =
+  XML order (no spacer); `DEFAULT_MINI` = compact everyday subset.
+- **`ToolbarLayoutManager`** — arranges the existing button views into `drawingToolbar` per
+  `ToolbarConfig`: resolves the visible key list (`order − hidden`, Close always kept; or the mini
+  set when `miniEnabled && FLOAT`), sets orientation + size + edge-aware background, inserts
+  orientation-aware auto-dividers (1dp × 28dp horizontal / 28dp × 1dp vertical), then appends a
+  **manager-owned weighted `Space`** + the overflow controls so `btnOverflow` stays pinned to the
+  trailing edge. The weighted spacer is the **only** spacer in the system — never user-facing, never
+  in `order`. Hands off to `ToolbarOverflowManager` (which detects + preserves the spacer + the FLOAT
+  drag handle) for fit/overflow. Button views are captured once and held permanently — a hidden
+  button is detached from the tree, so `findViewById` can't re-find it.
+
+### Placement, float, mini
+
+- **Anchoring:** TOP/BOTTOM are horizontal (`match_parent` × thickness); LEFT/RIGHT vertical
+  (thickness × `match_parent`); each with an edge-aware 1dp inkBlack border on the inner edge
+  (`toolbar_background_{top,bottom,left,right}`). `barThickness()` (56dp, captured from the inflated
+  layout before any flip) drives overflow-menu / page-indicator / floating-selection positioning so
+  none assume a placement.
+- **Float:** a detached bar at `shape_bordered`, length = `FLOAT_LENGTH_FRACTION` (0.75) × the
+  matching screen dimension (or `WRAP_CONTENT` in mini), positioned by `floatX/floatY` margins. A
+  manager-owned **grip drag handle** (`ic_grip_vertical`) leads the bar; `wireFloatDragHandle()` does
+  the long-drag (clamped to screen, persists `{floatX, floatY}` on release, re-pushes exclusion +
+  overflow anchor). Overflow can flip to the bar's leading side near a far screen edge
+  (`floatOverflowOpensBefore()` — consulted by both the menu anchor and the exclusion rect).
+- **Mini** is **float-only**: when `miniEnabled && placement == FLOAT`, the visible list is
+  **Close (lead) → ≤5 chosen → gear (trail)**; the float hugs its content. The gear long-press is a
+  fast Full↔Mini switch (no-op when not FLOAT). Customize-dialog mini UI only shows in Float.
+
+### Generalized pen-exclusion contract
+
+- Both drawing views expose **`setToolbarExclusion(rect: Rect?)`** (replaces the old
+  `setToolbarHeight`). `OnyxNotebookView.applyLimitRect()` uses the stored rect directly. The toolbar
+  and drawing view share the root `FrameLayout` origin, so the toolbar's bounds *are* the rect.
+- `computeToolbarExclusionRect()` is the single authority: per-placement bounds, extended away from
+  the anchored edge when the overflow menu is open, **empty `Rect()` when collapsed** (whole canvas
+  writable). `pushToolbarExclusion()` pushes it. **Highest-risk thread** — every placement / float /
+  overflow / collapsed state must push the right rect or the pen draws under the bar (or is blocked
+  where it shouldn't).
+
+### Customize dialog (`notebook/CustomizeToolbarDialog.kt`)
+
+`AlertDialog` (standard `shape_bordered` / `setElevation(0f)` rules). Fixed header = placement
+segmented control + float-axis toggle (Float only) + mini Full/Mini toggle (Float only); scrolling
+body = hand-rolled drag-reorder list (no RecyclerView), each row a grip handle + label + show/hide
+(tap row) + per-row Mini toggle (Float only). "Reset" rebuilds defaults in place; "Save" folds the
+read-back order + sets into a fresh `ToolbarConfig` and hands it to `applyToolbarConfig()`. Opened via
+the gear button `btnToolbarSettings`.
+
+### Double-tap hide gesture (always active)
+
+- A **one-finger double-tap on the canvas** toggles `collapsed` — the *only* way to hide the bar and
+  the *only* way back, so it never strands the user (no peek tab, no on/off setting — both were
+  dropped as redundant). `handleToolbarToggleGesture()` in `dispatchTouchEvent`, **finger-only**
+  (stylus never reaches it). A "tap" is short, near-stationary (≤ `scaledTouchSlop`), single-pointer,
+  and not on toolbar chrome; two within `getDoubleTapTimeout()` + `scaledDoubleTapSlop` fire it. The
+  movement + single-pointer guards keep it clear of the page-swipe and two-finger page-insert.
+- `applyCollapsedState()` hides/shows `drawingToolbar` (closing any open overflow first) + releases
+  the EPD overlay; `collapsed` persists and is restored on open via `root.doOnLayout` (after the
+  overflow-init `doOnLayout`, so fit is computed while the bar is still visible).
+
+---
+
 ## Drawing Engine Architecture
 
 ### Files
