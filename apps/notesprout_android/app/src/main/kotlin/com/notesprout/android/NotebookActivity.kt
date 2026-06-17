@@ -1708,16 +1708,26 @@ class NotebookActivity : AppCompatActivity() {
     }
 
     /** Keep the page indicator clear of the toolbar so they never collide: opposite a top/bottom bar,
-     *  and on the leading side away from a right bar. */
+     *  and on the leading side away from a right bar. When the toolbar is hidden, it always returns to
+     *  the lower-right corner. */
     private fun positionPageIndicator() {
         val lp = binding.tvPageIndicator.layoutParams as FrameLayout.LayoutParams
         val gap = (8f * resources.displayMetrics.density).toInt()
-        val thick = toolbarLayoutManager.barThickness()
         lp.topMargin = 0; lp.bottomMargin = 0; lp.marginStart = 0; lp.marginEnd = 0
+        // Toolbar hidden → the indicator always returns to the lower-right corner, regardless of where
+        // the bar would otherwise anchor it.
+        if (toolbarConfig.collapsed) {
+            lp.gravity = Gravity.BOTTOM or Gravity.END
+            lp.bottomMargin = gap
+            lp.marginEnd = gap
+            binding.tvPageIndicator.layoutParams = lp
+            return
+        }
         when (toolbarConfig.placement) {
             ToolbarPlacement.BOTTOM -> {
+                // Bar sits at the bottom; the top edge is free, so pin flush to the top-right.
                 lp.gravity = Gravity.TOP or Gravity.END
-                lp.topMargin = thick + gap
+                lp.topMargin = gap
                 lp.marginEnd = gap
             }
             ToolbarPlacement.RIGHT -> {
@@ -1829,6 +1839,8 @@ class NotebookActivity : AppCompatActivity() {
      * overlay either way so the change paints immediately on e-ink.
      */
     private fun applyCollapsedState() {
+        // Reposition the page indicator: hidden bar → lower-right, visible bar → placement corner.
+        positionPageIndicator()
         if (toolbarConfig.collapsed) {
             if (overflowManager.isOverflowMenuOpen()) overflowManager.closeOverflowMenu()
             binding.drawingToolbar.visibility = View.GONE
