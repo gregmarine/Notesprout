@@ -29,6 +29,7 @@ object ToolbarButtonRegistry {
     private const val GROUP_HISTORY = "history"   // undo, redo
     private const val GROUP_PAGE_VIEW = "pageView" // template, page index
     private const val GROUP_PAGE_EDIT = "pageEdit" // insert before/after, delete, copy, paste
+    private const val GROUP_SETTINGS = "settings"  // customize toolbar (gear)
 
     /** The stable key of the pinned Close button — always present, never hideable. */
     const val PINNED_KEY = "close"
@@ -69,6 +70,7 @@ object ToolbarButtonRegistry {
         ButtonSpec("deletePage", R.id.btnDeletePage, R.drawable.ic_page_delete, "Delete Page", GROUP_PAGE_EDIT),
         ButtonSpec("copyPage", R.id.btnCopyPage, R.drawable.ic_copy_page, "Copy Page", GROUP_PAGE_EDIT),
         ButtonSpec("pastePage", R.id.btnPastePage, R.drawable.ic_paste_page, "Paste Page", GROUP_PAGE_EDIT),
+        ButtonSpec("toolbarSettings", R.id.btnToolbarSettings, R.drawable.ic_adjustments, "Customize Toolbar", GROUP_SETTINGS),
     )
 
     private val byKey: Map<String, ButtonSpec> = SPECS.associateBy { it.key }

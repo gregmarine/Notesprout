@@ -80,8 +80,10 @@ import com.notesprout.android.notebook.SnapPreferences
 import com.notesprout.android.notebook.LassoGeometry
 import com.notesprout.android.notebook.LineObjectDialog
 import com.notesprout.android.notebook.TextEditDialog
+import com.notesprout.android.notebook.CustomizeToolbarDialog
 import com.notesprout.android.notebook.ToolbarOverflowManager
 import com.notesprout.android.notebook.ToolbarLayoutManager
+import com.notesprout.android.data.toolbar.ToolbarConfig
 import com.notesprout.android.data.toolbar.ToolbarPreferencesManager
 import com.notesprout.android.history.UndoRedoAction
 import com.notesprout.android.history.UndoRedoManager
@@ -133,6 +135,7 @@ class NotebookActivity : AppCompatActivity() {
     private lateinit var drawingView: NotebookView
     private lateinit var overflowManager: ToolbarOverflowManager
     private lateinit var toolbarLayoutManager: ToolbarLayoutManager
+    private var toolbarConfig: ToolbarConfig = ToolbarConfig()
     /** True while we're waiting for ACTION_UP to close the overflow menu after a button tap. */
     private var overflowCloseOnUp = false
     private var isEraserActive = false
@@ -1259,7 +1262,8 @@ class NotebookActivity : AppCompatActivity() {
             dividerOverflow = binding.dividerOverflow,
             btnOverflow     = binding.btnOverflow,
         )
-        toolbarLayoutManager.apply(ToolbarPreferencesManager.load(this))
+        toolbarConfig = ToolbarPreferencesManager.load(this)
+        toolbarLayoutManager.apply(toolbarConfig)
 
         // ── Toolbar overflow ──────────────────────────────────────────────────
         overflowManager = ToolbarOverflowManager(
@@ -1284,6 +1288,16 @@ class NotebookActivity : AppCompatActivity() {
             drawingView.releaseRender()
             if (overflowManager.isOverflowMenuOpen()) closeOverflowMenu()
             else openOverflowMenu()
+        }
+
+        // ── Customize toolbar (gear) ──────────────────────────────────────────
+        binding.btnToolbarSettings.setOnClickListener {
+            drawingView.releaseRender()
+            CustomizeToolbarDialog(
+                context = this,
+                current = toolbarConfig,
+                onApply = { updated -> applyToolbarConfig(updated) },
+            ).show()
         }
 
         // ── Page swipe gesture (one-finger, deliberate) ──────────────────────
@@ -1507,6 +1521,23 @@ class NotebookActivity : AppCompatActivity() {
     private fun closeOverflowMenu() {
         overflowManager.closeOverflowMenu()
         drawingView.setToolbarHeight(binding.drawingToolbar.height)
+    }
+
+    /**
+     * Persists [config] and re-applies the live toolbar in place: closes any open overflow menu,
+     * rearranges the existing button views via [toolbarLayoutManager], resets the overflow manager so
+     * it re-derives its moveable set + dividers, then recalculates fit. Move-not-clone throughout, so
+     * `isSelected` state and click listeners survive.
+     */
+    private fun applyToolbarConfig(config: ToolbarConfig) {
+        toolbarConfig = config
+        ToolbarPreferencesManager.save(this, config)
+        closeOverflowMenu()
+        toolbarLayoutManager.apply(config)
+        overflowManager.reset()
+        // Children just changed; the toolbar width is unchanged so addOnLayoutChangeListener won't
+        // fire. recalc() reads layout-param widths (not a fresh measure), so call it directly.
+        overflowManager.recalc()
     }
 
     /**

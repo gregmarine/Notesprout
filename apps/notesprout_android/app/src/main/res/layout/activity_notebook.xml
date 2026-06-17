@@ -204,6 +204,15 @@
             android:src="@drawable/ic_paste_page"
             android:contentDescription="Paste page" />
 
+        <!-- Customize toolbar (gear) — opens the reorder / show-hide dialog.
+             Customizable + overflow-eligible like any other button. -->
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnToolbarSettings"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:layout_marginStart="4dp"
+            android:src="@drawable/ic_adjustments"
+            android:contentDescription="Customize toolbar" />
+
         <!-- Overflow group divider — visible only when overflow button is shown -->
         <View
             android:id="@+id/dividerOverflow"

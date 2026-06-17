@@ -145,7 +145,9 @@ Each session ends with: **build clean → install on G10 → user verifies → f
 on report → on user "tests pass", commit (no push) with a message naming the work and
 `Session x/N`.** No pushing until the final session.
 
-`N = 7` coding sessions + a wrap step.
+`N = 7` core coding sessions, then **Session 8** (UI/UX polish — an idea backlog opened once the
+feature is usable), then a wrap step. Sessions 1–7 keep their original `x/7` labels; Session 8 is an
+appended exploration session.
 
 ---
 
@@ -317,6 +319,22 @@ double-tap to show. Confirm it never fires from the stylus and never collides wi
 swipes or two-finger insert. Disable the gesture in settings → peek tab still works.
 
 **Commit:** `🌱 Customizable toolbar: hide/show gesture + peek tab (Session 7/7)`
+
+---
+
+### Session 8 — UI/UX polish & refinements (idea backlog)
+
+**Goal:** A living catch-all for UI/UX ideas that surfaced once the feature was usable in the hand.
+Functionality (Sessions 1–7) is the priority; this session is where we revisit *feel*. Capture ideas
+here as they come up so none are lost, then triage into concrete steps before implementing.
+
+**Ideas backlog (to be fleshed out / discussed):**
+- _(placeholder — add ideas here as they arise)_
+
+**Process:** Each idea gets a short note now; we discuss + scope before building. May split into
+multiple commits. Same session protocol (build → install on G10 → verify → commit, no push).
+
+**Commit(s):** `🌱 Customizable toolbar: UI/UX polish — <what> (Session 8)`
 
 ---
 

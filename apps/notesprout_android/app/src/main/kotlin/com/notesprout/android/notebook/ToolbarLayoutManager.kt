@@ -36,15 +36,21 @@ class ToolbarLayoutManager(
     private val density = context.resources.displayMetrics.density
 
     /**
+     * Cached references to every button view, captured once from the inflated hierarchy. Views are
+     * never recreated (move-not-clone), so these stay valid for the Activity's lifetime. Holding them
+     * directly — rather than re-looking-up by id each apply — is essential: a hidden button's view is
+     * detached from the tree, and `findViewById` cannot find a detached view, so a later unhide could
+     * never re-add it.
+     */
+    private var buttonViews: Map<String, View>? = null
+
+    /**
      * Rebuild [toolbar]'s children from [config]: visible buttons in order, auto-dividers between
      * group boundaries, then the internal trailing weight + overflow controls. Idempotent — safe
      * to re-apply when the config changes.
      */
     fun apply(config: ToolbarConfig) {
-        // Capture the button views by key while they're still attached, before clearing.
-        val buttonViews: Map<String, View?> = ToolbarButtonRegistry.SPECS.associate { spec ->
-            spec.key to toolbar.findViewById<View?>(spec.viewId)
-        }
+        val views = captureButtonViews()
 
         toolbar.removeAllViews()
 
@@ -52,7 +58,7 @@ class ToolbarLayoutManager(
         var first = true
         for (key in resolveVisibleKeys(config)) {
             val spec = ToolbarButtonRegistry.spec(key) ?: continue
-            val view = buttonViews[key] ?: continue
+            val view = views[key] ?: continue
             if (!first && spec.group != prevGroup) toolbar.addView(makeDivider())
             (view.parent as? ViewGroup)?.removeView(view)
             toolbar.addView(view)
@@ -69,13 +75,36 @@ class ToolbarLayoutManager(
     }
 
     /**
+     * Capture (once) and return every button view by key. The first call runs in `onCreate` before
+     * overflow, when all buttons still live in the XML toolbar, so searching from the root finds them
+     * all; the references are then held permanently.
+     */
+    private fun captureButtonViews(): Map<String, View> {
+        buttonViews?.let { return it }
+        val root = toolbar.rootView
+        val captured = ToolbarButtonRegistry.SPECS.mapNotNull { spec ->
+            root.findViewById<View?>(spec.viewId)?.let { spec.key to it }
+        }.toMap()
+        buttonViews = captured
+        return captured
+    }
+
+    /**
      * order − hidden, in config order, keeping only keys with a registered spec. The pinned Close
      * is always retained (even if listed in `hidden`) and force-prepended if missing from `order`.
+     *
+     * Keys are append-only: a config persisted before a button shipped won't list that key. Any
+     * registered key missing from `order` (and not hidden) is appended at the end so new buttons
+     * always surface — otherwise, e.g., the gear that opens the customize dialog could vanish for
+     * users with an older saved config.
      */
     private fun resolveVisibleKeys(config: ToolbarConfig): List<String> {
         val pinned = ToolbarButtonRegistry.PINNED_KEY
         val result = config.order.filterTo(mutableListOf()) { key ->
             ToolbarButtonRegistry.spec(key) != null && (key == pinned || key !in config.hidden)
+        }
+        for (key in ToolbarButtonRegistry.DEFAULT_ORDER) {
+            if (key !in config.order && key !in config.hidden && key !in result) result.add(key)
         }
         if (pinned !in result && ToolbarButtonRegistry.spec(pinned) != null) result.add(0, pinned)
         return result

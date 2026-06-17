@@ -121,6 +121,13 @@ class ToolbarOverflowManager(
         )
     }
 
+    /**
+     * Forces the next [recalc] to re-derive [originalOrder] / [spaceView] from the toolbar's current
+     * children. Call after [ToolbarLayoutManager.apply] rebuilds the bar (reorder / show-hide), since
+     * the moveable set and the auto-generated dividers have changed.
+     */
+    fun reset() { initialized = false }
+
     fun openOverflowMenu()  { overflowMenu.visibility = View.VISIBLE }
     fun closeOverflowMenu() { overflowMenu.visibility = View.GONE }
     fun isOverflowMenuOpen() = overflowMenu.visibility == View.VISIBLE
