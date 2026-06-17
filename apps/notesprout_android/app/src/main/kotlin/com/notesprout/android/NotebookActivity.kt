@@ -167,10 +167,11 @@ class NotebookActivity : AppCompatActivity() {
     val selectedObjectIds = mutableSetOf<String>()
 
     // ── One-finger page swipe state ───────────────────────────────────────────
-    // Deliberate full-width horizontal swipe turns pages.  Three guards ensure
-    // only intentional gestures qualify: minimum distance (screen-width relative),
-    // minimum velocity (1.5× system fling threshold), and horizontal dominance.
-    // A second finger cancels the gesture so palm+finger combos never fire.
+    // Deliberate full-width horizontal swipe turns pages.  Distance is the primary
+    // gate: ≥30% screen width required; ≥50% qualifies regardless of velocity; a
+    // quick flick covering ≥30% also qualifies.  Horizontal dominance is always
+    // required.  If a second finger lands mid-swipe and the gesture already
+    // qualifies, it is committed immediately (palm tolerance) — otherwise cancelled.
     private var pageSwipeActive = false
     private var pageSwipeStartX = 0f
     private var pageSwipeStartY = 0f
@@ -2004,7 +2005,22 @@ class NotebookActivity : AppCompatActivity() {
                     twoFingerSwipeVelocityTracker?.recycle()
                     twoFingerSwipeVelocityTracker = VelocityTracker.obtain().also { it.addMovement(event) }
                 } else {
-                    // 3+ fingers — cancel.
+                    // 3+ fingers. If the two-finger swipe already qualifies, commit the insert now
+                    // before the extra finger (e.g. a palm) cancels it.
+                    if (twoFingerSwipeActive) {
+                        val tracker = twoFingerSwipeVelocityTracker
+                        val endX = (event.getX(0) + event.getX(1)) / 2f
+                        val endY = (event.getY(0) + event.getY(1)) / 2f
+                        val dx = endX - twoFingerSwipeStartX
+                        val dy = endY - twoFingerSwipeStartY
+                        if (tracker != null && pageSwipeQualifies(dx, dy)) {
+                            tracker.addMovement(event)
+                            tracker.computeCurrentVelocity(1000)
+                            val vx = tracker.getXVelocity(0)
+                            val vy = tracker.getYVelocity(0)
+                            evaluateTwoFingerInsertFling(vx, vy, dx, dy)
+                        }
+                    }
                     twoFingerSwipeActive = false
                     twoFingerSwipeVelocityTracker?.recycle()
                     twoFingerSwipeVelocityTracker = null
@@ -2012,14 +2028,15 @@ class NotebookActivity : AppCompatActivity() {
             }
             MotionEvent.ACTION_POINTER_UP -> {
                 // One finger lifted from a 2-finger gesture — evaluate and clean up.
+                // Both pointers are still present at POINTER_UP, so use their centroid
+                // as the end point (consistent with how the start centroid was recorded).
                 if (twoFingerSwipeActive && event.pointerCount == 2) {
                     val tracker = twoFingerSwipeVelocityTracker
                     if (tracker != null) {
                         tracker.addMovement(event)
                         tracker.computeCurrentVelocity(1000)
-                        val remainingIndex = 1 - event.actionIndex
-                        val endX = event.getX(remainingIndex)
-                        val endY = event.getY(remainingIndex)
+                        val endX = (event.getX(0) + event.getX(1)) / 2f
+                        val endY = (event.getY(0) + event.getY(1)) / 2f
                         val vx = tracker.getXVelocity(0)
                         val vy = tracker.getYVelocity(0)
                         val dx = endX - twoFingerSwipeStartX
@@ -2162,20 +2179,46 @@ class NotebookActivity : AppCompatActivity() {
     }
 
     /**
-     * Applies the same three guards as [evaluatePageFling] and inserts a new page
-     * relative to the current one.
+     * Inserts a new page relative to the current one if the two-finger gesture qualifies.
+     *
+     * Uses the same distance-primary gate as [evaluatePageFling]: horizontal dominance is
+     * required, ≥30% screen width is the minimum distance, and ≥50% screen width qualifies
+     * regardless of velocity. A quick flick covering ≥30% also qualifies. Direction is
+     * derived from displacement (dx), never velocity, to avoid sign flips on lift-off.
      *
      * Swipe left (dx < 0) → insert AFTER the current page, navigate to it.
      * Swipe right (dx > 0) → insert BEFORE the current page, navigate to it.
      */
     private fun evaluateTwoFingerInsertFling(velocityX: Float, velocityY: Float, dx: Float, dy: Float) {
-        if (Math.abs(dx) <= Math.abs(dy)) return
-        val minVelocity = ViewConfiguration.get(this).scaledMinimumFlingVelocity * 1.5f
-        if (Math.abs(velocityX) < minVelocity) return
-        val screenWidthPx = resources.displayMetrics.widthPixels.toFloat()
-        if (Math.abs(dx) < 0.50f * screenWidthPx) return
+        val absDx = abs(dx)
+        val absDy = abs(dy)
+        val width  = resources.displayMetrics.widthPixels.toFloat()
+        val minVel = ViewConfiguration.get(this).scaledMinimumFlingVelocity * PAGE_SWIPE_MIN_VELOCITY_MULT
+        val fastEnough = abs(velocityX) >= minVel
+        val longEnough = absDx >= PAGE_SWIPE_LONG_DISTANCE_FRAC * width
 
-        if (dx < 0) {
+        Slog.d(TAG) {
+            "evaluateTwoFingerInsertFling dx=$dx dy=$dy vx=$velocityX vy=$velocityY " +
+            "width=$width fastEnough=$fastEnough longEnough=$longEnough"
+        }
+
+        if (absDx <= absDy) {
+            Slog.d(TAG) { "evaluateTwoFingerInsertFling rejected: not horizontal (absDx=$absDx absDy=$absDy)" }
+            return
+        }
+        if (absDx < PAGE_SWIPE_MIN_DISTANCE_FRAC * width) {
+            Slog.d(TAG) { "evaluateTwoFingerInsertFling rejected: too short (absDx=$absDx minDist=${PAGE_SWIPE_MIN_DISTANCE_FRAC * width})" }
+            return
+        }
+        if (!fastEnough && !longEnough) {
+            Slog.d(TAG) { "evaluateTwoFingerInsertFling rejected: neither fast nor long" }
+            return
+        }
+
+        val insertAfter = dx < 0
+        Slog.d(TAG) { "evaluateTwoFingerInsertFling accepted: ${if (insertAfter) "insert after" else "insert before"}" }
+
+        if (insertAfter) {
             insertPageAfterCurrentAndNavigate()
         } else {
             insertPageBeforeCurrentAndNavigate()
