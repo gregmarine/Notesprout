@@ -329,7 +329,22 @@ Functionality (Sessions 1–7) is the priority; this session is where we revisit
 here as they come up so none are lost, then triage into concrete steps before implementing.
 
 **Ideas backlog (to be fleshed out / discussed):**
-- _(placeholder — add ideas here as they arise)_
+- **Pin the gear button (always shown).** The "Customize Toolbar" gear must never be hideable — if a
+  user hides it, they lose the only way back into the customize dialog. Treat it like Close: keep it
+  in the bar regardless of config (and disable its show/hide toggle in the dialog, like Close's).
+  Open question: should the gear *also* be reachable from a second entry point (e.g. overflow menu or
+  a long-press) as a belt-and-suspenders recovery, or is pinning it sufficient? (Pinning alone is the
+  simplest and probably enough.)
+- **Split-panel customize dialog (grid, not list).** Redesign the dialog into two stacked panels:
+  - **Top panel = "Showing"** — the currently-visible buttons, arrangeable in order.
+  - **Bottom panel = "Hidden / Available"** — buttons not currently in the bar.
+  - Each panel is a **grid** of icon buttons (not a vertical list). Drag a button between panels to
+    show/hide it; drag within the top panel to reorder. This makes order + visibility a single direct
+    manipulation instead of separate reorder + toggle actions.
+  - Considerations to work through: grid drag-reorder is more involved than the current list (2-D
+    target slots, reflow); still hand-rolled (no RecyclerView); how Close/gear pinning reads in a grid
+    (locked cells?); how the mini-set picker (Session 6) composes with this layout; cross-panel drag
+    must preserve the move-not-clone + key-stability contracts.
 
 **Process:** Each idea gets a short note now; we discuss + scope before building. May split into
 multiple commits. Same session protocol (build → install on G10 → verify → commit, no push).
