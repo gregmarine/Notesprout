@@ -912,6 +912,11 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
                     viewTreeObserver.removeOnGlobalLayoutListener(this)
                     Slog.d(TAG) { "onGlobalLayout: ${width}x${height} — calling openRawDrawing" }
                     openRawDrawing()
+                    // The Onyx SDK restores the previous session's exclusion zone asynchronously
+                    // during or after openRawDrawing(), overwriting the setLimitRect we called
+                    // inside it. Re-apply in the next looper turn — after the SDK restore has
+                    // settled — using whatever toolbarExclusion the doOnLayout callbacks have set.
+                    post { reapplyDrawingBounds() }
                 }
             }
         })
@@ -1281,6 +1286,18 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
         toolbarExclusion = rect?.takeUnless { it.isEmpty }?.let { Rect(it) }
         Slog.d(TAG) { "setToolbarExclusion rect=$toolbarExclusion" }
         if (isSetup) applyLimitRect()
+    }
+
+    override fun reapplyDrawingBounds() {
+        if (!isSetup) return
+        // Do NOT call restartRawDrawing() here. The Onyx SDK persists the exclusion zone and
+        // restores it every time restartRawDrawing() (or openRawDrawing()) is called — so calling
+        // restart would immediately undo the cleared exclusion we just set. Instead, call
+        // applyLimitRect() directly: the SDK honours dynamic setLimitRect updates (proven by the
+        // add-exclusion path), and the off-screen dummy rect in applyLimitRect() forces it to
+        // actually process the call rather than treating an emptyList as a no-op.
+        applyLimitRect()
+        epd { "REAPPLY_LIMIT_RECT caller=reapplyDrawingBounds exclusion=${toolbarExclusion}" }
     }
 
     override fun enableDrawing() {
@@ -1911,7 +1928,13 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
             frame.right - loc[0],
             frame.bottom - loc[1]
         )
-        val exclusion = toolbarExclusion?.let { listOf(Rect(it)) } ?: emptyList()
+        // Pass an off-screen dummy rect instead of emptyList() when there is no exclusion.
+        // The Onyx SDK treats an empty list as a no-op — it silently ignores the call and
+        // keeps whatever exclusion zone was previously active (or restored from its persisted
+        // state). A non-empty list with an off-screen rect forces the SDK to process the
+        // update and effectively clears any previous exclusion zone.
+        val exclusion = toolbarExclusion?.let { listOf(Rect(it)) }
+            ?: listOf(Rect(-1, -1, 0, 0))
         Slog.d(TAG) { "applyLimitRect: limitRect=$limitRect exclusion=$exclusion" }
         touchHelper.setLimitRect(limitRect, exclusion)
     }

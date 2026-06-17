@@ -24,6 +24,14 @@ interface NotebookView {
      * a different rect. Generic devices ignore this (the toolbar consumes its own touches).
      */
     fun setToolbarExclusion(rect: Rect?)
+
+    /**
+     * Re-arms the Onyx SDK pen layer with the current limit rect, forcing the new exclusion zone
+     * to take effect immediately without waiting for a focus-change cycle. No-op on Generic devices.
+     * Must only be called between strokes (not mid-contact). Respects all tool-state invariants.
+     */
+    fun reapplyDrawingBounds() {}
+
     fun enableDrawing()
     fun disableDrawing()
     fun resetOverlay() {}

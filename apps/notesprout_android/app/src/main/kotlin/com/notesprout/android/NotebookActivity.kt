@@ -1826,11 +1826,18 @@ class NotebookActivity : AppCompatActivity() {
             if (overflowManager.isOverflowMenuOpen()) overflowManager.closeOverflowMenu()
             binding.drawingToolbar.visibility = View.GONE
             pushToolbarExclusion()
+            // Defer to the next looper turn so reapplyDrawingBounds() runs AFTER the touch event
+            // that triggered the collapse has fully exited dispatchTouchEvent. Calling SDK restart
+            // methods mid-touch-event appears to silently fail on the Onyx SDK.
+            binding.root.post { drawingView.reapplyDrawingBounds() }
         } else {
             binding.drawingToolbar.visibility = View.VISIBLE
             // The bar's bounds are stale (0) until it relays out from GONE → VISIBLE; push the real
-            // exclusion rect once that pass completes.
-            binding.drawingToolbar.doOnLayout { pushToolbarExclusion() }
+            // exclusion rect and re-arm the Onyx SDK once that pass completes.
+            binding.drawingToolbar.doOnLayout {
+                pushToolbarExclusion()
+                drawingView.reapplyDrawingBounds()
+            }
         }
         drawingView.releaseRender()
     }
