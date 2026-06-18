@@ -769,24 +769,40 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
             for (i in 1 until pts.size) path.lineTo(pts[i].x, pts[i].y)
             canvas.drawPath(path, strokePaint)
         }
-        drawLinkChrome(canvas, link.boundingBox, link.chrome)
+        val iconOutside = link.headings.isNotEmpty() || link.textObjects.isNotEmpty()
+        drawLinkChrome(canvas, link.boundingBox, link.chrome, iconOutside)
     }
 
-    /** Draw a link's visual indicator: none, an underline, or a dotted box with a corner chevron. */
-    private fun drawLinkChrome(canvas: Canvas, box: RectF, chrome: LinkChrome) {
+    /** Draw a link's visual indicator: none, an underline, or a dotted box with a corner chevron.
+     *  When [iconOutside] is true (text/heading links), the icon sits 6dp to the right of the
+     *  content bbox and the dotted box extends to encompass it. */
+    private fun drawLinkChrome(canvas: Canvas, box: RectF, chrome: LinkChrome, iconOutside: Boolean = false) {
         when (chrome) {
             LinkChrome.NONE -> {}
             LinkChrome.UNDERLINE ->
                 canvas.drawLine(box.left, box.bottom, box.right, box.bottom, linkChromePaint)
             LinkChrome.DOTTED_CHEVRON -> {
-                canvas.drawRect(box, linkChromeDashPaint)
                 val d = resources.displayMetrics.density
                 val iconSize = (14f * d).toInt()
-                val iconRight = (box.right - 3f * d).toInt()
-                val iconBottom = (box.bottom - 3f * d).toInt()
-                AppCompatResources.getDrawable(context, R.drawable.ic_link)?.let { icon ->
-                    icon.setBounds(iconRight - iconSize, iconBottom - iconSize, iconRight, iconBottom)
-                    icon.draw(canvas)
+                val pad = 3f * d
+                if (iconOutside) {
+                    val gap = 6f * d
+                    val chromeBox = RectF(box.left, box.top, box.right + gap + iconSize + pad, box.bottom)
+                    canvas.drawRect(chromeBox, linkChromeDashPaint)
+                    val iconLeft = (box.right + gap).toInt()
+                    val iconBottom = (box.bottom - pad).toInt()
+                    AppCompatResources.getDrawable(context, R.drawable.ic_link)?.let { icon ->
+                        icon.setBounds(iconLeft, iconBottom - iconSize, iconLeft + iconSize, iconBottom)
+                        icon.draw(canvas)
+                    }
+                } else {
+                    canvas.drawRect(box, linkChromeDashPaint)
+                    val iconRight = (box.right - pad).toInt()
+                    val iconBottom = (box.bottom - pad).toInt()
+                    AppCompatResources.getDrawable(context, R.drawable.ic_link)?.let { icon ->
+                        icon.setBounds(iconRight - iconSize, iconBottom - iconSize, iconRight, iconBottom)
+                        icon.draw(canvas)
+                    }
                 }
             }
         }
