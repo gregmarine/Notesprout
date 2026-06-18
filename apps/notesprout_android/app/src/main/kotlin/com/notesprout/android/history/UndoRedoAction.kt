@@ -2,7 +2,9 @@ package com.notesprout.android.history
 
 import com.notesprout.android.data.HeadingStroke
 import com.notesprout.android.data.LineRender
+import com.notesprout.android.data.LinkChrome
 import com.notesprout.android.data.LinkRender
+import com.notesprout.android.data.LinkTarget
 import com.notesprout.android.data.LiveStroke
 import com.notesprout.android.data.TextRender
 import kotlinx.serialization.Serializable
@@ -469,5 +471,23 @@ sealed class UndoRedoAction {
         val restoredHeadingIds: List<String> = emptyList(),
         val restoredTextIds: List<String> = emptyList(),
         val restoredLineIds: List<String> = emptyList(),
+    ) : UndoRedoAction()
+
+    /**
+     * User edited a link's chrome and/or target in place (Session 2). The embedded held objects are
+     * untouched — only the serialized `data` column changes.
+     *
+     * Undo: rewrite the link row's data with [oldChrome] + [oldTarget].
+     * Redo: rewrite it with [newChrome] + [newTarget].
+     * Both take the full-reload path, re-reading the link from the DB.
+     */
+    @Serializable
+    data class LinkEdited(
+        val linkId: String,
+        val pageId: String,
+        val oldChrome: LinkChrome,
+        val oldTarget: LinkTarget,
+        val newChrome: LinkChrome,
+        val newTarget: LinkTarget,
     ) : UndoRedoAction()
 }

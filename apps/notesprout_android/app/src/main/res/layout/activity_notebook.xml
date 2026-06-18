@@ -371,6 +371,13 @@
             android:visibility="gone" />
 
         <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnLinkEdit"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:src="@drawable/ic_link"
+            android:contentDescription="Edit Link"
+            android:visibility="gone" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
             android:id="@+id/btnUnlink"
             style="@style/Widget.Notesprout.ToolbarButton"
             android:src="@drawable/ic_link_off"

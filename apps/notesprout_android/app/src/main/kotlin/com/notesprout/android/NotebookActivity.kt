@@ -174,11 +174,15 @@ class NotebookActivity : AppCompatActivity() {
     /** IDs of objects selected by the most recent lasso gesture. */
     val selectedObjectIds = mutableSetOf<String>()
 
-    // ── Link objects (Session 1 temporary creation hook) ──────────────────────
-    // The real target-picker dialog arrives in Session 2; until then the link-plus button
-    // points new links at the current notebook's first page and cycles the chrome on each
-    // creation so all three styles can be exercised visually.
-    private var tempLinkChromeCycle = 0
+    // ── Link objects (Session 2 target picker) ────────────────────────────────
+    // The picker round-trips through an Activity result, so the work-in-progress is stashed here
+    // while it's open: the captured selection to wrap (create) and/or the id of the link being
+    // edited. [pendingLinkEditId] non-null ⇒ the open picker is editing that link in place.
+    private var pendingLinkStrokes:  List<LiveStroke>    = emptyList()
+    private var pendingLinkHeadings: List<HeadingStroke> = emptyList()
+    private var pendingLinkTexts:    List<TextRender>    = emptyList()
+    private var pendingLinkLines:    List<LineRender>    = emptyList()
+    private var pendingLinkEditId:   String?             = null
 
     // ── One-finger page swipe state ───────────────────────────────────────────
     // Deliberate full-width horizontal swipe turns pages.  Distance is the primary
@@ -380,6 +384,50 @@ class NotebookActivity : AppCompatActivity() {
                 anySessionActions -> navigateToPage(currentPageIndex)
             }
         }
+    }
+
+    // ── Link target picker launcher (Session 2) ───────────────────────────────
+    // On OK, build the chosen chrome + target. If a link was being edited
+    // ([pendingLinkEditId] set) update it in place; otherwise wrap the stashed selection into a
+    // new link. Pending state is cleared either way (also on cancel — see the early returns).
+    private val linkPickerLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        val editId = pendingLinkEditId
+        val strokes  = pendingLinkStrokes
+        val headings = pendingLinkHeadings
+        val texts    = pendingLinkTexts
+        val lines    = pendingLinkLines
+        pendingLinkEditId = null
+        pendingLinkStrokes = emptyList(); pendingLinkHeadings = emptyList()
+        pendingLinkTexts = emptyList();   pendingLinkLines = emptyList()
+
+        if (result.resultCode != RESULT_OK) return@registerForActivityResult
+        val data = result.data ?: return@registerForActivityResult
+        val chrome = data.getStringExtra(LinkTargetPickerActivity.EXTRA_RESULT_CHROME)
+            ?.let { runCatching { LinkChrome.valueOf(it) }.getOrNull() } ?: return@registerForActivityResult
+        val pageId = data.getStringExtra(LinkTargetPickerActivity.EXTRA_RESULT_PAGE_ID) ?: return@registerForActivityResult
+        val target: LinkTarget = LinkTarget.CurrentNotebookPage(pageId)
+
+        lifecycleScope.launch(Dispatchers.IO) {
+            if (editId != null) {
+                updateLink(editId, chrome, target)
+            } else if (strokes.isNotEmpty() || headings.isNotEmpty() || texts.isNotEmpty() || lines.isNotEmpty()) {
+                createLinkFromSelection(strokes, headings, texts, lines, chrome, target)
+            }
+        }
+    }
+
+    /** Launch the link target picker, pre-selecting [initialChrome]/[initialPageId] when editing. */
+    private fun launchLinkPicker(initialChrome: LinkChrome?, initialPageId: String?) {
+        val intent = Intent(this, LinkTargetPickerActivity::class.java).apply {
+            putExtra(LinkTargetPickerActivity.EXTRA_NOTEBOOK_ID, notebookId)
+            putExtra(LinkTargetPickerActivity.EXTRA_NOTEBOOK_NAME, notebookDisplayName)
+            putExtra(LinkTargetPickerActivity.EXTRA_CURRENT_PAGE_INDEX, currentPageIndex)
+            if (initialChrome != null) putExtra(LinkTargetPickerActivity.EXTRA_INITIAL_CHROME, initialChrome.name)
+            if (initialPageId != null) putExtra(LinkTargetPickerActivity.EXTRA_INITIAL_PAGE_ID, initialPageId)
+        }
+        linkPickerLauncher.launch(intent)
     }
 
     // ── Export save-to-device launcher ───────────────────────────────────────
@@ -1263,9 +1311,20 @@ class NotebookActivity : AppCompatActivity() {
             val texts    = drawingView.getTextObjects().filter { it.id in ids }
             val lines    = drawingView.getLineObjects().filter { it.id in ids }
             if (strokes.isEmpty() && headings.isEmpty() && texts.isEmpty() && lines.isEmpty()) return@setOnClickListener
-            lifecycleScope.launch(Dispatchers.IO) {
-                createLinkFromSelection(strokes, headings, texts, lines)
-            }
+            // Stash the selection and open the target picker; the result handler creates the link.
+            pendingLinkEditId = null
+            pendingLinkStrokes = strokes; pendingLinkHeadings = headings
+            pendingLinkTexts = texts;     pendingLinkLines = lines
+            launchLinkPicker(initialChrome = null, initialPageId = null)
+        }
+
+        binding.btnLinkEdit.setOnClickListener {
+            val link = drawingView.getLinks().firstOrNull { it.id in drawingView.lassoSelectedIds } ?: return@setOnClickListener
+            pendingLinkEditId = link.id
+            pendingLinkStrokes = emptyList(); pendingLinkHeadings = emptyList()
+            pendingLinkTexts = emptyList();   pendingLinkLines = emptyList()
+            val initialPageId = (link.target as? LinkTarget.CurrentNotebookPage)?.pageId
+            launchLinkPicker(initialChrome = link.chrome, initialPageId = initialPageId)
         }
 
         binding.btnUnlink.setOnClickListener {
@@ -4244,16 +4303,17 @@ class NotebookActivity : AppCompatActivity() {
      * Wrap a heterogeneous lasso selection into a single `type = "link"` object, mirroring
      * [createHeadingFromStrokes] but holding any mix of strokes/headings/text/lines.
      *
-     * Session 1 temporary target: the current notebook's first page, with the chrome cycled on
-     * each creation so all three styles are testable. The real target-picker dialog lands in
-     * Session 2. The held objects are captured as fresh-UUID copies; the originals are soft-deleted
-     * in one transaction. Must be called on [Dispatchers.IO]; switches to Main for UI updates.
+     * [chrome] and [target] come from the Session 2 target picker. The held objects are captured as
+     * fresh-UUID copies; the originals are soft-deleted in one transaction. Must be called on
+     * [Dispatchers.IO]; switches to Main for UI updates.
      */
     private suspend fun createLinkFromSelection(
         selectedStrokes: List<LiveStroke>,
         selectedHeadings: List<HeadingStroke>,
         selectedTexts: List<TextRender>,
         selectedLines: List<LineRender>,
+        chrome: LinkChrome,
+        target: LinkTarget,
     ) {
         val db      = soilDatabase ?: return
         val layerId = currentLayerId.takeIf { it.isNotEmpty() } ?: return
@@ -4274,10 +4334,6 @@ class NotebookActivity : AppCompatActivity() {
         val embeddedHeadings = selectedHeadings.map { it.copy(id = UUID.randomUUID().toString(), boundingBox = RectF(it.boundingBox)) }
         val embeddedTexts = selectedTexts.map { it.copy(id = UUID.randomUUID().toString(), boundingBox = RectF(it.boundingBox)) }
         val embeddedLineRenders = selectedLines.map { it.copy(id = UUID.randomUUID().toString(), boundingBox = RectF(it.boundingBox)) }
-
-        val chrome = LinkChrome.values()[tempLinkChromeCycle % LinkChrome.values().size]
-        tempLinkChromeCycle++
-        val target: LinkTarget = LinkTarget.CurrentNotebookPage(pages.firstOrNull()?.id ?: pageId)
 
         val originalStrokeIds  = selectedStrokes.map { it.id }
         val originalHeadingIds = selectedHeadings.map { it.id }
@@ -4450,6 +4506,58 @@ class NotebookActivity : AppCompatActivity() {
         }
     }
 
+    /**
+     * Edit a link's chrome and/or target in place (Session 2). Rewrites the `data` column, swaps the
+     * in-memory [LinkRender] so the chrome redraws without a full reload, and pushes a [LinkEdited]
+     * action whose undo/redo flips the row's data back/forward. No-op when nothing actually changed.
+     * Must be called on [Dispatchers.IO]; switches to Main for UI updates.
+     */
+    private suspend fun updateLink(linkId: String, newChrome: LinkChrome, newTarget: LinkTarget) {
+        val db     = soilDatabase ?: return
+        val pageId = currentPageId.takeIf { it.isNotEmpty() } ?: return
+        val dao    = db.notebookDao()
+        val row    = dao.getObjectById(linkId) ?: return
+        val obj    = try { LinkObject.fromJson(row.data) } catch (_: Exception) { return }
+        val oldChrome = obj.chrome
+        val oldTarget = obj.target
+        if (oldChrome == newChrome && oldTarget == newTarget) return
+
+        val now = System.currentTimeMillis()
+        dao.updateData(linkId, obj.copy(chrome = newChrome, target = newTarget).toJson(), now)
+        invalidatePageSnapshot(db, pageId)
+
+        withContext(Dispatchers.Main) {
+            undoRedoManager.push(UndoRedoAction.LinkEdited(
+                linkId    = linkId,
+                pageId    = pageId,
+                oldChrome = oldChrome,
+                oldTarget = oldTarget,
+                newChrome = newChrome,
+                newTarget = newTarget,
+            ))
+            updateUndoRedoButtons()
+
+            val updatedLinks = drawingView.getLinks().map {
+                if (it.id == linkId) it.copy(chrome = newChrome, target = newTarget) else it
+            }
+            drawingView.loadLinks(updatedLinks)
+
+            val strokes  = drawingView.getStrokes()
+            val headings = drawingView.getHeadings()
+            val texts    = drawingView.getTextObjects()
+            val lines    = drawingView.getLineObjects()
+            val templateBmp = currentTemplateBitmap
+            val bitmap = withContext(Dispatchers.IO) {
+                drawingView.buildRenderBitmap(strokes, templateBmp, headings, texts, lines, updatedLinks)
+            }
+            if (bitmap != null) {
+                drawingView.loadStrokesWithBitmap(strokes, bitmap, templateBmp)
+            } else {
+                drawingView.loadStrokes(strokes)
+            }
+        }
+    }
+
     private fun showHeadingTextEditDialog(heading: HeadingStroke) {
         val dialogBinding = DialogEditHeadingTextBinding.inflate(layoutInflater)
         dialogBinding.editHeadingText.setText(heading.recognizedText)
@@ -4586,8 +4694,9 @@ class NotebookActivity : AppCompatActivity() {
         val anyNonLinkSelected = selStrokes.isNotEmpty() || selHeadings.isNotEmpty() || selTextObjects.isNotEmpty() || selLines.isNotEmpty()
         val canAddLink = selLinks.isEmpty() && anyNonLinkSelected
         val selectionIsSingleLink = selLinks.size == 1 && !anyNonLinkSelected
-        binding.btnLink.visibility    = if (canAddLink) View.VISIBLE else View.GONE
-        binding.btnUnlink.visibility  = if (selectionIsSingleLink) View.VISIBLE else View.GONE
+        binding.btnLink.visibility     = if (canAddLink) View.VISIBLE else View.GONE
+        binding.btnLinkEdit.visibility = if (selectionIsSingleLink) View.VISIBLE else View.GONE
+        binding.btnUnlink.visibility   = if (selectionIsSingleLink) View.VISIBLE else View.GONE
         binding.linkDivider.visibility = if (canAddLink || selectionIsSingleLink) View.VISIBLE else View.GONE
         binding.floatingSelectionToolbar.visibility = View.VISIBLE
         binding.floatingSelectionToolbar.post {
@@ -5275,6 +5384,7 @@ class NotebookActivity : AppCompatActivity() {
             is UndoRedoAction.LinesRemoved     -> action.pageId
             is UndoRedoAction.LinkCreated      -> action.pageId
             is UndoRedoAction.LinkRemoved      -> action.pageId
+            is UndoRedoAction.LinkEdited       -> action.pageId
             else                               -> null
         }
         val isCrossPage = targetPageId != null && targetPageId != currentPageId
@@ -5306,10 +5416,11 @@ class NotebookActivity : AppCompatActivity() {
             withContext(Dispatchers.IO) { invalidatePageSnapshot(db, snapshotPageId) }
         }
 
-        // Link create/remove undo/redo take the full-reload path (no optimised same-page handler).
-        // The reload re-reads links from the DB and re-renders; clear any lingering selection so the
-        // dashed box / floating toolbar don't point at an object that just changed identity.
-        if (action is UndoRedoAction.LinkCreated || action is UndoRedoAction.LinkRemoved) {
+        // Link create/remove/edit undo/redo take the full-reload path (no optimised same-page
+        // handler). The reload re-reads links from the DB and re-renders; clear any lingering
+        // selection so the dashed box / floating toolbar don't point at a just-changed object.
+        if (action is UndoRedoAction.LinkCreated || action is UndoRedoAction.LinkRemoved ||
+            action is UndoRedoAction.LinkEdited) {
             selectedObjectIds.clear()
             drawingView.lassoSelectedIds = emptySet()
             drawingView.setLassoOverlay(null, null)
@@ -6763,6 +6874,19 @@ class NotebookActivity : AppCompatActivity() {
                 } else {
                     dao.softDeleteById(action.linkId, now)
                     restoredIds.forEach { dao.restoreById(it, now) }
+                }
+                invalidatePageSnapshot(db, action.pageId)
+            }
+
+            is UndoRedoAction.LinkEdited -> withContext(Dispatchers.IO) {
+                val row = dao.getObjectById(action.linkId)
+                if (row != null) {
+                    val obj = try { LinkObject.fromJson(row.data) } catch (_: Exception) { null }
+                    if (obj != null) {
+                        val chrome = if (isUndo) action.oldChrome else action.newChrome
+                        val target = if (isUndo) action.oldTarget else action.newTarget
+                        dao.updateData(action.linkId, obj.copy(chrome = chrome, target = target).toJson(), now)
+                    }
                 }
                 invalidatePageSnapshot(db, action.pageId)
             }

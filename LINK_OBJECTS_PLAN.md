@@ -160,7 +160,18 @@ create and remove.
 
 ---
 
-### ⬜ Session 2 — Full-screen link dialog: chrome selector + Current-notebook page index (2/5)
+### ✅ Session 2 — Full-screen link dialog: chrome selector + Current-notebook page index (2/5)
+
+> **Done (tests passed on G10).** Implementation notes / deviations:
+> - Built as a full-screen `LinkTargetPickerActivity` (+ `activity_link_target_picker.xml`),
+>   reusing `PageIndexActivity`'s grid machinery (trimmed: no action mode / long-press). Returns
+>   `(chrome, pageId)` via an Activity result; the Other toggle is present but disabled (Session 3).
+> - Edit uses a new **`btnLinkEdit`** (`ic_link`) shown beside remove for a single-link selection;
+>   the picker pre-selects the link's chrome and highlights its target page.
+> - Edit is committed by `updateLink`, an **in-place** data-column rewrite + in-memory `LinkRender`
+>   swap (chrome redraws without a full reload). Undo/redo uses a new `UndoRedoAction.LinkEdited`
+>   (full-reload path, mirroring LinkCreated/LinkRemoved). `createLinkFromSelection` now takes
+>   `chrome` + `target` params (the Session-1 temp chrome-cycle hook was removed).
 
 Replace the temporary creation hook with the real dialog for the **Current notebook** path.
 

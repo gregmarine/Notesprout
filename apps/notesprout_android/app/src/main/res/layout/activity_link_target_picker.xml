@@ -1,0 +1,229 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Link target picker — full-screen. Top bar → chrome + target header → page-thumbnail grid →
+     pagination bar. Models PageIndexActivity but the grid picks a link target instead of navigating. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@color/paperWhite">
+
+    <!-- Top bar: cancel button + "Link to…" title -->
+    <LinearLayout
+        android:id="@+id/topBar"
+        android:layout_width="match_parent"
+        android:layout_height="56dp"
+        android:background="@drawable/toolbar_background"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="4dp"
+        android:paddingEnd="4dp">
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnBack"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:src="@drawable/ic_arrow_left"
+            android:contentDescription="Cancel" />
+
+        <androidx.appcompat.widget.AppCompatTextView
+            android:id="@+id/tvTopBarTitle"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="12dp"
+            android:text="Link to…"
+            android:textColor="@color/inkBlack"
+            android:textSize="18sp" />
+
+    </LinearLayout>
+
+    <!-- Header: chrome style + link-target toggle. 1dp inkBlack bottom border. -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:background="@drawable/toolbar_background"
+        android:paddingStart="16dp"
+        android:paddingEnd="16dp"
+        android:paddingTop="12dp"
+        android:paddingBottom="12dp">
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Style"
+            android:textColor="@color/inkBlack"
+            android:textSize="12sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="6dp" />
+
+        <!-- Chrome segmented control (None / Underline / Box). Selected = bg_toolbar_button border. -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginBottom="12dp">
+
+            <androidx.appcompat.widget.AppCompatButton
+                android:id="@+id/btnChromeNone"
+                android:layout_width="0dp"
+                android:layout_height="36dp"
+                android:layout_weight="1"
+                android:background="@drawable/bg_toolbar_button"
+                android:text="None"
+                android:textColor="@color/inkBlack"
+                android:textSize="12sp"
+                android:textAllCaps="false"
+                android:stateListAnimator="@null"
+                android:padding="2dp" />
+
+            <Space android:layout_width="6dp" android:layout_height="0dp" />
+
+            <androidx.appcompat.widget.AppCompatButton
+                android:id="@+id/btnChromeUnderline"
+                android:layout_width="0dp"
+                android:layout_height="36dp"
+                android:layout_weight="1"
+                android:background="@drawable/bg_toolbar_button"
+                android:text="Underline"
+                android:textColor="@color/inkBlack"
+                android:textSize="12sp"
+                android:textAllCaps="false"
+                android:stateListAnimator="@null"
+                android:padding="2dp" />
+
+            <Space android:layout_width="6dp" android:layout_height="0dp" />
+
+            <androidx.appcompat.widget.AppCompatButton
+                android:id="@+id/btnChromeBox"
+                android:layout_width="0dp"
+                android:layout_height="36dp"
+                android:layout_weight="1"
+                android:background="@drawable/bg_toolbar_button"
+                android:text="Box"
+                android:textColor="@color/inkBlack"
+                android:textSize="12sp"
+                android:textAllCaps="false"
+                android:stateListAnimator="@null"
+                android:padding="2dp" />
+
+        </LinearLayout>
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Target"
+            android:textColor="@color/inkBlack"
+            android:textSize="12sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="6dp" />
+
+        <!-- Current/Other toggle. Other is disabled until Session 3. -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
+
+            <androidx.appcompat.widget.AppCompatButton
+                android:id="@+id/btnTargetCurrent"
+                android:layout_width="0dp"
+                android:layout_height="36dp"
+                android:layout_weight="1"
+                android:background="@drawable/bg_toolbar_button"
+                android:text="This notebook"
+                android:textColor="@color/inkBlack"
+                android:textSize="12sp"
+                android:textAllCaps="false"
+                android:stateListAnimator="@null"
+                android:padding="2dp" />
+
+            <Space android:layout_width="6dp" android:layout_height="0dp" />
+
+            <androidx.appcompat.widget.AppCompatButton
+                android:id="@+id/btnTargetOther"
+                android:layout_width="0dp"
+                android:layout_height="36dp"
+                android:layout_weight="1"
+                android:background="@drawable/bg_toolbar_button"
+                android:text="Other notebook"
+                android:textColor="@color/inkLight"
+                android:textSize="12sp"
+                android:textAllCaps="false"
+                android:enabled="false"
+                android:stateListAnimator="@null"
+                android:padding="2dp" />
+
+        </LinearLayout>
+
+    </LinearLayout>
+
+    <!-- Grid area: fills remaining height between header and pagination bar. -->
+    <FrameLayout
+        android:id="@+id/gridContainer"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:background="@color/paperWhite" />
+
+    <!-- Bottom bar: 1dp inkBlack top border, pagination centred. -->
+    <RelativeLayout
+        android:id="@+id/bottomBar"
+        android:layout_width="match_parent"
+        android:layout_height="72dp"
+        android:background="@color/paperWhite">
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="@color/inkBlack"
+            android:layout_alignParentTop="true" />
+
+        <LinearLayout
+            android:id="@+id/paginationGroup"
+            android:layout_width="wrap_content"
+            android:layout_height="match_parent"
+            android:orientation="horizontal"
+            android:layout_centerInParent="true"
+            android:gravity="center_vertical">
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnFirstPage"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:src="@drawable/ic_page_first"
+                android:contentDescription="First page" />
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnPrevPage"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:layout_marginStart="4dp"
+                android:src="@drawable/ic_page_prev"
+                android:contentDescription="Previous page" />
+
+            <androidx.appcompat.widget.AppCompatTextView
+                android:id="@+id/tvPage"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:minWidth="72dp"
+                android:gravity="center"
+                android:textSize="16sp"
+                android:textColor="@color/inkBlack"
+                android:paddingStart="8dp"
+                android:paddingEnd="8dp"
+                android:text="1/1" />
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnNextPage"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:src="@drawable/ic_page_next"
+                android:contentDescription="Next page" />
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnLastPage"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:layout_marginStart="4dp"
+                android:src="@drawable/ic_page_last"
+                android:contentDescription="Last page" />
+
+        </LinearLayout>
+
+    </RelativeLayout>
+
+</LinearLayout>
