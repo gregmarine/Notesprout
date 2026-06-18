@@ -30,6 +30,7 @@ import com.notesprout.android.data.index.NotesproutIndex
 import com.notesprout.android.data.index.ObjectEntity
 import com.notesprout.android.data.index.ObjectType
 import com.notesprout.android.data.soilFile
+import com.notesprout.android.data.topHeadingNamesByPageId
 import com.notesprout.android.databinding.ActivityLinkTargetPickerBinding
 import com.notesprout.android.search.SearchDialog
 import com.notesprout.android.search.SearchEngine
@@ -111,7 +112,7 @@ class LinkTargetPickerActivity : AppCompatActivity() {
         val itemsPerPage: Int get() = cols * rows
     }
 
-    private data class PageEntry(val id: String, val pageNumber: Int, val snapshot: String?)
+    private data class PageEntry(val id: String, val pageNumber: Int, val snapshot: String?, val headingName: String? = null)
 
     /** A folder or notebook row in the Other-notebook browser. */
     private sealed class BrowseItem {
@@ -468,6 +469,7 @@ class LinkTargetPickerActivity : AppCompatActivity() {
         var db: SQLiteDatabase? = null
         return try {
             db = SQLiteDatabase.openDatabase(path, null, SQLiteDatabase.OPEN_READONLY)
+            val headingNames = topHeadingNamesByPageId(db)
             db.rawQuery(
                 "SELECT id, data FROM notebook WHERE type = 'page' AND deletedAt IS NULL ORDER BY `order` ASC",
                 null
@@ -480,7 +482,7 @@ class LinkTargetPickerActivity : AppCompatActivity() {
                     val snapshot = try {
                         pageCodec.decodeFromString<PageSnapshot>(dataJson).snapshot
                     } catch (_: Exception) { null }
-                    result.add(PageEntry(id, number++, snapshot))
+                    result.add(PageEntry(id, number++, snapshot, headingNames[id]))
                 }
                 result
             }
@@ -757,7 +759,9 @@ class LinkTargetPickerActivity : AppCompatActivity() {
         ))
 
         val label = AppCompatTextView(this).apply {
-            text      = "Page ${entry.pageNumber}"
+            text      = entry.headingName ?: "Page ${entry.pageNumber}"
+            maxLines  = 1
+            ellipsize = android.text.TextUtils.TruncateAt.END
             gravity   = Gravity.CENTER
             textSize  = 14f
             setTextColor(inkBlackColor)

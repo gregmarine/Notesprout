@@ -11,6 +11,28 @@
 - All lasso actions (move, copy, cut, paste, delete, eraser) treat headings as first-class participants
 - `copyPageAfter()` and `copyPageAfterRaw()` copy all object types, not just strokes
 
+### Top-heading-as-page-name rule
+
+A page's display name is the text of its **topmost heading**: smallest `boundingBox.top`, ties broken
+by smallest `left`; the label is `recognizedText` with a leading `"# "` markdown prefix stripped. When
+no heading qualifies (none present, or topmost has null/empty `recognizedText`), callers fall back to
+`Page {N}`.
+
+This rule is implemented in **two independent places** that read pages via different paths:
+
+- **`toc/TocRepository.kt`** — the notebook TOC, via the Room `NotebookDao`.
+- **`data/PageHeadingNames.kt`** (`topHeadingNamesByPageId`) — the **page index grid**
+  (`PageIndexActivity`) and the **link target picker** (`LinkTargetPickerActivity`), which read the
+  `.soil` over raw read-only SQLite (not the DAO), so the rule is re-implemented there rather than reused.
+
+⚠️ **Keep these two in sync.** If the page-name rule changes (tie-breaking, prefix stripping, fallback,
+which heading wins), **both** `TocRepository` and `PageHeadingNames` must be updated together — otherwise
+the TOC and the page-index/link labels will disagree.
+
+> **Known gap (intentional, do not "fix" without discussion):** headings nested **inside link objects**
+> are skipped by **both** the TOC and these page names — they never become a page's name. Noticed in
+> testing 2026-06-18; left as-is for now.
+
 ---
 
 ## Text Object System

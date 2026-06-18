@@ -113,6 +113,9 @@ A full-screen picker sharing the same notebook-list / page-grid pattern as the n
 - Chrome selection (NONE / UNDERLINE / DOTTED_CHEVRON) lives above the grid
 - Search filters notebooks when in the "other notebook" view
 - Used for both **create** (no pre-selection) and **edit** (pre-selected via `EXTRA_INITIAL_*` extras)
+- Page cards are labelled by the **top-heading-as-page-name rule** (`data/PageHeadingNames.kt`), the same
+  rule the TOC uses — see `content-objects.md`. Note: headings nested **inside link objects** are skipped
+  by this rule (intentional, known gap).
 
 ---
 
