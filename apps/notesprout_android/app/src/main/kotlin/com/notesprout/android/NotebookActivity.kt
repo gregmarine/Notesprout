@@ -4685,11 +4685,17 @@ class NotebookActivity : AppCompatActivity() {
         val density = resources.displayMetrics.density
 
         // Union bounding box of the whole selection — the chrome is drawn around this.
+        // Expand by LINK_CONTENT_PAD so the chrome has breathing room between it and the content.
         val unionBox = RectF()
         selectedStrokes.forEach { unionBox.union(it.boundingBox) }
         selectedHeadings.forEach { unionBox.union(it.boundingBox) }
         selectedTexts.forEach { unionBox.union(it.boundingBox) }
         selectedLines.forEach { unionBox.union(it.boundingBox) }
+        val linkContentPadPx = 6f * density
+        unionBox.inset(-linkContentPadPx, -linkContentPadPx)
+        // Extra right-side room for the link icon (14dp icon + 3dp inner margin).
+        // The base 6dp pad already provides the 6dp content-to-icon gap the user specified.
+        if (chrome == LinkChrome.DOTTED_CHEVRON) unionBox.right += 17f * density
 
         // Fresh-UUID embedded copies (so the held objects are independent of the originals).
         val embeddedStrokes = selectedStrokes.map { it.copy(id = UUID.randomUUID().toString(), points = it.points.map { p -> PointF(p.x, p.y) }) }

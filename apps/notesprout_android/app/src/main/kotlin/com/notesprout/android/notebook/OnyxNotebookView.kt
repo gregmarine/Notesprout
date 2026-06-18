@@ -3,6 +3,7 @@ package com.notesprout.android.notebook
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
+import androidx.appcompat.content.res.AppCompatResources
 import com.notesprout.android.R
 import android.graphics.Color
 import android.graphics.DashPathEffect
@@ -133,7 +134,6 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
         val d = resources.displayMetrics.density
         pathEffect = DashPathEffect(floatArrayOf(3f * d, 3f * d), 0f)
     }
-
 
     // When true, drawing callbacks treat pen input as erasing.
     // Set by setEraserMode(); also fires via physical eraser hardware callbacks regardless of this flag.
@@ -598,16 +598,13 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
             LinkChrome.DOTTED_CHEVRON -> {
                 canvas.drawRect(box, linkChromeDashPaint)
                 val d = resources.displayMetrics.density
-                val sz = 5f * d
-                val inset = 3f * d
-                val cx = box.right - inset
-                val cy = box.bottom - inset
-                val chevron = Path().apply {
-                    moveTo(cx - sz, cy - sz)
-                    lineTo(cx, cy)
-                    lineTo(cx - sz, cy)
+                val iconSize = (14f * d).toInt()
+                val iconRight = (box.right - 3f * d).toInt()
+                val iconBottom = (box.bottom - 3f * d).toInt()
+                AppCompatResources.getDrawable(context, R.drawable.ic_link)?.let { icon ->
+                    icon.setBounds(iconRight - iconSize, iconBottom - iconSize, iconRight, iconBottom)
+                    icon.draw(canvas)
                 }
-                canvas.drawPath(chevron, linkChromePaint)
             }
         }
     }
