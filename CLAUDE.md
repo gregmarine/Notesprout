@@ -21,6 +21,7 @@ matching doc before working in that area:**
 | Toolbar: base, overflow, full customization layer | [`docs/toolbar.md`](docs/toolbar.md) |
 | Drawing engines, EPD rules, perf, page snapshots, templates, undo/redo | [`docs/drawing-engine.md`](docs/drawing-engine.md) |
 | Heading / Text (+ markdown) / Line objects | [`docs/content-objects.md`](docs/content-objects.md) |
+| Link objects: data model, chrome, follow, back-stack, lasso/undo | [`docs/links.md`](docs/links.md) |
 | Scribble-erase, smart lasso, snap-to-guide, align & distribute | [`docs/lasso-and-gestures.md`](docs/lasso-and-gestures.md) |
 | MainActivity features (browse/search/sort/export/ML Kit) + recents | [`docs/mainactivity-and-recents.md`](docs/mainactivity-and-recents.md) |
 
