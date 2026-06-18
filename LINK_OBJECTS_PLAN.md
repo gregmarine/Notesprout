@@ -233,7 +233,27 @@ breadcrumb in/out; search finds notebooks; Notebook vs Page toggle behaves; edit
 
 ---
 
-### ⬜ Session 4 — Following links + swipe-up back-stack (4/5)
+### ✅ Session 4 — Following links + swipe-up back-stack (4/5)
+
+> **Done (tests passed on G10).** Implementation notes / deviations:
+> - **Back-stack** is `data/links/LinkBackStack.kt` — an `object` over SharedPreferences holding a
+>   kotlinx.serialized `List<BackEntry(notebookId, pageId)>` (oldest→newest, capped at 50), mirroring
+>   `RecentsManager`. `push`/`pop`/`clear`/`isEmpty`.
+> - **Tap-to-follow** is a self-contained `handleLinkFollowGesture` wired into `dispatchTouchEvent`
+>   ahead of the toolbar-toggle handler (finger only, tap-vs-drag gated). `isLinkFollowEnabled()` =
+>   not lasso / lasso-eraser / text-placement [A4]; `linkAt(x,y)` hit-tests topmost link bbox.
+> - **Cross-notebook follow** reuses the `switchToRecentNotebook` flow via a shared
+>   `openLinkedNotebook(targetId, pageId?, origin?)`; the launch carries `EXTRA_VIA_LINK` (so the
+>   target's `onCreate` *preserves* the stack instead of clearing) and `EXTRA_INITIAL_PAGE_ID` for a
+>   specific page. `loadStrokes` honors that extra (missing page → last-opened + toast) and consumes
+>   it so a config-change recreation falls back to normal last-page restore.
+> - **Fresh-open clear:** `onCreate` clears the stack unless `EXTRA_VIA_LINK` is set, so opening from
+>   MainActivity/Recents resets the trail.
+> - **Swipe-up** is `evaluateSwipeUpBack` inside the existing one-finger page-swipe `ACTION_UP` path
+>   (vertical-dominant, upward, distance/velocity gated on screen *height*); on fire it pops + walks
+>   back, empty stack = no-op [A3]. Back navigation does not push.
+> - **Toggle suppression:** `toggleDownOnLink` (set at the toggle gesture's DOWN) drops the
+>   double-tap-hide when the tap starts inside a followable link bbox.
 
 Make links navigable.
 

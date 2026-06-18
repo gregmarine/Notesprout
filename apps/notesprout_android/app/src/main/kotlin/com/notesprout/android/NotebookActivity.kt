@@ -75,6 +75,9 @@ import com.notesprout.android.data.TemplateData
 import com.notesprout.android.data.toBoundingBoxJson
 import com.notesprout.android.data.index.IndexRepository
 import com.notesprout.android.data.index.NotesproutIndex
+import com.notesprout.android.data.index.ObjectType
+import com.notesprout.android.data.links.BackEntry
+import com.notesprout.android.data.links.LinkBackStack
 import com.notesprout.android.data.recents.RecentsManager
 import com.notesprout.android.notebook.RecentsDialog
 import com.notesprout.android.state.AppStateManager
@@ -122,6 +125,18 @@ class NotebookActivity : AppCompatActivity() {
         const val EXTRA_NOTEBOOK_ID   = "notebook_id"
         /** Intent extra key — the display name for the notebook. */
         const val EXTRA_NOTEBOOK_NAME = "notebook_name"
+        /**
+         * Intent extra (boolean) — set when this notebook is opened by *following a link* (or a
+         * link back-swipe). A "fresh" open from MainActivity/Recents omits it, which is the signal
+         * to clear the [LinkBackStack]; a via-link open preserves the trail. See onCreate.
+         */
+        const val EXTRA_VIA_LINK = "via_link"
+        /**
+         * Intent extra (String) — a page row id to open to instead of the last-opened page. Set when
+         * following an other-notebook *page* link (or a cross-notebook back-swipe). If the page is
+         * missing the last-opened page is shown and a toast is surfaced. See [loadStrokes].
+         */
+        const val EXTRA_INITIAL_PAGE_ID = "initial_page_id"
 
         // One-finger page-turn gesture thresholds.
         private const val PAGE_SWIPE_MIN_DISTANCE_FRAC  = 0.30f  // min |dx| to qualify at all
@@ -215,6 +230,21 @@ class NotebookActivity : AppCompatActivity() {
     private var toggleFirstTapY = 0f
     private val toggleTouchSlopPx by lazy { ViewConfiguration.get(this).scaledTouchSlop }
     private val toggleDoubleTapSlopPx by lazy { ViewConfiguration.get(this).scaledDoubleTapSlop }
+    /** True when the toggle gesture's DOWN landed inside a followable link bbox — suppresses the
+     *  double-tap-hide so a link follow isn't also a toolbar toggle (Session 4, plan step 4). */
+    private var toggleDownOnLink = false
+
+    // ── Link follow gesture (Session 4) ───────────────────────────────────────
+    // A finger single-tap inside a link bbox follows the link, in pen mode only [A4]. Tap-vs-drag
+    // gated like the toolbar-toggle gesture; stylus events never reach it, so writing over a link
+    // with the pen is untouched. The vertical swipe-up that walks the back-stack is handled inside
+    // the one-finger page-swipe detector ([evaluateSwipeUpBack]).
+    private var linkTapDownX = 0f
+    private var linkTapDownY = 0f
+    private var linkTapDownTime = 0L
+    private var linkTapMoved = false
+    /** The link the current finger gesture started on (pen mode only), or null. */
+    private var linkTapCandidate: LinkRender? = null
 
     /** Index UUID of the open notebook — set once in onCreate from EXTRA_NOTEBOOK_ID. */
     private var notebookId: String = ""
@@ -1499,6 +1529,9 @@ class NotebookActivity : AppCompatActivity() {
         // ── Resolve notebook identity ─────────────────────────────────────────
         notebookId          = intent.getStringExtra(EXTRA_NOTEBOOK_ID) ?: ""
         notebookDisplayName = intent.getStringExtra(EXTRA_NOTEBOOK_NAME) ?: ""
+        // A "fresh" open (from MainActivity/Recents) resets the link back-stack; a via-link open
+        // (following a link or a back-swipe) preserves the trail. See [LinkBackStack].
+        if (!intent.getBooleanExtra(EXTRA_VIA_LINK, false)) LinkBackStack.clear(this)
         if (notebookId.isNotEmpty()) {
             notebookSoilPath = soilFile(this, notebookId).absolutePath
             title = notebookDisplayName
@@ -1595,6 +1628,7 @@ class NotebookActivity : AppCompatActivity() {
     override fun dispatchTouchEvent(event: MotionEvent): Boolean {
         if (event.getToolType(0) == MotionEvent.TOOL_TYPE_FINGER) {
             handlePageSwipe(event)
+            handleLinkFollowGesture(event)
             handleToolbarToggleGesture(event)
         }
 
@@ -1877,6 +1911,64 @@ class NotebookActivity : AppCompatActivity() {
     }
 
     /**
+     * Tap-to-follow link gesture (Session 4).
+     *
+     * A finger single-tap inside a link's bounding box follows the link — in **pen mode only**
+     * ([isLinkFollowEnabled]; not lasso, lasso-eraser, or text-placement, where a finger tap means
+     * something else). Stylus events never reach this detector, so writing/erasing over a link with
+     * the pen is untouched. Tap-vs-drag gated (short, near-stationary, single pointer) so it never
+     * collides with the page-swipe/back-swipe gestures.
+     *
+     * The candidate link is captured at DOWN; the follow fires at UP only if the touch never strayed
+     * past slop and lifts back inside the same box.
+     */
+    private fun handleLinkFollowGesture(event: MotionEvent) {
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                linkTapDownX = event.x
+                linkTapDownY = event.y
+                linkTapDownTime = event.eventTime
+                linkTapMoved = false
+                linkTapCandidate = if (isLinkFollowEnabled()) linkAt(event.x, event.y) else null
+            }
+            MotionEvent.ACTION_POINTER_DOWN -> {
+                // A second finger → this is a multi-touch gesture, never a follow tap.
+                linkTapMoved = true
+                linkTapCandidate = null
+            }
+            MotionEvent.ACTION_MOVE -> {
+                if (!linkTapMoved && linkTapCandidate != null) {
+                    val dx = event.x - linkTapDownX
+                    val dy = event.y - linkTapDownY
+                    if (Math.hypot(dx.toDouble(), dy.toDouble()) > toggleTouchSlopPx) linkTapMoved = true
+                }
+            }
+            MotionEvent.ACTION_UP -> {
+                val candidate = linkTapCandidate
+                linkTapCandidate = null
+                val isTap = candidate != null
+                    && !linkTapMoved
+                    && event.pointerCount == 1
+                    && event.eventTime - linkTapDownTime <= ViewConfiguration.getLongPressTimeout()
+                    && candidate.boundingBox.contains(event.x, event.y)
+                if (isTap) followLink(candidate!!)
+            }
+            MotionEvent.ACTION_CANCEL -> {
+                linkTapMoved = true
+                linkTapCandidate = null
+            }
+        }
+    }
+
+    /** Tap-to-follow is active in pen mode only — not lasso, lasso-eraser, or text-placement [A4]. */
+    private fun isLinkFollowEnabled(): Boolean =
+        !isLassoMode && !isLassoEraserMode && !isTextPlacementMode
+
+    /** Topmost link whose bounding box contains the view-space point ([x],[y]), or null. */
+    private fun linkAt(x: Float, y: Float): LinkRender? =
+        drawingView.getLinks().lastOrNull { it.boundingBox.contains(x, y) }
+
+    /**
      * One-finger double-tap on the canvas toggles the toolbar collapsed/expanded. Always active —
      * the double-tap is the only way to hide the bar and the only way to bring it back, so it never
      * strands the user. Finger-only. A "tap" is a short, near-stationary, single-pointer touch that
@@ -1891,6 +1983,8 @@ class NotebookActivity : AppCompatActivity() {
                 toggleTapDownX = event.rawX
                 toggleTapDownY = event.rawY
                 toggleTapMoved = false
+                // A tap that follows a link must not also toggle the toolbar (plan step 4).
+                toggleDownOnLink = isLinkFollowEnabled() && linkAt(event.x, event.y) != null
             }
             MotionEvent.ACTION_POINTER_DOWN -> {
                 // A second finger → this is a multi-touch gesture, never a tap.
@@ -1910,6 +2004,7 @@ class NotebookActivity : AppCompatActivity() {
                     && event.pointerCount == 1
                     && duration <= ViewConfiguration.getLongPressTimeout()
                     && !isPointInToolbarChrome(event)
+                    && !toggleDownOnLink
                 if (!isTap) {
                     toggleFirstTapTime = 0L
                     return
@@ -2208,7 +2303,11 @@ class NotebookActivity : AppCompatActivity() {
                         val vy = tracker.getYVelocity(0)
                         val dx = event.x - pageSwipeStartX
                         val dy = event.y - pageSwipeStartY
-                        evaluatePageFling(vx, vy, dx, dy)
+                        // A deliberate upward swipe walks the link back-stack; otherwise fall
+                        // through to the horizontal page-turn evaluator.
+                        if (!evaluateSwipeUpBack(vy, dx, dy)) {
+                            evaluatePageFling(vx, vy, dx, dy)
+                        }
                         tracker.recycle()
                         pageSwipeVelocityTracker = null
                     }
@@ -2318,6 +2417,33 @@ class NotebookActivity : AppCompatActivity() {
             val prev = currentPageIndex - 1
             if (prev >= 0) navigateToPage(prev)
         }
+    }
+
+    /**
+     * One-finger upward swipe → walk back through the link [LinkBackStack].
+     *
+     * Mirrors [evaluatePageFling]'s gates but on the *vertical* axis: vertical-dominant, upward
+     * ([dy] < 0), ≥30% of screen *height* to qualify at all, and either fast enough or ≥50% of
+     * height. Returns true when a qualifying back-swipe was consumed (so the caller skips the
+     * horizontal page-turn evaluator). An empty back-stack makes the follow a no-op [A3].
+     */
+    private fun evaluateSwipeUpBack(velocityY: Float, dx: Float, dy: Float): Boolean {
+        val absDx = abs(dx)
+        val absDy = abs(dy)
+        val height = resources.displayMetrics.heightPixels.toFloat()
+        val minDist = PAGE_SWIPE_MIN_DISTANCE_FRAC * height
+        val minVel = ViewConfiguration.get(this).scaledMinimumFlingVelocity * PAGE_SWIPE_MIN_VELOCITY_MULT
+        val fastEnough = abs(velocityY) >= minVel
+        val longEnough = absDy >= PAGE_SWIPE_LONG_DISTANCE_FRAC * height
+
+        if (dy >= 0) return false                 // must be upward
+        if (absDy <= absDx) return false          // must be vertical-dominant
+        if (absDy < minDist) return false         // must cover the minimum distance
+        if (!fastEnough && !longEnough) return false
+
+        Slog.d(TAG) { "evaluateSwipeUpBack accepted: dy=$dy vy=$velocityY" }
+        followBack()
+        return true
     }
 
     /**
@@ -2492,6 +2618,93 @@ class NotebookActivity : AppCompatActivity() {
         }
     }
 
+    // ── Link following + back-stack (Session 4) ───────────────────────────────
+
+    /**
+     * Follow [link] to its target. Every successful follow pushes the *origin* `{notebookId,
+     * pageId}` onto the [LinkBackStack] so a later swipe-up can walk back.
+     *
+     * - [LinkTarget.CurrentNotebookPage] → navigate within this notebook (no close). A self-link to
+     *   the page we're already on is a no-op (no push). Missing page → toast, no nav.
+     * - [LinkTarget.OtherNotebook] / [LinkTarget.OtherNotebookPage] → app-level switch via
+     *   [openLinkedNotebook] (close current, open target).
+     *
+     * Runs on the main thread (called from the finger-gesture path).
+     */
+    private fun followLink(link: LinkRender) {
+        val origin = BackEntry(notebookId, currentPageId)
+        when (val target = link.target) {
+            is LinkTarget.CurrentNotebookPage -> {
+                val idx = pages.indexOfFirst { it.id == target.pageId }
+                when {
+                    idx < 0 -> toast("Linked page is unavailable.")
+                    idx == currentPageIndex -> { /* already here — nothing to do */ }
+                    else -> {
+                        LinkBackStack.push(this, origin)
+                        navigateToPage(idx)
+                    }
+                }
+            }
+            is LinkTarget.OtherNotebook ->
+                openLinkedNotebook(target.notebookId, null, origin)
+            is LinkTarget.OtherNotebookPage ->
+                openLinkedNotebook(target.notebookId, target.pageId, origin)
+        }
+    }
+
+    /**
+     * Swipe-up handler: pop the newest [LinkBackStack] entry and navigate back to it. Empty stack →
+     * no-op [A3]. Same notebook → [navigateToPage]; cross-notebook → [openLinkedNotebook] with no
+     * new push (we're walking *back*, not following forward).
+     */
+    private fun followBack() {
+        val entry = LinkBackStack.pop(this) ?: return
+        if (entry.notebookId == notebookId) {
+            val idx = pages.indexOfFirst { it.id == entry.pageId }
+            if (idx >= 0) navigateToPage(idx) else toast("Linked page is unavailable.")
+        } else {
+            openLinkedNotebook(entry.notebookId, entry.pageId, origin = null)
+        }
+    }
+
+    /**
+     * App-level switch to another notebook for a link follow / back-swipe (mirrors
+     * [switchToRecentNotebook]): resolve the target, optionally push [origin], persist the
+     * return-to-folder state, seal the current notebook, then launch the target.
+     *
+     * The launch carries [EXTRA_VIA_LINK] so the target's [onCreate] **preserves** the back-stack
+     * (a link navigation, not a fresh open), and [EXTRA_INITIAL_PAGE_ID] when a specific page is
+     * requested. A missing/deleted target notebook toasts and aborts (no push, no nav).
+     */
+    private fun openLinkedNotebook(targetId: String, pageId: String?, origin: BackEntry?) {
+        lifecycleScope.launch {
+            val entity = withContext(Dispatchers.IO) { indexRepo.getNotebook(targetId) }
+            if (entity == null || entity.deletedAt != null || entity.type != ObjectType.NOTEBOOK) {
+                toast("Linked notebook is unavailable.")
+                return@launch
+            }
+            if (origin != null) LinkBackStack.push(this@NotebookActivity, origin)
+
+            // Return-to-folder: closing the opened notebook should land in *its* folder.
+            AppStateManager.save(this@NotebookActivity, AppViewState(entity.parentId, false))
+
+            closeNotebook()
+            startActivity(
+                Intent(this@NotebookActivity, NotebookActivity::class.java).apply {
+                    putExtra(EXTRA_NOTEBOOK_ID,   entity.id)
+                    putExtra(EXTRA_NOTEBOOK_NAME, entity.name)
+                    putExtra(EXTRA_VIA_LINK, true)
+                    if (pageId != null) putExtra(EXTRA_INITIAL_PAGE_ID, pageId)
+                }
+            )
+            finish()
+        }
+    }
+
+    private fun toast(message: String) {
+        android.widget.Toast.makeText(this, message, android.widget.Toast.LENGTH_SHORT).show()
+    }
+
     /**
      * Heavy file-seal: persist the page snapshot + any new strokes, run housekeeping PRAGMAs,
      * close the Room database, and delete the stray -journal Android leaves during DB init.
@@ -2550,22 +2763,36 @@ class NotebookActivity : AppCompatActivity() {
      */
     private fun loadStrokes() {
         val db = soilDatabase ?: return
+        // A followed other-notebook *page* link requests a specific opening page. Consume it so an
+        // activity recreation (config change) falls back to the normal last-opened-page restore.
+        val initialPageId = intent.getStringExtra(EXTRA_INITIAL_PAGE_ID)
+        intent.removeExtra(EXTRA_INITIAL_PAGE_ID)
+        var linkedPageMissing = false
         lifecycleScope.launch {
             val result = withContext(Dispatchers.IO) {
-                // Restore last-opened page position (first open only).
                 notebookMetadata = loadNotebookMetadataFromDb(db)
-                val lastPage = notebookMetadata?.lastOpenedPage
-                if (lastPage != null) {
-                    val allPages = db.notebookDao().getPagesSorted()
-                    val idx = allPages.indexOfFirst { it.id == lastPage }
-                    if (idx >= 0) currentPageIndex = idx
-                    // If idx == -1 (page deleted), currentPageIndex = 0 is the safe fallback.
+                val allPages = db.notebookDao().getPagesSorted()
+                // Open to the linked page when requested; if it's gone, fall back to last-opened
+                // and flag a toast. Otherwise restore the last-opened page position (first open only).
+                val linkedIdx = initialPageId?.let { pid -> allPages.indexOfFirst { it.id == pid } }
+                when {
+                    linkedIdx != null && linkedIdx >= 0 -> currentPageIndex = linkedIdx
+                    else -> {
+                        if (initialPageId != null) linkedPageMissing = true
+                        val lastPage = notebookMetadata?.lastOpenedPage
+                        if (lastPage != null) {
+                            val idx = allPages.indexOfFirst { it.id == lastPage }
+                            if (idx >= 0) currentPageIndex = idx
+                            // If idx == -1 (page deleted), currentPageIndex = 0 is the safe fallback.
+                        }
+                    }
                 }
                 loadCurrentPage(db)
             }
             displayPage(result)
             updatePageIndicator()
             postDisplayWork(db, result)
+            if (linkedPageMissing) toast("Linked page is unavailable.")
         }
     }
 
