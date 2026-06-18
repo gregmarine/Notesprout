@@ -1319,6 +1319,7 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
         headings = emptyList()
         textObjects = emptyList()
         lineObjects = emptyList()
+        links = emptyList()
         // Clear to white then re-apply template so the template persists after erase.
         renderCanvas?.let { canvas ->
             canvas.drawColor(Color.WHITE)

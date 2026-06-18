@@ -1784,6 +1784,7 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
         headings = emptyList()
         textObjects = emptyList()
         lineObjects = emptyList()
+        links = emptyList()
         if (isSetup) {
             touchHelper.setRawDrawingRenderEnabled(false)
             epd { "RENDER_DISABLED caller=eraseAll" }
