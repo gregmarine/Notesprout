@@ -4,4 +4,6 @@ object ObjectType {
     const val FOLDER = "folder"
     const val NOTEBOOK = "notebook"
     const val LIST = "list"
+    const val TEMPLATE = "template"
+    const val TEMPLATE_FOLDER = "template_folder"
 }

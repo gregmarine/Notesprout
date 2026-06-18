@@ -90,6 +90,111 @@ class IndexRepository(private val dao: ObjectDao) {
 
     // endregion
 
+    // region Template operations
+
+    suspend fun createTemplateFolder(name: String, parentId: String?): ObjectEntity {
+        val now = System.currentTimeMillis()
+        val entity = ObjectEntity(
+            id = UUID.randomUUID().toString(),
+            type = ObjectType.TEMPLATE_FOLDER,
+            name = name,
+            parentId = parentId,
+            createdAt = now,
+            updatedAt = now,
+            deletedAt = null,
+            data = Json.encodeToString(FolderObject())
+        )
+        dao.insert(entity)
+        return entity
+    }
+
+    suspend fun createTemplate(name: String, parentId: String?, width: Int, height: Int, imageBase64: String): ObjectEntity {
+        val now = System.currentTimeMillis()
+        val entity = ObjectEntity(
+            id = UUID.randomUUID().toString(),
+            type = ObjectType.TEMPLATE,
+            name = name,
+            parentId = parentId,
+            createdAt = now,
+            updatedAt = now,
+            deletedAt = null,
+            data = TemplateObject(width, height, imageBase64).toJson()
+        )
+        dao.insert(entity)
+        return entity
+    }
+
+    suspend fun renameTemplate(id: String, newName: String) {
+        val entity = dao.getById(id) ?: return
+        dao.update(entity.copy(name = newName, updatedAt = System.currentTimeMillis()))
+    }
+
+    suspend fun renameTemplateFolder(id: String, newName: String) {
+        val entity = dao.getById(id) ?: return
+        dao.update(entity.copy(name = newName, updatedAt = System.currentTimeMillis()))
+    }
+
+    suspend fun softDeleteTemplate(id: String) {
+        dao.softDelete(id, System.currentTimeMillis())
+    }
+
+    suspend fun softDeleteTemplateFolder(id: String) {
+        dao.softDelete(id, System.currentTimeMillis())
+    }
+
+    suspend fun getTemplate(id: String): ObjectEntity? = dao.getById(id)
+
+    suspend fun getTemplates(parentId: String?): List<ObjectEntity> =
+        dao.getChildren(parentId, ObjectType.TEMPLATE)
+
+    suspend fun getTemplateFolders(parentId: String?): List<ObjectEntity> =
+        dao.getChildren(parentId, ObjectType.TEMPLATE_FOLDER)
+
+    suspend fun getAllTemplates(): List<ObjectEntity> =
+        dao.getAllNotDeleted().filter { it.type == ObjectType.TEMPLATE }
+
+    suspend fun copyTemplate(sourceId: String, destParentId: String?, newName: String? = null): ObjectEntity? {
+        val source = dao.getById(sourceId) ?: return null
+        val now = System.currentTimeMillis()
+        val entity = ObjectEntity(
+            id = UUID.randomUUID().toString(),
+            type = source.type,
+            name = newName ?: source.name,
+            parentId = destParentId,
+            createdAt = now,
+            updatedAt = now,
+            deletedAt = null,
+            data = source.data
+        )
+        dao.insert(entity)
+        return entity
+    }
+
+    suspend fun copyTemplateFolderRecursively(sourceFolderId: String, destParentId: String?) {
+        val source = dao.getById(sourceFolderId) ?: return
+        if (source.type != ObjectType.TEMPLATE_FOLDER) return
+        val newFolder = createTemplateFolder(source.name, destParentId)
+        val newFolderId = newFolder.id
+        for (child in getTemplateFolders(sourceFolderId)) {
+            copyTemplateFolderRecursively(child.id, newFolderId)
+        }
+        for (child in getTemplates(sourceFolderId)) {
+            copyTemplate(child.id, newFolderId)
+        }
+    }
+
+    suspend fun deleteTemplateFolderRecursively(folderId: String) {
+        for (child in getTemplateFolders(folderId)) {
+            deleteTemplateFolderRecursively(child.id)
+        }
+        for (child in getTemplates(folderId)) {
+            softDeleteTemplate(child.id)
+        }
+        softDeleteTemplateFolder(folderId)
+    }
+
+    // endregion
+
     // region Navigation operations
 
     suspend fun getChildren(parentId: String?): List<ObjectEntity> =

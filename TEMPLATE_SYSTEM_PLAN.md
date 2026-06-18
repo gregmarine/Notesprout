@@ -34,7 +34,7 @@ adb -s 34E517F9 install -r app/build/outputs/apk/debug/app-debug.apk
 
 | # | Session | Status |
 |---|---|---|
-| 1 | Index data model & repository foundation | ⬜ Not started |
+| 1 | Index data model & repository foundation | ✅ Done |
 | 2 | TemplateBrowserActivity — browse, navigate, import, new folder + toolbar launch | ⬜ Not started |
 | 3 | Management actions — preview, action sheet, rename, copy, move, delete | ⬜ Not started |
 | 4 | Search & sort in the template browser | ⬜ Not started |
