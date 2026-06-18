@@ -194,7 +194,23 @@ existing link's chrome and target; cancel leaves the link unchanged; undo/redo.
 
 ---
 
-### ⬜ Session 3 — Other-notebook browsing: folders/notebooks, Notebook/Page sub-toggle, search, breadcrumb (3/5)
+### ✅ Session 3 — Other-notebook browsing: folders/notebooks, Notebook/Page sub-toggle, search, breadcrumb (3/5)
+
+> **Done (tests passed on G10).** Implementation notes / deviations:
+> - The Other half lives in `LinkTargetPickerActivity` as a small mode machine (`TargetTab`
+>   CURRENT/OTHER · `OtherKind` NOTEBOOK/PAGE · `OtherView` BROWSE/PAGES). A single `render()`
+>   dispatches to a shared page-grid renderer (current **and** other-notebook pages) or the
+>   folder/notebook browse grid; pagination/swipe operate on whichever list is active.
+> - Browser reuses `IndexRepository.getFolders/getNotebooks`; breadcrumb chips + an up/back button
+>   mirror MainActivity. Notebook covers/page thumbnails decode from the index snapshot / `.soil`.
+> - **Search** reuses `SearchDialog` + `SearchEngine` (a dialog, not an inline EditText — avoids the
+>   BOOX IME issues) and shows flat "folder › name" notebook results; a ✕ clears it.
+> - **Result contract** gained a `TARGET_*` kind discriminator (+ `EXTRA_RESULT_NOTEBOOK_ID`); the
+>   initial/edit contract mirrors it. `NotebookActivity` builds `CurrentNotebookPage` /
+>   `OtherNotebook` / `OtherNotebookPage` from it. `createLinkFromSelection`/`updateLink` were already
+>   target-agnostic, so all three kinds persist now; `launchLinkPicker` takes a `LinkTarget?` and
+>   pre-navigates the browser when editing.
+> - **Following** these targets is still Session 4 — links create/persist/edit only at this point.
 
 Build the **Other notebook** half of the dialog.
 

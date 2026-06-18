@@ -24,8 +24,15 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.lifecycleScope
 import com.notesprout.android.data.LinkChrome
+import com.notesprout.android.data.index.IndexRepository
+import com.notesprout.android.data.index.NotebookObject
+import com.notesprout.android.data.index.NotesproutIndex
+import com.notesprout.android.data.index.ObjectEntity
+import com.notesprout.android.data.index.ObjectType
 import com.notesprout.android.data.soilFile
 import com.notesprout.android.databinding.ActivityLinkTargetPickerBinding
+import com.notesprout.android.search.SearchDialog
+import com.notesprout.android.search.SearchEngine
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
@@ -34,13 +41,19 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
 /**
- * Full-screen link-target picker (Session 2 — Current-notebook path only).
+ * Full-screen link-target picker.
  *
- * Models [PageIndexActivity]'s thumbnail grid, but a tap on a page card **returns a link target**
- * (the chosen [LinkChrome] + the tapped page id) instead of navigating. The header carries a chrome
- * segmented control and a This-notebook / Other-notebook toggle; the Other half is stubbed/disabled
- * until Session 3. Used both to create a link (no initial selection) and to edit one
- * ([EXTRA_INITIAL_CHROME] / [EXTRA_INITIAL_PAGE_ID] pre-select the chrome + highlight the page).
+ * **This notebook** path (Session 2): a [PageIndexActivity]-style thumbnail grid where a tap on a
+ * page card returns `(chrome, current page id)`.
+ *
+ * **Other notebook** path (Session 3): a folder/notebook browser (breadcrumb + back, mirroring
+ * MainActivity) with a Notebook/Page sub-toggle and notebook-name search. In **Notebook** mode a
+ * notebook tap returns `(chrome, OtherNotebook)`; in **Page** mode a notebook tap opens that
+ * notebook's page list (read from its `.soil` via [soilFile]) and a page tap returns
+ * `(chrome, OtherNotebookPage)`.
+ *
+ * Used both to create a link (no initial target) and to edit one — [EXTRA_INITIAL_CHROME] plus the
+ * `EXTRA_INITIAL_*` target extras pre-select the chrome and pre-navigate to the link's target.
  */
 class LinkTargetPickerActivity : AppCompatActivity() {
 
@@ -48,16 +61,39 @@ class LinkTargetPickerActivity : AppCompatActivity() {
         const val EXTRA_NOTEBOOK_ID        = "notebook_id"
         const val EXTRA_NOTEBOOK_NAME      = "notebook_name"
         const val EXTRA_CURRENT_PAGE_INDEX = "current_page_index"
+
+        // Target-kind discriminator shared by the initial (edit) and result contracts.
+        const val TARGET_CURRENT_PAGE        = "current_page"
+        const val TARGET_OTHER_NOTEBOOK      = "other_notebook"
+        const val TARGET_OTHER_NOTEBOOK_PAGE = "other_notebook_page"
+
         /** Pre-selected chrome (a [LinkChrome] name) when editing; defaults to NONE. */
-        const val EXTRA_INITIAL_CHROME     = "initial_chrome"
-        /** Pre-selected current-notebook page id when editing a same-notebook page link. */
-        const val EXTRA_INITIAL_PAGE_ID    = "initial_page_id"
+        const val EXTRA_INITIAL_CHROME            = "initial_chrome"
+        /** Which target kind is being edited (one of the TARGET_* consts); absent ⇒ creating. */
+        const val EXTRA_INITIAL_TARGET_KIND       = "initial_target_kind"
+        /** Pre-selected current-notebook page id (current-page edit). */
+        const val EXTRA_INITIAL_PAGE_ID           = "initial_page_id"
+        /** Pre-selected other-notebook id (other-notebook / other-notebook-page edit). */
+        const val EXTRA_INITIAL_NOTEBOOK_ID       = "initial_notebook_id"
+        /** Pre-selected other-notebook page id (other-notebook-page edit). */
+        const val EXTRA_INITIAL_NOTEBOOK_PAGE_ID  = "initial_notebook_page_id"
 
         /** Result: chosen chrome (a [LinkChrome] name). */
-        const val EXTRA_RESULT_CHROME      = "result_chrome"
-        /** Result: chosen current-notebook page id (Session 2 always returns a current-notebook page). */
-        const val EXTRA_RESULT_PAGE_ID     = "result_page_id"
+        const val EXTRA_RESULT_CHROME       = "result_chrome"
+        /** Result: chosen target kind (one of the TARGET_* consts). */
+        const val EXTRA_RESULT_TARGET_KIND  = "result_target_kind"
+        /** Result: page id — current-notebook page, or the page within the target notebook. */
+        const val EXTRA_RESULT_PAGE_ID      = "result_page_id"
+        /** Result: target notebook id (other-notebook / other-notebook-page). */
+        const val EXTRA_RESULT_NOTEBOOK_ID  = "result_notebook_id"
     }
+
+    // ── View state ──────────────────────────────────────────────────────────────
+
+    private enum class TargetTab { CURRENT, OTHER }
+    private enum class OtherKind { NOTEBOOK, PAGE }
+    /** Within the Other tab: browsing folders/notebooks, or viewing one notebook's pages. */
+    private enum class OtherView { BROWSE, PAGES }
 
     // ── Grid specification (mirrors PageIndexActivity) ─────────────────────────
 
@@ -77,6 +113,13 @@ class LinkTargetPickerActivity : AppCompatActivity() {
 
     private data class PageEntry(val id: String, val pageNumber: Int, val snapshot: String?)
 
+    /** A folder or notebook row in the Other-notebook browser. */
+    private sealed class BrowseItem {
+        abstract val entity: ObjectEntity
+        data class Folder(override val entity: ObjectEntity) : BrowseItem()
+        data class Notebook(override val entity: ObjectEntity, val label: String) : BrowseItem()
+    }
+
     @Serializable
     private data class PageSnapshot(val snapshot: String? = null)
 
@@ -88,18 +131,44 @@ class LinkTargetPickerActivity : AppCompatActivity() {
     private var notebookSoilPath: String? = null
 
     private lateinit var binding: ActivityLinkTargetPickerBinding
+
+    private var targetTab = TargetTab.CURRENT
+    private var otherKind = OtherKind.NOTEBOOK
+    private var otherView = OtherView.BROWSE
+
+    // Current-notebook pages.
     private var pages: List<PageEntry> = emptyList()
     private var currentPageIndex: Int = 0
+
+    // Other-notebook browser (folders + notebooks). null root entry in the stack = top level.
+    private val directoryStack = ArrayDeque<ObjectEntity?>().apply { add(null) }
+    private var browseItems: List<BrowseItem> = emptyList()
+    private var browseLoaded = false
+    private var searchQuery: String = ""
+
+    // Selected other notebook whose pages are showing (OtherView.PAGES).
+    private var otherNotebookId: String? = null
+    private var otherNotebookName: String = ""
+    private var otherPages: List<PageEntry> = emptyList()
+
+    // The currently visible grid page index (shared across all grids).
     private var currentGridPage: Int = 0
     private var gridSpec: GridSpec? = null
 
     private var selectedChrome: LinkChrome = LinkChrome.NONE
-    /** Page id to highlight (the link's current target) when editing; null when creating. */
-    private var initialPageId: String? = null
+
+    // Edit pre-selection (the link's current target).
+    private var initialTargetKind: String? = null
+    private var initialCurrentPageId: String? = null
+    private var initialNotebookId: String? = null
+    private var initialNotebookPageId: String? = null
+
+    private val indexRepo: IndexRepository by lazy { IndexRepository(NotesproutIndex.dao()) }
 
     private val inkBlackColor by lazy { ContextCompat.getColor(this, R.color.inkBlack) }
+    private val inkLightColor by lazy { ContextCompat.getColor(this, R.color.inkLight) }
 
-    private val snapshotDecodeJobs = mutableListOf<Job>()
+    private val decodeJobs = mutableListOf<Job>()
 
     // ── Swipe gesture (left/right to paginate) ────────────────────────────────
 
@@ -133,13 +202,19 @@ class LinkTargetPickerActivity : AppCompatActivity() {
         notebookId       = intent.getStringExtra(EXTRA_NOTEBOOK_ID) ?: ""
         notebookSoilPath = if (notebookId.isNotEmpty()) soilFile(this, notebookId).absolutePath else null
         currentPageIndex = intent.getIntExtra(EXTRA_CURRENT_PAGE_INDEX, 0)
-        initialPageId    = intent.getStringExtra(EXTRA_INITIAL_PAGE_ID)
         selectedChrome   = intent.getStringExtra(EXTRA_INITIAL_CHROME)
             ?.let { runCatching { LinkChrome.valueOf(it) }.getOrNull() } ?: LinkChrome.NONE
 
+        initialTargetKind     = intent.getStringExtra(EXTRA_INITIAL_TARGET_KIND)
+        initialCurrentPageId  = intent.getStringExtra(EXTRA_INITIAL_PAGE_ID)
+        initialNotebookId     = intent.getStringExtra(EXTRA_INITIAL_NOTEBOOK_ID)
+        initialNotebookPageId = intent.getStringExtra(EXTRA_INITIAL_NOTEBOOK_PAGE_ID)
+
         binding.btnBack.setOnClickListener { finish() }
         onBackPressedDispatcher.addCallback(this, object : androidx.activity.OnBackPressedCallback(true) {
-            override fun handleOnBackPressed() { finish() }
+            override fun handleOnBackPressed() {
+                if (!handleInPickerBack()) finish()
+            }
         })
 
         binding.btnChromeNone.setOnClickListener      { selectedChrome = LinkChrome.NONE; refreshChromeButtons() }
@@ -147,8 +222,15 @@ class LinkTargetPickerActivity : AppCompatActivity() {
         binding.btnChromeBox.setOnClickListener       { selectedChrome = LinkChrome.DOTTED_CHEVRON; refreshChromeButtons() }
         refreshChromeButtons()
 
-        // Target toggle: only This-notebook is live in Session 2 (Other is built in Session 3).
-        binding.btnTargetCurrent.isSelected = true
+        binding.btnTargetCurrent.setOnClickListener { switchTab(TargetTab.CURRENT) }
+        binding.btnTargetOther.setOnClickListener   { switchTab(TargetTab.OTHER) }
+
+        binding.btnKindNotebook.setOnClickListener { switchKind(OtherKind.NOTEBOOK) }
+        binding.btnKindPage.setOnClickListener     { switchKind(OtherKind.PAGE) }
+
+        binding.btnBrowseBack.setOnClickListener  { handleInPickerBack() }
+        binding.btnBrowseSearch.setOnClickListener { showSearchDialog() }
+        binding.btnBrowseClearSearch.setOnClickListener { clearSearch() }
 
         binding.btnFirstPage.setOnClickListener { navigateGridPage(0) }
         binding.btnPrevPage.setOnClickListener  { navigateGridPage(currentGridPage - 1) }
@@ -168,12 +250,58 @@ class LinkTargetPickerActivity : AppCompatActivity() {
                     if (w <= 0 || h <= 0) return
                     binding.gridContainer.viewTreeObserver.removeOnGlobalLayoutListener(this)
                     gridSpec = computeGridSpec(w, h)
-                    if (pages.isNotEmpty()) renderGridPage()
+                    render()
                 }
             }
         )
 
-        loadPagesAsync()
+        loadCurrentPagesAsync()
+        applyInitialTarget()
+    }
+
+    /** Pre-navigate the picker to the link's current target when editing. */
+    private fun applyInitialTarget() {
+        when (initialTargetKind) {
+            TARGET_OTHER_NOTEBOOK -> {
+                targetTab = TargetTab.OTHER
+                otherKind = OtherKind.NOTEBOOK
+                otherView = OtherView.BROWSE
+                preNavigateToNotebookFolder(initialNotebookId)
+            }
+            TARGET_OTHER_NOTEBOOK_PAGE -> {
+                targetTab = TargetTab.OTHER
+                otherKind = OtherKind.PAGE
+                val nbId = initialNotebookId
+                if (nbId != null) {
+                    preNavigateToNotebookFolder(nbId)
+                    openOtherNotebookPages(nbId)
+                }
+            }
+            // TARGET_CURRENT_PAGE / null → stay on the current-notebook page grid.
+        }
+    }
+
+    /** Walk the index parent chain so [directoryStack] lands in the folder containing [notebookId]. */
+    private fun preNavigateToNotebookFolder(notebookId: String?) {
+        if (notebookId == null) return
+        lifecycleScope.launch {
+            val stack = withContext(Dispatchers.IO) {
+                val nb = indexRepo.getNotebook(notebookId) ?: return@withContext null
+                val path = ArrayDeque<ObjectEntity?>().apply { add(null) }
+                val chain = mutableListOf<ObjectEntity>()
+                var pid = nb.parentId
+                while (pid != null) {
+                    val folder = indexRepo.getFolder(pid) ?: break
+                    chain.add(0, folder)
+                    pid = folder.parentId
+                }
+                chain.forEach { path.add(it) }
+                path
+            } ?: return@launch
+            directoryStack.clear()
+            directoryStack.addAll(stack)
+            loadBrowseAsync()
+        }
     }
 
     private fun refreshChromeButtons() {
@@ -182,20 +310,150 @@ class LinkTargetPickerActivity : AppCompatActivity() {
         binding.btnChromeBox.isSelected       = selectedChrome == LinkChrome.DOTTED_CHEVRON
     }
 
+    // ── Tab / kind / navigation transitions ────────────────────────────────────
+
+    private fun switchTab(tab: TargetTab) {
+        if (targetTab == tab) return
+        targetTab = tab
+        currentGridPage = 0
+        if (tab == TargetTab.OTHER) {
+            otherView = OtherView.BROWSE
+            if (!browseLoaded) loadBrowseAsync() else render()
+        } else {
+            render()
+        }
+    }
+
+    private fun switchKind(kind: OtherKind) {
+        if (otherKind == kind && otherView == OtherView.BROWSE) return
+        otherKind = kind
+        // Changing the kind always returns to the folder/notebook browser.
+        otherView = OtherView.BROWSE
+        currentGridPage = 0
+        render()
+    }
+
+    /** Back within the picker: pages→browse, then up the folder stack. Returns false at the top. */
+    private fun handleInPickerBack(): Boolean {
+        if (targetTab == TargetTab.OTHER && otherView == OtherView.PAGES) {
+            otherView = OtherView.BROWSE
+            otherNotebookId = null
+            currentGridPage = 0
+            render()
+            return true
+        }
+        if (targetTab == TargetTab.OTHER && otherView == OtherView.BROWSE) {
+            if (searchQuery.isNotEmpty()) { clearSearch(); return true }
+            if (directoryStack.size > 1) {
+                directoryStack.removeLast()
+                currentGridPage = 0
+                loadBrowseAsync()
+                return true
+            }
+        }
+        return false
+    }
+
+    private fun navigateIntoFolder(entity: ObjectEntity) {
+        directoryStack.add(entity)
+        currentGridPage = 0
+        loadBrowseAsync()
+    }
+
+    private fun openOtherNotebook(entity: ObjectEntity) {
+        finishWithOtherNotebook(entity.id)
+    }
+
+    private fun openOtherNotebookPages(notebookId: String) {
+        val entity = browseItems.firstOrNull { it.entity.id == notebookId }?.entity
+        openOtherNotebookPages(notebookId, entity?.name ?: "")
+    }
+
+    private fun openOtherNotebookPages(notebookId: String, name: String) {
+        otherNotebookId = notebookId
+        otherNotebookName = name
+        otherView = OtherView.PAGES
+        currentGridPage = 0
+        loadOtherPagesAsync(notebookId)
+    }
+
+    // ── Search ──────────────────────────────────────────────────────────────────
+
+    private fun showSearchDialog() {
+        SearchDialog.show(
+            context = this,
+            initialQuery = searchQuery,
+            onSearch = { query ->
+                searchQuery = query.trim()
+                currentGridPage = 0
+                loadBrowseAsync()
+            },
+            onCancel = { },
+        )
+    }
+
+    private fun clearSearch() {
+        if (searchQuery.isEmpty()) return
+        searchQuery = ""
+        currentGridPage = 0
+        loadBrowseAsync()
+    }
+
     // ── Data loading ──────────────────────────────────────────────────────────
 
-    private fun loadPagesAsync() {
+    private fun loadCurrentPagesAsync() {
         val path = notebookSoilPath ?: return
         lifecycleScope.launch {
             pages = withContext(Dispatchers.IO) { loadPagesFromSoil(path) }
-            val spec = gridSpec
-            if (spec != null && spec.itemsPerPage > 0) {
-                // Open to the grid page containing the link's current target (edit) or the open page.
-                val anchorIdx = initialPageId?.let { id -> pages.indexOfFirst { it.id == id } }
-                    ?.takeIf { it >= 0 } ?: currentPageIndex
-                currentGridPage = anchorIdx / spec.itemsPerPage
-                renderGridPage()
+            if (targetTab == TargetTab.CURRENT) {
+                val spec = gridSpec
+                if (spec != null && spec.itemsPerPage > 0) {
+                    val anchorIdx = initialCurrentPageId?.let { id -> pages.indexOfFirst { it.id == id } }
+                        ?.takeIf { it >= 0 } ?: currentPageIndex
+                    currentGridPage = anchorIdx / spec.itemsPerPage
+                }
+                render()
             }
+        }
+    }
+
+    private fun loadBrowseAsync() {
+        lifecycleScope.launch {
+            val query = searchQuery
+            browseItems = withContext(Dispatchers.IO) {
+                if (query.isNotEmpty()) {
+                    SearchEngine.search(query, indexRepo).map { result ->
+                        val parent = result.folderLabel.substringAfterLast(" › ")
+                        val label = if (result.folderLabel == "Notebooks") result.displayName
+                                    else "$parent › ${result.displayName}"
+                        BrowseItem.Notebook(result.entity, label)
+                    }
+                } else {
+                    val parentId = directoryStack.last()?.id
+                    val folders   = indexRepo.getFolders(parentId).sortedBy { it.name.lowercase() }
+                    val notebooks = indexRepo.getNotebooks(parentId).sortedBy { it.name.lowercase() }
+                    folders.map { BrowseItem.Folder(it) } +
+                        notebooks.map { BrowseItem.Notebook(it, it.name) }
+                }
+            }
+            browseLoaded = true
+            if (targetTab == TargetTab.OTHER && otherView == OtherView.BROWSE) render()
+        }
+    }
+
+    private fun loadOtherPagesAsync(forNotebookId: String) {
+        val path = soilFile(this, forNotebookId).absolutePath
+        lifecycleScope.launch {
+            val loaded = withContext(Dispatchers.IO) { loadPagesFromSoil(path) }
+            if (otherNotebookId != forNotebookId) return@launch
+            otherPages = loaded
+            val spec = gridSpec
+            if (spec != null && spec.itemsPerPage > 0 && initialNotebookId == forNotebookId) {
+                val anchorIdx = initialNotebookPageId?.let { id -> otherPages.indexOfFirst { it.id == id } }
+                    ?.takeIf { it >= 0 } ?: 0
+                currentGridPage = anchorIdx / spec.itemsPerPage
+            }
+            render()
         }
     }
 
@@ -254,37 +512,156 @@ class LinkTargetPickerActivity : AppCompatActivity() {
         return GridSpec(cols, rows, cardWidth, cardHeight, gutterPx, rowGapPx, labelHeightPx, paddingHPx, paddingVPx)
     }
 
-    // ── Rendering ─────────────────────────────────────────────────────────────
+    // ── Active-grid plumbing ────────────────────────────────────────────────────
+
+    private fun activeSize(): Int = when {
+        targetTab == TargetTab.CURRENT     -> pages.size
+        otherView == OtherView.PAGES       -> otherPages.size
+        else                               -> browseItems.size
+    }
 
     private fun totalGridPages(): Int {
         val perPage = gridSpec?.itemsPerPage ?: return 1
-        if (perPage == 0 || pages.isEmpty()) return 1
-        return (pages.size + perPage - 1) / perPage
+        if (perPage == 0 || activeSize() == 0) return 1
+        return (activeSize() + perPage - 1) / perPage
     }
 
-    private fun renderGridPage() {
-        snapshotDecodeJobs.forEach { it.cancel() }
-        snapshotDecodeJobs.clear()
+    /** Single render entry point: chrome + header chrome state + active grid + pagination. */
+    private fun render() {
+        if (gridSpec == null) return
+        updateHeaderState()
 
-        val spec = gridSpec ?: return
+        decodeJobs.forEach { it.cancel() }
+        decodeJobs.clear()
         binding.gridContainer.removeAllViews()
 
-        if (pages.isEmpty()) {
-            renderEmptyState()
-            updatePaginationControls()
+        when {
+            targetTab == TargetTab.CURRENT ->
+                renderPageGrid(pages, highlightId = currentPageHighlightId()) { finishWithCurrentPage(it.id) }
+            otherView == OtherView.PAGES ->
+                renderPageGrid(otherPages, highlightId = otherPageHighlightId()) {
+                    finishWithOtherNotebookPage(otherNotebookId ?: return@renderPageGrid, it.id)
+                }
+            else -> renderBrowseGrid()
+        }
+
+        updatePaginationControls()
+    }
+
+    private fun currentPageHighlightId(): String? =
+        if (initialTargetKind == TARGET_CURRENT_PAGE) initialCurrentPageId else null
+
+    private fun otherPageHighlightId(): String? =
+        if (initialTargetKind == TARGET_OTHER_NOTEBOOK_PAGE && otherNotebookId == initialNotebookId)
+            initialNotebookPageId else null
+
+    private fun updateHeaderState() {
+        binding.btnTargetCurrent.isSelected = targetTab == TargetTab.CURRENT
+        binding.btnTargetOther.isSelected   = targetTab == TargetTab.OTHER
+
+        val inOther = targetTab == TargetTab.OTHER
+        binding.otherKindRow.visibility = if (inOther) View.VISIBLE else View.GONE
+        binding.btnKindNotebook.isSelected = otherKind == OtherKind.NOTEBOOK
+        binding.btnKindPage.isSelected     = otherKind == OtherKind.PAGE
+
+        val showBrowseBar = inOther && otherView == OtherView.BROWSE
+        binding.otherBrowseBar.visibility = if (showBrowseBar) View.VISIBLE else View.GONE
+        if (showBrowseBar) {
+            binding.btnBrowseClearSearch.visibility = if (searchQuery.isNotEmpty()) View.VISIBLE else View.GONE
+            buildBreadcrumbs()
+        }
+
+        binding.tvTopBarTitle.text = when {
+            inOther && otherView == OtherView.PAGES -> otherNotebookName.ifEmpty { "Link to…" }
+            else -> "Link to…"
+        }
+    }
+
+    // ── Breadcrumb bar ────────────────────────────────────────────────────────
+
+    private fun buildBreadcrumbs() {
+        val container = binding.breadcrumbContainer
+        container.removeAllViews()
+
+        if (searchQuery.isNotEmpty()) {
+            container.addView(AppCompatTextView(this).apply {
+                text = "Search: \"$searchQuery\""
+                setTextColor(inkBlackColor)
+                textSize = 14f
+                val density = resources.displayMetrics.density
+                setPadding((8 * density).toInt(), 0, 0, 0)
+            })
+            binding.btnBrowseBack.isEnabled = false
             return
         }
 
-        val start     = currentGridPage * spec.itemsPerPage
-        val end       = minOf(start + spec.itemsPerPage, pages.size)
-        val pageItems = pages.subList(start, end)
+        binding.btnBrowseBack.isEnabled = directoryStack.size > 1
 
+        val density = resources.displayMetrics.density
+        val padH = (8 * density).toInt()
+        val sepPad = (4 * density).toInt()
+
+        directoryStack.forEachIndexed { index, entry ->
+            if (index > 0) {
+                container.addView(AppCompatTextView(this).apply {
+                    text = "›"
+                    setTextColor(inkLightColor)
+                    textSize = 16f
+                    setPadding(sepPad, 0, sepPad, 0)
+                })
+            }
+            val label = if (index == 0) "Notebooks" else entry?.name ?: "Notebooks"
+            container.addView(AppCompatTextView(this).apply {
+                text = label
+                setTextColor(inkBlackColor)
+                textSize = 16f
+                setPadding(padH, 0, padH, 0)
+                isClickable = true
+                isFocusable = true
+                setOnClickListener {
+                    while (directoryStack.size > index + 1) directoryStack.removeLast()
+                    currentGridPage = 0
+                    loadBrowseAsync()
+                }
+            })
+        }
+
+        binding.breadcrumbScroll.post { binding.breadcrumbScroll.fullScroll(View.FOCUS_RIGHT) }
+    }
+
+    // ── Rendering: page grid (current or other notebook) ────────────────────────
+
+    private fun renderPageGrid(list: List<PageEntry>, highlightId: String?, onTap: (PageEntry) -> Unit) {
+        val spec = gridSpec ?: return
+        if (list.isEmpty()) { renderEmptyState("No pages found."); return }
+
+        val start     = currentGridPage * spec.itemsPerPage
+        val end       = minOf(start + spec.itemsPerPage, list.size)
+        val pageItems = list.subList(start, end)
+
+        renderRows(pageItems.size, spec) { idx -> buildPageCard(pageItems[idx], spec, highlightId, onTap) }
+    }
+
+    private fun renderBrowseGrid() {
+        val spec = gridSpec ?: return
+        if (browseItems.isEmpty()) {
+            renderEmptyState(if (searchQuery.isNotEmpty()) "No notebooks found." else "Empty.")
+            return
+        }
+        val start = currentGridPage * spec.itemsPerPage
+        val end   = minOf(start + spec.itemsPerPage, browseItems.size)
+        val items = browseItems.subList(start, end)
+        renderRows(items.size, spec) { idx -> buildBrowseCard(items[idx], spec) }
+    }
+
+    /** Lays out [count] cards in a centered grid, calling [buildCard] for each cell. */
+    private fun renderRows(count: Int, spec: GridSpec, buildCard: (Int) -> View) {
         val gridLayout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity     = Gravity.CENTER_HORIZONTAL
         }
 
-        val rowCount = (pageItems.size + spec.cols - 1) / spec.cols
+        val rowCount = (count + spec.cols - 1) / spec.cols
         for (rowIdx in 0 until rowCount) {
             if (rowIdx > 0) {
                 gridLayout.addView(Space(this), LinearLayout.LayoutParams(0, spec.gutterPx))
@@ -298,8 +675,8 @@ class LinkTargetPickerActivity : AppCompatActivity() {
                     row.addView(Space(this), LinearLayout.LayoutParams(spec.gutterPx, 0))
                 }
                 val itemIdx = rowIdx * spec.cols + colIdx
-                if (itemIdx < pageItems.size) {
-                    row.addView(buildCardGroup(pageItems[itemIdx], spec))
+                if (itemIdx < count) {
+                    row.addView(buildCard(itemIdx))
                 } else {
                     val totalCellHeight = spec.cardHeightPx + spec.rowGapPx + spec.labelHeightPx
                     row.addView(Space(this), LinearLayout.LayoutParams(spec.cardWidthPx, totalCellHeight))
@@ -317,13 +694,11 @@ class LinkTargetPickerActivity : AppCompatActivity() {
             Gravity.TOP or Gravity.CENTER_HORIZONTAL,
         ).apply { topMargin = spec.paddingVPx }
         binding.gridContainer.addView(gridLayout, containerLp)
-
-        updatePaginationControls()
     }
 
-    private fun renderEmptyState() {
+    private fun renderEmptyState(message: String) {
         val tv = AppCompatTextView(this).apply {
-            text = "No pages found."
+            text = message
             setTextColor(inkBlackColor)
             textSize = 14f
             gravity = Gravity.CENTER
@@ -339,17 +714,18 @@ class LinkTargetPickerActivity : AppCompatActivity() {
     }
 
     /**
-     * One card group: bordered snapshot card + "Page N" label. The card whose id matches
-     * [initialPageId] (the link's current target, when editing) is highlighted. A tap returns the
-     * chosen chrome + this page id as the link target.
+     * One page card: bordered snapshot card + "Page N" label. The card whose id matches
+     * [highlightId] (the link's current target, when editing) is highlighted; a tap invokes [onTap].
      */
-    private fun buildCardGroup(entry: PageEntry, spec: GridSpec): LinearLayout {
-        val highlighted = entry.id == initialPageId
+    private fun buildPageCard(
+        entry: PageEntry, spec: GridSpec, highlightId: String?, onTap: (PageEntry) -> Unit,
+    ): LinearLayout {
+        val highlighted = entry.id == highlightId
 
         val group = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity     = Gravity.CENTER_HORIZONTAL
-            setOnClickListener { finishWithTarget(entry.id) }
+            setOnClickListener { onTap(entry) }
         }
 
         val card = FrameLayout(this).apply {
@@ -383,23 +759,106 @@ class LinkTargetPickerActivity : AppCompatActivity() {
             it.topMargin = spec.rowGapPx
         })
 
-        if (!entry.snapshot.isNullOrEmpty()) {
-            val job = lifecycleScope.launch {
-                val bitmap: Bitmap? = withContext(Dispatchers.IO) {
-                    try {
-                        val bytes = Base64.decode(entry.snapshot, Base64.DEFAULT)
-                        BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
-                    } catch (_: Exception) { null }
-                }
-                if (bitmap != null) {
-                    snapshotImage.setImageBitmap(bitmap)
-                    snapshotImage.visibility = View.VISIBLE
+        decodeSnapshotInto(entry.snapshot, snapshotImage, null)
+        return group
+    }
+
+    /** One browse card: folder icon, or notebook cover (snapshot) with a fallback icon. */
+    private fun buildBrowseCard(item: BrowseItem, spec: GridSpec): LinearLayout {
+        val highlighted = item is BrowseItem.Notebook &&
+            otherKind == OtherKind.NOTEBOOK &&
+            initialTargetKind == TARGET_OTHER_NOTEBOOK &&
+            item.entity.id == initialNotebookId
+
+        val group = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity     = Gravity.CENTER_HORIZONTAL
+            setOnClickListener {
+                when (item) {
+                    is BrowseItem.Folder   -> navigateIntoFolder(item.entity)
+                    is BrowseItem.Notebook ->
+                        if (otherKind == OtherKind.NOTEBOOK) openOtherNotebook(item.entity)
+                        else openOtherNotebookPages(item.entity.id, item.entity.name)
                 }
             }
-            snapshotDecodeJobs.add(job)
         }
 
+        val card = FrameLayout(this).apply {
+            setBackgroundResource(
+                if (highlighted) R.drawable.bg_page_card_current else R.drawable.shape_bordered
+            )
+        }
+        group.addView(card, LinearLayout.LayoutParams(spec.cardWidthPx, spec.cardHeightPx))
+
+        val density = resources.displayMetrics.density
+        val pad1dp  = (density + 0.5f).toInt()
+        val padPx   = if (highlighted) (3 * density + 0.5f).toInt() else pad1dp
+        card.setPadding(padPx, padPx, padPx, padPx)
+
+        val iconSize = (minOf(spec.cardWidthPx, spec.cardHeightPx) * 0.45f).toInt()
+        when (item) {
+            is BrowseItem.Folder -> {
+                card.addView(AppCompatImageView(this).apply {
+                    setImageResource(R.drawable.ic_folder)
+                }, FrameLayout.LayoutParams(iconSize, iconSize, Gravity.CENTER))
+            }
+            is BrowseItem.Notebook -> {
+                val cover = AppCompatImageView(this).apply {
+                    scaleType  = ImageView.ScaleType.CENTER_CROP
+                    visibility = View.GONE
+                }
+                card.addView(cover, FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                ))
+                val icon = AppCompatImageView(this).apply {
+                    setImageResource(R.drawable.ic_notebook)
+                }
+                card.addView(icon, FrameLayout.LayoutParams(iconSize, iconSize, Gravity.CENTER))
+
+                val snapshotB64 = try {
+                    Json.decodeFromString<NotebookObject>(item.entity.data).snapshot
+                } catch (_: Exception) { null }
+                decodeSnapshotInto(snapshotB64, cover, icon)
+            }
+        }
+
+        val labelText = when (item) {
+            is BrowseItem.Folder   -> item.entity.name
+            is BrowseItem.Notebook -> item.label
+        }
+        val label = AppCompatTextView(this).apply {
+            text      = labelText
+            maxLines  = 1
+            ellipsize = android.text.TextUtils.TruncateAt.END
+            gravity   = Gravity.CENTER
+            textSize  = 14f
+            setTextColor(inkBlackColor)
+        }
+        group.addView(label, LinearLayout.LayoutParams(spec.cardWidthPx, spec.labelHeightPx).also {
+            it.topMargin = spec.rowGapPx
+        })
+
         return group
+    }
+
+    /** Decodes a base64 snapshot off-thread into [image]; hides [fallbackIcon] on success. */
+    private fun decodeSnapshotInto(b64: String?, image: AppCompatImageView, fallbackIcon: View?) {
+        if (b64.isNullOrEmpty()) return
+        val job = lifecycleScope.launch {
+            val bitmap: Bitmap? = withContext(Dispatchers.IO) {
+                try {
+                    val bytes = Base64.decode(b64, Base64.DEFAULT)
+                    BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                } catch (_: Exception) { null }
+            }
+            if (bitmap != null) {
+                image.setImageBitmap(bitmap)
+                image.visibility = View.VISIBLE
+                fallbackIcon?.visibility = View.GONE
+            }
+        }
+        decodeJobs.add(job)
     }
 
     // ── Pagination ────────────────────────────────────────────────────────────
@@ -408,7 +867,7 @@ class LinkTargetPickerActivity : AppCompatActivity() {
         val clamped = page.coerceIn(0, (totalGridPages() - 1).coerceAtLeast(0))
         if (clamped == currentGridPage) return
         currentGridPage = clamped
-        renderGridPage()
+        render()
     }
 
     private fun updatePaginationControls() {
@@ -425,10 +884,32 @@ class LinkTargetPickerActivity : AppCompatActivity() {
 
     // ── Result ────────────────────────────────────────────────────────────────
 
-    private fun finishWithTarget(pageId: String) {
+    private fun finishWithCurrentPage(pageId: String) {
+        finishWithResult {
+            putExtra(EXTRA_RESULT_TARGET_KIND, TARGET_CURRENT_PAGE)
+            putExtra(EXTRA_RESULT_PAGE_ID, pageId)
+        }
+    }
+
+    private fun finishWithOtherNotebook(notebookId: String) {
+        finishWithResult {
+            putExtra(EXTRA_RESULT_TARGET_KIND, TARGET_OTHER_NOTEBOOK)
+            putExtra(EXTRA_RESULT_NOTEBOOK_ID, notebookId)
+        }
+    }
+
+    private fun finishWithOtherNotebookPage(notebookId: String, pageId: String) {
+        finishWithResult {
+            putExtra(EXTRA_RESULT_TARGET_KIND, TARGET_OTHER_NOTEBOOK_PAGE)
+            putExtra(EXTRA_RESULT_NOTEBOOK_ID, notebookId)
+            putExtra(EXTRA_RESULT_PAGE_ID, pageId)
+        }
+    }
+
+    private inline fun finishWithResult(extras: Intent.() -> Unit) {
         val result = Intent().apply {
             putExtra(EXTRA_RESULT_CHROME, selectedChrome.name)
-            putExtra(EXTRA_RESULT_PAGE_ID, pageId)
+            extras()
         }
         setResult(RESULT_OK, result)
         finish()

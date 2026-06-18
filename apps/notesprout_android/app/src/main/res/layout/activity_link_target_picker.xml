@@ -116,7 +116,7 @@
             android:textStyle="bold"
             android:layout_marginBottom="6dp" />
 
-        <!-- Current/Other toggle. Other is disabled until Session 3. -->
+        <!-- Current/Other toggle. -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -144,14 +144,103 @@
                 android:layout_weight="1"
                 android:background="@drawable/bg_toolbar_button"
                 android:text="Other notebook"
-                android:textColor="@color/inkLight"
+                android:textColor="@color/inkBlack"
                 android:textSize="12sp"
                 android:textAllCaps="false"
-                android:enabled="false"
                 android:stateListAnimator="@null"
                 android:padding="2dp" />
 
         </LinearLayout>
+
+        <!-- Notebook/Page sub-toggle — only shown in Other-notebook mode (Session 3). -->
+        <LinearLayout
+            android:id="@+id/otherKindRow"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginTop="6dp"
+            android:visibility="gone">
+
+            <androidx.appcompat.widget.AppCompatButton
+                android:id="@+id/btnKindNotebook"
+                android:layout_width="0dp"
+                android:layout_height="36dp"
+                android:layout_weight="1"
+                android:background="@drawable/bg_toolbar_button"
+                android:text="Notebook"
+                android:textColor="@color/inkBlack"
+                android:textSize="12sp"
+                android:textAllCaps="false"
+                android:stateListAnimator="@null"
+                android:padding="2dp" />
+
+            <Space android:layout_width="6dp" android:layout_height="0dp" />
+
+            <androidx.appcompat.widget.AppCompatButton
+                android:id="@+id/btnKindPage"
+                android:layout_width="0dp"
+                android:layout_height="36dp"
+                android:layout_weight="1"
+                android:background="@drawable/bg_toolbar_button"
+                android:text="Page"
+                android:textColor="@color/inkBlack"
+                android:textSize="12sp"
+                android:textAllCaps="false"
+                android:stateListAnimator="@null"
+                android:padding="2dp" />
+
+        </LinearLayout>
+
+    </LinearLayout>
+
+    <!-- Browse bar: back + breadcrumb + search. Only shown when browsing Other-notebook
+         folders/notebooks (Session 3). 1dp inkBlack bottom border via toolbar_background. -->
+    <LinearLayout
+        android:id="@+id/otherBrowseBar"
+        android:layout_width="match_parent"
+        android:layout_height="48dp"
+        android:background="@drawable/toolbar_background"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="4dp"
+        android:paddingEnd="4dp"
+        android:visibility="gone">
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnBrowseBack"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:src="@drawable/ic_arrow_left"
+            android:contentDescription="Up one level" />
+
+        <HorizontalScrollView
+            android:id="@+id/breadcrumbScroll"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:scrollbars="none"
+            android:fillViewport="true">
+
+            <LinearLayout
+                android:id="@+id/breadcrumbContainer"
+                android:layout_width="wrap_content"
+                android:layout_height="match_parent"
+                android:gravity="center_vertical"
+                android:orientation="horizontal" />
+
+        </HorizontalScrollView>
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnBrowseClearSearch"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:src="@drawable/ic_close"
+            android:contentDescription="Clear search"
+            android:visibility="gone" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnBrowseSearch"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:src="@drawable/ic_search"
+            android:contentDescription="Search notebooks" />
 
     </LinearLayout>
 

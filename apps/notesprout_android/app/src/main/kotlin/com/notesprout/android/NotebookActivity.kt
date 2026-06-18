@@ -406,8 +406,22 @@ class NotebookActivity : AppCompatActivity() {
         val data = result.data ?: return@registerForActivityResult
         val chrome = data.getStringExtra(LinkTargetPickerActivity.EXTRA_RESULT_CHROME)
             ?.let { runCatching { LinkChrome.valueOf(it) }.getOrNull() } ?: return@registerForActivityResult
-        val pageId = data.getStringExtra(LinkTargetPickerActivity.EXTRA_RESULT_PAGE_ID) ?: return@registerForActivityResult
-        val target: LinkTarget = LinkTarget.CurrentNotebookPage(pageId)
+        val target: LinkTarget = run {
+            val kind = data.getStringExtra(LinkTargetPickerActivity.EXTRA_RESULT_TARGET_KIND)
+            val pageId     = data.getStringExtra(LinkTargetPickerActivity.EXTRA_RESULT_PAGE_ID)
+            val otherNbId  = data.getStringExtra(LinkTargetPickerActivity.EXTRA_RESULT_NOTEBOOK_ID)
+            when (kind) {
+                LinkTargetPickerActivity.TARGET_OTHER_NOTEBOOK ->
+                    LinkTarget.OtherNotebook(otherNbId ?: return@registerForActivityResult)
+                LinkTargetPickerActivity.TARGET_OTHER_NOTEBOOK_PAGE ->
+                    LinkTarget.OtherNotebookPage(
+                        otherNbId ?: return@registerForActivityResult,
+                        pageId ?: return@registerForActivityResult,
+                    )
+                else -> // TARGET_CURRENT_PAGE (and legacy results without a kind)
+                    LinkTarget.CurrentNotebookPage(pageId ?: return@registerForActivityResult)
+            }
+        }
 
         lifecycleScope.launch(Dispatchers.IO) {
             if (editId != null) {
@@ -418,14 +432,29 @@ class NotebookActivity : AppCompatActivity() {
         }
     }
 
-    /** Launch the link target picker, pre-selecting [initialChrome]/[initialPageId] when editing. */
-    private fun launchLinkPicker(initialChrome: LinkChrome?, initialPageId: String?) {
+    /** Launch the link target picker, pre-selecting [initialChrome]/[initialTarget] when editing. */
+    private fun launchLinkPicker(initialChrome: LinkChrome?, initialTarget: LinkTarget?) {
         val intent = Intent(this, LinkTargetPickerActivity::class.java).apply {
             putExtra(LinkTargetPickerActivity.EXTRA_NOTEBOOK_ID, notebookId)
             putExtra(LinkTargetPickerActivity.EXTRA_NOTEBOOK_NAME, notebookDisplayName)
             putExtra(LinkTargetPickerActivity.EXTRA_CURRENT_PAGE_INDEX, currentPageIndex)
             if (initialChrome != null) putExtra(LinkTargetPickerActivity.EXTRA_INITIAL_CHROME, initialChrome.name)
-            if (initialPageId != null) putExtra(LinkTargetPickerActivity.EXTRA_INITIAL_PAGE_ID, initialPageId)
+            when (initialTarget) {
+                is LinkTarget.CurrentNotebookPage -> {
+                    putExtra(LinkTargetPickerActivity.EXTRA_INITIAL_TARGET_KIND, LinkTargetPickerActivity.TARGET_CURRENT_PAGE)
+                    putExtra(LinkTargetPickerActivity.EXTRA_INITIAL_PAGE_ID, initialTarget.pageId)
+                }
+                is LinkTarget.OtherNotebook -> {
+                    putExtra(LinkTargetPickerActivity.EXTRA_INITIAL_TARGET_KIND, LinkTargetPickerActivity.TARGET_OTHER_NOTEBOOK)
+                    putExtra(LinkTargetPickerActivity.EXTRA_INITIAL_NOTEBOOK_ID, initialTarget.notebookId)
+                }
+                is LinkTarget.OtherNotebookPage -> {
+                    putExtra(LinkTargetPickerActivity.EXTRA_INITIAL_TARGET_KIND, LinkTargetPickerActivity.TARGET_OTHER_NOTEBOOK_PAGE)
+                    putExtra(LinkTargetPickerActivity.EXTRA_INITIAL_NOTEBOOK_ID, initialTarget.notebookId)
+                    putExtra(LinkTargetPickerActivity.EXTRA_INITIAL_NOTEBOOK_PAGE_ID, initialTarget.pageId)
+                }
+                null -> { /* creating a new link — no pre-selection */ }
+            }
         }
         linkPickerLauncher.launch(intent)
     }
@@ -1315,7 +1344,7 @@ class NotebookActivity : AppCompatActivity() {
             pendingLinkEditId = null
             pendingLinkStrokes = strokes; pendingLinkHeadings = headings
             pendingLinkTexts = texts;     pendingLinkLines = lines
-            launchLinkPicker(initialChrome = null, initialPageId = null)
+            launchLinkPicker(initialChrome = null, initialTarget = null)
         }
 
         binding.btnLinkEdit.setOnClickListener {
@@ -1323,8 +1352,7 @@ class NotebookActivity : AppCompatActivity() {
             pendingLinkEditId = link.id
             pendingLinkStrokes = emptyList(); pendingLinkHeadings = emptyList()
             pendingLinkTexts = emptyList();   pendingLinkLines = emptyList()
-            val initialPageId = (link.target as? LinkTarget.CurrentNotebookPage)?.pageId
-            launchLinkPicker(initialChrome = link.chrome, initialPageId = initialPageId)
+            launchLinkPicker(initialChrome = link.chrome, initialTarget = link.target)
         }
 
         binding.btnUnlink.setOnClickListener {
