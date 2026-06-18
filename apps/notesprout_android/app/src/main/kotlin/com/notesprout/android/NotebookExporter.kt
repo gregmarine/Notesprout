@@ -22,6 +22,9 @@ import com.notesprout.android.data.LineObject
 import com.notesprout.android.data.LineOrientation
 import com.notesprout.android.data.LineRender
 import com.notesprout.android.data.LineStyle
+import com.notesprout.android.data.LinkObject
+import com.notesprout.android.data.LinkRender
+import com.notesprout.android.data.toLineRender
 import com.notesprout.android.data.LiveStroke
 import com.notesprout.android.data.TextObject
 import com.notesprout.android.data.TextRender
@@ -130,6 +133,15 @@ object NotebookExporter {
                 }
             } else emptyList()
 
+            val links: List<LinkRender> = if (layer != null) {
+                dao.getLinkObjectsForLayer(layer.id).mapNotNull { row ->
+                    val box = parseBoundingBox(row.boundingBox) ?: return@mapNotNull null
+                    val lo = runCatching { LinkObject.fromJson(row.data) }.getOrNull()
+                        ?: return@mapNotNull null
+                    parseLinkRender(row.id, box, lo, context.resources.displayMetrics.density)
+                }
+            } else emptyList()
+
             val strokes: List<LiveStroke> = if (layer != null) {
                 dao.getStrokesForLayer(layer.id).mapNotNull { row ->
                     val sd = runCatching { StrokeData.fromJson(row.data) }.getOrNull()
@@ -138,7 +150,7 @@ object NotebookExporter {
                 }
             } else emptyList()
 
-            val bitmap = renderPage(pw, ph, templateBitmap, headings, textObjects, lineObjects, strokes, context)
+            val bitmap = renderPage(pw, ph, templateBitmap, headings, textObjects, lineObjects, strokes, context, links)
 
             val pageInfo = PdfDocument.PageInfo.Builder(pw, ph, pdfPageNumber++).create()
             val pdfPage = pdf.startPage(pageInfo)
@@ -171,6 +183,18 @@ object NotebookExporter {
         }
         return LineRender(id, box, startX, startY, endX, endY, lo.style, lo.orientation, lo.strokeWidthDp, lo.dotSpacingDp * densityDp)
     }
+
+    private fun parseLinkRender(id: String, box: RectF, lo: LinkObject, densityDp: Float): LinkRender =
+        LinkRender(
+            id = id,
+            boundingBox = box,
+            target = lo.target,
+            chrome = lo.chrome,
+            strokes = lo.strokes,
+            headings = lo.headings,
+            textObjects = lo.textObjects,
+            lines = lo.lines.map { it.toLineRender(densityDp) },
+        )
 
     private fun parseDimensions(boundingBoxJson: String): Pair<Int, Int> {
         val box = com.notesprout.android.data.BoundingBox.fromJson(boundingBoxJson)
@@ -205,6 +229,7 @@ object NotebookExporter {
         lineObjects: List<LineRender>,
         strokes: List<LiveStroke>,
         context: Context,
+        links: List<LinkRender> = emptyList(),
     ): Bitmap {
         val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bmp)
@@ -237,77 +262,101 @@ object NotebookExporter {
             textSize = textObjectTextSizePx
         }
 
-        for (heading in headings) {
-            canvas.drawRect(heading.boundingBox, headingPaint)
-            if (heading.recognizedText != null) {
-                val box = heading.boundingBox
-                val paddingPx = 8f * densityDp
-                val innerBox = android.graphics.RectF(box.left + paddingPx, box.top + paddingPx, box.right - paddingPx, box.bottom - paddingPx)
-                val widthPx = kotlin.math.ceil(innerBox.width().toDouble()).toInt().coerceAtLeast(1)
-                canvas.save()
-                canvas.clipRect(box)
-                TextObjectRenderer.draw(canvas, TextRender(heading.id, innerBox, heading.recognizedText), widthPx, textObjectPaint, densityDp, maxLines = 1)
-                canvas.restore()
-            } else {
-                for (liveStroke in heading.strokes) {
-                    val pts = liveStroke.points
-                    if (pts.size < 2) continue
-                    val path = Path()
-                    path.moveTo(pts[0].x, pts[0].y)
-                    for (i in 1 until pts.size) path.lineTo(pts[i].x, pts[i].y)
-                    canvas.drawPath(path, strokePaint)
+        fun drawHeadingList(list: List<HeadingStroke>) {
+            for (heading in list) {
+                canvas.drawRect(heading.boundingBox, headingPaint)
+                if (heading.recognizedText != null) {
+                    val box = heading.boundingBox
+                    val paddingPx = 8f * densityDp
+                    val innerBox = android.graphics.RectF(box.left + paddingPx, box.top + paddingPx, box.right - paddingPx, box.bottom - paddingPx)
+                    val widthPx = kotlin.math.ceil(innerBox.width().toDouble()).toInt().coerceAtLeast(1)
+                    canvas.save()
+                    canvas.clipRect(box)
+                    TextObjectRenderer.draw(canvas, TextRender(heading.id, innerBox, heading.recognizedText), widthPx, textObjectPaint, densityDp, maxLines = 1)
+                    canvas.restore()
+                } else {
+                    for (liveStroke in heading.strokes) {
+                        val pts = liveStroke.points
+                        if (pts.size < 2) continue
+                        val path = Path()
+                        path.moveTo(pts[0].x, pts[0].y)
+                        for (i in 1 until pts.size) path.lineTo(pts[i].x, pts[i].y)
+                        canvas.drawPath(path, strokePaint)
+                    }
                 }
             }
         }
 
-        for (textObj in textObjects) {
-            TextObjectRenderer.draw(canvas, textObj, w, textObjectPaint, densityDp)
+        fun drawTextList(list: List<TextRender>) {
+            for (textObj in list) {
+                TextObjectRenderer.draw(canvas, textObj, w, textObjectPaint, densityDp)
+            }
         }
 
-        for (lineObj in lineObjects) {
-            val sw = lineObj.strokeWidthDp * densityDp
-            val linePaint = Paint().apply {
-                isAntiAlias = true
-                color = context.getColor(R.color.inkLight)
-                strokeCap = Paint.Cap.ROUND
-                strokeWidth = sw
-            }
-            when (lineObj.style) {
-                LineStyle.SOLID -> {
-                    linePaint.style = Paint.Style.STROKE
-                    canvas.drawLine(lineObj.startX, lineObj.startY, lineObj.endX, lineObj.endY, linePaint)
+        fun drawLineList(list: List<LineRender>) {
+            for (lineObj in list) {
+                val sw = lineObj.strokeWidthDp * densityDp
+                val linePaint = Paint().apply {
+                    isAntiAlias = true
+                    color = context.getColor(R.color.inkLight)
+                    strokeCap = Paint.Cap.ROUND
+                    strokeWidth = sw
                 }
-                LineStyle.DASHED -> {
-                    linePaint.style = Paint.Style.STROKE
-                    linePaint.pathEffect = android.graphics.DashPathEffect(floatArrayOf(12f * densityDp, 8f * densityDp), 0f)
-                    canvas.drawLine(lineObj.startX, lineObj.startY, lineObj.endX, lineObj.endY, linePaint)
-                }
-                LineStyle.DOTTED -> {
-                    linePaint.style = Paint.Style.FILL
-                    val spacing = lineObj.dotSpacingPx.takeIf { it > 0f } ?: (sw * 4f)
-                    val r = sw / 2f
-                    when (lineObj.orientation) {
-                        LineOrientation.HORIZONTAL -> {
-                            var x = lineObj.startX
-                            while (x <= lineObj.endX) { canvas.drawCircle(x, lineObj.startY, r, linePaint); x += spacing }
-                        }
-                        LineOrientation.VERTICAL -> {
-                            var y = lineObj.startY
-                            while (y <= lineObj.endY) { canvas.drawCircle(lineObj.startX, y, r, linePaint); y += spacing }
+                when (lineObj.style) {
+                    LineStyle.SOLID -> {
+                        linePaint.style = Paint.Style.STROKE
+                        canvas.drawLine(lineObj.startX, lineObj.startY, lineObj.endX, lineObj.endY, linePaint)
+                    }
+                    LineStyle.DASHED -> {
+                        linePaint.style = Paint.Style.STROKE
+                        linePaint.pathEffect = android.graphics.DashPathEffect(floatArrayOf(12f * densityDp, 8f * densityDp), 0f)
+                        canvas.drawLine(lineObj.startX, lineObj.startY, lineObj.endX, lineObj.endY, linePaint)
+                    }
+                    LineStyle.DOTTED -> {
+                        linePaint.style = Paint.Style.FILL
+                        val spacing = lineObj.dotSpacingPx.takeIf { it > 0f } ?: (sw * 4f)
+                        val r = sw / 2f
+                        when (lineObj.orientation) {
+                            LineOrientation.HORIZONTAL -> {
+                                var x = lineObj.startX
+                                while (x <= lineObj.endX) { canvas.drawCircle(x, lineObj.startY, r, linePaint); x += spacing }
+                            }
+                            LineOrientation.VERTICAL -> {
+                                var y = lineObj.startY
+                                while (y <= lineObj.endY) { canvas.drawCircle(lineObj.startX, y, r, linePaint); y += spacing }
+                            }
                         }
                     }
                 }
             }
         }
 
-        for (liveStroke in strokes) {
-            val pts = liveStroke.points
-            if (pts.size < 2) continue
-            val path = Path()
-            path.moveTo(pts[0].x, pts[0].y)
-            for (i in 1 until pts.size) path.lineTo(pts[i].x, pts[i].y)
-            canvas.drawPath(path, strokePaint)
+        fun drawStrokeList(list: List<LiveStroke>) {
+            for (liveStroke in list) {
+                val pts = liveStroke.points
+                if (pts.size < 2) continue
+                val path = Path()
+                path.moveTo(pts[0].x, pts[0].y)
+                for (i in 1 until pts.size) path.lineTo(pts[i].x, pts[i].y)
+                canvas.drawPath(path, strokePaint)
+            }
         }
+
+        drawHeadingList(headings)
+        drawTextList(textObjects)
+        drawLineList(lineObjects)
+
+        // Links render their embedded content only — NO chrome (per Session 5 / export rule).
+        // Mirrors the view's drawLinkObject order (headings → text → lines → strokes), after the
+        // page's own lines and before its top-level strokes.
+        for (link in links) {
+            drawHeadingList(link.headings)
+            drawTextList(link.textObjects)
+            drawLineList(link.lines)
+            drawStrokeList(link.strokes)
+        }
+
+        drawStrokeList(strokes)
 
         return bmp
     }
@@ -374,6 +423,15 @@ object NotebookExporter {
                 }
             } else emptyList()
 
+            val links: List<LinkRender> = if (layer != null) {
+                dao.getLinkObjectsForLayer(layer.id).mapNotNull { row ->
+                    val box = parseBoundingBox(row.boundingBox) ?: return@mapNotNull null
+                    val lo = runCatching { LinkObject.fromJson(row.data) }.getOrNull()
+                        ?: return@mapNotNull null
+                    parseLinkRender(row.id, box, lo, context.resources.displayMetrics.density)
+                }
+            } else emptyList()
+
             val strokes: List<LiveStroke> = if (layer != null) {
                 dao.getStrokesForLayer(layer.id).mapNotNull { row ->
                     val sd = runCatching { StrokeData.fromJson(row.data) }.getOrNull()
@@ -382,7 +440,7 @@ object NotebookExporter {
                 }
             } else emptyList()
 
-            val bitmap = renderPage(pw, ph, templateBitmap, headings, textObjects, lineObjects, strokes, context)
+            val bitmap = renderPage(pw, ph, templateBitmap, headings, textObjects, lineObjects, strokes, context, links)
             templateBitmap?.recycle()
 
             val outDir = File(context.cacheDir, "exported_pngs").also { it.deleteRecursively(); it.mkdirs() }

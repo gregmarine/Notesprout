@@ -24,6 +24,7 @@ import com.notesprout.android.data.LineRender
 import com.notesprout.android.data.LineStyle
 import com.notesprout.android.data.LinkChrome
 import com.notesprout.android.data.LinkRender
+import com.notesprout.android.data.translate
 import com.notesprout.android.data.LiveStroke
 import com.notesprout.android.data.TextRender
 import java.io.ByteArrayOutputStream
@@ -142,6 +143,7 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
     private var dragOriginalHeadings: List<HeadingStroke> = emptyList()
     private var dragOriginalTextObjects: List<TextRender> = emptyList()
     private var dragOriginalLineObjects: List<LineRender> = emptyList()
+    private var dragOriginalLinks: List<LinkRender> = emptyList()
     private var dragBackingBitmap: Bitmap? = null
     private var activeSnapGuides: List<SnapGuide> = emptyList()
     private var snapObjectTargets: List<RectF> = emptyList()
@@ -182,7 +184,8 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
     override var onHeadingErased: ((HeadingStroke) -> Unit)? = null
     override var onTextErased: ((TextRender) -> Unit)? = null
     override var onLineErased: ((LineRender) -> Unit)? = null
-    override var onScribbleEraseComplete: ((List<String>, List<HeadingStroke>, List<TextRender>, List<LineRender>) -> Unit)? = null
+    override var onLinkErased: ((LinkRender) -> Unit)? = null
+    override var onScribbleEraseComplete: ((List<String>, List<HeadingStroke>, List<TextRender>, List<LineRender>, List<LinkRender>) -> Unit)? = null
     override var onSmartLassoComplete: ((List<String>, RectF) -> Unit)? = null
     override var onPenLifted: (() -> Unit)? = null
 
@@ -193,7 +196,7 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
     override var onLassoTapToDismiss: (() -> Unit)? = null
     override var onLassoEraseComplete: ((List<String>) -> Unit)? = null
     override var lassoSelectedIds: Set<String> = emptySet()
-    override var onStrokesMoved: ((List<LiveStroke>, List<LiveStroke>, List<HeadingStroke>, List<HeadingStroke>, List<TextRender>, List<TextRender>, List<LineRender>, List<LineRender>) -> Unit)? = null
+    override var onStrokesMoved: ((List<LiveStroke>, List<LiveStroke>, List<HeadingStroke>, List<HeadingStroke>, List<TextRender>, List<TextRender>, List<LineRender>, List<LineRender>, List<LinkRender>, List<LinkRender>) -> Unit)? = null
     override var onLassoTap: ((Float, Float) -> Unit)? = null
     override var onDragStarted: (() -> Unit)? = null
     override var onLassoSelectionCleared: (() -> Unit)? = null
@@ -310,12 +313,16 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
                     dragOriginalLineObjects = lineObjects
                         .filter { it.id in lassoSelectedIds }
                         .map { it.copy(boundingBox = RectF(it.boundingBox)) }
+                    dragOriginalLinks = links
+                        .filter { it.id in lassoSelectedIds }
+                        .map { it.translate(0f, 0f) }
                     val nonSelectedStrokes  = strokes.filter { it.id !in lassoSelectedIds }
                     val nonSelectedHeadings = headings.filter { it.id !in lassoSelectedIds }
                     val nonSelectedTexts    = textObjects.filter { it.id !in lassoSelectedIds }
                     val nonSelectedLines    = lineObjects.filter { it.id !in lassoSelectedIds }
-                    dragBackingBitmap = buildRenderBitmap(nonSelectedStrokes, templateBitmap, nonSelectedHeadings, nonSelectedTexts, nonSelectedLines)
-                    snapObjectTargets = if (isSnapEnabled) (nonSelectedHeadings.map { RectF(it.boundingBox) } + nonSelectedTexts.map { RectF(it.boundingBox) } + nonSelectedLines.map { RectF(it.boundingBox) }) else emptyList()
+                    val nonSelectedLinks    = links.filter { it.id !in lassoSelectedIds }
+                    dragBackingBitmap = buildRenderBitmap(nonSelectedStrokes, templateBitmap, nonSelectedHeadings, nonSelectedTexts, nonSelectedLines, nonSelectedLinks)
+                    snapObjectTargets = if (isSnapEnabled) (nonSelectedHeadings.map { RectF(it.boundingBox) } + nonSelectedTexts.map { RectF(it.boundingBox) } + nonSelectedLines.map { RectF(it.boundingBox) } + nonSelectedLinks.map { RectF(it.boundingBox) }) else emptyList()
                     return true
                 }
                 // Normal lasso: clear any existing selection so the user sees immediate feedback.
@@ -412,6 +419,7 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
                                 endX   = l.endX   + dragDx, endY   = l.endY   + dragDy,
                             )
                         }
+                        val movedLinks = dragOriginalLinks.map { it.translate(dragDx, dragDy) }
                         val movedById = movedStrokes.associateBy { it.id }
                         val updated = strokes.map { movedById[it.id] ?: it }
                         strokes.clear(); strokes.addAll(updated)
@@ -421,6 +429,8 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
                         textObjects = textObjects.map { textById[it.id] ?: it }
                         val lineById = movedLineObjects.associateBy { it.id }
                         lineObjects = lineObjects.map { lineById[it.id] ?: it }
+                        val linkById = movedLinks.associateBy { it.id }
+                        links = links.map { linkById[it.id] ?: it }
                         lassoSelectionBox = lassoSelectionBox?.let { b ->
                             RectF(b.left + dragDx, b.top + dragDy, b.right + dragDx, b.bottom + dragDy)
                         }
@@ -428,13 +438,15 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
                         val origHeadings = dragOriginalHeadings
                         val origTextObjects = dragOriginalTextObjects
                         val origLineObjects = dragOriginalLineObjects
+                        val origLinks = dragOriginalLinks
                         dragBackingBitmap?.recycle(); dragBackingBitmap = null
                         isDragMoveActive = false; dragThresholdMet = false
                         dragDx = 0f; dragDy = 0f; activeSnapGuides = emptyList(); snapObjectTargets = emptyList()
                         dragOriginalStrokes = emptyList(); dragOriginalHeadings = emptyList()
                         dragOriginalTextObjects = emptyList(); dragOriginalLineObjects = emptyList()
+                        dragOriginalLinks = emptyList()
                         redrawCanvas()
-                        onStrokesMoved?.invoke(origStrokes, movedStrokes, origHeadings, movedHeadings, origTextObjects, movedTextObjects, origLineObjects, movedLineObjects)
+                        onStrokesMoved?.invoke(origStrokes, movedStrokes, origHeadings, movedHeadings, origTextObjects, movedTextObjects, origLineObjects, movedLineObjects, origLinks, movedLinks)
                     } else {
                         // Below threshold — treat as a tap inside the selection box.
                         val tapX = event.x; val tapY = event.y
@@ -443,6 +455,7 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
                         dragDx = 0f; dragDy = 0f; activeSnapGuides = emptyList(); snapObjectTargets = emptyList()
                         dragOriginalStrokes = emptyList(); dragOriginalHeadings = emptyList()
                         dragOriginalTextObjects = emptyList(); dragOriginalLineObjects = emptyList()
+                        dragOriginalLinks = emptyList()
                         onLassoTap?.invoke(tapX, tapY)
                     }
                     return true
@@ -504,6 +517,9 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
             }
             for (lineObj in dragOriginalLineObjects) {
                 drawLineObject(canvas, lineObj)
+            }
+            for (link in dragOriginalLinks) {
+                drawLinkObject(canvas, link, width)
             }
             for (stroke in dragOriginalStrokes) {
                 val pts = stroke.points; if (pts.size < 2) continue
@@ -598,6 +614,15 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
             val hitIds = hitLines.mapTo(HashSet()) { it.id }
             lineObjects = lineObjects.filter { it.id !in hitIds }
             hitLines.forEach { onLineErased?.invoke(it) }
+            throttledEraseRedraw()
+        }
+
+        // Link-object hit-test: erase the entire link if eraser AABB intersects its box.
+        val hitLinks = links.filter { RectF.intersects(eBounds, it.boundingBox) }
+        if (hitLinks.isNotEmpty()) {
+            val hitIds = hitLinks.mapTo(HashSet()) { it.id }
+            links = links.filter { it.id !in hitIds }
+            hitLinks.forEach { onLinkErased?.invoke(it) }
             throttledEraseRedraw()
         }
 
@@ -871,6 +896,7 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
         val headingSnapshot = headings.toList()
         val textSnapshot    = textObjects.toList()
         val lineSnapshot    = lineObjects.toList()
+        val linkSnapshot    = links.toList()
 
         Thread {
             // ── Gate 1: Smart lasso ────────────────────────────────────────────────
@@ -881,7 +907,7 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
                     p.lineTo(points[0].x, points[0].y)
                     p.close()
                 }
-                val hitIds = runLassoHitTest(path, strokeSnapshot, headingSnapshot, textSnapshot, lineSnapshot)
+                val hitIds = runLassoHitTest(path, strokeSnapshot, headingSnapshot, textSnapshot, lineSnapshot, linkSnapshot)
                 if (hitIds.isNotEmpty()) {
                     val hitSet      = hitIds.toSet()
                     val unionBounds = RectF()
@@ -889,6 +915,7 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
                     for (h in headingSnapshot) { if (h.id in hitSet) unionBounds.union(h.boundingBox) }
                     for (t in textSnapshot)    { if (t.id in hitSet) unionBounds.union(t.boundingBox) }
                     for (l in lineSnapshot)    { if (l.id in hitSet) unionBounds.union(l.boundingBox) }
+                    for (lk in linkSnapshot)   { if (lk.id in hitSet) unionBounds.union(lk.boundingBox) }
                     post {
                         strokes.removeAll { it.id == strokeId }
                         onSmartLassoComplete?.invoke(hitIds, unionBounds)
@@ -904,7 +931,7 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
             }
 
             // ── Gate 2: Scribble-to-erase ──────────────────────────────────────────
-            val hitIds = scribbleHitTest(points, strokeSnapshot, headingSnapshot, textSnapshot, lineSnapshot, density)
+            val hitIds = scribbleHitTest(points, strokeSnapshot, headingSnapshot, textSnapshot, lineSnapshot, density, linkSnapshot)
             post {
                 if (hitIds.isEmpty()) {
                     onPenLifted?.invoke()
@@ -914,7 +941,8 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
                     val erasedHeadings = headingSnapshot.filter { it.id in hitSet }
                     val erasedTexts    = textSnapshot.filter { it.id in hitSet }
                     val erasedLines    = lineSnapshot.filter { it.id in hitSet }
-                    onScribbleEraseComplete?.invoke(hitIds, erasedHeadings, erasedTexts, erasedLines)
+                    val erasedLinks    = linkSnapshot.filter { it.id in hitSet }
+                    onScribbleEraseComplete?.invoke(hitIds, erasedHeadings, erasedTexts, erasedLines, erasedLinks)
                 }
             }
         }.start()
@@ -1005,6 +1033,7 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
         textObjects: List<TextRender>,
         lineObjects: List<LineRender>,
         density: Float,
+        links: List<LinkRender> = emptyList(),
     ): List<String> {
         if (scribblePoints.size < 2) return emptyList()
         val touchRadiusPx = SCRIBBLE_STROKE_TOUCH_RADIUS_DP * density
@@ -1052,6 +1081,12 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
                 hitIds.add(lineObj.id)
             }
         }
+        for (link in links) {
+            if (!RectF.intersects(rawBounds, link.boundingBox)) continue
+            if (scribblePathPenetration(scribblePoints, link.boundingBox) >= penetrationPx) {
+                hitIds.add(link.id)
+            }
+        }
         return hitIds
     }
 
@@ -1086,6 +1121,7 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
             dragDx = 0f; dragDy = 0f; activeSnapGuides = emptyList()
             dragOriginalStrokes = emptyList(); dragOriginalHeadings = emptyList()
             dragOriginalTextObjects = emptyList(); dragOriginalLineObjects = emptyList()
+            dragOriginalLinks = emptyList()
             invalidate()
         }
     }
@@ -1174,8 +1210,9 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
         val headingSnapshot = headings.toList()
         val textSnapshot    = textObjects.toList()
         val lineSnapshot    = lineObjects.toList()
+        val linkSnapshot    = links.toList()
         Thread {
-            val hitIds = runLassoHitTest(drawnPath, strokeSnapshot, headingSnapshot, textSnapshot, lineSnapshot)
+            val hitIds = runLassoHitTest(drawnPath, strokeSnapshot, headingSnapshot, textSnapshot, lineSnapshot, linkSnapshot)
             post {
                 lassoOverlayPath       = null
                 lassoEraserDisplayPath = null
@@ -1193,6 +1230,7 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
         headings: List<HeadingStroke> = emptyList(),
         textObjects: List<TextRender> = emptyList(),
         lineObjects: List<LineRender> = emptyList(),
+        links: List<LinkRender> = emptyList(),
     ): List<String> {
         val bounds = RectF()
         path.computeBounds(bounds, true)
@@ -1233,6 +1271,12 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
             if (!RectF.intersects(bounds, lineObj.boundingBox)) continue
             if (LassoGeometry.regionIntersectsBox(region, lineObj.boundingBox)) {
                 hitIds.add(lineObj.id)
+            }
+        }
+        for (link in links) {
+            if (!RectF.intersects(bounds, link.boundingBox)) continue
+            if (LassoGeometry.regionIntersectsBox(region, link.boundingBox)) {
+                hitIds.add(link.id)
             }
         }
         return hitIds

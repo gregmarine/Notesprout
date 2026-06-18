@@ -135,6 +135,8 @@ sealed class UndoRedoAction {
         val textObjects: List<TextRender> = emptyList(),
         val lineIds: List<String> = emptyList(),
         val lines: List<LineRender> = emptyList(),
+        val linkIds: List<String> = emptyList(),
+        val links: List<LinkRender> = emptyList(),
     ) : UndoRedoAction()
 
     /**
@@ -157,6 +159,8 @@ sealed class UndoRedoAction {
         val movedTextObjects: List<TextRender> = emptyList(),
         val originalLineObjects: List<LineRender> = emptyList(),
         val movedLineObjects: List<LineRender> = emptyList(),
+        val originalLinks: List<LinkRender> = emptyList(),
+        val movedLinks: List<LinkRender> = emptyList(),
     ) : UndoRedoAction()
 
     /**
@@ -179,6 +183,8 @@ sealed class UndoRedoAction {
         val textObjects: List<TextRender> = emptyList(),
         val lineIds: List<String> = emptyList(),
         val lines: List<LineRender> = emptyList(),
+        val linkIds: List<String> = emptyList(),
+        val links: List<LinkRender> = emptyList(),
     ) : UndoRedoAction()
 
     /**
@@ -206,6 +212,8 @@ sealed class UndoRedoAction {
         val textObjects: List<TextRender> = emptyList(),
         val lineIds: List<String> = emptyList(),
         val lines: List<LineRender> = emptyList(),
+        val linkIds: List<String> = emptyList(),
+        val links: List<LinkRender> = emptyList(),
     ) : UndoRedoAction()
 
     /**
@@ -229,6 +237,8 @@ sealed class UndoRedoAction {
         val textObjects: List<TextRender> = emptyList(),
         val lineIds: List<String> = emptyList(),
         val lines: List<LineRender> = emptyList(),
+        val linkIds: List<String> = emptyList(),
+        val links: List<LinkRender> = emptyList(),
     ) : UndoRedoAction()
 
     /**
@@ -376,6 +386,8 @@ sealed class UndoRedoAction {
         val textObjects: List<TextRender> = emptyList(),
         val lineIds: List<String> = emptyList(),
         val lines: List<LineRender> = emptyList(),
+        val linkIds: List<String> = emptyList(),
+        val links: List<LinkRender> = emptyList(),
     ) : UndoRedoAction()
 
     /**

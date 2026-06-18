@@ -211,6 +211,13 @@ class LinkTargetPickerActivity : AppCompatActivity() {
         initialNotebookPageId = intent.getStringExtra(EXTRA_INITIAL_NOTEBOOK_PAGE_ID)
 
         binding.btnBack.setOnClickListener { finish() }
+
+        // OK commits the current chrome + the link's existing target without re-picking a page.
+        // Only meaningful when editing (a target already exists); hidden when creating a new link.
+        if (initialTargetKind != null) {
+            binding.btnConfirm.visibility = View.VISIBLE
+            binding.btnConfirm.setOnClickListener { confirmInitialTarget() }
+        }
         onBackPressedDispatcher.addCallback(this, object : androidx.activity.OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
                 if (!handleInPickerBack()) finish()
@@ -903,6 +910,25 @@ class LinkTargetPickerActivity : AppCompatActivity() {
             putExtra(EXTRA_RESULT_TARGET_KIND, TARGET_OTHER_NOTEBOOK_PAGE)
             putExtra(EXTRA_RESULT_NOTEBOOK_ID, notebookId)
             putExtra(EXTRA_RESULT_PAGE_ID, pageId)
+        }
+    }
+
+    /**
+     * Commit the current [selectedChrome] against the link's existing (pre-selected) target — used by
+     * the OK button so a chrome-only edit doesn't require re-tapping the page/notebook. Falls back to
+     * just closing if a required id is somehow missing (defensive; shouldn't happen when editing).
+     */
+    private fun confirmInitialTarget() {
+        when (initialTargetKind) {
+            TARGET_CURRENT_PAGE ->
+                initialCurrentPageId?.let { finishWithCurrentPage(it) } ?: finish()
+            TARGET_OTHER_NOTEBOOK ->
+                initialNotebookId?.let { finishWithOtherNotebook(it) } ?: finish()
+            TARGET_OTHER_NOTEBOOK_PAGE -> {
+                val nb = initialNotebookId; val pg = initialNotebookPageId
+                if (nb != null && pg != null) finishWithOtherNotebookPage(nb, pg) else finish()
+            }
+            else -> finish()
         }
     }
 

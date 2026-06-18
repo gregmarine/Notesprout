@@ -33,6 +33,26 @@
             android:textColor="@color/inkBlack"
             android:textSize="18sp" />
 
+        <Space
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1" />
+
+        <!-- Commit the current style + existing target without re-picking a page (edit only). -->
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/btnConfirm"
+            android:layout_width="wrap_content"
+            android:layout_height="40dp"
+            android:layout_marginEnd="8dp"
+            android:background="@drawable/bg_toolbar_button"
+            android:minWidth="72dp"
+            android:text="OK"
+            android:textColor="@color/inkBlack"
+            android:textSize="14sp"
+            android:textAllCaps="false"
+            android:stateListAnimator="@null"
+            android:visibility="gone" />
+
     </LinearLayout>
 
     <!-- Header: chrome style + link-target toggle. 1dp inkBlack bottom border. -->

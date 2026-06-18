@@ -283,7 +283,28 @@ back-stack was reset; swipe-up on empty stack does nothing; verify pen writing o
 
 ---
 
-### ⬜ Session 5 — Delete/erase parity, lasso participation, export, edge cases (5/5)
+### ✅ Session 5 — Delete/erase parity, lasso participation, export, edge cases (5/5)
+
+> **Done (tests passed on G10).** Implementation notes / deviations:
+> - **Hit-tests:** links are now participants in `runLassoHitTest`, `scribbleHitTest`, smart-lasso,
+>   the lasso-eraser, and the hardware-eraser AABB test (new `onLinkErased` callback) in both
+>   `OnyxNotebookView` + `GenericNotebookView`. Delete/erase removes the **whole link row** — its
+>   embedded content lives inside the row, so there are no child rows to touch.
+> - **Drag-move + clipboard:** links carry through the drag path, `StrokesMoved`, and the clipboard.
+>   New `LinkRender.translate()` / `toLinkObject()` helpers (`data/LinkRender.kt`) handle the
+>   bbox + embedded-geometry translation for move and paste (fresh UUID).
+> - **Undo/redo:** `LassoErased`, `LassoDeleted`, `LassoCut`, `LassoPasted`, `ScribbleErased`,
+>   `StrokesMoved` gained `linkIds` + `List<LinkRender>`, wired through the DB phase, same-page
+>   optimised handlers, and all six cross-page two-phase handlers (which now also load the target
+>   page's existing links into the preview — a latent gap before this session).
+> - **Export:** `NotebookExporter.renderPage` renders link **embedded content only, no chrome**
+>   (PDF + PNG), via extracted local draw helpers.
+> - **Follow-mode fix (found in testing):** tap-to-follow (`isLinkFollowEnabled`) was pen-mode-only,
+>   so a link stayed untappable while the lasso-eraser/lasso-select tool was still active after an
+>   undo/paste. It now runs for a clean **finger** tap in every mode except text-placement; the
+>   finger-only gesture path never conflicts with stylus selection/erase/paste.
+> - **Link dialog OK button:** `LinkTargetPickerActivity` gained a top-right **OK** button (edit only)
+>   that commits a chrome-only change against the link's existing target without re-picking a page.
 
 Bring links to full first-class parity and finish.
 

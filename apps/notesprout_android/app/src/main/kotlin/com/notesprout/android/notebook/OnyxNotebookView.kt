@@ -25,6 +25,7 @@ import com.notesprout.android.data.LineRender
 import com.notesprout.android.data.LineStyle
 import com.notesprout.android.data.LinkChrome
 import com.notesprout.android.data.LinkRender
+import com.notesprout.android.data.translate
 import com.notesprout.android.data.LiveStroke
 import com.notesprout.android.data.TextRender
 import com.onyx.android.sdk.api.device.epd.EpdController
@@ -183,6 +184,7 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
     private var dragOriginalHeadings: List<HeadingStroke> = emptyList()
     private var dragOriginalTextObjects: List<TextRender> = emptyList()
     private var dragOriginalLineObjects: List<LineRender> = emptyList()
+    private var dragOriginalLinks: List<LinkRender> = emptyList()
     // Backing bitmap: non-selected strokes/headings/textObjects + template, built once at drag start.
     private var dragBackingBitmap: Bitmap? = null
     private var activeSnapGuides: List<SnapGuide> = emptyList()
@@ -233,7 +235,8 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
     override var onHeadingErased: ((HeadingStroke) -> Unit)? = null
     override var onTextErased: ((TextRender) -> Unit)? = null
     override var onLineErased: ((LineRender) -> Unit)? = null
-    override var onScribbleEraseComplete: ((List<String>, List<HeadingStroke>, List<TextRender>, List<LineRender>) -> Unit)? = null
+    override var onLinkErased: ((LinkRender) -> Unit)? = null
+    override var onScribbleEraseComplete: ((List<String>, List<HeadingStroke>, List<TextRender>, List<LineRender>, List<LinkRender>) -> Unit)? = null
     override var onSmartLassoComplete: ((List<String>, RectF) -> Unit)? = null
 
     // Points and stroke IDs accumulated between onBeginRawDrawing and onEndRawDrawing.
@@ -259,7 +262,7 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
     override var onLassoTapToDismiss: (() -> Unit)? = null
     override var onLassoEraseComplete: ((List<String>) -> Unit)? = null
     override var lassoSelectedIds: Set<String> = emptySet()
-    override var onStrokesMoved: ((List<LiveStroke>, List<LiveStroke>, List<HeadingStroke>, List<HeadingStroke>, List<TextRender>, List<TextRender>, List<LineRender>, List<LineRender>) -> Unit)? = null
+    override var onStrokesMoved: ((List<LiveStroke>, List<LiveStroke>, List<HeadingStroke>, List<HeadingStroke>, List<TextRender>, List<TextRender>, List<LineRender>, List<LineRender>, List<LinkRender>, List<LinkRender>) -> Unit)? = null
 
     // ── Raw input callback ───────────────────────────────────────────────────
 
@@ -430,6 +433,15 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
             val hitIds = hitLines.mapTo(HashSet()) { it.id }
             lineObjects = lineObjects.filter { it.id !in hitIds }
             hitLines.forEach { onLineErased?.invoke(it) }
+            throttledEraseRedraw()
+        }
+
+        // Link-object hit-test: erase the entire link if eraser AABB intersects its box.
+        val hitLinks = links.filter { android.graphics.RectF.intersects(eBounds, it.boundingBox) }
+        if (hitLinks.isNotEmpty()) {
+            val hitIds = hitLinks.mapTo(HashSet()) { it.id }
+            links = links.filter { it.id !in hitIds }
+            hitLinks.forEach { onLinkErased?.invoke(it) }
             throttledEraseRedraw()
         }
 
@@ -719,6 +731,7 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
         val headingSnapshot = headings.toList()
         val textSnapshot    = textObjects.toList()
         val lineSnapshot    = lineObjects.toList()
+        val linkSnapshot    = links.toList()
 
         Thread {
             // ── Gate 1: Smart lasso ────────────────────────────────────────────────
@@ -735,6 +748,7 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
                     headingSnapshot,
                     textSnapshot,
                     lineSnapshot,
+                    linkSnapshot,
                 )
                 if (hitIds.isNotEmpty()) {
                     val hitSet      = hitIds.toSet()
@@ -743,6 +757,7 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
                     for (h in headingSnapshot) { if (h.id in hitSet) unionBounds.union(h.boundingBox) }
                     for (t in textSnapshot)    { if (t.id in hitSet) unionBounds.union(t.boundingBox) }
                     for (l in lineSnapshot)    { if (l.id in hitSet) unionBounds.union(l.boundingBox) }
+                    for (lk in linkSnapshot)   { if (lk.id in hitSet) unionBounds.union(lk.boundingBox) }
                     post {
                         // Discard the gesture stroke — it is never page content.
                         strokes.removeAll { it.id in gestureIdSet }
@@ -772,6 +787,7 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
                 textSnapshot,
                 density,
                 lineSnapshot,
+                linkSnapshot,
             )
             post {
                 if (hitIds.isEmpty()) {
@@ -788,7 +804,8 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
                     val erasedHeadings = headingSnapshot.filter { it.id in hitSet }
                     val erasedTexts    = textSnapshot.filter { it.id in hitSet }
                     val erasedLines    = lineSnapshot.filter { it.id in hitSet }
-                    onScribbleEraseComplete?.invoke(hitIds, erasedHeadings, erasedTexts, erasedLines)
+                    val erasedLinks    = linkSnapshot.filter { it.id in hitSet }
+                    onScribbleEraseComplete?.invoke(hitIds, erasedHeadings, erasedTexts, erasedLines, erasedLinks)
                 }
             }
         }.start()
@@ -899,6 +916,7 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
         textObjects: List<TextRender>,
         density: Float,
         lineObjects: List<LineRender> = emptyList(),
+        links: List<LinkRender> = emptyList(),
     ): List<String> {
         if (scribblePoints.size < 2) return emptyList()
 
@@ -956,6 +974,14 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
             if (!android.graphics.RectF.intersects(rawBounds, lineObj.boundingBox)) continue
             if (scribblePathPenetration(scribblePoints, lineObj.boundingBox) >= penetrationPx) {
                 hitIds.add(lineObj.id)
+            }
+        }
+
+        // Link object hit-test: same penetration rule (erases the whole link).
+        for (link in links) {
+            if (!android.graphics.RectF.intersects(rawBounds, link.boundingBox)) continue
+            if (scribblePathPenetration(scribblePoints, link.boundingBox) >= penetrationPx) {
+                hitIds.add(link.id)
             }
         }
 
@@ -1095,13 +1121,17 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
                     dragOriginalLineObjects = lineObjects
                         .filter { it.id in lassoSelectedIds }
                         .map { it.copy(boundingBox = RectF(it.boundingBox)) }
-                    // Build backing bitmap without selected strokes/headings/textObjects/lineObjects (held for drag).
+                    dragOriginalLinks = links
+                        .filter { it.id in lassoSelectedIds }
+                        .map { it.translate(0f, 0f) }
+                    // Build backing bitmap without selected strokes/headings/textObjects/lineObjects/links (held for drag).
                     val nonSelectedStrokes  = strokes.filter { it.id !in lassoSelectedIds }
                     val nonSelectedHeadings = headings.filter { it.id !in lassoSelectedIds }
                     val nonSelectedTexts    = textObjects.filter { it.id !in lassoSelectedIds }
                     val nonSelectedLines    = lineObjects.filter { it.id !in lassoSelectedIds }
-                    dragBackingBitmap = buildRenderBitmap(nonSelectedStrokes, templateBitmap, nonSelectedHeadings, nonSelectedTexts, nonSelectedLines)
-                    snapObjectTargets = if (isSnapEnabled) (nonSelectedHeadings.map { RectF(it.boundingBox) } + nonSelectedTexts.map { RectF(it.boundingBox) } + nonSelectedLines.map { RectF(it.boundingBox) }) else emptyList()
+                    val nonSelectedLinks    = links.filter { it.id !in lassoSelectedIds }
+                    dragBackingBitmap = buildRenderBitmap(nonSelectedStrokes, templateBitmap, nonSelectedHeadings, nonSelectedTexts, nonSelectedLines, nonSelectedLinks)
+                    snapObjectTargets = if (isSnapEnabled) (nonSelectedHeadings.map { RectF(it.boundingBox) } + nonSelectedTexts.map { RectF(it.boundingBox) } + nonSelectedLines.map { RectF(it.boundingBox) } + nonSelectedLinks.map { RectF(it.boundingBox) }) else emptyList()
                     epd { "DRAG_START selected=${lassoSelectedIds.size}" }
                     return true
                 }
@@ -1209,6 +1239,8 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
                                 endX   = l.endX   + dragDx, endY   = l.endY   + dragDy,
                             )
                         }
+                        // Translate selected links (bbox + every embedded object's coordinates).
+                        val movedLinks = dragOriginalLinks.map { it.translate(dragDx, dragDy) }
                         // Update in-memory stroke list with translated positions.
                         val movedById = movedStrokes.associateBy { it.id }
                         val updated = strokes.map { movedById[it.id] ?: it }
@@ -1222,6 +1254,9 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
                         // Update in-memory line object list with translated positions.
                         val lineById = movedLineObjects.associateBy { it.id }
                         lineObjects = lineObjects.map { lineById[it.id] ?: it }
+                        // Update in-memory link list with translated positions.
+                        val linkById = movedLinks.associateBy { it.id }
+                        links = links.map { linkById[it.id] ?: it }
                         // Translate selection box to match new positions.
                         lassoSelectionBox = lassoSelectionBox?.let { b ->
                             RectF(b.left + dragDx, b.top + dragDy, b.right + dragDx, b.bottom + dragDy)
@@ -1231,11 +1266,13 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
                         val origHeadings = dragOriginalHeadings
                         val origTextObjects = dragOriginalTextObjects
                         val origLineObjects = dragOriginalLineObjects
+                        val origLinks = dragOriginalLinks
                         dragBackingBitmap?.recycle(); dragBackingBitmap = null
                         isDragMoveActive = false; dragThresholdMet = false
                         dragDx = 0f; dragDy = 0f; activeSnapGuides = emptyList(); snapObjectTargets = emptyList()
                         dragOriginalStrokes = emptyList(); dragOriginalHeadings = emptyList()
                         dragOriginalTextObjects = emptyList(); dragOriginalLineObjects = emptyList()
+                        dragOriginalLinks = emptyList()
                         EpdController.setViewDefaultUpdateMode(this, UpdateMode.GU)
                         epd { "DRAG_COMMIT A2_MODE_OFF" }
                         redrawCanvas(caller = "dragCommit")
@@ -1243,7 +1280,7 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
                             EpdController.handwritingRepaint(this, Rect(0, 0, width, height))
                             epd { "HANDWRITING_REPAINT caller=dragCommit" }
                         }
-                        onStrokesMoved?.invoke(origStrokes, movedStrokes, origHeadings, movedHeadings, origTextObjects, movedTextObjects, origLineObjects, movedLineObjects)
+                        onStrokesMoved?.invoke(origStrokes, movedStrokes, origHeadings, movedHeadings, origTextObjects, movedTextObjects, origLineObjects, movedLineObjects, origLinks, movedLinks)
                     } else {
                         // Below threshold — treat as a tap inside the selection box.
                         val tapX = event.x; val tapY = event.y
@@ -1252,6 +1289,7 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
                         dragDx = 0f; dragDy = 0f; activeSnapGuides = emptyList(); snapObjectTargets = emptyList()
                         dragOriginalStrokes = emptyList(); dragOriginalHeadings = emptyList()
                         dragOriginalTextObjects = emptyList(); dragOriginalLineObjects = emptyList()
+                        dragOriginalLinks = emptyList()
                         epd { "DRAG_CANCELLED threshold_not_met -> onLassoTap" }
                         onLassoTap?.invoke(tapX, tapY)
                     }
@@ -1315,6 +1353,9 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
             }
             for (lineObj in dragOriginalLineObjects) {
                 drawLineObject(canvas, lineObj)
+            }
+            for (link in dragOriginalLinks) {
+                drawLinkObject(canvas, link, width)
             }
             for (stroke in dragOriginalStrokes) {
                 val pts = stroke.points; if (pts.size < 2) continue
@@ -1436,6 +1477,7 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
             dragDx = 0f; dragDy = 0f; activeSnapGuides = emptyList()
             dragOriginalStrokes = emptyList(); dragOriginalHeadings = emptyList()
             dragOriginalTextObjects = emptyList(); dragOriginalLineObjects = emptyList()
+            dragOriginalLinks = emptyList()
             invalidate()
             epd { "INVALIDATE caller=setDragMoveMode_cancel" }
         }
@@ -1586,8 +1628,9 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
         val headingSnapshot = headings.toList()
         val textSnapshot    = textObjects.toList()
         val lineSnapshot    = lineObjects.toList()
+        val linkSnapshot    = links.toList()
         Thread {
-            val hitIds = runLassoHitTest(drawnPath, strokeSnapshot, headingSnapshot, textSnapshot, lineSnapshot)
+            val hitIds = runLassoHitTest(drawnPath, strokeSnapshot, headingSnapshot, textSnapshot, lineSnapshot, linkSnapshot)
             post {
                 // Clear overlay regardless of result.
                 lassoOverlayPath       = null
@@ -1609,6 +1652,7 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
         headings: List<HeadingStroke> = emptyList(),
         textObjects: List<TextRender> = emptyList(),
         lineObjects: List<LineRender> = emptyList(),
+        links: List<LinkRender> = emptyList(),
     ): List<String> {
         val bounds = RectF()
         path.computeBounds(bounds, true)
@@ -1649,6 +1693,12 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
             if (!RectF.intersects(bounds, lineObj.boundingBox)) continue
             if (LassoGeometry.regionIntersectsBox(region, lineObj.boundingBox)) {
                 hitIds.add(lineObj.id)
+            }
+        }
+        for (link in links) {
+            if (!RectF.intersects(bounds, link.boundingBox)) continue
+            if (LassoGeometry.regionIntersectsBox(region, link.boundingBox)) {
+                hitIds.add(link.id)
             }
         }
         return hitIds

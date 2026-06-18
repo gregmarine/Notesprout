@@ -130,6 +130,8 @@ interface NotebookView {
         movedTextObjects: List<TextRender>,
         originalLineObjects: List<LineRender>,
         movedLineObjects: List<LineRender>,
+        originalLinks: List<LinkRender>,
+        movedLinks: List<LinkRender>,
     ) -> Unit)?
         get() = null
         @Suppress("UNUSED_PARAMETER")
@@ -351,6 +353,7 @@ interface NotebookView {
         erasedHeadings: List<HeadingStroke>,
         erasedTextObjects: List<TextRender>,
         erasedLineObjects: List<LineRender>,
+        erasedLinks: List<LinkRender>,
     ) -> Unit)?
         get() = null
         @Suppress("UNUSED_PARAMETER")
@@ -385,6 +388,17 @@ interface NotebookView {
      * The full [LineRender] is passed so the caller has its data for undo restoration.
      */
     var onLineErased: ((lineObject: LineRender) -> Unit)?
+        get() = null
+        @Suppress("UNUSED_PARAMETER")
+        set(value) {}
+
+    /**
+     * Fired on the main thread when the eraser path intersects a link object's bounding box.
+     * The link has already been removed from the view's in-memory list before this fires.
+     * NotebookActivity wires this to soft-delete the link row from the DB and push an undo action.
+     * The full [LinkRender] is passed so the caller has its data for undo restoration.
+     */
+    var onLinkErased: ((linkObject: LinkRender) -> Unit)?
         get() = null
         @Suppress("UNUSED_PARAMETER")
         set(value) {}
