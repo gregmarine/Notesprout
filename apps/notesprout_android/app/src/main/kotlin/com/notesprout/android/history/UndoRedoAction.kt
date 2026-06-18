@@ -2,6 +2,7 @@ package com.notesprout.android.history
 
 import com.notesprout.android.data.HeadingStroke
 import com.notesprout.android.data.LineRender
+import com.notesprout.android.data.LinkRender
 import com.notesprout.android.data.LiveStroke
 import com.notesprout.android.data.TextRender
 import kotlinx.serialization.Serializable
@@ -427,5 +428,46 @@ sealed class UndoRedoAction {
         val deletedAt: Long,
         val originalStrokeIds: List<String>,
         val textRender: TextRender,
+    ) : UndoRedoAction()
+
+    /**
+     * User wrapped a heterogeneous lasso selection into a `type = "link"` object.
+     *
+     * Undo: soft-delete the link row, restore all original (held) rows by ID.
+     * Redo: re-soft-delete the originals, restore the link row.
+     *
+     * The original held rows are still present in the DB (soft-deleted at [deletedAt]); both
+     * undo and redo flip soft-delete state by ID. [link] carries full render data so a future
+     * optimised same-page handler could rebuild the link in-memory without a DB read; the current
+     * full-reload path re-reads it from the DB.
+     */
+    @Serializable
+    data class LinkCreated(
+        val linkId: String,
+        val pageId: String,
+        val layerId: String,
+        val deletedAt: Long,
+        val originalStrokeIds: List<String> = emptyList(),
+        val originalHeadingIds: List<String> = emptyList(),
+        val originalTextIds: List<String> = emptyList(),
+        val originalLineIds: List<String> = emptyList(),
+        val link: LinkRender,
+    ) : UndoRedoAction()
+
+    /**
+     * User removed a link, dispersing its embedded held objects back onto the layer as their own
+     * live rows (fresh UUIDs).
+     *
+     * Undo: soft-delete the restored rows by ID, restore the link row.
+     * Redo: soft-delete the link row, restore the restored rows by ID.
+     */
+    @Serializable
+    data class LinkRemoved(
+        val linkId: String,
+        val pageId: String,
+        val restoredStrokeIds: List<String> = emptyList(),
+        val restoredHeadingIds: List<String> = emptyList(),
+        val restoredTextIds: List<String> = emptyList(),
+        val restoredLineIds: List<String> = emptyList(),
     ) : UndoRedoAction()
 }

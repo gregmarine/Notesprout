@@ -23,6 +23,8 @@ import com.notesprout.android.data.HeadingStroke
 import com.notesprout.android.data.LineOrientation
 import com.notesprout.android.data.LineRender
 import com.notesprout.android.data.LineStyle
+import com.notesprout.android.data.LinkChrome
+import com.notesprout.android.data.LinkRender
 import com.notesprout.android.data.LiveStroke
 import com.notesprout.android.data.TextRender
 import com.onyx.android.sdk.api.device.epd.EpdController
@@ -100,6 +102,9 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
     // Line object store — populated from type="line" rows at page load time.
     private var lineObjects: List<LineRender> = emptyList()
 
+    // Link object store — populated from type="link" rows at page load time.
+    private var links: List<LinkRender> = emptyList()
+
     private val textObjectTextSizePx = android.util.TypedValue.applyDimension(
         android.util.TypedValue.COMPLEX_UNIT_SP, 16f, resources.displayMetrics
     )
@@ -112,6 +117,20 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
         style = Paint.Style.FILL
         color = HEADING_BACKGROUND_COLOR
         isAntiAlias = false
+    }
+
+    // Link chrome — 1dp inkBlack outline/underline/chevron drawn around a link's union bbox.
+    private val linkChromePaint = Paint().apply {
+        style = Paint.Style.STROKE
+        color = Color.BLACK
+        strokeWidth = resources.displayMetrics.density   // 1dp
+        strokeCap = Paint.Cap.ROUND
+        strokeJoin = Paint.Join.ROUND
+        isAntiAlias = true
+    }
+    private val linkChromeDashPaint = Paint(linkChromePaint).apply {
+        val d = resources.displayMetrics.density
+        pathEffect = DashPathEffect(floatArrayOf(3f * d, 3f * d), 0f)
     }
 
 
@@ -526,6 +545,61 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
         }
     }
 
+    /**
+     * Render a type="link" object onto [canvas]: its embedded content (headings, text, lines,
+     * strokes) painted via the existing per-type helpers, then the chrome around the union bbox.
+     * Links are drawn after page lines and before top-level strokes (see redrawCanvas).
+     */
+    private fun drawLinkObject(canvas: Canvas, link: LinkRender, widthPx: Int) {
+        for (heading in link.headings) {
+            canvas.drawRect(heading.boundingBox, headingPaint)
+            if (heading.recognizedText != null) {
+                drawHeadingText(canvas, heading)
+            } else {
+                for (liveStroke in heading.strokes) {
+                    val pts = liveStroke.points; if (pts.size < 2) continue
+                    val path = Path()
+                    path.moveTo(pts[0].x, pts[0].y)
+                    for (i in 1 until pts.size) path.lineTo(pts[i].x, pts[i].y)
+                    canvas.drawPath(path, strokePaint)
+                }
+            }
+        }
+        for (textObj in link.textObjects) drawTextObject(canvas, textObj, widthPx)
+        for (lineObj in link.lines) drawLineObject(canvas, lineObj)
+        for (liveStroke in link.strokes) {
+            val pts = liveStroke.points; if (pts.size < 2) continue
+            val path = Path()
+            path.moveTo(pts[0].x, pts[0].y)
+            for (i in 1 until pts.size) path.lineTo(pts[i].x, pts[i].y)
+            canvas.drawPath(path, strokePaint)
+        }
+        drawLinkChrome(canvas, link.boundingBox, link.chrome)
+    }
+
+    /** Draw a link's visual indicator: none, an underline, or a dotted box with a corner chevron. */
+    private fun drawLinkChrome(canvas: Canvas, box: RectF, chrome: LinkChrome) {
+        when (chrome) {
+            LinkChrome.NONE -> {}
+            LinkChrome.UNDERLINE ->
+                canvas.drawLine(box.left, box.bottom, box.right, box.bottom, linkChromePaint)
+            LinkChrome.DOTTED_CHEVRON -> {
+                canvas.drawRect(box, linkChromeDashPaint)
+                val d = resources.displayMetrics.density
+                val sz = 5f * d
+                val inset = 3f * d
+                val cx = box.right - inset
+                val cy = box.bottom - inset
+                val chevron = Path().apply {
+                    moveTo(cx - sz, cy - sz)
+                    lineTo(cx, cy)
+                    lineTo(cx - sz, cy)
+                }
+                canvas.drawPath(chevron, linkChromePaint)
+            }
+        }
+    }
+
     private fun drawSnapGuides(canvas: Canvas) {
         if (activeSnapGuides.isEmpty()) return
         for (guide in activeSnapGuides) {
@@ -570,6 +644,9 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
         }
         for (lineObj in lineObjects) {
             drawLineObject(canvas, lineObj)
+        }
+        for (link in links) {
+            drawLinkObject(canvas, link, width)
         }
         for (liveStroke in strokes) {
             val points = liveStroke.points
@@ -1721,6 +1798,20 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
         }
     }
 
+    override fun loadLinks(links: List<LinkRender>) {
+        this.links = links
+    }
+
+    override fun getLinks(): List<LinkRender> = links
+
+    override fun compositeLinks(bitmap: Bitmap) {
+        if (links.isEmpty()) return
+        val canvas = android.graphics.Canvas(bitmap)
+        for (link in links) {
+            drawLinkObject(canvas, link, bitmap.width)
+        }
+    }
+
     override fun loadStrokes(strokes: List<LiveStroke>) {
         val loadStart = System.currentTimeMillis()
         epd { "LOAD_STROKES_START strokeCount=${strokes.size}" }
@@ -1745,6 +1836,7 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
         headings: List<HeadingStroke>,
         textObjects: List<TextRender>?,
         lineObjects: List<LineRender>?,
+        links: List<LinkRender>?,
     ): Bitmap? {
         val buildStart = System.currentTimeMillis()
         epd { "BUILD_RENDER_BITMAP_START strokeCount=${strokes.size} hasTemplate=${templateBitmap != null}" }
@@ -1756,6 +1848,7 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
         // null = fall back to stored field (undo/redo paths); non-null = explicit list (page load)
         val effectiveTextObjects = textObjects ?: this.textObjects
         val effectiveLineObjects = lineObjects ?: this.lineObjects
+        val effectiveLinks = links ?: this.links
         val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
         val canvas = android.graphics.Canvas(bmp)
         canvas.drawColor(android.graphics.Color.WHITE)
@@ -1779,6 +1872,9 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
         }
         for (lineObj in effectiveLineObjects) {
             drawLineObject(canvas, lineObj)
+        }
+        for (link in effectiveLinks) {
+            drawLinkObject(canvas, link, w)
         }
         for (liveStroke in strokes) {
             val pts = liveStroke.points
@@ -1849,7 +1945,7 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
      * Returns null if there are no strokes and no headings, or the view is not yet laid out.
      */
     override fun captureSnapshot(): String? {
-        if (strokes.isEmpty() && headings.isEmpty() && textObjects.isEmpty() && lineObjects.isEmpty()) return null
+        if (strokes.isEmpty() && headings.isEmpty() && textObjects.isEmpty() && lineObjects.isEmpty() && links.isEmpty()) return null
         val w = width; val h = height
         if (w == 0 || h == 0) return null
         val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
@@ -1875,6 +1971,9 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
         }
         for (lineObj in lineObjects) {
             drawLineObject(snapshotCanvas, lineObj)
+        }
+        for (link in links) {
+            drawLinkObject(snapshotCanvas, link, w)
         }
         for (liveStroke in strokes) {
             val points = liveStroke.points

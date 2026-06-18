@@ -8,6 +8,7 @@ import android.graphics.RectF
 import android.view.View
 import com.notesprout.android.data.HeadingStroke
 import com.notesprout.android.data.LineRender
+import com.notesprout.android.data.LinkRender
 import com.notesprout.android.data.LiveStroke
 import com.notesprout.android.data.TextRender
 
@@ -288,6 +289,26 @@ interface NotebookView {
     fun compositeLineObjects(bitmap: Bitmap) {}
 
     /**
+     * Replace the in-memory link object list with [links] loaded from the database.
+     * Call before [loadStrokes] or [loadStrokesWithBitmap] so links (embedded content + chrome)
+     * are included in the next canvas redraw.  Must be called on the main thread.
+     */
+    fun loadLinks(links: List<LinkRender>) {}
+
+    /**
+     * Return the current in-memory link object list.
+     * Safe to call from any thread — links are replaced atomically.
+     */
+    fun getLinks(): List<LinkRender> = emptyList()
+
+    /**
+     * Paint the current links onto [bitmap].
+     * Called from displayPage on the snapshot fast-path: links are always loaded fresh from DB
+     * (identical reason to text/line objects).  Must be called on the main thread after [loadLinks].
+     */
+    fun compositeLinks(bitmap: Bitmap) {}
+
+    /**
      * Fired on the main thread when a fast, closed pen gesture in pen mode encloses or
      * crosses at least one object on the current layer (smart-lasso detection).
      * Fires INSTEAD OF [onPenLifted] or [onScribbleEraseComplete] — it is the first gate
@@ -428,6 +449,7 @@ interface NotebookView {
         headings: List<HeadingStroke> = emptyList(),
         textObjects: List<TextRender>? = null,
         lineObjects: List<LineRender>? = null,
+        links: List<LinkRender>? = null,
     ): Bitmap?
 
     /**

@@ -110,7 +110,21 @@ enum class LinkChrome { NONE, UNDERLINE, DOTTED_CHEVRON }
 
 ## Sessions
 
-### ⬜ Session 1 — Object model, rendering, chrome, create/remove + undo/redo (1/5)
+### ✅ Session 1 — Object model, rendering, chrome, create/remove + undo/redo (1/5)
+
+> **Done (tests passed on G10).** Implementation notes / deviations from the plan above:
+> - Embedded objects reuse the existing `@Serializable` render models (`HeadingStroke`, `TextRender`)
+>   directly; lines use a density-independent `EmbeddedLine` (dp + bbox) carrier. No separate
+>   `Embedded*` carriers were needed for headings/text.
+> - Link create/remove **undo/redo use the full-reload path** (no optimised same-page or two-phase
+>   cross-page handlers like headings have). The `'link'` type was added to `getMaxContentUpdatedAt`
+>   so the snapshot is correctly invalidated; selection is cleared before the reload. A future pass
+>   can add optimised handlers if redraw latency matters.
+> - **Drag-layer** link rendering and lasso **move/copy/cut/delete** parity are deferred to Session 5
+>   (links are lasso-*selectable* now — basic box hit-test — but not yet movable/copyable/deletable).
+> - Only `btnLink` (add) + `btnUnlink` (remove) were added this session; the `link` (edit) button
+>   arrives with the dialog in Session 2.
+
 
 Foundation. Ends with a **temporary** creation hook so the object is testable before the real dialog
 exists: the `link-plus` button wraps the selection into a link pointing at the **current notebook's

@@ -354,6 +354,29 @@
             android:contentDescription="Align top and distribute horizontally"
             android:visibility="gone" />
 
+        <!-- Separator before link actions — visible when add or remove link is shown -->
+        <View
+            android:id="@+id/linkDivider"
+            android:layout_width="1dp"
+            android:layout_height="28dp"
+            android:layout_marginHorizontal="2dp"
+            android:background="@color/inkBlack"
+            android:visibility="gone" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnLink"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:src="@drawable/ic_link_plus"
+            android:contentDescription="Make Link"
+            android:visibility="gone" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnUnlink"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:src="@drawable/ic_link_off"
+            android:contentDescription="Remove Link"
+            android:visibility="gone" />
+
         <View
             android:id="@+id/snapDivider"
             android:layout_width="1dp"
