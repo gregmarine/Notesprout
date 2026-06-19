@@ -41,8 +41,21 @@ adb -s 34E517F9 install -r app/build/outputs/apk/debug/app-debug.apk
 | 5 | In-notebook integration — slim picker + library browse + apply-into-`.soil` | ✅ Done |
 | 6 | Full-screen New Notebook flow + first-page template seeding | ✅ Done |
 | 7 | Wrap-up — docs, dead-code removal, cross-device QA, migration task | ✅ Done |
+| | **— Phase 2: Pinned · Recent · Toolbar · Save-as-Template (see §6) —** | |
+| 8 | Pinned templates — repository + MANAGE pin/unpin + pinned view | ⬜ Not started |
+| 9 | Recent templates — device-local store + use-tracking | ⬜ Not started |
+| 10 | Pinned & recent in the PICK selectors (new-notebook + in-notebook) | ⬜ Not started |
+| 11 | Toolbar relocation — search/sort/pinned/recent → top bar | ⬜ Not started |
+| 12 | "Save as Template" from the page index | ⬜ Not started |
+| 13 | Phase 2 wrap-up — docs, dead-code, cross-device QA | ⬜ Not started |
 
 Status legend: ⬜ Not started · 🚧 In progress · ✅ Done (committed, not pushed)
+
+> **Phase 1 (Sessions 1–7)** delivered the global-index template library, browser, in-notebook
+> integration, and New Notebook seeding — all committed **and pushed**. **Phase 2 (Sessions 8–13,
+> §6)** layers pinning, recents, a toolbar reorg, and page→template export on top. Phase 2 follows
+> the same workflow as §0 (one session at a time, Sonnet subagent implements, lead builds/installs
+> on G10, commit-no-push per session).
 
 ---
 
@@ -544,3 +557,341 @@ picks a template, taps CREATE; the notebook opens with the first page showing th
   inside the existing raw-`SQLiteDatabase` block — inserts a `type="template"` row (parentId = the
   in-soil notebook row id, matching `NotebookActivity.insertLibraryTemplateIntoSoil`) and points the
   first page's `data.template` at it. All within the existing creation coroutine. (Discovered S6.)
+
+---
+
+## 6. Phase 2 Growth — Pinned · Recent · Toolbar · Save-as-Template
+
+> **Growth / New Branch:** Four enhancements discovered after Phase 1 shipped:
+> **(1) Pinned templates** — same concept as pinned notebooks, in the template **manager** and the
+> PICK **selectors** (new-notebook + in-notebook), card grid + pagination.
+> **(2) Recent templates** — same concept as recent notebooks, in the PICK **selectors** only, card
+> grid + pagination.
+> **(3) Toolbar relocation** — move **search, sort, pinned, recent** from the bottom toolbar to a
+> **top** action bar on every template screen; **New Template Folder** and **Import (new template)**
+> stay in the bottom bar.
+> **(4) "Save as Template"** — export a page directly into the template library: a new option in the
+> page-index export sheet, beside **Share** and **Save to device**, that opens the template browser
+> to pick a destination folder.
+
+### 6.0 Workflow (same as §0)
+
+One session at a time, in order. A **Sonnet subagent implements** each session from its spec (no
+design decisions of its own — everything is locked here). The lead (Opus) does a clean
+`assembleDebug`, installs on **G10** (`34E517F9`), and on the user's confirmation updates the §1
+status table + this section, then **commits per session — does NOT push**. Fixes during a session are
+made by the lead, not a subagent. A **wrap-up** (Session 13) captures discoveries.
+
+### 6.1 Locked Architecture Decisions (Phase 2) — final, do not deviate
+
+**P1. Pinned templates use a dedicated index list — never reuse the notebook pinned list.**
+- New constant in `data/index/ListIds.kt`:
+  `const val PINNED_TEMPLATES_LIST_ID = "00000000-0000-0000-0000-746d706c7069"`.
+- New serializable `data/index/TemplateListObject.kt`:
+  ```kotlin
+  @Serializable
+  data class TemplateListObject(val templateIds: List<String> = emptyList())
+  ```
+  A parallel to `ListObject` so notebook list code is **untouched** and the member type is explicit.
+  The pinned-templates list is a `type = LIST` `ObjectEntity` (name `"Pinned Templates"`,
+  `parentId = null`), `data` = `TemplateListObject` JSON.
+- **Only templates are pinnable — never template folders** (mirrors notebooks: folders aren't pinned).
+- Pin order is the `templateIds` list order (newest pin appended last; render in list order, which
+  matches MainActivity pinned ordering). No drag-reorder this phase.
+
+**P2. Recents are device-local, library-template-only, separate from notebook recents.**
+- New `data/recents/TemplateRecentsManager.kt` mirroring `RecentsManager` exactly, but: prefs name
+  `notesprout_template_recents`, resolves against `ObjectType.TEMPLATE`, breadcrumb root label
+  `"Templates"`. New `TemplateRecentEntry(templateId, timestamp)` and `ResolvedTemplateRecent(
+  templateId, templateName, folderPath, timestamp)`. `MAX_ENTRIES = 20`. Self-healing prune on
+  `resolve` (skip missing/deleted, persist the pruned list).
+- **Recorded only when a *library* template is actually used on a page:** the in-notebook PICK apply
+  path and the New Notebook seed path (both consume a library `TemplateObject` id). Blank (`""`)
+  records nothing. The slim dialog's `.soil` "in this notebook" quick-pick uses `.soil` row ids, **not**
+  library ids → never recorded. **Importing or "Save as Template" does not record** (creation ≠ use).
+
+**P3. The pinned/recent surfaces reuse the existing browser card grid + pagination.** No new grid
+engine. They are alternate "view modes" of `TemplateBrowserActivity` toggled by top-bar buttons,
+exactly like MainActivity's `enterPinnedMode` / `enterRecentsMode` swap the breadcrumb area for a
+pinned/recents toolbar and re-render the same grid container.
+- **MANAGE:** pinned view available (recents is **not** — recents is a selector convenience only).
+- **PICK** (new-notebook `EXTRA_COLLECT_NAME` + in-notebook "Browse Templates…"): **both** pinned and
+  recents views available. Tapping a card in PICK selects it (returns `RESULT_TEMPLATE_ID`), same as a
+  normal grid tap. The **Blank** card belongs to the root browse view only — not pinned/recents.
+- Pinned/recents views show **templates only** (no folders, no breadcrumb navigation): a flat,
+  paginated card grid + an empty state. Long-press management is **MANAGE-only** and applies in the
+  pinned view too (pin/unpin, rename, etc., as in the browse grid); **omitted in PICK** (consistent
+  with §2 / S5).
+
+**P4. Toolbar layout (final end-state, all template screens).**
+- **Top action bar** (new, mirrors MainActivity's breadcrumb-bar button cluster): **Search**,
+  **Sort**, **Pinned**, **Recents**. `btnRecents` is **GONE in MANAGE** (selector-only), VISIBLE in
+  PICK. `btnPinned` visible in both MANAGE and PICK.
+- **Bottom bar:** pagination (unchanged) on the left; **New Template Folder** + **Import** on the
+  right. Search/Sort/Pinned/Recents are **removed** from the bottom bar.
+- Icons: `ic_search` / `ic_x` (clear) / `ic_filter` (sort) / `ic_pinned` (+ `ic_pinned_off` for the
+  unpin action-sheet item) / `ic_clock` (recents) — reuse the MainActivity set; **add no new
+  drawables**.
+
+**P5. "Save as Template" hands the browser a file path, not a base64 blob.** A full-page PNG base64 in
+an Intent risks `TransactionTooLargeException`. The page-index export already writes a PNG to disk
+(`NotebookExporter.exportPage`); pass **that file's path** + a default name to the browser via a new
+`MODE_SAVE_TARGET`. The browser navigates **folders only** (like the move/copy picker), and on
+**"Save Here"** prompts for a name (default = page heading / `"Page N"`, sanitized), then calls
+`repository.createTemplate(name, destFolderId, w, h, base64)` itself (it owns the repository). No
+result is returned to the page index beyond success/cancel.
+
+**P6. e-ink design system + standard constraints from `CLAUDE.md` apply everywhere** (no color /
+elevation / ripple / animation; 1dp inkBlack borders; `Slog.d`; `kotlinx.serialization`; no Material;
+no new Gradle deps). All index writes go through `IndexRepository`.
+
+### 6.2 Reference Map additions (Phase 2)
+
+- **Pinned notebooks (mirror for pinned templates):** `IndexRepository` — `ensurePinnedListExists`
+  (240), `togglePin` (318), `isNotebookPinned` (308), `getNotebooksInList` (299),
+  `scrubNotebookFromAllLists` (333); `ListObject.kt`; `ListIds.kt` (`PINNED_LIST_ID`).
+- **Pinned UI (mirror for pinned/recents views):** `MainActivity` — `enterPinnedMode` (403),
+  `exitPinnedMode` (417), `applyPinnedModeUI` (426), `renderPinnedList` (453); `enterRecentsMode`
+  (486) + recents render; the `pinnedToolbar` / `pinnedToolbarDivider` / `recents*` views in
+  `activity_main.xml`; pin/unpin in `showNotebookContextMenu`.
+- **Recents (mirror for template recents):** `data/recents/RecentsManager.kt`, `RecentEntry.kt`,
+  `ResolvedRecent.kt`; record sites = `MainActivity`/`NotebookActivity` open/close calls.
+- **Top button cluster styling:** `activity_main.xml` breadcrumb bar (~199–229) — `btnPinned`
+  (`ic_pinned`), `btnSearch` (`ic_search`), `btnClearSearch` (`ic_x`), `btnRecents` (`ic_clock`),
+  `btnSort` (`ic_filter`).
+- **Page-index export sheet (Save-as-Template host):** `PageIndexActivity` — `executeExport` (708),
+  `showExportChoice` (752, the Save-to-device/Share `AlertDialog`); `NotebookExporter.exportPage`.
+- **Template browser internals already built (Phase 1):** `TemplateBrowserActivity` modes
+  (`MODE_MANAGE` / `MODE_PICK`), `showBlankCard`, `render()`, `totalGridPagesWithBlank()`, the local
+  `TemplatePicker` sealed class + `pickerToolbar`, `sanitizeTemplateNameFromFile`,
+  `IndexRepository.createTemplate / getTemplate / getAllTemplates / getAllTemplateFolders`.
+- **Note:** `activity_template_browser.xml` has a **single** layout variant (no `sw360dp`/`sw600dp`
+  copies, unlike `activity_main.xml`) — new buttons are added once.
+
+---
+
+### Session 8 — Pinned templates: repository + MANAGE pin/unpin + pinned view
+
+**Objective:** Templates can be pinned/unpinned from the MANAGE action sheet, and a **Pinned** view in
+`TemplateBrowserActivity` lists them as a paginated card grid. Mirrors pinned notebooks.
+
+**Files:** `data/index/ListIds.kt`, `data/index/TemplateListObject.kt` *(new)*,
+`data/index/IndexRepository.kt`, `TemplateBrowserActivity.kt`, `res/layout/activity_template_browser.xml`.
+
+**Repository (`// region Template pin operations`):**
+- `suspend fun ensurePinnedTemplatesListExists()` — bootstrap the `PINNED_TEMPLATES_LIST_ID` LIST
+  object (name `"Pinned Templates"`) if absent/deleted (mirror `ensurePinnedListExists`). Call it from
+  the same place `ensurePinnedListExists` is called at app/index init.
+- `suspend fun isTemplatePinned(templateId: String): Boolean`
+- `suspend fun toggleTemplatePin(templateId: String): Boolean` — returns new pinned state (mirror
+  `togglePin`, backed by `TemplateListObject.templateIds`).
+- `suspend fun getPinnedTemplates(): List<ObjectEntity>` — resolve `templateIds` → entities, skip
+  null/`deletedAt`/non-`TEMPLATE` (mirror `getNotebooksInList`).
+- `suspend fun scrubTemplateFromPinned(templateId: String)` — remove from the list (mirror
+  `scrubNotebookFromAllLists`, single list). **Call this from `softDeleteTemplate`** so deleting a
+  pinned template also unpins it.
+
+**Action sheet (MANAGE, `TemplateBrowserActivity`):** in the **template** long-press
+`ActionSheetDialog`, add a toggle item **above Delete**:
+- if pinned → `ic_pinned_off` **"Unpin Template"**; else → `ic_pinned` **"Pin Template"**.
+- On tap: `repository.toggleTemplatePin(id)`, Toast (`"Pinned"` / `"Unpinned"`), re-render the active
+  view. (Resolve current pin state with `isTemplatePinned` when building the sheet.)
+- **Template *folders* get no pin item.**
+
+**Pinned view:**
+- Add `btnPinned` (`ic_pinned`) to the bottom `actionButtonsGroup` for now — **next to `btnSort`**
+  (Session 11 relocates the whole cluster to the top). Add a `pinnedToolbar` + `pinnedToolbarDivider`
+  to the layout (mirror MainActivity's: a title `"Pinned Templates"` + a cancel/back button), shown
+  only in pinned view.
+- `enterPinnedView()` / `exitPinnedView()` (mirror `enterPinnedMode`/`exitPinnedMode`): set an
+  `isPinnedView` flag, reset to page 0, swap the breadcrumb bar for the `pinnedToolbar`, hide
+  New-Folder/Import/Search/Sort while in pinned view, re-render.
+- Render: `repository.getPinnedTemplates()` as a flat paginated **template-card** grid (reuse the
+  existing card builder + pagination; no folder cards, no breadcrumb). Empty state:
+  `"No pinned templates yet."`
+- **MANAGE:** tapping a pinned card = full-screen preview; long-press = the same action sheet
+  (including Unpin). Pagination uses the existing controls.
+- **Pinned view is available in MANAGE this session.** (PICK wiring is Session 10 — but write
+  `enterPinnedView` mode-agnostic so S10 can reuse it; just keep the button hidden in PICK until S10.)
+
+**Edge cases:** unpinning the last pinned template → empty state; deleting a pinned template (via the
+sheet) re-renders without it (scrub already ran); a pinned template that becomes deleted elsewhere is
+filtered by `getPinnedTemplates`.
+
+**Definition of done:** In MANAGE, long-press a template → Pin; the Pinned button opens a paginated
+grid of pinned templates; Unpin removes it; deleting a pinned template unpins it. Build + install G10.
+
+---
+
+### Session 9 — Recent templates: device-local store + use-tracking
+
+**Objective:** Add a device-local "recently used library templates" store and record a use whenever a
+library template is applied to a page (in-notebook) or seeded into a new notebook. **No UI this
+session** (the recents view is Session 10) — this is the data + tracking layer, kept isolated.
+
+**Files:** `data/recents/TemplateRecentEntry.kt` *(new)*, `data/recents/ResolvedTemplateRecent.kt`
+*(new)*, `data/recents/TemplateRecentsManager.kt` *(new)*, `NotebookActivity.kt`, `MainActivity.kt`.
+
+**Store (mirror `RecentsManager` / `RecentEntry` / `ResolvedRecent` per §6.1 P2):**
+- `TemplateRecentEntry(templateId: String, timestamp: Long)` (`@Serializable`).
+- `ResolvedTemplateRecent(templateId, templateName, folderPath, timestamp)`.
+- `TemplateRecentsManager` object: `PREFS_NAME = "notesprout_template_recents"`, `MAX_ENTRIES = 20`;
+  `load`, `recordUse(context, templateId)` (drop existing, prepend now, cap), `remove`, and
+  `suspend fun resolve(context): List<ResolvedTemplateRecent>` resolving against `ObjectType.TEMPLATE`
+  via `IndexRepository`/`getAllTemplateFolders` for the breadcrumb (root label `"Templates"`),
+  self-healing prune of missing/deleted. (A single `recordUse` covers both open and re-use; no
+  separate close hook — templates aren't "closed".)
+
+**Tracking (record points — library template id only, never Blank):**
+- `NotebookActivity` — in the PICK-result apply path (`onTemplatePicked` →
+  `insertLibraryTemplateIntoSoil`): after a successful apply of a **non-empty** `RESULT_TEMPLATE_ID`,
+  call `TemplateRecentsManager.recordUse(this, libraryTemplateId)`.
+- `MainActivity` — in `createNotebook(name, libraryTemplateId)`: if `libraryTemplateId` is non-empty,
+  call `TemplateRecentsManager.recordUse(this, libraryTemplateId)` after the notebook is created.
+- **Cleanup:** in `IndexRepository.softDeleteTemplate`, recents can't be scrubbed (no `Context` in the
+  repo) — instead rely on `resolve`'s self-healing prune (deleted templates never surface). Do **not**
+  add a Context to the repository.
+
+**Definition of done:** Applying a library template in a notebook and creating a notebook from a
+template both write a recents entry (verify via a temporary `Slog.d`, or defer visible verification to
+S10). App builds; no behavior change visible yet. Build + install G10. (Lead verifies via S10.)
+
+---
+
+### Session 10 — Pinned & recent in the PICK selectors
+
+**Objective:** Surface **Pinned** and **Recents** views inside `TemplateBrowserActivity` **PICK** mode
+so both the New Notebook flow (`EXTRA_COLLECT_NAME`) and the in-notebook "Browse Templates…" selector
+expose them. Tapping a card selects it. Card grid + pagination (reuses S8's pinned view + the existing
+grid).
+
+**Files:** `TemplateBrowserActivity.kt`, `res/layout/activity_template_browser.xml`.
+
+**Behaviors:**
+- Make `btnPinned` (added S8) **visible in PICK** too, and add `btnRecents` (`ic_clock`) to the bottom
+  `actionButtonsGroup` (S11 relocates the cluster). `btnRecents` is **PICK-only** (GONE in MANAGE).
+- **Pinned view in PICK:** reuse `enterPinnedView()` from S8. In PICK, tapping a pinned card sets
+  `RESULT_TEMPLATE_ID = id` and `finish()` (same as a normal PICK grid tap); long-press is omitted
+  (PICK has no management). Selection-marker styling in `EXTRA_COLLECT_NAME` mode mirrors the S6 grid
+  (1dp `shape_bordered` around the whole cell, fixed footprint) — but since pinned/recents tap-selects
+  **and finishes immediately** (no CREATE deferral), no persistent marker is needed; **for the
+  New-Notebook flow keep the existing "tap sets pending selection + CREATE confirms" behavior** —
+  i.e., tapping a pinned/recents card sets the pending `RESULT_TEMPLATE_ID`, marks it, and returns the
+  user to the name+CREATE context (do **not** auto-finish in `EXTRA_COLLECT_NAME`). In the
+  non-collect-name in-notebook PICK, tap = select + finish.
+  > **Locked rule:** tap behavior in pinned/recents views = identical to the **root browse grid** for
+  > the current mode. (collectName → set pending + mark + stay; plain PICK → select + finish.)
+- **Recents view (PICK only):** `enterRecentsView()` / `exitRecentsView()` mirroring pinned;
+  `TemplateRecentsManager.resolve(this)` → flat paginated card grid (decode each template's thumbnail
+  from `repository.getTemplate(id)`), newest-first. Empty state `"No recent templates yet."` Add a
+  `recentsToolbar` + divider (title `"Recent Templates"` + back).
+- Pinned and recents are **mutually exclusive** view modes and exclusive with search (entering one
+  exits the others — mirror `clearRecentsMode()` in `enterPinnedMode`).
+- Import / New-Folder / Search / Sort stay available in PICK root browse; while in pinned/recents view
+  those buttons hide (like MANAGE pinned view).
+
+**Definition of done:** From the in-notebook "Browse Templates…" and the New Notebook flow, Pinned and
+Recents buttons open paginated card grids; picking from either applies/seeds the template (and, being a
+use, shows up in Recents next time). Build + install G10.
+
+---
+
+### Session 11 — Toolbar relocation: search/sort/pinned/recent → top bar
+
+**Objective:** Move **Search, Sort, Pinned, Recents** from the bottom `actionButtonsGroup` to a new
+**top action bar** in `TemplateBrowserActivity`, matching MainActivity's top button cluster. **New
+Template Folder** and **Import** stay in the bottom bar with pagination. Pure layout + wiring reorg —
+**no behavior change.**
+
+**Files:** `res/layout/activity_template_browser.xml`, `TemplateBrowserActivity.kt`.
+
+**Layout:**
+- In the **top bar** (`topBar`, the row with `btnBack` + title), add a right-aligned button group
+  (after the title, mirror `activity_main.xml` ~199–229): `btnSearch` (`ic_search`), `btnClearSearch`
+  (`ic_x`, gone), `btnSort` (`ic_filter`), `btnPinned` (`ic_pinned`), `btnRecents` (`ic_clock`). Use
+  `Widget.Notesprout.ToolbarButton`. Keep the existing ids so listeners need minimal change.
+- **Remove** those five buttons from the bottom `actionButtonsGroup`; it now holds only
+  `btnNewTemplateFolder` + `btnImport`.
+- The breadcrumb bar, pinned/recents/picker toolbars, grid, and pagination are unchanged.
+
+**Wiring:**
+- Update every visibility toggle that referenced these buttons (browse vs pinned vs recents vs search
+  vs picker vs collectName modes) to the new locations — audit `applyPinnedModeUI`-equivalent,
+  `enterRecentsView`, search mode, and picker mode handlers. **Mode rules unchanged** from S8–S10:
+  `btnRecents` GONE in MANAGE; pinned/recents/search hide the other action buttons while active;
+  picker hides Search/Sort/Pinned/Recents.
+- The `btnClearSearch` inline-search affordance moves with `btnSearch` to the top bar (mirror
+  MainActivity, where both live in the breadcrumb bar).
+
+**Definition of done:** On every template screen (MANAGE + both PICK entry points) Search/Sort/Pinned/
+Recents sit in the top bar; New-Folder/Import remain bottom; all four toggles behave exactly as before
+in every mode. Build + install G10.
+
+---
+
+### Session 12 — "Save as Template" from the page index
+
+**Objective:** Add a **"Save as Template"** option to the page-index export sheet (beside Share / Save
+to device). It exports the page PNG, then opens `TemplateBrowserActivity` in a new **`MODE_SAVE_TARGET`**
+to pick a destination folder and name, and creates the library template there.
+
+**Files:** `PageIndexActivity.kt`, `TemplateBrowserActivity.kt`,
+`res/layout/activity_template_browser.xml` (a save-target confirm toolbar; or reuse `pickerToolbar`).
+
+**Page index:**
+- In `showExportChoice(file)` add a **neutral** button **"Save as Template"**. On tap: launch
+  `TemplateBrowserActivity` via a `registerForActivityResult` launcher with:
+  - `EXTRA_MODE = MODE_SAVE_TARGET`
+  - `EXTRA_SAVE_SOURCE_PATH = file.absolutePath` (the exported PNG)
+  - `EXTRA_SAVE_DEFAULT_NAME` = page heading or `"Page N"`, pre-sanitized.
+  - `EXTRA_TITLE = "Save as Template"`.
+- `executeExport` already produces the PNG and calls `showExportChoice`; no change to export itself.
+  (The exported file lives in cache/export dir — fine as a transient source; the browser copies its
+  bytes into the index, so the file isn't needed afterward.)
+- On result `RESULT_OK`: Toast `"Saved to Templates"`. On cancel: no-op.
+
+**`TemplateBrowserActivity` — `MODE_SAVE_TARGET`:**
+- Add `MODE_SAVE_TARGET = 2` + the new extras to the companion.
+- Behaves like the **move/copy destination picker** (folders only, breadcrumb navigation, no template
+  cards as targets), but cross-launched: show a confirm toolbar (reuse/clone `pickerToolbar`) titled
+  `"Choose a folder"` with **"Save Here"** + **Cancel**.
+- **Save Here:** prompt for a name (rename-style dialog; default = `EXTRA_SAVE_DEFAULT_NAME`; validate
+  whitelist/`.`/`..`/non-empty; dup-check templates in the chosen folder → append ` (2)`… on
+  collision, same as Import). Then on IO: read the PNG at `EXTRA_SAVE_SOURCE_PATH`, decode bounded
+  (`core/BitmapDecode.decodeSampled`) for width/height, base64 (`NO_WRAP`), and
+  `repository.createTemplate(name, currentFolderId, w, h, base64)`. `setResult(RESULT_OK)`, `finish()`.
+- **Cancel:** `finish()` with no result.
+- New-Folder is **available** while choosing (user may create a destination folder); Import / Search /
+  Sort / Pinned / Recents are hidden in `MODE_SAVE_TARGET`. No long-press management.
+
+**Definition of done:** Long-press a page → Export → **Save as Template** → pick/navigate to a folder
+(optionally create one) → name it → the page appears as a template in that folder (verify in MANAGE).
+Build + install G10.
+
+---
+
+### Session 13 — Phase 2 wrap-up
+
+**Objective:** Docs, dead-code, cross-device QA for the Phase 2 features.
+
+**Tasks:**
+1. **Docs:**
+   - `docs/data-architecture.md` — document the **pinned-templates list** (`PINNED_TEMPLATES_LIST_ID`,
+     `TemplateListObject`) and the **template recents** store (`notesprout_template_recents`,
+     device-local, library-only, self-healing).
+   - `docs/drawing-engine.md` and/or `docs/mainactivity-and-recents.md` — pinned/recents views in the
+     template browser, the relocated top toolbar, and the page→template "Save as Template" flow.
+   - Update the `CLAUDE.md` docs table if any scope changed.
+2. **Dead-code:** confirm no leftover bottom-bar references to the relocated buttons; remove unused
+   imports/strings.
+3. **Cross-device QA (Tier 1):** build + install on G10 / MAX / G7 / P2P in one shell block; smoke
+   pin/unpin, pinned & recents in both selectors, toolbar layout, Save-as-Template. (Defer per user
+   request if instructed, as in S7.)
+4. **Anything discovered** during Sessions 8–12 that needs a home (append to §6.3 below).
+
+**Definition of done:** Docs updated; no dead references; Tier-1 smoke-tested (or deferred per user).
+Commit (no push).
+
+### 6.3 Phase 2 Open Questions / Notes (fill in as we go)
+
+- _(none yet)_
