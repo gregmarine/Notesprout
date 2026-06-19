@@ -38,7 +38,7 @@ adb -s 34E517F9 install -r app/build/outputs/apk/debug/app-debug.apk
 | 2 | TemplateBrowserActivity — browse, navigate, import, new folder + toolbar launch | ✅ Done |
 | 3 | Management actions — preview, action sheet, rename, copy, move, delete | ✅ Done |
 | 4 | Search & sort in the template browser | ✅ Done |
-| 5 | In-notebook integration — slim picker + library browse + apply-into-`.soil` | ⬜ Not started |
+| 5 | In-notebook integration — slim picker + library browse + apply-into-`.soil` | ✅ Done |
 | 6 | Full-screen New Notebook flow + first-page template seeding | ⬜ Not started |
 | 7 | Wrap-up — docs, dead-code removal, cross-device QA, migration task | ⬜ Not started |
 
@@ -504,3 +504,21 @@ picks a template, taps CREATE; the notebook opens with the first page showing th
 - **S4 search scope:** long-press management is disabled while in search mode (kept focused);
   move/copy picker hides Search/Sort. Picker can't be entered from search, so `btnClearSearch` is not
   re-shown on picker exit. (Discovered S4.)
+- **S5 `TemplateDialog` slimmed to single-view:** the `notebookId` constructor param was removed
+  (only the deleted `insertTemplateFromFile` used it); the dialog's only call site was
+  `NotebookActivity.btnTemplate`. `onRequestImport` → `onBrowseLibrary: () -> Unit`. The in-notebook
+  apply path (`db.notebookDao().getTemplatesSorted()` + tap-to-apply) is unchanged. (Discovered S5.)
+- **S5 library apply path:** `NotebookActivity.insertLibraryTemplateIntoSoil(libraryTemplateId, db):
+  Pair<String, Bitmap?>` copies a library `TemplateObject` into the open `.soil` as a new
+  `type="template"` row (decodes via `core/BitmapDecode.decodeSampled`, bounded), then
+  `applyTemplateToCurrentPage(soilRowId, bitmap)`. Launcher is `templatePickLauncher`
+  (`StartActivityForResult`) → `onTemplatePicked()`. Removed dead PNG-import machinery from
+  `NotebookActivity` (`templateImportLauncher`, `performTemplateImport`, `copyUriToFile`,
+  `onTemplateImportDone`, `sanitizeTemplateFileName`) — the browser keeps its own sanitize copy
+  (`TemplateBrowserActivity.sanitizeTemplateNameFromFile`). (Discovered S5.)
+- **S5 PICK Blank card:** the virtual **Blank** card (`RESULT_TEMPLATE_ID = ""`) is injected as grid
+  slot 0 only at root (`directoryStack.size <= 1`), and only outside copy/move picker and search.
+  `totalGridPagesWithBlank()` duplicates that `showBlank` condition from `render()` for pagination —
+  **keep the two in sync**; candidate to factor into a computed property in the S7 cleanup pass.
+- **S5 user-facing label:** the in-notebook title-bar button reads **"Browse Templates…"** (not
+  "Browse Library…") per user request. (Discovered S5.)

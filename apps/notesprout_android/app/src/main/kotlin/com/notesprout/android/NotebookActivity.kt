@@ -13,7 +13,6 @@ import android.graphics.RectF
 import android.graphics.Region
 import android.net.Uri
 import android.os.Build
-import android.provider.OpenableColumns
 import android.os.Bundle
 import android.util.Base64
 import android.util.Log
@@ -78,6 +77,7 @@ import com.notesprout.android.data.toBoundingBoxJson
 import com.notesprout.android.data.index.IndexRepository
 import com.notesprout.android.data.index.NotesproutIndex
 import com.notesprout.android.data.index.ObjectType
+import com.notesprout.android.data.index.TemplateObject as IndexTemplateObject
 import com.notesprout.android.data.links.BackEntry
 import com.notesprout.android.data.links.LinkBackStack
 import com.notesprout.android.data.recents.RecentsManager
@@ -336,15 +336,95 @@ class NotebookActivity : AppCompatActivity() {
         if (uri != null) onCoverImagePicked?.invoke(uri)
     }
 
-    // ── Template import launcher ──────────────────────────────────────────────
+    // ── Template library pick launcher ───────────────────────────────────────
 
-    /** Invoked on the main thread after a template file has been successfully imported. */
-    private var onTemplateImportDone: (() -> Unit)? = null
+    /**
+     * Launched when the user taps "Browse Templates…" in the in-notebook template picker.
+     * Opens [TemplateBrowserActivity] in MODE_PICK; on return applies the selected template
+     * (or Blank) to the current page.
+     */
+    private val templatePickLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode != RESULT_OK) return@registerForActivityResult
+        val templateId = result.data?.getStringExtra(TemplateBrowserActivity.RESULT_TEMPLATE_ID)
+            ?: return@registerForActivityResult
+        onTemplatePicked(templateId)
+    }
 
-    private val templateImportLauncher = registerForActivityResult(
-        ActivityResultContracts.OpenDocument()
-    ) { uri ->
-        if (uri != null) performTemplateImport(uri)
+    /**
+     * Called on the main thread after the user picks a template from [TemplateBrowserActivity].
+     * [templateId] is "" for Blank; otherwise a library TemplateObject id.
+     */
+    private fun onTemplatePicked(templateId: String) {
+        if (templateId.isEmpty()) {
+            // Blank — clear template immediately.
+            applyTemplateToCurrentPage("", null)
+            return
+        }
+        val db = soilDatabase ?: return
+        lifecycleScope.launch {
+            val (soilRowId, bitmap) = withContext(Dispatchers.IO) {
+                insertLibraryTemplateIntoSoil(templateId, db)
+            }
+            if (soilRowId.isNotEmpty()) {
+                applyTemplateToCurrentPage(soilRowId, bitmap)
+            }
+        }
+    }
+
+    /**
+     * Loads a library template by [libraryTemplateId] from the global index, encodes it into a
+     * `.soil` `type="template"` row, and inserts it into [db].
+     *
+     * Returns a [Pair] of the new soil row id (or "" on failure) and the decoded full-resolution
+     * Bitmap (or null). The Bitmap is decoded via [BitmapDecode.decodeSampled] (bounded).
+     * Must be called on [Dispatchers.IO].
+     */
+    private suspend fun insertLibraryTemplateIntoSoil(
+        libraryTemplateId: String,
+        db: SoilDatabase,
+    ): Pair<String, Bitmap?> {
+        val entity = indexRepo.getTemplate(libraryTemplateId) ?: run {
+            Slog.d(TAG) { "insertLibraryTemplateIntoSoil: entity not found for $libraryTemplateId" }
+            return Pair("", null)
+        }
+        val tObj = IndexTemplateObject.fromJson(entity.data) ?: run {
+            Slog.d(TAG) { "insertLibraryTemplateIntoSoil: failed to parse TemplateObject for $libraryTemplateId" }
+            return Pair("", null)
+        }
+        if (tObj.image.isEmpty()) {
+            Slog.d(TAG) { "insertLibraryTemplateIntoSoil: empty image for $libraryTemplateId" }
+            return Pair("", null)
+        }
+
+        // Decode full-res bitmap for immediate display (bounded to avoid OOM).
+        val imageBytes = Base64.decode(tObj.image, Base64.DEFAULT)
+        val bitmap = BitmapDecode.decodeSampled(imageBytes, BitmapDecode.MAX_DIMENSION, BitmapDecode.MAX_DIMENSION)
+
+        // Build the .soil TemplateData (name comes from entity.name, not from the JSON payload).
+        val dataJson = TemplateData(tObj.width, tObj.height, entity.name, tObj.image).toJson()
+
+        val newId = UUID.randomUUID().toString()
+        val now   = System.currentTimeMillis()
+        val fullScreenBounds = BoundingBox(0f, 0f, tObj.width.toFloat(), tObj.height.toFloat()).toJson()
+        val notebookParentId = notebookMetadata?.id ?: MainActivity.NIL_UUID
+
+        db.notebookDao().insertObject(
+            NotebookObject(
+                id          = newId,
+                type        = "template",
+                parentId    = notebookParentId,
+                boundingBox = fullScreenBounds,
+                sortOrder   = 0,
+                createdAt   = now,
+                updatedAt   = now,
+                deletedAt   = null,
+                data        = dataJson,
+            ),
+        )
+        Slog.d(TAG) { "insertLibraryTemplateIntoSoil: inserted soil row $newId for library template '$libraryTemplateId'" }
+        return Pair(newId, bitmap)
     }
 
     // ── Copy/paste clipboard ──────────────────────────────────────────────────
@@ -702,19 +782,18 @@ class NotebookActivity : AppCompatActivity() {
         binding.btnTemplate.setOnClickListener {
             val db = soilDatabase ?: return@setOnClickListener
             val pageId = currentPageId.takeIf { it.isNotEmpty() } ?: return@setOnClickListener
-            val notebookId = notebookMetadata?.id ?: MainActivity.NIL_UUID
             TemplateDialog(
-                activity        = this,
-                lifecycleScope  = lifecycleScope,
-                db              = db,
-                pageId          = pageId,
-                notebookId      = notebookId,
-                onConfirm       = { templateId, bitmap ->
+                activity       = this,
+                lifecycleScope = lifecycleScope,
+                db             = db,
+                pageId         = pageId,
+                onConfirm      = { templateId, bitmap ->
                     applyTemplateToCurrentPage(templateId, bitmap)
                 },
-                onRequestImport = { onDone ->
-                    onTemplateImportDone = onDone
-                    templateImportLauncher.launch(arrayOf("image/png"))
+                onBrowseLibrary = {
+                    val intent = Intent(this, TemplateBrowserActivity::class.java)
+                        .putExtra(TemplateBrowserActivity.EXTRA_MODE, TemplateBrowserActivity.MODE_PICK)
+                    templatePickLauncher.launch(intent)
                 },
             ).show()
         }
@@ -8229,67 +8308,4 @@ class NotebookActivity : AppCompatActivity() {
 
     private fun isBooxDevice() =
         Build.MANUFACTURER.lowercase(Locale.ROOT).contains("onyx")
-
-    // ── Template import ───────────────────────────────────────────────────────
-
-    private fun performTemplateImport(uri: Uri) {
-        lifecycleScope.launch {
-            val displayName = withContext(Dispatchers.IO) {
-                contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
-                    ?.use { c -> if (c.moveToFirst()) c.getString(0) else null }
-            } ?: "template.png"
-
-            val destDir = getExternalFilesDir("Templates")!!.also { it.mkdirs() }
-            // C1: never trust the provider's DISPLAY_NAME — a malicious/buggy document
-            // provider can return "../notesprout.db" and escape the Templates dir,
-            // overwriting the global index or a .soil notebook. Sanitize to a flat,
-            // whitelisted .png filename before building the destination path.
-            val destFile = File(destDir, sanitizeTemplateFileName(displayName))
-
-            if (destFile.exists()) {
-                val dialog = AlertDialog.Builder(this@NotebookActivity)
-                    .setTitle("Template already exists")
-                    .setMessage("\"${destFile.nameWithoutExtension}\" already exists. Overwrite it?")
-                    .setPositiveButton("Overwrite") { _, _ ->
-                        lifecycleScope.launch {
-                            withContext(Dispatchers.IO) { copyUriToFile(uri, destFile) }
-                            onTemplateImportDone?.invoke()
-                        }
-                    }
-                    .setNegativeButton("Cancel", null)
-                    .create()
-                dialog.show()
-                dialog.window?.setElevation(0f)
-                dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
-            } else {
-                withContext(Dispatchers.IO) { copyUriToFile(uri, destFile) }
-                onTemplateImportDone?.invoke()
-            }
-        }
-    }
-
-    private fun copyUriToFile(uri: Uri, dest: File) {
-        contentResolver.openInputStream(uri)?.use { input ->
-            dest.outputStream().use { output -> input.copyTo(output) }
-        }
-    }
-
-    /**
-     * C1: Produce a safe, flat filename for an imported template.
-     *
-     * Defends against path-traversal from an untrusted document provider's
-     * `DISPLAY_NAME`. Strips any directory components, applies the project's
-     * filename whitelist (mirrors `MainActivity.validateNotebookName`), rejects
-     * `.`/`..`, and forces a `.png` extension so the result can only ever land
-     * inside the Templates directory.
-     */
-    private fun sanitizeTemplateFileName(rawName: String): String {
-        // Drop any directory components a provider may inject ("../", absolute paths).
-        val baseName = rawName.substringAfterLast('/').substringAfterLast('\\')
-        val stem = baseName.substringBeforeLast('.', baseName)
-            .replace(Regex("[^a-zA-Z0-9_\\-. ]"), "_")
-            .trim()
-        val safeStem = if (stem.isBlank() || stem == "." || stem == "..") "template" else stem
-        return "$safeStem.png"
-    }
 }

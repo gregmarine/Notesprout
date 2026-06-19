@@ -592,11 +592,7 @@ class TemplateBrowserActivity : AppCompatActivity() {
 
     // ── Pagination helpers ─────────────────────────────────────────────────────
 
-    private fun totalGridPages(): Int {
-        val perPage = gridSpec?.itemsPerPage ?: return 1
-        if (perPage == 0 || browseItems.isEmpty()) return 1
-        return (browseItems.size + perPage - 1) / perPage
-    }
+    private fun totalGridPages(): Int = totalGridPagesWithBlank()
 
     private fun navigateGridPage(page: Int) {
         val clamped = page.coerceIn(0, (totalGridPages() - 1).coerceAtLeast(0))
@@ -627,7 +623,16 @@ class TemplateBrowserActivity : AppCompatActivity() {
         decodeJobs.clear()
         binding.gridContainer.removeAllViews()
 
-        if (browseItems.isEmpty()) {
+        // In PICK mode (not in copy/move picker, not in search), inject a Blank virtual card at
+        // root level. A search in PICK mode shows only real templates (no Blank injection).
+        val showBlank = mode == MODE_PICK
+            && picker == TemplatePicker.None
+            && !isSearchMode
+            && directoryStack.size <= 1
+
+        val spec = gridSpec ?: return
+
+        if (browseItems.isEmpty() && !showBlank) {
             val emptyMsg = when {
                 isSearchMode -> "No templates found for \"$currentSearchQuery\""
                 picker != TemplatePicker.None && directoryStack.size <= 1 -> "No template folders yet."
@@ -637,14 +642,37 @@ class TemplateBrowserActivity : AppCompatActivity() {
             }
             renderEmptyState(emptyMsg)
         } else {
-            val spec  = gridSpec ?: return
-            val start = currentGridPage * spec.itemsPerPage
-            val end   = minOf(start + spec.itemsPerPage, browseItems.size)
-            val items = browseItems.subList(start, end)
-            renderRows(items.size, spec) { idx -> buildCard(items[idx], spec) }
+            // Treat Blank + browse items as a single flat list for pagination.
+            // Blank is slot 0 on page 0 (PICK mode at root); browse items follow.
+            val totalVirtual = if (showBlank) 1 else 0
+            val totalItems   = totalVirtual + browseItems.size
+            val pageStart    = currentGridPage * spec.itemsPerPage
+            val pageEnd      = minOf(pageStart + spec.itemsPerPage, totalItems)
+            // Map each flat slot in [pageStart, pageEnd) to a card factory.
+            val pageCardFactories = (pageStart until pageEnd).map { flatIdx ->
+                if (flatIdx < totalVirtual) {
+                    { s: GridSpec -> buildBlankCard(s) }
+                } else {
+                    val item = browseItems[flatIdx - totalVirtual]
+                    { s: GridSpec -> buildCard(item, s) }
+                }
+            }
+            renderRows(pageCardFactories.size, spec) { idx -> pageCardFactories[idx](spec) }
         }
 
         updatePaginationControls()
+    }
+
+    private fun totalGridPagesWithBlank(): Int {
+        val spec = gridSpec ?: return 1
+        val perPage = spec.itemsPerPage
+        val showBlank = mode == MODE_PICK
+            && picker == TemplatePicker.None
+            && !isSearchMode
+            && directoryStack.size <= 1
+        val totalItems = (if (showBlank) 1 else 0) + browseItems.size
+        if (perPage == 0 || totalItems == 0) return 1
+        return (totalItems + perPage - 1) / perPage
     }
 
     private fun renderEmptyState(message: String) {
@@ -714,8 +742,17 @@ class TemplateBrowserActivity : AppCompatActivity() {
             gravity     = Gravity.CENTER_HORIZONTAL
             setOnClickListener {
                 when (item) {
-                    is BrowseItem.Folder   -> navigateIntoFolder(item.entity)
-                    is BrowseItem.Template -> openTemplatePreview(item.entity)
+                    is BrowseItem.Folder -> navigateIntoFolder(item.entity)
+                    is BrowseItem.Template -> {
+                        if (mode == MODE_PICK) {
+                            // PICK mode: return the chosen template id to the caller.
+                            val resultIntent = Intent().putExtra(RESULT_TEMPLATE_ID, item.entity.id)
+                            setResult(RESULT_OK, resultIntent)
+                            finish()
+                        } else {
+                            openTemplatePreview(item.entity)
+                        }
+                    }
                 }
             }
         }
@@ -778,6 +815,46 @@ class TemplateBrowserActivity : AppCompatActivity() {
         }
         val label = AppCompatTextView(this).apply {
             text      = labelText
+            maxLines  = 1
+            ellipsize = android.text.TextUtils.TruncateAt.END
+            gravity   = Gravity.CENTER
+            textSize  = 14f
+            setTextColor(inkBlackColor)
+        }
+        group.addView(label, LinearLayout.LayoutParams(spec.cardWidthPx, spec.labelHeightPx).also {
+            it.topMargin = spec.rowGapPx
+        })
+
+        return group
+    }
+
+    /**
+     * Builds the "Blank" virtual card shown in PICK mode at root.
+     * Tapping it returns [RESULT_TEMPLATE_ID] = "" to the caller (clears the page template).
+     */
+    private fun buildBlankCard(spec: GridSpec): LinearLayout {
+        val group = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity     = Gravity.CENTER_HORIZONTAL
+            setOnClickListener {
+                val resultIntent = Intent().putExtra(RESULT_TEMPLATE_ID, "")
+                setResult(RESULT_OK, resultIntent)
+                finish()
+            }
+        }
+
+        val card = FrameLayout(this).apply {
+            setBackgroundResource(R.drawable.shape_bordered)
+        }
+        val density = resources.displayMetrics.density
+        val pad1dp  = (density + 0.5f).toInt()
+        card.setPadding(pad1dp, pad1dp, pad1dp, pad1dp)
+
+        // Blank thumbnail: empty white area with no icon.
+        group.addView(card, LinearLayout.LayoutParams(spec.cardWidthPx, spec.cardHeightPx))
+
+        val label = AppCompatTextView(this).apply {
+            text      = "Blank"
             maxLines  = 1
             ellipsize = android.text.TextUtils.TruncateAt.END
             gravity   = Gravity.CENTER
