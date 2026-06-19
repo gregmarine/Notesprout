@@ -2,11 +2,13 @@ package com.notesprout.android
 
 import android.content.ClipData
 import android.content.Intent
+import android.graphics.BitmapFactory
+import android.net.Uri
+import android.provider.DocumentsContract
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import android.database.sqlite.SQLiteDatabase
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import android.util.Base64
 import android.view.GestureDetector
 import android.view.Gravity
@@ -24,6 +26,7 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.lifecycleScope
+import com.notesprout.android.core.Slog
 import com.notesprout.android.data.index.IndexRepository
 import com.notesprout.android.data.index.NotesproutIndex
 import com.notesprout.android.data.index.TemplateObject
@@ -167,9 +170,12 @@ class PageIndexActivity : AppCompatActivity() {
     /** Pages whose template will be set once the picker returns (snapshot of the selection). */
     private var pendingTemplateTargets: List<String> = emptyList()
 
-    // ── Export save-to-device launcher ───────────────────────────────────────
+    // ── Export save-to-device launchers ─────────────────────────────────────
 
     private var pendingExportFile: java.io.File? = null
+
+    /** Files to write into the folder chosen by [openDocumentTreeLauncher] (PNG batch). */
+    private var pendingPngFiles: List<java.io.File> = emptyList()
 
     private val saveTemplateLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -205,6 +211,47 @@ class PageIndexActivity : AppCompatActivity() {
                     ).show()
                 }
             }
+        }
+    }
+
+    /** Save a PDF to a location chosen by the user (multi-page PDF export). */
+    private val savePdfLauncher = registerForActivityResult(
+        ActivityResultContracts.CreateDocument("application/pdf")
+    ) { uri ->
+        val file = pendingExportFile ?: return@registerForActivityResult
+        if (uri == null) return@registerForActivityResult
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                contentResolver.openOutputStream(uri)?.use { out ->
+                    file.inputStream().use { it.copyTo(out) }
+                }
+            } catch (e: Exception) {
+                android.os.Handler(android.os.Looper.getMainLooper()).post {
+                    android.widget.Toast.makeText(
+                        this@PageIndexActivity, "Save failed: ${e.message}", android.widget.Toast.LENGTH_LONG
+                    ).show()
+                }
+            }
+        }
+    }
+
+    /**
+     * Folder picker for batch PNG export. Once the user selects a folder, all [pendingPngFiles]
+     * are written into it via [DocumentsContract.createDocument], one file per page.
+     */
+    private val openDocumentTreeLauncher = registerForActivityResult(
+        ActivityResultContracts.OpenDocumentTree()
+    ) { treeUri ->
+        val files = pendingPngFiles
+        pendingPngFiles = emptyList()
+        if (treeUri == null || files.isEmpty()) return@registerForActivityResult
+        lifecycleScope.launch {
+            val written = withContext(Dispatchers.IO) {
+                writePngFilesToTree(treeUri, files)
+            }
+            val msg = if (written == files.size) "Exported ${files.size} images"
+                      else "Exported $written of ${files.size} images"
+            android.widget.Toast.makeText(this@PageIndexActivity, msg, android.widget.Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -642,8 +689,7 @@ class PageIndexActivity : AppCompatActivity() {
     /**
      * Reflect the current selection in the chrome: action buttons visibility, the title count,
      * and per-button enablement.
-     * - Copy/Move are enabled for any selection size (multi-page support added in Session 2).
-     * - Export remains single-only (multi-export arrives in Session 4).
+     * - Copy/Move/Export/SetTemplate are enabled for any selection size.
      * - Delete is always enabled in action mode.
      * - The Paste button was removed in Session 2 fixes: Copy immediately enters PASTE dest mode.
      * Does not re-render the grid — callers do that.
@@ -666,8 +712,8 @@ class PageIndexActivity : AppCompatActivity() {
         if (active) {
             setButtonEnabled(binding.btnCopyPage,   true)
             setButtonEnabled(binding.btnMovePage,   true)
-            setButtonEnabled(binding.btnSetTemplate, true)  // any selection count
-            setButtonEnabled(binding.btnExportPage, selectedCount() == 1)  // single-only until Session 4
+            setButtonEnabled(binding.btnSetTemplate, true)
+            setButtonEnabled(binding.btnExportPage, true)   // multi-export enabled (Session 4)
             setButtonEnabled(binding.btnDeletePage, true)
             // Select-all content description reflects the toggle target.
             binding.btnSelectAll.contentDescription =
@@ -977,7 +1023,22 @@ class PageIndexActivity : AppCompatActivity() {
         dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
     }
 
+    /**
+     * Entry point for the Export toolbar button. Routes single-selection through the richer
+     * existing single-page flow ([showExportChoice]: Save to device / Save as Template / Share),
+     * and multi-selection through the new multi-export dialog (PDF / PNG / Cancel).
+     */
     private fun executeExport() {
+        if (!inActionMode()) return
+        if (selectedCount() == 1) {
+            executeSingleExport()
+        } else {
+            showMultiExportDialog()
+        }
+    }
+
+    /** Single-page export — renders a PNG then offers Save / Template / Share. */
+    private fun executeSingleExport() {
         val pageId = selectedPageIds.singleOrNull() ?: return
         val pageEntry = pages.firstOrNull { it.id == pageId } ?: return
         val path = notebookSoilPath ?: return
@@ -989,7 +1050,7 @@ class PageIndexActivity : AppCompatActivity() {
             setTextColor(android.graphics.Color.BLACK)
             textSize = 16f
         }
-        val dialog = androidx.appcompat.app.AlertDialog.Builder(this)
+        val dialog = AlertDialog.Builder(this)
             .setView(tvMessage)
             .setCancelable(false)
             .create()
@@ -1022,6 +1083,365 @@ class PageIndexActivity : AppCompatActivity() {
             )
             showExportChoice(pngFile, defaultName)
         }
+    }
+
+    /**
+     * Multi-page export dialog: presents PDF / PNG / Cancel.
+     * Selected pages are sorted to page order (not selection order) before export.
+     */
+    private fun showMultiExportDialog() {
+        val n = selectedCount()
+        val d = AlertDialog.Builder(this)
+            .setTitle("Export $n pages")
+            .setPositiveButton("PDF") { _, _ -> exportMultiAsPdf() }
+            .setNeutralButton("PNG") { _, _ -> showPngSubchoiceDialog() }
+            .setNegativeButton("Cancel", null)
+            .create()
+        d.show()
+        d.window?.setElevation(0f)
+        d.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+    }
+
+    /**
+     * PNG sub-choice: Save images (to a folder) vs Save as templates (import into library).
+     */
+    private fun showPngSubchoiceDialog() {
+        val d = AlertDialog.Builder(this)
+            .setTitle("PNG export")
+            .setPositiveButton("Save images") { _, _ -> exportMultiAsPngFiles() }
+            .setNeutralButton("Save as templates") { _, _ -> exportMultiAsPngTemplates() }
+            .setNegativeButton("Cancel", null)
+            .create()
+        d.show()
+        d.window?.setElevation(0f)
+        d.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+    }
+
+    /**
+     * Build the ordered page list for a multi-export (by page order, not selection insertion order).
+     * Returns null if there's nothing to export.
+     */
+    private fun orderedSelectedEntries(): List<PageEntry>? {
+        if (selectedPageIds.isEmpty()) return null
+        // Sort by position in the pages list (which is sorted by `order`) rather than selection order.
+        val idSet = selectedPageIds.toSet()
+        return pages.filter { it.id in idSet }.takeIf { it.isNotEmpty() }
+    }
+
+    /**
+     * Export all selected pages to a single PDF. Shows a progress dialog while rendering;
+     * afterwards offers Save to device ([savePdfLauncher]) and Share (FileProvider).
+     */
+    private fun exportMultiAsPdf() {
+        val entries = orderedSelectedEntries() ?: return
+        val path    = notebookSoilPath ?: return
+        val notebookName = intent.getStringExtra(EXTRA_NOTEBOOK_NAME) ?: "notebook"
+        val pageIds = entries.map { it.id }
+
+        val tvMessage = android.widget.TextView(this).apply {
+            text = "Exporting…"
+            setPadding(64, 48, 64, 48)
+            setTextColor(android.graphics.Color.BLACK)
+            textSize = 16f
+        }
+        val progressDialog = AlertDialog.Builder(this)
+            .setView(tvMessage)
+            .setCancelable(false)
+            .create()
+        progressDialog.show()
+        progressDialog.window?.setElevation(0f)
+        progressDialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+
+        val handler = android.os.Handler(android.os.Looper.getMainLooper())
+
+        lifecycleScope.launch {
+            val pdfFile = try {
+                withContext(Dispatchers.IO) {
+                    NotebookExporter.exportPagesPdf(
+                        context = this@PageIndexActivity,
+                        soilPath = path,
+                        pageIds = pageIds,
+                        notebookTitle = notebookName,
+                        onProgress = { current, total ->
+                            handler.post { tvMessage.text = "Exporting page $current of $total…" }
+                        },
+                    )
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("PageIndexActivity", "PDF export failed", e)
+                progressDialog.dismiss()
+                android.widget.Toast.makeText(this@PageIndexActivity, "Export failed: ${e.message}", android.widget.Toast.LENGTH_LONG).show()
+                return@launch
+            }
+
+            progressDialog.dismiss()
+            exitActionMode()
+            showPdfExportChoice(pdfFile)
+        }
+    }
+
+    /**
+     * Offer Save to device or Share after a multi-page PDF is rendered.
+     */
+    private fun showPdfExportChoice(file: java.io.File) {
+        val d = AlertDialog.Builder(this)
+            .setTitle("Export PDF")
+            .setPositiveButton("Save to device") { _, _ ->
+                pendingExportFile = file
+                savePdfLauncher.launch(file.name)
+            }
+            .setNegativeButton("Share") { _, _ ->
+                val uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", file)
+                val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                    type = "application/pdf"
+                    putExtra(Intent.EXTRA_STREAM, uri)
+                    clipData = ClipData.newRawUri("", uri)
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+                startActivity(Intent.createChooser(shareIntent, "Share PDF"))
+            }
+            .create()
+        d.show()
+        d.window?.setElevation(0f)
+        d.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+    }
+
+    /**
+     * Export all selected pages as individual PNGs, auto-named from notebook + page label.
+     * Renders to cache first (with a progress dialog), then prompts for a destination folder
+     * once via [openDocumentTreeLauncher]. No per-file prompts.
+     */
+    private fun exportMultiAsPngFiles() {
+        val entries = orderedSelectedEntries() ?: return
+        val path    = notebookSoilPath ?: return
+        val notebookName = intent.getStringExtra(EXTRA_NOTEBOOK_NAME) ?: "notebook"
+
+        // Build (pageId, filenameBase) pairs with sanitized, de-duplicated names.
+        val safeNotebook = notebookName.replace(Regex("[^a-zA-Z0-9_\\-. ]"), "_")
+            .trim('_', ' ').ifBlank { "notebook" }
+        val usedNames = mutableSetOf<String>()
+        val pageSpecs: List<Pair<String, String>> = entries.map { entry ->
+            val rawLabel = entry.headingName ?: "Page${entry.pageNumber}"
+            val safeLabel = rawLabel.replace(Regex("[^a-zA-Z0-9_\\-. ]"), "_").trim('_', ' ')
+                .ifBlank { "Page${entry.pageNumber}" }
+            val base = "${safeNotebook}_${safeLabel}"
+            val uniqueBase = makeUniqueFilename(base, usedNames)
+            usedNames.add(uniqueBase)
+            Pair(entry.id, uniqueBase)
+        }
+
+        val tvMessage = android.widget.TextView(this).apply {
+            text = "Exporting…"
+            setPadding(64, 48, 64, 48)
+            setTextColor(android.graphics.Color.BLACK)
+            textSize = 16f
+        }
+        val progressDialog = AlertDialog.Builder(this)
+            .setView(tvMessage)
+            .setCancelable(false)
+            .create()
+        progressDialog.show()
+        progressDialog.window?.setElevation(0f)
+        progressDialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+
+        val handler = android.os.Handler(android.os.Looper.getMainLooper())
+
+        lifecycleScope.launch {
+            val pngFiles = try {
+                withContext(Dispatchers.IO) {
+                    NotebookExporter.exportPagesPng(
+                        context = this@PageIndexActivity,
+                        soilPath = path,
+                        pages = pageSpecs,
+                        onProgress = { current, total ->
+                            handler.post { tvMessage.text = "Exporting page $current of $total…" }
+                        },
+                    )
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("PageIndexActivity", "PNG batch export failed", e)
+                progressDialog.dismiss()
+                android.widget.Toast.makeText(this@PageIndexActivity, "Export failed: ${e.message}", android.widget.Toast.LENGTH_LONG).show()
+                return@launch
+            }
+
+            progressDialog.dismiss()
+            exitActionMode()
+
+            if (pngFiles.isEmpty()) {
+                android.widget.Toast.makeText(this@PageIndexActivity, "Nothing to export", android.widget.Toast.LENGTH_SHORT).show()
+                return@launch
+            }
+
+            // Prompt once for a destination folder; writes happen in openDocumentTreeLauncher callback.
+            pendingPngFiles = pngFiles
+            openDocumentTreeLauncher.launch(null)
+        }
+    }
+
+    /**
+     * Write [files] into the folder at [treeUri] using [DocumentsContract].
+     * Returns the count of files successfully written.
+     * Runs on the IO dispatcher (caller is responsible).
+     */
+    private fun writePngFilesToTree(treeUri: Uri, files: List<java.io.File>): Int {
+        val treeDocId = DocumentsContract.getTreeDocumentId(treeUri)
+        val treeDocUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, treeDocId)
+        var written = 0
+        for (file in files) {
+            try {
+                val docUri = DocumentsContract.createDocument(
+                    contentResolver, treeDocUri, "image/png", file.name
+                ) ?: continue
+                contentResolver.openOutputStream(docUri)?.use { out ->
+                    file.inputStream().use { it.copyTo(out) }
+                }
+                written++
+            } catch (e: Exception) {
+                android.util.Log.e("PageIndexActivity", "Failed to write ${file.name} to tree", e)
+            }
+        }
+        Slog.d("PageIndexActivity") { "writePngFilesToTree: wrote $written of ${files.size}" }
+        return written
+    }
+
+    /**
+     * Export all selected pages as PNGs and import each into the template library at the root
+     * folder (parentId = null). Page label is used as the template name (sanitized, de-duped
+     * against existing root templates). All heavy work runs on [Dispatchers.IO].
+     *
+     * Phase-2 note: choosing a destination folder for the template import (rather than always
+     * importing into root) is deferred to Phase 2.
+     */
+    private fun exportMultiAsPngTemplates() {
+        val entries = orderedSelectedEntries() ?: return
+        val path    = notebookSoilPath ?: return
+        val notebookName = intent.getStringExtra(EXTRA_NOTEBOOK_NAME) ?: "notebook"
+
+        // Build (pageId, filenameBase) specs for rendering; names will be re-sanitized for the
+        // template library below.
+        val safeNotebook = notebookName.replace(Regex("[^a-zA-Z0-9_\\-. ]"), "_")
+            .trim('_', ' ').ifBlank { "notebook" }
+        val renderUsedNames = mutableSetOf<String>()
+        val pageSpecs: List<Pair<String, String>> = entries.map { entry ->
+            val rawLabel = entry.headingName ?: "Page${entry.pageNumber}"
+            val safeLabel = rawLabel.replace(Regex("[^a-zA-Z0-9_\\-. ]"), "_").trim('_', ' ')
+                .ifBlank { "Page${entry.pageNumber}" }
+            val base = "${safeNotebook}_${safeLabel}"
+            val uniqueBase = makeUniqueFilename(base, renderUsedNames)
+            renderUsedNames.add(uniqueBase)
+            Pair(entry.id, uniqueBase)
+        }
+        // Template names: use the raw page label directly (shorter / more readable than the
+        // notebook-prefixed filename base).
+        val templateLabels: List<String> = entries.map { entry ->
+            sanitizeTemplateName(entry.headingName ?: "Page ${entry.pageNumber}")
+        }
+
+        val tvMessage = android.widget.TextView(this).apply {
+            text = "Exporting…"
+            setPadding(64, 48, 64, 48)
+            setTextColor(android.graphics.Color.BLACK)
+            textSize = 16f
+        }
+        val progressDialog = AlertDialog.Builder(this)
+            .setView(tvMessage)
+            .setCancelable(false)
+            .create()
+        progressDialog.show()
+        progressDialog.window?.setElevation(0f)
+        progressDialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+
+        val handler = android.os.Handler(android.os.Looper.getMainLooper())
+
+        lifecycleScope.launch {
+            val pngFiles = try {
+                withContext(Dispatchers.IO) {
+                    NotebookExporter.exportPagesPng(
+                        context = this@PageIndexActivity,
+                        soilPath = path,
+                        pages = pageSpecs,
+                        onProgress = { current, total ->
+                            handler.post { tvMessage.text = "Rendering page $current of $total…" }
+                        },
+                    )
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("PageIndexActivity", "PNG-as-templates render failed", e)
+                progressDialog.dismiss()
+                android.widget.Toast.makeText(this@PageIndexActivity, "Export failed: ${e.message}", android.widget.Toast.LENGTH_LONG).show()
+                return@launch
+            }
+
+            if (pngFiles.isEmpty()) {
+                progressDialog.dismiss()
+                android.widget.Toast.makeText(this@PageIndexActivity, "Nothing to export", android.widget.Toast.LENGTH_SHORT).show()
+                return@launch
+            }
+
+            handler.post { tvMessage.text = "Importing templates…" }
+
+            val importedCount = withContext(Dispatchers.IO) {
+                // Fetch existing root-level template names once so de-duplication is consistent.
+                val existing = runCatching { indexRepo.getTemplates(null) }.getOrElse { emptyList() }
+                val existingNames = existing.map { it.name }.toMutableList()
+
+                var count = 0
+                for ((idx, file) in pngFiles.withIndex()) {
+                    val rawName = templateLabels.getOrNull(idx) ?: sanitizeTemplateName(file.nameWithoutExtension)
+                    val finalName = makeUniqueTemplateName(rawName, existingNames)
+                    existingNames.add(finalName)  // reserve so subsequent iterations don't collide
+
+                    try {
+                        val bytes = file.readBytes()
+                        val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)
+                        val w = opts.outWidth; val h = opts.outHeight
+                        if (w <= 0 || h <= 0) {
+                            android.util.Log.w("PageIndexActivity", "Template import: invalid bounds for ${file.name}")
+                            continue
+                        }
+                        val base64 = Base64.encodeToString(bytes, Base64.NO_WRAP)
+                        indexRepo.createTemplate(finalName, null, w, h, base64)
+                        Slog.d("PageIndexActivity") { "Imported template '$finalName' (${w}x${h})" }
+                        count++
+                    } catch (e: Exception) {
+                        android.util.Log.e("PageIndexActivity", "Template import failed for ${file.name}", e)
+                    }
+                }
+                count
+            }
+
+            progressDialog.dismiss()
+            exitActionMode()
+
+            val total = pngFiles.size
+            val msg = if (importedCount == total) "Saved $total templates"
+                      else "Saved $importedCount of $total templates"
+            android.widget.Toast.makeText(this@PageIndexActivity, msg, android.widget.Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    /**
+     * De-duplicate a filename base among [used] names by appending `_2`, `_3`, etc.
+     * Does NOT include an extension — callers add ".png" separately.
+     */
+    private fun makeUniqueFilename(base: String, used: Set<String>): String {
+        if (base !in used) return base
+        var n = 2
+        while ("${base}_$n" in used) n++
+        return "${base}_$n"
+    }
+
+    /**
+     * De-duplicate a template name among [existing] names using `(2)`, `(3)`, … suffix,
+     * matching the convention used in [TemplateBrowserActivity.makeUniqueName].
+     */
+    private fun makeUniqueTemplateName(name: String, existing: List<String>): String {
+        if (existing.none { it.equals(name, ignoreCase = true) }) return name
+        var n = 2
+        while (existing.any { it.equals("$name ($n)", ignoreCase = true) }) n++
+        return "$name ($n)"
     }
 
     /** Whitelist a proposed template name to the browser's accepted characters; never empty. */

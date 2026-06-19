@@ -16,6 +16,7 @@ import androidx.room.Room
 import com.notesprout.android.core.BitmapDecode
 import com.notesprout.android.data.CoverObject
 import com.notesprout.android.core.markdown.TextObjectRenderer
+import com.notesprout.android.data.BoundingBox
 import com.notesprout.android.data.HeadingObject
 import com.notesprout.android.data.HeadingStroke
 import com.notesprout.android.data.LineObject
@@ -26,6 +27,8 @@ import com.notesprout.android.data.LinkObject
 import com.notesprout.android.data.LinkRender
 import com.notesprout.android.data.toLineRender
 import com.notesprout.android.data.LiveStroke
+import com.notesprout.android.data.NotebookDao
+import com.notesprout.android.data.NotebookObject
 import com.notesprout.android.data.TextObject
 import com.notesprout.android.data.TextRender
 import com.notesprout.android.data.NotebookMetadata
@@ -97,62 +100,9 @@ object NotebookExporter {
         for ((i, pageRow) in pages.withIndex()) {
             onProgress(i + 1, totalPages)
 
-            val (pw, ph) = parseDimensions(pageRow.boundingBox)
-            val templateBitmap = loadTemplate(dao, pageRow.data, pw, ph)
+            val (bitmap, templateBitmap) = renderPageBitmap(dao, pageRow, context)
 
-            val layer = dao.getLayerForPage(pageRow.id)
-            val headings: List<HeadingStroke> = if (layer != null) {
-                dao.getHeadingsForLayer(layer.id).mapNotNull { row ->
-                    val box = parseBoundingBox(row.boundingBox) ?: return@mapNotNull null
-                    val ho = runCatching { HeadingObject.fromJson(row.data) }.getOrNull()
-                        ?: return@mapNotNull null
-                    HeadingStroke(
-                        id = row.id,
-                        boundingBox = box,
-                        strokes = ho.strokes,
-                        recognizedText = ho.recognizedText,
-                    )
-                }
-            } else emptyList()
-
-            val textObjects: List<TextRender> = if (layer != null) {
-                dao.getTextObjectsForLayer(layer.id).mapNotNull { row ->
-                    val box = parseBoundingBox(row.boundingBox) ?: return@mapNotNull null
-                    val to = runCatching { TextObject.fromJson(row.data) }.getOrNull()
-                        ?: return@mapNotNull null
-                    TextRender(id = row.id, boundingBox = box, text = to.text)
-                }
-            } else emptyList()
-
-            val lineObjects: List<LineRender> = if (layer != null) {
-                dao.getLineObjectsForLayer(layer.id).mapNotNull { row ->
-                    val box = parseBoundingBox(row.boundingBox) ?: return@mapNotNull null
-                    val lo = runCatching { LineObject.fromJson(row.data) }.getOrNull()
-                        ?: return@mapNotNull null
-                    parseLineRender(row.id, box, lo, context.resources.displayMetrics.density)
-                }
-            } else emptyList()
-
-            val links: List<LinkRender> = if (layer != null) {
-                dao.getLinkObjectsForLayer(layer.id).mapNotNull { row ->
-                    val box = parseBoundingBox(row.boundingBox) ?: return@mapNotNull null
-                    val lo = runCatching { LinkObject.fromJson(row.data) }.getOrNull()
-                        ?: return@mapNotNull null
-                    parseLinkRender(row.id, box, lo, context.resources.displayMetrics.density)
-                }
-            } else emptyList()
-
-            val strokes: List<LiveStroke> = if (layer != null) {
-                dao.getStrokesForLayer(layer.id).mapNotNull { row ->
-                    val sd = runCatching { StrokeData.fromJson(row.data) }.getOrNull()
-                        ?: return@mapNotNull null
-                    LiveStroke.fromStrokeData(row.id, sd)
-                }
-            } else emptyList()
-
-            val bitmap = renderPage(pw, ph, templateBitmap, headings, textObjects, lineObjects, strokes, context, links)
-
-            val pageInfo = PdfDocument.PageInfo.Builder(pw, ph, pdfPageNumber++).create()
+            val pageInfo = PdfDocument.PageInfo.Builder(bitmap.width, bitmap.height, pdfPageNumber++).create()
             val pdfPage = pdf.startPage(pageInfo)
             pdfPage.canvas.drawBitmap(bitmap, 0f, 0f, null)
             pdf.finishPage(pdfPage)
@@ -167,6 +117,116 @@ object NotebookExporter {
         pdf.close()
 
         return outFile
+    }
+
+    /**
+     * Renders selected pages to a single PDF using a transient Room connection for [soilPath].
+     * [pageIds] is the ordered list of page UUIDs to include (in display order, caller's
+     * responsibility to sort by page index). [notebookTitle] names the output file.
+     * [onProgress] is called on the IO thread with (currentPage, totalInSelection) before each
+     * page render — callers must post to main thread for UI updates.
+     * Does NOT checkpoint on close since NotebookActivity may hold the canonical connection.
+     * Returns the written PDF [File].
+     */
+    suspend fun exportPagesPdf(
+        context: Context,
+        soilPath: String,
+        pageIds: List<String>,
+        notebookTitle: String,
+        onProgress: (current: Int, total: Int) -> Unit,
+    ): File {
+        val safeTitle = notebookTitle.replace(Regex("[^a-zA-Z0-9_\\-. ]"), "_").trim('_', ' ')
+            .ifBlank { "notebook" }
+
+        val db = Room.databaseBuilder(
+            context.applicationContext,
+            SoilDatabase::class.java,
+            soilPath,
+        )
+            .addCallback(SoilDatabase.openCallback())
+            .build()
+
+        try {
+            val dao = db.notebookDao()
+            val pdf = PdfDocument()
+            var pdfPageNumber = 1
+            val total = pageIds.size
+
+            for ((i, pageId) in pageIds.withIndex()) {
+                onProgress(i + 1, total)
+                val pageRow = dao.getObjectById(pageId) ?: continue
+                val (bitmap, templateBitmap) = renderPageBitmap(dao, pageRow, context)
+
+                val pageInfo = PdfDocument.PageInfo.Builder(bitmap.width, bitmap.height, pdfPageNumber++).create()
+                val pdfPage = pdf.startPage(pageInfo)
+                pdfPage.canvas.drawBitmap(bitmap, 0f, 0f, null)
+                pdf.finishPage(pdfPage)
+
+                // Recycle per-page bitmaps immediately to keep memory flat across large selections.
+                bitmap.recycle()
+                templateBitmap?.recycle()
+            }
+
+            val outDir = File(context.cacheDir, "exported_pdfs").also { it.deleteRecursively(); it.mkdirs() }
+            val outFile = File(outDir, "$safeTitle.pdf")
+            FileOutputStream(outFile).use { pdf.writeTo(it) }
+            pdf.close()
+
+            return outFile
+        } finally {
+            db.close()
+        }
+    }
+
+    /**
+     * Renders selected pages to individual PNG files in [context.cacheDir/exported_pngs/].
+     * [pages] is a list of (pageId, filenameBase) pairs; [filenameBase] is already sanitized and
+     * de-duplicated by the caller. Each file is named `<filenameBase>.png`.
+     * Opens a transient Room connection for [soilPath]; does not checkpoint on close.
+     * [onProgress] is called on the IO thread with (current, total).
+     * Returns the list of written [File]s in input order (null entries are skipped/absent).
+     */
+    suspend fun exportPagesPng(
+        context: Context,
+        soilPath: String,
+        pages: List<Pair<String, String>>,   // (pageId, filenameBase)
+        onProgress: (current: Int, total: Int) -> Unit,
+    ): List<File> {
+        val db = Room.databaseBuilder(
+            context.applicationContext,
+            SoilDatabase::class.java,
+            soilPath,
+        )
+            .addCallback(SoilDatabase.openCallback())
+            .build()
+
+        val outDir = File(context.cacheDir, "exported_pngs").also { it.deleteRecursively(); it.mkdirs() }
+        val results = mutableListOf<File>()
+        val total = pages.size
+
+        try {
+            val dao = db.notebookDao()
+            for ((i, entry) in pages.withIndex()) {
+                val (pageId, fileBase) = entry
+                onProgress(i + 1, total)
+
+                val pageRow = dao.getObjectById(pageId) ?: continue
+                val (bitmap, templateBitmap) = renderPageBitmap(dao, pageRow, context)
+
+                val outFile = File(outDir, "$fileBase.png")
+                FileOutputStream(outFile).use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+
+                // Recycle per-page bitmaps immediately — large selections can be 50+ pages.
+                bitmap.recycle()
+                templateBitmap?.recycle()
+
+                results.add(outFile)
+            }
+        } finally {
+            db.close()
+        }
+
+        return results
     }
 
     private fun parseLineRender(id: String, box: RectF, lo: LineObject, densityDp: Float): LineRender {
@@ -197,13 +257,13 @@ object NotebookExporter {
         )
 
     private fun parseDimensions(boundingBoxJson: String): Pair<Int, Int> {
-        val box = com.notesprout.android.data.BoundingBox.fromJson(boundingBoxJson)
+        val box = BoundingBox.fromJson(boundingBoxJson)
             ?: return Pair(1404, 1872) // safe fallback
         return Pair(box.width.toInt().coerceAtLeast(1), box.height.toInt().coerceAtLeast(1))
     }
 
     private suspend fun loadTemplate(
-        dao: com.notesprout.android.data.NotebookDao,
+        dao: NotebookDao,
         pageData: String,
         pageWidth: Int,
         pageHeight: Int,
@@ -218,6 +278,78 @@ object NotebookExporter {
             // Bounded decode (M-1): cap to the page size this template renders into.
             BitmapDecode.decodeSampled(bytes, pageWidth, pageHeight)
         }.getOrNull()
+    }
+
+    /**
+     * Shared per-page render used by [export], [exportPage], [exportPagesPdf], and
+     * [exportPagesPng]. Loads every content layer from [dao] for [pageRow], renders the page
+     * to a new [Bitmap], and returns it together with the (possibly null) template bitmap so the
+     * caller can recycle both after drawing into the PDF or writing to disk.
+     *
+     * Must be called on a background (IO) dispatcher; never call from the UI thread.
+     */
+    private suspend fun renderPageBitmap(
+        dao: NotebookDao,
+        pageRow: NotebookObject,
+        context: Context,
+    ): Pair<Bitmap, Bitmap?> {
+        val (pw, ph) = parseDimensions(pageRow.boundingBox)
+        val templateBitmap = loadTemplate(dao, pageRow.data, pw, ph)
+        val density = context.resources.displayMetrics.density
+
+        val layer = dao.getLayerForPage(pageRow.id)
+
+        val headings: List<HeadingStroke> = if (layer != null) {
+            dao.getHeadingsForLayer(layer.id).mapNotNull { row ->
+                val box = parseBoundingBox(row.boundingBox) ?: return@mapNotNull null
+                val ho = runCatching { HeadingObject.fromJson(row.data) }.getOrNull()
+                    ?: return@mapNotNull null
+                HeadingStroke(
+                    id = row.id,
+                    boundingBox = box,
+                    strokes = ho.strokes,
+                    recognizedText = ho.recognizedText,
+                )
+            }
+        } else emptyList()
+
+        val textObjects: List<TextRender> = if (layer != null) {
+            dao.getTextObjectsForLayer(layer.id).mapNotNull { row ->
+                val box = parseBoundingBox(row.boundingBox) ?: return@mapNotNull null
+                val to = runCatching { TextObject.fromJson(row.data) }.getOrNull()
+                    ?: return@mapNotNull null
+                TextRender(id = row.id, boundingBox = box, text = to.text)
+            }
+        } else emptyList()
+
+        val lineObjects: List<LineRender> = if (layer != null) {
+            dao.getLineObjectsForLayer(layer.id).mapNotNull { row ->
+                val box = parseBoundingBox(row.boundingBox) ?: return@mapNotNull null
+                val lo = runCatching { LineObject.fromJson(row.data) }.getOrNull()
+                    ?: return@mapNotNull null
+                parseLineRender(row.id, box, lo, density)
+            }
+        } else emptyList()
+
+        val links: List<LinkRender> = if (layer != null) {
+            dao.getLinkObjectsForLayer(layer.id).mapNotNull { row ->
+                val box = parseBoundingBox(row.boundingBox) ?: return@mapNotNull null
+                val lo = runCatching { LinkObject.fromJson(row.data) }.getOrNull()
+                    ?: return@mapNotNull null
+                parseLinkRender(row.id, box, lo, density)
+            }
+        } else emptyList()
+
+        val strokes: List<LiveStroke> = if (layer != null) {
+            dao.getStrokesForLayer(layer.id).mapNotNull { row ->
+                val sd = runCatching { StrokeData.fromJson(row.data) }.getOrNull()
+                    ?: return@mapNotNull null
+                LiveStroke.fromStrokeData(row.id, sd)
+            }
+        } else emptyList()
+
+        val bitmap = renderPage(pw, ph, templateBitmap, headings, textObjects, lineObjects, strokes, context, links)
+        return Pair(bitmap, templateBitmap)
     }
 
     private fun renderPage(
@@ -391,56 +523,7 @@ object NotebookExporter {
             val pageRow = dao.getObjectById(pageId)
                 ?: throw IllegalStateException("Page not found: $pageId")
 
-            val (pw, ph) = parseDimensions(pageRow.boundingBox)
-            val templateBitmap = loadTemplate(dao, pageRow.data, pw, ph)
-
-            val layer = dao.getLayerForPage(pageId)
-
-            val headings: List<HeadingStroke> = if (layer != null) {
-                dao.getHeadingsForLayer(layer.id).mapNotNull { row ->
-                    val box = parseBoundingBox(row.boundingBox) ?: return@mapNotNull null
-                    val ho = runCatching { HeadingObject.fromJson(row.data) }.getOrNull()
-                        ?: return@mapNotNull null
-                    HeadingStroke(id = row.id, boundingBox = box, strokes = ho.strokes, recognizedText = ho.recognizedText)
-                }
-            } else emptyList()
-
-            val textObjects: List<TextRender> = if (layer != null) {
-                dao.getTextObjectsForLayer(layer.id).mapNotNull { row ->
-                    val box = parseBoundingBox(row.boundingBox) ?: return@mapNotNull null
-                    val to = runCatching { TextObject.fromJson(row.data) }.getOrNull()
-                        ?: return@mapNotNull null
-                    TextRender(id = row.id, boundingBox = box, text = to.text)
-                }
-            } else emptyList()
-
-            val lineObjects: List<LineRender> = if (layer != null) {
-                dao.getLineObjectsForLayer(layer.id).mapNotNull { row ->
-                    val box = parseBoundingBox(row.boundingBox) ?: return@mapNotNull null
-                    val lo = runCatching { LineObject.fromJson(row.data) }.getOrNull()
-                        ?: return@mapNotNull null
-                    parseLineRender(row.id, box, lo, context.resources.displayMetrics.density)
-                }
-            } else emptyList()
-
-            val links: List<LinkRender> = if (layer != null) {
-                dao.getLinkObjectsForLayer(layer.id).mapNotNull { row ->
-                    val box = parseBoundingBox(row.boundingBox) ?: return@mapNotNull null
-                    val lo = runCatching { LinkObject.fromJson(row.data) }.getOrNull()
-                        ?: return@mapNotNull null
-                    parseLinkRender(row.id, box, lo, context.resources.displayMetrics.density)
-                }
-            } else emptyList()
-
-            val strokes: List<LiveStroke> = if (layer != null) {
-                dao.getStrokesForLayer(layer.id).mapNotNull { row ->
-                    val sd = runCatching { StrokeData.fromJson(row.data) }.getOrNull()
-                        ?: return@mapNotNull null
-                    LiveStroke.fromStrokeData(row.id, sd)
-                }
-            } else emptyList()
-
-            val bitmap = renderPage(pw, ph, templateBitmap, headings, textObjects, lineObjects, strokes, context, links)
+            val (bitmap, templateBitmap) = renderPageBitmap(dao, pageRow, context)
             templateBitmap?.recycle()
 
             val outDir = File(context.cacheDir, "exported_pngs").also { it.deleteRecursively(); it.mkdirs() }

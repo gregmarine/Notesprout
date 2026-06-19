@@ -386,7 +386,7 @@ picker, with full undo.
 
 ## Session 4 — Multi Export (PDF combined / PNG per-page / PNG as templates)
 
-**Status:** ☐ Not started
+**Status:** ✅ DONE (2026-06-19)
 
 **Goal:** Export every selected page. User chooses **PDF** (all selected pages in one PDF) or **PNG**
 (one file per page). For PNG, also offer **export as templates**. Never prompt for individual
@@ -459,6 +459,20 @@ filenames when exporting multiple PNGs — auto-name from notebook + page name/n
 - Export → PNG → Save as templates: N templates appear in the template library with sensible names.
 - Single-selection export still offers the existing Save/Template/Share flow (if that route was
   kept).
+
+**Corrections (impl):**
+- **`DocumentsContract` instead of `DocumentFile`.** §4.3 specified
+  `DocumentFile.fromTreeUri(...).createFile(...)` for writing PNGs into the chosen tree.
+  `androidx.documentfile` is not an explicit Gradle dependency (only transitive via appcompat), so to
+  honor CLAUDE.md's "no new Gradle dependencies" the PNG batch writer uses
+  `DocumentsContract.createDocument(...)` directly (platform API, minSdk 29) — same result, zero new
+  deps. The folder is still picked once via `OpenDocumentTree`.
+- **Single vs. multi routing.** Per §4.1's recommendation, single-selection keeps the richer existing
+  `showExportChoice` (Save / Template / Share); only `selectedCount() > 1` uses the new multi dialog
+  (PDF / PNG / Cancel → PNG sub-choice: Save images / Save as templates).
+- **Shared render path.** The per-page load+render block in `export` and `exportPage` was extracted
+  into a private `renderPageBitmap(...)` (per §4.2) so the new `exportPagesPdf` / `exportPagesPng`
+  reuse it rather than adding a third copy.
 
 **→ Haiku: clean build + install on G10. Fix-loop until pass. Update Status. Commit (no push).**
 
@@ -539,7 +553,7 @@ Append items discovered during implementation here. Seeds:
 | 1 — Selection model, Select All, multi-Delete | ✅ DONE (2026-06-19) |
 | 2 — Multi Copy/Paste & Move + before/after | ✅ DONE (2026-06-19) |
 | 3 — Multi Set Template | ✅ DONE (2026-06-19) |
-| 4 — Multi Export (PDF/PNG/templates) | ☐ Not started |
+| 4 — Multi Export (PDF/PNG/templates) | ✅ DONE (2026-06-19) |
 | 5 — Wrap-up (docs, polish) | ☐ Not started |
 </content>
 </invoke>
