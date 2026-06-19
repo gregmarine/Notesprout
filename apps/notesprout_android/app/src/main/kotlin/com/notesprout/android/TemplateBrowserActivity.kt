@@ -74,6 +74,17 @@ class TemplateBrowserActivity : AppCompatActivity() {
         const val MODE_MANAGE = 0
         /** Pick mode — returns a template id (S5/S6). */
         const val MODE_PICK = 1
+        /**
+         * Save-target mode (S12) — cross-launched from the page-index export sheet. Navigate folders
+         * only (no template cards), pick a destination, and on **Save Here** create a library template
+         * from the source PNG. Returns only [RESULT_OK]/cancel, no payload.
+         */
+        const val MODE_SAVE_TARGET = 2
+
+        /** [MODE_SAVE_TARGET] only: absolute path of the exported PNG to import as a template. */
+        const val EXTRA_SAVE_SOURCE_PATH = "save_source_path"
+        /** [MODE_SAVE_TARGET] only: pre-sanitized default template name (page heading or "Page N"). */
+        const val EXTRA_SAVE_DEFAULT_NAME = "save_default_name"
 
         /** PICK only: also show a name field + CREATE (S6). Default false. */
         const val EXTRA_COLLECT_NAME = "collect_name"
@@ -136,6 +147,11 @@ class TemplateBrowserActivity : AppCompatActivity() {
     private var collectName: Boolean = false
     private var pendingTemplateId: String = ""   // "" = Blank (default selection)
     private var targetParentId: String? = null   // collectName: folder the new notebook lands in
+
+    /** True when launched as a Save-as-Template destination picker ([MODE_SAVE_TARGET]). */
+    private val isSaveTarget: Boolean get() = mode == MODE_SAVE_TARGET
+    private var saveSourcePath: String? = null   // save-target: PNG to import
+    private var saveDefaultName: String = "Template"  // save-target: default name in the prompt
 
     // Directory navigation — null = root.
     private val directoryStack = ArrayDeque<ObjectEntity?>().apply { add(null) }
@@ -224,6 +240,11 @@ class TemplateBrowserActivity : AppCompatActivity() {
             )
             binding.btnCreate.setOnClickListener { confirmCreate() }
         }
+        if (isSaveTarget) {
+            saveSourcePath  = intent.getStringExtra(EXTRA_SAVE_SOURCE_PATH)
+            saveDefaultName = intent.getStringExtra(EXTRA_SAVE_DEFAULT_NAME)?.takeIf { it.isNotBlank() }
+                ?: "Template"
+        }
         sortPrefs = SortPreferencesManager.load(this, SortPreferencesManager.TEMPLATE_PREFS_NAME)
         val titleOverride = intent.getStringExtra(EXTRA_TITLE)
         if (titleOverride != null) binding.tvTopBarTitle.text = titleOverride
@@ -258,8 +279,14 @@ class TemplateBrowserActivity : AppCompatActivity() {
         }
         binding.btnClearSearch.setOnClickListener { exitSearchMode() }
 
-        binding.btnPickerConfirm.setOnClickListener { confirmPickerDestination() }
-        binding.btnPickerCancel.setOnClickListener  { exitPicker() }
+        // The picker toolbar is shared: in MANAGE it confirms a move/copy destination; in
+        // MODE_SAVE_TARGET it confirms the Save-as-Template destination.
+        binding.btnPickerConfirm.setOnClickListener {
+            if (isSaveTarget) confirmSaveTarget() else confirmPickerDestination()
+        }
+        binding.btnPickerCancel.setOnClickListener {
+            if (isSaveTarget) finish() else exitPicker()
+        }
 
         binding.btnPinned.setOnClickListener { enterPinnedView() }
         binding.btnPinnedCancel.setOnClickListener { exitPinnedView() }
@@ -270,6 +297,10 @@ class TemplateBrowserActivity : AppCompatActivity() {
         binding.btnRecentsCancel.setOnClickListener { exitRecentsView() }
         // Recents is PICK-only (GONE in MANAGE).
         binding.btnRecents.visibility = if (mode == MODE_PICK) View.VISIBLE else View.GONE
+
+        // Save-target: repurpose the picker toolbar as a persistent destination chooser. Only the
+        // breadcrumb + New Template Folder remain; everything else is hidden.
+        if (isSaveTarget) applySaveTargetUI()
 
         binding.gridContainer.setOnTouchListener { _, event ->
             gestureDetector.onTouchEvent(event)
@@ -501,6 +532,127 @@ class TemplateBrowserActivity : AppCompatActivity() {
         }
     }
 
+    // ── Save-target mode (S12) ────────────────────────────────────────────────
+
+    /**
+     * One-shot UI for [MODE_SAVE_TARGET]: the picker toolbar becomes a persistent "Choose a folder"
+     * bar with **Save Here** + **Cancel**; only the breadcrumb and New Template Folder remain. Search,
+     * Sort, Import, Pinned, Recents are hidden. Folders-only navigation is enforced in [loadAndRender].
+     */
+    private fun applySaveTargetUI() {
+        binding.pickerToolbar.visibility        = View.VISIBLE
+        binding.pickerToolbarDivider.visibility = View.VISIBLE
+        binding.pickerTitle.text     = "Choose a folder"
+        binding.btnPickerConfirm.text = "Save Here"
+
+        binding.btnNewTemplateFolder.visibility = View.VISIBLE
+        binding.btnImport.visibility            = View.GONE
+        binding.btnSearch.visibility            = View.GONE
+        binding.btnClearSearch.visibility       = View.GONE
+        binding.btnSort.visibility              = View.GONE
+        binding.btnPinned.visibility            = View.GONE
+        binding.btnRecents.visibility           = View.GONE
+    }
+
+    /**
+     * Prompts for a template name (default = [saveDefaultName]), then imports the source PNG at
+     * [saveSourcePath] into the current folder as a library template. On success returns [RESULT_OK].
+     */
+    private fun confirmSaveTarget() {
+        val dialogBinding = DialogNewNotebookBinding.inflate(layoutInflater)
+        dialogBinding.editNotebookName.setText(saveDefaultName)
+        dialogBinding.editNotebookName.setSelection(saveDefaultName.length)
+
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("Template name")
+            .setView(dialogBinding.root)
+            .setPositiveButton("Save") { _, _ ->
+                val imm = getSystemService(InputMethodManager::class.java)
+                imm.hideSoftInputFromWindow(dialogBinding.editNotebookName.windowToken, 0)
+                val name = dialogBinding.editNotebookName.text?.toString()?.trim().orEmpty()
+                lifecycleScope.launch {
+                    val error = validateSaveTemplateName(name)
+                    if (error != null) {
+                        Toast.makeText(this@TemplateBrowserActivity, error, Toast.LENGTH_SHORT).show()
+                    } else {
+                        saveTemplateFromSource(name)
+                    }
+                }
+            }
+            .setNegativeButton("Cancel") { _, _ ->
+                val imm = getSystemService(InputMethodManager::class.java)
+                imm.hideSoftInputFromWindow(dialogBinding.editNotebookName.windowToken, 0)
+            }
+            .create()
+
+        dialog.window?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE)
+        dialog.show()
+        dialog.window?.setElevation(0f)
+        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+
+        dialogBinding.editNotebookName.requestFocus()
+        dialogBinding.editNotebookName.postDelayed({
+            ViewCompat.getWindowInsetsController(dialogBinding.editNotebookName)
+                ?.show(WindowInsetsCompat.Type.ime())
+                ?: run {
+                    val imm = getSystemService(InputMethodManager::class.java)
+                    @Suppress("DEPRECATION")
+                    imm.showSoftInput(dialogBinding.editNotebookName, InputMethodManager.SHOW_IMPLICIT)
+                }
+        }, 100)
+    }
+
+    /** Name whitelist for save-target — same rules as import; collisions are auto-uniquified later. */
+    private fun validateSaveTemplateName(name: String): String? {
+        if (name.isBlank()) return "Template name cannot be empty"
+        if (name == "." || name == "..") return "Invalid template name"
+        if (name.contains(Regex("[^a-zA-Z0-9_\\-. ]"))) {
+            return "Name may only contain letters, numbers, spaces, and _ - ."
+        }
+        return null
+    }
+
+    /**
+     * Reads the source PNG at [saveSourcePath], decodes its bounds for width/height, base64-encodes
+     * it, and persists a library template in the current folder (name uniquified against siblings,
+     * same as Import). Finishes with [RESULT_OK] on success.
+     */
+    private fun saveTemplateFromSource(name: String) {
+        val path = saveSourcePath
+        if (path.isNullOrBlank()) {
+            Toast.makeText(this, "Save failed.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val destFolderId = currentParentId
+        lifecycleScope.launch {
+            val ok = withContext(Dispatchers.IO) {
+                try {
+                    val bytes = java.io.File(path).readBytes()
+                    val boundsOpts = Options().apply { inJustDecodeBounds = true }
+                    BitmapFactory.decodeByteArray(bytes, 0, bytes.size, boundsOpts)
+                    val w = boundsOpts.outWidth
+                    val h = boundsOpts.outHeight
+                    if (w <= 0 || h <= 0) throw IllegalStateException("Not a valid image")
+                    val base64 = Base64.encodeToString(bytes, Base64.NO_WRAP)
+                    val siblings = repository.getTemplates(destFolderId)
+                    val finalName = makeUniqueName(name, siblings.map { it.name })
+                    repository.createTemplate(finalName, destFolderId, w, h, base64)
+                    Slog.d(TAG) { "saveTemplateFromSource: saved '$finalName' (${w}x${h})" }
+                    true
+                } catch (e: Exception) {
+                    Slog.d(TAG) { "saveTemplateFromSource: failed: ${e.message}" }
+                    false
+                }
+            }
+            if (ok) {
+                setResult(RESULT_OK)
+                finish()
+            } else {
+                Toast.makeText(this@TemplateBrowserActivity, "Save failed.", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
     private fun confirmPickerDestination() {
         val state = picker
         if (state == TemplatePicker.None) return
@@ -681,8 +833,8 @@ class TemplateBrowserActivity : AppCompatActivity() {
                     searchResults = emptyList()
                     val parentId = currentParentId
                     val folders = repository.getTemplateFolders(parentId).map { BrowseItem.Folder(it) }
-                    if (picker != TemplatePicker.None) {
-                        // In picker mode: only folders are destinations.
+                    if (picker != TemplatePicker.None || isSaveTarget) {
+                        // Picker / save-target: only folders are destinations.
                         sortBrowseItems(folders)
                     } else {
                         val templates = repository.getTemplates(parentId).map { BrowseItem.Template(it) }
@@ -787,8 +939,8 @@ class TemplateBrowserActivity : AppCompatActivity() {
                 isPinnedView  -> "No pinned templates yet."
                 isRecentsView -> "No recent templates yet."
                 isSearchMode  -> "No templates found for \"$currentSearchQuery\""
-                picker != TemplatePicker.None && directoryStack.size <= 1 -> "No template folders yet."
-                picker != TemplatePicker.None -> "Empty folder."
+                (picker != TemplatePicker.None || isSaveTarget) && directoryStack.size <= 1 -> "No template folders yet."
+                (picker != TemplatePicker.None || isSaveTarget) -> "Empty folder."
                 directoryStack.size > 1 -> "Empty folder."
                 else -> "No templates yet."
             }

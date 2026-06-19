@@ -46,7 +46,7 @@ adb -s 34E517F9 install -r app/build/outputs/apk/debug/app-debug.apk
 | 9 | Recent templates — device-local store + use-tracking | ✅ Done |
 | 10 | Pinned & recent in the PICK selectors (new-notebook + in-notebook) | ✅ Done |
 | 11 | Toolbar relocation — search/sort/pinned/recent → top bar | ✅ Done |
-| 12 | "Save as Template" from the page index | ⬜ Not started |
+| 12 | "Save as Template" from the page index | ✅ Done |
 | 13 | Phase 2 wrap-up — docs, dead-code, cross-device QA | ⬜ Not started |
 
 Status legend: ⬜ Not started · 🚧 In progress · ✅ Done (committed, not pushed)
@@ -961,3 +961,15 @@ Commit (no push).
   Margins dropped (the 44dp ToolbarButton style spaces them); `btnNewTemplateFolder` lost its now-leading
   `marginStart`. Mode rules unchanged: `btnRecents` GONE in MANAGE; pinned/recents/search hide the other
   action buttons; picker hides all four.
+- **S12 Save-as-Template:** new `MODE_SAVE_TARGET = 2` + `EXTRA_SAVE_SOURCE_PATH` /
+  `EXTRA_SAVE_DEFAULT_NAME`. `PageIndexActivity.showExportChoice` gained a **neutral** "Save as
+  Template" button that launches the browser via a `StartActivityForResult` launcher (PNG path +
+  pre-sanitized page-heading/`"Page N"` default + `EXTRA_TITLE`); `RESULT_OK` → Toast "Saved to
+  Templates". **Reused the existing `pickerToolbar`** (no new layout views) as a persistent "Choose a
+  folder" bar with **Save Here** + **Cancel** — `confirmPickerDestination`/`exitPicker` are branched on
+  `isSaveTarget`. Folders-only nav reuses the move/copy filter (`picker != None || isSaveTarget` in
+  `loadAndRender` + the empty-state messages); New-Folder stays available, all else hidden.
+  **Save Here** → rename-style name prompt (whitelist/`.`/`..`/non-empty; `makeUniqueName` against
+  siblings like Import) → decode bounds for w/h, base64 `NO_WRAP`, `repository.createTemplate` in the
+  chosen folder → `setResult(RESULT_OK)`. Creation ≠ use, so **no recents recording** (per P2). No new
+  drawables/deps.

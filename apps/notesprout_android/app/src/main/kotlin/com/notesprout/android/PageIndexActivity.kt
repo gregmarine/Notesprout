@@ -130,6 +130,14 @@ class PageIndexActivity : AppCompatActivity() {
 
     private var pendingExportFile: java.io.File? = null
 
+    private val saveTemplateLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == RESULT_OK) {
+            android.widget.Toast.makeText(this, "Saved to Templates", android.widget.Toast.LENGTH_SHORT).show()
+        }
+    }
+
     private val savePngLauncher = registerForActivityResult(
         ActivityResultContracts.CreateDocument("image/png")
     ) { uri ->
@@ -745,16 +753,34 @@ class PageIndexActivity : AppCompatActivity() {
 
             dialog.dismiss()
             exitActionMode()
-            showExportChoice(pngFile)
+            val defaultName = sanitizeTemplateName(
+                pageEntry.headingName ?: "Page ${pageEntry.pageNumber}"
+            )
+            showExportChoice(pngFile, defaultName)
         }
     }
 
-    private fun showExportChoice(file: java.io.File) {
+    /** Whitelist a proposed template name to the browser's accepted characters; never empty. */
+    private fun sanitizeTemplateName(raw: String): String {
+        val cleaned = raw.replace(Regex("[^a-zA-Z0-9_\\-. ]"), "_").trim()
+        return if (cleaned.isBlank() || cleaned == "." || cleaned == "..") "Template" else cleaned
+    }
+
+    private fun showExportChoice(file: java.io.File, templateDefaultName: String) {
         val d = AlertDialog.Builder(this)
             .setTitle("Export page")
             .setPositiveButton("Save to device") { _, _ ->
                 pendingExportFile = file
                 savePngLauncher.launch(file.name)
+            }
+            .setNeutralButton("Save as Template") { _, _ ->
+                val intent = Intent(this, TemplateBrowserActivity::class.java).apply {
+                    putExtra(TemplateBrowserActivity.EXTRA_MODE, TemplateBrowserActivity.MODE_SAVE_TARGET)
+                    putExtra(TemplateBrowserActivity.EXTRA_SAVE_SOURCE_PATH, file.absolutePath)
+                    putExtra(TemplateBrowserActivity.EXTRA_SAVE_DEFAULT_NAME, templateDefaultName)
+                    putExtra(TemplateBrowserActivity.EXTRA_TITLE, "Save as Template")
+                }
+                saveTemplateLauncher.launch(intent)
             }
             .setNegativeButton("Share") { _, _ ->
                 val uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", file)
