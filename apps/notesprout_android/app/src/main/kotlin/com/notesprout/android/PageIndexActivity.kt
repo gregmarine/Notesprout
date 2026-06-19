@@ -192,6 +192,26 @@ class PageIndexActivity : AppCompatActivity() {
         }
     }
 
+    /** Selected pages captured for a batch "PNG as templates" import, pending the folder pick. */
+    private var pendingTemplateEntries: List<PageEntry> = emptyList()
+
+    /**
+     * Folder picker for batch "PNG as templates" (P2.2). Returns the chosen library folder id
+     * ("" = root/null); the selected pages are then rendered and imported into that folder.
+     */
+    private val pickTemplateFolderLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode != RESULT_OK) {
+            pendingTemplateEntries = emptyList()  // cancelled — selection stays in action mode
+            return@registerForActivityResult
+        }
+        val folderId = result.data
+            ?.getStringExtra(TemplateBrowserActivity.RESULT_TEMPLATE_FOLDER_ID)
+            ?.takeIf { it.isNotEmpty() }  // "" encodes root/null
+        renderAndImportTemplates(folderId)
+    }
+
     private val templatePickerLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
@@ -1396,15 +1416,27 @@ class PageIndexActivity : AppCompatActivity() {
     }
 
     /**
-     * Export all selected pages as PNGs and import each into the template library at the root
-     * folder (parentId = null). Page label is used as the template name (sanitized, de-duped
-     * against existing root templates). All heavy work runs on [Dispatchers.IO].
-     *
-     * Phase-2 note: choosing a destination folder for the template import (rather than always
-     * importing into root) is deferred to Phase 2.
+     * Export all selected pages as PNGs and import each into the template library (P2.2). First lets
+     * the user pick a destination folder via [TemplateBrowserActivity.MODE_PICK_FOLDER]; the actual
+     * render + import happens in [renderAndImportTemplates] once the folder comes back.
      */
     private fun exportMultiAsPngTemplates() {
-        val entries = orderedSelectedEntries() ?: return
+        pendingTemplateEntries = orderedSelectedEntries() ?: return
+        val intent = Intent(this, TemplateBrowserActivity::class.java)
+            .putExtra(TemplateBrowserActivity.EXTRA_MODE, TemplateBrowserActivity.MODE_PICK_FOLDER)
+            .putExtra(TemplateBrowserActivity.EXTRA_TITLE, "Save templates to…")
+        pickTemplateFolderLauncher.launch(intent)
+    }
+
+    /**
+     * Render the [pendingTemplateEntries] to PNGs and import each into the template library under
+     * [parentId] (null = root). Page label is used as the template name (sanitized, de-duped against
+     * existing templates in that folder). All heavy work runs on [Dispatchers.IO].
+     */
+    private fun renderAndImportTemplates(parentId: String?) {
+        val entries = pendingTemplateEntries
+        pendingTemplateEntries = emptyList()
+        if (entries.isEmpty()) return
         val path    = notebookSoilPath ?: return
         val notebookName = intent.getStringExtra(EXTRA_NOTEBOOK_NAME) ?: "notebook"
 
@@ -1472,8 +1504,8 @@ class PageIndexActivity : AppCompatActivity() {
             handler.post { tvMessage.text = "Importing templates…" }
 
             val importedCount = withContext(Dispatchers.IO) {
-                // Fetch existing root-level template names once so de-duplication is consistent.
-                val existing = runCatching { indexRepo.getTemplates(null) }.getOrElse { emptyList() }
+                // Fetch existing template names in the target folder once so de-dup is consistent.
+                val existing = runCatching { indexRepo.getTemplates(parentId) }.getOrElse { emptyList() }
                 val existingNames = existing.map { it.name }.toMutableList()
 
                 var count = 0
@@ -1492,7 +1524,7 @@ class PageIndexActivity : AppCompatActivity() {
                             continue
                         }
                         val base64 = Base64.encodeToString(bytes, Base64.NO_WRAP)
-                        indexRepo.createTemplate(finalName, null, w, h, base64)
+                        indexRepo.createTemplate(finalName, parentId, w, h, base64)
                         Slog.d("PageIndexActivity") { "Imported template '$finalName' (${w}x${h})" }
                         count++
                     } catch (e: Exception) {

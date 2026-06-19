@@ -166,10 +166,13 @@ destination mode is entered. Back / system-back cancels destination mode → act
     `<safeNotebook>_<heading|PageN>.png` (de-duplicated via `makeUniqueFilename`), then prompts **once**
     for a folder (`OpenDocumentTree`) and writes each file via `DocumentsContract.createDocument` (no
     `androidx.documentfile` dep, no per-file prompts).
-  - **PNG → Save as templates** — renders each page to PNG, then imports each into the template library
-    **root** (`IndexRepository.createTemplate(name, parentId=null, w, h, base64)`), named from the page
-    label and de-duplicated against existing root templates (`makeUniqueTemplateName`, `(2)`/`(3)`
-    suffix). Choosing a destination folder is a Phase-2 item.
+  - **PNG → Save as templates** — first prompts for a **destination folder** via
+    `TemplateBrowserActivity.MODE_PICK_FOLDER` (a folders-only chooser whose **Save Here** returns the
+    folder id in `RESULT_TEMPLATE_FOLDER_ID`, `""` = root). `renderAndImportTemplates(parentId)` then
+    renders each selected page to PNG and imports it into that folder
+    (`IndexRepository.createTemplate(name, parentId, w, h, base64)`), named from the page label and
+    de-duplicated against existing templates **in that folder** (`makeUniqueTemplateName`, `(2)`/`(3)`
+    suffix). Cancel/back in the chooser imports nothing and leaves the selection in action mode.
 
 All exporters share `NotebookExporter.renderPageBitmap(...)` (white → template → headings → text →
 strokes, full-quality), recycle bitmaps per page, run on `Dispatchers.IO` behind a non-cancellable

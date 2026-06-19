@@ -82,6 +82,13 @@ class TemplateBrowserActivity : AppCompatActivity() {
          * from the source PNG. Returns only [RESULT_OK]/cancel, no payload.
          */
         const val MODE_SAVE_TARGET = 2
+        /**
+         * Folder-picker mode (P2.2) — cross-launched from the page-index batch "PNG as templates"
+         * export. Same folders-only chooser as [MODE_SAVE_TARGET], but **Save Here** returns the
+         * chosen folder id via [RESULT_TEMPLATE_FOLDER_ID] instead of importing — the caller does the
+         * batch `createTemplate` into that folder. No source PNG, no name prompt.
+         */
+        const val MODE_PICK_FOLDER = 3
 
         /** [MODE_SAVE_TARGET] only: absolute path of the exported PNG to import as a template. */
         const val EXTRA_SAVE_SOURCE_PATH = "save_source_path"
@@ -101,6 +108,8 @@ class TemplateBrowserActivity : AppCompatActivity() {
 
         /** Result: chosen template id. "" = Blank. */
         const val RESULT_TEMPLATE_ID = "result_template_id"
+        /** Result ([MODE_PICK_FOLDER]): chosen destination folder id. "" = root (null). */
+        const val RESULT_TEMPLATE_FOLDER_ID = "result_template_folder_id"
         /** Result: only when [EXTRA_COLLECT_NAME]. */
         const val RESULT_NOTEBOOK_NAME = "result_notebook_name"
 
@@ -152,6 +161,8 @@ class TemplateBrowserActivity : AppCompatActivity() {
 
     /** True when launched as a Save-as-Template destination picker ([MODE_SAVE_TARGET]). */
     private val isSaveTarget: Boolean get() = mode == MODE_SAVE_TARGET
+    /** True for any folders-only chooser ([MODE_SAVE_TARGET] or [MODE_PICK_FOLDER]) — shared chrome/nav. */
+    private val isFolderChooser: Boolean get() = mode == MODE_SAVE_TARGET || mode == MODE_PICK_FOLDER
     private var saveSourcePath: String? = null   // save-target: PNG to import
     private var saveDefaultName: String = "Template"  // save-target: default name in the prompt
 
@@ -314,10 +325,14 @@ class TemplateBrowserActivity : AppCompatActivity() {
         // The picker toolbar is shared: in MANAGE it confirms a move/copy destination; in
         // MODE_SAVE_TARGET it confirms the Save-as-Template destination.
         binding.btnPickerConfirm.setOnClickListener {
-            if (isSaveTarget) confirmSaveTarget() else confirmPickerDestination()
+            when {
+                isSaveTarget -> confirmSaveTarget()
+                mode == MODE_PICK_FOLDER -> returnPickedFolder()
+                else -> confirmPickerDestination()
+            }
         }
         binding.btnPickerCancel.setOnClickListener {
-            if (isSaveTarget) finish() else exitPicker()
+            if (isFolderChooser) finish() else exitPicker()
         }
 
         binding.btnPinned.setOnClickListener { enterPinnedView() }
@@ -330,9 +345,9 @@ class TemplateBrowserActivity : AppCompatActivity() {
         // Recents is PICK-only (GONE in MANAGE).
         binding.btnRecents.visibility = if (mode == MODE_PICK) View.VISIBLE else View.GONE
 
-        // Save-target: repurpose the picker toolbar as a persistent destination chooser. Only the
-        // breadcrumb + New Template Folder remain; everything else is hidden.
-        if (isSaveTarget) applySaveTargetUI()
+        // Folder chooser (save-target / pick-folder): repurpose the picker toolbar as a persistent
+        // destination chooser. Only the breadcrumb + New Template Folder remain; all else hidden.
+        if (isFolderChooser) applySaveTargetUI()
 
         binding.gridContainer.setOnTouchListener { _, event ->
             gestureDetector.onTouchEvent(event)
@@ -634,6 +649,16 @@ class TemplateBrowserActivity : AppCompatActivity() {
         }, 100)
     }
 
+    /**
+     * [MODE_PICK_FOLDER]: return the currently-browsed folder id to the caller (the batch importer
+     * does the actual `createTemplate`). "" encodes root/null.
+     */
+    private fun returnPickedFolder() {
+        val resultIntent = Intent().putExtra(RESULT_TEMPLATE_FOLDER_ID, currentParentId ?: "")
+        setResult(RESULT_OK, resultIntent)
+        finish()
+    }
+
     /** Name whitelist for save-target — same rules as import; collisions are auto-uniquified later. */
     private fun validateSaveTemplateName(name: String): String? {
         if (name.isBlank()) return "Template name cannot be empty"
@@ -865,8 +890,8 @@ class TemplateBrowserActivity : AppCompatActivity() {
                     searchResults = emptyList()
                     val parentId = currentParentId
                     val folders = repository.getTemplateFolders(parentId).map { BrowseItem.Folder(it) }
-                    if (picker != TemplatePicker.None || isSaveTarget) {
-                        // Picker / save-target: only folders are destinations.
+                    if (picker != TemplatePicker.None || isFolderChooser) {
+                        // Picker / folder-chooser: only folders are destinations.
                         sortBrowseItems(folders)
                     } else {
                         val templates = repository.getTemplates(parentId).map { BrowseItem.Template(it) }
@@ -971,8 +996,8 @@ class TemplateBrowserActivity : AppCompatActivity() {
                 isPinnedView  -> "No pinned templates yet."
                 isRecentsView -> "No recent templates yet."
                 isSearchMode  -> "No templates found for \"$currentSearchQuery\""
-                (picker != TemplatePicker.None || isSaveTarget) && directoryStack.size <= 1 -> "No template folders yet."
-                (picker != TemplatePicker.None || isSaveTarget) -> "Empty folder."
+                (picker != TemplatePicker.None || isFolderChooser) && directoryStack.size <= 1 -> "No template folders yet."
+                (picker != TemplatePicker.None || isFolderChooser) -> "Empty folder."
                 directoryStack.size > 1 -> "Empty folder."
                 else -> "No templates yet."
             }

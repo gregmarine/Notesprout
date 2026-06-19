@@ -709,6 +709,103 @@ Then update Status above and commit (no push).**
 
 ---
 
+## Phase 2 — Session P2.2 — Choose template folder for batch "PNG as templates"
+
+**Status:** ✅ DONE (2026-06-19)
+
+> **Goal:** When the user exports a multi-page selection as **PNG → Save as templates**, let them
+> **pick the destination folder** in the template library instead of always dumping every template
+> into the library **root** (`parentId = null`, as Session 4.4 shipped). The single-page "Save as
+> Template" flow (which already lets the user navigate folders via `MODE_SAVE_TARGET`) is the model;
+> this session brings the same folder choice to the **batch** path, **once**, with no per-file
+> prompts — matching the "never prompt for individual filenames when exporting multiple" rule from
+> Session 4.
+>
+> **Slogan check:** reuses the existing folder-chooser chrome (`applySaveTargetUI` — "Choose a
+> folder" / "Save Here" + New Template Folder). No color, no Material chrome. Calm, paper-like.
+
+### Architecture recap (read before implementing)
+
+- **Today's batch path** (`PageIndexActivity.exportMultiAsPngTemplates()`, line ~1406): renders each
+  selected page to a cached PNG (progress dialog), then on `Dispatchers.IO` imports each into the
+  library via `indexRepo.createTemplate(finalName, **null**, w, h, base64)` — hard-coded root
+  `parentId = null`. Names de-duped against `indexRepo.getTemplates(**null**)`.
+- **Single-page "Save as Template"** (`showExportChoice`, line ~1543) launches
+  `TemplateBrowserActivity` in `MODE_SAVE_TARGET` (`saveTemplateLauncher`, line ~187): the browser
+  shows a **folders-only** chooser (`applySaveTargetUI`, line ~574), and **Save Here**
+  (`confirmSaveTarget`, line ~593) prompts for a name and imports the one PNG into `currentParentId`.
+- `TemplateBrowserActivity` modes (companion, line ~70): `MODE_MANAGE=0`, `MODE_PICK=1`,
+  `MODE_SAVE_TARGET=2`. `isSaveTarget` (line ~154) drives: extras read (~275), confirm/cancel
+  branch (~317/320), `applySaveTargetUI()` (~335), and folders-only enforcement in `loadAndRender`
+  (~868) + empty-state text (~974/975).
+- `IndexRepository.createTemplate(name, parentId, w, h, base64)` and `getTemplates(parentId)` already
+  take any folder id (the browser passes `currentParentId` everywhere). No repository change needed.
+
+### P2.2.1 New browser mode: folder-only picker that **returns** the folder
+
+`TemplateBrowserActivity` — add a mode that reuses the Save-target chrome but, instead of importing,
+**returns the chosen folder id** to the caller (the batch importer does the actual `createTemplate`).
+
+- Add `const val MODE_PICK_FOLDER = 3` and `const val RESULT_TEMPLATE_FOLDER_ID = "result_template_folder_id"`
+  (value = chosen folder id; `""` encodes root/`null`, same empty-string-for-null convention used
+  elsewhere).
+- Introduce `private val isFolderChooser: Boolean get() = mode == MODE_SAVE_TARGET || mode == MODE_PICK_FOLDER`.
+  Replace the **UI/navigation** `isSaveTarget` uses with `isFolderChooser`: `applySaveTargetUI()`
+  gate (~335), folders-only in `loadAndRender` (~868), empty-state text (~974/975), and the
+  **cancel** branch (~320 → `if (isFolderChooser) finish() else exitPicker()`). Keep `isSaveTarget`
+  for the **import-only** branches: the extras read (~275, source PNG + default name) and the
+  **confirm** branch.
+- Confirm button (`btnPickerConfirm`, ~316): branch three ways —
+  `if (isSaveTarget) confirmSaveTarget() else if (mode == MODE_PICK_FOLDER) returnPickedFolder() else confirmPickerDestination()`.
+- `applySaveTargetUI()` already reads well for both ("Choose a folder" / "Save Here"); leave the
+  copy as-is (an `EXTRA_TITLE` override still works for the top-bar title). Call it for
+  `isFolderChooser`, not just `isSaveTarget` (the ~335 gate change covers this).
+- Add `private fun returnPickedFolder()`:
+  `setResult(RESULT_OK, Intent().putExtra(RESULT_TEMPLATE_FOLDER_ID, currentParentId ?: "")); finish()`.
+
+### P2.2.2 Launch the folder picker from the batch path (`PageIndexActivity`)
+
+- Snapshot fields for the deferred import (the picker is a separate activity; capture inputs up front
+  so the import doesn't depend on live selection): `private var pendingTemplateEntries: List<PageEntry> = emptyList()`.
+- New launcher `pickTemplateFolderLauncher` (`StartActivityForResult`): on `RESULT_OK`, read
+  `RESULT_TEMPLATE_FOLDER_ID` (`""` → `null`) and call `renderAndImportTemplates(folderId)`; on
+  cancel, clear `pendingTemplateEntries` and no-op (selection stays in action mode).
+- Rewrite `exportMultiAsPngTemplates()` to **pick the folder first** (cheaper: cancel before any
+  rendering), then render+import:
+  - `pendingTemplateEntries = orderedSelectedEntries() ?: return`.
+  - Launch `TemplateBrowserActivity` with `EXTRA_MODE = MODE_PICK_FOLDER`,
+    `EXTRA_TITLE = "Save templates to…"`.
+- Extract the existing render + import body into `private fun renderAndImportTemplates(parentId: String?)`,
+  using `pendingTemplateEntries` (cleared at the top) and replacing the two hard-coded `null`s:
+  `indexRepo.getTemplates(parentId)` for de-dup and `indexRepo.createTemplate(finalName, parentId, …)`.
+  The progress dialog, sanitize/de-dup helpers, `exitActionMode()`, and the final toast are unchanged.
+
+### P2.2.3 Acceptance
+
+- Multi-select → Export → PNG → **Save as templates** → the folder chooser opens (folders only, "Save
+  Here"); navigate into a subfolder (or create one with New Template Folder) and tap **Save Here** →
+  all N templates land in **that** folder (verify in the template manager), names de-duped against
+  that folder's existing templates.
+- Choosing the **root** (Save Here at top level) behaves exactly as today (templates in root).
+- **Cancel/back** in the chooser: nothing is imported; the page index stays in action mode with the
+  selection intact.
+- Single-page "Save as Template" (`MODE_SAVE_TARGET`) is unchanged — still prompts for a name and
+  imports into the chosen folder.
+- No `Log.d` (use `Slog.d`); no `runBlocking`; all rendering + DB work on `Dispatchers.IO` behind the
+  progress dialog; `kotlinx.serialization` only.
+
+### P2.2.4 Docs
+
+- Update the **Page Index — Multi-Page Selection** section of `docs/mainactivity-and-recents.md`: the
+  "PNG → Save as templates" batch now picks a destination folder (folders-only chooser, Save Here),
+  no longer always root. Remove the "deferred to Phase 2" note. Drop the matching Phase-2 backlog
+  seed below once shipped.
+
+**→ Haiku: clean build + install on G10. Fix-loop (Sonnet fix → Haiku rebuild) until user passes.
+Then update Status above and commit (no push).**
+
+---
+
 ## Phase 2 Backlog (do NOT build in Phase 1 without discussion)
 
 Append items discovered during implementation here. Seeds:
@@ -717,8 +814,6 @@ Append items discovered during implementation here. Seeds:
   P2.1 above.** (Destination tap selects-and-previews; **OK** commits; Cancel via the existing
   back / `cancelDestMode()` path. Affects only the `destMode` gate in front of
   `executeMove` / `executePaste`; the batch ops and undo/redo are untouched.)
-- **Choose template folder for batch "PNG as templates"** instead of importing into root (Session 4.4
-  noted this).
 - **Range selection** (tap first, shift/long-press last to select a span) for faster large
   selections.
 - **Selection count badge on each grid page** / a footer summary while paginating.
@@ -741,5 +836,6 @@ Append items discovered during implementation here. Seeds:
 | 4 — Multi Export (PDF/PNG/templates) | ✅ DONE (2026-06-19) |
 | 5 — Wrap-up (docs, polish) | ✅ DONE (2026-06-19) |
 | P2.1 — Confirm step for Copy/Move destinations | ✅ DONE (2026-06-19) |
+| P2.2 — Choose template folder for batch PNG-as-templates | ✅ DONE (2026-06-19) |
 </content>
 </invoke>
