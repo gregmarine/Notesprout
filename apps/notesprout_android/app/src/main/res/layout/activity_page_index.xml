@@ -57,14 +57,7 @@
             android:contentDescription="Copy page"
             android:visibility="gone" />
 
-        <!-- Paste page — only visible in action mode -->
-        <androidx.appcompat.widget.AppCompatImageButton
-            android:id="@+id/btnPastePage"
-            style="@style/Widget.Notesprout.ToolbarButton"
-            android:layout_marginEnd="4dp"
-            android:src="@drawable/ic_paste_page"
-            android:contentDescription="Paste page"
-            android:visibility="gone" />
+        <!-- Paste page button removed: Copy now immediately enters destination-picking PASTE mode. -->
 
         <!-- Delete page — only visible in action mode -->
         <androidx.appcompat.widget.AppCompatImageButton
@@ -91,6 +84,24 @@
             android:layout_marginEnd="4dp"
             android:src="@drawable/ic_export"
             android:contentDescription="Export page as PNG"
+            android:visibility="gone" />
+
+        <!-- Before/After selectable text buttons — only visible in destination-picking mode (move
+             or paste). Labels are set at runtime ("Move Before"/"Move After" or "Copy Before"/
+             "Copy After"). Uses bg_toolbar_button state_selected selector (1.5dp inkBlack border on
+             selected state) to show which is active. Before is selected by default (insertBefore=true). -->
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/btnInsertBefore"
+            style="@style/Widget.Notesprout.ToggleTextButton"
+            android:layout_marginEnd="4dp"
+            android:text="Move Before"
+            android:visibility="gone" />
+
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/btnInsertAfter"
+            style="@style/Widget.Notesprout.ToggleTextButton"
+            android:layout_marginEnd="4dp"
+            android:text="Move After"
             android:visibility="gone" />
 
     </LinearLayout>

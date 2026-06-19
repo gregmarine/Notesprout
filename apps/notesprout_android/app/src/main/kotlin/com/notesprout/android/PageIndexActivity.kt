@@ -53,12 +53,17 @@ class PageIndexActivity : AppCompatActivity() {
         const val EXTRA_DELETED_PAGE_INDICES  = "deleted_page_indices"
         /** Comma-separated deletedAt timestamps matching [EXTRA_DELETED_PAGE_IDS]. */
         const val EXTRA_DELETED_PAGE_TIMESTAMPS = "deleted_page_timestamps"
-        /** Comma-separated UUIDs of pages moved during this session (may be empty). */
+        /** Comma-separated UUIDs of pages moved during this session, flattened across all move
+         *  operations (may be empty). Split into per-operation batches using [EXTRA_MOVED_OP_SIZES]. */
         const val EXTRA_MOVED_PAGE_IDS        = "moved_page_ids"
         /** Comma-separated previous-after page IDs matching [EXTRA_MOVED_PAGE_IDS] (empty string = was first page). */
         const val EXTRA_MOVED_PREV_AFTER_IDS  = "moved_prev_after_ids"
-        /** Comma-separated target-after page IDs matching [EXTRA_MOVED_PAGE_IDS]. */
-        const val EXTRA_MOVED_TARGET_IDS      = "moved_target_ids"
+        /** Comma-separated new-after page IDs (post-move predecessor) matching [EXTRA_MOVED_PAGE_IDS]
+         *  (empty string = became first page); used by redo. */
+        const val EXTRA_MOVED_NEW_AFTER_IDS   = "moved_new_after_ids"
+        /** Comma-separated page-counts, one per move operation, so the flattened move lists can be
+         *  split back into per-operation batches (one PagesMoved undo step each). */
+        const val EXTRA_MOVED_OP_SIZES        = "moved_op_sizes"
     }
 
     // ── Grid specification ────────────────────────────────────────────────────
@@ -101,7 +106,7 @@ class PageIndexActivity : AppCompatActivity() {
 
     private val snapshotDecodeJobs = mutableListOf<Job>()
 
-    // ── Action mode (long-press) and move mode ────────────────────────────────
+    // ── Action mode (long-press) and destination-picking mode ────────────────
 
     /** Pages selected in action mode, by stable UUID. Insertion order is preserved
      *  (matters for paste/move block ordering). Empty = normal mode; non-empty = action mode. */
@@ -110,14 +115,22 @@ class PageIndexActivity : AppCompatActivity() {
     private fun inActionMode(): Boolean = selectedPageIds.isNotEmpty()
     private fun selectedCount(): Int = selectedPageIds.size
 
-    /** Page ID waiting to be pasted. Null means clipboard is empty. */
-    private var pendingCopyPageId: String? = null
+    /**
+     * Destination-picking mode unifies move and paste: the user taps a card to pick where the
+     * block is inserted. [DestMode.NONE] = normal / action mode; [DestMode.MOVE] = picking a
+     * destination for a move operation; [DestMode.PASTE] = picking a destination for a paste.
+     */
+    private enum class DestMode { NONE, MOVE, PASTE }
+    private var destMode: DestMode = DestMode.NONE
 
-    /** True while the user is picking a destination for a page move. */
-    private var isMoveMode: Boolean = false
+    /** IDs of pages being moved (snapshot of [selectedPageIds] when Move is entered). */
+    private var moveSourceIds: List<String> = emptyList()
 
-    /** ID of the page being moved (set when move mode is entered). */
-    private var moveModeSourcePageId: String? = null
+    /** When true (default), insert before the tapped destination card; false = insert after. */
+    private var insertBefore: Boolean = true
+
+    /** Pages copied to the clipboard. Empty = clipboard is empty. */
+    private var pendingCopyPageIds: List<String> = emptyList()
 
     /** Stable ID of the currently-open page in NotebookActivity — used to recompute
      *  [currentPageIndex] after a move reshuffles the pages list. */
@@ -127,8 +140,10 @@ class PageIndexActivity : AppCompatActivity() {
     private val pastedActions  = mutableListOf<Pair<String, Int>>()          // (pageId, pageIndex)
     /** Delete operations performed this session — returned to NotebookActivity for undo/redo. */
     private val deletedActions = mutableListOf<Triple<String, Int, Long>>()  // (pageId, pageIndex, deletedAt)
-    /** Move operations performed this session — returned to NotebookActivity for undo/redo. */
-    private val movedActions   = mutableListOf<Triple<String, String?, String>>() // (pageId, prevAfterId, targetId)
+    /** Move operations performed this session — returned to NotebookActivity for undo/redo.
+     *  One entry per move OPERATION; each is the operation's per-page triples
+     *  (pageId, prevAfterId [undo], newAfterId [redo]) in original document order. */
+    private val movedActions   = mutableListOf<List<Triple<String, String?, String?>>>()
 
     // ── Export save-to-device launcher ───────────────────────────────────────
 
@@ -203,24 +218,25 @@ class PageIndexActivity : AppCompatActivity() {
 
         binding.btnBack.setOnClickListener {
             when {
-                isMoveMode -> cancelMoveMode()
+                destMode != DestMode.NONE -> cancelDestMode()
                 inActionMode() -> exitActionMode()
                 else -> finishWithResult(null)
             }
         }
 
-        binding.btnSelectAll.setOnClickListener { toggleSelectAll() }
-        binding.btnCopyPage.setOnClickListener  { copySelectedPage() }
-        binding.btnPastePage.setOnClickListener { executePaste() }
+        binding.btnSelectAll.setOnClickListener  { toggleSelectAll() }
+        binding.btnCopyPage.setOnClickListener   { copySelectedPages() }
         binding.btnDeletePage.setOnClickListener { executeDelete() }
-        binding.btnMovePage.setOnClickListener  { enterMoveMode() }
+        binding.btnMovePage.setOnClickListener   { enterDestMode(DestMode.MOVE) }
         binding.btnExportPage.setOnClickListener { executeExport() }
+        binding.btnInsertBefore.setOnClickListener { insertBefore = true;  refreshInsertBeforeAfter() }
+        binding.btnInsertAfter.setOnClickListener  { insertBefore = false; refreshInsertBeforeAfter() }
 
-        // Back gesture exits move/action mode; if already in normal mode, return to NotebookActivity.
+        // Back gesture exits destination-picking / action mode; otherwise finish.
         onBackPressedDispatcher.addCallback(this, object : androidx.activity.OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
                 when {
-                    isMoveMode -> cancelMoveMode()
+                    destMode != DestMode.NONE -> cancelDestMode()
                     inActionMode() -> exitActionMode()
                     else -> finishWithResult(null)
                 }
@@ -432,8 +448,9 @@ class PageIndexActivity : AppCompatActivity() {
      * Normal tap: navigate to this page.
      * Action mode tap: toggle this card's selection (exits action mode if the set empties).
      * Action mode long-press: same as tap once in action mode.
-     * Move mode tap (a selected/source card): cancel move, return to action mode.
-     * Move mode tap (any other card): execute move, return to normal mode.
+     * Destination mode tap (MOVE — a source card): cancel, return to action mode.
+     * Destination mode tap (MOVE — non-source): execute move to this page.
+     * Destination mode tap (PASTE — any card): paste clipboard after/before this page.
      * Long press in normal mode: enter action mode with this card selected.
      */
     private fun buildCardGroup(entry: PageEntry, spec: GridSpec): LinearLayout {
@@ -447,17 +464,22 @@ class PageIndexActivity : AppCompatActivity() {
 
             setOnClickListener {
                 when {
-                    isMoveMode -> {
-                        if (isSelected) cancelMoveMode()   // tapped a move source → cancel
-                        else executeMoveAfter(pageIndex)
+                    destMode == DestMode.MOVE -> {
+                        if (entry.id in moveSourceIds) {
+                            // Tapped a source card — cancel back to action mode.
+                            cancelDestMode()
+                        } else {
+                            executeMove(entry.id)
+                        }
                     }
+                    destMode == DestMode.PASTE -> executePaste(entry.id)
                     !inActionMode() -> finishWithResult(pageIndex)
                     else -> toggleSelection(entry.id)
                 }
             }
 
             setOnLongClickListener {
-                if (isMoveMode) return@setOnLongClickListener true
+                if (destMode != DestMode.NONE) return@setOnLongClickListener true
                 if (!inActionMode()) {
                     selectedPageIds.add(entry.id)
                     refreshActionMode()
@@ -470,11 +492,11 @@ class PageIndexActivity : AppCompatActivity() {
         }
 
         // ── Card ──────────────────────────────────────────────────────────────
-        // Move mode: highlight the move sources (the selection).
+        // Destination mode: highlight the source pages (selection / moveSourceIds).
         // Action mode: highlight every selected card.
         // Normal mode: highlight only the currently-open page.
         val highlighted = when {
-            isMoveMode -> isSelected
+            destMode != DestMode.NONE -> isSelected || entry.id in moveSourceIds
             inActionMode() -> isSelected
             else -> isCurrent
         }
@@ -586,29 +608,32 @@ class PageIndexActivity : AppCompatActivity() {
     }
 
     /**
-     * Reflect the current selection in the chrome: action buttons visibility, the title count, and
-     * the single-only enablement of Copy/Paste/Move/Export (multi support arrives in Sessions 2–4).
+     * Reflect the current selection in the chrome: action buttons visibility, the title count,
+     * and per-button enablement.
+     * - Copy/Move are enabled for any selection size (multi-page support added in Session 2).
+     * - Export remains single-only (multi-export arrives in Session 4).
+     * - Delete is always enabled in action mode.
+     * - The Paste button was removed in Session 2 fixes: Copy immediately enters PASTE dest mode.
      * Does not re-render the grid — callers do that.
      */
     private fun refreshActionMode() {
         val active = inActionMode()
-        val vis = if (active) android.view.View.VISIBLE else android.view.View.GONE
+        val vis    = if (active) android.view.View.VISIBLE else android.view.View.GONE
         binding.btnSelectAll.visibility  = vis
         binding.btnCopyPage.visibility   = vis
-        binding.btnPastePage.visibility  = vis
         binding.btnDeletePage.visibility = vis
         binding.btnMovePage.visibility   = vis
         binding.btnExportPage.visibility = vis
+        // Before/after buttons are only shown in destination-picking mode.
+        binding.btnInsertBefore.visibility = android.view.View.GONE
+        binding.btnInsertAfter.visibility  = android.view.View.GONE
 
         binding.tvTopBarTitle.text = if (active) "${selectedCount()} selected" else "Pages"
 
         if (active) {
-            // Copy/Move/Export are single-only until later sessions; Delete is always enabled.
-            val single = selectedCount() == 1
-            setButtonEnabled(binding.btnCopyPage,   single)
-            setButtonEnabled(binding.btnMovePage,   single)
-            setButtonEnabled(binding.btnExportPage, single)
-            setButtonEnabled(binding.btnPastePage,  single && pendingCopyPageId != null)
+            setButtonEnabled(binding.btnCopyPage,   true)
+            setButtonEnabled(binding.btnMovePage,   true)
+            setButtonEnabled(binding.btnExportPage, selectedCount() == 1)  // single-only until Session 4
             setButtonEnabled(binding.btnDeletePage, true)
             // Select-all content description reflects the toggle target.
             binding.btnSelectAll.contentDescription =
@@ -618,120 +643,166 @@ class PageIndexActivity : AppCompatActivity() {
 
     private fun exitActionMode() {
         selectedPageIds.clear()
+        destMode = DestMode.NONE
+        moveSourceIds = emptyList()
         binding.tvTopBarTitle.text = "Pages"
+        binding.btnSelectAll.visibility    = android.view.View.GONE
+        binding.btnCopyPage.visibility     = android.view.View.GONE
+        binding.btnDeletePage.visibility   = android.view.View.GONE
+        binding.btnMovePage.visibility     = android.view.View.GONE
+        binding.btnExportPage.visibility   = android.view.View.GONE
+        binding.btnInsertBefore.visibility = android.view.View.GONE
+        binding.btnInsertAfter.visibility  = android.view.View.GONE
+        renderGridPage()
+    }
+
+    // ── Destination-picking mode (move + paste) ───────────────────────────────
+
+    /**
+     * Enter destination-picking mode for [mode] (MOVE or PASTE). Hides action buttons, shows
+     * the Before/After selectable buttons, and updates the title. [insertBefore] resets to true
+     * (Before selected) each time destination mode is entered.
+     */
+    private fun enterDestMode(mode: DestMode) {
+        if (mode == DestMode.NONE) return
+        if (mode == DestMode.MOVE && selectedPageIds.isEmpty()) return
+        if (mode == DestMode.PASTE && pendingCopyPageIds.isEmpty()) return
+
+        destMode = mode
+        insertBefore = true   // reset to "before" each time
+
+        if (mode == DestMode.MOVE) {
+            moveSourceIds = selectedPageIds.toList()
+        }
+
         binding.btnSelectAll.visibility  = android.view.View.GONE
         binding.btnCopyPage.visibility   = android.view.View.GONE
-        binding.btnPastePage.visibility  = android.view.View.GONE
         binding.btnDeletePage.visibility = android.view.View.GONE
         binding.btnMovePage.visibility   = android.view.View.GONE
         binding.btnExportPage.visibility = android.view.View.GONE
+
+        // Show the Before/After selectable text buttons; Before is selected by default.
+        val verb = if (mode == DestMode.MOVE) "Move" else "Copy"
+        binding.btnInsertBefore.text = "$verb Before"
+        binding.btnInsertAfter.text  = "$verb After"
+        binding.btnInsertBefore.visibility = android.view.View.VISIBLE
+        binding.btnInsertAfter.visibility  = android.view.View.VISIBLE
+        refreshInsertBeforeAfter()
+
+        val titlePrefix = if (mode == DestMode.MOVE) "Move" else "Paste"
+        binding.tvTopBarTitle.text = "$titlePrefix before/after…"
         renderGridPage()
     }
 
-    // ── Move mode ─────────────────────────────────────────────────────────────
+    /**
+     * Update the selected state of the Before/After buttons to reflect [insertBefore].
+     * [btnInsertBefore] is selected when [insertBefore] == true; [btnInsertAfter] is selected
+     * when [insertBefore] == false. Before is selected by default. Uses the [bg_toolbar_button]
+     * state_selected selector (1.5dp inkBlack border) to show which is active.
+     */
+    private fun refreshInsertBeforeAfter() {
+        binding.btnInsertBefore.isSelected = insertBefore
+        binding.btnInsertAfter.isSelected  = !insertBefore
+    }
 
-    /** Enter move mode: hide action buttons, show "Move to…" title, keep source card highlighted.
-     *  Session 1 keeps move single-only — the lone selected page is the source. */
-    private fun enterMoveMode() {
-        moveModeSourcePageId = selectedPageIds.singleOrNull() ?: return
-        isMoveMode = true
-        binding.btnSelectAll.visibility  = android.view.View.GONE
-        binding.btnCopyPage.visibility   = android.view.View.GONE
-        binding.btnPastePage.visibility  = android.view.View.GONE
-        binding.btnDeletePage.visibility = android.view.View.GONE
-        binding.btnMovePage.visibility   = android.view.View.GONE
-        binding.btnExportPage.visibility = android.view.View.GONE
-        binding.tvTopBarTitle.text = "Move to…"
+    /** Cancel destination-picking mode: restore action mode chrome and selection state. */
+    private fun cancelDestMode() {
+        destMode = DestMode.NONE
+        moveSourceIds = emptyList()
+        // Hide the Before/After buttons before refreshActionMode re-shows action buttons.
+        binding.btnInsertBefore.visibility = android.view.View.GONE
+        binding.btnInsertAfter.visibility  = android.view.View.GONE
+        refreshActionMode()   // restores action buttons + title
         renderGridPage()
     }
 
-    /** Cancel move mode: restore action mode buttons and selection title. */
-    private fun cancelMoveMode() {
-        isMoveMode = false
-        moveModeSourcePageId = null
-        refreshActionMode()   // restores buttons + title, or hides them if selection is empty
-        renderGridPage()
-    }
-
-    /** Complete move mode: clear selection and return to normal mode. */
-    private fun completeMoveMode() {
-        isMoveMode = false
-        moveModeSourcePageId = null
-        exitActionMode()  // hides all buttons, clears selection, restores title, re-renders
-    }
-
-    /** Move [moveModeSourcePageId] to immediately after the page at [destinationIndex]. */
-    private fun executeMoveAfter(destinationIndex: Int) {
-        val sourceId = moveModeSourcePageId ?: return
-        val targetId = pages.getOrNull(destinationIndex)?.id ?: return
-        if (sourceId == targetId) { cancelMoveMode(); return }
+    /**
+     * Execute a batch move: moves all [moveSourceIds] before/after [targetPageId].
+     * On success, appends this operation's undo/redo batch to [movedActions], reloads pages,
+     * recomputes [currentPageIndex] by stable id, then returns to normal mode.
+     */
+    private fun executeMove(targetPageId: String) {
+        val sources = moveSourceIds
+        if (sources.isEmpty()) { cancelDestMode(); return }
+        if (sources.all { it == targetPageId }) {
+            android.widget.Toast.makeText(this, "Pick a page outside the selection", android.widget.Toast.LENGTH_SHORT).show()
+            return
+        }
         val path = notebookSoilPath ?: return
 
         lifecycleScope.launch {
-            val prevAfterResultRaw = withContext(Dispatchers.IO) {
-                com.notesprout.android.data.movePageAfterRaw(sourceId, targetId, path)
+            val results = withContext(Dispatchers.IO) {
+                com.notesprout.android.data.movePagesRelativeRaw(sources, targetPageId, insertBefore, path)
             }
-            if (prevAfterResultRaw == null) {
-                android.widget.Toast.makeText(this@PageIndexActivity, "Couldn't move page", android.widget.Toast.LENGTH_SHORT).show()
-                cancelMoveMode(); return@launch
+            if (results == null) {
+                android.widget.Toast.makeText(this@PageIndexActivity, "Couldn't move pages", android.widget.Toast.LENGTH_SHORT).show()
+                cancelDestMode(); return@launch
             }
-
-            // "" = source was first page (no previous page); non-empty = UUID of previous page.
-            val prevAfterId: String? = prevAfterResultRaw.ifEmpty { null }
+            if (results.isNotEmpty()) movedActions.add(results)  // one batch per move operation
 
             pages = withContext(Dispatchers.IO) { loadPagesFromSoil(path) }
-            movedActions.add(Triple(sourceId, prevAfterId, targetId))
-
-            // Recompute currentPageIndex by stable ID in case the move shifted it.
+            pruneSelection()
             val cid = currentPageId
             if (cid != null) {
                 val newIdx = pages.indexOfFirst { it.id == cid }
                 if (newIdx >= 0) currentPageIndex = newIdx
             }
-
-            completeMoveMode()
+            exitActionMode()
         }
     }
 
     /**
-     * Copies the selected page ID to the clipboard and stays in action mode.
-     * The paste button is enabled immediately — the user can tap another card
-     * to move the paste-target selection, then tap Paste.
+     * Execute a batch paste: deep-copies [pendingCopyPageIds] before/after [targetPageId].
+     * On success, appends undo pairs to [pastedActions], reloads pages, adjusts
+     * [currentPageIndex] for inserted pages, then returns to normal mode.
      */
-    private fun copySelectedPage() {
-        pendingCopyPageId = selectedPageIds.singleOrNull() ?: return
-        setButtonEnabled(binding.btnPastePage, true)
-    }
-
-    /** Deep-copies the clipboard page after the selected card, refreshes the grid. */
-    private fun executePaste() {
-        val sourcePageId = pendingCopyPageId ?: return
-        val targetPageId = selectedPageIds.singleOrNull() ?: return
-        val targetIdx    = pages.indexOfFirst { it.id == targetPageId }
-        if (targetIdx < 0) return
-        val path         = notebookSoilPath ?: return
+    private fun executePaste(targetPageId: String) {
+        val sources = pendingCopyPageIds
+        if (sources.isEmpty()) { cancelDestMode(); return }
+        val path = notebookSoilPath ?: return
 
         lifecycleScope.launch {
-            val newPageId = withContext(Dispatchers.IO) {
-                com.notesprout.android.data.copyPageAfterRaw(sourcePageId, targetPageId, path)
+            val results = withContext(Dispatchers.IO) {
+                com.notesprout.android.data.copyPagesRelativeRaw(sources, targetPageId, insertBefore, path)
             }
-            if (newPageId == null) {
-                android.widget.Toast.makeText(this@PageIndexActivity, "Couldn't paste page", android.widget.Toast.LENGTH_SHORT).show()
-                return@launch
+            if (results == null) {
+                android.widget.Toast.makeText(this@PageIndexActivity, "Couldn't paste pages", android.widget.Toast.LENGTH_SHORT).show()
+                cancelDestMode(); return@launch
             }
+            pastedActions.addAll(results)
 
-            // Reload pages and record the paste for undo/redo on return.
+            // Reload and recompute currentPageIndex: count how many inserted pages land before it.
+            val oldPageIndex = currentPageIndex
             pages = withContext(Dispatchers.IO) { loadPagesFromSoil(path) }
-            val newPageIndex = pages.indexOfFirst { it.id == newPageId }
-            if (newPageIndex >= 0) pastedActions.add(newPageId to newPageIndex)
 
-            // Adjust currentPageIndex if the insertion shifted it.
-            val insertionIndex = targetIdx + 1
-            if (insertionIndex <= currentPageIndex) currentPageIndex++
+            // Shift currentPageIndex by however many new pages were inserted at or before it.
+            val insertedBefore = results.count { it.second <= oldPageIndex }
+            currentPageIndex = oldPageIndex + insertedBefore
 
-            pendingCopyPageId = null
-            exitActionMode()   // hides buttons, re-renders grid
+            // Also try to recover from stable ID (more robust after reload).
+            val cid = currentPageId
+            if (cid != null) {
+                val stableIdx = pages.indexOfFirst { it.id == cid }
+                if (stableIdx >= 0) currentPageIndex = stableIdx
+            }
+
+            pendingCopyPageIds = emptyList()
+            exitActionMode()
         }
+    }
+
+    /**
+     * Copies the selected pages to the clipboard and immediately enters destination-picking
+     * PASTE mode. The clipboard is stashed before the selection is cleared so that the pasted
+     * content is exactly the pages that were highlighted when Copy was tapped.
+     * The separate Paste button was removed in Session 2 fixes — Copy goes straight to paste mode.
+     */
+    private fun copySelectedPages() {
+        if (selectedPageIds.isEmpty()) return
+        // Stash clipboard before selection changes.
+        pendingCopyPageIds = selectedPageIds.toList()
+        // Immediately enter destination-picking paste mode (same flow as Move).
+        enterDestMode(DestMode.PASTE)
     }
 
     private fun executeDelete() {
@@ -895,9 +966,13 @@ class PageIndexActivity : AppCompatActivity() {
             result.putExtra(EXTRA_DELETED_PAGE_TIMESTAMPS, deletedActions.joinToString(",") { it.third.toString() })
         }
         if (movedActions.isNotEmpty()) {
-            result.putExtra(EXTRA_MOVED_PAGE_IDS,       movedActions.joinToString(",") { it.first })
-            result.putExtra(EXTRA_MOVED_PREV_AFTER_IDS, movedActions.joinToString(",") { it.second ?: "" })
-            result.putExtra(EXTRA_MOVED_TARGET_IDS,     movedActions.joinToString(",") { it.third })
+            // Flatten all operations; EXTRA_MOVED_OP_SIZES records the page-count per operation so
+            // NotebookActivity can split them back into one PagesMoved undo step each.
+            val flat = movedActions.flatten()
+            result.putExtra(EXTRA_MOVED_PAGE_IDS,       flat.joinToString(",") { it.first })
+            result.putExtra(EXTRA_MOVED_PREV_AFTER_IDS, flat.joinToString(",") { it.second ?: "" })
+            result.putExtra(EXTRA_MOVED_NEW_AFTER_IDS,  flat.joinToString(",") { it.third ?: "" })
+            result.putExtra(EXTRA_MOVED_OP_SIZES,       movedActions.joinToString(",") { it.size.toString() })
         }
         setResult(RESULT_OK, result)
         finish()

@@ -199,7 +199,7 @@ Then update Status above and commit (no push).**
 
 ## Session 2 — Multi Copy / Paste & Move, with before/after toggle
 
-**Status:** ☐ Not started
+**Status:** ✅ DONE (2026-06-19)
 
 **Goal:** Enable Copy/Paste and Move for any number of selected pages, inserting them as a
 contiguous block, and add a **before/after** toggle the user sets when choosing the destination.
@@ -513,7 +513,7 @@ Append items discovered during implementation here. Seeds:
 | Session | Status |
 |---|---|
 | 1 — Selection model, Select All, multi-Delete | ✅ DONE (2026-06-19) |
-| 2 — Multi Copy/Paste & Move + before/after | ☐ Not started |
+| 2 — Multi Copy/Paste & Move + before/after | ✅ DONE (2026-06-19) |
 | 3 — Multi Set Template | ☐ Not started |
 | 4 — Multi Export (PDF/PNG/templates) | ☐ Not started |
 | 5 — Wrap-up (docs, polish) | ☐ Not started |

@@ -120,6 +120,28 @@ sealed class UndoRedoAction {
     ) : UndoRedoAction()
 
     /**
+     * User pasted several pages at once from the page index — undo soft-deletes them all,
+     * redo restores them all, as a single atomic undo step.
+     *
+     * Each [PastedPageRef] carries the [PastedPageRef.pageId] and [PastedPageRef.pageIndex]
+     * of the inserted copy, matching the data the single [PagePasted] action holds.
+     * [PastedPageRef.undoDeletedAt] starts at 0; after undo executes it is set to the
+     * soft-delete timestamp so redo can restore exactly the right rows.
+     */
+    @Serializable
+    data class PagesPasted(
+        val pages: List<PastedPageRef>,
+    ) : UndoRedoAction()
+
+    /** One page pasted as part of a [PagesPasted] batch. */
+    @Serializable
+    data class PastedPageRef(
+        val pageId: String,
+        val pageIndex: Int,
+        val undoDeletedAt: Long = 0,
+    )
+
+    /**
      * User moved a page to a new position — undo moves it back; redo moves it forward again.
      *
      * [previousAfterPageId] is the ID of the page that was immediately before the moved page
@@ -134,6 +156,36 @@ sealed class UndoRedoAction {
         val previousAfterPageId: String?,
         val targetPageId: String,
     ) : UndoRedoAction()
+
+    /**
+     * One move operation from the page index that moved several pages at once, as a single undo
+     * step. One [PagesMoved] is pushed per move operation; cross-operation ordering is handled by
+     * the undo stack.
+     *
+     * [moves] is ordered by the pages' ORIGINAL document order, and the moved pages form a
+     * contiguous block in the final order. Because of this, both undo and redo iterate [moves]
+     * **forward**:
+     *  - undo moves each page after its [MovedPageRef.previousAfterPageId] (original predecessor),
+     *  - redo moves each page after its [MovedPageRef.newAfterPageId] (post-move predecessor).
+     * Forward processing guarantees that if a page's predecessor is also in the block it has
+     * already been placed before this page is moved relative to it.
+     */
+    @Serializable
+    data class PagesMoved(
+        val moves: List<MovedPageRef>,
+    ) : UndoRedoAction()
+
+    /**
+     * One page moved as part of a [PagesMoved] batch.
+     * - [previousAfterPageId]: predecessor in the original order (null = was first) — used by undo.
+     * - [newAfterPageId]: predecessor in the post-move order (null = became first) — used by redo.
+     */
+    @Serializable
+    data class MovedPageRef(
+        val pageId: String,
+        val previousAfterPageId: String?,
+        val newAfterPageId: String?,
+    )
 
     /**
      * User erased a batch of strokes/headings/text objects via the lasso eraser tool — undo

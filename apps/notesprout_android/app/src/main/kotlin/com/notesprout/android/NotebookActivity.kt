@@ -449,14 +449,17 @@ class NotebookActivity : AppCompatActivity() {
             val data = result.data
 
             // Push paste actions recorded during the index session onto the undo stack.
+            // Group the whole index-session paste batch into ONE undo step (mirrors PagesDeleted)
+            // so a single undo reverses every page pasted together.
             val pastedIds     = data?.getStringExtra(PageIndexActivity.EXTRA_PASTED_PAGE_IDS)
             val pastedIndices = data?.getStringExtra(PageIndexActivity.EXTRA_PASTED_PAGE_INDICES)
             if (!pastedIds.isNullOrEmpty() && !pastedIndices.isNullOrEmpty()) {
                 val ids     = pastedIds.split(",")
                 val indices = pastedIndices.split(",").mapNotNull { it.toIntOrNull() }
-                ids.zip(indices).forEach { (pageId, pageIndex) ->
-                    undoRedoManager.push(UndoRedoAction.PagePasted(pageId, pageIndex))
+                val refs = ids.zip(indices).map { (pageId, pageIndex) ->
+                    UndoRedoAction.PastedPageRef(pageId, pageIndex)
                 }
+                if (refs.isNotEmpty()) undoRedoManager.push(UndoRedoAction.PagesPasted(refs))
             }
 
             // Push delete actions recorded during the index session onto the undo stack.
@@ -476,16 +479,30 @@ class NotebookActivity : AppCompatActivity() {
             }
 
             // Push move actions recorded during the index session onto the undo stack.
-            val movedIds       = data?.getStringExtra(PageIndexActivity.EXTRA_MOVED_PAGE_IDS)
-            val movedPrevAfter = data?.getStringExtra(PageIndexActivity.EXTRA_MOVED_PREV_AFTER_IDS)
-            val movedTargets   = data?.getStringExtra(PageIndexActivity.EXTRA_MOVED_TARGET_IDS)
-            if (!movedIds.isNullOrEmpty() && !movedTargets.isNullOrEmpty()) {
-                val ids     = movedIds.split(",")
-                val prevs   = movedPrevAfter?.split(",") ?: emptyList()
-                val targets = movedTargets.split(",")
-                ids.zip(targets).forEachIndexed { i, (pageId, targetId) ->
-                    val prevAfterId = prevs.getOrNull(i)?.takeIf { it.isNotEmpty() }
-                    undoRedoManager.push(UndoRedoAction.PageMoved(pageId, prevAfterId, targetId))
+            // Each move OPERATION becomes one PagesMoved undo step (split by EXTRA_MOVED_OP_SIZES);
+            // cross-operation ordering is handled naturally by the undo stack. Within an operation
+            // both undo and redo process pages forward (see PagesMoved / movePagesRelativeRaw docs).
+            val movedIds      = data?.getStringExtra(PageIndexActivity.EXTRA_MOVED_PAGE_IDS)
+            val movedPrev     = data?.getStringExtra(PageIndexActivity.EXTRA_MOVED_PREV_AFTER_IDS)
+            val movedNewAfter = data?.getStringExtra(PageIndexActivity.EXTRA_MOVED_NEW_AFTER_IDS)
+            val movedOpSizes  = data?.getStringExtra(PageIndexActivity.EXTRA_MOVED_OP_SIZES)
+            if (!movedIds.isNullOrEmpty() && !movedOpSizes.isNullOrEmpty()) {
+                val ids       = movedIds.split(",")
+                val prevs     = movedPrev?.split(",") ?: emptyList()
+                val newAfters = movedNewAfter?.split(",") ?: emptyList()
+                val allRefs = ids.indices.map { i ->
+                    UndoRedoAction.MovedPageRef(
+                        pageId = ids[i],
+                        previousAfterPageId = prevs.getOrNull(i)?.takeIf { it.isNotEmpty() },
+                        newAfterPageId = newAfters.getOrNull(i)?.takeIf { it.isNotEmpty() },
+                    )
+                }
+                // Split the flattened refs back into per-operation batches and push one each.
+                var offset = 0
+                movedOpSizes.split(",").mapNotNull { it.toIntOrNull() }.forEach { size ->
+                    val batch = allRefs.subList(offset, (offset + size).coerceAtMost(allRefs.size))
+                    if (batch.isNotEmpty()) undoRedoManager.push(UndoRedoAction.PagesMoved(batch.toList()))
+                    offset += size
                 }
             }
 
@@ -7195,6 +7212,67 @@ class NotebookActivity : AppCompatActivity() {
                 // Undo: put the page back where it was; redo: put it at the target position.
                 val afterId = if (isUndo) action.previousAfterPageId else action.targetPageId
                 movePageToAfter(db, action.pageId, afterId)
+                // currentPageIndex is resolved by setupPageIds in the full reload below.
+            }
+
+            is UndoRedoAction.PagesPasted -> {
+                // Undo: soft-delete every pasted page + its children.
+                // Redo: restore every page + its children (using per-ref undoDeletedAt).
+                // Each ref's undoDeletedAt starts at 0; after undo it is patched via amendLastRedo
+                // so redo knows which rows to restore (same pattern as single PagePasted).
+                if (isUndo) {
+                    val updatedRefs = withContext(Dispatchers.IO) {
+                        action.pages.map { ref ->
+                            val ts = System.currentTimeMillis()
+                            dao.softDeleteById(ref.pageId, ts)
+                            dao.softDeleteByParentId(ref.pageId, ts)      // layer
+                            val layer = dao.getLayerForPageAny(ref.pageId)
+                            if (layer != null) dao.softDeleteByParentId(layer.id, ts) // strokes
+                            ref.copy(undoDeletedAt = ts)
+                        }
+                    }
+                    undoRedoManager.amendLastRedo(action.copy(pages = updatedRefs))
+                    // Land just before the first pasted page (same heuristic as single PagePasted).
+                    val firstPastedIndex = action.pages.minOfOrNull { it.pageIndex } ?: 1
+                    currentPageIndex = (firstPastedIndex - 1).coerceAtLeast(0)
+                } else {
+                    withContext(Dispatchers.IO) {
+                        action.pages.forEach { ref ->
+                            dao.restoreById(ref.pageId, now)
+                            val layer = dao.getLayerForPageAny(ref.pageId)
+                            if (layer != null) {
+                                dao.restoreById(layer.id, now)
+                                if (ref.undoDeletedAt > 0) {
+                                    dao.restoreChildrenDeletedSince(layer.id, ref.undoDeletedAt, now)
+                                }
+                            }
+                            // Invalidate snapshot for each restored page so the index shows
+                            // current content (mirrors what single PagePasted does in step 3b).
+                            invalidatePageSnapshot(db, ref.pageId)
+                        }
+                    }
+                    currentPageIndex = action.pages.minOfOrNull { it.pageIndex }
+                        ?.coerceAtLeast(0) ?: currentPageIndex
+                }
+            }
+
+            is UndoRedoAction.PagesMoved -> withContext(Dispatchers.IO) {
+                // moves is in original document order and the moved pages form a contiguous block,
+                // so BOTH undo and redo process forward:
+                //  - undo moves each page after its original predecessor (previousAfterPageId),
+                //  - redo moves each page after its post-move predecessor (newAfterPageId).
+                // Forward order ensures a predecessor that is itself in the block is already placed
+                // before this page is moved relative to it. Cross-operation ordering is handled by
+                // the undo stack (one PagesMoved per move operation).
+                if (isUndo) {
+                    action.moves.forEach { ref ->
+                        movePageToAfter(db, ref.pageId, ref.previousAfterPageId)
+                    }
+                } else {
+                    action.moves.forEach { ref ->
+                        movePageToAfter(db, ref.pageId, ref.newAfterPageId)
+                    }
+                }
                 // currentPageIndex is resolved by setupPageIds in the full reload below.
             }
 

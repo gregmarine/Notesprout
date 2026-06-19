@@ -102,6 +102,22 @@
         <item name="android:stateListAnimator">@null</item>
     </style>
 
+    <!-- Selectable text toggle button — bg_toolbar_button selector (border on selected),
+         44dp tall, wrap-width text. Used by the Before/After move/copy toggle in the page index. -->
+    <style name="Widget.Notesprout.ToggleTextButton" parent="">
+        <item name="android:layout_width">wrap_content</item>
+        <item name="android:layout_height">44dp</item>
+        <item name="android:background">@drawable/bg_toolbar_button</item>
+        <item name="android:textColor">@color/inkBlack</item>
+        <item name="android:textSize">14sp</item>
+        <item name="android:textAllCaps">false</item>
+        <item name="android:stateListAnimator">@null</item>
+        <item name="android:paddingStart">12dp</item>
+        <item name="android:paddingEnd">12dp</item>
+        <item name="android:minWidth">0dp</item>
+        <item name="android:minHeight">0dp</item>
+    </style>
+
     <!-- Transparent background, black text, no press effect -->
     <style name="Widget.Notesprout.TextButton" parent="Widget.AppCompat.Button">
         <item name="android:background">@android:color/transparent</item>
