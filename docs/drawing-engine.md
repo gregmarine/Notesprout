@@ -117,14 +117,42 @@ Rendering order: white → template → snapshot PNG → new content drawn this 
 
 ## Template System
 
-- Templates are `type = "template"` rows stored in the `.soil` notebook database
-- Template PNG files stored in `getExternalFilesDir("Templates")` — imported via `ACTION_OPEN_DOCUMENT`
-- `data` JSON: `{ "width": Int, "height": Int, "name": String, "image": String (base64) }`
-- `parseTemplateId(data)` reads `data.template` from a page row to get the active template UUID (empty = Blank)
+Templates live in **two layers**:
 
-**TemplateDialog:** Two-tab (All / Notebook), adaptive grid — 4 columns on NA5C (≥1500px), 2 on P2P/GC7. `thumbFrame` uses `shape_bordered` + **1dp padding** to inset the `ImageView` so it cannot render over the border stroke. Do NOT use `clipToOutline` — it clips the border itself at rounded corners.
+1. **The library** — reusable templates organized in nestable folders, stored as first-class objects
+   in the **global index** (`notesprout.db`). This is the user's permanent collection, independent of
+   any notebook. See the Templates subsection of [`data-architecture.md`](data-architecture.md) for
+   the object model (`template` / `template_folder` types, `TemplateObject` payload, base64-in-`data`).
+2. **Applied templates** — when a library template is used, it is **copied into the notebook's `.soil`**
+   as a `type = "template"` row. A page references its active template by UUID via `data.template`.
+   `parseTemplateId(data)` reads `data.template` from a page row (empty = Blank). This layer is
+   unchanged from before the global-index migration; deleting a library template never affects
+   notebooks that already used it.
 
-- **Title bar:** custom title view (`setCustomTitle`) — "Template" label (bold 18sp, weight=1) + "Import…" bordered button on the right. The import button lives here (not inside the scrollable content area) so it never causes clipping at the bottom of the dialog.
-- **Delete from All tab:** each non-Blank file item shows an `ic_trash` (Tabler `trash`) button overlaid at the top-right corner of its cell (32dp, 6dp internal padding, 6dp margin from edge). Tapping it shows a confirmation AlertDialog; confirming deletes the PNG from `getExternalFilesDir("Templates")`, rescans, and repopulates the All tab without closing the dialog.
+`.soil` template rows keep `data` JSON `{ "width", "height", "name", "image" (base64) }` (`TemplateData`).
+The library `TemplateObject` differs: the **name lives in `ObjectEntity.name`**, not the JSON.
 
-**Template inheritance on new page:** `addPage()` reads the current page **fresh from DB** via `dao.getObjectById(currentPageId)`. Do NOT read from the stale in-memory `pages` list — it is not refreshed after `applyTemplateToCurrentPage()` writes to DB.
+**TemplateBrowserActivity** — one full-screen Activity (`Theme.Notesprout`, no immersive mode) drives
+all contexts via `EXTRA_MODE`:
+- `MODE_MANAGE` — launched from the MainActivity toolbar (`btnTemplates`). Full management: browse,
+  import PNGs, new folder, long-press action sheet (rename / copy / move / delete, with self-descendant
+  + conflict guards), search, sort. No selection result.
+- `MODE_PICK` — selection. Returns `RESULT_TEMPLATE_ID` (`""` = Blank, else a library `TemplateObject`
+  id). With `EXTRA_COLLECT_NAME=true` it also shows a name field + CREATE button (the New Notebook
+  flow) and returns `RESULT_NOTEBOOK_NAME`. Long-press management is omitted in PICK.
+
+Thumbnails decode-sampled from the full base64 on `Dispatchers.IO`, cached in-memory keyed by
+`"${id}:${updatedAt}"`. Adaptive grid — 4 columns ≥1500px, else 2. Template cells use `shape_bordered`
++ 1dp inset (never `clipToOutline` — it clips the border at rounded corners).
+
+**In-notebook `TemplateDialog`** (slim, single-view — owned by `NotebookActivity`, which holds the live
+`.soil` connection): **Blank** + a quick-pick grid of templates **already used in this notebook**
+(`db.notebookDao().getTemplatesSorted()`) + a **"Browse Templates…"** button that launches the browser
+in `MODE_PICK`. On a library pick, `NotebookActivity.insertLibraryTemplateIntoSoil(id, db)` copies the
+`TemplateObject` into the open `.soil` as a new `type="template"` row, then
+`applyTemplateToCurrentPage(soilRowId, bitmap)`. The browser Activity **never opens a `.soil`** —
+avoids cross-Activity WAL/sidecar risk.
+
+**Template inheritance on new page:** `addPage()` reads the current page **fresh from DB** via
+`dao.getObjectById(currentPageId)`. Do NOT read from the stale in-memory `pages` list — it is not
+refreshed after `applyTemplateToCurrentPage()` writes to DB.

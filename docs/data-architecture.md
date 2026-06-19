@@ -43,7 +43,7 @@ CREATE INDEX idx_objects_parent_type_deleted
 ### Key Classes
 
 - `ObjectEntity` (`data/index/ObjectEntity.kt`) — Room entity; universal index row
-- `ObjectType` (`data/index/ObjectType.kt`) — `FOLDER`, `NOTEBOOK`, `LIST`
+- `ObjectType` (`data/index/ObjectType.kt`) — `FOLDER`, `NOTEBOOK`, `LIST`, `TEMPLATE`, `TEMPLATE_FOLDER`
 - `FolderObject`, `NotebookObject`, `ListObject` — `@Serializable` data classes in `data` column. `NotebookObject` carries `snapshot: String?` + `pageCount: Int`. `ListObject` carries `notebookIds: List<String>` (array order = display order).
 - `ListIds` (`data/index/ListIds.kt`) — `PINNED_LIST_ID = "00000000-0000-0000-0000-70696e6e6564"`
 - `ObjectDao` (`data/index/ObjectDao.kt`) — Room DAO for all index queries and mutations
@@ -59,6 +59,33 @@ CREATE INDEX idx_objects_parent_type_deleted
 - **List bootstrap:** `NotesproutApplication.onCreate` calls `repository.ensurePinnedListExists()` on `appScope` after `NotesproutIndex.open()` — idempotent, safe every launch
 - **Scrub-on-delete:** `deleteNotebook()` and `deleteFolderRecursively()` call `repository.scrubNotebookFromAllLists(notebookId)` before soft-deleting, so list rows never contain dangling references
 - **G10 ADB pull:** `adb -s 34E517F9 pull /sdcard/Android/data/com.notesprout.android.dev/files/notesprout.db /tmp/notesprout.db`
+
+### Templates (library)
+
+The reusable **template library** lives in the global index — not the filesystem, not any `.soil`.
+
+- **Types:** `TEMPLATE` (`"template"`) and `TEMPLATE_FOLDER` (`"template_folder"`). These do **not**
+  collide with the `.soil` `type="template"` rows — those live in each notebook's `notebook` table, a
+  different database.
+- **Payload** — `TemplateObject` (`data/index/TemplateObject.kt`), `@Serializable`, in the `data` column:
+  ```kotlin
+  data class TemplateObject(val width: Int = 0, val height: Int = 0, val image: String = "")
+  ```
+  `image` is the full-resolution PNG as base64 (`NO_WRAP`), stored in `ObjectEntity.data` — same pattern
+  as `NotebookObject.snapshot`. The template **name lives in `ObjectEntity.name`** (the top-level
+  column), like notebooks/folders — *not* inside the JSON. (Contrast the `.soil` `TemplateData`, which
+  keeps name in JSON; that class is unchanged and still used inside `.soil`.)
+- **Template folders** behave like notebook folders: nestable, `parentId = null` at root, movable,
+  copyable, renamable, recursively soft-deleted. A separate type — never reuse `FOLDER`. A template
+  folder contains only template folders + templates.
+- **Repository:** `IndexRepository` `// region Template operations` — `createTemplate`,
+  `createTemplateFolder`, `renameTemplate`/`renameTemplateFolder`, `softDeleteTemplate`,
+  `deleteTemplateFolderRecursively`, `getTemplate(s)`, `getTemplateFolders`, `getAllTemplates`,
+  `copyTemplate`, `copyTemplateFolderRecursively`; moves reuse the generic `moveObject`. All
+  index-only — **no `.soil`/file cleanup** on delete (templates are index-only).
+- **Apply / seed → `.soil`:** selecting a library template **copies** it into the target `.soil` as a
+  new `type="template"` row (`TemplateData` shape). See the Template System section of
+  [`drawing-engine.md`](drawing-engine.md).
 
 ### WAL Maintenance
 

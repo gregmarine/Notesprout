@@ -140,6 +140,17 @@ class TemplateBrowserActivity : AppCompatActivity() {
     private val directoryStack = ArrayDeque<ObjectEntity?>().apply { add(null) }
     private val currentParentId: String? get() = directoryStack.last()?.id
 
+    /**
+     * Whether the virtual **Blank** card occupies grid slot 0. Only in PICK mode, at root, outside
+     * any copy/move picker and outside search. `render()` and [totalGridPagesWithBlank] must agree
+     * on this, so it lives in one place.
+     */
+    private val showBlankCard: Boolean
+        get() = mode == MODE_PICK
+            && picker == TemplatePicker.None
+            && !isSearchMode
+            && directoryStack.size <= 1
+
     private var browseItems: List<BrowseItem> = emptyList()
     private var currentGridPage: Int = 0
     private var gridSpec: GridSpec? = null
@@ -418,8 +429,6 @@ class TemplateBrowserActivity : AppCompatActivity() {
             }
 
             // ── Conflict check at destination ──────────────────────────────────
-            val isCopyTemplate = state is TemplatePicker.CopyTemplate
-            val isCopyFolder   = state is TemplatePicker.CopyFolder
             val existingConflict: ObjectEntity? = withContext(Dispatchers.IO) {
                 when (state) {
                     is TemplatePicker.CopyTemplate,
@@ -645,10 +654,7 @@ class TemplateBrowserActivity : AppCompatActivity() {
 
         // In PICK mode (not in copy/move picker, not in search), inject a Blank virtual card at
         // root level. A search in PICK mode shows only real templates (no Blank injection).
-        val showBlank = mode == MODE_PICK
-            && picker == TemplatePicker.None
-            && !isSearchMode
-            && directoryStack.size <= 1
+        val showBlank = showBlankCard
 
         val spec = gridSpec ?: return
 
@@ -686,11 +692,7 @@ class TemplateBrowserActivity : AppCompatActivity() {
     private fun totalGridPagesWithBlank(): Int {
         val spec = gridSpec ?: return 1
         val perPage = spec.itemsPerPage
-        val showBlank = mode == MODE_PICK
-            && picker == TemplatePicker.None
-            && !isSearchMode
-            && directoryStack.size <= 1
-        val totalItems = (if (showBlank) 1 else 0) + browseItems.size
+        val totalItems = (if (showBlankCard) 1 else 0) + browseItems.size
         if (perPage == 0 || totalItems == 0) return 1
         return (totalItems + perPage - 1) / perPage
     }

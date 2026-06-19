@@ -40,7 +40,7 @@ adb -s 34E517F9 install -r app/build/outputs/apk/debug/app-debug.apk
 | 4 | Search & sort in the template browser | ✅ Done |
 | 5 | In-notebook integration — slim picker + library browse + apply-into-`.soil` | ✅ Done |
 | 6 | Full-screen New Notebook flow + first-page template seeding | ✅ Done |
-| 7 | Wrap-up — docs, dead-code removal, cross-device QA, migration task | ⬜ Not started |
+| 7 | Wrap-up — docs, dead-code removal, cross-device QA, migration task | ✅ Done |
 
 Status legend: ⬜ Not started · 🚧 In progress · ✅ Done (committed, not pushed)
 
@@ -462,12 +462,16 @@ picks a template, taps CREATE; the notebook opens with the first page showing th
    old PNG library, or removed `NotebookActivity` import members. Remove now-unused imports/strings.
 3. **Cross-device QA (Tier 1):** build + install on Go 10.3 (G10), Note Max (MAX), Go 7 (G7),
    Palma2 Pro (P2P); smoke-test browse/import/preview/manage/pick/new-notebook. Lead runs installs in
-   one shell block.
+   one shell block. _(Deferred at user request — clean `assembleDebug` verified; on-device QA skipped
+   for this commit. Features were validated on G10 incrementally across S2–S6.)_
 4. **Migration (separate, on user request):** The app ships **fresh** (no in-app migration). When the
    user asks, the lead runs a **Haiku subagent** to migrate the user's existing device templates: pull
    `notesprout.db` and the old `Templates/` PNGs from the device, insert `template` objects (base64)
    at root (or an "Imported" template folder), push back. This is an **operational task, not app
-   code** — document the exact steps here when performed.
+   code**. **The full step-by-step runbook (debug + stable builds) lives in
+   [`TEMPLATE_MIGRATION_RUNBOOK.md`](TEMPLATE_MIGRATION_RUNBOOK.md)** — hand a Haiku session that file.
+   Record each run (date, build, device, template count) at the bottom of this item when performed.
+   - _Runs log:_ (none yet)
 5. **Anything discovered** during Sessions 1–6 that needs a home.
 
 **Definition of done:** Docs updated; no dead references; Tier-1 devices smoke-tested. Commit (no push).

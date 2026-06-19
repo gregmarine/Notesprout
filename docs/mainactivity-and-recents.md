@@ -5,13 +5,36 @@
 
 ## Notebook & Folder Management
 
-- New-notebook name validation: whitelist `[^a-zA-Z0-9_\-. ]`, reject `.`/`..`, check index for duplicate name in current folder. New-notebook dialog pre-fills with `YYYYMMDD_HHmmss` timestamp (editable before confirm).
+- **New Notebook** is a full-screen flow, not an AlertDialog: `btnNewNotebook` launches
+  `TemplateBrowserActivity` in `MODE_PICK` + `EXTRA_COLLECT_NAME=true` + `EXTRA_TITLE="New Notebook"` +
+  `EXTRA_TARGET_PARENT_ID=currentParentId`. The browser shows a name field (pre-filled with a
+  `YYYYMMDD_HHmmss` timestamp, editable), the template grid (Blank default-selected), and a **CREATE**
+  button. Name validation: whitelist `[^a-zA-Z0-9_\-. ]`, reject `.`/`..`, non-empty — *format* checked
+  in the browser, *duplicate-in-target-folder* checked inside `confirmCreate` (suspend, on IO, via
+  `EXTRA_TARGET_PARENT_ID`); a collision Toasts and keeps the user on the screen. `MainActivity` retains
+  a post-result dup check as a harmless safety net. On result, `createNotebook(name, libraryTemplateId)`
+  seeds the first page's template (see Templates below).
 - **Move:** index update only — `.soil` file stays at `Garden/<id>.soil` (UUID unchanged).
 - **Rename:** index update only via `repository.renameNotebook` / `renameFolder` (`.soil` file/UUID untouched, same as Move). Context-menu actions use `ic_edit` (Tabler `edit`): "Rename Notebook" between Move Notebook and Set Cover; "Rename Folder" between Move Folder and Delete. Dialog reuses `DialogNewNotebookBinding`, pre-filled with the current name (cursor at end). Notebook rename runs `validateNotebookName`; folder rename runs `validateFolderRename` — same whitelist + `.`/`..` reject, but duplicate check is against the folder's own `parentId` (not the current browse folder) and excludes itself. No-op when name is unchanged. After rename, `refreshActiveView()` re-renders the active mode (normal/search via `scanAndRender`, pinned, or recents).
 - **Copy notebook:** new `ObjectEntity` + copy `.soil` to new UUID path via `soilFile()`.
 - **Copy folder:** recursively create new index entries and copy all descendant `.soil` files.
 - **Conflict check:** if a sibling with the same name exists at the destination, show AlertDialog "A [notebook/folder] named '[name]' already exists here. Replace it?" Replace proceeds; Cancel stays in picker mode.
 - **Folder delete:** recursively soft-deletes all descendants in the index; deletes `.soil` files via `soilFile()`; cleans up WAL sidecars. Confirmation dialog message: `Delete "[name]"? This will permanently remove all notebooks and subfolders inside it. This cannot be undone.`
+
+## Templates
+
+- **Toolbar entry:** `btnTemplates` (`ic_template`) sits in `actionButtonsGroup` after `btnNewFolder`,
+  in all three `activity_main.xml` variants (`layout/`, `layout-sw360dp/`, `layout-sw600dp/`). It
+  launches `TemplateBrowserActivity` in `MODE_MANAGE`. Visibility is toggled alongside `btnNewFolder`
+  (hidden in picker, pinned, recents, and search modes).
+- **`createNotebook(name, libraryTemplateId = "")`:** when `libraryTemplateId` is non-empty, it loads
+  the library `TemplateObject` (suspend, before opening the `.soil`), inserts a `type="template"` row
+  into the new `.soil`, and points the first page's `data.template` at that row — all inside the
+  existing creation coroutine on IO.
+- The template **library model**, `TemplateBrowserActivity` modes, and the in-notebook
+  `TemplateDialog` are documented in the Template System section of
+  [`drawing-engine.md`](drawing-engine.md) and the Templates subsection of
+  [`data-architecture.md`](data-architecture.md).
 
 ## ActionSheetDialog (`ActionSheetDialog.kt`)
 
