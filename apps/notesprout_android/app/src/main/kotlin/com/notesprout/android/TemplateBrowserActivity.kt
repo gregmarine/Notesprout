@@ -150,12 +150,15 @@ class TemplateBrowserActivity : AppCompatActivity() {
             && picker == TemplatePicker.None
             && !isSearchMode
             && directoryStack.size <= 1
+            && !isPinnedView
 
     private var browseItems: List<BrowseItem> = emptyList()
     private var currentGridPage: Int = 0
     private var gridSpec: GridSpec? = null
 
     private var picker: TemplatePicker = TemplatePicker.None
+
+    private var isPinnedView: Boolean = false
 
     private var sortPrefs: SortPreferences = SortPreferences()
 
@@ -255,6 +258,11 @@ class TemplateBrowserActivity : AppCompatActivity() {
         binding.btnPickerConfirm.setOnClickListener { confirmPickerDestination() }
         binding.btnPickerCancel.setOnClickListener  { exitPicker() }
 
+        binding.btnPinned.setOnClickListener { enterPinnedView() }
+        binding.btnPinnedCancel.setOnClickListener { exitPinnedView() }
+        // S8: Pinned view is MANAGE-only for now (PICK wiring lands in Session 10).
+        binding.btnPinned.visibility = if (mode == MODE_MANAGE) View.VISIBLE else View.GONE
+
         binding.gridContainer.setOnTouchListener { _, event ->
             gestureDetector.onTouchEvent(event)
             true
@@ -262,6 +270,7 @@ class TemplateBrowserActivity : AppCompatActivity() {
 
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
+                if (isPinnedView) { exitPinnedView(); return }
                 if (isSearchMode) { exitSearchMode(); return }
                 // While in picker: cancel picker if at root, else navigate up.
                 if (picker != TemplatePicker.None) {
@@ -357,6 +366,44 @@ class TemplateBrowserActivity : AppCompatActivity() {
         binding.btnNewTemplateFolder.visibility = View.VISIBLE
         binding.btnImport.visibility            = View.VISIBLE
         loadAndRender()
+    }
+
+    // ── Pinned view ───────────────────────────────────────────────────────────
+
+    private fun enterPinnedView() {
+        isPinnedView = true
+        currentGridPage = 0
+        applyPinnedViewUI()
+        loadAndRender()
+    }
+
+    private fun exitPinnedView() {
+        isPinnedView = false
+        currentGridPage = 0
+        applyPinnedViewUI()
+        loadAndRender()
+    }
+
+    private fun applyPinnedViewUI() {
+        val inPinned = isPinnedView
+        binding.pinnedToolbar.visibility        = if (inPinned) View.VISIBLE else View.GONE
+        binding.pinnedToolbarDivider.visibility = if (inPinned) View.VISIBLE else View.GONE
+        binding.breadcrumbBar.visibility        = if (inPinned) View.GONE   else View.VISIBLE
+        if (inPinned) {
+            binding.btnNewTemplateFolder.visibility = View.GONE
+            binding.btnImport.visibility            = View.GONE
+            binding.btnSearch.visibility            = View.GONE
+            binding.btnClearSearch.visibility       = View.GONE
+            binding.btnSort.visibility              = View.GONE
+            binding.btnPinned.visibility            = View.GONE
+        } else {
+            binding.btnNewTemplateFolder.visibility = View.VISIBLE
+            binding.btnImport.visibility            = View.VISIBLE
+            binding.btnSearch.visibility            = View.VISIBLE
+            binding.btnClearSearch.visibility       = View.GONE
+            binding.btnSort.visibility              = View.VISIBLE
+            binding.btnPinned.visibility            = if (mode == MODE_MANAGE) View.VISIBLE else View.GONE
+        }
     }
 
     private fun applyPickerUI() {
@@ -549,7 +596,10 @@ class TemplateBrowserActivity : AppCompatActivity() {
     private fun loadAndRender() {
         lifecycleScope.launch {
             browseItems = withContext(Dispatchers.IO) {
-                if (isSearchMode) {
+                if (isPinnedView) {
+                    searchResults = emptyList()
+                    repository.getPinnedTemplates().map { BrowseItem.Template(it) }
+                } else if (isSearchMode) {
                     val results = SearchEngine.searchTemplates(currentSearchQuery, repository)
                     searchResults = results
                     results.map { BrowseItem.Template(it.entity) }
@@ -660,6 +710,7 @@ class TemplateBrowserActivity : AppCompatActivity() {
 
         if (browseItems.isEmpty() && !showBlank) {
             val emptyMsg = when {
+                isPinnedView -> "No pinned templates yet."
                 isSearchMode -> "No templates found for \"$currentSearchQuery\""
                 picker != TemplatePicker.None && directoryStack.size <= 1 -> "No template folders yet."
                 picker != TemplatePicker.None -> "Empty folder."
@@ -1100,13 +1151,33 @@ class TemplateBrowserActivity : AppCompatActivity() {
     // ── Template context menu ─────────────────────────────────────────────────
 
     private fun showTemplateContextMenu(entity: ObjectEntity) {
-        ActionSheetDialog(this)
-            .title(entity.name)
-            .addAction(R.drawable.ic_copy_plus,       "Copy Template") { enterPicker(TemplatePicker.CopyTemplate(entity)) }
-            .addAction(R.drawable.ic_move_page,       "Move Template") { enterPicker(TemplatePicker.MoveTemplate(entity)) }
-            .addAction(R.drawable.ic_edit,            "Rename Template") { showRenameTemplateDialog(entity) }
-            .addAction(R.drawable.ic_delete_notebook, "Delete Template") { showDeleteTemplateConfirmation(entity) }
-            .show()
+        lifecycleScope.launch {
+            val pinned = withContext(Dispatchers.IO) { repository.isTemplatePinned(entity.id) }
+            val sheet = ActionSheetDialog(this@TemplateBrowserActivity)
+                .title(entity.name)
+                .addAction(R.drawable.ic_copy_plus, "Copy Template") { enterPicker(TemplatePicker.CopyTemplate(entity)) }
+                .addAction(R.drawable.ic_move_page, "Move Template") { enterPicker(TemplatePicker.MoveTemplate(entity)) }
+                .addAction(R.drawable.ic_edit,      "Rename Template") { showRenameTemplateDialog(entity) }
+            if (pinned) {
+                sheet.addAction(R.drawable.ic_pinned_off, "Unpin Template") { toggleTemplatePin(entity) }
+            } else {
+                sheet.addAction(R.drawable.ic_pinned, "Pin Template") { toggleTemplatePin(entity) }
+            }
+            sheet.addAction(R.drawable.ic_delete_notebook, "Delete Template") { showDeleteTemplateConfirmation(entity) }
+            sheet.show()
+        }
+    }
+
+    private fun toggleTemplatePin(entity: ObjectEntity) {
+        lifecycleScope.launch {
+            val nowPinned = withContext(Dispatchers.IO) { repository.toggleTemplatePin(entity.id) }
+            Toast.makeText(
+                this@TemplateBrowserActivity,
+                if (nowPinned) "Pinned" else "Unpinned",
+                Toast.LENGTH_SHORT
+            ).show()
+            loadAndRender()
+        }
     }
 
     // ── Template folder context menu ──────────────────────────────────────────

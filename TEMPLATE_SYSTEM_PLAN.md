@@ -42,7 +42,7 @@ adb -s 34E517F9 install -r app/build/outputs/apk/debug/app-debug.apk
 | 6 | Full-screen New Notebook flow + first-page template seeding | ✅ Done |
 | 7 | Wrap-up — docs, dead-code removal, cross-device QA, migration task | ✅ Done |
 | | **— Phase 2: Pinned · Recent · Toolbar · Save-as-Template (see §6) —** | |
-| 8 | Pinned templates — repository + MANAGE pin/unpin + pinned view | ⬜ Not started |
+| 8 | Pinned templates — repository + MANAGE pin/unpin + pinned view | ✅ Done |
 | 9 | Recent templates — device-local store + use-tracking | ⬜ Not started |
 | 10 | Pinned & recent in the PICK selectors (new-notebook + in-notebook) | ⬜ Not started |
 | 11 | Toolbar relocation — search/sort/pinned/recent → top bar | ⬜ Not started |
@@ -903,4 +903,18 @@ Commit (no push).
 
 ### 6.3 Phase 2 Open Questions / Notes (fill in as we go)
 
-- _(none yet)_
+- **S8 pinned-templates store:** mirrors the notebook pinned list exactly. New
+  `PINNED_TEMPLATES_LIST_ID` (`…746d706c7069` = "tmplpi") + a dedicated `TemplateListObject`
+  (`templateIds`) so notebook list code is untouched. `IndexRepository` gained
+  `ensurePinnedTemplatesListExists` / `isTemplatePinned` / `toggleTemplatePin` / `getPinnedTemplates`
+  / `scrubTemplateFromPinned`; `softDeleteTemplate` now scrubs-then-deletes so deleting a pinned
+  template unpins it. Bootstrap launched from `NotesproutApplication` alongside `ensurePinnedListExists`.
+- **S8 pinned view (MANAGE-only this session):** `isPinnedView` flag swaps the breadcrumb bar for a
+  `pinnedToolbar` ("Pinned Templates" + ✕), hides New-Folder/Import/Search/Sort/Pinned while active,
+  and renders `getPinnedTemplates()` as a flat paginated template grid (no folders, no Blank — the
+  `showBlankCard` getter gained `&& !isPinnedView`). Empty state "No pinned templates yet." Back press
+  exits the view first. `btnPinned` lives in the **bottom** `actionButtonsGroup` next to Sort for now
+  and is **GONE in PICK** — Session 10 enables it in PICK, Session 11 relocates the cluster to a top bar.
+- **S8 action sheet:** `showTemplateContextMenu` is now `lifecycleScope.launch` (queries
+  `isTemplatePinned` on IO) so it can insert a conditional **Pin / Unpin** item (`ic_pinned` /
+  `ic_pinned_off`) above Delete. Template *folders* get no pin item. (Discovered S8.)

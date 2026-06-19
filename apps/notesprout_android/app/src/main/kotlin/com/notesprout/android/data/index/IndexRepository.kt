@@ -135,6 +135,7 @@ class IndexRepository(private val dao: ObjectDao) {
     }
 
     suspend fun softDeleteTemplate(id: String) {
+        scrubTemplateFromPinned(id)
         dao.softDelete(id, System.currentTimeMillis())
     }
 
@@ -342,6 +343,76 @@ class IndexRepository(private val dao: ObjectDao) {
                     )
                 )
             }
+        }
+    }
+
+    // endregion
+
+    // region Template pin operations
+
+    suspend fun ensurePinnedTemplatesListExists() {
+        val existing = dao.getById(PINNED_TEMPLATES_LIST_ID)
+        if (existing == null || existing.deletedAt != null) {
+            val now = System.currentTimeMillis()
+            dao.insert(
+                ObjectEntity(
+                    id = PINNED_TEMPLATES_LIST_ID,
+                    type = ObjectType.LIST,
+                    name = "Pinned Templates",
+                    parentId = null,
+                    createdAt = now,
+                    updatedAt = now,
+                    deletedAt = null,
+                    data = Json.encodeToString(TemplateListObject())
+                )
+            )
+        }
+    }
+
+    suspend fun isTemplatePinned(templateId: String): Boolean {
+        val entity = dao.getById(PINNED_TEMPLATES_LIST_ID) ?: return false
+        val listObj = Json.decodeFromString<TemplateListObject>(entity.data)
+        return templateId in listObj.templateIds
+    }
+
+    /**
+     * Toggles the pin state of a template in a single DB round-trip.
+     * Returns true if the template is now pinned, false if now unpinned.
+     */
+    suspend fun toggleTemplatePin(templateId: String): Boolean {
+        val entity = dao.getById(PINNED_TEMPLATES_LIST_ID) ?: return false
+        val listObj = Json.decodeFromString<TemplateListObject>(entity.data)
+        val nowPinned = templateId !in listObj.templateIds
+        val newIds = if (nowPinned) listObj.templateIds + templateId
+                     else listObj.templateIds - templateId
+        dao.update(
+            entity.copy(
+                data = Json.encodeToString(listObj.copy(templateIds = newIds)),
+                updatedAt = System.currentTimeMillis()
+            )
+        )
+        return nowPinned
+    }
+
+    suspend fun getPinnedTemplates(): List<ObjectEntity> {
+        val entity = dao.getById(PINNED_TEMPLATES_LIST_ID) ?: return emptyList()
+        val listObj = Json.decodeFromString<TemplateListObject>(entity.data)
+        return listObj.templateIds.mapNotNull { id ->
+            val e = dao.getById(id)
+            if (e == null || e.deletedAt != null || e.type != ObjectType.TEMPLATE) null else e
+        }
+    }
+
+    suspend fun scrubTemplateFromPinned(templateId: String) {
+        val entity = dao.getById(PINNED_TEMPLATES_LIST_ID) ?: return
+        val listObj = Json.decodeFromString<TemplateListObject>(entity.data)
+        if (templateId in listObj.templateIds) {
+            dao.update(
+                entity.copy(
+                    data = Json.encodeToString(listObj.copy(templateIds = listObj.templateIds - templateId)),
+                    updatedAt = System.currentTimeMillis()
+                )
+            )
         }
     }
 

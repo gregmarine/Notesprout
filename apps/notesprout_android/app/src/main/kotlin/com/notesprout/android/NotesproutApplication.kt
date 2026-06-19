@@ -38,6 +38,7 @@ class NotesproutApplication : Application() {
             com.notesprout.android.data.index.NotesproutIndex.dao()
         )
         appScope.launch { repository.ensurePinnedListExists() }
+        appScope.launch { repository.ensurePinnedTemplatesListExists() }
 
         val mlKitRecognizer = com.notesprout.android.recognition.MlKitHandwritingRecognizer()
         com.notesprout.android.recognition.HandwritingRecognizerProvider.init(mlKitRecognizer)
