@@ -38,6 +38,15 @@ import com.notesprout.android.data.index.ObjectEntity
 import com.notesprout.android.data.index.TemplateObject
 import com.notesprout.android.databinding.ActivityTemplateBrowserBinding
 import com.notesprout.android.databinding.DialogNewNotebookBinding
+import com.notesprout.android.search.SearchDialog
+import com.notesprout.android.search.SearchEngine
+import com.notesprout.android.search.SearchResult
+import com.notesprout.android.sort.FolderSort
+import com.notesprout.android.sort.SortDialog
+import com.notesprout.android.sort.SortField
+import com.notesprout.android.sort.SortOrder
+import com.notesprout.android.sort.SortPreferences
+import com.notesprout.android.sort.SortPreferencesManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
@@ -128,6 +137,13 @@ class TemplateBrowserActivity : AppCompatActivity() {
 
     private var picker: TemplatePicker = TemplatePicker.None
 
+    private var sortPrefs: SortPreferences = SortPreferences()
+
+    // Search spans ALL templates (across folders). Independent of directoryStack.
+    private var isSearchMode: Boolean = false
+    private var currentSearchQuery: String = ""
+    private var searchResults: List<SearchResult> = emptyList()
+
     private val repository: IndexRepository by lazy { IndexRepository(NotesproutIndex.dao()) }
 
     private lateinit var binding: ActivityTemplateBrowserBinding
@@ -171,6 +187,7 @@ class TemplateBrowserActivity : AppCompatActivity() {
         setContentView(binding.root)
 
         mode = intent.getIntExtra(EXTRA_MODE, MODE_MANAGE)
+        sortPrefs = SortPreferencesManager.load(this, SortPreferencesManager.TEMPLATE_PREFS_NAME)
         val titleOverride = intent.getStringExtra(EXTRA_TITLE)
         if (titleOverride != null) binding.tvTopBarTitle.text = titleOverride
 
@@ -185,6 +202,25 @@ class TemplateBrowserActivity : AppCompatActivity() {
         binding.btnNewTemplateFolder.setOnClickListener { showNewTemplateFolderDialog() }
         binding.btnImport.setOnClickListener { importLauncher.launch(arrayOf("image/png")) }
 
+        binding.btnSort.setOnClickListener {
+            SortDialog(this, sortPrefs, itemNoun = "Templates") { newPrefs ->
+                sortPrefs = newPrefs
+                SortPreferencesManager.save(this, newPrefs, SortPreferencesManager.TEMPLATE_PREFS_NAME)
+                currentGridPage = 0
+                loadAndRender()
+            }.show()
+        }
+        binding.btnSearch.setOnClickListener {
+            SearchDialog.show(
+                context = this,
+                initialQuery = if (isSearchMode) currentSearchQuery else "",
+                hint = "Search templates…",
+                onSearch = { query -> enterSearchMode(query) },
+                onCancel = { },
+            )
+        }
+        binding.btnClearSearch.setOnClickListener { exitSearchMode() }
+
         binding.btnPickerConfirm.setOnClickListener { confirmPickerDestination() }
         binding.btnPickerCancel.setOnClickListener  { exitPicker() }
 
@@ -195,6 +231,7 @@ class TemplateBrowserActivity : AppCompatActivity() {
 
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
+                if (isSearchMode) { exitSearchMode(); return }
                 // While in picker: cancel picker if at root, else navigate up.
                 if (picker != TemplatePicker.None) {
                     if (directoryStack.size <= 1) {
@@ -265,6 +302,32 @@ class TemplateBrowserActivity : AppCompatActivity() {
         loadAndRender()
     }
 
+    private fun enterSearchMode(query: String) {
+        isSearchMode = true
+        currentSearchQuery = query
+        currentGridPage = 0
+        binding.btnClearSearch.visibility       = View.VISIBLE
+        binding.btnSearch.visibility            = View.GONE
+        binding.btnSort.visibility              = View.GONE
+        binding.btnNewTemplateFolder.visibility = View.GONE
+        binding.btnImport.visibility            = View.GONE
+        binding.btnBreadcrumbBack.isEnabled     = false
+        loadAndRender()
+    }
+
+    private fun exitSearchMode() {
+        isSearchMode = false
+        currentSearchQuery = ""
+        searchResults = emptyList()
+        currentGridPage = 0
+        binding.btnClearSearch.visibility       = View.GONE
+        binding.btnSearch.visibility            = View.VISIBLE
+        binding.btnSort.visibility              = View.VISIBLE
+        binding.btnNewTemplateFolder.visibility = View.VISIBLE
+        binding.btnImport.visibility            = View.VISIBLE
+        loadAndRender()
+    }
+
     private fun applyPickerUI() {
         val inPicker = picker != TemplatePicker.None
         binding.pickerToolbar.visibility        = if (inPicker) View.VISIBLE else View.GONE
@@ -282,9 +345,15 @@ class TemplateBrowserActivity : AppCompatActivity() {
             // Hide action buttons in picker mode (mirror MainActivity).
             binding.btnNewTemplateFolder.visibility = View.GONE
             binding.btnImport.visibility            = View.GONE
+            binding.btnSearch.visibility      = View.GONE
+            binding.btnSort.visibility        = View.GONE
+            binding.btnClearSearch.visibility = View.GONE
         } else {
             binding.btnNewTemplateFolder.visibility = View.VISIBLE
             binding.btnImport.visibility            = View.VISIBLE
+            binding.btnSearch.visibility = View.VISIBLE
+            binding.btnSort.visibility   = View.VISIBLE
+            // btnClearSearch stays GONE — picker can't be entered from search.
         }
     }
 
@@ -451,18 +520,45 @@ class TemplateBrowserActivity : AppCompatActivity() {
     private fun loadAndRender() {
         lifecycleScope.launch {
             browseItems = withContext(Dispatchers.IO) {
-                val parentId = currentParentId
-                val folders   = repository.getTemplateFolders(parentId).sortedBy { it.name.lowercase() }
-                if (picker != TemplatePicker.None) {
-                    // In picker mode: only show folders (no template cards — folders are destinations).
-                    folders.map { BrowseItem.Folder(it) }
+                if (isSearchMode) {
+                    val results = SearchEngine.searchTemplates(currentSearchQuery, repository)
+                    searchResults = results
+                    results.map { BrowseItem.Template(it.entity) }
                 } else {
-                    val templates = repository.getTemplates(parentId).sortedBy { it.name.lowercase() }
-                    folders.map { BrowseItem.Folder(it) } +
-                        templates.map { BrowseItem.Template(it) }
+                    searchResults = emptyList()
+                    val parentId = currentParentId
+                    val folders = repository.getTemplateFolders(parentId).map { BrowseItem.Folder(it) }
+                    if (picker != TemplatePicker.None) {
+                        // In picker mode: only folders are destinations.
+                        sortBrowseItems(folders)
+                    } else {
+                        val templates = repository.getTemplates(parentId).map { BrowseItem.Template(it) }
+                        applyFolderSort(folders, templates)
+                    }
                 }
             }
             render()
+        }
+    }
+
+    /** Orders a single homogeneous list by the current sort field + order. */
+    private fun sortBrowseItems(items: List<BrowseItem>): List<BrowseItem> {
+        val comparator: Comparator<BrowseItem> = when (sortPrefs.field) {
+            SortField.NAME ->
+                Comparator { a, b -> a.entity.name.lowercase().compareTo(b.entity.name.lowercase()) }
+            SortField.DATE_MODIFIED ->
+                Comparator { a, b -> a.entity.updatedAt.compareTo(b.entity.updatedAt) }
+        }
+        val ordered = if (sortPrefs.order == SortOrder.DESCENDING) comparator.reversed() else comparator
+        return items.sortedWith(ordered)
+    }
+
+    /** Groups folders vs templates per the FolderSort pref, each group internally sorted. */
+    private fun applyFolderSort(folders: List<BrowseItem>, templates: List<BrowseItem>): List<BrowseItem> {
+        return when (sortPrefs.folderSort) {
+            FolderSort.FOLDERS_FIRST   -> sortBrowseItems(folders) + sortBrowseItems(templates)
+            FolderSort.NOTEBOOKS_FIRST -> sortBrowseItems(templates) + sortBrowseItems(folders) // "Templates first"
+            FolderSort.MIXED           -> sortBrowseItems(folders + templates)
         }
     }
 
@@ -533,6 +629,7 @@ class TemplateBrowserActivity : AppCompatActivity() {
 
         if (browseItems.isEmpty()) {
             val emptyMsg = when {
+                isSearchMode -> "No templates found for \"$currentSearchQuery\""
                 picker != TemplatePicker.None && directoryStack.size <= 1 -> "No template folders yet."
                 picker != TemplatePicker.None -> "Empty folder."
                 directoryStack.size > 1 -> "Empty folder."
@@ -623,8 +720,8 @@ class TemplateBrowserActivity : AppCompatActivity() {
             }
         }
 
-        // Long-press management actions — only in MODE_MANAGE (not MODE_PICK per spec).
-        if (mode == MODE_MANAGE) {
+        // Long-press management actions — only in MODE_MANAGE (not MODE_PICK per spec) and not in search mode.
+        if (mode == MODE_MANAGE && !isSearchMode) {
             group.setOnLongClickListener {
                 when (item) {
                     is BrowseItem.Folder   -> showTemplateFolderContextMenu(item.entity)
@@ -670,8 +767,17 @@ class TemplateBrowserActivity : AppCompatActivity() {
             }
         }
 
+        val labelText = if (isSearchMode && item is BrowseItem.Template) {
+            val result = searchResults.find { it.entity.id == item.entity.id }
+            if (result != null) {
+                val parent = result.folderLabel.substringAfterLast(" › ")
+                "$parent › ${result.displayName}"
+            } else item.entity.name
+        } else {
+            item.entity.name
+        }
         val label = AppCompatTextView(this).apply {
-            text      = item.entity.name
+            text      = labelText
             maxLines  = 1
             ellipsize = android.text.TextUtils.TruncateAt.END
             gravity   = Gravity.CENTER

@@ -90,6 +90,7 @@
 
     <!-- Folders & Notebooks -->
     <TextView
+        android:id="@+id/tvFolderSortHeader"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:text="Folders &amp; Notebooks"

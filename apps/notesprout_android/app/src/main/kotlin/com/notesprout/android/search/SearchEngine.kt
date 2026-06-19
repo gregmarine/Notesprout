@@ -57,6 +57,51 @@ object SearchEngine {
         return segments.joinToString(" › ")
     }
 
+    /** Public name scorer (same tiers as notebook search). */
+    fun scoreName(query: String, name: String): Int = score(query, name)
+
+    /**
+     * Queries the index for all templates matching [query].
+     * Same ranking tiers as [search].
+     */
+    suspend fun searchTemplates(query: String, repository: IndexRepository): List<SearchResult> {
+        val trimmed = query.trim()
+        if (trimmed.isBlank()) return emptyList()
+
+        val allTemplates       = repository.getAllTemplates()
+        val allTemplateFolders = repository.getAllTemplateFolders()
+
+        val results = allTemplates.mapNotNull { entity ->
+            val s = score(trimmed, entity.name)
+            if (s > 0) {
+                SearchResult(
+                    entity      = entity,
+                    displayName = entity.name,
+                    folderLabel = buildTemplateFolderLabel(entity.parentId, allTemplateFolders),
+                    score       = s,
+                )
+            } else null
+        }
+
+        return results.sortedWith(
+            compareByDescending<SearchResult> { it.score }
+                .thenBy { it.displayName.lowercase() }
+        )
+    }
+
+    /** Like [buildFolderLabel] but rooted at "Templates" over template folders. */
+    private fun buildTemplateFolderLabel(parentId: String?, folders: List<ObjectEntity>): String {
+        val segments = mutableListOf<String>()
+        var currentId = parentId
+        while (currentId != null) {
+            val folder = folders.find { it.id == currentId } ?: break
+            segments.add(0, folder.name)
+            currentId = folder.parentId
+        }
+        segments.add(0, "Templates")
+        return segments.joinToString(" › ")
+    }
+
     /**
      * Scoring tiers:
      *   3 = case-insensitive substring match (query appears anywhere in name)

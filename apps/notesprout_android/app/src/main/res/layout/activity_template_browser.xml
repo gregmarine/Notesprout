@@ -215,8 +215,30 @@
             android:gravity="center_vertical">
 
             <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnSearch"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:src="@drawable/ic_search"
+                android:contentDescription="Search templates" />
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnClearSearch"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:layout_marginStart="4dp"
+                android:src="@drawable/ic_x"
+                android:contentDescription="Clear search"
+                android:visibility="gone" />
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnSort"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:layout_marginStart="4dp"
+                android:src="@drawable/ic_filter"
+                android:contentDescription="Sort" />
+
+            <androidx.appcompat.widget.AppCompatImageButton
                 android:id="@+id/btnNewTemplateFolder"
                 style="@style/Widget.Notesprout.ToolbarButton"
+                android:layout_marginStart="4dp"
                 android:src="@drawable/ic_folder_plus"
                 android:contentDescription="New template folder" />
 

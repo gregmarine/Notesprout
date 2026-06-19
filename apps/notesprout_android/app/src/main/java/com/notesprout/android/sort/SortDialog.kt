@@ -2,14 +2,17 @@ package com.notesprout.android.sort
 
 import android.content.Context
 import android.view.LayoutInflater
+import android.widget.TextView
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.widget.AppCompatButton
+import androidx.appcompat.widget.AppCompatRadioButton
 import android.widget.RadioGroup
 import com.notesprout.android.R
 
 class SortDialog(
     private val context: Context,
     private val current: SortPreferences,
+    private val itemNoun: String = "Notebooks",
     private val onApply: (SortPreferences) -> Unit,
 ) {
     fun show() {
@@ -20,6 +23,9 @@ class SortDialog(
         val rgFolderSort = view.findViewById<RadioGroup>(R.id.rgFolderSort)
         val btnCancel = view.findViewById<AppCompatButton>(R.id.btnSortCancel)
         val btnApply = view.findViewById<AppCompatButton>(R.id.btnSortApply)
+
+        view.findViewById<TextView>(R.id.tvFolderSortHeader).text = "Folders & $itemNoun"
+        view.findViewById<AppCompatRadioButton>(R.id.rbNotebooksFirst).text = "$itemNoun first"
 
         rgSortField.check(when (current.field) {
             SortField.NAME -> R.id.rbSortName

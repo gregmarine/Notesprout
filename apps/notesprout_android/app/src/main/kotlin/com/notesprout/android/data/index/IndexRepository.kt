@@ -153,6 +153,9 @@ class IndexRepository(private val dao: ObjectDao) {
     suspend fun getAllTemplates(): List<ObjectEntity> =
         dao.getAllNotDeleted().filter { it.type == ObjectType.TEMPLATE }
 
+    suspend fun getAllTemplateFolders(): List<ObjectEntity> =
+        dao.getAllNotDeleted().filter { it.type == ObjectType.TEMPLATE_FOLDER }
+
     suspend fun copyTemplate(sourceId: String, destParentId: String?, newName: String? = null): ObjectEntity? {
         val source = dao.getById(sourceId) ?: return null
         val now = System.currentTimeMillis()

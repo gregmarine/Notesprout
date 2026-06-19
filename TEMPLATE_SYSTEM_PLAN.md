@@ -37,7 +37,7 @@ adb -s 34E517F9 install -r app/build/outputs/apk/debug/app-debug.apk
 | 1 | Index data model & repository foundation | ✅ Done |
 | 2 | TemplateBrowserActivity — browse, navigate, import, new folder + toolbar launch | ✅ Done |
 | 3 | Management actions — preview, action sheet, rename, copy, move, delete | ✅ Done |
-| 4 | Search & sort in the template browser | ⬜ Not started |
+| 4 | Search & sort in the template browser | ✅ Done |
 | 5 | In-notebook integration — slim picker + library browse + apply-into-`.soil` | ⬜ Not started |
 | 6 | Full-screen New Notebook flow + first-page template seeding | ⬜ Not started |
 | 7 | Wrap-up — docs, dead-code removal, cross-device QA, migration task | ⬜ Not started |
@@ -493,3 +493,14 @@ picks a template, taps CREATE; the notebook opens with the first page showing th
   (`dao.getById` is type-agnostic). (Discovered S3.)
 - **S7 cleanup nit:** `confirmPickerDestination` has two unused locals (`isCopyTemplate`,
   `isCopyFolder`) left over from the conflict branch — harmless, remove during the S7 dead-code pass.
+- **S4 shared-component params (non-breaking):** `SortPreferencesManager.load/save` gained a trailing
+  `prefsName` arg (default = notebook key) + a `TEMPLATE_PREFS_NAME` const, so template sort persists
+  to `notesprout_template_sort_prefs` and never clobbers notebook sort. `SortDialog` gained an
+  `itemNoun` param (before `onApply` so the trailing-lambda call site still compiles) that relabels
+  the header → "Folders & Templates" and the radio → "Templates first" (`FolderSort.NOTEBOOKS_FIRST`
+  enum value unchanged). `SearchDialog.show` gained a `hint` param. `SearchEngine` gained public
+  `scoreName` + `searchTemplates` (mirrors notebook `search`, rooted at "Templates"); `scoreName` is
+  currently unused (kept as a small public helper). New `IndexRepository.getAllTemplateFolders()`.
+- **S4 search scope:** long-press management is disabled while in search mode (kept focused);
+  move/copy picker hides Search/Sort. Picker can't be entered from search, so `btnClearSearch` is not
+  re-shown on picker exit. (Discovered S4.)

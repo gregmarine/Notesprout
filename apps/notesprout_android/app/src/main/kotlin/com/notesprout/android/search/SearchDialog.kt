@@ -16,12 +16,13 @@ object SearchDialog {
     fun show(
         context: Context,
         initialQuery: String = "",
+        hint: String = "Search notebooks…",
         onSearch: (String) -> Unit,
         onCancel: () -> Unit
     ) {
         val dialogBinding = DialogNewNotebookBinding.inflate(LayoutInflater.from(context))
+        dialogBinding.editNotebookName.setHint(hint)
         dialogBinding.editNotebookName.apply {
-            hint = "Search notebooks…"
             inputType = InputType.TYPE_CLASS_TEXT
             setText(initialQuery)
             setSelection(initialQuery.length)
