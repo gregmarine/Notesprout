@@ -250,8 +250,9 @@ class ToolbarLayoutManager(
      * sits between them, in its own order, filtered to keys with a registered spec.
      *
      * **Full mode** (default): `order − hidden`, in config order, keeping only keys with a registered
-     * spec. The pinned Close is always retained (even if listed in `hidden`) and force-prepended if
-     * missing from `order`. Keys are append-only: a config persisted before a button shipped won't
+     * spec. The pinned buttons (Close and the gear) are always retained (even if an older config
+     * listed them in `hidden`) and force-added if missing — Close to the leading edge, the gear to
+     * the trailing edge. Keys are append-only: a config persisted before a button shipped won't
      * list that key, so any registered key missing from `order` (and not hidden) is appended at the
      * end — otherwise, e.g., a newly added button could vanish for users with an older saved config.
      */
@@ -267,14 +268,20 @@ class ToolbarLayoutManager(
             if (ToolbarButtonRegistry.spec(gear) != null) result.add(gear)
             return result
         }
-        val pinned = ToolbarButtonRegistry.PINNED_KEY
         val result = config.order.filterTo(mutableListOf()) { key ->
-            ToolbarButtonRegistry.spec(key) != null && (key == pinned || key !in config.hidden)
+            val spec = ToolbarButtonRegistry.spec(key)
+            spec != null && (spec.pinned || key !in config.hidden)
         }
         for (key in ToolbarButtonRegistry.DEFAULT_ORDER) {
             if (key !in config.order && key !in config.hidden && key !in result) result.add(key)
         }
-        if (pinned !in result && ToolbarButtonRegistry.spec(pinned) != null) result.add(0, pinned)
+        // Both pinned buttons must always appear, even if an older saved config hid them: Close is the
+        // way out of the notebook (force-prepended to the leading edge), and the gear is the only way
+        // back into the customize dialog (force-appended to the trailing edge).
+        val close = ToolbarButtonRegistry.PINNED_KEY
+        if (close !in result && ToolbarButtonRegistry.spec(close) != null) result.add(0, close)
+        val gear = ToolbarButtonRegistry.SETTINGS_KEY
+        if (gear !in result && ToolbarButtonRegistry.spec(gear) != null) result.add(gear)
         return result
     }
 

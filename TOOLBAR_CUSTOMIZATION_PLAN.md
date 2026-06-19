@@ -345,12 +345,12 @@ Functionality (Sessions 1–7) is the priority; this session is where we revisit
 here as they come up so none are lost, then triage into concrete steps before implementing.
 
 **Ideas backlog (to be fleshed out / discussed):**
-- **Pin the gear button (always shown).** The "Customize Toolbar" gear must never be hideable — if a
-  user hides it, they lose the only way back into the customize dialog. Treat it like Close: keep it
-  in the bar regardless of config (and disable its show/hide toggle in the dialog, like Close's).
-  Open question: should the gear *also* be reachable from a second entry point (e.g. overflow menu or
-  a long-press) as a belt-and-suspenders recovery, or is pinning it sufficient? (Pinning alone is the
-  simplest and probably enough.)
+- **Pin the gear button (always shown).** ✅ DONE. The gear spec is now `pinned = true`, so it's
+  treated exactly like Close: force-retained in `ToolbarLayoutManager.resolveVisibleKeys` (full +
+  mini), and the customize dialog shows no show/hide toggle for it ("Always shown"). A legacy config
+  that had the gear hidden is force-restored (gear → trailing edge, Close → leading edge) and the
+  dialog strips pinned keys from its working `hidden` set so the stale state isn't re-persisted.
+  Decided pinning alone is sufficient — no second entry point added.
 - **Split-panel customize dialog (grid, not list).** Redesign the dialog into two stacked panels:
   - **Top panel = "Showing"** — the currently-visible buttons, arrangeable in order.
   - **Bottom panel = "Hidden / Available"** — buttons not currently in the bar.

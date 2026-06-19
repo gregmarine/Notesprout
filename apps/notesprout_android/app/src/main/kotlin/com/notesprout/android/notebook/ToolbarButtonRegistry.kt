@@ -10,7 +10,7 @@ import com.notesprout.android.R
  * Each [ButtonSpec] carries the key, the `R.id` of its `AppCompatImageButton` in
  * `activity_notebook.xml`, its icon, a human label (for the customize dialog), its **group**
  * (consecutive buttons whose group differs get an auto-divider between them), and whether it is
- * **pinned** (Close — always present, can never be hidden).
+ * **pinned** (Close and the Customize gear — always present, can never be hidden).
  *
  * KEY STABILITY RULE: keys are persisted in [com.notesprout.android.data.toolbar.ToolbarConfig].
  * They are **append-only** and must never change once shipped. Adding a button means appending a
@@ -35,9 +35,10 @@ object ToolbarButtonRegistry {
     const val PINNED_KEY = "close"
 
     /**
-     * The stable key of the Customize-Toolbar gear. Force-included in mini mode (see
-     * [ToolbarLayoutManager.resolveVisibleKeys]) so the user can always reopen the dialog and toggle
-     * mini back off — the customize dialog is the only entry point to that toggle.
+     * The stable key of the Customize-Toolbar gear. **Pinned** (like Close): always present, never
+     * hideable. It is the only entry point to the customize dialog — if it could be hidden the user
+     * would lose all access to toolbar customization (including the mini toggle). Force-included in
+     * mini mode and force-retained in full mode (see [ToolbarLayoutManager.resolveVisibleKeys]).
      */
     const val SETTINGS_KEY = "toolbarSettings"
 
@@ -77,7 +78,7 @@ object ToolbarButtonRegistry {
         ButtonSpec("deletePage", R.id.btnDeletePage, R.drawable.ic_page_delete, "Delete Page", GROUP_PAGE_EDIT),
         ButtonSpec("copyPage", R.id.btnCopyPage, R.drawable.ic_copy_page, "Copy Page", GROUP_PAGE_EDIT),
         ButtonSpec("pastePage", R.id.btnPastePage, R.drawable.ic_paste_page, "Paste Page", GROUP_PAGE_EDIT),
-        ButtonSpec("toolbarSettings", R.id.btnToolbarSettings, R.drawable.ic_adjustments, "Customize Toolbar", GROUP_SETTINGS),
+        ButtonSpec("toolbarSettings", R.id.btnToolbarSettings, R.drawable.ic_adjustments, "Customize Toolbar", GROUP_SETTINGS, pinned = true),
     )
 
     private val byKey: Map<String, ButtonSpec> = SPECS.associateBy { it.key }

@@ -38,7 +38,10 @@ class CustomizeToolbarDialog(
     private val current: ToolbarConfig,
     private val onApply: (ToolbarConfig) -> Unit,
 ) {
-    private val hidden: MutableSet<String> = current.hidden.toMutableSet()
+    // Pinned buttons (Close, the gear) can never be hidden; drop them from the working set so an older
+    // config that wrongly listed one isn't carried forward and re-persisted on Save.
+    private val hidden: MutableSet<String> = current.hidden
+        .filterTo(mutableSetOf()) { ToolbarButtonRegistry.spec(it)?.pinned != true }
 
     /** Live mini on/off; committed to the config on Save. */
     private var miniEnabled: Boolean = current.miniEnabled
