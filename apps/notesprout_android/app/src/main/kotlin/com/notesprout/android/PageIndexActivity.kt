@@ -141,6 +141,13 @@ class PageIndexActivity : AppCompatActivity() {
     /** IDs of pages being moved (snapshot of [selectedPageIds] when Move is entered). */
     private var moveSourceIds: List<String> = emptyList()
 
+    /**
+     * The destination card the user has tapped in destination-picking mode but not yet confirmed.
+     * `null` = no destination chosen yet (still picking). When non-null, the insertion-bar preview
+     * is drawn and the Confirm (✓) button is shown; the op only commits on [confirmDestination].
+     */
+    private var pendingDestPageId: String? = null
+
     /** When true (default), insert before the tapped destination card; false = insert after. */
     private var insertBefore: Boolean = true
 
@@ -310,6 +317,7 @@ class PageIndexActivity : AppCompatActivity() {
         binding.btnExportPage.setOnClickListener { executeExport() }
         binding.btnInsertBefore.setOnClickListener { insertBefore = true;  refreshInsertBeforeAfter() }
         binding.btnInsertAfter.setOnClickListener  { insertBefore = false; refreshInsertBeforeAfter() }
+        binding.btnConfirmDest.setOnClickListener  { confirmDestination() }
 
         // Back gesture exits destination-picking / action mode; otherwise finish.
         onBackPressedDispatcher.addCallback(this, object : androidx.activity.OnBackPressedCallback(true) {
@@ -545,13 +553,28 @@ class PageIndexActivity : AppCompatActivity() {
                 when {
                     destMode == DestMode.MOVE -> {
                         if (entry.id in moveSourceIds) {
-                            // Tapped a source card — cancel back to action mode.
-                            cancelDestMode()
+                            // Tapped a source card. If a destination is already pending, just clear
+                            // the pending pick (back to "picking"); otherwise cancel to action mode.
+                            if (pendingDestPageId != null) {
+                                pendingDestPageId = null
+                                refreshDestChrome()
+                                renderGridPage()
+                            } else {
+                                cancelDestMode()
+                            }
                         } else {
-                            executeMove(entry.id)
+                            // Select + preview this destination (do not commit until OK).
+                            pendingDestPageId = entry.id
+                            refreshDestChrome()
+                            renderGridPage()
                         }
                     }
-                    destMode == DestMode.PASTE -> executePaste(entry.id)
+                    destMode == DestMode.PASTE -> {
+                        // Any card is a valid paste destination — select + preview, don't commit.
+                        pendingDestPageId = entry.id
+                        refreshDestChrome()
+                        renderGridPage()
+                    }
                     !inActionMode() -> finishWithResult(pageIndex)
                     else -> toggleSelection(entry.id)
                 }
@@ -571,11 +594,13 @@ class PageIndexActivity : AppCompatActivity() {
         }
 
         // ── Card ──────────────────────────────────────────────────────────────
-        // Destination mode: highlight the source pages (selection / moveSourceIds).
+        // Destination mode: highlight the source pages (selection / moveSourceIds) and the pending
+        // destination card.
         // Action mode: highlight every selected card.
         // Normal mode: highlight only the currently-open page.
+        val isPendingDest = destMode != DestMode.NONE && entry.id == pendingDestPageId
         val highlighted = when {
-            destMode != DestMode.NONE -> isSelected || entry.id in moveSourceIds
+            destMode != DestMode.NONE -> isSelected || entry.id in moveSourceIds || isPendingDest
             inActionMode() -> isSelected
             else -> isCurrent
         }
@@ -602,6 +627,21 @@ class PageIndexActivity : AppCompatActivity() {
             FrameLayout.LayoutParams.MATCH_PARENT,
             FrameLayout.LayoutParams.MATCH_PARENT,
         ))
+
+        // ── Insertion-bar preview ──────────────────────────────────────────────
+        // For the pending destination, draw a bold inkBlack bar on the leading edge (insertBefore)
+        // or trailing edge (insert after) — the side conveys where the block will land. An arrowhead
+        // with an inset white triangle points in the insertion direction for extra flair. Overlaid
+        // inside the card FrameLayout so it doesn't disturb grid measurement.
+        if (isPendingDest) {
+            val markerWidthPx = (12 * resources.displayMetrics.density + 0.5f).toInt()
+            val marker = InsertionMarkerView(this, insertBefore, inkBlackColor)
+            card.addView(marker, FrameLayout.LayoutParams(
+                markerWidthPx,
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                if (insertBefore) Gravity.START else Gravity.END,
+            ))
+        }
 
         // ── Label ─────────────────────────────────────────────────────────────
         val label = AppCompatTextView(this).apply {
@@ -725,6 +765,7 @@ class PageIndexActivity : AppCompatActivity() {
         selectedPageIds.clear()
         destMode = DestMode.NONE
         moveSourceIds = emptyList()
+        pendingDestPageId = null
         binding.tvTopBarTitle.text = "Pages"
         binding.btnSelectAll.visibility    = android.view.View.GONE
         binding.btnCopyPage.visibility     = android.view.View.GONE
@@ -734,6 +775,7 @@ class PageIndexActivity : AppCompatActivity() {
         binding.btnExportPage.visibility   = android.view.View.GONE
         binding.btnInsertBefore.visibility = android.view.View.GONE
         binding.btnInsertAfter.visibility  = android.view.View.GONE
+        binding.btnConfirmDest.visibility  = android.view.View.GONE
         renderGridPage()
     }
 
@@ -751,6 +793,7 @@ class PageIndexActivity : AppCompatActivity() {
 
         destMode = mode
         insertBefore = true   // reset to "before" each time
+        pendingDestPageId = null   // no destination chosen yet
 
         if (mode == DestMode.MOVE) {
             moveSourceIds = selectedPageIds.toList()
@@ -762,6 +805,7 @@ class PageIndexActivity : AppCompatActivity() {
         binding.btnMovePage.visibility   = android.view.View.GONE
         binding.btnSetTemplate.visibility = android.view.View.GONE
         binding.btnExportPage.visibility = android.view.View.GONE
+        binding.btnConfirmDest.visibility = android.view.View.GONE
 
         // Show the Before/After selectable text buttons; Before is selected by default.
         val verb = if (mode == DestMode.MOVE) "Move" else "Copy"
@@ -770,9 +814,7 @@ class PageIndexActivity : AppCompatActivity() {
         binding.btnInsertBefore.visibility = android.view.View.VISIBLE
         binding.btnInsertAfter.visibility  = android.view.View.VISIBLE
         refreshInsertBeforeAfter()
-
-        val titlePrefix = if (mode == DestMode.MOVE) "Move" else "Paste"
-        binding.tvTopBarTitle.text = "$titlePrefix before/after…"
+        refreshDestChrome()
         renderGridPage()
     }
 
@@ -785,15 +827,63 @@ class PageIndexActivity : AppCompatActivity() {
     private fun refreshInsertBeforeAfter() {
         binding.btnInsertBefore.isSelected = insertBefore
         binding.btnInsertAfter.isSelected  = !insertBefore
+        // When a destination is already chosen, flipping before/after must update both the
+        // confirming title and which edge the insertion bar is drawn on.
+        if (pendingDestPageId != null) {
+            refreshDestChrome()
+            renderGridPage()
+        }
+    }
+
+    /**
+     * Reflect the pending-destination sub-state in the chrome: show the Confirm (✓) button only
+     * once a destination is chosen, and update the title from "pick a spot" to a confirming prompt.
+     * Called from [enterDestMode], destination taps, and before/after flips.
+     */
+    private fun refreshDestChrome() {
+        if (destMode == DestMode.NONE) return
+        val target = pendingDestPageId
+        binding.btnConfirmDest.visibility =
+            if (target != null) android.view.View.VISIBLE else android.view.View.GONE
+        // Show the OK button in its selected (bordered) state so it reads as the ready commit action.
+        binding.btnConfirmDest.isSelected = target != null
+
+        if (target == null) {
+            // Still picking a destination.
+            val titlePrefix = if (destMode == DestMode.MOVE) "Move" else "Paste"
+            binding.tvTopBarTitle.text = "$titlePrefix before/after…"
+        } else {
+            // A destination is chosen — show a confirming prompt with the page number.
+            val verb     = if (destMode == DestMode.MOVE) "Move" else "Paste"
+            val side     = if (insertBefore) "before" else "after"
+            val pageNum  = pages.indexOfFirst { it.id == target }.let { if (it >= 0) it + 1 else null }
+            binding.tvTopBarTitle.text =
+                if (pageNum != null) "$verb $side p.$pageNum?" else "$verb $side…"
+        }
+    }
+
+    /**
+     * Commit the chosen destination. The destination tap selects + previews only; this runs the
+     * actual batch op. [executeMove] / [executePaste] handle all teardown ([exitActionMode]).
+     */
+    private fun confirmDestination() {
+        val target = pendingDestPageId ?: return
+        when (destMode) {
+            DestMode.MOVE  -> executeMove(target)
+            DestMode.PASTE -> executePaste(target)
+            DestMode.NONE  -> {}
+        }
     }
 
     /** Cancel destination-picking mode: restore action mode chrome and selection state. */
     private fun cancelDestMode() {
         destMode = DestMode.NONE
         moveSourceIds = emptyList()
-        // Hide the Before/After buttons before refreshActionMode re-shows action buttons.
+        pendingDestPageId = null
+        // Hide the Before/After + Confirm buttons before refreshActionMode re-shows action buttons.
         binding.btnInsertBefore.visibility = android.view.View.GONE
         binding.btnInsertAfter.visibility  = android.view.View.GONE
+        binding.btnConfirmDest.visibility  = android.view.View.GONE
         refreshActionMode()   // restores action buttons + title
         renderGridPage()
     }
@@ -1531,5 +1621,73 @@ class PageIndexActivity : AppCompatActivity() {
         binding.btnPrevPage.isEnabled  = !atFirst
         binding.btnNextPage.isEnabled  = !atLast
         binding.btnLastPage.isEnabled  = !atLast
+    }
+}
+
+/**
+ * The insertion-bar preview drawn on the pending destination card. A full-height inkBlack bar sits
+ * on the card's leading ([before]) or trailing edge, with a centred arrowhead (apex on the bar's
+ * outer edge) and an inset white triangle — both pointing in the insertion direction. Drawn in code
+ * for crisp, color-free e-ink rendering. Sized 12dp wide, overlaid inside the card FrameLayout.
+ */
+private class InsertionMarkerView(
+    context: android.content.Context,
+    private val before: Boolean,
+    inkBlack: Int,
+) : android.view.View(context) {
+
+    private val density = resources.displayMetrics.density
+    private val inkPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+        color = inkBlack
+        style = android.graphics.Paint.Style.FILL
+    }
+    private val whitePaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+        color = android.graphics.Color.WHITE
+        style = android.graphics.Paint.Style.FILL
+    }
+    private val inkPath = android.graphics.Path()
+    private val whitePath = android.graphics.Path()
+
+    override fun onDraw(canvas: android.graphics.Canvas) {
+        val w = width.toFloat()
+        val h = height.toFloat()
+        val barW = 3f * density
+        val triW = 9f * density          // how far the arrowhead extends from the edge
+        val triHalf = 9f * density       // half the arrowhead height
+        val cy = h / 2f
+
+        // Vertical bar on the appropriate edge.
+        if (before) canvas.drawRect(0f, 0f, barW, h, inkPaint)
+        else        canvas.drawRect(w - barW, 0f, w, h, inkPaint)
+
+        // Black arrowhead: apex on the outer edge, base inside the card — points in the insert dir.
+        inkPath.reset()
+        if (before) {
+            inkPath.moveTo(0f, cy)
+            inkPath.lineTo(triW, cy - triHalf)
+            inkPath.lineTo(triW, cy + triHalf)
+        } else {
+            inkPath.moveTo(w, cy)
+            inkPath.lineTo(w - triW, cy - triHalf)
+            inkPath.lineTo(w - triW, cy + triHalf)
+        }
+        inkPath.close()
+        canvas.drawPath(inkPath, inkPaint)
+
+        // Inset white triangle for flair, same direction, sitting inside the arrowhead.
+        val inset = 2.5f * density
+        val wHalf = triHalf - inset * 1.4f
+        whitePath.reset()
+        if (before) {
+            whitePath.moveTo(inset, cy)
+            whitePath.lineTo(triW - inset, cy - wHalf)
+            whitePath.lineTo(triW - inset, cy + wHalf)
+        } else {
+            whitePath.moveTo(w - inset, cy)
+            whitePath.lineTo(w - (triW - inset), cy - wHalf)
+            whitePath.lineTo(w - (triW - inset), cy + wHalf)
+        }
+        whitePath.close()
+        canvas.drawPath(whitePath, whitePaint)
     }
 }

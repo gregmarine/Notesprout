@@ -537,7 +537,7 @@ Commit (no push). Summarize the Phase 2 backlog for the user.**
 
 ## Phase 2 — Session P2.1 — Confirm step for Copy & Move destinations
 
-**Status:** ☐ Not started
+**Status:** ✅ DONE (2026-06-19)
 
 > **Goal:** Insert an explicit **OK / Cancel** confirmation between picking a move/paste destination
 > and committing it. Today a destination tap commits **immediately** (`executeMove` / `executePaste`
@@ -693,6 +693,17 @@ Rewrite the card click handler (`buildCardGroup`, lines ~544–558) for the dest
 - Preview survives pagination; disabled/hidden chrome correct; no `Log.d`, no `runBlocking`, e-ink
   visuals (inkBlack bar, no color).
 
+**Corrections (impl):**
+- **"OK" text button, not a ✓ icon.** §P2.1.2 specified an `ic_check` checkmark `AppCompatImageButton`.
+  As built, `btnConfirmDest` is an **"OK" text button** (`Widget.Notesprout.ToggleTextButton`, shown in
+  its selected/bordered state) to read more clearly as the commit action and match the Before/After
+  toggle pair. Given a `layout_marginStart="16dp"` so it sits apart: `[Before] [After]   [OK]`. The
+  `ic_check.xml` drawable was created then removed (unused).
+- **Insertion bar got an arrowhead + white triangle.** §P2.1.6's plain inkBlack bar was upgraded to a
+  code-drawn `InsertionMarkerView`: full-height inkBlack bar on the destination edge **plus** a centred
+  arrowhead with an inset **white triangle**, both pointing in the insertion direction (left = Before,
+  right = After). Flipping Before/After flips the arrow with the bar's edge. No color, crisp on e-ink.
+
 **→ Haiku: clean build + install on G10. Fix-loop (Sonnet fix → Haiku rebuild) until user passes.
 Then update Status above and commit (no push).**
 
@@ -729,6 +740,6 @@ Append items discovered during implementation here. Seeds:
 | 3 — Multi Set Template | ✅ DONE (2026-06-19) |
 | 4 — Multi Export (PDF/PNG/templates) | ✅ DONE (2026-06-19) |
 | 5 — Wrap-up (docs, polish) | ✅ DONE (2026-06-19) |
-| P2.1 — Confirm step for Copy/Move destinations | ☐ Not started |
+| P2.1 — Confirm step for Copy/Move destinations | ✅ DONE (2026-06-19) |
 </content>
 </invoke>

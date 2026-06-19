@@ -113,6 +113,19 @@
             android:text="Move After"
             android:visibility="gone" />
 
+        <!-- Confirm destination — only visible in destination-picking mode once a destination card
+             has been tapped (pendingDestPageId != null). Commits the move/paste; the destination
+             cluster reads [Before] [After]   [OK]. The marginStart sets it apart from the
+             Before/After toggle pair so it reads as the commit action. -->
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/btnConfirmDest"
+            style="@style/Widget.Notesprout.ToggleTextButton"
+            android:layout_marginStart="16dp"
+            android:layout_marginEnd="4dp"
+            android:text="OK"
+            android:contentDescription="Confirm"
+            android:visibility="gone" />
+
     </LinearLayout>
 
     <!-- Grid area: fills all remaining height between top and bottom bars. -->

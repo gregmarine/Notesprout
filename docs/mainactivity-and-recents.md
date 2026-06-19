@@ -112,15 +112,26 @@ separate Paste button — Copy goes straight to destination-picking (see below).
 
 Move and Paste share one **destination-picking mode** (`DestMode { NONE, MOVE, PASTE }`): hide the
 action buttons, show two selectable buttons **"Move/Copy Before"** and **"Move/Copy After"**, and tap a
-destination card to commit. `insertBefore` resets to **true (Before)** each time destination mode is
-entered. Back / system-back cancels destination mode → action mode (`cancelDestMode`), then action mode
-→ normal (`exitActionMode`), then finishes.
+destination card to **select + preview** the landing spot. The flow is *select → pick destination →
+(preview, adjust Before/After) → **OK***. `insertBefore` resets to **true (Before)** each time
+destination mode is entered. Back / system-back cancels destination mode → action mode
+(`cancelDestMode`), then action mode → normal (`exitActionMode`), then finishes.
 
+- **Preview + confirm step** (`pendingDestPageId`): a destination tap does **not** commit — it sets
+  `pendingDestPageId`, outlines the card, and draws a bold inkBlack **insertion bar** on the card's
+  leading edge (Before) or trailing edge (After) so the landing spot is legible (`borderGray` is
+  invisible on e-ink → inkBlack). A **Confirm (✓)** button (`btnConfirmDest`, `ic_check`) appears only
+  once a destination is chosen; tapping it runs `confirmDestination()` → `executeMove`/`executePaste`.
+  Flipping Before/After moves the bar and updates the confirming title ("Move before p.3?"); tapping a
+  different card moves the preview. The preview survives pagination (state is by id, re-derived in
+  `renderGridPage`). `refreshDestChrome()` owns the title + Confirm-button visibility. **The batch ops,
+  undo/redo, and extras are untouched** — the confirm step is purely a gate in front of them.
 - **Copy** (`copySelectedPages`): stashes the selection into `pendingCopyPageIds`, then immediately
-  enters `PASTE` destination mode. Tapping any card deep-copies the clipboard as a contiguous block
-  before/after it, in clipboard (selection) order.
-- **Move** (`enterDestMode(MOVE)`): stashes `moveSourceIds`. Tapping a non-source card moves the block
-  before/after it; tapping a source card cancels. Sources can't be their own destination.
+  enters `PASTE` destination mode. The chosen destination deep-copies the clipboard as a contiguous
+  block before/after it, in clipboard (selection) order.
+- **Move** (`enterDestMode(MOVE)`): stashes `moveSourceIds`. A non-source card is a valid destination;
+  tapping a source card clears the pending destination (back to picking) or, if none is pending, cancels.
+  Sources can't be their own destination.
 - Data layer (`data/PageCopier.kt`): `movePagesRelativeRaw(pageIds, targetPageId, before, path)` and
   `copyPagesRelativeRaw(sourcePageIds, targetPageId, before, path)`. Both rebuild the full page order in
   one transaction, ordering the block by **original document order** so undo/redo predecessor chaining
