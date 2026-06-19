@@ -135,11 +135,41 @@ The library `TemplateObject` differs: the **name lives in `ObjectEntity.name`**,
 **TemplateBrowserActivity** — one full-screen Activity (`Theme.Notesprout`, no immersive mode) drives
 all contexts via `EXTRA_MODE`:
 - `MODE_MANAGE` — launched from the MainActivity toolbar (`btnTemplates`). Full management: browse,
-  import PNGs, new folder, long-press action sheet (rename / copy / move / delete, with self-descendant
-  + conflict guards), search, sort. No selection result.
+  import PNGs, new folder, long-press action sheet (rename / copy / move / delete / pin-unpin /
+  **export**, with self-descendant + conflict guards), search, sort. No selection result.
 - `MODE_PICK` — selection. Returns `RESULT_TEMPLATE_ID` (`""` = Blank, else a library `TemplateObject`
   id). With `EXTRA_COLLECT_NAME=true` it also shows a name field + CREATE button (the New Notebook
   flow) and returns `RESULT_NOTEBOOK_NAME`. Long-press management is omitted in PICK.
+- `MODE_SAVE_TARGET` — cross-launched from the page-index "Save as Template" export option. Behaves
+  like the move/copy destination picker (folders only, breadcrumb nav, no template cards) with a
+  "Choose a folder" confirm bar (**Save Here** + **Cancel**, reuses `pickerToolbar`). Save Here prompts
+  for a name (default = `EXTRA_SAVE_DEFAULT_NAME`, dup-checked with ` (2)`… like Import), reads the PNG
+  at `EXTRA_SAVE_SOURCE_PATH`, and calls `repository.createTemplate` itself; returns only `RESULT_OK` /
+  cancel. New-Folder stays available; everything else is hidden. (See `mainactivity-and-recents.md`
+  for the host export sheet. Creation ≠ use → no recents recording.)
+
+**Top toolbar (S11):** Search / Sort / Pinned / Recents live in a right-aligned cluster in the
+`breadcrumbBar` (mirrors MainActivity). New-Folder + Import stay in the bottom bar with pagination.
+`btnRecents` is GONE in MANAGE (selector-only), visible in PICK; `btnPinned` is visible in both.
+
+**Pinned & Recents views** — alternate flat, paginated card grids (templates only, no folders, no
+breadcrumb nav) toggled by the top-bar buttons, reusing the existing grid + pagination:
+- **Pinned** (`enterPinnedView`/`exitPinnedView`, `isPinnedView`) — `repository.getPinnedTemplates()`.
+  Available in **MANAGE and PICK**. Long-press management (incl. Pin/Unpin) applies in MANAGE only.
+- **Recents** (`enterRecentsView`/`exitRecentsView`, `isRecentsView`) — `TemplateRecentsManager.resolve`,
+  newest-first. **PICK-only.**
+- Pinned / Recents / Search are mutually exclusive (entering one exits the others). Tap behavior matches
+  the root browse grid for the mode: `collectName` → set pending + mark + stay (CREATE confirms); plain
+  PICK → select + `finish()`. The **Blank** card belongs to root browse only (never pinned/recents).
+- `applyOverlayViewUI` is the single authority handling both overlay toolbars + the action-button
+  cluster. See `data-architecture.md` for the pinned-templates list + recents store.
+
+**Export Template (S13, MANAGE):** the template long-press menu has an **"Export Template"** action
+(after Rename, before Pin) → `showExportTemplateChoice` → an "Export template" `AlertDialog` with
+**Save to device** (`CreateDocument` launcher) and **Share** (`ACTION_SEND` chooser). `writeTemplatePng`
+decodes `TemplateObject.image` and writes the **raw bytes** (no re-encode) to
+`cacheDir/exported_pngs/<name>.png`; reuses the `${applicationId}.fileprovider` authority. Single action
+opening a chooser (the app-wide export pattern) — not two menu items.
 
 Thumbnails decode-sampled from the full base64 on `Dispatchers.IO`, cached in-memory keyed by
 `"${id}:${updatedAt}"`. Adaptive grid — 4 columns ≥1500px, else 2. Template cells use `shape_bordered`

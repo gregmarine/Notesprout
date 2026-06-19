@@ -308,13 +308,13 @@
             android:background="@color/inkBlack"
             android:layout_alignParentTop="true" />
 
-        <!-- Pagination — centred -->
+        <!-- Pagination — left-anchored on narrow screens so it does not overlap the action buttons. -->
         <LinearLayout
             android:id="@+id/paginationGroup"
             android:layout_width="wrap_content"
             android:layout_height="match_parent"
             android:orientation="horizontal"
-            android:layout_centerInParent="true"
+            android:layout_alignParentStart="true"
             android:gravity="center_vertical">
 
             <androidx.appcompat.widget.AppCompatImageButton

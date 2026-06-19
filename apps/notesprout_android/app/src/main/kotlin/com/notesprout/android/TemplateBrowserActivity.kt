@@ -252,6 +252,14 @@ class TemplateBrowserActivity : AppCompatActivity() {
         binding = ActivityTemplateBrowserBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
+        // Android 15 (targetSdk 35) enforces edge-to-edge. Pad the root view by the
+        // system bar insets so content doesn't draw under the status/nav bars.
+        ViewCompat.setOnApplyWindowInsetsListener(binding.root) { v, insets ->
+            val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            v.setPadding(0, bars.top, 0, bars.bottom)
+            insets
+        }
+
         mode = intent.getIntExtra(EXTRA_MODE, MODE_MANAGE)
         collectName = intent.getBooleanExtra(EXTRA_COLLECT_NAME, false)
         if (collectName) {

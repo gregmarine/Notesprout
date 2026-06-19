@@ -48,7 +48,7 @@ adb -s 34E517F9 install -r app/build/outputs/apk/debug/app-debug.apk
 | 11 | Toolbar relocation — search/sort/pinned/recent → top bar | ✅ Done |
 | 12 | "Save as Template" from the page index | ✅ Done |
 | 13 | Export a template from the manager — Share / Save to device | ✅ Done |
-| 14 | Phase 2 wrap-up — docs, dead-code, cross-device QA | ⬜ Not started |
+| 14 | Phase 2 wrap-up — docs, dead-code, cross-device QA | ✅ Done |
 
 Status legend: ⬜ Not started · 🚧 In progress · ✅ Done (committed, not pushed)
 
@@ -936,6 +936,12 @@ Save to device writes a PNG via the system file picker. Build + install G10. ✅
 
 **Definition of done:** Docs updated; no dead references; Tier-1 smoke-tested (or deferred per user).
 Commit (no push).
+
+✅ **Done.** Docs updated (`data-architecture.md`, `drawing-engine.md`, `mainactivity-and-recents.md`).
+Template browser given top/bottom outer borders + a 1dp bottom-bar top border; bottom bar height
+matched to MainActivity (56dp); navbar-overlap inset padding added in `TemplateBrowserActivity`;
+responsive pagination via new `layout-sw360dp` / `layout-sw600dp` variants. QA on G10 + P2P (also
+installed G7 + MAX).
 
 ### 6.3 Phase 2 Open Questions / Notes (fill in as we go)
 

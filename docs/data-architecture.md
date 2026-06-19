@@ -45,7 +45,8 @@ CREATE INDEX idx_objects_parent_type_deleted
 - `ObjectEntity` (`data/index/ObjectEntity.kt`) — Room entity; universal index row
 - `ObjectType` (`data/index/ObjectType.kt`) — `FOLDER`, `NOTEBOOK`, `LIST`, `TEMPLATE`, `TEMPLATE_FOLDER`
 - `FolderObject`, `NotebookObject`, `ListObject` — `@Serializable` data classes in `data` column. `NotebookObject` carries `snapshot: String?` + `pageCount: Int`. `ListObject` carries `notebookIds: List<String>` (array order = display order).
-- `ListIds` (`data/index/ListIds.kt`) — `PINNED_LIST_ID = "00000000-0000-0000-0000-70696e6e6564"`
+- `ListIds` (`data/index/ListIds.kt`) — `PINNED_LIST_ID = "00000000-0000-0000-0000-70696e6e6564"`, `PINNED_TEMPLATES_LIST_ID = "00000000-0000-0000-0000-746d706c7069"`
+- `TemplateListObject` (`data/index/TemplateListObject.kt`) — `@Serializable data class TemplateListObject(templateIds: List<String>)`; the `data` payload of the pinned-templates `LIST` object. A parallel to `ListObject` so notebook list code is untouched.
 - `ObjectDao` (`data/index/ObjectDao.kt`) — Room DAO for all index queries and mutations
 - `IndexRepository` (`data/index/IndexRepository.kt`) — higher-level API: create/rename/softDelete/move for folders and notebooks; list ops: `ensurePinnedListExists`, `getPinnedList`, `addNotebookToList`, `removeNotebookFromList`, `reorderList`, `getNotebooksInList`, `scrubNotebookFromAllLists`; pin helpers: `isNotebookPinned(notebookId)`, `togglePin(notebookId)`
 - `NotesproutIndex` (`data/index/NotesproutIndex.kt`) — singleton managing `notesprout.db`; `open(context)` in `Application.onCreate`, `seal()` on shutdown
@@ -86,6 +87,32 @@ The reusable **template library** lives in the global index — not the filesyst
 - **Apply / seed → `.soil`:** selecting a library template **copies** it into the target `.soil` as a
   new `type="template"` row (`TemplateData` shape). See the Template System section of
   [`drawing-engine.md`](drawing-engine.md).
+
+#### Pinned templates (index)
+
+- **Dedicated list, never the notebook pinned list.** The `PINNED_TEMPLATES_LIST_ID` row is a
+  `type = LIST` `ObjectEntity` (name `"Pinned Templates"`, `parentId = null`) whose `data` is a
+  `TemplateListObject` JSON. Pin order = `templateIds` list order (newest pin appended last).
+- **Only templates are pinnable — never template folders** (mirrors notebooks: folders aren't pinned).
+- **Repository:** `ensurePinnedTemplatesListExists` (bootstrapped from `NotesproutApplication.onCreate`
+  alongside `ensurePinnedListExists`), `isTemplatePinned`, `toggleTemplatePin` (returns new state),
+  `getPinnedTemplates` (resolves ids → entities, skips null/deleted/non-`TEMPLATE`),
+  `scrubTemplateFromPinned`. `softDeleteTemplate` scrubs-then-deletes, so deleting a pinned template
+  also unpins it.
+
+#### Template recents (device-local)
+
+- **Separate from notebook recents, library-template-only.** Lives in `data/recents/` —
+  `TemplateRecentEntry(templateId, timestamp)`, `ResolvedTemplateRecent(templateId, templateName,
+  folderPath, timestamp)`, and `TemplateRecentsManager` (`object`, prefs `notesprout_template_recents`,
+  `MAX_ENTRIES = 20`). Exact mirror of the notebook `RecentsManager`, but resolves against
+  `ObjectType.TEMPLATE` via `IndexRepository.getTemplate` + `getAllTemplateFolders` (breadcrumb root
+  `"Templates"`), with a self-healing prune in `resolve` (missing/deleted ids never surface).
+- **A "use" is recorded only when a *library* template is actually applied to a page** — exactly two
+  sites: `NotebookActivity.onTemplatePicked` (after a successful library-browse apply) and
+  `MainActivity.createNotebook` (when seeding a new notebook from a library template). Blank, in-notebook
+  re-apply (`.soil` row ids), importing, and "Save as Template" do **not** record (creation ≠ use). The
+  repo gets no `Context` — cleanup relies on `resolve`'s prune.
 
 ### WAL Maintenance
 

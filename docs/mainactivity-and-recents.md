@@ -80,6 +80,7 @@ Fuzzy match against all notebooks: substring (3) > all words present (2) > prefi
 - Share intent: `type = "image/png"`, same `ClipData` + `FLAG_GRANT_READ_URI_PERMISSION` pattern as PDF export
 - Progress: non-cancellable `AlertDialog` ("Exporting…") matching the PDF export pattern; dismissed on success or failure
 - After export: `exitActionMode()` then `showExportChoice(file)` — same "Save to device" / "Share" pattern as PDF; `savePngLauncher` uses `CreateDocument("image/png")`
+- **Save as Template:** `showExportChoice` also carries a **neutral** "Save as Template" button. It launches `TemplateBrowserActivity` in `MODE_SAVE_TARGET` with `EXTRA_SAVE_SOURCE_PATH` (the exported PNG) + `EXTRA_SAVE_DEFAULT_NAME` (page heading or `"Page N"`, pre-sanitized) + `EXTRA_TITLE`. The browser picks a destination folder, names the template, and creates it; `RESULT_OK` → Toast "Saved to Templates". See the Template System section of [`drawing-engine.md`](drawing-engine.md).
 
 ## ML Kit
 
@@ -152,6 +153,13 @@ a **MainActivity recents browse mode** (notebook cards) and a **NotebookActivity
   when no special mode is active and the persisted browse folder differs from the current one,
   re-navigate the stack to the persisted folder before rendering. Narrow by design — the normal close
   path leaves persisted == current, so it no-ops and just scans.
+
+### Template recents (separate store)
+
+Library templates have their own device-local recents store (`TemplateRecentsManager`, prefs
+`notesprout_template_recents`), surfaced as a Recents view inside `TemplateBrowserActivity` (PICK only).
+It is independent of notebook recents — see `data-architecture.md` (template recents) and
+`drawing-engine.md` (the browser's Pinned/Recents views).
 
 ---
 
