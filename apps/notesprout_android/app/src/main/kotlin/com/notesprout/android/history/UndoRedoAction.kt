@@ -91,6 +91,24 @@ sealed class UndoRedoAction {
     ) : UndoRedoAction()
 
     /**
+     * User set the template on several pages at once from the page index — undo reverts every page
+     * to its [TemplateChangeRef.previousTemplateId], redo re-applies [TemplateChangeRef.newTemplateId],
+     * as a single atomic undo step (mirrors [PagesDeleted] / [PagesMoved]).
+     */
+    @Serializable
+    data class TemplatesChanged(
+        val changes: List<TemplateChangeRef>,
+    ) : UndoRedoAction()
+
+    /** One page's template change as part of a [TemplatesChanged] batch (null = blank/no template). */
+    @Serializable
+    data class TemplateChangeRef(
+        val pageId: String,
+        val previousTemplateId: String?,
+        val newTemplateId: String?,
+    )
+
+    /**
      * User erased all strokes from a page — undo restores every stroke soft-deleted
      * at [deletedAt]; redo soft-deletes all surviving strokes on [layerId] again.
      *

@@ -506,7 +506,28 @@ class NotebookActivity : AppCompatActivity() {
                 }
             }
 
-            val anySessionActions = !pastedIds.isNullOrEmpty() || !deletedIds.isNullOrEmpty() || !movedIds.isNullOrEmpty()
+            // Push template-change actions recorded during the index session onto the undo stack.
+            // Group the whole batch into ONE TemplatesChanged step (mirrors PagesDeleted) so a single
+            // undo reverts every page set together. Ids are .soil template-row ids ("" → null = blank).
+            val templatePageIds = data?.getStringExtra(PageIndexActivity.EXTRA_TEMPLATE_PAGE_IDS)
+            val templatePrevIds = data?.getStringExtra(PageIndexActivity.EXTRA_TEMPLATE_PREV_IDS)
+            val templateNewIds  = data?.getStringExtra(PageIndexActivity.EXTRA_TEMPLATE_NEW_IDS)
+            if (!templatePageIds.isNullOrEmpty()) {
+                val ids   = templatePageIds.split(",")
+                val prevs = templatePrevIds?.split(",") ?: emptyList()
+                val news  = templateNewIds?.split(",") ?: emptyList()
+                val refs = ids.indices.map { i ->
+                    UndoRedoAction.TemplateChangeRef(
+                        pageId             = ids[i],
+                        previousTemplateId = prevs.getOrNull(i)?.takeIf { it.isNotEmpty() },
+                        newTemplateId      = news.getOrNull(i)?.takeIf { it.isNotEmpty() },
+                    )
+                }
+                if (refs.isNotEmpty()) undoRedoManager.push(UndoRedoAction.TemplatesChanged(refs))
+            }
+
+            val anySessionActions = !pastedIds.isNullOrEmpty() || !deletedIds.isNullOrEmpty() ||
+                !movedIds.isNullOrEmpty() || !templatePageIds.isNullOrEmpty()
             if (anySessionActions) updateUndoRedoButtons()
 
             val selected = data?.getIntExtra(PageIndexActivity.EXTRA_SELECTED_PAGE_INDEX, -1) ?: -1
@@ -7164,6 +7185,16 @@ class NotebookActivity : AppCompatActivity() {
                     persistPageTemplate(dao, action.pageId, templateId ?: "")
                 }
                 // Visual update is handled by the full page reload in step 3b below.
+            }
+
+            is UndoRedoAction.TemplatesChanged -> withContext(Dispatchers.IO) {
+                // Revert (undo) or re-apply (redo) every page's template in one atomic step.
+                action.changes.forEach { ref ->
+                    val templateId = if (isUndo) ref.previousTemplateId else ref.newTemplateId
+                    persistPageTemplate(dao, ref.pageId, templateId ?: "")
+                    invalidatePageSnapshot(db, ref.pageId)
+                }
+                // Visual update for the open page is handled by the full page reload in step 3b below.
             }
 
             is UndoRedoAction.PageEraseAll -> withContext(Dispatchers.IO) {

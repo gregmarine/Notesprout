@@ -303,7 +303,7 @@ old ones (your choice; note it in the commit).
 
 ## Session 3 — Multi "Set Template" toolbar action
 
-**Status:** ☐ Not started
+**Status:** ✅ DONE (2026-06-19)
 
 **Goal:** Add a new toolbar action that sets the template of all selected pages via the template
 picker, with full undo.
@@ -364,6 +364,21 @@ picker, with full undo.
   each / snapshots after next edit). Picking "Blank" clears the template on all selected.
 - If the open page was among them, its template updates on return to the canvas.
 - Undo reverses each page's template change; redo re-applies.
+
+**Corrections (impl):**
+- **Template id indirection.** §3.3 assumed the picker's returned id could be written straight into
+  `PageData.template`. In reality a page's `template` field stores a **`.soil` `type="template"`
+  row id**, while the picker returns a **global-index library id** (NotebookActivity bridges this via
+  `insertLibraryTemplateIntoSoil`). The index now replicates that: `PageCopier.insertSoilTemplateRaw`
+  copies the library image into one shared `.soil` template row per Set-Template op, then
+  `setPagesTemplateRaw` points every selected page at it. `readNotebookRowId` supplies the template
+  row's parentId. Undo/redo round-trips through these soil-row ids (which `TemplateChanged` already
+  expects). Blank (`""`) clears the template.
+- **Batch undo.** Pushing one `TemplateChanged` per page made a single undo revert only the last page
+  (same defect Session 1 hit with delete). Fixed by adding `UndoRedoAction.TemplatesChanged`
+  (a batch of `TemplateChangeRef`, mirroring `PagesDeleted`/`PagesMoved`); the launcher pushes **one**
+  per index session and the handler reverts/re-applies the whole group atomically. Extras format on
+  the index side unchanged.
 
 **→ Haiku: clean build + install on G10. Fix-loop until pass. Update Status. Commit (no push).**
 
@@ -494,6 +509,15 @@ Commit (no push). Summarize the Phase 2 backlog for the user.**
 
 Append items discovered during implementation here. Seeds:
 
+- **Confirm (OK) step for Copy & Move destinations.** Today, once the user taps a destination card in
+  destination-picking mode, the paste/move applies **immediately**. Add an explicit **OK / Cancel**
+  confirmation: the user runs the current workflow for both actions, picks the destination, and then —
+  instead of it applying instantly — gets the chance to **OK** it (commit the op) or **Cancel** it
+  (Cancel is already implemented via the back / cancel-destination-mode path). Applies to both Copy
+  (paste) and Move. Plan the detailed session for this **after the Phase 1 sessions are complete** —
+  do not implement yet. (Affects the `destMode` flow + `executeMove` / `executePaste` in
+  `PageIndexActivity.kt`; the before/after toggle and destination tap stay, but the destination tap
+  selects-and-previews rather than commits.)
 - **Choose template folder for batch "PNG as templates"** instead of importing into root (Session 4.4
   noted this).
 - **Range selection** (tap first, shift/long-press last to select a span) for faster large
@@ -514,7 +538,7 @@ Append items discovered during implementation here. Seeds:
 |---|---|
 | 1 — Selection model, Select All, multi-Delete | ✅ DONE (2026-06-19) |
 | 2 — Multi Copy/Paste & Move + before/after | ✅ DONE (2026-06-19) |
-| 3 — Multi Set Template | ☐ Not started |
+| 3 — Multi Set Template | ✅ DONE (2026-06-19) |
 | 4 — Multi Export (PDF/PNG/templates) | ☐ Not started |
 | 5 — Wrap-up (docs, polish) | ☐ Not started |
 </content>

@@ -24,6 +24,10 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.lifecycleScope
+import com.notesprout.android.data.index.IndexRepository
+import com.notesprout.android.data.index.NotesproutIndex
+import com.notesprout.android.data.index.TemplateObject
+import com.notesprout.android.data.recents.TemplateRecentsManager
 import com.notesprout.android.data.soilFile
 import com.notesprout.android.data.topHeadingNamesByPageId
 import com.notesprout.android.databinding.ActivityPageIndexBinding
@@ -64,6 +68,14 @@ class PageIndexActivity : AppCompatActivity() {
         /** Comma-separated page-counts, one per move operation, so the flattened move lists can be
          *  split back into per-operation batches (one PagesMoved undo step each). */
         const val EXTRA_MOVED_OP_SIZES        = "moved_op_sizes"
+        /** Comma-separated UUIDs of pages whose template changed during this session (may be empty). */
+        const val EXTRA_TEMPLATE_PAGE_IDS     = "template_page_ids"
+        /** Comma-separated previous template-row ids matching [EXTRA_TEMPLATE_PAGE_IDS]
+         *  (empty string = page had no template / was blank). */
+        const val EXTRA_TEMPLATE_PREV_IDS     = "template_prev_ids"
+        /** Comma-separated new template-row ids matching [EXTRA_TEMPLATE_PAGE_IDS]
+         *  (empty string = template cleared / set to blank). */
+        const val EXTRA_TEMPLATE_NEW_IDS      = "template_new_ids"
     }
 
     // ── Grid specification ────────────────────────────────────────────────────
@@ -144,6 +156,16 @@ class PageIndexActivity : AppCompatActivity() {
      *  One entry per move OPERATION; each is the operation's per-page triples
      *  (pageId, prevAfterId [undo], newAfterId [redo]) in original document order. */
     private val movedActions   = mutableListOf<List<Triple<String, String?, String?>>>()
+    /** Template-change operations performed this session — returned to NotebookActivity for
+     *  undo/redo. Each entry is (pageId, previousTemplateId, newTemplateId); ids are `.soil`
+     *  template-row ids, null = blank/no template. */
+    private val templateChanges = mutableListOf<Triple<String, String?, String?>>()
+
+    /** Global-index repository (templates live in `notesprout.db`, not the `.soil`). */
+    private val indexRepo: IndexRepository by lazy { IndexRepository(NotesproutIndex.dao()) }
+
+    /** Pages whose template will be set once the picker returns (snapshot of the selection). */
+    private var pendingTemplateTargets: List<String> = emptyList()
 
     // ── Export save-to-device launcher ───────────────────────────────────────
 
@@ -155,6 +177,15 @@ class PageIndexActivity : AppCompatActivity() {
         if (result.resultCode == RESULT_OK) {
             android.widget.Toast.makeText(this, "Saved to Templates", android.widget.Toast.LENGTH_SHORT).show()
         }
+    }
+
+    private val templatePickerLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode != RESULT_OK) return@registerForActivityResult
+        val templateId = result.data?.getStringExtra(TemplateBrowserActivity.RESULT_TEMPLATE_ID)
+            ?: return@registerForActivityResult
+        applyTemplateToSelection(templateId)
     }
 
     private val savePngLauncher = registerForActivityResult(
@@ -228,6 +259,7 @@ class PageIndexActivity : AppCompatActivity() {
         binding.btnCopyPage.setOnClickListener   { copySelectedPages() }
         binding.btnDeletePage.setOnClickListener { executeDelete() }
         binding.btnMovePage.setOnClickListener   { enterDestMode(DestMode.MOVE) }
+        binding.btnSetTemplate.setOnClickListener { chooseTemplateForSelection() }
         binding.btnExportPage.setOnClickListener { executeExport() }
         binding.btnInsertBefore.setOnClickListener { insertBefore = true;  refreshInsertBeforeAfter() }
         binding.btnInsertAfter.setOnClickListener  { insertBefore = false; refreshInsertBeforeAfter() }
@@ -623,6 +655,7 @@ class PageIndexActivity : AppCompatActivity() {
         binding.btnCopyPage.visibility   = vis
         binding.btnDeletePage.visibility = vis
         binding.btnMovePage.visibility   = vis
+        binding.btnSetTemplate.visibility = vis
         binding.btnExportPage.visibility = vis
         // Before/after buttons are only shown in destination-picking mode.
         binding.btnInsertBefore.visibility = android.view.View.GONE
@@ -633,6 +666,7 @@ class PageIndexActivity : AppCompatActivity() {
         if (active) {
             setButtonEnabled(binding.btnCopyPage,   true)
             setButtonEnabled(binding.btnMovePage,   true)
+            setButtonEnabled(binding.btnSetTemplate, true)  // any selection count
             setButtonEnabled(binding.btnExportPage, selectedCount() == 1)  // single-only until Session 4
             setButtonEnabled(binding.btnDeletePage, true)
             // Select-all content description reflects the toggle target.
@@ -650,6 +684,7 @@ class PageIndexActivity : AppCompatActivity() {
         binding.btnCopyPage.visibility     = android.view.View.GONE
         binding.btnDeletePage.visibility   = android.view.View.GONE
         binding.btnMovePage.visibility     = android.view.View.GONE
+        binding.btnSetTemplate.visibility  = android.view.View.GONE
         binding.btnExportPage.visibility   = android.view.View.GONE
         binding.btnInsertBefore.visibility = android.view.View.GONE
         binding.btnInsertAfter.visibility  = android.view.View.GONE
@@ -679,6 +714,7 @@ class PageIndexActivity : AppCompatActivity() {
         binding.btnCopyPage.visibility   = android.view.View.GONE
         binding.btnDeletePage.visibility = android.view.View.GONE
         binding.btnMovePage.visibility   = android.view.View.GONE
+        binding.btnSetTemplate.visibility = android.view.View.GONE
         binding.btnExportPage.visibility = android.view.View.GONE
 
         // Show the Before/After selectable text buttons; Before is selected by default.
@@ -803,6 +839,82 @@ class PageIndexActivity : AppCompatActivity() {
         pendingCopyPageIds = selectedPageIds.toList()
         // Immediately enter destination-picking paste mode (same flow as Move).
         enterDestMode(DestMode.PASTE)
+    }
+
+    /**
+     * Launch the template picker (MODE_PICK) for the current selection. The selection is snapshotted
+     * into [pendingTemplateTargets] so the chosen template is applied to exactly the pages that were
+     * highlighted when Set Template was tapped (the picker activity may outlive a config change).
+     */
+    private fun chooseTemplateForSelection() {
+        if (!inActionMode()) return
+        pendingTemplateTargets = selectedPageIds.toList()
+        val intent = Intent(this, TemplateBrowserActivity::class.java).apply {
+            putExtra(TemplateBrowserActivity.EXTRA_MODE, TemplateBrowserActivity.MODE_PICK)
+            putExtra(TemplateBrowserActivity.EXTRA_TITLE, "Set template")
+        }
+        templatePickerLauncher.launch(intent)
+    }
+
+    /**
+     * Apply the picked template to every page in [pendingTemplateTargets].
+     *
+     * [libraryTemplateId] is the global-index library id from the picker, or "" for Blank (clear).
+     * A page's `template` property stores a `.soil` template-row id, so a non-blank library template
+     * is first copied into the `.soil` ([insertSoilTemplateRaw]); one shared soil row is created per
+     * operation and every selected page is pointed at it. Each page's previous/new template ids are
+     * recorded in [templateChanges] for undo/redo.
+     */
+    private fun applyTemplateToSelection(libraryTemplateId: String) {
+        val targets = pendingTemplateTargets
+        pendingTemplateTargets = emptyList()
+        if (targets.isEmpty()) return
+        val path = notebookSoilPath ?: return
+
+        lifecycleScope.launch {
+            val soilTemplateId: String? = withContext(Dispatchers.IO) {
+                if (libraryTemplateId.isEmpty()) {
+                    ""  // Blank — clear template.
+                } else {
+                    val entity = indexRepo.getTemplate(libraryTemplateId) ?: return@withContext null
+                    val tObj = TemplateObject.fromJson(entity.data) ?: return@withContext null
+                    if (tObj.image.isEmpty()) return@withContext null
+                    val parentId = com.notesprout.android.data.readNotebookRowId(path)
+                        ?: MainActivity.NIL_UUID
+                    com.notesprout.android.data.insertSoilTemplateRaw(
+                        notebookPath = path,
+                        parentId     = parentId,
+                        width        = tObj.width,
+                        height       = tObj.height,
+                        name         = entity.name,
+                        imageBase64  = tObj.image,
+                    )
+                }
+            }
+            if (soilTemplateId == null) {
+                android.widget.Toast.makeText(this@PageIndexActivity, "Couldn't set template", android.widget.Toast.LENGTH_SHORT).show()
+                return@launch
+            }
+
+            val pairs = withContext(Dispatchers.IO) {
+                com.notesprout.android.data.setPagesTemplateRaw(targets, soilTemplateId, path)
+            }
+            if (pairs == null) {
+                android.widget.Toast.makeText(this@PageIndexActivity, "Couldn't set template", android.widget.Toast.LENGTH_SHORT).show()
+                return@launch
+            }
+
+            val newId = soilTemplateId.takeIf { it.isNotEmpty() }
+            pairs.forEach { (pageId, prev) -> templateChanges.add(Triple(pageId, prev, newId)) }
+
+            if (libraryTemplateId.isNotEmpty()) {
+                TemplateRecentsManager.recordUse(this@PageIndexActivity, libraryTemplateId)
+            }
+
+            val msg = if (pairs.size == 1) "Template set" else "Template set on ${pairs.size} pages"
+            android.widget.Toast.makeText(this@PageIndexActivity, msg, android.widget.Toast.LENGTH_SHORT).show()
+            exitActionMode()
+        }
     }
 
     private fun executeDelete() {
@@ -973,6 +1085,12 @@ class PageIndexActivity : AppCompatActivity() {
             result.putExtra(EXTRA_MOVED_PREV_AFTER_IDS, flat.joinToString(",") { it.second ?: "" })
             result.putExtra(EXTRA_MOVED_NEW_AFTER_IDS,  flat.joinToString(",") { it.third ?: "" })
             result.putExtra(EXTRA_MOVED_OP_SIZES,       movedActions.joinToString(",") { it.size.toString() })
+        }
+        if (templateChanges.isNotEmpty()) {
+            // Empty string encodes a null/blank template id (same convention as the moved extras).
+            result.putExtra(EXTRA_TEMPLATE_PAGE_IDS, templateChanges.joinToString(",") { it.first })
+            result.putExtra(EXTRA_TEMPLATE_PREV_IDS, templateChanges.joinToString(",") { it.second ?: "" })
+            result.putExtra(EXTRA_TEMPLATE_NEW_IDS,  templateChanges.joinToString(",") { it.third ?: "" })
         }
         setResult(RESULT_OK, result)
         finish()

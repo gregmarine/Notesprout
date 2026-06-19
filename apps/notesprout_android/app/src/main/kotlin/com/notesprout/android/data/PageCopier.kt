@@ -575,6 +575,144 @@ suspend fun copyPagesRelativeRaw(
 }
 
 /**
+ * Inserts a `type="template"` row into the `.soil` at [notebookPath], mirroring
+ * [com.notesprout.android.NotebookActivity.insertLibraryTemplateIntoSoil] but via a raw
+ * [SQLiteDatabase] connection (PageIndexActivity has no Room instance).
+ *
+ * A page's `template` property stores a `.soil` template-row id, NOT a global-index library id, so
+ * applying a library template from the index requires copying the library image into the `.soil`
+ * first. One row is inserted per Set-Template operation and shared by every selected page.
+ *
+ * [parentId] should be the notebook metadata row id (`type="notebook"`); template resolution
+ * ([com.notesprout.android.data.NotebookDao.getTemplateById]) is by id only, so the parent is
+ * cosmetic — callers pass the metadata id when available.
+ *
+ * Returns the new template row's UUID, or null on failure. Must be called on [Dispatchers.IO].
+ */
+suspend fun insertSoilTemplateRaw(
+    notebookPath: String,
+    parentId: String,
+    width: Int,
+    height: Int,
+    name: String,
+    imageBase64: String,
+): String? = withContext(Dispatchers.IO) {
+    var db: SQLiteDatabase? = null
+    try {
+        db = SQLiteDatabase.openDatabase(notebookPath, null, SQLiteDatabase.OPEN_READWRITE)
+        val now = System.currentTimeMillis()
+        val newId = UUID.randomUUID().toString()
+        val bbox = BoundingBox(0f, 0f, width.toFloat(), height.toFloat()).toJson()
+        val data = TemplateData(width, height, name, imageBase64).toJson()
+
+        db.beginTransaction()
+        try {
+            db.insert("notebook", null, ContentValues().apply {
+                put("id",          newId)
+                put("parentId",    parentId)
+                put("type",        "template")
+                put("boundingBox", bbox)
+                put("`order`",     0)
+                put("createdAt",   now)
+                put("updatedAt",   now)
+                putNull("deletedAt")
+                put("data",        data)
+            })
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
+
+        db.checkpointAndVacuum()
+        newId
+    } catch (e: Exception) {
+        Log.e(TAG, "insertSoilTemplateRaw failed", e)
+        null
+    } finally {
+        db?.close()
+        cleanStrayJournal(notebookPath)
+    }
+}
+
+/**
+ * Reads the `type="notebook"` metadata row id from the `.soil` at [notebookPath], used as the
+ * parentId for template rows inserted by [insertSoilTemplateRaw]. Returns null if absent.
+ * Must be called on [Dispatchers.IO].
+ */
+suspend fun readNotebookRowId(notebookPath: String): String? = withContext(Dispatchers.IO) {
+    var db: SQLiteDatabase? = null
+    try {
+        db = SQLiteDatabase.openDatabase(notebookPath, null, SQLiteDatabase.OPEN_READONLY)
+        db.rawQuery("SELECT id FROM notebook WHERE type = 'notebook' LIMIT 1", null).use { c ->
+            if (c.moveToFirst()) c.getString(0) else null
+        }
+    } catch (e: Exception) {
+        Log.e(TAG, "readNotebookRowId failed", e)
+        null
+    } finally {
+        db?.close()
+    }
+}
+
+/**
+ * Sets the `template` property of every page in [pageIds] to [newTemplateId] (a `.soil` template
+ * row id, or "" to clear / make blank), rewriting each page row's `data` JSON in one transaction.
+ *
+ * Returns one [Pair] per successfully-updated page: (pageId, previousTemplateId), where
+ * previousTemplateId is the page's prior template row id or null if it had none. This is compatible
+ * with [com.notesprout.android.history.UndoRedoAction.TemplateChanged] and the templateChanges
+ * extras used by PageIndexActivity / NotebookActivity. Pages not found are skipped.
+ *
+ * Returns null on any failure. Must be called on [Dispatchers.IO].
+ */
+suspend fun setPagesTemplateRaw(
+    pageIds: List<String>,
+    newTemplateId: String,
+    notebookPath: String,
+): List<Pair<String, String?>>? = withContext(Dispatchers.IO) {
+    if (pageIds.isEmpty()) return@withContext emptyList()
+    var db: SQLiteDatabase? = null
+    try {
+        db = SQLiteDatabase.openDatabase(notebookPath, null, SQLiteDatabase.OPEN_READWRITE)
+        val now = System.currentTimeMillis()
+        val result = mutableListOf<Pair<String, String?>>()
+
+        db.beginTransaction()
+        try {
+            for (pageId in pageIds) {
+                val oldData = db.rawQuery(
+                    "SELECT data FROM notebook WHERE id = ? AND type = 'page' LIMIT 1",
+                    arrayOf(pageId)
+                ).use { c -> if (c.moveToFirst()) c.getString(0) else null } ?: continue
+
+                val parsed = PageData.fromJson(oldData)
+                val previousTemplateId = parsed.template.takeIf { it.isNotEmpty() }
+                val newData = parsed.copy(template = newTemplateId).toJson()
+
+                db.update("notebook", ContentValues().apply {
+                    put("data",      newData)
+                    put("updatedAt", now)
+                }, "id = ?", arrayOf(pageId))
+
+                result.add(pageId to previousTemplateId)
+            }
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
+
+        db.checkpointAndVacuum()
+        result
+    } catch (e: Exception) {
+        Log.e(TAG, "setPagesTemplateRaw failed pages=$pageIds template=$newTemplateId", e)
+        null
+    } finally {
+        db?.close()
+        cleanStrayJournal(notebookPath)
+    }
+}
+
+/**
  * Soft-deletes [pageId] and all its descendants (layer + strokes) using a single shared
  * timestamp, matching the pattern used by NotebookActivity's deletePage().
  *
