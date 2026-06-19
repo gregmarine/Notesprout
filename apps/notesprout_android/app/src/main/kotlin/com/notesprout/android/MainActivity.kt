@@ -46,6 +46,7 @@ import com.notesprout.android.data.index.ObjectEntity
 import com.notesprout.android.data.index.ObjectType
 import com.notesprout.android.data.recents.RecentsManager
 import com.notesprout.android.data.recents.ResolvedRecent
+import com.notesprout.android.data.recents.TemplateRecentsManager
 import com.notesprout.android.data.soilFile
 import com.notesprout.android.search.SearchDialog
 import com.notesprout.android.search.SearchEngine
@@ -1468,6 +1469,10 @@ class MainActivity : AppCompatActivity() {
                 }
 
                 Toast.makeText(this@MainActivity, "Notebook '$name' created", Toast.LENGTH_SHORT).show()
+
+                if (libraryTemplateId.isNotEmpty()) {
+                    TemplateRecentsManager.recordUse(this@MainActivity, libraryTemplateId)
+                }
 
                 // Rescan and navigate to the page containing the new notebook.
                 scanAndRender()

@@ -43,7 +43,7 @@ adb -s 34E517F9 install -r app/build/outputs/apk/debug/app-debug.apk
 | 7 | Wrap-up — docs, dead-code removal, cross-device QA, migration task | ✅ Done |
 | | **— Phase 2: Pinned · Recent · Toolbar · Save-as-Template (see §6) —** | |
 | 8 | Pinned templates — repository + MANAGE pin/unpin + pinned view | ✅ Done |
-| 9 | Recent templates — device-local store + use-tracking | ⬜ Not started |
+| 9 | Recent templates — device-local store + use-tracking | ✅ Done |
 | 10 | Pinned & recent in the PICK selectors (new-notebook + in-notebook) | ⬜ Not started |
 | 11 | Toolbar relocation — search/sort/pinned/recent → top bar | ⬜ Not started |
 | 12 | "Save as Template" from the page index | ⬜ Not started |
@@ -918,3 +918,15 @@ Commit (no push).
 - **S8 action sheet:** `showTemplateContextMenu` is now `lifecycleScope.launch` (queries
   `isTemplatePinned` on IO) so it can insert a conditional **Pin / Unpin** item (`ic_pinned` /
   `ic_pinned_off`) above Delete. Template *folders* get no pin item. (Discovered S8.)
+- **S9 template recents store (no UI):** new `data/recents/TemplateRecentEntry`,
+  `ResolvedTemplateRecent`, and `TemplateRecentsManager` — exact mirrors of the notebook
+  `RecentEntry` / `ResolvedRecent` / `RecentsManager`, but prefs `notesprout_template_recents`,
+  `MAX_ENTRIES = 20`, breadcrumb root `"Templates"`, resolving against `ObjectType.TEMPLATE` via
+  `getTemplate` + `getAllTemplateFolders`, self-healing prune in `resolve`. A single
+  `recordUse(context, templateId)` (no open/close split — templates aren't "closed").
+- **S9 use-tracking (exactly two sites, library id only, never Blank):**
+  `NotebookActivity.onTemplatePicked` records after a successful library-browse apply (inside the
+  `soilRowId.isNotEmpty()` block); `MainActivity.createNotebook` records when `libraryTemplateId`
+  is non-empty after the notebook is created. `applyTemplateToCurrentPage` / `TemplateDialog.onConfirm`
+  (in-notebook re-apply) are intentionally **not** recorded. No `Context` added to the repo — deleted
+  templates never surface thanks to `resolve`'s prune. No visible behavior yet (verified via S10).

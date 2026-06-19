@@ -81,6 +81,7 @@ import com.notesprout.android.data.index.TemplateObject as IndexTemplateObject
 import com.notesprout.android.data.links.BackEntry
 import com.notesprout.android.data.links.LinkBackStack
 import com.notesprout.android.data.recents.RecentsManager
+import com.notesprout.android.data.recents.TemplateRecentsManager
 import com.notesprout.android.notebook.RecentsDialog
 import com.notesprout.android.state.AppStateManager
 import com.notesprout.android.state.AppViewState
@@ -369,6 +370,7 @@ class NotebookActivity : AppCompatActivity() {
             }
             if (soilRowId.isNotEmpty()) {
                 applyTemplateToCurrentPage(soilRowId, bitmap)
+                TemplateRecentsManager.recordUse(this@NotebookActivity, templateId)
             }
         }
     }
