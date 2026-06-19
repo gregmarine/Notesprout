@@ -480,7 +480,23 @@ filenames when exporting multiple PNGs — auto-name from notebook + page name/n
 
 ## Session 5 — Wrap-up: docs, polish, edge cases
 
-**Status:** ☐ Not started
+**Status:** ✅ DONE (2026-06-19)
+
+**Wrap-up notes (impl):**
+- **Docs.** Replaced the stale single-page "Page Export (PNG)" section in
+  `docs/mainactivity-and-recents.md` with a full **Page Index — Multi-Page Selection** section
+  (selection model, action-mode toolbar, Copy/Paste & Move with Before/After, Set Template,
+  single-vs-multi Export, and the undo/redo extras round-trip). Added the batch raw-op names to the
+  `PageCopier.kt` line in `docs/data-architecture.md`. No `CLAUDE.md` guardrail changed.
+- **Dead-code prune.** `copyPageAfterRaw` / `movePageAfterRaw` in `data/PageCopier.kt` had no callers
+  left (the index routes everything through `copyPagesRelativeRaw` / `movePagesRelativeRaw`); removed
+  both (~190 lines), as §2.4 anticipated.
+- **Hygiene pass.** Confirmed no `Log.d` (only `Log.e`/`Log.w` + `Slog.d`), no `runBlocking`, all
+  heavy work on `Dispatchers.IO` behind a progress dialog, and per-page bitmap `recycle()` in every
+  `NotebookExporter` path. Disabled buttons dim via `alpha 0.4f` (visible on e-ink).
+- **Behavior note.** The Before/After control shipped (Session 2) as two explicit selectable buttons
+  with **Before** selected by default — superseding the original plan's single "after" toggle. Docs
+  reflect the as-built behavior.
 
 **Goal:** Tighten the feature, document it, and confirm the whole flow.
 
@@ -554,6 +570,6 @@ Append items discovered during implementation here. Seeds:
 | 2 — Multi Copy/Paste & Move + before/after | ✅ DONE (2026-06-19) |
 | 3 — Multi Set Template | ✅ DONE (2026-06-19) |
 | 4 — Multi Export (PDF/PNG/templates) | ✅ DONE (2026-06-19) |
-| 5 — Wrap-up (docs, polish) | ☐ Not started |
+| 5 — Wrap-up (docs, polish) | ✅ DONE (2026-06-19) |
 </content>
 </invoke>

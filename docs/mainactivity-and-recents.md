@@ -70,17 +70,112 @@ Fuzzy match against all notebooks: substring (3) > all words present (2) > prefi
 - Progress dialog: "Exporting page X of N…" via `Handler(Looper.getMainLooper())`
 - After export: `showExportChoice(file)` presents an `AlertDialog` with "Save to device" (`ACTION_CREATE_DOCUMENT` via `savePdfLauncher`) or "Share" (existing `ACTION_SEND` flow). Available from both `NotebookActivity` (toolbar export button) and `MainActivity` (long-press action sheet).
 
-## Page Export (PNG)
+## Page Index — Multi-Page Selection (`PageIndexActivity`)
 
-- Entry point: long-press a page in `PageIndexActivity` → tap the export button (`ic_export`) in the action-mode toolbar
-- `NotebookExporter.exportPage(context, soilPath, pageId, pageNumber, notebookTitle)` — opens a transient Room instance for the given `.soil` path; does NOT checkpoint on close (NotebookActivity's canonical connection is still live)
-- Render pipeline: identical to PDF — white → template → headings → text objects → strokes; full-quality, no snapshot shortcut
-- Filename format: `<safeTitle>_page<N>.png` where N is the 1-based page number. Same sanitization regex as PDF: `[^a-zA-Z0-9_\\-. ]` → `_`.
-- Output to `context.cacheDir/exported_pngs/`; FileProvider path entry `name="exported_pngs"` in `res/xml/file_paths.xml`
-- Share intent: `type = "image/png"`, same `ClipData` + `FLAG_GRANT_READ_URI_PERMISSION` pattern as PDF export
-- Progress: non-cancellable `AlertDialog` ("Exporting…") matching the PDF export pattern; dismissed on success or failure
-- After export: `exitActionMode()` then `showExportChoice(file)` — same "Save to device" / "Share" pattern as PDF; `savePngLauncher` uses `CreateDocument("image/png")`
-- **Save as Template:** `showExportChoice` also carries a **neutral** "Save as Template" button. It launches `TemplateBrowserActivity` in `MODE_SAVE_TARGET` with `EXTRA_SAVE_SOURCE_PATH` (the exported PNG) + `EXTRA_SAVE_DEFAULT_NAME` (page heading or `"Page N"`, pre-sanitized) + `EXTRA_TITLE`. The browser picks a destination folder, names the template, and creates it; `RESULT_OK` → Toast "Saved to Templates". See the Template System section of [`drawing-engine.md`](drawing-engine.md).
+The page index is a paginated grid of page snapshots. Long-press enters **action mode**; the user can
+then select any number of pages — across pagination — and apply every toolbar action to all of them at
+once. Calm/paper-like per `docs/design-system.md`: selection is shown with the existing card highlight
+(`bg_page_card_current`, 3dp inset border), no color, no Material chrome.
+
+### Selection model
+
+- **`selectedPageIds: LinkedHashSet<String>`** — selection by stable page **UUID**, not index. IDs
+  survive pagination and reorder/delete reshuffles; insertion order is preserved (it drives paste/move
+  block ordering). Empty set = normal mode; non-empty = action mode (`inActionMode()`).
+- **Tap** in normal mode navigates to that page (`finishWithResult(pageIndex)`). **Long-press** enters
+  action mode with that page selected. In action mode, **tap toggles** a card; emptying the set exits
+  action mode. Highlight: normal mode → the open page only; action mode → every selected card;
+  destination mode → the source pages.
+- `pruneSelection()` drops IDs no longer present after any reload; destructive/move/paste/template ops
+  clear the selection via `exitActionMode()`.
+
+### Action-mode toolbar (`activity_page_index.xml`)
+
+Shown only in action mode. Title shows `"N selected"`. Buttons (all enabled for any selection size):
+**Select All** (`btnSelectAll`, `ic_select_all`), **Copy** (`btnCopyPage`), **Move** (`btnMovePage`),
+**Set Template** (`btnSetTemplate`, `ic_template`), **Export** (`btnExportPage`), **Delete**
+(`btnDeletePage`). Disabled buttons dim to `alpha 0.4f` (visible on e-ink — never color). There is no
+separate Paste button — Copy goes straight to destination-picking (see below).
+
+- **Select All** (`toggleSelectAll`): selects every page in the notebook (across all grid pages). When
+  everything is already selected, tapping it **deselects all and exits** action mode (an empty
+  selection *is* normal mode; keeping one selected was rejected as surprising). Content description
+  flips "Select all" / "Deselect all".
+- **Delete** (`executeDelete`): guard — the notebook must retain ≥1 page (`selectedPageIds.size >=
+  pages.size` → Toast "Cannot delete all pages"). Confirmation message is `"Delete Page N?"` for a
+  single page, else `"Delete N pages?"`. Each page's pre-delete index is snapshotted up front
+  (`indexById`) so recorded undo indices are consistent with the list NotebookActivity restores
+  against. `currentPageIndex` is recomputed by stable id (clamped to a survivor if the open page was
+  deleted); `currentGridPage` is re-clamped in case the last grid page emptied.
+
+### Copy / Paste & Move — destination-picking with Before/After
+
+Move and Paste share one **destination-picking mode** (`DestMode { NONE, MOVE, PASTE }`): hide the
+action buttons, show two selectable buttons **"Move/Copy Before"** and **"Move/Copy After"**, and tap a
+destination card to commit. `insertBefore` resets to **true (Before)** each time destination mode is
+entered. Back / system-back cancels destination mode → action mode (`cancelDestMode`), then action mode
+→ normal (`exitActionMode`), then finishes.
+
+- **Copy** (`copySelectedPages`): stashes the selection into `pendingCopyPageIds`, then immediately
+  enters `PASTE` destination mode. Tapping any card deep-copies the clipboard as a contiguous block
+  before/after it, in clipboard (selection) order.
+- **Move** (`enterDestMode(MOVE)`): stashes `moveSourceIds`. Tapping a non-source card moves the block
+  before/after it; tapping a source card cancels. Sources can't be their own destination.
+- Data layer (`data/PageCopier.kt`): `movePagesRelativeRaw(pageIds, targetPageId, before, path)` and
+  `copyPagesRelativeRaw(sourcePageIds, targetPageId, before, path)`. Both rebuild the full page order in
+  one transaction, ordering the block by **original document order** so undo/redo predecessor chaining
+  is stable. Move returns `(pageId, prevAfterId, newAfterId)` triples (undo/redo); copy returns
+  `(newPageId, newPageIndex)` pairs. (The old single-page `copyPageAfterRaw`/`movePageAfterRaw` were
+  removed in Session 5 — superseded by these batch variants.)
+
+### Set Template (multi)
+
+- `btnSetTemplate` → `chooseTemplateForSelection()` snapshots the selection into
+  `pendingTemplateTargets` and launches `TemplateBrowserActivity` in `MODE_PICK`. The "Blank" tile
+  returns `RESULT_TEMPLATE_ID = ""` → clears the template.
+- **Template-id indirection:** a page's `data.template` stores a `.soil` `type="template"` **row id**,
+  while the picker returns a global-index **library id**. `applyTemplateToSelection` bridges this:
+  `insertSoilTemplateRaw` copies the library image into **one shared `.soil` template row** per
+  Set-Template op (parentId from `readNotebookRowId`), then `setPagesTemplateRaw` points every selected
+  page at it and returns each page's previous template id for undo. Blank (`""`) clears.
+
+### Export (single vs. multi)
+
+`executeExport()` routes by selection size:
+
+- **Single** (`selectedCount() == 1`) → the richer `showExportChoice`: Save to device
+  (`savePngLauncher`, `CreateDocument("image/png")`) / Save as Template (`MODE_SAVE_TARGET`) / Share.
+  Render via `NotebookExporter.exportPage(...)`.
+- **Multi** (`> 1`) → `showMultiExportDialog`: **PDF** / **PNG** / Cancel.
+  - **PDF** — `NotebookExporter.exportPagesPdf(context, soilPath, pageIds, notebookTitle, onProgress)`
+    renders all selected pages (in page order) into one `PdfDocument`, no cover; then offers Save
+    (`savePdfLauncher`) / Share. Pages are sorted to page order, not selection order
+    (`orderedSelectedEntries`).
+  - **PNG → Save images** — `exportPagesPng(...)` renders one PNG per page named
+    `<safeNotebook>_<heading|PageN>.png` (de-duplicated via `makeUniqueFilename`), then prompts **once**
+    for a folder (`OpenDocumentTree`) and writes each file via `DocumentsContract.createDocument` (no
+    `androidx.documentfile` dep, no per-file prompts).
+  - **PNG → Save as templates** — renders each page to PNG, then imports each into the template library
+    **root** (`IndexRepository.createTemplate(name, parentId=null, w, h, base64)`), named from the page
+    label and de-duplicated against existing root templates (`makeUniqueTemplateName`, `(2)`/`(3)`
+    suffix). Choosing a destination folder is a Phase-2 item.
+
+All exporters share `NotebookExporter.renderPageBitmap(...)` (white → template → headings → text →
+strokes, full-quality), recycle bitmaps per page, run on `Dispatchers.IO` behind a non-cancellable
+"Exporting page X of N…" progress dialog, and open a transient Room instance that does **not** checkpoint
+on close (NotebookActivity's canonical connection stays live). Cache dirs: `exported_pdfs/`,
+`exported_pngs/` (FileProvider entries in `res/xml/file_paths.xml`). Share intents use the `ClipData`
++ `FLAG_GRANT_READ_URI_PERMISSION` pattern (see PDF Export note above).
+
+### Undo/redo round-trip (`NotebookActivity.pageIndexLauncher`)
+
+The index never mutates NotebookActivity's undo stack directly. Every session action is recorded
+(`pastedActions`, `deletedActions`, `movedActions`, `templateChanges`) and returned as **comma-joined
+string extras** in `finishWithResult(...)`; `pageIndexLauncher` splits them back out and pushes
+**one batch `UndoRedoAction` per operation** so a single undo reverses the whole batch:
+`PagesDeleted`, `PagesMoved` (split by `EXTRA_MOVED_OP_SIZES`), `PagePasted`, `TemplatesChanged`.
+A changed open page reloads its template on return to the canvas. Empty string encodes a null/blank id
+in every extras list.
 
 ## ML Kit
 
