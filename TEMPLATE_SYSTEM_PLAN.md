@@ -47,12 +47,13 @@ adb -s 34E517F9 install -r app/build/outputs/apk/debug/app-debug.apk
 | 10 | Pinned & recent in the PICK selectors (new-notebook + in-notebook) | ✅ Done |
 | 11 | Toolbar relocation — search/sort/pinned/recent → top bar | ✅ Done |
 | 12 | "Save as Template" from the page index | ✅ Done |
-| 13 | Phase 2 wrap-up — docs, dead-code, cross-device QA | ⬜ Not started |
+| 13 | Export a template from the manager — Share / Save to device | ✅ Done |
+| 14 | Phase 2 wrap-up — docs, dead-code, cross-device QA | ⬜ Not started |
 
 Status legend: ⬜ Not started · 🚧 In progress · ✅ Done (committed, not pushed)
 
 > **Phase 1 (Sessions 1–7)** delivered the global-index template library, browser, in-notebook
-> integration, and New Notebook seeding — all committed **and pushed**. **Phase 2 (Sessions 8–13,
+> integration, and New Notebook seeding — all committed **and pushed**. **Phase 2 (Sessions 8–14,
 > §6)** layers pinning, recents, a toolbar reorg, and page→template export on top. Phase 2 follows
 > the same workflow as §0 (one session at a time, Sonnet subagent implements, lead builds/installs
 > on G10, commit-no-push per session).
@@ -879,7 +880,41 @@ Build + install G10.
 
 ---
 
-### Session 13 — Phase 2 wrap-up
+### Session 13 — Export a template from the manager
+
+**Objective:** Add an **"Export Template"** option to the template manager's long-press context menu
+(`MODE_MANAGE`) that prompts the user for **Share** or **Save to device** — the inverse of S12 (which
+imports a page *into* the library; this exports a library template *out* as a PNG).
+
+**Files:** `TemplateBrowserActivity.kt` only. No layout, manifest, or schema changes — the
+`${applicationId}.fileprovider` authority and the `exported_pngs` cache-path already exist (added for
+the page-index export in S12).
+
+**Implementation:**
+- In `showTemplateContextMenu(entity)`, add a single `.addAction(R.drawable.ic_export, "Export
+  Template") { showExportTemplateChoice(entity) }` — after "Rename Template", before Pin/Unpin.
+- `writeTemplatePng(entity): java.io.File?` — `suspend`, on `Dispatchers.IO`: decode the base64 PNG
+  from `TemplateObject.fromJson(entity.data)?.image`, write the **raw decoded bytes** (no re-encode —
+  preserves fidelity) to `cacheDir/exported_pngs/<sanitizedName>.png`; return the file or null.
+- `showExportTemplateChoice(entity)` — launches a coroutine, builds the PNG via `writeTemplatePng`
+  (Toast "Export failed." on null), then shows an `AlertDialog` titled **"Export template"** styled
+  `shape_bordered` + zero-elevation, with **"Save to device"** (positive → `pendingExportFile` +
+  `savePngLauncher.launch(file.name)`) and **"Share"** (negative → `FileProvider` URI + `ACTION_SEND`
+  chooser). Mirrors `PageIndexActivity.showExportChoice` minus the neutral "Save as Template" button
+  (templates are already in the library).
+- New `pendingExportFile` field + `savePngLauncher` (`CreateDocument("image/png")`) and a local
+  `sanitizeTemplateName` — all mirrors of the page-index export.
+
+**Single-action chooser, not two menu items:** the standard export pattern app-wide is one "Export"
+entry that opens a Share / Save-to-device chooser. (First draft added two separate context-menu items;
+corrected per user feedback.)
+
+**Definition of done:** Long-press a template → **Export Template** → Share routes to the share sheet;
+Save to device writes a PNG via the system file picker. Build + install G10. ✅ Verified on G10.
+
+---
+
+### Session 14 — Phase 2 wrap-up
 
 **Objective:** Docs, dead-code, cross-device QA for the Phase 2 features.
 
@@ -889,14 +924,15 @@ Build + install G10.
      `TemplateListObject`) and the **template recents** store (`notesprout_template_recents`,
      device-local, library-only, self-healing).
    - `docs/drawing-engine.md` and/or `docs/mainactivity-and-recents.md` — pinned/recents views in the
-     template browser, the relocated top toolbar, and the page→template "Save as Template" flow.
+     template browser, the relocated top toolbar, the page→template "Save as Template" flow, and the
+     manager's **Export Template** (Share / Save to device).
    - Update the `CLAUDE.md` docs table if any scope changed.
 2. **Dead-code:** confirm no leftover bottom-bar references to the relocated buttons; remove unused
    imports/strings.
 3. **Cross-device QA (Tier 1):** build + install on G10 / MAX / G7 / P2P in one shell block; smoke
-   pin/unpin, pinned & recents in both selectors, toolbar layout, Save-as-Template. (Defer per user
-   request if instructed, as in S7.)
-4. **Anything discovered** during Sessions 8–12 that needs a home (append to §6.3 below).
+   pin/unpin, pinned & recents in both selectors, toolbar layout, Save-as-Template, Export Template.
+   (Defer per user request if instructed, as in S7.)
+4. **Anything discovered** during Sessions 8–13 that needs a home (append to §6.3 below).
 
 **Definition of done:** Docs updated; no dead references; Tier-1 smoke-tested (or deferred per user).
 Commit (no push).
@@ -973,3 +1009,14 @@ Commit (no push).
   siblings like Import) → decode bounds for w/h, base64 `NO_WRAP`, `repository.createTemplate` in the
   chosen folder → `setResult(RESULT_OK)`. Creation ≠ use, so **no recents recording** (per P2). No new
   drawables/deps.
+- **S13 Export Template (manager → out):** `showTemplateContextMenu` gained one **"Export Template"**
+  action (`ic_export`, after Rename / before Pin) → `showExportTemplateChoice(entity)`. New
+  `writeTemplatePng(entity): File?` (suspend, IO) decodes `TemplateObject.image` base64 and writes the
+  **raw bytes** (no re-encode) to `cacheDir/exported_pngs/<sanitizedName>.png`; reuses the S12
+  FileProvider authority + cache-path (zero layout/manifest/schema change). `showExportTemplateChoice`
+  builds the file first, then shows an "Export template" `AlertDialog` (Save to device → `savePngLauncher`
+  / Share → `ACTION_SEND` chooser), styled `shape_bordered` + zero-elevation — the inverse of S12's
+  import, modelled on `PageIndexActivity.showExportChoice` minus the neutral button. New
+  `pendingExportFile` + `savePngLauncher` (`CreateDocument("image/png")`) + a local `sanitizeTemplateName`.
+  **Single "Export" action opening a Share / Save chooser — not two menu items** (corrected per user
+  feedback to match the app-wide export pattern). Verified on G10. No new drawables/deps.

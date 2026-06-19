@@ -1,5 +1,6 @@
 package com.notesprout.android
 
+import android.content.ClipData
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -27,6 +28,7 @@ import androidx.appcompat.widget.AppCompatImageView
 import androidx.appcompat.widget.AppCompatTextView
 import android.view.GestureDetector
 import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.lifecycleScope
@@ -220,6 +222,28 @@ class TemplateBrowserActivity : AppCompatActivity() {
     private val importLauncher = registerForActivityResult(
         ActivityResultContracts.OpenDocument()
     ) { uri -> if (uri != null) performImport(uri) }
+
+    // ── PNG export save-to-device launcher ────────────────────────────────────
+
+    private var pendingExportFile: java.io.File? = null
+
+    private val savePngLauncher = registerForActivityResult(
+        ActivityResultContracts.CreateDocument("image/png")
+    ) { uri ->
+        val file = pendingExportFile ?: return@registerForActivityResult
+        if (uri == null) return@registerForActivityResult
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                contentResolver.openOutputStream(uri)?.use { out ->
+                    file.inputStream().use { it.copyTo(out) }
+                }
+            } catch (e: Exception) {
+                android.os.Handler(android.os.Looper.getMainLooper()).post {
+                    Toast.makeText(this@TemplateBrowserActivity, "Save failed: ${e.message}", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+    }
 
     // ── Lifecycle ─────────────────────────────────────────────────────────────
 
@@ -1385,6 +1409,7 @@ class TemplateBrowserActivity : AppCompatActivity() {
                 .addAction(R.drawable.ic_copy_plus, "Copy Template") { enterPicker(TemplatePicker.CopyTemplate(entity)) }
                 .addAction(R.drawable.ic_move_page, "Move Template") { enterPicker(TemplatePicker.MoveTemplate(entity)) }
                 .addAction(R.drawable.ic_edit,      "Rename Template") { showRenameTemplateDialog(entity) }
+                .addAction(R.drawable.ic_export,    "Export Template") { showExportTemplateChoice(entity) }
             if (pinned) {
                 sheet.addAction(R.drawable.ic_pinned_off, "Unpin Template") { toggleTemplatePin(entity) }
             } else {
@@ -1404,6 +1429,60 @@ class TemplateBrowserActivity : AppCompatActivity() {
                 Toast.LENGTH_SHORT
             ).show()
             loadAndRender()
+        }
+    }
+
+    /** Whitelist a proposed template name to accepted characters; never empty. */
+    private fun sanitizeTemplateName(raw: String): String {
+        val cleaned = raw.replace(Regex("[^a-zA-Z0-9_\\-. ]"), "_").trim()
+        return if (cleaned.isBlank() || cleaned == "." || cleaned == "..") "Template" else cleaned
+    }
+
+    private suspend fun writeTemplatePng(entity: ObjectEntity): java.io.File? {
+        return withContext(Dispatchers.IO) {
+            try {
+                val tObj = TemplateObject.fromJson(entity.data)
+                if (tObj == null || tObj.image.isEmpty()) return@withContext null
+                val bytes = android.util.Base64.decode(tObj.image, android.util.Base64.DEFAULT)
+                val outDir = java.io.File(cacheDir, "exported_pngs").apply { mkdirs() }
+                val safeName = sanitizeTemplateName(entity.name)
+                val outFile = java.io.File(outDir, "$safeName.png")
+                outFile.writeBytes(bytes)
+                outFile
+            } catch (e: Exception) {
+                Slog.d(TAG) { "writeTemplatePng: failed for ${entity.id}: ${e.message}" }
+                null
+            }
+        }
+    }
+
+    private fun showExportTemplateChoice(entity: ObjectEntity) {
+        lifecycleScope.launch {
+            val file = writeTemplatePng(entity)
+            if (file == null) {
+                Toast.makeText(this@TemplateBrowserActivity, "Export failed.", Toast.LENGTH_SHORT).show()
+                return@launch
+            }
+            val dialog = AlertDialog.Builder(this@TemplateBrowserActivity)
+                .setTitle("Export template")
+                .setPositiveButton("Save to device") { _, _ ->
+                    pendingExportFile = file
+                    savePngLauncher.launch(file.name)
+                }
+                .setNegativeButton("Share") { _, _ ->
+                    val uri = FileProvider.getUriForFile(this@TemplateBrowserActivity, "$packageName.fileprovider", file)
+                    val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                        type = "image/png"
+                        putExtra(Intent.EXTRA_STREAM, uri)
+                        clipData = ClipData.newRawUri("", uri)
+                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    }
+                    startActivity(Intent.createChooser(shareIntent, "Share template"))
+                }
+                .create()
+            dialog.show()
+            dialog.window?.setElevation(0f)
+            dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
         }
     }
 
