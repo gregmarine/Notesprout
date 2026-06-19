@@ -39,6 +39,47 @@
 
     </LinearLayout>
 
+    <!-- Collect-name bar: shown in PICK+collectName mode to enter a notebook name + confirm. -->
+    <LinearLayout
+        android:id="@+id/collectNameBar"
+        android:layout_width="match_parent"
+        android:layout_height="56dp"
+        android:background="@drawable/toolbar_background"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="12dp"
+        android:paddingEnd="12dp"
+        android:visibility="gone">
+
+        <androidx.appcompat.widget.AppCompatEditText
+            android:id="@+id/editNotebookName"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:background="@drawable/shape_bordered"
+            android:singleLine="true"
+            android:inputType="text"
+            android:textColor="@color/inkBlack"
+            android:textSize="16sp"
+            android:padding="8dp"
+            android:hint="Notebook name" />
+
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/btnCreate"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="8dp"
+            android:background="@drawable/shape_bordered"
+            android:stateListAnimator="@null"
+            android:textColor="@color/inkBlack"
+            android:paddingStart="16dp"
+            android:paddingEnd="16dp"
+            android:paddingTop="6dp"
+            android:paddingBottom="6dp"
+            android:text="CREATE" />
+
+    </LinearLayout>
+
     <!-- Breadcrumb bar: back + scrollable breadcrumb. 1dp inkBlack bottom border via toolbar_background. -->
     <LinearLayout
         android:id="@+id/breadcrumbBar"

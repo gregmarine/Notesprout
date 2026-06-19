@@ -184,6 +184,27 @@ class MainActivity : AppCompatActivity() {
         if (uri != null) onCoverImagePicked?.invoke(uri)
     }
 
+    // ── New notebook launcher (S6: launched from TemplateBrowserActivity) ─────
+
+    private val newNotebookLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode != RESULT_OK) return@registerForActivityResult
+        val data = result.data ?: return@registerForActivityResult
+        val name = data.getStringExtra(TemplateBrowserActivity.RESULT_NOTEBOOK_NAME)?.trim().orEmpty()
+        val templateId = data.getStringExtra(TemplateBrowserActivity.RESULT_TEMPLATE_ID).orEmpty()
+        if (name.isBlank()) return@registerForActivityResult
+        lifecycleScope.launch {
+            // Duplicate-in-target-folder check (browser only did format validation).
+            val siblings = withContext(Dispatchers.IO) { repository.getNotebooks(currentParentId) }
+            if (siblings.any { it.name.equals(name, ignoreCase = true) }) {
+                Toast.makeText(this@MainActivity, "A notebook named \"$name\" already exists", Toast.LENGTH_SHORT).show()
+                return@launch
+            }
+            createNotebook(name, templateId)
+        }
+    }
+
     // ── Export save-to-device launcher ───────────────────────────────────────
 
     private var pendingExportFile: java.io.File? = null
@@ -1125,44 +1146,12 @@ class MainActivity : AppCompatActivity() {
     // ── New notebook dialog ───────────────────────────────────────────────────
 
     private fun showNewNotebookDialog() {
-        val dialogBinding = DialogNewNotebookBinding.inflate(layoutInflater)
-        val defaultName = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"))
-        dialogBinding.editNotebookName.setText(defaultName)
-        val dialog = AlertDialog.Builder(this)
-            .setTitle("New Notebook")
-            .setView(dialogBinding.root)
-            .setPositiveButton("Create") { _, _ ->
-                val imm = getSystemService(InputMethodManager::class.java)
-                imm.hideSoftInputFromWindow(dialogBinding.editNotebookName.windowToken, 0)
-                val name = dialogBinding.editNotebookName.text?.toString()?.trim().orEmpty()
-                val error = validateNotebookName(name)
-                if (error != null) {
-                    Toast.makeText(this, error, Toast.LENGTH_SHORT).show()
-                } else {
-                    createNotebook(name)
-                }
-            }
-            .setNegativeButton("Cancel") { _, _ ->
-                val imm = getSystemService(InputMethodManager::class.java)
-                imm.hideSoftInputFromWindow(dialogBinding.editNotebookName.windowToken, 0)
-            }
-            .create()
-
-        dialog.window?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE)
-        dialog.show()
-        dialog.window?.setElevation(0f)
-        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
-
-        dialogBinding.editNotebookName.requestFocus()
-        dialogBinding.editNotebookName.postDelayed({
-            ViewCompat.getWindowInsetsController(dialogBinding.editNotebookName)
-                ?.show(WindowInsetsCompat.Type.ime())
-                ?: run {
-                    val imm = getSystemService(InputMethodManager::class.java)
-                    @Suppress("DEPRECATION")
-                    imm.showSoftInput(dialogBinding.editNotebookName, InputMethodManager.SHOW_IMPLICIT)
-                }
-        }, 100)
+        val intent = Intent(this, TemplateBrowserActivity::class.java)
+            .putExtra(TemplateBrowserActivity.EXTRA_MODE, TemplateBrowserActivity.MODE_PICK)
+            .putExtra(TemplateBrowserActivity.EXTRA_COLLECT_NAME, true)
+            .putExtra(TemplateBrowserActivity.EXTRA_TITLE, "New Notebook")
+        currentParentId?.let { intent.putExtra(TemplateBrowserActivity.EXTRA_TARGET_PARENT_ID, it) }
+        newNotebookLauncher.launch(intent)
     }
 
     // ── New folder dialog ─────────────────────────────────────────────────────
@@ -1365,7 +1354,7 @@ class MainActivity : AppCompatActivity() {
 
     // ── Notebook creation ─────────────────────────────────────────────────────
 
-    private fun createNotebook(name: String) {
+    private fun createNotebook(name: String, libraryTemplateId: String = "") {
         lifecycleScope.launch {
             try {
                 validateNotebookName(name)?.let { error ->
@@ -1377,6 +1366,17 @@ class MainActivity : AppCompatActivity() {
                 val entity = withContext(Dispatchers.IO) {
                     repository.createNotebook(name, currentParentId)
                 }
+
+                // Load the chosen library template (if any) before opening the .soil.
+                data class SeedTemplate(val width: Int, val height: Int, val name: String, val image: String)
+                val seed: SeedTemplate? = if (libraryTemplateId.isNotEmpty()) {
+                    withContext(Dispatchers.IO) {
+                        val e = repository.getTemplate(libraryTemplateId)
+                        val t = e?.let { com.notesprout.android.data.index.TemplateObject.fromJson(it.data) }
+                        if (e != null && t != null && t.image.isNotEmpty())
+                            SeedTemplate(t.width, t.height, e.name, t.image) else null
+                    }
+                } else null
 
                 // 2. Create the physical .soil file at its UUID path.
                 val soilPath = soilFile(this@MainActivity, entity.id)
@@ -1438,10 +1438,18 @@ class MainActivity : AppCompatActivity() {
                             notebookId, "", "{}", now, now, "notebook", notebookDataJson
                         ))
 
+                        val firstPageTemplate = if (seed != null) UUID.randomUUID().toString() else ""
                         db.execSQL(insertSql, arrayOf(
                             pageId, notebookId, bboxJson, now, now, "page",
-                            PageData(width = screenW, height = screenH, template = "").toJson()
+                            PageData(width = screenW, height = screenH, template = firstPageTemplate).toJson()
                         ))
+                        if (seed != null) {
+                            val tmplBbox = BoundingBox(0f, 0f, seed.width.toFloat(), seed.height.toFloat()).toJson()
+                            db.execSQL(insertSql, arrayOf(
+                                firstPageTemplate, notebookId, tmplBbox, now, now, "template",
+                                com.notesprout.android.data.TemplateData(seed.width, seed.height, seed.name, seed.image).toJson()
+                            ))
+                        }
 
                         val layerId = UUID.randomUUID().toString()
                         db.execSQL(insertSql, arrayOf(

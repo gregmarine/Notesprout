@@ -78,6 +78,12 @@ class TemplateBrowserActivity : AppCompatActivity() {
         const val EXTRA_COLLECT_NAME = "collect_name"
         /** Optional title override. */
         const val EXTRA_TITLE = "title"
+        /**
+         * collectName only: the target folder id the new notebook will live in (null = root).
+         * Lets the browser duplicate-check the name before finishing, so a collision keeps the
+         * user on the screen to edit the name instead of dismissing.
+         */
+        const val EXTRA_TARGET_PARENT_ID = "target_parent_id"
 
         /** Result: chosen template id. "" = Blank. */
         const val RESULT_TEMPLATE_ID = "result_template_id"
@@ -126,6 +132,9 @@ class TemplateBrowserActivity : AppCompatActivity() {
     // ── State ─────────────────────────────────────────────────────────────────
 
     private var mode: Int = MODE_MANAGE
+    private var collectName: Boolean = false
+    private var pendingTemplateId: String = ""   // "" = Blank (default selection)
+    private var targetParentId: String? = null   // collectName: folder the new notebook lands in
 
     // Directory navigation — null = root.
     private val directoryStack = ArrayDeque<ObjectEntity?>().apply { add(null) }
@@ -187,6 +196,17 @@ class TemplateBrowserActivity : AppCompatActivity() {
         setContentView(binding.root)
 
         mode = intent.getIntExtra(EXTRA_MODE, MODE_MANAGE)
+        collectName = intent.getBooleanExtra(EXTRA_COLLECT_NAME, false)
+        if (collectName) {
+            mode = MODE_PICK                      // collectName always implies PICK
+            targetParentId = intent.getStringExtra(EXTRA_TARGET_PARENT_ID)
+            binding.collectNameBar.visibility = View.VISIBLE
+            binding.editNotebookName.setText(
+                java.time.LocalDateTime.now()
+                    .format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"))
+            )
+            binding.btnCreate.setOnClickListener { confirmCreate() }
+        }
         sortPrefs = SortPreferencesManager.load(this, SortPreferencesManager.TEMPLATE_PREFS_NAME)
         val titleOverride = intent.getStringExtra(EXTRA_TITLE)
         if (titleOverride != null) binding.tvTopBarTitle.text = titleOverride
@@ -744,8 +764,10 @@ class TemplateBrowserActivity : AppCompatActivity() {
                 when (item) {
                     is BrowseItem.Folder -> navigateIntoFolder(item.entity)
                     is BrowseItem.Template -> {
-                        if (mode == MODE_PICK) {
-                            // PICK mode: return the chosen template id to the caller.
+                        if (collectName) {
+                            pendingTemplateId = item.entity.id
+                            render()
+                        } else if (mode == MODE_PICK) {
                             val resultIntent = Intent().putExtra(RESULT_TEMPLATE_ID, item.entity.id)
                             setResult(RESULT_OK, resultIntent)
                             finish()
@@ -768,15 +790,29 @@ class TemplateBrowserActivity : AppCompatActivity() {
             }
         }
 
-        val card = FrameLayout(this).apply {
-            setBackgroundResource(R.drawable.shape_bordered)
-        }
+        // Selection (collectName mode): mirror TemplateDialog's selected cell — a thin 1dp border
+        // around the WHOLE cell (thumbnail + label), drawn on the group. In collectName mode a
+        // constant gap is reserved (and the inner card shrunk to match) so the cell footprint is
+        // identical whether or not it's selected — the grid never shifts.
+        val isSelected = collectName && item is BrowseItem.Template && pendingTemplateId == item.entity.id
         val density = resources.displayMetrics.density
         val pad1dp  = (density + 0.5f).toInt()
-        card.setPadding(pad1dp, pad1dp, pad1dp, pad1dp)
-        group.addView(card, LinearLayout.LayoutParams(spec.cardWidthPx, spec.cardHeightPx))
+        val gapPx   = if (collectName) (6 * density).toInt() else 0
+        if (collectName) {
+            group.setPadding(gapPx, gapPx, gapPx, gapPx)
+            if (isSelected) group.setBackgroundResource(R.drawable.shape_bordered)
+        }
+        val cardW = spec.cardWidthPx  - 2 * gapPx
+        val cardH = spec.cardHeightPx - 2 * gapPx
 
-        val iconSize = (minOf(spec.cardWidthPx, spec.cardHeightPx) * 0.45f).toInt()
+        // The card is the thumbnail frame — always 1dp bordered (matches TemplateDialog's thumbFrame).
+        val card = FrameLayout(this).apply {
+            setBackgroundResource(R.drawable.shape_bordered)
+            setPadding(pad1dp, pad1dp, pad1dp, pad1dp)
+        }
+        group.addView(card, LinearLayout.LayoutParams(cardW, cardH))
+
+        val iconSize = (minOf(cardW, cardH) * 0.45f).toInt()
 
         when (item) {
             is BrowseItem.Folder -> {
@@ -821,7 +857,7 @@ class TemplateBrowserActivity : AppCompatActivity() {
             textSize  = 14f
             setTextColor(inkBlackColor)
         }
-        group.addView(label, LinearLayout.LayoutParams(spec.cardWidthPx, spec.labelHeightPx).also {
+        group.addView(label, LinearLayout.LayoutParams(cardW, spec.labelHeightPx).also {
             it.topMargin = spec.rowGapPx
         })
 
@@ -837,21 +873,37 @@ class TemplateBrowserActivity : AppCompatActivity() {
             orientation = LinearLayout.VERTICAL
             gravity     = Gravity.CENTER_HORIZONTAL
             setOnClickListener {
-                val resultIntent = Intent().putExtra(RESULT_TEMPLATE_ID, "")
-                setResult(RESULT_OK, resultIntent)
-                finish()
+                if (collectName) {
+                    pendingTemplateId = ""
+                    render()
+                } else {
+                    val resultIntent = Intent().putExtra(RESULT_TEMPLATE_ID, "")
+                    setResult(RESULT_OK, resultIntent)
+                    finish()
+                }
             }
         }
 
-        val card = FrameLayout(this).apply {
-            setBackgroundResource(R.drawable.shape_bordered)
-        }
+        // Selection (collectName mode): 1dp border around the WHOLE cell (thumbnail + label) on the
+        // group, matching template cards and TemplateDialog. Constant reserved gap keeps the cell
+        // footprint identical whether or not selected.
+        val isSelected = collectName && pendingTemplateId.isEmpty()
         val density = resources.displayMetrics.density
         val pad1dp  = (density + 0.5f).toInt()
-        card.setPadding(pad1dp, pad1dp, pad1dp, pad1dp)
+        val gapPx   = if (collectName) (6 * density).toInt() else 0
+        if (collectName) {
+            group.setPadding(gapPx, gapPx, gapPx, gapPx)
+            if (isSelected) group.setBackgroundResource(R.drawable.shape_bordered)
+        }
+        val cardW = spec.cardWidthPx  - 2 * gapPx
+        val cardH = spec.cardHeightPx - 2 * gapPx
 
-        // Blank thumbnail: empty white area with no icon.
-        group.addView(card, LinearLayout.LayoutParams(spec.cardWidthPx, spec.cardHeightPx))
+        // The card is the Blank thumbnail frame — always 1dp bordered (empty white area).
+        val card = FrameLayout(this).apply {
+            setBackgroundResource(R.drawable.shape_bordered)
+            setPadding(pad1dp, pad1dp, pad1dp, pad1dp)
+        }
+        group.addView(card, LinearLayout.LayoutParams(cardW, cardH))
 
         val label = AppCompatTextView(this).apply {
             text      = "Blank"
@@ -861,7 +913,7 @@ class TemplateBrowserActivity : AppCompatActivity() {
             textSize  = 14f
             setTextColor(inkBlackColor)
         }
-        group.addView(label, LinearLayout.LayoutParams(spec.cardWidthPx, spec.labelHeightPx).also {
+        group.addView(label, LinearLayout.LayoutParams(cardW, spec.labelHeightPx).also {
             it.topMargin = spec.rowGapPx
         })
 
@@ -1245,6 +1297,42 @@ class TemplateBrowserActivity : AppCompatActivity() {
                     imm.showSoftInput(dialogBinding.editNotebookName, InputMethodManager.SHOW_IMPLICIT)
                 }
         }, 100)
+    }
+
+    // ── Collect-name confirmation ─────────────────────────────────────────────
+
+    private fun confirmCreate() {
+        val name = binding.editNotebookName.text?.toString()?.trim().orEmpty()
+        val error = when {
+            name.isBlank() -> "Notebook name cannot be empty"
+            name == "." || name == ".." -> "Invalid notebook name"
+            name.contains(Regex("[^a-zA-Z0-9_\\-. ]")) ->
+                "Name may only contain letters, numbers, spaces, and _ - ."
+            else -> null
+        }
+        if (error != null) {
+            Toast.makeText(this, error, Toast.LENGTH_SHORT).show()
+            return
+        }
+        // Duplicate-in-target-folder check here (not after finish) so a collision keeps the user on
+        // this screen to edit the name rather than dismissing back to MainActivity.
+        binding.btnCreate.isEnabled = false
+        lifecycleScope.launch {
+            val duplicate = withContext(Dispatchers.IO) {
+                repository.getNotebooks(targetParentId).any { it.name.equals(name, ignoreCase = true) }
+            }
+            if (duplicate) {
+                Toast.makeText(this@TemplateBrowserActivity,
+                    "A notebook named \"$name\" already exists", Toast.LENGTH_SHORT).show()
+                binding.btnCreate.isEnabled = true
+                return@launch
+            }
+            val resultIntent = Intent()
+                .putExtra(RESULT_NOTEBOOK_NAME, name)
+                .putExtra(RESULT_TEMPLATE_ID, pendingTemplateId)
+            setResult(RESULT_OK, resultIntent)
+            finish()
+        }
     }
 
     // ── Validation ────────────────────────────────────────────────────────────

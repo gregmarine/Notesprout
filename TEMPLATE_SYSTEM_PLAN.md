@@ -39,7 +39,7 @@ adb -s 34E517F9 install -r app/build/outputs/apk/debug/app-debug.apk
 | 3 | Management actions — preview, action sheet, rename, copy, move, delete | ✅ Done |
 | 4 | Search & sort in the template browser | ✅ Done |
 | 5 | In-notebook integration — slim picker + library browse + apply-into-`.soil` | ✅ Done |
-| 6 | Full-screen New Notebook flow + first-page template seeding | ⬜ Not started |
+| 6 | Full-screen New Notebook flow + first-page template seeding | ✅ Done |
 | 7 | Wrap-up — docs, dead-code removal, cross-device QA, migration task | ⬜ Not started |
 
 Status legend: ⬜ Not started · 🚧 In progress · ✅ Done (committed, not pushed)
@@ -522,3 +522,21 @@ picks a template, taps CREATE; the notebook opens with the first page showing th
   **keep the two in sync**; candidate to factor into a computed property in the S7 cleanup pass.
 - **S5 user-facing label:** the in-notebook title-bar button reads **"Browse Templates…"** (not
   "Browse Library…") per user request. (Discovered S5.)
+- **S6 new extra `EXTRA_TARGET_PARENT_ID`:** the spec put the duplicate-name check back in
+  `MainActivity` after the result. In practice that dismissed the flow on a collision with no way to
+  fix the name. Resolved by passing the target folder id to the browser via a new
+  `EXTRA_TARGET_PARENT_ID` extra and doing the **dup check inside `confirmCreate`** (suspend, on IO)
+  — a collision now Toasts and keeps the user on the screen. `MainActivity`'s post-result dup check
+  is retained as a harmless safety net. (Discovered S6, per user feedback.)
+- **S6 selection-marker styling:** the selected template/Blank cell mirrors `TemplateDialog`'s
+  selected cell — a thin **1dp `shape_bordered`** border around the WHOLE cell (thumbnail + label),
+  set on the card `group`, NOT a thick `bg_page_card_current` border on the thumbnail alone. Because
+  the browser grid uses fixed-pixel cells (unlike the dialog's weighted cells), a constant 6dp gap is
+  reserved in collectName mode and the inner card shrunk by `2*gap`, so the cell footprint is
+  identical selected-or-not and the grid never shifts. Non-collectName modes pass `gapPx = 0` →
+  unchanged. (Discovered S6, two rounds of user feedback.)
+- **S6 `.soil` seeding:** `createNotebook(name, libraryTemplateId = "")` loads the library
+  `TemplateObject` (suspend, before opening the `.soil`) into a method-local `SeedTemplate`, then —
+  inside the existing raw-`SQLiteDatabase` block — inserts a `type="template"` row (parentId = the
+  in-soil notebook row id, matching `NotebookActivity.insertLibraryTemplateIntoSoil`) and points the
+  first page's `data.template` at it. All within the existing creation coroutine. (Discovered S6.)
