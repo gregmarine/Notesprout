@@ -38,6 +38,7 @@ import com.notesprout.android.data.index.ObjectEntity
 import com.notesprout.android.data.index.TemplateObject
 import com.notesprout.android.databinding.ActivityTemplateBrowserBinding
 import com.notesprout.android.databinding.DialogNewNotebookBinding
+import com.notesprout.android.data.recents.TemplateRecentsManager
 import com.notesprout.android.search.SearchDialog
 import com.notesprout.android.search.SearchEngine
 import com.notesprout.android.search.SearchResult
@@ -151,6 +152,7 @@ class TemplateBrowserActivity : AppCompatActivity() {
             && !isSearchMode
             && directoryStack.size <= 1
             && !isPinnedView
+            && !isRecentsView
 
     private var browseItems: List<BrowseItem> = emptyList()
     private var currentGridPage: Int = 0
@@ -159,6 +161,7 @@ class TemplateBrowserActivity : AppCompatActivity() {
     private var picker: TemplatePicker = TemplatePicker.None
 
     private var isPinnedView: Boolean = false
+    private var isRecentsView: Boolean = false
 
     private var sortPrefs: SortPreferences = SortPreferences()
 
@@ -260,8 +263,13 @@ class TemplateBrowserActivity : AppCompatActivity() {
 
         binding.btnPinned.setOnClickListener { enterPinnedView() }
         binding.btnPinnedCancel.setOnClickListener { exitPinnedView() }
-        // S8: Pinned view is MANAGE-only for now (PICK wiring lands in Session 10).
-        binding.btnPinned.visibility = if (mode == MODE_MANAGE) View.VISIBLE else View.GONE
+        // S10: Pinned visible in both MANAGE and PICK.
+        binding.btnPinned.visibility = View.VISIBLE
+
+        binding.btnRecents.setOnClickListener { enterRecentsView() }
+        binding.btnRecentsCancel.setOnClickListener { exitRecentsView() }
+        // Recents is PICK-only (GONE in MANAGE).
+        binding.btnRecents.visibility = if (mode == MODE_PICK) View.VISIBLE else View.GONE
 
         binding.gridContainer.setOnTouchListener { _, event ->
             gestureDetector.onTouchEvent(event)
@@ -271,6 +279,7 @@ class TemplateBrowserActivity : AppCompatActivity() {
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
                 if (isPinnedView) { exitPinnedView(); return }
+                if (isRecentsView) { exitRecentsView(); return }
                 if (isSearchMode) { exitSearchMode(); return }
                 // While in picker: cancel picker if at root, else navigate up.
                 if (picker != TemplatePicker.None) {
@@ -351,6 +360,8 @@ class TemplateBrowserActivity : AppCompatActivity() {
         binding.btnSort.visibility              = View.GONE
         binding.btnNewTemplateFolder.visibility = View.GONE
         binding.btnImport.visibility            = View.GONE
+        binding.btnPinned.visibility            = View.GONE
+        binding.btnRecents.visibility           = View.GONE
         binding.btnBreadcrumbBack.isEnabled     = false
         loadAndRender()
     }
@@ -365,44 +376,93 @@ class TemplateBrowserActivity : AppCompatActivity() {
         binding.btnSort.visibility              = View.VISIBLE
         binding.btnNewTemplateFolder.visibility = View.VISIBLE
         binding.btnImport.visibility            = View.VISIBLE
+        // Pinned: visible in both MANAGE and PICK. Recents: PICK-only.
+        binding.btnPinned.visibility            = View.VISIBLE
+        binding.btnRecents.visibility           = if (mode == MODE_PICK) View.VISIBLE else View.GONE
         loadAndRender()
     }
 
     // ── Pinned view ───────────────────────────────────────────────────────────
 
     private fun enterPinnedView() {
+        // Mutual exclusivity: exit recents and search before entering pinned.
+        if (isRecentsView) {
+            isRecentsView = false
+            applyOverlayViewUI()
+        }
+        if (isSearchMode) exitSearchMode()
         isPinnedView = true
         currentGridPage = 0
-        applyPinnedViewUI()
+        applyOverlayViewUI()
         loadAndRender()
     }
 
     private fun exitPinnedView() {
         isPinnedView = false
         currentGridPage = 0
-        applyPinnedViewUI()
+        applyOverlayViewUI()
         loadAndRender()
     }
 
-    private fun applyPinnedViewUI() {
-        val inPinned = isPinnedView
-        binding.pinnedToolbar.visibility        = if (inPinned) View.VISIBLE else View.GONE
-        binding.pinnedToolbarDivider.visibility = if (inPinned) View.VISIBLE else View.GONE
-        binding.breadcrumbBar.visibility        = if (inPinned) View.GONE   else View.VISIBLE
-        if (inPinned) {
+    // ── Recents view (PICK-only) ──────────────────────────────────────────────
+
+    private fun enterRecentsView() {
+        // Mutual exclusivity: exit pinned and search before entering recents.
+        if (isPinnedView) {
+            isPinnedView = false
+            applyOverlayViewUI()
+        }
+        if (isSearchMode) exitSearchMode()
+        isRecentsView = true
+        currentGridPage = 0
+        applyOverlayViewUI()
+        loadAndRender()
+    }
+
+    private fun exitRecentsView() {
+        isRecentsView = false
+        currentGridPage = 0
+        applyOverlayViewUI()
+        loadAndRender()
+    }
+
+    /**
+     * Applies visibility for the overlay toolbars (pinned / recents) and the action buttons.
+     * Called whenever [isPinnedView] or [isRecentsView] changes. Exactly one of these may be true;
+     * both false means normal browse mode.
+     */
+    private fun applyOverlayViewUI() {
+        val inPinned  = isPinnedView
+        val inRecents = isRecentsView
+        val inOverlay = inPinned || inRecents
+
+        // Pinned toolbar
+        binding.pinnedToolbar.visibility        = if (inPinned)  View.VISIBLE else View.GONE
+        binding.pinnedToolbarDivider.visibility = if (inPinned)  View.VISIBLE else View.GONE
+        // Recents toolbar
+        binding.recentsToolbar.visibility        = if (inRecents) View.VISIBLE else View.GONE
+        binding.recentsToolbarDivider.visibility = if (inRecents) View.VISIBLE else View.GONE
+        // Breadcrumb visible only in normal browse
+        binding.breadcrumbBar.visibility = if (inOverlay) View.GONE else View.VISIBLE
+
+        if (inOverlay) {
             binding.btnNewTemplateFolder.visibility = View.GONE
             binding.btnImport.visibility            = View.GONE
             binding.btnSearch.visibility            = View.GONE
             binding.btnClearSearch.visibility       = View.GONE
             binding.btnSort.visibility              = View.GONE
             binding.btnPinned.visibility            = View.GONE
+            binding.btnRecents.visibility           = View.GONE
         } else {
             binding.btnNewTemplateFolder.visibility = View.VISIBLE
             binding.btnImport.visibility            = View.VISIBLE
             binding.btnSearch.visibility            = View.VISIBLE
             binding.btnClearSearch.visibility       = View.GONE
             binding.btnSort.visibility              = View.VISIBLE
-            binding.btnPinned.visibility            = if (mode == MODE_MANAGE) View.VISIBLE else View.GONE
+            // Pinned: visible in both MANAGE and PICK.
+            binding.btnPinned.visibility            = View.VISIBLE
+            // Recents: PICK-only.
+            binding.btnRecents.visibility           = if (mode == MODE_PICK) View.VISIBLE else View.GONE
         }
     }
 
@@ -423,14 +483,20 @@ class TemplateBrowserActivity : AppCompatActivity() {
             // Hide action buttons in picker mode (mirror MainActivity).
             binding.btnNewTemplateFolder.visibility = View.GONE
             binding.btnImport.visibility            = View.GONE
-            binding.btnSearch.visibility      = View.GONE
-            binding.btnSort.visibility        = View.GONE
-            binding.btnClearSearch.visibility = View.GONE
+            binding.btnSearch.visibility            = View.GONE
+            binding.btnSort.visibility              = View.GONE
+            binding.btnClearSearch.visibility       = View.GONE
+            binding.btnPinned.visibility            = View.GONE
+            binding.btnRecents.visibility           = View.GONE
         } else {
             binding.btnNewTemplateFolder.visibility = View.VISIBLE
             binding.btnImport.visibility            = View.VISIBLE
-            binding.btnSearch.visibility = View.VISIBLE
-            binding.btnSort.visibility   = View.VISIBLE
+            binding.btnSearch.visibility            = View.VISIBLE
+            binding.btnSort.visibility              = View.VISIBLE
+            // Pinned: visible in both MANAGE and PICK.
+            binding.btnPinned.visibility            = View.VISIBLE
+            // Recents: PICK-only.
+            binding.btnRecents.visibility           = if (mode == MODE_PICK) View.VISIBLE else View.GONE
             // btnClearSearch stays GONE — picker can't be entered from search.
         }
     }
@@ -599,6 +665,14 @@ class TemplateBrowserActivity : AppCompatActivity() {
                 if (isPinnedView) {
                     searchResults = emptyList()
                     repository.getPinnedTemplates().map { BrowseItem.Template(it) }
+                } else if (isRecentsView) {
+                    searchResults = emptyList()
+                    // Resolve recents (newest-first, self-healing) then look up each entity.
+                    val recents = TemplateRecentsManager.resolve(this@TemplateBrowserActivity)
+                    recents.mapNotNull { recent ->
+                        repository.getTemplate(recent.templateId)
+                            ?.let { BrowseItem.Template(it) }
+                    }
                 } else if (isSearchMode) {
                     val results = SearchEngine.searchTemplates(currentSearchQuery, repository)
                     searchResults = results
@@ -710,8 +784,9 @@ class TemplateBrowserActivity : AppCompatActivity() {
 
         if (browseItems.isEmpty() && !showBlank) {
             val emptyMsg = when {
-                isPinnedView -> "No pinned templates yet."
-                isSearchMode -> "No templates found for \"$currentSearchQuery\""
+                isPinnedView  -> "No pinned templates yet."
+                isRecentsView -> "No recent templates yet."
+                isSearchMode  -> "No templates found for \"$currentSearchQuery\""
                 picker != TemplatePicker.None && directoryStack.size <= 1 -> "No template folders yet."
                 picker != TemplatePicker.None -> "Empty folder."
                 directoryStack.size > 1 -> "Empty folder."

@@ -211,6 +211,43 @@
         android:background="@color/inkBlack"
         android:visibility="gone" />
 
+    <!-- Recents toolbar: shown only in the Recents view (PICK mode only). -->
+    <LinearLayout
+        android:id="@+id/recentsToolbar"
+        android:layout_width="match_parent"
+        android:layout_height="48dp"
+        android:background="@color/paperWhite"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:visibility="gone">
+
+        <androidx.appcompat.widget.AppCompatTextView
+            android:id="@+id/recentsTitle"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_gravity="center_vertical"
+            android:text="Recent Templates"
+            android:textSize="18sp"
+            android:textColor="@color/inkBlack"
+            android:paddingStart="16dp"
+            android:paddingEnd="16dp" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnRecentsCancel"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:src="@drawable/ic_x"
+            android:contentDescription="Exit recents view" />
+
+    </LinearLayout>
+
+    <View
+        android:id="@+id/recentsToolbarDivider"
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="@color/inkBlack"
+        android:visibility="gone" />
+
     <!-- Grid area: fills remaining height between breadcrumb and bottom bar. -->
     <FrameLayout
         android:id="@+id/gridContainer"
@@ -319,6 +356,14 @@
                 android:layout_marginStart="4dp"
                 android:src="@drawable/ic_pinned"
                 android:contentDescription="Pinned templates" />
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnRecents"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:layout_marginStart="4dp"
+                android:src="@drawable/ic_clock"
+                android:contentDescription="Recent templates"
+                android:visibility="gone" />
 
             <androidx.appcompat.widget.AppCompatImageButton
                 android:id="@+id/btnNewTemplateFolder"

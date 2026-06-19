@@ -44,7 +44,7 @@ adb -s 34E517F9 install -r app/build/outputs/apk/debug/app-debug.apk
 | | **— Phase 2: Pinned · Recent · Toolbar · Save-as-Template (see §6) —** | |
 | 8 | Pinned templates — repository + MANAGE pin/unpin + pinned view | ✅ Done |
 | 9 | Recent templates — device-local store + use-tracking | ✅ Done |
-| 10 | Pinned & recent in the PICK selectors (new-notebook + in-notebook) | ⬜ Not started |
+| 10 | Pinned & recent in the PICK selectors (new-notebook + in-notebook) | ✅ Done |
 | 11 | Toolbar relocation — search/sort/pinned/recent → top bar | ⬜ Not started |
 | 12 | "Save as Template" from the page index | ⬜ Not started |
 | 13 | Phase 2 wrap-up — docs, dead-code, cross-device QA | ⬜ Not started |
@@ -930,3 +930,20 @@ Commit (no push).
   is non-empty after the notebook is created. `applyTemplateToCurrentPage` / `TemplateDialog.onConfirm`
   (in-notebook re-apply) are intentionally **not** recorded. No `Context` added to the repo — deleted
   templates never surface thanks to `resolve`'s prune. No visible behavior yet (verified via S10).
+- **S10 Pinned & Recents in PICK:** `btnPinned` is now VISIBLE in **both** MANAGE and PICK (was
+  MANAGE-only in S8); new `btnRecents` (`ic_clock`, no new drawable) added to `actionButtonsGroup`,
+  **PICK-only** (GONE in MANAGE). New `recentsToolbar` / `recentsToolbarDivider` mirror the S8 pinned
+  toolbar (title "Recent Templates" + `btnRecentsCancel` `ic_x`). New `isRecentsView` flag + `enter/
+  exitRecentsView()`; recents resolves via `TemplateRecentsManager.resolve(this)` (newest-first,
+  self-healing) → `repository.getTemplate(id)` per entry, `mapNotNull` skips deleted.
+- **S10 `applyPinnedViewUI` → `applyOverlayViewUI`:** generalized to one authority handling **both**
+  pinned and recents toolbars + the action-button cluster (avoids duplicating 14 binding refs). The
+  `showBlankCard` getter gained `&& !isRecentsView` (Blank belongs to root browse only).
+- **S10 mutual exclusivity (pinned / recents / search):** `enterPinnedView`/`enterRecentsView` each
+  clear the other overlay + call `exitSearchMode()` first. **`enterSearchMode`/`exitSearchMode` were
+  updated** (lead fix, discovered in test) to hide/restore `btnPinned` + `btnRecents` — previously they
+  leaked into search mode once S10 made them visible. Back-press order: pinned → recents → search →
+  picker → directory up.
+- **S10 tap behavior (locked rule, unchanged code):** `buildCard()` already routed pinned/recents taps
+  identically to the root grid for the mode — `collectName` sets pending + marks + stays (CREATE
+  confirms); plain PICK selects + `finish()`. Long-press stays MANAGE-only.
