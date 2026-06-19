@@ -726,8 +726,15 @@ grid of pinned templates; Unpin removes it; deleting a pinned template unpins it
 ### Session 9 — Recent templates: device-local store + use-tracking
 
 **Objective:** Add a device-local "recently used library templates" store and record a use whenever a
-library template is applied to a page (in-notebook) or seeded into a new notebook. **No UI this
-session** (the recents view is Session 10) — this is the data + tracking layer, kept isolated.
+**library** template is *selected from the library* — i.e. picked via the in-notebook "Browse
+Templates…" library browser, or seeded into a new notebook. **No UI this session** (the recents view
+is Session 10) — this is the data + tracking layer, kept isolated.
+
+**"Recents" means recently *selected from the library*, NOT recently *added*.** A "use" is recorded
+only at the two library-selection points below. Explicitly **excluded** (these do **not** record a
+use): re-applying a template **already in the notebook** via `TemplateDialog.onConfirm` →
+`applyTemplateToCurrentPage(...)` (this path never touches `insertLibraryTemplateIntoSoil`), and the
+**Blank** selection (empty `RESULT_TEMPLATE_ID`).
 
 **Files:** `data/recents/TemplateRecentEntry.kt` *(new)*, `data/recents/ResolvedTemplateRecent.kt`
 *(new)*, `data/recents/TemplateRecentsManager.kt` *(new)*, `NotebookActivity.kt`, `MainActivity.kt`.
@@ -742,10 +749,12 @@ session** (the recents view is Session 10) — this is the data + tracking layer
   self-healing prune of missing/deleted. (A single `recordUse` covers both open and re-use; no
   separate close hook — templates aren't "closed".)
 
-**Tracking (record points — library template id only, never Blank):**
-- `NotebookActivity` — in the PICK-result apply path (`onTemplatePicked` →
+**Tracking (record points — library template id only, never Blank; exactly two sites):**
+- `NotebookActivity` — **only** the library-browse PICK-result apply path (`onTemplatePicked` →
   `insertLibraryTemplateIntoSoil`): after a successful apply of a **non-empty** `RESULT_TEMPLATE_ID`,
-  call `TemplateRecentsManager.recordUse(this, libraryTemplateId)`.
+  call `TemplateRecentsManager.recordUse(this, libraryTemplateId)`. ⚠️ Do **not** add a record call to
+  `applyTemplateToCurrentPage` or `TemplateDialog.onConfirm` — those cover in-notebook re-apply of an
+  existing template and are deliberately excluded from recents.
 - `MainActivity` — in `createNotebook(name, libraryTemplateId)`: if `libraryTemplateId` is non-empty,
   call `TemplateRecentsManager.recordUse(this, libraryTemplateId)` after the notebook is created.
 - **Cleanup:** in `IndexRepository.softDeleteTemplate`, recents can't be scrubbed (no `Context` in the
