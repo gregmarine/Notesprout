@@ -948,10 +948,16 @@ Commit (no push).
   identically to the root grid for the mode — `collectName` sets pending + marks + stays (CREATE
   confirms); plain PICK selects + `finish()`. Long-press stays MANAGE-only.
 - **S11 toolbar relocation (pure layout move, zero Kotlin change):** Search/Sort/Pinned/Recents moved
-  from the bottom `actionButtonsGroup` to a right-aligned cluster in `topBar` (after the title `Space`),
-  mirroring MainActivity. The bottom bar now holds only New-Folder + Import alongside centred
-  pagination. **All button ids kept stable**, so every visibility toggle (`enterSearchMode`/`exitSearchMode`,
-  `applyOverlayViewUI`, `applyPickerUI`, the onCreate Pinned/Recents-visibility lines) works unchanged —
-  no `TemplateBrowserActivity.kt` edit was needed. Margins dropped (the 44dp ToolbarButton style spaces
-  them); `btnNewTemplateFolder` lost its now-leading `marginStart`. Mode rules unchanged: `btnRecents`
-  GONE in MANAGE; pinned/recents/search hide the other action buttons; picker hides all four.
+  from the bottom `actionButtonsGroup` to a right-aligned cluster in the **`breadcrumbBar`** (after the
+  breadcrumb `HorizontalScrollView`), mirroring MainActivity exactly — that is the browser's working
+  toolbar, so the cluster now sits with the navigation it acts on. (First parked in `topBar` next to the
+  title, but in the new-notebook `collectName` picker that read as out-of-place beside the "New Notebook"
+  title — moved down to the breadcrumb bar per user feedback.) The bottom bar now holds only New-Folder +
+  Import alongside centred pagination. **All button ids kept stable**, so every visibility toggle
+  (`enterSearchMode`/`exitSearchMode`, `applyOverlayViewUI`, `applyPickerUI`, the onCreate
+  Pinned/Recents-visibility lines) works unchanged — no `TemplateBrowserActivity.kt` edit was needed.
+  Because the cluster lives in `breadcrumbBar`, the overlay views (pinned/recents) hide it for free when
+  they GONE the breadcrumb bar; the explicit per-button GONE toggles are now redundant but harmless.
+  Margins dropped (the 44dp ToolbarButton style spaces them); `btnNewTemplateFolder` lost its now-leading
+  `marginStart`. Mode rules unchanged: `btnRecents` GONE in MANAGE; pinned/recents/search hide the other
+  action buttons; picker hides all four.

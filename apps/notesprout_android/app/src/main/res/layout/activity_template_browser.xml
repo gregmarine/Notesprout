@@ -37,39 +37,6 @@
             android:layout_height="match_parent"
             android:layout_weight="1" />
 
-        <!-- S11: top action cluster (mirrors MainActivity) — Search/Sort/Pinned/Recents. -->
-        <androidx.appcompat.widget.AppCompatImageButton
-            android:id="@+id/btnSearch"
-            style="@style/Widget.Notesprout.ToolbarButton"
-            android:src="@drawable/ic_search"
-            android:contentDescription="Search templates" />
-
-        <androidx.appcompat.widget.AppCompatImageButton
-            android:id="@+id/btnClearSearch"
-            style="@style/Widget.Notesprout.ToolbarButton"
-            android:src="@drawable/ic_x"
-            android:contentDescription="Clear search"
-            android:visibility="gone" />
-
-        <androidx.appcompat.widget.AppCompatImageButton
-            android:id="@+id/btnSort"
-            style="@style/Widget.Notesprout.ToolbarButton"
-            android:src="@drawable/ic_filter"
-            android:contentDescription="Sort" />
-
-        <androidx.appcompat.widget.AppCompatImageButton
-            android:id="@+id/btnPinned"
-            style="@style/Widget.Notesprout.ToolbarButton"
-            android:src="@drawable/ic_pinned"
-            android:contentDescription="Pinned templates" />
-
-        <androidx.appcompat.widget.AppCompatImageButton
-            android:id="@+id/btnRecents"
-            style="@style/Widget.Notesprout.ToolbarButton"
-            android:src="@drawable/ic_clock"
-            android:contentDescription="Recent templates"
-            android:visibility="gone" />
-
     </LinearLayout>
 
     <!-- Collect-name bar: shown in PICK+collectName mode to enter a notebook name + confirm. -->
@@ -146,6 +113,39 @@
                 android:orientation="horizontal" />
 
         </HorizontalScrollView>
+
+        <!-- S11: action cluster (mirrors MainActivity's breadcrumb bar) — Search/Sort/Pinned/Recents. -->
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnSearch"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:src="@drawable/ic_search"
+            android:contentDescription="Search templates" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnClearSearch"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:src="@drawable/ic_x"
+            android:contentDescription="Clear search"
+            android:visibility="gone" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnSort"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:src="@drawable/ic_filter"
+            android:contentDescription="Sort" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnPinned"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:src="@drawable/ic_pinned"
+            android:contentDescription="Pinned templates" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnRecents"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:src="@drawable/ic_clock"
+            android:contentDescription="Recent templates"
+            android:visibility="gone" />
 
     </LinearLayout>
 
