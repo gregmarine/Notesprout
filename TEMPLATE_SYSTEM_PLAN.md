@@ -36,7 +36,7 @@ adb -s 34E517F9 install -r app/build/outputs/apk/debug/app-debug.apk
 |---|---|---|
 | 1 | Index data model & repository foundation | ✅ Done |
 | 2 | TemplateBrowserActivity — browse, navigate, import, new folder + toolbar launch | ✅ Done |
-| 3 | Management actions — preview, action sheet, rename, copy, move, delete | ⬜ Not started |
+| 3 | Management actions — preview, action sheet, rename, copy, move, delete | ✅ Done |
 | 4 | Search & sort in the template browser | ⬜ Not started |
 | 5 | In-notebook integration — slim picker + library browse + apply-into-`.soil` | ⬜ Not started |
 | 6 | Full-screen New Notebook flow + first-page template seeding | ⬜ Not started |
@@ -485,3 +485,11 @@ picks a template, taps CREATE; the notebook opens with the first page showing th
 - Search mode (`enterSearchMode`/`exitSearchMode`) does **not** hide `btnNewFolder`/`btnNewNotebook`,
   but per the S2 spec `btnTemplates` **is** hidden in search mode. Existing button behavior left
   unchanged.
+- **S3 picker is a local sealed class** (`TemplatePicker` inside `TemplateBrowserActivity`) — the
+  shared `ui/DestinationPickerState` was intentionally **not** extended with template variants. A
+  dedicated `pickerToolbar` + `pickerToolbarDivider` (`gone` by default) was added to
+  `activity_template_browser.xml`, mirroring MainActivity's picker bar (import/new-folder buttons
+  hide while picking). `isSelfOrDescendant` walks ancestors via `repository.getTemplate(id)`
+  (`dao.getById` is type-agnostic). (Discovered S3.)
+- **S7 cleanup nit:** `confirmPickerDestination` has two unused locals (`isCopyTemplate`,
+  `isCopyFolder`) left over from the conflict branch — harmless, remove during the S7 dead-code pass.

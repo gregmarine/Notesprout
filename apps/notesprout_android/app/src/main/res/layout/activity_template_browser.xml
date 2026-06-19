@@ -75,6 +75,64 @@
 
     </LinearLayout>
 
+    <!-- Picker toolbar: shown only while in move/copy picker mode. -->
+    <LinearLayout
+        android:id="@+id/pickerToolbar"
+        android:layout_width="match_parent"
+        android:layout_height="48dp"
+        android:background="@color/paperWhite"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="12dp"
+        android:paddingEnd="12dp"
+        android:visibility="gone">
+
+        <androidx.appcompat.widget.AppCompatTextView
+            android:id="@+id/pickerTitle"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:textColor="@color/inkBlack"
+            android:textSize="15sp"
+            android:text="Move here" />
+
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/btnPickerConfirm"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:background="@drawable/shape_bordered"
+            android:paddingStart="16dp"
+            android:paddingEnd="16dp"
+            android:paddingTop="6dp"
+            android:paddingBottom="6dp"
+            android:stateListAnimator="@null"
+            android:textColor="@color/inkBlack"
+            android:text="Move here" />
+
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/btnPickerCancel"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="8dp"
+            android:background="@drawable/shape_bordered"
+            android:paddingStart="16dp"
+            android:paddingEnd="16dp"
+            android:paddingTop="6dp"
+            android:paddingBottom="6dp"
+            android:stateListAnimator="@null"
+            android:textColor="@color/inkBlack"
+            android:text="Cancel" />
+
+    </LinearLayout>
+
+    <!-- Picker toolbar divider -->
+    <View
+        android:id="@+id/pickerToolbarDivider"
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="@color/inkBlack"
+        android:visibility="gone" />
+
     <!-- Grid area: fills remaining height between breadcrumb and bottom bar. -->
     <FrameLayout
         android:id="@+id/gridContainer"

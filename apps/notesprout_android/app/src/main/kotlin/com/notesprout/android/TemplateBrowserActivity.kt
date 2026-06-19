@@ -104,6 +104,16 @@ class TemplateBrowserActivity : AppCompatActivity() {
         data class Template(override val entity: ObjectEntity) : BrowseItem()
     }
 
+    // ── Template picker (local — does NOT touch the shared DestinationPickerState) ─────────────
+
+    private sealed class TemplatePicker {
+        object None : TemplatePicker()
+        data class CopyTemplate(val source: ObjectEntity) : TemplatePicker()
+        data class MoveTemplate(val source: ObjectEntity) : TemplatePicker()
+        data class CopyFolder(val source: ObjectEntity) : TemplatePicker()
+        data class MoveFolder(val source: ObjectEntity) : TemplatePicker()
+    }
+
     // ── State ─────────────────────────────────────────────────────────────────
 
     private var mode: Int = MODE_MANAGE
@@ -115,6 +125,8 @@ class TemplateBrowserActivity : AppCompatActivity() {
     private var browseItems: List<BrowseItem> = emptyList()
     private var currentGridPage: Int = 0
     private var gridSpec: GridSpec? = null
+
+    private var picker: TemplatePicker = TemplatePicker.None
 
     private val repository: IndexRepository by lazy { IndexRepository(NotesproutIndex.dao()) }
 
@@ -173,6 +185,9 @@ class TemplateBrowserActivity : AppCompatActivity() {
         binding.btnNewTemplateFolder.setOnClickListener { showNewTemplateFolderDialog() }
         binding.btnImport.setOnClickListener { importLauncher.launch(arrayOf("image/png")) }
 
+        binding.btnPickerConfirm.setOnClickListener { confirmPickerDestination() }
+        binding.btnPickerCancel.setOnClickListener  { exitPicker() }
+
         binding.gridContainer.setOnTouchListener { _, event ->
             gestureDetector.onTouchEvent(event)
             true
@@ -180,6 +195,15 @@ class TemplateBrowserActivity : AppCompatActivity() {
 
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
+                // While in picker: cancel picker if at root, else navigate up.
+                if (picker != TemplatePicker.None) {
+                    if (directoryStack.size <= 1) {
+                        exitPicker()
+                    } else {
+                        navigateUpOneLevel()
+                    }
+                    return
+                }
                 if (!navigateUpOneLevel()) finish()
             }
         })
@@ -220,6 +244,208 @@ class TemplateBrowserActivity : AppCompatActivity() {
         return true
     }
 
+    // ── Picker mode ───────────────────────────────────────────────────────────
+
+    private fun enterPicker(state: TemplatePicker) {
+        picker = state
+        // Reset navigation to root (mirror MainActivity which resets to root when entering picker).
+        directoryStack.clear()
+        directoryStack.add(null)
+        currentGridPage = 0
+        applyPickerUI()
+        loadAndRender()
+    }
+
+    private fun exitPicker() {
+        picker = TemplatePicker.None
+        directoryStack.clear()
+        directoryStack.add(null)
+        currentGridPage = 0
+        applyPickerUI()
+        loadAndRender()
+    }
+
+    private fun applyPickerUI() {
+        val inPicker = picker != TemplatePicker.None
+        binding.pickerToolbar.visibility        = if (inPicker) View.VISIBLE else View.GONE
+        binding.pickerToolbarDivider.visibility = if (inPicker) View.VISIBLE else View.GONE
+        if (inPicker) {
+            val (title, confirmLabel) = when (picker) {
+                is TemplatePicker.CopyTemplate -> "Copy template here" to "Copy here"
+                is TemplatePicker.MoveTemplate -> "Move template here" to "Move here"
+                is TemplatePicker.CopyFolder   -> "Copy folder here"   to "Copy here"
+                is TemplatePicker.MoveFolder   -> "Move folder here"   to "Move here"
+                TemplatePicker.None            -> "" to ""
+            }
+            binding.pickerTitle.text = title
+            binding.btnPickerConfirm.text = confirmLabel
+            // Hide action buttons in picker mode (mirror MainActivity).
+            binding.btnNewTemplateFolder.visibility = View.GONE
+            binding.btnImport.visibility            = View.GONE
+        } else {
+            binding.btnNewTemplateFolder.visibility = View.VISIBLE
+            binding.btnImport.visibility            = View.VISIBLE
+        }
+    }
+
+    private fun confirmPickerDestination() {
+        val state = picker
+        if (state == TemplatePicker.None) return
+
+        lifecycleScope.launch {
+            val source: ObjectEntity = when (state) {
+                is TemplatePicker.CopyTemplate -> state.source
+                is TemplatePicker.MoveTemplate -> state.source
+                is TemplatePicker.CopyFolder   -> state.source
+                is TemplatePicker.MoveFolder   -> state.source
+                TemplatePicker.None            -> return@launch
+            }
+
+            // ── Guard: no-op move (already in same parent) ─────────────────────
+            when (state) {
+                is TemplatePicker.MoveTemplate,
+                is TemplatePicker.MoveFolder -> {
+                    if (currentParentId == source.parentId) {
+                        Toast.makeText(this@TemplateBrowserActivity,
+                            "Already in this folder", Toast.LENGTH_SHORT).show()
+                        return@launch
+                    }
+                }
+                else -> {}
+            }
+
+            // ── Guard: self/descendant (folder copy/move only) ─────────────────
+            when (state) {
+                is TemplatePicker.CopyFolder,
+                is TemplatePicker.MoveFolder -> {
+                    if (isSelfOrDescendant(currentParentId, source.id)) {
+                        val verb = if (state is TemplatePicker.CopyFolder) "copy" else "move"
+                        Toast.makeText(this@TemplateBrowserActivity,
+                            "Cannot $verb a folder into itself", Toast.LENGTH_SHORT).show()
+                        return@launch
+                    }
+                }
+                else -> {}
+            }
+
+            // ── Conflict check at destination ──────────────────────────────────
+            val isCopyTemplate = state is TemplatePicker.CopyTemplate
+            val isCopyFolder   = state is TemplatePicker.CopyFolder
+            val existingConflict: ObjectEntity? = withContext(Dispatchers.IO) {
+                when (state) {
+                    is TemplatePicker.CopyTemplate,
+                    is TemplatePicker.MoveTemplate -> {
+                        repository.getTemplates(currentParentId)
+                            .find { it.name == source.name && it.id != source.id }
+                    }
+                    is TemplatePicker.CopyFolder,
+                    is TemplatePicker.MoveFolder -> {
+                        repository.getTemplateFolders(currentParentId)
+                            .find { it.name == source.name && it.id != source.id }
+                    }
+                    TemplatePicker.None -> null
+                }
+            }
+
+            if (existingConflict != null) {
+                val itemType = when (state) {
+                    is TemplatePicker.CopyTemplate,
+                    is TemplatePicker.MoveTemplate -> "template"
+                    else                           -> "folder"
+                }
+                val dialog = AlertDialog.Builder(this@TemplateBrowserActivity)
+                    .setMessage("A $itemType named \"${source.name}\" already exists here. Replace it?")
+                    .setNegativeButton("Cancel", null)
+                    .setPositiveButton("Replace") { _, _ ->
+                        executePickerOperation(state, source, existingConflict.id)
+                    }
+                    .create()
+                dialog.show()
+                dialog.window?.setElevation(0f)
+                dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+            } else {
+                executePickerOperation(state, source, null)
+            }
+        }
+    }
+
+    private fun executePickerOperation(
+        state: TemplatePicker,
+        source: ObjectEntity,
+        conflictId: String?,
+    ) {
+        val isCopy = state is TemplatePicker.CopyTemplate || state is TemplatePicker.CopyFolder
+        lifecycleScope.launch {
+            val success = withContext(Dispatchers.IO) {
+                try {
+                    // Delete conflicting entry first.
+                    if (conflictId != null) {
+                        when (state) {
+                            is TemplatePicker.CopyTemplate,
+                            is TemplatePicker.MoveTemplate -> repository.softDeleteTemplate(conflictId)
+                            is TemplatePicker.CopyFolder,
+                            is TemplatePicker.MoveFolder   -> repository.deleteTemplateFolderRecursively(conflictId)
+                            TemplatePicker.None -> {}
+                        }
+                    }
+                    // Execute the operation.
+                    when (state) {
+                        is TemplatePicker.MoveTemplate -> {
+                            repository.moveObject(source.id, currentParentId)
+                            true
+                        }
+                        is TemplatePicker.CopyTemplate -> {
+                            repository.copyTemplate(source.id, currentParentId)
+                            true
+                        }
+                        is TemplatePicker.MoveFolder -> {
+                            repository.moveObject(source.id, currentParentId)
+                            true
+                        }
+                        is TemplatePicker.CopyFolder -> {
+                            repository.copyTemplateFolderRecursively(source.id, currentParentId)
+                            true
+                        }
+                        TemplatePicker.None -> false
+                    }
+                } catch (e: Exception) {
+                    Slog.d(TAG) { "executePickerOperation failed: ${e.message}" }
+                    false
+                }
+            }
+            if (success) {
+                picker = TemplatePicker.None
+                directoryStack.clear()
+                directoryStack.add(null)
+                currentGridPage = 0
+                applyPickerUI()
+                loadAndRender()
+                Toast.makeText(this@TemplateBrowserActivity,
+                    if (isCopy) "Copied." else "Moved.", Toast.LENGTH_SHORT).show()
+            } else {
+                Toast.makeText(this@TemplateBrowserActivity,
+                    if (isCopy) "Copy failed." else "Move failed.", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    /**
+     * Returns true if [folderId] is [sourceId] itself or has [sourceId] as an ancestor.
+     * Mirrors MainActivity.isSelfOrDescendant, scoped to template folders.
+     * Uses repository.getTemplate (backed by dao.getById) which is type-agnostic.
+     */
+    private suspend fun isSelfOrDescendant(folderId: String?, sourceId: String): Boolean {
+        if (folderId == null) return false
+        if (folderId == sourceId) return true
+        var id: String? = folderId
+        while (id != null) {
+            val folder = withContext(Dispatchers.IO) { repository.getTemplate(id!!) } ?: break
+            id = folder.parentId
+            if (id == sourceId) return true
+        }
+        return false
+    }
+
     // ── Data loading ──────────────────────────────────────────────────────────
 
     private fun loadAndRender() {
@@ -227,9 +453,14 @@ class TemplateBrowserActivity : AppCompatActivity() {
             browseItems = withContext(Dispatchers.IO) {
                 val parentId = currentParentId
                 val folders   = repository.getTemplateFolders(parentId).sortedBy { it.name.lowercase() }
-                val templates = repository.getTemplates(parentId).sortedBy { it.name.lowercase() }
-                folders.map { BrowseItem.Folder(it) } +
-                    templates.map { BrowseItem.Template(it) }
+                if (picker != TemplatePicker.None) {
+                    // In picker mode: only show folders (no template cards — folders are destinations).
+                    folders.map { BrowseItem.Folder(it) }
+                } else {
+                    val templates = repository.getTemplates(parentId).sortedBy { it.name.lowercase() }
+                    folders.map { BrowseItem.Folder(it) } +
+                        templates.map { BrowseItem.Template(it) }
+                }
             }
             render()
         }
@@ -301,7 +532,13 @@ class TemplateBrowserActivity : AppCompatActivity() {
         binding.gridContainer.removeAllViews()
 
         if (browseItems.isEmpty()) {
-            renderEmptyState(if (directoryStack.size > 1) "Empty folder." else "No templates yet.")
+            val emptyMsg = when {
+                picker != TemplatePicker.None && directoryStack.size <= 1 -> "No template folders yet."
+                picker != TemplatePicker.None -> "Empty folder."
+                directoryStack.size > 1 -> "Empty folder."
+                else -> "No templates yet."
+            }
+            renderEmptyState(emptyMsg)
         } else {
             val spec  = gridSpec ?: return
             val start = currentGridPage * spec.itemsPerPage
@@ -383,6 +620,17 @@ class TemplateBrowserActivity : AppCompatActivity() {
                     is BrowseItem.Folder   -> navigateIntoFolder(item.entity)
                     is BrowseItem.Template -> openTemplatePreview(item.entity)
                 }
+            }
+        }
+
+        // Long-press management actions — only in MODE_MANAGE (not MODE_PICK per spec).
+        if (mode == MODE_MANAGE) {
+            group.setOnLongClickListener {
+                when (item) {
+                    is BrowseItem.Folder   -> showTemplateFolderContextMenu(item.entity)
+                    is BrowseItem.Template -> showTemplateContextMenu(item.entity)
+                }
+                true
             }
         }
 
@@ -612,6 +860,161 @@ class TemplateBrowserActivity : AppCompatActivity() {
         }
     }
 
+    // ── Template context menu ─────────────────────────────────────────────────
+
+    private fun showTemplateContextMenu(entity: ObjectEntity) {
+        ActionSheetDialog(this)
+            .title(entity.name)
+            .addAction(R.drawable.ic_copy_plus,       "Copy Template") { enterPicker(TemplatePicker.CopyTemplate(entity)) }
+            .addAction(R.drawable.ic_move_page,       "Move Template") { enterPicker(TemplatePicker.MoveTemplate(entity)) }
+            .addAction(R.drawable.ic_edit,            "Rename Template") { showRenameTemplateDialog(entity) }
+            .addAction(R.drawable.ic_delete_notebook, "Delete Template") { showDeleteTemplateConfirmation(entity) }
+            .show()
+    }
+
+    // ── Template folder context menu ──────────────────────────────────────────
+
+    private fun showTemplateFolderContextMenu(entity: ObjectEntity) {
+        ActionSheetDialog(this)
+            .title(entity.name)
+            .addAction(R.drawable.ic_copy_plus,    "Copy Folder")   { enterPicker(TemplatePicker.CopyFolder(entity)) }
+            .addAction(R.drawable.ic_move_page,    "Move Folder")   { enterPicker(TemplatePicker.MoveFolder(entity)) }
+            .addAction(R.drawable.ic_edit,         "Rename Folder") { showRenameTemplateFolderDialog(entity) }
+            .addAction(R.drawable.ic_folder_minus, "Delete")        { showDeleteTemplateFolderConfirmation(entity) }
+            .show()
+    }
+
+    // ── Rename template dialog ────────────────────────────────────────────────
+
+    private fun showRenameTemplateDialog(entity: ObjectEntity) {
+        val dialogBinding = DialogNewNotebookBinding.inflate(layoutInflater)
+        dialogBinding.editNotebookName.setText(entity.name)
+        dialogBinding.editNotebookName.setSelection(entity.name.length)
+
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("Rename Template")
+            .setView(dialogBinding.root)
+            .setPositiveButton("Rename") { _, _ ->
+                val imm = getSystemService(InputMethodManager::class.java)
+                imm.hideSoftInputFromWindow(dialogBinding.editNotebookName.windowToken, 0)
+                val name = dialogBinding.editNotebookName.text?.toString()?.trim().orEmpty()
+                lifecycleScope.launch {
+                    val error = validateTemplateRename(name, entity)
+                    if (error != null) {
+                        Toast.makeText(this@TemplateBrowserActivity, error, Toast.LENGTH_SHORT).show()
+                    } else if (name != entity.name) {
+                        withContext(Dispatchers.IO) { repository.renameTemplate(entity.id, name) }
+                        loadAndRender()
+                    }
+                }
+            }
+            .setNegativeButton("Cancel") { _, _ ->
+                val imm = getSystemService(InputMethodManager::class.java)
+                imm.hideSoftInputFromWindow(dialogBinding.editNotebookName.windowToken, 0)
+            }
+            .create()
+
+        dialog.window?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE)
+        dialog.show()
+        dialog.window?.setElevation(0f)
+        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+
+        dialogBinding.editNotebookName.requestFocus()
+        dialogBinding.editNotebookName.postDelayed({
+            ViewCompat.getWindowInsetsController(dialogBinding.editNotebookName)
+                ?.show(WindowInsetsCompat.Type.ime())
+                ?: run {
+                    val imm = getSystemService(InputMethodManager::class.java)
+                    @Suppress("DEPRECATION")
+                    imm.showSoftInput(dialogBinding.editNotebookName, InputMethodManager.SHOW_IMPLICIT)
+                }
+        }, 100)
+    }
+
+    // ── Rename template folder dialog ──────────────────────────────────────────
+
+    private fun showRenameTemplateFolderDialog(entity: ObjectEntity) {
+        val dialogBinding = DialogNewNotebookBinding.inflate(layoutInflater)
+        dialogBinding.editNotebookName.hint = "Folder name"
+        dialogBinding.editNotebookName.setText(entity.name)
+        dialogBinding.editNotebookName.setSelection(entity.name.length)
+
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("Rename Folder")
+            .setView(dialogBinding.root)
+            .setPositiveButton("Rename") { _, _ ->
+                val imm = getSystemService(InputMethodManager::class.java)
+                imm.hideSoftInputFromWindow(dialogBinding.editNotebookName.windowToken, 0)
+                val name = dialogBinding.editNotebookName.text?.toString()?.trim().orEmpty()
+                lifecycleScope.launch {
+                    val error = validateTemplateFolderRename(name, entity)
+                    if (error != null) {
+                        Toast.makeText(this@TemplateBrowserActivity, error, Toast.LENGTH_SHORT).show()
+                    } else if (name != entity.name) {
+                        withContext(Dispatchers.IO) { repository.renameTemplateFolder(entity.id, name) }
+                        loadAndRender()
+                    }
+                }
+            }
+            .setNegativeButton("Cancel") { _, _ ->
+                val imm = getSystemService(InputMethodManager::class.java)
+                imm.hideSoftInputFromWindow(dialogBinding.editNotebookName.windowToken, 0)
+            }
+            .create()
+
+        dialog.window?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE)
+        dialog.show()
+        dialog.window?.setElevation(0f)
+        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+
+        dialogBinding.editNotebookName.requestFocus()
+        dialogBinding.editNotebookName.postDelayed({
+            ViewCompat.getWindowInsetsController(dialogBinding.editNotebookName)
+                ?.show(WindowInsetsCompat.Type.ime())
+                ?: run {
+                    val imm = getSystemService(InputMethodManager::class.java)
+                    @Suppress("DEPRECATION")
+                    imm.showSoftInput(dialogBinding.editNotebookName, InputMethodManager.SHOW_IMPLICIT)
+                }
+        }, 100)
+    }
+
+    // ── Delete template confirmation ───────────────────────────────────────────
+
+    private fun showDeleteTemplateConfirmation(entity: ObjectEntity) {
+        val dialog = AlertDialog.Builder(this)
+            .setMessage("Delete \"${entity.name}\"? This cannot be undone.")
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Delete") { _, _ ->
+                lifecycleScope.launch {
+                    withContext(Dispatchers.IO) { repository.softDeleteTemplate(entity.id) }
+                    loadAndRender()
+                }
+            }
+            .create()
+        dialog.show()
+        dialog.window?.setElevation(0f)
+        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+    }
+
+    // ── Delete template folder confirmation ───────────────────────────────────
+
+    private fun showDeleteTemplateFolderConfirmation(entity: ObjectEntity) {
+        val dialog = AlertDialog.Builder(this)
+            .setMessage("Delete \"${entity.name}\"? This will permanently remove all template folders and templates inside it. This cannot be undone.")
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Delete") { _, _ ->
+                lifecycleScope.launch {
+                    withContext(Dispatchers.IO) { repository.deleteTemplateFolderRecursively(entity.id) }
+                    loadAndRender()
+                }
+            }
+            .create()
+        dialog.show()
+        dialog.window?.setElevation(0f)
+        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+    }
+
     // ── New template folder dialog ────────────────────────────────────────────
 
     private fun showNewTemplateFolderDialog() {
@@ -675,6 +1078,40 @@ class TemplateBrowserActivity : AppCompatActivity() {
         }
         val siblings = withContext(Dispatchers.IO) { repository.getTemplateFolders(currentParentId) }
         if (siblings.any { it.name.equals(name, ignoreCase = true) }) {
+            return "A folder named \"$name\" already exists"
+        }
+        return null
+    }
+
+    /**
+     * Validates a template rename. Dup-check against the template's own parent (not current nav),
+     * excluding self. Returns an error string or null.
+     */
+    private suspend fun validateTemplateRename(name: String, entity: ObjectEntity): String? {
+        if (name.isBlank()) return "Template name cannot be empty"
+        if (name == "." || name == "..") return "Invalid template name"
+        if (name.contains(Regex("[^a-zA-Z0-9_\\-. ]"))) {
+            return "Name may only contain letters, numbers, spaces, and _ - ."
+        }
+        val siblings = withContext(Dispatchers.IO) { repository.getTemplates(entity.parentId) }
+        if (siblings.any { it.id != entity.id && it.name.equals(name, ignoreCase = true) }) {
+            return "A template named \"$name\" already exists"
+        }
+        return null
+    }
+
+    /**
+     * Validates a template folder rename. Dup-check against the folder's own parent, excluding self.
+     * Returns an error string or null.
+     */
+    private suspend fun validateTemplateFolderRename(name: String, entity: ObjectEntity): String? {
+        if (name.isBlank()) return "Folder name cannot be empty"
+        if (name == "." || name == "..") return "Invalid folder name"
+        if (name.contains(Regex("[^a-zA-Z0-9_\\-. ]"))) {
+            return "Name may only contain letters, numbers, spaces, and _ - ."
+        }
+        val siblings = withContext(Dispatchers.IO) { repository.getTemplateFolders(entity.parentId) }
+        if (siblings.any { it.id != entity.id && it.name.equals(name, ignoreCase = true) }) {
             return "A folder named \"$name\" already exists"
         }
         return null
