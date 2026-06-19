@@ -535,19 +535,177 @@ Commit (no push). Summarize the Phase 2 backlog for the user.**
 
 ---
 
+## Phase 2 — Session P2.1 — Confirm step for Copy & Move destinations
+
+**Status:** ☐ Not started
+
+> **Goal:** Insert an explicit **OK / Cancel** confirmation between picking a move/paste destination
+> and committing it. Today a destination tap commits **immediately** (`executeMove` / `executePaste`
+> are called straight from the card click). After this session, a destination tap instead **selects
+> and previews** the landing spot; the op only runs when the user taps **OK**. The before/after
+> toggle and destination tap stay; the user can re-pick the destination or flip before/after and watch
+> the preview update before committing. **Cancel** (back gesture / cancel) is already wired via
+> `cancelDestMode()` and returns to action mode with the selection intact.
+>
+> **Slogan check:** no color, no Material chrome. The "where will this land" affordance is a single
+> bold inkBlack insertion bar drawn on the leading/trailing edge of the destination card — paper-like,
+> readable on e-ink (`borderGray` is invisible on BOOX → use inkBlack, per memory + design-system.md).
+
+### Architecture recap (read before implementing)
+
+The destination flow lives entirely in `PageIndexActivity.kt`:
+
+- `enterDestMode(mode)` (line ~747) — enters MOVE/PASTE picking; resets `insertBefore = true`, stashes
+  `moveSourceIds`, hides action buttons, shows the Before/After selectable buttons, sets the title.
+- The **card click handler** (`buildCardGroup`, line ~544) is where a destination tap currently
+  **commits**: `destMode == MOVE` → `executeMove(entry.id)` (unless the tap is a source → cancel);
+  `destMode == PASTE` → `executePaste(entry.id)`.
+- The **card highlight** (line ~577) highlights sources/selection; there is no destination highlight
+  today (the op is instant, so none was needed).
+- `executeMove(targetPageId)` (line ~806) / `executePaste(targetPageId)` (line ~841) do the batch op
+  on `Dispatchers.IO`, record undo batches, reload, then `exitActionMode()`.
+- `cancelDestMode()` (line ~791) clears `destMode` + `moveSourceIds`, hides Before/After, restores
+  action chrome.
+- `refreshInsertBeforeAfter()` (line ~785) reflects `insertBefore` on the two toggle buttons.
+- Back handling: `onBackPressedDispatcher` (line ~318) and `btnBack` (line ~299) already branch
+  `destMode != DestMode.NONE -> cancelDestMode()` first.
+
+Layout: `res/layout/activity_page_index.xml`. The destination-mode top bar shows `btnInsertBefore` /
+`btnInsertAfter` (lines 102–114, `Widget.Notesprout.ToggleTextButton`). There is **no confirm button
+yet** and **no `ic_check` drawable** (confirmed: `res/drawable/` has no check/done/confirm glyph).
+
+### P2.1.1 New state: pending destination
+
+- Add `private var pendingDestPageId: String? = null` — the destination the user has tapped but not
+  yet confirmed. `null` = no destination chosen yet (still picking).
+- A "destination is chosen" sub-state of dest mode is simply `pendingDestPageId != null`. Clear it
+  back to `null` in `enterDestMode()` and `cancelDestMode()`.
+
+### P2.1.2 Confirm button (`activity_page_index.xml` + drawable)
+
+- Create a minimal e-ink vector **`res/drawable/ic_check.xml`** (24dp, 1dp/2dp inkBlack stroke, no
+  fill, no gradient) — a plain checkmark. Match the stroke weight of the existing
+  `ic_insert_page_after.xml` so it sits visually with its neighbours.
+- Add **`btnConfirmDest`** (`AppCompatImageButton`, `style="@style/Widget.Notesprout.ToolbarButton"`,
+  `src="@drawable/ic_check"`, `contentDescription="Confirm"`, `visibility="gone"`) to the top bar,
+  placed **after `btnInsertAfter`** (so the destination-mode cluster reads: `[Before] [After]
+  [✓]`). Keep `layout_marginEnd="4dp"`.
+- Wire in the click-listener setup block (near line ~308–312):
+  `binding.btnConfirmDest.setOnClickListener { confirmDestination() }`.
+
+### P2.1.3 Destination tap = select + preview (not commit)
+
+Rewrite the card click handler (`buildCardGroup`, lines ~544–558) for the dest-mode branches:
+
+- `destMode == DestMode.MOVE`:
+  - Tapped card **is a source** (`entry.id in moveSourceIds`): keep current behavior — treat as
+    "cancel the pick". **Refinement:** if a destination is already pending, clear only the pending
+    destination (`pendingDestPageId = null; refreshDestChrome(); renderGridPage()`) rather than
+    exiting dest mode; if none is pending, `cancelDestMode()` as today. (Document the choice in a
+    comment.)
+  - Otherwise: **set** `pendingDestPageId = entry.id` (do **not** call `executeMove`). Then
+    `refreshDestChrome()` + `renderGridPage()` to show the preview + reveal OK.
+- `destMode == DestMode.PASTE`: any card is valid → `pendingDestPageId = entry.id`,
+  `refreshDestChrome()` + `renderGridPage()` (no immediate `executePaste`).
+- Normal/action-mode branches (`!inActionMode()` / `toggleSelection`) are unchanged.
+
+### P2.1.4 Commit on OK
+
+- Add `private fun confirmDestination()`:
+  - Guard: `val target = pendingDestPageId ?: return` (OK is only enabled when a destination exists —
+    see P2.1.6, but guard anyway).
+  - `when (destMode) { MOVE -> executeMove(target); PASTE -> executePaste(target); NONE -> {} }`.
+  - `executeMove` / `executePaste` already clear state and `exitActionMode()` on success, so no extra
+    teardown here. `pendingDestPageId` is reset by `exitActionMode()` (P2.1.5) — confirm that path
+    nulls it, or null it explicitly at the top of both execute fns.
+- **No change to the batch ops, undo/redo, or extras** — `executeMove`/`executePaste` and
+  `PageCopier` are untouched. This session is purely the gate in front of them.
+
+### P2.1.5 Chrome refresh (`refreshDestChrome()` + teardown)
+
+- Add `private fun refreshDestChrome()` (called from `enterDestMode`, dest taps, and
+  `refreshInsertBeforeAfter` flips):
+  - `btnConfirmDest.visibility = if (destMode != NONE && pendingDestPageId != null) VISIBLE else GONE`.
+  - Title: when `pendingDestPageId == null` keep the existing `"$titlePrefix before/after…"`; when a
+    destination is chosen, set a confirming title, e.g. `"Move ${if (insertBefore) "before" else
+    "after"} p.${destPageNumber}?"` (derive the page number from `pages.indexOfFirst { it.id ==
+    pendingDestPageId } + 1`; fall back to the bare verb if not found). Keep it terse.
+- `enterDestMode()` (line ~747): set `pendingDestPageId = null` and add `binding.btnConfirmDest`
+  to the GONE block; call `refreshDestChrome()` after showing Before/After.
+- `cancelDestMode()` (line ~791): set `pendingDestPageId = null`, hide `btnConfirmDest`.
+- `exitActionMode()`: ensure it nulls `pendingDestPageId` and hides `btnConfirmDest` (it already hides
+  the dest cluster on the normal→action restore; add the confirm button to that path).
+- `refreshInsertBeforeAfter()` (line ~785): after flipping, also call `refreshDestChrome()` so the
+  title text and the preview side update when the user changes before/after **after** picking a
+  destination. (Flipping must re-render the grid — add `renderGridPage()` to the
+  `btnInsertBefore`/`btnInsertAfter` click handlers, lines ~311–312, when `pendingDestPageId != null`.)
+
+### P2.1.6 Preview affordance (`buildCardGroup` render, line ~577)
+
+- The destination card (`entry.id == pendingDestPageId`) gets a distinct treatment from the source
+  highlight so the two reads differently:
+  - Keep sources highlighted as today (`bg_page_card_current`).
+  - For the pending destination, draw a **bold insertion bar** (a `View`, `3dp` × card-height,
+    `@color/inkBlack`) on the card's **leading edge if `insertBefore`** else **trailing edge**. The
+    grid cards live in a wrapping row layout (`group` is a vertical `LinearLayout` inside the grid) —
+    add the bar as a sibling on the correct side within the card's container, or overlay it in the
+    card `FrameLayout` with `Gravity.START` / `Gravity.END` and a matching height. Prefer the overlay
+    inside the existing card `FrameLayout` (line ~582) to avoid disturbing grid measurement.
+  - Optionally also outline the destination card itself (e.g. reuse `bg_page_card_current`) so it's
+    obvious which card the bar attaches to — but the bar's side is what conveys before/after.
+- Because before/after now has a visible consequence (the bar jumps sides), the earlier "reset
+  insertBefore to true each time" still holds at `enterDestMode`; the preview just makes the current
+  value legible.
+
+### P2.1.7 Edge cases
+
+- Re-tapping the **same** destination card: no-op beyond keeping it selected (or, optional polish,
+  toggle it off back to "picking"). Keep it simple: re-set to the same id, re-render.
+- Tapping a **different** card after one is pending: moves the preview to the new card (just reassign
+  `pendingDestPageId`).
+- MOVE: tapping a **source** card while a destination is pending clears the pending destination (back
+  to picking), per P2.1.3 — it does not commit and does not exit.
+- Back / cancel at any point (`destMode != NONE`) → `cancelDestMode()` → action mode, selection +
+  clipboard intact (paste) / selection intact (move). No op runs.
+- OK with `pendingDestPageId == null` is impossible (button hidden), but `confirmDestination()` guards
+  anyway.
+- Pagination while a destination is pending: the preview must survive paginating to another grid page
+  and back (state is by id, and `renderGridPage()` re-derives the bar from `pendingDestPageId` — verify
+  the bar redraws after `first/prev/next/last`).
+
+### P2.1.8 Docs
+
+- Update the **Page Index — Multi-Page Selection** section of `docs/mainactivity-and-recents.md`: the
+  Copy/Move flow now reads *select → pick destination → (preview, adjust before/after) → OK*, with
+  Cancel via back. Note the insertion-bar preview affordance.
+
+### P2.1.9 Acceptance
+
+- Copy several pages → pick a destination → an insertion bar shows the landing edge; flipping
+  Before/After moves the bar; tapping a different card moves the preview; **OK** commits exactly as
+  before; the result is identical to today's instant paste.
+- Same for Move, including: tapping a source while a destination is pending returns to picking (no
+  commit); a destination can't be a source on commit.
+- Back / cancel at the picking **or** the confirming step returns to action mode with selection (and
+  clipboard, for paste) intact and nothing changed.
+- Undo/redo of a confirmed multi-move / multi-paste behaves exactly as in Phase 1 (no regression —
+  this session does not touch the ops).
+- Preview survives pagination; disabled/hidden chrome correct; no `Log.d`, no `runBlocking`, e-ink
+  visuals (inkBlack bar, no color).
+
+**→ Haiku: clean build + install on G10. Fix-loop (Sonnet fix → Haiku rebuild) until user passes.
+Then update Status above and commit (no push).**
+
+---
+
 ## Phase 2 Backlog (do NOT build in Phase 1 without discussion)
 
 Append items discovered during implementation here. Seeds:
 
-- **Confirm (OK) step for Copy & Move destinations.** Today, once the user taps a destination card in
-  destination-picking mode, the paste/move applies **immediately**. Add an explicit **OK / Cancel**
-  confirmation: the user runs the current workflow for both actions, picks the destination, and then —
-  instead of it applying instantly — gets the chance to **OK** it (commit the op) or **Cancel** it
-  (Cancel is already implemented via the back / cancel-destination-mode path). Applies to both Copy
-  (paste) and Move. Plan the detailed session for this **after the Phase 1 sessions are complete** —
-  do not implement yet. (Affects the `destMode` flow + `executeMove` / `executePaste` in
-  `PageIndexActivity.kt`; the before/after toggle and destination tap stay, but the destination tap
-  selects-and-previews rather than commits.)
+- **Confirm (OK) step for Copy & Move destinations.** → **Planned in detail: see § Phase 2 — Session
+  P2.1 above.** (Destination tap selects-and-previews; **OK** commits; Cancel via the existing
+  back / `cancelDestMode()` path. Affects only the `destMode` gate in front of
+  `executeMove` / `executePaste`; the batch ops and undo/redo are untouched.)
 - **Choose template folder for batch "PNG as templates"** instead of importing into root (Session 4.4
   noted this).
 - **Range selection** (tap first, shift/long-press last to select a span) for faster large
@@ -571,5 +729,6 @@ Append items discovered during implementation here. Seeds:
 | 3 — Multi Set Template | ✅ DONE (2026-06-19) |
 | 4 — Multi Export (PDF/PNG/templates) | ✅ DONE (2026-06-19) |
 | 5 — Wrap-up (docs, polish) | ✅ DONE (2026-06-19) |
+| P2.1 — Confirm step for Copy/Move destinations | ☐ Not started |
 </content>
 </invoke>
