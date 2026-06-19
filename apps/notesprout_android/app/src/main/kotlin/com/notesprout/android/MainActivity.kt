@@ -359,6 +359,7 @@ class MainActivity : AppCompatActivity() {
         currentSearchQuery = query
         currentPage = 0
         binding.btnClearSearch.visibility = View.VISIBLE
+        binding.btnTemplates.visibility   = View.GONE
         binding.btnPinned.visibility = View.GONE
         binding.btnRecents.visibility = View.GONE
         binding.btnSort.visibility = View.GONE
@@ -371,6 +372,7 @@ class MainActivity : AppCompatActivity() {
         searchResults = emptyList()
         currentPage = 0
         binding.btnClearSearch.visibility = View.GONE
+        binding.btnTemplates.visibility   = View.VISIBLE
         binding.btnPinned.visibility = View.VISIBLE
         binding.btnRecents.visibility = View.VISIBLE
         binding.btnSort.visibility = View.VISIBLE
@@ -409,6 +411,7 @@ class MainActivity : AppCompatActivity() {
         if (inPinned) {
             binding.btnNewNotebook.visibility   = View.GONE
             binding.btnNewFolder.visibility     = View.GONE
+            binding.btnTemplates.visibility     = View.GONE
             binding.btnSearch.visibility        = View.GONE
             binding.btnClearSearch.visibility   = View.GONE
             binding.btnSort.visibility          = View.GONE
@@ -417,6 +420,7 @@ class MainActivity : AppCompatActivity() {
         } else {
             binding.btnNewNotebook.visibility   = View.VISIBLE
             binding.btnNewFolder.visibility     = View.VISIBLE
+            binding.btnTemplates.visibility     = View.VISIBLE
             binding.btnSearch.visibility        = View.VISIBLE
             binding.btnClearSearch.visibility   = View.GONE
             binding.btnSort.visibility          = View.VISIBLE
@@ -497,6 +501,7 @@ class MainActivity : AppCompatActivity() {
         if (inRecents) {
             binding.btnNewNotebook.visibility = View.GONE
             binding.btnNewFolder.visibility   = View.GONE
+            binding.btnTemplates.visibility   = View.GONE
             binding.btnSearch.visibility      = View.GONE
             binding.btnClearSearch.visibility = View.GONE
             binding.btnSort.visibility        = View.GONE
@@ -505,6 +510,7 @@ class MainActivity : AppCompatActivity() {
         } else {
             binding.btnNewNotebook.visibility = View.VISIBLE
             binding.btnNewFolder.visibility   = View.VISIBLE
+            binding.btnTemplates.visibility   = View.VISIBLE
             binding.btnSearch.visibility      = View.VISIBLE
             binding.btnClearSearch.visibility = View.GONE
             binding.btnSort.visibility        = View.VISIBLE
@@ -610,6 +616,12 @@ class MainActivity : AppCompatActivity() {
 
         binding.btnNewNotebook.setOnClickListener    { showNewNotebookDialog() }
         binding.btnNewFolder.setOnClickListener      { showNewFolderDialog() }
+        binding.btnTemplates.setOnClickListener      {
+            startActivity(
+                Intent(this, TemplateBrowserActivity::class.java)
+                    .putExtra(TemplateBrowserActivity.EXTRA_MODE, TemplateBrowserActivity.MODE_MANAGE)
+            )
+        }
         binding.btnBreadcrumbBack.setOnClickListener { navigateUpOneLevel() }
     }
 
@@ -1537,6 +1549,8 @@ class MainActivity : AppCompatActivity() {
         if (inPicker) {
             updatePickerTitle()
             binding.btnNewNotebook.visibility   = View.GONE
+            binding.btnNewFolder.visibility     = View.GONE
+            binding.btnTemplates.visibility     = View.GONE
             binding.btnSearch.visibility        = View.GONE
             binding.btnClearSearch.visibility   = View.GONE
             binding.btnSort.visibility          = View.GONE
@@ -1544,6 +1558,8 @@ class MainActivity : AppCompatActivity() {
             binding.btnRecents.visibility       = View.GONE
         } else {
             binding.btnNewNotebook.visibility   = View.VISIBLE
+            binding.btnNewFolder.visibility     = View.VISIBLE
+            binding.btnTemplates.visibility     = View.VISIBLE
             binding.btnSearch.visibility        = View.VISIBLE
             binding.btnClearSearch.visibility   = View.GONE
             binding.btnSort.visibility          = View.VISIBLE

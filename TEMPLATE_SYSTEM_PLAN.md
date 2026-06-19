@@ -35,7 +35,7 @@ adb -s 34E517F9 install -r app/build/outputs/apk/debug/app-debug.apk
 | # | Session | Status |
 |---|---|---|
 | 1 | Index data model & repository foundation | ✅ Done |
-| 2 | TemplateBrowserActivity — browse, navigate, import, new folder + toolbar launch | ⬜ Not started |
+| 2 | TemplateBrowserActivity — browse, navigate, import, new folder + toolbar launch | ✅ Done |
 | 3 | Management actions — preview, action sheet, rename, copy, move, delete | ⬜ Not started |
 | 4 | Search & sort in the template browser | ⬜ Not started |
 | 5 | In-notebook integration — slim picker + library browse + apply-into-`.soil` | ⬜ Not started |
@@ -476,4 +476,12 @@ picks a template, taps CREATE; the notebook opens with the first page showing th
 
 ## 5. Open Questions / Notes (fill in as we go)
 
-- _(none yet — add discoveries here)_
+- **`activity_main.xml` has three layout variants** (`layout/`, `layout-sw360dp/`, `layout-sw600dp/`)
+  that must stay in sync. Any new toolbar button must be added to **all three** or the generated view
+  binding field becomes nullable. (Discovered S2 — `btnTemplates` added to all three.)
+- **`applyPickerModeUI` was missing `btnNewFolder` visibility handling** (pre-existing gap — it only
+  toggled `btnNewNotebook`). Fixed in S2 alongside adding `btnTemplates` so picker mode hides all
+  three action buttons consistently.
+- Search mode (`enterSearchMode`/`exitSearchMode`) does **not** hide `btnNewFolder`/`btnNewNotebook`,
+  but per the S2 spec `btnTemplates` **is** hidden in search mode. Existing button behavior left
+  unchanged.

@@ -341,6 +341,13 @@
                 android:src="@drawable/ic_folder_plus"
                 android:contentDescription="New folder" />
 
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnTemplates"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:layout_marginStart="4dp"
+                android:src="@drawable/ic_template"
+                android:contentDescription="Templates" />
+
         </LinearLayout>
 
     </RelativeLayout>

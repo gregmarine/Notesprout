@@ -43,6 +43,13 @@
             android:configChanges="orientation|keyboardHidden|screenSize|smallestScreenSize|screenLayout|density"
             android:windowSoftInputMode="stateHidden" />
 
+        <!-- Template browser — full-screen folder/template grid (manage + pick modes) -->
+        <activity
+            android:name=".TemplateBrowserActivity"
+            android:exported="false"
+            android:theme="@style/Theme.Notesprout"
+            android:windowSoftInputMode="stateHidden" />
+
         <!-- FileProvider — exposes cacheDir PDF exports to the share sheet -->
         <provider
             android:name="androidx.core.content.FileProvider"
