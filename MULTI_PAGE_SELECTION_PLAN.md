@@ -82,7 +82,7 @@ working.
 
 ## Session 1 — Selection model, Select All, multi-Delete
 
-**Status:** ☐ Not started
+**Status:** ✅ DONE (2026-06-19)
 
 **Goal:** Replace the single-index action mode with a multi-page selection set, add a Select
 All / Deselect All control, show a live count, and convert **Delete** to operate on every selected
@@ -168,8 +168,12 @@ toolbar action yet (Template arrives in Session 3).
     line ~622): reload `pages`, then `pages.indexOfFirst { it.id == currentPageId }`; if the open
     page was itself deleted, clamp to a surviving page.
   - Clear `selectedPageIds`, clamp `currentGridPage`, `exitActionMode()`.
-- The existing `deletedActions` list + `finishWithResult` extras already support multiple deletes —
-  **no NotebookActivity change needed** for delete (it already loops, line ~466).
+- The existing `deletedActions` list + `finishWithResult` extras already support multiple deletes.
+  **Correction (impl):** the original loop pushed one `PageDeleted` per page = N separate undo
+  steps, so a single undo restored only one page. Fixed by adding `UndoRedoAction.PagesDeleted`
+  (a batch holding `List<DeletedPageRef(pageId, pageIndex, deletedAt)>`, mirroring `LassoDeleted`);
+  the launcher now pushes **one** `PagesDeleted` per index-session batch, and the executor restores
+  / re-deletes the whole batch as a single undo/redo step. Extras format on the index side unchanged.
 
 ### 1.5b Selection hygiene after operations
 
@@ -508,7 +512,7 @@ Append items discovered during implementation here. Seeds:
 
 | Session | Status |
 |---|---|
-| 1 — Selection model, Select All, multi-Delete | ☐ Not started |
+| 1 — Selection model, Select All, multi-Delete | ✅ DONE (2026-06-19) |
 | 2 — Multi Copy/Paste & Move + before/after | ☐ Not started |
 | 3 — Multi Set Template | ☐ Not started |
 | 4 — Multi Export (PDF/PNG/templates) | ☐ Not started |

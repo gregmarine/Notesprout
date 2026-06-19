@@ -467,9 +467,12 @@ class NotebookActivity : AppCompatActivity() {
                 val ids        = deletedIds.split(",")
                 val indices    = deletedIndices.split(",").mapNotNull { it.toIntOrNull() }
                 val timestamps = deletedTimestamps.split(",").mapNotNull { it.toLongOrNull() }
-                ids.zip(indices).zip(timestamps).forEach { (idIndex, ts) ->
-                    undoRedoManager.push(UndoRedoAction.PageDeleted(idIndex.first, idIndex.second, ts))
+                // Group the whole index-session delete batch into one undo step so a single
+                // undo restores every page deleted together (mirrors LassoDeleted).
+                val refs = ids.zip(indices).zip(timestamps).map { (idIndex, ts) ->
+                    UndoRedoAction.DeletedPageRef(idIndex.first, idIndex.second, ts)
                 }
+                if (refs.isNotEmpty()) undoRedoManager.push(UndoRedoAction.PagesDeleted(refs))
             }
 
             // Push move actions recorded during the index session onto the undo stack.
@@ -7108,6 +7111,32 @@ class NotebookActivity : AppCompatActivity() {
                     dao.softDeleteByParentId(action.pageId, now)
                     val layer = dao.getLayerForPageAny(action.pageId)
                     if (layer != null) dao.softDeleteByParentId(layer.id, now)
+                    // currentPageIndex will be coerced by setupPageIds in loadCurrentPage.
+                }
+            }
+
+            is UndoRedoAction.PagesDeleted -> withContext(Dispatchers.IO) {
+                if (isUndo) {
+                    // Restore every page in the batch + its children (each by its own deletedAt).
+                    action.pages.forEach { ref ->
+                        dao.restoreById(ref.pageId, now)
+                        dao.restoreChildrenDeletedSince(ref.pageId, ref.deletedAt, now)
+                        val layer = dao.getLayerForPageAny(ref.pageId)
+                        if (layer != null) {
+                            dao.restoreChildrenDeletedSince(layer.id, ref.deletedAt, now)
+                        }
+                        invalidatePageSnapshot(db, ref.pageId)
+                    }
+                    // Land near the restored block; loadCurrentPage will coerce into range.
+                    currentPageIndex = action.pages.minOf { it.pageIndex }
+                } else {
+                    // Redo: re-soft-delete page + surviving children for each.
+                    action.pages.forEach { ref ->
+                        dao.softDeleteById(ref.pageId, now)
+                        dao.softDeleteByParentId(ref.pageId, now)
+                        val layer = dao.getLayerForPageAny(ref.pageId)
+                        if (layer != null) dao.softDeleteByParentId(layer.id, now)
+                    }
                     // currentPageIndex will be coerced by setupPageIds in loadCurrentPage.
                 }
             }

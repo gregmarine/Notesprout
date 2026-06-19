@@ -60,6 +60,28 @@ sealed class UndoRedoAction {
         val deletedAt: Long,
     ) : UndoRedoAction()
 
+    /**
+     * User deleted several pages at once from the page index — undo restores them all,
+     * redo soft-deletes them all, as a single atomic undo step.
+     *
+     * Each [DeletedPageRef] carries that page's own [DeletedPageRef.deletedAt] (the timestamp
+     * used by its original soft-delete) so [restoreChildrenDeletedSince] can recover exactly its
+     * child rows on undo. [DeletedPageRef.pageIndex] is the pre-delete 0-based index, used to
+     * land the open page near the restored block.
+     */
+    @Serializable
+    data class PagesDeleted(
+        val pages: List<DeletedPageRef>,
+    ) : UndoRedoAction()
+
+    /** One page deleted as part of a [PagesDeleted] batch. */
+    @Serializable
+    data class DeletedPageRef(
+        val pageId: String,
+        val pageIndex: Int,
+        val deletedAt: Long,
+    )
+
     /** User changed a page template — undo applies [previousTemplateId]; redo applies [newTemplateId]. */
     @Serializable
     data class TemplateChanged(

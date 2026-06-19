@@ -103,8 +103,12 @@ class PageIndexActivity : AppCompatActivity() {
 
     // ── Action mode (long-press) and move mode ────────────────────────────────
 
-    /** Index into [pages] of the card selected by a long-press. Null = normal mode. */
-    private var actionModePageIndex: Int? = null
+    /** Pages selected in action mode, by stable UUID. Insertion order is preserved
+     *  (matters for paste/move block ordering). Empty = normal mode; non-empty = action mode. */
+    private val selectedPageIds = LinkedHashSet<String>()
+
+    private fun inActionMode(): Boolean = selectedPageIds.isNotEmpty()
+    private fun selectedCount(): Int = selectedPageIds.size
 
     /** Page ID waiting to be pasted. Null means clipboard is empty. */
     private var pendingCopyPageId: String? = null
@@ -200,11 +204,12 @@ class PageIndexActivity : AppCompatActivity() {
         binding.btnBack.setOnClickListener {
             when {
                 isMoveMode -> cancelMoveMode()
-                actionModePageIndex != null -> exitActionMode()
+                inActionMode() -> exitActionMode()
                 else -> finishWithResult(null)
             }
         }
 
+        binding.btnSelectAll.setOnClickListener { toggleSelectAll() }
         binding.btnCopyPage.setOnClickListener  { copySelectedPage() }
         binding.btnPastePage.setOnClickListener { executePaste() }
         binding.btnDeletePage.setOnClickListener { executeDelete() }
@@ -216,7 +221,7 @@ class PageIndexActivity : AppCompatActivity() {
             override fun handleOnBackPressed() {
                 when {
                     isMoveMode -> cancelMoveMode()
-                    actionModePageIndex != null -> exitActionMode()
+                    inActionMode() -> exitActionMode()
                     else -> finishWithResult(null)
                 }
             }
@@ -425,17 +430,16 @@ class PageIndexActivity : AppCompatActivity() {
      * [label "Page N"]
      * ```
      * Normal tap: navigate to this page.
-     * Action mode tap (same card): navigate + exit action mode.
-     * Action mode tap (different card): move paste-target selection.
-     * Move mode tap (source card): cancel move, return to action mode.
+     * Action mode tap: toggle this card's selection (exits action mode if the set empties).
+     * Action mode long-press: same as tap once in action mode.
+     * Move mode tap (a selected/source card): cancel move, return to action mode.
      * Move mode tap (any other card): execute move, return to normal mode.
-     * Long press: enter action mode with this card selected.
+     * Long press in normal mode: enter action mode with this card selected.
      */
     private fun buildCardGroup(entry: PageEntry, spec: GridSpec): LinearLayout {
         val pageIndex  = entry.pageNumber - 1   // 0-based
         val isCurrent  = pageIndex == currentPageIndex
-        val isSelected = pageIndex == actionModePageIndex
-        val isSource   = isMoveMode && pages.getOrNull(pageIndex)?.id == moveModeSourcePageId
+        val isSelected = entry.id in selectedPageIds
 
         val group = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -444,28 +448,34 @@ class PageIndexActivity : AppCompatActivity() {
             setOnClickListener {
                 when {
                     isMoveMode -> {
-                        if (isSource) cancelMoveMode()
+                        if (isSelected) cancelMoveMode()   // tapped a move source → cancel
                         else executeMoveAfter(pageIndex)
                     }
-                    actionModePageIndex == null -> finishWithResult(pageIndex)
-                    pageIndex == actionModePageIndex -> { exitActionMode(); finishWithResult(pageIndex) }
-                    else -> { actionModePageIndex = pageIndex; renderGridPage() }
+                    !inActionMode() -> finishWithResult(pageIndex)
+                    else -> toggleSelection(entry.id)
                 }
             }
 
             setOnLongClickListener {
-                enterActionMode(pageIndex)
+                if (isMoveMode) return@setOnLongClickListener true
+                if (!inActionMode()) {
+                    selectedPageIds.add(entry.id)
+                    refreshActionMode()
+                    renderGridPage()
+                } else {
+                    toggleSelection(entry.id)
+                }
                 true
             }
         }
 
         // ── Card ──────────────────────────────────────────────────────────────
-        // Move mode: highlight only the source card being moved.
-        // Action mode: highlight only the selected card.
+        // Move mode: highlight the move sources (the selection).
+        // Action mode: highlight every selected card.
         // Normal mode: highlight only the currently-open page.
         val highlighted = when {
-            isMoveMode -> isSource
-            actionModePageIndex != null -> isSelected
+            isMoveMode -> isSelected
+            inActionMode() -> isSelected
             else -> isCurrent
         }
         val card = FrameLayout(this).apply {
@@ -536,19 +546,80 @@ class PageIndexActivity : AppCompatActivity() {
 
     // ── Action mode ───────────────────────────────────────────────────────────
 
-    private fun enterActionMode(pageIndex: Int) {
-        actionModePageIndex = pageIndex
-        binding.btnCopyPage.visibility   = android.view.View.VISIBLE
-        binding.btnPastePage.visibility  = android.view.View.VISIBLE
-        binding.btnPastePage.isEnabled   = pendingCopyPageId != null
-        binding.btnDeletePage.visibility = android.view.View.VISIBLE
-        binding.btnMovePage.visibility   = android.view.View.VISIBLE
-        binding.btnExportPage.visibility = android.view.View.VISIBLE
-        renderGridPage()
+    /** Toggle one page's membership in the selection. Exits action mode if the set empties. */
+    private fun toggleSelection(pageId: String) {
+        if (!selectedPageIds.remove(pageId)) selectedPageIds.add(pageId)
+        if (selectedPageIds.isEmpty()) {
+            exitActionMode()
+        } else {
+            refreshActionMode()
+            renderGridPage()
+        }
+    }
+
+    /**
+     * Select-all toggle. When not everything is selected, select every page in the notebook
+     * (across all grid pages). When everything is already selected, deselect all — which also
+     * exits action mode, since an empty selection is normal mode. (Keeping one selected was
+     * considered and rejected as surprising.)
+     */
+    private fun toggleSelectAll() {
+        if (!inActionMode()) return
+        if (selectedPageIds.size >= pages.size) {
+            exitActionMode()
+        } else {
+            selectedPageIds.clear()
+            pages.forEach { selectedPageIds.add(it.id) }
+            refreshActionMode()
+            renderGridPage()
+        }
+    }
+
+    /** Drop any selected IDs no longer present in [pages] (e.g. after a reload). */
+    private fun pruneSelection() {
+        selectedPageIds.retainAll(pages.map { it.id }.toSet())
+    }
+
+    private fun setButtonEnabled(button: android.view.View, enabled: Boolean) {
+        button.isEnabled = enabled
+        button.alpha = if (enabled) 1f else 0.4f
+    }
+
+    /**
+     * Reflect the current selection in the chrome: action buttons visibility, the title count, and
+     * the single-only enablement of Copy/Paste/Move/Export (multi support arrives in Sessions 2–4).
+     * Does not re-render the grid — callers do that.
+     */
+    private fun refreshActionMode() {
+        val active = inActionMode()
+        val vis = if (active) android.view.View.VISIBLE else android.view.View.GONE
+        binding.btnSelectAll.visibility  = vis
+        binding.btnCopyPage.visibility   = vis
+        binding.btnPastePage.visibility  = vis
+        binding.btnDeletePage.visibility = vis
+        binding.btnMovePage.visibility   = vis
+        binding.btnExportPage.visibility = vis
+
+        binding.tvTopBarTitle.text = if (active) "${selectedCount()} selected" else "Pages"
+
+        if (active) {
+            // Copy/Move/Export are single-only until later sessions; Delete is always enabled.
+            val single = selectedCount() == 1
+            setButtonEnabled(binding.btnCopyPage,   single)
+            setButtonEnabled(binding.btnMovePage,   single)
+            setButtonEnabled(binding.btnExportPage, single)
+            setButtonEnabled(binding.btnPastePage,  single && pendingCopyPageId != null)
+            setButtonEnabled(binding.btnDeletePage, true)
+            // Select-all content description reflects the toggle target.
+            binding.btnSelectAll.contentDescription =
+                if (selectedPageIds.size >= pages.size) "Deselect all" else "Select all"
+        }
     }
 
     private fun exitActionMode() {
-        actionModePageIndex = null
+        selectedPageIds.clear()
+        binding.tvTopBarTitle.text = "Pages"
+        binding.btnSelectAll.visibility  = android.view.View.GONE
         binding.btnCopyPage.visibility   = android.view.View.GONE
         binding.btnPastePage.visibility  = android.view.View.GONE
         binding.btnDeletePage.visibility = android.view.View.GONE
@@ -559,11 +630,12 @@ class PageIndexActivity : AppCompatActivity() {
 
     // ── Move mode ─────────────────────────────────────────────────────────────
 
-    /** Enter move mode: hide action buttons, show "Move to…" title, keep source card highlighted. */
+    /** Enter move mode: hide action buttons, show "Move to…" title, keep source card highlighted.
+     *  Session 1 keeps move single-only — the lone selected page is the source. */
     private fun enterMoveMode() {
-        val idx = actionModePageIndex ?: return
-        moveModeSourcePageId = pages.getOrNull(idx)?.id ?: return
+        moveModeSourcePageId = selectedPageIds.singleOrNull() ?: return
         isMoveMode = true
+        binding.btnSelectAll.visibility  = android.view.View.GONE
         binding.btnCopyPage.visibility   = android.view.View.GONE
         binding.btnPastePage.visibility  = android.view.View.GONE
         binding.btnDeletePage.visibility = android.view.View.GONE
@@ -573,28 +645,19 @@ class PageIndexActivity : AppCompatActivity() {
         renderGridPage()
     }
 
-    /** Cancel move mode: restore action mode buttons and "Pages" title. */
+    /** Cancel move mode: restore action mode buttons and selection title. */
     private fun cancelMoveMode() {
         isMoveMode = false
         moveModeSourcePageId = null
-        binding.tvTopBarTitle.text = "Pages"
-        if (actionModePageIndex != null) {
-            binding.btnCopyPage.visibility   = android.view.View.VISIBLE
-            binding.btnPastePage.visibility  = android.view.View.VISIBLE
-            binding.btnPastePage.isEnabled   = pendingCopyPageId != null
-            binding.btnDeletePage.visibility = android.view.View.VISIBLE
-            binding.btnMovePage.visibility   = android.view.View.VISIBLE
-            binding.btnExportPage.visibility = android.view.View.VISIBLE
-        }
+        refreshActionMode()   // restores buttons + title, or hides them if selection is empty
         renderGridPage()
     }
 
-    /** Complete move mode: restore "Pages" title and return to normal mode. */
+    /** Complete move mode: clear selection and return to normal mode. */
     private fun completeMoveMode() {
         isMoveMode = false
         moveModeSourcePageId = null
-        binding.tvTopBarTitle.text = "Pages"
-        exitActionMode()  // hides all buttons, clears actionModePageIndex, re-renders
+        exitActionMode()  // hides all buttons, clears selection, restores title, re-renders
     }
 
     /** Move [moveModeSourcePageId] to immediately after the page at [destinationIndex]. */
@@ -636,16 +699,16 @@ class PageIndexActivity : AppCompatActivity() {
      * to move the paste-target selection, then tap Paste.
      */
     private fun copySelectedPage() {
-        val idx = actionModePageIndex ?: return
-        pendingCopyPageId = pages.getOrNull(idx)?.id
-        binding.btnPastePage.isEnabled = pendingCopyPageId != null
+        pendingCopyPageId = selectedPageIds.singleOrNull() ?: return
+        setButtonEnabled(binding.btnPastePage, true)
     }
 
     /** Deep-copies the clipboard page after the selected card, refreshes the grid. */
     private fun executePaste() {
         val sourcePageId = pendingCopyPageId ?: return
-        val targetIdx    = actionModePageIndex ?: return
-        val targetPageId = pages.getOrNull(targetIdx)?.id ?: return
+        val targetPageId = selectedPageIds.singleOrNull() ?: return
+        val targetIdx    = pages.indexOfFirst { it.id == targetPageId }
+        if (targetIdx < 0) return
         val path         = notebookSoilPath ?: return
 
         lifecycleScope.launch {
@@ -672,37 +735,55 @@ class PageIndexActivity : AppCompatActivity() {
     }
 
     private fun executeDelete() {
-        val idx      = actionModePageIndex ?: return
-        val pageId   = pages.getOrNull(idx)?.id ?: return
-        val path     = notebookSoilPath ?: return
-        val pageNum  = pages.getOrNull(idx)?.pageNumber ?: return
+        if (!inActionMode()) return
+        val path = notebookSoilPath ?: return
 
-        if (pages.size <= 1) {
-            android.widget.Toast.makeText(this, "Cannot delete the only page", android.widget.Toast.LENGTH_SHORT).show()
+        // The notebook must retain at least one page.
+        if (selectedPageIds.size >= pages.size) {
+            android.widget.Toast.makeText(this, "Cannot delete all pages", android.widget.Toast.LENGTH_SHORT).show()
             return
         }
 
+        // Snapshot the selection and each page's pre-delete index, so all recorded indices are
+        // consistent with the page list NotebookActivity will undo against.
+        val targetIds   = selectedPageIds.toList()
+        val indexById   = pages.withIndex().associate { (i, p) -> p.id to i }
+        val message = if (targetIds.size == 1) {
+            val pageNum = pages.firstOrNull { it.id == targetIds[0] }?.pageNumber
+            if (pageNum != null) "Delete Page $pageNum?" else "Delete 1 page?"
+        } else {
+            "Delete ${targetIds.size} pages?"
+        }
+
         val dialog = androidx.appcompat.app.AlertDialog.Builder(this)
-            .setMessage("Delete Page $pageNum?")
+            .setMessage(message)
             .setNegativeButton("Cancel", null)
             .setPositiveButton("Delete") { _, _ ->
                 lifecycleScope.launch {
-                    val deletedAt = withContext(kotlinx.coroutines.Dispatchers.IO) {
-                        com.notesprout.android.data.deletePageRaw(pageId, path)
+                    val deleted = withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        targetIds.mapNotNull { id ->
+                            val deletedAt = com.notesprout.android.data.deletePageRaw(id, path)
+                            val originalIndex = indexById[id]
+                            if (deletedAt != null && originalIndex != null) {
+                                Triple(id, originalIndex, deletedAt)
+                            } else null
+                        }
                     }
-                    if (deletedAt == null) {
-                        android.widget.Toast.makeText(this@PageIndexActivity, "Couldn't delete page", android.widget.Toast.LENGTH_SHORT).show()
+                    if (deleted.isEmpty()) {
+                        android.widget.Toast.makeText(this@PageIndexActivity, "Couldn't delete pages", android.widget.Toast.LENGTH_SHORT).show()
                         return@launch
                     }
-
-                    deletedActions.add(Triple(pageId, idx, deletedAt))
-
-                    // Adjust currentPageIndex for the removed page.
-                    if (idx < currentPageIndex) currentPageIndex--
-                    else if (idx == currentPageIndex) currentPageIndex = (idx - 1).coerceAtLeast(0)
+                    deletedActions.addAll(deleted)
 
                     pages = withContext(kotlinx.coroutines.Dispatchers.IO) { loadPagesFromSoil(path) }
-                    // Clamp grid page in case we were on the last grid page and it's now empty.
+                    // Recompute the open page by stable ID; if it was deleted, clamp to a survivor.
+                    val cid = currentPageId
+                    val newIdx = if (cid != null) pages.indexOfFirst { it.id == cid } else -1
+                    currentPageIndex = if (newIdx >= 0) newIdx
+                        else currentPageIndex.coerceIn(0, (pages.size - 1).coerceAtLeast(0))
+                    currentPageId = pages.getOrNull(currentPageIndex)?.id
+
+                    // Clamp grid page in case the last grid page is now empty.
                     currentGridPage = currentGridPage.coerceIn(0, (totalGridPages() - 1).coerceAtLeast(0))
                     exitActionMode()
                 }
@@ -714,8 +795,8 @@ class PageIndexActivity : AppCompatActivity() {
     }
 
     private fun executeExport() {
-        val idx = actionModePageIndex ?: return
-        val pageEntry = pages.getOrNull(idx) ?: return
+        val pageId = selectedPageIds.singleOrNull() ?: return
+        val pageEntry = pages.firstOrNull { it.id == pageId } ?: return
         val path = notebookSoilPath ?: return
         val notebookName = intent.getStringExtra(EXTRA_NOTEBOOK_NAME) ?: "notebook"
 
