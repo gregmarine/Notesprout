@@ -45,7 +45,7 @@ adb -s 34E517F9 install -r app/build/outputs/apk/debug/app-debug.apk
 | 8 | Pinned templates — repository + MANAGE pin/unpin + pinned view | ✅ Done |
 | 9 | Recent templates — device-local store + use-tracking | ✅ Done |
 | 10 | Pinned & recent in the PICK selectors (new-notebook + in-notebook) | ✅ Done |
-| 11 | Toolbar relocation — search/sort/pinned/recent → top bar | ⬜ Not started |
+| 11 | Toolbar relocation — search/sort/pinned/recent → top bar | ✅ Done |
 | 12 | "Save as Template" from the page index | ⬜ Not started |
 | 13 | Phase 2 wrap-up — docs, dead-code, cross-device QA | ⬜ Not started |
 
@@ -947,3 +947,11 @@ Commit (no push).
 - **S10 tap behavior (locked rule, unchanged code):** `buildCard()` already routed pinned/recents taps
   identically to the root grid for the mode — `collectName` sets pending + marks + stays (CREATE
   confirms); plain PICK selects + `finish()`. Long-press stays MANAGE-only.
+- **S11 toolbar relocation (pure layout move, zero Kotlin change):** Search/Sort/Pinned/Recents moved
+  from the bottom `actionButtonsGroup` to a right-aligned cluster in `topBar` (after the title `Space`),
+  mirroring MainActivity. The bottom bar now holds only New-Folder + Import alongside centred
+  pagination. **All button ids kept stable**, so every visibility toggle (`enterSearchMode`/`exitSearchMode`,
+  `applyOverlayViewUI`, `applyPickerUI`, the onCreate Pinned/Recents-visibility lines) works unchanged —
+  no `TemplateBrowserActivity.kt` edit was needed. Margins dropped (the 44dp ToolbarButton style spaces
+  them); `btnNewTemplateFolder` lost its now-leading `marginStart`. Mode rules unchanged: `btnRecents`
+  GONE in MANAGE; pinned/recents/search hide the other action buttons; picker hides all four.
