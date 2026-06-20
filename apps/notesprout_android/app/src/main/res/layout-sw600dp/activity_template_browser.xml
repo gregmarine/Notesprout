@@ -86,6 +86,60 @@
 
     </LinearLayout>
 
+    <!-- Collect-scope bar: shown in PICK+collectName mode to choose encryption scope. -->
+    <LinearLayout
+        android:id="@+id/collectScopeBar"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@drawable/toolbar_background"
+        android:orientation="vertical"
+        android:paddingStart="16dp"
+        android:paddingEnd="16dp"
+        android:paddingTop="6dp"
+        android:paddingBottom="6dp"
+        android:visibility="gone">
+
+        <RadioGroup
+            android:id="@+id/scopeRadioGroup"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
+
+            <RadioButton
+                android:id="@+id/radioNoEncryption"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:checked="true"
+                android:text="No Encryption"
+                android:textColor="@color/inkBlack"
+                android:textSize="16sp"
+                android:paddingTop="4dp"
+                android:paddingBottom="4dp" />
+
+            <RadioButton
+                android:id="@+id/radioScopeGlobal"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Encrypt (Global Passphrase)"
+                android:textColor="@color/inkBlack"
+                android:textSize="16sp"
+                android:paddingTop="4dp"
+                android:paddingBottom="4dp" />
+
+            <RadioButton
+                android:id="@+id/radioScopeNotebook"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Encrypt (Notebook Passphrase)"
+                android:textColor="@color/inkBlack"
+                android:textSize="16sp"
+                android:paddingTop="4dp"
+                android:paddingBottom="4dp" />
+
+        </RadioGroup>
+
+    </LinearLayout>
+
     <!-- Breadcrumb bar: back + scrollable breadcrumb. 1dp inkBlack bottom border via toolbar_background. -->
     <LinearLayout
         android:id="@+id/breadcrumbBar"

@@ -50,7 +50,7 @@
 | # | Session | Status |
 |---|---|---|
 | P2.S1 | Passphrase-dialog & open-time UX (show/hide toggle, "Opening…" overlay) | ✅ DONE |
-| P2.S2 | New-notebook flow: encryption scope in TemplateBrowser + toolbar-merge verify | ⬜ NOT STARTED |
+| P2.S2 | New-notebook flow: encryption scope in TemplateBrowser + toolbar-merge verify | ✅ DONE |
 | P2.S3 | Undo/redo persistence for encrypted notebooks (store inside the `.soil`) | ⬜ NOT STARTED |
 | P2.S4 | Re-key a single notebook: change passphrase + change scope (`PRAGMA rekey`) | ⬜ NOT STARTED |
 | P2.S5 | Global passphrase management UI (view / change / forget) + rotation trigger | ⬜ NOT STARTED |
@@ -131,7 +131,7 @@ encrypted notebooks and clears on first render.
 
 ## P2.S2 — New-Notebook Flow: Encryption Scope in TemplateBrowser (+ toolbar-merge verify)
 
-**Status:** ⬜ NOT STARTED
+**Status:** ✅ DONE
 
 **Goal:** Choose **name + template + encryption** in one cohesive screen. Today `TemplateBrowserActivity`
 collects name + template and returns; `MainActivity.onTemplatePicked` (~line 203) then pops a **separate**

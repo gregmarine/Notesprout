@@ -202,6 +202,12 @@ class MainActivity : AppCompatActivity() {
         val data = result.data ?: return@registerForActivityResult
         val name = data.getStringExtra(TemplateBrowserActivity.RESULT_NOTEBOOK_NAME)?.trim().orEmpty()
         val templateId = data.getStringExtra(TemplateBrowserActivity.RESULT_TEMPLATE_ID).orEmpty()
+        val scopeString = data.getStringExtra(TemplateBrowserActivity.RESULT_KEY_SCOPE).orEmpty()
+        val scope: KeyScope? = when (scopeString) {
+            "GLOBAL"   -> KeyScope.GLOBAL
+            "NOTEBOOK" -> KeyScope.NOTEBOOK
+            else       -> null
+        }
         if (name.isBlank()) return@registerForActivityResult
         lifecycleScope.launch {
             // Duplicate-in-target-folder check (browser only did format validation).
@@ -210,7 +216,7 @@ class MainActivity : AppCompatActivity() {
                 Toast.makeText(this@MainActivity, "A notebook named \"$name\" already exists", Toast.LENGTH_SHORT).show()
                 return@launch
             }
-            showEncryptionScopePicker(name, templateId)
+            createNotebook(name, templateId, scope)
         }
     }
 
@@ -1368,23 +1374,6 @@ class MainActivity : AppCompatActivity() {
     }
 
     // ── Notebook creation ─────────────────────────────────────────────────────
-
-    /** Show an e-ink-safe scope picker before creating the notebook. Must be called on Main. */
-    private fun showEncryptionScopePicker(name: String, libraryTemplateId: String) {
-        ActionSheetDialog(this)
-            .title("Encryption")
-            .canceledOnTouchOutside(false)   // trailing touch from "Create" tap must not dismiss
-            .addAction(null, "No Encryption") {
-                lifecycleScope.launch { createNotebook(name, libraryTemplateId, scope = null) }
-            }
-            .addAction(null, "Encrypt (Global Passphrase)") {
-                lifecycleScope.launch { createNotebook(name, libraryTemplateId, scope = KeyScope.GLOBAL) }
-            }
-            .addAction(null, "Encrypt (Notebook Passphrase)") {
-                lifecycleScope.launch { createNotebook(name, libraryTemplateId, scope = KeyScope.NOTEBOOK) }
-            }
-            .show()
-    }
 
     private suspend fun createNotebook(name: String, libraryTemplateId: String = "", scope: KeyScope? = null) {
         try {

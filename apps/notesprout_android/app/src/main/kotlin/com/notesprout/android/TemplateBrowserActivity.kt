@@ -110,8 +110,10 @@ class TemplateBrowserActivity : AppCompatActivity() {
         const val RESULT_TEMPLATE_ID = "result_template_id"
         /** Result ([MODE_PICK_FOLDER]): chosen destination folder id. "" = root (null). */
         const val RESULT_TEMPLATE_FOLDER_ID = "result_template_folder_id"
-        /** Result: only when [EXTRA_COLLECT_NAME]. */
+        /** Result: only when [EXTRA_COLLECT_NAME]. Scope string: "" = none, "GLOBAL", "NOTEBOOK". */
         const val RESULT_NOTEBOOK_NAME = "result_notebook_name"
+        /** Result: only when [EXTRA_COLLECT_NAME]. Scope string: "" = none, "GLOBAL", "NOTEBOOK". */
+        const val RESULT_KEY_SCOPE = "result_key_scope"
 
         // Thumbnail sampling: cap inSampleSize at 4 — mirrors TemplateDialog.computeInSampleSize.
         private const val THUMB_PX = 1300
@@ -277,6 +279,7 @@ class TemplateBrowserActivity : AppCompatActivity() {
             mode = MODE_PICK                      // collectName always implies PICK
             targetParentId = intent.getStringExtra(EXTRA_TARGET_PARENT_ID)
             binding.collectNameBar.visibility = View.VISIBLE
+            binding.collectScopeBar.visibility = View.VISIBLE
             binding.editNotebookName.setText(
                 java.time.LocalDateTime.now()
                     .format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"))
@@ -1739,9 +1742,15 @@ class TemplateBrowserActivity : AppCompatActivity() {
                 binding.btnCreate.isEnabled = true
                 return@launch
             }
+            val scopeString = when (binding.scopeRadioGroup.checkedRadioButtonId) {
+                R.id.radioScopeGlobal    -> "GLOBAL"
+                R.id.radioScopeNotebook  -> "NOTEBOOK"
+                else                     -> ""
+            }
             val resultIntent = Intent()
                 .putExtra(RESULT_NOTEBOOK_NAME, name)
                 .putExtra(RESULT_TEMPLATE_ID, pendingTemplateId)
+                .putExtra(RESULT_KEY_SCOPE, scopeString)
             setResult(RESULT_OK, resultIntent)
             finish()
         }
