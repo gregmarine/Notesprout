@@ -26,6 +26,11 @@ class NotesproutApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        try {
+            System.loadLibrary("sqlcipher")
+        } catch (e: UnsatisfiedLinkError) {
+            android.util.Log.e("NotesproutApplication", "SQLCipher native lib failed to load", e)
+        }
         // BOOX SDK uses reflection to call hidden Android system APIs (VMRuntime,
         // RawInputManager). Android 14+ blocks VMRuntime.setHiddenApiExemptions, so the
         // SDK cannot bootstrap itself. This bypasses the enforcement at the JNI level

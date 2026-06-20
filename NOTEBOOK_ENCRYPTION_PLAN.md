@@ -23,7 +23,7 @@ When the user reports all manual tests pass, Claude marks the session ✅ DONE a
 
 | # | Session | Status |
 |---|---|---|
-| S1 | Crypto foundation (deps, native lib, PassphraseStore, SoilCrypto) | ⬜ NOT STARTED |
+| S1 | Crypto foundation (deps, native lib, PassphraseStore, SoilCrypto) | ✅ DONE |
 | S2 | Index metadata + key-resolution service + passphrase dialog | ⬜ NOT STARTED |
 | S3 | Open path — opening an encrypted notebook | ⬜ NOT STARTED |
 | S4 | Create an encrypted notebook (create dialog + global bootstrap) | ⬜ NOT STARTED |
@@ -121,7 +121,7 @@ open. Every existing open site is migrated to route through it. This is the encr
 
 ## S1 — Crypto Foundation
 
-**Status:** ⬜ NOT STARTED
+**Status:** ✅ DONE
 
 **Goal:** Add dependencies, load the native lib, and create the crypto primitives (`PassphraseStore`,
 `SoilCrypto`, `KeyScope`). No behavior change to any notebook yet — purely additive plumbing that

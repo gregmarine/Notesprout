@@ -95,4 +95,10 @@ dependencies {
 
     // ML Kit Digital Ink Recognition — general-purpose handwriting-to-text layer.
     implementation("com.google.mlkit:digital-ink-recognition:19.0.0")
+
+    // SQLCipher — full-file encryption for .soil notebooks. Key = user passphrase (portable).
+    implementation("net.zetetic:sqlcipher-android:4.6.1")
+    implementation("androidx.sqlite:sqlite:2.4.0")
+    // Keystore-backed cache for the GLOBAL passphrase only (never the notebook key itself).
+    implementation("androidx.security:security-crypto:1.1.0-alpha06")
 }
