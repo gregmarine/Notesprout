@@ -315,6 +315,14 @@
             android:contentDescription="Remove Heading"
             android:visibility="gone" />
 
+        <!-- S4: shown when selection is a single heading; opens headingTypeSubmenu in CHANGE mode -->
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnHeadingMenu"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:src="@drawable/ic_heading"
+            android:contentDescription="Change heading level"
+            android:visibility="gone" />
+
         <!-- Separator before text conversion action — visible only for pure-stroke selections -->
         <View
             android:id="@+id/textConvertDivider"

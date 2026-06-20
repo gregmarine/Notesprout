@@ -26,6 +26,21 @@
   (words only, no `#`); `updateHeadingText` re-applies `applyLevel(newText, level)` on Save, measures
   the box with the prefixed text, and preserves `level`. The `HeadingTextEdited` undo action stores
   **prefixed** text both directions (its undo/redo handlers assign `recognizedText` directly).
+- **Selection-menu submenu (`headingTypeSubmenu`):** a shared H1/H2/H3 popover (+ optional un-heading
+  button) opened from the floating selection toolbar. A `headingSubmenuMode` field disambiguates the
+  two uses of the H1/H2/H3 buttons:
+  - **CONVERT** — `btnMakeHeading` (`ic_heading`, pure-stroke selection only) opens the submenu;
+    picking a level calls `createHeadingFromStrokes(strokes, box, level)`.
+  - **CHANGE** — `btnHeadingMenu` (`ic_heading`, single-heading selection only; `btnUnheading` is now
+    always hidden, superseded) opens the submenu with the heading's current level highlighted
+    (`bg_heading_type_selected`, a 1dp inkBlack border via `applyHeadingLevelHighlight`) and the
+    un-heading button shown. Picking a different level calls `changeHeadingLevel(heading, newLevel)`.
+- **`changeHeadingLevel`** re-prefixes via `applyLevel(recognizedText, newLevel)` (null stays null),
+  re-measures the box for text headings (keeps the existing box for stroke headings), persists
+  `HeadingObject.copy(recognizedText, level)`, rebuilds, and pushes a `HeadingLevelChanged` undo
+  action. That action carries pre-computed `previousBox`/`newBox` plus prefixed text both directions,
+  and is wired across all four undo dispatch tiers (`pageIdFor`, cross-page DB, same-page DB, same-page
+  in-memory) — the DB handlers write the stored box directly (no re-measure).
 
 ### Top-heading-as-page-name rule
 

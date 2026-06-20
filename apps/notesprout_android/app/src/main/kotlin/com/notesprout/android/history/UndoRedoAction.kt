@@ -1,11 +1,13 @@
 package com.notesprout.android.history
 
+import android.graphics.RectF
 import com.notesprout.android.data.HeadingStroke
 import com.notesprout.android.data.LineRender
 import com.notesprout.android.data.LinkChrome
 import com.notesprout.android.data.LinkRender
 import com.notesprout.android.data.LinkTarget
 import com.notesprout.android.data.LiveStroke
+import com.notesprout.android.data.RectFSerializer
 import com.notesprout.android.data.TextRender
 import kotlinx.serialization.Serializable
 
@@ -374,6 +376,28 @@ sealed class UndoRedoAction {
         val pageId: String,
         val previousText: String? = null,
         val newText: String,
+    ) : UndoRedoAction()
+
+    /**
+     * User changed a heading's level (H1 → H2, etc.) via the heading-type submenu.
+     *
+     * Undo: restore [previousLevel], [previousText], and [previousBox] to the DB row.
+     * Redo: apply [newLevel], [newText], and [newBox] to the DB row.
+     *
+     * Both [previousText] and [newText] are stored with the matching markdown prefix
+     * (e.g. "## Chapter One" for H2) so handlers can write them directly without re-prefixing.
+     * For stroke-only headings both are null and the box is unchanged between previous/new.
+     */
+    @Serializable
+    data class HeadingLevelChanged(
+        val headingId: String,
+        val pageId: String,
+        val previousLevel: Int,
+        val newLevel: Int,
+        val previousText: String?,
+        val newText: String?,
+        @Serializable(with = RectFSerializer::class) val previousBox: RectF,
+        @Serializable(with = RectFSerializer::class) val newBox: RectF,
     ) : UndoRedoAction()
 
     /**

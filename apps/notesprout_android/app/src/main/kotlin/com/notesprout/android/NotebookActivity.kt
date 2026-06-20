@@ -1539,7 +1539,9 @@ class NotebookActivity : AppCompatActivity() {
             // Capture the selection for the deferred convert; the level is chosen in the submenu.
             pendingHeadingStrokes = strokes
             pendingHeadingBox = box
+            headingSubmenuMode = HeadingSubmenuMode.CONVERT
             binding.btnHeadingUnheading.visibility = View.GONE   // convert mode — no un-heading
+            applyHeadingLevelHighlight(0)                        // no level pre-selected in convert mode
             binding.headingTypeSubmenu.visibility = View.VISIBLE
             binding.headingTypeSubmenu.post {
                 // Anchor to the floating toolbar (which hosts the heading button), not the selection
@@ -1550,21 +1552,53 @@ class NotebookActivity : AppCompatActivity() {
             }
         }
 
-        // Shared H1/H2/H3 submenu buttons. In S3 they convert a pure-stroke selection into a heading
-        // of the chosen level. (S4 will add change-level behaviour for single-heading selections.)
-        val convertToHeading: (Int) -> Unit = { level ->
-            val strokes = pendingHeadingStrokes
-            val box = pendingHeadingBox
-            hideHeadingTypeSubmenu()
-            if (strokes.isNotEmpty() && box != null) {
-                lifecycleScope.launch(Dispatchers.IO) {
-                    createHeadingFromStrokes(strokes, box, level = level)
+        // S4: btnHeadingMenu — opens the submenu in CHANGE mode for a single-heading selection.
+        binding.btnHeadingMenu.setOnClickListener {
+            // Toggle-close if submenu is already showing.
+            if (binding.headingTypeSubmenu.visibility == View.VISIBLE) {
+                hideHeadingTypeSubmenu()
+                return@setOnClickListener
+            }
+            val heading = selectedHeadings.firstOrNull() ?: return@setOnClickListener
+            pendingChangeHeading = heading
+            headingSubmenuMode = HeadingSubmenuMode.CHANGE
+            binding.btnHeadingUnheading.visibility = View.VISIBLE  // un-heading available in change mode
+            applyHeadingLevelHighlight(heading.level)               // highlight current level
+            binding.headingTypeSubmenu.visibility = View.VISIBLE
+            binding.headingTypeSubmenu.post {
+                val tb = binding.floatingSelectionToolbar
+                val anchor = RectF(tb.x, tb.y, tb.x + tb.width, tb.y + tb.height)
+                positionPopover(binding.headingTypeSubmenu, anchor)
+            }
+        }
+
+        // Shared H1/H2/H3 submenu buttons. Branch on headingSubmenuMode:
+        //   CONVERT (S3) → convert selected strokes into a heading of the chosen level.
+        //   CHANGE  (S4) → change an existing heading's level.
+        val onHeadingLevelPicked: (Int) -> Unit = { level ->
+            when (headingSubmenuMode) {
+                HeadingSubmenuMode.CONVERT -> {
+                    val strokes = pendingHeadingStrokes
+                    val box = pendingHeadingBox
+                    hideHeadingTypeSubmenu()
+                    if (strokes.isNotEmpty() && box != null) {
+                        lifecycleScope.launch(Dispatchers.IO) {
+                            createHeadingFromStrokes(strokes, box, level = level)
+                        }
+                    }
+                }
+                HeadingSubmenuMode.CHANGE -> {
+                    val h = pendingChangeHeading
+                    hideHeadingTypeSubmenu()
+                    if (h != null && level != h.level) {
+                        changeHeadingLevel(h, level)
+                    }
                 }
             }
         }
-        binding.btnHeadingH1.setOnClickListener { convertToHeading(1) }
-        binding.btnHeadingH2.setOnClickListener { convertToHeading(2) }
-        binding.btnHeadingH3.setOnClickListener { convertToHeading(3) }
+        binding.btnHeadingH1.setOnClickListener { onHeadingLevelPicked(1) }
+        binding.btnHeadingH2.setOnClickListener { onHeadingLevelPicked(2) }
+        binding.btnHeadingH3.setOnClickListener { onHeadingLevelPicked(3) }
         binding.btnHeadingUnheading.setOnClickListener {
             val heading = selectedHeadings.firstOrNull() ?: return@setOnClickListener
             hideHeadingTypeSubmenu()
@@ -1573,6 +1607,8 @@ class NotebookActivity : AppCompatActivity() {
             }
         }
 
+        // btnUnheading is superseded by btnHeadingMenu + submenu in S4 but kept for safety.
+        // It is always GONE (see updateFloatingSelectionToolbar) so this handler is dead code.
         binding.btnUnheading.setOnClickListener {
             val heading = selectedHeadings.firstOrNull() ?: return@setOnClickListener
             lifecycleScope.launch(Dispatchers.IO) {
@@ -5198,6 +5234,83 @@ class NotebookActivity : AppCompatActivity() {
         }
     }
 
+    /**
+     * Change [heading]'s level to [newLevel], persisting to DB and rebuilding the canvas.
+     *
+     * Modeled on [updateHeadingText]: runs on the main dispatcher; uses withContext(IO) for DB/bitmap.
+     * The stored text is re-prefixed to match the new level; for stroke-only headings
+     * (recognizedText == null) the bounding box is kept unchanged.
+     */
+    private fun changeHeadingLevel(heading: HeadingStroke, newLevel: Int) {
+        val db = soilDatabase ?: return
+        val previousLevel = heading.level
+        val previousText  = heading.recognizedText
+        val previousBox   = RectF(heading.boundingBox)
+        val newText       = HeadingObject.applyLevel(heading.recognizedText, newLevel)   // null stays null
+
+        // Compute new bounding box: re-measure for text headings; keep existing box for stroke headings.
+        val newBox: RectF
+        if (newText != null) {
+            val textPaint = TextPaint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+                textSize = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 16f, resources.displayMetrics)
+            }
+            val paddingPx = 8f * resources.displayMetrics.density
+            val pageWidth = resources.displayMetrics.widthPixels
+            val (measuredW, measuredH) = TextObjectRenderer.measure(newText, pageWidth, textPaint, resources.displayMetrics.density, singleLine = true)
+            newBox = RectF(
+                heading.boundingBox.left,
+                heading.boundingBox.top,
+                heading.boundingBox.left + measuredW + 2f * paddingPx,
+                heading.boundingBox.top  + measuredH + 2f * paddingPx,
+            )
+        } else {
+            newBox = RectF(heading.boundingBox)
+        }
+
+        lifecycleScope.launch {
+            withContext(Dispatchers.IO) {
+                val row        = db.notebookDao().getObjectById(heading.id) ?: return@withContext
+                val headingObj = HeadingObject.fromJson(row.data)
+                val updated    = headingObj.copy(recognizedText = newText, level = newLevel)
+                val bboxJson   = newBox.toBoundingBoxJson()
+                db.notebookDao().updateHeadingData(heading.id, bboxJson, updated.toJson(), System.currentTimeMillis())
+            }
+            val updatedHeadings = drawingView.getHeadings().map { h ->
+                if (h.id == heading.id) h.copy(recognizedText = newText, boundingBox = newBox, level = newLevel) else h
+            }
+            drawingView.loadHeadings(updatedHeadings)
+            val strokes     = drawingView.getStrokes()
+            val templateBmp = currentTemplateBitmap
+            val bitmap = withContext(Dispatchers.IO) {
+                drawingView.buildRenderBitmap(strokes, templateBmp, updatedHeadings)
+            }
+            if (bitmap != null) {
+                drawingView.loadStrokesWithBitmap(strokes, bitmap, templateBmp)
+            } else {
+                drawingView.loadStrokes(strokes)
+            }
+            val pad    = 8f * resources.displayMetrics.density
+            val selBox = RectF(newBox).also { it.inset(-pad, -pad) }
+            drawingView.setLassoOverlay(null, selBox)
+            if (binding.floatingSelectionToolbar.visibility == View.VISIBLE) {
+                updateFloatingSelectionToolbar(selBox)
+            }
+            undoRedoManager.push(
+                UndoRedoAction.HeadingLevelChanged(
+                    headingId     = heading.id,
+                    pageId        = currentPageId,
+                    previousLevel = previousLevel,
+                    newLevel      = newLevel,
+                    previousText  = previousText,
+                    newText       = newText,
+                    previousBox   = previousBox,
+                    newBox        = newBox,
+                )
+            )
+            updateUndoRedoButtons()
+        }
+    }
+
     /** Update btnLasso icon: ic_lasso_clipboard when clipboard has content, ic_lasso otherwise. */
     private fun updateLassoButtonIcon() {
         binding.btnLasso.setImageResource(
@@ -5219,6 +5332,12 @@ class NotebookActivity : AppCompatActivity() {
     private var pendingHeadingStrokes: List<LiveStroke> = emptyList()
     private var pendingHeadingBox: RectF? = null
 
+    // S4: disambiguate shared H1/H2/H3 buttons between convert-from-strokes (S3) and change-level (S4).
+    private enum class HeadingSubmenuMode { CONVERT, CHANGE }
+    private var headingSubmenuMode = HeadingSubmenuMode.CONVERT
+    // S4: the heading whose level is being changed; set when opening the submenu in CHANGE mode.
+    private var pendingChangeHeading: HeadingStroke? = null
+
     /**
      * Position and show the floating selection toolbar relative to [selectionBox].
      * Default: centered below the box with an 8dp gap.
@@ -5235,8 +5354,11 @@ class NotebookActivity : AppCompatActivity() {
         val selectionIsSingleHeading = selHeadings.size == 1 && selStrokes.isEmpty()
         val selectionIsPureStrokes   = selStrokes.isNotEmpty() && selHeadings.isEmpty()
         val selectionIsNonStrokeGroup = selStrokes.isEmpty() && (selHeadings.size + selTextObjects.size + selLines.size) >= 2
-        binding.btnMakeHeading.visibility = if (selectionIsPureStrokes)   View.VISIBLE else View.GONE
-        binding.btnUnheading.visibility   = if (selectionIsSingleHeading) View.VISIBLE else View.GONE
+        binding.btnMakeHeading.visibility  = if (selectionIsPureStrokes)   View.VISIBLE else View.GONE
+        // S4: btnHeadingMenu opens the submenu in CHANGE mode for a single heading.
+        // btnUnheading is superseded by the submenu's un-heading button — always hidden.
+        binding.btnHeadingMenu.visibility  = if (selectionIsSingleHeading) View.VISIBLE else View.GONE
+        binding.btnUnheading.visibility    = View.GONE
         binding.headingDivider.visibility =
             if (selectionIsPureStrokes || selectionIsSingleHeading) View.VISIBLE else View.GONE
         binding.btnConvertText.visibility   = if (selectionIsPureStrokes) View.VISIBLE else View.GONE
@@ -5305,6 +5427,21 @@ class NotebookActivity : AppCompatActivity() {
 
     private fun hideHeadingTypeSubmenu() {
         binding.headingTypeSubmenu.visibility = View.GONE
+        // Clear any level-highlight backgrounds when the submenu is dismissed.
+        applyHeadingLevelHighlight(0)
+    }
+
+    /**
+     * Highlight the H1/H2/H3 button matching [activeLevel] with [bg_heading_type_selected],
+     * and clear the background of the other two. Pass [activeLevel] = 0 to clear all three.
+     */
+    private fun applyHeadingLevelHighlight(activeLevel: Int) {
+        val selectedBg = if (activeLevel in 1..3)
+            androidx.core.content.ContextCompat.getDrawable(this, R.drawable.bg_heading_type_selected)
+        else null
+        binding.btnHeadingH1.background = if (activeLevel == 1) selectedBg else null
+        binding.btnHeadingH2.background = if (activeLevel == 2) selectedBg else null
+        binding.btnHeadingH3.background = if (activeLevel == 3) selectedBg else null
     }
 
     private fun updateSnapToggleIcon() {
@@ -5942,9 +6079,10 @@ class NotebookActivity : AppCompatActivity() {
             is UndoRedoAction.StrokesMoved     -> action.pageId
             is UndoRedoAction.TemplateChanged  -> action.pageId
             is UndoRedoAction.PageEraseAll     -> action.pageId
-            is UndoRedoAction.HeadingCreated   -> action.pageId
-            is UndoRedoAction.HeadingRemoved   -> action.pageId
-            is UndoRedoAction.HeadingTextEdited -> action.pageId
+            is UndoRedoAction.HeadingCreated      -> action.pageId
+            is UndoRedoAction.HeadingRemoved      -> action.pageId
+            is UndoRedoAction.HeadingTextEdited   -> action.pageId
+            is UndoRedoAction.HeadingLevelChanged -> action.pageId
             is UndoRedoAction.TextInserted     -> action.pageId
             is UndoRedoAction.TextEdited       -> action.pageId
             is UndoRedoAction.TextRemoved      -> action.pageId
@@ -6834,6 +6972,71 @@ class NotebookActivity : AppCompatActivity() {
             return true
         }
 
+        // ── Cross-page HeadingLevelChanged ───────────────────────────────────
+        if (action is UndoRedoAction.HeadingLevelChanged) {
+            val targetLevel = if (isUndo) action.previousLevel else action.newLevel
+            val targetText  = if (isUndo) action.previousText  else action.newText
+            val targetBox   = if (isUndo) action.previousBox   else action.newBox
+            val snapshot      = drawingView.captureSnapshot()
+            val leavingPageId = currentPageId
+            withContext(Dispatchers.IO) {
+                if (snapshot != null && leavingPageId.isNotEmpty()) {
+                    persistSnapshot(db, leavingPageId, snapshot)
+                }
+                saveStrokes(db)
+            }
+            currentPageIndex = pages.indexOfFirst { it.id == action.pageId }.coerceAtLeast(0)
+
+            val templateBmp: Bitmap?
+            val preUndoStrokes: List<LiveStroke>
+            val preUndoHeadings: List<HeadingStroke>
+            withContext(Dispatchers.IO) {
+                setupPageIds(db)
+                templateBmp     = loadPageTemplateFromDb(db)
+                preUndoStrokes  = deserializeStrokesFromDb(db)
+                preUndoHeadings = loadHeadingsFromDb(db, currentLayerId)
+            }
+            drawingView.loadHeadings(preUndoHeadings)
+            val preUndobitmap = withContext(Dispatchers.IO) {
+                drawingView.buildRenderBitmap(preUndoStrokes, templateBmp, preUndoHeadings)
+            }
+            if (preUndobitmap != null) {
+                drawingView.loadStrokesWithBitmap(preUndoStrokes, preUndobitmap, templateBmp)
+            } else {
+                drawingView.loadStrokes(preUndoStrokes)
+            }
+            currentTemplateBitmap = templateBmp
+            updatePageIndicator()
+            saveLastOpenedPage(currentPageId)
+
+            // Write target level/text/box directly — no re-measure needed (boxes are pre-computed).
+            withContext(Dispatchers.IO) {
+                val row        = dao.getObjectById(action.headingId) ?: return@withContext
+                val headingObj = HeadingObject.fromJson(row.data)
+                val updated    = headingObj.copy(recognizedText = targetText, level = targetLevel)
+                val bboxJson   = targetBox.toBoundingBoxJson()
+                dao.updateHeadingData(action.headingId, bboxJson, updated.toJson(), now)
+            }
+
+            val updatedHeadings = withContext(Dispatchers.IO) {
+                loadHeadingsFromDb(db, currentLayerId)
+            }
+            drawingView.loadHeadings(updatedHeadings)
+            val bitmap = withContext(Dispatchers.IO) {
+                drawingView.buildRenderBitmap(preUndoStrokes, templateBmp, updatedHeadings)
+            }
+            if (bitmap != null) {
+                drawingView.loadStrokesWithBitmap(preUndoStrokes, bitmap, templateBmp)
+            } else {
+                drawingView.loadStrokes(preUndoStrokes)
+            }
+            selectedObjectIds.clear()
+            drawingView.lassoSelectedIds = emptySet()
+            drawingView.setLassoOverlay(null, null)
+            hideFloatingSelectionToolbar()
+            return true
+        }
+
         // ── Cross-page TextConverted: two-phase display ──────────────────────
         // Undo: text row soft-deleted, original strokes restored — page shows strokes, no text obj.
         // Redo: original strokes soft-deleted, text row restored — page shows text obj, no strokes.
@@ -7525,6 +7728,18 @@ class NotebookActivity : AppCompatActivity() {
                 }
             }}
 
+            is UndoRedoAction.HeadingLevelChanged -> withContext(Dispatchers.IO) {
+                // Boxes are pre-computed and stored in the action — write directly, no re-measure needed.
+                val targetLevel = if (isUndo) action.previousLevel else action.newLevel
+                val targetText  = if (isUndo) action.previousText  else action.newText
+                val targetBox   = if (isUndo) action.previousBox   else action.newBox
+                val row        = dao.getObjectById(action.headingId) ?: return@withContext
+                val headingObj = HeadingObject.fromJson(row.data)
+                val updated    = headingObj.copy(recognizedText = targetText, level = targetLevel)
+                val bboxJson   = targetBox.toBoundingBoxJson()
+                dao.updateHeadingData(action.headingId, bboxJson, updated.toJson(), now)
+            }
+
             is UndoRedoAction.TextInserted -> withContext(Dispatchers.IO) {
                 if (isUndo) {
                     dao.softDeleteById(action.textId, now)
@@ -8156,6 +8371,37 @@ class NotebookActivity : AppCompatActivity() {
                 drawingView.loadStrokes(strokes)
             }
             // Update selection box if the edited heading is still selected.
+            val updatedHeading = updatedHeadings.find { it.id == action.headingId }
+            if (updatedHeading != null && action.headingId in selectedObjectIds) {
+                val pad = 8f * resources.displayMetrics.density
+                val selBox = RectF(updatedHeading.boundingBox).also { it.inset(-pad, -pad) }
+                drawingView.setLassoOverlay(null, selBox)
+                if (binding.floatingSelectionToolbar.visibility == View.VISIBLE) {
+                    updateFloatingSelectionToolbar(selBox)
+                }
+            }
+            updatePageIndicator()
+            saveLastOpenedPage(currentPageId)
+            return true
+        }
+
+        // ── Step 3a-level-change: Same-page HeadingLevelChanged — in-memory update ─
+        if (action is UndoRedoAction.HeadingLevelChanged) {
+            val updatedHeadings = withContext(Dispatchers.IO) {
+                loadHeadingsFromDb(db, currentLayerId)
+            }
+            drawingView.loadHeadings(updatedHeadings)
+            val strokes = drawingView.getStrokes()
+            val templateBmp = currentTemplateBitmap
+            val bitmap = withContext(Dispatchers.IO) {
+                drawingView.buildRenderBitmap(strokes, templateBmp, updatedHeadings)
+            }
+            if (bitmap != null) {
+                drawingView.loadStrokesWithBitmap(strokes, bitmap, templateBmp)
+            } else {
+                drawingView.loadStrokes(strokes)
+            }
+            // Update selection box if the changed heading is still selected.
             val updatedHeading = updatedHeadings.find { it.id == action.headingId }
             if (updatedHeading != null && action.headingId in selectedObjectIds) {
                 val pad = 8f * resources.displayMetrics.density
