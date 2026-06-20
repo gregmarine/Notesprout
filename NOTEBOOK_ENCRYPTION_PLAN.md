@@ -706,6 +706,12 @@ Same G10 command.
 
 ## Phase 2 — Deferred / Found-Along-The-Way
 
+> **Now planned in detail in [`NOTEBOOK_ENCRYPTION_PHASE2_PLAN.md`](NOTEBOOK_ENCRYPTION_PHASE2_PLAN.md)**
+> (9 sessions, Sonnet/medium, user-run testing, G10 + P2P wrap-up). The seed list below is the raw
+> backlog this plan was built from — the Phase 2 plan file is the source of truth going forward.
+> (Cross-notebook copy confirm + bulk encrypt/decrypt are deferred to Phase 3 — they depend on
+> cross-notebook copy/move and multi-select features that don't exist yet.)
+
 > Populate as issues surface during S1–S9. Seed list:
 
 - **Undo/redo sidecar encryption** — currently skipped for encrypted notebooks (no cross-session undo

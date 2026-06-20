@@ -27,7 +27,8 @@ matching doc before working in that area:**
 | Encryption: SQLCipher model, scopes, key lifecycle, leak hygiene, migration | [`docs/encryption.md`](docs/encryption.md) |
 
 Standing backlogs at monorepo root: `CODE_REVIEW_PRUNING.md`, `TOOLBAR_CUSTOMIZATION_PLAN.md`
-(Session 8 open), `SUPERNOTE_SUPPORT_PLAN.md`.
+(Session 8 open), `SUPERNOTE_SUPPORT_PLAN.md`, `NOTEBOOK_ENCRYPTION_PHASE2_PLAN.md` (encryption
+Phase 2 — 9 sessions, not started).
 
 ---
 
