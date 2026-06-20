@@ -5060,7 +5060,10 @@ class NotebookActivity : AppCompatActivity() {
 
     private fun showHeadingTextEditDialog(heading: HeadingStroke) {
         val dialogBinding = DialogEditHeadingTextBinding.inflate(layoutInflater)
-        dialogBinding.editHeadingText.setText(heading.recognizedText)
+        // Strip the markdown prefix (e.g. "# ") so the user sees only the words.
+        val displayText = HeadingObject.stripHeadingPrefix(heading.recognizedText ?: "")
+        dialogBinding.editHeadingText.setText(displayText)
+        val headingLevel = heading.level
         val dialog = AlertDialog.Builder(this)
             .setTitle("Edit Heading")
             .setView(dialogBinding.root)
@@ -5069,7 +5072,7 @@ class NotebookActivity : AppCompatActivity() {
                 imm.hideSoftInputFromWindow(dialogBinding.editHeadingText.windowToken, 0)
                 val newText = dialogBinding.editHeadingText.text?.toString()?.trim().orEmpty()
                 if (newText.isNotBlank()) {
-                    updateHeadingText(heading, newText)
+                    updateHeadingText(heading, newText, headingLevel)
                 }
             }
             .setNegativeButton("Cancel") { _, _ ->
@@ -5095,15 +5098,19 @@ class NotebookActivity : AppCompatActivity() {
         }, 100)
     }
 
-    private fun updateHeadingText(heading: HeadingStroke, newText: String) {
+    private fun updateHeadingText(heading: HeadingStroke, newText: String, level: Int = heading.level) {
         val db = soilDatabase ?: return
+        // previousText is already stored with the markdown prefix (e.g. "# Chapter One").
         val previousText = heading.recognizedText
+        // Re-apply the heading prefix so stored text stays prefixed (level and prefix always agree).
+        val prefixedText = HeadingObject.applyLevel(newText, level) ?: newText
         val textPaint = TextPaint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
             textSize = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 16f, resources.displayMetrics)
         }
         val paddingPx = 8f * resources.displayMetrics.density
         val pageWidth = resources.displayMetrics.widthPixels
-        val (measuredW, measuredH) = TextObjectRenderer.measure(newText, pageWidth, textPaint, resources.displayMetrics.density, singleLine = true)
+        // Measure using the prefixed text so per-level sizing (H1/H2/H3 via MarkdownParser) is correct.
+        val (measuredW, measuredH) = TextObjectRenderer.measure(prefixedText, pageWidth, textPaint, resources.displayMetrics.density, singleLine = true)
         val newBox = RectF(
             heading.boundingBox.left,
             heading.boundingBox.top,
@@ -5114,12 +5121,13 @@ class NotebookActivity : AppCompatActivity() {
             withContext(Dispatchers.IO) {
                 val row = db.notebookDao().getObjectById(heading.id) ?: return@withContext
                 val headingObj = HeadingObject.fromJson(row.data)
-                val updated = headingObj.copy(recognizedText = newText)
+                // Persist prefixed text and preserve level so the two always agree.
+                val updated = headingObj.copy(recognizedText = prefixedText, level = level)
                 val bboxJson = newBox.toBoundingBoxJson()
                 db.notebookDao().updateHeadingData(heading.id, bboxJson, updated.toJson(), System.currentTimeMillis())
             }
             val updatedHeadings = drawingView.getHeadings().map { h ->
-                if (h.id == heading.id) h.copy(recognizedText = newText, boundingBox = newBox) else h
+                if (h.id == heading.id) h.copy(recognizedText = prefixedText, boundingBox = newBox, level = level) else h
             }
             drawingView.loadHeadings(updatedHeadings)
             val strokes = drawingView.getStrokes()
@@ -5143,7 +5151,9 @@ class NotebookActivity : AppCompatActivity() {
                     headingId    = heading.id,
                     pageId       = currentPageId,
                     previousText = previousText,
-                    newText      = newText,
+                    // Store prefixed text in the undo action so undo/redo handlers that write
+                    // recognizedText = targetText directly receive correctly prefixed text.
+                    newText      = prefixedText,
                 )
             )
             updateUndoRedoButtons()

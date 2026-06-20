@@ -11,6 +11,22 @@
 - All lasso actions (move, copy, cut, paste, delete, eraser) treat headings as first-class participants
 - `copyPageAfter()` and `copyPageAfterRaw()` copy all object types, not just strokes
 
+### Heading levels (H1 / H2 / H3)
+
+- `level: Int = 1` on both `HeadingObject` (DB-serialized) and `HeadingStroke` (render-time) is the
+  authoritative source of heading type — it works even for **unrecognized** (stroke-rendered) headings
+  that have no text prefix to encode it. Defaults to `1`, so old `.soil` rows decode as H1 (no migration).
+- When `recognizedText != null` it is stored **with** the matching markdown prefix (`# `/`## `/`### `).
+  `level` and the stored prefix must always agree — every write path that sets one sets the other.
+  Canvas rendering/measuring "just works" because `recognizedText` flows through `TextObjectRenderer` →
+  `MarkdownParser`/`MarkdownRenderer`, which scale headings per level (h1 ×2.0, h2 ×1.75, h3 ×1.5).
+- **Never hardcode `"# "`.** Use the `HeadingObject` companion helpers: `headingPrefix(level)`,
+  `stripHeadingPrefix(text)`, `levelFromText(text)`, `applyLevel(text, level)`.
+- **Edit dialog is hash-free:** `showHeadingTextEditDialog` prefills with `stripHeadingPrefix(...)`
+  (words only, no `#`); `updateHeadingText` re-applies `applyLevel(newText, level)` on Save, measures
+  the box with the prefixed text, and preserves `level`. The `HeadingTextEdited` undo action stores
+  **prefixed** text both directions (its undo/redo handlers assign `recognizedText` directly).
+
 ### Top-heading-as-page-name rule
 
 A page's display name is the text of its **topmost heading**: smallest `boundingBox.top`, ties broken
