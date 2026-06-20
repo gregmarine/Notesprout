@@ -33,10 +33,12 @@ import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.lifecycleScope
+import com.notesprout.android.crypto.EncryptionInfo
 import com.notesprout.android.crypto.KeyResolver
 import com.notesprout.android.crypto.KeyScope
 import com.notesprout.android.crypto.PassphraseCache
 import com.notesprout.android.crypto.SoilCrypto
+import com.notesprout.android.crypto.SoilMigrator
 import com.notesprout.android.data.BoundingBox
 import com.notesprout.android.data.NotebookMetadata
 import com.notesprout.android.data.PageData
@@ -1552,9 +1554,10 @@ class MainActivity : AppCompatActivity() {
     private fun showNotebookContextMenu(entity: ObjectEntity) {
         lifecycleScope.launch {
             val pinned = withContext(Dispatchers.IO) { repository.isNotebookPinned(entity.id) }
+            val encInfo = withContext(Dispatchers.IO) { repository.getEncryptionInfo(entity.id) }
             val pinIcon  = if (pinned) R.drawable.ic_pinned_off else R.drawable.ic_pinned
             val pinLabel = if (pinned) "Unpin Notebook" else "Pin Notebook"
-            ActionSheetDialog(this@MainActivity)
+            val menu = ActionSheetDialog(this@MainActivity)
                 .title(entity.name)
                 .addAction(pinIcon,                       pinLabel)          {
                     lifecycleScope.launch {
@@ -1569,9 +1572,107 @@ class MainActivity : AppCompatActivity() {
                 .addAction(R.drawable.ic_copy_page,       "Copy Notebook")   { enterPickerMode(DestinationPickerState.CopyNotebook(entity)) }
                 .addAction(R.drawable.ic_move_page,       "Move Notebook")   { enterPickerMode(DestinationPickerState.MoveNotebook(entity)) }
                 .addAction(R.drawable.ic_edit,            "Rename Notebook") { showRenameNotebookDialog(entity) }
-                .addAction(R.drawable.ic_polaroid,        "Set Cover")       { openCoverDialog(entity) }
-                .addAction(R.drawable.ic_delete_notebook, "Delete Notebook") { showDeleteNotebookConfirmation(entity) }
-                .show()
+            if (!encInfo.encrypted) {
+                menu.addAction(R.drawable.ic_polaroid, "Set Cover") { openCoverDialog(entity) }
+            }
+            if (!encInfo.encrypted) {
+                menu.addAction(R.drawable.ic_lock,     "Encrypt Notebook") { showEncryptNotebookDialog(entity) }
+            } else {
+                menu.addAction(R.drawable.ic_lock_off, "Decrypt Notebook") { showDecryptNotebookDialog(entity, encInfo) }
+            }
+            menu.addAction(R.drawable.ic_delete_notebook, "Delete Notebook") { showDeleteNotebookConfirmation(entity) }
+            menu.show()
+        }
+    }
+
+    // ── Notebook encrypt / decrypt ────────────────────────────────────────────
+
+    private fun showEncryptNotebookDialog(entity: ObjectEntity) {
+        ActionSheetDialog(this)
+            .title("Encrypt Notebook")
+            .addAction(null, "Encrypt (Global Passphrase)") {
+                lifecycleScope.launch { encryptNotebook(entity, KeyScope.GLOBAL) }
+            }
+            .addAction(null, "Encrypt (Notebook Passphrase)") {
+                lifecycleScope.launch { encryptNotebook(entity, KeyScope.NOTEBOOK) }
+            }
+            .show()
+    }
+
+    private suspend fun encryptNotebook(entity: ObjectEntity, scope: KeyScope) {
+        val key = KeyResolver.resolveForConvertToEncrypted(this, scope) ?: return
+
+        val tvMessage = android.widget.TextView(this).apply {
+            text = "Encrypting…"
+            setPadding(64, 48, 64, 48)
+            setTextColor(android.graphics.Color.BLACK)
+            textSize = 16f
+        }
+        val dialog = AlertDialog.Builder(this)
+            .setView(tvMessage)
+            .setCancelable(false)
+            .create()
+        dialog.show()
+        dialog.window?.setElevation(0f)
+        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+
+        try {
+            val file = soilFile(this, entity.id)
+            withContext(Dispatchers.IO) { SoilMigrator.encryptInPlace(file, key) }
+            withContext(Dispatchers.IO) { repository.setEncryptionState(entity.id, encrypted = true, keyScope = scope) }
+            dialog.dismiss()
+            scanAndRender()
+        } catch (e: Exception) {
+            dialog.dismiss()
+            Toast.makeText(this, "Encryption failed: ${e.message}", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private fun showDecryptNotebookDialog(entity: ObjectEntity, encInfo: EncryptionInfo) {
+        AlertDialog.Builder(this)
+            .setTitle("Decrypt Notebook")
+            .setMessage(
+                "\"${entity.name}\" will be stored unencrypted. Anyone with access to the file " +
+                "can read its contents. This cannot be undone."
+            )
+            .setPositiveButton("Continue") { _, _ ->
+                lifecycleScope.launch { decryptNotebook(entity, encInfo) }
+            }
+            .setNegativeButton("Cancel", null)
+            .create()
+            .also { d ->
+                d.show()
+                d.window?.setElevation(0f)
+                d.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+            }
+    }
+
+    private suspend fun decryptNotebook(entity: ObjectEntity, encInfo: EncryptionInfo) {
+        val key = KeyResolver.resolveForDecrypt(this, entity.id, encInfo) ?: return
+
+        val tvMessage = android.widget.TextView(this).apply {
+            text = "Decrypting…"
+            setPadding(64, 48, 64, 48)
+            setTextColor(android.graphics.Color.BLACK)
+            textSize = 16f
+        }
+        val dialog = AlertDialog.Builder(this)
+            .setView(tvMessage)
+            .setCancelable(false)
+            .create()
+        dialog.show()
+        dialog.window?.setElevation(0f)
+        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+
+        try {
+            val file = soilFile(this, entity.id)
+            withContext(Dispatchers.IO) { SoilMigrator.decryptInPlace(file, key) }
+            withContext(Dispatchers.IO) { repository.setEncryptionState(entity.id, encrypted = false, keyScope = null) }
+            dialog.dismiss()
+            scanAndRender()
+        } catch (e: Exception) {
+            dialog.dismiss()
+            Toast.makeText(this, "Decryption failed: ${e.message}", Toast.LENGTH_LONG).show()
         }
     }
 

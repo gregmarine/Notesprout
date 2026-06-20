@@ -27,7 +27,7 @@ When the user reports all manual tests pass, Claude marks the session ✅ DONE a
 | S2 | Index metadata + key-resolution service + passphrase dialog | ✅ DONE |
 | S3 | Open path — opening an encrypted notebook | ✅ DONE |
 | S4 | Create an encrypted notebook (create dialog + global bootstrap) | ✅ DONE |
-| S5 | Convert: encrypt ⇄ decrypt from MainActivity context menu | ⬜ NOT STARTED |
+| S5 | Convert: encrypt ⇄ decrypt from MainActivity context menu | ✅ DONE |
 | S6 | Toolbar lock / lock-off buttons (close → encrypt → reopen) | ⬜ NOT STARTED |
 | S7 | Lock indicator in notebook lists + cover/snapshot read guards | ⬜ NOT STARTED |
 | S8 | Operational read/write sites (export, page copy, link/page pickers) | ⬜ NOT STARTED |
@@ -353,7 +353,7 @@ Same G10 command.
 
 ## S4 — Create an Encrypted Notebook
 
-**Status:** ⬜ NOT STARTED
+**Status:** ✅ DONE
 
 **Goal:** The new-notebook flow offers **None / Global / Notebook-specific** encryption. Creating an
 encrypted notebook writes the `.soil` with SQLCipher from the start (no plaintext ever touches disk),
@@ -411,7 +411,7 @@ Also verifies index JSON has `"encrypted":true` + correct `"keyScope"` for the e
 
 ## S5 — Convert: Encrypt ⇄ Decrypt from MainActivity Context Menu
 
-**Status:** ⬜ NOT STARTED
+**Status:** ✅ DONE
 
 **Goal:** From the notebook long-press context menu, convert an unencrypted notebook to encrypted, and
 an encrypted notebook back to unencrypted, using `sqlcipher_export()`. Decrypt always re-prompts and
