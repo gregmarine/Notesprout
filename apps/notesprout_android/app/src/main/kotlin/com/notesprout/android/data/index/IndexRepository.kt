@@ -1,5 +1,7 @@
 package com.notesprout.android.data.index
 
+import com.notesprout.android.crypto.EncryptionInfo
+import com.notesprout.android.crypto.KeyScope
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.util.UUID
@@ -67,6 +69,8 @@ class IndexRepository(private val dao: ObjectDao) {
     suspend fun updateNotebookSnapshot(id: String, snapshot: String?) {
         val entity = dao.getById(id) ?: return
         val obj = Json.decodeFromString<NotebookObject>(entity.data)
+        // Never cache plaintext page content for encrypted notebooks (leak hygiene).
+        if (obj.encrypted) return
         dao.update(
             entity.copy(
                 data = Json.encodeToString(obj.copy(snapshot = snapshot)),
@@ -332,7 +336,9 @@ class IndexRepository(private val dao: ObjectDao) {
     }
 
     suspend fun scrubNotebookFromAllLists(notebookId: String) {
-        val lists = dao.getAllNotDeleted().filter { it.type == ObjectType.LIST }
+        val lists = dao.getAllNotDeleted().filter {
+            it.type == ObjectType.LIST && it.id != PINNED_TEMPLATES_LIST_ID
+        }
         for (listEntity in lists) {
             val listObj = Json.decodeFromString<ListObject>(listEntity.data)
             if (notebookId in listObj.notebookIds) {
@@ -414,6 +420,31 @@ class IndexRepository(private val dao: ObjectDao) {
                 )
             )
         }
+    }
+
+    // endregion
+
+    // region Encryption metadata
+
+    suspend fun getEncryptionInfo(notebookId: String): EncryptionInfo {
+        val entity = dao.getById(notebookId) ?: return EncryptionInfo.NONE
+        val obj = Json.decodeFromString<NotebookObject>(entity.data)
+        return EncryptionInfo(obj.encrypted, obj.keyScope)
+    }
+
+    /**
+     * Write encryption state to the index row. When [encrypted] is true, also clears the snapshot
+     * to prevent plaintext page content from leaking into the global (unencrypted) index.
+     */
+    suspend fun setEncryptionState(notebookId: String, encrypted: Boolean, keyScope: KeyScope?) {
+        val entity = dao.getById(notebookId) ?: return
+        val obj = Json.decodeFromString<NotebookObject>(entity.data)
+        val updated = obj.copy(
+            encrypted = encrypted,
+            keyScope = keyScope,
+            snapshot = if (encrypted) null else obj.snapshot,
+        )
+        dao.update(entity.copy(data = Json.encodeToString(updated), updatedAt = System.currentTimeMillis()))
     }
 
     // endregion

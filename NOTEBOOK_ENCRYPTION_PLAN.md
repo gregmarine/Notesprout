@@ -24,7 +24,7 @@ When the user reports all manual tests pass, Claude marks the session ✅ DONE a
 | # | Session | Status |
 |---|---|---|
 | S1 | Crypto foundation (deps, native lib, PassphraseStore, SoilCrypto) | ✅ DONE |
-| S2 | Index metadata + key-resolution service + passphrase dialog | ⬜ NOT STARTED |
+| S2 | Index metadata + key-resolution service + passphrase dialog | ✅ DONE |
 | S3 | Open path — opening an encrypted notebook | ⬜ NOT STARTED |
 | S4 | Create an encrypted notebook (create dialog + global bootstrap) | ⬜ NOT STARTED |
 | S5 | Convert: encrypt ⇄ decrypt from MainActivity context menu | ⬜ NOT STARTED |
@@ -206,7 +206,7 @@ user-visible encryption yet.
 
 ## S2 — Index Metadata + Key-Resolution Service + Passphrase Dialog
 
-**Status:** ⬜ NOT STARTED
+**Status:** ✅ DONE
 
 **Goal:** Teach the global index to record encryption state, build the **one** place that resolves a
 notebook's key (cache-or-prompt logic), and the **one** reusable e-ink passphrase dialog. Still no
