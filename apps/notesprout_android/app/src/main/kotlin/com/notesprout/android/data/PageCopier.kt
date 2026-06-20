@@ -1,33 +1,16 @@
 package com.notesprout.android.data
 
 import android.content.ContentValues
-import android.database.sqlite.SQLiteDatabase
 import android.util.Log
 import androidx.room.withTransaction
+import com.notesprout.android.crypto.SoilCrypto
+import com.notesprout.android.crypto.SoilRawDb
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.UUID
 
 private const val TAG = "PageCopier"
-
-/**
- * Mirrors the Room close path ([com.notesprout.android.NotebookActivity.closeNotebook]) for the
- * raw [SQLiteDatabase] connections used by the `*Raw` helpers: flushes the WAL back into the
- * `.soil` file and reclaims free pages so the file stays clean (CLAUDE.md "folder shows only
- * `.soil` files" rule).
- *
- * PRAGMAs that return a result set must consume the cursor — never `execSQL`.
- *
- * Call this immediately before [SQLiteDatabase.close]. Only the leftover rollback `-journal`
- * is deleted afterwards (see [cleanStrayJournal]); the `-wal`/`-shm` sidecars are NOT touched
- * here because [com.notesprout.android.NotebookActivity] keeps its own Room connection open to
- * the same file while these helpers run — SQLite removes those when that last connection closes.
- */
-private fun SQLiteDatabase.checkpointAndVacuum() {
-    rawQuery("PRAGMA incremental_vacuum", null).use { it.moveToFirst() }
-    rawQuery("PRAGMA wal_checkpoint(TRUNCATE)", null).use { it.moveToFirst() }
-}
 
 /** Deletes the empty `-journal` artifact SQLite may leave next to [notebookPath]. */
 private fun cleanStrayJournal(notebookPath: String) {
@@ -134,11 +117,12 @@ suspend fun movePagesRelativeRaw(
     targetPageId: String,
     before: Boolean,
     notebookPath: String,
+    passphrase: String? = null,
 ): List<Triple<String, String?, String?>>? = withContext(Dispatchers.IO) {
     if (pageIds.isEmpty()) return@withContext emptyList()
-    var db: SQLiteDatabase? = null
+    var db: SoilRawDb? = null
     try {
-        db = SQLiteDatabase.openDatabase(notebookPath, null, SQLiteDatabase.OPEN_READWRITE)
+        db = SoilCrypto.openRaw(File(notebookPath), passphrase)
 
         data class PageOrder(val id: String, val order: Int)
         val allPages: MutableList<PageOrder> = db.rawQuery(
@@ -229,11 +213,12 @@ suspend fun copyPagesRelativeRaw(
     targetPageId: String,
     before: Boolean,
     notebookPath: String,
+    passphrase: String? = null,
 ): List<Pair<String, Int>>? = withContext(Dispatchers.IO) {
     if (sourcePageIds.isEmpty()) return@withContext emptyList()
-    var db: SQLiteDatabase? = null
+    var db: SoilRawDb? = null
     try {
-        db = SQLiteDatabase.openDatabase(notebookPath, null, SQLiteDatabase.OPEN_READWRITE)
+        db = SoilCrypto.openRaw(File(notebookPath), passphrase)
 
         // ── Shared row types ─────────────────────────────────────────────────
         data class Row(val id: String, val parentId: String, val bbox: String,
@@ -395,10 +380,11 @@ suspend fun insertSoilTemplateRaw(
     height: Int,
     name: String,
     imageBase64: String,
+    passphrase: String? = null,
 ): String? = withContext(Dispatchers.IO) {
-    var db: SQLiteDatabase? = null
+    var db: SoilRawDb? = null
     try {
-        db = SQLiteDatabase.openDatabase(notebookPath, null, SQLiteDatabase.OPEN_READWRITE)
+        db = SoilCrypto.openRaw(File(notebookPath), passphrase)
         val now = System.currentTimeMillis()
         val newId = UUID.randomUUID().toString()
         val bbox = BoundingBox(0f, 0f, width.toFloat(), height.toFloat()).toJson()
@@ -438,10 +424,10 @@ suspend fun insertSoilTemplateRaw(
  * parentId for template rows inserted by [insertSoilTemplateRaw]. Returns null if absent.
  * Must be called on [Dispatchers.IO].
  */
-suspend fun readNotebookRowId(notebookPath: String): String? = withContext(Dispatchers.IO) {
-    var db: SQLiteDatabase? = null
+suspend fun readNotebookRowId(notebookPath: String, passphrase: String? = null): String? = withContext(Dispatchers.IO) {
+    var db: SoilRawDb? = null
     try {
-        db = SQLiteDatabase.openDatabase(notebookPath, null, SQLiteDatabase.OPEN_READONLY)
+        db = SoilCrypto.openRaw(File(notebookPath), passphrase)
         db.rawQuery("SELECT id FROM notebook WHERE type = 'notebook' LIMIT 1", null).use { c ->
             if (c.moveToFirst()) c.getString(0) else null
         }
@@ -468,11 +454,12 @@ suspend fun setPagesTemplateRaw(
     pageIds: List<String>,
     newTemplateId: String,
     notebookPath: String,
+    passphrase: String? = null,
 ): List<Pair<String, String?>>? = withContext(Dispatchers.IO) {
     if (pageIds.isEmpty()) return@withContext emptyList()
-    var db: SQLiteDatabase? = null
+    var db: SoilRawDb? = null
     try {
-        db = SQLiteDatabase.openDatabase(notebookPath, null, SQLiteDatabase.OPEN_READWRITE)
+        db = SoilCrypto.openRaw(File(notebookPath), passphrase)
         val now = System.currentTimeMillis()
         val result = mutableListOf<Pair<String, String?>>()
 
@@ -524,10 +511,11 @@ suspend fun setPagesTemplateRaw(
 suspend fun deletePageRaw(
     pageId: String,
     notebookPath: String,
+    passphrase: String? = null,
 ): Long? = withContext(Dispatchers.IO) {
-    var db: SQLiteDatabase? = null
+    var db: SoilRawDb? = null
     try {
-        db = SQLiteDatabase.openDatabase(notebookPath, null, SQLiteDatabase.OPEN_READWRITE)
+        db = SoilCrypto.openRaw(File(notebookPath), passphrase)
         val deletedAt = System.currentTimeMillis()
 
         val layerId = db.rawQuery(

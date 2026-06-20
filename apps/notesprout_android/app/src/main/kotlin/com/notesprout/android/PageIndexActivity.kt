@@ -7,7 +7,6 @@ import android.net.Uri
 import android.provider.DocumentsContract
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
-import android.database.sqlite.SQLiteDatabase
 import android.graphics.Bitmap
 import android.util.Base64
 import android.view.GestureDetector
@@ -27,6 +26,8 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.lifecycleScope
 import com.notesprout.android.core.Slog
+import com.notesprout.android.crypto.KeySession
+import com.notesprout.android.crypto.SoilCrypto
 import com.notesprout.android.data.index.IndexRepository
 import com.notesprout.android.data.index.NotesproutIndex
 import com.notesprout.android.data.index.TemplateObject
@@ -394,9 +395,10 @@ class PageIndexActivity : AppCompatActivity() {
     }
 
     private fun loadPagesFromSoil(path: String): List<PageEntry> {
-        var db: SQLiteDatabase? = null
+        val passphrase = KeySession.getFor(notebookId)
+        var db: com.notesprout.android.crypto.SoilRawDb? = null
         return try {
-            db = SQLiteDatabase.openDatabase(path, null, SQLiteDatabase.OPEN_READONLY)
+            db = SoilCrypto.openRaw(java.io.File(path), passphrase)
             val headingNames = topHeadingNamesByPageId(db)
             db.rawQuery(
                 "SELECT id, data FROM notebook WHERE type = 'page' AND deletedAt IS NULL ORDER BY `order` ASC",
@@ -924,7 +926,7 @@ class PageIndexActivity : AppCompatActivity() {
 
         lifecycleScope.launch {
             val results = withContext(Dispatchers.IO) {
-                com.notesprout.android.data.movePagesRelativeRaw(sources, targetPageId, insertBefore, path)
+                com.notesprout.android.data.movePagesRelativeRaw(sources, targetPageId, insertBefore, path, KeySession.getFor(notebookId))
             }
             if (results == null) {
                 android.widget.Toast.makeText(this@PageIndexActivity, "Couldn't move pages", android.widget.Toast.LENGTH_SHORT).show()
@@ -955,7 +957,7 @@ class PageIndexActivity : AppCompatActivity() {
 
         lifecycleScope.launch {
             val results = withContext(Dispatchers.IO) {
-                com.notesprout.android.data.copyPagesRelativeRaw(sources, targetPageId, insertBefore, path)
+                com.notesprout.android.data.copyPagesRelativeRaw(sources, targetPageId, insertBefore, path, KeySession.getFor(notebookId))
             }
             if (results == null) {
                 android.widget.Toast.makeText(this@PageIndexActivity, "Couldn't paste pages", android.widget.Toast.LENGTH_SHORT).show()
@@ -1035,7 +1037,8 @@ class PageIndexActivity : AppCompatActivity() {
                     val entity = indexRepo.getTemplate(libraryTemplateId) ?: return@withContext null
                     val tObj = TemplateObject.fromJson(entity.data) ?: return@withContext null
                     if (tObj.image.isEmpty()) return@withContext null
-                    val parentId = com.notesprout.android.data.readNotebookRowId(path)
+                    val key = KeySession.getFor(notebookId)
+                    val parentId = com.notesprout.android.data.readNotebookRowId(path, key)
                         ?: MainActivity.NIL_UUID
                     com.notesprout.android.data.insertSoilTemplateRaw(
                         notebookPath = path,
@@ -1044,6 +1047,7 @@ class PageIndexActivity : AppCompatActivity() {
                         height       = tObj.height,
                         name         = entity.name,
                         imageBase64  = tObj.image,
+                        passphrase   = key,
                     )
                 }
             }
@@ -1053,7 +1057,7 @@ class PageIndexActivity : AppCompatActivity() {
             }
 
             val pairs = withContext(Dispatchers.IO) {
-                com.notesprout.android.data.setPagesTemplateRaw(targets, soilTemplateId, path)
+                com.notesprout.android.data.setPagesTemplateRaw(targets, soilTemplateId, path, KeySession.getFor(notebookId))
             }
             if (pairs == null) {
                 android.widget.Toast.makeText(this@PageIndexActivity, "Couldn't set template", android.widget.Toast.LENGTH_SHORT).show()
@@ -1101,7 +1105,7 @@ class PageIndexActivity : AppCompatActivity() {
                 lifecycleScope.launch {
                     val deleted = withContext(kotlinx.coroutines.Dispatchers.IO) {
                         targetIds.mapNotNull { id ->
-                            val deletedAt = com.notesprout.android.data.deletePageRaw(id, path)
+                            val deletedAt = com.notesprout.android.data.deletePageRaw(id, path, KeySession.getFor(notebookId))
                             val originalIndex = indexById[id]
                             if (deletedAt != null && originalIndex != null) {
                                 Triple(id, originalIndex, deletedAt)
@@ -1140,6 +1144,22 @@ class PageIndexActivity : AppCompatActivity() {
      */
     private fun executeExport() {
         if (!inActionMode()) return
+        if (KeySession.getFor(notebookId) != null) {
+            val d = AlertDialog.Builder(this)
+                .setTitle("Export encrypted notebook")
+                .setMessage("This notebook is encrypted. The exported file will be unencrypted — anyone with access to the exported file will be able to read its contents.")
+                .setPositiveButton("Export anyway") { _, _ -> doExecuteExport() }
+                .setNegativeButton("Cancel", null)
+                .create()
+            d.show()
+            d.window?.setElevation(0f)
+            d.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+        } else {
+            doExecuteExport()
+        }
+    }
+
+    private fun doExecuteExport() {
         if (selectedCount() == 1) {
             executeSingleExport()
         } else {
@@ -1177,6 +1197,7 @@ class PageIndexActivity : AppCompatActivity() {
                         pageId = pageEntry.id,
                         pageNumber = pageEntry.pageNumber,
                         notebookTitle = notebookName,
+                        passphrase = KeySession.getFor(notebookId),
                     )
                 }
             } catch (e: Exception) {
@@ -1275,6 +1296,7 @@ class PageIndexActivity : AppCompatActivity() {
                         onProgress = { current, total ->
                             handler.post { tvMessage.text = "Exporting page $current of $total…" }
                         },
+                        passphrase = KeySession.getFor(notebookId),
                     )
                 }
             } catch (e: Exception) {
@@ -1366,6 +1388,7 @@ class PageIndexActivity : AppCompatActivity() {
                         onProgress = { current, total ->
                             handler.post { tvMessage.text = "Exporting page $current of $total…" }
                         },
+                        passphrase = KeySession.getFor(notebookId),
                     )
                 }
             } catch (e: Exception) {
@@ -1486,6 +1509,7 @@ class PageIndexActivity : AppCompatActivity() {
                         onProgress = { current, total ->
                             handler.post { tvMessage.text = "Rendering page $current of $total…" }
                         },
+                        passphrase = KeySession.getFor(notebookId),
                     )
                 }
             } catch (e: Exception) {

@@ -14,6 +14,7 @@ import android.util.Base64
 import android.util.TypedValue
 import androidx.room.Room
 import com.notesprout.android.core.BitmapDecode
+import com.notesprout.android.crypto.SoilCrypto
 import com.notesprout.android.data.CoverObject
 import com.notesprout.android.core.markdown.TextObjectRenderer
 import com.notesprout.android.data.BoundingBox
@@ -134,17 +135,18 @@ object NotebookExporter {
         pageIds: List<String>,
         notebookTitle: String,
         onProgress: (current: Int, total: Int) -> Unit,
+        passphrase: String? = null,
     ): File {
         val safeTitle = notebookTitle.replace(Regex("[^a-zA-Z0-9_\\-. ]"), "_").trim('_', ' ')
             .ifBlank { "notebook" }
 
-        val db = Room.databaseBuilder(
+        val builder = Room.databaseBuilder(
             context.applicationContext,
             SoilDatabase::class.java,
             soilPath,
-        )
-            .addCallback(SoilDatabase.openCallback())
-            .build()
+        ).addCallback(SoilDatabase.openCallback())
+        if (passphrase != null) builder.openHelperFactory(SoilCrypto.roomFactory(passphrase))
+        val db = builder.build()
 
         try {
             val dao = db.notebookDao()
@@ -191,14 +193,15 @@ object NotebookExporter {
         soilPath: String,
         pages: List<Pair<String, String>>,   // (pageId, filenameBase)
         onProgress: (current: Int, total: Int) -> Unit,
+        passphrase: String? = null,
     ): List<File> {
-        val db = Room.databaseBuilder(
+        val builder = Room.databaseBuilder(
             context.applicationContext,
             SoilDatabase::class.java,
             soilPath,
-        )
-            .addCallback(SoilDatabase.openCallback())
-            .build()
+        ).addCallback(SoilDatabase.openCallback())
+        if (passphrase != null) builder.openHelperFactory(SoilCrypto.roomFactory(passphrase))
+        val db = builder.build()
 
         val outDir = File(context.cacheDir, "exported_pngs").also { it.deleteRecursively(); it.mkdirs() }
         val results = mutableListOf<File>()
@@ -507,17 +510,18 @@ object NotebookExporter {
         pageId: String,
         pageNumber: Int,
         notebookTitle: String,
+        passphrase: String? = null,
     ): File {
         val safeTitle = notebookTitle.replace(Regex("[^a-zA-Z0-9_\\-. ]"), "_").trim('_', ' ')
             .ifBlank { "notebook" }
 
-        val db = Room.databaseBuilder(
+        val builder = Room.databaseBuilder(
             context.applicationContext,
             SoilDatabase::class.java,
             soilPath,
-        )
-            .addCallback(SoilDatabase.openCallback())
-            .build()
+        ).addCallback(SoilDatabase.openCallback())
+        if (passphrase != null) builder.openHelperFactory(SoilCrypto.roomFactory(passphrase))
+        val db = builder.build()
 
         try {
             val dao = db.notebookDao()

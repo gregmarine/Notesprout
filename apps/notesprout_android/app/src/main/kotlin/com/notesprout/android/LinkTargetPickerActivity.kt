@@ -1,7 +1,6 @@
 package com.notesprout.android
 
 import android.content.Intent
-import android.database.sqlite.SQLiteDatabase
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.os.Bundle
@@ -23,6 +22,9 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.lifecycleScope
+import com.notesprout.android.crypto.KeyResolver
+import com.notesprout.android.crypto.KeySession
+import com.notesprout.android.crypto.SoilCrypto
 import com.notesprout.android.data.LinkChrome
 import com.notesprout.android.data.index.IndexRepository
 import com.notesprout.android.data.index.NotebookObject
@@ -412,7 +414,7 @@ class LinkTargetPickerActivity : AppCompatActivity() {
     private fun loadCurrentPagesAsync() {
         val path = notebookSoilPath ?: return
         lifecycleScope.launch {
-            pages = withContext(Dispatchers.IO) { loadPagesFromSoil(path) }
+            pages = withContext(Dispatchers.IO) { loadPagesFromSoil(path, KeySession.getFor(notebookId)) }
             if (targetTab == TargetTab.CURRENT) {
                 val spec = gridSpec
                 if (spec != null && spec.itemsPerPage > 0) {
@@ -452,7 +454,20 @@ class LinkTargetPickerActivity : AppCompatActivity() {
     private fun loadOtherPagesAsync(forNotebookId: String) {
         val path = soilFile(this, forNotebookId).absolutePath
         lifecycleScope.launch {
-            val loaded = withContext(Dispatchers.IO) { loadPagesFromSoil(path) }
+            // Resolve the key before going to IO (dialog must run on the main thread).
+            val info = withContext(Dispatchers.IO) { indexRepo.getEncryptionInfo(forNotebookId) }
+            val key = if (info.encrypted) {
+                KeySession.getFor(forNotebookId)
+                    ?: KeyResolver.resolveForOpen(this@LinkTargetPickerActivity, forNotebookId, info)
+            } else null
+            if (info.encrypted && key == null) {
+                // User cancelled — stay on the browse list.
+                otherView = OtherView.BROWSE
+                android.widget.Toast.makeText(this@LinkTargetPickerActivity, "Notebook is locked", android.widget.Toast.LENGTH_SHORT).show()
+                render()
+                return@launch
+            }
+            val loaded = withContext(Dispatchers.IO) { loadPagesFromSoil(path, key) }
             if (otherNotebookId != forNotebookId) return@launch
             otherPages = loaded
             val spec = gridSpec
@@ -465,10 +480,10 @@ class LinkTargetPickerActivity : AppCompatActivity() {
         }
     }
 
-    private fun loadPagesFromSoil(path: String): List<PageEntry> {
-        var db: SQLiteDatabase? = null
+    private fun loadPagesFromSoil(path: String, passphrase: String? = null): List<PageEntry> {
+        var db: com.notesprout.android.crypto.SoilRawDb? = null
         return try {
-            db = SQLiteDatabase.openDatabase(path, null, SQLiteDatabase.OPEN_READONLY)
+            db = SoilCrypto.openRaw(java.io.File(path), passphrase)
             val headingNames = topHeadingNamesByPageId(db)
             db.rawQuery(
                 "SELECT id, data FROM notebook WHERE type = 'page' AND deletedAt IS NULL ORDER BY `order` ASC",

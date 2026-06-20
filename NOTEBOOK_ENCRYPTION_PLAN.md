@@ -30,7 +30,7 @@ When the user reports all manual tests pass, Claude marks the session ✅ DONE a
 | S5 | Convert: encrypt ⇄ decrypt from MainActivity context menu | ✅ DONE |
 | S6 | Toolbar lock / lock-off buttons (close → encrypt → reopen) | ✅ DONE |
 | S7 | Lock indicator in notebook lists + cover/snapshot read guards | ✅ DONE |
-| S8 | Operational read/write sites (export, page copy, link/page pickers) | ⬜ NOT STARTED |
+| S8 | Operational read/write sites (export, page copy, link/page pickers) | ✅ DONE |
 | S9 | Wrap-up (docs, edge cases, P2P + G10 test, Phase 2) | ⬜ NOT STARTED |
 
 ---
@@ -595,7 +595,7 @@ Same G10 command.
 
 ## S8 — Operational Read/Write Sites Needing the Key
 
-**Status:** ⬜ NOT STARTED
+**Status:** ✅ DONE
 
 **Goal:** The remaining sites that genuinely need to *read page content* of a (possibly encrypted)
 notebook acquire the key: **export**, **page copy/move across notebooks**, and the **link workflow's
@@ -721,9 +721,10 @@ Same G10 command.
 - **Toolbar config auto-merge** — migrate existing persisted toolbar orders to include new buttons.
 - **Cross-notebook plaintext-leak confirm** — warn when copying a page from an encrypted notebook into
   a plaintext one.
-- **Export destination security** — exported PDFs/PNGs are plaintext by nature; consider a warning.
+- **Export destination security** — exported PDFs/PNGs are plaintext by nature; a warning dialog is already shown (S8). Future: support exporting to a password-protected PDF (PDF encryption standard) so the exported file itself is encrypted — the user's passphrase (or a separate export password) would protect the PDF at rest on disk and in any file manager or cloud storage.
 - **KDF parameter pinning / interop test** — verify a notebook encrypted here opens with stock
   SQLCipher on desktop (true portability test) and document exact cipher params.
 - **Bulk operations** — encrypt/decrypt multiple notebooks; encrypt a whole folder.
 - **Recents/search index** — ensure no encrypted page text leaks into any future search index.
 - **Encryption choice in TemplateBrowserActivity** — move the encryption scope picker (currently a separate post-picker dialog) into the "New Notebook" flow inside `TemplateBrowserActivity` so name, template, and encryption are chosen in one cohesive screen.
+- **Opening feedback for encrypted notebooks** — the async key resolution + Room build + stroke load takes noticeably longer for encrypted notebooks, leaving the drawing canvas blank for a few seconds after the passphrase dialog closes. Show a subtle "Opening…" overlay or spinner on the canvas during this window (from just before the Room build until `loadStrokes()` renders the first page). Plaintext notebooks open fast enough that they don't need this.

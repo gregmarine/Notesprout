@@ -1,7 +1,7 @@
 package com.notesprout.android.data
 
-import android.database.sqlite.SQLiteDatabase
 import android.graphics.RectF
+import com.notesprout.android.crypto.SoilRawDb
 
 /**
  * Reads the "page name" for every page in an open `.soil` database using the authoritative
@@ -21,7 +21,7 @@ import android.graphics.RectF
  * [db] must already be open and readable on the notebook `.soil` file. This function neither
  * opens nor closes [db].
  */
-fun topHeadingNamesByPageId(db: SQLiteDatabase): Map<String, String> {
+fun topHeadingNamesByPageId(db: SoilRawDb): Map<String, String> {
     // A heading's parentId is its layer; the layer's parentId is the page. Build layer → page.
     val pageIdByLayerId = HashMap<String, String>()
     db.rawQuery(

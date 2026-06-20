@@ -42,6 +42,7 @@ import com.notesprout.android.core.BitmapDecode
 import com.notesprout.android.core.Slog
 import com.notesprout.android.crypto.EncryptionInfo
 import com.notesprout.android.crypto.KeyResolver
+import com.notesprout.android.crypto.KeySession
 import com.notesprout.android.crypto.KeyScope
 import com.notesprout.android.crypto.PassphraseCache
 import com.notesprout.android.crypto.SoilCrypto
@@ -1830,6 +1831,7 @@ class NotebookActivity : AppCompatActivity() {
                     return@launch
                 }
                 soilKey = key
+                if (key != null) KeySession.set(nbId, key) else KeySession.clear()
                 // Encrypted notebooks never write a plaintext sidecar; clear any stale one.
                 if (info.encrypted) {
                     undoRedoPersistenceFile(notebookPath).takeIf { it.exists() }?.delete()
@@ -3164,6 +3166,7 @@ class NotebookActivity : AppCompatActivity() {
             query("PRAGMA incremental_vacuum").use { it.moveToFirst() }
             query("PRAGMA wal_checkpoint(TRUNCATE)").use { it.moveToFirst() }
         }
+        KeySession.clear()
         db.close()
         if (nbPath != null) File("$nbPath-journal").takeIf { it.exists() }?.delete()
         // Update the index updatedAt so sort-by-date stays correct in MainActivity.
@@ -3770,6 +3773,22 @@ class NotebookActivity : AppCompatActivity() {
     }
 
     private fun startExport(db: SoilDatabase) {
+        if (encryptionInfo.encrypted) {
+            val d = AlertDialog.Builder(this)
+                .setTitle("Export encrypted notebook")
+                .setMessage("This notebook is encrypted. The exported file will be unencrypted — anyone with access to the exported file will be able to read its contents.")
+                .setPositiveButton("Export anyway") { _, _ -> doStartExport(db) }
+                .setNegativeButton("Cancel", null)
+                .create()
+            d.show()
+            d.window?.setElevation(0f)
+            d.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+        } else {
+            doStartExport(db)
+        }
+    }
+
+    private fun doStartExport(db: SoilDatabase) {
         // Save current page strokes before reading from DB so the export sees the latest content.
         lifecycleScope.launch {
             withContext(Dispatchers.IO) { saveStrokes(db) }

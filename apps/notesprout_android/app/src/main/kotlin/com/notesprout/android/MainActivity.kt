@@ -68,9 +68,11 @@ import com.notesprout.android.sort.SortPreferencesManager
 import com.notesprout.android.ui.DestinationPickerState
 import com.notesprout.android.databinding.ActivityMainBinding
 import com.notesprout.android.databinding.DialogNewNotebookBinding
+import kotlin.coroutines.resume
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import java.io.ByteArrayOutputStream
@@ -1865,11 +1867,16 @@ class MainActivity : AppCompatActivity() {
                                 Json.decodeFromString<NotebookObject>(source.data)
                             } catch (_: Exception) { NotebookObject() }
                             val newEntity = repository.createNotebook(source.name, currentParentId)
-                            if (sourceObj.snapshot != null) {
+                            // Encrypted notebooks never expose a plaintext snapshot.
+                            if (sourceObj.snapshot != null && !sourceObj.encrypted) {
                                 repository.updateNotebookSnapshot(newEntity.id, sourceObj.snapshot)
                             }
                             if (sourceObj.pageCount > 0) {
                                 repository.updateNotebookPageCount(newEntity.id, sourceObj.pageCount)
+                            }
+                            // Propagate encryption state so the copy opens with the same passphrase.
+                            if (sourceObj.encrypted) {
+                                repository.setEncryptionState(newEntity.id, encrypted = true, keyScope = sourceObj.keyScope)
                             }
                             val srcFile = soilFile(this@MainActivity, source.id)
                             if (srcFile.exists()) {
@@ -1938,11 +1945,14 @@ class MainActivity : AppCompatActivity() {
                         Json.decodeFromString<NotebookObject>(child.data)
                     } catch (_: Exception) { NotebookObject() }
                     val newNotebook = repository.createNotebook(child.name, newFolder.id)
-                    if (sourceObj.snapshot != null) {
+                    if (sourceObj.snapshot != null && !sourceObj.encrypted) {
                         repository.updateNotebookSnapshot(newNotebook.id, sourceObj.snapshot)
                     }
                     if (sourceObj.pageCount > 0) {
                         repository.updateNotebookPageCount(newNotebook.id, sourceObj.pageCount)
+                    }
+                    if (sourceObj.encrypted) {
+                        repository.setEncryptionState(newNotebook.id, encrypted = true, keyScope = sourceObj.keyScope)
                     }
                     val srcFile = soilFile(this, child.id)
                     if (srcFile.exists()) {
@@ -2146,33 +2156,63 @@ class MainActivity : AppCompatActivity() {
     // ── Export ────────────────────────────────────────────────────────────────
 
     private fun startExportFromMain(entity: ObjectEntity) {
-        val tvMessage = android.widget.TextView(this).apply {
-            text = "Exporting…"
-            setPadding(64, 48, 64, 48)
-            setTextColor(android.graphics.Color.BLACK)
-            textSize = 16f
-        }
-        val dialog = AlertDialog.Builder(this)
-            .setView(tvMessage)
-            .setCancelable(false)
-            .create()
-        dialog.show()
-        dialog.window?.setElevation(0f)
-        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
-
-        val handler = android.os.Handler(android.os.Looper.getMainLooper())
         val file = soilFile(this, entity.id)
 
         lifecycleScope.launch {
+            val info = withContext(Dispatchers.IO) { repository.getEncryptionInfo(entity.id) }
+
+            // Encrypted notebooks: warn the user that the exported file will be unencrypted.
+            // Must happen before the modal progress dialog so the warning can receive input.
+            if (info.encrypted) {
+                val confirmed = suspendCancellableCoroutine { cont ->
+                    val d = AlertDialog.Builder(this@MainActivity)
+                        .setMessage("This notebook is encrypted. The exported file will be unencrypted — anyone with access to the exported file will be able to read its contents.")
+                        .setPositiveButton("Export anyway") { _, _ -> if (cont.isActive) cont.resume(true) }
+                        .setNegativeButton("Cancel") { _, _ -> if (cont.isActive) cont.resume(false) }
+                        .setOnCancelListener { if (cont.isActive) cont.resume(false) }
+                        .create()
+                    d.show()
+                    d.window?.setElevation(0f)
+                    d.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+                    cont.invokeOnCancellation { d.dismiss() }
+                }
+                if (!confirmed) return@launch
+            }
+
+            // For GLOBAL scope the passphrase is cached — no prompt needed.
+            // For NOTEBOOK scope there is no cache, so KeyResolver will prompt here.
+            // Either way this must finish before the modal progress dialog opens.
+            val key = KeyResolver.resolveForOpen(this@MainActivity, entity.id, info)
+            if (info.encrypted && key == null) {
+                Toast.makeText(this@MainActivity, "Notebook is locked", Toast.LENGTH_SHORT).show()
+                return@launch
+            }
+
+            val tvMessage = android.widget.TextView(this@MainActivity).apply {
+                text = "Exporting…"
+                setPadding(64, 48, 64, 48)
+                setTextColor(android.graphics.Color.BLACK)
+                textSize = 16f
+            }
+            val dialog = AlertDialog.Builder(this@MainActivity)
+                .setView(tvMessage)
+                .setCancelable(false)
+                .create()
+            dialog.show()
+            dialog.window?.setElevation(0f)
+            dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+
+            val handler = android.os.Handler(android.os.Looper.getMainLooper())
+
             val pdfFile = try {
                 withContext(Dispatchers.IO) {
-                    val db = androidx.room.Room.databaseBuilder(
+                    val builder = androidx.room.Room.databaseBuilder(
                         applicationContext,
                         SoilDatabase::class.java,
                         file.absolutePath,
-                    )
-                        .addCallback(SoilDatabase.openCallback())
-                        .build()
+                    ).addCallback(SoilDatabase.openCallback())
+                    if (key != null) builder.openHelperFactory(SoilCrypto.roomFactory(key))
+                    val db = builder.build()
                     try {
                         NotebookExporter.export(
                             context    = this@MainActivity,

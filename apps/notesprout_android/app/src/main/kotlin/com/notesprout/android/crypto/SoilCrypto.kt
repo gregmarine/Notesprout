@@ -1,5 +1,6 @@
 package com.notesprout.android.crypto
 
+import android.content.ContentValues
 import androidx.sqlite.db.SupportSQLiteOpenHelper
 import net.zetetic.database.sqlcipher.SQLiteDatabase as ZeticDB
 import net.zetetic.database.sqlcipher.SupportOpenHelperFactory
@@ -58,5 +59,61 @@ object SoilCrypto {
         } catch (e: Exception) {
             false
         }
+    }
+
+    /**
+     * Open a .soil for raw (non-Room) access, dispatching to the plaintext or encrypted path.
+     * Returns a [SoilRawDb] that wraps whichever underlying type is needed.
+     * Plaintext pass: passphrase == null → android.database.sqlite.SQLiteDatabase.
+     * Encrypted pass: passphrase != null → net.zetetic.database.sqlcipher.SQLiteDatabase.
+     */
+    fun openRaw(file: File, passphrase: String?): SoilRawDb =
+        if (passphrase == null) SoilRawDb.Plaintext(openRawPlaintext(file))
+        else SoilRawDb.Encrypted(openRawEncrypted(file, passphrase))
+}
+
+/**
+ * Thin sealed wrapper over the two raw DB types, providing a common API for the operations
+ * used by PageCopier and page-list loaders. Neither type shares a supertype so this acts as
+ * the bridge. Only expose the methods actually needed — don't grow this surface.
+ */
+sealed class SoilRawDb {
+
+    abstract fun rawQuery(sql: String, selectionArgs: Array<String>?): android.database.Cursor
+    abstract fun beginTransaction()
+    abstract fun endTransaction()
+    abstract fun setTransactionSuccessful()
+    abstract fun close()
+    abstract fun update(table: String, values: ContentValues, whereClause: String, whereArgs: Array<String>?): Int
+    abstract fun insert(table: String, nullColumnHack: String?, values: ContentValues): Long
+
+    /** Flush the WAL back into the main DB file and reclaim free pages. Call before close(). */
+    fun checkpointAndVacuum() {
+        rawQuery("PRAGMA incremental_vacuum", null).use { it.moveToFirst() }
+        rawQuery("PRAGMA wal_checkpoint(TRUNCATE)", null).use { it.moveToFirst() }
+    }
+
+    class Plaintext(private val db: android.database.sqlite.SQLiteDatabase) : SoilRawDb() {
+        override fun rawQuery(sql: String, selectionArgs: Array<String>?) = db.rawQuery(sql, selectionArgs)
+        override fun beginTransaction() = db.beginTransaction()
+        override fun endTransaction() = db.endTransaction()
+        override fun setTransactionSuccessful() = db.setTransactionSuccessful()
+        override fun close() = db.close()
+        override fun update(table: String, values: ContentValues, whereClause: String, whereArgs: Array<String>?) =
+            db.update(table, values, whereClause, whereArgs)
+        override fun insert(table: String, nullColumnHack: String?, values: ContentValues) =
+            db.insert(table, nullColumnHack, values)
+    }
+
+    class Encrypted(private val db: ZeticDB) : SoilRawDb() {
+        override fun rawQuery(sql: String, selectionArgs: Array<String>?) = db.rawQuery(sql, selectionArgs)
+        override fun beginTransaction() = db.beginTransaction()
+        override fun endTransaction() = db.endTransaction()
+        override fun setTransactionSuccessful() = db.setTransactionSuccessful()
+        override fun close() = db.close()
+        override fun update(table: String, values: ContentValues, whereClause: String, whereArgs: Array<String>?) =
+            db.update(table, values, whereClause, whereArgs)
+        override fun insert(table: String, nullColumnHack: String?, values: ContentValues) =
+            db.insert(table, nullColumnHack, values)
     }
 }
