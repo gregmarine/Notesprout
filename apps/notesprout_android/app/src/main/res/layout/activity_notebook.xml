@@ -308,13 +308,6 @@
             android:contentDescription="Make Heading"
             android:visibility="gone" />
 
-        <androidx.appcompat.widget.AppCompatImageButton
-            android:id="@+id/btnUnheading"
-            style="@style/Widget.Notesprout.ToolbarButton"
-            android:src="@drawable/ic_heading_off"
-            android:contentDescription="Remove Heading"
-            android:visibility="gone" />
-
         <!-- S4: shown when selection is a single heading; opens headingTypeSubmenu in CHANGE mode -->
         <androidx.appcompat.widget.AppCompatImageButton
             android:id="@+id/btnHeadingMenu"

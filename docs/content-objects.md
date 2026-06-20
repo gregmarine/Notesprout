@@ -21,7 +21,8 @@
   Canvas rendering/measuring "just works" because `recognizedText` flows through `TextObjectRenderer` →
   `MarkdownParser`/`MarkdownRenderer`, which scale headings per level (h1 ×2.0, h2 ×1.75, h3 ×1.5).
 - **Never hardcode `"# "`.** Use the `HeadingObject` companion helpers: `headingPrefix(level)`,
-  `stripHeadingPrefix(text)`, `levelFromText(text)`, `applyLevel(text, level)`.
+  `stripHeadingPrefix(text)`, `applyLevel(text, level)`. (`level` is authoritative, so the prefix is
+  only ever *written* from it — there is no "derive level from text" helper.)
 - **Edit dialog is hash-free:** `showHeadingTextEditDialog` prefills with `stripHeadingPrefix(...)`
   (words only, no `#`); `updateHeadingText` re-applies `applyLevel(newText, level)` on Save, measures
   the box with the prefixed text, and preserves `level`. The `HeadingTextEdited` undo action stores
@@ -31,8 +32,9 @@
   two uses of the H1/H2/H3 buttons:
   - **CONVERT** — `btnMakeHeading` (`ic_heading`, pure-stroke selection only) opens the submenu;
     picking a level calls `createHeadingFromStrokes(strokes, box, level)`.
-  - **CHANGE** — `btnHeadingMenu` (`ic_heading`, single-heading selection only; `btnUnheading` is now
-    always hidden, superseded) opens the submenu with the heading's current level highlighted
+  - **CHANGE** — `btnHeadingMenu` (`ic_heading`, single-heading selection only; the old standalone
+    `btnUnheading` toolbar button was removed — un-heading lives in the submenu) opens the submenu
+    with the heading's current level highlighted
     (`bg_heading_type_selected`, a 1dp inkBlack border via `applyHeadingLevelHighlight`) and the
     un-heading button shown. Picking a different level calls `changeHeadingLevel(heading, newLevel)`.
 - **`changeHeadingLevel`** re-prefixes via `applyLevel(recognizedText, newLevel)` (null stays null),

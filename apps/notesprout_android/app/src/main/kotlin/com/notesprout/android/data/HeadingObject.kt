@@ -25,16 +25,6 @@ data class HeadingObject(
             text.replaceFirst(Regex("^#{1,3}\\s+"), "")
 
         /**
-         * Counts the leading `#` characters in [text] (clamped 1–3) to derive the heading level.
-         * Returns 1 if [text] is null or has no leading `#`.
-         */
-        fun levelFromText(text: String?): Int {
-            if (text == null) return 1
-            val count = text.takeWhile { it == '#' }.length
-            return count.coerceIn(1, 3)
-        }
-
-        /**
          * Returns [text] with its heading prefix replaced by the prefix for [level].
          * Returns null when [text] is null (preserves null for stroke-only headings).
          */

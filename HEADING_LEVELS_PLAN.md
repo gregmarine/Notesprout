@@ -51,7 +51,7 @@ Branch: `seed`. Primary module: `apps/notesprout_android`.
 | S4 | Selection menu: selected-heading submenu (change type + un-heading) + undo | ✅ Done |
 | S5 | Page-name rule update + TOC hierarchy data (TocRepository) | ✅ Done |
 | S6 | TOC collapsible cascading UI (TocDialog) | ✅ Done |
-| S7 | Wrap-up: docs, polish, dead-code prune, full-device QA | ⬜ Not started |
+| S7 | Wrap-up: docs, polish, dead-code prune, full-device QA | ✅ Done |
 
 Status legend: ⬜ Not started · 🟡 In progress · 🧪 Awaiting test · ✅ Done
 

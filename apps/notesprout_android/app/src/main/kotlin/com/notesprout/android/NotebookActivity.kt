@@ -1607,15 +1607,6 @@ class NotebookActivity : AppCompatActivity() {
             }
         }
 
-        // btnUnheading is superseded by btnHeadingMenu + submenu in S4 but kept for safety.
-        // It is always GONE (see updateFloatingSelectionToolbar) so this handler is dead code.
-        binding.btnUnheading.setOnClickListener {
-            val heading = selectedHeadings.firstOrNull() ?: return@setOnClickListener
-            lifecycleScope.launch(Dispatchers.IO) {
-                removeHeading(heading)
-            }
-        }
-
         binding.btnLink.setOnClickListener {
             val ids = drawingView.lassoSelectedIds
             val strokes  = drawingView.getStrokes().filter { it.id in ids }
@@ -5356,9 +5347,8 @@ class NotebookActivity : AppCompatActivity() {
         val selectionIsNonStrokeGroup = selStrokes.isEmpty() && (selHeadings.size + selTextObjects.size + selLines.size) >= 2
         binding.btnMakeHeading.visibility  = if (selectionIsPureStrokes)   View.VISIBLE else View.GONE
         // S4: btnHeadingMenu opens the submenu in CHANGE mode for a single heading.
-        // btnUnheading is superseded by the submenu's un-heading button — always hidden.
+        // (Un-heading lives inside that submenu now — there is no standalone un-heading button.)
         binding.btnHeadingMenu.visibility  = if (selectionIsSingleHeading) View.VISIBLE else View.GONE
-        binding.btnUnheading.visibility    = View.GONE
         binding.headingDivider.visibility =
             if (selectionIsPureStrokes || selectionIsSingleHeading) View.VISIBLE else View.GONE
         binding.btnConvertText.visibility   = if (selectionIsPureStrokes) View.VISIBLE else View.GONE
