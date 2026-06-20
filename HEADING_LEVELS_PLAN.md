@@ -47,7 +47,7 @@ Branch: `seed`. Primary module: `apps/notesprout_android`.
 |---|---------|--------|
 | S1 | Data model: `level` field + plumbing + prefix helpers | ✅ Done |
 | S2 | Heading edit dialog: hash-free editing (strip/restore, level-aware) | ✅ Done |
-| S3 | Selection menu: make-heading submenu (strokes → H1/H2/H3) + icons | ⬜ Not started |
+| S3 | Selection menu: make-heading submenu (strokes → H1/H2/H3) + icons | ✅ Done |
 | S4 | Selection menu: selected-heading submenu (change type + un-heading) + undo | ⬜ Not started |
 | S5 | Page-name rule update + TOC hierarchy data (TocRepository) | ⬜ Not started |
 | S6 | TOC collapsible cascading UI (TocDialog) | ⬜ Not started |

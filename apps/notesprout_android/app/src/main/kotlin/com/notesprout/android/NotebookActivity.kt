@@ -1523,15 +1523,53 @@ class NotebookActivity : AppCompatActivity() {
         }
 
         binding.btnMakeHeading.setOnClickListener {
+            // Toggle the H1/H2/H3 submenu rather than converting directly. The actual conversion
+            // happens when the user picks a level (btnHeadingH1/H2/H3 below).
+            if (binding.headingTypeSubmenu.visibility == View.VISIBLE) {
+                hideHeadingTypeSubmenu()
+                return@setOnClickListener
+            }
             val ids = drawingView.lassoSelectedIds
-            val selectedStrokes = drawingView.getStrokes().filter { it.id in ids }
-            if (selectedStrokes.isEmpty()) return@setOnClickListener
+            val strokes = drawingView.getStrokes().filter { it.id in ids }
+            if (strokes.isEmpty()) return@setOnClickListener
             val box = RectF()
-            selectedStrokes.forEach { box.union(it.boundingBox) }
+            strokes.forEach { box.union(it.boundingBox) }
             val pad = 8f * resources.displayMetrics.density
             box.inset(-pad, -pad)
+            // Capture the selection for the deferred convert; the level is chosen in the submenu.
+            pendingHeadingStrokes = strokes
+            pendingHeadingBox = box
+            binding.btnHeadingUnheading.visibility = View.GONE   // convert mode — no un-heading
+            binding.headingTypeSubmenu.visibility = View.VISIBLE
+            binding.headingTypeSubmenu.post {
+                // Anchor to the floating toolbar (which hosts the heading button), not the selection
+                // box — otherwise both popovers land in the same place and overlap.
+                val tb = binding.floatingSelectionToolbar
+                val anchor = RectF(tb.x, tb.y, tb.x + tb.width, tb.y + tb.height)
+                positionPopover(binding.headingTypeSubmenu, anchor)
+            }
+        }
+
+        // Shared H1/H2/H3 submenu buttons. In S3 they convert a pure-stroke selection into a heading
+        // of the chosen level. (S4 will add change-level behaviour for single-heading selections.)
+        val convertToHeading: (Int) -> Unit = { level ->
+            val strokes = pendingHeadingStrokes
+            val box = pendingHeadingBox
+            hideHeadingTypeSubmenu()
+            if (strokes.isNotEmpty() && box != null) {
+                lifecycleScope.launch(Dispatchers.IO) {
+                    createHeadingFromStrokes(strokes, box, level = level)
+                }
+            }
+        }
+        binding.btnHeadingH1.setOnClickListener { convertToHeading(1) }
+        binding.btnHeadingH2.setOnClickListener { convertToHeading(2) }
+        binding.btnHeadingH3.setOnClickListener { convertToHeading(3) }
+        binding.btnHeadingUnheading.setOnClickListener {
+            val heading = selectedHeadings.firstOrNull() ?: return@setOnClickListener
+            hideHeadingTypeSubmenu()
             lifecycleScope.launch(Dispatchers.IO) {
-                createHeadingFromStrokes(selectedStrokes, box)
+                removeHeading(heading)
             }
         }
 
@@ -5176,12 +5214,19 @@ class NotebookActivity : AppCompatActivity() {
     private val selectedStrokes: List<LiveStroke>
         get() = drawingView.getStrokes().filter { it.id in drawingView.lassoSelectedIds }
 
+    // Selection captured when the heading-type submenu is opened in convert mode (S3), used when the
+    // user picks a level. Read on the H1/H2/H3 button taps; cleared implicitly when the submenu hides.
+    private var pendingHeadingStrokes: List<LiveStroke> = emptyList()
+    private var pendingHeadingBox: RectF? = null
+
     /**
      * Position and show the floating selection toolbar relative to [selectionBox].
      * Default: centered below the box with an 8dp gap.
      * Fallback: centered above when the bottom edge would clip off screen.
      */
     private fun updateFloatingSelectionToolbar(selectionBox: RectF) {
+        // The selection changed — drop any stale heading-type submenu.
+        hideHeadingTypeSubmenu()
         val selHeadings = selectedHeadings
         val selStrokes  = selectedStrokes
         val selTextObjects = drawingView.getTextObjects().filter { it.id in drawingView.lassoSelectedIds }
@@ -5210,41 +5255,56 @@ class NotebookActivity : AppCompatActivity() {
         binding.linkDivider.visibility = if (canAddLink || selectionIsSingleLink) View.VISIBLE else View.GONE
         binding.floatingSelectionToolbar.visibility = View.VISIBLE
         binding.floatingSelectionToolbar.post {
-            val toolbarW = binding.floatingSelectionToolbar.measuredWidth.toFloat()
-            val toolbarH = binding.floatingSelectionToolbar.measuredHeight.toFloat()
-            val screenW  = binding.root.width.toFloat()
-            val screenH  = binding.root.height.toFloat()
-            val dpGap    = 8f * resources.displayMetrics.density
-            // Keep the floating toolbar clear of the main bar, whichever edge it's anchored to.
-            // Use the fixed bar thickness, not drawingToolbar.height — a vertical bar's height is the
-            // full screen, which would push the safe area off-screen.
-            val barThick = toolbarLayoutManager.barThickness().toFloat()
-            val place    = toolbarConfig.placement
-            val minY     = if (place == ToolbarPlacement.TOP)    barThick + dpGap else dpGap
-            val maxY     = if (place == ToolbarPlacement.BOTTOM) screenH - barThick - toolbarH - dpGap
-                           else screenH - toolbarH
-            val minX     = if (place == ToolbarPlacement.LEFT)   barThick + dpGap else 0f
-            val maxX     = if (place == ToolbarPlacement.RIGHT)  screenW - barThick - toolbarW - dpGap
-                           else screenW - toolbarW
-
-            var x = selectionBox.centerX() - toolbarW / 2f
-            var y = selectionBox.bottom + dpGap
-
-            // Fallback: above the selection box if clipped at the bottom.
-            if (y + toolbarH > screenH) {
-                y = selectionBox.top - dpGap - toolbarH
-            }
-            // Clamp to the safe area, clear of the main bar on whichever edge it sits.
-            y = y.coerceIn(minY, maxY.coerceAtLeast(minY))
-            x = x.coerceIn(minX, maxX.coerceAtLeast(minX))
-
-            binding.floatingSelectionToolbar.x = x
-            binding.floatingSelectionToolbar.y = y
+            positionPopover(binding.floatingSelectionToolbar, selectionBox)
         }
+    }
+
+    /**
+     * Place [view] (a popover/toolbar) relative to [selectionBox]: centered below the box with an
+     * 8dp gap, falling back to above when the bottom edge would clip, then clamped to the safe area
+     * so it stays clear of the main toolbar on whichever edge that bar is anchored. [view] must
+     * already be measured (call from a `post {}` after making it visible).
+     */
+    private fun positionPopover(view: View, selectionBox: RectF) {
+        val viewW   = view.measuredWidth.toFloat()
+        val viewH   = view.measuredHeight.toFloat()
+        val screenW = binding.root.width.toFloat()
+        val screenH = binding.root.height.toFloat()
+        val dpGap   = 8f * resources.displayMetrics.density
+        // Keep clear of the main bar, whichever edge it's anchored to. Use the fixed bar thickness,
+        // not drawingToolbar.height — a vertical bar's height is the full screen, which would push
+        // the safe area off-screen.
+        val barThick = toolbarLayoutManager.barThickness().toFloat()
+        val place    = toolbarConfig.placement
+        val minY     = if (place == ToolbarPlacement.TOP)    barThick + dpGap else dpGap
+        val maxY     = if (place == ToolbarPlacement.BOTTOM) screenH - barThick - viewH - dpGap
+                       else screenH - viewH
+        val minX     = if (place == ToolbarPlacement.LEFT)   barThick + dpGap else 0f
+        val maxX     = if (place == ToolbarPlacement.RIGHT)  screenW - barThick - viewW - dpGap
+                       else screenW - viewW
+
+        var x = selectionBox.centerX() - viewW / 2f
+        var y = selectionBox.bottom + dpGap
+
+        // Fallback: above the selection box if clipped at the bottom.
+        if (y + viewH > screenH) {
+            y = selectionBox.top - dpGap - viewH
+        }
+        // Clamp to the safe area, clear of the main bar on whichever edge it sits.
+        y = y.coerceIn(minY, maxY.coerceAtLeast(minY))
+        x = x.coerceIn(minX, maxX.coerceAtLeast(minX))
+
+        view.x = x
+        view.y = y
     }
 
     private fun hideFloatingSelectionToolbar() {
         binding.floatingSelectionToolbar.visibility = View.GONE
+        hideHeadingTypeSubmenu()
+    }
+
+    private fun hideHeadingTypeSubmenu() {
+        binding.headingTypeSubmenu.visibility = View.GONE
     }
 
     private fun updateSnapToggleIcon() {

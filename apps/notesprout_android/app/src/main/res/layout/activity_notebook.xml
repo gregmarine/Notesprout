@@ -304,7 +304,7 @@
         <androidx.appcompat.widget.AppCompatImageButton
             android:id="@+id/btnMakeHeading"
             style="@style/Widget.Notesprout.ToolbarButton"
-            android:src="@drawable/ic_h_1"
+            android:src="@drawable/ic_heading"
             android:contentDescription="Make Heading"
             android:visibility="gone" />
 
@@ -396,6 +396,47 @@
             style="@style/Widget.Notesprout.ToolbarButton"
             android:src="@drawable/ic_snap_on"
             android:contentDescription="Toggle snap to guides" />
+
+    </LinearLayout>
+
+    <!-- Heading-type submenu — appears below (or above) the selection box when the heading button
+         in the floating selection toolbar is tapped. Positioned programmatically via positionPopover().
+         Shared between S3 (pure-stroke selection → convert to H1/H2/H3) and S4 (single-heading
+         selection → change level / un-heading). The un-heading button is hidden in S3. -->
+    <LinearLayout
+        android:id="@+id/headingTypeSubmenu"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:visibility="gone"
+        android:background="@drawable/shape_bordered"
+        android:padding="4dp"
+        android:elevation="0dp">
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnHeadingH1"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:src="@drawable/ic_h_1"
+            android:contentDescription="Heading 1" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnHeadingH2"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:src="@drawable/ic_h_2"
+            android:contentDescription="Heading 2" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnHeadingH3"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:src="@drawable/ic_h_3"
+            android:contentDescription="Heading 3" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnHeadingUnheading"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:src="@drawable/ic_heading_off"
+            android:contentDescription="Remove Heading"
+            android:visibility="gone" />
 
     </LinearLayout>
 
