@@ -56,6 +56,12 @@ so `isSelected` state, icon state, and listeners always survive.
   "toolbarSettings"` (the gear; force-included in mini so the dialog is always reachable).
   **KEY STABILITY RULE:** keys are persisted → append-only, never rename/reorder. `DEFAULT_ORDER` =
   XML order (no spacer); `DEFAULT_MINI` = compact everyday subset.
+  **Encryption buttons:** `"lock"` (`btnLock`, `ic_lock`, group `GROUP_NOTEBOOK`) and `"lockOff"`
+  (`btnLockOff`, `ic_lock_off`, group `GROUP_NOTEBOOK`) were appended in S6. They are runtime-hidden
+  based on encryption state — `btnLock` visible only on unencrypted notebooks, `btnLockOff` only on
+  encrypted. Existing users' persisted `order` configs that pre-date S6 may not include these keys;
+  a one-time migration in `ToolbarPreferencesManager` appends any registry keys missing from the
+  persisted list (new keys appear at the end rather than being hidden until a manual reset).
 - **`ToolbarLayoutManager`** — arranges the existing button views into `drawingToolbar` per
   `ToolbarConfig`: resolves the visible key list (`order − hidden`, Close always kept; or the mini
   set when `miniEnabled && FLOAT`), sets orientation + size + edge-aware background, inserts

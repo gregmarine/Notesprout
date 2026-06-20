@@ -1373,6 +1373,7 @@ class MainActivity : AppCompatActivity() {
     private fun showEncryptionScopePicker(name: String, libraryTemplateId: String) {
         ActionSheetDialog(this)
             .title("Encryption")
+            .canceledOnTouchOutside(false)   // trailing touch from "Create" tap must not dismiss
             .addAction(null, "No Encryption") {
                 lifecycleScope.launch { createNotebook(name, libraryTemplateId, scope = null) }
             }

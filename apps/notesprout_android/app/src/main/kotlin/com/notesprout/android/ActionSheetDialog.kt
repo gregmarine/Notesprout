@@ -38,6 +38,7 @@ class ActionSheetDialog(private val context: Context) {
 
     private var title: String? = null
     private val actions = mutableListOf<Action>()
+    private var touchOutsideDismisses: Boolean = true
 
     fun title(text: String): ActionSheetDialog {
         title = text
@@ -46,6 +47,12 @@ class ActionSheetDialog(private val context: Context) {
 
     fun addAction(iconRes: Int?, label: String, onClick: () -> Unit): ActionSheetDialog {
         actions.add(Action(iconRes, label, onClick))
+        return this
+    }
+
+    /** Prevent touch-outside from dismissing — use for mandatory choices. X button and Back still work. */
+    fun canceledOnTouchOutside(value: Boolean): ActionSheetDialog {
+        touchOutsideDismisses = value
         return this
     }
 
@@ -120,6 +127,7 @@ class ActionSheetDialog(private val context: Context) {
             .setView(container)
             .create()
 
+        dialog.setCanceledOnTouchOutside(touchOutsideDismisses)
         dialog.show()
 
         dialog.window?.setElevation(0f)

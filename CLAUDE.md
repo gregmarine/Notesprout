@@ -24,6 +24,7 @@ matching doc before working in that area:**
 | Link objects: data model, chrome, follow, back-stack, lasso/undo | [`docs/links.md`](docs/links.md) |
 | Scribble-erase, smart lasso, snap-to-guide, align & distribute | [`docs/lasso-and-gestures.md`](docs/lasso-and-gestures.md) |
 | MainActivity features (browse/search/sort/export/ML Kit) + recents | [`docs/mainactivity-and-recents.md`](docs/mainactivity-and-recents.md) |
+| Encryption: SQLCipher model, scopes, key lifecycle, leak hygiene, migration | [`docs/encryption.md`](docs/encryption.md) |
 
 Standing backlogs at monorepo root: `CODE_REVIEW_PRUNING.md`, `TOOLBAR_CUSTOMIZATION_PLAN.md`
 (Session 8 open), `SUPERNOTE_SUPPORT_PLAN.md`.
@@ -50,6 +51,7 @@ These apply everywhere — do not repeat them in feature sections.
 - **No Material Components** — `com.google.android.material` is not a dependency; do not add it.
 - **Never `runBlocking` on the UI thread** — ANR risk, especially on large stroke/snapshot data.
 - **No `Log.d` directly** — use `Slog.d(tag) { "msg" }` (`core/Slog.kt`, `inline fun` gated on `BuildConfig.DEBUG`). Release builds pay zero cost (lambda never evaluated). `Log.e` / `Log.w` survive into release.
+- **Encryption:** every `.soil` open routes through `SoilCrypto`; passphrases are **never** logged, never put in Intent extras, never written to the global index. See [`docs/encryption.md`](docs/encryption.md).
 
 ---
 

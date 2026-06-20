@@ -31,7 +31,7 @@ When the user reports all manual tests pass, Claude marks the session ✅ DONE a
 | S6 | Toolbar lock / lock-off buttons (close → encrypt → reopen) | ✅ DONE |
 | S7 | Lock indicator in notebook lists + cover/snapshot read guards | ✅ DONE |
 | S8 | Operational read/write sites (export, page copy, link/page pickers) | ✅ DONE |
-| S9 | Wrap-up (docs, edge cases, P2P + G10 test, Phase 2) | ⬜ NOT STARTED |
+| S9 | Wrap-up (docs, edge cases, P2P + G10 test, Phase 2) | ✅ DONE |
 
 ---
 
@@ -669,7 +669,7 @@ Same G10 command.
 
 ## S9 — Wrap-Up
 
-**Status:** ⬜ NOT STARTED
+**Status:** ✅ DONE
 
 **Goal:** Documentation, edge-case sweep, and focused testing on **P2P** (`287d2364`) and **G10**
 (`34E517F9`) only (not full Tier-1). Capture deferrals in Phase 2.
@@ -728,3 +728,5 @@ Same G10 command.
 - **Recents/search index** — ensure no encrypted page text leaks into any future search index.
 - **Encryption choice in TemplateBrowserActivity** — move the encryption scope picker (currently a separate post-picker dialog) into the "New Notebook" flow inside `TemplateBrowserActivity` so name, template, and encryption are chosen in one cohesive screen.
 - **Opening feedback for encrypted notebooks** — the async key resolution + Room build + stroke load takes noticeably longer for encrypted notebooks, leaving the drawing canvas blank for a few seconds after the passphrase dialog closes. Show a subtle "Opening…" overlay or spinner on the canvas during this window (from just before the Room build until `loadStrokes()` renders the first page). Plaintext notebooks open fast enough that they don't need this.
+- **Passphrase attempt rate-limiting** — after N consecutive wrong-passphrase rejections within a rolling window, impose an escalating delay before the next attempt is allowed (e.g. 3 failures → 30 s lockout, 5 → 5 min, 10 → 1 hr). Display a countdown in the prompt dialog so the user knows when they can retry. Persisted per-notebook (or globally) in `EncryptedSharedPreferences` so the counter survives process death. Protects against offline brute-force if the device is compromised. Does not replace SQLCipher's PBKDF2 cost, which already slows individual attempts.
+- **Show/hide passphrase toggle** — add an eye icon to the right end of the passphrase `EditText` in all passphrase dialogs (create, open, decrypt prompt). Tapping it toggles `inputType` between `textPassword` (masked) and `textVisiblePassword` (plain text), letting the user verify what they typed before confirming. Use an `AppCompatImageView` inside the input row; icon `ic_eye` / `ic_eye_off` (Tabler), tinted `inkBlack`. Never log or snapshot the field value regardless of toggle state.

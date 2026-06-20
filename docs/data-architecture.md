@@ -44,7 +44,8 @@ CREATE INDEX idx_objects_parent_type_deleted
 
 - `ObjectEntity` (`data/index/ObjectEntity.kt`) — Room entity; universal index row
 - `ObjectType` (`data/index/ObjectType.kt`) — `FOLDER`, `NOTEBOOK`, `LIST`, `TEMPLATE`, `TEMPLATE_FOLDER`
-- `FolderObject`, `NotebookObject`, `ListObject` — `@Serializable` data classes in `data` column. `NotebookObject` carries `snapshot: String?` + `pageCount: Int`. `ListObject` carries `notebookIds: List<String>` (array order = display order).
+- `FolderObject`, `NotebookObject`, `ListObject` — `@Serializable` data classes in `data` column. `NotebookObject` carries `snapshot: String?`, `pageCount: Int`, `encrypted: Boolean` (default `false`), and `keyScope: KeyScope?` (non-null only when `encrypted == true`). `ListObject` carries `notebookIds: List<String>` (array order = display order).
+  - **Snapshot suppression:** `snapshot` is **always `null`** for encrypted notebooks. `IndexRepository.updateNotebookSnapshot` is a no-op when the row has `encrypted = true`; `setEncryptionState(..., encrypted = true)` atomically clears `snapshot` in the same write. Lists and card renders show the lock icon instead. See [`docs/encryption.md`](docs/encryption.md).
 - `ListIds` (`data/index/ListIds.kt`) — `PINNED_LIST_ID = "00000000-0000-0000-0000-70696e6e6564"`, `PINNED_TEMPLATES_LIST_ID = "00000000-0000-0000-0000-746d706c7069"`
 - `TemplateListObject` (`data/index/TemplateListObject.kt`) — `@Serializable data class TemplateListObject(templateIds: List<String>)`; the `data` payload of the pinned-templates `LIST` object. A parallel to `ListObject` so notebook list code is untouched.
 - `ObjectDao` (`data/index/ObjectDao.kt`) — Room DAO for all index queries and mutations
