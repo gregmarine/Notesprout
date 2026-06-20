@@ -80,6 +80,22 @@
             android:src="@drawable/ic_pinned"
             android:contentDescription="Pin notebook" />
 
+        <!-- Lock button: encrypt this notebook (visible only when unencrypted) -->
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnLock"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:layout_marginStart="4dp"
+            android:src="@drawable/ic_lock"
+            android:contentDescription="Encrypt notebook" />
+
+        <!-- Lock-off button: decrypt this notebook (visible only when encrypted) -->
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnLockOff"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:layout_marginStart="4dp"
+            android:src="@drawable/ic_lock_off"
+            android:contentDescription="Decrypt notebook" />
+
         <!-- Pen tool -->
         <androidx.appcompat.widget.AppCompatImageButton
             android:id="@+id/btnPen"

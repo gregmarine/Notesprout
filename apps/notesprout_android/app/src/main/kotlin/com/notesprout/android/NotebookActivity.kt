@@ -42,7 +42,10 @@ import com.notesprout.android.core.BitmapDecode
 import com.notesprout.android.core.Slog
 import com.notesprout.android.crypto.EncryptionInfo
 import com.notesprout.android.crypto.KeyResolver
+import com.notesprout.android.crypto.KeyScope
+import com.notesprout.android.crypto.PassphraseCache
 import com.notesprout.android.crypto.SoilCrypto
+import com.notesprout.android.crypto.SoilMigrator
 import com.notesprout.android.data.BoundingBox
 import com.notesprout.android.data.CoverObject
 import com.notesprout.android.data.copyPageAfter
@@ -898,6 +901,16 @@ class NotebookActivity : AppCompatActivity() {
                     if (nowPinned) R.drawable.ic_pinned_off else R.drawable.ic_pinned
                 )
             }
+        }
+
+        binding.btnLock.setOnClickListener {
+            val nbId = notebookId.takeIf { it.isNotEmpty() } ?: return@setOnClickListener
+            showEncryptFromToolbarDialog(nbId)
+        }
+
+        binding.btnLockOff.setOnClickListener {
+            val nbId = notebookId.takeIf { it.isNotEmpty() } ?: return@setOnClickListener
+            showDecryptFromToolbarDialog(nbId)
         }
 
         binding.btnPageIndex.setOnClickListener { openPageIndex() }
@@ -1807,6 +1820,7 @@ class NotebookActivity : AppCompatActivity() {
                 val nbId = notebookId
                 val info = withContext(Dispatchers.IO) { indexRepo.getEncryptionInfo(nbId) }
                 encryptionInfo = info
+                updateLockButtonVisibility(info)
                 val key = KeyResolver.resolveForOpen(this@NotebookActivity, nbId, info)
                 if (info.encrypted && key == null) {
                     android.widget.Toast.makeText(
@@ -2862,6 +2876,138 @@ class NotebookActivity : AppCompatActivity() {
             runBlocking { sealNotebook(db, snapshot, pageId, nbPath, nbId, sessionStart) }
         } else {
             NotesproutApplication.appScope.launch { sealNotebook(db, snapshot, pageId, nbPath, nbId, sessionStart) }
+        }
+    }
+
+    // ── Toolbar lock / lock-off ───────────────────────────────────────────────
+
+    private fun updateLockButtonVisibility(info: EncryptionInfo) {
+        binding.btnLock.visibility    = if (info.encrypted) View.GONE else View.VISIBLE
+        binding.btnLockOff.visibility = if (info.encrypted) View.VISIBLE else View.GONE
+    }
+
+    private fun showEncryptFromToolbarDialog(nbId: String) {
+        ActionSheetDialog(this)
+            .title("Encrypt Notebook")
+            .addAction(null, "Encrypt (Global Passphrase)") {
+                lifecycleScope.launch { encryptFromToolbar(nbId, KeyScope.GLOBAL) }
+            }
+            .addAction(null, "Encrypt (Notebook Passphrase)") {
+                lifecycleScope.launch { encryptFromToolbar(nbId, KeyScope.NOTEBOOK) }
+            }
+            .show()
+    }
+
+    private fun showDecryptFromToolbarDialog(nbId: String) {
+        AlertDialog.Builder(this)
+            .setTitle("Decrypt Notebook")
+            .setMessage(
+                "\"$notebookDisplayName\" will be stored unencrypted. Anyone with access to " +
+                "the file can read its contents. This cannot be undone."
+            )
+            .setPositiveButton("Continue") { _, _ ->
+                lifecycleScope.launch { decryptFromToolbar(nbId) }
+            }
+            .setNegativeButton("Cancel", null)
+            .create()
+            .also { d ->
+                d.show()
+                d.window?.setElevation(0f)
+                d.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+            }
+    }
+
+    /**
+     * Seals the open notebook on IO without spawning a fire-and-forget job, so the caller
+     * can await completion before migrating the file. Skips the page snapshot intentionally
+     * (no plaintext content written to the index when converting to encrypted).
+     */
+    private suspend fun sealForConversion() {
+        val db = soilDatabase ?: return
+        soilDatabase = null
+        undoRedoManager.clear()
+        NotesproutClipboard.clear()
+        val nbPath = notebookSoilPath
+        if (nbPath != null) undoRedoPersistenceFile(nbPath).takeIf { it.exists() }?.delete()
+        val pageId       = currentPageId
+        val nbId         = notebookId
+        val sessionStart = sessionStartTime
+        withContext(Dispatchers.IO) {
+            sealNotebook(db, snapshot = null, pageId, nbPath, nbId, sessionStart)
+        }
+    }
+
+    private suspend fun encryptFromToolbar(nbId: String, scope: KeyScope) {
+        val key = KeyResolver.resolveForConvertToEncrypted(this, scope) ?: return
+        // Cache the passphrase so the immediate reopen skips the prompt (same as new-notebook flow).
+        if (scope == KeyScope.NOTEBOOK) PassphraseCache.storeOnce(nbId, key)
+
+        val tvMessage = android.widget.TextView(this).apply {
+            text = "Encrypting…"
+            setPadding(64, 48, 64, 48)
+            setTextColor(android.graphics.Color.BLACK)
+            textSize = 16f
+        }
+        val dialog = AlertDialog.Builder(this)
+            .setView(tvMessage)
+            .setCancelable(false)
+            .create()
+        dialog.show()
+        dialog.window?.setElevation(0f)
+        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+
+        try {
+            sealForConversion()
+            val file = soilFile(this, nbId)
+            withContext(Dispatchers.IO) { SoilMigrator.encryptInPlace(file, key) }
+            withContext(Dispatchers.IO) { indexRepo.setEncryptionState(nbId, encrypted = true, keyScope = scope) }
+            dialog.dismiss()
+            startActivity(
+                Intent(this, NotebookActivity::class.java).apply {
+                    putExtra(EXTRA_NOTEBOOK_ID,   nbId)
+                    putExtra(EXTRA_NOTEBOOK_NAME, notebookDisplayName)
+                }
+            )
+            finish()
+        } catch (e: Exception) {
+            dialog.dismiss()
+            android.widget.Toast.makeText(this, "Encryption failed: ${e.message}", android.widget.Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private suspend fun decryptFromToolbar(nbId: String) {
+        val key = KeyResolver.resolveForDecrypt(this, nbId, encryptionInfo) ?: return
+
+        val tvMessage = android.widget.TextView(this).apply {
+            text = "Decrypting…"
+            setPadding(64, 48, 64, 48)
+            setTextColor(android.graphics.Color.BLACK)
+            textSize = 16f
+        }
+        val dialog = AlertDialog.Builder(this)
+            .setView(tvMessage)
+            .setCancelable(false)
+            .create()
+        dialog.show()
+        dialog.window?.setElevation(0f)
+        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+
+        try {
+            sealForConversion()
+            val file = soilFile(this, nbId)
+            withContext(Dispatchers.IO) { SoilMigrator.decryptInPlace(file, key) }
+            withContext(Dispatchers.IO) { indexRepo.setEncryptionState(nbId, encrypted = false, keyScope = null) }
+            dialog.dismiss()
+            startActivity(
+                Intent(this, NotebookActivity::class.java).apply {
+                    putExtra(EXTRA_NOTEBOOK_ID,   nbId)
+                    putExtra(EXTRA_NOTEBOOK_NAME, notebookDisplayName)
+                }
+            )
+            finish()
+        } catch (e: Exception) {
+            dialog.dismiss()
+            android.widget.Toast.makeText(this, "Decryption failed: ${e.message}", android.widget.Toast.LENGTH_LONG).show()
         }
     }
 

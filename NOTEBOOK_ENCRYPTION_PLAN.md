@@ -28,7 +28,7 @@ When the user reports all manual tests pass, Claude marks the session ✅ DONE a
 | S3 | Open path — opening an encrypted notebook | ✅ DONE |
 | S4 | Create an encrypted notebook (create dialog + global bootstrap) | ✅ DONE |
 | S5 | Convert: encrypt ⇄ decrypt from MainActivity context menu | ✅ DONE |
-| S6 | Toolbar lock / lock-off buttons (close → encrypt → reopen) | ⬜ NOT STARTED |
+| S6 | Toolbar lock / lock-off buttons (close → encrypt → reopen) | ✅ DONE |
 | S7 | Lock indicator in notebook lists + cover/snapshot read guards | ⬜ NOT STARTED |
 | S8 | Operational read/write sites (export, page copy, link/page pickers) | ⬜ NOT STARTED |
 | S9 | Wrap-up (docs, edge cases, P2P + G10 test, Phase 2) | ⬜ NOT STARTED |
@@ -476,7 +476,7 @@ Same G10 command.
 
 ## S6 — Toolbar Lock / Lock-Off Buttons
 
-**Status:** ⬜ NOT STARTED
+**Status:** ✅ DONE
 
 **Goal:** Add `lock` (encrypt) and `lock-off` (decrypt) buttons to the notebook toolbar. Encrypting
 from the open notebook closes → encrypts → reopens so no plaintext remains.

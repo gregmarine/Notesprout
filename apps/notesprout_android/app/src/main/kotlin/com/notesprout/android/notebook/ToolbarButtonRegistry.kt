@@ -62,6 +62,8 @@ object ToolbarButtonRegistry {
         ButtonSpec("cover", R.id.btnCover, R.drawable.ic_polaroid, "Set Cover", GROUP_NOTEBOOK),
         ButtonSpec("export", R.id.btnExport, R.drawable.ic_export, "Export", GROUP_NOTEBOOK),
         ButtonSpec("pin", R.id.btnPin, R.drawable.ic_pinned, "Pin", GROUP_NOTEBOOK),
+        ButtonSpec("lock", R.id.btnLock, R.drawable.ic_lock, "Encrypt", GROUP_NOTEBOOK),
+        ButtonSpec("lockOff", R.id.btnLockOff, R.drawable.ic_lock_off, "Decrypt", GROUP_NOTEBOOK),
         ButtonSpec("pen", R.id.btnPen, R.drawable.ic_pen, "Pen", GROUP_TOOLS),
         ButtonSpec("eraser", R.id.btnEraser, R.drawable.ic_eraser, "Eraser", GROUP_TOOLS),
         ButtonSpec("lassoEraser", R.id.btnLassoEraser, R.drawable.ic_lasso_eraser, "Lasso Eraser", GROUP_TOOLS),

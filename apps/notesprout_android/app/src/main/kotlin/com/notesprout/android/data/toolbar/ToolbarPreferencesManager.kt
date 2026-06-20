@@ -1,6 +1,7 @@
 package com.notesprout.android.data.toolbar
 
 import android.content.Context
+import com.notesprout.android.notebook.ToolbarButtonRegistry
 import kotlinx.serialization.json.Json
 
 /**
@@ -24,8 +25,16 @@ object ToolbarPreferencesManager {
     /** The persisted config, or [ToolbarConfig] defaults when absent or unparseable. */
     fun load(context: Context): ToolbarConfig {
         val raw = prefs(context).getString(KEY_CONFIG, null) ?: return ToolbarConfig()
-        return runCatching { codec.decodeFromString(ToolbarConfig.serializer(), raw) }
+        val config = runCatching { codec.decodeFromString(ToolbarConfig.serializer(), raw) }
             .getOrElse { ToolbarConfig() }
+        // Insert registry keys missing from the persisted order (e.g. buttons added in later app
+        // updates). Appended to the end so the existing layout is unchanged. Persisted back so this
+        // runs only once per new button rather than on every open.
+        val missingKeys = ToolbarButtonRegistry.DEFAULT_ORDER.filter { it !in config.order }
+        if (missingKeys.isEmpty()) return config
+        val merged = config.copy(order = config.order + missingKeys)
+        save(context, merged)
+        return merged
     }
 
     /** Persist [config] as the single global toolbar configuration. */
