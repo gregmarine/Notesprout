@@ -25,7 +25,7 @@ When the user reports all manual tests pass, Claude marks the session ✅ DONE a
 |---|---|---|
 | S1 | Crypto foundation (deps, native lib, PassphraseStore, SoilCrypto) | ✅ DONE |
 | S2 | Index metadata + key-resolution service + passphrase dialog | ✅ DONE |
-| S3 | Open path — opening an encrypted notebook | ⬜ NOT STARTED |
+| S3 | Open path — opening an encrypted notebook | ✅ DONE |
 | S4 | Create an encrypted notebook (create dialog + global bootstrap) | ⬜ NOT STARTED |
 | S5 | Convert: encrypt ⇄ decrypt from MainActivity context menu | ⬜ NOT STARTED |
 | S6 | Toolbar lock / lock-off buttons (close → encrypt → reopen) | ⬜ NOT STARTED |
@@ -299,7 +299,7 @@ Same G10 command.
 
 ## S3 — Open Path: Opening an Encrypted Notebook
 
-**Status:** ⬜ NOT STARTED
+**Status:** ✅ DONE
 
 **Goal:** `NotebookActivity` opens an encrypted `.soil` using a key resolved via `KeyResolver`, with
 the SQLCipher `SupportFactory` wired into the Room builder. After this session an encrypted notebook

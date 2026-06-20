@@ -40,6 +40,9 @@ import androidx.room.Room
 import androidx.room.withTransaction
 import com.notesprout.android.core.BitmapDecode
 import com.notesprout.android.core.Slog
+import com.notesprout.android.crypto.EncryptionInfo
+import com.notesprout.android.crypto.KeyResolver
+import com.notesprout.android.crypto.SoilCrypto
 import com.notesprout.android.data.BoundingBox
 import com.notesprout.android.data.CoverObject
 import com.notesprout.android.data.copyPageAfter
@@ -267,6 +270,12 @@ class NotebookActivity : AppCompatActivity() {
     /** Room DB instance for the open notebook. Null before open and after close. */
     private var soilDatabase: SoilDatabase? = null
     private var sessionStartTime: Long = 0L
+
+    /** Resolved SQLCipher key for the open notebook; null for plaintext notebooks. */
+    private var soilKey: String? = null
+
+    /** Encryption metadata for the open notebook — set during the async open, before loadStrokes(). */
+    private var encryptionInfo: EncryptionInfo = EncryptionInfo.NONE
 
     /**
      * In-memory notebook metadata row.  Loaded once when the notebook is opened.
@@ -1791,19 +1800,39 @@ class NotebookActivity : AppCompatActivity() {
         }
 
         // ── Open the Room DB ──────────────────────────────────────────────────
+        // Key resolution may show a passphrase dialog, so the open is async.
         val notebookPath = notebookSoilPath
         if (notebookPath != null) {
-            sessionStartTime = System.currentTimeMillis()
-            soilDatabase = Room.databaseBuilder(
-                applicationContext,
-                SoilDatabase::class.java,
-                notebookPath,
-            )
-                .addCallback(SoilDatabase.openCallback())
-                .build()
+            lifecycleScope.launch {
+                val nbId = notebookId
+                val info = withContext(Dispatchers.IO) { indexRepo.getEncryptionInfo(nbId) }
+                encryptionInfo = info
+                val key = KeyResolver.resolveForOpen(this@NotebookActivity, nbId, info)
+                if (info.encrypted && key == null) {
+                    android.widget.Toast.makeText(
+                        this@NotebookActivity, "Notebook locked", android.widget.Toast.LENGTH_SHORT
+                    ).show()
+                    finish()
+                    return@launch
+                }
+                soilKey = key
+                // Encrypted notebooks never write a plaintext sidecar; clear any stale one.
+                if (info.encrypted) {
+                    undoRedoPersistenceFile(notebookPath).takeIf { it.exists() }?.delete()
+                    undoRedoManager = UndoRedoManager()
+                    updateUndoRedoButtons()
+                }
+                sessionStartTime = System.currentTimeMillis()
+                val builder = Room.databaseBuilder(
+                    applicationContext,
+                    SoilDatabase::class.java,
+                    notebookPath,
+                ).addCallback(SoilDatabase.openCallback())
+                if (key != null) builder.openHelperFactory(SoilCrypto.roomFactory(key))
+                soilDatabase = builder.build()
+                loadStrokes()
+            }
         }
-
-        loadStrokes()
     }
 
     override fun onStart() {
@@ -1825,6 +1854,8 @@ class NotebookActivity : AppCompatActivity() {
 
     override fun onStop() {
         super.onStop()
+        // Encrypted notebooks never persist a plaintext sidecar — skip to avoid a plaintext leak.
+        if (encryptionInfo.encrypted) return
         // Persist undo/redo stacks so they survive process death when the app is backgrounded.
         if (!undoRedoManager.isEmpty()) {
             val path = notebookSoilPath ?: return
@@ -2975,7 +3006,7 @@ class NotebookActivity : AppCompatActivity() {
             // (written by MainActivity.reloadCoverForNotebook) and the page thumbnail must not
             // clobber it — otherwise the card reverts to the page image after every close (M9).
             if (nbId.isNotEmpty() && notebookMetadata?.cover.isNullOrEmpty()) {
-                runCatching { indexRepo.updateNotebookSnapshot(nbId, snapshot) }
+                cacheSnapshotIfAllowed(nbId, snapshot)
             }
         }
         saveStrokes(db)
@@ -3558,6 +3589,15 @@ class NotebookActivity : AppCompatActivity() {
     }
 
     /**
+     * Write [snapshot] to the index only when the notebook is unencrypted.
+     * Encrypted notebooks must never cache page content in the plaintext global index.
+     */
+    private suspend fun cacheSnapshotIfAllowed(nbId: String, snapshot: String) {
+        if (encryptionInfo.encrypted) return
+        runCatching { indexRepo.updateNotebookSnapshot(nbId, snapshot) }
+    }
+
+    /**
      * After an in-notebook cover change: re-read the notebook metadata + cover row from the open
      * .soil, refresh [notebookMetadata], and update the index snapshot the MainActivity grid card
      * displays — the cover image when one is set, otherwise [fallbackPageSnapshot]. Mirrors
@@ -3577,7 +3617,7 @@ class NotebookActivity : AppCompatActivity() {
                 } else null
                 val newSnapshot = coverB64 ?: fallbackPageSnapshot
                 if (newSnapshot != null) {
-                    runCatching { indexRepo.updateNotebookSnapshot(nbId, newSnapshot) }
+                    cacheSnapshotIfAllowed(nbId, newSnapshot)
                 }
             }
         }
