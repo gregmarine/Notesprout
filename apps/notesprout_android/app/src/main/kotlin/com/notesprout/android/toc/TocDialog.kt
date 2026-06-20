@@ -40,8 +40,24 @@ class TocDialog(
 ) {
     private val dialog = Dialog(context)
 
-    /** Pre-order flattened list of all nodes — this is what pagination iterates. */
-    private val flatNodes: List<TocNode> = buildFlatList(nodes)
+    /**
+     * In-memory expanded set: holds the heading.id of nodes that are expanded.
+     * Empty by default → TOC opens collapsed (only H1 roots visible).
+     * Not persisted; reopening the TOC starts collapsed again.
+     */
+    private val expanded = mutableSetOf<String>()
+
+    /**
+     * Currently visible nodes derived from [nodes] and [expanded].
+     * Recomputed by [computeVisibleNodes] on every expand/collapse.
+     */
+    private var visibleNodes: List<TocNode> = computeVisibleNodes()
+
+    /**
+     * Map from child heading.id → parent TocNode, built once from the full tree.
+     * Used to walk ancestors when looking for the nearest visible ancestor of the active node.
+     */
+    private val parentMap: Map<String, TocNode> = buildParentMap(nodes)
 
     private var currentTocPage = 0
     private var activeNode: TocNode? = null
@@ -117,11 +133,9 @@ class TocDialog(
         btnTocPrev.setOnClickListener { currentTocPage--; renderCurrentTocPage() }
         btnTocNext.setOnClickListener { currentTocPage++; renderCurrentTocPage() }
         btnTocLast.setOnClickListener {
-            currentTocPage = ceil(flatNodes.size.toDouble() / itemsPerPage).toInt() - 1
+            currentTocPage = ceil(visibleNodes.size.toDouble() / itemsPerPage).toInt() - 1
             renderCurrentTocPage()
         }
-
-        val density = context.resources.displayMetrics.density
 
         // Measure the actual list height after layout to compute itemsPerPage accurately.
         // This accounts for the real available space on any device without relying on density
@@ -129,16 +143,21 @@ class TocDialog(
         llTocList.viewTreeObserver.addOnGlobalLayoutListener(object : ViewTreeObserver.OnGlobalLayoutListener {
             override fun onGlobalLayout() {
                 llTocList.viewTreeObserver.removeOnGlobalLayoutListener(this)
+                val density = context.resources.displayMetrics.density
                 val usableHeightPx = llTocList.height - llTocList.paddingTop - llTocList.paddingBottom
                 val rowHeightPx = (ROW_HEIGHT_DP + ROW_SEPARATOR_DP) * density
                 itemsPerPage = maxOf(1, floor(usableHeightPx / rowHeightPx).toInt())
 
-                // Determine the active node: the last flat node whose pageIndex <= currentPageIndex.
-                activeNode = flatNodes
+                // Determine the active node from the full flat tree (regardless of collapse state).
+                val flatAll = buildFlatList(nodes)
+                activeNode = flatAll
                     .filter { it.pageIndex <= currentPageIndex }
                     .maxByOrNull { it.pageIndex }
-                val activeIndex = activeNode?.let { flatNodes.indexOf(it) } ?: -1
-                currentTocPage = if (activeIndex >= 0) activeIndex / itemsPerPage else 0
+
+                // Start on the TOC page that shows the resolved highlight node.
+                val highlightId = resolveHighlightNodeId()
+                val highlightIndex = visibleNodes.indexOfFirst { it.heading.id == highlightId }
+                currentTocPage = if (highlightIndex >= 0) highlightIndex / itemsPerPage else 0
 
                 renderCurrentTocPage()
             }
@@ -156,10 +175,71 @@ class TocDialog(
         }
     }
 
+    // -------------------------------------------------------------------------
+    // Collapse/expand helpers
+    // -------------------------------------------------------------------------
+
+    /**
+     * Pre-order walk over [nodes] that only descends into a node's children when its id
+     * is in [expanded]. This is the visible list that pagination operates on.
+     */
+    private fun computeVisibleNodes(): List<TocNode> {
+        val result = mutableListOf<TocNode>()
+        fun visit(node: TocNode) {
+            result += node
+            if (expanded.contains(node.heading.id)) {
+                node.children.forEach { visit(it) }
+            }
+        }
+        nodes.forEach { visit(it) }
+        return result
+    }
+
+    /**
+     * Toggles [nodeId] in [expanded], recomputes [visibleNodes], clamps [currentTocPage],
+     * and re-renders without dismissing the dialog.
+     */
+    private fun toggleExpanded(nodeId: String) {
+        if (expanded.contains(nodeId)) {
+            expanded.remove(nodeId)
+        } else {
+            expanded.add(nodeId)
+        }
+        visibleNodes = computeVisibleNodes()
+        // Clamp page to new bounds — do this before render so totalTocPages is correct.
+        if (visibleNodes.isNotEmpty()) {
+            val totalTocPages = ceil(visibleNodes.size.toDouble() / itemsPerPage).toInt()
+            currentTocPage = currentTocPage.coerceIn(0, totalTocPages - 1)
+        }
+        renderCurrentTocPage()
+    }
+
+    /**
+     * Returns the heading.id of the node that should be highlighted:
+     * - If the active node is visible, return its id.
+     * - Otherwise walk up the ancestor chain (via [parentMap]) to find the nearest visible ancestor.
+     * - If nothing found, return null.
+     */
+    private fun resolveHighlightNodeId(): String? {
+        val active = activeNode ?: return null
+        val visibleIds = visibleNodes.map { it.heading.id }.toSet()
+        // Walk up from active node until we find a visible one.
+        var candidate: TocNode? = active
+        while (candidate != null) {
+            if (visibleIds.contains(candidate.heading.id)) return candidate.heading.id
+            candidate = parentMap[candidate.heading.id]
+        }
+        return null
+    }
+
+    // -------------------------------------------------------------------------
+    // Rendering
+    // -------------------------------------------------------------------------
+
     private fun renderCurrentTocPage() {
         llTocList.removeAllViews()
 
-        if (flatNodes.isEmpty()) {
+        if (visibleNodes.isEmpty()) {
             val empty = TextView(context).apply {
                 text = "No headings available"
                 setTextColor(ContextCompat.getColor(context, R.color.inkBlack))
@@ -176,37 +256,55 @@ class TocDialog(
             return
         }
 
-        val totalTocPages = ceil(flatNodes.size.toDouble() / itemsPerPage).toInt()
+        val totalTocPages = ceil(visibleNodes.size.toDouble() / itemsPerPage).toInt()
         currentTocPage = currentTocPage.coerceIn(0, totalTocPages - 1)
 
         val start = currentTocPage * itemsPerPage
-        val end = minOf(start + itemsPerPage, flatNodes.size)
-        val pageNodes = flatNodes.subList(start, end)
+        val end = minOf(start + itemsPerPage, visibleNodes.size)
+        val pageNodes = visibleNodes.subList(start, end)
 
         val density = context.resources.displayMetrics.density
         val maxHeightPx = (HEADING_MAX_HEIGHT_DP * density).toInt()
         val indentPerLevelPx = (LEVEL_INDENT_DP * density).roundToInt()
         val inflater = android.view.LayoutInflater.from(context)
 
+        val highlightId = resolveHighlightNodeId()
+
         for (node in pageNodes) {
             val row = inflater.inflate(R.layout.item_toc_entry, llTocList, false)
+            val llRowContent = row.findViewById<LinearLayout>(R.id.llTocRowContent)
+            val btnToggle = row.findViewById<AppCompatImageButton>(R.id.btnTocToggle)
             val tvPageNumber = row.findViewById<TextView>(R.id.tvTocPageNumber)
             val flContainer = row.findViewById<FrameLayout>(R.id.flTocHeadingContainer)
             val tvHeadingText = row.findViewById<TextView>(R.id.tvHeadingText)
 
             tvPageNumber.text = node.pageNumber.toString()
 
-            // Apply level-based indent: H1 = no extra indent, H2 = +16dp, H3 = +32dp.
-            // Indent is added to the FrameLayout container so both text and thumbnail shift.
+            // ---- Toggle button ----
+            if (node.children.isNotEmpty()) {
+                btnToggle.visibility = View.VISIBLE
+                val isExpanded = expanded.contains(node.heading.id)
+                btnToggle.setImageResource(if (isExpanded) R.drawable.ic_minus else R.drawable.ic_plus)
+                btnToggle.setOnClickListener {
+                    toggleExpanded(node.heading.id)
+                }
+            } else {
+                // No children — invisible to preserve horizontal alignment; no click listener.
+                btnToggle.visibility = View.INVISIBLE
+                btnToggle.setOnClickListener(null)
+            }
+
+            // ---- Level indent (applied to the whole content row so the toggle, page number,
+            // divider, and text all shift together) ----
             val extraIndentPx = (node.level - 1) * indentPerLevelPx
-            val existingStart = flContainer.paddingStart
-            flContainer.setPaddingRelative(
-                existingStart + extraIndentPx,
-                flContainer.paddingTop,
-                flContainer.paddingEnd,
-                flContainer.paddingBottom,
+            llRowContent.setPaddingRelative(
+                llRowContent.paddingStart + extraIndentPx,
+                llRowContent.paddingTop,
+                llRowContent.paddingEnd,
+                llRowContent.paddingBottom,
             )
 
+            // ---- Content ----
             if (node.title.isNotEmpty()) {
                 tvHeadingText.text = node.title  // already prefix-stripped
                 tvHeadingText.visibility = View.VISIBLE
@@ -222,16 +320,23 @@ class TocDialog(
                 flContainer.addView(thumbnail)
             }
 
-            if (node.pageIndex == activeNode?.pageIndex) {
+            // ---- Active-page highlight ----
+            // Highlight the resolved visible node (which may be an ancestor when the active
+            // node's own row is collapsed away).
+            if (node.heading.id == highlightId) {
                 row.background = ContextCompat.getDrawable(context, R.drawable.bg_toc_active_entry)
             } else {
                 row.background = null
             }
 
+            // ---- Row navigation click (text/thumbnail area only via the row itself) ----
+            // The toggle button is a separate child and consumes its own clicks, so this
+            // listener won't fire when the toggle is tapped.
             row.setOnClickListener {
                 dialog.dismiss()
                 onPageSelected(node.pageId)
             }
+
             llTocList.addView(row)
         }
 
@@ -244,8 +349,8 @@ class TocDialog(
 
     companion object {
         /**
-         * Flattens [roots] into a pre-order list (parent then its children recursively).
-         * This is the display order for the paginated flat-indented TOC.
+         * Flattens [roots] into a full pre-order list (all nodes regardless of expanded state).
+         * Used only for determining the active node across the complete tree.
          */
         private fun buildFlatList(roots: List<TocNode>): List<TocNode> {
             val result = mutableListOf<TocNode>()
@@ -255,6 +360,22 @@ class TocDialog(
             }
             roots.forEach { visit(it) }
             return result
+        }
+
+        /**
+         * Builds a map of child heading.id → parent TocNode for the entire tree,
+         * enabling upward ancestor traversal for the highlight-ancestor logic.
+         */
+        private fun buildParentMap(roots: List<TocNode>): Map<String, TocNode> {
+            val map = mutableMapOf<String, TocNode>()
+            fun visit(node: TocNode) {
+                node.children.forEach { child ->
+                    map[child.heading.id] = node
+                    visit(child)
+                }
+            }
+            roots.forEach { visit(it) }
+            return map
         }
     }
 }

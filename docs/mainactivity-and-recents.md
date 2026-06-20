@@ -214,13 +214,26 @@ headings, built by `toc/TocRepository.buildTocTree(): List<TocNode>`.
   - `level 3` → child of `currentH2`; **orphan H3 is skipped**.
   - The "most recent" parent **persists across page boundaries** — an H2 on page 3 can parent under an
     H1 from page 1.
-- **`TocDialog`** flattens the tree **pre-order** and renders it **flat, indented by level**
-  (`(level − 1) × 16dp` added to each row's container). Recognized rows show `node.title`; unrecognized
-  rows render a `HeadingThumbnailView` from `node.heading`. Pagination (`itemsPerPage` measured from row
-  height) iterates the flattened list; the active page's node is highlighted.
+- **`TocDialog`** is a **collapsible cascading menu**. It opens **collapsed** — only the H1 roots are
+  visible. An in-memory `expanded: MutableSet<String>` (keyed on `node.heading.id`, empty by default,
+  **not persisted** — reopening starts collapsed) drives a `computeVisibleNodes()` pre-order walk that
+  descends into a node's `children` only when its id is in `expanded`. Each render builds the **visible
+  list**; pagination (`itemsPerPage` measured from row height; first/prev/next/last + indicator) iterates
+  the visible list, and `toggleExpanded()` recomputes it, clamps the current page, and re-renders without
+  dismissing.
+- **Row chrome** (`item_toc_entry.xml`): a leading `@+id/btnTocToggle` (`ic_plus` / `ic_minus`,
+  inkBlack) sits before the page number. It is `VISIBLE` only for nodes with children (`ic_minus` when
+  expanded, else `ic_plus`) and `INVISIBLE` otherwise (preserves alignment). The whole content row
+  (`@+id/llTocRowContent` — toggle, page number, divider, and text) is indented `(level − 1) × 16dp`,
+  so a child row shifts wholesale under its parent. Recognized rows show `node.title`; unrecognized rows
+  render a `HeadingThumbnailView` from `node.heading`. The toggle button consumes its own click, so
+  tapping it expands/collapses without navigating; tapping anywhere else on the row dismisses + navigates.
+- **Active-page highlight** — `resolveHighlightNodeId()` finds the active node (last node with
+  `pageIndex ≤ currentPageIndex`); if that node is collapsed away, it walks a `parentMap` up to the
+  nearest **visible ancestor** and highlights that row (`bg_toc_active_entry`). The dialog also opens on
+  the page that shows the resolved row.
 
-> Collapse/expand chrome is **not** in this version (it lands in a later session); the tree is shown
-> fully expanded. The TOC is distinct from the **page-name rule** (`PageHeadingNames`, see
+> The TOC is distinct from the **page-name rule** (`PageHeadingNames`, see
 > [`docs/content-objects.md`](content-objects.md)) — `TocRepository` no longer produces page names.
 
 ---

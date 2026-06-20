@@ -5,6 +5,7 @@
     android:orientation="vertical">
 
     <LinearLayout
+        android:id="@+id/llTocRowContent"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="horizontal"
@@ -13,6 +14,17 @@
         android:paddingBottom="8dp"
         android:paddingStart="4dp"
         android:paddingEnd="12dp">
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnTocToggle"
+            android:layout_width="36dp"
+            android:layout_height="36dp"
+            android:background="@android:color/transparent"
+            android:src="@drawable/ic_plus"
+            android:tint="@color/inkBlack"
+            android:scaleType="centerInside"
+            android:stateListAnimator="@null"
+            android:contentDescription="Expand or collapse" />
 
         <androidx.appcompat.widget.AppCompatTextView
             android:id="@+id/tvTocPageNumber"
