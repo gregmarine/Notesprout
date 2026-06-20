@@ -20,6 +20,7 @@ import androidx.core.view.WindowInsetsControllerCompat
 import com.notesprout.android.R
 import kotlin.math.ceil
 import kotlin.math.floor
+import kotlin.math.roundToInt
 
 // Row height = thumbnail max height (52dp) + paddingTop (8dp) + paddingBottom (8dp) from item_toc_entry.xml
 private const val ROW_HEIGHT_DP = 68f
@@ -28,16 +29,22 @@ private const val HEADING_MAX_HEIGHT_DP = 52
 private const val WIDE_SCREEN_THRESHOLD_DP = 480
 private const val SIDEBAR_WIDTH_FRACTION = 0.60f
 
+// Extra paddingStart added per heading level above 1 (16dp × (level - 1))
+private const val LEVEL_INDENT_DP = 16f
+
 class TocDialog(
     private val context: Context,
-    private val entries: List<TocEntry>,
+    private val nodes: List<TocNode>,
     private val currentPageIndex: Int = 0,
     private val onPageSelected: (pageId: String) -> Unit,
 ) {
     private val dialog = Dialog(context)
-    private var tocEntries: List<TocEntry> = entries
+
+    /** Pre-order flattened list of all nodes — this is what pagination iterates. */
+    private val flatNodes: List<TocNode> = buildFlatList(nodes)
+
     private var currentTocPage = 0
-    private var activeEntry: TocEntry? = null
+    private var activeNode: TocNode? = null
     private var itemsPerPage = 1
 
     private lateinit var flTocRoot: FrameLayout
@@ -110,7 +117,7 @@ class TocDialog(
         btnTocPrev.setOnClickListener { currentTocPage--; renderCurrentTocPage() }
         btnTocNext.setOnClickListener { currentTocPage++; renderCurrentTocPage() }
         btnTocLast.setOnClickListener {
-            currentTocPage = ceil(tocEntries.size.toDouble() / itemsPerPage).toInt() - 1
+            currentTocPage = ceil(flatNodes.size.toDouble() / itemsPerPage).toInt() - 1
             renderCurrentTocPage()
         }
 
@@ -126,10 +133,11 @@ class TocDialog(
                 val rowHeightPx = (ROW_HEIGHT_DP + ROW_SEPARATOR_DP) * density
                 itemsPerPage = maxOf(1, floor(usableHeightPx / rowHeightPx).toInt())
 
-                activeEntry = entries
+                // Determine the active node: the last flat node whose pageIndex <= currentPageIndex.
+                activeNode = flatNodes
                     .filter { it.pageIndex <= currentPageIndex }
                     .maxByOrNull { it.pageIndex }
-                val activeIndex = activeEntry?.let { entries.indexOf(it) } ?: -1
+                val activeIndex = activeNode?.let { flatNodes.indexOf(it) } ?: -1
                 currentTocPage = if (activeIndex >= 0) activeIndex / itemsPerPage else 0
 
                 renderCurrentTocPage()
@@ -151,7 +159,7 @@ class TocDialog(
     private fun renderCurrentTocPage() {
         llTocList.removeAllViews()
 
-        if (tocEntries.isEmpty()) {
+        if (flatNodes.isEmpty()) {
             val empty = TextView(context).apply {
                 text = "No headings available"
                 setTextColor(ContextCompat.getColor(context, R.color.inkBlack))
@@ -168,40 +176,53 @@ class TocDialog(
             return
         }
 
-        val totalTocPages = ceil(tocEntries.size.toDouble() / itemsPerPage).toInt()
+        val totalTocPages = ceil(flatNodes.size.toDouble() / itemsPerPage).toInt()
         currentTocPage = currentTocPage.coerceIn(0, totalTocPages - 1)
 
         val start = currentTocPage * itemsPerPage
-        val end = minOf(start + itemsPerPage, tocEntries.size)
-        val pageEntries = tocEntries.subList(start, end)
+        val end = minOf(start + itemsPerPage, flatNodes.size)
+        val pageNodes = flatNodes.subList(start, end)
 
-        val maxHeightPx = (HEADING_MAX_HEIGHT_DP * context.resources.displayMetrics.density).toInt()
+        val density = context.resources.displayMetrics.density
+        val maxHeightPx = (HEADING_MAX_HEIGHT_DP * density).toInt()
+        val indentPerLevelPx = (LEVEL_INDENT_DP * density).roundToInt()
         val inflater = android.view.LayoutInflater.from(context)
 
-        for (entry in pageEntries) {
+        for (node in pageNodes) {
             val row = inflater.inflate(R.layout.item_toc_entry, llTocList, false)
             val tvPageNumber = row.findViewById<TextView>(R.id.tvTocPageNumber)
             val flContainer = row.findViewById<FrameLayout>(R.id.flTocHeadingContainer)
             val tvHeadingText = row.findViewById<TextView>(R.id.tvHeadingText)
 
-            tvPageNumber.text = entry.pageNumber.toString()
+            tvPageNumber.text = node.pageNumber.toString()
 
-            val recognizedText = entry.heading.recognizedText
-            if (recognizedText != null) {
-                tvHeadingText.text = recognizedText.removePrefix("# ")
+            // Apply level-based indent: H1 = no extra indent, H2 = +16dp, H3 = +32dp.
+            // Indent is added to the FrameLayout container so both text and thumbnail shift.
+            val extraIndentPx = (node.level - 1) * indentPerLevelPx
+            val existingStart = flContainer.paddingStart
+            flContainer.setPaddingRelative(
+                existingStart + extraIndentPx,
+                flContainer.paddingTop,
+                flContainer.paddingEnd,
+                flContainer.paddingBottom,
+            )
+
+            if (node.title.isNotEmpty()) {
+                tvHeadingText.text = node.title  // already prefix-stripped
                 tvHeadingText.visibility = View.VISIBLE
             } else {
+                // Unrecognized heading — render stroke thumbnail
                 val thumbnail = HeadingThumbnailView(context).apply {
                     layoutParams = FrameLayout.LayoutParams(
                         FrameLayout.LayoutParams.MATCH_PARENT,
                         maxHeightPx
                     )
-                    setHeading(entry.heading, maxHeightPx)
+                    setHeading(node.heading, maxHeightPx)
                 }
                 flContainer.addView(thumbnail)
             }
 
-            if (entry.pageIndex == activeEntry?.pageIndex) {
+            if (node.pageIndex == activeNode?.pageIndex) {
                 row.background = ContextCompat.getDrawable(context, R.drawable.bg_toc_active_entry)
             } else {
                 row.background = null
@@ -209,7 +230,7 @@ class TocDialog(
 
             row.setOnClickListener {
                 dialog.dismiss()
-                onPageSelected(entry.pageId)
+                onPageSelected(node.pageId)
             }
             llTocList.addView(row)
         }
@@ -219,5 +240,21 @@ class TocDialog(
         btnTocPrev.isEnabled = currentTocPage > 0
         btnTocNext.isEnabled = currentTocPage < totalTocPages - 1
         btnTocLast.isEnabled = currentTocPage < totalTocPages - 1
+    }
+
+    companion object {
+        /**
+         * Flattens [roots] into a pre-order list (parent then its children recursively).
+         * This is the display order for the paginated flat-indented TOC.
+         */
+        private fun buildFlatList(roots: List<TocNode>): List<TocNode> {
+            val result = mutableListOf<TocNode>()
+            fun visit(node: TocNode) {
+                result += node
+                node.children.forEach { visit(it) }
+            }
+            roots.forEach { visit(it) }
+            return result
+        }
     }
 }

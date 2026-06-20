@@ -49,7 +49,7 @@ Branch: `seed`. Primary module: `apps/notesprout_android`.
 | S2 | Heading edit dialog: hash-free editing (strip/restore, level-aware) | ✅ Done |
 | S3 | Selection menu: make-heading submenu (strokes → H1/H2/H3) + icons | ✅ Done |
 | S4 | Selection menu: selected-heading submenu (change type + un-heading) + undo | ✅ Done |
-| S5 | Page-name rule update + TOC hierarchy data (TocRepository) | ⬜ Not started |
+| S5 | Page-name rule update + TOC hierarchy data (TocRepository) | ✅ Done |
 | S6 | TOC collapsible cascading UI (TocDialog) | ⬜ Not started |
 | S7 | Wrap-up: docs, polish, dead-code prune, full-device QA | ⬜ Not started |
 
@@ -285,6 +285,8 @@ temporary flattened adapter or ships together — see note).
 > model **and** a minimal `TocDialog` adaptation that renders the tree *flat* (all nodes, indented by
 > level, no collapse yet); S6 then adds collapse/expand chrome. Alternatively S5+S6 may be done as one
 > larger session if the subagent prefers — note the choice in status.
+>
+> **Choice made:** S5 shipped **alone** (flat indented TOC, no collapse). S6 adds collapse/expand.
 
 ### Files & changes
 

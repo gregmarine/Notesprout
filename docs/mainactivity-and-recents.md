@@ -198,6 +198,33 @@ in every extras list.
 
 ---
 
+## Table of Contents (TOC)
+
+The notebook TOC (`btnToc` → `toc/TocDialog`) is a **hierarchical** H1→H2→H3 outline of the notebook's
+headings, built by `toc/TocRepository.buildTocTree(): List<TocNode>`.
+
+- **`TocNode`** (`toc/TocNode.kt`) — `pageNumber`, `pageIndex`, `pageId`, `level` (1–3), `title`
+  (prefix-stripped; `""` for unrecognized stroke headings), `heading: HeadingStroke`, and a mutable
+  `children` list. Returned list holds the H1 roots; H2/H3 hang off `children`.
+- **Tree build** — all non-deleted headings are resolved to their page (layer→page map), sorted into
+  **document order** (`pageIndex` → `boundingBox.top` → `left`), then walked once with running
+  `currentH1`/`currentH2` pointers:
+  - `level 1` → new root; resets `currentH2`.
+  - `level 2` → child of `currentH1`; **orphan H2 (no preceding H1) is skipped**.
+  - `level 3` → child of `currentH2`; **orphan H3 is skipped**.
+  - The "most recent" parent **persists across page boundaries** — an H2 on page 3 can parent under an
+    H1 from page 1.
+- **`TocDialog`** flattens the tree **pre-order** and renders it **flat, indented by level**
+  (`(level − 1) × 16dp` added to each row's container). Recognized rows show `node.title`; unrecognized
+  rows render a `HeadingThumbnailView` from `node.heading`. Pagination (`itemsPerPage` measured from row
+  height) iterates the flattened list; the active page's node is highlighted.
+
+> Collapse/expand chrome is **not** in this version (it lands in a later session); the tree is shown
+> fully expanded. The TOC is distinct from the **page-name rule** (`PageHeadingNames`, see
+> [`docs/content-objects.md`](content-objects.md)) — `TocRepository` no longer produces page names.
+
+---
+
 ## Recents System
 
 Device-local list of the most recently opened notebooks, surfaced in two places with different UI:

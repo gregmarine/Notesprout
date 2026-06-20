@@ -844,12 +844,12 @@ class NotebookActivity : AppCompatActivity() {
         binding.btnToc.setOnClickListener {
             val db = soilDatabase ?: return@setOnClickListener
             lifecycleScope.launch {
-                val entries = withContext(Dispatchers.IO) {
-                    TocRepository(db.notebookDao()).buildTocEntries()
+                val tree = withContext(Dispatchers.IO) {
+                    TocRepository(db.notebookDao()).buildTocTree()
                 }
                 TocDialog(
                     context = this@NotebookActivity,
-                    entries = entries,
+                    nodes = tree,
                     currentPageIndex = currentPageIndex,
                     onPageSelected = { pageId ->
                         val index = pages.indexOfFirst { it.id == pageId }

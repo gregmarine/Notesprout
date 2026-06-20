@@ -42,23 +42,23 @@
   and is wired across all four undo dispatch tiers (`pageIdFor`, cross-page DB, same-page DB, same-page
   in-memory) — the DB handlers write the stored box directly (no re-measure).
 
-### Top-heading-as-page-name rule
+### Heading-as-page-name rule
 
-A page's display name is the text of its **topmost heading**: smallest `boundingBox.top`, ties broken
-by smallest `left`; the label is `recognizedText` with a leading `"# "` markdown prefix stripped. When
-no heading qualifies (none present, or topmost has null/empty `recognizedText`), callers fall back to
-`Page {N}`.
+A page's display name is the text of its **top-left-most H1** (`level == 1`); if the page has no H1,
+its **top-left-most heading of any level**. "Top-left-most" = smallest `boundingBox.top`, ties broken
+by smallest `left`. The label is the chosen heading's `recognizedText` with its markdown prefix stripped
+via `HeadingObject.stripHeadingPrefix` (handles `#`/`##`/`###`). When the chosen heading has null/empty
+`recognizedText` — including the case where a page's selected H1 is a stroke-only heading — callers fall
+back to `Page {N}` (the rule does **not** skip past a stroke-only H1 to a recognized lower-level heading).
 
-This rule is implemented in **two independent places** that read pages via different paths:
+The rule lives in **one place** now: **`data/PageHeadingNames.kt`** (`topHeadingNamesByPageId`), which
+feeds the **page index grid** (`PageIndexActivity`) and the **link target picker**
+(`LinkTargetPickerActivity`). It reads the `.soil` over raw read-only SQLite (not the DAO).
 
-- **`toc/TocRepository.kt`** — the notebook TOC, via the Room `NotebookDao`.
-- **`data/PageHeadingNames.kt`** (`topHeadingNamesByPageId`) — the **page index grid**
-  (`PageIndexActivity`) and the **link target picker** (`LinkTargetPickerActivity`), which read the
-  `.soil` over raw read-only SQLite (not the DAO), so the rule is re-implemented there rather than reused.
-
-⚠️ **Keep these two in sync.** If the page-name rule changes (tie-breaking, prefix stripping, fallback,
-which heading wins), **both** `TocRepository` and `PageHeadingNames` must be updated together — otherwise
-the TOC and the page-index/link labels will disagree.
+> **`TocRepository` no longer carries the page-name rule.** As of the Heading Levels feature (S5) it
+> builds the **hierarchical TOC tree** (`buildTocTree(): List<TocNode>`, H1→H2→H3) instead of one
+> name-per-page — see [`docs/mainactivity-and-recents.md`](mainactivity-and-recents.md). Only
+> `PageHeadingNames` owns the page-name rule; there is no longer a second copy to keep in sync.
 
 > **Known gap (intentional, do not "fix" without discussion):** headings nested **inside link objects**
 > are skipped by **both** the TOC and these page names — they never become a page's name. Noticed in
