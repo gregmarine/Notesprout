@@ -26,7 +26,7 @@ When the user reports all manual tests pass, Claude marks the session ✅ DONE a
 | S1 | Crypto foundation (deps, native lib, PassphraseStore, SoilCrypto) | ✅ DONE |
 | S2 | Index metadata + key-resolution service + passphrase dialog | ✅ DONE |
 | S3 | Open path — opening an encrypted notebook | ✅ DONE |
-| S4 | Create an encrypted notebook (create dialog + global bootstrap) | ⬜ NOT STARTED |
+| S4 | Create an encrypted notebook (create dialog + global bootstrap) | ✅ DONE |
 | S5 | Convert: encrypt ⇄ decrypt from MainActivity context menu | ⬜ NOT STARTED |
 | S6 | Toolbar lock / lock-off buttons (close → encrypt → reopen) | ⬜ NOT STARTED |
 | S7 | Lock indicator in notebook lists + cover/snapshot read guards | ⬜ NOT STARTED |
@@ -712,6 +712,10 @@ Same G10 command.
   persistence). Could encrypt the sidecar with the session key, or store it inside the `.soil`.
 - **Change passphrase** — re-key an encrypted notebook (`PRAGMA rekey`) or change scope (global↔notebook)
   without a full decrypt/re-encrypt round trip.
+- **Global passphrase rotation** — change the global passphrase and batch re-key every notebook in the
+  index whose `keyScope == GLOBAL` in a single operation. Requires iterating all global-scoped notebooks,
+  opening each with the old key, running `PRAGMA rekey`, and updating `PassphraseStore`. Must be
+  cancellable/resumable so a crash mid-batch doesn't leave notebooks split across two keys.
 - **Global passphrase management UI** — view/clear/reset the cached global; "forget on this device".
 - **Biometric gate** — optionally require fingerprint/face to release the cached global passphrase.
 - **Toolbar config auto-merge** — migrate existing persisted toolbar orders to include new buttons.
@@ -722,4 +726,4 @@ Same G10 command.
   SQLCipher on desktop (true portability test) and document exact cipher params.
 - **Bulk operations** — encrypt/decrypt multiple notebooks; encrypt a whole folder.
 - **Recents/search index** — ensure no encrypted page text leaks into any future search index.
-```
+- **Encryption choice in TemplateBrowserActivity** — move the encryption scope picker (currently a separate post-picker dialog) into the "New Notebook" flow inside `TemplateBrowserActivity` so name, template, and encryption are chosen in one cohesive screen.

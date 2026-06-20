@@ -97,6 +97,9 @@ object KeyResolver {
     }
 
     private suspend fun resolveNotebookForOpen(activity: Activity, notebookId: String): String? {
+        // Consume the single-use cache set immediately after notebook creation so the user
+        // isn't prompted a third time (they just typed it twice to set it).
+        PassphraseCache.consumeOnce(notebookId)?.let { return it }
         return promptAndVerify(
             activity, notebookId,
             title = "Notebook Passphrase",

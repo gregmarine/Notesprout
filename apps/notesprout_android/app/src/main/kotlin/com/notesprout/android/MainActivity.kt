@@ -33,6 +33,10 @@ import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.lifecycleScope
+import com.notesprout.android.crypto.KeyResolver
+import com.notesprout.android.crypto.KeyScope
+import com.notesprout.android.crypto.PassphraseCache
+import com.notesprout.android.crypto.SoilCrypto
 import com.notesprout.android.data.BoundingBox
 import com.notesprout.android.data.NotebookMetadata
 import com.notesprout.android.data.PageData
@@ -202,7 +206,7 @@ class MainActivity : AppCompatActivity() {
                 Toast.makeText(this@MainActivity, "A notebook named \"$name\" already exists", Toast.LENGTH_SHORT).show()
                 return@launch
             }
-            createNotebook(name, templateId)
+            showEncryptionScopePicker(name, templateId)
         }
     }
 
@@ -1355,141 +1359,191 @@ class MainActivity : AppCompatActivity() {
 
     // ── Notebook creation ─────────────────────────────────────────────────────
 
-    private fun createNotebook(name: String, libraryTemplateId: String = "") {
-        lifecycleScope.launch {
-            try {
-                validateNotebookName(name)?.let { error ->
-                    Toast.makeText(this@MainActivity, error, Toast.LENGTH_SHORT).show()
-                    return@launch
-                }
-
-                // 1. Create the index entry — its id becomes the filename.
-                val entity = withContext(Dispatchers.IO) {
-                    repository.createNotebook(name, currentParentId)
-                }
-
-                // Load the chosen library template (if any) before opening the .soil.
-                data class SeedTemplate(val width: Int, val height: Int, val name: String, val image: String)
-                val seed: SeedTemplate? = if (libraryTemplateId.isNotEmpty()) {
-                    withContext(Dispatchers.IO) {
-                        val e = repository.getTemplate(libraryTemplateId)
-                        val t = e?.let { com.notesprout.android.data.index.TemplateObject.fromJson(it.data) }
-                        if (e != null && t != null && t.image.isNotEmpty())
-                            SeedTemplate(t.width, t.height, e.name, t.image) else null
-                    }
-                } else null
-
-                // 2. Create the physical .soil file at its UUID path.
-                val soilPath = soilFile(this@MainActivity, entity.id)
-
-                withContext(Dispatchers.IO) {
-                    val db = SQLiteDatabase.openOrCreateDatabase(soilPath, null)
-                    try {
-                        db.rawQuery("PRAGMA journal_mode = WAL",        null).use { it.moveToFirst() }
-                        db.rawQuery("PRAGMA wal_autocheckpoint = 100",  null).use { it.moveToFirst() }
-                        db.rawQuery("PRAGMA auto_vacuum = INCREMENTAL", null).use { it.moveToFirst() }
-
-                        db.execSQL(
-                            """
-                            CREATE TABLE IF NOT EXISTS notebook (
-                                id          TEXT    NOT NULL PRIMARY KEY,
-                                parentId    TEXT    NOT NULL,
-                                boundingBox TEXT    NOT NULL,
-                                "order"     INTEGER NOT NULL DEFAULT 0,
-                                createdAt   INTEGER NOT NULL,
-                                updatedAt   INTEGER NOT NULL,
-                                deletedAt   INTEGER,
-                                type        TEXT    NOT NULL,
-                                data        TEXT    NOT NULL
-                            )
-                            """.trimIndent()
-                        )
-                        db.execSQL(
-                            """
-                            CREATE INDEX IF NOT EXISTS idx_notebook_parent_order
-                                ON notebook(parentId, "order", deletedAt)
-                            """.trimIndent()
-                        )
-
-                        val screenBounds = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                            windowManager.currentWindowMetrics.bounds
-                        } else {
-                            val dm = resources.displayMetrics
-                            android.graphics.Rect(0, 0, dm.widthPixels, dm.heightPixels)
-                        }
-                        val screenW = screenBounds.width().toFloat()
-                        val screenH = screenBounds.height().toFloat()
-                        val bboxJson = BoundingBox(0f, 0f, screenW, screenH).toJson()
-                        val now = System.currentTimeMillis()
-
-                        val insertSql =
-                            """INSERT INTO notebook (id, parentId, boundingBox, "order", createdAt, updatedAt, deletedAt, type, data)
-                               VALUES (?, ?, ?, 0, ?, ?, NULL, ?, ?)"""
-
-                        val notebookId = UUID.randomUUID().toString()
-                        val pageId     = UUID.randomUUID().toString()
-
-                        val notebookDataJson = NotebookMetadata(
-                            id             = notebookId,
-                            title          = name,
-                            cover          = "",
-                            lastOpenedPage = pageId,
-                        ).toJson()
-                        db.execSQL(insertSql, arrayOf(
-                            notebookId, "", "{}", now, now, "notebook", notebookDataJson
-                        ))
-
-                        val firstPageTemplate = if (seed != null) UUID.randomUUID().toString() else ""
-                        db.execSQL(insertSql, arrayOf(
-                            pageId, notebookId, bboxJson, now, now, "page",
-                            PageData(width = screenW, height = screenH, template = firstPageTemplate).toJson()
-                        ))
-                        if (seed != null) {
-                            val tmplBbox = BoundingBox(0f, 0f, seed.width.toFloat(), seed.height.toFloat()).toJson()
-                            db.execSQL(insertSql, arrayOf(
-                                firstPageTemplate, notebookId, tmplBbox, now, now, "template",
-                                com.notesprout.android.data.TemplateData(seed.width, seed.height, seed.name, seed.image).toJson()
-                            ))
-                        }
-
-                        val layerId = UUID.randomUUID().toString()
-                        db.execSQL(insertSql, arrayOf(
-                            layerId, pageId, bboxJson, now, now, "layer",
-                            """{"label":"Content","isLocked":false,"isVisible":true}"""
-                        ))
-
-                        db.rawQuery("PRAGMA incremental_vacuum",       null).use { it.moveToFirst() }
-                        db.rawQuery("PRAGMA wal_checkpoint(TRUNCATE)", null).use { it.moveToFirst() }
-                    } finally {
-                        db.close()
-                    }
-
-                    // Remove any 0-byte rollback journal from initialisation.
-                    java.io.File("${soilPath.absolutePath}-journal").takeIf { it.exists() }?.delete()
-                }
-
-                Toast.makeText(this@MainActivity, "Notebook '$name' created", Toast.LENGTH_SHORT).show()
-
-                if (libraryTemplateId.isNotEmpty()) {
-                    TemplateRecentsManager.recordUse(this@MainActivity, libraryTemplateId)
-                }
-
-                // Rescan and navigate to the page containing the new notebook.
-                scanAndRender()
-                val spec = gridSpec
-                if (spec != null && spec.itemsPerPage > 0) {
-                    val idx = items.indexOfFirst {
-                        it is NotebookListItem.Notebook && it.entity.id == entity.id
-                    }
-                    if (idx >= 0) navigatePage(idx / spec.itemsPerPage)
-                }
-
-                // Open the new notebook immediately.
-                launchNotebookActivity(entity)
-
-            } catch (e: Exception) {
-                Toast.makeText(this@MainActivity, "Error: ${e.message}", Toast.LENGTH_LONG).show()
+    /** Show an e-ink-safe scope picker before creating the notebook. Must be called on Main. */
+    private fun showEncryptionScopePicker(name: String, libraryTemplateId: String) {
+        ActionSheetDialog(this)
+            .title("Encryption")
+            .addAction(null, "No Encryption") {
+                lifecycleScope.launch { createNotebook(name, libraryTemplateId, scope = null) }
             }
+            .addAction(null, "Encrypt (Global Passphrase)") {
+                lifecycleScope.launch { createNotebook(name, libraryTemplateId, scope = KeyScope.GLOBAL) }
+            }
+            .addAction(null, "Encrypt (Notebook Passphrase)") {
+                lifecycleScope.launch { createNotebook(name, libraryTemplateId, scope = KeyScope.NOTEBOOK) }
+            }
+            .show()
+    }
+
+    private suspend fun createNotebook(name: String, libraryTemplateId: String = "", scope: KeyScope? = null) {
+        try {
+            validateNotebookName(name)?.let { error ->
+                Toast.makeText(this@MainActivity, error, Toast.LENGTH_SHORT).show()
+                return
+            }
+
+            // Resolve the encryption key before touching the index — abort cleanly on cancel.
+            val key: String? = if (scope != null) {
+                KeyResolver.resolveForConvertToEncrypted(this, scope) ?: return
+            } else null
+
+            // 1. Create the index entry — its id becomes the filename.
+            val entity = withContext(Dispatchers.IO) {
+                repository.createNotebook(name, currentParentId)
+            }
+
+            // Load the chosen library template (if any) before opening the .soil.
+            data class SeedTemplate(val width: Int, val height: Int, val name: String, val image: String)
+            val seed: SeedTemplate? = if (libraryTemplateId.isNotEmpty()) {
+                withContext(Dispatchers.IO) {
+                    val e = repository.getTemplate(libraryTemplateId)
+                    val t = e?.let { com.notesprout.android.data.index.TemplateObject.fromJson(it.data) }
+                    if (e != null && t != null && t.image.isNotEmpty())
+                        SeedTemplate(t.width, t.height, e.name, t.image) else null
+                }
+            } else null
+
+            // 2. Create the physical .soil file at its UUID path.
+            val soilPath = soilFile(this@MainActivity, entity.id)
+
+            // Screen bounds are needed on the main thread before the IO block.
+            val screenBounds = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                windowManager.currentWindowMetrics.bounds
+            } else {
+                val dm = resources.displayMetrics
+                android.graphics.Rect(0, 0, dm.widthPixels, dm.heightPixels)
+            }
+
+            withContext(Dispatchers.IO) {
+                // Open with SQLCipher for encrypted notebooks, standard SQLite otherwise.
+                // Both DB types expose identical execSQL / rawQuery APIs.
+                val exec: (String, Array<Any?>?) -> Unit
+                val pragma: (String) -> Unit
+                val closeDb: () -> Unit
+                if (key != null) {
+                    val db = SoilCrypto.openRawEncrypted(soilPath, key)
+                    exec = { sql, args -> if (args != null) db.execSQL(sql, args) else db.execSQL(sql) }
+                    pragma = { sql -> db.rawQuery(sql, null).use { it.moveToFirst() } }
+                    closeDb = { db.close() }
+                } else {
+                    val db = SQLiteDatabase.openOrCreateDatabase(soilPath, null)
+                    exec = { sql, args -> if (args != null) db.execSQL(sql, args) else db.execSQL(sql) }
+                    pragma = { sql -> db.rawQuery(sql, null).use { it.moveToFirst() } }
+                    closeDb = { db.close() }
+                }
+
+                try {
+                    pragma("PRAGMA journal_mode = WAL")
+                    pragma("PRAGMA wal_autocheckpoint = 100")
+                    pragma("PRAGMA auto_vacuum = INCREMENTAL")
+
+                    exec(
+                        """
+                        CREATE TABLE IF NOT EXISTS notebook (
+                            id          TEXT    NOT NULL PRIMARY KEY,
+                            parentId    TEXT    NOT NULL,
+                            boundingBox TEXT    NOT NULL,
+                            "order"     INTEGER NOT NULL DEFAULT 0,
+                            createdAt   INTEGER NOT NULL,
+                            updatedAt   INTEGER NOT NULL,
+                            deletedAt   INTEGER,
+                            type        TEXT    NOT NULL,
+                            data        TEXT    NOT NULL
+                        )
+                        """.trimIndent(),
+                        null
+                    )
+                    exec(
+                        """
+                        CREATE INDEX IF NOT EXISTS idx_notebook_parent_order
+                            ON notebook(parentId, "order", deletedAt)
+                        """.trimIndent(),
+                        null
+                    )
+
+                    val screenW = screenBounds.width().toFloat()
+                    val screenH = screenBounds.height().toFloat()
+                    val bboxJson = BoundingBox(0f, 0f, screenW, screenH).toJson()
+                    val now = System.currentTimeMillis()
+
+                    val insertSql =
+                        """INSERT INTO notebook (id, parentId, boundingBox, "order", createdAt, updatedAt, deletedAt, type, data)
+                           VALUES (?, ?, ?, 0, ?, ?, NULL, ?, ?)"""
+
+                    val notebookId = UUID.randomUUID().toString()
+                    val pageId     = UUID.randomUUID().toString()
+
+                    val notebookDataJson = NotebookMetadata(
+                        id             = notebookId,
+                        title          = name,
+                        cover          = "",
+                        lastOpenedPage = pageId,
+                    ).toJson()
+                    exec(insertSql, arrayOf(notebookId, "", "{}", now, now, "notebook", notebookDataJson))
+
+                    val firstPageTemplate = if (seed != null) UUID.randomUUID().toString() else ""
+                    exec(insertSql, arrayOf(
+                        pageId, notebookId, bboxJson, now, now, "page",
+                        PageData(width = screenW, height = screenH, template = firstPageTemplate).toJson()
+                    ))
+                    if (seed != null) {
+                        val tmplBbox = BoundingBox(0f, 0f, seed.width.toFloat(), seed.height.toFloat()).toJson()
+                        exec(insertSql, arrayOf(
+                            firstPageTemplate, notebookId, tmplBbox, now, now, "template",
+                            com.notesprout.android.data.TemplateData(seed.width, seed.height, seed.name, seed.image).toJson()
+                        ))
+                    }
+
+                    val layerId = UUID.randomUUID().toString()
+                    exec(insertSql, arrayOf(
+                        layerId, pageId, bboxJson, now, now, "layer",
+                        """{"label":"Content","isLocked":false,"isVisible":true}"""
+                    ))
+
+                    pragma("PRAGMA incremental_vacuum")
+                    pragma("PRAGMA wal_checkpoint(TRUNCATE)")
+                } finally {
+                    closeDb()
+                }
+
+                // Remove any 0-byte rollback journal from initialisation.
+                java.io.File("${soilPath.absolutePath}-journal").takeIf { it.exists() }?.delete()
+            }
+
+            // Record encryption state in the index (also clears snapshot for encrypted notebooks).
+            if (scope != null) {
+                withContext(Dispatchers.IO) {
+                    repository.setEncryptionState(entity.id, encrypted = true, keyScope = scope)
+                }
+            }
+
+            Toast.makeText(this@MainActivity, "Notebook '$name' created", Toast.LENGTH_SHORT).show()
+
+            if (libraryTemplateId.isNotEmpty()) {
+                TemplateRecentsManager.recordUse(this@MainActivity, libraryTemplateId)
+            }
+
+            // Rescan and navigate to the page containing the new notebook.
+            scanAndRender()
+            val spec = gridSpec
+            if (spec != null && spec.itemsPerPage > 0) {
+                val idx = items.indexOfFirst {
+                    it is NotebookListItem.Notebook && it.entity.id == entity.id
+                }
+                if (idx >= 0) navigatePage(idx / spec.itemsPerPage)
+            }
+
+            // For notebook-scoped encryption, seed the single-use cache so the immediate open
+            // doesn't prompt — the user just typed the passphrase twice to set it.
+            if (scope == KeyScope.NOTEBOOK && key != null) {
+                PassphraseCache.storeOnce(entity.id, key)
+            }
+
+            // Open the new notebook immediately.
+            launchNotebookActivity(entity)
+
+        } catch (e: Exception) {
+            Toast.makeText(this@MainActivity, "Error: ${e.message}", Toast.LENGTH_LONG).show()
         }
     }
 
