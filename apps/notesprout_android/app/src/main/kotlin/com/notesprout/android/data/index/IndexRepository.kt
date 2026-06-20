@@ -6,6 +6,8 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.util.UUID
 
+private val lenientJson = Json { ignoreUnknownKeys = true }
+
 class IndexRepository(private val dao: ObjectDao) {
 
     // region Folder operations
@@ -340,7 +342,9 @@ class IndexRepository(private val dao: ObjectDao) {
             it.type == ObjectType.LIST && it.id != PINNED_TEMPLATES_LIST_ID
         }
         for (listEntity in lists) {
-            val listObj = Json.decodeFromString<ListObject>(listEntity.data)
+            val listObj = try {
+                lenientJson.decodeFromString<ListObject>(listEntity.data)
+            } catch (_: Exception) { continue }
             if (notebookId in listObj.notebookIds) {
                 dao.update(
                     listEntity.copy(

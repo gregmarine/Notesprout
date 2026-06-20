@@ -29,7 +29,7 @@ When the user reports all manual tests pass, Claude marks the session ✅ DONE a
 | S4 | Create an encrypted notebook (create dialog + global bootstrap) | ✅ DONE |
 | S5 | Convert: encrypt ⇄ decrypt from MainActivity context menu | ✅ DONE |
 | S6 | Toolbar lock / lock-off buttons (close → encrypt → reopen) | ✅ DONE |
-| S7 | Lock indicator in notebook lists + cover/snapshot read guards | ⬜ NOT STARTED |
+| S7 | Lock indicator in notebook lists + cover/snapshot read guards | ✅ DONE |
 | S8 | Operational read/write sites (export, page copy, link/page pickers) | ⬜ NOT STARTED |
 | S9 | Wrap-up (docs, edge cases, P2P + G10 test, Phase 2) | ⬜ NOT STARTED |
 
@@ -548,7 +548,7 @@ Same G10 command.
 
 ## S7 — Lock Indicator in Lists + Cover/Snapshot Read Guards
 
-**Status:** ⬜ NOT STARTED
+**Status:** ✅ DONE
 
 **Goal:** Every notebook list shows the Tabler `lock` icon as the cover for encrypted notebooks, and no
 code path attempts to read an encrypted `.soil` for a cover/snapshot (which would fail or, worse, cache

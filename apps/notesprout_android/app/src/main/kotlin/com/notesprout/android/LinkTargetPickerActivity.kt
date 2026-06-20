@@ -827,10 +827,15 @@ class LinkTargetPickerActivity : AppCompatActivity() {
                 }
                 card.addView(icon, FrameLayout.LayoutParams(iconSize, iconSize, Gravity.CENTER))
 
-                val snapshotB64 = try {
-                    Json.decodeFromString<NotebookObject>(item.entity.data).snapshot
+                val notebookObj = try {
+                    Json.decodeFromString<NotebookObject>(item.entity.data)
                 } catch (_: Exception) { null }
-                decodeSnapshotInto(snapshotB64, cover, icon)
+
+                if (notebookObj?.encrypted == true) {
+                    icon.setImageResource(R.drawable.ic_lock_cover)
+                } else {
+                    decodeSnapshotInto(notebookObj?.snapshot, cover, icon)
+                }
             }
         }
 

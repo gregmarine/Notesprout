@@ -29,7 +29,8 @@ import java.io.File
  * write permission), stranding those sidecars in the notebook folder. [checkpointTruncateAndClose]
  * checkpoint-truncates and closes so SQLite removes both, keeping the folder showing only `.soil`.
  */
-suspend fun loadNotebookCoverBitmap(file: File): Bitmap? = withContext(Dispatchers.IO) {
+suspend fun loadNotebookCoverBitmap(file: File, encrypted: Boolean = false): Bitmap? = withContext(Dispatchers.IO) {
+    if (encrypted) return@withContext null
     var db: SQLiteDatabase? = null
     try {
         db = SQLiteDatabase.openDatabase(file.absolutePath, null, SQLiteDatabase.OPEN_READWRITE)

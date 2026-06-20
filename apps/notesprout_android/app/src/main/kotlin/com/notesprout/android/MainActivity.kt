@@ -975,25 +975,31 @@ class MainActivity : AppCompatActivity() {
                 card.addView(icon, FrameLayout.LayoutParams(iconSize, iconSize, Gravity.CENTER))
 
                 // Read snapshot from the index — no .soil file access during list rendering.
-                val snapshotB64 = try {
-                    Json.decodeFromString<NotebookObject>(item.entity.data).snapshot
+                val notebookObj = try {
+                    Json.decodeFromString<NotebookObject>(item.entity.data)
                 } catch (_: Exception) { null }
 
-                if (snapshotB64 != null) {
-                    val job = lifecycleScope.launch {
-                        val bitmap = withContext(Dispatchers.IO) {
-                            try {
-                                val bytes = Base64.decode(snapshotB64, Base64.DEFAULT)
-                                BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
-                            } catch (_: Exception) { null }
+                if (notebookObj?.encrypted == true) {
+                    // Encrypted: show lock icon; never decode a snapshot (plaintext-leak guard).
+                    icon.setImageResource(R.drawable.ic_lock_cover)
+                } else {
+                    val snapshotB64 = notebookObj?.snapshot
+                    if (snapshotB64 != null) {
+                        val job = lifecycleScope.launch {
+                            val bitmap = withContext(Dispatchers.IO) {
+                                try {
+                                    val bytes = Base64.decode(snapshotB64, Base64.DEFAULT)
+                                    BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                                } catch (_: Exception) { null }
+                            }
+                            if (bitmap != null) {
+                                coverImage.setImageBitmap(bitmap)
+                                coverImage.visibility = View.VISIBLE
+                                icon.visibility       = View.GONE
+                            }
                         }
-                        if (bitmap != null) {
-                            coverImage.setImageBitmap(bitmap)
-                            coverImage.visibility = View.VISIBLE
-                            icon.visibility       = View.GONE
-                        }
+                        coverLoadJobs.add(job)
                     }
-                    coverLoadJobs.add(job)
                 }
             }
         }
@@ -2008,6 +2014,11 @@ class MainActivity : AppCompatActivity() {
      * future list renders can use the cached value without opening the .soil.
      */
     private suspend fun loadAndCacheSnapshot(entity: ObjectEntity): Bitmap? {
+        val isEncrypted = try {
+            Json.decodeFromString<NotebookObject>(entity.data).encrypted
+        } catch (_: Exception) { false }
+        if (isEncrypted) return null
+
         val file = soilFile(this, entity.id)
         if (!file.exists()) return null
         var db: android.database.sqlite.SQLiteDatabase? = null
@@ -2051,6 +2062,11 @@ class MainActivity : AppCompatActivity() {
      * base64 to the index, then rescans so the grid card shows the updated image.
      */
     private fun reloadCoverForNotebook(entity: ObjectEntity) {
+        val isEncrypted = try {
+            Json.decodeFromString<NotebookObject>(entity.data).encrypted
+        } catch (_: Exception) { false }
+        if (isEncrypted) return
+
         lifecycleScope.launch {
             withContext(Dispatchers.IO) {
                 try {
