@@ -1127,7 +1127,8 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
                         .filter { it.id in lassoSelectedIds }
                         .map { h -> HeadingStroke(h.id, android.graphics.RectF(h.boundingBox),
                             h.strokes.map { s -> LiveStroke(s.id, s.points.map { PointF(it.x, it.y) }) },
-                            recognizedText = h.recognizedText) }
+                            recognizedText = h.recognizedText,
+                            level = h.level) }
                     dragOriginalTextObjects = textObjects
                         .filter { it.id in lassoSelectedIds }
                         .map { TextRender(it.id, RectF(it.boundingBox), it.text) }
@@ -1232,6 +1233,7 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
                                     s.copy(points = s.points.map { PointF(it.x + dragDx, it.y + dragDy) })
                                 },
                                 recognizedText = h.recognizedText,
+                                level = h.level,
                             )
                         }
                         // Translate selected text objects (boundingBox only — text content unchanged).

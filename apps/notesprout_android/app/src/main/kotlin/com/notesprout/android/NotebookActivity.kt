@@ -955,6 +955,7 @@ class NotebookActivity : AppCompatActivity() {
                     heading.id, RectF(heading.boundingBox),
                     heading.strokes.map { s -> LiveStroke(s.id, s.points.map { PointF(it.x, it.y) }) },
                     recognizedText = heading.recognizedText,
+                    level = heading.level,
                 )
                 lifecycleScope.launch(Dispatchers.IO) {
                     db.notebookDao().softDeleteById(heading.id, deletedAt)
@@ -1263,7 +1264,8 @@ class NotebookActivity : AppCompatActivity() {
                         val capturedHeadings  = erasedHeadings.map { h ->
                             HeadingStroke(h.id, RectF(h.boundingBox),
                                 h.strokes.map { s -> LiveStroke(s.id, s.points.map { PointF(it.x, it.y) }) },
-                                recognizedText = h.recognizedText)
+                                recognizedText = h.recognizedText,
+                                level = h.level)
                         }
                         val erasedTexts    = drawingView.getTextObjects().filter { it.id in erasedSet }
                         val erasedTextIds  = erasedTexts.mapTo(mutableSetOf()) { it.id }
@@ -1331,6 +1333,7 @@ class NotebookActivity : AppCompatActivity() {
                             boundingBox    = RectF(h.boundingBox),
                             strokes        = h.strokes.map { s -> LiveStroke(s.id, s.points.map { PointF(it.x, it.y) }) },
                             recognizedText = h.recognizedText,
+                            level          = h.level,
                         )
                     }
                     val erasedTextIds = erasedTextObjects.mapTo(mutableSetOf()) { it.id }
@@ -1426,7 +1429,7 @@ class NotebookActivity : AppCompatActivity() {
                             for (heading in movedHeadings) {
                                 val bboxJson = heading.boundingBox.toBoundingBoxJson()
                                 db.notebookDao().updateHeadingData(
-                                    heading.id, bboxJson, HeadingObject(heading.strokes, heading.recognizedText).toJson(), now
+                                    heading.id, bboxJson, HeadingObject(heading.strokes, heading.recognizedText, heading.level).toJson(), now
                                 )
                             }
                             for (textObj in movedTextObjects) {
@@ -3108,7 +3111,7 @@ class NotebookActivity : AppCompatActivity() {
             val box = row.parseBoundingBox() ?: return@mapNotNull null
             val headingObj = runCatching { HeadingObject.fromJson(row.data) }.getOrNull()
                 ?: return@mapNotNull null
-            HeadingStroke(id = row.id, boundingBox = box, strokes = headingObj.strokes, recognizedText = headingObj.recognizedText)
+            HeadingStroke(id = row.id, boundingBox = box, strokes = headingObj.strokes, recognizedText = headingObj.recognizedText, level = headingObj.level)
         }
     }
 
@@ -4043,7 +4046,8 @@ class NotebookActivity : AppCompatActivity() {
             strokes  = strokes.map { LiveStroke(it.id, it.points.map { pt -> PointF(pt.x, pt.y) }) },
             headings = headings.map { h -> HeadingStroke(h.id, RectF(h.boundingBox),
                 h.strokes.map { s -> LiveStroke(s.id, s.points.map { PointF(it.x, it.y) }) },
-                recognizedText = h.recognizedText) },
+                recognizedText = h.recognizedText,
+                level = h.level) },
             boundingBox = box,
             textObjects = textObjects.map { t -> TextRender(t.id, RectF(t.boundingBox), t.text, t.strokes) },
             lineObjects = lineObjects.map { l -> l.copy(boundingBox = RectF(l.boundingBox)) },
@@ -4087,6 +4091,7 @@ class NotebookActivity : AppCompatActivity() {
                     )
                 },
                 recognizedText = h.recognizedText,
+                level = h.level,
             )
         }
         val newTextObjects = clip.textObjects.map { t ->
@@ -4153,7 +4158,7 @@ class NotebookActivity : AppCompatActivity() {
                                 createdAt   = now,
                                 updatedAt   = now,
                                 deletedAt   = null,
-                                data        = HeadingObject(heading.strokes, heading.recognizedText).toJson(),
+                                data        = HeadingObject(heading.strokes, heading.recognizedText, heading.level).toJson(),
                             )
                         )
                     }
@@ -4290,7 +4295,8 @@ class NotebookActivity : AppCompatActivity() {
         val clipHeadings = selectedHeadings.map { h ->
             HeadingStroke(h.id, RectF(h.boundingBox),
                 h.strokes.map { s -> LiveStroke(s.id, s.points.map { PointF(it.x, it.y) }) },
-                recognizedText = h.recognizedText)
+                recognizedText = h.recognizedText,
+                level = h.level)
         }
         val clipTextObjects = selectedTextObjects.map { t ->
             TextRender(t.id, RectF(t.boundingBox), t.text, t.strokes)
@@ -4395,7 +4401,8 @@ class NotebookActivity : AppCompatActivity() {
         val capturedHeadings = selectedHeadings.map { h ->
             HeadingStroke(h.id, RectF(h.boundingBox),
                 h.strokes.map { s -> LiveStroke(s.id, s.points.map { PointF(it.x, it.y) }) },
-                recognizedText = h.recognizedText)
+                recognizedText = h.recognizedText,
+                level = h.level)
         }
         val capturedLinks = selectedLinks.map { it.translate(0f, 0f) }
 
@@ -4467,6 +4474,7 @@ class NotebookActivity : AppCompatActivity() {
     private suspend fun createHeadingFromStrokes(
         selectedStrokes: List<LiveStroke>,
         boundingBox: RectF,
+        level: Int = 1,
     ) {
         val db      = soilDatabase ?: return
         val layerId = currentLayerId.takeIf { it.isNotEmpty() } ?: return
@@ -4489,7 +4497,7 @@ class NotebookActivity : AppCompatActivity() {
         }
 
         val isRecognized = recognizedText != HandwritingRecognizer.FALLBACK_TEXT
-        val storedText: String? = if (isRecognized) "# $recognizedText" else null
+        val storedText: String? = if (isRecognized) HeadingObject.headingPrefix(level) + recognizedText else null
         val pad = 8f * resources.displayMetrics.density
         if (storedText != null) {
             val textPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -4520,7 +4528,7 @@ class NotebookActivity : AppCompatActivity() {
             originalStrokeIds.forEach { dao.softDeleteById(it, deletedAt) }
             val now        = System.currentTimeMillis()
             val bboxJson   = boundsToConvert.toBoundingBoxJson()
-            val headingObj = HeadingObject(strokes = embeddedStrokes, recognizedText = storedText)
+            val headingObj = HeadingObject(strokes = embeddedStrokes, recognizedText = storedText, level = level)
             dao.insertObject(
                 NotebookObject(
                     id          = headingId,
@@ -4546,7 +4554,7 @@ class NotebookActivity : AppCompatActivity() {
             val updatedStrokes = drawingView.getStrokes().filter { it.id !in erasedSet }
             persistedStrokeIds.removeAll(erasedSet)
 
-            val newHeading    = HeadingStroke(id = headingId, boundingBox = boundsToConvert, strokes = embeddedStrokes, recognizedText = storedText)
+            val newHeading    = HeadingStroke(id = headingId, boundingBox = boundsToConvert, strokes = embeddedStrokes, recognizedText = storedText, level = level)
             val updatedHeadings = drawingView.getHeadings() + newHeading
             drawingView.loadHeadings(updatedHeadings)
 
@@ -4559,6 +4567,7 @@ class NotebookActivity : AppCompatActivity() {
                     originalStrokeIds = originalStrokeIds,
                     embeddedStrokes   = embeddedStrokes,
                     recognizedText    = storedText,
+                    level             = level,
                 )
             )
             updateUndoRedoButtons()
@@ -4748,11 +4757,12 @@ class NotebookActivity : AppCompatActivity() {
 
         withContext(Dispatchers.Main) {
             undoRedoManager.push(UndoRedoAction.HeadingRemoved(
-                headingId      = heading.id,
-                pageId         = pageId,
+                headingId       = heading.id,
+                pageId          = pageId,
                 restoredStrokes = restoredStrokes,
                 embeddedStrokes = heading.strokes,
-                recognizedText = heading.recognizedText,
+                recognizedText  = heading.recognizedText,
+                level           = heading.level,
             ))
             updateUndoRedoButtons()
 
@@ -4936,7 +4946,7 @@ class NotebookActivity : AppCompatActivity() {
                 dao.insertObject(NotebookObject(s.id, layerId, s.boundingBox.toBoundingBoxJson(), 0, now, now, null, "stroke", s.toStrokeData(now).toJson()))
             }
             restoredHeadings.forEach { h ->
-                val data = HeadingObject(strokes = h.strokes, recognizedText = h.recognizedText).toJson()
+                val data = HeadingObject(strokes = h.strokes, recognizedText = h.recognizedText, level = h.level).toJson()
                 dao.insertObject(NotebookObject(h.id, layerId, h.boundingBox.toBoundingBoxJson(), 0, now, now, null, TYPE_HEADING, data))
             }
             restoredTexts.forEach { t ->
@@ -5306,7 +5316,7 @@ class NotebookActivity : AppCompatActivity() {
                     val bb = heading.boundingBox
                     val bboxJson = bb.toBoundingBoxJson()
                     db.notebookDao().updateHeadingData(
-                        heading.id, bboxJson, HeadingObject(heading.strokes, heading.recognizedText).toJson(), now
+                        heading.id, bboxJson, HeadingObject(heading.strokes, heading.recognizedText, heading.level).toJson(), now
                     )
                 }
                 for (textObj in movedTextObjects) {
@@ -6022,7 +6032,7 @@ class NotebookActivity : AppCompatActivity() {
                     .mapNotNull { obj ->
                         val box = obj.parseBoundingBox() ?: return@mapNotNull null
                         val headingObj = runCatching { HeadingObject.fromJson(obj.data) }.getOrNull() ?: return@mapNotNull null
-                        HeadingStroke(id = obj.id, boundingBox = box, strokes = headingObj.strokes, recognizedText = headingObj.recognizedText)
+                        HeadingStroke(id = obj.id, boundingBox = box, strokes = headingObj.strokes, recognizedText = headingObj.recognizedText, level = headingObj.level)
                     }
                 updatedStrokes  = buildList { addAll(preUndoStrokes); addAll(restoredStrokes) }
                 updatedHeadings = preUndoHeadings + restoredHeadings
@@ -6232,7 +6242,8 @@ class NotebookActivity : AppCompatActivity() {
                     strokes     = action.strokes.map { s -> LiveStroke(s.id, s.points.map { pt -> PointF(pt.x, pt.y) }) },
                     headings    = action.headings.map { h -> HeadingStroke(h.id, RectF(h.boundingBox),
                         h.strokes.map { s -> LiveStroke(s.id, s.points.map { PointF(it.x, it.y) }) },
-                        recognizedText = h.recognizedText) },
+                        recognizedText = h.recognizedText,
+                        level = h.level) },
                     boundingBox = clipBox,
                     textObjects = action.textObjects.map { t -> TextRender(t.id, RectF(t.boundingBox), t.text, t.strokes) },
                     lineObjects = action.lines,
@@ -6477,7 +6488,7 @@ class NotebookActivity : AppCompatActivity() {
                             try {
                                 val ho = HeadingObject.fromJson(obj.data)
                                 val box = obj.parseBoundingBox() ?: return@mapNotNull null
-                                HeadingStroke(id = obj.id, boundingBox = box, strokes = ho.strokes, recognizedText = ho.recognizedText)
+                                HeadingStroke(id = obj.id, boundingBox = box, strokes = ho.strokes, recognizedText = ho.recognizedText, level = ho.level)
                             } catch (e: Exception) {
                                 Log.e(TAG, "executeAction LassoPasted redo: failed to deserialize heading $id", e); null
                             }
@@ -6577,7 +6588,7 @@ class NotebookActivity : AppCompatActivity() {
                 updatedStrokes = preUndoStrokes.filter { it.id !in idsSet }
                 persistedStrokeIds.removeAll(idsSet)
                 val headingBox = headingBoundingBox(action.embeddedStrokes, action.recognizedText)
-                val newHeading = HeadingStroke(id = action.headingId, boundingBox = headingBox, strokes = action.embeddedStrokes, recognizedText = action.recognizedText)
+                val newHeading = HeadingStroke(id = action.headingId, boundingBox = headingBox, strokes = action.embeddedStrokes, recognizedText = action.recognizedText, level = action.level)
                 updatedHeadings = preUndoHeadings + newHeading
             }
             drawingView.loadHeadings(updatedHeadings)
@@ -6652,7 +6663,7 @@ class NotebookActivity : AppCompatActivity() {
                 updatedStrokes = preUndoStrokes.filter { it.id !in restoredIds }
                 persistedStrokeIds.removeAll(restoredIds)
                 val headingBox = headingBoundingBox(action.embeddedStrokes, action.recognizedText)
-                val heading = HeadingStroke(id = action.headingId, boundingBox = headingBox, strokes = action.embeddedStrokes, recognizedText = action.recognizedText)
+                val heading = HeadingStroke(id = action.headingId, boundingBox = headingBox, strokes = action.embeddedStrokes, recognizedText = action.recognizedText, level = action.level)
                 updatedHeadings = preUndoHeadings + heading
             } else {
                 // Redo: heading removed, strokes re-appear.
@@ -6948,7 +6959,7 @@ class NotebookActivity : AppCompatActivity() {
                     }
                     for (heading in targetHeadings) {
                         val bboxJson = heading.boundingBox.toBoundingBoxJson()
-                        dao.updateHeadingData(heading.id, bboxJson, HeadingObject(heading.strokes, heading.recognizedText).toJson(), ts)
+                        dao.updateHeadingData(heading.id, bboxJson, HeadingObject(heading.strokes, heading.recognizedText, heading.level).toJson(), ts)
                     }
                     for (textObj in targetTexts) {
                         val bb = textObj.boundingBox
@@ -7379,7 +7390,7 @@ class NotebookActivity : AppCompatActivity() {
                     for (heading in targetHeadings) {
                         val bb = heading.boundingBox
                         val bbJson = bb.toBoundingBoxJson()
-                        val dataJson = HeadingObject(strokes = heading.strokes, recognizedText = heading.recognizedText).toJson()
+                        val dataJson = HeadingObject(strokes = heading.strokes, recognizedText = heading.recognizedText, level = heading.level).toJson()
                         dao.updateHeadingData(heading.id, bbJson, dataJson, now)
                     }
                     for (textObj in targetTexts) {
@@ -7668,7 +7679,7 @@ class NotebookActivity : AppCompatActivity() {
                             dao.getObjectById(id)?.let { obj ->
                                 val box = obj.parseBoundingBox() ?: return@mapNotNull null
                                 val headingObj = runCatching { HeadingObject.fromJson(obj.data) }.getOrNull() ?: return@mapNotNull null
-                                HeadingStroke(id = obj.id, boundingBox = box, strokes = headingObj.strokes, recognizedText = headingObj.recognizedText)
+                                HeadingStroke(id = obj.id, boundingBox = box, strokes = headingObj.strokes, recognizedText = headingObj.recognizedText, level = headingObj.level)
                             }
                         }
                     }
@@ -7738,7 +7749,7 @@ class NotebookActivity : AppCompatActivity() {
                             dao.getObjectById(id)?.let { obj ->
                                 val box = obj.parseBoundingBox() ?: return@mapNotNull null
                                 val ho = runCatching { HeadingObject.fromJson(obj.data) }.getOrNull() ?: return@mapNotNull null
-                                HeadingStroke(id = obj.id, boundingBox = box, strokes = ho.strokes, recognizedText = ho.recognizedText)
+                                HeadingStroke(id = obj.id, boundingBox = box, strokes = ho.strokes, recognizedText = ho.recognizedText, level = ho.level)
                             }
                         }
                     }
@@ -7799,7 +7810,8 @@ class NotebookActivity : AppCompatActivity() {
                     strokes     = action.strokes.map { s -> LiveStroke(s.id, s.points.map { pt -> PointF(pt.x, pt.y) }) },
                     headings    = action.headings.map { h -> HeadingStroke(h.id, RectF(h.boundingBox),
                         h.strokes.map { s -> LiveStroke(s.id, s.points.map { PointF(it.x, it.y) }) },
-                        recognizedText = h.recognizedText) },
+                        recognizedText = h.recognizedText,
+                        level = h.level) },
                     boundingBox = clipBox,
                     textObjects = action.textObjects.map { t -> TextRender(t.id, RectF(t.boundingBox), t.text, t.strokes) },
                     lineObjects = action.lines,
@@ -7925,7 +7937,7 @@ class NotebookActivity : AppCompatActivity() {
                 updatedStrokes = drawingView.getStrokes().filter { it.id !in idsSet }
                 persistedStrokeIds.removeAll(idsSet)
                 val headingBox = headingBoundingBox(action.embeddedStrokes, action.recognizedText)
-                val newHeading = HeadingStroke(id = action.headingId, boundingBox = headingBox, strokes = action.embeddedStrokes, recognizedText = action.recognizedText)
+                val newHeading = HeadingStroke(id = action.headingId, boundingBox = headingBox, strokes = action.embeddedStrokes, recognizedText = action.recognizedText, level = action.level)
                 updatedHeadings = drawingView.getHeadings() + newHeading
             }
             drawingView.loadHeadings(updatedHeadings)
@@ -7957,7 +7969,7 @@ class NotebookActivity : AppCompatActivity() {
                 updatedStrokes = drawingView.getStrokes().filter { it.id !in restoredIds }
                 persistedStrokeIds.removeAll(restoredIds)
                 val headingBox = headingBoundingBox(action.embeddedStrokes, action.recognizedText)
-                val heading = HeadingStroke(id = action.headingId, boundingBox = headingBox, strokes = action.embeddedStrokes, recognizedText = action.recognizedText)
+                val heading = HeadingStroke(id = action.headingId, boundingBox = headingBox, strokes = action.embeddedStrokes, recognizedText = action.recognizedText, level = action.level)
                 updatedHeadings = drawingView.getHeadings() + heading
             } else {
                 // Redo: remove heading, add restored strokes back.
@@ -8024,7 +8036,7 @@ class NotebookActivity : AppCompatActivity() {
                         dao.getObjectById(id)?.let { obj ->
                             val box = obj.parseBoundingBox() ?: return@mapNotNull null
                             val hObj = runCatching { HeadingObject.fromJson(obj.data) }.getOrNull() ?: return@mapNotNull null
-                            HeadingStroke(id = obj.id, boundingBox = box, strokes = hObj.strokes, recognizedText = hObj.recognizedText)
+                            HeadingStroke(id = obj.id, boundingBox = box, strokes = hObj.strokes, recognizedText = hObj.recognizedText, level = hObj.level)
                         }
                     }
                 }

@@ -355,6 +355,7 @@ sealed class UndoRedoAction {
         val originalStrokeIds: List<String>,
         val embeddedStrokes: List<LiveStroke>,
         val recognizedText: String? = null,
+        val level: Int = 1,
     ) : UndoRedoAction()
 
     /**
@@ -394,6 +395,7 @@ sealed class UndoRedoAction {
         val restoredStrokes: List<LiveStroke>,
         val embeddedStrokes: List<LiveStroke>,
         val recognizedText: String? = null,
+        val level: Int = 1,
     ) : UndoRedoAction()
 
     /**

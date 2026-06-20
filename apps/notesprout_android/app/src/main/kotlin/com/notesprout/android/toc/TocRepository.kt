@@ -29,7 +29,7 @@ class TocRepository(private val dao: NotebookDao) {
             } catch (e: Exception) {
                 continue
             }
-            val candidate = HeadingStroke(id = row.id, boundingBox = box, strokes = headingObject.strokes, recognizedText = headingObject.recognizedText)
+            val candidate = HeadingStroke(id = row.id, boundingBox = box, strokes = headingObject.strokes, recognizedText = headingObject.recognizedText, level = headingObject.level)
             val current = topmostByPageId[pageId]
             if (current == null || isHigher(candidate.boundingBox, current.boundingBox)) {
                 topmostByPageId[pageId] = candidate

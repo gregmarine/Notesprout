@@ -26,6 +26,7 @@ data class HeadingStroke(
     val boundingBox: RectF,
     val strokes: List<LiveStroke>,
     val recognizedText: String? = null,
+    val level: Int = 1,
 )
 
 @Serializable

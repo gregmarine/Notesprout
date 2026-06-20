@@ -46,6 +46,7 @@ fun LinkRender.translate(dx: Float, dy: Float, newId: String = id): LinkRender =
             RectF(h.boundingBox).apply { offset(dx, dy) },
             h.strokes.map { s -> LiveStroke(s.id, s.points.map { PointF(it.x + dx, it.y + dy) }) },
             recognizedText = h.recognizedText,
+            level = h.level,
         )
     },
     textObjects = textObjects.map { t -> TextRender(t.id, RectF(t.boundingBox).apply { offset(dx, dy) }, t.text, t.strokes) },

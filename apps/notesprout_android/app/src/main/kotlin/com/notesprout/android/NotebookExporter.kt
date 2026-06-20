@@ -309,6 +309,7 @@ object NotebookExporter {
                     boundingBox = box,
                     strokes = ho.strokes,
                     recognizedText = ho.recognizedText,
+                    level = ho.level,
                 )
             }
         } else emptyList()

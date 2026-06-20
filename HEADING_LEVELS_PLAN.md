@@ -45,7 +45,7 @@ Branch: `seed`. Primary module: `apps/notesprout_android`.
 
 | # | Session | Status |
 |---|---------|--------|
-| S1 | Data model: `level` field + plumbing + prefix helpers | ⬜ Not started |
+| S1 | Data model: `level` field + plumbing + prefix helpers | ✅ Done |
 | S2 | Heading edit dialog: hash-free editing (strip/restore, level-aware) | ⬜ Not started |
 | S3 | Selection menu: make-heading submenu (strokes → H1/H2/H3) + icons | ⬜ Not started |
 | S4 | Selection menu: selected-heading submenu (change type + un-heading) + undo | ⬜ Not started |
