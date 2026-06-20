@@ -49,7 +49,7 @@
 
 | # | Session | Status |
 |---|---|---|
-| P2.S1 | Passphrase-dialog & open-time UX (show/hide toggle, "Opening…" overlay) | ⬜ NOT STARTED |
+| P2.S1 | Passphrase-dialog & open-time UX (show/hide toggle, "Opening…" overlay) | ✅ DONE |
 | P2.S2 | New-notebook flow: encryption scope in TemplateBrowser + toolbar-merge verify | ⬜ NOT STARTED |
 | P2.S3 | Undo/redo persistence for encrypted notebooks (store inside the `.soil`) | ⬜ NOT STARTED |
 | P2.S4 | Re-key a single notebook: change passphrase + change scope (`PRAGMA rekey`) | ⬜ NOT STARTED |
@@ -67,7 +67,7 @@
 
 ## P2.S1 — Passphrase-Dialog & Open-Time UX
 
-**Status:** ⬜ NOT STARTED
+**Status:** ✅ DONE
 
 **Goal:** Two low-risk, visible polish items: (a) a **show/hide passphrase** eye toggle on every
 passphrase dialog, and (b) an **"Opening…" overlay** on the canvas while an encrypted notebook unlocks

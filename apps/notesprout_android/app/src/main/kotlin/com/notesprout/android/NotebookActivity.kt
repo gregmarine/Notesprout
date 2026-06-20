@@ -1837,6 +1837,7 @@ class NotebookActivity : AppCompatActivity() {
                     undoRedoPersistenceFile(notebookPath).takeIf { it.exists() }?.delete()
                     undoRedoManager = UndoRedoManager()
                     updateUndoRedoButtons()
+                    binding.openingOverlay.visibility = View.VISIBLE
                 }
                 sessionStartTime = System.currentTimeMillis()
                 val builder = Room.databaseBuilder(
@@ -3219,6 +3220,7 @@ class NotebookActivity : AppCompatActivity() {
                 loadCurrentPage(db)
             }
             displayPage(result)
+            binding.openingOverlay.visibility = View.GONE
             updatePageIndicator()
             postDisplayWork(db, result)
             if (linkedPageMissing) toast("Linked page is unavailable.")

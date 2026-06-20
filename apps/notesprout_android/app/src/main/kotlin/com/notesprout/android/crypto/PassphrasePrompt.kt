@@ -1,6 +1,7 @@
 package com.notesprout.android.crypto
 
 import android.app.Activity
+import android.text.InputType
 import android.view.View
 import android.view.WindowManager
 import android.view.inputmethod.InputMethodManager
@@ -22,7 +23,7 @@ object PassphrasePrompt {
 
     /**
      * Show a passphrase prompt and return the entered string, or null if the user cancelled.
-     * When [confirm] is true a second field is shown and both must match before OK is accepted.
+     * When [confirm] is true a second field is shown; one eye toggle reveals/masks both fields.
      * Must be called from the main thread.
      */
     suspend fun promptForPassphrase(
@@ -38,7 +39,34 @@ object PassphrasePrompt {
             dialogBinding.tvPassphraseMessage.visibility = View.VISIBLE
         }
         if (confirm) {
-            dialogBinding.editPassphraseConfirm.visibility = View.VISIBLE
+            dialogBinding.rowPassphraseConfirm.visibility = View.VISIBLE
+        }
+
+        // Eye toggle: one button reveals/masks both fields simultaneously.
+        var isVisible = false
+        dialogBinding.btnTogglePassphrase.setOnClickListener {
+            isVisible = !isVisible
+            val inputType = if (isVisible)
+                InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD
+            else
+                InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+
+            dialogBinding.editPassphrase.inputType = inputType
+            // Restore cursor position — changing inputType resets it to 0.
+            dialogBinding.editPassphrase.setSelection(
+                dialogBinding.editPassphrase.text?.length ?: 0
+            )
+
+            if (confirm) {
+                dialogBinding.editPassphraseConfirm.inputType = inputType
+                dialogBinding.editPassphraseConfirm.setSelection(
+                    dialogBinding.editPassphraseConfirm.text?.length ?: 0
+                )
+            }
+
+            dialogBinding.btnTogglePassphrase.setImageResource(
+                if (isVisible) R.drawable.ic_eye else R.drawable.ic_eye_off
+            )
         }
 
         val dialog = AlertDialog.Builder(activity)
