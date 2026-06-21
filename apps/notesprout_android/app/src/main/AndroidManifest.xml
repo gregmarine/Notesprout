@@ -50,6 +50,12 @@
             android:theme="@style/Theme.Notesprout"
             android:windowSoftInputMode="stateHidden" />
 
+        <!-- Encryption settings — global passphrase management (status, forget, change) -->
+        <activity
+            android:name=".EncryptionSettingsActivity"
+            android:exported="false"
+            android:windowSoftInputMode="stateHidden" />
+
         <!-- FileProvider — exposes cacheDir PDF exports to the share sheet -->
         <provider
             android:name="androidx.core.content.FileProvider"

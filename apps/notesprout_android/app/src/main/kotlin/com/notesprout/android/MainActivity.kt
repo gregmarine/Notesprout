@@ -659,6 +659,7 @@ class MainActivity : AppCompatActivity() {
                     .putExtra(TemplateBrowserActivity.EXTRA_MODE, TemplateBrowserActivity.MODE_MANAGE)
             )
         }
+        binding.btnMore?.setOnClickListener          { showMoreMenu() }
         binding.btnBreadcrumbBack.setOnClickListener { navigateUpOneLevel() }
     }
 
@@ -1691,8 +1692,11 @@ class MainActivity : AppCompatActivity() {
         if (encInfo.keyScope == KeyScope.GLOBAL) {
             AlertDialog.Builder(this)
                 .setTitle("Change Passphrase")
-                .setMessage("Global notebooks share a device passphrase. To change it, go to Settings → Encryption (available in a future update).")
-                .setPositiveButton("OK", null)
+                .setMessage("Global notebooks share a device passphrase. To change it, use the More (…) menu → Encryption.")
+                .setPositiveButton("Open Encryption Settings") { _, _ ->
+                    startActivity(Intent(this, EncryptionSettingsActivity::class.java))
+                }
+                .setNegativeButton("Cancel", null)
                 .create()
                 .also { d ->
                     d.show()
@@ -2370,5 +2374,13 @@ class MainActivity : AppCompatActivity() {
         d.show()
         d.window?.setElevation(0f)
         d.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+    }
+
+    private fun showMoreMenu() {
+        ActionSheetDialog(this)
+            .addAction(R.drawable.ic_lock, "Encryption…") {
+                startActivity(Intent(this, EncryptionSettingsActivity::class.java))
+            }
+            .show()
     }
 }

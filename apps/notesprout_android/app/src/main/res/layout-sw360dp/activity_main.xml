@@ -348,6 +348,13 @@
                 android:src="@drawable/ic_template"
                 android:contentDescription="Templates" />
 
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnMore"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:layout_marginStart="4dp"
+                android:src="@drawable/ic_dots"
+                android:contentDescription="More actions" />
+
         </LinearLayout>
 
     </RelativeLayout>

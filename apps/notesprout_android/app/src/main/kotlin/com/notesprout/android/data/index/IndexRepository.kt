@@ -430,6 +430,14 @@ class IndexRepository(private val dao: ObjectDao) {
 
     // region Encryption metadata
 
+    suspend fun countGlobalNotebooks(): Int =
+        dao.getAllNotDeleted()
+            .count { entity ->
+                if (entity.type != ObjectType.NOTEBOOK) return@count false
+                val obj = try { Json.decodeFromString<NotebookObject>(entity.data) } catch (_: Exception) { return@count false }
+                obj.encrypted && obj.keyScope == KeyScope.GLOBAL
+            }
+
     suspend fun getEncryptionInfo(notebookId: String): EncryptionInfo {
         val entity = dao.getById(notebookId) ?: return EncryptionInfo.NONE
         val obj = Json.decodeFromString<NotebookObject>(entity.data)

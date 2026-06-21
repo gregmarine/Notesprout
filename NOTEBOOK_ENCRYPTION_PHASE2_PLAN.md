@@ -53,7 +53,7 @@
 | P2.S2 | New-notebook flow: encryption scope in TemplateBrowser + toolbar-merge verify | ✅ DONE |
 | P2.S3 | Undo/redo persistence for encrypted notebooks (store inside the `.soil`) | ✅ DONE |
 | P2.S4 | Re-key a single notebook: change passphrase + change scope (`PRAGMA rekey`) | ✅ DONE |
-| P2.S5 | Global passphrase management UI (view / change / forget) + rotation trigger | ⬜ NOT STARTED |
+| P2.S5 | Global passphrase management UI (view / change / forget) + rotation trigger | ✅ DONE |
 | P2.S6 | Global passphrase rotation: cancellable/resumable batch re-key | ⬜ NOT STARTED |
 | P2.S7 | Passphrase attempt rate-limiting (escalating lockout + countdown) | ⬜ NOT STARTED |
 | P2.S8 | Password-protected PDF export (PdfBox-Android) | ⬜ NOT STARTED |
@@ -300,7 +300,7 @@ failures/cancel leave the original file intact and openable.
 
 ## P2.S5 — Global Passphrase Management UI
 
-**Status:** ⬜ NOT STARTED
+**Status:** ✅ DONE
 
 **Goal:** A place to manage the device's cached GLOBAL passphrase: **view status** (set / not set),
 **change** it (which triggers the S6 rotation), and **forget on this device**. No Settings screen
