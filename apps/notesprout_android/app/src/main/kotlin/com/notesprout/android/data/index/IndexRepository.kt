@@ -2,6 +2,7 @@ package com.notesprout.android.data.index
 
 import com.notesprout.android.crypto.EncryptionInfo
 import com.notesprout.android.crypto.KeyScope
+import com.notesprout.android.data.FolderRef
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.util.UUID
@@ -204,6 +205,24 @@ class IndexRepository(private val dao: ObjectDao) {
     }
 
     // endregion
+
+    /**
+     * Returns the ancestor chain from root → immediate parent of [startParentId], as
+     * [FolderRef] entries. Returns an empty list when [startParentId] is null (notebook at root).
+     * Capped at 50 hops as a cycle guard.
+     */
+    suspend fun getFolderAncestry(startParentId: String?): List<FolderRef> {
+        if (startParentId == null) return emptyList()
+        val chain = ArrayDeque<FolderRef>()
+        var currentId: String? = startParentId
+        var hops = 0
+        while (currentId != null && hops++ < 50) {
+            val entity = dao.getById(currentId) ?: break
+            chain.addFirst(FolderRef(entity.id, entity.name, entity.parentId))
+            currentId = entity.parentId
+        }
+        return chain.toList()
+    }
 
     // region Navigation operations
 

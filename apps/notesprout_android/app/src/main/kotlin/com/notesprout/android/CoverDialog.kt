@@ -15,7 +15,6 @@ import androidx.appcompat.widget.AppCompatImageView
 import androidx.appcompat.widget.AppCompatTextView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.LifecycleCoroutineScope
-import androidx.room.Room
 import com.notesprout.android.data.BoundingBox
 import com.notesprout.android.data.CoverObject
 import com.notesprout.android.data.NotebookMetadata
@@ -474,14 +473,7 @@ class CoverDialog(
 
     // ── Room helper ───────────────────────────────────────────────────────────
 
-    private fun openDb(): SoilDatabase =
-        Room.databaseBuilder(
-            activity.applicationContext,
-            SoilDatabase::class.java,
-            soilFilePath,
-        )
-            .addCallback(SoilDatabase.openCallback())
-            .build()
+    private fun openDb(): SoilDatabase = SoilDatabase.builder(activity, soilFilePath).build()
 
     // ── Codec ─────────────────────────────────────────────────────────────────
 

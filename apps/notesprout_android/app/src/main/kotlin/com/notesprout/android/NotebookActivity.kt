@@ -36,7 +36,7 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.core.view.doOnLayout
 import androidx.lifecycle.lifecycleScope
-import androidx.room.Room
+import com.notesprout.android.data.NotebookMetaStore
 import androidx.room.withTransaction
 import com.notesprout.android.core.BitmapDecode
 import com.notesprout.android.core.Slog
@@ -1840,14 +1840,15 @@ class NotebookActivity : AppCompatActivity() {
                     binding.openingOverlay.visibility = View.VISIBLE
                 }
                 sessionStartTime = System.currentTimeMillis()
-                val builder = Room.databaseBuilder(
-                    applicationContext,
-                    SoilDatabase::class.java,
-                    notebookPath,
-                ).addCallback(SoilDatabase.openCallback())
-                 .addMigrations(SoilDatabase.MIGRATION_1_2)
+                val builder = SoilDatabase.builder(this@NotebookActivity, notebookPath)
                 if (key != null) builder.openHelperFactory(SoilCrypto.roomFactory(key))
                 soilDatabase = builder.build()
+                val db = soilDatabase!!
+                lifecycleScope.launch(Dispatchers.IO) {
+                    runCatching {
+                        NotebookMetaStore.refresh(db, indexRepo, notebookId)
+                    }.onFailure { Slog.d(TAG) { "meta refresh on open failed: ${it.message}" } }
+                }
                 loadStrokes()
             }
         }
@@ -3185,6 +3186,9 @@ class NotebookActivity : AppCompatActivity() {
             }
         }
         saveStrokes(db)
+        runCatching {
+            NotebookMetaStore.refresh(db, indexRepo, nbId)
+        }.onFailure { Slog.d(TAG) { "meta refresh on seal failed: ${it.message}" } }
         // Hard-delete rows soft-deleted before this session — they predate the undo stack
         // and can never be restored, so they are dead weight. Current-session soft-deletes
         // (deletedAt >= sessionStart) are kept for undo/redo safety on abnormal teardown.

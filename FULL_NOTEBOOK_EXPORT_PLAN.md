@@ -74,7 +74,7 @@
 
 | # | Session | Status |
 |---|---|---|
-| S1 | Self-describing `.soil`: `notebook_meta` table, model, continuous upkeep, migration-set fix | ⬜ NOT STARTED |
+| S1 | Self-describing `.soil`: `notebook_meta` table, model, continuous upkeep, migration-set fix | ✅ DONE |
 | S2 | Export-format chooser + full-notebook copy engine + MainActivity (context-menu) path | ⬜ NOT STARTED |
 | S3 | NotebookActivity (open-notebook) export path + encrypted (no-prompt) + open-file flush/checkpoint | ⬜ NOT STARTED |
 | S4 | Wrap-up: hygiene, edge cases, docs, MEMORY, two-device matrix (G10 + P2P) | ⬜ NOT STARTED |
@@ -83,7 +83,7 @@
 
 ## S1 — Self-Describing `.soil`: `notebook_meta` Table + Continuous Upkeep
 
-**Status:** ⬜ NOT STARTED
+**Status:** ✅ DONE
 
 **Goal:** Give every `.soil` a single-row `notebook_meta` table holding the import metadata, and keep it
 current at creation / open / close. **No export UI yet** — this is the foundation S2/S3 copy out. Mirrors

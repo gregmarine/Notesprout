@@ -12,7 +12,6 @@ import android.graphics.pdf.PdfDocument
 import android.text.TextPaint
 import android.util.Base64
 import android.util.TypedValue
-import androidx.room.Room
 import com.notesprout.android.core.BitmapDecode
 import com.notesprout.android.crypto.SoilCrypto
 import com.notesprout.android.data.CoverObject
@@ -152,11 +151,7 @@ object NotebookExporter {
         val safeTitle = notebookTitle.replace(Regex("[^a-zA-Z0-9_\\-. ]"), "_").trim('_', ' ')
             .ifBlank { "notebook" }
 
-        val builder = Room.databaseBuilder(
-            context.applicationContext,
-            SoilDatabase::class.java,
-            soilPath,
-        ).addCallback(SoilDatabase.openCallback())
+        val builder = SoilDatabase.builder(context, soilPath)
         if (passphrase != null) builder.openHelperFactory(SoilCrypto.roomFactory(passphrase))
         val db = builder.build()
 
@@ -215,11 +210,7 @@ object NotebookExporter {
         onProgress: (current: Int, total: Int) -> Unit,
         passphrase: String? = null,
     ): List<File> {
-        val builder = Room.databaseBuilder(
-            context.applicationContext,
-            SoilDatabase::class.java,
-            soilPath,
-        ).addCallback(SoilDatabase.openCallback())
+        val builder = SoilDatabase.builder(context, soilPath)
         if (passphrase != null) builder.openHelperFactory(SoilCrypto.roomFactory(passphrase))
         val db = builder.build()
 
@@ -551,11 +542,7 @@ object NotebookExporter {
         val safeTitle = notebookTitle.replace(Regex("[^a-zA-Z0-9_\\-. ]"), "_").trim('_', ' ')
             .ifBlank { "notebook" }
 
-        val builder = Room.databaseBuilder(
-            context.applicationContext,
-            SoilDatabase::class.java,
-            soilPath,
-        ).addCallback(SoilDatabase.openCallback())
+        val builder = SoilDatabase.builder(context, soilPath)
         if (passphrase != null) builder.openHelperFactory(SoilCrypto.roomFactory(passphrase))
         val db = builder.build()
 

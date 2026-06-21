@@ -1,6 +1,8 @@
 package com.notesprout.android.data
 
+import android.content.Context
 import androidx.room.Database
+import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
@@ -20,7 +22,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
  *     .build()
  * ```
  */
-@Database(entities = [NotebookObject::class], version = 2, exportSchema = false)
+@Database(entities = [NotebookObject::class], version = 3, exportSchema = false)
 abstract class SoilDatabase : RoomDatabase() {
 
     abstract fun notebookDao(): NotebookDao
@@ -39,6 +41,25 @@ abstract class SoilDatabase : RoomDatabase() {
                 )
             }
         }
+
+        val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS notebook_meta " +
+                    "(id INTEGER PRIMARY KEY CHECK (id = 0), json TEXT NOT NULL)"
+                )
+            }
+        }
+
+        /**
+         * Single factory that wires the open callback and full migration set onto every
+         * SoilDatabase builder. Callers add `.openHelperFactory(SoilCrypto.roomFactory(key))`
+         * on top where encryption is needed.
+         */
+        fun builder(context: Context, absolutePath: String): RoomDatabase.Builder<SoilDatabase> =
+            Room.databaseBuilder(context.applicationContext, SoilDatabase::class.java, absolutePath)
+                .addCallback(openCallback())
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
 
         /**
          * Room callback that (re-)applies connection-level PRAGMAs every time the

@@ -40,8 +40,11 @@ import com.notesprout.android.crypto.KeySession
 import com.notesprout.android.crypto.PassphraseCache
 import com.notesprout.android.crypto.SoilCrypto
 import com.notesprout.android.crypto.SoilMigrator
+import com.notesprout.android.core.Slog
 import com.notesprout.android.data.BoundingBox
+import com.notesprout.android.data.NotebookMeta
 import com.notesprout.android.data.NotebookMetadata
+import com.notesprout.android.data.NotebookMetaStore
 import com.notesprout.android.data.PageData
 import com.notesprout.android.data.SoilDatabase
 import com.notesprout.android.data.checkpointTruncateAndClose
@@ -1479,6 +1482,12 @@ class MainActivity : AppCompatActivity() {
                         "(id INTEGER PRIMARY KEY CHECK (id = 0), json TEXT NOT NULL)",
                         null
                     )
+                    // Self-describing export metadata (S1). Single row; encrypted at rest for free.
+                    exec(
+                        "CREATE TABLE IF NOT EXISTS notebook_meta " +
+                        "(id INTEGER PRIMARY KEY CHECK (id = 0), json TEXT NOT NULL)",
+                        null
+                    )
 
                     val screenW = screenBounds.width().toFloat()
                     val screenH = screenBounds.height().toFloat()
@@ -1518,6 +1527,23 @@ class MainActivity : AppCompatActivity() {
                         layerId, pageId, bboxJson, now, now, "layer",
                         """{"label":"Content","isLocked":false,"isVisible":true}"""
                     ))
+
+                    val folderPath = repository.getFolderAncestry(currentParentId)
+                    val initialMeta = NotebookMeta(
+                        notebookId     = entity.id,
+                        name           = name,
+                        createdAt      = entity.createdAt,
+                        updatedAt      = entity.updatedAt,
+                        encrypted      = scope != null,
+                        keyScope       = scope,
+                        cover          = null,
+                        folderPath     = folderPath,
+                        appVersionCode = BuildConfig.VERSION_CODE,
+                    )
+                    exec(
+                        "INSERT OR REPLACE INTO notebook_meta (id, json) VALUES (0, ?)",
+                        arrayOf(initialMeta.toJson())
+                    )
 
                     pragma("PRAGMA incremental_vacuum")
                     pragma("PRAGMA wal_checkpoint(TRUNCATE)")
@@ -1986,6 +2012,7 @@ class MainActivity : AppCompatActivity() {
                     when (state) {
                         is DestinationPickerState.MoveNotebook -> {
                             repository.moveObject(source.id, currentParentId)
+                            refreshNotebookMeta(source.id)
                             true
                         }
                         is DestinationPickerState.CopyNotebook -> {
@@ -2008,6 +2035,7 @@ class MainActivity : AppCompatActivity() {
                             if (srcFile.exists()) {
                                 srcFile.copyTo(soilFile(this@MainActivity, newEntity.id), overwrite = true)
                             }
+                            refreshNotebookMeta(newEntity.id)
                             true
                         }
                         is DestinationPickerState.MoveFolder -> {
@@ -2044,6 +2072,31 @@ class MainActivity : AppCompatActivity() {
     // ── Recursive folder helpers ──────────────────────────────────────────────
 
     /** Soft-deletes the folder and all its descendants; deletes physical .soil files. */
+    /**
+     * Best-effort refresh of [notebook_meta] after a move or copy — no prompt ever.
+     * Plaintext: always opens. GLOBAL encrypted: opens only when the key is already cached.
+     * NOTEBOOK encrypted: skipped (meta self-heals on next open/close).
+     */
+    private suspend fun refreshNotebookMeta(notebookId: String) = runCatching {
+        val info = repository.getEncryptionInfo(notebookId)
+        val key: String? = when {
+            !info.encrypted -> null
+            info.keyScope == KeyScope.GLOBAL ->
+                com.notesprout.android.crypto.PassphraseStore.getGlobalPassphrase(this)
+                    ?: return@runCatching
+            else -> return@runCatching
+        }
+        val soilPath = soilFile(this, notebookId).absolutePath
+        val builder = SoilDatabase.builder(this, soilPath)
+        if (key != null) builder.openHelperFactory(com.notesprout.android.crypto.SoilCrypto.roomFactory(key))
+        val db = builder.build()
+        try {
+            NotebookMetaStore.refresh(db, repository, notebookId)
+        } finally {
+            db.close()
+        }
+    }.onFailure { Slog.d("MainActivity") { "refreshNotebookMeta failed for $notebookId: ${it.message}" } }
+
     private suspend fun deleteFolderRecursively(folderId: String) {
         val children = repository.getChildren(folderId)
         for (child in children) {
@@ -2337,11 +2390,7 @@ class MainActivity : AppCompatActivity() {
 
             val pdfFile = try {
                 withContext(Dispatchers.IO) {
-                    val builder = androidx.room.Room.databaseBuilder(
-                        applicationContext,
-                        SoilDatabase::class.java,
-                        file.absolutePath,
-                    ).addCallback(SoilDatabase.openCallback())
+                    val builder = SoilDatabase.builder(this@MainActivity, file.absolutePath)
                     if (key != null) builder.openHelperFactory(SoilCrypto.roomFactory(key))
                     val db = builder.build()
                     try {
