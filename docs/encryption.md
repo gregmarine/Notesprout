@@ -278,6 +278,27 @@ The row is intentionally left in place (no data hazard — same JSON a sidecar w
 
 ---
 
+### Full-Notebook Export — Encrypted Notebooks
+
+Full-notebook export of an encrypted notebook is a **silent pure copy** of the `.soil` file:
+
+- No passphrase is prompted at export time. The export file is still encrypted — SQLCipher encrypts
+  the entire file, including the embedded `notebook_meta` table. A file browser sees opaque
+  ciphertext.
+- No "exported file is unencrypted" warning is shown (contrast: PDF export decrypts content for
+  rendering and does warn). The encrypted status travels with the file; importing requires the same
+  passphrase.
+- For **open-notebook** export (NotebookActivity), the already-held `db` connection supplies the
+  key — no second prompt. For **cold** NOTEBOOK-scoped export (MainActivity context menu), the
+  file is copied without opening it; embedded `notebook_meta` reflects the last open/close state.
+- `notebook_meta` is encrypted at rest inside the SQLCipher file. An encrypted notebook's cover
+  snapshot is always `null` in `notebook_meta` (same rule as the index snapshot suppression).
+
+See [`docs/full-notebook-export.md`](full-notebook-export.md) for the full format, copy engine,
+and the encrypted-NOTEBOOK meta-freshness trade-off.
+
+---
+
 ### Password-Protected PDF Export (PdfBox-Android)
 
 Notebooks can be exported to a password-protected PDF. The existing bitmap → `android.graphics.pdf.PdfDocument`

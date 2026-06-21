@@ -62,13 +62,38 @@ Fuzzy match against all notebooks: substring (3) > all words present (2) > prefi
 
 `SortPreferences`: `SortField` (NAME / DATE_MODIFIED), `SortOrder` (ASC / DESC), `FolderSort` (FOLDERS_FIRST / NOTEBOOKS_FIRST / MIXED). Persisted in `SharedPreferences("notesprout_sort_prefs")`. Card labels (normal mode): `"$displayName ($dateStr, $timeStr)"` via `DateFormat.getMediumDateFormat` + `DateFormat.getTimeFormat`.
 
-## PDF Export
+## Notebook-Level Export
+
+Both `MainActivity` (long-press → Export) and `NotebookActivity` (toolbar Export button) first
+present a **format chooser** `ActionSheetDialog` with two rows before starting any export:
+
+- **Export as PDF** → existing PDF path (encrypted-unencrypted warning + optional PDF password)
+- **Export Notebook (.soil)** → full-notebook copy via `NotebookPackager`
+
+### PDF Export
 
 - `NotebookExporter` renders all pages off-screen on `Dispatchers.IO` using white→template→headings→text→strokes pipeline
 - Output to `context.cacheDir/<title>.pdf`; FileProvider (`${applicationId}.fileprovider`) used for both save and share paths
 - Share intent **must** include `clipData = ClipData.newRawUri("", uri)` alongside `FLAG_GRANT_READ_URI_PERMISSION` — on Android 12+, the chooser intermediary does not forward URI permissions without `ClipData` (causes silent Google Drive upload failure on NA5C)
 - Progress dialog: "Exporting page X of N…" via `Handler(Looper.getMainLooper())`
-- After export: `showExportChoice(file)` presents an `AlertDialog` with "Save to device" (`ACTION_CREATE_DOCUMENT` via `savePdfLauncher`) or "Share" (existing `ACTION_SEND` flow). Available from both `NotebookActivity` (toolbar export button) and `MainActivity` (long-press action sheet).
+- After export: `showExportChoice(file)` presents an `AlertDialog` with "Save to device" (`ACTION_CREATE_DOCUMENT` via `savePdfLauncher`) or "Share" (existing `ACTION_SEND` flow).
+- **Encrypted-notebook warning:** the rendered PDF is plaintext — a warning dialog is shown before the export proceeds.
+
+### Full-Notebook Export (.soil)
+
+- `NotebookPackager.packageForExport(context, repo, notebookId, openableKey)` (cold-file / MainActivity path)
+  or `NotebookPackager.packageOpenForExport(context, db, repo, notebookId)` (open-DB / NotebookActivity path).
+- No passphrase prompt; no "unencrypted" warning. Encrypted notebooks stay encrypted in the copy.
+- Export cache: `cacheDir/exported_notebooks/<safeName>.soil`. Directory is wiped+recreated each export.
+- FileProvider entry: `<cache-path name="exported_notebooks" path="exported_notebooks/" />` in `file_paths.xml`.
+- After packaging: `showSoilExportChoice(file)` — `AlertDialog` with "Save to device"
+  (`saveSoilLauncher`, `CreateDocument("application/octet-stream")`) or "Share"
+  (`ACTION_SEND`, same `ClipData` + `FLAG_GRANT_READ_URI_PERMISSION` pattern as PDF share).
+- **openableKey semantics (cold path):** `""` = plaintext; non-empty = GLOBAL passphrase (cached,
+  no prompt); `null` = NOTEBOOK-scoped or key not cached → copy cold without meta refresh.
+
+See [`docs/full-notebook-export.md`](full-notebook-export.md) for the full format, `notebook_meta`
+schema, continuous upkeep, and encrypted trade-off.
 
 ## Page Index — Multi-Page Selection (`PageIndexActivity`)
 

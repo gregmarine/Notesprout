@@ -170,6 +170,31 @@ The `CHECK (id = 0)` constraint limits this to one row. Encrypted notebooks writ
 `*.soil.undoredo` sidecar and never write to this table. See
 [`docs/encryption.md`](encryption.md) for the full undo-persistence design.
 
+### `.soil` Schema Version 3 — `notebook_meta`
+
+`SoilDatabase.MIGRATION_2_3` (Room version 2 → 3) adds the export/import identity table:
+
+```sql
+CREATE TABLE IF NOT EXISTS notebook_meta
+    (id INTEGER PRIMARY KEY CHECK (id = 0), json TEXT NOT NULL)
+```
+
+`CHECK (id = 0)` enforces a single row. The JSON is a `NotebookMeta` object
+(`data/NotebookMeta.kt`, `@Serializable`) containing the notebook's id, name, `createdAt`,
+`updatedAt`, `encrypted`/`keyScope`, cover snapshot (plaintext only), full folder ancestry
+(`folderPath: List<FolderRef>` ordered root→parent), and export provenance (`exportedAt`,
+`appVersionCode`). For encrypted notebooks the row is encrypted at rest along with the rest of the
+file.
+
+**Continuous upkeep:** the row is written at notebook creation and refreshed on every open/close via
+`NotebookMetaStore` (`data/NotebookMetaStore.kt`). Full-notebook export uses this embedded metadata
+to be a prompt-free pure file copy. See [`docs/full-notebook-export.md`](full-notebook-export.md).
+
+**Migration-set rule:** all `SoilDatabase` Room builder sites must register
+`MIGRATION_1_2` **and** `MIGRATION_2_3`. A shared factory `SoilDatabase.builder(context, path)`
+applies both migrations (plus `openCallback()`) — route all builders through it; add per-site
+`.openHelperFactory(SoilCrypto.roomFactory(key))` where a keyed open is needed.
+
 ---
 
 ### Room Setup Rules

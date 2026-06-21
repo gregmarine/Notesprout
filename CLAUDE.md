@@ -25,6 +25,7 @@ matching doc before working in that area:**
 | Scribble-erase, smart lasso, snap-to-guide, align & distribute | [`docs/lasso-and-gestures.md`](docs/lasso-and-gestures.md) |
 | MainActivity features (browse/search/sort/export/ML Kit) + recents | [`docs/mainactivity-and-recents.md`](docs/mainactivity-and-recents.md) |
 | Encryption: SQLCipher model, scopes, key lifecycle, leak hygiene, migration | [`docs/encryption.md`](docs/encryption.md) |
+| Full-notebook export: `.soil` format, `notebook_meta`, copy engine, encrypted trade-off | [`docs/full-notebook-export.md`](docs/full-notebook-export.md) |
 
 Standing backlogs at monorepo root: `CODE_REVIEW_PRUNING.md`, `TOOLBAR_CUSTOMIZATION_PLAN.md`
 (Session 8 open), `SUPERNOTE_SUPPORT_PLAN.md`, `NOTEBOOK_ENCRYPTION_PHASE2_PLAN.md` (encryption
@@ -65,6 +66,7 @@ These apply everywhere — do not repeat them in feature sections.
 - Every object carries: id, parentId, boundingBox, order, createdAt, updatedAt, deletedAt, data
 - Soft deletes only (set `deletedAt`); stable UUIDs everywhere
 - Activities receive notebook identity as `EXTRA_NOTEBOOK_ID` + `EXTRA_NOTEBOOK_NAME` — never a `File` object
+- Every `.soil` is **self-describing** via a single-row `notebook_meta` table (schema v3): id, name, folder ancestry, encrypted flag, and cover snapshot travel inside the file for portable import
 
 Full schema, Room setup, and WAL/sidecar rules: [`docs/data-architecture.md`](docs/data-architecture.md).
 

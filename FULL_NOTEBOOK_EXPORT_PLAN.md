@@ -77,7 +77,7 @@
 | S1 | Self-describing `.soil`: `notebook_meta` table, model, continuous upkeep, migration-set fix | ✅ DONE |
 | S2 | Export-format chooser + full-notebook copy engine + MainActivity (context-menu) path | ✅ DONE |
 | S3 | NotebookActivity (open-notebook) export path + encrypted (no-prompt) + open-file flush/checkpoint | ✅ DONE |
-| S4 | Wrap-up: hygiene, edge cases, docs, MEMORY, two-device matrix (G10 + P2P) | ⬜ NOT STARTED |
+| S4 | Wrap-up: hygiene, edge cases, docs, MEMORY, two-device matrix (G10 + P2P) | ✅ DONE |
 
 ---
 
@@ -345,7 +345,7 @@ paths unchanged. Build clean, installed on G10.
 
 ## S4 — Wrap-Up: Hygiene, Edge Cases, Docs, MEMORY, Two-Device Matrix
 
-**Status:** ⬜ NOT STARTED
+**Status:** ✅ DONE
 
 **Goal:** Hygiene sweep, edge-case verification, documentation, memory, and a two-device test matrix on
 **G10 (`34E517F9`)** and **P2P (`287d2364`)**.
