@@ -75,7 +75,7 @@
 | # | Session | Status |
 |---|---|---|
 | S1 | Self-describing `.soil`: `notebook_meta` table, model, continuous upkeep, migration-set fix | ✅ DONE |
-| S2 | Export-format chooser + full-notebook copy engine + MainActivity (context-menu) path | ⬜ NOT STARTED |
+| S2 | Export-format chooser + full-notebook copy engine + MainActivity (context-menu) path | ✅ DONE |
 | S3 | NotebookActivity (open-notebook) export path + encrypted (no-prompt) + open-file flush/checkpoint | ⬜ NOT STARTED |
 | S4 | Wrap-up: hygiene, edge cases, docs, MEMORY, two-device matrix (G10 + P2P) | ⬜ NOT STARTED |
 
@@ -201,7 +201,7 @@ regression; no UI change yet. Build clean, installed on G10.
 
 ## S2 — Export-Format Chooser + Full-Notebook Copy Engine (MainActivity path)
 
-**Status:** ⬜ NOT STARTED
+**Status:** ✅ DONE
 
 **Goal:** From the **context menu** (long-press → Export), let the user choose **PDF** (existing) or
 **Full Notebook (.soil)** (new), and implement the copy engine + Save/Share for the new option. Plaintext

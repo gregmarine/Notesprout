@@ -2,4 +2,5 @@
 <paths>
     <cache-path name="exported_pdfs" path="exported_pdfs/" />
     <cache-path name="exported_pngs" path="exported_pngs/" />
+    <cache-path name="exported_notebooks" path="exported_notebooks/" />
 </paths>

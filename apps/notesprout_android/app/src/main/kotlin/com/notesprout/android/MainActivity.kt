@@ -42,6 +42,7 @@ import com.notesprout.android.crypto.SoilCrypto
 import com.notesprout.android.crypto.SoilMigrator
 import com.notesprout.android.core.Slog
 import com.notesprout.android.data.BoundingBox
+import com.notesprout.android.NotebookPackager
 import com.notesprout.android.data.NotebookMeta
 import com.notesprout.android.data.NotebookMetadata
 import com.notesprout.android.data.NotebookMetaStore
@@ -230,6 +231,24 @@ class MainActivity : AppCompatActivity() {
 
     private val savePdfLauncher = registerForActivityResult(
         ActivityResultContracts.CreateDocument("application/pdf")
+    ) { uri ->
+        val file = pendingExportFile ?: return@registerForActivityResult
+        if (uri == null) return@registerForActivityResult
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                contentResolver.openOutputStream(uri)?.use { out ->
+                    file.inputStream().use { it.copyTo(out) }
+                }
+            } catch (e: Exception) {
+                android.os.Handler(android.os.Looper.getMainLooper()).post {
+                    Toast.makeText(this@MainActivity, "Save failed: ${e.message}", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+    }
+
+    private val saveSoilLauncher = registerForActivityResult(
+        ActivityResultContracts.CreateDocument("application/octet-stream")
     ) { uri ->
         val file = pendingExportFile ?: return@registerForActivityResult
         if (uri == null) return@registerForActivityResult
@@ -2335,6 +2354,14 @@ class MainActivity : AppCompatActivity() {
     // ── Export ────────────────────────────────────────────────────────────────
 
     private fun startExportFromMain(entity: ObjectEntity) {
+        ActionSheetDialog(this)
+            .title("Export")
+            .addAction(R.drawable.ic_export,   "Export as PDF")          { startPdfExportFromMain(entity) }
+            .addAction(R.drawable.ic_notebook, "Export Notebook (.soil)") { startSoilExportFromMain(entity) }
+            .show()
+    }
+
+    private fun startPdfExportFromMain(entity: ObjectEntity) {
         val file = soilFile(this, entity.id)
 
         lifecycleScope.launch {
@@ -2414,6 +2441,77 @@ class MainActivity : AppCompatActivity() {
             dialog.dismiss()
             showExportChoice(pdfFile)
         }
+    }
+
+    private fun startSoilExportFromMain(entity: ObjectEntity) {
+        lifecycleScope.launch {
+            val info = withContext(Dispatchers.IO) { repository.getEncryptionInfo(entity.id) }
+
+            // Determine openableKey without prompting. Empty = plaintext; non-empty = GLOBAL key;
+            // null = skip refresh (NOTEBOOK-encrypted or GLOBAL key not yet cached).
+            val openableKey: String? = when {
+                !info.encrypted -> ""
+                info.keyScope == KeyScope.GLOBAL ->
+                    com.notesprout.android.crypto.PassphraseStore.getGlobalPassphrase(this@MainActivity)
+                else -> null
+            }
+
+            val tvMessage = android.widget.TextView(this@MainActivity).apply {
+                text = "Exporting…"
+                setPadding(64, 48, 64, 48)
+                setTextColor(android.graphics.Color.BLACK)
+                textSize = 16f
+            }
+            val dialog = AlertDialog.Builder(this@MainActivity)
+                .setView(tvMessage)
+                .setCancelable(false)
+                .create()
+            dialog.show()
+            dialog.window?.setElevation(0f)
+            dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+
+            val soilFile = try {
+                withContext(Dispatchers.IO) {
+                    NotebookPackager.packageForExport(
+                        context     = this@MainActivity,
+                        repo        = repository,
+                        notebookId  = entity.id,
+                        openableKey = openableKey,
+                    )
+                }
+            } catch (e: Exception) {
+                dialog.dismiss()
+                Toast.makeText(this@MainActivity, "Export failed: ${e.message}", Toast.LENGTH_LONG).show()
+                return@launch
+            }
+            dialog.dismiss()
+            showSoilExportChoice(soilFile)
+        }
+    }
+
+    private fun showSoilExportChoice(file: java.io.File) {
+        val d = AlertDialog.Builder(this)
+            .setTitle("Export Notebook")
+            .setPositiveButton("Save to device") { _, _ ->
+                pendingExportFile = file
+                saveSoilLauncher.launch(file.name)
+            }
+            .setNegativeButton("Share") { _, _ ->
+                val uri = androidx.core.content.FileProvider.getUriForFile(
+                    this, "$packageName.fileprovider", file
+                )
+                val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                    type = "application/octet-stream"
+                    putExtra(Intent.EXTRA_STREAM, uri)
+                    clipData = android.content.ClipData.newRawUri("", uri)
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+                startActivity(Intent.createChooser(shareIntent, "Share Notebook"))
+            }
+            .create()
+        d.show()
+        d.window?.setElevation(0f)
+        d.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
     }
 
     private fun showExportChoice(file: java.io.File) {
