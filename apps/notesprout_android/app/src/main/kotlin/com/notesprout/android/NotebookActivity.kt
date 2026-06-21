@@ -627,12 +627,32 @@ class NotebookActivity : AppCompatActivity() {
         linkPickerLauncher.launch(intent)
     }
 
-    // ── Export save-to-device launcher ───────────────────────────────────────
+    // ── Export save-to-device launchers ──────────────────────────────────────
 
     private var pendingExportFile: java.io.File? = null
 
     private val savePdfLauncher = registerForActivityResult(
         ActivityResultContracts.CreateDocument("application/pdf")
+    ) { uri ->
+        val file = pendingExportFile ?: return@registerForActivityResult
+        if (uri == null) return@registerForActivityResult
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                contentResolver.openOutputStream(uri)?.use { out ->
+                    file.inputStream().use { it.copyTo(out) }
+                }
+            } catch (e: Exception) {
+                android.os.Handler(android.os.Looper.getMainLooper()).post {
+                    android.widget.Toast.makeText(
+                        this@NotebookActivity, "Save failed: ${e.message}", android.widget.Toast.LENGTH_LONG
+                    ).show()
+                }
+            }
+        }
+    }
+
+    private val saveSoilLauncher = registerForActivityResult(
+        ActivityResultContracts.CreateDocument("application/octet-stream")
     ) { uri ->
         val file = pendingExportFile ?: return@registerForActivityResult
         if (uri == null) return@registerForActivityResult
@@ -3826,6 +3846,14 @@ class NotebookActivity : AppCompatActivity() {
     }
 
     private fun startExport(db: SoilDatabase) {
+        ActionSheetDialog(this)
+            .title("Export")
+            .addAction(R.drawable.ic_export,   "Export as PDF")          { startPdfExport(db) }
+            .addAction(R.drawable.ic_notebook, "Export Notebook (.soil)") { startSoilExport(db) }
+            .show()
+    }
+
+    private fun startPdfExport(db: SoilDatabase) {
         lifecycleScope.launch {
             // 1. If encrypted: warn that the exported file is not encrypted (notebook passphrase
             //    stays on the .soil — the PDF export is plaintext unless the user adds a password).
@@ -3854,6 +3882,45 @@ class NotebookActivity : AppCompatActivity() {
             // 3. Flush current page strokes so the export reflects the latest content.
             withContext(Dispatchers.IO) { saveStrokes(db) }
             runExport(db, exportPassword)
+        }
+    }
+
+    private fun startSoilExport(db: SoilDatabase) {
+        val nbId = notebookId.takeIf { it.isNotEmpty() } ?: return
+        lifecycleScope.launch {
+            val tvMessage = android.widget.TextView(this@NotebookActivity).apply {
+                text = "Exporting…"
+                setPadding(64, 48, 64, 48)
+                setTextColor(android.graphics.Color.BLACK)
+                textSize = 16f
+            }
+            val dialog = AlertDialog.Builder(this@NotebookActivity)
+                .setView(tvMessage)
+                .setCancelable(false)
+                .create()
+            dialog.show()
+            dialog.window?.setElevation(0f)
+            dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+
+            val soilFile = try {
+                withContext(Dispatchers.IO) {
+                    saveStrokes(db)
+                    NotebookPackager.packageOpenForExport(
+                        context    = this@NotebookActivity,
+                        db         = db,
+                        repo       = indexRepo,
+                        notebookId = nbId,
+                    )
+                }
+            } catch (e: Exception) {
+                dialog.dismiss()
+                android.widget.Toast.makeText(
+                    this@NotebookActivity, "Export failed: ${e.message}", android.widget.Toast.LENGTH_LONG
+                ).show()
+                return@launch
+            }
+            dialog.dismiss()
+            showSoilExportChoice(soilFile)
         }
     }
 
@@ -3925,6 +3992,37 @@ class NotebookActivity : AppCompatActivity() {
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
         startActivity(Intent.createChooser(intent, "Share PDF"))
+    }
+
+    private fun showSoilExportChoice(file: java.io.File) {
+        val d = AlertDialog.Builder(this)
+            .setTitle("Export Notebook")
+            .setPositiveButton("Save to device") { _, _ ->
+                pendingExportFile = file
+                saveSoilLauncher.launch(file.name)
+            }
+            .setNegativeButton("Share") { _, _ ->
+                shareSoil(file)
+            }
+            .create()
+        d.show()
+        d.window?.setElevation(0f)
+        d.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+    }
+
+    private fun shareSoil(file: java.io.File) {
+        val uri = androidx.core.content.FileProvider.getUriForFile(
+            this,
+            "$packageName.fileprovider",
+            file,
+        )
+        val intent = Intent(Intent.ACTION_SEND).apply {
+            type = "application/octet-stream"
+            putExtra(Intent.EXTRA_STREAM, uri)
+            clipData = android.content.ClipData.newRawUri("", uri)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        startActivity(Intent.createChooser(intent, "Share Notebook"))
     }
 
     /**

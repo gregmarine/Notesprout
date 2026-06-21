@@ -76,7 +76,7 @@
 |---|---|---|
 | S1 | Self-describing `.soil`: `notebook_meta` table, model, continuous upkeep, migration-set fix | ✅ DONE |
 | S2 | Export-format chooser + full-notebook copy engine + MainActivity (context-menu) path | ✅ DONE |
-| S3 | NotebookActivity (open-notebook) export path + encrypted (no-prompt) + open-file flush/checkpoint | ⬜ NOT STARTED |
+| S3 | NotebookActivity (open-notebook) export path + encrypted (no-prompt) + open-file flush/checkpoint | ✅ DONE |
 | S4 | Wrap-up: hygiene, edge cases, docs, MEMORY, two-device matrix (G10 + P2P) | ⬜ NOT STARTED |
 
 ---
@@ -277,7 +277,7 @@ PDF path unchanged. Build clean, installed on G10.
 
 ## S3 — Open-Notebook Export (NotebookActivity) + Encrypted, No-Prompt Pure Copy
 
-**Status:** ⬜ NOT STARTED
+**Status:** ✅ DONE
 
 **Goal:** Offer the same Full-Notebook option from **inside an open notebook**, and finish the encrypted
 story: full-notebook export of an encrypted notebook is a **pure copy with no passphrase prompt and no
