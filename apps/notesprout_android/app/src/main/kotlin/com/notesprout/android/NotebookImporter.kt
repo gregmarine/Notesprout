@@ -59,11 +59,10 @@ object NotebookImporter {
     }
 
     /**
-     * Import a plaintext .soil from [file] (the import cache temp) into Garden and register it
-     * in the global index. Returns the resolved notebook id.
+     * Import a plaintext .soil from [file] into Garden and register it in the global index.
      *
-     * S1 behavior: placement always uses the notebook's own [folderPath] (default); id collisions
-     * silently take a fresh UUID (Keep-both). The [file] is deleted after a successful import.
+     * [parentId] and [resolvedId] are pre-resolved by the caller (placement + collision
+     * dialogs in MainActivity). [file] is deleted after a successful import.
      */
     suspend fun importPlaintext(
         context: Context,
@@ -71,36 +70,23 @@ object NotebookImporter {
         file: File,
         manifest: ImportManifest,
         displayName: String,
+        parentId: String?,
+        resolvedId: String,
     ): String = withContext(Dispatchers.IO) {
         val meta = manifest.meta
 
-        // Resolve placement: walk folderPath root→parent, ensureFolderWithId at each level.
-        var resolvedParentId: String? = null
-        meta?.folderPath?.forEach { ref ->
-            val entity = repo.ensureFolderWithId(ref.id, ref.name, resolvedParentId)
-            resolvedParentId = entity.id
-        }
-
-        // Resolve id: use the embedded id if not already in the index, else fresh UUID.
-        val resolvedId = if (meta != null && repo.getNotebook(meta.notebookId) == null) {
-            meta.notebookId
-        } else {
-            UUID.randomUUID().toString()
-        }
-
-        // Clear any stale sidecars for the resolved id before copying into Garden.
+        // Clear any stale sidecars before copying into Garden.
         val gardenFile = soilFile(context, resolvedId)
         File(gardenFile.parent!!, "$resolvedId.soil-wal").delete()
         File(gardenFile.parent!!, "$resolvedId.soil-shm").delete()
         File(gardenFile.parent!!, "$resolvedId.soil-journal").delete()
         file.copyTo(gardenFile, overwrite = true)
 
-        // Register the notebook in the global index.
         val now = System.currentTimeMillis()
         repo.importNotebookRow(
             id = resolvedId,
             name = displayName,
-            parentId = resolvedParentId,
+            parentId = parentId,
             obj = NotebookObject(
                 snapshot = meta?.cover,
                 pageCount = manifest.pageCount,
@@ -111,33 +97,73 @@ object NotebookImporter {
             updatedAt = now,
         )
 
-        // Best-effort: refresh the embedded notebook_meta to reflect the imported identity
-        // (new id, resolved folderPath, etc.) so a later re-export is self-consistent.
-        runCatching {
-            val freshMeta = NotebookMeta(
-                notebookId = resolvedId,
-                name = displayName,
-                createdAt = meta?.createdAt ?: now,
-                updatedAt = now,
-                encrypted = false,
-                keyScope = null,
-                cover = meta?.cover,
-                folderPath = repo.getFolderAncestry(resolvedParentId),
-            )
-            val db = SoilDatabase.builder(context, gardenFile.absolutePath).build()
-            try {
-                NotebookMetaStore.write(db, freshMeta)
-                db.openHelper.writableDatabase
-                    .query("PRAGMA wal_checkpoint(TRUNCATE)")
-                    .use { it.moveToFirst() }
-            } finally {
-                db.close()
-            }
-        }.onFailure { Slog.d("NotebookImporter") { "meta refresh failed: ${it.message}" } }
+        refreshPlaintextMeta(context, repo, gardenFile, resolvedId, displayName, parentId, meta, now)
 
-        // Clean up the import temp file.
         runCatching { file.delete() }
-
         resolvedId
     }
+
+    /**
+     * Replace an existing notebook in-place (same index row / folder / pin) with the contents
+     * of [file]. Updates name, page count, and snapshot from [manifest]; keeps placement.
+     * [file] is deleted after a successful replace.
+     */
+    suspend fun replacePlaintext(
+        context: Context,
+        repo: IndexRepository,
+        file: File,
+        manifest: ImportManifest,
+        displayName: String,
+        existingId: String,
+    ): String = withContext(Dispatchers.IO) {
+        val meta = manifest.meta
+        val parentId = repo.getNotebook(existingId)?.parentId
+
+        val gardenFile = soilFile(context, existingId)
+        File(gardenFile.parent!!, "$existingId.soil-wal").delete()
+        File(gardenFile.parent!!, "$existingId.soil-shm").delete()
+        File(gardenFile.parent!!, "$existingId.soil-journal").delete()
+        file.copyTo(gardenFile, overwrite = true)
+
+        repo.renameNotebook(existingId, displayName)
+        repo.updateNotebookPageCount(existingId, manifest.pageCount)
+        repo.updateNotebookSnapshot(existingId, meta?.cover)
+
+        val now = System.currentTimeMillis()
+        refreshPlaintextMeta(context, repo, gardenFile, existingId, displayName, parentId, meta, now)
+
+        runCatching { file.delete() }
+        existingId
+    }
+
+    private suspend fun refreshPlaintextMeta(
+        context: Context,
+        repo: IndexRepository,
+        gardenFile: File,
+        notebookId: String,
+        displayName: String,
+        parentId: String?,
+        meta: NotebookMeta?,
+        now: Long,
+    ) = runCatching {
+        val freshMeta = NotebookMeta(
+            notebookId = notebookId,
+            name = displayName,
+            createdAt = meta?.createdAt ?: now,
+            updatedAt = now,
+            encrypted = false,
+            keyScope = null,
+            cover = meta?.cover,
+            folderPath = repo.getFolderAncestry(parentId),
+        )
+        val db = SoilDatabase.builder(context, gardenFile.absolutePath).build()
+        try {
+            NotebookMetaStore.write(db, freshMeta)
+            db.openHelper.writableDatabase
+                .query("PRAGMA wal_checkpoint(TRUNCATE)")
+                .use { it.moveToFirst() }
+        } finally {
+            db.close()
+        }
+    }.onFailure { Slog.d("NotebookImporter") { "meta refresh failed: ${it.message}" } }
 }

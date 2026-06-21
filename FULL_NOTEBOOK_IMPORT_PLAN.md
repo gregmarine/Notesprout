@@ -100,7 +100,7 @@
 | # | Session | Status |
 |---|---|---|
 | S1 | Import engine + file-picker entry (plaintext, default folder, silent fresh-UUID) | ✅ DONE |
-| S2 | Placement & conflicts: folder-choice dialog, missing-folder creation, ID-collision Replace/Keep-both, name conflicts | ⬜ NOT STARTED |
+| S2 | Placement & conflicts: folder-choice dialog, missing-folder creation, ID-collision Replace/Keep-both, name conflicts | ✅ DONE |
 | S3 | Encrypted import: probe, passphrase-to-read, keying chooser (keep/global/new), re-key, scope, meta refresh | ⬜ NOT STARTED |
 | S4 | Intent filters (open-with / share-to) + wrap-up: hygiene, edge cases, docs, MEMORY, two-device matrix | ⬜ NOT STARTED |
 
@@ -209,7 +209,7 @@ Encrypted files are detected and declined cleanly. Build clean, installed on G10
 
 ## S2 — Placement & Conflicts: Folder Choice, Replace/Keep-Both, Name Conflicts
 
-**Status:** ⬜ NOT STARTED
+**Status:** ✅ DONE
 
 **Goal:** Give the user control over **where** the import lands and resolve **collisions** — the
 "choose what folder" requirement and the Replace/Keep-both requirement. Still plaintext-only (S3 layers

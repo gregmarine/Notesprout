@@ -58,7 +58,7 @@ class IndexRepository(private val dao: ObjectDao) {
         return entity
     }
 
-    /** Import helper: insert a notebook row with an explicit [id] and explicit timestamps. */
+    /** Import helper: insert (or resurrect a soft-deleted) notebook row with an explicit [id]. */
     suspend fun importNotebookRow(
         id: String,
         name: String,
@@ -77,7 +77,8 @@ class IndexRepository(private val dao: ObjectDao) {
             deletedAt = null,
             data = Json.encodeToString(obj),
         )
-        dao.insert(entity)
+        val existing = dao.getById(id)
+        if (existing != null) dao.update(entity) else dao.insert(entity)
         return entity
     }
 

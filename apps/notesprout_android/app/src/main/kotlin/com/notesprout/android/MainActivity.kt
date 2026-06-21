@@ -1929,11 +1929,12 @@ class MainActivity : AppCompatActivity() {
 
     private fun updatePickerTitle() {
         val (title, confirmLabel) = when (destinationPickerState) {
-            is DestinationPickerState.CopyNotebook -> "Copy notebook here" to "Copy here"
-            is DestinationPickerState.MoveNotebook -> "Move notebook here" to "Move here"
-            is DestinationPickerState.CopyFolder   -> "Copy folder here"   to "Copy here"
-            is DestinationPickerState.MoveFolder   -> "Move folder here"   to "Move here"
-            DestinationPickerState.None            -> "" to ""
+            is DestinationPickerState.CopyNotebook   -> "Copy notebook here"  to "Copy here"
+            is DestinationPickerState.MoveNotebook   -> "Move notebook here"  to "Move here"
+            is DestinationPickerState.CopyFolder     -> "Copy folder here"    to "Copy here"
+            is DestinationPickerState.MoveFolder     -> "Move folder here"    to "Move here"
+            is DestinationPickerState.ImportNotebook -> "Place notebook here" to "Confirm"
+            DestinationPickerState.None              -> "" to ""
         }
         binding.pickerTitle.text = title
         binding.btnPickerConfirm.text = confirmLabel
@@ -1943,13 +1944,19 @@ class MainActivity : AppCompatActivity() {
         val state = destinationPickerState
         if (state == DestinationPickerState.None) return
 
+        // Import picker: separate branch — no "source entity", just the in-flight import context.
+        if (state is DestinationPickerState.ImportNotebook) {
+            confirmImportPickerDestination(state)
+            return
+        }
+
         lifecycleScope.launch {
             val source: ObjectEntity = when (state) {
                 is DestinationPickerState.CopyNotebook -> state.source
                 is DestinationPickerState.MoveNotebook -> state.source
                 is DestinationPickerState.CopyFolder   -> state.source
                 is DestinationPickerState.MoveFolder   -> state.source
-                DestinationPickerState.None            -> return@launch
+                else                                   -> return@launch
             }
 
             // Validate destination.
@@ -1969,7 +1976,7 @@ class MainActivity : AppCompatActivity() {
                         return@launch
                     }
                 }
-                DestinationPickerState.None -> return@launch
+                else -> return@launch
             }
 
             // Check for name conflict in the target folder.
@@ -1997,6 +2004,26 @@ class MainActivity : AppCompatActivity() {
                 dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
             } else {
                 executePickerOperation(state, source, null)
+            }
+        }
+    }
+
+    private fun confirmImportPickerDestination(state: DestinationPickerState.ImportNotebook) {
+        val targetParentId = currentParentId
+        destinationPickerState = DestinationPickerState.None
+        applyPickerModeUI()
+
+        lifecycleScope.launch {
+            val conflict = withContext(Dispatchers.IO) {
+                repository.getNotebooks(targetParentId).find { it.name == state.displayName }
+            }
+            if (conflict != null) {
+                showImportNameConflictDialog(
+                    state.manifest, state.tempFile, state.displayName,
+                    targetParentId, state.resolvedId, conflict.id
+                )
+            } else {
+                executeImport(state.manifest, state.tempFile, state.displayName, targetParentId, state.resolvedId)
             }
         }
     }
@@ -2077,7 +2104,7 @@ class MainActivity : AppCompatActivity() {
                             copyFolderRecursively(source.id, currentParentId)
                             true
                         }
-                        DestinationPickerState.None -> false
+                        else -> false
                     }
                 } catch (e: Exception) {
                     Log.e("MainActivity", "Picker operation failed", e)
@@ -2553,7 +2580,6 @@ class MainActivity : AppCompatActivity() {
 
     private fun startImportFromUri(uri: android.net.Uri) {
         lifecycleScope.launch {
-            // Derive a fallback display name from the URI before going off-UI.
             val uriDisplayName = contentResolver.query(
                 uri,
                 arrayOf(android.provider.OpenableColumns.DISPLAY_NAME),
@@ -2567,52 +2593,207 @@ class MainActivity : AppCompatActivity() {
                 ?.takeIf { it.isNotEmpty() }
                 ?: "Imported Notebook"
 
-            // Show "Importing…" modal — all DB/file work happens off-UI.
-            val tvMessage = android.widget.TextView(this@MainActivity).apply {
-                text = "Importing…"
-                setPadding(64, 48, 64, 48)
-                setTextColor(android.graphics.Color.BLACK)
-                textSize = 16f
-            }
-            val dialog = AlertDialog.Builder(this@MainActivity)
-                .setView(tvMessage)
-                .setCancelable(false)
-                .create()
-            dialog.show()
-            dialog.window?.setElevation(0f)
-            dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
-
-            val notebookName = try {
-                val importedId = withContext(Dispatchers.IO) {
-                    // Copy URI to a cache temp so SQLite can open it.
+            val (tempFile, manifest) = try {
+                withContext(Dispatchers.IO) {
                     val importDir = java.io.File(cacheDir, "imported_notebooks")
                         .also { it.deleteRecursively(); it.mkdirs() }
                     val tempFile = java.io.File(importDir, "incoming.soil")
                     contentResolver.openInputStream(uri)?.use { input ->
                         tempFile.outputStream().use { input.copyTo(it) }
                     }
-
                     val manifest = NotebookImporter.readManifest(tempFile, fallbackName)
-                    val displayName = manifest.meta?.name?.trim()?.takeIf { it.isNotEmpty() }
-                        ?: fallbackName
-                    NotebookImporter.importPlaintext(this@MainActivity, repository, tempFile, manifest, displayName)
-                    displayName
+                    tempFile to manifest
                 }
-                importedId
             } catch (e: ImportException) {
-                dialog.dismiss()
                 Toast.makeText(this@MainActivity, e.message, Toast.LENGTH_LONG).show()
                 return@launch
             } catch (e: Exception) {
-                dialog.dismiss()
                 Toast.makeText(this@MainActivity, "Import failed: ${e.message}", Toast.LENGTH_LONG).show()
                 return@launch
             }
 
-            dialog.dismiss()
-            Toast.makeText(this@MainActivity, "Imported “$notebookName”", Toast.LENGTH_SHORT).show()
-            scanAndRender()
+            val displayName = manifest.meta?.name?.trim()?.takeIf { it.isNotEmpty() } ?: fallbackName
+
+            val collision = manifest.meta?.notebookId?.let { id ->
+                withContext(Dispatchers.IO) {
+                    repository.getNotebook(id)?.takeIf { it.deletedAt == null }
+                }
+            }
+
+            if (collision != null) {
+                showImportCollisionDialog(manifest, tempFile, displayName, collision.id)
+            } else {
+                val resolvedId = manifest.meta?.notebookId ?: UUID.randomUUID().toString()
+                showImportPlacementDialog(manifest, tempFile, displayName, resolvedId)
+            }
         }
+    }
+
+    private fun showImportCollisionDialog(
+        manifest: ImportManifest,
+        tempFile: java.io.File,
+        displayName: String,
+        existingId: String,
+    ) {
+        ActionSheetDialog(this)
+            .title("\"$displayName\" already exists")
+            .addAction(null, "Replace existing notebook") {
+                lifecycleScope.launch { executeReplace(manifest, tempFile, displayName, existingId) }
+            }
+            .addAction(null, "Keep both") {
+                val freshId = UUID.randomUUID().toString()
+                showImportPlacementDialog(manifest, tempFile, displayName, freshId)
+            }
+            .addAction(null, "Cancel") {
+                runCatching { tempFile.delete() }
+            }
+            .show()
+    }
+
+    private fun showImportPlacementDialog(
+        manifest: ImportManifest,
+        tempFile: java.io.File,
+        displayName: String,
+        resolvedId: String,
+    ) {
+        val folderLabel = manifest.meta?.folderPath
+            ?.joinToString(" / ") { it.name }
+            ?.takeIf { it.isNotEmpty() }
+            ?: "Top level"
+
+        AlertDialog.Builder(this)
+            .setMessage("Place \"$displayName\" in its original folder?\n\n$folderLabel")
+            .setPositiveButton("Notebook's folders") { _, _ ->
+                lifecycleScope.launch {
+                    // Walk folderPath to resolve parentId, then check for name conflict.
+                    val (parentId, conflict) = withContext(Dispatchers.IO) {
+                        var pid: String? = null
+                        manifest.meta?.folderPath?.forEach { ref ->
+                            val entity = repository.ensureFolderWithId(ref.id, ref.name, pid)
+                            pid = entity.id
+                        }
+                        val conflict = repository.getNotebooks(pid).find { it.name == displayName }
+                        pid to conflict
+                    }
+                    if (conflict != null) {
+                        showImportNameConflictDialog(manifest, tempFile, displayName, parentId, resolvedId, conflict.id)
+                    } else {
+                        executeImport(manifest, tempFile, displayName, parentId, resolvedId)
+                    }
+                }
+            }
+            .setNeutralButton("Choose folder…") { _, _ ->
+                enterPickerMode(DestinationPickerState.ImportNotebook(manifest, tempFile, resolvedId, displayName))
+            }
+            .setNegativeButton("Cancel") { _, _ ->
+                runCatching { tempFile.delete() }
+            }
+            .create()
+            .also { d ->
+                d.show()
+                d.window?.setElevation(0f)
+                d.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+            }
+    }
+
+    private fun showImportNameConflictDialog(
+        manifest: ImportManifest,
+        tempFile: java.io.File,
+        displayName: String,
+        parentId: String?,
+        resolvedId: String,
+        conflictId: String,
+    ) {
+        AlertDialog.Builder(this)
+            .setMessage("A notebook named \"$displayName\" already exists here. Replace it or keep both?")
+            .setPositiveButton("Replace") { _, _ ->
+                lifecycleScope.launch {
+                    withContext(Dispatchers.IO) {
+                        repository.softDeleteNotebook(conflictId)
+                        soilFile(this@MainActivity, conflictId).delete()
+                    }
+                    executeImport(manifest, tempFile, displayName, parentId, resolvedId)
+                }
+            }
+            .setNeutralButton("Keep both") { _, _ ->
+                val dedupedName = "$displayName Copy"
+                lifecycleScope.launch { executeImport(manifest, tempFile, dedupedName, parentId, resolvedId) }
+            }
+            .setNegativeButton("Cancel") { _, _ ->
+                runCatching { tempFile.delete() }
+            }
+            .create()
+            .also { d ->
+                d.show()
+                d.window?.setElevation(0f)
+                d.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+            }
+    }
+
+    private suspend fun executeImport(
+        manifest: ImportManifest,
+        tempFile: java.io.File,
+        displayName: String,
+        parentId: String?,
+        resolvedId: String,
+    ) {
+        val modal = showImportingModal()
+        val name = try {
+            withContext(Dispatchers.IO) {
+                NotebookImporter.importPlaintext(
+                    this@MainActivity, repository, tempFile, manifest, displayName, parentId, resolvedId
+                )
+                displayName
+            }
+        } catch (e: Exception) {
+            modal.dismiss()
+            Toast.makeText(this@MainActivity, "Import failed: ${e.message}", Toast.LENGTH_LONG).show()
+            return
+        }
+        modal.dismiss()
+        Toast.makeText(this@MainActivity, "Imported “$name”", Toast.LENGTH_SHORT).show()
+        scanAndRender()
+    }
+
+    private suspend fun executeReplace(
+        manifest: ImportManifest,
+        tempFile: java.io.File,
+        displayName: String,
+        existingId: String,
+    ) {
+        val modal = showImportingModal()
+        val name = try {
+            withContext(Dispatchers.IO) {
+                NotebookImporter.replacePlaintext(
+                    this@MainActivity, repository, tempFile, manifest, displayName, existingId
+                )
+                displayName
+            }
+        } catch (e: Exception) {
+            modal.dismiss()
+            Toast.makeText(this@MainActivity, "Import failed: ${e.message}", Toast.LENGTH_LONG).show()
+            return
+        }
+        modal.dismiss()
+        Toast.makeText(this@MainActivity, "Replaced “$name”", Toast.LENGTH_SHORT).show()
+        scanAndRender()
+    }
+
+    private fun showImportingModal(): AlertDialog {
+        val tvMessage = TextView(this).apply {
+            text = "Importing…"
+            setPadding(64, 48, 64, 48)
+            setTextColor(android.graphics.Color.BLACK)
+            textSize = 16f
+        }
+        val dialog = AlertDialog.Builder(this)
+            .setView(tvMessage)
+            .setCancelable(false)
+            .create()
+        dialog.show()
+        dialog.window?.setElevation(0f)
+        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+        return dialog
     }
 
     private fun toggleOverflowToolbar() {
