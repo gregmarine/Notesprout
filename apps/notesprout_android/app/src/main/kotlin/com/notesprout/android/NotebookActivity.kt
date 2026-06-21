@@ -2908,9 +2908,9 @@ class NotebookActivity : AppCompatActivity() {
             }
         }
 
-        // Clear history, clipboard, and remove any on-disk persistence file — notebook is done.
+        // Clear history and remove any on-disk persistence file — notebook is done.
+        // Clipboard is app-global and intentionally survives notebook transitions.
         undoRedoManager.clear()
-        clearClipboard()
         val nbPath = notebookSoilPath
         if (nbPath != null) undoRedoPersistenceFile(nbPath).takeIf { it.exists() }?.delete()
 
@@ -2977,7 +2977,6 @@ class NotebookActivity : AppCompatActivity() {
         val db = soilDatabase ?: return
         soilDatabase = null
         undoRedoManager.clear()
-        clearClipboard()
         val nbPath = notebookSoilPath
         if (nbPath != null) undoRedoPersistenceFile(nbPath).takeIf { it.exists() }?.delete()
         val pageId       = currentPageId
