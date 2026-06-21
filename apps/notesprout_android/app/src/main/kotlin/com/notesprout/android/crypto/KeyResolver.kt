@@ -74,6 +74,7 @@ object KeyResolver {
             activity, notebookId,
             title = "Current Passphrase",
             message = "Enter the current passphrase to proceed.",
+            limiterKey = limiterKeyFor(notebookId, info.keyScope),
         )
     }
 
@@ -88,6 +89,7 @@ object KeyResolver {
             activity, notebookId,
             title = "Enter Passphrase",
             message = "Enter the current passphrase to decrypt this notebook.",
+            limiterKey = limiterKeyFor(notebookId, info.keyScope),
         )
     }
 
@@ -105,6 +107,7 @@ object KeyResolver {
             activity, notebookId,
             title = "Global Passphrase",
             message = "Enter the global passphrase to open this notebook.",
+            limiterKey = AttemptLimiter.GLOBAL_KEY,
         ) { passphrase ->
             withContext(Dispatchers.IO) { PassphraseStore.setGlobalPassphrase(activity, passphrase) }
         }
@@ -123,6 +126,7 @@ object KeyResolver {
 
     /**
      * Prompt for a passphrase, verify it against [notebookId]'s file, and loop on wrong passphrase.
+     * [limiterKey] selects the AttemptLimiter bucket — notebook id for NOTEBOOK-scope, [AttemptLimiter.GLOBAL_KEY] for GLOBAL-scope.
      * [onSuccess] runs (before returning) when the passphrase is verified.
      * Returns null if the user cancels at any point.
      */
@@ -131,18 +135,27 @@ object KeyResolver {
         notebookId: String,
         title: String,
         message: String,
+        limiterKey: String = notebookId,
         onSuccess: suspend (String) -> Unit = {},
     ): String? {
         var promptMessage = message
         while (true) {
-            val passphrase = PassphrasePrompt.promptForPassphrase(activity, title, promptMessage) ?: return null
+            val lockedUntilMs = withContext(Dispatchers.IO) { AttemptLimiter.check(activity, limiterKey) }
+            val passphrase = PassphrasePrompt.promptForPassphrase(
+                activity, title, promptMessage, lockedUntilMs = lockedUntilMs,
+            ) ?: return null
             val file = soilFile(activity, notebookId)
             val valid = withContext(Dispatchers.IO) { SoilCrypto.verifyPassphrase(file, passphrase) }
             if (valid) {
+                withContext(Dispatchers.IO) { AttemptLimiter.recordSuccess(activity, limiterKey) }
                 onSuccess(passphrase)
                 return passphrase
             }
+            withContext(Dispatchers.IO) { AttemptLimiter.recordFailure(activity, limiterKey) }
             promptMessage = "Wrong passphrase. Try again."
         }
     }
+
+    private fun limiterKeyFor(notebookId: String, scope: KeyScope?): String =
+        if (scope == KeyScope.GLOBAL) AttemptLimiter.GLOBAL_KEY else notebookId
 }

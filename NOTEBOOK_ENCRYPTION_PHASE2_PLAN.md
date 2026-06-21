@@ -55,7 +55,7 @@
 | P2.S4 | Re-key a single notebook: change passphrase + change scope (`PRAGMA rekey`) | ✅ DONE |
 | P2.S5 | Global passphrase management UI (view / change / forget) + rotation trigger | ✅ DONE |
 | P2.S6 | Global passphrase rotation: cancellable/resumable batch re-key | ✅ DONE |
-| P2.S7 | Passphrase attempt rate-limiting (escalating lockout + countdown) | ⬜ NOT STARTED |
+| P2.S7 | Passphrase attempt rate-limiting (escalating lockout + countdown) | ✅ DONE |
 | P2.S8 | Password-protected PDF export (PdfBox-Android) | ⬜ NOT STARTED |
 | P2.S9 | Wrap-up (search/KDF audit, docs, edge cases, P2P + G10 matrix) | ⬜ NOT STARTED |
 
@@ -407,7 +407,7 @@ every notebook openable and the operation resumable; new global cached only on f
 
 ## P2.S7 — Passphrase Attempt Rate-Limiting
 
-**Status:** ⬜ NOT STARTED
+**Status:** ✅ DONE
 
 **Goal:** After repeated wrong-passphrase rejections, impose an **escalating lockout** before the next
 attempt is allowed, with a **countdown** in the prompt. Slows offline brute-force on a compromised
