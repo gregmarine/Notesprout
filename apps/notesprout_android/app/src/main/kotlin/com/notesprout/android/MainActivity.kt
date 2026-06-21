@@ -250,7 +250,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private val saveSoilLauncher = registerForActivityResult(
-        ActivityResultContracts.CreateDocument("application/octet-stream")
+        ActivityResultContracts.CreateDocument("application/x-notesprout-soil")
     ) { uri ->
         val file = pendingExportFile ?: return@registerForActivityResult
         if (uri == null) return@registerForActivityResult
@@ -360,6 +360,16 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         )
+
+        // Handle .soil open-with / share-to on cold launch only; config-change recreations
+        // must not re-trigger the import pipeline.
+        if (savedInstanceState == null) handleIncomingIntent(intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleIncomingIntent(intent)
     }
 
     override fun onResume() {
@@ -2542,7 +2552,7 @@ class MainActivity : AppCompatActivity() {
                     this, "$packageName.fileprovider", file
                 )
                 val shareIntent = Intent(Intent.ACTION_SEND).apply {
-                    type = "application/octet-stream"
+                    type = "application/x-notesprout-soil"
                     putExtra(Intent.EXTRA_STREAM, uri)
                     clipData = android.content.ClipData.newRawUri("", uri)
                     addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
@@ -2578,6 +2588,19 @@ class MainActivity : AppCompatActivity() {
         d.show()
         d.window?.setElevation(0f)
         d.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+    }
+
+    /**
+     * Handle an incoming .soil URI from ACTION_VIEW or ACTION_SEND.
+     * Called from onCreate (cold launch) and onNewIntent (app already open).
+     */
+    private fun handleIncomingIntent(intent: Intent) {
+        val uri: Uri = when (intent.action) {
+            Intent.ACTION_VIEW -> intent.data
+            Intent.ACTION_SEND -> @Suppress("DEPRECATION") intent.getParcelableExtra<Uri>(Intent.EXTRA_STREAM)
+            else -> null
+        } ?: return
+        startImportFromUri(uri)
     }
 
     private fun startImportFromUri(uri: android.net.Uri) {

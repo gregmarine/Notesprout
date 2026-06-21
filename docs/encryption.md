@@ -299,6 +299,34 @@ and the encrypted-NOTEBOOK meta-freshness trade-off.
 
 ---
 
+### Full-Notebook Import — Encrypted Notebooks
+
+Encrypted `.soil` files follow a **probe → unlock → keying chooser → re-key → register** pipeline:
+
+**Probe:** `SoilCrypto.probe(file)` attempts a plain SQLite open. Success → `Plaintext`; failure on a non-empty file → `Encrypted`. (A definitive encrypted-vs-garbage distinction happens in the verify step.)
+
+**Unlock to read meta:** `KeyResolver.resolveForImportRead(activity, file)` prompts the user for the passphrase and verifies it against the file with `SoilCrypto.verifyPassphrase`. Uses an `AttemptLimiter` bucket keyed `"IMPORT"` (independent of any notebook id). Loops on wrong passphrase with the standard lockout escalation; cancel returns null → import aborted, temp deleted.
+
+**Keying chooser (ActionSheetDialog)** — after the user confirms placement but before the file is written into Garden:
+
+| Choice | Action | Resulting scope |
+|---|---|---|
+| **Keep existing passphrase** | No re-key | `GLOBAL` if entered pass equals this device's cached global; otherwise `NOTEBOOK` |
+| **Use this device's global** | `rekeyInPlace(file, enteredPass, globalPass)` (creates/caches global via `resolveForConvertToEncrypted(GLOBAL)` if none) | **GLOBAL** |
+| **New notebook passphrase** | `rekeyInPlace(file, enteredPass, newPass)` (prompt-with-confirm via `resolveForConvertToEncrypted(NOTEBOOK)`) | **NOTEBOOK** |
+
+**GLOBAL→NOTEBOOK downgrade rule:** when importing a GLOBAL-encrypted notebook from another device and choosing "Keep existing passphrase", the kept passphrase is compared to `PassphraseStore.getGlobalPassphrase(context)`. If they differ, the scope is set to `NOTEBOOK` — the index records `NOTEBOOK`, and every open will prompt. This is correct: the imported file's passphrase is not this device's global.
+
+**Re-key order:** `rekeyInPlace` operates on the temp file before the copy into Garden. A failure leaves Garden untouched.
+
+**Leak hygiene:** the temp file is the still-encrypted `.soil` (never a plaintext copy); passphrases are never logged, never put in an Intent; the index never receives a `snapshot` for encrypted notebooks.
+
+`KeyResolver.resolveForImportRead` lives in `crypto/KeyResolver.kt`. The `"IMPORT"` `AttemptLimiter` bucket lives in the same file and persists across process restarts.
+
+See [`docs/full-notebook-export.md`](full-notebook-export.md) for the full import pipeline (placement, collision, meta refresh).
+
+---
+
 ### Password-Protected PDF Export (PdfBox-Android)
 
 Notebooks can be exported to a password-protected PDF. The existing bitmap → `android.graphics.pdf.PdfDocument`

@@ -102,7 +102,7 @@
 | S1 | Import engine + file-picker entry (plaintext, default folder, silent fresh-UUID) | ✅ DONE |
 | S2 | Placement & conflicts: folder-choice dialog, missing-folder creation, ID-collision Replace/Keep-both, name conflicts | ✅ DONE |
 | S3 | Encrypted import: probe, passphrase-to-read, keying chooser (keep/global/new), re-key, scope, meta refresh | ✅ DONE |
-| S4 | Intent filters (open-with / share-to) + wrap-up: hygiene, edge cases, docs, MEMORY, two-device matrix | ⬜ NOT STARTED |
+| S4 | Intent filters (open-with / share-to) + wrap-up: hygiene, edge cases, docs, MEMORY, two-device matrix | ✅ DONE |
 
 ---
 
@@ -363,7 +363,7 @@ prompts route through `KeyResolver`. Build clean, installed on G10.
 
 ## S4 — Intent Filters (Open-With / Share-To) + Wrap-Up
 
-**Status:** ⬜ NOT STARTED
+**Status:** ✅ DONE
 
 **Goal:** Add the second entry point (tap-a-`.soil` / share-to-Notesprout), then the hygiene /
 edge-case / docs / memory / two-device-matrix wrap-up on **G10 (`34E517F9`)** and **P2P (`287d2364`)**.

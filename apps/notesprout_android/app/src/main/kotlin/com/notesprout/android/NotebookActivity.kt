@@ -652,7 +652,7 @@ class NotebookActivity : AppCompatActivity() {
     }
 
     private val saveSoilLauncher = registerForActivityResult(
-        ActivityResultContracts.CreateDocument("application/octet-stream")
+        ActivityResultContracts.CreateDocument("application/x-notesprout-soil")
     ) { uri ->
         val file = pendingExportFile ?: return@registerForActivityResult
         if (uri == null) return@registerForActivityResult
@@ -4017,7 +4017,7 @@ class NotebookActivity : AppCompatActivity() {
             file,
         )
         val intent = Intent(Intent.ACTION_SEND).apply {
-            type = "application/octet-stream"
+            type = "application/x-notesprout-soil"
             putExtra(Intent.EXTRA_STREAM, uri)
             clipData = android.content.ClipData.newRawUri("", uri)
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)

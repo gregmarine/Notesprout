@@ -177,31 +177,78 @@ Cancelling Save or Share leaves only the (harmless) cache file, which is wiped a
 
 ---
 
-## Import (Future — Stub)
+## Import
 
-Import is explicitly out of scope for this implementation. This stub records the intended design so
-a future implementer can build on it.
+Full-notebook import is the reverse of export: a `.soil` file is accepted from the file picker or an
+open-with / share-to intent, probed, optionally unlocked, placed in the folder hierarchy, and
+registered in the global index. The embedded `notebook_meta` drives the entire process.
 
-**Input:** a `.soil` file provided by the user (e.g. via `ACTION_VIEW` / `ACTION_SEND` intent or a
-file picker). The file may be encrypted.
+### Entry Points
 
-**Steps:**
+- **Overflow "Import Notebook (.soil)"** — `importSoilLauncher` (`OpenDocument`, MIME
+  `application/octet-stream` + `*/*`) in `MainActivity`.
+- **Open-with / share-to** — `AndroidManifest.xml` registers `ACTION_VIEW` (content:// and file://)
+  and `ACTION_SEND` filters on `MainActivity` (`launchMode="singleTop"`). Cold launch triggers in
+  `onCreate` (`savedInstanceState == null`); already-open app triggers in `onNewIntent`.
 
-1. Read `notebook_meta` from the file (for plaintext: open via standard SQLite; for encrypted:
-   prompt for passphrase via `KeyResolver`, open via `SoilCrypto`).
-2. From `folderPath`, recreate any missing folders in the global index **using the same UUIDs and
-   names** so cross-device links resolve correctly. Walk the list root → immediate parent; for each
-   folder, `getOrCreate` by id (check index first; insert only if absent).
-3. Determine the target notebook id. If `notebookMeta.notebookId` does not yet exist in the index,
-   use it as-is (no collision). If it exists and refers to a different notebook, generate a fresh UUID
-   for the imported copy.
-4. Copy the `.soil` file to `Garden/<resolvedId>.soil`.
-5. Insert a `type="notebook"` row in the global index with the resolved id, the name from meta
-   (editable by the user post-import), parent from the reconstructed folder chain, and
-   `encrypted`/`keyScope` from meta.
-6. For GLOBAL-scoped encrypted notebooks: prompt for the passphrase once (verify against the file);
-   if the device already has a global passphrase cached and they differ, the user must either supply
-   the notebook's original passphrase (and re-key to the device's global) or keep it as NOTEBOOK
-   scope.
-7. Page count is derivable on import by counting `type="page"` rows in the `.soil` — no embedded
-   value needed.
+Both paths call `startImportFromUri(uri)`.
+
+### Pipeline
+
+1. **Copy to temp.** The incoming `content://` URI is copied to `cacheDir/imported_notebooks/incoming.soil`
+   (dir wiped+recreated each import so no stale files accumulate).
+2. **Probe.** `SoilCrypto.probe(temp)` → `Plaintext` / `Encrypted` / `Invalid`. Invalid → toast + abort.
+3. **Unlock (encrypted only).** `KeyResolver.resolveForImportRead(activity, temp)` — prompts for the
+   passphrase, verifies with `SoilCrypto.verifyPassphrase`, loops on wrong (using the `"IMPORT"`
+   `AttemptLimiter` bucket, independent of any notebook id). Cancel → abort + wipe temp.
+4. **Read manifest.** `NotebookImporter.readManifest(file, fallbackName, passphrase?)` opens the file via
+   `SoilCrypto.openRaw`, reads `notebook_meta` + page count. Missing `notebook_meta` → `meta = null`,
+   fallback name = file's display name minus `.soil`, empty `folderPath` (lands at root or chosen folder).
+   No `notebook` table → `ImportException` → rejected.
+5. **ID collision.** If `meta.notebookId` already exists in the index (live row): **Replace existing** /
+   **Keep both** (fresh UUID) / **Cancel**. Replace keeps the existing row's placement and skips the
+   placement dialog. Keep both proceeds to placement.
+6. **Placement dialog.** "Notebook's folders" (default — recreates missing folders with same UUIDs/names
+   via `ensureFolderWithId`, walking `folderPath` root→parent) or "Choose folder…" (enters
+   `DestinationPickerState.ImportNotebook` — existing picker, no folders created).
+7. **Name conflict.** If a notebook of the same name already exists in the target folder: **Replace**
+   (soft-deletes the conflict, imports with same name) or **Keep both** (appends " Copy").
+8. **Keying chooser (encrypted only).** `ActionSheetDialog` after placement is resolved, before writing
+   to Garden — "Keep existing passphrase" / "Use this device's global" / "New notebook passphrase".
+   See [`docs/encryption.md`](encryption.md) for the scope rule (including GLOBAL→NOTEBOOK downgrade).
+   Re-key happens on the temp file (`SoilMigrator.rekeyInPlace`) before the copy, keeping Garden clean
+   on any failure.
+9. **Write to Garden.** Delete stale sidecars, copy temp to `soilFile(context, resolvedId)`.
+10. **Register / update index.** `importNotebookRow` (new) or `renameNotebook` + `updateNotebookPageCount`
+    + `setEncryptionState` (Replace). Encrypted imports always set `snapshot = null` (leak hygiene).
+11. **Refresh embedded meta.** Opens the Garden file (keyed or plaintext), writes a fresh `NotebookMeta`
+    (resolved id, new `folderPath`, resulting `encrypted`/`keyScope`, cover null for encrypted),
+    `PRAGMA wal_checkpoint(TRUNCATE)`, closes. Best-effort — failure is logged, import proceeds.
+12. **Cleanup.** Delete `incoming.soil`; dir is wiped at the start of the next import regardless.
+
+### Key Classes
+
+- `NotebookImporter.kt` — engine: `readManifest`, `importPlaintext`, `replacePlaintext`,
+  `importEncrypted`, `replaceEncrypted`, `refreshPlaintextMeta`, `refreshEncryptedMeta`.
+- `MainActivity.kt` — all import dialogs and coroutine wiring: `startImportFromUri`,
+  `handleIncomingIntent`, `showImportCollisionDialog`, `showImportPlacementDialog`,
+  `showImportNameConflictDialog`, `showKeyingChooserForImport`, `showKeyingChooserForReplace`,
+  `executeImport`, `executeReplace`, `doImportEncrypted`, `doReplaceEncrypted`.
+- `IndexRepository` — `ensureFolderWithId`, `importNotebookRow`, `setEncryptionState`.
+
+### Import Cache Dir
+
+`cacheDir/imported_notebooks/` — wiped+recreated at the start of every import. The FileProvider does
+not need to expose this directory (it is not shared with other apps).
+
+### Edge Cases
+
+- **Folder id collision** — if a `folderPath` id already exists as a notebook (not a folder), that
+  level is skipped and the notebook lands one level up; the hierarchy still forms.
+- **Soft-deleted folder** — `ensureFolderWithId` un-deletes the folder (same id, same name) rather
+  than creating a duplicate.
+- **Default placement when folders already exist** — `ensureFolderWithId` is a no-op for folders
+  that are already live; no duplicates are created.
+- **Pre-S1 `.soil` (no `notebook_meta`)** — imports with the file's display name at the chosen folder
+  (or root if default); the index snapshot is null; opens and draws correctly.
+- **Corrupt / non-`.soil`** — rejected at the probe step; no partial index row is written.

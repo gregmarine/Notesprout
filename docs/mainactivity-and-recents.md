@@ -95,6 +95,34 @@ present a **format chooser** `ActionSheetDialog` with two rows before starting a
 See [`docs/full-notebook-export.md`](full-notebook-export.md) for the full format, `notebook_meta`
 schema, continuous upkeep, and encrypted trade-off.
 
+## Full-Notebook Import (.soil)
+
+Consumes a `.soil` produced by full-notebook export. Entry points:
+
+- **Overflow action "Import Notebook (.soil)"** — `importSoilLauncher` (`OpenDocument`, MIME `application/octet-stream` + `*/*`). Shows `startImportFromUri(uri)` with the system file picker.
+- **Open-with / Share-to intent filters** — `AndroidManifest.xml` registers three filters on `MainActivity` (`launchMode="singleTop"`):
+  - `ACTION_VIEW` with `scheme=content`, `mimeType=application/octet-stream`
+  - `ACTION_VIEW` with `scheme=file`, `mimeType=application/octet-stream` (legacy)
+  - `ACTION_SEND` with `mimeType=application/octet-stream`
+  - Cold launch: `onCreate` calls `handleIncomingIntent(intent)` when `savedInstanceState == null`
+  - Already-open: `onNewIntent` calls `handleIncomingIntent(intent)` and `setIntent(intent)`
+
+**Import pipeline** (both entry points feed `startImportFromUri`):
+1. Copy the incoming `content://` URI to `cacheDir/imported_notebooks/incoming.soil` (dir is wiped+recreated each import).
+2. Probe the temp file (`SoilCrypto.probe`). Invalid → toast + abort. Encrypted → `KeyResolver.resolveForImportRead` (prompts + verifies; `"IMPORT"` AttemptLimiter bucket; cancel → abort + wipe temp).
+3. `NotebookImporter.readManifest(file, fallbackName, passphrase?)` — reads `notebook_meta` + page count; missing meta → fallback name + empty `folderPath`.
+4. **ID collision check** — if `meta.notebookId` already exists in the index (live row): show **Replace / Keep both / Cancel** dialog. Replace keeps the existing row's placement; Keep both assigns a fresh UUID.
+5. **Placement dialog** — skipped for Replace. Options: **"Notebook's folders"** (recreates missing folders with same UUIDs via `ensureFolderWithId`) or **"Choose folder…"** (enters `DestinationPickerState.ImportNotebook` — existing picker; no folders created).
+6. **Name conflict** — if a notebook of the same name exists in the target folder: Replace (soft-delete conflict, import with same name) or Keep both (name gets " Copy" suffix).
+7. **Keying chooser** (encrypted only, after placement, before writing to Garden) — Keep existing / Use device global / New notebook passphrase. See [`docs/encryption.md`](encryption.md) for the scope rule.
+8. Re-key on the temp file (if needed), copy to `soilFile(context, resolvedId)`, register/update the index row, refresh `notebook_meta` inside the Garden file (`wal_checkpoint(TRUNCATE)`), delete the temp.
+
+**Cache hygiene:** `imported_notebooks/` is wiped+recreated at the start of each import; the temp `incoming.soil` is deleted after success or cancel. Encrypted temp is never decrypted to disk — the still-encrypted `.soil` is the temp; re-key happens in place.
+
+Key classes: `NotebookImporter.kt` (engine — `readManifest`, `importPlaintext`, `replacePlaintext`, `importEncrypted`, `replaceEncrypted`); import dialogs live entirely in `MainActivity`.
+
+See [`docs/full-notebook-export.md`](full-notebook-export.md) for the `.soil` format, `notebook_meta` schema, and the full import spec.
+
 ## Page Index — Multi-Page Selection (`PageIndexActivity`)
 
 The page index is a paginated grid of page snapshots. Long-press enters **action mode**; the user can
