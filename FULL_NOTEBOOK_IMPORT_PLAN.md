@@ -101,7 +101,7 @@
 |---|---|---|
 | S1 | Import engine + file-picker entry (plaintext, default folder, silent fresh-UUID) | ✅ DONE |
 | S2 | Placement & conflicts: folder-choice dialog, missing-folder creation, ID-collision Replace/Keep-both, name conflicts | ✅ DONE |
-| S3 | Encrypted import: probe, passphrase-to-read, keying chooser (keep/global/new), re-key, scope, meta refresh | ⬜ NOT STARTED |
+| S3 | Encrypted import: probe, passphrase-to-read, keying chooser (keep/global/new), re-key, scope, meta refresh | ✅ DONE |
 | S4 | Intent filters (open-with / share-to) + wrap-up: hygiene, edge cases, docs, MEMORY, two-device matrix | ⬜ NOT STARTED |
 
 ---
@@ -356,6 +356,8 @@ G10 command.
 Encrypted `.soil` files import through the same placement/collision UI; the keying chooser re-keys as
 chosen; the index scope is set correctly (including GLOBAL→NOTEBOOK downgrade); no plaintext leaks; all
 prompts route through `KeyResolver`. Build clean, installed on G10.
+
+**All 7 user tests passed. Test 7 (hygiene) verified programmatically via adb + SQLite index query.**
 
 ---
 

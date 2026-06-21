@@ -38,7 +38,9 @@ import com.notesprout.android.crypto.KeyResolver
 import com.notesprout.android.crypto.KeyScope
 import com.notesprout.android.crypto.KeySession
 import com.notesprout.android.crypto.PassphraseCache
+import com.notesprout.android.crypto.PassphraseStore
 import com.notesprout.android.crypto.SoilCrypto
+import com.notesprout.android.crypto.SoilFileKind
 import com.notesprout.android.crypto.SoilMigrator
 import com.notesprout.android.core.Slog
 import com.notesprout.android.data.BoundingBox
@@ -2020,10 +2022,10 @@ class MainActivity : AppCompatActivity() {
             if (conflict != null) {
                 showImportNameConflictDialog(
                     state.manifest, state.tempFile, state.displayName,
-                    targetParentId, state.resolvedId, conflict.id
+                    targetParentId, state.resolvedId, conflict.id, state.enteredPass
                 )
             } else {
-                executeImport(state.manifest, state.tempFile, state.displayName, targetParentId, state.resolvedId)
+                executeImport(state.manifest, state.tempFile, state.displayName, targetParentId, state.resolvedId, state.enteredPass)
             }
         }
     }
@@ -2491,7 +2493,7 @@ class MainActivity : AppCompatActivity() {
             val openableKey: String? = when {
                 !info.encrypted -> ""
                 info.keyScope == KeyScope.GLOBAL ->
-                    com.notesprout.android.crypto.PassphraseStore.getGlobalPassphrase(this@MainActivity)
+                    PassphraseStore.getGlobalPassphrase(this@MainActivity)
                 else -> null
             }
 
@@ -2593,7 +2595,8 @@ class MainActivity : AppCompatActivity() {
                 ?.takeIf { it.isNotEmpty() }
                 ?: "Imported Notebook"
 
-            val (tempFile, manifest) = try {
+            // Copy the incoming content:// URI to a local temp file so SQLite can open it.
+            val (tempFile, kind) = try {
                 withContext(Dispatchers.IO) {
                     val importDir = java.io.File(cacheDir, "imported_notebooks")
                         .also { it.deleteRecursively(); it.mkdirs() }
@@ -2601,13 +2604,39 @@ class MainActivity : AppCompatActivity() {
                     contentResolver.openInputStream(uri)?.use { input ->
                         tempFile.outputStream().use { input.copyTo(it) }
                     }
-                    val manifest = NotebookImporter.readManifest(tempFile, fallbackName)
-                    tempFile to manifest
+                    tempFile to SoilCrypto.probe(tempFile)
+                }
+            } catch (e: Exception) {
+                Toast.makeText(this@MainActivity, "Import failed: ${e.message}", Toast.LENGTH_LONG).show()
+                return@launch
+            }
+
+            if (kind == SoilFileKind.Invalid) {
+                runCatching { tempFile.delete() }
+                Toast.makeText(this@MainActivity, "Not a valid notebook file", Toast.LENGTH_LONG).show()
+                return@launch
+            }
+
+            // For encrypted files, prompt for the passphrase now (before reading meta).
+            val enteredPass: String? = if (kind == SoilFileKind.Encrypted) {
+                val pass = KeyResolver.resolveForImportRead(this@MainActivity, tempFile)
+                if (pass == null) {
+                    runCatching { tempFile.delete() }
+                    return@launch
+                }
+                pass
+            } else null
+
+            val manifest = try {
+                withContext(Dispatchers.IO) {
+                    NotebookImporter.readManifest(tempFile, fallbackName, enteredPass)
                 }
             } catch (e: ImportException) {
+                runCatching { tempFile.delete() }
                 Toast.makeText(this@MainActivity, e.message, Toast.LENGTH_LONG).show()
                 return@launch
             } catch (e: Exception) {
+                runCatching { tempFile.delete() }
                 Toast.makeText(this@MainActivity, "Import failed: ${e.message}", Toast.LENGTH_LONG).show()
                 return@launch
             }
@@ -2621,10 +2650,10 @@ class MainActivity : AppCompatActivity() {
             }
 
             if (collision != null) {
-                showImportCollisionDialog(manifest, tempFile, displayName, collision.id)
+                showImportCollisionDialog(manifest, tempFile, displayName, collision.id, enteredPass)
             } else {
                 val resolvedId = manifest.meta?.notebookId ?: UUID.randomUUID().toString()
-                showImportPlacementDialog(manifest, tempFile, displayName, resolvedId)
+                showImportPlacementDialog(manifest, tempFile, displayName, resolvedId, enteredPass)
             }
         }
     }
@@ -2634,15 +2663,16 @@ class MainActivity : AppCompatActivity() {
         tempFile: java.io.File,
         displayName: String,
         existingId: String,
+        enteredPass: String? = null,
     ) {
         ActionSheetDialog(this)
             .title("\"$displayName\" already exists")
             .addAction(null, "Replace existing notebook") {
-                lifecycleScope.launch { executeReplace(manifest, tempFile, displayName, existingId) }
+                lifecycleScope.launch { executeReplace(manifest, tempFile, displayName, existingId, enteredPass) }
             }
             .addAction(null, "Keep both") {
                 val freshId = UUID.randomUUID().toString()
-                showImportPlacementDialog(manifest, tempFile, displayName, freshId)
+                showImportPlacementDialog(manifest, tempFile, displayName, freshId, enteredPass)
             }
             .addAction(null, "Cancel") {
                 runCatching { tempFile.delete() }
@@ -2655,6 +2685,7 @@ class MainActivity : AppCompatActivity() {
         tempFile: java.io.File,
         displayName: String,
         resolvedId: String,
+        enteredPass: String? = null,
     ) {
         val folderLabel = manifest.meta?.folderPath
             ?.joinToString(" / ") { it.name }
@@ -2676,14 +2707,14 @@ class MainActivity : AppCompatActivity() {
                         pid to conflict
                     }
                     if (conflict != null) {
-                        showImportNameConflictDialog(manifest, tempFile, displayName, parentId, resolvedId, conflict.id)
+                        showImportNameConflictDialog(manifest, tempFile, displayName, parentId, resolvedId, conflict.id, enteredPass)
                     } else {
-                        executeImport(manifest, tempFile, displayName, parentId, resolvedId)
+                        executeImport(manifest, tempFile, displayName, parentId, resolvedId, enteredPass)
                     }
                 }
             }
             .setNeutralButton("Choose folder…") { _, _ ->
-                enterPickerMode(DestinationPickerState.ImportNotebook(manifest, tempFile, resolvedId, displayName))
+                enterPickerMode(DestinationPickerState.ImportNotebook(manifest, tempFile, resolvedId, displayName, enteredPass))
             }
             .setNegativeButton("Cancel") { _, _ ->
                 runCatching { tempFile.delete() }
@@ -2703,6 +2734,7 @@ class MainActivity : AppCompatActivity() {
         parentId: String?,
         resolvedId: String,
         conflictId: String,
+        enteredPass: String? = null,
     ) {
         AlertDialog.Builder(this)
             .setMessage("A notebook named \"$displayName\" already exists here. Replace it or keep both?")
@@ -2712,12 +2744,12 @@ class MainActivity : AppCompatActivity() {
                         repository.softDeleteNotebook(conflictId)
                         soilFile(this@MainActivity, conflictId).delete()
                     }
-                    executeImport(manifest, tempFile, displayName, parentId, resolvedId)
+                    executeImport(manifest, tempFile, displayName, parentId, resolvedId, enteredPass)
                 }
             }
             .setNeutralButton("Keep both") { _, _ ->
                 val dedupedName = "$displayName Copy"
-                lifecycleScope.launch { executeImport(manifest, tempFile, dedupedName, parentId, resolvedId) }
+                lifecycleScope.launch { executeImport(manifest, tempFile, dedupedName, parentId, resolvedId, enteredPass) }
             }
             .setNegativeButton("Cancel") { _, _ ->
                 runCatching { tempFile.delete() }
@@ -2736,7 +2768,12 @@ class MainActivity : AppCompatActivity() {
         displayName: String,
         parentId: String?,
         resolvedId: String,
+        enteredPass: String? = null,
     ) {
+        if (enteredPass != null) {
+            showKeyingChooserForImport(manifest, tempFile, displayName, parentId, resolvedId, enteredPass)
+            return
+        }
         val modal = showImportingModal()
         val name = try {
             withContext(Dispatchers.IO) {
@@ -2760,12 +2797,151 @@ class MainActivity : AppCompatActivity() {
         tempFile: java.io.File,
         displayName: String,
         existingId: String,
+        enteredPass: String? = null,
     ) {
+        if (enteredPass != null) {
+            showKeyingChooserForReplace(manifest, tempFile, displayName, existingId, enteredPass)
+            return
+        }
         val modal = showImportingModal()
         val name = try {
             withContext(Dispatchers.IO) {
                 NotebookImporter.replacePlaintext(
                     this@MainActivity, repository, tempFile, manifest, displayName, existingId
+                )
+                displayName
+            }
+        } catch (e: Exception) {
+            modal.dismiss()
+            Toast.makeText(this@MainActivity, "Import failed: ${e.message}", Toast.LENGTH_LONG).show()
+            return
+        }
+        modal.dismiss()
+        Toast.makeText(this@MainActivity, "Replaced “$name”", Toast.LENGTH_SHORT).show()
+        scanAndRender()
+    }
+
+    private fun showKeyingChooserForImport(
+        manifest: ImportManifest,
+        tempFile: java.io.File,
+        displayName: String,
+        parentId: String?,
+        resolvedId: String,
+        enteredPass: String,
+    ) {
+        ActionSheetDialog(this)
+            .title("Import encrypted notebook")
+            .addAction(null, "Keep existing passphrase") {
+                lifecycleScope.launch {
+                    val globalPass = withContext(Dispatchers.IO) {
+                        PassphraseStore.getGlobalPassphrase(this@MainActivity)
+                    }
+                    val scope = if (enteredPass == globalPass) KeyScope.GLOBAL else KeyScope.NOTEBOOK
+                    doImportEncrypted(manifest, tempFile, displayName, parentId, resolvedId, enteredPass, enteredPass, scope)
+                }
+            }
+            .addAction(null, "Use this device's global") {
+                lifecycleScope.launch {
+                    val globalPass = KeyResolver.resolveForConvertToEncrypted(this@MainActivity, KeyScope.GLOBAL)
+                        ?: return@launch
+                    doImportEncrypted(manifest, tempFile, displayName, parentId, resolvedId, enteredPass, globalPass, KeyScope.GLOBAL)
+                }
+            }
+            .addAction(null, "New notebook passphrase") {
+                lifecycleScope.launch {
+                    val newPass = KeyResolver.resolveForConvertToEncrypted(this@MainActivity, KeyScope.NOTEBOOK)
+                        ?: return@launch
+                    doImportEncrypted(manifest, tempFile, displayName, parentId, resolvedId, enteredPass, newPass, KeyScope.NOTEBOOK)
+                }
+            }
+            .addAction(null, "Cancel") {
+                runCatching { tempFile.delete() }
+            }
+            .show()
+    }
+
+    private fun showKeyingChooserForReplace(
+        manifest: ImportManifest,
+        tempFile: java.io.File,
+        displayName: String,
+        existingId: String,
+        enteredPass: String,
+    ) {
+        ActionSheetDialog(this)
+            .title("Import encrypted notebook")
+            .addAction(null, "Keep existing passphrase") {
+                lifecycleScope.launch {
+                    val globalPass = withContext(Dispatchers.IO) {
+                        PassphraseStore.getGlobalPassphrase(this@MainActivity)
+                    }
+                    val scope = if (enteredPass == globalPass) KeyScope.GLOBAL else KeyScope.NOTEBOOK
+                    doReplaceEncrypted(manifest, tempFile, displayName, existingId, enteredPass, enteredPass, scope)
+                }
+            }
+            .addAction(null, "Use this device's global") {
+                lifecycleScope.launch {
+                    val globalPass = KeyResolver.resolveForConvertToEncrypted(this@MainActivity, KeyScope.GLOBAL)
+                        ?: return@launch
+                    doReplaceEncrypted(manifest, tempFile, displayName, existingId, enteredPass, globalPass, KeyScope.GLOBAL)
+                }
+            }
+            .addAction(null, "New notebook passphrase") {
+                lifecycleScope.launch {
+                    val newPass = KeyResolver.resolveForConvertToEncrypted(this@MainActivity, KeyScope.NOTEBOOK)
+                        ?: return@launch
+                    doReplaceEncrypted(manifest, tempFile, displayName, existingId, enteredPass, newPass, KeyScope.NOTEBOOK)
+                }
+            }
+            .addAction(null, "Cancel") {
+                runCatching { tempFile.delete() }
+            }
+            .show()
+    }
+
+    private suspend fun doImportEncrypted(
+        manifest: ImportManifest,
+        tempFile: java.io.File,
+        displayName: String,
+        parentId: String?,
+        resolvedId: String,
+        enteredPass: String,
+        finalPass: String,
+        scope: KeyScope,
+    ) {
+        val modal = showImportingModal()
+        val name = try {
+            withContext(Dispatchers.IO) {
+                NotebookImporter.importEncrypted(
+                    this@MainActivity, repository, tempFile, manifest, displayName,
+                    parentId, resolvedId, enteredPass, finalPass, scope,
+                )
+                displayName
+            }
+        } catch (e: Exception) {
+            modal.dismiss()
+            Toast.makeText(this@MainActivity, "Import failed: ${e.message}", Toast.LENGTH_LONG).show()
+            return
+        }
+        modal.dismiss()
+        Toast.makeText(this@MainActivity, "Imported “$name”", Toast.LENGTH_SHORT).show()
+        scanAndRender()
+    }
+
+    private suspend fun doReplaceEncrypted(
+        manifest: ImportManifest,
+        tempFile: java.io.File,
+        displayName: String,
+        existingId: String,
+        enteredPass: String,
+        finalPass: String,
+        scope: KeyScope,
+    ) {
+        val modal = showImportingModal()
+        val name = try {
+            withContext(Dispatchers.IO) {
+                NotebookImporter.replaceEncrypted(
+                    this@MainActivity, repository, tempFile, manifest, displayName,
+                    existingId, enteredPass, finalPass, scope,
                 )
                 displayName
             }

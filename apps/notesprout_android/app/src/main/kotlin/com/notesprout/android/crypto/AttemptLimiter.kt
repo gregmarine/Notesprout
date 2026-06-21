@@ -15,6 +15,7 @@ import androidx.security.crypto.MasterKey
 object AttemptLimiter {
 
     const val GLOBAL_KEY = "GLOBAL"
+    const val IMPORT_KEY = "IMPORT"
 
     private const val PREFS_FILE = "notesprout_secure"
     private const val PREFIX_FAILURES = "attempt_failures_"

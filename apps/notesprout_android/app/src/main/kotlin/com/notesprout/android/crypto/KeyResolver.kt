@@ -4,6 +4,7 @@ import android.app.Activity
 import com.notesprout.android.data.soilFile
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.io.File
 
 /**
  * Single decision point for obtaining a notebook's SQLCipher key.
@@ -91,6 +92,33 @@ object KeyResolver {
             message = "Enter the current passphrase to decrypt this notebook.",
             limiterKey = limiterKeyFor(notebookId, info.keyScope),
         )
+    }
+
+    /**
+     * Prompt for the passphrase that unlocks an encrypted .soil for import.
+     *
+     * Verifies against the provided [file] directly (no notebook id needed — the file is a
+     * temp copy of an incoming .soil). Uses the [AttemptLimiter.IMPORT_KEY] bucket so
+     * failed attempts are tracked independently from any open notebook. Returns null if the
+     * user cancels.
+     */
+    suspend fun resolveForImportRead(activity: Activity, file: File): String? {
+        var promptMessage = "Enter the passphrase to import this encrypted notebook."
+        while (true) {
+            val lockedUntilMs = withContext(Dispatchers.IO) {
+                AttemptLimiter.check(activity, AttemptLimiter.IMPORT_KEY)
+            }
+            val passphrase = PassphrasePrompt.promptForPassphrase(
+                activity, "Import Passphrase", promptMessage, lockedUntilMs = lockedUntilMs,
+            ) ?: return null
+            val valid = withContext(Dispatchers.IO) { SoilCrypto.verifyPassphrase(file, passphrase) }
+            if (valid) {
+                withContext(Dispatchers.IO) { AttemptLimiter.recordSuccess(activity, AttemptLimiter.IMPORT_KEY) }
+                return passphrase
+            }
+            withContext(Dispatchers.IO) { AttemptLimiter.recordFailure(activity, AttemptLimiter.IMPORT_KEY) }
+            promptMessage = "Wrong passphrase. Try again."
+        }
     }
 
     // ── Private helpers ───────────────────────────────────────────────────────

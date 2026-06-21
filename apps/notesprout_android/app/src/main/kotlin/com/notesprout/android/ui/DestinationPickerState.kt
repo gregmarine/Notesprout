@@ -16,5 +16,6 @@ sealed class DestinationPickerState {
         val tempFile: File,
         val resolvedId: String,
         val displayName: String,
+        val enteredPass: String? = null,
     ) : DestinationPickerState()
 }
