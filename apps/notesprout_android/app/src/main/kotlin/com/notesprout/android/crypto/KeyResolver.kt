@@ -64,6 +64,20 @@ object KeyResolver {
     }
 
     /**
+     * Resolve the current key for a re-key operation (change passphrase or change scope).
+     * Always prompts and verifies — never reads from cache — to prove the user knows it.
+     * Returns null if the user cancelled or the passphrase was wrong.
+     */
+    suspend fun resolveCurrentKeyForRekey(activity: Activity, notebookId: String, info: EncryptionInfo): String? {
+        if (!info.encrypted) return null
+        return promptAndVerify(
+            activity, notebookId,
+            title = "Current Passphrase",
+            message = "Enter the current passphrase to proceed.",
+        )
+    }
+
+    /**
      * Resolve the key for a decrypt operation. Always prompts — even if the global passphrase
      * is cached — as an extra confirmation before an irreversible action.
      * Returns null if the user cancelled or the passphrase was wrong.

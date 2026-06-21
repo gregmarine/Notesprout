@@ -123,13 +123,58 @@ object SoilMigrator {
         Slog.d(TAG) { "decryptInPlace complete: ${file.name}" }
     }
 
+    /**
+     * Re-keys an encrypted .soil file in place using the export round-trip.
+     *
+     * PRAGMA rekey was found unreliable on-device. Mirrors the encryptInPlace pattern:
+     * open the new encrypted destination as the primary zetetic connection, ATTACH the
+     * old encrypted source with the old key, export FROM source TO main, verify, replace.
+     *
+     * Must be called on a dispatcher that allows blocking I/O (Dispatchers.IO).
+     * Throws on failure — caller is responsible for surfacing the error.
+     */
+    suspend fun rekeyInPlace(file: File, oldPassphrase: String, newPassphrase: String) = withContext(Dispatchers.IO) {
+        val tmp = File("${file.absolutePath}.rekey.tmp")
+        tmp.delete()
+
+        // Open the new-encrypted destination as the primary zetetic connection (mirrors encryptInPlace).
+        val dest = ZeticDB.openOrCreateDatabase(tmp, newPassphrase, null, null)
+        try {
+            // Attach the old-encrypted source with the old key.
+            dest.execSQL("ATTACH DATABASE '${file.absolutePath}' AS old_src KEY '${oldPassphrase.replace("'", "''")}'")
+            try {
+                // Two-argument export: copies FROM 'old_src' attachment TO 'main' (new-encrypted dest).
+                dest.rawQuery("SELECT sqlcipher_export('main', 'old_src')", null).use { it.moveToFirst() }
+            } finally {
+                dest.execSQL("DETACH DATABASE old_src")
+            }
+        } finally {
+            dest.close()
+        }
+
+        if (!SoilCrypto.verifyPassphrase(tmp, newPassphrase)) {
+            tmp.delete()
+            error("Re-key verification failed — original notebook is unchanged.")
+        }
+
+        // Delete original + sidecars but NOT the rekey temp (it hasn't been renamed yet).
+        deleteSoilAndSidecars(file)
+        if (!tmp.renameTo(file)) {
+            tmp.delete()
+            error("Failed to rename re-keyed temp file to ${file.name}.")
+        }
+
+        Slog.d(TAG) { "rekeyInPlace complete: ${file.name}" }
+    }
+
     // ── Private helpers ───────────────────────────────────────────────────────
 
     private fun deleteSoilAndSidecars(file: File) {
         file.parentFile?.listFiles { f ->
             f.name.startsWith(file.name) &&
             !f.name.endsWith(".enc.tmp") &&
-            !f.name.endsWith(".dec.tmp")
+            !f.name.endsWith(".dec.tmp") &&
+            !f.name.endsWith(".rekey.tmp")
         }?.forEach { it.delete() }
     }
 

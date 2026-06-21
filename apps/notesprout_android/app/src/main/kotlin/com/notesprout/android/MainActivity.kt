@@ -36,6 +36,7 @@ import androidx.lifecycle.lifecycleScope
 import com.notesprout.android.crypto.EncryptionInfo
 import com.notesprout.android.crypto.KeyResolver
 import com.notesprout.android.crypto.KeyScope
+import com.notesprout.android.crypto.KeySession
 import com.notesprout.android.crypto.PassphraseCache
 import com.notesprout.android.crypto.SoilCrypto
 import com.notesprout.android.crypto.SoilMigrator
@@ -1585,6 +1586,8 @@ class MainActivity : AppCompatActivity() {
                 menu.addAction(R.drawable.ic_lock,     "Encrypt Notebook") { showEncryptNotebookDialog(entity) }
             } else {
                 menu.addAction(R.drawable.ic_lock_off, "Decrypt Notebook") { showDecryptNotebookDialog(entity, encInfo) }
+                menu.addAction(R.drawable.ic_edit,     "Change Passphrase") { showChangePassphraseDialog(entity, encInfo) }
+                menu.addAction(R.drawable.ic_lock,     "Change Encryption Scope") { showChangeScopeDialog(entity, encInfo) }
             }
             menu.addAction(R.drawable.ic_delete_notebook, "Delete Notebook") { showDeleteNotebookConfirmation(entity) }
             menu.show()
@@ -1679,6 +1682,117 @@ class MainActivity : AppCompatActivity() {
         } catch (e: Exception) {
             dialog.dismiss()
             Toast.makeText(this, "Decryption failed: ${e.message}", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    // ── Notebook re-key: change passphrase / change scope ────────────────────
+
+    private fun showChangePassphraseDialog(entity: ObjectEntity, encInfo: EncryptionInfo) {
+        if (encInfo.keyScope == KeyScope.GLOBAL) {
+            AlertDialog.Builder(this)
+                .setTitle("Change Passphrase")
+                .setMessage("Global notebooks share a device passphrase. To change it, go to Settings → Encryption (available in a future update).")
+                .setPositiveButton("OK", null)
+                .create()
+                .also { d ->
+                    d.show()
+                    d.window?.setElevation(0f)
+                    d.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+                }
+            return
+        }
+        lifecycleScope.launch { changePassphrase(entity, encInfo) }
+    }
+
+    private suspend fun changePassphrase(entity: ObjectEntity, encInfo: EncryptionInfo) {
+        val oldKey = KeyResolver.resolveCurrentKeyForRekey(this, entity.id, encInfo) ?: return
+        val newKey = KeyResolver.resolveForConvertToEncrypted(this, KeyScope.NOTEBOOK) ?: return
+
+        val tvMessage = android.widget.TextView(this).apply {
+            text = "Updating…"
+            setPadding(64, 48, 64, 48)
+            setTextColor(android.graphics.Color.BLACK)
+            textSize = 16f
+        }
+        val dialog = AlertDialog.Builder(this)
+            .setView(tvMessage)
+            .setCancelable(false)
+            .create()
+        dialog.show()
+        dialog.window?.setElevation(0f)
+        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+
+        try {
+            val file = soilFile(this, entity.id)
+            withContext(Dispatchers.IO) { SoilMigrator.rekeyInPlace(file, oldKey, newKey) }
+            // Invalidate any in-process session so the old key isn't reused.
+            if (KeySession.entry?.notebookId == entity.id) KeySession.clear()
+            dialog.dismiss()
+            Toast.makeText(this, "Passphrase updated.", Toast.LENGTH_SHORT).show()
+        } catch (e: Exception) {
+            dialog.dismiss()
+            Toast.makeText(this, "Passphrase change failed: ${e.message}", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private fun showChangeScopeDialog(entity: ObjectEntity, encInfo: EncryptionInfo) {
+        val (newScopeLabel, message) = when (encInfo.keyScope) {
+            KeyScope.NOTEBOOK -> "Switch to Global Passphrase" to
+                "\"${entity.name}\" will be re-keyed to use the device global passphrase. You will need the current notebook passphrase to proceed."
+            KeyScope.GLOBAL -> "Switch to Notebook Passphrase" to
+                "\"${entity.name}\" will be re-keyed to use a dedicated passphrase. You will need the current global passphrase and a new notebook passphrase."
+            null -> return
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Change Encryption Scope")
+            .setMessage(message)
+            .setPositiveButton(newScopeLabel) { _, _ ->
+                lifecycleScope.launch { changeScope(entity, encInfo) }
+            }
+            .setNegativeButton("Cancel", null)
+            .create()
+            .also { d ->
+                d.show()
+                d.window?.setElevation(0f)
+                d.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+            }
+    }
+
+    private suspend fun changeScope(entity: ObjectEntity, encInfo: EncryptionInfo) {
+        val currentScope = encInfo.keyScope ?: return
+        val oldKey = KeyResolver.resolveCurrentKeyForRekey(this, entity.id, encInfo) ?: return
+        val newScope = when (currentScope) {
+            KeyScope.NOTEBOOK -> KeyScope.GLOBAL
+            KeyScope.GLOBAL   -> KeyScope.NOTEBOOK
+        }
+        val newKey = KeyResolver.resolveForConvertToEncrypted(this, newScope) ?: return
+
+        val tvMessage = android.widget.TextView(this).apply {
+            text = "Updating…"
+            setPadding(64, 48, 64, 48)
+            setTextColor(android.graphics.Color.BLACK)
+            textSize = 16f
+        }
+        val dialog = AlertDialog.Builder(this)
+            .setView(tvMessage)
+            .setCancelable(false)
+            .create()
+        dialog.show()
+        dialog.window?.setElevation(0f)
+        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+
+        try {
+            val file = soilFile(this, entity.id)
+            withContext(Dispatchers.IO) { SoilMigrator.rekeyInPlace(file, oldKey, newKey) }
+            withContext(Dispatchers.IO) { repository.setEncryptionState(entity.id, encrypted = true, keyScope = newScope) }
+            if (KeySession.entry?.notebookId == entity.id) KeySession.clear()
+            dialog.dismiss()
+            scanAndRender()
+            val scopeLabel = if (newScope == KeyScope.GLOBAL) "global" else "notebook"
+            Toast.makeText(this, "Scope changed to $scopeLabel passphrase.", Toast.LENGTH_SHORT).show()
+        } catch (e: Exception) {
+            dialog.dismiss()
+            Toast.makeText(this, "Scope change failed: ${e.message}", Toast.LENGTH_LONG).show()
         }
     }
 
