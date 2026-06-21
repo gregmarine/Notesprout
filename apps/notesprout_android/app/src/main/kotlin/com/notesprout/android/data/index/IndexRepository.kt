@@ -438,6 +438,15 @@ class IndexRepository(private val dao: ObjectDao) {
                 obj.encrypted && obj.keyScope == KeyScope.GLOBAL
             }
 
+    suspend fun getGlobalNotebookIds(): List<String> =
+        dao.getAllNotDeleted()
+            .filter { entity ->
+                if (entity.type != ObjectType.NOTEBOOK) return@filter false
+                val obj = try { Json.decodeFromString<NotebookObject>(entity.data) } catch (_: Exception) { return@filter false }
+                obj.encrypted && obj.keyScope == KeyScope.GLOBAL
+            }
+            .map { it.id }
+
     suspend fun getEncryptionInfo(notebookId: String): EncryptionInfo {
         val entity = dao.getById(notebookId) ?: return EncryptionInfo.NONE
         val obj = Json.decodeFromString<NotebookObject>(entity.data)

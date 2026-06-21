@@ -54,7 +54,7 @@
 | P2.S3 | Undo/redo persistence for encrypted notebooks (store inside the `.soil`) | ✅ DONE |
 | P2.S4 | Re-key a single notebook: change passphrase + change scope (`PRAGMA rekey`) | ✅ DONE |
 | P2.S5 | Global passphrase management UI (view / change / forget) + rotation trigger | ✅ DONE |
-| P2.S6 | Global passphrase rotation: cancellable/resumable batch re-key | ⬜ NOT STARTED |
+| P2.S6 | Global passphrase rotation: cancellable/resumable batch re-key | ✅ DONE |
 | P2.S7 | Passphrase attempt rate-limiting (escalating lockout + countdown) | ⬜ NOT STARTED |
 | P2.S8 | Password-protected PDF export (PdfBox-Android) | ⬜ NOT STARTED |
 | P2.S9 | Wrap-up (search/KDF audit, docs, edge cases, P2P + G10 matrix) | ⬜ NOT STARTED |
@@ -347,7 +347,7 @@ without touching any notebook, change-button launches rotation.
 
 ## P2.S6 — Global Passphrase Rotation (Cancellable / Resumable Batch Re-Key)
 
-**Status:** ⬜ NOT STARTED
+**Status:** ✅ DONE
 
 **Goal:** Change the global passphrase and **re-key every `keyScope == GLOBAL` notebook** from the old
 global to the new one in a single, **cancellable and crash-resumable** operation. Builds on

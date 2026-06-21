@@ -135,7 +135,18 @@ object SoilMigrator {
      */
     suspend fun rekeyInPlace(file: File, oldPassphrase: String, newPassphrase: String) = withContext(Dispatchers.IO) {
         val tmp = File("${file.absolutePath}.rekey.tmp")
-        tmp.delete()
+        // Clean tmp AND its WAL/SHM sidecars — a previous aborted run may have left them behind.
+        file.parentFile?.listFiles { f -> f.name.startsWith(tmp.name) }?.forEach { it.delete() }
+
+        // Checkpoint the source WAL before the export so the ATTACH sees a consistent state.
+        // Mirrors decryptInPlace; skipped silently on failure (WAL is optional).
+        try {
+            val src = ZeticDB.openOrCreateDatabase(file, oldPassphrase, null, null)
+            src.rawQuery("PRAGMA wal_checkpoint(TRUNCATE)", null).use { it.moveToFirst() }
+            src.close()
+        } catch (e: Exception) {
+            Log.w(TAG, "WAL checkpoint before rekey skipped: ${e.message}")
+        }
 
         // Open the new-encrypted destination as the primary zetetic connection (mirrors encryptInPlace).
         val dest = ZeticDB.openOrCreateDatabase(tmp, newPassphrase, null, null)

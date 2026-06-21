@@ -14,9 +14,13 @@ import androidx.security.crypto.MasterKey
  *
  * NEVER cache a notebook-specific passphrase here. NEVER log passphrase values.
  */
+data class RotationMarker(val pendingIds: List<String>, val newPassphrase: String)
+
 object PassphraseStore {
     private const val PREFS_FILE = "notesprout_secure"
     private const val KEY_GLOBAL = "global_passphrase"
+    private const val KEY_ROTATION_PENDING = "rotation_pending_ids"
+    private const val KEY_ROTATION_NEW = "rotation_new_passphrase"
 
     private fun prefs(context: Context) = EncryptedSharedPreferences.create(
         context,
@@ -38,5 +42,38 @@ object PassphraseStore {
 
     fun clearGlobalPassphrase(context: Context) {
         prefs(context).edit().remove(KEY_GLOBAL).apply()
+    }
+
+    // ── Rotation marker ───────────────────────────────────────────────────────
+    // Stores the in-progress rotation state so a crash or cancel can be resumed.
+    // The new passphrase is kept here (in EncryptedSharedPreferences) for the duration
+    // of the rotation so a resume can complete without re-prompting.
+
+    fun getRotationMarker(context: Context): RotationMarker? {
+        val p = prefs(context)
+        val pending = p.getString(KEY_ROTATION_PENDING, null) ?: return null
+        val newPassphrase = p.getString(KEY_ROTATION_NEW, null) ?: return null
+        val ids = pending.split(",").filter { it.isNotEmpty() }
+        return RotationMarker(ids, newPassphrase)
+    }
+
+    fun setRotationMarker(context: Context, marker: RotationMarker) {
+        prefs(context).edit()
+            .putString(KEY_ROTATION_PENDING, marker.pendingIds.joinToString(","))
+            .putString(KEY_ROTATION_NEW, marker.newPassphrase)
+            .apply()
+    }
+
+    fun updateRotationPending(context: Context, remaining: List<String>) {
+        prefs(context).edit()
+            .putString(KEY_ROTATION_PENDING, remaining.joinToString(","))
+            .apply()
+    }
+
+    fun clearRotationMarker(context: Context) {
+        prefs(context).edit()
+            .remove(KEY_ROTATION_PENDING)
+            .remove(KEY_ROTATION_NEW)
+            .apply()
     }
 }
