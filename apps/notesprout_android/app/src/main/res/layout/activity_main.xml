@@ -248,7 +248,7 @@
 
     <!--
         Overflow toolbar: secondary row shown when btnMore is tapped.
-        Contains Templates and Encryption — right-aligned to mirror the bottom bar.
+        Contains Import, Templates, and Encryption — right-aligned to mirror the bottom bar.
         Hidden by default; toggled by btnMore.
     -->
     <View
@@ -269,8 +269,15 @@
         android:visibility="gone">
 
         <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnImport"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:src="@drawable/ic_import"
+            android:contentDescription="Import Notebook" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
             android:id="@+id/btnTemplates"
             style="@style/Widget.Notesprout.ToolbarButton"
+            android:layout_marginStart="4dp"
             android:src="@drawable/ic_template"
             android:contentDescription="Templates" />
 

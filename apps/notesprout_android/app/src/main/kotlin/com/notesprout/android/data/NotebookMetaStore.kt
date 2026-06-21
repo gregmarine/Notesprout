@@ -1,6 +1,7 @@
 package com.notesprout.android.data
 
 import com.notesprout.android.BuildConfig
+import com.notesprout.android.crypto.SoilRawDb
 import com.notesprout.android.data.index.IndexRepository
 import com.notesprout.android.data.index.NotebookObject
 import kotlinx.coroutines.Dispatchers
@@ -56,5 +57,32 @@ object NotebookMetaStore {
     suspend fun refresh(db: SoilDatabase, repo: IndexRepository, notebookId: String) {
         val meta = buildFromIndex(repo, notebookId) ?: return
         write(db, meta)
+    }
+
+    /** Read notebook_meta from a cold raw DB (no Room). Returns null if the table is absent. */
+    fun readRaw(rawDb: SoilRawDb): NotebookMeta? {
+        return try {
+            rawDb.rawQuery("SELECT json FROM notebook_meta WHERE id = 0", null)
+                .use { cursor ->
+                    if (!cursor.moveToFirst()) null
+                    else NotebookMeta.fromJson(cursor.getString(0))
+                }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    /** Count non-deleted page rows in a cold raw DB (no Room). */
+    fun countPages(rawDb: SoilRawDb): Int {
+        return try {
+            rawDb.rawQuery(
+                "SELECT count(*) FROM notebook WHERE type='page' AND deletedAt IS NULL",
+                null
+            ).use { cursor ->
+                if (cursor.moveToFirst()) cursor.getInt(0) else 0
+            }
+        } catch (_: Exception) {
+            0
+        }
     }
 }

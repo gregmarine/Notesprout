@@ -265,6 +265,14 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    // ── Import launcher ───────────────────────────────────────────────────────
+
+    private val importSoilLauncher = registerForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) startImportFromUri(uri)
+    }
+
     // ── Lifecycle ─────────────────────────────────────────────────────────────
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -679,6 +687,10 @@ class MainActivity : AppCompatActivity() {
         binding.btnNewNotebook.setOnClickListener    { showNewNotebookDialog() }
         binding.btnNewFolder.setOnClickListener      { showNewFolderDialog() }
         binding.btnMore.setOnClickListener           { toggleOverflowToolbar() }
+        binding.btnImport.setOnClickListener         {
+            closeOverflowToolbar()
+            importSoilLauncher.launch(arrayOf("application/octet-stream", "*/*"))
+        }
         binding.btnTemplates.setOnClickListener      {
             closeOverflowToolbar()
             startActivity(
@@ -2537,6 +2549,70 @@ class MainActivity : AppCompatActivity() {
         d.show()
         d.window?.setElevation(0f)
         d.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+    }
+
+    private fun startImportFromUri(uri: android.net.Uri) {
+        lifecycleScope.launch {
+            // Derive a fallback display name from the URI before going off-UI.
+            val uriDisplayName = contentResolver.query(
+                uri,
+                arrayOf(android.provider.OpenableColumns.DISPLAY_NAME),
+                null, null, null
+            )?.use { cursor ->
+                if (cursor.moveToFirst()) cursor.getString(0) else null
+            }
+            val fallbackName = uriDisplayName
+                ?.removeSuffix(".soil")
+                ?.trim()
+                ?.takeIf { it.isNotEmpty() }
+                ?: "Imported Notebook"
+
+            // Show "Importing…" modal — all DB/file work happens off-UI.
+            val tvMessage = android.widget.TextView(this@MainActivity).apply {
+                text = "Importing…"
+                setPadding(64, 48, 64, 48)
+                setTextColor(android.graphics.Color.BLACK)
+                textSize = 16f
+            }
+            val dialog = AlertDialog.Builder(this@MainActivity)
+                .setView(tvMessage)
+                .setCancelable(false)
+                .create()
+            dialog.show()
+            dialog.window?.setElevation(0f)
+            dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+
+            val notebookName = try {
+                val importedId = withContext(Dispatchers.IO) {
+                    // Copy URI to a cache temp so SQLite can open it.
+                    val importDir = java.io.File(cacheDir, "imported_notebooks")
+                        .also { it.deleteRecursively(); it.mkdirs() }
+                    val tempFile = java.io.File(importDir, "incoming.soil")
+                    contentResolver.openInputStream(uri)?.use { input ->
+                        tempFile.outputStream().use { input.copyTo(it) }
+                    }
+
+                    val manifest = NotebookImporter.readManifest(tempFile, fallbackName)
+                    val displayName = manifest.meta?.name?.trim()?.takeIf { it.isNotEmpty() }
+                        ?: fallbackName
+                    NotebookImporter.importPlaintext(this@MainActivity, repository, tempFile, manifest, displayName)
+                    displayName
+                }
+                importedId
+            } catch (e: ImportException) {
+                dialog.dismiss()
+                Toast.makeText(this@MainActivity, e.message, Toast.LENGTH_LONG).show()
+                return@launch
+            } catch (e: Exception) {
+                dialog.dismiss()
+                Toast.makeText(this@MainActivity, "Import failed: ${e.message}", Toast.LENGTH_LONG).show()
+                return@launch
+            }
+
+            dialog.dismiss()
+            Toast.makeText(this@MainActivity, "Imported “$notebookName”", Toast.LENGTH_SHORT).show()
+            scanAndRender()
+        }
     }
 
     private fun toggleOverflowToolbar() {

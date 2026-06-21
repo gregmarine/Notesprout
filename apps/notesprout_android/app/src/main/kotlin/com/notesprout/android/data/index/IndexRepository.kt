@@ -29,6 +29,58 @@ class IndexRepository(private val dao: ObjectDao) {
         return entity
     }
 
+    /**
+     * Import helper: ensure a FOLDER with an exact [id] exists (for recreating the source
+     * notebook's folder hierarchy with the same UUIDs). If the folder is present and live,
+     * it is returned as-is. If soft-deleted, it is un-deleted and its name/parent updated.
+     * If absent, a new row is inserted with the given [id].
+     */
+    suspend fun ensureFolderWithId(id: String, name: String, parentId: String?): ObjectEntity {
+        val existing = dao.getById(id)
+        val now = System.currentTimeMillis()
+        if (existing != null) {
+            if (existing.deletedAt == null) return existing
+            val restored = existing.copy(name = name, parentId = parentId, deletedAt = null, updatedAt = now)
+            dao.update(restored)
+            return restored
+        }
+        val entity = ObjectEntity(
+            id = id,
+            type = ObjectType.FOLDER,
+            name = name,
+            parentId = parentId,
+            createdAt = now,
+            updatedAt = now,
+            deletedAt = null,
+            data = Json.encodeToString(FolderObject()),
+        )
+        dao.insert(entity)
+        return entity
+    }
+
+    /** Import helper: insert a notebook row with an explicit [id] and explicit timestamps. */
+    suspend fun importNotebookRow(
+        id: String,
+        name: String,
+        parentId: String?,
+        obj: NotebookObject,
+        createdAt: Long,
+        updatedAt: Long,
+    ): ObjectEntity {
+        val entity = ObjectEntity(
+            id = id,
+            type = ObjectType.NOTEBOOK,
+            name = name,
+            parentId = parentId,
+            createdAt = createdAt,
+            updatedAt = updatedAt,
+            deletedAt = null,
+            data = Json.encodeToString(obj),
+        )
+        dao.insert(entity)
+        return entity
+    }
+
     suspend fun renameFolder(id: String, newName: String) {
         val entity = dao.getById(id) ?: return
         dao.update(entity.copy(name = newName, updatedAt = System.currentTimeMillis()))
