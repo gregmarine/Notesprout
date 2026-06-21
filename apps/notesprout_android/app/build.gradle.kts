@@ -101,4 +101,8 @@ dependencies {
     implementation("androidx.sqlite:sqlite:2.4.0")
     // Keystore-backed cache for the GLOBAL passphrase only (never the notebook key itself).
     implementation("androidx.security:security-crypto:1.1.0-alpha06")
+
+    // PdfBox-Android — post-process exported PDFs to add AES-128 password protection.
+    // Apache-2.0 license (compatible with project MIT). Deliberate Phase-2 dependency addition.
+    implementation("com.tom-roush:pdfbox-android:2.0.27.0")
 }

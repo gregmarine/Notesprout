@@ -169,6 +169,39 @@ object PassphrasePrompt {
                else "Too many attempts. Try again in ${sec}s."
     }
 
+    /**
+     * Shows a "Password-protect PDF?" three-button dialog, then (if yes) a confirm passphrase
+     * prompt for the export password.
+     * Returns: null = user cancelled the flow; "" = no password wanted; non-empty = export password.
+     * NEVER log the returned value. This is a separate credential from the notebook passphrase.
+     */
+    suspend fun promptForPdfExportPassword(activity: Activity): String? {
+        val wantsPassword = suspendCancellableCoroutine<Boolean?> { cont ->
+            val d = AlertDialog.Builder(activity)
+                .setTitle("Password-protect PDF?")
+                .setMessage("Add a password to the exported PDF. The PDF reader will prompt for it when opened.")
+                .setPositiveButton("Yes") { _, _ -> if (cont.isActive) cont.resume(true) }
+                .setNegativeButton("No") { _, _ -> if (cont.isActive) cont.resume(false) }
+                .setNeutralButton("Cancel") { _, _ -> if (cont.isActive) cont.resume(null) }
+                .setOnCancelListener { if (cont.isActive) cont.resume(null) }
+                .create()
+            d.show()
+            d.window?.setElevation(0f)
+            d.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+            cont.invokeOnCancellation { d.dismiss() }
+        }
+        return when (wantsPassword) {
+            null -> null
+            false -> ""
+            true -> promptForPassphrase(
+                activity,
+                title = "Export password",
+                message = "Set a password for the exported PDF.",
+                confirm = true,
+            )
+        }
+    }
+
     private fun showError(binding: DialogPassphraseBinding, message: String) {
         binding.tvPassphraseError.text = message
         binding.tvPassphraseError.visibility = View.VISIBLE

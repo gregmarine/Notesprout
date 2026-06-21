@@ -56,7 +56,7 @@
 | P2.S5 | Global passphrase management UI (view / change / forget) + rotation trigger | ✅ DONE |
 | P2.S6 | Global passphrase rotation: cancellable/resumable batch re-key | ✅ DONE |
 | P2.S7 | Passphrase attempt rate-limiting (escalating lockout + countdown) | ✅ DONE |
-| P2.S8 | Password-protected PDF export (PdfBox-Android) | ⬜ NOT STARTED |
+| P2.S8 | Password-protected PDF export (PdfBox-Android) | ✅ DONE |
 | P2.S9 | Wrap-up (search/KDF audit, docs, edge cases, P2P + G10 matrix) | ⬜ NOT STARTED |
 
 > S5/S6 (global key management) are split into UI vs the rotation engine — tightly coupled but each is a
@@ -459,7 +459,7 @@ passphrase/attempt material logged.
 
 ## P2.S8 — Password-Protected PDF Export (PdfBox-Android)
 
-**Status:** ⬜ NOT STARTED
+**Status:** ✅ DONE
 
 **Goal:** Offer an **encrypted PDF** export option so the exported file itself is protected at rest
 (currently `NotebookExporter` produces plaintext PDFs via Android's `PdfDocument`). Add the password as a

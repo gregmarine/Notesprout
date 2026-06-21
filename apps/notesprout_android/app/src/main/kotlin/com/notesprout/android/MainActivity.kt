@@ -2304,6 +2304,11 @@ class MainActivity : AppCompatActivity() {
                 return@launch
             }
 
+            // Offer password protection for the exported PDF (separate from the notebook passphrase).
+            val exportPwdChoice = com.notesprout.android.crypto.PassphrasePrompt.promptForPdfExportPassword(this@MainActivity)
+                ?: return@launch  // user cancelled
+            val exportPassword = exportPwdChoice.ifEmpty { null }
+
             val tvMessage = android.widget.TextView(this@MainActivity).apply {
                 text = "Exporting…"
                 setPadding(64, 48, 64, 48)
@@ -2331,11 +2336,12 @@ class MainActivity : AppCompatActivity() {
                     val db = builder.build()
                     try {
                         NotebookExporter.export(
-                            context    = this@MainActivity,
-                            db         = db,
-                            onProgress = { current, total ->
+                            context        = this@MainActivity,
+                            db             = db,
+                            onProgress     = { current, total ->
                                 handler.post { tvMessage.text = "Exporting page $current of $total…" }
                             },
+                            exportPassword = exportPassword,
                         )
                     } finally {
                         db.close()

@@ -35,9 +35,11 @@ import com.notesprout.android.data.recents.TemplateRecentsManager
 import com.notesprout.android.data.soilFile
 import com.notesprout.android.data.topHeadingNamesByPageId
 import com.notesprout.android.databinding.ActivityPageIndexBinding
+import kotlin.coroutines.resume
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -1144,17 +1146,23 @@ class PageIndexActivity : AppCompatActivity() {
      */
     private fun executeExport() {
         if (!inActionMode()) return
-        if (KeySession.getFor(notebookId) != null) {
-            val d = AlertDialog.Builder(this)
-                .setTitle("Export encrypted notebook")
-                .setMessage("This notebook is encrypted. The exported file will be unencrypted — anyone with access to the exported file will be able to read its contents.")
-                .setPositiveButton("Export anyway") { _, _ -> doExecuteExport() }
-                .setNegativeButton("Cancel", null)
-                .create()
-            d.show()
-            d.window?.setElevation(0f)
-            d.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
-        } else {
+        lifecycleScope.launch {
+            if (KeySession.getFor(notebookId) != null) {
+                val confirmed = suspendCancellableCoroutine<Boolean> { cont ->
+                    val d = AlertDialog.Builder(this@PageIndexActivity)
+                        .setTitle("Export encrypted notebook")
+                        .setMessage("This notebook is encrypted. The exported file will be unencrypted — anyone with access to the exported file will be able to read its contents.")
+                        .setPositiveButton("Export anyway") { _, _ -> if (cont.isActive) cont.resume(true) }
+                        .setNegativeButton("Cancel") { _, _ -> if (cont.isActive) cont.resume(false) }
+                        .setOnCancelListener { if (cont.isActive) cont.resume(false) }
+                        .create()
+                    d.show()
+                    d.window?.setElevation(0f)
+                    d.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+                    cont.invokeOnCancellation { d.dismiss() }
+                }
+                if (!confirmed) return@launch
+            }
             doExecuteExport()
         }
     }
@@ -1260,8 +1268,8 @@ class PageIndexActivity : AppCompatActivity() {
     }
 
     /**
-     * Export all selected pages to a single PDF. Shows a progress dialog while rendering;
-     * afterwards offers Save to device ([savePdfLauncher]) and Share (FileProvider).
+     * Export all selected pages to a single PDF. Offers optional password protection before
+     * showing the progress dialog; afterwards offers Save to device ([savePdfLauncher]) and Share.
      */
     private fun exportMultiAsPdf() {
         val entries = orderedSelectedEntries() ?: return
@@ -1269,34 +1277,40 @@ class PageIndexActivity : AppCompatActivity() {
         val notebookName = intent.getStringExtra(EXTRA_NOTEBOOK_NAME) ?: "notebook"
         val pageIds = entries.map { it.id }
 
-        val tvMessage = android.widget.TextView(this).apply {
-            text = "Exporting…"
-            setPadding(64, 48, 64, 48)
-            setTextColor(android.graphics.Color.BLACK)
-            textSize = 16f
-        }
-        val progressDialog = AlertDialog.Builder(this)
-            .setView(tvMessage)
-            .setCancelable(false)
-            .create()
-        progressDialog.show()
-        progressDialog.window?.setElevation(0f)
-        progressDialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
-
-        val handler = android.os.Handler(android.os.Looper.getMainLooper())
-
         lifecycleScope.launch {
+            // Offer password protection before the progress dialog.
+            val exportPwdChoice = com.notesprout.android.crypto.PassphrasePrompt.promptForPdfExportPassword(this@PageIndexActivity)
+                ?: return@launch  // user cancelled
+            val exportPassword = exportPwdChoice.ifEmpty { null }
+
+            val tvMessage = android.widget.TextView(this@PageIndexActivity).apply {
+                text = "Exporting…"
+                setPadding(64, 48, 64, 48)
+                setTextColor(android.graphics.Color.BLACK)
+                textSize = 16f
+            }
+            val progressDialog = AlertDialog.Builder(this@PageIndexActivity)
+                .setView(tvMessage)
+                .setCancelable(false)
+                .create()
+            progressDialog.show()
+            progressDialog.window?.setElevation(0f)
+            progressDialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+
+            val handler = android.os.Handler(android.os.Looper.getMainLooper())
+
             val pdfFile = try {
                 withContext(Dispatchers.IO) {
                     NotebookExporter.exportPagesPdf(
-                        context = this@PageIndexActivity,
-                        soilPath = path,
-                        pageIds = pageIds,
-                        notebookTitle = notebookName,
-                        onProgress = { current, total ->
+                        context        = this@PageIndexActivity,
+                        soilPath       = path,
+                        pageIds        = pageIds,
+                        notebookTitle  = notebookName,
+                        onProgress     = { current, total ->
                             handler.post { tvMessage.text = "Exporting page $current of $total…" }
                         },
-                        passphrase = KeySession.getFor(notebookId),
+                        passphrase     = KeySession.getFor(notebookId),
+                        exportPassword = exportPassword,
                     )
                 }
             } catch (e: Exception) {

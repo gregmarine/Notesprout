@@ -49,12 +49,15 @@ object NotebookExporter {
      * If the notebook has a `type="cover"` object it becomes page 1 of the PDF.
      * [onProgress] is called on the calling thread (IO) with (currentPage, totalPages)
      * before each notebook page is rendered — callers must post to main thread for UI updates.
+     * When [exportPassword] is non-null, post-processes the PDF with AES-128 password protection
+     * using PdfBox-Android; the intermediate plaintext PDF is deleted before returning.
      * Returns the written PDF [File].
      */
     suspend fun export(
         context: Context,
         db: SoilDatabase,
         onProgress: (current: Int, total: Int) -> Unit,
+        exportPassword: String? = null,
     ): File {
         val dao = db.notebookDao()
 
@@ -114,8 +117,16 @@ object NotebookExporter {
 
         val outDir = File(context.cacheDir, "exported_pdfs").also { it.deleteRecursively(); it.mkdirs() }
         val outFile = File(outDir, "$safeTitle.pdf")
-        FileOutputStream(outFile).use { pdf.writeTo(it) }
-        pdf.close()
+
+        if (exportPassword != null) {
+            val tmpFile = File(outDir, "${safeTitle}_tmp.pdf")
+            FileOutputStream(tmpFile).use { pdf.writeTo(it) }
+            pdf.close()
+            encryptPdfFile(tmpFile, outFile, exportPassword)
+        } else {
+            FileOutputStream(outFile).use { pdf.writeTo(it) }
+            pdf.close()
+        }
 
         return outFile
     }
@@ -136,6 +147,7 @@ object NotebookExporter {
         notebookTitle: String,
         onProgress: (current: Int, total: Int) -> Unit,
         passphrase: String? = null,
+        exportPassword: String? = null,
     ): File {
         val safeTitle = notebookTitle.replace(Regex("[^a-zA-Z0-9_\\-. ]"), "_").trim('_', ' ')
             .ifBlank { "notebook" }
@@ -171,8 +183,16 @@ object NotebookExporter {
 
             val outDir = File(context.cacheDir, "exported_pdfs").also { it.deleteRecursively(); it.mkdirs() }
             val outFile = File(outDir, "$safeTitle.pdf")
-            FileOutputStream(outFile).use { pdf.writeTo(it) }
-            pdf.close()
+
+            if (exportPassword != null) {
+                val tmpFile = File(outDir, "${safeTitle}_tmp.pdf")
+                FileOutputStream(tmpFile).use { pdf.writeTo(it) }
+                pdf.close()
+                encryptPdfFile(tmpFile, outFile, exportPassword)
+            } else {
+                FileOutputStream(outFile).use { pdf.writeTo(it) }
+                pdf.close()
+            }
 
             return outFile
         } finally {
@@ -230,6 +250,22 @@ object NotebookExporter {
         }
 
         return results
+    }
+
+    /**
+     * Post-processes [input] into an AES-128 password-protected PDF at [output], then deletes
+     * [input]. Both [ownerPassword] and [userPassword] are set to [password] so the file opens
+     * with a single password in any standard PDF reader. Must be called on a background thread.
+     */
+    private fun encryptPdfFile(input: File, output: File, password: String) {
+        val doc = com.tom_roush.pdfbox.pdmodel.PDDocument.load(input)
+        val ap = com.tom_roush.pdfbox.pdmodel.encryption.AccessPermission()
+        val policy = com.tom_roush.pdfbox.pdmodel.encryption.StandardProtectionPolicy(password, password, ap)
+        policy.encryptionKeyLength = 128
+        doc.protect(policy)
+        doc.save(output)
+        doc.close()
+        input.delete()
     }
 
     private fun parseLineRender(id: String, box: RectF, lo: LineObject, densityDp: Float): LineRender {

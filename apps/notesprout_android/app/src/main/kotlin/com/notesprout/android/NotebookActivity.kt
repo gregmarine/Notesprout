@@ -3822,30 +3822,38 @@ class NotebookActivity : AppCompatActivity() {
     }
 
     private fun startExport(db: SoilDatabase) {
-        if (encryptionInfo.encrypted) {
-            val d = AlertDialog.Builder(this)
-                .setTitle("Export encrypted notebook")
-                .setMessage("This notebook is encrypted. The exported file will be unencrypted — anyone with access to the exported file will be able to read its contents.")
-                .setPositiveButton("Export anyway") { _, _ -> doStartExport(db) }
-                .setNegativeButton("Cancel", null)
-                .create()
-            d.show()
-            d.window?.setElevation(0f)
-            d.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
-        } else {
-            doStartExport(db)
-        }
-    }
-
-    private fun doStartExport(db: SoilDatabase) {
-        // Save current page strokes before reading from DB so the export sees the latest content.
         lifecycleScope.launch {
+            // 1. If encrypted: warn that the exported file is not encrypted (notebook passphrase
+            //    stays on the .soil — the PDF export is plaintext unless the user adds a password).
+            if (encryptionInfo.encrypted) {
+                val confirmed = suspendCancellableCoroutine<Boolean> { cont ->
+                    val d = AlertDialog.Builder(this@NotebookActivity)
+                        .setTitle("Export encrypted notebook")
+                        .setMessage("This notebook is encrypted. The exported file will be unencrypted — anyone with access to the exported file will be able to read its contents.")
+                        .setPositiveButton("Export anyway") { _, _ -> if (cont.isActive) cont.resume(true) }
+                        .setNegativeButton("Cancel") { _, _ -> if (cont.isActive) cont.resume(false) }
+                        .setOnCancelListener { if (cont.isActive) cont.resume(false) }
+                        .create()
+                    d.show()
+                    d.window?.setElevation(0f)
+                    d.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+                    cont.invokeOnCancellation { d.dismiss() }
+                }
+                if (!confirmed) return@launch
+            }
+
+            // 2. Offer password protection for the exported PDF.
+            val exportPwdChoice = com.notesprout.android.crypto.PassphrasePrompt.promptForPdfExportPassword(this@NotebookActivity)
+                ?: return@launch  // user cancelled
+            val exportPassword = exportPwdChoice.ifEmpty { null }
+
+            // 3. Flush current page strokes so the export reflects the latest content.
             withContext(Dispatchers.IO) { saveStrokes(db) }
-            runExport(db)
+            runExport(db, exportPassword)
         }
     }
 
-    private fun runExport(db: SoilDatabase) {
+    private fun runExport(db: SoilDatabase, exportPassword: String? = null) {
         val tvMessage = android.widget.TextView(this).apply {
             text = "Exporting…"
             setPadding(64, 48, 64, 48)
@@ -3871,6 +3879,7 @@ class NotebookActivity : AppCompatActivity() {
                         onProgress = { current, total ->
                             handler.post { tvMessage.text = "Exporting page $current of $total…" }
                         },
+                        exportPassword = exportPassword,
                     )
                 }
             } catch (e: Exception) {
