@@ -1845,6 +1845,7 @@ class NotebookActivity : AppCompatActivity() {
                     SoilDatabase::class.java,
                     notebookPath,
                 ).addCallback(SoilDatabase.openCallback())
+                 .addMigrations(SoilDatabase.MIGRATION_1_2)
                 if (key != null) builder.openHelperFactory(SoilCrypto.roomFactory(key))
                 soilDatabase = builder.build()
                 loadStrokes()
@@ -1871,9 +1872,21 @@ class NotebookActivity : AppCompatActivity() {
 
     override fun onStop() {
         super.onStop()
-        // Encrypted notebooks never persist a plaintext sidecar — skip to avoid a plaintext leak.
-        if (encryptionInfo.encrypted) return
-        // Persist undo/redo stacks so they survive process death when the app is backgrounded.
+        if (encryptionInfo.encrypted) {
+            // Persist undo/redo state inside the encrypted .soil so process death while
+            // backgrounded doesn't lose history. Write even when empty to clear stale state.
+            val db = soilDatabase ?: return
+            try {
+                db.openHelper.writableDatabase.execSQL(
+                    "INSERT OR REPLACE INTO undo_redo_state (id, json) VALUES (0, ?)",
+                    arrayOf(undoRedoManager.toJson())
+                )
+            } catch (e: Exception) {
+                Log.e(TAG, "onStop: failed to persist undo/redo state", e)
+            }
+            return
+        }
+        // Plaintext: persist sidecar so history survives process death while backgrounded.
         if (!undoRedoManager.isEmpty()) {
             val path = notebookSoilPath ?: return
             try {
@@ -2860,6 +2873,19 @@ class NotebookActivity : AppCompatActivity() {
         val db = soilDatabase ?: return
         soilDatabase = null   // mark as closed before any potentially-throwing work
 
+        // For encrypted notebooks, persist undo/redo state into the .soil before clearing
+        // so history survives across close/reopen sessions (P2.S3).
+        if (encryptionInfo.encrypted) {
+            try {
+                db.openHelper.writableDatabase.execSQL(
+                    "INSERT OR REPLACE INTO undo_redo_state (id, json) VALUES (0, ?)",
+                    arrayOf(undoRedoManager.toJson())
+                )
+            } catch (e: Exception) {
+                Log.e(TAG, "closeNotebook: failed to persist undo/redo state", e)
+            }
+        }
+
         // Clear history, clipboard, and remove any on-disk persistence file — notebook is done.
         undoRedoManager.clear()
         NotesproutClipboard.clear()
@@ -3198,6 +3224,7 @@ class NotebookActivity : AppCompatActivity() {
         val initialPageId = intent.getStringExtra(EXTRA_INITIAL_PAGE_ID)
         intent.removeExtra(EXTRA_INITIAL_PAGE_ID)
         var linkedPageMissing = false
+        var savedUndoJson: String? = null
         lifecycleScope.launch {
             val result = withContext(Dispatchers.IO) {
                 notebookMetadata = loadNotebookMetadataFromDb(db)
@@ -3217,10 +3244,30 @@ class NotebookActivity : AppCompatActivity() {
                         }
                     }
                 }
+                // Read persisted undo/redo state for encrypted notebooks (P2.S3).
+                // Plaintext notebooks use the *.undoredo sidecar — see onStart/onStop.
+                if (encryptionInfo.encrypted) {
+                    savedUndoJson = try {
+                        db.openHelper.readableDatabase
+                            .query("SELECT json FROM undo_redo_state WHERE id = 0")
+                            .use { c -> if (c.moveToFirst()) c.getString(0) else null }
+                    } catch (e: Exception) {
+                        Log.e(TAG, "loadStrokes: failed to read undo/redo state", e)
+                        null
+                    }
+                }
                 loadCurrentPage(db)
             }
             displayPage(result)
             binding.openingOverlay.visibility = View.GONE
+            if (savedUndoJson != null) {
+                try {
+                    undoRedoManager = UndoRedoManager.fromJson(savedUndoJson!!)
+                    updateUndoRedoButtons()
+                } catch (e: Exception) {
+                    Log.e(TAG, "loadStrokes: failed to restore undo/redo state", e)
+                }
+            }
             updatePageIndicator()
             postDisplayWork(db, result)
             if (linkedPageMissing) toast("Linked page is unavailable.")

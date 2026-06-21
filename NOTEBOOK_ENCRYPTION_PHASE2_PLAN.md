@@ -51,7 +51,7 @@
 |---|---|---|
 | P2.S1 | Passphrase-dialog & open-time UX (show/hide toggle, "Opening…" overlay) | ✅ DONE |
 | P2.S2 | New-notebook flow: encryption scope in TemplateBrowser + toolbar-merge verify | ✅ DONE |
-| P2.S3 | Undo/redo persistence for encrypted notebooks (store inside the `.soil`) | ⬜ NOT STARTED |
+| P2.S3 | Undo/redo persistence for encrypted notebooks (store inside the `.soil`) | ✅ DONE |
 | P2.S4 | Re-key a single notebook: change passphrase + change scope (`PRAGMA rekey`) | ⬜ NOT STARTED |
 | P2.S5 | Global passphrase management UI (view / change / forget) + rotation trigger | ⬜ NOT STARTED |
 | P2.S6 | Global passphrase rotation: cancellable/resumable batch re-key | ⬜ NOT STARTED |
@@ -187,7 +187,7 @@ visible for legacy configs.
 
 ## P2.S3 — Undo/Redo Persistence for Encrypted Notebooks
 
-**Status:** ⬜ NOT STARTED
+**Status:** ✅ DONE
 
 **Goal:** Restore cross-session undo/redo for encrypted notebooks. Phase 1 **skips** the plaintext
 `*.soil.undoredo` sidecar for encrypted notebooks (`NotebookActivity` ~1837/~1879) to avoid a plaintext
@@ -577,4 +577,4 @@ two-device test matrix on **G10 (`34E517F9`)** and **P2P (`287d2364`)**.
 - **Recents thumbnail for encrypted notebooks** — currently the lock icon; consider a user-set cover.
 - **Search over decrypted content (opt-in)** — if full-text search of page content is ever added, design
   an explicitly opt-in, encrypted-at-rest index (the S9 audit documents that none exists today).
-- *(append items discovered during Phase 2 here)*
+- **Cross-session undo/redo for plaintext notebooks** — S3 added in-`.soil` undo persistence for encrypted notebooks; extend the same cross-session behaviour to plaintext notebooks (currently plaintext loses history on explicit close; only survives background→foreground via sidecar). Store undo state in the `undo_redo_state` table on close, read it back on open — same pattern, no crypto needed.

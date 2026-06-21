@@ -2,6 +2,7 @@ package com.notesprout.android.data
 
 import androidx.room.Database
 import androidx.room.RoomDatabase
+import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
 /**
@@ -19,12 +20,26 @@ import androidx.sqlite.db.SupportSQLiteDatabase
  *     .build()
  * ```
  */
-@Database(entities = [NotebookObject::class], version = 1, exportSchema = false)
+@Database(entities = [NotebookObject::class], version = 2, exportSchema = false)
 abstract class SoilDatabase : RoomDatabase() {
 
     abstract fun notebookDao(): NotebookDao
 
     companion object {
+        /**
+         * Adds the `undo_redo_state` single-row meta table used to persist undo/redo
+         * history inside encrypted notebooks (P2.S3). Encrypted at rest for free via
+         * SQLCipher; plaintext notebooks never write to this table.
+         */
+        val MIGRATION_1_2 = object : Migration(1, 2) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS undo_redo_state " +
+                    "(id INTEGER PRIMARY KEY CHECK (id = 0), json TEXT NOT NULL)"
+                )
+            }
+        }
+
         /**
          * Room callback that (re-)applies connection-level PRAGMAs every time the
          * database is opened. These settings are NOT stored in the database file —

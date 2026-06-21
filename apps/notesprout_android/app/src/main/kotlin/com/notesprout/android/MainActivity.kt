@@ -1460,6 +1460,14 @@ class MainActivity : AppCompatActivity() {
                         """.trimIndent(),
                         null
                     )
+                    // Meta table for undo/redo persistence inside encrypted .soil files (P2.S3).
+                    // Plaintext notebooks never write to this table; Room migration 1→2 adds it
+                    // to existing notebooks. id = 0 is the only row.
+                    exec(
+                        "CREATE TABLE IF NOT EXISTS undo_redo_state " +
+                        "(id INTEGER PRIMARY KEY CHECK (id = 0), json TEXT NOT NULL)",
+                        null
+                    )
 
                     val screenW = screenBounds.width().toFloat()
                     val screenH = screenBounds.height().toFloat()
