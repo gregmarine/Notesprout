@@ -66,6 +66,7 @@ import com.notesprout.android.data.toLinkObject
 import com.notesprout.android.data.translate
 import com.notesprout.android.data.LinkTarget
 import com.notesprout.android.data.toEmbeddedLine
+import com.notesprout.android.data.toPayload
 import com.notesprout.android.data.toLineRender
 import com.notesprout.android.data.TYPE_HEADING
 import com.notesprout.android.data.TYPE_LINE
@@ -1710,7 +1711,7 @@ class NotebookActivity : AppCompatActivity() {
 
         // Wire the lasso popup Clear Clipboard button.
         binding.btnLassoClearClipboard.setOnClickListener {
-            NotesproutClipboard.clear()
+            clearClipboard()
             updateLassoButtonIcon()
             hideLassoPopupToolbar()
         }
@@ -2909,7 +2910,7 @@ class NotebookActivity : AppCompatActivity() {
 
         // Clear history, clipboard, and remove any on-disk persistence file — notebook is done.
         undoRedoManager.clear()
-        NotesproutClipboard.clear()
+        clearClipboard()
         val nbPath = notebookSoilPath
         if (nbPath != null) undoRedoPersistenceFile(nbPath).takeIf { it.exists() }?.delete()
 
@@ -2976,7 +2977,7 @@ class NotebookActivity : AppCompatActivity() {
         val db = soilDatabase ?: return
         soilDatabase = null
         undoRedoManager.clear()
-        NotesproutClipboard.clear()
+        clearClipboard()
         val nbPath = notebookSoilPath
         if (nbPath != null) undoRedoPersistenceFile(nbPath).takeIf { it.exists() }?.delete()
         val pageId       = currentPageId
@@ -4472,7 +4473,7 @@ class NotebookActivity : AppCompatActivity() {
         textObjects.forEach { box.union(it.boundingBox) }
         lineObjects.forEach { box.union(it.boundingBox) }
         linkObjects.forEach { box.union(it.boundingBox) }
-        NotesproutClipboard.content = NotesproutClipboard.ClipboardContent(
+        val clip = NotesproutClipboard.ClipboardContent(
             strokes  = strokes.map { LiveStroke(it.id, it.points.map { pt -> PointF(pt.x, pt.y) }) },
             headings = headings.map { h -> HeadingStroke(h.id, RectF(h.boundingBox),
                 h.strokes.map { s -> LiveStroke(s.id, s.points.map { PointF(it.x, it.y) }) },
@@ -4483,7 +4484,13 @@ class NotebookActivity : AppCompatActivity() {
             lineObjects = lineObjects.map { l -> l.copy(boundingBox = RectF(l.boundingBox)) },
             links = linkObjects.map { it.translate(0f, 0f) },
         )
-        updateLassoButtonIcon()
+        lifecycleScope.launch {
+            val encInfo = withContext(Dispatchers.IO) { indexRepo.getEncryptionInfo(notebookId) }
+            if (encInfo.encrypted && !awaitEncryptionClipboardConfirm()) return@launch
+            NotesproutClipboard.content = clip
+            updateLassoButtonIcon()
+            withContext(Dispatchers.IO) { indexRepo.saveClipboard(clip.toPayload(notebookId, encInfo.encrypted)) }
+        }
     }
 
     /**
@@ -4733,7 +4740,7 @@ class NotebookActivity : AppCompatActivity() {
         }
         val clipLineObjects = selectedLineObjects.map { l -> l.copy(boundingBox = RectF(l.boundingBox)) }
         val clipLinks = selectedLinks.map { it.translate(0f, 0f) }
-        NotesproutClipboard.content = NotesproutClipboard.ClipboardContent(
+        val clip = NotesproutClipboard.ClipboardContent(
             strokes     = clipStrokes,
             headings    = clipHeadings,
             boundingBox = box,
@@ -4748,7 +4755,12 @@ class NotebookActivity : AppCompatActivity() {
         val lineIds    = selectedLineObjects.map { it.id }
         val linkIds    = selectedLinks.map { it.id }
 
-        lifecycleScope.launch(Dispatchers.IO) {
+        lifecycleScope.launch {
+            val encInfo = withContext(Dispatchers.IO) { indexRepo.getEncryptionInfo(notebookId) }
+            if (encInfo.encrypted && !awaitEncryptionClipboardConfirm()) return@launch
+            NotesproutClipboard.content = clip
+            withContext(Dispatchers.IO) {
+            indexRepo.saveClipboard(clip.toPayload(notebookId, encInfo.encrypted))
             val deletedAt = System.currentTimeMillis()
             (strokeIds + headingIds + textIds + lineIds + linkIds).forEach { id ->
                 soilDatabase?.notebookDao()?.softDeleteById(id, deletedAt)
@@ -4801,7 +4813,33 @@ class NotebookActivity : AppCompatActivity() {
                 hideFloatingSelectionToolbar()
                 updateLassoButtonIcon()
             }
+            }
         }
+    }
+
+    /** Shows the "encrypted source → unencrypted clipboard" warning. Returns true to proceed, false to cancel. */
+    private suspend fun awaitEncryptionClipboardConfirm(): Boolean =
+        suspendCancellableCoroutine { cont ->
+            AlertDialog.Builder(this)
+                .setMessage(
+                    "This notebook is encrypted. Copying these objects places their contents " +
+                    "in the app clipboard, which is stored unencrypted on this device. Continue?"
+                )
+                .setPositiveButton("Continue") { _, _ -> if (cont.isActive) cont.resume(true) }
+                .setNegativeButton("Cancel") { _, _ -> if (cont.isActive) cont.resume(false) }
+                .setOnCancelListener { if (cont.isActive) cont.resume(false) }
+                .create()
+                .also { d ->
+                    d.show()
+                    d.window?.setElevation(0f)
+                    d.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+                }
+        }
+
+    /** Clears both the in-memory clipboard and the persisted row in notesprout.db. */
+    private fun clearClipboard() {
+        NotesproutClipboard.clear()
+        NotesproutApplication.appScope.launch { indexRepo.clearClipboard() }
     }
 
     /**

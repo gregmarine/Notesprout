@@ -1,6 +1,7 @@
 package com.notesprout.android
 
 import android.app.Application
+import com.notesprout.android.data.toClipboardContent
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -45,6 +46,12 @@ class NotesproutApplication : Application() {
         )
         appScope.launch { repository.ensurePinnedListExists() }
         appScope.launch { repository.ensurePinnedTemplatesListExists() }
+        appScope.launch {
+            val payload = repository.loadClipboard()
+            if (payload != null && NotesproutClipboard.content == null) {
+                NotesproutClipboard.content = payload.toClipboardContent()
+            }
+        }
 
         val mlKitRecognizer = com.notesprout.android.recognition.MlKitHandwritingRecognizer()
         com.notesprout.android.recognition.HandwritingRecognizerProvider.init(mlKitRecognizer)

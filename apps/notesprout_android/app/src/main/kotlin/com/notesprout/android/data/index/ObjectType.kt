@@ -6,4 +6,5 @@ object ObjectType {
     const val LIST = "list"
     const val TEMPLATE = "template"
     const val TEMPLATE_FOLDER = "template_folder"
+    const val CLIPBOARD = "clipboard"
 }

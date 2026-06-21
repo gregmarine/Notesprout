@@ -2,6 +2,8 @@ package com.notesprout.android.data.index
 
 import com.notesprout.android.crypto.EncryptionInfo
 import com.notesprout.android.crypto.KeyScope
+import com.notesprout.android.data.ClipboardPayload
+import com.notesprout.android.data.ClipboardStore
 import com.notesprout.android.data.FolderRef
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -497,6 +499,14 @@ class IndexRepository(private val dao: ObjectDao) {
             )
         }
     }
+
+    // endregion
+
+    // region Clipboard
+
+    suspend fun saveClipboard(payload: ClipboardPayload) = ClipboardStore.write(dao, payload)
+    suspend fun loadClipboard(): ClipboardPayload? = ClipboardStore.read(dao)
+    suspend fun clearClipboard() = ClipboardStore.clear(dao)
 
     // endregion
 
