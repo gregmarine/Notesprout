@@ -396,10 +396,11 @@ class MainActivity : AppCompatActivity() {
         currentSearchQuery = query
         currentPage = 0
         binding.btnClearSearch.visibility = View.VISIBLE
-        binding.btnTemplates.visibility   = View.GONE
-        binding.btnPinned.visibility = View.GONE
-        binding.btnRecents.visibility = View.GONE
-        binding.btnSort.visibility = View.GONE
+        binding.btnMore.visibility        = View.GONE
+        binding.btnPinned.visibility      = View.GONE
+        binding.btnRecents.visibility     = View.GONE
+        binding.btnSort.visibility        = View.GONE
+        closeOverflowToolbar()
         scanAndRender()
     }
 
@@ -409,10 +410,10 @@ class MainActivity : AppCompatActivity() {
         searchResults = emptyList()
         currentPage = 0
         binding.btnClearSearch.visibility = View.GONE
-        binding.btnTemplates.visibility   = View.VISIBLE
-        binding.btnPinned.visibility = View.VISIBLE
-        binding.btnRecents.visibility = View.VISIBLE
-        binding.btnSort.visibility = View.VISIBLE
+        binding.btnMore.visibility        = View.VISIBLE
+        binding.btnPinned.visibility      = View.VISIBLE
+        binding.btnRecents.visibility     = View.VISIBLE
+        binding.btnSort.visibility        = View.VISIBLE
         scanAndRender()
     }
 
@@ -448,16 +449,17 @@ class MainActivity : AppCompatActivity() {
         if (inPinned) {
             binding.btnNewNotebook.visibility   = View.GONE
             binding.btnNewFolder.visibility     = View.GONE
-            binding.btnTemplates.visibility     = View.GONE
+            binding.btnMore.visibility          = View.GONE
             binding.btnSearch.visibility        = View.GONE
             binding.btnClearSearch.visibility   = View.GONE
             binding.btnSort.visibility          = View.GONE
             binding.btnPinned.visibility        = View.GONE
             binding.btnRecents.visibility       = View.GONE
+            closeOverflowToolbar()
         } else {
             binding.btnNewNotebook.visibility   = View.VISIBLE
             binding.btnNewFolder.visibility     = View.VISIBLE
-            binding.btnTemplates.visibility     = View.VISIBLE
+            binding.btnMore.visibility          = View.VISIBLE
             binding.btnSearch.visibility        = View.VISIBLE
             binding.btnClearSearch.visibility   = View.GONE
             binding.btnSort.visibility          = View.VISIBLE
@@ -538,16 +540,17 @@ class MainActivity : AppCompatActivity() {
         if (inRecents) {
             binding.btnNewNotebook.visibility = View.GONE
             binding.btnNewFolder.visibility   = View.GONE
-            binding.btnTemplates.visibility   = View.GONE
+            binding.btnMore.visibility        = View.GONE
             binding.btnSearch.visibility      = View.GONE
             binding.btnClearSearch.visibility = View.GONE
             binding.btnSort.visibility        = View.GONE
             binding.btnPinned.visibility      = View.GONE
             binding.btnRecents.visibility     = View.GONE
+            closeOverflowToolbar()
         } else {
             binding.btnNewNotebook.visibility = View.VISIBLE
             binding.btnNewFolder.visibility   = View.VISIBLE
-            binding.btnTemplates.visibility   = View.VISIBLE
+            binding.btnMore.visibility        = View.VISIBLE
             binding.btnSearch.visibility      = View.VISIBLE
             binding.btnClearSearch.visibility = View.GONE
             binding.btnSort.visibility        = View.VISIBLE
@@ -653,13 +656,18 @@ class MainActivity : AppCompatActivity() {
 
         binding.btnNewNotebook.setOnClickListener    { showNewNotebookDialog() }
         binding.btnNewFolder.setOnClickListener      { showNewFolderDialog() }
+        binding.btnMore.setOnClickListener           { toggleOverflowToolbar() }
         binding.btnTemplates.setOnClickListener      {
+            closeOverflowToolbar()
             startActivity(
                 Intent(this, TemplateBrowserActivity::class.java)
                     .putExtra(TemplateBrowserActivity.EXTRA_MODE, TemplateBrowserActivity.MODE_MANAGE)
             )
         }
-        binding.btnMore?.setOnClickListener          { showMoreMenu() }
+        binding.btnEncryption.setOnClickListener     {
+            closeOverflowToolbar()
+            startActivity(Intent(this, EncryptionSettingsActivity::class.java))
+        }
         binding.btnBreadcrumbBack.setOnClickListener { navigateUpOneLevel() }
     }
 
@@ -667,6 +675,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun setupGridGestures() {
         binding.gridContainer.setOnTouchListener { _, event ->
+            if (event.action == android.view.MotionEvent.ACTION_DOWN) closeOverflowToolbar()
             gestureDetector.onTouchEvent(event)
             true
         }
@@ -1842,16 +1851,17 @@ class MainActivity : AppCompatActivity() {
             updatePickerTitle()
             binding.btnNewNotebook.visibility   = View.GONE
             binding.btnNewFolder.visibility     = View.GONE
-            binding.btnTemplates.visibility     = View.GONE
+            binding.btnMore.visibility          = View.GONE
             binding.btnSearch.visibility        = View.GONE
             binding.btnClearSearch.visibility   = View.GONE
             binding.btnSort.visibility          = View.GONE
             binding.btnPinned.visibility        = View.GONE
             binding.btnRecents.visibility       = View.GONE
+            closeOverflowToolbar()
         } else {
             binding.btnNewNotebook.visibility   = View.VISIBLE
             binding.btnNewFolder.visibility     = View.VISIBLE
-            binding.btnTemplates.visibility     = View.VISIBLE
+            binding.btnMore.visibility          = View.VISIBLE
             binding.btnSearch.visibility        = View.VISIBLE
             binding.btnClearSearch.visibility   = View.GONE
             binding.btnSort.visibility          = View.VISIBLE
@@ -2382,11 +2392,14 @@ class MainActivity : AppCompatActivity() {
         d.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
     }
 
-    private fun showMoreMenu() {
-        ActionSheetDialog(this)
-            .addAction(R.drawable.ic_lock, "Encryption…") {
-                startActivity(Intent(this, EncryptionSettingsActivity::class.java))
-            }
-            .show()
+    private fun toggleOverflowToolbar() {
+        val visible = binding.overflowToolbar.visibility == View.VISIBLE
+        binding.overflowToolbar.visibility        = if (visible) View.GONE else View.VISIBLE
+        binding.overflowToolbarDivider.visibility = if (visible) View.GONE else View.VISIBLE
+    }
+
+    private fun closeOverflowToolbar() {
+        binding.overflowToolbar.visibility        = View.GONE
+        binding.overflowToolbarDivider.visibility = View.GONE
     }
 }

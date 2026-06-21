@@ -247,6 +247,43 @@
         android:layout_weight="1" />
 
     <!--
+        Overflow toolbar: secondary row shown when btnMore is tapped.
+        Contains Templates and Encryption — right-aligned to mirror the bottom bar.
+        Hidden by default; toggled by btnMore.
+    -->
+    <View
+        android:id="@+id/overflowToolbarDivider"
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="@color/inkBlack"
+        android:visibility="gone" />
+
+    <LinearLayout
+        android:id="@+id/overflowToolbar"
+        android:layout_width="match_parent"
+        android:layout_height="56dp"
+        android:orientation="horizontal"
+        android:background="@color/paperWhite"
+        android:gravity="center_vertical|end"
+        android:paddingEnd="16dp"
+        android:visibility="gone">
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnTemplates"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:src="@drawable/ic_template"
+            android:contentDescription="Templates" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnEncryption"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:layout_marginStart="4dp"
+            android:src="@drawable/ic_lock"
+            android:contentDescription="Encryption" />
+
+    </LinearLayout>
+
+    <!--
         Bottom bar: 1dp inkBlack top border, pagination centred, action buttons right-aligned.
         Height 56dp — matches the notebook activity toolbar for uniformity.
     -->
@@ -316,7 +353,7 @@
 
         </LinearLayout>
 
-        <!-- Right-side action buttons: New Notebook + New Folder, right-aligned -->
+        <!-- Right-side action buttons: New Notebook + New Folder + More, right-aligned -->
         <LinearLayout
             android:id="@+id/actionButtonsGroup"
             android:layout_width="wrap_content"
@@ -339,13 +376,6 @@
                 android:layout_marginStart="4dp"
                 android:src="@drawable/ic_folder_plus"
                 android:contentDescription="New folder" />
-
-            <androidx.appcompat.widget.AppCompatImageButton
-                android:id="@+id/btnTemplates"
-                style="@style/Widget.Notesprout.ToolbarButton"
-                android:layout_marginStart="4dp"
-                android:src="@drawable/ic_template"
-                android:contentDescription="Templates" />
 
             <androidx.appcompat.widget.AppCompatImageButton
                 android:id="@+id/btnMore"
