@@ -155,6 +155,23 @@ CREATE INDEX IF NOT EXISTS idx_notebook_parent_order
     ON notebook(parentId, "order", deletedAt);
 ```
 
+### `.soil` Schema Version 2 — `undo_redo_state`
+
+`SoilDatabase.MIGRATION_1_2` (Room version 1 → 2) adds a single-row meta table used to persist
+undo/redo history for encrypted notebooks (P2.S3):
+
+```sql
+CREATE TABLE IF NOT EXISTS undo_redo_state
+    (id INTEGER PRIMARY KEY CHECK (id = 0), json TEXT NOT NULL)
+```
+
+The `CHECK (id = 0)` constraint limits this to one row. Encrypted notebooks write
+`undoRedoManager.toJson()` here on `onStop`; plaintext notebooks continue to use the
+`*.soil.undoredo` sidecar and never write to this table. See
+[`docs/encryption.md`](encryption.md) for the full undo-persistence design.
+
+---
+
 ### Room Setup Rules
 
 - Open `.soil` files by absolute path: `Room.databaseBuilder(context, SoilDatabase::class.java, absolutePath)`

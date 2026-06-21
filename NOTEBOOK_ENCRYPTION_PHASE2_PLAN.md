@@ -57,7 +57,7 @@
 | P2.S6 | Global passphrase rotation: cancellable/resumable batch re-key | ✅ DONE |
 | P2.S7 | Passphrase attempt rate-limiting (escalating lockout + countdown) | ✅ DONE |
 | P2.S8 | Password-protected PDF export (PdfBox-Android) | ✅ DONE |
-| P2.S9 | Wrap-up (search/KDF audit, docs, edge cases, P2P + G10 matrix) | ⬜ NOT STARTED |
+| P2.S9 | Wrap-up (search/KDF audit, docs, edge cases, P2P + G10 matrix) | ✅ DONE |
 
 > S5/S6 (global key management) are split into UI vs the rotation engine — tightly coupled but each is a
 > full medium session. If they prove light on device, they can be merged at commit time; keep them
@@ -509,7 +509,7 @@ path unchanged, no plaintext temp left behind, password never logged.
 
 ## P2.S9 — Wrap-Up
 
-**Status:** ⬜ NOT STARTED
+**Status:** ✅ DONE
 
 **Goal:** Verification-only audits (search-leak, KDF interop), documentation, edge-case sweep, and a
 two-device test matrix on **G10 (`34E517F9`)** and **P2P (`287d2364`)**.

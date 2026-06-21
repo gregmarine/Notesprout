@@ -52,7 +52,7 @@ These apply everywhere — do not repeat them in feature sections.
 - **No Material Components** — `com.google.android.material` is not a dependency; do not add it.
 - **Never `runBlocking` on the UI thread** — ANR risk, especially on large stroke/snapshot data.
 - **No `Log.d` directly** — use `Slog.d(tag) { "msg" }` (`core/Slog.kt`, `inline fun` gated on `BuildConfig.DEBUG`). Release builds pay zero cost (lambda never evaluated). `Log.e` / `Log.w` survive into release.
-- **Encryption:** every `.soil` open routes through `SoilCrypto`; passphrases are **never** logged, never put in Intent extras, never written to the global index. See [`docs/encryption.md`](docs/encryption.md).
+- **Encryption:** every `.soil` open routes through `SoilCrypto`; passphrases are **never** logged, never put in Intent extras, never written to the global index. See [`docs/encryption.md`](docs/encryption.md). Global passphrase management and rotation live in `EncryptionSettingsActivity` (reachable from MainActivity's overflow). The one Phase 2 Gradle dependency is `com.tom-roush:pdfbox-android:2.0.27.0` (Apache-2.0) for password-protected PDF export — do not add further dependencies without explicit discussion.
 
 ---
 
