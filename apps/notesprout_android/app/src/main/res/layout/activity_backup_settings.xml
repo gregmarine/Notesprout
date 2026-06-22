@@ -203,11 +203,11 @@
                 android:gravity="center_vertical">
 
                 <androidx.appcompat.widget.AppCompatButton
-                    android:id="@+id/btnChooseDrive"
+                    android:id="@+id/btnConnectDrive"
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
-                    android:text="Choose folder…"
+                    android:text="Connect Google Drive"
                     android:textSize="14sp"
                     android:textColor="@color/inkBlack"
                     android:textAllCaps="false"
@@ -215,6 +215,21 @@
                     android:stateListAnimator="@null"
                     android:minWidth="0dp"
                     android:minHeight="0dp" />
+
+                <androidx.appcompat.widget.AppCompatButton
+                    android:id="@+id/btnDisconnectDrive"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="8dp"
+                    android:text="Disconnect"
+                    android:textSize="14sp"
+                    android:textColor="@color/inkBlack"
+                    android:textAllCaps="false"
+                    android:background="@drawable/shape_bordered"
+                    android:stateListAnimator="@null"
+                    android:minWidth="0dp"
+                    android:minHeight="0dp"
+                    android:visibility="gone" />
 
                 <androidx.appcompat.widget.AppCompatCheckBox
                     android:id="@+id/switchDriveEnabled"
@@ -232,7 +247,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="6dp"
-                android:text="Notebooks are stored in a per-device subfolder inside the chosen Drive folder."
+                android:text="Backs up to a 'Notesprout Backups' folder in your Google Drive, in a per-device subfolder. Requires Google Play Services."
                 android:textSize="12sp"
                 android:textColor="@color/inkLight" />
 

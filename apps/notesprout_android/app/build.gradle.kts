@@ -5,6 +5,11 @@ plugins {
     id("org.jetbrains.kotlin.plugin.serialization")
 }
 
+// Drive OAuth credentials are read from environment variables — never from disk.
+// Set DRIVE_CLIENT_ID and DRIVE_CLIENT_SECRET in your shell profile (see BACKUP_PLAN.md S2.2).
+// Create a "Desktop app" OAuth client at https://console.cloud.google.com
+// with redirect URI http://localhost/oauth2callback.
+
 android {
     namespace = "com.notesprout.android"
     compileSdk = 35
@@ -15,6 +20,11 @@ android {
         targetSdk = 35
         versionCode = 1
         versionName = "1.0"
+
+        buildConfigField("String", "DRIVE_CLIENT_ID",
+            "\"${System.getenv("DRIVE_CLIENT_ID") ?: ""}\"")
+        buildConfigField("String", "DRIVE_CLIENT_SECRET",
+            "\"${System.getenv("DRIVE_CLIENT_SECRET") ?: ""}\"")
 
         ndk {
             // Every target device (BOOX, Wacom Movink, Supernote) is 64-bit ARM.
@@ -105,6 +115,9 @@ dependencies {
     // PdfBox-Android — post-process exported PDFs to add AES-128 password protection.
     // Apache-2.0 license (compatible with project MIT). Deliberate Phase-2 dependency addition.
     implementation("com.tom-roush:pdfbox-android:2.0.27.0")
+
+    // Drive OAuth 2.0 + PKCE via WebView — no GMS dependency (works on SERVICE_INVALID BOOX).
+    // Credentials injected via BuildConfig from local.properties. See BACKUP_PLAN D13/S2.2.
 
     // Unit test infrastructure — JUnit 4 for pure-Kotlin/JVM tests.
     testImplementation("junit:junit:4.13.2")

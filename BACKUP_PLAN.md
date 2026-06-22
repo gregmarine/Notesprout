@@ -25,11 +25,11 @@
 | D10 | **Encrypted `.soil` files are copied as-is (ciphertext).** No passphrase prompt — same as full-notebook export. | SQLCipher encrypts the whole file; backup is a pure byte copy. |
 | D11 | **All backup state lives in `notesprout.db`.** Per-notebook timestamps live in `NotebookObject` JSON (no migration). Global config lives in a singleton `BACKUP_CONFIG` row (mirrors `CLIPBOARD`). | Spec: "tracked in notesprout.db"; consistent with existing patterns. |
 | D12 | **The DRIVE slot uses the Google Drive REST API v3 + Google Identity Services (GIS) authorization** — *not* SAF. The S2 SAF "Choose folder…" UI for Drive is replaced (Session 2.1). LOCAL remains SAF. `BackupKind.LOCAL` → `SafBackupWriter`; `BackupKind.DRIVE` → Drive REST path. | SAF Drive picker is missing on BOOX; the REST API is the only reliable Drive path. |
-| D13 | **Exactly one new Gradle dependency: `com.google.android.gms:play-services-auth` (21.x).** Explicitly authorized for this work. **No Google API client libraries** (`google-api-services-drive`, `google-http-client`, GSON, Guava). Drive REST is hand-rolled with `HttpURLConnection` (built-in) + `kotlinx.serialization` for JSON. | Honors the project's minimalism + "kotlinx.serialization only / no org.json" rule; the official client libs are heavy and pull reflection-based JSON. |
+| D13 | ~~**Exactly one new Gradle dependency: `com.google.android.gms:play-services-auth` (21.x).**~~ **SUPERSEDED by S2.2:** `play-services-auth` is removed. Drive auth is now a WebView OAuth 2.0 + PKCE flow with zero new Gradle dependencies (uses `HttpURLConnection` + existing `security-crypto` for refresh-token storage). Drive REST remains hand-rolled. | G102 reports `SERVICE_INVALID` for GMS; the GIS Identity API is blocked. WebView OAuth works on any device with a WebView engine. `security-crypto` was already a dependency for the global-passphrase Keystore cache. |
 | D14 | **OAuth scope = `https://www.googleapis.com/auth/drive.file`** (per-file: the app sees/manages **only** files it creates). The app creates its own visible **"Notesprout Backups"** folder in the user's Drive; **there is no Drive folder picker.** | `drive.file` is *sensitive* but **not** *restricted* → no costly annual third-party security assessment (full `drive` scope would require it). Sufficient for backup since the app owns everything it writes. |
-| D15 | **No backend, no offline access, no refresh tokens.** Each backup run fetches a fresh **access token** via a silent `AuthorizationClient.authorize()` (returns without UI once consent is granted). Tokens live in memory only — **never persisted, never logged, never in Intent extras** (same hygiene as encryption passphrases). | Manual, foreground-only backup. A 1-hour access token covers any run; silent re-auth is the "refresh" mechanism. No server to hold a refresh token (the secure place for one). |
+| D15 | ~~**No backend, no offline access, no refresh tokens.**~~ **UPDATED by S2.2:** No backend, no server-side component. The **refresh token is stored on-device** in `EncryptedSharedPreferences` (AES-256-GCM, master key in Android Keystore) via `DriveTokenStore`. Each backup run uses the refresh token to silently fetch a fresh access token via a POST to the Google token endpoint — no UI required. Access tokens still live in memory only and are never persisted, never logged, never put in Intent extras. | Without GMS's `AuthorizationClient`, there is no framework-managed silent re-auth. Storing the refresh token locally is the standard native-app pattern (RFC 6749 §10.3). `EncryptedSharedPreferences` is already a project dependency; the refresh token is treated with the same hygiene as encryption passphrases. |
 | D16 | **Drive replace-in-place = search-then-update.** Drive permits multiple files with the same name in a folder, so each run **finds** the existing `<uuid>.soil` / `notesprout.db` by name within the device folder and **`PATCH`es its content** (stable file ID); only creates when absent. Folders are resolved find-or-create **every run** (no cached folder IDs) to avoid staleness. | Blind `create` would accumulate duplicate-named backups. Re-resolving folders each run is one cheap list call and eliminates a class of stale-ID bugs. |
-| D17 | **Drive is Google-Play-Services-gated.** If GMS is unavailable (`GoogleApiAvailability != SUCCESS`), the Drive section is disabled with an explanatory message; LOCAL is unaffected. | GIS authorization requires GMS. Some BOOX builds lack it; those users still get LOCAL/SAF backup. |
+| D17 | ~~**Drive is Google-Play-Services-gated.**~~ **SUPERSEDED by S2.2:** Drive works on **any device with a WebView engine** — no GMS required. The OAuth flow is a standard WebView that opens Google's consent page; no Play Services framework is involved. Drive section is now unconditionally available in the UI. | G102 has GMS installed but as `SERVICE_INVALID` (uncertified OEM build); the GIS API is blocked even though Play Services appears present. WebView OAuth is GMS-independent and works universally on Android. |
 
 ### Known Phase-1 limitations (document, don't fix)
 - Renaming the device folder orphans the old Drive subfolder (no migration of prior backups).
@@ -258,7 +258,7 @@ see "Connected as <email>", toggle Drive on, and — wired in Session 3 — back
 session delivers the auth + REST plumbing and the reworked Drive UI, not the run loop (that is S3,
 which dispatches `BackupKind.DRIVE` to this code).
 
-**Status:** ☐ Not started
+**Status:** ☑ Complete — `play-services-auth:21.6.0` added; `DriveAuth`, `DriveApiClient`, `DriveBackupWriter` created; `BackupSettingsActivity` Drive section reworked (Connect/Disconnect); `BackupConfig.driveAccountEmail` added; tests updated/added. Awaiting on-device integration test (user performs prerequisite GCP setup + Testing steps).
 
 ---
 
@@ -658,6 +658,57 @@ superseded by D12):
 
 ---
 
+## Session 2.2 — WebView OAuth replaces GIS (BOOX SERVICE_INVALID fix)
+
+> **Trigger:** G102 (BOOX Go 10.3 Gen 2) reports GMS status `SERVICE_INVALID` (9). The GIS
+> `Auth.Api.Identity.Authorization.API` is unavailable even though GMS is installed — the BOOX OEM
+> build is not certified. Session 2.1's GIS flow is replaced end-to-end with standard OAuth 2.0 +
+> PKCE via a WebView.
+
+**Status:** ☑ Complete
+
+### Prerequisite — Google Cloud Console changes (user action, replaces S2.1 prerequisite)
+
+The Android OAuth client from S2.1 is no longer used. Create a new **Desktop app** client:
+
+1. Go to *APIs & Services → Credentials → Create credentials → OAuth client ID*.
+2. **Application type: Desktop app**. Name it e.g. "Notesprout Desktop".
+3. **Redirect URI:** `http://localhost/oauth2callback` (add it under "Authorized redirect URIs").
+4. Download / copy the **Client ID** and **Client secret**.
+5. Add them as environment variables in `~/.zshenv` (see step-by-step in the session notes below).
+   They are injected into `BuildConfig.DRIVE_CLIENT_ID` / `BuildConfig.DRIVE_CLIENT_SECRET` at build time via `System.getenv()`. **Never written to disk or committed to git.**
+7. Keep the Drive API enabled and the OAuth consent screen configured from S2.1 (scope `drive.file`,
+   user type External, your account as a test user).
+
+> The Android OAuth client from S2.1 can be left in place or deleted — it is no longer used.
+
+### Files changed
+
+- `DriveAuth.kt` — complete rewrite: GIS removed; PKCE helpers, `buildAuthUrl`, `exchangeCodeForTokens`, `getAccessTokenSilent` (refresh-token path).
+- `DriveTokenStore.kt` (new) — `EncryptedSharedPreferences`-backed refresh token storage.
+- `DriveAuthActivity.kt` (new) — WebView OAuth activity; intercepts `http://localhost/oauth2callback`.
+- `res/layout/activity_drive_auth.xml` (new) — back-button header + full-screen WebView.
+- `BackupSettingsActivity.kt` — `driveConsentLauncher` → `driveAuthLauncher`; `connectDrive()` now just launches `DriveAuthActivity`; `disconnectDrive()` clears `DriveTokenStore`.
+- `AndroidManifest.xml` — registers `DriveAuthActivity`.
+- `app/build.gradle.kts` — removes `play-services-auth`; injects `DRIVE_CLIENT_ID`/`DRIVE_CLIENT_SECRET` from `local.properties` into BuildConfig.
+- `BACKUP_PLAN.md` — decisions D13, D15, D17 updated.
+
+### Testing steps
+
+1. Complete the prerequisite above (Desktop app client + local.properties).
+2. Build + install debug on G102.
+3. Open Backup Settings → Drive section shows "Not connected", "Connect Google Drive" button.
+4. Tap **Connect Google Drive** → Google sign-in WebView opens. Sign in + grant `drive.file` consent.
+5. WebView closes → status shows "Connected as \<email>", Disconnect appears, toggle enables.
+6. Force-stop + relaunch → still connected (email + refresh token persisted).
+7. Tap **Disconnect** → status returns to "Not connected", token cleared.
+8. Reconnect → no full re-consent (Google skips it if still granted); if re-consent shown, that's fine.
+9. **"Back Up Now" still disabled** (S3).
+
+> On pass: commit. e.g. `🌱 Backup S2.2: WebView OAuth replaces GIS (BOOX SERVICE_INVALID fix)`.
+
+---
+
 ## Session 3 — Backup engine (copy + status tracking)
 
 **Goal:** "Back Up Now" runs the full process: copy every notebook needing backup to each enabled
@@ -828,7 +879,8 @@ Track ☑ per item. Record the actual progress-dialog approach chosen.
 |---|---|---|
 | 1 | Data model & backup-state foundations | ☑ Complete |
 | 2 | Backup Settings screen & destination config | ☑ Complete |
-| 2.1 | Google Drive via REST API + OAuth (replaces SAF for DRIVE) | ☐ Not started |
+| 2.1 | Google Drive via REST API + GIS OAuth (replaces SAF for DRIVE) | ☑ Complete |
+| 2.2 | WebView OAuth replaces GIS (BOOX SERVICE_INVALID fix) | ☑ Complete |
 | 3 | Backup engine + per-notebook exclude | ☐ Not started |
 | 4 | Docs, edge cases & polish | ☐ Not started |
 

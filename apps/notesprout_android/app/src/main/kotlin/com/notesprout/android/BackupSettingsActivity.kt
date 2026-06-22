@@ -7,9 +7,11 @@ import android.view.inputmethod.InputMethodManager
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.view.isVisible
 import androidx.lifecycle.lifecycleScope
 import com.notesprout.android.data.backup.BackupConfig
 import com.notesprout.android.data.backup.DeviceIdentity
+import com.notesprout.android.data.backup.DriveTokenStore
 import com.notesprout.android.data.index.IndexRepository
 import com.notesprout.android.data.index.NotesproutIndex
 import com.notesprout.android.databinding.ActivityBackupSettingsBinding
@@ -27,13 +29,16 @@ class BackupSettingsActivity : AppCompatActivity() {
     private val pickLocalTreeLauncher = registerForActivityResult(
         ActivityResultContracts.OpenDocumentTree()
     ) { uri ->
-        if (uri != null) onTreePicked(uri, isLocal = true)
+        if (uri != null) onLocalTreePicked(uri)
     }
 
-    private val pickDriveTreeLauncher = registerForActivityResult(
-        ActivityResultContracts.OpenDocumentTree()
-    ) { uri ->
-        if (uri != null) onTreePicked(uri, isLocal = false)
+    private val driveAuthLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == RESULT_OK) {
+            val email = result.data?.getStringExtra(DriveAuthActivity.EXTRA_EMAIL)
+            onDriveConnected(email)
+        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -43,9 +48,10 @@ class BackupSettingsActivity : AppCompatActivity() {
 
         binding.btnBack.setOnClickListener { finish() }
         binding.btnChooseLocal.setOnClickListener { pickLocalTreeLauncher.launch(null) }
-        binding.btnChooseDrive.setOnClickListener { pickDriveTreeLauncher.launch(null) }
-
         binding.btnSaveDeviceName.setOnClickListener { saveDeviceName() }
+
+        binding.btnConnectDrive.setOnClickListener { connectDrive() }
+        binding.btnDisconnectDrive.setOnClickListener { disconnectDrive() }
 
         binding.switchLocalEnabled.setOnCheckedChangeListener { _, checked ->
             persistToggle(isLocal = true, enabled = checked)
@@ -75,6 +81,7 @@ class BackupSettingsActivity : AppCompatActivity() {
     private fun applyConfigToUi(config: BackupConfig) {
         binding.etDeviceFolderName.setText(config.deviceFolderName)
 
+        // Local section
         val localUri = config.localTreeUri?.let { Uri.parse(it) }
         binding.tvLocalStatus.text = if (localUri != null) {
             localUri.lastPathSegment?.substringAfterLast(':') ?: localUri.toString()
@@ -88,19 +95,20 @@ class BackupSettingsActivity : AppCompatActivity() {
             persistToggle(isLocal = true, enabled = checked)
         }
 
-        val driveUri = config.driveTreeUri?.let { Uri.parse(it) }
-        binding.tvDriveStatus.text = if (driveUri != null) {
-            driveUri.lastPathSegment?.substringAfterLast(':') ?: driveUri.toString()
-        } else {
-            "Not configured"
-        }
-        binding.switchDriveEnabled.isEnabled = driveUri != null
+        // Drive section
+        val connected = config.driveAccountEmail != null
+        binding.tvDriveStatus.text = if (connected) "Connected as ${config.driveAccountEmail}"
+                                     else "Not connected"
+        binding.btnConnectDrive.isVisible = !connected
+        binding.btnDisconnectDrive.isVisible = connected
+        binding.switchDriveEnabled.isEnabled = connected
         binding.switchDriveEnabled.setOnCheckedChangeListener(null)
-        binding.switchDriveEnabled.isChecked = config.driveEnabled && driveUri != null
+        binding.switchDriveEnabled.isChecked = config.driveEnabled && connected
         binding.switchDriveEnabled.setOnCheckedChangeListener { _, checked ->
             persistToggle(isLocal = false, enabled = checked)
         }
 
+        // Last run
         val lastRun = config.lastRunAt
         binding.tvLastRun.text = if (lastRun != null) {
             "Last backup: ${DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(lastRun))}"
@@ -109,7 +117,9 @@ class BackupSettingsActivity : AppCompatActivity() {
         }
     }
 
-    private fun onTreePicked(uri: Uri, isLocal: Boolean) {
+    // ── Local ─────────────────────────────────────────────────────────────────
+
+    private fun onLocalTreePicked(uri: Uri) {
         contentResolver.takePersistableUriPermission(
             uri,
             Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
@@ -118,15 +128,42 @@ class BackupSettingsActivity : AppCompatActivity() {
             val config = withContext(Dispatchers.IO) {
                 repository.ensureBackupConfig(DeviceIdentity.defaultDeviceFolderName())
             }
-            val updated = if (isLocal) {
-                config.copy(localTreeUri = uri.toString(), localEnabled = true)
-            } else {
-                config.copy(driveTreeUri = uri.toString(), driveEnabled = true)
-            }
+            val updated = config.copy(localTreeUri = uri.toString(), localEnabled = true)
             withContext(Dispatchers.IO) { repository.saveBackupConfig(updated) }
             applyConfigToUi(updated)
         }
     }
+
+    // ── Drive ─────────────────────────────────────────────────────────────────
+
+    private fun connectDrive() {
+        driveAuthLauncher.launch(Intent(this, DriveAuthActivity::class.java))
+    }
+
+    private fun onDriveConnected(email: String?) {
+        lifecycleScope.launch {
+            val config = withContext(Dispatchers.IO) {
+                repository.ensureBackupConfig(DeviceIdentity.defaultDeviceFolderName())
+            }
+            val updated = config.copy(driveAccountEmail = email, driveEnabled = true)
+            withContext(Dispatchers.IO) { repository.saveBackupConfig(updated) }
+            applyConfigToUi(updated)
+        }
+    }
+
+    private fun disconnectDrive() {
+        DriveTokenStore.clear(this)
+        lifecycleScope.launch {
+            val config = withContext(Dispatchers.IO) {
+                repository.ensureBackupConfig(DeviceIdentity.defaultDeviceFolderName())
+            }
+            val updated = config.copy(driveAccountEmail = null, driveEnabled = false)
+            withContext(Dispatchers.IO) { repository.saveBackupConfig(updated) }
+            applyConfigToUi(updated)
+        }
+    }
+
+    // ── Shared ────────────────────────────────────────────────────────────────
 
     private fun persistToggle(isLocal: Boolean, enabled: Boolean) {
         lifecycleScope.launch {

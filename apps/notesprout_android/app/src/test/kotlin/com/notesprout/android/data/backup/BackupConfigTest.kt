@@ -14,10 +14,24 @@ class BackupConfigTest {
             localEnabled = true,
             driveTreeUri = null,
             driveEnabled = false,
+            driveAccountEmail = "user@example.com",
             lastRunAt = 1_700_000_000_000L,
         )
         val json = config.toJson()
         val decoded = BackupConfig.fromJson(json)
+        assertEquals(config, decoded)
+    }
+
+    @Test
+    fun roundTrip_driveEmailNull() {
+        val config = BackupConfig(
+            deviceId = "test-device-id",
+            deviceFolderName = "BOOX-Go-103-abcd1234",
+            driveAccountEmail = null,
+        )
+        val json = config.toJson()
+        val decoded = BackupConfig.fromJson(json)
+        assertNull(decoded.driveAccountEmail)
         assertEquals(config, decoded)
     }
 
@@ -29,7 +43,18 @@ class BackupConfigTest {
         assertFalse(config.driveEnabled)
         assertNull(config.localTreeUri)
         assertNull(config.driveTreeUri)
+        assertNull(config.driveAccountEmail)
         assertNull(config.lastRunAt)
+    }
+
+    @Test
+    fun legacyJson_withDriveTreeUri_decodesWithoutEmail() {
+        // Row written before driveAccountEmail was added — must still decode cleanly.
+        val legacy = """{"deviceId":"x","deviceFolderName":"Dev","driveTreeUri":"content://com.google.android.apps.docs.storage/tree/root","driveEnabled":true,"localEnabled":false}"""
+        val config = BackupConfig.fromJson(legacy)
+        assertNull(config.driveAccountEmail)
+        assertEquals("content://com.google.android.apps.docs.storage/tree/root", config.driveTreeUri)
+        assertTrue(config.driveEnabled)
     }
 
     @Test
@@ -39,6 +64,7 @@ class BackupConfigTest {
         assertEquals("TestDevice-abc123", config.deviceFolderName)
         assertFalse(config.localEnabled)
         assertFalse(config.driveEnabled)
+        assertNull(config.driveAccountEmail)
     }
 
     @Test

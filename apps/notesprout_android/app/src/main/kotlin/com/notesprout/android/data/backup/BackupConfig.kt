@@ -15,6 +15,7 @@ data class BackupConfig(
     @EncodeDefault(EncodeDefault.Mode.ALWAYS) val localEnabled: Boolean = false,
     val driveTreeUri: String? = null,
     @EncodeDefault(EncodeDefault.Mode.ALWAYS) val driveEnabled: Boolean = false,
+    val driveAccountEmail: String? = null,
     val lastRunAt: Long? = null,
 ) {
     fun toJson(): String = codec.encodeToString(serializer(), this)
