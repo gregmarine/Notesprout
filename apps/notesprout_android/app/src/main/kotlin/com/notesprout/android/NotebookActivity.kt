@@ -908,23 +908,7 @@ class NotebookActivity : AppCompatActivity() {
             ).show()
         }
 
-        binding.btnToc.setOnClickListener {
-            val db = soilDatabase ?: return@setOnClickListener
-            lifecycleScope.launch {
-                val tree = withContext(Dispatchers.IO) {
-                    TocRepository(db.notebookDao()).buildTocTree()
-                }
-                TocDialog(
-                    context = this@NotebookActivity,
-                    nodes = tree,
-                    currentPageIndex = currentPageIndex,
-                    onPageSelected = { pageId ->
-                        val index = pages.indexOfFirst { it.id == pageId }
-                        if (index >= 0 && index != currentPageIndex) navigateToPage(index)
-                    }
-                ).show()
-            }
-        }
+        binding.btnToc.setOnClickListener { openToc() }
 
         binding.btnRecents.setOnClickListener {
             lifecycleScope.launch {
@@ -2668,9 +2652,9 @@ class NotebookActivity : AppCompatActivity() {
                         val vy = tracker.getYVelocity(0)
                         val dx = event.x - pageSwipeStartX
                         val dy = event.y - pageSwipeStartY
-                        // A deliberate upward swipe walks the link back-stack; otherwise fall
-                        // through to the horizontal page-turn evaluator.
-                        if (!evaluateSwipeUpBack(vy, dx, dy)) {
+                        // A deliberate upward swipe walks the link back-stack; a downward swipe
+                        // opens the TOC; otherwise fall through to the horizontal page-turn evaluator.
+                        if (!evaluateSwipeUpBack(vy, dx, dy) && !evaluateSwipeDownToc(vy, dx, dy)) {
                             evaluatePageFling(vx, vy, dx, dy)
                         }
                         tracker.recycle()
@@ -2809,6 +2793,51 @@ class NotebookActivity : AppCompatActivity() {
         Slog.d(TAG) { "evaluateSwipeUpBack accepted: dy=$dy vy=$velocityY" }
         followBack()
         return true
+    }
+
+    /**
+     * One-finger downward swipe → open the table of contents.
+     *
+     * Mirrors [evaluateSwipeUpBack]'s gates but downward ([dy] > 0): vertical-dominant, ≥30% of
+     * screen *height* to qualify at all, and either fast enough or ≥50% of height. Returns true
+     * when a qualifying swipe was consumed (so the caller skips the horizontal page-turn evaluator).
+     */
+    private fun evaluateSwipeDownToc(velocityY: Float, dx: Float, dy: Float): Boolean {
+        val absDx = abs(dx)
+        val absDy = abs(dy)
+        val height = resources.displayMetrics.heightPixels.toFloat()
+        val minDist = PAGE_SWIPE_MIN_DISTANCE_FRAC * height
+        val minVel = ViewConfiguration.get(this).scaledMinimumFlingVelocity * PAGE_SWIPE_MIN_VELOCITY_MULT
+        val fastEnough = abs(velocityY) >= minVel
+        val longEnough = absDy >= PAGE_SWIPE_LONG_DISTANCE_FRAC * height
+
+        if (dy <= 0) return false                 // must be downward
+        if (absDy <= absDx) return false          // must be vertical-dominant
+        if (absDy < minDist) return false         // must cover the minimum distance
+        if (!fastEnough && !longEnough) return false
+
+        Slog.d(TAG) { "evaluateSwipeDownToc accepted: dy=$dy vy=$velocityY" }
+        openToc()
+        return true
+    }
+
+    /** Builds the TOC tree off-thread and shows the [TocDialog]. */
+    private fun openToc() {
+        val db = soilDatabase ?: return
+        lifecycleScope.launch {
+            val tree = withContext(Dispatchers.IO) {
+                TocRepository(db.notebookDao()).buildTocTree()
+            }
+            TocDialog(
+                context = this@NotebookActivity,
+                nodes = tree,
+                currentPageIndex = currentPageIndex,
+                onPageSelected = { pageId ->
+                    val index = pages.indexOfFirst { it.id == pageId }
+                    if (index >= 0 && index != currentPageIndex) navigateToPage(index)
+                }
+            ).show()
+        }
     }
 
     /**
