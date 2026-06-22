@@ -47,5 +47,8 @@ key.properties
 # VSCode
 .vscode/
 
+# Claude Code local tooling
+.claude/
+
 # Logs
 *.log
