@@ -714,6 +714,10 @@ class MainActivity : AppCompatActivity() {
             closeOverflowToolbar()
             startActivity(Intent(this, EncryptionSettingsActivity::class.java))
         }
+        binding.btnBackup.setOnClickListener {
+            closeOverflowToolbar()
+            startActivity(Intent(this, BackupSettingsActivity::class.java))
+        }
         binding.btnBreadcrumbBack.setOnClickListener { navigateUpOneLevel() }
     }
 

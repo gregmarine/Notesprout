@@ -288,6 +288,13 @@
             android:src="@drawable/ic_lock"
             android:contentDescription="Encryption" />
 
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnBackup"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:layout_marginStart="4dp"
+            android:src="@drawable/ic_backup"
+            android:contentDescription="Backup" />
+
     </LinearLayout>
 
     <!--

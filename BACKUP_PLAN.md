@@ -30,6 +30,10 @@
   not flushed mid-edit. Acceptable for v1; note in docs.
 - Deleting a notebook does not remove its backup file. Restore/GC is future work.
 - SAF writes to Drive can be slow; the progress UI must remain responsive (work on `Dispatchers.IO`).
+- **Google Drive does not appear in the SAF folder picker on BOOX devices** (confirmed on G102). The
+  Drive app is present but its `DocumentsProvider` is not registered by the Play Services layer on
+  BOOX/ONYX. Users can still pick a local or SD card folder for the "Drive" slot as a workaround.
+  Document in `docs/backup.md` (S4); do not change the code.
 
 ---
 
@@ -146,7 +150,7 @@ the user picks a local folder and/or a Drive folder (SAF), toggles each on/off, 
 folder name. Everything persists across restart. **No actual backup runs yet** — "Back Up Now" is
 present but disabled (wired in Session 3).
 
-**Status:** ☐ Not started
+**Status:** ☑ Complete
 
 ### Files to create
 1. `res/drawable/ic_backup.xml` — monochrome vector (e-ink: single path, `android:tint`/fill
@@ -374,7 +378,7 @@ Track ☑ per item. Record the actual progress-dialog approach chosen.
 | Session | Title | Status |
 |---|---|---|
 | 1 | Data model & backup-state foundations | ☑ Complete |
-| 2 | Backup Settings screen & destination config | ☐ Not started |
+| 2 | Backup Settings screen & destination config | ☑ Complete |
 | 3 | Backup engine + per-notebook exclude | ☐ Not started |
 | 4 | Docs, edge cases & polish | ☐ Not started |
 
