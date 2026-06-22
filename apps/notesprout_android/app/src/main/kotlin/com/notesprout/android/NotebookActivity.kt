@@ -3917,29 +3917,34 @@ class NotebookActivity : AppCompatActivity() {
 
     private fun startPdfExport(db: SoilDatabase) {
         lifecycleScope.launch {
-            // 1. If encrypted: warn that the exported file is not encrypted (notebook passphrase
-            //    stays on the .soil — the PDF export is plaintext unless the user adds a password).
+            // 1. For encrypted notebooks only: offer PDF password protection first.
+            //    If the user declines a password, warn that the export will be unencrypted.
+            val exportPassword: String?
             if (encryptionInfo.encrypted) {
-                val confirmed = suspendCancellableCoroutine<Boolean> { cont ->
-                    val d = AlertDialog.Builder(this@NotebookActivity)
-                        .setTitle("Export encrypted notebook")
-                        .setMessage("This notebook is encrypted. The exported file will be unencrypted — anyone with access to the exported file will be able to read its contents.")
-                        .setPositiveButton("Export anyway") { _, _ -> if (cont.isActive) cont.resume(true) }
-                        .setNegativeButton("Cancel") { _, _ -> if (cont.isActive) cont.resume(false) }
-                        .setOnCancelListener { if (cont.isActive) cont.resume(false) }
-                        .create()
-                    d.show()
-                    d.window?.setElevation(0f)
-                    d.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
-                    cont.invokeOnCancellation { d.dismiss() }
+                val exportPwdChoice = com.notesprout.android.crypto.PassphrasePrompt.promptForPdfExportPassword(this@NotebookActivity)
+                    ?: return@launch  // user cancelled
+                if (exportPwdChoice.isEmpty()) {
+                    val confirmed = suspendCancellableCoroutine<Boolean> { cont ->
+                        val d = AlertDialog.Builder(this@NotebookActivity)
+                            .setTitle("Export encrypted notebook")
+                            .setMessage("This notebook is encrypted. The exported file will be unencrypted — anyone with access to the exported file will be able to read its contents.")
+                            .setPositiveButton("Export anyway") { _, _ -> if (cont.isActive) cont.resume(true) }
+                            .setNegativeButton("Cancel") { _, _ -> if (cont.isActive) cont.resume(false) }
+                            .setOnCancelListener { if (cont.isActive) cont.resume(false) }
+                            .create()
+                        d.show()
+                        d.window?.setElevation(0f)
+                        d.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+                        cont.invokeOnCancellation { d.dismiss() }
+                    }
+                    if (!confirmed) return@launch
+                    exportPassword = null
+                } else {
+                    exportPassword = exportPwdChoice
                 }
-                if (!confirmed) return@launch
+            } else {
+                exportPassword = null
             }
-
-            // 2. Offer password protection for the exported PDF.
-            val exportPwdChoice = com.notesprout.android.crypto.PassphrasePrompt.promptForPdfExportPassword(this@NotebookActivity)
-                ?: return@launch  // user cancelled
-            val exportPassword = exportPwdChoice.ifEmpty { null }
 
             // 3. Flush current page strokes so the export reflects the latest content.
             withContext(Dispatchers.IO) { saveStrokes(db) }

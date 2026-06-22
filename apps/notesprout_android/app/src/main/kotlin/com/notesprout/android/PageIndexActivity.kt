@@ -1390,31 +1390,29 @@ class PageIndexActivity : AppCompatActivity() {
      */
     private fun executeExport() {
         if (!inActionMode()) return
-        lifecycleScope.launch {
-            if (KeySession.getFor(notebookId) != null) {
-                val confirmed = suspendCancellableCoroutine<Boolean> { cont ->
-                    val d = AlertDialog.Builder(this@PageIndexActivity)
-                        .setTitle("Export encrypted notebook")
-                        .setMessage("This notebook is encrypted. The exported file will be unencrypted — anyone with access to the exported file will be able to read its contents.")
-                        .setPositiveButton("Export anyway") { _, _ -> if (cont.isActive) cont.resume(true) }
-                        .setNegativeButton("Cancel") { _, _ -> if (cont.isActive) cont.resume(false) }
-                        .setOnCancelListener { if (cont.isActive) cont.resume(false) }
-                        .create()
-                    d.show()
-                    d.window?.setElevation(0f)
-                    d.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
-                    cont.invokeOnCancellation { d.dismiss() }
-                }
-                if (!confirmed) return@launch
-            }
-            doExecuteExport()
-        }
-    }
-
-    private fun doExecuteExport() {
         if (selectedCount() == 1) {
-            executeSingleExport()
+            // Single-page export is always PNG — warn upfront if encrypted.
+            lifecycleScope.launch {
+                if (KeySession.getFor(notebookId) != null) {
+                    val confirmed = suspendCancellableCoroutine<Boolean> { cont ->
+                        val d = AlertDialog.Builder(this@PageIndexActivity)
+                            .setTitle("Export encrypted notebook")
+                            .setMessage("This notebook is encrypted. The exported file will be unencrypted — anyone with access to the exported file will be able to read its contents.")
+                            .setPositiveButton("Export anyway") { _, _ -> if (cont.isActive) cont.resume(true) }
+                            .setNegativeButton("Cancel") { _, _ -> if (cont.isActive) cont.resume(false) }
+                            .setOnCancelListener { if (cont.isActive) cont.resume(false) }
+                            .create()
+                        d.show()
+                        d.window?.setElevation(0f)
+                        d.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+                        cont.invokeOnCancellation { d.dismiss() }
+                    }
+                    if (!confirmed) return@launch
+                }
+                executeSingleExport()
+            }
         } else {
+            // Multi-page: each format path handles its own warning.
             showMultiExportDialog()
         }
     }
@@ -1477,7 +1475,28 @@ class PageIndexActivity : AppCompatActivity() {
         val d = AlertDialog.Builder(this)
             .setTitle("Export $n pages")
             .setPositiveButton("PDF") { _, _ -> exportMultiAsPdf() }
-            .setNeutralButton("PNG") { _, _ -> showPngSubchoiceDialog() }
+            .setNeutralButton("PNG") { _, _ ->
+                // PNG is always unencrypted — warn upfront if the notebook is encrypted.
+                lifecycleScope.launch {
+                    if (KeySession.getFor(notebookId) != null) {
+                        val confirmed = suspendCancellableCoroutine<Boolean> { cont ->
+                            val dlg = AlertDialog.Builder(this@PageIndexActivity)
+                                .setTitle("Export encrypted notebook")
+                                .setMessage("This notebook is encrypted. The exported file will be unencrypted — anyone with access to the exported file will be able to read its contents.")
+                                .setPositiveButton("Export anyway") { _, _ -> if (cont.isActive) cont.resume(true) }
+                                .setNegativeButton("Cancel") { _, _ -> if (cont.isActive) cont.resume(false) }
+                                .setOnCancelListener { if (cont.isActive) cont.resume(false) }
+                                .create()
+                            dlg.show()
+                            dlg.window?.setElevation(0f)
+                            dlg.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+                            cont.invokeOnCancellation { dlg.dismiss() }
+                        }
+                        if (!confirmed) return@launch
+                    }
+                    showPngSubchoiceDialog()
+                }
+            }
             .setNegativeButton("Cancel", null)
             .create()
         d.show()
@@ -1522,10 +1541,35 @@ class PageIndexActivity : AppCompatActivity() {
         val pageIds = entries.map { it.id }
 
         lifecycleScope.launch {
-            // Offer password protection before the progress dialog.
-            val exportPwdChoice = com.notesprout.android.crypto.PassphrasePrompt.promptForPdfExportPassword(this@PageIndexActivity)
-                ?: return@launch  // user cancelled
-            val exportPassword = exportPwdChoice.ifEmpty { null }
+            // For encrypted notebooks only: offer PDF password protection first.
+            // If the user declines a password, warn that the export will be unencrypted.
+            val isEncrypted = KeySession.getFor(notebookId) != null
+            val exportPassword: String?
+            if (isEncrypted) {
+                val exportPwdChoice = com.notesprout.android.crypto.PassphrasePrompt.promptForPdfExportPassword(this@PageIndexActivity)
+                    ?: return@launch  // user cancelled
+                if (exportPwdChoice.isEmpty()) {
+                    val confirmed = suspendCancellableCoroutine<Boolean> { cont ->
+                        val d = AlertDialog.Builder(this@PageIndexActivity)
+                            .setTitle("Export encrypted notebook")
+                            .setMessage("This notebook is encrypted. The exported file will be unencrypted — anyone with access to the exported file will be able to read its contents.")
+                            .setPositiveButton("Export anyway") { _, _ -> if (cont.isActive) cont.resume(true) }
+                            .setNegativeButton("Cancel") { _, _ -> if (cont.isActive) cont.resume(false) }
+                            .setOnCancelListener { if (cont.isActive) cont.resume(false) }
+                            .create()
+                        d.show()
+                        d.window?.setElevation(0f)
+                        d.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+                        cont.invokeOnCancellation { d.dismiss() }
+                    }
+                    if (!confirmed) return@launch
+                    exportPassword = null
+                } else {
+                    exportPassword = exportPwdChoice
+                }
+            } else {
+                exportPassword = null
+            }
 
             val tvMessage = android.widget.TextView(this@PageIndexActivity).apply {
                 text = "Exporting…"
