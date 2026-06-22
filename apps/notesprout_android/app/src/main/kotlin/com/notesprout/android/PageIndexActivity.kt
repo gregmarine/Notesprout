@@ -91,6 +91,13 @@ class PageIndexActivity : AppCompatActivity() {
         const val EXTRA_XNB_REMOVED_PAGE_IDS   = "xnb_removed_page_ids"
         /** The shared soft-delete timestamp for [EXTRA_XNB_REMOVED_PAGE_IDS]. */
         const val EXTRA_XNB_REMOVED_DELETED_AT = "xnb_removed_deleted_at"
+        /**
+         * When the user chooses "Open ‹DestName›" after a cross-notebook copy/move, set to the
+         * destination notebook id so [NotebookActivity] can seal the source and open the dest.
+         */
+        const val EXTRA_OPEN_NOTEBOOK_ID   = "open_notebook_id"
+        /** Display name matching [EXTRA_OPEN_NOTEBOOK_ID]. */
+        const val EXTRA_OPEN_NOTEBOOK_NAME = "open_notebook_name"
     }
 
     // ── Grid specification ────────────────────────────────────────────────────
@@ -207,6 +214,9 @@ class PageIndexActivity : AppCompatActivity() {
     /** Page IDs removed from source by a cross-notebook move — returned for source-side undo. */
     private var xnbRemovedPageIds: List<String> = emptyList()
     private var xnbRemovedDeletedAt: Long = 0L
+    /** When the user chooses "Open ‹DestName›", set so finishWithResult includes the dest extras. */
+    private var pendingOpenNotebookId: String? = null
+    private var pendingOpenNotebookName: String? = null
 
     /** Global-index repository (templates live in `notesprout.db`, not the `.soil`). */
     private val indexRepo: IndexRepository by lazy { IndexRepository(NotesproutIndex.dao()) }
@@ -1182,7 +1192,6 @@ class PageIndexActivity : AppCompatActivity() {
                     android.widget.Toast.makeText(this@PageIndexActivity, "Couldn't copy pages", android.widget.Toast.LENGTH_SHORT).show()
                     return@launch
                 }
-                android.widget.Toast.makeText(this@PageIndexActivity, "Copied $n $nLabel to ${cross.destName}", android.widget.Toast.LENGTH_SHORT).show()
             } else {
                 val result = withContext(Dispatchers.IO) {
                     com.notesprout.android.data.movePagesAcrossNotebooks(
@@ -1196,7 +1205,6 @@ class PageIndexActivity : AppCompatActivity() {
                 }
                 xnbRemovedPageIds  = result.sourceDeletedPageIds
                 xnbRemovedDeletedAt = result.sourceDeletedAt
-                android.widget.Toast.makeText(this@PageIndexActivity, "Moved $n $nLabel to ${cross.destName}", android.widget.Toast.LENGTH_SHORT).show()
             }
 
             // Restore source page view (reload for move since pages were removed; reuse snapshot for copy).
@@ -1214,6 +1222,26 @@ class PageIndexActivity : AppCompatActivity() {
                 if (newIdx >= 0) currentPageIndex = newIdx
             }
             exitActionMode()
+
+            // Navigation prompt — "Stay here" or "Open ‹DestName›".
+            val verb = if (cross.isCopy) "copied" else "moved"
+            val openChosen = suspendCancellableCoroutine<Boolean> { cont ->
+                val d = androidx.appcompat.app.AlertDialog.Builder(this@PageIndexActivity)
+                    .setMessage("$n $nLabel $verb to ${cross.destName}.")
+                    .setPositiveButton("Stay here") { _, _ -> if (cont.isActive) cont.resume(false) }
+                    .setNegativeButton("Open ${cross.destName}") { _, _ -> if (cont.isActive) cont.resume(true) }
+                    .setOnCancelListener { if (cont.isActive) cont.resume(false) }
+                    .create()
+                d.show()
+                d.window?.setElevation(0f)
+                d.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+                cont.invokeOnCancellation { d.dismiss() }
+            }
+            if (openChosen) {
+                pendingOpenNotebookId   = cross.destNotebookId
+                pendingOpenNotebookName = cross.destName
+                finishWithResult(null)
+            }
         }
     }
 
@@ -1891,6 +1919,12 @@ class PageIndexActivity : AppCompatActivity() {
         if (xnbRemovedPageIds.isNotEmpty()) {
             result.putExtra(EXTRA_XNB_REMOVED_PAGE_IDS,   xnbRemovedPageIds.joinToString(","))
             result.putExtra(EXTRA_XNB_REMOVED_DELETED_AT, xnbRemovedDeletedAt.toString())
+        }
+        val openId = pendingOpenNotebookId
+        val openName = pendingOpenNotebookName
+        if (openId != null && openName != null) {
+            result.putExtra(EXTRA_OPEN_NOTEBOOK_ID,   openId)
+            result.putExtra(EXTRA_OPEN_NOTEBOOK_NAME, openName)
         }
         setResult(RESULT_OK, result)
         finish()

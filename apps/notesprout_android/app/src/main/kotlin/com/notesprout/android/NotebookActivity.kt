@@ -555,6 +555,28 @@ class NotebookActivity : AppCompatActivity() {
                 !xnbRemovedPageIds.isNullOrEmpty()
             if (anySessionActions) updateUndoRedoButtons()
 
+            // If the user chose "Open ‹DestName›" after a cross-notebook op, seal this notebook
+            // and launch the destination (mirrors switchToRecentNotebook / openLinkedNotebook).
+            val openNotebookId   = data?.getStringExtra(PageIndexActivity.EXTRA_OPEN_NOTEBOOK_ID)
+            val openNotebookName = data?.getStringExtra(PageIndexActivity.EXTRA_OPEN_NOTEBOOK_NAME)
+            if (!openNotebookId.isNullOrEmpty() && !openNotebookName.isNullOrEmpty()) {
+                lifecycleScope.launch {
+                    val parentId = withContext(Dispatchers.IO) {
+                        indexRepo.getNotebook(openNotebookId)?.parentId
+                    } ?: ""
+                    AppStateManager.save(this@NotebookActivity, AppViewState(parentId, false))
+                    closeNotebook()
+                    startActivity(
+                        Intent(this@NotebookActivity, NotebookActivity::class.java).apply {
+                            putExtra(EXTRA_NOTEBOOK_ID,   openNotebookId)
+                            putExtra(EXTRA_NOTEBOOK_NAME, openNotebookName)
+                        }
+                    )
+                    finish()
+                }
+                return@registerForActivityResult
+            }
+
             val selected = data?.getIntExtra(PageIndexActivity.EXTRA_SELECTED_PAGE_INDEX, -1) ?: -1
             when {
                 // User tapped a card — navigate to that page (forces full reload).

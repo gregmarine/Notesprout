@@ -1,6 +1,6 @@
 # Global Clipboard + Cross-Notebook Page Transfer — Implementation Plan
 
-> Status: **S3 done** (2026-06-21). Two related features, sequenced into 5 sessions, each
+> Status: **S4 done** (2026-06-21). Two related features, sequenced into 5 sessions, each
 > shippable and encryption-safe on its own. Follows the same session conventions as the encryption /
 > full-notebook export / import plans.
 
