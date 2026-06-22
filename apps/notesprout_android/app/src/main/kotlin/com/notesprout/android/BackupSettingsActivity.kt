@@ -6,10 +6,14 @@ import android.os.Bundle
 import android.view.inputmethod.InputMethodManager
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.isVisible
 import androidx.lifecycle.lifecycleScope
+import com.notesprout.android.R
 import com.notesprout.android.data.backup.BackupConfig
+import com.notesprout.android.data.backup.BackupEngine
+import com.notesprout.android.data.backup.BackupKind
 import com.notesprout.android.data.backup.DeviceIdentity
 import com.notesprout.android.data.backup.DriveTokenStore
 import com.notesprout.android.data.index.IndexRepository
@@ -20,11 +24,13 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.text.DateFormat
 import java.util.Date
+import java.util.concurrent.atomic.AtomicBoolean
 
 class BackupSettingsActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityBackupSettingsBinding
     private val repository: IndexRepository by lazy { IndexRepository(NotesproutIndex.dao()) }
+    private val isBackupRunning = AtomicBoolean(false)
 
     private val pickLocalTreeLauncher = registerForActivityResult(
         ActivityResultContracts.OpenDocumentTree()
@@ -60,8 +66,7 @@ class BackupSettingsActivity : AppCompatActivity() {
             persistToggle(isLocal = false, enabled = checked)
         }
 
-        // TODO (Session 3): wire btnBackUpNow to the backup engine
-        binding.btnBackUpNow.isEnabled = false
+        binding.btnBackUpNow.setOnClickListener { startBackup() }
     }
 
     override fun onResume() {
@@ -115,6 +120,11 @@ class BackupSettingsActivity : AppCompatActivity() {
         } else {
             "Last backup: never"
         }
+
+        // Enable "Back Up Now" when at least one destination is ready
+        val localReady = config.localEnabled && config.localTreeUri != null
+        val driveReady = config.driveEnabled && config.driveAccountEmail != null
+        binding.btnBackUpNow.isEnabled = localReady || driveReady
     }
 
     // ── Local ─────────────────────────────────────────────────────────────────
@@ -173,6 +183,81 @@ class BackupSettingsActivity : AppCompatActivity() {
             val updated = if (isLocal) config.copy(localEnabled = enabled)
                           else config.copy(driveEnabled = enabled)
             withContext(Dispatchers.IO) { repository.saveBackupConfig(updated) }
+        }
+    }
+
+    // ── Backup run ────────────────────────────────────────────────────────────
+
+    private fun startBackup() {
+        if (!isBackupRunning.compareAndSet(false, true)) return
+
+        val tvProgress = android.widget.TextView(this).apply {
+            text = "Preparing…"
+            setPadding(64, 48, 64, 48)
+            setTextColor(android.graphics.Color.BLACK)
+            textSize = 16f
+        }
+        val progressDialog = AlertDialog.Builder(this)
+            .setTitle("Backing Up")
+            .setView(tvProgress)
+            .setCancelable(false)
+            .create()
+            .also { d ->
+                d.show()
+                d.window?.setElevation(0f)
+                d.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+            }
+
+        lifecycleScope.launch {
+            val config = withContext(Dispatchers.IO) {
+                repository.ensureBackupConfig(DeviceIdentity.defaultDeviceFolderName())
+            }
+            val result = try {
+                BackupEngine.run(
+                    context = this@BackupSettingsActivity,
+                    repo = repository,
+                    config = config,
+                    onProgress = { current, total, label ->
+                        runOnUiThread {
+                            tvProgress.text = "Backing up $current / $total\n$label"
+                        }
+                    }
+                )
+            } finally {
+                isBackupRunning.set(false)
+                progressDialog.dismiss()
+            }
+
+            // Build summary message
+            val sb = StringBuilder()
+            result.perDestination.forEach { (kind, dest) ->
+                val label = if (kind == BackupKind.LOCAL) "Local" else "Drive"
+                if (dest.errors.isNotEmpty() && dest.attempted == 0) {
+                    // Hard error — destination never became active
+                    sb.appendLine("$label: ${dest.errors.first()}")
+                } else {
+                    sb.append("$label: ${dest.succeeded} backed up")
+                    if (dest.failed > 0) sb.append(", ${dest.failed} failed")
+                    if (dest.skipped > 0) sb.append(", ${dest.skipped} skipped")
+                    if (dest.indexCopied) sb.append(", index copied") else sb.append(", index FAILED")
+                    sb.appendLine()
+                    dest.errors.forEach { sb.appendLine("  • $it") }
+                }
+            }
+            if (result.perDestination.isEmpty()) sb.appendLine("No destinations enabled.")
+
+            AlertDialog.Builder(this@BackupSettingsActivity)
+                .setTitle("Backup Complete")
+                .setMessage(sb.toString().trim())
+                .setPositiveButton("OK", null)
+                .create()
+                .also { d ->
+                    d.show()
+                    d.window?.setElevation(0f)
+                    d.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+                }
+
+            refreshUi()
         }
     }
 

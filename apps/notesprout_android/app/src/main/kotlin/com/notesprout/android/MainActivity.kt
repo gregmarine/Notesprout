@@ -1645,6 +1645,7 @@ class MainActivity : AppCompatActivity() {
         lifecycleScope.launch {
             val pinned = withContext(Dispatchers.IO) { repository.isNotebookPinned(entity.id) }
             val encInfo = withContext(Dispatchers.IO) { repository.getEncryptionInfo(entity.id) }
+            val excluded = try { Json.decodeFromString<NotebookObject>(entity.data).excludeFromBackup } catch (_: Exception) { false }
             val pinIcon  = if (pinned) R.drawable.ic_pinned_off else R.drawable.ic_pinned
             val pinLabel = if (pinned) "Unpin Notebook" else "Pin Notebook"
             val menu = ActionSheetDialog(this@MainActivity)
@@ -1671,6 +1672,14 @@ class MainActivity : AppCompatActivity() {
                 menu.addAction(R.drawable.ic_lock_off, "Decrypt Notebook") { showDecryptNotebookDialog(entity, encInfo) }
                 menu.addAction(R.drawable.ic_edit,     "Change Passphrase") { showChangePassphraseDialog(entity, encInfo) }
                 menu.addAction(R.drawable.ic_lock,     "Change Encryption Scope") { showChangeScopeDialog(entity, encInfo) }
+            }
+            val backupLabel = if (excluded) "Include in Backup" else "Exclude from Backup"
+            menu.addAction(R.drawable.ic_backup, backupLabel) {
+                lifecycleScope.launch {
+                    withContext(Dispatchers.IO) {
+                        repository.setNotebookExcludedFromBackup(entity.id, !excluded)
+                    }
+                }
             }
             menu.addAction(R.drawable.ic_delete_notebook, "Delete Notebook") { showDeleteNotebookConfirmation(entity) }
             menu.show()

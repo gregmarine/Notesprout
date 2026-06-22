@@ -715,7 +715,7 @@ The Android OAuth client from S2.1 is no longer used. Create a new **Desktop app
 destination, stamp per-destination timestamps after each success, then copy `notesprout.db` last.
 Per-notebook **Exclude from backup** toggle added to the MainActivity context menu.
 
-**Status:** ☐ Not started
+**Status:** ☑ Complete — `SafBackupWriter`, `BackupResult`, `BackupEngine` created; `BackupSettingsActivity` wired (`btnBackUpNow` enabled by destination readiness, progress dialog, summary AlertDialog, `isBackupRunning` guard); "Exclude/Include from Backup" added to notebook context menu in `MainActivity`. One new dependency added: `androidx.documentfile:documentfile:1.0.1` (required for SAF tree navigation; not in transitive appcompat deps in `appcompat:1.7.0`).
 
 ### Files to create
 1. `data/backup/SafBackupWriter.kt` — `object SafBackupWriter`, SAF/`DocumentFile` helpers (all on
@@ -881,7 +881,7 @@ Track ☑ per item. Record the actual progress-dialog approach chosen.
 | 2 | Backup Settings screen & destination config | ☑ Complete |
 | 2.1 | Google Drive via REST API + GIS OAuth (replaces SAF for DRIVE) | ☑ Complete |
 | 2.2 | WebView OAuth replaces GIS (BOOX SERVICE_INVALID fix) | ☑ Complete |
-| 3 | Backup engine + per-notebook exclude | ☐ Not started |
+| 3 | Backup engine + per-notebook exclude | ☑ Complete |
 | 4 | Docs, edge cases & polish | ☐ Not started |
 
 **Branch:** `seed` · **Test device:** G102 (`b7a46e13`) · **Commit after each session only once the

@@ -13,6 +13,10 @@ object DriveBackupWriter {
         return client.ensureFolder(deviceFolderName, root)
     }
 
+    /** Resolves (find-or-create) a named child folder inside an existing Drive folder. */
+    fun resolveChildFolderId(client: DriveApiClient, parentFolderId: String, name: String): String? =
+        client.ensureFolder(name, parentFolderId)
+
     /** Replace-in-place one file into the device folder. */
     fun replaceFile(
         client: DriveApiClient,
