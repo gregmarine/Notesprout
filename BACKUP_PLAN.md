@@ -1,9 +1,11 @@
 # Notesprout — Backup (Phase 1) Implementation Plan
 
 > **Scope:** Back up `.soil` notebooks + the global index (`notesprout.db`) to a local device
-> folder and/or a Google Drive folder, via the Storage Access Framework (SAF). **Backup only —
-> restore is a separate future effort.** This document is the source of truth for the work; keep the
-> per-session **Status** blocks current as you go.
+> folder (via the Storage Access Framework, SAF) and/or to Google Drive (via the **Google Drive REST
+> API v3 + Google Identity Services OAuth** — see Session 2.1; SAF is *not* used for Drive because the
+> Drive `DocumentsProvider` is unavailable in the SAF picker on BOOX). **Backup only — restore is a
+> separate future effort.** This document is the source of truth for the work; keep the per-session
+> **Status** blocks current as you go.
 
 ---
 
@@ -11,7 +13,7 @@
 
 | # | Decision | Rationale |
 |---|---|---|
-| D1 | **SAF for both destinations.** Local and Drive both use `ACTION_OPEN_DOCUMENT_TREE` + `takePersistableUriPermission` + `DocumentFile`. No new Gradle dependencies. Google Drive folders are pickable when the Drive app's DocumentsProvider is present. | Honors the "no new deps" rule; unified code path. |
+| D1 | ~~**SAF for both destinations.**~~ **SUPERSEDED by D12 for Drive.** LOCAL still uses SAF (`ACTION_OPEN_DOCUMENT_TREE` + `takePersistableUriPermission` + `DocumentFile`). Drive does **not** — its `DocumentsProvider` is not registered in the SAF picker on BOOX (confirmed G102), so Drive now uses the Google Drive REST API (Session 2.1). | SAF unified path was the original goal; reality on BOOX forced a native Drive API path for the DRIVE slot. |
 | D2 | **Two fixed destination slots: `LOCAL` and `DRIVE`** — not an arbitrary list. Each is independently configurable + enable-toggleable. A backup run writes to **every enabled** destination. | Matches the spec exactly (local→root, Drive→device subfolder). |
 | D3 | **Local layout:** files written to the **root** of the chosen tree. **Drive layout:** files written to a **per-device subfolder** inside the chosen tree. | Multiple devices share one Drive folder without collision. |
 | D4 | **Device folder name = `Build.MODEL` + short stable UUID, user-editable** (e.g. `BOOX-Go-103-a1b2c3d4`). **Hardware serial is NOT used** — `Build.getSerial()` requires privileged `READ_PHONE_STATE` and returns `"UNKNOWN"` for a normal sideloaded app on Android 10+. | Unique, human-readable, no permissions. |
@@ -22,6 +24,12 @@
 | D9 | **`notesprout.db` is copied LAST**, after every notebook's status has been written, so the backed-up index reflects the completed run. | Spec. |
 | D10 | **Encrypted `.soil` files are copied as-is (ciphertext).** No passphrase prompt — same as full-notebook export. | SQLCipher encrypts the whole file; backup is a pure byte copy. |
 | D11 | **All backup state lives in `notesprout.db`.** Per-notebook timestamps live in `NotebookObject` JSON (no migration). Global config lives in a singleton `BACKUP_CONFIG` row (mirrors `CLIPBOARD`). | Spec: "tracked in notesprout.db"; consistent with existing patterns. |
+| D12 | **The DRIVE slot uses the Google Drive REST API v3 + Google Identity Services (GIS) authorization** — *not* SAF. The S2 SAF "Choose folder…" UI for Drive is replaced (Session 2.1). LOCAL remains SAF. `BackupKind.LOCAL` → `SafBackupWriter`; `BackupKind.DRIVE` → Drive REST path. | SAF Drive picker is missing on BOOX; the REST API is the only reliable Drive path. |
+| D13 | **Exactly one new Gradle dependency: `com.google.android.gms:play-services-auth` (21.x).** Explicitly authorized for this work. **No Google API client libraries** (`google-api-services-drive`, `google-http-client`, GSON, Guava). Drive REST is hand-rolled with `HttpURLConnection` (built-in) + `kotlinx.serialization` for JSON. | Honors the project's minimalism + "kotlinx.serialization only / no org.json" rule; the official client libs are heavy and pull reflection-based JSON. |
+| D14 | **OAuth scope = `https://www.googleapis.com/auth/drive.file`** (per-file: the app sees/manages **only** files it creates). The app creates its own visible **"Notesprout Backups"** folder in the user's Drive; **there is no Drive folder picker.** | `drive.file` is *sensitive* but **not** *restricted* → no costly annual third-party security assessment (full `drive` scope would require it). Sufficient for backup since the app owns everything it writes. |
+| D15 | **No backend, no offline access, no refresh tokens.** Each backup run fetches a fresh **access token** via a silent `AuthorizationClient.authorize()` (returns without UI once consent is granted). Tokens live in memory only — **never persisted, never logged, never in Intent extras** (same hygiene as encryption passphrases). | Manual, foreground-only backup. A 1-hour access token covers any run; silent re-auth is the "refresh" mechanism. No server to hold a refresh token (the secure place for one). |
+| D16 | **Drive replace-in-place = search-then-update.** Drive permits multiple files with the same name in a folder, so each run **finds** the existing `<uuid>.soil` / `notesprout.db` by name within the device folder and **`PATCH`es its content** (stable file ID); only creates when absent. Folders are resolved find-or-create **every run** (no cached folder IDs) to avoid staleness. | Blind `create` would accumulate duplicate-named backups. Re-resolving folders each run is one cheap list call and eliminates a class of stale-ID bugs. |
+| D17 | **Drive is Google-Play-Services-gated.** If GMS is unavailable (`GoogleApiAvailability != SUCCESS`), the Drive section is disabled with an explanatory message; LOCAL is unaffected. | GIS authorization requires GMS. Some BOOX builds lack it; those users still get LOCAL/SAF backup. |
 
 ### Known Phase-1 limitations (document, don't fix)
 - Renaming the device folder orphans the old Drive subfolder (no migration of prior backups).
@@ -30,10 +38,16 @@
   not flushed mid-edit. Acceptable for v1; note in docs.
 - Deleting a notebook does not remove its backup file. Restore/GC is future work.
 - SAF writes to Drive can be slow; the progress UI must remain responsive (work on `Dispatchers.IO`).
-- **Google Drive does not appear in the SAF folder picker on BOOX devices** (confirmed on G102). The
-  Drive app is present but its `DocumentsProvider` is not registered by the Play Services layer on
-  BOOX/ONYX. Users can still pick a local or SD card folder for the "Drive" slot as a workaround.
-  Document in `docs/backup.md` (S4); do not change the code.
+- **Google Drive does not appear in the SAF folder picker on BOOX devices** (confirmed on G102) — the
+  reason the DRIVE slot moved to the Drive REST API (Session 2.1, D12). The LOCAL/SAF slot can still
+  target an SD card or any other SAF tree.
+- **Drive backup goes to an app-created "Notesprout Backups" folder, not a folder the user picks**
+  (D14, `drive.file` scope). Choosing an arbitrary pre-existing Drive folder would need the full
+  `drive` scope + Google's restricted-scope security assessment — out of scope.
+- **Drive requires Google Play Services** (D17). BOOX builds without GMS get LOCAL backup only.
+- **Drive backup requires the user to have set up an OAuth client in Google Cloud Console** keyed to
+  the app's package name + signing-cert SHA-1 (Session 2.1 Prerequisite). This is a one-time manual
+  setup, documented in `docs/backup.md` (S4).
 
 ---
 
@@ -51,13 +65,17 @@ notesprout.db (global index)
  │           deviceFolderName: String    (Model + short id, user-editable)
  │           localTreeUri: String?       (persisted SAF tree URI)
  │           localEnabled: Boolean = false
- │           driveTreeUri: String?       (persisted SAF tree URI)
- │           driveEnabled: Boolean = false
+ │           driveTreeUri: String?       (LEGACY — unused after S2.1/D12; kept for back-compat)
+ │           driveEnabled: Boolean = false  (now = "Drive API backup enabled")
+ │           driveAccountEmail: String?  (display only; non-secret; added S2.1)
  │           lastRunAt: Long?            (device-local bookkeeping)
  │
-Destinations (DocumentFile trees):
-   LOCAL:  <localTreeUri>/<uuid>.soil ,  <localTreeUri>/notesprout.db
-   DRIVE:  <driveTreeUri>/<deviceFolderName>/<uuid>.soil ,  .../notesprout.db
+LOCAL destination (SAF / DocumentFile tree):
+   <localTreeUri>/<uuid>.soil ,  <localTreeUri>/notesprout.db
+
+DRIVE destination (Google Drive REST API v3, resolved find-or-create each run):
+   My Drive / "Notesprout Backups" / <deviceFolderName> / <uuid>.soil
+                                                         / notesprout.db
 ```
 
 New package: `com.notesprout.android.data.backup` (the existing empty `sync/` dir is left alone).
@@ -226,6 +244,420 @@ Update ☑ per item; note any styling deviations from the encryption screen.
 
 ---
 
+## Session 2.1 — Google Drive via REST API + OAuth (replaces SAF for the DRIVE slot)
+
+> **Implementer profile:** intended for Sonnet / medium effort. Follow this section literally; every
+> class, endpoint, header, and config field is specified. Do **not** add the Google API client
+> libraries (D13) — hand-roll the REST calls. Do **not** persist or log access tokens (D15).
+
+**Goal:** The Drive section of Backup Settings stops using SAF and instead **connects a Google
+account** via Google Identity Services (GIS), then reads/writes through the **Google Drive REST API
+v3**. After this session the user can: tap **Connect Google Drive**, grant `drive.file` consent once,
+see "Connected as <email>", toggle Drive on, and — wired in Session 3 — back up into
+`My Drive / Notesprout Backups / <deviceFolderName> /`. **"Back Up Now" stays disabled here**; this
+session delivers the auth + REST plumbing and the reworked Drive UI, not the run loop (that is S3,
+which dispatches `BackupKind.DRIVE` to this code).
+
+**Status:** ☐ Not started
+
+---
+
+### Prerequisite — Google Cloud Console setup (one-time, performed by the user/Gardener)
+
+This is **manual** and must be done before the OAuth flow will succeed. Document it verbatim in
+`docs/backup.md` (S4). The implementer cannot do this from code; surface it in the plan and in the
+"Connect" failure messaging.
+
+1. **Create / pick a Google Cloud project** at <https://console.cloud.google.com>.
+2. **Enable the Google Drive API**: *APIs & Services → Library → Google Drive API → Enable*.
+3. **Configure the OAuth consent screen** (*APIs & Services → OAuth consent screen*):
+   - User type **External**.
+   - App name (e.g. "Notesprout"), user support email, developer contact email.
+   - **Add scope** `.../auth/drive.file` (listed as *sensitive*, **not** *restricted* → no third-party
+     security assessment required).
+   - **Publishing status:** for personal multi-device use, leave it in **Testing** and add the
+     Gardener's own Google account under **Test users**. (Testing mode caps refresh tokens at 7 days —
+     irrelevant here because we fetch a fresh **access token** each run via silent `authorize()`, D15.
+     For a public release, *Publish app* → standard verification for the sensitive scope.)
+4. **Create OAuth 2.0 Client IDs of type _Android_** (*APIs & Services → Credentials → Create
+   credentials → OAuth client ID → Android*). The Android client type matches the caller by
+   **package name + signing-cert SHA-1**; no client-ID string is embedded in the app (we use the
+   access-token-only path — no `requestOfflineAccess`, so no Web client ID is needed). Create **two**
+   clients (the app ships two package names, both currently signed with the debug keystore per
+   CLAUDE.md):
+   | Package name | Build |
+   |---|---|
+   | `com.notesprout.android.dev` | debug (default dev install) |
+   | `com.notesprout.android` | release |
+   - **SHA-1 of the (debug) signing key** — both packages use `~/.android/debug.keystore`:
+     ```sh
+     keytool -list -v -keystore ~/.android/debug.keystore \
+       -alias androiddebugkey -storepass android -keypass android
+     ```
+     Copy the `SHA1:` value into **both** Android OAuth clients. (When a real release keystore is
+     adopted later, add a third client with that key's SHA-1 + `com.notesprout.android`.)
+5. No `google-services.json` is required for this flow (Android OAuth client + access-token path).
+
+> If consent fails with `ApiException` status `10` (DEVELOPER_ERROR), the SHA-1/package pair is not
+> registered correctly — the single most common setup mistake. Surface a hint to that effect.
+
+---
+
+### Config & manifest changes
+
+1. `AndroidManifest.xml` — add network permissions **above** `<application>` (none are declared
+   today; the REST calls need INTERNET):
+   ```xml
+   <uses-permission android:name="android.permission.INTERNET" />
+   <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+   ```
+2. `app/build.gradle.kts` — add the **one** authorized dependency (D13), grouped with a comment in the
+   spirit of the existing dependency comments:
+   ```kotlin
+   // Google Identity Services — OAuth authorization (drive.file access token) for Drive backup.
+   // The ONLY Google dependency: Drive REST v3 is hand-rolled (HttpURLConnection + kotlinx.serialization),
+   // no google-api-services-drive / GSON / Guava. See BACKUP_PLAN D13.
+   implementation("com.google.android.gms:play-services-auth:21.6.0")
+   ```
+   (`21.6.0` is current as of this writing; use the latest stable `21.x` resolvable from `google()`. `play-services-auth` provides
+   `com.google.android.gms.auth.api.identity.*` and `com.google.android.gms.common.api.Scope`. It is
+   compatible with `minSdk 29` / `compileSdk 35`. Build arm64-only is unaffected — this is a Java/AAR
+   dependency.)
+3. `data/backup/BackupConfig.kt` — add **one** field (keep `driveTreeUri` for back-compat, now unused):
+   ```kotlin
+   val driveAccountEmail: String? = null,   // display only; non-secret. null = not connected.
+   ```
+   Place it after `driveEnabled`. No `@EncodeDefault` needed (nullable default decodes fine; existing
+   rows omit it → `null`). Update `BackupConfigTest` round-trip to cover the new field.
+
+> **`driveEnabled` semantics change (D12):** it now means "Drive **API** backup enabled" and may only
+> be `true` when `driveAccountEmail != null`. The old `driveTreeUri` SAF value is ignored everywhere.
+
+---
+
+### Files to create
+
+#### 4. `data/backup/DriveAuth.kt` — GIS authorization (access token acquisition)
+
+`object DriveAuth`. Responsibilities: build the authorization request, gate on GMS, fetch access
+tokens (silent for the engine; interactive resolution is launched from the Activity, item 7).
+
+```kotlin
+package com.notesprout.android.data.backup
+
+import android.content.Context
+import com.google.android.gms.auth.api.identity.AuthorizationRequest
+import com.google.android.gms.auth.api.identity.AuthorizationResult
+import com.google.android.gms.auth.api.identity.Identity
+import com.google.android.gms.common.ConnectionResult
+import com.google.android.gms.common.GoogleApiAvailability
+import com.google.android.gms.common.api.Scope
+import com.google.android.gms.tasks.Tasks
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+
+object DriveAuth {
+    /** drive.file: per-file access to files THIS app creates/opens (D14). Sensitive, not restricted. */
+    const val SCOPE_DRIVE_FILE = "https://www.googleapis.com/auth/drive.file"
+
+    /** Result of a token attempt. Never log the token (D15). */
+    sealed interface TokenResult {
+        data class Token(val accessToken: String) : TokenResult
+        /** Consent needed → must be resolved interactively from an Activity (item 7). */
+        data class NeedsConsent(val pendingIntent: android.app.PendingIntent) : TokenResult
+        data class Error(val message: String) : TokenResult
+    }
+
+    fun isPlayServicesAvailable(context: Context): Boolean =
+        GoogleApiAvailability.getInstance()
+            .isGooglePlayServicesAvailable(context) == ConnectionResult.SUCCESS
+
+    fun request(): AuthorizationRequest =
+        AuthorizationRequest.builder()
+            .setRequestedScopes(listOf(Scope(SCOPE_DRIVE_FILE)))
+            .build()
+    // NOTE: no .requestOfflineAccess(...) — access-token-only path, no server (D15).
+
+    /**
+     * Blocking-on-IO token fetch for the backup engine (S3). If consent was already granted this
+     * returns a fresh token with NO UI; otherwise returns NeedsConsent so the caller can tell the
+     * user to (re)connect in Backup Settings. Engine MUST call this on Dispatchers.IO.
+     */
+    suspend fun getAccessTokenSilent(context: Context): TokenResult = withContext(Dispatchers.IO) {
+        try {
+            val result: AuthorizationResult = Tasks.await(
+                Identity.getAuthorizationClient(context).authorize(request())
+            )
+            if (result.hasResolution()) {
+                TokenResult.NeedsConsent(result.pendingIntent!!)
+            } else {
+                val token = result.accessToken
+                if (token.isNullOrBlank()) TokenResult.Error("No access token returned.")
+                else TokenResult.Token(token)
+            }
+        } catch (e: Exception) {
+            // Do NOT include any token material. ApiException status 10 == DEVELOPER_ERROR (SHA-1/pkg).
+            TokenResult.Error(e.message ?: "Authorization failed.")
+        }
+    }
+}
+```
+
+> `Tasks.await` is synchronous → only ever call `getAccessTokenSilent` from a coroutine on
+> `Dispatchers.IO` (the `withContext` above guarantees it). The **interactive** first-time consent is
+> launched from the Activity with `StartIntentSenderForResult` (item 7) — `Tasks.await` cannot drive a
+> UI resolution.
+
+#### 5. `data/backup/DriveApiClient.kt` — hand-rolled Drive REST v3 (D13/D16)
+
+A class constructed with a valid access token. All methods run on the caller's IO context, use
+`HttpURLConnection`, set `Authorization: Bearer <token>`, and parse responses with
+`kotlinx.serialization`. **Never log the token or full request/response bodies.**
+
+DTOs (top of file):
+```kotlin
+@Serializable private data class DriveFile(val id: String, val name: String? = null)
+@Serializable private data class DriveFileList(val files: List<DriveFile> = emptyList())
+@Serializable private data class CreateFolderBody(
+    val name: String, val mimeType: String, val parents: List<String>,
+)
+@Serializable private data class UploadMeta(
+    val name: String? = null, val parents: List<String>? = null,
+)
+@Serializable private data class DriveUser(val emailAddress: String? = null, val displayName: String? = null)
+@Serializable private data class DriveAbout(val user: DriveUser? = null)
+```
+
+Constants:
+```kotlin
+private const val FOLDER_MIME = "application/vnd.google-apps.folder"
+private const val FILES = "https://www.googleapis.com/drive/v3/files"
+private const val UPLOAD = "https://www.googleapis.com/upload/drive/v3/files"
+private const val ABOUT = "https://www.googleapis.com/drive/v3/about?fields=user(emailAddress,displayName)"
+const val ROOT_BACKUP_FOLDER = "Notesprout Backups"   // app-created, visible in My Drive (D14)
+```
+
+Public API (all `fun`/`suspend fun` as you prefer; engine calls them on IO):
+- `fun accountEmail(): String?` — `GET ABOUT`; return `user.emailAddress`. Used to display the
+  connected account (works under `drive.file`, no extra scope). Returns null on any failure.
+- `fun findChild(name: String, parentId: String, foldersOnly: Boolean): String?` —
+  `GET FILES?q=<q>&spaces=drive&fields=files(id,name)&pageSize=10`, where
+  `q = "name = '<esc(name)>' and '<parentId>' in parents and trashed = false"` and, if
+  `foldersOnly`, append `" and mimeType = '$FOLDER_MIME'"`. Return the first file's id or null.
+  **Escape** single quotes in `name`: `name.replace("\\", "\\\\").replace("'", "\\'")`. URL-encode
+  the whole `q`. (Under `drive.file` the listing only ever returns app-created items — exactly what we
+  want.)
+- `fun ensureFolder(name: String, parentId: String): String?` —
+  `findChild(name, parentId, foldersOnly = true) ?: createFolder(name, parentId)`.
+- `private fun createFolder(name: String, parentId: String): String?` — `POST FILES?fields=id` with
+  `Content-Type: application/json; charset=UTF-8`, body =
+  `Json.encodeToString(CreateFolderBody(name, FOLDER_MIME, listOf(parentId)))`. Parse `{ "id": ... }`,
+  return id.
+- `fun uploadOrReplace(name: String, parentId: String, source: File): Boolean` — the D16 core:
+  1. `val existing = findChild(name, parentId, foldersOnly = false)`.
+  2. **Resumable initiate:**
+     - new file → `POST  UPLOAD?uploadType=resumable&fields=id`
+     - existing → `PATCH UPLOAD/<existing>?uploadType=resumable&fields=id`
+     Headers: `Authorization`, `Content-Type: application/json; charset=UTF-8`,
+     `X-Upload-Content-Type: application/octet-stream`,
+     `X-Upload-Content-Length: <source.length()>`.
+     Body: for **new** → `UploadMeta(name = name, parents = listOf(parentId))`; for **existing** →
+     `UploadMeta()` (empty `{}`; do **not** resend `parents` on PATCH — that would try to move it).
+     On `HTTP 200`, read the **`Location`** response header = the **session URI**.
+  3. **Upload bytes:** `PUT <sessionUri>` with `Content-Length: <source.length()>`; stream
+     `source.inputStream()` → `connection.outputStream` with an 8 KB buffer (see `SafBackupWriter`'s
+     copy for the buffer idiom). Use `setFixedLengthStreamingMode(source.length())` to avoid buffering
+     the whole file in memory (large `.soil`). Accept `HTTP 200` or `201` as success.
+  4. Return `true` on success; on any non-2xx or exception, `Log.e` (no token, no body) and return
+     `false` — never throw into the engine's loop.
+  - **Single-PUT** upload is fine for v1 (BOOX notebooks are modest). Chunked upload with
+    `Content-Range` + `308 Resume Incomplete` is a documented future enhancement; note it in
+    `docs/backup.md`.
+- Small private helpers: `open(method, urlString): HttpURLConnection` (sets method, `Authorization`
+  header, `connectTimeout`/`readTimeout` ~30 s, `doInput`), and `readBody(conn): String`. Treat
+  `responseCode` 401/403 specially in `uploadOrReplace`/`findChild` by returning a failure the engine
+  can map to "reconnect Drive" (e.g. a `DriveAuthExpired` signal — simplest: return false and let the
+  engine's pre-flight token check (item 6) catch expiry first).
+
+> **Why resumable, not multipart:** resumable handles large files and flaky e-ink Wi-Fi without
+> re-sending, and gives a clean metadata-then-bytes split. `PATCH` on an existing file ID preserves
+> the file's identity and revision history in Drive (true replace-in-place, D6/D16).
+
+#### 6. `data/backup/DriveBackupWriter.kt` — engine-facing facade (mirrors `SafBackupWriter`)
+
+`object DriveBackupWriter`. Gives the S3 engine a LOCAL-parallel surface so it can branch by
+`BackupKind` cleanly. Holds **no** state; takes a `DriveApiClient` it is handed.
+
+```kotlin
+object DriveBackupWriter {
+    /** Resolve (find-or-create, every run — D16) My Drive/Notesprout Backups/<deviceFolderName>. */
+    fun resolveDeviceFolderId(client: DriveApiClient, deviceFolderName: String): String? {
+        val root = client.ensureFolder(DriveApiClient.ROOT_BACKUP_FOLDER, "root") ?: return null
+        return client.ensureFolder(deviceFolderName, root)
+    }
+
+    /** Replace-in-place one file into the device folder. fileName e.g. "<uuid>.soil" / "notesprout.db". */
+    fun replaceFile(client: DriveApiClient, deviceFolderId: String, fileName: String, source: File): Boolean =
+        client.uploadOrReplace(fileName, deviceFolderId, source)
+}
+```
+(`"root"` is the Drive alias for My Drive; the top folder is created there, user-visible per D14.)
+
+### Files to edit
+
+#### 7. `BackupSettingsActivity.kt` — rework the Drive section from SAF to GIS connect
+
+- **Remove** the Drive SAF launcher (`pickDriveTreeLauncher`) and its `onTreePicked(isLocal=false)`
+  branch. Keep the LOCAL launcher untouched.
+- **Add** a `StartIntentSenderForResult` launcher for consent resolution:
+  ```kotlin
+  private val driveConsentLauncher = registerForActivityResult(
+      ActivityResultContracts.StartIntentSenderForResult()
+  ) { result ->
+      // After the consent UI, re-run the silent fetch to confirm + grab email.
+      onDriveConsentReturned()
+  }
+  ```
+- **`btnConnectDrive` click** (renamed from `btnChooseDrive`, item 8):
+  ```kotlin
+  if (!DriveAuth.isPlayServicesAvailable(this)) {
+      toast("Google Drive backup requires Google Play Services, which isn't available on this device.")
+      return
+  }
+  lifecycleScope.launch {
+      when (val r = DriveAuth.getAccessTokenSilent(this@BackupSettingsActivity)) {
+          is DriveAuth.TokenResult.NeedsConsent ->
+              driveConsentLauncher.launch(
+                  IntentSenderRequest.Builder(r.pendingIntent.intentSender).build())
+          is DriveAuth.TokenResult.Token -> finishConnect(r.accessToken)   // already granted
+          is DriveAuth.TokenResult.Error -> toast("Couldn't connect Drive: ${r.message}")
+      }
+  }
+  ```
+- **`onDriveConsentReturned()` / `finishConnect(token)`** — fetch the account email and persist it:
+  ```kotlin
+  // onDriveConsentReturned: re-call getAccessTokenSilent (now Token), then finishConnect.
+  private fun finishConnect(token: String) = lifecycleScope.launch {
+      val email = withContext(Dispatchers.IO) { DriveApiClient(token).accountEmail() }
+      val config = withContext(Dispatchers.IO) {
+          repository.ensureBackupConfig(DeviceIdentity.defaultDeviceFolderName())
+      }
+      val updated = config.copy(driveAccountEmail = email, driveEnabled = true)
+      withContext(Dispatchers.IO) { repository.saveBackupConfig(updated) }
+      applyConfigToUi(updated)
+  }
+  ```
+  **Never store `token`** — only `email` (D15).
+- **`btnDisconnectDrive` click** (new, item 8): clear `driveAccountEmail = null, driveEnabled = false`,
+  persist, refresh. (Optional best-effort: `POST https://oauth2.googleapis.com/revoke?token=<token>`
+  on IO if a token is handy — not required; clearing local state is the contract.)
+- **`applyConfigToUi`** Drive branch — replace the SAF status logic:
+  ```kotlin
+  val connected = config.driveAccountEmail != null
+  val gms = DriveAuth.isPlayServicesAvailable(this)
+  binding.tvDriveStatus.text = when {
+      !gms       -> "Google Play Services unavailable on this device"
+      connected  -> "Connected as ${config.driveAccountEmail}"
+      else       -> "Not connected"
+  }
+  binding.btnConnectDrive.isEnabled = gms && !connected
+  binding.btnDisconnectDrive.isVisible = connected
+  binding.switchDriveEnabled.isEnabled = gms && connected
+  // re-bind the listener exactly as the existing local toggle does (clear → set isChecked → set listener)
+  binding.switchDriveEnabled.isChecked = config.driveEnabled && connected
+  ```
+- The toggle persist path (`persistToggle(isLocal=false, ...)`) is unchanged — it flips
+  `driveEnabled`. Guard: cannot enable when `driveAccountEmail == null` (UI already disables it).
+- Keep `btnBackUpNow.isEnabled = false` this session (S3 enables it).
+
+#### 8. `res/layout/activity_backup_settings.xml` — rework the Drive section
+
+In the "Google Drive Backup" section (currently lines ~179–237):
+- **Replace** `btnChooseDrive` ("Choose folder…") with `btnConnectDrive` (text **"Connect Google
+  Drive"**, same `shape_bordered`/`stateListAnimator=@null`/inkBlack styling as the other buttons).
+- **Add** `btnDisconnectDrive` (text **"Disconnect"**, `android:visibility="gone"`, same styling),
+  placed after `tvDriveStatus` or beside Connect.
+- Keep `tvDriveStatus` and `switchDriveEnabled` (same IDs).
+- **Update the helper text** to: *"Backs up to a 'Notesprout Backups' folder in your Google Drive, in
+  a per-device subfolder. Requires Google Play Services."* (Remove the SAF "Choose folder" framing.)
+- No new colors/styles — reuse existing (`shape_bordered`, `@color/inkBlack`, `@color/inkLight`). To
+  use `isVisible` from code, the binding gives the view; `androidx.core.view.isVisible` is already
+  available via `core-ktx`.
+
+#### 9. `data/backup/DeviceIdentity.kt` — (no change expected)
+
+The device folder name from D4 doubles as the Drive subfolder name; sanitation already strips path
+separators (`saveDeviceName` in the Activity). Confirm a Drive folder name can't contain `/` — the
+existing sanitize regex covers it.
+
+### Tests (`app/src/test`)
+
+> The REST + GIS calls hit the network/GMS and **cannot** run as JVM unit tests. Keep tests to pure
+> logic; verify the network path on-device (Testing steps).
+
+10. `BackupConfigTest.kt` — extend the round-trip to include `driveAccountEmail` (set + null); confirm
+    a legacy JSON string **without** `driveAccountEmail` decodes to `null` and that a row with
+    `driveTreeUri` set still decodes (back-compat).
+11. `DriveQueryTest.kt` (new) — extract the Drive `q` builder and the single-quote escaper into small
+    pure functions in `DriveApiClient` (e.g. `internal fun buildChildQuery(name, parentId, foldersOnly): String`
+    and `internal fun escapeDriveString(s): String`) and unit-test them: correct escaping of names
+    containing `'` and `\`, folder-only clause present/absent, parent clause present. This is the only
+    meaningfully testable Drive logic without a network.
+
+### Status maintenance
+
+Update ☑ per numbered item. Record the exact `play-services-auth` version resolved, and note on-device
+whether silent re-auth returned a token without UI on the 2nd+ connect.
+
+### Integration with Session 3 (read before S3)
+
+S3's `BackupEngine` must **dispatch by `BackupKind`** (the S3 text's "SafBackupWriter for both" is
+superseded by D12):
+- **LOCAL** → existing `SafBackupWriter` path (S3 item 1) into `<localTreeUri>` root.
+- **DRIVE** → **pre-flight once per run:** `DriveAuth.getAccessTokenSilent(context)`.
+  - `Error` / `NeedsConsent` → record the DRIVE destination as a hard error
+    ("Reconnect Google Drive in Backup Settings"), skip all DRIVE copies, **do not** stamp
+    `lastBackedUpDrive`, and do not crash. (LOCAL still runs.)
+  - `Token(t)` → build `DriveApiClient(t)`; `val devFolder = DriveBackupWriter.resolveDeviceFolderId(client, config.deviceFolderName)`
+    (null → hard error, skip DRIVE). Then per notebook needing DRIVE backup:
+    `DriveBackupWriter.replaceFile(client, devFolder, "<uuid>.soil", soilFile)` → on success
+    `repo.markNotebookBackedUp(id, BackupKind.DRIVE, runStart)`. Finally upload `notesprout.db` last
+    (D9) the same way. One access token (valid ~1 h) comfortably covers an entire run; do not refetch
+    per file.
+- The "Back Up Now" enable rule (S3 item 4) becomes: enabled when
+  (`localEnabled && localTreeUri != null`) **or** (`driveEnabled && driveAccountEmail != null`).
+
+### Testing steps (you perform; report back)
+
+1. Complete the **Prerequisite** Cloud Console setup (both Android OAuth clients with the debug-keystore
+   SHA-1; add the test Google account; Drive API enabled).
+2. Clean build + install debug on **G102**:
+   ```sh
+   cd apps/notesprout_android && ./gradlew clean assembleDebug
+   adb -s b7a46e13 install -r app/build/outputs/apk/debug/app-debug.apk
+   ```
+   Confirm the build succeeds with the new `play-services-auth` dependency (arm64-only APK unaffected).
+3. Run unit tests: `./gradlew testDebugUnitTest` — all green (config round-trip + Drive query/escape).
+4. Open **Backup Settings** → Drive section shows **"Not connected"** and **Connect Google Drive**.
+   - On a device **without** GMS, it shows the "Google Play Services unavailable" message and Connect
+     is disabled (test this on a non-GMS BOOX if available; otherwise note as untested).
+5. Tap **Connect Google Drive** → Google account picker + `drive.file` consent appears → grant.
+   Status becomes **"Connected as <email>"**, the Drive toggle enables, **Disconnect** appears.
+6. Force-stop + relaunch → still "Connected as <email>" (email persisted; token is **not** persisted).
+   Tap Connect-equivalent path again is unnecessary; verify the engine's silent token path later in S3.
+7. **Tap Disconnect** → returns to "Not connected", toggle disables. Re-connect → no full re-consent
+   if still granted (returns silently/fast) — note the behavior observed.
+8. Confirm **"Back Up Now" is still disabled** (S3 wires it).
+9. In `~/.android/debug.keystore`-misconfigured scenarios, verify the DEVELOPER_ERROR (status 10) hint
+   shows (optional negative test).
+10. Report: resolved `play-services-auth` version, consent UX on BOOX (the GIS bottom-sheet renders
+    fine on e-ink?), whether the email displays, and any failures.
+
+> On pass: Status → ☑, commit (no push). e.g.
+> `🌱 Backup S2.1: Google Drive via REST API + GIS OAuth (drive.file)`.
+
+---
+
 ## Session 3 — Backup engine (copy + status tracking)
 
 **Goal:** "Back Up Now" runs the full process: copy every notebook needing backup to each enabled
@@ -340,10 +772,15 @@ Track ☑ per item. Record the actual progress-dialog approach chosen.
 ### Files to create
 1. `docs/backup.md` — full subsystem doc: destinations & layout (D2/D3), device identity (D4),
    filename scheme (D5), the needs-backup rule (D8), run ordering / index-last (D9), encrypted
-   behavior (D10), state storage (D11), key classes (`BackupConfig`, `BackupConfigStore`,
-   `BackupEngine`, `SafBackupWriter`, `DeviceIdentity`, `BackupKind`), the Backup Settings screen,
-   and the **Known limitations** list. Note "Restore — out of scope (future)" stub at the end,
-   mirroring the import stub style in `docs/full-notebook-export.md`.
+   behavior (D10), state storage (D11), **the Google Drive REST/OAuth path (D12–D17): `drive.file`
+   scope, app-created "Notesprout Backups" folder, GIS access-token flow, GMS gating, token
+   hygiene**, key classes (`BackupConfig`, `BackupConfigStore`, `BackupEngine`, `SafBackupWriter`,
+   `DriveAuth`, `DriveApiClient`, `DriveBackupWriter`, `DeviceIdentity`, `BackupKind`), the Backup
+   Settings screen, and the **Known limitations** list. **Include the full Google Cloud Console
+   setup runbook** (Session 2.1 Prerequisite: enable Drive API, consent screen + `drive.file` scope,
+   two Android OAuth clients with the debug-keystore SHA-1, `keytool` command, Testing-vs-Published
+   note, DEVELOPER_ERROR/status-10 troubleshooting). Note "Restore — out of scope (future)" stub at
+   the end, mirroring the import stub style in `docs/full-notebook-export.md`.
 
 ### Files to edit
 2. `CLAUDE.md` — add a row to the `docs/` table:
@@ -360,7 +797,19 @@ Track ☑ per item. Record the actual progress-dialog approach chosen.
 - **A notebook currently open** in another Activity while backing up from settings is not expected
   (settings is reached from MainActivity) — document the cold-copy caveat.
 - **Name sanitation:** a device folder name with slashes/illegal chars is sanitized before use as a
-  SAF directory name.
+  SAF **and** Drive directory name (the same sanitized name is the Drive subfolder).
+- **Drive token expired / consent revoked** between runs: engine pre-flight `getAccessTokenSilent`
+  returns `Error`/`NeedsConsent` → DRIVE recorded as a hard error ("Reconnect Google Drive"),
+  timestamps not stamped, LOCAL still completes, no crash.
+- **Drive offline / no network:** REST calls fail gracefully → DRIVE failures reported in the summary,
+  `lastBackedUpDrive` untouched (auto-retry next run).
+- **"Notesprout Backups" or the device subfolder deleted in Drive between runs:** `ensureFolder`
+  re-creates it (find-or-create each run, D16); backups repopulate. No duplicate folders accumulate
+  (search-then-create).
+- **Duplicate-name safety:** re-running backup `PATCH`es the existing `<uuid>.soil`/`notesprout.db`
+  rather than creating a second copy (D16) — verify exactly one file per name in the device folder
+  after two runs.
+- **GMS absent:** Drive section disabled with the explanatory message; LOCAL backup unaffected (D17).
 
 ### Testing steps (you perform; report back)
 1. Clean build + install on G102.
@@ -379,6 +828,7 @@ Track ☑ per item. Record the actual progress-dialog approach chosen.
 |---|---|---|
 | 1 | Data model & backup-state foundations | ☑ Complete |
 | 2 | Backup Settings screen & destination config | ☑ Complete |
+| 2.1 | Google Drive via REST API + OAuth (replaces SAF for DRIVE) | ☐ Not started |
 | 3 | Backup engine + per-notebook exclude | ☐ Not started |
 | 4 | Docs, edge cases & polish | ☐ Not started |
 
