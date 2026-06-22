@@ -818,7 +818,7 @@ Track ☑ per item. Record the actual progress-dialog approach chosen.
 
 **Goal:** Documentation, hardening of edge cases, and the final cross-device sanity pass.
 
-**Status:** ☐ Not started
+**Status:** ☑ Complete — `docs/backup.md` created; `CLAUDE.md` docs table updated; memory entry added; edge cases reviewed (no code gaps found).
 
 ### Files to create
 1. `docs/backup.md` — full subsystem doc: destinations & layout (D2/D3), device identity (D4),
@@ -882,7 +882,7 @@ Track ☑ per item. Record the actual progress-dialog approach chosen.
 | 2.1 | Google Drive via REST API + GIS OAuth (replaces SAF for DRIVE) | ☑ Complete |
 | 2.2 | WebView OAuth replaces GIS (BOOX SERVICE_INVALID fix) | ☑ Complete |
 | 3 | Backup engine + per-notebook exclude | ☑ Complete |
-| 4 | Docs, edge cases & polish | ☐ Not started |
+| 4 | Docs, edge cases & polish | ☑ Complete |
 
 **Branch:** `seed` · **Test device:** G102 (`b7a46e13`) · **Commit after each session only once the
 user confirms tests pass. Never push.**
