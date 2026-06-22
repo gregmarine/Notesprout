@@ -26,6 +26,7 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.lifecycleScope
 import com.notesprout.android.core.Slog
+import com.notesprout.android.crypto.KeyResolver
 import com.notesprout.android.crypto.KeySession
 import com.notesprout.android.crypto.SoilCrypto
 import com.notesprout.android.data.index.IndexRepository
@@ -82,6 +83,14 @@ class PageIndexActivity : AppCompatActivity() {
         /** Comma-separated new template-row ids matching [EXTRA_TEMPLATE_PAGE_IDS]
          *  (empty string = template cleared / set to blank). */
         const val EXTRA_TEMPLATE_NEW_IDS      = "template_new_ids"
+        /**
+         * Comma-separated UUIDs of pages removed from the source notebook during a cross-notebook
+         * move. NotebookActivity uses these to build a [UndoRedoAction.CrossNotebookPagesRemoved]
+         * action so the source removal can be undone.
+         */
+        const val EXTRA_XNB_REMOVED_PAGE_IDS   = "xnb_removed_page_ids"
+        /** The shared soft-delete timestamp for [EXTRA_XNB_REMOVED_PAGE_IDS]. */
+        const val EXTRA_XNB_REMOVED_DELETED_AT = "xnb_removed_deleted_at"
     }
 
     // ── Grid specification ────────────────────────────────────────────────────
@@ -174,6 +183,31 @@ class PageIndexActivity : AppCompatActivity() {
      *  template-row ids, null = blank/no template. */
     private val templateChanges = mutableListOf<Triple<String, String?, String?>>()
 
+    // ── Cross-notebook page transfer state ────────────────────────────────────
+
+    /** Parameters for a cross-notebook copy or move, set while the user picks a dest page. */
+    private data class CrossNotebookInfo(
+        val sourcePageIds: List<String>,
+        val sourcePath: String,
+        val sourceNotebookId: String,
+        val sourcePass: String?,
+        val destNotebookId: String,
+        val destName: String,
+        val destPath: String,
+        val destPass: String?,
+        val isCopy: Boolean,
+    )
+    private var crossInfo: CrossNotebookInfo? = null
+    /** [pages] snapshot before swapping in dest pages; restored on cancel or after the op. */
+    private var savedSourcePages: List<PageEntry> = emptyList()
+    /** Source IDs snapshotted when the user taps "Other Notebook" in the scope chooser. */
+    private var crossPendingSourceIds: List<String> = emptyList()
+    /** Whether the pending cross-notebook op is a copy (true) or move (false). */
+    private var pendingCrossIsCopy: Boolean = true
+    /** Page IDs removed from source by a cross-notebook move — returned for source-side undo. */
+    private var xnbRemovedPageIds: List<String> = emptyList()
+    private var xnbRemovedDeletedAt: Long = 0L
+
     /** Global-index repository (templates live in `notesprout.db`, not the `.soil`). */
     private val indexRepo: IndexRepository by lazy { IndexRepository(NotesproutIndex.dao()) }
 
@@ -193,6 +227,20 @@ class PageIndexActivity : AppCompatActivity() {
         if (result.resultCode == RESULT_OK) {
             android.widget.Toast.makeText(this, "Saved to Templates", android.widget.Toast.LENGTH_SHORT).show()
         }
+    }
+
+    private val notebookPickerLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode != RESULT_OK) {
+            // Cancelled — stay in action mode.
+            refreshActionMode()
+            renderGridPage()
+            return@registerForActivityResult
+        }
+        val destId   = result.data?.getStringExtra(NotebookPickerActivity.RESULT_NOTEBOOK_ID) ?: return@registerForActivityResult
+        val destName = result.data?.getStringExtra(NotebookPickerActivity.RESULT_NOTEBOOK_NAME) ?: ""
+        enterCrossNotebookDestMode(destId, destName, pendingCrossIsCopy)
     }
 
     /** Selected pages captured for a batch "PNG as templates" import, pending the folder pick. */
@@ -333,9 +381,9 @@ class PageIndexActivity : AppCompatActivity() {
         }
 
         binding.btnSelectAll.setOnClickListener  { toggleSelectAll() }
-        binding.btnCopyPage.setOnClickListener   { copySelectedPages() }
+        binding.btnCopyPage.setOnClickListener   { showScopeChooser(isCopy = true) }
         binding.btnDeletePage.setOnClickListener { executeDelete() }
-        binding.btnMovePage.setOnClickListener   { enterDestMode(DestMode.MOVE) }
+        binding.btnMovePage.setOnClickListener   { showScopeChooser(isCopy = false) }
         binding.btnSetTemplate.setOnClickListener { chooseTemplateForSelection() }
         binding.btnExportPage.setOnClickListener { executeExport() }
         binding.btnInsertBefore.setOnClickListener { insertBefore = true;  refreshInsertBeforeAfter() }
@@ -396,8 +444,7 @@ class PageIndexActivity : AppCompatActivity() {
         }
     }
 
-    private fun loadPagesFromSoil(path: String): List<PageEntry> {
-        val passphrase = KeySession.getFor(notebookId)
+    private fun loadPagesFromSoil(path: String, passphrase: String? = KeySession.getFor(notebookId)): List<PageEntry> {
         var db: com.notesprout.android.crypto.SoilRawDb? = null
         return try {
             db = SoilCrypto.openRaw(java.io.File(path), passphrase)
@@ -860,27 +907,30 @@ class PageIndexActivity : AppCompatActivity() {
     }
 
     /**
-     * Reflect the pending-destination sub-state in the chrome: show the Confirm (✓) button only
+     * Reflect the pending-destination sub-state in the chrome: show the Confirm button only
      * once a destination is chosen, and update the title from "pick a spot" to a confirming prompt.
      * Called from [enterDestMode], destination taps, and before/after flips.
      */
     private fun refreshDestChrome() {
-        if (destMode == DestMode.NONE) return
+        if (destMode == DestMode.NONE && crossInfo == null) return
         val target = pendingDestPageId
         binding.btnConfirmDest.visibility =
             if (target != null) android.view.View.VISIBLE else android.view.View.GONE
-        // Show the OK button in its selected (bordered) state so it reads as the ready commit action.
         binding.btnConfirmDest.isSelected = target != null
 
+        val cross = crossInfo
+        val verb = when {
+            cross != null            -> if (cross.isCopy) "Copy" else "Move"
+            destMode == DestMode.MOVE -> "Move"
+            else                     -> "Paste"
+        }
+
         if (target == null) {
-            // Still picking a destination.
-            val titlePrefix = if (destMode == DestMode.MOVE) "Move" else "Paste"
-            binding.tvTopBarTitle.text = "$titlePrefix before/after…"
+            val titlePrefix = if (cross != null) "$verb to ${cross.destName}" else verb
+            binding.tvTopBarTitle.text = "$titlePrefix — before/after…"
         } else {
-            // A destination is chosen — show a confirming prompt with the page number.
-            val verb     = if (destMode == DestMode.MOVE) "Move" else "Paste"
-            val side     = if (insertBefore) "before" else "after"
-            val pageNum  = pages.indexOfFirst { it.id == target }.let { if (it >= 0) it + 1 else null }
+            val side    = if (insertBefore) "before" else "after"
+            val pageNum = pages.indexOfFirst { it.id == target }.let { if (it >= 0) it + 1 else null }
             binding.tvTopBarTitle.text =
                 if (pageNum != null) "$verb $side p.$pageNum?" else "$verb $side…"
         }
@@ -888,19 +938,25 @@ class PageIndexActivity : AppCompatActivity() {
 
     /**
      * Commit the chosen destination. The destination tap selects + previews only; this runs the
-     * actual batch op. [executeMove] / [executePaste] handle all teardown ([exitActionMode]).
+     * actual batch op. [executeMove] / [executePaste] / [executeCrossNotebookOp] handle teardown.
      */
     private fun confirmDestination() {
         val target = pendingDestPageId ?: return
-        when (destMode) {
-            DestMode.MOVE  -> executeMove(target)
-            DestMode.PASTE -> executePaste(target)
-            DestMode.NONE  -> {}
+        when {
+            crossInfo != null      -> executeCrossNotebookOp(target)
+            destMode == DestMode.MOVE  -> executeMove(target)
+            destMode == DestMode.PASTE -> executePaste(target)
+            else -> {}
         }
     }
 
     /** Cancel destination-picking mode: restore action mode chrome and selection state. */
     private fun cancelDestMode() {
+        // If cancelling a cross-notebook op, restore source pages.
+        if (crossInfo != null) {
+            crossInfo = null
+            pages = savedSourcePages
+        }
         destMode = DestMode.NONE
         moveSourceIds = emptyList()
         pendingDestPageId = null
@@ -988,17 +1044,177 @@ class PageIndexActivity : AppCompatActivity() {
     }
 
     /**
-     * Copies the selected pages to the clipboard and immediately enters destination-picking
-     * PASTE mode. The clipboard is stashed before the selection is cleared so that the pasted
-     * content is exactly the pages that were highlighted when Copy was tapped.
-     * The separate Paste button was removed in Session 2 fixes — Copy goes straight to paste mode.
+     * Shows a scope chooser (This Notebook / Other Notebook) for Copy or Move.
+     * "This Notebook" follows the existing same-file dest-pick flow; "Other Notebook" launches
+     * the [NotebookPickerActivity] then wires the cross-notebook engine.
      */
-    private fun copySelectedPages() {
+    private fun showScopeChooser(isCopy: Boolean) {
         if (selectedPageIds.isEmpty()) return
-        // Stash clipboard before selection changes.
-        pendingCopyPageIds = selectedPageIds.toList()
-        // Immediately enter destination-picking paste mode (same flow as Move).
-        enterDestMode(DestMode.PASTE)
+        val verb = if (isCopy) "Copy" else "Move"
+        ActionSheetDialog(this)
+            .title("$verb pages")
+            .addAction(null, "This Notebook") {
+                if (isCopy) {
+                    pendingCopyPageIds = selectedPageIds.toList()
+                    enterDestMode(DestMode.PASTE)
+                } else {
+                    enterDestMode(DestMode.MOVE)
+                }
+            }
+            .addAction(null, "Other Notebook") {
+                crossPendingSourceIds = selectedPageIds.toList()
+                pendingCrossIsCopy = isCopy
+                val intent = android.content.Intent(this, NotebookPickerActivity::class.java).apply {
+                    putExtra(NotebookPickerActivity.EXTRA_EXCLUDE_NOTEBOOK_ID, notebookId)
+                }
+                notebookPickerLauncher.launch(intent)
+            }
+            .show()
+    }
+
+    /**
+     * After a destination notebook is picked, resolve its key, load its pages, and enter the
+     * cross-notebook destination-picking mode (same Before/After/Confirm chrome as single-file ops).
+     */
+    private fun enterCrossNotebookDestMode(destId: String, destName: String, isCopy: Boolean) {
+        val sourceIds = crossPendingSourceIds
+        if (sourceIds.isEmpty()) { refreshActionMode(); renderGridPage(); return }
+        val sourcePath = notebookSoilPath ?: return
+        val sourcePass = KeySession.getFor(notebookId)
+        val destPath   = soilFile(this, destId).absolutePath
+
+        lifecycleScope.launch {
+            val destInfo = withContext(Dispatchers.IO) { indexRepo.getEncryptionInfo(destId) }
+            val destPass: String? = if (destInfo.encrypted) {
+                KeySession.getFor(destId)
+                    ?: KeyResolver.resolveForOpen(this@PageIndexActivity, destId, destInfo)
+            } else null
+            if (destInfo.encrypted && destPass == null) {
+                android.widget.Toast.makeText(this@PageIndexActivity, "Notebook is locked", android.widget.Toast.LENGTH_SHORT).show()
+                refreshActionMode(); renderGridPage()
+                return@launch
+            }
+
+            val destPages = withContext(Dispatchers.IO) { loadPagesFromSoil(destPath, destPass) }
+
+            // Snapshot source pages and swap in dest pages for the card-pick UI.
+            savedSourcePages = pages
+            crossInfo = CrossNotebookInfo(
+                sourcePageIds    = sourceIds,
+                sourcePath       = sourcePath,
+                sourceNotebookId = notebookId,
+                sourcePass       = sourcePass,
+                destNotebookId   = destId,
+                destName         = destName,
+                destPath         = destPath,
+                destPass         = destPass,
+                isCopy           = isCopy,
+            )
+            pages = destPages
+
+            // Enter dest-picking mode (reuse PASTE card-click UI; crossInfo drives the engine).
+            destMode = DestMode.PASTE
+            insertBefore = true
+            pendingDestPageId = null
+
+            binding.btnSelectAll.visibility   = android.view.View.GONE
+            binding.btnCopyPage.visibility    = android.view.View.GONE
+            binding.btnDeletePage.visibility  = android.view.View.GONE
+            binding.btnMovePage.visibility    = android.view.View.GONE
+            binding.btnSetTemplate.visibility = android.view.View.GONE
+            binding.btnExportPage.visibility  = android.view.View.GONE
+            binding.btnConfirmDest.visibility = android.view.View.GONE
+
+            val verbLabel = if (isCopy) "Copy" else "Move"
+            binding.btnInsertBefore.text = "$verbLabel Before"
+            binding.btnInsertAfter.text  = "$verbLabel After"
+            binding.btnInsertBefore.visibility = android.view.View.VISIBLE
+            binding.btnInsertAfter.visibility  = android.view.View.VISIBLE
+            refreshInsertBeforeAfter()
+            refreshDestChrome()
+            renderGridPage()
+        }
+    }
+
+    /**
+     * Run the cross-notebook copy or move engine after the user confirms a destination page.
+     * Applies the smart encryption gate before writing, restores the source page view on completion,
+     * and records source-removed page data for source-side undo (move only).
+     */
+    private fun executeCrossNotebookOp(targetPageId: String) {
+        val cross = crossInfo ?: return
+
+        lifecycleScope.launch {
+            val srcInfo = withContext(Dispatchers.IO) { indexRepo.getEncryptionInfo(cross.sourceNotebookId) }
+            val dstInfo = withContext(Dispatchers.IO) { indexRepo.getEncryptionInfo(cross.destNotebookId) }
+
+            val protectionDrops = srcInfo.encrypted &&
+                (!dstInfo.encrypted || cross.destPass != cross.sourcePass)
+
+            if (protectionDrops) {
+                val verb = if (cross.isCopy) "Copying" else "Moving"
+                val confirmed = suspendCancellableCoroutine<Boolean> { cont ->
+                    val d = androidx.appcompat.app.AlertDialog.Builder(this@PageIndexActivity)
+                        .setMessage("This notebook is encrypted. $verb these pages to ${cross.destName} will store their contents outside this notebook's encryption. Continue?")
+                        .setPositiveButton("Continue") { _, _ -> if (cont.isActive) cont.resume(true) }
+                        .setNegativeButton("Cancel")   { _, _ -> if (cont.isActive) cont.resume(false) }
+                        .setOnCancelListener           { if (cont.isActive) cont.resume(false) }
+                        .create()
+                    d.show()
+                    d.window?.setElevation(0f)
+                    d.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+                    cont.invokeOnCancellation { d.dismiss() }
+                }
+                if (!confirmed) return@launch
+            }
+
+            val n = cross.sourcePageIds.size
+            val nLabel = if (n == 1) "page" else "pages"
+
+            if (cross.isCopy) {
+                val results = withContext(Dispatchers.IO) {
+                    com.notesprout.android.data.copyPagesAcrossNotebooks(
+                        cross.sourcePageIds, cross.sourcePath, cross.sourcePass,
+                        targetPageId, insertBefore, cross.destPath, cross.destPass,
+                    )
+                }
+                if (results == null) {
+                    android.widget.Toast.makeText(this@PageIndexActivity, "Couldn't copy pages", android.widget.Toast.LENGTH_SHORT).show()
+                    return@launch
+                }
+                android.widget.Toast.makeText(this@PageIndexActivity, "Copied $n $nLabel to ${cross.destName}", android.widget.Toast.LENGTH_SHORT).show()
+            } else {
+                val result = withContext(Dispatchers.IO) {
+                    com.notesprout.android.data.movePagesAcrossNotebooks(
+                        cross.sourcePageIds, cross.sourcePath, cross.sourcePass,
+                        targetPageId, insertBefore, cross.destPath, cross.destPass,
+                    )
+                }
+                if (result == null) {
+                    android.widget.Toast.makeText(this@PageIndexActivity, "Couldn't move pages", android.widget.Toast.LENGTH_SHORT).show()
+                    return@launch
+                }
+                xnbRemovedPageIds  = result.sourceDeletedPageIds
+                xnbRemovedDeletedAt = result.sourceDeletedAt
+                android.widget.Toast.makeText(this@PageIndexActivity, "Moved $n $nLabel to ${cross.destName}", android.widget.Toast.LENGTH_SHORT).show()
+            }
+
+            // Restore source page view (reload for move since pages were removed; reuse snapshot for copy).
+            crossInfo = null
+            pages = if (!cross.isCopy) {
+                withContext(Dispatchers.IO) { loadPagesFromSoil(cross.sourcePath, cross.sourcePass) }
+            } else {
+                savedSourcePages
+            }
+
+            pruneSelection()
+            val cid = currentPageId
+            if (cid != null) {
+                val newIdx = pages.indexOfFirst { it.id == cid }
+                if (newIdx >= 0) currentPageIndex = newIdx
+            }
+            exitActionMode()
+        }
     }
 
     /**
@@ -1671,6 +1887,10 @@ class PageIndexActivity : AppCompatActivity() {
             result.putExtra(EXTRA_TEMPLATE_PAGE_IDS, templateChanges.joinToString(",") { it.first })
             result.putExtra(EXTRA_TEMPLATE_PREV_IDS, templateChanges.joinToString(",") { it.second ?: "" })
             result.putExtra(EXTRA_TEMPLATE_NEW_IDS,  templateChanges.joinToString(",") { it.third ?: "" })
+        }
+        if (xnbRemovedPageIds.isNotEmpty()) {
+            result.putExtra(EXTRA_XNB_REMOVED_PAGE_IDS,   xnbRemovedPageIds.joinToString(","))
+            result.putExtra(EXTRA_XNB_REMOVED_DELETED_AT, xnbRemovedDeletedAt.toString())
         }
         setResult(RESULT_OK, result)
         finish()

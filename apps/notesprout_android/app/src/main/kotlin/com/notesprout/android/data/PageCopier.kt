@@ -18,6 +18,16 @@ private fun cleanStrayJournal(notebookPath: String) {
 }
 
 /**
+ * Result of [movePagesAcrossNotebooks]: the destination insertions (same shape as
+ * [copyPagesAcrossNotebooks]) plus the data needed to build a source-side restore undo action.
+ */
+data class MoveAcrossResult(
+    val destInsertions: List<Pair<String, Int>>,
+    val sourceDeletedAt: Long,
+    val sourceDeletedPageIds: List<String>,
+)
+
+/**
  * Deep-copies [sourcePageId] and inserts the duplicate immediately after [targetPageId].
  *
  * Copies: the page row, its non-deleted layer, and all non-deleted content objects for that
@@ -499,6 +509,53 @@ suspend fun setPagesTemplateRaw(
 }
 
 /**
+ * Soft-deletes all pages in [pageIds] (and their layers/children) in the source .soil using a
+ * single shared [deletedAt]. Opens, writes, and closes [sourcePath] internally.
+ * Returns true on success. Must be called on [Dispatchers.IO].
+ */
+private suspend fun softDeleteSourcePages(
+    pageIds: List<String>,
+    deletedAt: Long,
+    sourcePath: String,
+    sourcePass: String?,
+): Boolean = withContext(Dispatchers.IO) {
+    var db: SoilRawDb? = null
+    try {
+        db = SoilCrypto.openRaw(File(sourcePath), sourcePass)
+        val cv = ContentValues().apply {
+            put("deletedAt", deletedAt)
+            put("updatedAt", deletedAt)
+        }
+        db.beginTransaction()
+        try {
+            for (pageId in pageIds) {
+                val layerId = db.rawQuery(
+                    "SELECT id FROM notebook WHERE type = 'layer' AND parentId = ? AND deletedAt IS NULL LIMIT 1",
+                    arrayOf(pageId)
+                ).use { c -> if (c.moveToFirst()) c.getString(0) else null }
+
+                db.update("notebook", cv, "id = ?", arrayOf(pageId))
+                db.update("notebook", cv, "parentId = ? AND deletedAt IS NULL", arrayOf(pageId))
+                if (layerId != null) {
+                    db.update("notebook", cv, "parentId = ? AND deletedAt IS NULL", arrayOf(layerId))
+                }
+            }
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
+        db.checkpointAndVacuum()
+        true
+    } catch (e: Exception) {
+        Log.e(TAG, "softDeleteSourcePages failed pages=$pageIds", e)
+        false
+    } finally {
+        db?.close()
+        cleanStrayJournal(sourcePath)
+    }
+}
+
+/**
  * Soft-deletes [pageId] and all its descendants (layer + strokes) using a single shared
  * timestamp, matching the pattern used by NotebookActivity's deletePage().
  *
@@ -550,4 +607,268 @@ suspend fun deletePageRaw(
         db?.close()
         cleanStrayJournal(notebookPath)
     }
+}
+
+/**
+ * Deep-copies each page in [sourcePageIds] from the `.soil` at [sourcePath] into the `.soil` at
+ * [destPath], placing the copies as a contiguous block before or after [targetPageId] in the
+ * destination (append to end when [targetPageId] is null or not found).
+ *
+ * Each copy includes: the page row, its non-deleted layer, and all non-deleted content objects.
+ * Template rows referenced by any copied page are also copied into [destPath] with fresh UUIDs,
+ * and each page's `data.template` is rewritten to point to the new destination template id.
+ * Page content (`boundingBox`, `data` other than `template`) is preserved verbatim.
+ * Soft-deleted objects are not copied.
+ *
+ * [sourcePath] and [destPath] must be distinct files — use [copyPagesRelativeRaw] for same-file
+ * operations.
+ *
+ * Returns one [Pair] per new page: (newPageId, 0-based index in the destination after insertion),
+ * or null on any failure. On failure the destination transaction is rolled back; no partial writes
+ * remain. Must be called on [Dispatchers.IO].
+ */
+suspend fun copyPagesAcrossNotebooks(
+    sourcePageIds: List<String>,
+    sourcePath: String, sourcePass: String?,
+    targetPageId: String?, before: Boolean,
+    destPath: String, destPass: String?,
+): List<Pair<String, Int>>? = withContext(Dispatchers.IO) {
+    if (sourcePageIds.isEmpty()) return@withContext emptyList()
+    if (sourcePath == destPath) {
+        Log.e(TAG, "copyPagesAcrossNotebooks: source == dest; use copyPagesRelativeRaw")
+        return@withContext null
+    }
+
+    // ── Shared local types ────────────────────────────────────────────────
+    data class Row(val id: String, val parentId: String, val bbox: String,
+                   val order: Int, val data: String, val type: String)
+    data class ChildRow(val type: String, val bbox: String, val order: Int, val data: String)
+
+    fun readRow(c: android.database.Cursor): Row? {
+        if (!c.moveToFirst()) return null
+        return Row(
+            id       = c.getString(c.getColumnIndexOrThrow("id")),
+            parentId = c.getString(c.getColumnIndexOrThrow("parentId")),
+            bbox     = c.getString(c.getColumnIndexOrThrow("boundingBox")),
+            order    = c.getInt(c.getColumnIndexOrThrow("order")),
+            data     = c.getString(c.getColumnIndexOrThrow("data")),
+            type     = c.getString(c.getColumnIndexOrThrow("type")),
+        )
+    }
+
+    data class SourcePage(val page: Row, val layer: Row, val children: List<ChildRow>)
+    data class TemplateRow(val bbox: String, val data: String)
+
+    var sourceDb: SoilRawDb? = null
+    var destDb: SoilRawDb? = null
+    try {
+        // ── Read from source ──────────────────────────────────────────────
+        sourceDb = SoilCrypto.openRaw(File(sourcePath), sourcePass)
+
+        val sources = sourcePageIds.mapNotNull { srcId ->
+            val page = sourceDb.rawQuery(
+                "SELECT * FROM notebook WHERE id = ? LIMIT 1", arrayOf(srcId)
+            ).use { readRow(it) } ?: return@mapNotNull null
+
+            val layer = sourceDb.rawQuery(
+                "SELECT * FROM notebook WHERE type = 'layer' AND parentId = ? AND deletedAt IS NULL LIMIT 1",
+                arrayOf(srcId)
+            ).use { readRow(it) } ?: return@mapNotNull null
+
+            val children: List<ChildRow> = sourceDb.rawQuery(
+                "SELECT type, boundingBox, `order`, data FROM notebook WHERE parentId = ? AND deletedAt IS NULL ORDER BY `order` ASC",
+                arrayOf(layer.id)
+            ).use { c ->
+                val list = mutableListOf<ChildRow>()
+                while (c.moveToNext()) list.add(ChildRow(c.getString(0), c.getString(1), c.getInt(2), c.getString(3)))
+                list
+            }
+            SourcePage(page, layer, children)
+        }
+        if (sources.isEmpty()) return@withContext null
+
+        // Collect distinct template ids referenced by the pages being copied.
+        val referencedTemplateIds = sources.mapNotNull { src ->
+            PageData.fromJson(src.page.data).template.takeIf { it.isNotEmpty() }
+        }.toSet()
+
+        val sourceTemplates = mutableMapOf<String, TemplateRow>()
+        for (templateId in referencedTemplateIds) {
+            sourceDb.rawQuery(
+                "SELECT boundingBox, data FROM notebook WHERE id = ? AND type = 'template' LIMIT 1",
+                arrayOf(templateId)
+            ).use { c ->
+                if (c.moveToFirst()) sourceTemplates[templateId] = TemplateRow(c.getString(0), c.getString(1))
+            }
+        }
+
+        sourceDb.close()
+        sourceDb = null
+        cleanStrayJournal(sourcePath)
+
+        // ── Write to destination ──────────────────────────────────────────
+        destDb = SoilCrypto.openRaw(File(destPath), destPass)
+
+        // Use dest notebook metadata row as parentId for pages and templates.
+        val destParentId = destDb.rawQuery(
+            "SELECT id FROM notebook WHERE type = 'notebook' LIMIT 1", null
+        ).use { c -> if (c.moveToFirst()) c.getString(0) else sources.first().page.parentId }
+
+        data class PageOrder(val id: String, val order: Int)
+        val allDestPages: MutableList<PageOrder> = destDb.rawQuery(
+            "SELECT id, `order` FROM notebook WHERE type = 'page' AND deletedAt IS NULL ORDER BY `order` ASC",
+            null
+        ).use { c ->
+            val list = mutableListOf<PageOrder>()
+            while (c.moveToNext()) list.add(PageOrder(c.getString(0), c.getInt(1)))
+            list
+        }
+
+        val targetIdx = if (targetPageId != null) allDestPages.indexOfFirst { it.id == targetPageId } else -1
+        val insertionIndex = if (targetIdx >= 0) {
+            if (before) targetIdx else targetIdx + 1
+        } else allDestPages.size
+
+        val now = System.currentTimeMillis()
+        val newPageIds = mutableListOf<String>()
+        val templateRemap = mutableMapOf<String, String>()
+
+        destDb.beginTransaction()
+        try {
+            // Copy template rows into dest and build the remap.
+            for ((srcTemplateId, templateRow) in sourceTemplates) {
+                val newTemplateId = UUID.randomUUID().toString()
+                destDb.insert("notebook", null, ContentValues().apply {
+                    put("id",          newTemplateId)
+                    put("parentId",    destParentId)
+                    put("type",        "template")
+                    put("boundingBox", templateRow.bbox)
+                    put("`order`",     0)
+                    put("createdAt",   now)
+                    put("updatedAt",   now)
+                    putNull("deletedAt")
+                    put("data",        templateRow.data)
+                })
+                templateRemap[srcTemplateId] = newTemplateId
+            }
+
+            // Shift existing dest pages at or after insertionIndex to make room.
+            val shift = sources.size
+            for (i in (insertionIndex until allDestPages.size).reversed()) {
+                destDb.update("notebook", ContentValues().apply { put("`order`", i + shift) },
+                    "id = ?", arrayOf(allDestPages[i].id))
+            }
+
+            // Insert each copied page, layer, and children.
+            sources.forEachIndexed { offset, src ->
+                val newPageId  = UUID.randomUUID().toString()
+                val newLayerId = UUID.randomUUID().toString()
+                newPageIds.add(newPageId)
+
+                // Rewrite template id if this page referenced a template.
+                val pageData = PageData.fromJson(src.page.data)
+                val remappedData = templateRemap[pageData.template]?.let { newTplId ->
+                    pageData.copy(template = newTplId).toJson()
+                } ?: src.page.data
+
+                destDb.insert("notebook", null, ContentValues().apply {
+                    put("id",          newPageId)
+                    put("parentId",    destParentId)
+                    put("type",        "page")
+                    put("boundingBox", src.page.bbox)
+                    put("`order`",     insertionIndex + offset)
+                    put("createdAt",   now)
+                    put("updatedAt",   now)
+                    putNull("deletedAt")
+                    put("data",        remappedData)
+                })
+
+                destDb.insert("notebook", null, ContentValues().apply {
+                    put("id",          newLayerId)
+                    put("parentId",    newPageId)
+                    put("type",        "layer")
+                    put("boundingBox", src.layer.bbox)
+                    put("`order`",     0)
+                    put("createdAt",   now)
+                    put("updatedAt",   now)
+                    putNull("deletedAt")
+                    put("data",        src.layer.data)
+                })
+
+                for (obj in src.children) {
+                    destDb.insert("notebook", null, ContentValues().apply {
+                        put("id",          UUID.randomUUID().toString())
+                        put("parentId",    newLayerId)
+                        put("type",        obj.type)
+                        put("boundingBox", obj.bbox)
+                        put("`order`",     obj.order)
+                        put("createdAt",   now)
+                        put("updatedAt",   now)
+                        putNull("deletedAt")
+                        put("data",        obj.data)
+                    })
+                }
+            }
+
+            destDb.setTransactionSuccessful()
+        } finally {
+            destDb.endTransaction()
+        }
+
+        destDb.checkpointAndVacuum()
+
+        newPageIds.mapIndexed { offset, id -> id to (insertionIndex + offset) }
+    } catch (e: Exception) {
+        Log.e(TAG, "copyPagesAcrossNotebooks failed sources=$sourcePageIds", e)
+        null
+    } finally {
+        sourceDb?.close()
+        cleanStrayJournal(sourcePath)
+        destDb?.close()
+        cleanStrayJournal(destPath)
+    }
+}
+
+/**
+ * Moves each page in [sourcePageIds] from the `.soil` at [sourcePath] into the `.soil` at
+ * [destPath], placing the block before or after [targetPageId] in the destination (append to end
+ * when [targetPageId] is null or not found).
+ *
+ * Copies the pages and their templates first (via [copyPagesAcrossNotebooks]); only soft-deletes
+ * the source rows after a successful copy. If the copy fails, the source is untouched. If the
+ * soft-delete fails after a successful copy, returns null — the caller should treat this as an
+ * error (pages will exist in both notebooks; the user can manually delete the duplicate).
+ *
+ * [sourcePath] and [destPath] must be distinct files — use [movePagesRelativeRaw] for same-file
+ * operations.
+ *
+ * Returns [MoveAcrossResult] on success (dest insertions + source soft-delete metadata for
+ * building a source-side undo action), or null on any failure. Must be called on [Dispatchers.IO].
+ */
+suspend fun movePagesAcrossNotebooks(
+    sourcePageIds: List<String>,
+    sourcePath: String, sourcePass: String?,
+    targetPageId: String?, before: Boolean,
+    destPath: String, destPass: String?,
+): MoveAcrossResult? = withContext(Dispatchers.IO) {
+    if (sourcePageIds.isEmpty()) return@withContext null
+    if (sourcePath == destPath) {
+        Log.e(TAG, "movePagesAcrossNotebooks: source == dest; use movePagesRelativeRaw")
+        return@withContext null
+    }
+
+    val destInsertions = copyPagesAcrossNotebooks(
+        sourcePageIds, sourcePath, sourcePass,
+        targetPageId, before, destPath, destPass,
+    ) ?: return@withContext null
+
+    val deletedAt = System.currentTimeMillis()
+    val deleted = softDeleteSourcePages(sourcePageIds, deletedAt, sourcePath, sourcePass)
+    if (!deleted) return@withContext null
+
+    MoveAcrossResult(
+        destInsertions     = destInsertions,
+        sourceDeletedAt    = deletedAt,
+        sourceDeletedPageIds = sourcePageIds,
+    )
 }

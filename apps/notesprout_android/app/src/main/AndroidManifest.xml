@@ -79,6 +79,13 @@
             android:configChanges="orientation|keyboardHidden|screenSize|smallestScreenSize|screenLayout|density"
             android:windowSoftInputMode="stateHidden" />
 
+        <!-- Notebook picker — folder-browse list for cross-notebook page copy/move destination -->
+        <activity
+            android:name=".NotebookPickerActivity"
+            android:exported="false"
+            android:configChanges="orientation|keyboardHidden|screenSize|smallestScreenSize|screenLayout|density"
+            android:windowSoftInputMode="stateHidden" />
+
         <!-- Link target picker — full-screen chrome + page-thumbnail grid -->
         <activity
             android:name=".LinkTargetPickerActivity"

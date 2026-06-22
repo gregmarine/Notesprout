@@ -540,8 +540,19 @@ class NotebookActivity : AppCompatActivity() {
                 if (refs.isNotEmpty()) undoRedoManager.push(UndoRedoAction.TemplatesChanged(refs))
             }
 
+            val xnbRemovedPageIds   = data?.getStringExtra(PageIndexActivity.EXTRA_XNB_REMOVED_PAGE_IDS)
+            val xnbRemovedDeletedAt = data?.getStringExtra(PageIndexActivity.EXTRA_XNB_REMOVED_DELETED_AT)
+            if (!xnbRemovedPageIds.isNullOrEmpty() && !xnbRemovedDeletedAt.isNullOrEmpty()) {
+                val ids = xnbRemovedPageIds.split(",")
+                val ts  = xnbRemovedDeletedAt.toLongOrNull() ?: 0L
+                if (ids.isNotEmpty() && ts > 0) {
+                    undoRedoManager.push(UndoRedoAction.CrossNotebookPagesRemoved(ids, ts))
+                }
+            }
+
             val anySessionActions = !pastedIds.isNullOrEmpty() || !deletedIds.isNullOrEmpty() ||
-                !movedIds.isNullOrEmpty() || !templatePageIds.isNullOrEmpty()
+                !movedIds.isNullOrEmpty() || !templatePageIds.isNullOrEmpty() ||
+                !xnbRemovedPageIds.isNullOrEmpty()
             if (anySessionActions) updateUndoRedoButtons()
 
             val selected = data?.getIntExtra(PageIndexActivity.EXTRA_SELECTED_PAGE_INDEX, -1) ?: -1
@@ -7852,6 +7863,27 @@ class NotebookActivity : AppCompatActivity() {
                         if (layer != null) dao.softDeleteByParentId(layer.id, now)
                     }
                     // currentPageIndex will be coerced by setupPageIds in loadCurrentPage.
+                }
+            }
+
+            is UndoRedoAction.CrossNotebookPagesRemoved -> withContext(Dispatchers.IO) {
+                if (isUndo) {
+                    action.pageIds.forEach { pageId ->
+                        dao.restoreById(pageId, now)
+                        dao.restoreChildrenDeletedSince(pageId, action.deletedAt, now)
+                        val layer = dao.getLayerForPageAny(pageId)
+                        if (layer != null) {
+                            dao.restoreChildrenDeletedSince(layer.id, action.deletedAt, now)
+                        }
+                        invalidatePageSnapshot(db, pageId)
+                    }
+                } else {
+                    action.pageIds.forEach { pageId ->
+                        dao.softDeleteById(pageId, now)
+                        dao.softDeleteByParentId(pageId, now)
+                        val layer = dao.getLayerForPageAny(pageId)
+                        if (layer != null) dao.softDeleteByParentId(layer.id, now)
+                    }
                 }
             }
 

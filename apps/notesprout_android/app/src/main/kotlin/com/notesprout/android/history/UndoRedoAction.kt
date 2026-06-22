@@ -587,6 +587,21 @@ sealed class UndoRedoAction {
     ) : UndoRedoAction()
 
     /**
+     * Pages removed from the source notebook as the source-side of a cross-notebook move.
+     *
+     * Undo: restores the page rows and their layers/children (soft-deleted at [deletedAt]).
+     * Redo: re-soft-deletes the same rows — the destination copy is not touched by either.
+     *
+     * The destination additions are intentionally not in the undo graph (copy is non-undoable;
+     * undo only reverses the source removal).
+     */
+    @Serializable
+    data class CrossNotebookPagesRemoved(
+        val pageIds: List<String>,
+        val deletedAt: Long,
+    ) : UndoRedoAction()
+
+    /**
      * User removed a link, dispersing its embedded held objects back onto the layer as their own
      * live rows (fresh UUIDs).
      *
