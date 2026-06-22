@@ -5,6 +5,10 @@ import com.notesprout.android.crypto.KeyScope
 import com.notesprout.android.data.ClipboardPayload
 import com.notesprout.android.data.ClipboardStore
 import com.notesprout.android.data.FolderRef
+import com.notesprout.android.data.backup.BackupConfig
+import com.notesprout.android.data.backup.BackupConfigStore
+import com.notesprout.android.data.backup.BackupKind
+import com.notesprout.android.data.backup.needsBackup
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.util.UUID
@@ -507,6 +511,50 @@ class IndexRepository(private val dao: ObjectDao) {
     suspend fun saveClipboard(payload: ClipboardPayload) = ClipboardStore.write(dao, payload)
     suspend fun loadClipboard(): ClipboardPayload? = ClipboardStore.read(dao)
     suspend fun clearClipboard() = ClipboardStore.clear(dao)
+
+    // endregion
+
+    // region Backup
+
+    suspend fun getBackupConfig(): BackupConfig? = BackupConfigStore.read(dao)
+
+    suspend fun ensureBackupConfig(defaultName: String): BackupConfig =
+        BackupConfigStore.ensure(dao, defaultName)
+
+    suspend fun saveBackupConfig(config: BackupConfig) = BackupConfigStore.write(dao, config)
+
+    suspend fun setNotebookExcludedFromBackup(notebookId: String, excluded: Boolean) {
+        val entity = dao.getById(notebookId) ?: return
+        val obj = Json.decodeFromString<NotebookObject>(entity.data)
+        // Do NOT bump updatedAt — exclusion flag is not a content modification.
+        dao.update(entity.copy(data = Json.encodeToString(obj.copy(excludeFromBackup = excluded))))
+    }
+
+    suspend fun markNotebookBackedUp(notebookId: String, kind: BackupKind, timestamp: Long) {
+        val entity = dao.getById(notebookId) ?: return
+        val obj = Json.decodeFromString<NotebookObject>(entity.data)
+        val updated = when (kind) {
+            BackupKind.LOCAL -> obj.copy(lastBackedUpLocal = timestamp)
+            BackupKind.DRIVE -> obj.copy(lastBackedUpDrive = timestamp)
+        }
+        // Do NOT bump updatedAt — stamping backup time is not a content modification.
+        dao.update(entity.copy(data = Json.encodeToString(updated)))
+    }
+
+    suspend fun notebooksNeedingBackup(kind: BackupKind): List<ObjectEntity> {
+        return dao.getAllNotDeleted()
+            .filter { it.type == ObjectType.NOTEBOOK }
+            .filter { entity ->
+                val obj = try {
+                    Json.decodeFromString<NotebookObject>(entity.data)
+                } catch (_: Exception) { return@filter false }
+                val lastBackedUp = when (kind) {
+                    BackupKind.LOCAL -> obj.lastBackedUpLocal
+                    BackupKind.DRIVE -> obj.lastBackedUpDrive
+                }
+                needsBackup(entity.updatedAt, lastBackedUp, obj.excludeFromBackup)
+            }
+    }
 
     // endregion
 

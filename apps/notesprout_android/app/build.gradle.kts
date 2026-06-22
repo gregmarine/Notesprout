@@ -105,4 +105,7 @@ dependencies {
     // PdfBox-Android — post-process exported PDFs to add AES-128 password protection.
     // Apache-2.0 license (compatible with project MIT). Deliberate Phase-2 dependency addition.
     implementation("com.tom-roush:pdfbox-android:2.0.27.0")
+
+    // Unit test infrastructure — JUnit 4 for pure-Kotlin/JVM tests.
+    testImplementation("junit:junit:4.13.2")
 }

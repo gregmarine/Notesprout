@@ -65,7 +65,7 @@ New package: `com.notesprout.android.data.backup` (the existing empty `sync/` di
 **Goal:** All persistence plumbing for backup state, no UI, no actual file copying. App behaves
 exactly as before to the user; existing notebooks load unchanged (JSON back-compat).
 
-**Status:** ☐ Not started
+**Status:** ☑ Complete
 
 ### Files to create
 1. `data/backup/BackupConfig.kt` — `@Serializable data class BackupConfig` with the fields in the
@@ -373,7 +373,7 @@ Track ☑ per item. Record the actual progress-dialog approach chosen.
 
 | Session | Title | Status |
 |---|---|---|
-| 1 | Data model & backup-state foundations | ☐ Not started |
+| 1 | Data model & backup-state foundations | ☑ Complete |
 | 2 | Backup Settings screen & destination config | ☐ Not started |
 | 3 | Backup engine + per-notebook exclude | ☐ Not started |
 | 4 | Docs, edge cases & polish | ☐ Not started |

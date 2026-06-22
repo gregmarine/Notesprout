@@ -7,4 +7,5 @@ object ObjectType {
     const val TEMPLATE = "template"
     const val TEMPLATE_FOLDER = "template_folder"
     const val CLIPBOARD = "clipboard"
+    const val BACKUP_CONFIG = "backup_config"
 }

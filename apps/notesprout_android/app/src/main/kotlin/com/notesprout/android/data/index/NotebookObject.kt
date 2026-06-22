@@ -12,4 +12,7 @@ data class NotebookObject(
     val pageCount: Int = 0,
     @EncodeDefault(EncodeDefault.Mode.ALWAYS) val encrypted: Boolean = false,
     @EncodeDefault(EncodeDefault.Mode.ALWAYS) val keyScope: KeyScope? = null,
+    @EncodeDefault(EncodeDefault.Mode.ALWAYS) val excludeFromBackup: Boolean = false,
+    val lastBackedUpLocal: Long? = null,
+    val lastBackedUpDrive: Long? = null,
 )
