@@ -26,6 +26,7 @@ matching doc before working in that area:**
 | MainActivity features (browse/search/sort/export/ML Kit) + recents | [`docs/mainactivity-and-recents.md`](docs/mainactivity-and-recents.md) |
 | Encryption: SQLCipher model, scopes, key lifecycle, leak hygiene, migration | [`docs/encryption.md`](docs/encryption.md) |
 | Full-notebook export + import: `.soil` format, `notebook_meta`, copy engine, import pipeline (probe/unlock/placement/keying) | [`docs/full-notebook-export.md`](docs/full-notebook-export.md) |
+| Global clipboard (persist across restart, encrypted-source warning) + cross-notebook page copy/move (template remap, smart encryption gate, source-side undo, nav prompt) | [`docs/clipboard-and-page-transfer.md`](docs/clipboard-and-page-transfer.md) |
 
 Standing backlogs at monorepo root: `CODE_REVIEW_PRUNING.md`, `TOOLBAR_CUSTOMIZATION_PLAN.md`
 (Session 8 open), `SUPERNOTE_SUPPORT_PLAN.md`, `NOTEBOOK_ENCRYPTION_PHASE2_PLAN.md` (encryption
