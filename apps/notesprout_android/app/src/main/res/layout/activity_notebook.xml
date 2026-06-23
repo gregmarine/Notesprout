@@ -470,11 +470,13 @@
         android:padding="4dp"
         android:elevation="0dp">
 
-        <androidx.appcompat.widget.AppCompatImageButton
+        <androidx.appcompat.widget.AppCompatButton
             android:id="@+id/btnLassoClearClipboard"
-            style="@style/Widget.Notesprout.ToolbarButton"
-            android:src="@drawable/ic_clipboard_x"
-            android:contentDescription="Clear lasso clipboard" />
+            style="@style/Widget.Notesprout.ToggleTextButton"
+            android:drawableStart="@drawable/ic_lasso_x"
+            android:drawablePadding="6dp"
+            android:text="Clear"
+            android:contentDescription="Clear clipboard" />
 
     </LinearLayout>
 
