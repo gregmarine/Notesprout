@@ -166,6 +166,12 @@ class LinkTargetPickerActivity : AppCompatActivity() {
     private var initialNotebookId: String? = null
     private var initialNotebookPageId: String? = null
 
+    // Pending selection — updated on each tap; committed when OK is pressed.
+    private var pendingTargetKind: String? = null
+    private var pendingPageId: String? = null
+    private var pendingNotebookId: String? = null
+    private var pendingNotebookPageId: String? = null
+
     private val indexRepo: IndexRepository by lazy { IndexRepository(NotesproutIndex.dao()) }
 
     private val inkBlackColor by lazy { ContextCompat.getColor(this, R.color.inkBlack) }
@@ -213,14 +219,16 @@ class LinkTargetPickerActivity : AppCompatActivity() {
         initialNotebookId     = intent.getStringExtra(EXTRA_INITIAL_NOTEBOOK_ID)
         initialNotebookPageId = intent.getStringExtra(EXTRA_INITIAL_NOTEBOOK_PAGE_ID)
 
+        // Pre-populate the pending selection from the initial (editing) target.
+        pendingTargetKind     = initialTargetKind
+        pendingPageId         = initialCurrentPageId
+        pendingNotebookId     = initialNotebookId
+        pendingNotebookPageId = initialNotebookPageId
+
         binding.btnBack.setOnClickListener { finish() }
 
-        // OK commits the current chrome + the link's existing target without re-picking a page.
-        // Only meaningful when editing (a target already exists); hidden when creating a new link.
-        if (initialTargetKind != null) {
-            binding.btnConfirm.visibility = View.VISIBLE
-            binding.btnConfirm.setOnClickListener { confirmInitialTarget() }
-        }
+        binding.btnConfirm.visibility = View.VISIBLE
+        binding.btnConfirm.setOnClickListener { confirmPendingTarget() }
         onBackPressedDispatcher.addCallback(this, object : androidx.activity.OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
                 if (!handleInPickerBack()) finish()
@@ -368,10 +376,6 @@ class LinkTargetPickerActivity : AppCompatActivity() {
         directoryStack.add(entity)
         currentGridPage = 0
         loadBrowseAsync()
-    }
-
-    private fun openOtherNotebook(entity: ObjectEntity) {
-        finishWithOtherNotebook(entity.id)
     }
 
     private fun openOtherNotebookPages(notebookId: String) {
@@ -561,23 +565,24 @@ class LinkTargetPickerActivity : AppCompatActivity() {
 
         when {
             targetTab == TargetTab.CURRENT ->
-                renderPageGrid(pages, highlightId = currentPageHighlightId()) { finishWithCurrentPage(it.id) }
+                renderPageGrid(pages, highlightId = currentPageHighlightId()) { selectCurrentPage(it.id) }
             otherView == OtherView.PAGES ->
                 renderPageGrid(otherPages, highlightId = otherPageHighlightId()) {
-                    finishWithOtherNotebookPage(otherNotebookId ?: return@renderPageGrid, it.id)
+                    selectOtherNotebookPage(otherNotebookId ?: return@renderPageGrid, it.id)
                 }
             else -> renderBrowseGrid()
         }
 
         updatePaginationControls()
+        updateConfirmButton()
     }
 
     private fun currentPageHighlightId(): String? =
-        if (initialTargetKind == TARGET_CURRENT_PAGE) initialCurrentPageId else null
+        if (pendingTargetKind == TARGET_CURRENT_PAGE) pendingPageId else null
 
     private fun otherPageHighlightId(): String? =
-        if (initialTargetKind == TARGET_OTHER_NOTEBOOK_PAGE && otherNotebookId == initialNotebookId)
-            initialNotebookPageId else null
+        if (pendingTargetKind == TARGET_OTHER_NOTEBOOK_PAGE && pendingNotebookId == otherNotebookId)
+            pendingNotebookPageId else null
 
     private fun updateHeaderState() {
         binding.btnTargetCurrent.isSelected = targetTab == TargetTab.CURRENT
@@ -588,10 +593,12 @@ class LinkTargetPickerActivity : AppCompatActivity() {
         binding.btnKindNotebook.isSelected = otherKind == OtherKind.NOTEBOOK
         binding.btnKindPage.isSelected     = otherKind == OtherKind.PAGE
 
-        val showBrowseBar = inOther && otherView == OtherView.BROWSE
+        val showBrowseBar = inOther && (otherView == OtherView.BROWSE || otherView == OtherView.PAGES)
         binding.otherBrowseBar.visibility = if (showBrowseBar) View.VISIBLE else View.GONE
         if (showBrowseBar) {
-            binding.btnBrowseClearSearch.visibility = if (searchQuery.isNotEmpty()) View.VISIBLE else View.GONE
+            val inBrowse = otherView == OtherView.BROWSE
+            binding.btnBrowseClearSearch.visibility = if (inBrowse && searchQuery.isNotEmpty()) View.VISIBLE else View.GONE
+            binding.btnBrowseSearch.visibility = if (inBrowse) View.VISIBLE else View.GONE
             buildBreadcrumbs()
         }
 
@@ -619,7 +626,7 @@ class LinkTargetPickerActivity : AppCompatActivity() {
             return
         }
 
-        binding.btnBrowseBack.isEnabled = directoryStack.size > 1
+        binding.btnBrowseBack.isEnabled = directoryStack.size > 1 || otherView == OtherView.PAGES
 
         val density = resources.displayMetrics.density
         val padH = (8 * density).toInt()
@@ -643,10 +650,32 @@ class LinkTargetPickerActivity : AppCompatActivity() {
                 isClickable = true
                 isFocusable = true
                 setOnClickListener {
+                    // Tapping a folder crumb while viewing pages returns to browse first.
+                    if (otherView == OtherView.PAGES) {
+                        otherView = OtherView.BROWSE
+                        otherNotebookId = null
+                        currentGridPage = 0
+                    }
                     while (directoryStack.size > index + 1) directoryStack.removeLast()
                     currentGridPage = 0
                     loadBrowseAsync()
                 }
+            })
+        }
+
+        // When viewing a notebook's page list, append the notebook name as the final crumb.
+        if (otherView == OtherView.PAGES && otherNotebookName.isNotEmpty()) {
+            container.addView(AppCompatTextView(this).apply {
+                text = "›"
+                setTextColor(inkLightColor)
+                textSize = 16f
+                setPadding(sepPad, 0, sepPad, 0)
+            })
+            container.addView(AppCompatTextView(this).apply {
+                text = otherNotebookName
+                setTextColor(inkBlackColor)
+                textSize = 16f
+                setPadding(padH, 0, padH, 0)
             })
         }
 
@@ -793,8 +822,8 @@ class LinkTargetPickerActivity : AppCompatActivity() {
     private fun buildBrowseCard(item: BrowseItem, spec: GridSpec): LinearLayout {
         val highlighted = item is BrowseItem.Notebook &&
             otherKind == OtherKind.NOTEBOOK &&
-            initialTargetKind == TARGET_OTHER_NOTEBOOK &&
-            item.entity.id == initialNotebookId
+            pendingTargetKind == TARGET_OTHER_NOTEBOOK &&
+            item.entity.id == pendingNotebookId
 
         val group = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -803,7 +832,7 @@ class LinkTargetPickerActivity : AppCompatActivity() {
                 when (item) {
                     is BrowseItem.Folder   -> navigateIntoFolder(item.entity)
                     is BrowseItem.Notebook ->
-                        if (otherKind == OtherKind.NOTEBOOK) openOtherNotebook(item.entity)
+                        if (otherKind == OtherKind.NOTEBOOK) selectOtherNotebook(item.entity)
                         else openOtherNotebookPages(item.entity.id, item.entity.name)
                 }
             }
@@ -913,7 +942,50 @@ class LinkTargetPickerActivity : AppCompatActivity() {
         binding.btnLastPage.isEnabled  = !atLast
     }
 
+    // ── Selection (tap to select; OK to commit) ───────────────────────────────
+
+    private fun selectCurrentPage(pageId: String) {
+        pendingTargetKind     = TARGET_CURRENT_PAGE
+        pendingPageId         = pageId
+        pendingNotebookId     = null
+        pendingNotebookPageId = null
+        render()
+    }
+
+    private fun selectOtherNotebook(entity: ObjectEntity) {
+        pendingTargetKind     = TARGET_OTHER_NOTEBOOK
+        pendingNotebookId     = entity.id
+        pendingPageId         = null
+        pendingNotebookPageId = null
+        render()
+    }
+
+    private fun selectOtherNotebookPage(notebookId: String, pageId: String) {
+        pendingTargetKind     = TARGET_OTHER_NOTEBOOK_PAGE
+        pendingNotebookId     = notebookId
+        pendingNotebookPageId = pageId
+        pendingPageId         = null
+        render()
+    }
+
+    private fun updateConfirmButton() {
+        binding.btnConfirm.isEnabled = pendingTargetKind != null
+    }
+
     // ── Result ────────────────────────────────────────────────────────────────
+
+    private fun confirmPendingTarget() {
+        when (pendingTargetKind) {
+            TARGET_CURRENT_PAGE ->
+                pendingPageId?.let { finishWithCurrentPage(it) }
+            TARGET_OTHER_NOTEBOOK ->
+                pendingNotebookId?.let { finishWithOtherNotebook(it) }
+            TARGET_OTHER_NOTEBOOK_PAGE -> {
+                val nb = pendingNotebookId; val pg = pendingNotebookPageId
+                if (nb != null && pg != null) finishWithOtherNotebookPage(nb, pg)
+            }
+        }
+    }
 
     private fun finishWithCurrentPage(pageId: String) {
         finishWithResult {
@@ -934,25 +1006,6 @@ class LinkTargetPickerActivity : AppCompatActivity() {
             putExtra(EXTRA_RESULT_TARGET_KIND, TARGET_OTHER_NOTEBOOK_PAGE)
             putExtra(EXTRA_RESULT_NOTEBOOK_ID, notebookId)
             putExtra(EXTRA_RESULT_PAGE_ID, pageId)
-        }
-    }
-
-    /**
-     * Commit the current [selectedChrome] against the link's existing (pre-selected) target — used by
-     * the OK button so a chrome-only edit doesn't require re-tapping the page/notebook. Falls back to
-     * just closing if a required id is somehow missing (defensive; shouldn't happen when editing).
-     */
-    private fun confirmInitialTarget() {
-        when (initialTargetKind) {
-            TARGET_CURRENT_PAGE ->
-                initialCurrentPageId?.let { finishWithCurrentPage(it) } ?: finish()
-            TARGET_OTHER_NOTEBOOK ->
-                initialNotebookId?.let { finishWithOtherNotebook(it) } ?: finish()
-            TARGET_OTHER_NOTEBOOK_PAGE -> {
-                val nb = initialNotebookId; val pg = initialNotebookPageId
-                if (nb != null && pg != null) finishWithOtherNotebookPage(nb, pg) else finish()
-            }
-            else -> finish()
         }
     }
 
