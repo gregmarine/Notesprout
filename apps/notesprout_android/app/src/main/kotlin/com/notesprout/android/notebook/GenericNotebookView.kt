@@ -1012,7 +1012,7 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
         }
         val dw = maxX - minX; val dh = maxY - minY
         val diagonal = Math.sqrt((dw * dw + dh * dh).toDouble()).toFloat()
-        if (diagonal < 10f) return false
+        if (diagonal < SCRIBBLE_MIN_DIAGONAL_DP * resources.displayMetrics.density) return false
         if (pathLength / diagonal < SCRIBBLE_DENSITY_RATIO) return false
         val filtered = mutableListOf(points[0])
         for (p in points) {

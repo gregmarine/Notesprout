@@ -9,9 +9,10 @@ Always-active in pen mode (no toggle). A rapid scribble across existing content 
 
 ### Detection heuristic (both drawing engines)
 
-A completed stroke is a **scribble candidate** when BOTH hold:
-1. **High ink density:** `pathLength / boundingBoxDiagonal ≥ SCRIBBLE_DENSITY_RATIO` (4.0). Both values are computed from the stroke's point array.
-2. **Zigzag tightness:** at least `SCRIBBLE_MIN_DIRECTION_REVERSALS` (3) direction reversals on the noise-filtered path (consecutive movement vectors whose dot product is negative). Points < 2 px apart are collapsed before counting.
+A completed stroke is a **scribble candidate** when ALL THREE hold:
+1. **Minimum size:** `boundingBoxDiagonal ≥ SCRIBBLE_MIN_DIAGONAL_DP` (40 dp). Prevents tiny jitter-heavy micro-strokes from accidentally satisfying the density ratio.
+2. **High ink density:** `pathLength / boundingBoxDiagonal ≥ SCRIBBLE_DENSITY_RATIO` (3.0). Both values are computed from the stroke's point array. A natural 3-pass back-and-forth satisfies this.
+3. **Zigzag tightness:** at least `SCRIBBLE_MIN_DIRECTION_REVERSALS` (2) direction reversals on the noise-filtered path (consecutive movement vectors whose dot product is negative). Points < 2 px apart are collapsed before counting.
 
 Detection runs at **pen lift** (`onEndRawDrawing` on Onyx, `ACTION_UP` on Generic), after the full stroke is captured. On Onyx, all points from the gesture are accumulated in `currentGesturePoints / currentGestureStrokeIds` (cleared on `onBeginRawDrawing`). On Generic, `commitActiveStroke()` supplies the last stroke.
 
@@ -28,8 +29,9 @@ If the hit test returns **empty** the scribble is treated as a normal stroke and
 
 | Constant | Default | Purpose |
 |---|---|---|
-| `SCRIBBLE_DENSITY_RATIO` | `4.0f` | Minimum pathLength / diagonal ratio |
-| `SCRIBBLE_MIN_DIRECTION_REVERSALS` | `3` | Minimum zigzag reversals |
+| `SCRIBBLE_DENSITY_RATIO` | `3.0f` | Minimum pathLength / diagonal ratio |
+| `SCRIBBLE_MIN_DIRECTION_REVERSALS` | `2` | Minimum zigzag reversals |
+| `SCRIBBLE_MIN_DIAGONAL_DP` | `40f` | Minimum bounding-box diagonal (dp); prevents tiny jitter-strokes from qualifying |
 | `SCRIBBLE_BBOX_PENETRATION_DP` | `14f` | Minimum travel inside heading/text bbox (dp) |
 | `SCRIBBLE_STROKE_TOUCH_RADIUS_DP` | `8f` | Proximity radius for stroke-to-stroke touch (dp) |
 

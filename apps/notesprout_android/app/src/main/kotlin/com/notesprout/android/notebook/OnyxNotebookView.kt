@@ -882,7 +882,7 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
         }
         val dw = maxX - minX; val dh = maxY - minY
         val diagonal = Math.sqrt((dw * dw + dh * dh).toDouble()).toFloat()
-        if (diagonal < 10f) return false
+        if (diagonal < SCRIBBLE_MIN_DIAGONAL_DP * resources.displayMetrics.density) return false
         if (pathLength / diagonal < SCRIBBLE_DENSITY_RATIO) return false
 
         // Noise-filter: only keep points more than 2 px apart to reduce stylus jitter.

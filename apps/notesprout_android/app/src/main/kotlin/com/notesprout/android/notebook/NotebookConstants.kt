@@ -14,16 +14,22 @@ const val SNAP_THRESHOLD_DP = 20f
 
 /**
  * Minimum ratio of total path length to bounding-box diagonal for a stroke to
- * qualify as a scribble candidate. A value of 4.0 means the pen traveled at least
- * 4× the straight-line extent of the gesture, indicating a dense back-and-forth.
+ * qualify as a scribble candidate. A value of 3.0 means the pen traveled at least
+ * 3× the straight-line extent of the gesture — satisfied by a natural 3-pass scribble.
  */
-const val SCRIBBLE_DENSITY_RATIO = 4.0f
+const val SCRIBBLE_DENSITY_RATIO = 3.0f
 
 /**
  * Minimum number of significant direction reversals (consecutive movement vectors
  * whose dot product is negative) in a scribble candidate gesture.
  */
-const val SCRIBBLE_MIN_DIRECTION_REVERSALS = 3
+const val SCRIBBLE_MIN_DIRECTION_REVERSALS = 2
+
+/**
+ * Minimum bounding-box diagonal (dp) for a stroke to qualify as a scribble candidate.
+ * Prevents tiny jitter-heavy micro-strokes from accidentally satisfying the density ratio.
+ */
+const val SCRIBBLE_MIN_DIAGONAL_DP = 40f
 
 /**
  * Minimum distance (dp) the scribble path must travel INSIDE a heading or text
