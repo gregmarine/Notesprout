@@ -68,6 +68,13 @@ When `performLassoCopy` / `performLassyCut` runs and the current notebook is enc
 2. Continue → proceed (in-memory + persist).
 3. Cancel → abort. For **Cut**, abort *before* the soft-delete (no data loss).
 
+### Clear button (`btnLassoClearClipboard`)
+
+The lasso clipboard popup contains a **Clear** button (`AppCompatButton`, `ToggleTextButton` style)
+with `ic_lasso_x` (lasso oval with ×-mark) as `drawableStart` and the label "Clear". Tapping it
+calls `clearClipboard()` in `NotebookActivity`, which clears both the in-memory singleton and the
+persisted row (`appScope`). The button is visible only when `NotesproutClipboard.hasContent()`.
+
 ### Single-slot model
 
 Copy/Cut always replaces the previous payload. There is no clipboard history. This matches the

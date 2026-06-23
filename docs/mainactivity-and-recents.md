@@ -281,6 +281,10 @@ headings, built by `toc/TocRepository.buildTocTree(): List<TocNode>`.
   so a child row shifts wholesale under its parent. Recognized rows show `node.title`; unrecognized rows
   render a `HeadingThumbnailView` from `node.heading`. The toggle button consumes its own click, so
   tapping it expands/collapses without navigating; tapping anywhere else on the row dismisses + navigates.
+- **Active-page auto-expand** — when the TOC opens, if the active page maps to an H2 or H3 node its
+  full ancestor chain is pre-added to `expanded` before the first render. H2 pre-expands its H1
+  parent; H3 pre-expands both H2 and H1. H1 pages and pages not in the TOC open fully collapsed.
+  Logic lives in `TocDialog` right after `resolveActiveNode()`, before `resolveHighlightNodeId()`.
 - **Active-page highlight** — `resolveHighlightNodeId()` finds the active node (last node with
   `pageIndex ≤ currentPageIndex`); if that node is collapsed away, it walks a `parentMap` up to the
   nearest **visible ancestor** and highlights that row (`bg_toc_active_entry`). The dialog also opens on

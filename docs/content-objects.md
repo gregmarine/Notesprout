@@ -6,7 +6,7 @@
 ## Heading Objects
 
 - `type = "heading"` rows in `.soil`; `HeadingObject` serialized to `data`; `HeadingStroke` is the in-memory representation
-- Headings render as grey-fill backgrounds with embedded strokes, or 20sp inkBlack canvas text when `recognizedText` is non-null
+- Headings render **without a background fill** — strokes draw directly on the white page, or 20sp inkBlack canvas text when `recognizedText` is non-null. No grey rect is drawn at any render site.
 - `recognizedText: String?` — null = render strokes; non-null = canvas text (populated by ML Kit at creation)
 - All lasso actions (move, copy, cut, paste, delete, eraser) treat headings as first-class participants
 - `copyPageAfter()` and `copyPageAfterRaw()` copy all object types, not just strokes
@@ -89,7 +89,7 @@ Dispatch is centralized in `drawTextObject(canvas, textRender, widthPx)` in each
 - `text.isBlank()` AND `strokes` non-empty → render embedded strokes (unrecognized state)
 - `text.isBlank()` AND `strokes` null/empty → render nothing
 
-Rendering: `StaticLayout` + `TextPaint` at 16sp `Color.BLACK`. Entry point: `TextObjectRenderer.draw(canvas, textRender, widthPx, paint, density)`.
+Rendering: `StaticLayout` + `TextPaint` at **24sp** `Color.BLACK`. Entry point: `TextObjectRenderer.draw(canvas, textRender, widthPx, paint, density)`.
 
 ### Markdown Engine (`core/markdown/`)
 
