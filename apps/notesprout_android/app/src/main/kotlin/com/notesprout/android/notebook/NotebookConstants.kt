@@ -10,10 +10,6 @@ const val SNAP_MARGIN_DP = 44f
 /** Maximum distance (dp) between a selection anchor and a guide for snapping to engage. */
 const val SNAP_THRESHOLD_DP = 20f
 
-/** Grey fill drawn behind all strokes that belong to a heading object.
- *  Must be dark enough to be visible on e-ink (0xE8 washes out completely on BOOX). */
-const val HEADING_BACKGROUND_COLOR = 0xFFBBBBBB.toInt()
-
 // ── Scribble-to-Erase detection constants ────────────────────────────────────
 
 /**

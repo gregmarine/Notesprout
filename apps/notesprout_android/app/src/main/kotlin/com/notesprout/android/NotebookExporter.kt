@@ -35,7 +35,6 @@ import com.notesprout.android.data.NotebookMetadata
 import com.notesprout.android.data.SoilDatabase
 import com.notesprout.android.data.StrokeData
 import com.notesprout.android.R
-import com.notesprout.android.notebook.HEADING_BACKGROUND_COLOR
 import kotlinx.serialization.json.Json
 import com.notesprout.android.data.parseBoundingBox
 import java.io.File
@@ -403,11 +402,6 @@ object NotebookExporter {
             canvas.drawBitmap(it, null, RectF(0f, 0f, w.toFloat(), h.toFloat()), null)
         }
 
-        val headingPaint = Paint().apply {
-            style = Paint.Style.FILL
-            color = HEADING_BACKGROUND_COLOR
-            isAntiAlias = false
-        }
         val strokePaint = Paint().apply {
             isAntiAlias = true
             color = Color.BLACK
@@ -427,7 +421,6 @@ object NotebookExporter {
 
         fun drawHeadingList(list: List<HeadingStroke>) {
             for (heading in list) {
-                canvas.drawRect(heading.boundingBox, headingPaint)
                 if (heading.recognizedText != null) {
                     val box = heading.boundingBox
                     val paddingPx = 8f * densityDp

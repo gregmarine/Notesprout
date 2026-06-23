@@ -11,8 +11,8 @@ import kotlinx.serialization.encoding.Encoder
  * Render-time representation of a heading row — NOT stored in the DB.
  * Built at load time from `type = "heading"` rows in the notebook table.
  *
- * The grey background is drawn using [boundingBox]; the embedded [strokes]
- * are replayed on top of it using the normal stroke rendering path.
+ * The embedded [strokes] are replayed using the normal stroke rendering path;
+ * [boundingBox] is used for hit-testing, erase, and lasso detection.
  *
  * [@Serializable] so heading data can be carried in undo/redo actions
  * (e.g. [StrokesMoved], [LassoCut], [LassoDeleted], [LassoErased]).

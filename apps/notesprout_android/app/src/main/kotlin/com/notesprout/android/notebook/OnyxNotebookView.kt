@@ -115,12 +115,6 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
         textSize = textObjectTextSizePx
     }
 
-    private val headingPaint = Paint().apply {
-        style = Paint.Style.FILL
-        color = HEADING_BACKGROUND_COLOR
-        isAntiAlias = false
-    }
-
     // Link chrome — 1dp inkBlack outline/underline/chevron drawn around a link's union bbox.
     private val linkChromePaint = Paint().apply {
         style = Paint.Style.STROKE
@@ -564,7 +558,6 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
      */
     private fun drawLinkObject(canvas: Canvas, link: LinkRender, widthPx: Int) {
         for (heading in link.headings) {
-            canvas.drawRect(heading.boundingBox, headingPaint)
             if (heading.recognizedText != null) {
                 drawHeadingText(canvas, heading)
             } else {
@@ -651,7 +644,6 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
             canvas.drawBitmap(tb, null, RectF(0f, 0f, width.toFloat(), height.toFloat()), null)
         }
         for (heading in headings) {
-            canvas.drawRect(heading.boundingBox, headingPaint)
             if (heading.recognizedText != null) {
                 drawHeadingText(canvas, heading)
             } else {
@@ -1350,7 +1342,6 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
             val save = canvas.save()
             canvas.translate(dragDx, dragDy)
             for (heading in dragOriginalHeadings) {
-                canvas.drawRect(heading.boundingBox, headingPaint)
                 if (heading.recognizedText != null) {
                     drawHeadingText(canvas, heading)
                 } else {
@@ -1920,7 +1911,6 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
         canvas.drawColor(android.graphics.Color.WHITE)
         templateBitmap?.let { canvas.drawBitmap(it, null, RectF(0f, 0f, w.toFloat(), h.toFloat()), null) }
         for (heading in headings) {
-            canvas.drawRect(heading.boundingBox, headingPaint)
             if (heading.recognizedText != null) {
                 drawHeadingText(canvas, heading)
             } else {
@@ -2018,7 +2008,6 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
         // Transparent base — do NOT fill with white, do NOT paint the template.
         val snapshotCanvas = Canvas(bmp)
         for (heading in headings) {
-            snapshotCanvas.drawRect(heading.boundingBox, headingPaint)
             if (heading.recognizedText != null) {
                 drawHeadingText(snapshotCanvas, heading)
             } else {

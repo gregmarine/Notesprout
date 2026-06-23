@@ -5002,7 +5002,7 @@ class NotebookActivity : AppCompatActivity() {
 
     /**
      * Convert the [selectedStrokes] lasso selection into a heading object.
-     * [boundingBox] is the padded selection RectF used as the heading's visual background.
+     * [boundingBox] is the padded selection RectF used for hit-testing and layout.
      * Must be called on [Dispatchers.IO]; switches to Main for in-memory + UI updates.
      */
     private suspend fun createHeadingFromStrokes(
@@ -5078,9 +5078,8 @@ class NotebookActivity : AppCompatActivity() {
             )
         }
 
-        // Invalidate any existing page snapshot — it predates the heading and doesn't
-        // include the heading background.  The next close will capture a fresh snapshot
-        // via captureSnapshot() which now includes heading backgrounds.
+        // Invalidate any existing page snapshot — it predates the heading.
+        // The next close will capture a fresh snapshot via captureSnapshot().
         invalidatePageSnapshot(db, pageId)
 
         withContext(Dispatchers.Main) {

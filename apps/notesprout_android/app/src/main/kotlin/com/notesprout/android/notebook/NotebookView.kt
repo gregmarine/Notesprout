@@ -435,8 +435,8 @@ interface NotebookView {
     // ── Option B: off-thread bitmap pre-build ─────────────────────────────────
 
     /**
-     * Build the full render bitmap (white → [templateBitmap] → [headings] grey fills +
-     * embedded strokes → [strokes]) on a background thread and return it, or null if
+     * Build the full render bitmap (white → [templateBitmap] → [headings] embedded strokes →
+     * [strokes]) on a background thread and return it, or null if
      * the view isn't laid out yet.
      *
      * [headings] defaults to empty — existing call sites that don't yet pass headings
