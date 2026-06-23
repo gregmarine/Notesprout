@@ -154,6 +154,19 @@ class TocDialog(
                     .filter { it.pageIndex <= currentPageIndex }
                     .maxByOrNull { it.pageIndex }
 
+                // If the active page is in the TOC (H2 or H3), pre-expand its ancestor chain so
+                // the node is visible and selected when the panel opens — instead of collapsing
+                // away into its parent.
+                val active = activeNode
+                if (active != null) {
+                    var ancestor: TocNode? = parentMap[active.heading.id]
+                    while (ancestor != null) {
+                        expanded.add(ancestor.heading.id)
+                        ancestor = parentMap[ancestor.heading.id]
+                    }
+                    if (expanded.isNotEmpty()) visibleNodes = computeVisibleNodes()
+                }
+
                 // Start on the TOC page that shows the resolved highlight node.
                 val highlightId = resolveHighlightNodeId()
                 val highlightIndex = visibleNodes.indexOfFirst { it.heading.id == highlightId }
