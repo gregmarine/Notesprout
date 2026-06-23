@@ -1932,7 +1932,6 @@ class MainActivity : AppCompatActivity() {
         if (inPicker) {
             updatePickerTitle()
             binding.btnNewNotebook.visibility   = View.GONE
-            binding.btnNewFolder.visibility     = View.GONE
             binding.btnMore.visibility          = View.GONE
             binding.btnSearch.visibility        = View.GONE
             binding.btnClearSearch.visibility   = View.GONE
