@@ -31,7 +31,8 @@ matching doc before working in that area:**
 
 Standing backlogs at monorepo root: `CODE_REVIEW_PRUNING.md`, `TOOLBAR_CUSTOMIZATION_PLAN.md`
 (Session 8 open), `SUPERNOTE_SUPPORT_PLAN.md`, `NOTEBOOK_ENCRYPTION_PHASE2_PLAN.md` (encryption
-Phase 2 — 9 sessions, not started).
+Phase 2 — 9 sessions, not started), `NOTEBOOK_SIZE_RESEARCH.md` (research only — `.soil` size
+reduction in-use + backup compaction; nothing decided/scheduled).
 
 ---
 
