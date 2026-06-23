@@ -70,7 +70,7 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
     private var links: List<LinkRender> = emptyList()
 
     private val textObjectTextSizePx = android.util.TypedValue.applyDimension(
-        android.util.TypedValue.COMPLEX_UNIT_SP, 16f, resources.displayMetrics
+        android.util.TypedValue.COMPLEX_UNIT_SP, 24f, resources.displayMetrics
     )
     private val textObjectPaint = android.text.TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.BLACK
@@ -776,8 +776,9 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
     }
 
     /** Draw a link's visual indicator: none, an underline, or a dotted box with a corner chevron.
-     *  When [iconOutside] is true (text/heading links), the icon sits 6dp to the right of the
-     *  content bbox and the dotted box extends to encompass it. */
+     *  For text/heading links [iconOutside]=true: the stored bbox already includes the gap + icon
+     *  room baked in at creation (6dp gap + 14dp icon + 3dp inner pad), so the chrome box IS the
+     *  bbox and the icon is placed inside at bottom-right. */
     private fun drawLinkChrome(canvas: Canvas, box: RectF, chrome: LinkChrome, iconOutside: Boolean = false) {
         when (chrome) {
             LinkChrome.NONE -> {}
@@ -788,10 +789,9 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
                 val iconSize = (14f * d).toInt()
                 val pad = 3f * d
                 if (iconOutside) {
-                    val gap = 6f * d
-                    val chromeBox = RectF(box.left, box.top, box.right + gap + iconSize + pad, box.bottom)
-                    canvas.drawRect(chromeBox, linkChromeDashPaint)
-                    val iconLeft = (box.right + gap).toInt()
+                    // bbox already contains the full visual extent; draw it as-is.
+                    canvas.drawRect(box, linkChromeDashPaint)
+                    val iconLeft = (box.right - iconSize - pad).toInt()
                     val iconBottom = (box.bottom - pad).toInt()
                     AppCompatResources.getDrawable(context, R.drawable.ic_link)?.let { icon ->
                         icon.setBounds(iconLeft, iconBottom - iconSize, iconLeft + iconSize, iconBottom)

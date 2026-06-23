@@ -4505,7 +4505,7 @@ class NotebookActivity : AppCompatActivity() {
             return strokeBox
         }
         val textPaint = TextPaint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
-            textSize = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 16f, resources.displayMetrics)
+            textSize = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 24f, resources.displayMetrics)
         }
         val (measuredW, measuredH) = TextObjectRenderer.measure(recognizedText, resources.displayMetrics.widthPixels, textPaint, resources.displayMetrics.density, singleLine = true)
         return RectF(
@@ -5035,7 +5035,7 @@ class NotebookActivity : AppCompatActivity() {
         val pad = 8f * resources.displayMetrics.density
         if (storedText != null) {
             val textPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
-                textSize = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 16f, resources.displayMetrics)
+                textSize = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 24f, resources.displayMetrics)
             }
             val (measuredW, measuredH) = TextObjectRenderer.measure(storedText, resources.displayMetrics.widthPixels, textPaint, resources.displayMetrics.density, singleLine = true)
             boundsToConvert.set(
@@ -5165,7 +5165,7 @@ class NotebookActivity : AppCompatActivity() {
             // Resize bounding box to fit the recognised text (same approach as heading conversion).
             val paint = TextPaint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
                 color    = android.graphics.Color.BLACK
-                textSize = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 16f, resources.displayMetrics)
+                textSize = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 24f, resources.displayMetrics)
             }
             val pageW = drawingView.asView().width
             val (measuredW, measuredH) = withContext(Dispatchers.Default) {
@@ -5639,7 +5639,7 @@ class NotebookActivity : AppCompatActivity() {
         // Re-apply the heading prefix so stored text stays prefixed (level and prefix always agree).
         val prefixedText = HeadingObject.applyLevel(newText, level) ?: newText
         val textPaint = TextPaint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
-            textSize = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 16f, resources.displayMetrics)
+            textSize = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 24f, resources.displayMetrics)
         }
         val paddingPx = 8f * resources.displayMetrics.density
         val pageWidth = resources.displayMetrics.widthPixels
@@ -5712,7 +5712,7 @@ class NotebookActivity : AppCompatActivity() {
         val newBox: RectF
         if (newText != null) {
             val textPaint = TextPaint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
-                textSize = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 16f, resources.displayMetrics)
+                textSize = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 24f, resources.displayMetrics)
             }
             val paddingPx = 8f * resources.displayMetrics.density
             val pageWidth = resources.displayMetrics.widthPixels
@@ -6185,7 +6185,7 @@ class NotebookActivity : AppCompatActivity() {
         lifecycleScope.launch {
             val paint = TextPaint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
                 color    = android.graphics.Color.BLACK
-                textSize = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 16f, resources.displayMetrics)
+                textSize = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 24f, resources.displayMetrics)
             }
             val (measuredW, measuredH) = withContext(Dispatchers.Default) {
                 TextObjectRenderer.measure(markdown, pageW, paint, resources.displayMetrics.density)
@@ -6354,7 +6354,7 @@ class NotebookActivity : AppCompatActivity() {
         lifecycleScope.launch {
             val paint = TextPaint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
                 color    = android.graphics.Color.BLACK
-                textSize = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 16f, resources.displayMetrics)
+                textSize = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 24f, resources.displayMetrics)
             }
             val (measuredW, measuredH) = withContext(Dispatchers.Default) {
                 TextObjectRenderer.measure(newMarkdown, pageW, paint, resources.displayMetrics.density)
@@ -7399,7 +7399,7 @@ class NotebookActivity : AppCompatActivity() {
                 val updated = headingObj.copy(recognizedText = targetText)
                 if (targetText != null) {
                     val textPaint = TextPaint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
-                        textSize = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 16f, resources.displayMetrics)
+                        textSize = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 24f, resources.displayMetrics)
                     }
                     val paddingPx = 8f * resources.displayMetrics.density
                     val box = row.parseBoundingBox() ?: return@withContext
@@ -8194,7 +8194,7 @@ class NotebookActivity : AppCompatActivity() {
                 val updated = headingObj.copy(recognizedText = targetText)
                 if (targetText != null) {
                     val textPaint = TextPaint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
-                        textSize = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 16f, resources.displayMetrics)
+                        textSize = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 24f, resources.displayMetrics)
                     }
                     val paddingPx = 8f * resources.displayMetrics.density
                     val box = row.parseBoundingBox() ?: return@withContext

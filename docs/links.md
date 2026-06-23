@@ -190,7 +190,10 @@ to DB rows, so stale references can't linger.
 5. Calls `drawLinkChrome()` with `iconOutside = link.headings.isNotEmpty() || link.textObjects.isNotEmpty()`
 
 `drawLinkChrome()` handles the three `LinkChrome` variants. For `DOTTED_CHEVRON` with
-`iconOutside = true`, the dashed box right edge extends to `bbox.right + 6dp + 14dp + 3dp`.
+`iconOutside = true`, the dashed box IS the stored bbox (which already includes the 6dp gap +
+14dp icon + 3dp inner pad baked in at creation). The icon is placed inside the box at bottom-right
+(`box.right - 3dp - 14dp` to `box.right - 3dp`). The stored bbox is therefore the full visual
+extent, so lasso overlap tests against `link.boundingBox` cover the entire chrome.
 
 Links are drawn after page-rule lines and before top-level strokes (see `redrawCanvas` order).
 
