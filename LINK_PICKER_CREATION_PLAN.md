@@ -172,7 +172,7 @@ device): use `resources.displayMetrics.widthPixels.toFloat()` / `heightPixels.to
 
 ---
 
-### Session 1 — "This Notebook": create a new page  ·  Status: ☐ NOT STARTED
+### Session 1 — "This Notebook": create a new page  ·  Status: ✅ DONE
 
 **Scope:** the new-page button for the current notebook, plus the shared `insertBlankPageRaw` helper
 and the NotebookActivity refresh-on-return.
@@ -537,7 +537,7 @@ viewing a notebook's pages).
 
 | Session | Title | Status |
 |---|---|---|
-| 1 | This Notebook — new page (+ `insertBlankPageRaw`, refresh-on-return) | ☐ NOT STARTED |
+| 1 | This Notebook — new page (+ `insertBlankPageRaw`, refresh-on-return) | ✅ DONE |
 | 2 | Other Notebook — new folder + notebook (+ `NotebookFactory`) | ☐ NOT STARTED |
 | 3 | Other Notebook Page kind — new page in target notebook | ☐ NOT STARTED |
 | 4 | Wrap-up — docs & polish | ☐ NOT STARTED |

@@ -26,6 +26,7 @@ import com.notesprout.android.crypto.KeyResolver
 import com.notesprout.android.crypto.KeySession
 import com.notesprout.android.crypto.SoilCrypto
 import com.notesprout.android.data.LinkChrome
+import com.notesprout.android.data.insertBlankPageRaw
 import com.notesprout.android.data.index.IndexRepository
 import com.notesprout.android.data.index.NotebookObject
 import com.notesprout.android.data.index.NotesproutIndex
@@ -179,6 +180,8 @@ class LinkTargetPickerActivity : AppCompatActivity() {
 
     private val decodeJobs = mutableListOf<Job>()
 
+    private var currentNotebookPagesChanged = false
+
     // ── Swipe gesture (left/right to paginate) ────────────────────────────────
 
     private val gestureDetector by lazy {
@@ -272,6 +275,8 @@ class LinkTargetPickerActivity : AppCompatActivity() {
                 }
             }
         )
+
+        binding.btnNewPage.setOnClickListener { onNewPageTapped() }
 
         loadCurrentPagesAsync()
         applyInitialTarget()
@@ -585,6 +590,9 @@ class LinkTargetPickerActivity : AppCompatActivity() {
             pendingNotebookPageId else null
 
     private fun updateHeaderState() {
+        // Session 1: CURRENT only. Session 3 extends this condition.
+        binding.btnNewPage.visibility = if (targetTab == TargetTab.CURRENT) View.VISIBLE else View.GONE
+
         binding.btnTargetCurrent.isSelected = targetTab == TargetTab.CURRENT
         binding.btnTargetOther.isSelected   = targetTab == TargetTab.OTHER
 
@@ -970,6 +978,53 @@ class LinkTargetPickerActivity : AppCompatActivity() {
 
     private fun updateConfirmButton() {
         binding.btnConfirm.isEnabled = pendingTargetKind != null
+    }
+
+    // ── In-picker page creation (Session 1: This Notebook) ────────────────────
+
+    private fun onNewPageTapped() {
+        // Session 1 handles CURRENT only; Session 3 adds the OTHER/PAGES branch.
+        if (targetTab != TargetTab.CURRENT) return
+        val selectedId = if (pendingTargetKind == TARGET_CURRENT_PAGE) pendingPageId else null
+        if (selectedId != null) {
+            ActionSheetDialog(this)
+                .title("Insert Page")
+                .addAction(R.drawable.ic_insert_page_before, "Insert Before") {
+                    createCurrentPage(anchorPageId = selectedId, before = true)
+                }
+                .addAction(R.drawable.ic_insert_page_after, "Insert After") {
+                    createCurrentPage(anchorPageId = selectedId, before = false)
+                }
+                .show()
+        } else {
+            createCurrentPage(anchorPageId = null, before = false)
+        }
+    }
+
+    private fun createCurrentPage(anchorPageId: String?, before: Boolean) {
+        val path = notebookSoilPath ?: return
+        val w = resources.displayMetrics.widthPixels.toFloat()
+        val h = resources.displayMetrics.heightPixels.toFloat()
+        lifecycleScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                insertBlankPageRaw(path, anchorPageId, before, w, h, KeySession.getFor(notebookId))
+            } ?: run {
+                android.widget.Toast.makeText(
+                    this@LinkTargetPickerActivity, "Could not create page", android.widget.Toast.LENGTH_SHORT
+                ).show()
+                return@launch
+            }
+            currentNotebookPagesChanged = true
+            pages = withContext(Dispatchers.IO) {
+                loadPagesFromSoil(path, KeySession.getFor(notebookId))
+            }
+            selectCurrentPage(result.first)
+            val spec = gridSpec
+            if (spec != null && spec.itemsPerPage > 0) {
+                currentGridPage = result.second / spec.itemsPerPage
+            }
+            render()
+        }
     }
 
     // ── Result ────────────────────────────────────────────────────────────────

@@ -595,6 +595,10 @@ class NotebookActivity : AppCompatActivity() {
     private val linkPickerLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
+        // Refresh the page list on every return — the picker may have inserted a page into
+        // the current notebook's .soil even if the user then cancelled.
+        reloadPagesPreservingCurrent()
+
         val editId = pendingLinkEditId
         val strokes  = pendingLinkStrokes
         val headings = pendingLinkHeadings
@@ -636,29 +640,50 @@ class NotebookActivity : AppCompatActivity() {
 
     /** Launch the link target picker, pre-selecting [initialChrome]/[initialTarget] when editing. */
     private fun launchLinkPicker(initialChrome: LinkChrome?, initialTarget: LinkTarget?) {
-        val intent = Intent(this, LinkTargetPickerActivity::class.java).apply {
-            putExtra(LinkTargetPickerActivity.EXTRA_NOTEBOOK_ID, notebookId)
-            putExtra(LinkTargetPickerActivity.EXTRA_NOTEBOOK_NAME, notebookDisplayName)
-            putExtra(LinkTargetPickerActivity.EXTRA_CURRENT_PAGE_INDEX, currentPageIndex)
-            if (initialChrome != null) putExtra(LinkTargetPickerActivity.EXTRA_INITIAL_CHROME, initialChrome.name)
-            when (initialTarget) {
-                is LinkTarget.CurrentNotebookPage -> {
-                    putExtra(LinkTargetPickerActivity.EXTRA_INITIAL_TARGET_KIND, LinkTargetPickerActivity.TARGET_CURRENT_PAGE)
-                    putExtra(LinkTargetPickerActivity.EXTRA_INITIAL_PAGE_ID, initialTarget.pageId)
-                }
-                is LinkTarget.OtherNotebook -> {
-                    putExtra(LinkTargetPickerActivity.EXTRA_INITIAL_TARGET_KIND, LinkTargetPickerActivity.TARGET_OTHER_NOTEBOOK)
-                    putExtra(LinkTargetPickerActivity.EXTRA_INITIAL_NOTEBOOK_ID, initialTarget.notebookId)
-                }
-                is LinkTarget.OtherNotebookPage -> {
-                    putExtra(LinkTargetPickerActivity.EXTRA_INITIAL_TARGET_KIND, LinkTargetPickerActivity.TARGET_OTHER_NOTEBOOK_PAGE)
-                    putExtra(LinkTargetPickerActivity.EXTRA_INITIAL_NOTEBOOK_ID, initialTarget.notebookId)
-                    putExtra(LinkTargetPickerActivity.EXTRA_INITIAL_NOTEBOOK_PAGE_ID, initialTarget.pageId)
-                }
-                null -> { /* creating a new link — no pre-selection */ }
+        val db = soilDatabase ?: return
+        lifecycleScope.launch {
+            val snapshot  = drawingView.captureSnapshot()
+            val pageId    = currentPageId
+            withContext(Dispatchers.IO) {
+                if (snapshot != null && pageId.isNotEmpty()) persistSnapshot(db, pageId, snapshot)
+                saveStrokes(db)
             }
+            val intent = Intent(this@NotebookActivity, LinkTargetPickerActivity::class.java).apply {
+                putExtra(LinkTargetPickerActivity.EXTRA_NOTEBOOK_ID, notebookId)
+                putExtra(LinkTargetPickerActivity.EXTRA_NOTEBOOK_NAME, notebookDisplayName)
+                putExtra(LinkTargetPickerActivity.EXTRA_CURRENT_PAGE_INDEX, currentPageIndex)
+                if (initialChrome != null) putExtra(LinkTargetPickerActivity.EXTRA_INITIAL_CHROME, initialChrome.name)
+                when (initialTarget) {
+                    is LinkTarget.CurrentNotebookPage -> {
+                        putExtra(LinkTargetPickerActivity.EXTRA_INITIAL_TARGET_KIND, LinkTargetPickerActivity.TARGET_CURRENT_PAGE)
+                        putExtra(LinkTargetPickerActivity.EXTRA_INITIAL_PAGE_ID, initialTarget.pageId)
+                    }
+                    is LinkTarget.OtherNotebook -> {
+                        putExtra(LinkTargetPickerActivity.EXTRA_INITIAL_TARGET_KIND, LinkTargetPickerActivity.TARGET_OTHER_NOTEBOOK)
+                        putExtra(LinkTargetPickerActivity.EXTRA_INITIAL_NOTEBOOK_ID, initialTarget.notebookId)
+                    }
+                    is LinkTarget.OtherNotebookPage -> {
+                        putExtra(LinkTargetPickerActivity.EXTRA_INITIAL_TARGET_KIND, LinkTargetPickerActivity.TARGET_OTHER_NOTEBOOK_PAGE)
+                        putExtra(LinkTargetPickerActivity.EXTRA_INITIAL_NOTEBOOK_ID, initialTarget.notebookId)
+                        putExtra(LinkTargetPickerActivity.EXTRA_INITIAL_NOTEBOOK_PAGE_ID, initialTarget.pageId)
+                    }
+                    null -> { /* creating a new link — no pre-selection */ }
+                }
+            }
+            linkPickerLauncher.launch(intent)
         }
-        linkPickerLauncher.launch(intent)
+    }
+
+    /** Re-read the page list after an external picker may have inserted current-notebook pages. */
+    private fun reloadPagesPreservingCurrent() {
+        val db = soilDatabase ?: return
+        lifecycleScope.launch {
+            val refreshed = withContext(Dispatchers.IO) { db.notebookDao().getPagesSorted() }
+            pages = refreshed.toMutableList()
+            val idx = pages.indexOfFirst { it.id == currentPageId }
+            if (idx >= 0) currentPageIndex = idx
+            updatePageIndicator()
+        }
     }
 
     // ── Export save-to-device launchers ──────────────────────────────────────

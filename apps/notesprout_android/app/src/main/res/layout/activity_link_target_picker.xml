@@ -38,6 +38,13 @@
             android:layout_height="match_parent"
             android:layout_weight="1" />
 
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnNewPage"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:src="@drawable/ic_page_add"
+            android:contentDescription="New page"
+            android:visibility="gone" />
+
         <!-- Commit the current style + existing target without re-picking a page (edit only). -->
         <androidx.appcompat.widget.AppCompatButton
             android:id="@+id/btnConfirm"

@@ -430,6 +430,112 @@ suspend fun insertSoilTemplateRaw(
 }
 
 /**
+ * Inserts a single blank page (and its content layer) into the .soil at [notebookPath].
+ *
+ * Placement:
+ *  - [anchorPageId] != null  → insert immediately before/after that page per [before].
+ *  - [anchorPageId] == null  → append to the end.
+ *
+ * The new page inherits the template id of its anchor page (or, for end-insert, the last page;
+ * "" when the notebook has no pages). parentId is the notebook metadata row id (type="notebook"),
+ * falling back to any existing page's parentId.
+ *
+ * Returns Pair(newPageId, newPageIndex) — 0-based index in the post-insert page order — or null
+ * on failure. Must be called on [Dispatchers.IO].
+ */
+suspend fun insertBlankPageRaw(
+    notebookPath: String,
+    anchorPageId: String?,
+    before: Boolean,
+    pageWidth: Float,
+    pageHeight: Float,
+    passphrase: String? = null,
+): Pair<String, Int>? = withContext(Dispatchers.IO) {
+    var db: SoilRawDb? = null
+    try {
+        db = SoilCrypto.openRaw(File(notebookPath), passphrase)
+
+        data class PageRow(val id: String, val parentId: String, val order: Int, val data: String)
+        val allPages: List<PageRow> = db.rawQuery(
+            "SELECT id, parentId, `order`, data FROM notebook WHERE type = 'page' AND deletedAt IS NULL ORDER BY `order` ASC",
+            null
+        ).use { c ->
+            val list = mutableListOf<PageRow>()
+            while (c.moveToNext()) {
+                list.add(PageRow(c.getString(0), c.getString(1), c.getInt(2), c.getString(3)))
+            }
+            list
+        }
+
+        val anchorIdx = if (anchorPageId != null) allPages.indexOfFirst { it.id == anchorPageId } else -1
+        val insertionIndex = when {
+            anchorIdx >= 0 -> if (before) anchorIdx else anchorIdx + 1
+            else -> allPages.size
+        }
+
+        val inheritedTemplate: String = when {
+            anchorIdx >= 0 -> PageData.fromJson(allPages[anchorIdx].data).template
+            allPages.isNotEmpty() -> PageData.fromJson(allPages.last().data).template
+            else -> ""
+        }
+
+        val notebookParentId = db.rawQuery(
+            "SELECT id FROM notebook WHERE type = 'notebook' LIMIT 1", null
+        ).use { c -> if (c.moveToFirst()) c.getString(0) else null }
+            ?: allPages.firstOrNull()?.parentId
+            ?: UUID.randomUUID().toString()
+
+        val bbox = BoundingBox(0f, 0f, pageWidth, pageHeight).toJson()
+        val pageData = PageData(width = pageWidth, height = pageHeight, template = inheritedTemplate).toJson()
+        val now = System.currentTimeMillis()
+        val newPageId  = UUID.randomUUID().toString()
+        val newLayerId = UUID.randomUUID().toString()
+
+        db.beginTransaction()
+        try {
+            for (i in (insertionIndex until allPages.size).reversed()) {
+                val cv = ContentValues().apply { put("`order`", i + 1) }
+                db.update("notebook", cv, "id = ?", arrayOf(allPages[i].id))
+            }
+            db.insert("notebook", null, ContentValues().apply {
+                put("id",          newPageId)
+                put("parentId",    notebookParentId)
+                put("type",        "page")
+                put("boundingBox", bbox)
+                put("`order`",     insertionIndex)
+                put("createdAt",   now)
+                put("updatedAt",   now)
+                putNull("deletedAt")
+                put("data",        pageData)
+            })
+            db.insert("notebook", null, ContentValues().apply {
+                put("id",          newLayerId)
+                put("parentId",    newPageId)
+                put("type",        "layer")
+                put("boundingBox", bbox)
+                put("`order`",     0)
+                put("createdAt",   now)
+                put("updatedAt",   now)
+                putNull("deletedAt")
+                put("data",        """{"label":"Content","isLocked":false,"isVisible":true}""")
+            })
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
+
+        db.checkpointAndVacuum()
+        newPageId to insertionIndex
+    } catch (e: Exception) {
+        Log.e(TAG, "insertBlankPageRaw failed anchor=$anchorPageId before=$before", e)
+        null
+    } finally {
+        db?.close()
+        cleanStrayJournal(notebookPath)
+    }
+}
+
+/**
  * Reads the `type="notebook"` metadata row id from the `.soil` at [notebookPath], used as the
  * parentId for template rows inserted by [insertSoilTemplateRaw]. Returns null if absent.
  * Must be called on [Dispatchers.IO].
