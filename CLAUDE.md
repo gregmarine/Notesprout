@@ -135,9 +135,9 @@ Install all requested devices in a single shell block. If the user says devices 
 
 ## Branch Strategy
 
-- `main` — stable releases only
+- `main` — current active development (seed branch merged 2026-06-24, all major features complete)
 - `germination` — previous post-MVP feature branch (reference, not active)
-- `seed` — current active development
+- `seed` — archived (all major features shipped in final commit cc2c7ca)
 
 ---
 
