@@ -39,6 +39,20 @@
             android:layout_weight="1" />
 
         <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnNewFolder"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:src="@drawable/ic_folder_plus"
+            android:contentDescription="New folder"
+            android:visibility="gone" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnNewNotebook"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:src="@drawable/ic_new_notebook"
+            android:contentDescription="New notebook"
+            android:visibility="gone" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
             android:id="@+id/btnNewPage"
             style="@style/Widget.Notesprout.ToolbarButton"
             android:src="@drawable/ic_page_add"

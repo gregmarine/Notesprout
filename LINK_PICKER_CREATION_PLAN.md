@@ -294,7 +294,7 @@ and the NotebookActivity refresh-on-return.
 
 ---
 
-### Session 2 — "Other Notebook": create folder + notebook  ·  Status: ☐ NOT STARTED
+### Session 2 — "Other Notebook": create folder + notebook  ·  Status: ✅ DONE
 
 **Scope:** new-folder and new-notebook buttons while browsing the Other-notebook folder tree, plus
 the `NotebookFactory` blank-notebook bootstrap.
@@ -538,7 +538,7 @@ viewing a notebook's pages).
 | Session | Title | Status |
 |---|---|---|
 | 1 | This Notebook — new page (+ `insertBlankPageRaw`, refresh-on-return) | ✅ DONE |
-| 2 | Other Notebook — new folder + notebook (+ `NotebookFactory`) | ☐ NOT STARTED |
+| 2 | Other Notebook — new folder + notebook (+ `NotebookFactory`) | ✅ DONE |
 | 3 | Other Notebook Page kind — new page in target notebook | ☐ NOT STARTED |
 | 4 | Wrap-up — docs & polish | ☐ NOT STARTED |
 

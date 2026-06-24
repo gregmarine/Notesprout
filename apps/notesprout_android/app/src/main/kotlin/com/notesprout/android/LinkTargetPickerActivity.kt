@@ -10,14 +10,19 @@ import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewTreeObserver
+import android.view.WindowManager
+import android.view.inputmethod.InputMethodManager
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.Space
+import android.widget.Toast
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.AppCompatImageView
 import androidx.appcompat.widget.AppCompatTextView
 import androidx.core.content.ContextCompat
+import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
@@ -26,6 +31,7 @@ import com.notesprout.android.crypto.KeyResolver
 import com.notesprout.android.crypto.KeySession
 import com.notesprout.android.crypto.SoilCrypto
 import com.notesprout.android.data.LinkChrome
+import com.notesprout.android.data.createBlankNotebook
 import com.notesprout.android.data.insertBlankPageRaw
 import com.notesprout.android.data.index.IndexRepository
 import com.notesprout.android.data.index.NotebookObject
@@ -35,6 +41,7 @@ import com.notesprout.android.data.index.ObjectType
 import com.notesprout.android.data.soilFile
 import com.notesprout.android.data.topHeadingNamesByPageId
 import com.notesprout.android.databinding.ActivityLinkTargetPickerBinding
+import com.notesprout.android.databinding.DialogNewNotebookBinding
 import com.notesprout.android.search.SearchDialog
 import com.notesprout.android.search.SearchEngine
 import kotlinx.coroutines.Dispatchers
@@ -276,7 +283,9 @@ class LinkTargetPickerActivity : AppCompatActivity() {
             }
         )
 
-        binding.btnNewPage.setOnClickListener { onNewPageTapped() }
+        binding.btnNewPage.setOnClickListener     { onNewPageTapped() }
+        binding.btnNewFolder.setOnClickListener   { onNewFolderTapped() }
+        binding.btnNewNotebook.setOnClickListener { onNewNotebookTapped() }
 
         loadCurrentPagesAsync()
         applyInitialTarget()
@@ -592,6 +601,10 @@ class LinkTargetPickerActivity : AppCompatActivity() {
     private fun updateHeaderState() {
         // Session 1: CURRENT only. Session 3 extends this condition.
         binding.btnNewPage.visibility = if (targetTab == TargetTab.CURRENT) View.VISIBLE else View.GONE
+
+        val showOtherCreate = targetTab == TargetTab.OTHER && otherView == OtherView.BROWSE
+        binding.btnNewFolder.visibility   = if (showOtherCreate) View.VISIBLE else View.GONE
+        binding.btnNewNotebook.visibility = if (showOtherCreate) View.VISIBLE else View.GONE
 
         binding.btnTargetCurrent.isSelected = targetTab == TargetTab.CURRENT
         binding.btnTargetOther.isSelected   = targetTab == TargetTab.OTHER
@@ -1026,6 +1039,96 @@ class LinkTargetPickerActivity : AppCompatActivity() {
             render()
         }
     }
+
+    // ── In-picker folder + notebook creation (Session 2: Other Notebook browse) ──
+
+    private fun promptForName(title: String, hint: String, defaultText: String = "", onName: (String) -> Unit) {
+        val dialogBinding = DialogNewNotebookBinding.inflate(layoutInflater)
+        dialogBinding.editNotebookName.setText(defaultText)
+        if (defaultText.isNotEmpty()) dialogBinding.editNotebookName.selectAll()
+        dialogBinding.editNotebookName.hint = hint
+
+        val dialog = AlertDialog.Builder(this)
+            .setTitle(title)
+            .setView(dialogBinding.root)
+            .setPositiveButton("Create") { _, _ ->
+                val imm = getSystemService(InputMethodManager::class.java)
+                imm.hideSoftInputFromWindow(dialogBinding.editNotebookName.windowToken, 0)
+                val name = dialogBinding.editNotebookName.text?.toString()?.trim().orEmpty()
+                onName(name)
+            }
+            .setNegativeButton("Cancel") { _, _ ->
+                val imm = getSystemService(InputMethodManager::class.java)
+                imm.hideSoftInputFromWindow(dialogBinding.editNotebookName.windowToken, 0)
+            }
+            .create()
+
+        dialog.window?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE)
+        dialog.show()
+        dialog.window?.setElevation(0f)
+        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+
+        dialogBinding.editNotebookName.requestFocus()
+        dialogBinding.editNotebookName.postDelayed({
+            ViewCompat.getWindowInsetsController(dialogBinding.editNotebookName)
+                ?.show(WindowInsetsCompat.Type.ime())
+                ?: run {
+                    val imm = getSystemService(InputMethodManager::class.java)
+                    @Suppress("DEPRECATION")
+                    imm.showSoftInput(dialogBinding.editNotebookName, InputMethodManager.SHOW_IMPLICIT)
+                }
+        }, 100)
+    }
+
+    private fun nameError(name: String): String? {
+        if (name.isBlank()) return "Name cannot be empty"
+        if (name == "." || name == "..") return "Invalid name"
+        if (name.contains(Regex("[^a-zA-Z0-9_\\-. ]")))
+            return "Name may only contain letters, numbers, spaces, and _ - ."
+        return null
+    }
+
+    private fun onNewFolderTapped() = promptForName("New Folder", "Folder name") { raw ->
+        val name = raw.trim()
+        lifecycleScope.launch {
+            nameError(name)?.let { toast(it); return@launch }
+            val parentId = directoryStack.last()?.id
+            val siblings = withContext(Dispatchers.IO) { indexRepo.getFolders(parentId) }
+            if (siblings.any { it.name.equals(name, ignoreCase = true) }) {
+                toast("A folder named \"$name\" already exists")
+                return@launch
+            }
+            val entity = withContext(Dispatchers.IO) { indexRepo.createFolder(name, parentId) }
+            navigateIntoFolder(entity)
+        }
+    }
+
+    private fun onNewNotebookTapped() {
+        val defaultName = java.time.LocalDateTime.now()
+            .format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"))
+        promptForName("New Notebook", "Notebook name", defaultName) { raw ->
+            val name = raw.trim()
+            lifecycleScope.launch {
+                nameError(name)?.let { toast(it); return@launch }
+                val parentId = directoryStack.last()?.id
+                val w = resources.displayMetrics.widthPixels
+                val h = resources.displayMetrics.heightPixels
+                val entity = withContext(Dispatchers.IO) {
+                    createBlankNotebook(this@LinkTargetPickerActivity, name, parentId, indexRepo, w, h)
+                }
+                loadBrowseAsync()
+                if (otherKind == OtherKind.NOTEBOOK) {
+                    pendingTargetKind     = TARGET_OTHER_NOTEBOOK
+                    pendingNotebookId     = entity.id
+                    pendingPageId         = null
+                    pendingNotebookPageId = null
+                }
+            }
+        }
+    }
+
+    private fun toast(msg: String) =
+        Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
 
     // ── Result ────────────────────────────────────────────────────────────────
 
