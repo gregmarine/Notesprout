@@ -4600,6 +4600,13 @@ class NotebookActivity : AppCompatActivity() {
             NotesproutClipboard.content = clip
             updateLassoButtonIcon()
             withContext(Dispatchers.IO) { indexRepo.saveClipboard(clip.toPayload(notebookId, encInfo.encrypted)) }
+            // Deselect immediately so the user can paste without tapping off first.
+            // Lasso mode stays active (isSmartLassoSession is preserved) so they can paste
+            // on this page or navigate to another page and paste there.
+            selectedObjectIds.clear()
+            drawingView.lassoSelectedIds = emptySet()
+            drawingView.setLassoOverlay(null, null)
+            hideFloatingSelectionToolbar()
         }
     }
 
@@ -4607,6 +4614,7 @@ class NotebookActivity : AppCompatActivity() {
      * Paste clipboard strokes/headings/text objects onto the current page, centered on
      * [tapX], [tapY].  Inserts new rows into the DB, updates in-memory lists, sets them
      * as the active selection, and shows the floating toolbar at the new selection box.
+     * When the copy/cut was initiated via smart lasso, returns to pen tool after paste.
      */
     private fun performLassoPaste(tapX: Float, tapY: Float) {
         val clip = NotesproutClipboard.content ?: return
@@ -4797,21 +4805,32 @@ class NotebookActivity : AppCompatActivity() {
                 drawingView.loadStrokes(allStrokes)
             }
 
-            // Set pasted content as the active selection.
-            val newBox = computeUnionBoundingBox(newStrokes, newHeadings)
-            newTextObjects.forEach { newBox.union(it.boundingBox) }
-            newLineObjects.forEach { newBox.union(it.boundingBox) }
-            newLinks.forEach { newBox.union(it.boundingBox) }
-            val pad = 8f * resources.displayMetrics.density
-            newBox.inset(-pad, -pad)
-            selectedObjectIds.clear()
-            selectedObjectIds.addAll(newStrokes.map { it.id })
-            selectedObjectIds.addAll(newHeadings.map { it.id })
-            selectedObjectIds.addAll(newTextObjects.map { it.id })
-            selectedObjectIds.addAll(newLineObjects.map { it.id })
-            selectedObjectIds.addAll(newLinks.map { it.id })
-            drawingView.setLassoSelectedIds(selectedObjectIds.toSet(), newBox)
-            updateFloatingSelectionToolbar(newBox)
+            if (isSmartLassoSession) {
+                // Smart lasso initiated the copy/cut — return to pen after paste.
+                selectedObjectIds.clear()
+                drawingView.lassoSelectedIds = emptySet()
+                drawingView.setLassoOverlay(null, null)
+                hideFloatingSelectionToolbar()
+                exitLassoMode()
+                drawingView.enableDrawing()
+                binding.btnPen.isSelected = true
+            } else {
+                // Set pasted content as the active selection.
+                val newBox = computeUnionBoundingBox(newStrokes, newHeadings)
+                newTextObjects.forEach { newBox.union(it.boundingBox) }
+                newLineObjects.forEach { newBox.union(it.boundingBox) }
+                newLinks.forEach { newBox.union(it.boundingBox) }
+                val pad = 8f * resources.displayMetrics.density
+                newBox.inset(-pad, -pad)
+                selectedObjectIds.clear()
+                selectedObjectIds.addAll(newStrokes.map { it.id })
+                selectedObjectIds.addAll(newHeadings.map { it.id })
+                selectedObjectIds.addAll(newTextObjects.map { it.id })
+                selectedObjectIds.addAll(newLineObjects.map { it.id })
+                selectedObjectIds.addAll(newLinks.map { it.id })
+                drawingView.setLassoSelectedIds(selectedObjectIds.toSet(), newBox)
+                updateFloatingSelectionToolbar(newBox)
+            }
         }
     }
 

@@ -51,8 +51,10 @@ records that the user accepted the unencryption warning; it is not used at paste
 `NotesproutClipboard` (in-memory singleton) remains the **fast path** for paste within a session.
 `notesprout.db` is the **source of truth** — it survives force-stop and app restart.
 
-- Copy/Cut → sets `NotesproutClipboard.content` immediately, then persists via
-  `indexRepo.saveClipboard(payload)` on `Dispatchers.IO`.
+- Copy → sets `NotesproutClipboard.content` immediately, persists via `indexRepo.saveClipboard`, then
+  **clears the selection** (overlay hidden, `lassoSelectedIds` emptied) while keeping lasso mode active.
+  The user can tap to paste on the current page or navigate to another page and paste there.
+- Cut → same clipboard write + selection clear, but also soft-deletes the selected objects first.
 - App start → `NotesproutApplication.onCreate` rehydrates `NotesproutClipboard.content` from
   `ClipboardStore.read` (off-thread) so the clipboard button shows correctly on the first open.
 - Clear → `clearClipboard()` in `NotebookActivity` clears both (`NotesproutClipboard.clear()` +

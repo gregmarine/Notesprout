@@ -96,7 +96,16 @@ If all three conditions hold, `runLassoHitTest` is called against all non-delete
 
 ### Persistent mode switch
 
-The user remains in lasso mode after any lasso action (move, copy, delete, etc.) until the pen tool is explicitly tapped — the same behavior as a toolbar-initiated lasso selection. Smart lasso does NOT auto-return to pen mode.
+After a smart lasso selection, lasso mode stays active until an action resolves it:
+
+- **Move / drag commit** — stays in lasso mode (same as toolbar-initiated lasso).
+- **Copy** — selection clears immediately (objects are no longer highlighted); lasso mode stays active so the user can paste on the current page or navigate to another page and paste there. After paste, lasso mode exits and pen is restored.
+- **Cut** — selection is removed from the page; same paste-ready state as copy. After paste, lasso mode exits and pen is restored.
+- **Delete** — selection is removed; lasso mode exits immediately and pen is restored.
+- **Tap-to-dismiss an active selection** — lasso mode exits and pen is restored.
+- **Tap with no selection + no clipboard content** — lasso mode stays (nothing to act on).
+
+If the user explicitly selected the lasso tool (toolbar tap, not smart lasso), the tool remains in lasso mode after paste — it does not return to pen.
 
 ### Implementation files
 
