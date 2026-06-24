@@ -12,6 +12,20 @@
 - Dividers: `@color/inkBlack`, 1dp × 28dp
 - Undo/Redo: statically always-enabled — empty stack silently does nothing (matches native BOOX behavior)
 
+### Active Tool Persistence (`notebook/ToolPreferencesManager.kt`)
+
+The last-used drawing tool is persisted across notebook switches and app restarts via
+`ToolPreferencesManager` (SharedPreferences `"notesprout_tool_prefs"`, key `"active_tool"`). The
+stored value is the name of the `ActiveTool` enum: `PEN`, `ERASER`, `LASSO`, `LASSO_ERASER`.
+
+- **Saved** when the user taps a tool button: pen saves `PEN`; eraser toggles between `ERASER` and
+  `PEN`; lasso saves `LASSO` on enter; lasso eraser saves `LASSO_ERASER` on enter. Exiting a lasso
+  mode via the pen or eraser button is covered by those buttons' own save calls.
+- **Restored** in `NotebookActivity.onCreate` immediately after `drawingView` is created (so lasso
+  modes can call `enterLassoMode()` / `enterLassoEraserMode()` safely). Absent or unrecognised
+  values default to `PEN`.
+- Mirrors the `SnapPreferences` pattern — not in `notesprout.db`, not in any `.soil`.
+
 ---
 
 ## Toolbar Overflow System (`notebook/ToolbarOverflowManager.kt`)

@@ -99,7 +99,9 @@ import com.notesprout.android.databinding.DialogEditHeadingTextBinding
 import com.notesprout.android.notebook.NotebookView
 import com.notesprout.android.notebook.GenericNotebookView
 import com.notesprout.android.notebook.OnyxNotebookView
+import com.notesprout.android.notebook.ActiveTool
 import com.notesprout.android.notebook.SnapPreferences
+import com.notesprout.android.notebook.ToolPreferencesManager
 import com.notesprout.android.notebook.LassoGeometry
 import com.notesprout.android.notebook.LineObjectDialog
 import com.notesprout.android.notebook.TextEditDialog
@@ -870,6 +872,7 @@ class NotebookActivity : AppCompatActivity() {
             binding.btnEraser.isSelected = false
             binding.btnLassoEraser.isSelected = false
             binding.btnLasso.isSelected = false
+            ToolPreferencesManager.save(this, ActiveTool.PEN)
         }
 
         binding.btnEraser.setOnClickListener {
@@ -882,11 +885,15 @@ class NotebookActivity : AppCompatActivity() {
             binding.btnPen.isSelected = !isEraserActive
             binding.btnLassoEraser.isSelected = false
             binding.btnLasso.isSelected = false
+            ToolPreferencesManager.save(this, if (isEraserActive) ActiveTool.ERASER else ActiveTool.PEN)
         }
 
         binding.btnLassoEraser.setOnClickListener {
             hideLassoPopupToolbar()
-            if (!isLassoEraserMode) enterLassoEraserMode()
+            if (!isLassoEraserMode) {
+                enterLassoEraserMode()
+                ToolPreferencesManager.save(this, ActiveTool.LASSO_ERASER)
+            }
             // Tapping the active lasso eraser button is a no-op.
         }
 
@@ -915,6 +922,7 @@ class NotebookActivity : AppCompatActivity() {
             if (isLassoEraserMode) exitLassoEraserMode()
             if (!isLassoMode) {
                 enterLassoMode()
+                ToolPreferencesManager.save(this, ActiveTool.LASSO)
             } else {
                 // Already in lasso mode — toggle popup if clipboard has content.
                 if (NotesproutClipboard.hasContent()) {
@@ -1002,7 +1010,7 @@ class NotebookActivity : AppCompatActivity() {
         binding.btnRedo.setOnClickListener { performRedo() }
         updateUndoRedoButtons()  // both disabled initially (empty stacks)
 
-        // Initial tool state: pen is selected by default
+        // Initial button states — tool is restored after drawingView is created below.
         binding.btnPen.isSelected = true
         binding.btnEraser.isSelected = false
         binding.btnLassoEraser.isSelected = false
@@ -1020,6 +1028,18 @@ class NotebookActivity : AppCompatActivity() {
         drawingView = if (isBooxDevice()) OnyxNotebookView(this) else GenericNotebookView(this)
         isSnapEnabled = SnapPreferences.load(this)
         drawingView.isSnapEnabled = isSnapEnabled
+        // Restore the last-used tool — survives notebook switches and app restarts.
+        when (ToolPreferencesManager.load(this)) {
+            ActiveTool.ERASER      -> {
+                isEraserActive = true
+                drawingView.setEraserMode(true)
+                binding.btnPen.isSelected    = false
+                binding.btnEraser.isSelected = true
+            }
+            ActiveTool.LASSO       -> enterLassoMode()
+            ActiveTool.LASSO_ERASER -> enterLassoEraserMode()
+            ActiveTool.PEN         -> { /* already default from button init above */ }
+        }
 
         // Erase callback — soft-delete the stroke's DB row as soon as it leaves memory.
         drawingView.onStrokeErased = { strokeId ->
