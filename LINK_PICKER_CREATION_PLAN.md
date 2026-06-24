@@ -428,7 +428,7 @@ the `NotebookFactory` blank-notebook bootstrap.
 
 ---
 
-### Session 3 — "Other Notebook" Page kind: create a page in the target notebook  ·  Status: ☐ NOT STARTED
+### Session 3 — "Other Notebook" Page kind: create a page in the target notebook  ·  Status: ✅ DONE
 
 **Scope:** reuse the `btnNewPage` button for the target-notebook page case (Other tab, Page kind,
 viewing a notebook's pages).
@@ -539,7 +539,7 @@ viewing a notebook's pages).
 |---|---|---|
 | 1 | This Notebook — new page (+ `insertBlankPageRaw`, refresh-on-return) | ✅ DONE |
 | 2 | Other Notebook — new folder + notebook (+ `NotebookFactory`) | ✅ DONE |
-| 3 | Other Notebook Page kind — new page in target notebook | ☐ NOT STARTED |
+| 3 | Other Notebook Page kind — new page in target notebook | ✅ DONE |
 | 4 | Wrap-up — docs & polish | ☐ NOT STARTED |
 
 > Status legend: ☐ NOT STARTED · ◐ IN PROGRESS · ✅ DONE

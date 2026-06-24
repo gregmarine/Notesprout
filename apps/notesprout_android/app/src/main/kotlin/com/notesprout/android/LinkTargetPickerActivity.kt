@@ -599,8 +599,9 @@ class LinkTargetPickerActivity : AppCompatActivity() {
             pendingNotebookPageId else null
 
     private fun updateHeaderState() {
-        // Session 1: CURRENT only. Session 3 extends this condition.
-        binding.btnNewPage.visibility = if (targetTab == TargetTab.CURRENT) View.VISIBLE else View.GONE
+        val showNewPage = targetTab == TargetTab.CURRENT ||
+            (targetTab == TargetTab.OTHER && otherKind == OtherKind.PAGE && otherView == OtherView.PAGES)
+        binding.btnNewPage.visibility = if (showNewPage) View.VISIBLE else View.GONE
 
         val showOtherCreate = targetTab == TargetTab.OTHER && otherView == OtherView.BROWSE
         binding.btnNewFolder.visibility   = if (showOtherCreate) View.VISIBLE else View.GONE
@@ -993,24 +994,44 @@ class LinkTargetPickerActivity : AppCompatActivity() {
         binding.btnConfirm.isEnabled = pendingTargetKind != null
     }
 
-    // ── In-picker page creation (Session 1: This Notebook) ────────────────────
+    // ── In-picker page creation (Session 1: This Notebook; Session 3: Other/Pages) ──
 
     private fun onNewPageTapped() {
-        // Session 1 handles CURRENT only; Session 3 adds the OTHER/PAGES branch.
-        if (targetTab != TargetTab.CURRENT) return
-        val selectedId = if (pendingTargetKind == TARGET_CURRENT_PAGE) pendingPageId else null
-        if (selectedId != null) {
-            ActionSheetDialog(this)
-                .title("Insert Page")
-                .addAction(R.drawable.ic_insert_page_before, "Insert Before") {
-                    createCurrentPage(anchorPageId = selectedId, before = true)
+        when {
+            targetTab == TargetTab.CURRENT -> {
+                val selectedId = if (pendingTargetKind == TARGET_CURRENT_PAGE) pendingPageId else null
+                if (selectedId != null) {
+                    ActionSheetDialog(this)
+                        .title("Insert Page")
+                        .addAction(R.drawable.ic_insert_page_before, "Insert Before") {
+                            createCurrentPage(anchorPageId = selectedId, before = true)
+                        }
+                        .addAction(R.drawable.ic_insert_page_after, "Insert After") {
+                            createCurrentPage(anchorPageId = selectedId, before = false)
+                        }
+                        .show()
+                } else {
+                    createCurrentPage(anchorPageId = null, before = false)
                 }
-                .addAction(R.drawable.ic_insert_page_after, "Insert After") {
-                    createCurrentPage(anchorPageId = selectedId, before = false)
+            }
+            targetTab == TargetTab.OTHER && otherView == OtherView.PAGES -> {
+                val nbId = otherNotebookId ?: return
+                val selectedId = if (pendingTargetKind == TARGET_OTHER_NOTEBOOK_PAGE &&
+                                     pendingNotebookId == nbId) pendingNotebookPageId else null
+                if (selectedId != null) {
+                    ActionSheetDialog(this)
+                        .title("Insert Page")
+                        .addAction(R.drawable.ic_insert_page_before, "Insert Before") {
+                            createOtherPage(nbId, selectedId, before = true)
+                        }
+                        .addAction(R.drawable.ic_insert_page_after, "Insert After") {
+                            createOtherPage(nbId, selectedId, before = false)
+                        }
+                        .show()
+                } else {
+                    createOtherPage(nbId, anchorPageId = null, before = false)
                 }
-                .show()
-        } else {
-            createCurrentPage(anchorPageId = null, before = false)
+            }
         }
     }
 
@@ -1036,6 +1057,29 @@ class LinkTargetPickerActivity : AppCompatActivity() {
             if (spec != null && spec.itemsPerPage > 0) {
                 currentGridPage = result.second / spec.itemsPerPage
             }
+            render()
+        }
+    }
+
+    private fun createOtherPage(forNotebookId: String, anchorPageId: String?, before: Boolean) {
+        val path = soilFile(this, forNotebookId).absolutePath
+        val w = resources.displayMetrics.widthPixels.toFloat()
+        val h = resources.displayMetrics.heightPixels.toFloat()
+        lifecycleScope.launch {
+            val info = withContext(Dispatchers.IO) { indexRepo.getEncryptionInfo(forNotebookId) }
+            val key = if (info.encrypted)
+                KeySession.getFor(forNotebookId)
+                    ?: KeyResolver.resolveForOpen(this@LinkTargetPickerActivity, forNotebookId, info)
+            else null
+            if (info.encrypted && key == null) { toast("Notebook is locked"); return@launch }
+            val result = withContext(Dispatchers.IO) {
+                insertBlankPageRaw(path, anchorPageId, before, w, h, key)
+            } ?: run { toast("Could not create page"); return@launch }
+            if (otherNotebookId != forNotebookId) return@launch
+            otherPages = withContext(Dispatchers.IO) { loadPagesFromSoil(path, key) }
+            selectOtherNotebookPage(forNotebookId, result.first)
+            val spec = gridSpec
+            if (spec != null && spec.itemsPerPage > 0) currentGridPage = result.second / spec.itemsPerPage
             render()
         }
     }
