@@ -204,11 +204,12 @@ class NotebookActivity : AppCompatActivity() {
     // The picker round-trips through an Activity result, so the work-in-progress is stashed here
     // while it's open: the captured selection to wrap (create) and/or the id of the link being
     // edited. [pendingLinkEditId] non-null ⇒ the open picker is editing that link in place.
-    private var pendingLinkStrokes:  List<LiveStroke>    = emptyList()
-    private var pendingLinkHeadings: List<HeadingStroke> = emptyList()
-    private var pendingLinkTexts:    List<TextRender>    = emptyList()
-    private var pendingLinkLines:    List<LineRender>    = emptyList()
-    private var pendingLinkEditId:   String?             = null
+    private var pendingLinkStrokes:     List<LiveStroke>    = emptyList()
+    private var pendingLinkHeadings:    List<HeadingStroke> = emptyList()
+    private var pendingLinkTexts:       List<TextRender>    = emptyList()
+    private var pendingLinkLines:       List<LineRender>    = emptyList()
+    private var pendingLinkEditId:      String?             = null
+    private var pendingLinkStrokesOnly: Boolean             = false
 
     // ── One-finger page swipe state ───────────────────────────────────────────
     // Deliberate full-width horizontal swipe turns pages.  Distance is the primary
@@ -599,12 +600,14 @@ class NotebookActivity : AppCompatActivity() {
         // the current notebook's .soil even if the user then cancelled.
         reloadPagesPreservingCurrent()
 
-        val editId = pendingLinkEditId
-        val strokes  = pendingLinkStrokes
-        val headings = pendingLinkHeadings
-        val texts    = pendingLinkTexts
-        val lines    = pendingLinkLines
-        pendingLinkEditId = null
+        val editId      = pendingLinkEditId
+        val strokes     = pendingLinkStrokes
+        val headings    = pendingLinkHeadings
+        val texts       = pendingLinkTexts
+        val lines       = pendingLinkLines
+        val strokesOnly = pendingLinkStrokesOnly
+        pendingLinkEditId      = null
+        pendingLinkStrokesOnly = false
         pendingLinkStrokes = emptyList(); pendingLinkHeadings = emptyList()
         pendingLinkTexts = emptyList();   pendingLinkLines = emptyList()
 
@@ -629,9 +632,14 @@ class NotebookActivity : AppCompatActivity() {
             }
         }
 
+        val convertToText = result.data?.getBooleanExtra(LinkTargetPickerActivity.EXTRA_RESULT_CONVERT_TO_TEXT, false) ?: false
+        val resultText = result.data?.getStringExtra(LinkTargetPickerActivity.EXTRA_RESULT_TEXT)
+
         lifecycleScope.launch(Dispatchers.IO) {
             if (editId != null) {
-                updateLink(editId, chrome, target)
+                updateLink(editId, chrome, target, newText = resultText)
+            } else if (strokesOnly && convertToText && strokes.isNotEmpty()) {
+                createLinkFromStrokesConvertingToText(strokes, chrome, target)
             } else if (strokes.isNotEmpty() || headings.isNotEmpty() || texts.isNotEmpty() || lines.isNotEmpty()) {
                 createLinkFromSelection(strokes, headings, texts, lines, chrome, target)
             }
@@ -639,7 +647,12 @@ class NotebookActivity : AppCompatActivity() {
     }
 
     /** Launch the link target picker, pre-selecting [initialChrome]/[initialTarget] when editing. */
-    private fun launchLinkPicker(initialChrome: LinkChrome?, initialTarget: LinkTarget?) {
+    private fun launchLinkPicker(
+        initialChrome: LinkChrome?,
+        initialTarget: LinkTarget?,
+        strokesOnly: Boolean = false,
+        initialText: String? = null,
+    ) {
         val db = soilDatabase ?: return
         lifecycleScope.launch {
             val snapshot  = drawingView.captureSnapshot()
@@ -652,6 +665,8 @@ class NotebookActivity : AppCompatActivity() {
                 putExtra(LinkTargetPickerActivity.EXTRA_NOTEBOOK_ID, notebookId)
                 putExtra(LinkTargetPickerActivity.EXTRA_NOTEBOOK_NAME, notebookDisplayName)
                 putExtra(LinkTargetPickerActivity.EXTRA_CURRENT_PAGE_INDEX, currentPageIndex)
+                if (strokesOnly) putExtra(LinkTargetPickerActivity.EXTRA_STROKES_ONLY, true)
+                if (initialText != null) putExtra(LinkTargetPickerActivity.EXTRA_INITIAL_TEXT, initialText)
                 if (initialChrome != null) putExtra(LinkTargetPickerActivity.EXTRA_INITIAL_CHROME, initialChrome.name)
                 when (initialTarget) {
                     is LinkTarget.CurrentNotebookPage -> {
@@ -1704,7 +1719,8 @@ class NotebookActivity : AppCompatActivity() {
             pendingLinkEditId = null
             pendingLinkStrokes = strokes; pendingLinkHeadings = headings
             pendingLinkTexts = texts;     pendingLinkLines = lines
-            launchLinkPicker(initialChrome = null, initialTarget = null)
+            pendingLinkStrokesOnly = strokes.isNotEmpty() && headings.isEmpty() && texts.isEmpty() && lines.isEmpty()
+            launchLinkPicker(initialChrome = null, initialTarget = null, strokesOnly = pendingLinkStrokesOnly)
         }
 
         binding.btnLinkEdit.setOnClickListener {
@@ -1712,7 +1728,10 @@ class NotebookActivity : AppCompatActivity() {
             pendingLinkEditId = link.id
             pendingLinkStrokes = emptyList(); pendingLinkHeadings = emptyList()
             pendingLinkTexts = emptyList();   pendingLinkLines = emptyList()
-            launchLinkPicker(initialChrome = link.chrome, initialTarget = link.target)
+            val singleText = link.textObjects.singleOrNull()?.text?.takeIf {
+                link.strokes.isEmpty() && link.headings.isEmpty() && link.lines.isEmpty()
+            }
+            launchLinkPicker(initialChrome = link.chrome, initialTarget = link.target, initialText = singleText)
         }
 
         binding.btnUnlink.setOnClickListener {
@@ -5352,6 +5371,214 @@ class NotebookActivity : AppCompatActivity() {
     }
 
     /**
+     * Like [createLinkFromSelection] but for a strokes-only selection where the user chose to
+     * convert to text first. Runs ML Kit recognition, builds a [TextRender] (with embedded stroke
+     * copies for fallback rendering), then creates the link embedding the text object rather than
+     * the raw strokes. The original strokes are soft-deleted in the same transaction as the link
+     * insert. Must be called on [Dispatchers.IO]; switches to Main for ML Kit and UI updates.
+     */
+    private suspend fun createLinkFromStrokesConvertingToText(
+        selectedStrokes: List<LiveStroke>,
+        chrome: LinkChrome,
+        target: LinkTarget,
+    ) {
+        val db      = soilDatabase ?: return
+        val layerId = currentLayerId.takeIf { it.isNotEmpty() } ?: return
+        val pageId  = currentPageId.takeIf  { it.isNotEmpty() } ?: return
+        if (selectedStrokes.isEmpty()) return
+
+        val density = resources.displayMetrics.density
+
+        // Initial bounds from the strokes (same pad as convertLassoToText).
+        val strokesToConvert = selectedStrokes.toList()
+        var textBounds = RectF()
+        strokesToConvert.forEach { textBounds.union(it.boundingBox) }
+        val pad = 8f * density
+        textBounds.inset(-pad, -pad)
+
+        // ML Kit recognition — must happen on the main thread.
+        val rawResult: String = if (HandwritingRecognizerProvider.instance?.isReady() == true) {
+            withContext(Dispatchers.Main) {
+                suspendCancellableCoroutine { cont ->
+                    HandwritingRecognizerProvider.instance!!.recognize(strokesToConvert, textBounds) { result ->
+                        if (cont.isActive) cont.resume(result)
+                    }
+                }
+            }
+        } else {
+            HandwritingRecognizer.FALLBACK_TEXT
+        }
+
+        val isRecognized = rawResult != HandwritingRecognizer.FALLBACK_TEXT
+
+        // Let the user correct the ML Kit result before the link is finalized.
+        val finalText: String = if (isRecognized) {
+            withContext(Dispatchers.Main) {
+                suspendCancellableCoroutine { cont ->
+                    val editView = androidx.appcompat.widget.AppCompatEditText(this@NotebookActivity).apply {
+                        setText(rawResult)
+                        setSelection(rawResult.length)
+                        setTextColor(getColor(R.color.inkBlack))
+                        setHintTextColor(getColor(R.color.inkLight))
+                        textSize = 14f
+                        val dp8 = (8 * resources.displayMetrics.density).toInt()
+                        setPadding(dp8, dp8, dp8, dp8)
+                        minLines = 2
+                        maxLines = 6
+                        gravity = android.view.Gravity.TOP or android.view.Gravity.START
+                        inputType = android.text.InputType.TYPE_CLASS_TEXT or
+                                android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE or
+                                android.text.InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
+                    }
+                    val dp16 = (16 * resources.displayMetrics.density).toInt()
+                    val container = android.widget.FrameLayout(this@NotebookActivity).apply {
+                        setPadding(dp16, dp16 / 2, dp16, dp16 / 2)
+                        addView(editView, android.widget.FrameLayout.LayoutParams(
+                            android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
+                            android.widget.FrameLayout.LayoutParams.WRAP_CONTENT,
+                        ))
+                    }
+                    val dialog = AlertDialog.Builder(this@NotebookActivity)
+                        .setTitle("Edit recognized text")
+                        .setView(container)
+                        .setPositiveButton("OK") { _, _ ->
+                            if (cont.isActive) cont.resume(editView.text?.toString() ?: rawResult)
+                        }
+                        .setNegativeButton("Cancel") { _, _ ->
+                            if (cont.isActive) cont.resume(rawResult)
+                        }
+                        .setOnCancelListener { if (cont.isActive) cont.resume(rawResult) }
+                        .create()
+                    cont.invokeOnCancellation { runCatching { dialog.dismiss() } }
+                    dialog.window?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE)
+                    dialog.show()
+                    dialog.window?.setElevation(0f)
+                    dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+                    editView.requestFocus()
+                    editView.postDelayed({
+                        ViewCompat.getWindowInsetsController(editView)
+                            ?.show(WindowInsetsCompat.Type.ime())
+                            ?: run {
+                                val imm = getSystemService(InputMethodManager::class.java)
+                                @Suppress("DEPRECATION")
+                                imm.showSoftInput(editView, InputMethodManager.SHOW_IMPLICIT)
+                            }
+                    }, 100)
+                }
+            }
+        } else ""
+
+        if (finalText.isNotBlank()) {
+            val paint = TextPaint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+                color    = android.graphics.Color.BLACK
+                textSize = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 24f, resources.displayMetrics)
+            }
+            val pageW = drawingView.asView().width
+            val (measuredW, measuredH) = withContext(Dispatchers.Default) {
+                TextObjectRenderer.measure(finalText, pageW, paint, resources.displayMetrics.density)
+            }
+            val objW = measuredW.toFloat().coerceAtMost(pageW.toFloat())
+            val objH = measuredH.toFloat()
+            val newLeft = textBounds.left.coerceIn(0f, (pageW - objW).coerceAtLeast(0f))
+            textBounds = RectF(newLeft, textBounds.top, newLeft + objW, textBounds.top + objH)
+        }
+
+        // Embedded stroke copies kept inside the TextRender for fallback rendering.
+        val embeddedStrokes = strokesToConvert.map { stroke ->
+            stroke.copy(id = UUID.randomUUID().toString(), points = stroke.points.map { PointF(it.x, it.y) })
+        }
+        val embeddedText = TextRender(
+            id          = UUID.randomUUID().toString(),
+            boundingBox = RectF(textBounds),
+            text        = finalText,
+            strokes     = embeddedStrokes,
+        )
+
+        // Link bounding box wraps the text object with breathing room + icon clearance.
+        val linkContentPadPx = 6f * density
+        val unionBox = RectF(textBounds).apply { inset(-linkContentPadPx, -linkContentPadPx) }
+        if (chrome == LinkChrome.DOTTED_CHEVRON) unionBox.right += 17f * density
+
+        val originalStrokeIds = strokesToConvert.map { it.id }
+        val deletedAt = System.currentTimeMillis()
+        val linkId    = UUID.randomUUID().toString()
+
+        val linkObj = LinkObject(
+            target      = target,
+            chrome      = chrome,
+            strokes     = emptyList(),
+            headings    = emptyList(),
+            textObjects = listOf(embeddedText),
+            lines       = emptyList(),
+        )
+
+        db.withTransaction {
+            val dao = db.notebookDao()
+            originalStrokeIds.forEach { dao.softDeleteById(it, deletedAt) }
+            val now = System.currentTimeMillis()
+            dao.insertObject(NotebookObject(
+                id          = linkId,
+                parentId    = layerId,
+                type        = TYPE_LINK,
+                boundingBox = unionBox.toBoundingBoxJson(),
+                sortOrder   = 0,
+                createdAt   = now,
+                updatedAt   = now,
+                deletedAt   = null,
+                data        = linkObj.toJson(),
+            ))
+        }
+        invalidatePageSnapshot(db, pageId)
+
+        val newLink = LinkRender(linkId, RectF(unionBox), target, chrome,
+            strokes = emptyList(), headings = emptyList(),
+            textObjects = listOf(embeddedText), lines = emptyList())
+
+        withContext(Dispatchers.Main) {
+            val strokeSet      = originalStrokeIds.toSet()
+            val updatedStrokes = drawingView.getStrokes().filter { it.id !in strokeSet }
+            persistedStrokeIds.removeAll(strokeSet)
+
+            val updatedLinks = drawingView.getLinks() + newLink
+            drawingView.loadLinks(updatedLinks)
+
+            undoRedoManager.push(UndoRedoAction.LinkCreated(
+                linkId             = linkId,
+                pageId             = pageId,
+                layerId            = layerId,
+                deletedAt          = deletedAt,
+                originalStrokeIds  = originalStrokeIds,
+                originalHeadingIds = emptyList(),
+                originalTextIds    = emptyList(),
+                originalLineIds    = emptyList(),
+                link               = newLink,
+            ))
+            updateUndoRedoButtons()
+
+            val templateBmp = currentTemplateBitmap
+            val bitmap = withContext(Dispatchers.IO) {
+                drawingView.buildRenderBitmap(
+                    updatedStrokes, templateBmp,
+                    drawingView.getHeadings(), drawingView.getTextObjects(),
+                    drawingView.getLineObjects(), updatedLinks,
+                )
+            }
+            if (bitmap != null) {
+                drawingView.loadStrokesWithBitmap(updatedStrokes, bitmap, templateBmp)
+            } else {
+                drawingView.loadStrokes(updatedStrokes)
+            }
+
+            val selPad = 8f * density
+            val selBox = RectF(unionBox).also { it.inset(-selPad, -selPad) }
+            selectedObjectIds.clear()
+            selectedObjectIds.add(linkId)
+            drawingView.setLassoSelectedIds(setOf(linkId), selBox)
+            updateFloatingSelectionToolbar(selBox)
+        }
+    }
+
+    /**
      * Wrap a heterogeneous lasso selection into a single `type = "link"` object, mirroring
      * [createHeadingFromStrokes] but holding any mix of strokes/headings/text/lines.
      *
@@ -5570,7 +5797,12 @@ class NotebookActivity : AppCompatActivity() {
      * action whose undo/redo flips the row's data back/forward. No-op when nothing actually changed.
      * Must be called on [Dispatchers.IO]; switches to Main for UI updates.
      */
-    private suspend fun updateLink(linkId: String, newChrome: LinkChrome, newTarget: LinkTarget) {
+    private suspend fun updateLink(
+        linkId: String,
+        newChrome: LinkChrome,
+        newTarget: LinkTarget,
+        newText: String? = null,
+    ) {
         val db     = soilDatabase ?: return
         val pageId = currentPageId.takeIf { it.isNotEmpty() } ?: return
         val dao    = db.notebookDao()
@@ -5578,10 +5810,19 @@ class NotebookActivity : AppCompatActivity() {
         val obj    = try { LinkObject.fromJson(row.data) } catch (_: Exception) { return }
         val oldChrome = obj.chrome
         val oldTarget = obj.target
-        if (oldChrome == newChrome && oldTarget == newTarget) return
 
+        // Apply text update only when the link embeds exactly one text object and no other content.
+        val updatedTextObjects = if (newText != null && obj.textObjects.size == 1
+                && obj.strokes.isEmpty() && obj.headings.isEmpty() && obj.lines.isEmpty()) {
+            listOf(obj.textObjects[0].copy(text = newText))
+        } else obj.textObjects
+
+        val textChanged = updatedTextObjects !== obj.textObjects
+        if (oldChrome == newChrome && oldTarget == newTarget && !textChanged) return
+
+        val updatedObj = obj.copy(chrome = newChrome, target = newTarget, textObjects = updatedTextObjects)
         val now = System.currentTimeMillis()
-        dao.updateData(linkId, obj.copy(chrome = newChrome, target = newTarget).toJson(), now)
+        dao.updateData(linkId, updatedObj.toJson(), now)
         invalidatePageSnapshot(db, pageId)
 
         withContext(Dispatchers.Main) {
@@ -5596,7 +5837,11 @@ class NotebookActivity : AppCompatActivity() {
             updateUndoRedoButtons()
 
             val updatedLinks = drawingView.getLinks().map {
-                if (it.id == linkId) it.copy(chrome = newChrome, target = newTarget) else it
+                if (it.id == linkId) it.copy(
+                    chrome      = newChrome,
+                    target      = newTarget,
+                    textObjects = if (textChanged) updatedTextObjects else it.textObjects,
+                ) else it
             }
             drawingView.loadLinks(updatedLinks)
 

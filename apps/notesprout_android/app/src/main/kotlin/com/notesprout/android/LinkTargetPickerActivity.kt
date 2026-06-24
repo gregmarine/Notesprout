@@ -97,6 +97,16 @@ class LinkTargetPickerActivity : AppCompatActivity() {
         const val EXTRA_RESULT_PAGE_ID      = "result_page_id"
         /** Result: target notebook id (other-notebook / other-notebook-page). */
         const val EXTRA_RESULT_NOTEBOOK_ID  = "result_notebook_id"
+
+        /** Input: true when the current selection contains only strokes (enables the convert checkbox). */
+        const val EXTRA_STROKES_ONLY = "strokes_only"
+        /** Result: true if the user checked "Convert to text" (only set for strokes-only creation). */
+        const val EXTRA_RESULT_CONVERT_TO_TEXT = "result_convert_to_text"
+
+        /** Input: the current text of the single embedded text object (edit mode, 1 text object). */
+        const val EXTRA_INITIAL_TEXT = "initial_text"
+        /** Result: the edited text to use for the single embedded text object. */
+        const val EXTRA_RESULT_TEXT = "result_text"
     }
 
     // ── View state ──────────────────────────────────────────────────────────────
@@ -167,6 +177,8 @@ class LinkTargetPickerActivity : AppCompatActivity() {
     private var gridSpec: GridSpec? = null
 
     private var selectedChrome: LinkChrome = LinkChrome.NONE
+    private var strokesOnly: Boolean = false
+    private var initialText: String? = null
 
     // Edit pre-selection (the link's current target).
     private var initialTargetKind: String? = null
@@ -224,6 +236,9 @@ class LinkTargetPickerActivity : AppCompatActivity() {
         selectedChrome   = intent.getStringExtra(EXTRA_INITIAL_CHROME)
             ?.let { runCatching { LinkChrome.valueOf(it) }.getOrNull() } ?: LinkChrome.NONE
 
+        strokesOnly           = intent.getBooleanExtra(EXTRA_STROKES_ONLY, false)
+        initialText           = intent.getStringExtra(EXTRA_INITIAL_TEXT)
+
         initialTargetKind     = intent.getStringExtra(EXTRA_INITIAL_TARGET_KIND)
         initialCurrentPageId  = intent.getStringExtra(EXTRA_INITIAL_PAGE_ID)
         initialNotebookId     = intent.getStringExtra(EXTRA_INITIAL_NOTEBOOK_ID)
@@ -234,6 +249,19 @@ class LinkTargetPickerActivity : AppCompatActivity() {
         pendingPageId         = initialCurrentPageId
         pendingNotebookId     = initialNotebookId
         pendingNotebookPageId = initialNotebookPageId
+
+        // Show "Convert to text" only when creating a new link from a strokes-only selection.
+        binding.convertToTextRow.visibility =
+            if (strokesOnly && initialTargetKind == null) View.VISIBLE else View.GONE
+
+        // Show text edit field when editing an existing link that has exactly one text object.
+        val iText = initialText
+        if (iText != null) {
+            binding.editLinkTextRow.visibility = View.VISIBLE
+            binding.etLinkText.setText(iText)
+        } else {
+            binding.editLinkTextRow.visibility = View.GONE
+        }
 
         binding.btnBack.setOnClickListener { finish() }
 
@@ -277,7 +305,6 @@ class LinkTargetPickerActivity : AppCompatActivity() {
                     val h = binding.gridContainer.height
                     if (w <= 0 || h <= 0) return
                     binding.gridContainer.viewTreeObserver.removeOnGlobalLayoutListener(this)
-                    gridSpec = computeGridSpec(w, h)
                     render()
                 }
             }
@@ -570,7 +597,10 @@ class LinkTargetPickerActivity : AppCompatActivity() {
 
     /** Single render entry point: chrome + header chrome state + active grid + pagination. */
     private fun render() {
-        if (gridSpec == null) return
+        val w = binding.gridContainer.width
+        val h = binding.gridContainer.height
+        if (w <= 0 || h <= 0) return
+        gridSpec = computeGridSpec(w, h)
         updateHeaderState()
 
         decodeJobs.forEach { it.cancel() }
@@ -1214,6 +1244,12 @@ class LinkTargetPickerActivity : AppCompatActivity() {
     private inline fun finishWithResult(extras: Intent.() -> Unit) {
         val result = Intent().apply {
             putExtra(EXTRA_RESULT_CHROME, selectedChrome.name)
+            if (strokesOnly && initialTargetKind == null) {
+                putExtra(EXTRA_RESULT_CONVERT_TO_TEXT, binding.cbConvertToText.isChecked)
+            }
+            if (binding.editLinkTextRow.visibility == View.VISIBLE) {
+                putExtra(EXTRA_RESULT_TEXT, binding.etLinkText.text?.toString() ?: "")
+            }
             extras()
         }
         setResult(RESULT_OK, result)
