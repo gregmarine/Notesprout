@@ -4825,32 +4825,22 @@ class NotebookActivity : AppCompatActivity() {
                 drawingView.loadStrokes(allStrokes)
             }
 
-            if (isSmartLassoSession) {
-                // Smart lasso initiated the copy/cut — return to pen after paste.
-                selectedObjectIds.clear()
-                drawingView.lassoSelectedIds = emptySet()
-                drawingView.setLassoOverlay(null, null)
-                hideFloatingSelectionToolbar()
-                exitLassoMode()
-                drawingView.enableDrawing()
-                binding.btnPen.isSelected = true
-            } else {
-                // Set pasted content as the active selection.
-                val newBox = computeUnionBoundingBox(newStrokes, newHeadings)
-                newTextObjects.forEach { newBox.union(it.boundingBox) }
-                newLineObjects.forEach { newBox.union(it.boundingBox) }
-                newLinks.forEach { newBox.union(it.boundingBox) }
-                val pad = 8f * resources.displayMetrics.density
-                newBox.inset(-pad, -pad)
-                selectedObjectIds.clear()
-                selectedObjectIds.addAll(newStrokes.map { it.id })
-                selectedObjectIds.addAll(newHeadings.map { it.id })
-                selectedObjectIds.addAll(newTextObjects.map { it.id })
-                selectedObjectIds.addAll(newLineObjects.map { it.id })
-                selectedObjectIds.addAll(newLinks.map { it.id })
-                drawingView.setLassoSelectedIds(selectedObjectIds.toSet(), newBox)
-                updateFloatingSelectionToolbar(newBox)
-            }
+            // Set pasted content as the active selection regardless of how paste was triggered.
+            val newBox = computeUnionBoundingBox(newStrokes, newHeadings)
+            newTextObjects.forEach { newBox.union(it.boundingBox) }
+            newLineObjects.forEach { newBox.union(it.boundingBox) }
+            newLinks.forEach { newBox.union(it.boundingBox) }
+            val pad = 8f * resources.displayMetrics.density
+            newBox.inset(-pad, -pad)
+            selectedObjectIds.clear()
+            selectedObjectIds.addAll(newStrokes.map { it.id })
+            selectedObjectIds.addAll(newHeadings.map { it.id })
+            selectedObjectIds.addAll(newTextObjects.map { it.id })
+            selectedObjectIds.addAll(newLineObjects.map { it.id })
+            selectedObjectIds.addAll(newLinks.map { it.id })
+            isSmartLassoSession = false
+            drawingView.setLassoSelectedIds(selectedObjectIds.toSet(), newBox)
+            updateFloatingSelectionToolbar(newBox)
         }
     }
 

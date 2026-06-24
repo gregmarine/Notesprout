@@ -99,13 +99,13 @@ If all three conditions hold, `runLassoHitTest` is called against all non-delete
 After a smart lasso selection, lasso mode stays active until an action resolves it:
 
 - **Move / drag commit** — stays in lasso mode (same as toolbar-initiated lasso).
-- **Copy** — selection clears immediately (objects are no longer highlighted); lasso mode stays active so the user can paste on the current page or navigate to another page and paste there. After paste, lasso mode exits and pen is restored.
-- **Cut** — selection is removed from the page; same paste-ready state as copy. After paste, lasso mode exits and pen is restored.
+- **Copy** — selection clears immediately (objects are no longer highlighted); lasso mode stays active so the user can paste on the current page or navigate to another page and paste there. After paste, pasted objects become the active selection with the floating toolbar visible; the smart-lasso session ends but lasso mode remains active.
+- **Cut** — selection is removed from the page; same paste-ready state as copy. After paste, pasted objects become the active selection with the floating toolbar visible; the smart-lasso session ends but lasso mode remains active.
 - **Delete** — selection is removed; lasso mode exits immediately and pen is restored.
 - **Tap-to-dismiss an active selection** — lasso mode exits and pen is restored.
 - **Tap with no selection + no clipboard content** — lasso mode stays (nothing to act on).
 
-If the user explicitly selected the lasso tool (toolbar tap, not smart lasso), the tool remains in lasso mode after paste — it does not return to pen.
+Paste always leaves pasted objects selected regardless of how lasso was entered (smart gesture or toolbar tap). The only distinction is that `isSmartLassoSession` is cleared on paste, so a subsequent tap with no selection no longer triggers the smart-lasso "tap-with-hadActiveSelection" shortcut.
 
 ### Implementation files
 
