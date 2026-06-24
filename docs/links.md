@@ -110,7 +110,7 @@ A full-screen picker sharing the same notebook-list / page-grid pattern as the n
 | Other Notebook | Shows notebooks; tap → `OtherNotebook` |
 | Other Notebook Page | Shows notebooks; tap drills into that notebook's page grid → `OtherNotebookPage` |
 
-- Chrome selection (NONE / UNDERLINE / DOTTED_CHEVRON) lives above the grid
+- Chrome selection (UNDERLINE / DOTTED_CHEVRON / NONE) lives above the grid; **UNDERLINE is the default** for new links
 - Search filters notebooks when in the "other notebook" view
 - Used for both **create** (no pre-selection) and **edit** (pre-selected via `EXTRA_INITIAL_*` extras)
 - Page cards are labelled by the **top-heading-as-page-name rule** (`data/PageHeadingNames.kt`), the same

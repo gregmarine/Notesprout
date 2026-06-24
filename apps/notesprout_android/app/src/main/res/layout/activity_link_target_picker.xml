@@ -96,27 +96,12 @@
             android:textStyle="bold"
             android:layout_marginBottom="6dp" />
 
-        <!-- Chrome segmented control (None / Underline / Box). Selected = bg_toolbar_button border. -->
+        <!-- Chrome segmented control (Underline / Box / None). Selected = bg_toolbar_button border. -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="horizontal"
             android:layout_marginBottom="12dp">
-
-            <androidx.appcompat.widget.AppCompatButton
-                android:id="@+id/btnChromeNone"
-                android:layout_width="0dp"
-                android:layout_height="36dp"
-                android:layout_weight="1"
-                android:background="@drawable/bg_toolbar_button"
-                android:text="None"
-                android:textColor="@color/inkBlack"
-                android:textSize="12sp"
-                android:textAllCaps="false"
-                android:stateListAnimator="@null"
-                android:padding="2dp" />
-
-            <Space android:layout_width="6dp" android:layout_height="0dp" />
 
             <androidx.appcompat.widget.AppCompatButton
                 android:id="@+id/btnChromeUnderline"
@@ -140,6 +125,21 @@
                 android:layout_weight="1"
                 android:background="@drawable/bg_toolbar_button"
                 android:text="Box"
+                android:textColor="@color/inkBlack"
+                android:textSize="12sp"
+                android:textAllCaps="false"
+                android:stateListAnimator="@null"
+                android:padding="2dp" />
+
+            <Space android:layout_width="6dp" android:layout_height="0dp" />
+
+            <androidx.appcompat.widget.AppCompatButton
+                android:id="@+id/btnChromeNone"
+                android:layout_width="0dp"
+                android:layout_height="36dp"
+                android:layout_weight="1"
+                android:background="@drawable/bg_toolbar_button"
+                android:text="None"
                 android:textColor="@color/inkBlack"
                 android:textSize="12sp"
                 android:textAllCaps="false"

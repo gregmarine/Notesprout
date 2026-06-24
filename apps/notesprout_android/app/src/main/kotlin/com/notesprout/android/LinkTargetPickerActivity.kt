@@ -78,7 +78,7 @@ class LinkTargetPickerActivity : AppCompatActivity() {
         const val TARGET_OTHER_NOTEBOOK      = "other_notebook"
         const val TARGET_OTHER_NOTEBOOK_PAGE = "other_notebook_page"
 
-        /** Pre-selected chrome (a [LinkChrome] name) when editing; defaults to NONE. */
+        /** Pre-selected chrome (a [LinkChrome] name) when editing; defaults to UNDERLINE. */
         const val EXTRA_INITIAL_CHROME            = "initial_chrome"
         /** Which target kind is being edited (one of the TARGET_* consts); absent ⇒ creating. */
         const val EXTRA_INITIAL_TARGET_KIND       = "initial_target_kind"
@@ -176,7 +176,7 @@ class LinkTargetPickerActivity : AppCompatActivity() {
     private var currentGridPage: Int = 0
     private var gridSpec: GridSpec? = null
 
-    private var selectedChrome: LinkChrome = LinkChrome.NONE
+    private var selectedChrome: LinkChrome = LinkChrome.UNDERLINE
     private var strokesOnly: Boolean = false
     private var initialText: String? = null
 
@@ -234,7 +234,7 @@ class LinkTargetPickerActivity : AppCompatActivity() {
         notebookSoilPath = if (notebookId.isNotEmpty()) soilFile(this, notebookId).absolutePath else null
         currentPageIndex = intent.getIntExtra(EXTRA_CURRENT_PAGE_INDEX, 0)
         selectedChrome   = intent.getStringExtra(EXTRA_INITIAL_CHROME)
-            ?.let { runCatching { LinkChrome.valueOf(it) }.getOrNull() } ?: LinkChrome.NONE
+            ?.let { runCatching { LinkChrome.valueOf(it) }.getOrNull() } ?: LinkChrome.UNDERLINE
 
         strokesOnly           = intent.getBooleanExtra(EXTRA_STROKES_ONLY, false)
         initialText           = intent.getStringExtra(EXTRA_INITIAL_TEXT)
