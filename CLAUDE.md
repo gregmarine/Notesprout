@@ -29,10 +29,12 @@ matching doc before working in that area:**
 | Global clipboard (persist across restart, encrypted-source warning) + cross-notebook page copy/move (template remap, smart encryption gate, source-side undo, nav prompt) | [`docs/clipboard-and-page-transfer.md`](docs/clipboard-and-page-transfer.md) |
 | Backup: local (SAF) + Google Drive (REST API v3 + WebView OAuth PKCE), per-device subfolder, incremental-by-timestamp, index-last | [`docs/backup.md`](docs/backup.md) |
 
-Standing backlogs at monorepo root: `CODE_REVIEW_PRUNING.md`, `TOOLBAR_CUSTOMIZATION_PLAN.md`
-(Session 8 open), `SUPERNOTE_SUPPORT_PLAN.md`, `NOTEBOOK_ENCRYPTION_PHASE2_PLAN.md` (encryption
-Phase 2 — 9 sessions, not started), `NOTEBOOK_SIZE_RESEARCH.md` (research only — `.soil` size
-reduction in-use + backup compaction; nothing decided/scheduled).
+Backlog at monorepo root: `BACKLOG.md` — consolidated deferred/future items harvested from the
+completed-and-retired feature plans (toolbar Session-8 polish, multi-page Phase 2, encryption Phase 3,
+link Phase 2, import/backup futures, the legacy-template ADB migration task). Detailed retired plans
+live in git history. Standing design docs kept as-is: `SUPERNOTE_SUPPORT_PLAN.md` (Ratta ink path,
+not started) and `NOTEBOOK_SIZE_RESEARCH.md` (`.soil` size reduction + backup compaction research —
+nothing decided/scheduled).
 
 ---
 
@@ -128,16 +130,6 @@ Install all requested devices in a single shell block. If the user says devices 
 - **Tier 1 (primary, always-tested):** BOOX Go 10.3 (**flagship**), Go 10.3 Gen 2, Note Max, Go 7, Palma2 Pro
 - **Tier 2 (QA):** NoteAir5C/4C, Tab XC, Go Color 7 Gen II, Wacom Movink Pad 11 & 14 (GenericDrawingEngine)
 - **Future:** iPad + Apple Pencil, iPhone 14, MacBook/Web, Supernote Nomad & Manta (GenericDrawingEngine)
-
----
-
-## Code Review Pruning List
-
-`CODE_REVIEW_PRUNING.md` (monorepo root) is the standing pruning backlog. Items are IDed by severity:
-**C**ritical / **M**oderate / **L**ow (e.g. `C1`, `M3`, `L2`). When the user says "Let's prune C1"
-(or any ID), open the file, read that item's entry (files, line numbers, root cause, suggested fix),
-and resolve it. Mark resolved items `✅ DONE` in place — never renumber. Add new findings with the
-next free ID in their severity tier.
 
 ---
 

@@ -33,8 +33,8 @@ notebook. The XML (`activity_notebook.xml`) still declares every button **once**
 wires the listeners; the customization layer only **rearranges the existing views** (move-not-clone),
 so `isSelected` state, icon state, and listeners always survive.
 
-> The `TOOLBAR_CUSTOMIZATION_PLAN.md` backlog (Session 8 UI/UX polish) is still open. Don't delete it
-> until Session 8 closes; this section is the shipped reference for sessions 1–7.
+> Sessions 1–7 shipped; this section is the reference. Remaining Session-8 UI/UX polish ideas live in
+> `BACKLOG.md` ("Toolbar Customization — Session 8").
 
 ### Prefs store + config (`data/toolbar/`)
 
