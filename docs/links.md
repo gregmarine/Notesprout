@@ -117,6 +117,47 @@ A full-screen picker sharing the same notebook-list / page-grid pattern as the n
   rule the TOC uses — see `content-objects.md`. Note: headings nested **inside link objects** are skipped
   by this rule (intentional, known gap).
 
+### Creating targets in the picker
+
+New targets can be created without leaving the picker via toolbar buttons that appear in the top bar
+(left of OK) depending on the current mode:
+
+| Mode | Buttons shown |
+|---|---|
+| This Notebook (current tab) | **New page** (`ic_page_add`) |
+| Other Notebook — browsing folders/notebooks | **New folder** (`ic_folder_plus`) + **New notebook** (`ic_new_notebook`) |
+| Other Notebook — Page kind — viewing a notebook's pages | **New page** (`ic_page_add`) |
+
+**New page (This Notebook):** `insertBlankPageRaw` (`data/PageCopier.kt`) writes directly to the
+current notebook's `.soil` via `SoilCrypto.openRaw`. If a page is selected in the picker, an
+`ActionSheetDialog` asks **Insert Before** / **Insert After**; otherwise the page is appended at
+the end. The new page inherits the template of its anchor (or last page; blank if the notebook is
+empty). It immediately becomes the selected target. Works for encrypted notebooks (key comes from
+`KeySession.getFor(notebookId)`).
+
+**New page (Other Notebook / Page kind):** same `insertBlankPageRaw` helper, but the key is
+resolved via `KeySession.getFor` + `KeyResolver.resolveForOpen` (same path as `loadOtherPagesAsync`).
+Before/after behaviour and selection are identical.
+
+**New folder:** prompts for a name, validates it (non-blank, no reserved names, letters/numbers/spaces/`_-.`
+only, duplicate-sibling check), calls `IndexRepository.createFolder`, then navigates into the new
+folder (`directoryStack` push + reload).
+
+**New notebook:** prompts for a name (same validation, no duplicate check), calls
+`createBlankNotebook` (`data/NotebookFactory.kt`) to create a blank, unencrypted `.soil` with one
+blank page and a `notebook_meta` row, then reloads the browse list. In **Notebook kind** the new
+notebook is auto-selected as the link target; in **Page kind** the user taps it to drill into its
+pages.
+
+**No undo/redo:** picker-created pages, folders, and notebooks are not added to the undo stack.
+Creation is an explicit act (matching `MainActivity`, which does not undo folder/notebook creation).
+The link object itself remains undoable as `LinkCreated`/`LinkEdited`.
+
+**NotebookActivity refresh on return:** on *any* picker result (OK or cancel),
+`NotebookActivity.reloadPagesPreservingCurrent()` re-reads the page list from the DB and recomputes
+`currentPageIndex` from the stable `currentPageId`. This ensures ordering stays correct even when
+the picker inserted a page into the current notebook's `.soil` but the user cancelled the link.
+
 ---
 
 ## Tap-to-Follow Gesture

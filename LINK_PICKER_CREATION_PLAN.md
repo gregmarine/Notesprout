@@ -511,7 +511,7 @@ viewing a notebook's pages).
 
 ---
 
-### Session 4 — Wrap-up: docs & polish  ·  Status: ☐ NOT STARTED
+### Session 4 — Wrap-up: docs & polish  ·  Status: ✅ DONE
 
 **No Tier 1 testing. Final build/install on G102 only.**
 
@@ -540,7 +540,7 @@ viewing a notebook's pages).
 | 1 | This Notebook — new page (+ `insertBlankPageRaw`, refresh-on-return) | ✅ DONE |
 | 2 | Other Notebook — new folder + notebook (+ `NotebookFactory`) | ✅ DONE |
 | 3 | Other Notebook Page kind — new page in target notebook | ✅ DONE |
-| 4 | Wrap-up — docs & polish | ☐ NOT STARTED |
+| 4 | Wrap-up — docs & polish | ✅ DONE |
 
 > Status legend: ☐ NOT STARTED · ◐ IN PROGRESS · ✅ DONE
 > When a session passes G102 testing, set its row + heading to ✅ DONE, then `git commit` (no push).
