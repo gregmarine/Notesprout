@@ -161,6 +161,11 @@ class MainActivity : AppCompatActivity() {
     // listener and onResume from triggering a premature scan before the stack is rebuilt.
     private var isStateRestored = true
 
+    // Set to true whenever a NotebookActivity is launched; cleared in onResume when we return,
+    // which also clears the persisted lastOpenedNotebookId so the notebook is not re-launched
+    // on the next cold start (only a crash leaves it set for restore).
+    private var notebookOpenedThisSession = false
+
     // ── Color cache ───────────────────────────────────────────────────────────
 
     private val inkBlackColor by lazy { ContextCompat.getColor(this, R.color.inkBlack) }
@@ -297,9 +302,15 @@ class MainActivity : AppCompatActivity() {
         sortPrefs = SortPreferencesManager.load(this)
 
         val savedViewState = AppStateManager.load(this)
-        if (savedViewState.folderId != null || savedViewState.pinnedMode) {
+        val coldLaunch = savedInstanceState == null
+        val hasNonDefaultState = savedViewState.folderId != null ||
+                savedViewState.pinnedMode ||
+                savedViewState.recentsMode ||
+                (savedViewState.searchMode && savedViewState.searchQuery.isNotEmpty()) ||
+                (coldLaunch && savedViewState.lastOpenedNotebookId != null)
+        if (hasNonDefaultState) {
             isStateRestored = false
-            lifecycleScope.launch { restoreSavedBrowseState(savedViewState) }
+            lifecycleScope.launch { restoreSavedBrowseState(savedViewState, coldLaunch) }
         }
 
         setupBottomBar()
@@ -324,7 +335,7 @@ class MainActivity : AppCompatActivity() {
             }.show()
         }
 
-        binding.btnSearch.setOnClickListener {
+        val openSearch = View.OnClickListener {
             SearchDialog.show(
                 context = this,
                 initialQuery = if (isSearchMode) currentSearchQuery else "",
@@ -332,6 +343,8 @@ class MainActivity : AppCompatActivity() {
                 onCancel = { }
             )
         }
+        binding.btnSearch.setOnClickListener(openSearch)
+        binding.btnSearchInToolbar.setOnClickListener(openSearch)
 
         binding.btnClearSearch.setOnClickListener { exitSearchMode() }
 
@@ -374,6 +387,13 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        if (notebookOpenedThisSession) {
+            notebookOpenedThisSession = false
+            val st = AppStateManager.load(this)
+            if (st.lastOpenedNotebookId != null) {
+                AppStateManager.save(this, st.copy(lastOpenedNotebookId = null))
+            }
+        }
         if (!isStateRestored) {
             pendingScan = true
             return
@@ -437,13 +457,23 @@ class MainActivity : AppCompatActivity() {
         isSearchMode = true
         currentSearchQuery = query
         currentPage = 0
-        binding.btnClearSearch.visibility = View.VISIBLE
-        binding.btnMore.visibility        = View.GONE
-        binding.btnPinned.visibility      = View.GONE
-        binding.btnRecents.visibility     = View.GONE
-        binding.btnSort.visibility        = View.GONE
+        val st = AppStateManager.load(this)
+        AppStateManager.save(this, st.copy(searchMode = true, searchQuery = query, recentsMode = false, pinnedMode = false))
+        applySearchModeUI()
         closeOverflowToolbar()
         scanAndRender()
+    }
+
+    private fun applySearchModeUI() {
+        val inSearch = isSearchMode
+        binding.searchToolbar.visibility        = if (inSearch) View.VISIBLE else View.GONE
+        binding.searchToolbarDivider.visibility = if (inSearch) View.VISIBLE else View.GONE
+        binding.breadcrumbBar.visibility        = if (inSearch) View.GONE   else View.VISIBLE
+        binding.breadcrumbDivider.visibility    = if (inSearch) View.GONE   else View.VISIBLE
+        binding.btnMore.visibility              = if (inSearch) View.GONE   else View.VISIBLE
+        if (inSearch) {
+            binding.searchTitle.text = "Search: $currentSearchQuery"
+        }
     }
 
     private fun exitSearchMode() {
@@ -451,11 +481,9 @@ class MainActivity : AppCompatActivity() {
         currentSearchQuery = ""
         searchResults = emptyList()
         currentPage = 0
-        binding.btnClearSearch.visibility = View.GONE
-        binding.btnMore.visibility        = View.VISIBLE
-        binding.btnPinned.visibility      = View.VISIBLE
-        binding.btnRecents.visibility     = View.VISIBLE
-        binding.btnSort.visibility        = View.VISIBLE
+        val st = AppStateManager.load(this)
+        AppStateManager.save(this, st.copy(searchMode = false, searchQuery = ""))
+        applySearchModeUI()
         scanAndRender()
     }
 
@@ -551,7 +579,8 @@ class MainActivity : AppCompatActivity() {
         }
         isRecentsMode = true
         currentPage = 0
-        // Recents mode is intentionally never persisted to AppStateManager (same as search).
+        val st = AppStateManager.load(this)
+        AppStateManager.save(this, st.copy(recentsMode = true, searchMode = false, searchQuery = "", pinnedMode = false))
         applyRecentsModeUI()
         renderRecentsList()
     }
@@ -559,6 +588,8 @@ class MainActivity : AppCompatActivity() {
     private fun exitRecentsMode() {
         isRecentsMode = false
         currentPage = 0
+        val st = AppStateManager.load(this)
+        AppStateManager.save(this, st.copy(recentsMode = false))
         applyRecentsModeUI()
         scanAndRender()
     }
@@ -644,19 +675,49 @@ class MainActivity : AppCompatActivity() {
         directoryStack.addAll(path)
     }
 
-    private suspend fun restoreSavedBrowseState(state: AppViewState) {
+    private suspend fun restoreSavedBrowseState(state: AppViewState, coldLaunch: Boolean = false) {
+        // Reopen the last notebook only on cold launch (crash/process-kill recovery).
+        // On a warm restart (MainActivity killed while notebook was open, user then closes notebook),
+        // coldLaunch is false and we just restore the browse state behind it instead.
+        if (coldLaunch && state.lastOpenedNotebookId != null) {
+            val notebook = withContext(Dispatchers.IO) {
+                repository.getNotebook(state.lastOpenedNotebookId)
+            }
+            if (notebook != null && notebook.deletedAt == null) {
+                launchNotebookActivity(notebook)
+            } else {
+                // Notebook gone — clear the stale entry.
+                AppStateManager.save(this@MainActivity, state.copy(lastOpenedNotebookId = null))
+            }
+        }
+
         navigateStackToFolder(state.folderId)
         if (state.folderId != null && currentParentId != state.folderId) {
             // Folder was deleted — clear the stale entry so we don't retry next launch.
             AppStateManager.save(this@MainActivity, AppViewState(null, false))
         }
-        if (state.pinnedMode) {
-            isPinnedMode = true
-            applyPinnedModeUI()
+        when {
+            state.pinnedMode -> {
+                isPinnedMode = true
+                applyPinnedModeUI()
+            }
+            state.recentsMode -> {
+                isRecentsMode = true
+                applyRecentsModeUI()
+            }
+            state.searchMode && state.searchQuery.isNotEmpty() -> {
+                isSearchMode = true
+                currentSearchQuery = state.searchQuery
+                applySearchModeUI()
+            }
         }
         isStateRestored = true
         if (gridSpec != null) {
-            if (isPinnedMode) renderPinnedList() else scanAndRender()
+            when {
+                isPinnedMode  -> renderPinnedList()
+                isRecentsMode -> renderRecentsList()
+                else          -> scanAndRender()
+            }
         }
         // If gridSpec is still null, the layout listener will handle the render now that
         // isStateRestored is true.
@@ -1163,37 +1224,13 @@ class MainActivity : AppCompatActivity() {
     // ── Notebook opening ──────────────────────────────────────────────────────
 
     private fun openNotebook(entity: ObjectEntity) {
-        if (isSearchMode) {
-            // Navigate the stack to the notebook's parent folder so that returning from
-            // NotebookActivity lands in the correct folder.
-            lifecycleScope.launch {
-                navigateStackToFolder(entity.parentId)
-                AppStateManager.save(this@MainActivity, AppViewState(entity.parentId, false))
-                isSearchMode = false
-                currentSearchQuery = ""
-                searchResults = emptyList()
-                binding.btnClearSearch.visibility = View.GONE
-                binding.btnSort.visibility = View.VISIBLE
-                launchNotebookActivity(entity)
-            }
-            return
-        }
-        if (isRecentsMode) {
-            // Same return-to-folder contract as search: land back in the notebook's folder on close.
-            lifecycleScope.launch {
-                navigateStackToFolder(entity.parentId)
-                AppStateManager.save(this@MainActivity, AppViewState(entity.parentId, false))
-                isRecentsMode = false
-                currentPage = 0
-                applyRecentsModeUI()
-                launchNotebookActivity(entity)
-            }
-            return
-        }
         launchNotebookActivity(entity)
     }
 
     private fun launchNotebookActivity(entity: ObjectEntity) {
+        val st = AppStateManager.load(this)
+        AppStateManager.save(this, st.copy(lastOpenedNotebookId = entity.id))
+        notebookOpenedThisSession = true
         val intent = Intent(this, NotebookActivity::class.java).apply {
             putExtra(NotebookActivity.EXTRA_NOTEBOOK_ID,   entity.id)
             putExtra(NotebookActivity.EXTRA_NOTEBOOK_NAME, entity.name)

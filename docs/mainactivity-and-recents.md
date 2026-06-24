@@ -42,9 +42,25 @@ Reusable flat action sheet. Builder: `.title(String)` (optional) → `.addAction
 
 ## Browse State Persistence (`state/AppStateManager.kt`)
 
-`data class AppViewState(val folderId: String?, val pinnedMode: Boolean)` persisted in `SharedPreferences("notesprout_view_state")`. Saved at every browse-context change. Search mode is never persisted.
+```kotlin
+data class AppViewState(
+    val folderId: String?,
+    val pinnedMode: Boolean,
+    val recentsMode: Boolean = false,
+    val searchMode: Boolean = false,
+    val searchQuery: String = "",
+    val lastOpenedNotebookId: String? = null,
+)
+```
 
-**Restore on launch:** `onCreate` loads state synchronously. Non-default state: set `isStateRestored = false`, launch coroutine to `navigateStackToFolder(folderId)` then optionally `enterPinnedMode()`, set `isStateRestored = true`, trigger first render. Layout listener and `onResume` check `isStateRestored` — if false, defer scan to the restore coroutine. **Stale folder:** if `navigateStackToFolder` resolves to root (folder deleted), clear via `AppStateManager.save(context, AppViewState(null, false))`.
+Persisted in `SharedPreferences("notesprout_view_state")`. Saved at every browse-context change — including entering/exiting search and recents modes.
+
+**Restore on launch:** `onCreate` loads state synchronously. Non-default state (any non-root folder, pinned/recents/search mode active, or a last-opened notebook ID on cold launch): set `isStateRestored = false`, launch coroutine `restoreSavedBrowseState(state, coldLaunch)`, set `isStateRestored = true`, trigger first render. Layout listener and `onResume` check `isStateRestored` — if false, defer scan to the restore coroutine.
+
+- **Last opened notebook (`lastOpenedNotebookId`):** on a **cold launch** (`savedInstanceState == null` — app was killed or crashed), if a notebook ID is persisted, the restore coroutine immediately relaunches it via `launchNotebookActivity`. On a **warm restart** (MainActivity killed by OS while notebook was open, then user closes notebook), `coldLaunch` is false and only the browse state is restored. The notebook ID is cleared from prefs in `onResume` when `notebookOpenedThisSession` is true (set by `launchNotebookActivity`, checked once on return).
+- **Mode restore:** after navigating to the saved folder, `restoreSavedBrowseState` applies the active mode: pinned → `applyPinnedModeUI()`; recents → `applyRecentsModeUI()`; search (query non-empty) → `applySearchModeUI()` + restores `currentSearchQuery`.
+- **Stale folder:** if `navigateStackToFolder` resolves to root (folder deleted), clear via `AppStateManager.save(context, AppViewState(null, false))`.
+- **Stale notebook:** if `getNotebook(id)` returns null or `deletedAt != null`, clear `lastOpenedNotebookId` from prefs and proceed to browse state restore only.
 
 ## Pinned Browse View
 
@@ -57,6 +73,10 @@ Reusable flat action sheet. Builder: `.title(String)` (optional) → `.addAction
 ## Search (`search/SearchEngine.kt`)
 
 Fuzzy match against all notebooks: substring (3) > all words present (2) > prefix/initials (1). Opening a notebook from search results rebuilds `directoryStack` by walking the `parentId` chain (`navigateStackToDirectory`) so returning lands in the correct folder.
+
+**Search toolbar:** entering search mode hides the breadcrumb bar and shows a dedicated `searchToolbar` (same pattern as pinned/recents) containing a **"Search: {query}"** title, a search icon (re-opens `SearchDialog` pre-filled with the current query to modify it), and an X button (`btnClearSearch`) to exit search. `applySearchModeUI()` toggles both toolbars and also hides `btnMore` (new-notebook/folder actions suppressed during search).
+
+**Search persistence:** `enterSearchMode` saves `searchMode=true, searchQuery=query` to `AppStateManager`; `exitSearchMode` clears both. On cold launch, a saved search query is restored and `applySearchModeUI()` is applied so the user lands directly back in their previous search.
 
 ## Sorting (`sort/`)
 
@@ -336,9 +356,10 @@ a **MainActivity recents browse mode** (notebook cards) and a **NotebookActivity
   new-folder hidden). `renderRecentsList()` resolves off-thread, renders notebook cards (reusing the
   pinned/search card builder) with folder name + notebook name + date/time (`getMediumDateFormat` +
   `getTimeFormat`), paginated over the resolved list; empty state "No recent notebooks".
-- **Tap → open** reuses the search-mode pattern: `navigateStackToFolder(parentId)` +
-  `AppStateManager.save(AppViewState(parentId, false))` + exit recents + `launchNotebookActivity` —
-  so closing the notebook returns to its folder.
+- **Tap → open** calls `launchNotebookActivity(entity)` directly (no mode-clearing). The recents mode
+  stays active in both memory and prefs, so closing the notebook returns to the recents screen.
+- **Recents persistence:** `enterRecentsMode` saves `recentsMode=true` to `AppStateManager`;
+  `exitRecentsMode` clears it. On cold launch, recents mode is restored via `applyRecentsModeUI()`.
 
 ### NotebookActivity recents dialog (`notebook/RecentsDialog.kt`)
 

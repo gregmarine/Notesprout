@@ -150,6 +150,53 @@
         android:visibility="gone" />
 
     <!--
+        Search toolbar: shown only in search mode.
+        Hidden by default; VISIBLE when isSearchMode is true.
+    -->
+    <LinearLayout
+        android:id="@+id/searchToolbar"
+        android:layout_width="match_parent"
+        android:layout_height="56dp"
+        android:orientation="horizontal"
+        android:background="@color/paperWhite"
+        android:gravity="center_vertical"
+        android:visibility="gone">
+
+        <TextView
+            android:id="@+id/searchTitle"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_gravity="center_vertical"
+            android:textSize="18sp"
+            android:textColor="@color/inkBlack"
+            android:paddingStart="16dp"
+            android:paddingEnd="16dp"
+            android:singleLine="true"
+            android:ellipsize="end" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnSearchInToolbar"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:src="@drawable/ic_search"
+            android:contentDescription="Search notebooks" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnClearSearch"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:src="@drawable/ic_x"
+            android:contentDescription="Clear search" />
+
+    </LinearLayout>
+
+    <View
+        android:id="@+id/searchToolbarDivider"
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="@color/inkBlack"
+        android:visibility="gone" />
+
+    <!--
         Breadcrumb bar: always visible for consistent layout.
         Back button and chips are hidden at root; chips populate when navigated into a subfolder.
     -->
@@ -208,12 +255,6 @@
             android:src="@drawable/ic_search"
             android:contentDescription="Search notebooks" />
 
-        <androidx.appcompat.widget.AppCompatImageButton
-            android:id="@+id/btnClearSearch"
-            style="@style/Widget.Notesprout.ToolbarButton"
-            android:src="@drawable/ic_x"
-            android:contentDescription="Clear search"
-            android:visibility="gone" />
 
         <androidx.appcompat.widget.AppCompatImageButton
             android:id="@+id/btnRecents"
