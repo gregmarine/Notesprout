@@ -21,7 +21,7 @@
 | 1 | Data layer — `scratchpad` table, DAO, repository, Room migration | ✅ Done |
 | 2 | Icons + host window + launch buttons (empty bordered window) | ✅ Done |
 | 3 | Canvas integration — reuse Onyx/Generic view, pen/eraser, load/save | ✅ Done |
-| 4 | Multi-page — add/delete/navigate (swipe + indicator) | ⬜ Not started |
+| 4 | Multi-page — add/delete/navigate (swipe + indicator) | ✅ Done |
 | 5 | Lasso on scratch pad — select/copy/cut/paste, smart-lasso, scribble-erase | ⬜ Not started |
 | 6 | Notebook → Scratch Pad transfer ("Send to Scratch Pad" + fit/crop) | ⬜ Not started |
 | 7 | Scratch Pad → Notebook transfer ("Send to Notebook") | ⬜ Not started |
