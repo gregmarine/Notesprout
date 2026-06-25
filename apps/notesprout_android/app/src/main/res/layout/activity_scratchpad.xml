@@ -18,7 +18,8 @@
         android:layout_gravity="center"
         android:orientation="vertical"
         android:background="@drawable/shape_bordered"
-        android:padding="1dp">
+        android:padding="1dp"
+        android:clipToOutline="true">
 
         <!-- Chrome bar: title + spacer + prev / indicator / next -->
         <LinearLayout
@@ -26,8 +27,7 @@
             android:layout_width="match_parent"
             android:layout_height="56dp"
             android:orientation="horizontal"
-            android:gravity="center_vertical"
-            android:background="@color/paperWhite">
+            android:gravity="center_vertical">
 
             <TextView
                 android:id="@+id/tvScratchpadTitle"
@@ -97,7 +97,6 @@
             android:layout_height="56dp"
             android:orientation="horizontal"
             android:gravity="center_vertical"
-            android:background="@color/paperWhite"
             android:paddingStart="4dp"
             android:paddingEnd="4dp">
 
