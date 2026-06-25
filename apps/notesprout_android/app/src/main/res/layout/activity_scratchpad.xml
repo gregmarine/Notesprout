@@ -76,13 +76,46 @@
             android:layout_height="1dp"
             android:background="@color/inkBlack" />
 
-        <!-- Drawing container — drawing view added programmatically in Session 3 -->
+        <!-- Drawing container — drawing view added programmatically; floating toolbar overlaid here -->
         <FrameLayout
             android:id="@+id/drawingContainer"
             android:layout_width="match_parent"
             android:layout_height="0dp"
             android:layout_weight="1"
-            android:background="@color/paperWhite" />
+            android:background="@color/paperWhite">
+
+            <!-- Floating selection context toolbar — positioned programmatically on lasso selection -->
+            <LinearLayout
+                android:id="@+id/floatingSelectionToolbar"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:visibility="gone"
+                android:background="@drawable/shape_bordered"
+                android:padding="4dp"
+                android:elevation="0dp">
+
+                <androidx.appcompat.widget.AppCompatImageButton
+                    android:id="@+id/btnLassoCopy"
+                    style="@style/Widget.Notesprout.ToolbarButton"
+                    android:src="@drawable/ic_copy_plus"
+                    android:contentDescription="Copy selection" />
+
+                <androidx.appcompat.widget.AppCompatImageButton
+                    android:id="@+id/btnLassoCut"
+                    style="@style/Widget.Notesprout.ToolbarButton"
+                    android:src="@drawable/ic_cut"
+                    android:contentDescription="Cut selection" />
+
+                <androidx.appcompat.widget.AppCompatImageButton
+                    android:id="@+id/btnLassoDelete"
+                    style="@style/Widget.Notesprout.ToolbarButton"
+                    android:src="@drawable/ic_lasso_delete"
+                    android:contentDescription="Delete selection" />
+
+            </LinearLayout>
+
+        </FrameLayout>
 
         <!-- 1dp divider between canvas and toolbar -->
         <View
