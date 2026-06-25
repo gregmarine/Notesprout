@@ -3237,7 +3237,8 @@ class NotebookActivity : AppCompatActivity() {
             val entity = withContext(Dispatchers.IO) { indexRepo.getNotebook(selectedId) } ?: return@launch
 
             // Return-to-folder: closing the switched notebook should land in *its* folder.
-            AppStateManager.save(this@NotebookActivity, AppViewState(entity.parentId, false))
+            // Also record lastOpenedNotebookId so a cold relaunch reopens this notebook.
+            AppStateManager.save(this@NotebookActivity, AppViewState(entity.parentId, false, lastOpenedNotebookId = entity.id))
 
             // Seal the current notebook (records close), then open the selected one directly.
             closeNotebook()
@@ -3319,7 +3320,8 @@ class NotebookActivity : AppCompatActivity() {
             if (origin != null) LinkBackStack.push(this@NotebookActivity, origin)
 
             // Return-to-folder: closing the opened notebook should land in *its* folder.
-            AppStateManager.save(this@NotebookActivity, AppViewState(entity.parentId, false))
+            // Also record lastOpenedNotebookId so a cold relaunch reopens this notebook.
+            AppStateManager.save(this@NotebookActivity, AppViewState(entity.parentId, false, lastOpenedNotebookId = entity.id))
 
             closeNotebook()
             startActivity(
