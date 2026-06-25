@@ -11,6 +11,7 @@ import android.view.VelocityTracker
 import android.view.View
 import android.view.ViewConfiguration
 import android.widget.FrameLayout
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.doOnLayout
 import androidx.lifecycle.lifecycleScope
@@ -154,7 +155,14 @@ class ScratchpadActivity : AppCompatActivity() {
             lifecycleScope.launch { addPage() }
         }
         binding.btnScratchDeletePage.setOnClickListener {
-            lifecycleScope.launch { deletePage() }
+            val dialog = AlertDialog.Builder(this)
+                .setTitle("Delete Page")
+                .setMessage("Delete this page? This cannot be undone.")
+                .setPositiveButton("Delete") { _, _ -> lifecycleScope.launch { deletePage() } }
+                .setNegativeButton("Cancel", null)
+                .show()
+            dialog.window?.setElevation(0f)
+            dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
         }
         binding.btnScratchpadPrev.setOnClickListener {
             if (currentPageIndex > 0) lifecycleScope.launch { navigateTo(currentPageIndex - 1) }
@@ -1123,7 +1131,11 @@ class ScratchpadActivity : AppCompatActivity() {
 
         Slog.d(TAG) { "scratchpad evaluatePageFling: ${if (dx < 0) "next" else "prev"}" }
         if (dx < 0) {
-            if (currentPageIndex < pages.lastIndex) lifecycleScope.launch { navigateTo(currentPageIndex + 1) }
+            if (currentPageIndex < pages.lastIndex) {
+                lifecycleScope.launch { navigateTo(currentPageIndex + 1) }
+            } else {
+                lifecycleScope.launch { addPage() }
+            }
         } else {
             if (currentPageIndex > 0) lifecycleScope.launch { navigateTo(currentPageIndex - 1) }
         }

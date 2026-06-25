@@ -25,6 +25,8 @@
 | 5 | Lasso on scratch pad — select/copy/cut/paste, smart-lasso, scribble-erase | ✅ Done |
 | 6 | Notebook → Scratch Pad transfer ("Send to Scratch Pad" + fit/crop) | ✅ Done |
 | 7 | Scratch Pad → Notebook transfer ("Send to Notebook") | ✅ Done |
+| 4a | Swipe past last page → auto-insert new page | ✅ Done |
+| 4b | Delete Page button shows e-ink confirmation dialog | ✅ Done |
 | 8 | Wrap-up — docs, cleanup, final build + commit + **push** | ⬜ Not started |
 
 Legend: ⬜ Not started · 🚧 In progress · ✅ Done
@@ -323,6 +325,14 @@ per page.
   notebook). No `eraseAll`-then-write races.
 - Persist `currentPageIndex` to prefs on every navigation and on close.
 
+**Post-S7 additions (4a + 4b)**
+- **Swipe past last page** → in `evaluatePageFling()`, the `dx < 0` (left swipe) branch that was a
+  no-op at `lastIndex` now calls `addPage()`, matching the notebook pattern. Added in `ScratchpadActivity.kt`.
+- **Delete Page confirmation** → `btnScratchDeletePage` click now shows an `AlertDialog` ("Delete this
+  page? This cannot be undone." — Delete / Cancel) styled with `setElevation(0f)` +
+  `setBackgroundDrawableResource(R.drawable.shape_bordered)` after `show()`, matching all other e-ink
+  dialogs. The `deletePage()` coroutine only runs on confirmation.
+
 **Build + install** on G102.
 
 **Device test checklist**
@@ -333,6 +343,9 @@ per page.
 5. Delete the only page → it clears to blank but a page still exists ("1 / 1").
 6. Navigate to page 2, close, reopen → reopens on page 2 (current-page persistence).
 7. Swipe does not fire while writing with the stylus.
+8. Swipe left past the last page → a new blank page is inserted and navigated to.
+9. Tap Delete Page → confirmation dialog appears flat, no shadow, 1dp inkBlack border; Cancel does
+   nothing; Delete removes the page.
 
 **Exit:** all checklist items pass and any issues are resolved → Session 4 ✅ → commit.
 
