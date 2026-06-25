@@ -2,6 +2,7 @@ package com.notesprout.android.data
 
 import com.notesprout.android.NotesproutClipboard
 import kotlinx.serialization.json.Json
+import com.notesprout.android.data.StickyNoteRender
 
 private val clipCodec = Json { ignoreUnknownKeys = true; explicitNulls = false }
 
@@ -40,6 +41,12 @@ fun NotesproutClipboard.ClipboardContent.toPayload(
             clipCodec.encodeToString(LinkRender.serializer(), lk),
         )
     }
+    stickyNotes.forEach { sn ->
+        items += ClipItem(
+            TYPE_STICKY_NOTE, BoundingBoxData.from(sn.boundingBox),
+            clipCodec.encodeToString(StickyNoteRender.serializer(), sn),
+        )
+    }
     return ClipboardPayload(
         items = items,
         boundingBox = BoundingBoxData.from(boundingBox),
@@ -51,21 +58,23 @@ fun NotesproutClipboard.ClipboardContent.toPayload(
 
 fun ClipboardPayload.toClipboardContent(): NotesproutClipboard.ClipboardContent? {
     if (items.isEmpty()) return null
-    val strokes     = mutableListOf<LiveStroke>()
-    val headings    = mutableListOf<HeadingStroke>()
-    val textObjects = mutableListOf<TextRender>()
-    val lineObjects = mutableListOf<LineRender>()
-    val links       = mutableListOf<LinkRender>()
+    val strokes      = mutableListOf<LiveStroke>()
+    val headings     = mutableListOf<HeadingStroke>()
+    val textObjects  = mutableListOf<TextRender>()
+    val lineObjects  = mutableListOf<LineRender>()
+    val links        = mutableListOf<LinkRender>()
+    val stickyNotes  = mutableListOf<StickyNoteRender>()
     for (item in items) {
         when (item.type) {
-            TYPE_STROKE  -> strokes.add(clipCodec.decodeFromString(LiveStroke.serializer(), item.data))
-            TYPE_HEADING -> headings.add(clipCodec.decodeFromString(HeadingStroke.serializer(), item.data))
-            TYPE_TEXT    -> textObjects.add(clipCodec.decodeFromString(TextRender.serializer(), item.data))
-            TYPE_LINE    -> lineObjects.add(clipCodec.decodeFromString(LineRender.serializer(), item.data))
-            TYPE_LINK    -> links.add(clipCodec.decodeFromString(LinkRender.serializer(), item.data))
+            TYPE_STROKE       -> strokes.add(clipCodec.decodeFromString(LiveStroke.serializer(), item.data))
+            TYPE_HEADING      -> headings.add(clipCodec.decodeFromString(HeadingStroke.serializer(), item.data))
+            TYPE_TEXT         -> textObjects.add(clipCodec.decodeFromString(TextRender.serializer(), item.data))
+            TYPE_LINE         -> lineObjects.add(clipCodec.decodeFromString(LineRender.serializer(), item.data))
+            TYPE_LINK         -> links.add(clipCodec.decodeFromString(LinkRender.serializer(), item.data))
+            TYPE_STICKY_NOTE  -> stickyNotes.add(clipCodec.decodeFromString(StickyNoteRender.serializer(), item.data))
         }
     }
-    if (strokes.isEmpty() && headings.isEmpty() && textObjects.isEmpty() && lineObjects.isEmpty() && links.isEmpty()) return null
+    if (strokes.isEmpty() && headings.isEmpty() && textObjects.isEmpty() && lineObjects.isEmpty() && links.isEmpty() && stickyNotes.isEmpty()) return null
     return NotesproutClipboard.ClipboardContent(
         strokes = strokes,
         headings = headings,
@@ -73,5 +82,6 @@ fun ClipboardPayload.toClipboardContent(): NotesproutClipboard.ClipboardContent?
         textObjects = textObjects,
         lineObjects = lineObjects,
         links = links,
+        stickyNotes = stickyNotes,
     )
 }
