@@ -16,16 +16,20 @@ import androidx.core.view.doOnLayout
 import androidx.lifecycle.lifecycleScope
 import com.notesprout.android.core.Slog
 import com.notesprout.android.core.isBooxDevice
+import com.notesprout.android.data.BoundingBox
 import com.notesprout.android.data.HeadingObject
 import com.notesprout.android.data.HeadingStroke
 import com.notesprout.android.data.LineObject
 import com.notesprout.android.data.LineRender
+import com.notesprout.android.data.LinkObject
+import com.notesprout.android.data.LinkRender
 import com.notesprout.android.data.LiveStroke
 import com.notesprout.android.data.PageData
 import com.notesprout.android.data.ScratchpadRepository
 import com.notesprout.android.data.TextObject
 import com.notesprout.android.data.TextRender
 import com.notesprout.android.data.toBoundingBoxJson
+import com.notesprout.android.data.toLinkObject
 import com.notesprout.android.data.index.NotesproutIndex
 import com.notesprout.android.data.index.ScratchpadEntity
 import com.notesprout.android.data.translate
@@ -49,6 +53,11 @@ class ScratchpadActivity : AppCompatActivity() {
         const val EXTRA_FROM_NOTEBOOK_ID        = "from_notebook_id"
         const val EXTRA_FROM_NOTEBOOK_NAME      = "from_notebook_name"
         const val EXTRA_FROM_NOTEBOOK_ENCRYPTED = "from_notebook_encrypted"
+
+        /** If set, navigate to this page ID on open (used by "Send to Scratch Pad"). */
+        const val EXTRA_JUMP_TO_PAGE_ID   = "jump_to_page_id"
+        /** Comma-separated object IDs to select after load (used by "Send to Scratch Pad"). */
+        const val EXTRA_SELECT_OBJECT_IDS = "select_object_ids"
 
         private const val TAG = "Notesprout"
 
@@ -159,18 +168,31 @@ class ScratchpadActivity : AppCompatActivity() {
         lifecycleScope.launch {
             repository.ensureBootstrap()
             pages = repository.getPages()
-            val savedIndex = ScratchpadPreferences.loadCurrentPageIndex(this@ScratchpadActivity)
-            currentPageIndex = savedIndex.coerceIn(0, (pages.size - 1).coerceAtLeast(0))
+
+            val jumpPageId    = intent.getStringExtra(EXTRA_JUMP_TO_PAGE_ID)
+            val selectIdsStr  = intent.getStringExtra(EXTRA_SELECT_OBJECT_IDS)
+            val jumpIndex     = jumpPageId?.let { pid -> pages.indexOfFirst { it.id == pid }.takeIf { it >= 0 } }
+            val savedIndex    = jumpIndex ?: ScratchpadPreferences.loadCurrentPageIndex(this@ScratchpadActivity)
+            currentPageIndex  = savedIndex.coerceIn(0, (pages.size - 1).coerceAtLeast(0))
+            if (jumpIndex != null) ScratchpadPreferences.saveCurrentPageIndex(this@ScratchpadActivity, currentPageIndex)
 
             val page = pages.getOrNull(currentPageIndex) ?: return@launch
-            currentPageId = page.id
-            currentLayerId = repository.getLayerForPage(currentPageId)?.id ?: ""
+            currentPageId   = page.id
+            currentLayerId  = repository.getLayerForPage(currentPageId)?.id ?: ""
             updatePageIndicator()
+
+            val selectIds = selectIdsStr?.split(",")?.toSet()?.takeIf { it.isNotEmpty() }
 
             if (binding.drawingContainer.width > 0) {
                 loadCurrentPage()
+                if (selectIds != null) selectInsertedObjects(selectIds)
             } else {
-                binding.drawingContainer.doOnLayout { lifecycleScope.launch { loadCurrentPage() } }
+                binding.drawingContainer.doOnLayout {
+                    lifecycleScope.launch {
+                        loadCurrentPage()
+                        if (selectIds != null) selectInsertedObjects(selectIds)
+                    }
+                }
             }
         }
     }
@@ -345,6 +367,41 @@ class ScratchpadActivity : AppCompatActivity() {
 
         drawingView.onDragStarted = {
             hideFloatingSelectionToolbar()
+        }
+
+        drawingView.onStrokesMoved = { _, movedStrokes, _, movedHeadings, _, movedTextObjects, _, movedLineObjects, _, movedLinks ->
+            lifecycleScope.launch {
+                val now     = System.currentTimeMillis()
+                val density = resources.displayMetrics.density
+                val dao     = NotesproutIndex.scratchpadDao()
+                withContext(Dispatchers.IO) {
+                    for (s in movedStrokes) {
+                        val bbox = s.boundingBox
+                        dao.updateObjectData(s.id, BoundingBox(bbox.left, bbox.top, bbox.width(), bbox.height()).toJson(), s.toStrokeData(now).toJson(), now)
+                    }
+                    for (h in movedHeadings) {
+                        dao.updateObjectData(h.id, h.boundingBox.toBoundingBoxJson(), HeadingObject(h.strokes, h.recognizedText, h.level).toJson(), now)
+                    }
+                    for (t in movedTextObjects) {
+                        dao.updateObjectData(t.id, t.boundingBox.toBoundingBoxJson(), TextObject(text = t.text, strokes = t.strokes).toJson(), now)
+                    }
+                    for (l in movedLineObjects) {
+                        dao.updateObjectData(l.id, l.boundingBox.toBoundingBoxJson(), LineObject(l.style, l.orientation, l.strokeWidthDp, l.dotSpacingPx / density).toJson(), now)
+                    }
+                    for (lk in movedLinks) {
+                        dao.updateObjectData(lk.id, lk.boundingBox.toBoundingBoxJson(), lk.toLinkObject(density).toJson(), now)
+                    }
+                }
+                val newBox = RectF()
+                movedStrokes.forEach { newBox.union(it.boundingBox) }
+                movedHeadings.forEach { newBox.union(it.boundingBox) }
+                movedTextObjects.forEach { newBox.union(it.boundingBox) }
+                movedLineObjects.forEach { newBox.union(it.boundingBox) }
+                movedLinks.forEach { newBox.union(it.boundingBox) }
+                val pad = 8f * resources.displayMetrics.density
+                newBox.inset(-pad, -pad)
+                updateFloatingSelectionToolbar(newBox)
+            }
         }
 
         drawingView.onLassoSelectionCleared = {
@@ -721,6 +778,39 @@ class ScratchpadActivity : AppCompatActivity() {
             drawingView.setLassoSelectedIds(selectedObjectIds.toSet(), newBox)
             updateFloatingSelectionToolbar(newBox)
         }
+    }
+
+    // ── Post-insert selection (from "Send to Scratch Pad") ───────────────────
+
+    private fun selectInsertedObjects(ids: Set<String>) {
+        val strokes     = drawingView.getStrokes().filter { it.id in ids }
+        val headings    = drawingView.getHeadings().filter { it.id in ids }
+        val textObjects = drawingView.getTextObjects().filter { it.id in ids }
+        val lineObjects = drawingView.getLineObjects().filter { it.id in ids }
+        val links       = drawingView.getLinks().filter { it.id in ids }
+
+        val hitIds = mutableSetOf<String>()
+        strokes.mapTo(hitIds) { it.id }
+        headings.mapTo(hitIds) { it.id }
+        textObjects.mapTo(hitIds) { it.id }
+        lineObjects.mapTo(hitIds) { it.id }
+        links.mapTo(hitIds) { it.id }
+        if (hitIds.isEmpty()) return
+
+        val box = RectF()
+        strokes.forEach { box.union(it.boundingBox) }
+        headings.forEach { box.union(it.boundingBox) }
+        textObjects.forEach { box.union(it.boundingBox) }
+        lineObjects.forEach { box.union(it.boundingBox) }
+        links.forEach { box.union(it.boundingBox) }
+
+        selectedObjectIds.clear()
+        selectedObjectIds.addAll(hitIds)
+        if (!isLassoMode) enterLassoMode()
+        val pad = 8f * resources.displayMetrics.density
+        box.inset(-pad, -pad)
+        drawingView.setLassoSelectedIds(hitIds, box)
+        updateFloatingSelectionToolbar(box)
     }
 
     // ── Lasso button icon ─────────────────────────────────────────────────────

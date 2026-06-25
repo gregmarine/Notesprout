@@ -23,7 +23,7 @@
 | 3 | Canvas integration — reuse Onyx/Generic view, pen/eraser, load/save | ✅ Done |
 | 4 | Multi-page — add/delete/navigate (swipe + indicator) | ✅ Done |
 | 5 | Lasso on scratch pad — select/copy/cut/paste, smart-lasso, scribble-erase | ✅ Done |
-| 6 | Notebook → Scratch Pad transfer ("Send to Scratch Pad" + fit/crop) | ⬜ Not started |
+| 6 | Notebook → Scratch Pad transfer ("Send to Scratch Pad" + fit/crop) | ✅ Done |
 | 7 | Scratch Pad → Notebook transfer ("Send to Notebook") | ⬜ Not started |
 | 8 | Wrap-up — docs, cleanup, final build + commit + **push** | ⬜ Not started |
 

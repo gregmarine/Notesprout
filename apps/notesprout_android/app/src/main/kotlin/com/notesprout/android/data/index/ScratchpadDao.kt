@@ -70,4 +70,7 @@ interface ScratchpadDao {
 
     @Query("UPDATE scratchpad SET boundingBox = :boundingBox, data = :data, updatedAt = :updatedAt WHERE id = :id")
     suspend fun updatePageSize(id: String, boundingBox: String, data: String, updatedAt: Long)
+
+    @Query("UPDATE scratchpad SET boundingBox = :boundingBox, data = :data, updatedAt = :updatedAt WHERE id = :id")
+    suspend fun updateObjectData(id: String, boundingBox: String, data: String, updatedAt: Long)
 }

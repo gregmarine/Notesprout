@@ -422,6 +422,19 @@
             android:src="@drawable/ic_snap_on"
             android:contentDescription="Toggle snap to guides" />
 
+        <View
+            android:id="@+id/scratchpadSendDivider"
+            android:layout_width="1dp"
+            android:layout_height="28dp"
+            android:layout_marginHorizontal="2dp"
+            android:background="@color/inkBlack" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnLassoSendToScratchpad"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:src="@drawable/ic_sketching_send"
+            android:contentDescription="Send to Scratch Pad" />
+
     </LinearLayout>
 
     <!-- Heading-type submenu — appears below (or above) the selection box when the heading button

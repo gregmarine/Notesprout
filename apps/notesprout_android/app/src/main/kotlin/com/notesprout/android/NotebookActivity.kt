@@ -84,6 +84,8 @@ import com.notesprout.android.data.TemplateData
 import com.notesprout.android.data.toBoundingBoxJson
 import com.notesprout.android.data.index.IndexRepository
 import com.notesprout.android.data.index.NotesproutIndex
+import com.notesprout.android.data.ScratchpadRepository
+import com.notesprout.android.notebook.ScratchpadPreferences
 import com.notesprout.android.data.index.ObjectType
 import com.notesprout.android.data.index.TemplateObject as IndexTemplateObject
 import com.notesprout.android.data.links.BackEntry
@@ -271,6 +273,11 @@ class NotebookActivity : AppCompatActivity() {
 
     /** Lazy access to the index repository for snapshot/page-count/updatedAt sync. */
     private val indexRepo: IndexRepository by lazy { IndexRepository(NotesproutIndex.dao()) }
+
+    /** Lazy access to the scratch pad repository — used for "Send to Scratch Pad". */
+    private val scratchpadRepo: ScratchpadRepository by lazy {
+        ScratchpadRepository(NotesproutIndex.db(), NotesproutIndex.scratchpadDao())
+    }
 
     /** Last page count pushed to the index; -1 = not yet synced. */
     private var lastSyncedPageCount: Int = -1
@@ -1804,6 +1811,10 @@ class NotebookActivity : AppCompatActivity() {
             updateSnapToggleIcon()
         }
         updateSnapToggleIcon()
+
+        binding.btnLassoSendToScratchpad.setOnClickListener {
+            lifecycleScope.launch { performSendToScratchpad() }
+        }
 
         // Wire the lasso popup Clear Clipboard button.
         binding.btnLassoClearClipboard.setOnClickListener {
@@ -4994,6 +5005,185 @@ class NotebookActivity : AppCompatActivity() {
     private fun clearClipboard() {
         NotesproutClipboard.clear()
         NotesproutApplication.appScope.launch { indexRepo.clearClipboard() }
+    }
+
+    /**
+     * Send the current lasso selection into the scratch pad (background, no UI open).
+     * Shows: encryption warning (if needed) → crop/cancel (if too large) → new/current page.
+     */
+    private suspend fun performSendToScratchpad() {
+        val ids = drawingView.lassoSelectedIds
+        if (ids.isEmpty()) return
+        val strokes     = drawingView.getStrokes().filter { it.id in ids }
+        val headings    = drawingView.getHeadings().filter { it.id in ids }
+        val textObjects = drawingView.getTextObjects().filter { it.id in ids }
+        val lineObjects = drawingView.getLineObjects().filter { it.id in ids }
+        val linkObjects = drawingView.getLinks().filter { it.id in ids }
+        if (strokes.isEmpty() && headings.isEmpty() && textObjects.isEmpty() && lineObjects.isEmpty() && linkObjects.isEmpty()) return
+
+        val box = computeUnionBoundingBox(strokes, headings)
+        textObjects.forEach { box.union(it.boundingBox) }
+        lineObjects.forEach { box.union(it.boundingBox) }
+        linkObjects.forEach { box.union(it.boundingBox) }
+
+        // Encryption guard: scratch pad is plaintext, same warning as clipboard copy.
+        val encInfo = withContext(Dispatchers.IO) { indexRepo.getEncryptionInfo(notebookId) }
+        if (encInfo.encrypted && !awaitEncryptionClipboardConfirm()) return
+
+        // Ensure the scratch pad is initialised so we can read page dimensions.
+        withContext(Dispatchers.IO) { scratchpadRepo.ensureBootstrap() }
+
+        // Get current scratch pad page size.
+        val pages = withContext(Dispatchers.IO) { scratchpadRepo.getPages() }
+        val savedIndex = ScratchpadPreferences.loadCurrentPageIndex(this)
+        val pageIndex = savedIndex.coerceIn(0, (pages.size - 1).coerceAtLeast(0))
+        val currentPage = pages.getOrNull(pageIndex)
+        val pageData = currentPage?.let {
+            runCatching { PageData.fromJson(it.data) }.getOrNull()
+        }
+        val pageW = pageData?.width ?: 0f
+        val pageH = pageData?.height ?: 0f
+
+        // Fit check: compare selection dimensions against the current page.
+        val selW = box.width()
+        val selH = box.height()
+        val doesNotFit = pageW > 0f && pageH > 0f && (selW > pageW || selH > pageH)
+
+        if (doesNotFit) {
+            val proceed = suspendCancellableCoroutine<Boolean> { cont ->
+                AlertDialog.Builder(this)
+                    .setMessage(
+                        "This selection is larger than the scratch pad page. " +
+                        "Crop it to fit (content may be clipped), or cancel?"
+                    )
+                    .setPositiveButton("Crop") { _, _ -> if (cont.isActive) cont.resume(true) }
+                    .setNegativeButton("Cancel") { _, _ -> if (cont.isActive) cont.resume(false) }
+                    .setOnCancelListener { if (cont.isActive) cont.resume(false) }
+                    .create()
+                    .also { d ->
+                        d.show()
+                        d.window?.setElevation(0f)
+                        d.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+                    }
+            }
+            if (!proceed) return
+        }
+
+        // Placement prompt: new page or current page.
+        val useNewPage = suspendCancellableCoroutine<Boolean?> { cont ->
+            AlertDialog.Builder(this)
+                .setMessage("Add to the scratch pad?")
+                .setPositiveButton("New page") { _, _ -> if (cont.isActive) cont.resume(true) }
+                .setNeutralButton("Current page") { _, _ -> if (cont.isActive) cont.resume(false) }
+                .setNegativeButton("Cancel") { _, _ -> if (cont.isActive) cont.resume(null) }
+                .setOnCancelListener { if (cont.isActive) cont.resume(null) }
+                .create()
+                .also { d ->
+                    d.show()
+                    d.window?.setElevation(0f)
+                    d.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+                }
+        } ?: return
+
+        // Resolve the target page and layer. New page goes at the end of the list.
+        data class LayerTarget(val pageId: String, val layerId: String)
+        val target = withContext(Dispatchers.IO) {
+            if (useNewPage) {
+                val updatedPages = scratchpadRepo.getPages()
+                val newPageId = scratchpadRepo.addPage(afterIndex = updatedPages.size - 1)
+                val lId = scratchpadRepo.getLayerForPage(newPageId)?.id ?: return@withContext null
+                LayerTarget(newPageId, lId)
+            } else {
+                val updatedPages = scratchpadRepo.getPages()
+                val idx = ScratchpadPreferences.loadCurrentPageIndex(this@NotebookActivity)
+                    .coerceIn(0, (updatedPages.size - 1).coerceAtLeast(0))
+                val pId = updatedPages.getOrNull(idx)?.id ?: return@withContext null
+                val lId = scratchpadRepo.getLayerForPage(pId)?.id ?: return@withContext null
+                LayerTarget(pId, lId)
+            }
+        } ?: run {
+            android.widget.Toast.makeText(this, "Could not send to scratch pad.", android.widget.Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        // Compute dx/dy: center on the target page when dimensions are known; fall back to origin.
+        val dx: Float
+        val dy: Float
+        if (pageW > 0f && pageH > 0f) {
+            dx = (pageW - selW) / 2f - box.left
+            dy = (pageH - selH) / 2f - box.top
+        } else {
+            dx = -box.left
+            dy = -box.top
+        }
+
+        // Build translated, fresh-UUID content.
+        val density = resources.displayMetrics.density
+        val translatedContent = NotesproutClipboard.ClipboardContent(
+            strokes = strokes.map { s ->
+                LiveStroke(
+                    id = java.util.UUID.randomUUID().toString(),
+                    points = s.points.map { android.graphics.PointF(it.x + dx, it.y + dy) },
+                )
+            },
+            headings = headings.map { h ->
+                HeadingStroke(
+                    id = java.util.UUID.randomUUID().toString(),
+                    boundingBox = RectF(h.boundingBox.left + dx, h.boundingBox.top + dy,
+                                        h.boundingBox.right + dx, h.boundingBox.bottom + dy),
+                    strokes = h.strokes.map { s ->
+                        s.copy(
+                            id = java.util.UUID.randomUUID().toString(),
+                            points = s.points.map { android.graphics.PointF(it.x + dx, it.y + dy) },
+                        )
+                    },
+                    recognizedText = h.recognizedText,
+                    level = h.level,
+                )
+            },
+            textObjects = textObjects.map { t ->
+                TextRender(
+                    id = java.util.UUID.randomUUID().toString(),
+                    boundingBox = RectF(t.boundingBox.left + dx, t.boundingBox.top + dy,
+                                        t.boundingBox.right + dx, t.boundingBox.bottom + dy),
+                    text = t.text,
+                    strokes = t.strokes,
+                )
+            },
+            lineObjects = lineObjects.map { l ->
+                l.copy(
+                    id = java.util.UUID.randomUUID().toString(),
+                    boundingBox = RectF(l.boundingBox.left + dx, l.boundingBox.top + dy,
+                                        l.boundingBox.right + dx, l.boundingBox.bottom + dy),
+                    startX = l.startX + dx, startY = l.startY + dy,
+                    endX   = l.endX   + dx, endY   = l.endY   + dy,
+                )
+            },
+            links = linkObjects.map { link -> link.translate(dx, dy, newId = java.util.UUID.randomUUID().toString()) },
+            boundingBox = RectF(0f, 0f, selW, selH),
+        )
+
+        withContext(Dispatchers.IO) { scratchpadRepo.insertObjects(target.layerId, translatedContent, density) }
+
+        // Collect the IDs of all inserted objects to pre-select them in the scratch pad.
+        val insertedIds = buildList<String> {
+            translatedContent.strokes.mapTo(this) { it.id }
+            translatedContent.headings.mapTo(this) { it.id }
+            translatedContent.textObjects.mapTo(this) { it.id }
+            translatedContent.lineObjects.mapTo(this) { it.id }
+            translatedContent.links.mapTo(this) { it.id }
+        }
+
+        // Launch the scratch pad, navigating to the target page with the new objects pre-selected.
+        startActivity(
+            android.content.Intent(this, ScratchpadActivity::class.java).apply {
+                putExtra(ScratchpadActivity.EXTRA_FROM_NOTEBOOK_ID,        notebookId)
+                putExtra(ScratchpadActivity.EXTRA_FROM_NOTEBOOK_NAME,      notebookDisplayName)
+                putExtra(ScratchpadActivity.EXTRA_FROM_NOTEBOOK_ENCRYPTED, encInfo.encrypted)
+                putExtra(ScratchpadActivity.EXTRA_JUMP_TO_PAGE_ID,         target.pageId)
+                putExtra(ScratchpadActivity.EXTRA_SELECT_OBJECT_IDS,       insertedIds.joinToString(","))
+            }
+        )
     }
 
     /**
