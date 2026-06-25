@@ -2079,8 +2079,8 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
         val limitRect = Rect(
             maxOf(0, frame.left - loc[0]),
             maxOf(0, frame.top - loc[1]),
-            frame.right - loc[0],
-            frame.bottom - loc[1]
+            minOf(width, frame.right - loc[0]),
+            minOf(height, frame.bottom - loc[1])
         )
         // Pass an off-screen dummy rect instead of emptyList() when there is no exclusion.
         // The Onyx SDK treats an empty list as a no-op — it silently ignores the call and

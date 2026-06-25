@@ -118,6 +118,7 @@ import com.notesprout.android.recognition.HandwritingRecognizer
 import com.notesprout.android.recognition.HandwritingRecognizerProvider
 import com.notesprout.android.toc.TocDialog
 import com.notesprout.android.toc.TocRepository
+import com.notesprout.android.core.isBooxDevice
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
@@ -126,7 +127,6 @@ import kotlinx.coroutines.withContext
 import kotlin.coroutines.resume
 import kotlin.math.abs
 import java.io.File
-import java.util.Locale
 import java.util.UUID
 
 class NotebookActivity : AppCompatActivity() {
@@ -9567,6 +9567,4 @@ class NotebookActivity : AppCompatActivity() {
             Rect(0, 0, dm.widthPixels, dm.heightPixels)
         }
 
-    private fun isBooxDevice() =
-        Build.MANUFACTURER.lowercase(Locale.ROOT).contains("onyx")
 }
