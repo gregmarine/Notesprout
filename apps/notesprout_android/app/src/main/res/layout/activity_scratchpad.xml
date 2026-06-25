@@ -113,6 +113,14 @@
                     android:src="@drawable/ic_lasso_delete"
                     android:contentDescription="Delete selection" />
 
+                <!-- Visible only when launched from a notebook and a selection exists -->
+                <androidx.appcompat.widget.AppCompatImageButton
+                    android:id="@+id/btnLassoSendToNotebook"
+                    style="@style/Widget.Notesprout.ToolbarButton"
+                    android:src="@drawable/ic_sketching_receive"
+                    android:contentDescription="Send selection to Notebook"
+                    android:visibility="gone" />
+
             </LinearLayout>
 
         </FrameLayout>

@@ -84,6 +84,9 @@ class ScratchpadActivity : AppCompatActivity() {
     private val persistedStrokeIds = mutableSetOf<String>()
     private var isEraserActive = false
 
+    /** Non-null only when launched from a notebook — determines Send-to-Notebook visibility. */
+    private var fromNotebookId: String? = null
+
     // ── Lasso state ───────────────────────────────────────────────────────────
     private var isLassoMode = false
     private var isSmartLassoSession = false
@@ -96,7 +99,7 @@ class ScratchpadActivity : AppCompatActivity() {
 
         repository = ScratchpadRepository(NotesproutIndex.db(), NotesproutIndex.scratchpadDao())
 
-        val fromNotebookId = intent.getStringExtra(EXTRA_FROM_NOTEBOOK_ID)
+        fromNotebookId = intent.getStringExtra(EXTRA_FROM_NOTEBOOK_ID)
         binding.btnSendToNotebook.visibility =
             if (fromNotebookId != null) View.VISIBLE else View.GONE
 
@@ -144,7 +147,8 @@ class ScratchpadActivity : AppCompatActivity() {
             }
         }
 
-        binding.btnSendToNotebook.setOnClickListener { }
+        binding.btnSendToNotebook.setOnClickListener { sendPageToNotebook() }
+        binding.btnLassoSendToNotebook.setOnClickListener { sendSelectionToNotebook() }
 
         binding.btnScratchAddPage.setOnClickListener {
             lifecycleScope.launch { addPage() }
@@ -668,6 +672,76 @@ class ScratchpadActivity : AppCompatActivity() {
         }
     }
 
+    // ── Send to Notebook ──────────────────────────────────────────────────────
+
+    /** Toolbar button: send all objects on the current page to the notebook. */
+    private fun sendPageToNotebook() {
+        if (fromNotebookId == null) return
+        val strokes     = drawingView.getStrokes()
+        val headings    = drawingView.getHeadings()
+        val textObjects = drawingView.getTextObjects()
+        val lineObjects = drawingView.getLineObjects()
+        val links       = drawingView.getLinks()
+        if (strokes.isEmpty() && headings.isEmpty() && textObjects.isEmpty() && lineObjects.isEmpty() && links.isEmpty()) return
+
+        val box = RectF()
+        strokes.forEach { box.union(it.boundingBox) }
+        headings.forEach { box.union(it.boundingBox) }
+        textObjects.forEach { box.union(it.boundingBox) }
+        lineObjects.forEach { box.union(it.boundingBox) }
+        links.forEach { box.union(it.boundingBox) }
+
+        ScratchpadTransfer.pending = NotesproutClipboard.ClipboardContent(
+            strokes = strokes.map { LiveStroke(it.id, it.points.map { pt -> PointF(pt.x, pt.y) }) },
+            headings = headings.map { h ->
+                HeadingStroke(h.id, RectF(h.boundingBox),
+                    h.strokes.map { s -> LiveStroke(s.id, s.points.map { PointF(it.x, it.y) }) },
+                    recognizedText = h.recognizedText, level = h.level)
+            },
+            boundingBox = box,
+            textObjects = textObjects.map { t -> TextRender(t.id, RectF(t.boundingBox), t.text, t.strokes) },
+            lineObjects = lineObjects.map { l -> l.copy(boundingBox = RectF(l.boundingBox)) },
+            links = links.map { it.translate(0f, 0f) },
+        )
+        setResult(RESULT_OK)
+        finish()
+    }
+
+    /** Floating-toolbar lasso button: send the current selection to the notebook. */
+    private fun sendSelectionToNotebook() {
+        if (fromNotebookId == null) return
+        val ids = drawingView.lassoSelectedIds
+        if (ids.isEmpty()) return
+        val strokes     = drawingView.getStrokes().filter { it.id in ids }
+        val headings    = drawingView.getHeadings().filter { it.id in ids }
+        val textObjects = drawingView.getTextObjects().filter { it.id in ids }
+        val lineObjects = drawingView.getLineObjects().filter { it.id in ids }
+        val links       = drawingView.getLinks().filter { it.id in ids }
+        if (strokes.isEmpty() && headings.isEmpty() && textObjects.isEmpty() && lineObjects.isEmpty() && links.isEmpty()) return
+
+        val box = RectF()
+        strokes.forEach { box.union(it.boundingBox) }
+        headings.forEach { box.union(it.boundingBox) }
+        textObjects.forEach { box.union(it.boundingBox) }
+        lineObjects.forEach { box.union(it.boundingBox) }
+        links.forEach { box.union(it.boundingBox) }
+
+        ScratchpadTransfer.pending = NotesproutClipboard.ClipboardContent(
+            strokes = strokes.map { LiveStroke(it.id, it.points.map { pt -> PointF(pt.x, pt.y) }) },
+            headings = headings.map { h ->
+                HeadingStroke(h.id, RectF(h.boundingBox),
+                    h.strokes.map { s -> LiveStroke(s.id, s.points.map { PointF(it.x, it.y) }) },
+                    recognizedText = h.recognizedText, level = h.level)
+            },
+            boundingBox = box,
+            textObjects = textObjects.map { t -> TextRender(t.id, RectF(t.boundingBox), t.text, t.strokes) },
+            lineObjects = lineObjects.map { l -> l.copy(boundingBox = RectF(l.boundingBox)) },
+            links = links.map { it.translate(0f, 0f) },
+        )
+        setResult(RESULT_OK)
+        finish()
+    }
+
     private fun performLassoPaste(tapX: Float, tapY: Float) {
         val clip    = NotesproutClipboard.content ?: return
         val layerId = currentLayerId.takeIf { it.isNotEmpty() } ?: return
@@ -825,6 +899,8 @@ class ScratchpadActivity : AppCompatActivity() {
     // ── Floating selection toolbar helpers ────────────────────────────────────
 
     private fun updateFloatingSelectionToolbar(selectionBox: RectF) {
+        binding.btnLassoSendToNotebook.visibility =
+            if (fromNotebookId != null) View.VISIBLE else View.GONE
         binding.floatingSelectionToolbar.visibility = View.VISIBLE
         binding.floatingSelectionToolbar.post { positionFloatingToolbar(selectionBox) }
     }

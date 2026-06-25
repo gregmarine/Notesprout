@@ -718,7 +718,12 @@ class NotebookActivity : AppCompatActivity() {
      *  consume RESULT_OK to paste content returned from the scratch pad. */
     private val scratchpadLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
-    ) { /* Session 7: handle RESULT_OK + ScratchpadTransfer.pending here */ }
+    ) { result ->
+        if (result.resultCode != RESULT_OK) return@registerForActivityResult
+        val content = ScratchpadTransfer.pending ?: return@registerForActivityResult
+        ScratchpadTransfer.pending = null
+        performScratchpadTransfer(content)
+    }
 
     private val savePdfLauncher = registerForActivityResult(
         ActivityResultContracts.CreateDocument("application/pdf")
@@ -4865,6 +4870,212 @@ class NotebookActivity : AppCompatActivity() {
             selectedObjectIds.addAll(newLineObjects.map { it.id })
             selectedObjectIds.addAll(newLinks.map { it.id })
             isSmartLassoSession = false
+            drawingView.setLassoSelectedIds(selectedObjectIds.toSet(), newBox)
+            updateFloatingSelectionToolbar(newBox)
+        }
+    }
+
+    /**
+     * Paste content transferred from the scratch pad onto the current page, top-left aligned to
+     * the page origin (0,0).  Leaves the pasted objects selected.
+     */
+    private fun performScratchpadTransfer(content: NotesproutClipboard.ClipboardContent) {
+        val db      = soilDatabase ?: return
+        val pageId  = currentPageId.takeIf  { it.isNotEmpty() } ?: return
+        val layerId = currentLayerId.takeIf { it.isNotEmpty() } ?: return
+
+        // Translate so the center of the selection lands at the center of the page.
+        val pageCx = binding.drawingContainer.width  / 2f
+        val pageCy = binding.drawingContainer.height / 2f
+        val dx = pageCx - content.boundingBox.centerX()
+        val dy = pageCy - content.boundingBox.centerY()
+
+        val insertedAt = System.currentTimeMillis()
+        val newStrokes = content.strokes.map { stroke ->
+            stroke.copy(
+                id = java.util.UUID.randomUUID().toString(),
+                points = stroke.points.map { PointF(it.x + dx, it.y + dy) },
+            )
+        }
+        val newHeadings = content.headings.map { h ->
+            HeadingStroke(
+                id = java.util.UUID.randomUUID().toString(),
+                boundingBox = RectF(h.boundingBox.left + dx, h.boundingBox.top + dy,
+                                    h.boundingBox.right + dx, h.boundingBox.bottom + dy),
+                strokes = h.strokes.map { s ->
+                    s.copy(
+                        id = java.util.UUID.randomUUID().toString(),
+                        points = s.points.map { PointF(it.x + dx, it.y + dy) },
+                    )
+                },
+                recognizedText = h.recognizedText,
+                level = h.level,
+            )
+        }
+        val newTextObjects = content.textObjects.map { t ->
+            TextRender(
+                id = java.util.UUID.randomUUID().toString(),
+                boundingBox = RectF(t.boundingBox.left + dx, t.boundingBox.top + dy,
+                                    t.boundingBox.right + dx, t.boundingBox.bottom + dy),
+                text = t.text,
+                strokes = t.strokes,
+            )
+        }
+        val newLineObjects = content.lineObjects.map { l ->
+            l.copy(
+                id = java.util.UUID.randomUUID().toString(),
+                boundingBox = RectF(l.boundingBox.left + dx, l.boundingBox.top + dy,
+                                    l.boundingBox.right + dx, l.boundingBox.bottom + dy),
+                startX = l.startX + dx, startY = l.startY + dy,
+                endX   = l.endX   + dx, endY   = l.endY   + dy,
+            )
+        }
+        val newLinks = content.links.map { it.translate(dx, dy, newId = java.util.UUID.randomUUID().toString()) }
+        val density = resources.displayMetrics.density
+
+        lifecycleScope.launch {
+            val existingStrokes = drawingView.getStrokes()
+            val baseOrder = existingStrokes.size
+            withContext(Dispatchers.IO) {
+                val now = insertedAt
+                val dao = db.notebookDao()
+                db.withTransaction {
+                    newStrokes.forEachIndexed { i, stroke ->
+                        val points = stroke.points
+                        if (points.size < 2) return@forEachIndexed
+                        val minX = points.minOf { it.x }
+                        val minY = points.minOf { it.y }
+                        val maxX = points.maxOf { it.x }
+                        val maxY = points.maxOf { it.y }
+                        val bboxJson = BoundingBox(minX, minY, maxX - minX, maxY - minY).toJson()
+                        val strokeData = stroke.toStrokeData(now)
+                        dao.insertOrIgnore(
+                            NotebookObject(
+                                id          = stroke.id,
+                                type        = "stroke",
+                                parentId    = layerId,
+                                boundingBox = bboxJson,
+                                sortOrder   = baseOrder + i,
+                                createdAt   = now,
+                                updatedAt   = now,
+                                deletedAt   = null,
+                                data        = strokeData.toJson(),
+                            )
+                        )
+                    }
+                    newHeadings.forEach { heading ->
+                        dao.insertOrIgnore(
+                            NotebookObject(
+                                id          = heading.id,
+                                type        = TYPE_HEADING,
+                                parentId    = layerId,
+                                boundingBox = heading.boundingBox.toBoundingBoxJson(),
+                                sortOrder   = 0,
+                                createdAt   = now,
+                                updatedAt   = now,
+                                deletedAt   = null,
+                                data        = HeadingObject(heading.strokes, heading.recognizedText, heading.level).toJson(),
+                            )
+                        )
+                    }
+                    newTextObjects.forEach { textObj ->
+                        dao.insertOrIgnore(
+                            NotebookObject(
+                                id          = textObj.id,
+                                type        = TYPE_TEXT,
+                                parentId    = layerId,
+                                boundingBox = textObj.boundingBox.toBoundingBoxJson(),
+                                sortOrder   = 0,
+                                createdAt   = now,
+                                updatedAt   = now,
+                                deletedAt   = null,
+                                data        = TextObject(text = textObj.text, strokes = textObj.strokes).toJson(),
+                            )
+                        )
+                    }
+                    newLineObjects.forEach { lineObj ->
+                        dao.insertOrIgnore(
+                            NotebookObject(
+                                id          = lineObj.id,
+                                type        = TYPE_LINE,
+                                parentId    = layerId,
+                                boundingBox = lineObj.boundingBox.toBoundingBoxJson(),
+                                sortOrder   = 0,
+                                createdAt   = now,
+                                updatedAt   = now,
+                                deletedAt   = null,
+                                data        = LineObject(lineObj.style, lineObj.orientation, lineObj.strokeWidthDp, lineObj.dotSpacingPx / density).toJson(),
+                            )
+                        )
+                    }
+                    newLinks.forEach { link ->
+                        dao.insertOrIgnore(
+                            NotebookObject(
+                                id          = link.id,
+                                type        = TYPE_LINK,
+                                parentId    = layerId,
+                                boundingBox = link.boundingBox.toBoundingBoxJson(),
+                                sortOrder   = 0,
+                                createdAt   = now,
+                                updatedAt   = now,
+                                deletedAt   = null,
+                                data        = link.toLinkObject(density).toJson(),
+                            )
+                        )
+                    }
+                }
+                if (newLinks.isNotEmpty()) invalidatePageSnapshot(db, pageId)
+            }
+
+            val allStrokes  = existingStrokes + newStrokes
+            val allHeadings = drawingView.getHeadings() + newHeadings
+            val allTexts    = drawingView.getTextObjects() + newTextObjects
+            val allLines    = drawingView.getLineObjects() + newLineObjects
+            val allLinks    = drawingView.getLinks() + newLinks
+            newStrokes.forEach { persistedStrokeIds.add(it.id) }
+            drawingView.loadHeadings(allHeadings)
+            drawingView.loadTextObjects(allTexts)
+            drawingView.loadLineObjects(allLines)
+            drawingView.loadLinks(allLinks)
+
+            undoRedoManager.push(UndoRedoAction.LassoPasted(
+                strokeIds   = newStrokes.map { it.id },
+                pageId      = pageId,
+                insertedAt  = insertedAt,
+                headingIds  = newHeadings.map { it.id },
+                textIds     = newTextObjects.map { it.id },
+                textObjects = newTextObjects,
+                lineIds     = newLineObjects.map { it.id },
+                lines       = newLineObjects,
+                linkIds     = newLinks.map { it.id },
+                links       = newLinks,
+            ))
+            updateUndoRedoButtons()
+
+            val templateBmp = currentTemplateBitmap
+            val bitmap = withContext(Dispatchers.IO) {
+                drawingView.buildRenderBitmap(allStrokes, templateBmp, allHeadings, allTexts, allLines, allLinks)
+            }
+            if (bitmap != null) {
+                drawingView.loadStrokesWithBitmap(allStrokes, bitmap, templateBmp)
+            } else {
+                drawingView.loadStrokes(allStrokes)
+            }
+
+            val newBox = computeUnionBoundingBox(newStrokes, newHeadings)
+            newTextObjects.forEach { newBox.union(it.boundingBox) }
+            newLineObjects.forEach { newBox.union(it.boundingBox) }
+            newLinks.forEach { newBox.union(it.boundingBox) }
+            val pad = 8f * resources.displayMetrics.density
+            newBox.inset(-pad, -pad)
+            selectedObjectIds.clear()
+            selectedObjectIds.addAll(newStrokes.map { it.id })
+            selectedObjectIds.addAll(newHeadings.map { it.id })
+            selectedObjectIds.addAll(newTextObjects.map { it.id })
+            selectedObjectIds.addAll(newLineObjects.map { it.id })
+            selectedObjectIds.addAll(newLinks.map { it.id })
+            isSmartLassoSession = false
+            if (!isLassoMode) enterLassoMode()
             drawingView.setLassoSelectedIds(selectedObjectIds.toSet(), newBox)
             updateFloatingSelectionToolbar(newBox)
         }
