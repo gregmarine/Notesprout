@@ -381,7 +381,7 @@ class ScratchpadActivity : AppCompatActivity() {
             hideFloatingSelectionToolbar()
         }
 
-        drawingView.onStrokesMoved = { _, movedStrokes, _, movedHeadings, _, movedTextObjects, _, movedLineObjects, _, movedLinks ->
+        drawingView.onStrokesMoved = { _, movedStrokes, _, movedHeadings, _, movedTextObjects, _, movedLineObjects, _, movedLinks, _, _ ->
             lifecycleScope.launch {
                 val now     = System.currentTimeMillis()
                 val density = resources.displayMetrics.density
@@ -447,7 +447,7 @@ class ScratchpadActivity : AppCompatActivity() {
             }
         }
 
-        drawingView.onScribbleEraseComplete = { erasedObjectIds, erasedHeadings, erasedTextObjects, erasedLineObjects, erasedLinks ->
+        drawingView.onScribbleEraseComplete = { erasedObjectIds, erasedHeadings, erasedTextObjects, erasedLineObjects, erasedLinks, _ ->
             if (erasedObjectIds.isNotEmpty()) {
                 lifecycleScope.launch {
                     withContext(Dispatchers.IO) { repository.softDeleteObjects(erasedObjectIds) }

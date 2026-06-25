@@ -133,6 +133,8 @@ interface NotebookView {
         movedLineObjects: List<LineRender>,
         originalLinks: List<LinkRender>,
         movedLinks: List<LinkRender>,
+        originalStickyNotes: List<StickyNoteRender>,
+        movedStickyNotes: List<StickyNoteRender>,
     ) -> Unit)?
         get() = null
         @Suppress("UNUSED_PARAMETER")
@@ -376,6 +378,7 @@ interface NotebookView {
         erasedTextObjects: List<TextRender>,
         erasedLineObjects: List<LineRender>,
         erasedLinks: List<LinkRender>,
+        erasedStickyNotes: List<StickyNoteRender>,
     ) -> Unit)?
         get() = null
         @Suppress("UNUSED_PARAMETER")
@@ -421,6 +424,17 @@ interface NotebookView {
      * The full [LinkRender] is passed so the caller has its data for undo restoration.
      */
     var onLinkErased: ((linkObject: LinkRender) -> Unit)?
+        get() = null
+        @Suppress("UNUSED_PARAMETER")
+        set(value) {}
+
+    /**
+     * Fired on the main thread when the eraser path intersects a sticky note's icon bounding box.
+     * The note has already been removed from the view's in-memory list before this fires.
+     * NotebookActivity wires this to soft-delete the row from the DB and push an undo action.
+     * The full [StickyNoteRender] is passed so the caller has its data for undo restoration.
+     */
+    var onStickyNoteErased: ((note: StickyNoteRender) -> Unit)?
         get() = null
         @Suppress("UNUSED_PARAMETER")
         set(value) {}

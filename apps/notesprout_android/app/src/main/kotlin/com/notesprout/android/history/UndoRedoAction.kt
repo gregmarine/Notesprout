@@ -124,6 +124,7 @@ sealed class UndoRedoAction {
         val layerId: String,
         val deletedAt: Long,
         val headingIds: List<String> = emptyList(),
+        val stickyNoteIds: List<String> = emptyList(),
     ) : UndoRedoAction()
 
     /**
@@ -232,6 +233,8 @@ sealed class UndoRedoAction {
         val lines: List<LineRender> = emptyList(),
         val linkIds: List<String> = emptyList(),
         val links: List<LinkRender> = emptyList(),
+        val stickyNoteIds: List<String> = emptyList(),
+        val stickyNotes: List<StickyNoteRender> = emptyList(),
     ) : UndoRedoAction()
 
     /**
@@ -256,6 +259,8 @@ sealed class UndoRedoAction {
         val movedLineObjects: List<LineRender> = emptyList(),
         val originalLinks: List<LinkRender> = emptyList(),
         val movedLinks: List<LinkRender> = emptyList(),
+        val originalStickyNotes: List<StickyNoteRender> = emptyList(),
+        val movedStickyNotes: List<StickyNoteRender> = emptyList(),
     ) : UndoRedoAction()
 
     /**
@@ -280,6 +285,8 @@ sealed class UndoRedoAction {
         val lines: List<LineRender> = emptyList(),
         val linkIds: List<String> = emptyList(),
         val links: List<LinkRender> = emptyList(),
+        val stickyNoteIds: List<String> = emptyList(),
+        val stickyNotes: List<StickyNoteRender> = emptyList(),
     ) : UndoRedoAction()
 
     /**
@@ -309,6 +316,8 @@ sealed class UndoRedoAction {
         val lines: List<LineRender> = emptyList(),
         val linkIds: List<String> = emptyList(),
         val links: List<LinkRender> = emptyList(),
+        val stickyNoteIds: List<String> = emptyList(),
+        val stickyNotes: List<StickyNoteRender> = emptyList(),
     ) : UndoRedoAction()
 
     /**
@@ -334,6 +343,8 @@ sealed class UndoRedoAction {
         val lines: List<LineRender> = emptyList(),
         val linkIds: List<String> = emptyList(),
         val links: List<LinkRender> = emptyList(),
+        val stickyNoteIds: List<String> = emptyList(),
+        val stickyNotes: List<StickyNoteRender> = emptyList(),
     ) : UndoRedoAction()
 
     /**
@@ -507,6 +518,8 @@ sealed class UndoRedoAction {
         val lines: List<LineRender> = emptyList(),
         val linkIds: List<String> = emptyList(),
         val links: List<LinkRender> = emptyList(),
+        val stickyNoteIds: List<String> = emptyList(),
+        val stickyNotes: List<StickyNoteRender> = emptyList(),
     ) : UndoRedoAction()
 
     /**
