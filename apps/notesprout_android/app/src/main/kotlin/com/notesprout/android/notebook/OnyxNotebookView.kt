@@ -1066,10 +1066,45 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
+        // In any mode that disables the SDK raw-drawing path (setRawDrawingEnabled=false),
+        // the SDK never fires onBeginRawErasing for the stylus button/eraser-end. Intercept
+        // via Android events before the per-mode handler gets a chance to drop the event.
+        // BOOX reports the barrel button as TOOL_TYPE_ERASER; also check BUTTON_STYLUS_PRIMARY.
+        if (isTextPlacementMode || isLassoMode || isLassoEraserMode) {
+            val t = event.getToolType(0)
+            if (t == MotionEvent.TOOL_TYPE_ERASER
+                || (t == MotionEvent.TOOL_TYPE_STYLUS
+                    && (event.buttonState and MotionEvent.BUTTON_STYLUS_PRIMARY) != 0)) {
+                return handleBarrelButtonErase(event)
+            }
+        }
         if (isTextPlacementMode) return handleTextPlacementTouch(event)
         if (isLassoMode) return handleLassoTouch(event)
         if (isLassoEraserMode) return handleLassoEraserTouch(event)
         return if (isSetup) touchHelper.onTouchEvent(event) else super.onTouchEvent(event)
+    }
+
+    private fun handleBarrelButtonErase(event: MotionEvent): Boolean {
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                eraseAtPath(listOf(PointF(event.x, event.y)))
+            }
+            MotionEvent.ACTION_MOVE -> {
+                val pts = mutableListOf<PointF>()
+                for (i in 0 until event.historySize) pts.add(PointF(event.getHistoricalX(i), event.getHistoricalY(i)))
+                pts.add(PointF(event.x, event.y))
+                eraseAtPath(pts)
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                eraseAtPath(listOf(PointF(event.x, event.y)))
+                finalizeEraseRedraw()
+                post {
+                    EpdController.handwritingRepaint(this, Rect(0, 0, width, height))
+                }
+                onPenLifted?.invoke()
+            }
+        }
+        return true
     }
 
     private fun handleTextPlacementTouch(event: MotionEvent): Boolean {

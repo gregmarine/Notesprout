@@ -212,6 +212,17 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
         if (isTextPlacementMode) return handleTextPlacementTouch(event)
+        // In any mode that bypasses the SDK raw-drawing path, intercept stylus button/eraser-end
+        // events before the per-mode handler drops them. Check both TOOL_TYPE_ERASER and
+        // BUTTON_STYLUS_PRIMARY to cover all platform/stylus variants.
+        if (isTextPlacementMode || isLassoMode || isLassoEraserMode) {
+            val t = event.getToolType(0)
+            if (t == MotionEvent.TOOL_TYPE_ERASER
+                || (t == MotionEvent.TOOL_TYPE_STYLUS
+                    && (event.buttonState and MotionEvent.BUTTON_STYLUS_PRIMARY) != 0)) {
+                return handleBarrelButtonErase(event)
+            }
+        }
         if (isLassoMode) return handleLassoTouch(event)
         if (isLassoEraserMode) return handleLassoEraserTouch(event)
 
@@ -219,6 +230,7 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
         if (toolType != MotionEvent.TOOL_TYPE_STYLUS && toolType != MotionEvent.TOOL_TYPE_ERASER) return false
 
         val erasing = toolType == MotionEvent.TOOL_TYPE_ERASER || isEraserActive
+            || (event.buttonState and MotionEvent.BUTTON_STYLUS_PRIMARY) != 0
 
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
@@ -254,6 +266,28 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
                     val durationMs = (System.currentTimeMillis() - strokeStartTimeMs).coerceAtLeast(1L)
                     checkAndDispatchGesture(durationMs)
                 }
+            }
+        }
+        return true
+    }
+
+    private fun handleBarrelButtonErase(event: MotionEvent): Boolean {
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                eraseAtPath(listOf(PointF(event.x, event.y)))
+            }
+            MotionEvent.ACTION_MOVE -> {
+                val pts = mutableListOf<PointF>()
+                for (i in 0 until event.historySize) pts.add(PointF(event.getHistoricalX(i), event.getHistoricalY(i)))
+                pts.add(PointF(event.x, event.y))
+                eraseAtPath(pts)
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                eraseAtPath(listOf(PointF(event.x, event.y)))
+                finalizeEraseRedraw()
+                activePoints.clear()
+                invalidate()
+                onPenLifted?.invoke()
             }
         }
         return true

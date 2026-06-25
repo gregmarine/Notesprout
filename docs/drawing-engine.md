@@ -61,6 +61,10 @@ When a Dialog is shown over NotebookActivity, focus changes trigger `onWindowFoc
 
 `openRawDrawing()` and `enableDrawing()` must guard `setRawDrawingEnabled(true)` with `!isLassoMode && !isLassoEraserMode && !isTextPlacementMode`. If the guard passes and `isEraserMode` is true, immediately follow with `setRawDrawingRenderEnabled(false)`. Failing this causes phantom pen strokes on the EPD overlay — they look real but vanish on the next EPD refresh.
 
+## Stylus Barrel Button
+
+The BOOX stylus barrel button is reported to Android as `TOOL_TYPE_ERASER` (not `BUTTON_STYLUS_PRIMARY`). In pen/eraser mode the Onyx SDK intercepts this at the hardware level and fires `onBeginRawErasing` → the existing erasing callbacks handle it. In modes where `setRawDrawingEnabled(false)` is active (lasso, lasso eraser, text placement), the SDK is silent and the button event arrives only via Android's `onTouchEvent`. Both views intercept `TOOL_TYPE_ERASER` (and `BUTTON_STYLUS_PRIMARY` for completeness) **before** the per-mode handler in `onTouchEvent`, routing to `handleBarrelButtonErase` which calls `eraseAtPath` → `finalizeEraseRedraw` → `handwritingRepaint`. This gives consistent erase-on-button behavior regardless of active toolbar tool.
+
 ## Performance Rules (Do Not Regress)
 
 **Save path:** Wrap INSERT OR IGNORE loops in `db.withTransaction {}`; track `persistedStrokeIds` set and skip `toJson()` for already-persisted strokes.
