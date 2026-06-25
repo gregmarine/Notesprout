@@ -27,7 +27,7 @@
 | 7 | Scratch Pad → Notebook transfer ("Send to Notebook") | ✅ Done |
 | 4a | Swipe past last page → auto-insert new page | ✅ Done |
 | 4b | Delete Page button shows e-ink confirmation dialog | ✅ Done |
-| 8 | Wrap-up — docs, cleanup, final build + commit + **push** | ⬜ Not started |
+| 8 | Wrap-up — docs, cleanup, final build + commit + **push** | ✅ Done |
 
 Legend: ⬜ Not started · 🚧 In progress · ✅ Done
 

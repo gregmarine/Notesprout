@@ -14,6 +14,33 @@
 
 ---
 
+## Scratch Pad — phase 2 / deferred
+
+> From the completed `SCRATCHPAD_PLAN.md` (all 8 sessions shipped). Items below were explicitly
+> deferred during build or noted as non-goals for phase 1.
+
+- **True geometric crop (Send to Scratch Pad).** Current "Crop to fit" translates the selection to
+  origin `(0,0)` and lets the canvas clip the overflow. No geometric point-cutting of strokes that
+  straddle the boundary. A proper crop would bisect strokes at the page edge.
+- **Per-pad pen style picker.** Phase 1 reuses the global `ToolPreferencesManager` pen settings.
+  A scratch-pad-local pen style (separate from the notebook pen) would need its own prefs key and
+  toolbar picker.
+- **Snapshot fast-load.** `PageData.snapshot` is persisted on `onSnapshotReady` but the load path
+  always does a full `buildRenderBitmap` (no snapshot-first shortcut). Could skip bitmap rebuild
+  when a valid snapshot exists.
+- **Move-vs-copy on "Send to Notebook".** Current behaviour: Send is a copy — content stays in the
+  scratch pad after sending. A "move" variant (auto-clear the sent page after transfer) may be useful
+  and was deferred pending UX decision.
+- **Scratch-pad-only undo persistence.** There is no undo/redo on the scratch pad. If undo is added,
+  persisting the undo stack across restarts (like notebooks do via `undo_redo_state`) would be needed.
+- **Scratch pad snapshot in recents / cover.** No thumbnail is generated for the scratch pad in the
+  recents bar or anywhere else in the UI.
+- **Encryption path for global DB.** The scratch pad is permanently plaintext because `notesprout.db`
+  is never encrypted. If per-user DB encryption is ever added, the scratch pad inherits it
+  automatically; the existing `awaitEncryptionClipboardConfirm` warning would need revisiting.
+
+---
+
 ## Toolbar Customization — Session 8 (UI/UX polish)
 
 > From the retired `TOOLBAR_CUSTOMIZATION_PLAN.md`. Core Sessions 1–7 shipped (feature is live and

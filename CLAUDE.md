@@ -28,6 +28,7 @@ matching doc before working in that area:**
 | Full-notebook export + import: `.soil` format, `notebook_meta`, copy engine, import pipeline (probe/unlock/placement/keying) | [`docs/full-notebook-export.md`](docs/full-notebook-export.md) |
 | Global clipboard (persist across restart, encrypted-source warning) + cross-notebook page copy/move (template remap, smart encryption gate, source-side undo, nav prompt) | [`docs/clipboard-and-page-transfer.md`](docs/clipboard-and-page-transfer.md) |
 | Backup: local (SAF) + Google Drive (REST API v3 + WebView OAuth PKCE), per-device subfolder, incremental-by-timestamp, index-last | [`docs/backup.md`](docs/backup.md) |
+| Scratch Pad: data model, host window, canvas reuse, multi-page, lasso, both transfer directions, encryption note | [`docs/scratchpad.md`](docs/scratchpad.md) |
 
 Backlog at monorepo root: `BACKLOG.md` — consolidated deferred/future items harvested from the
 completed-and-retired feature plans (toolbar Session-8 polish, multi-page Phase 2, encryption Phase 3,
