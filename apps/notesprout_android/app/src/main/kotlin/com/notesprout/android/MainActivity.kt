@@ -479,6 +479,7 @@ class MainActivity : AppCompatActivity() {
         binding.btnMore.visibility              = if (inSearch) View.GONE   else View.VISIBLE
         if (inSearch) {
             binding.searchTitle.text = "Search: $currentSearchQuery"
+            binding.btnClearSearch.visibility = View.VISIBLE
         }
     }
 

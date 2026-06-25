@@ -45,7 +45,7 @@
             <androidx.appcompat.widget.AppCompatImageButton
                 android:id="@+id/btnScratchpadPrev"
                 style="@style/Widget.Notesprout.ToolbarButton"
-                android:src="@drawable/ic_arrow_left"
+                android:src="@drawable/ic_page_prev"
                 android:contentDescription="Previous scratch pad page" />
 
             <TextView

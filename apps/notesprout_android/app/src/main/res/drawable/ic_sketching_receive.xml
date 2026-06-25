@@ -1,34 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Scratch pad icon with a small ↘ arrow in the bottom-right ("send to notebook"). -->
+<!-- Tabler "sketching" scribble + small ↘ arrow at bottom-right ("send to notebook"). -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp"
     android:height="24dp"
     android:viewportWidth="24"
     android:viewportHeight="24">
-    <!-- Pen body -->
+    <!-- Scribble mark (same as ic_sketching) -->
     <path
         android:fillColor="@android:color/transparent"
         android:strokeColor="@color/inkBlack"
         android:strokeWidth="2"
         android:strokeLineCap="round"
         android:strokeLineJoin="round"
-        android:pathData="M4 20h4l10.5 -10.5a2.828 2.828 0 1 0 -4 -4l-10.5 10.5v4"/>
-    <!-- Nib guideline -->
-    <path
-        android:fillColor="@android:color/transparent"
-        android:strokeColor="@color/inkBlack"
-        android:strokeWidth="2"
-        android:strokeLineCap="round"
-        android:strokeLineJoin="round"
-        android:pathData="M13.5 6.5l4 4"/>
-    <!-- Scratch pad baseline -->
-    <path
-        android:fillColor="@android:color/transparent"
-        android:strokeColor="@color/inkBlack"
-        android:strokeWidth="2"
-        android:strokeLineCap="round"
-        android:pathData="M3 22h6"/>
-    <!-- Arrow ↘ body (bottom-right corner) -->
+        android:pathData="M4 15c2 -4.97 7.356 -11 9 -11c4.25 0 -5.5 11.958 -3 13s5.65 -6.678 7.4 -5.902c1.75 .777 -1.05 7.589 -.3 8.63s3.15 -.897 3.9 -2.728"/>
+    <!-- Arrow ↘ body -->
     <path
         android:fillColor="@android:color/transparent"
         android:strokeColor="@color/inkBlack"

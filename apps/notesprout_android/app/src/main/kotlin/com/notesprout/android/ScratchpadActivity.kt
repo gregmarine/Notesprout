@@ -1,7 +1,9 @@
 package com.notesprout.android
 
 import android.os.Bundle
+import android.view.Gravity
 import android.view.View
+import android.widget.FrameLayout
 import androidx.appcompat.app.AppCompatActivity
 import com.notesprout.android.databinding.ActivityScratchpadBinding
 
@@ -28,14 +30,14 @@ class ScratchpadActivity : AppCompatActivity() {
             if (fromNotebookId != null) View.VISIBLE else View.GONE
 
         // On large screens, constrain the window to 75% × 75% of the display, centered.
+        // Set synchronously before the first layout pass so there is no full-screen flash.
         if (resources.getBoolean(R.bool.is_large_screen)) {
-            binding.scratchpadWindow.post {
-                val dm = resources.displayMetrics
-                val lp = binding.scratchpadWindow.layoutParams
-                lp.width  = (dm.widthPixels  * 0.75f).toInt()
-                lp.height = (dm.heightPixels * 0.75f).toInt()
-                binding.scratchpadWindow.layoutParams = lp
-            }
+            val dm = resources.displayMetrics
+            val lp = binding.scratchpadWindow.layoutParams as FrameLayout.LayoutParams
+            lp.width   = (dm.widthPixels  * 0.75f).toInt()
+            lp.height  = (dm.heightPixels * 0.75f).toInt()
+            lp.gravity = Gravity.CENTER
+            binding.scratchpadWindow.layoutParams = lp
         }
 
         // Tapping outside the bordered window (on the transparent root) dismisses.
