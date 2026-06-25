@@ -2,14 +2,42 @@ package com.notesprout.android.data.index
 
 import androidx.room.Database
 import androidx.room.RoomDatabase
+import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
-@Database(entities = [ObjectEntity::class], version = 1, exportSchema = false)
+@Database(entities = [ObjectEntity::class, ScratchpadEntity::class], version = 2, exportSchema = false)
 abstract class NotesproutDatabase : RoomDatabase() {
 
     abstract fun objectDao(): ObjectDao
+    abstract fun scratchpadDao(): ScratchpadDao
 
     companion object {
+        val MIGRATION_1_2 = object : Migration(1, 2) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS scratchpad (
+                        id          TEXT    NOT NULL PRIMARY KEY,
+                        parentId    TEXT    NOT NULL,
+                        boundingBox TEXT    NOT NULL,
+                        "order"     INTEGER NOT NULL DEFAULT 0,
+                        createdAt   INTEGER NOT NULL,
+                        updatedAt   INTEGER NOT NULL,
+                        deletedAt   INTEGER,
+                        type        TEXT    NOT NULL,
+                        data        TEXT    NOT NULL
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    CREATE INDEX IF NOT EXISTS idx_scratchpad_parent_order
+                        ON scratchpad(parentId, "order", deletedAt)
+                    """.trimIndent()
+                )
+            }
+        }
+
         fun openCallback(): Callback = object : Callback() {
             override fun onOpen(db: SupportSQLiteDatabase) {
                 super.onOpen(db)

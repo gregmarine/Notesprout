@@ -23,6 +23,7 @@ object NotesproutIndex {
                 dbFile.absolutePath
             )
                 .addCallback(NotesproutDatabase.openCallback())
+                .addMigrations(NotesproutDatabase.MIGRATION_1_2)
                 .build()
         }
     }
@@ -31,6 +32,8 @@ object NotesproutIndex {
         instance ?: throw IllegalStateException("NotesproutIndex is not open — call open() first")
 
     fun dao(): ObjectDao = db().objectDao()
+
+    fun scratchpadDao(): ScratchpadDao = db().scratchpadDao()
 
     suspend fun checkpointAndVacuum() = withContext(Dispatchers.IO) {
         try {

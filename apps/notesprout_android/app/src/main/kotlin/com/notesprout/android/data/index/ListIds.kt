@@ -11,3 +11,6 @@ const val CLIPBOARD_ID = "00000000-0000-0000-0000-636c69706264"
 
 // "backup" in hex as the last UUID group: 62 61 63 6b 75 70
 const val BACKUP_CONFIG_ID = "00000000-0000-0000-0000-6261636b7570"
+
+// "scrtch" in hex as the last UUID group: 73 63 72 74 63 68
+const val SCRATCHPAD_ROOT_ID = "00000000-0000-0000-0000-736372746368"

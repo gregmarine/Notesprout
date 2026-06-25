@@ -15,7 +15,7 @@
 
 | # | Session | Status |
 |---|---------|--------|
-| 1 | Data layer — `scratchpad` table, DAO, repository, Room migration | ⬜ Not started |
+| 1 | Data layer — `scratchpad` table, DAO, repository, Room migration | ✅ Done |
 | 2 | Icons + host window + launch buttons (empty bordered window) | ⬜ Not started |
 | 3 | Canvas integration — reuse Onyx/Generic view, pen/eraser, load/save | ⬜ Not started |
 | 4 | Multi-page — add/delete/navigate (swipe + indicator) | ⬜ Not started |
