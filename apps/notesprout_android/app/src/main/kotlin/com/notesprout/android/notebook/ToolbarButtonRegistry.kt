@@ -81,6 +81,7 @@ object ToolbarButtonRegistry {
         ButtonSpec("copyPage", R.id.btnCopyPage, R.drawable.ic_copy_page, "Copy Page", GROUP_PAGE_EDIT),
         ButtonSpec("pastePage", R.id.btnPastePage, R.drawable.ic_paste_page, "Paste Page", GROUP_PAGE_EDIT),
         ButtonSpec("toolbarSettings", R.id.btnToolbarSettings, R.drawable.ic_adjustments, "Customize Toolbar", GROUP_SETTINGS, pinned = true),
+        ButtonSpec("scratchpad", R.id.btnScratchpad, R.drawable.ic_sketching, "Scratch Pad", GROUP_NOTEBOOK),
     )
 
     private val byKey: Map<String, ButtonSpec> = SPECS.associateBy { it.key }

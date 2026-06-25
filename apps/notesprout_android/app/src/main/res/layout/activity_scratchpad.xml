@@ -1,0 +1,153 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Transparent root — tapping outside the window dismisses the activity.
+     On large screens the scratchpadWindow is resized to 75% × 75% in ScratchpadActivity.onCreate.
+     On small screens it fills the display so it reads as its own screen. -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@android:color/transparent"
+    android:gravity="center">
+
+    <!-- Bordered paper-white scratch pad window -->
+    <LinearLayout
+        android:id="@+id/scratchpadWindow"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:layout_gravity="center"
+        android:orientation="vertical"
+        android:background="@drawable/shape_bordered">
+
+        <!-- Chrome bar: title + spacer + prev / indicator / next -->
+        <LinearLayout
+            android:id="@+id/chromeBar"
+            android:layout_width="match_parent"
+            android:layout_height="56dp"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:background="@color/paperWhite">
+
+            <TextView
+                android:id="@+id/tvScratchpadTitle"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Scratch Pad"
+                android:textSize="18sp"
+                android:textColor="@color/inkBlack"
+                android:paddingStart="16dp"
+                android:paddingEnd="16dp" />
+
+            <View
+                android:layout_width="0dp"
+                android:layout_height="0dp"
+                android:layout_weight="1" />
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnScratchpadPrev"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:src="@drawable/ic_arrow_left"
+                android:contentDescription="Previous scratch pad page" />
+
+            <TextView
+                android:id="@+id/tvScratchpadPageIndicator"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="1 / 1"
+                android:textSize="16sp"
+                android:textColor="@color/inkBlack"
+                android:minWidth="56dp"
+                android:gravity="center"
+                android:paddingStart="4dp"
+                android:paddingEnd="4dp" />
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnScratchpadNext"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:src="@drawable/ic_page_next"
+                android:contentDescription="Next scratch pad page" />
+
+        </LinearLayout>
+
+        <!-- 1dp divider between chrome bar and canvas -->
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="@color/inkBlack" />
+
+        <!-- Drawing container — drawing view added programmatically in Session 3 -->
+        <FrameLayout
+            android:id="@+id/drawingContainer"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:background="@color/paperWhite" />
+
+        <!-- 1dp divider between canvas and toolbar -->
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="@color/inkBlack" />
+
+        <!-- Scratch pad toolbar: tool buttons left, Send to Notebook right -->
+        <LinearLayout
+            android:id="@+id/scratchpadToolbar"
+            android:layout_width="match_parent"
+            android:layout_height="56dp"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:background="@color/paperWhite"
+            android:paddingStart="4dp"
+            android:paddingEnd="4dp">
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnScratchPen"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:src="@drawable/ic_pen"
+                android:contentDescription="Pen" />
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnScratchEraser"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:layout_marginStart="4dp"
+                android:src="@drawable/ic_eraser"
+                android:contentDescription="Eraser" />
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnScratchLasso"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:layout_marginStart="4dp"
+                android:src="@drawable/ic_lasso"
+                android:contentDescription="Lasso" />
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnScratchAddPage"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:layout_marginStart="4dp"
+                android:src="@drawable/ic_insert_page_after"
+                android:contentDescription="Add page" />
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnScratchDeletePage"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:layout_marginStart="4dp"
+                android:src="@drawable/ic_page_delete"
+                android:contentDescription="Delete page" />
+
+            <View
+                android:layout_width="0dp"
+                android:layout_height="0dp"
+                android:layout_weight="1" />
+
+            <!-- Visible only when launched from a notebook (EXTRA_FROM_NOTEBOOK_ID != null) -->
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnSendToNotebook"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:src="@drawable/ic_sketching_receive"
+                android:contentDescription="Send to Notebook"
+                android:visibility="gone" />
+
+        </LinearLayout>
+
+    </LinearLayout>
+
+</FrameLayout>

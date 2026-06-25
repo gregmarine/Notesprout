@@ -123,6 +123,14 @@
             android:theme="@style/Theme.Notesprout"
             android:windowSoftInputMode="stateHidden" />
 
+        <!-- Scratch pad — translucent floating window over any launch surface -->
+        <activity
+            android:name=".ScratchpadActivity"
+            android:exported="false"
+            android:theme="@style/Theme.Notesprout.Scratchpad"
+            android:configChanges="orientation|keyboardHidden|screenSize|smallestScreenSize|screenLayout|density"
+            android:windowSoftInputMode="stateHidden" />
+
         <!-- FileProvider — exposes cacheDir PDF exports to the share sheet -->
         <provider
             android:name="androidx.core.content.FileProvider"

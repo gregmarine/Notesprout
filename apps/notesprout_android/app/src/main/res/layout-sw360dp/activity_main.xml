@@ -95,6 +95,12 @@
             android:paddingEnd="16dp" />
 
         <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnScratchpadPinned"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:src="@drawable/ic_sketching"
+            android:contentDescription="Scratch Pad" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
             android:id="@+id/btnPinnedCancel"
             style="@style/Widget.Notesprout.ToolbarButton"
             android:src="@drawable/ic_x"
@@ -133,6 +139,12 @@
             android:textColor="@color/inkBlack"
             android:paddingStart="16dp"
             android:paddingEnd="16dp" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnScratchpadRecents"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:src="@drawable/ic_sketching"
+            android:contentDescription="Scratch Pad" />
 
         <androidx.appcompat.widget.AppCompatImageButton
             android:id="@+id/btnRecentsCancel"
@@ -180,6 +192,12 @@
             style="@style/Widget.Notesprout.ToolbarButton"
             android:src="@drawable/ic_search"
             android:contentDescription="Search notebooks" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnScratchpadSearch"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:src="@drawable/ic_sketching"
+            android:contentDescription="Scratch Pad" />
 
         <androidx.appcompat.widget.AppCompatImageButton
             android:id="@+id/btnClearSearch"
@@ -267,6 +285,13 @@
             style="@style/Widget.Notesprout.ToolbarButton"
             android:src="@drawable/ic_filter"
             android:contentDescription="Sort" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnScratchpad"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:layout_marginStart="4dp"
+            android:src="@drawable/ic_sketching"
+            android:contentDescription="Scratch Pad" />
 
     </LinearLayout>
 

@@ -707,6 +707,12 @@ class NotebookActivity : AppCompatActivity() {
 
     private var pendingExportFile: java.io.File? = null
 
+    /** Launched when the user taps the Scratch Pad button in the notebook toolbar. Session 7 will
+     *  consume RESULT_OK to paste content returned from the scratch pad. */
+    private val scratchpadLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { /* Session 7: handle RESULT_OK + ScratchpadTransfer.pending here */ }
+
     private val savePdfLauncher = registerForActivityResult(
         ActivityResultContracts.CreateDocument("application/pdf")
     ) { uri ->
@@ -1001,6 +1007,15 @@ class NotebookActivity : AppCompatActivity() {
         }
 
         binding.btnPageIndex.setOnClickListener { openPageIndex() }
+
+        binding.btnScratchpad.setOnClickListener {
+            val intent = Intent(this, ScratchpadActivity::class.java).apply {
+                putExtra(ScratchpadActivity.EXTRA_FROM_NOTEBOOK_ID,        notebookId)
+                putExtra(ScratchpadActivity.EXTRA_FROM_NOTEBOOK_NAME,      notebookDisplayName)
+                putExtra(ScratchpadActivity.EXTRA_FROM_NOTEBOOK_ENCRYPTED, encryptionInfo.encrypted)
+            }
+            scratchpadLauncher.launch(intent)
+        }
 
         binding.btnCopyPage.setOnClickListener { copyCurrentPage() }
         binding.btnPastePage.setOnClickListener { pasteCopiedPage() }

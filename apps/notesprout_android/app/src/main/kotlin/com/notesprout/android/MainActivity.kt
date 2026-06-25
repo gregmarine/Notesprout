@@ -326,6 +326,12 @@ class MainActivity : AppCompatActivity() {
         binding.btnRecents.setOnClickListener { enterRecentsMode() }
         binding.btnRecentsCancel.setOnClickListener { exitRecentsMode() }
 
+        val openScratchpad = View.OnClickListener { launchScratchpad() }
+        binding.btnScratchpad.setOnClickListener(openScratchpad)
+        binding.btnScratchpadPinned.setOnClickListener(openScratchpad)
+        binding.btnScratchpadRecents.setOnClickListener(openScratchpad)
+        binding.btnScratchpadSearch.setOnClickListener(openScratchpad)
+
         binding.btnSort.setOnClickListener {
             SortDialog(this, sortPrefs) { newPrefs ->
                 sortPrefs = newPrefs
@@ -525,6 +531,7 @@ class MainActivity : AppCompatActivity() {
             binding.btnSort.visibility          = View.GONE
             binding.btnPinned.visibility        = View.GONE
             binding.btnRecents.visibility       = View.GONE
+            binding.btnScratchpad.visibility    = View.GONE
             closeOverflowToolbar()
         } else {
             binding.btnNewNotebook.visibility   = View.VISIBLE
@@ -535,6 +542,7 @@ class MainActivity : AppCompatActivity() {
             binding.btnSort.visibility          = View.VISIBLE
             binding.btnPinned.visibility        = View.VISIBLE
             binding.btnRecents.visibility       = View.VISIBLE
+            binding.btnScratchpad.visibility    = View.VISIBLE
         }
     }
 
@@ -619,6 +627,7 @@ class MainActivity : AppCompatActivity() {
             binding.btnSort.visibility        = View.GONE
             binding.btnPinned.visibility      = View.GONE
             binding.btnRecents.visibility     = View.GONE
+            binding.btnScratchpad.visibility  = View.GONE
             closeOverflowToolbar()
         } else {
             binding.btnNewNotebook.visibility = View.VISIBLE
@@ -629,6 +638,7 @@ class MainActivity : AppCompatActivity() {
             binding.btnSort.visibility        = View.VISIBLE
             binding.btnPinned.visibility      = View.VISIBLE
             binding.btnRecents.visibility     = View.VISIBLE
+            binding.btnScratchpad.visibility  = View.VISIBLE
         }
     }
 
@@ -1225,6 +1235,10 @@ class MainActivity : AppCompatActivity() {
 
     private fun openNotebook(entity: ObjectEntity) {
         launchNotebookActivity(entity)
+    }
+
+    private fun launchScratchpad() {
+        startActivity(Intent(this, ScratchpadActivity::class.java))
     }
 
     private fun launchNotebookActivity(entity: ObjectEntity) {
