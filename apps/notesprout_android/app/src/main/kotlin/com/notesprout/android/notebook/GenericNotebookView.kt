@@ -25,6 +25,7 @@ import com.notesprout.android.data.LineRender
 import com.notesprout.android.data.LineStyle
 import com.notesprout.android.data.LinkChrome
 import com.notesprout.android.data.LinkRender
+import com.notesprout.android.data.StickyNoteRender
 import com.notesprout.android.data.translate
 import com.notesprout.android.data.LiveStroke
 import com.notesprout.android.data.TextRender
@@ -68,6 +69,9 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
 
     // Link object store — populated from type="link" rows at page load time.
     private var links: List<LinkRender> = emptyList()
+
+    // Sticky note store — populated from type="sticky_note" rows at page load time.
+    private var stickyNotes: List<StickyNoteRender> = emptyList()
 
     private val textObjectTextSizePx = android.util.TypedValue.applyDimension(
         android.util.TypedValue.COMPLEX_UNIT_SP, 24f, resources.displayMetrics
@@ -801,6 +805,14 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
         drawLinkChrome(canvas, link.boundingBox, link.chrome, iconOutside)
     }
 
+    private fun drawStickyNoteObject(canvas: Canvas, note: StickyNoteRender) {
+        val box = note.boundingBox
+        AppCompatResources.getDrawable(context, R.drawable.ic_sticker_2)?.let { icon ->
+            icon.setBounds(box.left.toInt(), box.top.toInt(), box.right.toInt(), box.bottom.toInt())
+            icon.draw(canvas)
+        }
+    }
+
     /** Draw a link's visual indicator: none, an underline, or a dotted box with a corner chevron.
      *  For text/heading links [iconOutside]=true: the stored bbox already includes the gap + icon
      *  room baked in at creation (6dp gap + 14dp icon + 3dp inner pad), so the chrome box IS the
@@ -877,6 +889,9 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
         }
         for (link in links) {
             drawLinkObject(canvas, link, width)
+        }
+        for (note in stickyNotes) {
+            drawStickyNoteObject(canvas, note)
         }
         for (liveStroke in strokes) {
             val points = liveStroke.points
@@ -1360,6 +1375,7 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
         textObjects = emptyList()
         lineObjects = emptyList()
         links = emptyList()
+        stickyNotes = emptyList()
         // Clear to white then re-apply template so the template persists after erase.
         renderCanvas?.let { canvas ->
             canvas.drawColor(Color.WHITE)
@@ -1418,6 +1434,23 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
         }
     }
 
+    override fun loadStickyNotes(stickyNotes: List<StickyNoteRender>) {
+        this.stickyNotes = stickyNotes
+        redrawCanvas()
+        invalidate()
+    }
+
+    override fun getStickyNotes(): List<StickyNoteRender> = stickyNotes
+
+    override fun compositeStickyNotes(bitmap: Bitmap) {
+        if (stickyNotes.isEmpty()) return
+        val canvas = Canvas(bitmap)
+        for (note in stickyNotes) {
+            drawStickyNoteObject(canvas, note)
+        }
+    }
+
+
     override fun loadStrokes(strokes: List<LiveStroke>) {
         this.strokes.clear()
         this.strokes.addAll(strokes)
@@ -1436,6 +1469,7 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
         textObjects: List<TextRender>?,
         lineObjects: List<LineRender>?,
         links: List<LinkRender>?,
+        stickyNotes: List<StickyNoteRender>?,
     ): Bitmap? {
         val w = width; val h = height
         if (w == 0 || h == 0) return null
@@ -1443,6 +1477,7 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
         val effectiveTextObjects = textObjects ?: this.textObjects
         val effectiveLineObjects = lineObjects ?: this.lineObjects
         val effectiveLinks = links ?: this.links
+        val effectiveStickyNotes = stickyNotes ?: this.stickyNotes
         val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bmp)
         canvas.drawColor(Color.WHITE)
@@ -1468,6 +1503,9 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
         }
         for (link in effectiveLinks) {
             drawLinkObject(canvas, link, w)
+        }
+        for (note in effectiveStickyNotes) {
+            drawStickyNoteObject(canvas, note)
         }
         for (liveStroke in strokes) {
             val pts = liveStroke.points
@@ -1513,7 +1551,7 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
      * Returns null if there are no strokes and no headings, or the view is not yet laid out.
      */
     override fun captureSnapshot(): String? {
-        if (strokes.isEmpty() && headings.isEmpty() && textObjects.isEmpty() && lineObjects.isEmpty() && links.isEmpty()) return null
+        if (strokes.isEmpty() && headings.isEmpty() && textObjects.isEmpty() && lineObjects.isEmpty() && links.isEmpty() && stickyNotes.isEmpty()) return null
         val w = width; val h = height
         if (w == 0 || h == 0) return null
         val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
@@ -1541,6 +1579,9 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
         }
         for (link in links) {
             drawLinkObject(snapshotCanvas, link, w)
+        }
+        for (note in stickyNotes) {
+            drawStickyNoteObject(snapshotCanvas, note)
         }
         for (liveStroke in strokes) {
             val points = liveStroke.points

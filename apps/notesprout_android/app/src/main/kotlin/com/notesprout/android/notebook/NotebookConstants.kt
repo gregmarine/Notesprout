@@ -2,6 +2,9 @@ package com.notesprout.android.notebook
 
 const val DRAG_THRESHOLD_DP = 8f
 
+/** Fixed icon size (dp) for a sticky note on the page. Tunable after device testing. */
+const val STICKY_NOTE_ICON_SIZE_DP = 72f
+
 // ── Snap-to-guide constants ───────────────────────────────────────────────────
 
 /** Margin guide distance from each page edge (dp). Matches the standard toolbar button size. */

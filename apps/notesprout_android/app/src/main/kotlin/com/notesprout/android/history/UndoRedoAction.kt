@@ -8,6 +8,7 @@ import com.notesprout.android.data.LinkRender
 import com.notesprout.android.data.LinkTarget
 import com.notesprout.android.data.LiveStroke
 import com.notesprout.android.data.RectFSerializer
+import com.notesprout.android.data.StickyNoteRender
 import com.notesprout.android.data.TextRender
 import kotlinx.serialization.Serializable
 
@@ -599,6 +600,23 @@ sealed class UndoRedoAction {
     data class CrossNotebookPagesRemoved(
         val pageIds: List<String>,
         val deletedAt: Long,
+    ) : UndoRedoAction()
+
+    /**
+     * User inserted a sticky note via the Insert Sticky Note toolbar button.
+     *
+     * Undo: soft-deletes the sticky note row; removes from in-memory list; rebuilds bitmap.
+     * Redo: restores the sticky note row; re-adds [note] to in-memory list; rebuilds bitmap.
+     *
+     * [note] carries the full render data (id, boundingBox, empty content) so redo can rebuild
+     * the in-memory list without a DB read.
+     */
+    @Serializable
+    data class StickyNoteInserted(
+        val noteId: String,
+        val pageId: String,
+        val layerId: String,
+        val note: StickyNoteRender,
     ) : UndoRedoAction()
 
     /**

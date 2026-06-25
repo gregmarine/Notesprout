@@ -71,7 +71,11 @@ import com.notesprout.android.data.toLineRender
 import com.notesprout.android.data.TYPE_HEADING
 import com.notesprout.android.data.TYPE_LINE
 import com.notesprout.android.data.TYPE_LINK
+import com.notesprout.android.data.TYPE_STICKY_NOTE
 import com.notesprout.android.data.TYPE_TEXT
+import com.notesprout.android.data.StickyNoteObject
+import com.notesprout.android.data.StickyNoteRender
+import com.notesprout.android.data.toStickyNoteObject
 import com.notesprout.android.core.markdown.TextObjectRenderer
 import android.text.TextPaint
 import com.notesprout.android.data.NotebookDao
@@ -101,6 +105,7 @@ import com.notesprout.android.databinding.DialogEditHeadingTextBinding
 import com.notesprout.android.notebook.NotebookView
 import com.notesprout.android.notebook.GenericNotebookView
 import com.notesprout.android.notebook.OnyxNotebookView
+import com.notesprout.android.notebook.STICKY_NOTE_ICON_SIZE_DP
 import com.notesprout.android.notebook.ActiveTool
 import com.notesprout.android.notebook.SnapPreferences
 import com.notesprout.android.notebook.ToolPreferencesManager
@@ -177,6 +182,7 @@ class NotebookActivity : AppCompatActivity() {
         val textObjects: List<TextRender> = emptyList(),
         val lineObjects: List<LineRender> = emptyList(),
         val links: List<LinkRender> = emptyList(),
+        val stickyNotes: List<StickyNoteRender> = emptyList(),
     )
 
     private lateinit var binding: ActivityNotebookBinding
@@ -934,6 +940,10 @@ class NotebookActivity : AppCompatActivity() {
                 density  = resources.displayMetrics.density,
                 onInsert = { lines -> insertLineObjects(db, lines) },
             ).show()
+        }
+
+        binding.btnInsertStickyNote.setOnClickListener {
+            insertStickyNote()
         }
 
         binding.btnLasso.setOnClickListener {
@@ -3566,13 +3576,14 @@ class NotebookActivity : AppCompatActivity() {
         val textObjects     = loadTextObjectsFromDb(db, currentLayerId)
         val lineObjects     = loadLineObjectsFromDb(db, currentLayerId)
         val links           = loadLinksFromDb(db, currentLayerId)
+        val stickyNotes     = loadStickyNotesFromDb(db, currentLayerId)
         val snapshotBitmap  = tryLoadSnapshotBitmap(db, templateBitmap)
         return if (snapshotBitmap != null) {
-            PageLoadResult(emptyList(), templateBitmap, snapshotBitmap, usedSnapshot = true, headings = headings, textObjects = textObjects, lineObjects = lineObjects, links = links)
+            PageLoadResult(emptyList(), templateBitmap, snapshotBitmap, usedSnapshot = true, headings = headings, textObjects = textObjects, lineObjects = lineObjects, links = links, stickyNotes = stickyNotes)
         } else {
             val strokes      = deserializeStrokesFromDb(db)
-            val renderBitmap = drawingView.buildRenderBitmap(strokes, templateBitmap, headings, textObjects, lineObjects, links)
-            PageLoadResult(strokes, templateBitmap, renderBitmap, usedSnapshot = false, headings = headings, textObjects = textObjects, lineObjects = lineObjects, links = links)
+            val renderBitmap = drawingView.buildRenderBitmap(strokes, templateBitmap, headings, textObjects, lineObjects, links, stickyNotes)
+            PageLoadResult(strokes, templateBitmap, renderBitmap, usedSnapshot = false, headings = headings, textObjects = textObjects, lineObjects = lineObjects, links = links, stickyNotes = stickyNotes)
         }
     }
 
@@ -3650,6 +3661,26 @@ class NotebookActivity : AppCompatActivity() {
         }
     }
 
+    private suspend fun loadStickyNotesFromDb(db: SoilDatabase, layerId: String): List<StickyNoteRender> {
+        if (layerId.isEmpty()) return emptyList()
+        val density = resources.displayMetrics.density
+        val rows = db.notebookDao().getStickyNotesForLayer(layerId)
+        return rows.mapNotNull { row ->
+            val box = row.parseBoundingBox() ?: return@mapNotNull null
+            val noteObj = runCatching { StickyNoteObject.fromJson(row.data) }.getOrNull() ?: return@mapNotNull null
+            StickyNoteRender(
+                id           = row.id,
+                boundingBox  = box,
+                strokes      = noteObj.strokes,
+                headings     = noteObj.headings,
+                textObjects  = noteObj.textObjects,
+                lines        = noteObj.lines.map { it.toLineRender(density) },
+                contentWidth = noteObj.contentWidth,
+                contentHeight = noteObj.contentHeight,
+            )
+        }
+    }
+
     private fun NotebookObject.parseBoundingBox(): android.graphics.RectF? =
         com.notesprout.android.data.parseBoundingBox(boundingBox)
 
@@ -3663,14 +3694,16 @@ class NotebookActivity : AppCompatActivity() {
         drawingView.loadTextObjects(result.textObjects)
         drawingView.loadLineObjects(result.lineObjects)
         drawingView.loadLinks(result.links)
+        drawingView.loadStickyNotes(result.stickyNotes)
         val bitmap = result.displayBitmap
         if (bitmap != null) {
             // On the snapshot fast-path the snapshot bitmap contains strokes + headings but
-            // NOT text/line/link objects (always loaded fresh from DB). Composite them now.
+            // NOT text/line/link/sticky-note objects (always loaded fresh from DB). Composite them now.
             if (result.usedSnapshot) {
                 drawingView.compositeTextObjects(bitmap)
                 drawingView.compositeLineObjects(bitmap)
                 drawingView.compositeLinks(bitmap)
+                drawingView.compositeStickyNotes(bitmap)
             }
             drawingView.loadStrokesWithBitmap(result.strokes, bitmap, result.templateBitmap)
         } else {
@@ -6986,6 +7019,65 @@ class NotebookActivity : AppCompatActivity() {
         ).show()
     }
 
+    private fun insertStickyNote() {
+        val db      = soilDatabase ?: return
+        val layerId = currentLayerId.takeIf { it.isNotEmpty() } ?: return
+        val pageId  = currentPageId.takeIf { it.isNotEmpty() } ?: return
+        val pageW   = drawingView.asView().width.takeIf { it > 0 } ?: return
+        val pageH   = drawingView.asView().height.takeIf { it > 0 } ?: return
+        val density = resources.displayMetrics.density
+
+        lifecycleScope.launch {
+            val iconSizePx = (STICKY_NOTE_ICON_SIZE_DP * density)
+            val left  = ((pageW - iconSizePx) / 2f).coerceAtLeast(0f)
+            val top   = ((pageH - iconSizePx) / 2f).coerceAtLeast(0f)
+            val bbox  = RectF(left, top, left + iconSizePx, top + iconSizePx)
+
+            val noteId   = java.util.UUID.randomUUID().toString()
+            val now      = System.currentTimeMillis()
+            val bboxJson = bbox.toBoundingBoxJson()
+
+            withContext(Dispatchers.IO) {
+                db.notebookDao().insertObject(
+                    NotebookObject(
+                        id          = noteId,
+                        parentId    = layerId,
+                        type        = TYPE_STICKY_NOTE,
+                        boundingBox = bboxJson,
+                        sortOrder   = 0,
+                        createdAt   = now,
+                        updatedAt   = now,
+                        deletedAt   = null,
+                        data        = StickyNoteObject().toJson(),
+                    )
+                )
+                invalidatePageSnapshot(db, pageId)
+            }
+
+            val noteRender     = StickyNoteRender(id = noteId, boundingBox = bbox)
+            val updatedNotes   = drawingView.getStickyNotes() + noteRender
+            drawingView.loadStickyNotes(updatedNotes)
+
+            val templateBmp    = currentTemplateBitmap
+            val currentStrokes = drawingView.getStrokes()
+            val currentHeadings = drawingView.getHeadings()
+            val bitmap = withContext(kotlinx.coroutines.Dispatchers.IO) {
+                drawingView.buildRenderBitmap(currentStrokes, templateBmp, currentHeadings, stickyNotes = updatedNotes)
+            }
+            if (bitmap != null) {
+                drawingView.loadStrokesWithBitmap(currentStrokes, bitmap, templateBmp)
+            }
+
+            undoRedoManager.push(UndoRedoAction.StickyNoteInserted(
+                noteId  = noteId,
+                pageId  = pageId,
+                layerId = layerId,
+                note    = noteRender,
+            ))
+            updateUndoRedoButtons()
+        }
+    }
+
     private fun insertLineObjects(db: SoilDatabase, lines: List<LineRender>) {
         val layerId = currentLayerId.takeIf { it.isNotEmpty() } ?: return
         val pageId  = currentPageId.takeIf { it.isNotEmpty() } ?: return
@@ -7265,10 +7357,11 @@ class NotebookActivity : AppCompatActivity() {
             is UndoRedoAction.ScribbleErased   -> action.pageId
             is UndoRedoAction.LinesInserted    -> action.pageId
             is UndoRedoAction.LinesRemoved     -> action.pageId
-            is UndoRedoAction.LinkCreated      -> action.pageId
-            is UndoRedoAction.LinkRemoved      -> action.pageId
-            is UndoRedoAction.LinkEdited       -> action.pageId
-            else                               -> null
+            is UndoRedoAction.LinkCreated         -> action.pageId
+            is UndoRedoAction.LinkRemoved         -> action.pageId
+            is UndoRedoAction.LinkEdited          -> action.pageId
+            is UndoRedoAction.StickyNoteInserted  -> action.pageId
+            else                                  -> null
         }
         val isCrossPage = targetPageId != null && targetPageId != currentPageId
 
@@ -9036,6 +9129,15 @@ class NotebookActivity : AppCompatActivity() {
                 }
                 invalidatePageSnapshot(db, action.pageId)
             }
+
+            is UndoRedoAction.StickyNoteInserted -> withContext(Dispatchers.IO) {
+                if (isUndo) {
+                    dao.softDeleteById(action.noteId, now)
+                } else {
+                    dao.restoreById(action.noteId, now)
+                }
+                invalidatePageSnapshot(db, action.pageId)
+            }
         }
     }
 
@@ -9861,6 +9963,37 @@ class NotebookActivity : AppCompatActivity() {
             drawingView.lassoSelectedIds = emptySet()
             drawingView.setLassoOverlay(null, null)
             hideFloatingSelectionToolbar()
+            updatePageIndicator()
+            saveLastOpenedPage(currentPageId)
+            return true
+        }
+
+        // ── Step 3a-sticky-insert: Same-page StickyNoteInserted — in-memory update ─
+        if (action is UndoRedoAction.StickyNoteInserted) {
+            val updatedNotes: List<StickyNoteRender>
+            if (isUndo) {
+                updatedNotes = drawingView.getStickyNotes().filter { it.id != action.noteId }
+            } else {
+                updatedNotes = drawingView.getStickyNotes() + action.note
+            }
+            drawingView.loadStickyNotes(updatedNotes)
+            val currentStrokes  = drawingView.getStrokes()
+            val currentHeadings = drawingView.getHeadings()
+            val templateBmp     = currentTemplateBitmap
+            val bitmap = withContext(Dispatchers.IO) {
+                drawingView.buildRenderBitmap(currentStrokes, templateBmp, currentHeadings, stickyNotes = updatedNotes)
+            }
+            if (bitmap != null) {
+                drawingView.loadStrokesWithBitmap(currentStrokes, bitmap, templateBmp)
+            } else {
+                drawingView.loadStrokes(currentStrokes)
+            }
+            if (isUndo) {
+                selectedObjectIds.clear()
+                drawingView.lassoSelectedIds = emptySet()
+                drawingView.setLassoOverlay(null, null)
+                hideFloatingSelectionToolbar()
+            }
             updatePageIndicator()
             saveLastOpenedPage(currentPageId)
             return true

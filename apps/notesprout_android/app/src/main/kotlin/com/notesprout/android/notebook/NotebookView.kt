@@ -10,6 +10,7 @@ import com.notesprout.android.data.HeadingStroke
 import com.notesprout.android.data.LineRender
 import com.notesprout.android.data.LinkRender
 import com.notesprout.android.data.LiveStroke
+import com.notesprout.android.data.StickyNoteRender
 import com.notesprout.android.data.TextRender
 
 // Option B: buildRenderBitmap + loadStrokesWithBitmap — pre-build bitmap on IO thread
@@ -311,6 +312,27 @@ interface NotebookView {
     fun compositeLinks(bitmap: Bitmap) {}
 
     /**
+     * Replace the in-memory sticky note list with [stickyNotes] loaded from the database.
+     * Call before [loadStrokes] or [loadStrokesWithBitmap] so the icons are included in the
+     * next canvas redraw.  Must be called on the main thread.
+     */
+    fun loadStickyNotes(stickyNotes: List<StickyNoteRender>) {}
+
+    /**
+     * Return the current in-memory sticky note list.
+     * Safe to call from any thread — sticky notes are replaced atomically.
+     */
+    fun getStickyNotes(): List<StickyNoteRender> = emptyList()
+
+    /**
+     * Paint the current sticky note icons onto [bitmap].
+     * Called from displayPage on the snapshot fast-path: sticky notes are always loaded fresh
+     * from DB (identical reason to text/line/link objects).  Must be called on the main thread
+     * after [loadStickyNotes].
+     */
+    fun compositeStickyNotes(bitmap: Bitmap) {}
+
+    /**
      * Fired on the main thread when a fast, closed pen gesture in pen mode encloses or
      * crosses at least one object on the current layer (smart-lasso detection).
      * Fires INSTEAD OF [onPenLifted] or [onScribbleEraseComplete] — it is the first gate
@@ -464,6 +486,7 @@ interface NotebookView {
         textObjects: List<TextRender>? = null,
         lineObjects: List<LineRender>? = null,
         links: List<LinkRender>? = null,
+        stickyNotes: List<StickyNoteRender>? = null,
     ): Bitmap?
 
     /**

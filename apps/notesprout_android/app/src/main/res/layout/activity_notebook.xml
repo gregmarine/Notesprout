@@ -143,6 +143,14 @@
             android:src="@drawable/ic_density_small"
             android:contentDescription="Insert lines" />
 
+        <!-- Insert sticky note -->
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnInsertStickyNote"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:layout_marginStart="4dp"
+            android:src="@drawable/ic_sticker_2"
+            android:contentDescription="Insert sticky note" />
+
         <!-- Lasso selection tool -->
         <androidx.appcompat.widget.AppCompatImageButton
             android:id="@+id/btnLasso"

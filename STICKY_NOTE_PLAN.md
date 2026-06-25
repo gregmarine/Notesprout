@@ -122,7 +122,7 @@ The **same** `ic_sticker_2.xml` is used for the toolbar button (44dp standard) a
 
 | Session | Title | Status | Commit |
 |---|---|---|---|
-| S1 | Data model, icon, on-page render, insert + persist + insert-undo | ☐ Not started | — |
+| S1 | Data model, icon, on-page render, insert + persist + insert-undo | ☑ Complete (tested on G102 + committed) | — |
 | S2 | Lasso lifecycle: select / move / delete / lasso-erase / scribble / erase-all (notebook) | ☐ Not started | — |
 | S3 | Content window editor + transfer + tap-to-open + create-flow + content-edit undo | ☐ Not started | — |
 | S4 | Copy / cut / paste parity (lasso clipboard + page copy/paste + cross-notebook) | ☐ Not started | — |
