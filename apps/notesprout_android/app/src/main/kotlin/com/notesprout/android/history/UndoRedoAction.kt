@@ -633,6 +633,24 @@ sealed class UndoRedoAction {
     ) : UndoRedoAction()
 
     /**
+     * User edited the content of a sticky note via [StickyNoteEditorActivity].
+     *
+     * Undo: write [before] content JSON to the row; update the in-memory render; rebuild bitmap.
+     * Redo: write [after] content JSON to the row; update the in-memory render; rebuild bitmap.
+     *
+     * The icon [boundingBox] is identical in [before] and [after] — only embedded content changes.
+     * Full [StickyNoteRender] snapshots are stored so the in-memory list can be updated without
+     * a DB round-trip on same-page undo/redo.
+     */
+    @Serializable
+    data class StickyNoteContentEdited(
+        val noteId: String,
+        val pageId: String,
+        val before: StickyNoteRender,
+        val after: StickyNoteRender,
+    ) : UndoRedoAction()
+
+    /**
      * User removed a link, dispersing its embedded held objects back onto the layer as their own
      * live rows (fresh UUIDs).
      *

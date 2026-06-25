@@ -131,6 +131,14 @@
             android:configChanges="orientation|keyboardHidden|screenSize|smallestScreenSize|screenLayout|density"
             android:windowSoftInputMode="stateHidden" />
 
+        <!-- Sticky note editor — translucent in-memory popup over NotebookActivity -->
+        <activity
+            android:name=".StickyNoteEditorActivity"
+            android:exported="false"
+            android:theme="@style/Theme.Notesprout.Scratchpad"
+            android:configChanges="orientation|keyboardHidden|screenSize|smallestScreenSize|screenLayout|density"
+            android:windowSoftInputMode="stateHidden" />
+
         <!-- FileProvider — exposes cacheDir PDF exports to the share sheet -->
         <provider
             android:name="androidx.core.content.FileProvider"

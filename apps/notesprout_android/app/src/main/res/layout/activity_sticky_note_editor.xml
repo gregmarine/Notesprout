@@ -1,0 +1,129 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Transparent root — tapping outside the window dismisses the activity.
+     On large screens the stickyNoteEditorWindow is resized to 75% × 75% in StickyNoteEditorActivity.onCreate.
+     On small screens it fills the display so it reads as its own screen. -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@android:color/transparent"
+    android:gravity="center">
+
+    <!-- Bordered paper-white editor window. -->
+    <LinearLayout
+        android:id="@+id/stickyNoteEditorWindow"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:layout_gravity="center"
+        android:orientation="vertical"
+        android:background="@drawable/shape_bordered"
+        android:padding="1dp"
+        android:clipToOutline="true">
+
+        <!-- Chrome bar: title only (single page — no page nav) -->
+        <LinearLayout
+            android:id="@+id/chromeBar"
+            android:layout_width="match_parent"
+            android:layout_height="56dp"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Sticky Note"
+                android:textSize="18sp"
+                android:textColor="@color/inkBlack"
+                android:paddingStart="16dp"
+                android:paddingEnd="16dp" />
+
+        </LinearLayout>
+
+        <!-- 1dp divider between chrome bar and canvas -->
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="@color/inkBlack" />
+
+        <!-- Drawing container — drawing view added programmatically; floating toolbar overlaid here -->
+        <FrameLayout
+            android:id="@+id/drawingContainer"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:background="@color/paperWhite">
+
+            <!-- Floating selection context toolbar — positioned programmatically on lasso selection -->
+            <LinearLayout
+                android:id="@+id/floatingSelectionToolbar"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:visibility="gone"
+                android:background="@drawable/shape_bordered"
+                android:padding="4dp"
+                android:elevation="0dp">
+
+                <androidx.appcompat.widget.AppCompatImageButton
+                    android:id="@+id/btnLassoCopy"
+                    style="@style/Widget.Notesprout.ToolbarButton"
+                    android:src="@drawable/ic_copy_plus"
+                    android:contentDescription="Copy selection" />
+
+                <androidx.appcompat.widget.AppCompatImageButton
+                    android:id="@+id/btnLassoCut"
+                    style="@style/Widget.Notesprout.ToolbarButton"
+                    android:src="@drawable/ic_cut"
+                    android:contentDescription="Cut selection" />
+
+                <androidx.appcompat.widget.AppCompatImageButton
+                    android:id="@+id/btnLassoDelete"
+                    style="@style/Widget.Notesprout.ToolbarButton"
+                    android:src="@drawable/ic_lasso_delete"
+                    android:contentDescription="Delete selection" />
+
+            </LinearLayout>
+
+        </FrameLayout>
+
+        <!-- 1dp divider between canvas and toolbar -->
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="@color/inkBlack" />
+
+        <!-- Editor toolbar: pen, eraser, lasso only -->
+        <LinearLayout
+            android:id="@+id/editorToolbar"
+            android:layout_width="match_parent"
+            android:layout_height="56dp"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:paddingStart="4dp"
+            android:paddingEnd="4dp">
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnStickyPen"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:src="@drawable/ic_pen"
+                android:contentDescription="Pen" />
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnStickyEraser"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:layout_marginStart="4dp"
+                android:src="@drawable/ic_eraser"
+                android:contentDescription="Eraser" />
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnStickyLasso"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:layout_marginStart="4dp"
+                android:src="@drawable/ic_lasso"
+                android:contentDescription="Lasso" />
+
+        </LinearLayout>
+
+    </LinearLayout>
+
+</FrameLayout>

@@ -124,7 +124,7 @@ The **same** `ic_sticker_2.xml` is used for the toolbar button (44dp standard) a
 |---|---|---|---|
 | S1 | Data model, icon, on-page render, insert + persist + insert-undo | ☑ Complete (tested on G102 + committed) | 84e0762 |
 | S2 | Lasso lifecycle: select / move / delete / lasso-erase / scribble / erase-all (notebook) | ☑ Complete (tested on G102 + committed) | e87edaf |
-| S3 | Content window editor + transfer + tap-to-open + create-flow + content-edit undo | ☐ Not started | — |
+| S3 | Content window editor + transfer + tap-to-open + create-flow + content-edit undo | ☑ Complete (tested on G102 + committed) | — |
 | S4 | Copy / cut / paste parity (lasso clipboard + page copy/paste + cross-notebook) | ☐ Not started | — |
 | S5 | Scratch pad parity (insert / render / tap-open / lasso on scratch pad pages) | ☐ Not started | — |
 | S6 | PDF export — interactive footnote/endnote (icon → GoTo endnote page → back-link) | ☐ Not started | — |

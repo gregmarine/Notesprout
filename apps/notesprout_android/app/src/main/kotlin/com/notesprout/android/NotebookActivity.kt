@@ -267,6 +267,8 @@ class NotebookActivity : AppCompatActivity() {
     private var linkTapMoved = false
     /** The link the current finger gesture started on (pen mode only), or null. */
     private var linkTapCandidate: LinkRender? = null
+    /** The sticky note the current finger gesture started on (pen mode only), or null. */
+    private var stickyNoteTapCandidate: StickyNoteRender? = null
 
     /** Index UUID of the open notebook — set once in onCreate from EXTRA_NOTEBOOK_ID. */
     private var notebookId: String = ""
@@ -720,6 +722,11 @@ class NotebookActivity : AppCompatActivity() {
 
     private var pendingExportFile: java.io.File? = null
 
+    /** The sticky note being edited in [StickyNoteEditorActivity] — stashed before launch,
+     *  read in [editorLauncher] to know which note to persist content to. */
+    private var pendingStickyNote: StickyNoteRender? = null
+    private var pendingStickyInitialCreate = false
+
     /** Launched when the user taps the Scratch Pad button in the notebook toolbar. Session 7 will
      *  consume RESULT_OK to paste content returned from the scratch pad. */
     private val scratchpadLauncher = registerForActivityResult(
@@ -729,6 +736,74 @@ class NotebookActivity : AppCompatActivity() {
         val content = ScratchpadTransfer.pending ?: return@registerForActivityResult
         ScratchpadTransfer.pending = null
         performScratchpadTransfer(content)
+    }
+
+    /** Launched when opening a sticky note's content editor. */
+    private val editorLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { _ ->
+        val out = StickyNoteEditorTransfer.output
+        StickyNoteEditorTransfer.input  = null
+        StickyNoteEditorTransfer.output = null
+        val pending          = pendingStickyNote ?: return@registerForActivityResult
+        pendingStickyNote    = null
+        val wasInitialCreate = pendingStickyInitialCreate
+        pendingStickyInitialCreate = false
+
+        val afterRender = if (out != null) {
+            StickyNoteRender(
+                id            = pending.id,
+                boundingBox   = pending.boundingBox,
+                strokes       = out.strokes,
+                headings      = out.headings,
+                textObjects   = out.textObjects,
+                lines         = out.lines,
+                contentWidth  = out.contentWidth,
+                contentHeight = out.contentHeight,
+            )
+        } else {
+            pending
+        }
+
+        val db     = soilDatabase
+        val pageId = currentPageId.takeIf { it.isNotEmpty() }
+        val density = resources.displayMetrics.density
+
+        if (out != null && db != null && pageId != null) {
+            val afterData  = afterRender.toStickyNoteObject(density).toJson()
+            val beforeData = pending.toStickyNoteObject(density).toJson()
+            if (afterData != beforeData) {
+                lifecycleScope.launch {
+                    withContext(Dispatchers.IO) {
+                        db.notebookDao().updateData(pending.id, afterData, System.currentTimeMillis())
+                        invalidatePageSnapshot(db, pageId)
+                    }
+                    val updatedNotes = drawingView.getStickyNotes().map {
+                        if (it.id == afterRender.id) afterRender else it
+                    }
+                    drawingView.loadStickyNotes(updatedNotes)
+                    val currentStrokes  = drawingView.getStrokes()
+                    val currentHeadings = drawingView.getHeadings()
+                    val templateBmp     = currentTemplateBitmap
+                    val bitmap = withContext(Dispatchers.IO) {
+                        drawingView.buildRenderBitmap(currentStrokes, templateBmp, currentHeadings, stickyNotes = updatedNotes)
+                    }
+                    if (bitmap != null) drawingView.loadStrokesWithBitmap(currentStrokes, bitmap, templateBmp)
+                    undoRedoManager.push(
+                        UndoRedoAction.StickyNoteContentEdited(
+                            noteId = pending.id,
+                            pageId = pageId,
+                            before = pending,
+                            after  = afterRender,
+                        )
+                    )
+                    updateUndoRedoButtons()
+                    if (wasInitialCreate) selectStickyNoteIcon(afterRender)
+                }
+                return@registerForActivityResult
+            }
+        }
+        if (wasInitialCreate) selectStickyNoteIcon(afterRender)
     }
 
     private val savePdfLauncher = registerForActivityResult(
@@ -2436,32 +2511,48 @@ class NotebookActivity : AppCompatActivity() {
                 linkTapDownY = event.y
                 linkTapDownTime = event.eventTime
                 linkTapMoved = false
-                linkTapCandidate = if (isLinkFollowEnabled()) linkAt(event.x, event.y) else null
+                if (isLinkFollowEnabled()) {
+                    // Sticky notes take priority over links for tap-to-open.
+                    stickyNoteTapCandidate = stickyNoteAt(event.x, event.y)
+                    linkTapCandidate = if (stickyNoteTapCandidate == null) linkAt(event.x, event.y) else null
+                } else {
+                    stickyNoteTapCandidate = null
+                    linkTapCandidate = null
+                }
             }
             MotionEvent.ACTION_POINTER_DOWN -> {
                 // A second finger → this is a multi-touch gesture, never a follow tap.
                 linkTapMoved = true
+                stickyNoteTapCandidate = null
                 linkTapCandidate = null
             }
             MotionEvent.ACTION_MOVE -> {
-                if (!linkTapMoved && linkTapCandidate != null) {
+                if (!linkTapMoved && (linkTapCandidate != null || stickyNoteTapCandidate != null)) {
                     val dx = event.x - linkTapDownX
                     val dy = event.y - linkTapDownY
                     if (Math.hypot(dx.toDouble(), dy.toDouble()) > toggleTouchSlopPx) linkTapMoved = true
                 }
             }
             MotionEvent.ACTION_UP -> {
-                val candidate = linkTapCandidate
-                linkTapCandidate = null
-                val isTap = candidate != null
+                val stickyCandidate = stickyNoteTapCandidate
+                val candidate       = linkTapCandidate
+                stickyNoteTapCandidate = null
+                linkTapCandidate       = null
+                val isTap = (stickyCandidate != null || candidate != null)
                     && !linkTapMoved
                     && event.pointerCount == 1
                     && event.eventTime - linkTapDownTime <= ViewConfiguration.getLongPressTimeout()
-                    && candidate.boundingBox.contains(event.x, event.y)
-                if (isTap) followLink(candidate!!)
+                if (isTap) {
+                    if (stickyCandidate != null && stickyCandidate.boundingBox.contains(event.x, event.y)) {
+                        openStickyNote(stickyCandidate, initialCreate = false)
+                    } else if (candidate != null && candidate.boundingBox.contains(event.x, event.y)) {
+                        followLink(candidate)
+                    }
+                }
             }
             MotionEvent.ACTION_CANCEL -> {
                 linkTapMoved = true
+                stickyNoteTapCandidate = null
                 linkTapCandidate = null
             }
         }
@@ -2495,8 +2586,9 @@ class NotebookActivity : AppCompatActivity() {
                 toggleTapDownX = event.rawX
                 toggleTapDownY = event.rawY
                 toggleTapMoved = false
-                // A tap that follows a link must not also toggle the toolbar (plan step 4).
-                toggleDownOnLink = isLinkFollowEnabled() && linkAt(event.x, event.y) != null
+                // A tap that follows a link or opens a sticky note must not also toggle the toolbar.
+                toggleDownOnLink = isLinkFollowEnabled() &&
+                    (linkAt(event.x, event.y) != null || stickyNoteAt(event.x, event.y) != null)
             }
             MotionEvent.ACTION_POINTER_DOWN -> {
                 // A second finger → this is a multi-touch gesture, never a tap.
@@ -7134,16 +7226,6 @@ class NotebookActivity : AppCompatActivity() {
                 drawingView.loadStrokesWithBitmap(currentStrokes, bitmap, templateBmp)
             }
 
-            // Select the new sticky note icon and show the floating toolbar.
-            if (!isLassoMode) enterLassoMode()
-            selectedObjectIds.clear()
-            selectedObjectIds.add(noteId)
-            drawingView.lassoSelectedIds = selectedObjectIds.toSet()
-            val pad = 8f * resources.displayMetrics.density
-            val selBox = RectF(bbox).apply { inset(-pad, -pad) }
-            drawingView.setLassoOverlay(null, selBox)
-            updateFloatingSelectionToolbar(selBox)
-
             undoRedoManager.push(UndoRedoAction.StickyNoteInserted(
                 noteId  = noteId,
                 pageId  = pageId,
@@ -7151,7 +7233,42 @@ class NotebookActivity : AppCompatActivity() {
                 note    = noteRender,
             ))
             updateUndoRedoButtons()
+
+            // Open the editor immediately so the user can draw content before placing the icon.
+            openStickyNote(noteRender, initialCreate = true)
         }
+    }
+
+    /** Set the transfer singleton and launch [StickyNoteEditorActivity]. */
+    private fun openStickyNote(note: StickyNoteRender, initialCreate: Boolean) {
+        StickyNoteEditorTransfer.input = StickyNoteEditorTransfer.Content(
+            strokes       = note.strokes,
+            headings      = note.headings,
+            textObjects   = note.textObjects,
+            lines         = note.lines,
+            contentWidth  = note.contentWidth,
+            contentHeight = note.contentHeight,
+        )
+        StickyNoteEditorTransfer.output = null
+        pendingStickyNote          = note
+        pendingStickyInitialCreate = initialCreate
+        editorLauncher.launch(Intent(this, StickyNoteEditorActivity::class.java))
+    }
+
+    /** Topmost sticky note icon whose bbox contains the view-space point ([x],[y]), or null. */
+    private fun stickyNoteAt(x: Float, y: Float): StickyNoteRender? =
+        drawingView.getStickyNotes().lastOrNull { it.boundingBox.contains(x, y) }
+
+    /** Enter lasso mode and select [note]'s icon box — used after create-flow returns. */
+    private fun selectStickyNoteIcon(note: StickyNoteRender) {
+        if (!isLassoMode) enterLassoMode()
+        selectedObjectIds.clear()
+        selectedObjectIds.add(note.id)
+        drawingView.lassoSelectedIds = selectedObjectIds.toSet()
+        val pad = 8f * resources.displayMetrics.density
+        val selBox = RectF(note.boundingBox).apply { inset(-pad, -pad) }
+        drawingView.setLassoOverlay(null, selBox)
+        updateFloatingSelectionToolbar(selBox)
     }
 
     private fun insertLineObjects(db: SoilDatabase, lines: List<LineRender>) {
@@ -7436,8 +7553,9 @@ class NotebookActivity : AppCompatActivity() {
             is UndoRedoAction.LinkCreated         -> action.pageId
             is UndoRedoAction.LinkRemoved         -> action.pageId
             is UndoRedoAction.LinkEdited          -> action.pageId
-            is UndoRedoAction.StickyNoteInserted  -> action.pageId
-            else                                  -> null
+            is UndoRedoAction.StickyNoteInserted       -> action.pageId
+            is UndoRedoAction.StickyNoteContentEdited  -> action.pageId
+            else                                       -> null
         }
         val isCrossPage = targetPageId != null && targetPageId != currentPageId
 
@@ -9226,6 +9344,13 @@ class NotebookActivity : AppCompatActivity() {
                 }
                 invalidatePageSnapshot(db, action.pageId)
             }
+
+            is UndoRedoAction.StickyNoteContentEdited -> withContext(Dispatchers.IO) {
+                val density = resources.displayMetrics.density
+                val target  = if (isUndo) action.before else action.after
+                dao.updateData(action.noteId, target.toStickyNoteObject(density).toJson(), now)
+                invalidatePageSnapshot(db, action.pageId)
+            }
         }
     }
 
@@ -10106,6 +10231,29 @@ class NotebookActivity : AppCompatActivity() {
                 drawingView.lassoSelectedIds = emptySet()
                 drawingView.setLassoOverlay(null, null)
                 hideFloatingSelectionToolbar()
+            }
+            updatePageIndicator()
+            saveLastOpenedPage(currentPageId)
+            return true
+        }
+
+        // ── Step 3a-sticky-content: Same-page StickyNoteContentEdited — in-memory update ─
+        if (action is UndoRedoAction.StickyNoteContentEdited) {
+            val target = if (isUndo) action.before else action.after
+            val updatedNotes = drawingView.getStickyNotes().map {
+                if (it.id == action.noteId) target else it
+            }
+            drawingView.loadStickyNotes(updatedNotes)
+            val currentStrokes  = drawingView.getStrokes()
+            val currentHeadings = drawingView.getHeadings()
+            val templateBmp     = currentTemplateBitmap
+            val bitmap = withContext(Dispatchers.IO) {
+                drawingView.buildRenderBitmap(currentStrokes, templateBmp, currentHeadings, stickyNotes = updatedNotes)
+            }
+            if (bitmap != null) {
+                drawingView.loadStrokesWithBitmap(currentStrokes, bitmap, templateBmp)
+            } else {
+                drawingView.loadStrokes(currentStrokes)
             }
             updatePageIndicator()
             saveLastOpenedPage(currentPageId)
