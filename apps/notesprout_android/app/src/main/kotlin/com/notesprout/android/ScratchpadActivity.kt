@@ -3,11 +3,14 @@ package com.notesprout.android
 import android.os.Bundle
 import android.view.Gravity
 import android.view.MotionEvent
+import android.view.VelocityTracker
 import android.view.View
+import android.view.ViewConfiguration
 import android.widget.FrameLayout
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.doOnLayout
 import androidx.lifecycle.lifecycleScope
+import com.notesprout.android.core.Slog
 import com.notesprout.android.core.isBooxDevice
 import com.notesprout.android.data.PageData
 import com.notesprout.android.data.ScratchpadRepository
@@ -23,6 +26,7 @@ import com.notesprout.android.notebook.ToolPreferencesManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlin.math.abs
 
 class ScratchpadActivity : AppCompatActivity() {
 
@@ -33,7 +37,18 @@ class ScratchpadActivity : AppCompatActivity() {
         const val EXTRA_FROM_NOTEBOOK_ENCRYPTED = "from_notebook_encrypted"
 
         private const val TAG = "Notesprout"
+
+        // One-finger page-swipe thresholds — mirrors NotebookActivity.
+        private const val PAGE_SWIPE_MIN_DISTANCE_FRAC  = 0.30f
+        private const val PAGE_SWIPE_LONG_DISTANCE_FRAC = 0.50f
+        private const val PAGE_SWIPE_MIN_VELOCITY_MULT  = 1.0f
     }
+
+    // ── Page-swipe state ──────────────────────────────────────────────────────
+    private var pageSwipeActive = false
+    private var pageSwipeStartX = 0f
+    private var pageSwipeStartY = 0f
+    private var pageSwipeVelocityTracker: VelocityTracker? = null
 
     private lateinit var binding: ActivityScratchpadBinding
     private lateinit var drawingView: NotebookView
@@ -98,13 +113,22 @@ class ScratchpadActivity : AppCompatActivity() {
             }
         }
 
-        // S4–S7: wired in later sessions.
+        // S5+: wired in later sessions.
         binding.btnScratchLasso.setOnClickListener { }
-        binding.btnScratchAddPage.setOnClickListener { }
-        binding.btnScratchDeletePage.setOnClickListener { }
         binding.btnSendToNotebook.setOnClickListener { }
-        binding.btnScratchpadPrev.setOnClickListener { }
-        binding.btnScratchpadNext.setOnClickListener { }
+
+        binding.btnScratchAddPage.setOnClickListener {
+            lifecycleScope.launch { addPage() }
+        }
+        binding.btnScratchDeletePage.setOnClickListener {
+            lifecycleScope.launch { deletePage() }
+        }
+        binding.btnScratchpadPrev.setOnClickListener {
+            if (currentPageIndex > 0) lifecycleScope.launch { navigateTo(currentPageIndex - 1) }
+        }
+        binding.btnScratchpadNext.setOnClickListener {
+            if (currentPageIndex < pages.lastIndex) lifecycleScope.launch { navigateTo(currentPageIndex + 1) }
+        }
 
         // Bootstrap and load on first open.
         lifecycleScope.launch {
@@ -290,22 +314,135 @@ class ScratchpadActivity : AppCompatActivity() {
         }
     }
 
+    // ── Multi-page navigation ─────────────────────────────────────────────────
+
+    /** Two-phase navigate: save leaving page, erase, load target. Main-thread coroutine only. */
+    private suspend fun navigateTo(newIndex: Int) {
+        withContext(Dispatchers.IO) { saveStrokes() }
+        currentPageIndex = newIndex
+        ScratchpadPreferences.saveCurrentPageIndex(this, currentPageIndex)
+        val page = pages.getOrNull(currentPageIndex) ?: return
+        currentPageId   = page.id
+        currentLayerId  = repository.getLayerForPage(currentPageId)?.id ?: ""
+        persistedStrokeIds.clear()
+        drawingView.eraseAll()
+        updatePageIndicator()
+        loadCurrentPage()
+    }
+
+    private suspend fun addPage() {
+        withContext(Dispatchers.IO) { saveStrokes() }
+        val newPageId = repository.addPage(afterIndex = currentPageIndex)
+        pages = repository.getPages()
+        currentPageIndex = pages.indexOfFirst { it.id == newPageId }.coerceAtLeast(0)
+        currentPageId   = newPageId
+        currentLayerId  = repository.getLayerForPage(newPageId)?.id ?: ""
+        persistedStrokeIds.clear()
+        ScratchpadPreferences.saveCurrentPageIndex(this, currentPageIndex)
+        drawingView.eraseAll()
+        updatePageIndicator()
+        loadCurrentPage()
+    }
+
+    private suspend fun deletePage() {
+        val deletingId = currentPageId.takeIf { it.isNotEmpty() } ?: return
+        repository.deletePage(deletingId)
+        pages = repository.getPages()
+        currentPageIndex = currentPageIndex.coerceIn(0, (pages.size - 1).coerceAtLeast(0))
+        val page = pages.getOrNull(currentPageIndex)
+        currentPageId   = page?.id ?: ""
+        currentLayerId  = if (currentPageId.isNotEmpty()) repository.getLayerForPage(currentPageId)?.id ?: "" else ""
+        persistedStrokeIds.clear()
+        ScratchpadPreferences.saveCurrentPageIndex(this, currentPageIndex)
+        drawingView.eraseAll()
+        updatePageIndicator()
+        if (currentPageId.isNotEmpty()) loadCurrentPage()
+    }
+
+    // ── Page-swipe gesture ────────────────────────────────────────────────────
+
+    private fun handlePageSwipe(event: MotionEvent) {
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                pageSwipeActive = true
+                pageSwipeStartX = event.x
+                pageSwipeStartY = event.y
+                pageSwipeVelocityTracker?.recycle()
+                pageSwipeVelocityTracker = VelocityTracker.obtain().also { it.addMovement(event) }
+            }
+            MotionEvent.ACTION_POINTER_DOWN -> {
+                pageSwipeActive = false
+                pageSwipeVelocityTracker?.recycle()
+                pageSwipeVelocityTracker = null
+            }
+            MotionEvent.ACTION_MOVE -> {
+                if (pageSwipeActive) pageSwipeVelocityTracker?.addMovement(event)
+            }
+            MotionEvent.ACTION_UP -> {
+                if (pageSwipeActive) {
+                    val tracker = pageSwipeVelocityTracker
+                    if (tracker != null) {
+                        tracker.addMovement(event)
+                        tracker.computeCurrentVelocity(1000)
+                        val vx = tracker.getXVelocity(0)
+                        val vy = tracker.getYVelocity(0)
+                        evaluatePageFling(vx, vy, event.x - pageSwipeStartX, event.y - pageSwipeStartY)
+                        tracker.recycle()
+                        pageSwipeVelocityTracker = null
+                    }
+                }
+                pageSwipeActive = false
+            }
+            MotionEvent.ACTION_CANCEL -> {
+                pageSwipeActive = false
+                pageSwipeVelocityTracker?.recycle()
+                pageSwipeVelocityTracker = null
+            }
+        }
+    }
+
+    private fun evaluatePageFling(velocityX: Float, velocityY: Float, dx: Float, dy: Float) {
+        val absDx = abs(dx)
+        val absDy = abs(dy)
+        if (absDx <= absDy) return
+        val width    = binding.drawingContainer.width.toFloat().takeIf { it > 0 }
+            ?: resources.displayMetrics.widthPixels.toFloat()
+        val minDist  = PAGE_SWIPE_MIN_DISTANCE_FRAC * width
+        val minVel   = ViewConfiguration.get(this).scaledMinimumFlingVelocity * PAGE_SWIPE_MIN_VELOCITY_MULT
+        val fastEnough = abs(velocityX) >= minVel
+        val longEnough = absDx >= PAGE_SWIPE_LONG_DISTANCE_FRAC * width
+        if (absDx < minDist) return
+        if (!fastEnough && !longEnough) return
+
+        Slog.d(TAG) { "scratchpad evaluatePageFling: ${if (dx < 0) "next" else "prev"}" }
+        if (dx < 0) {
+            if (currentPageIndex < pages.lastIndex) lifecycleScope.launch { navigateTo(currentPageIndex + 1) }
+        } else {
+            if (currentPageIndex > 0) lifecycleScope.launch { navigateTo(currentPageIndex - 1) }
+        }
+    }
+
     // ── Chrome helpers ────────────────────────────────────────────────────────
 
     private fun updatePageIndicator() {
-        binding.tvScratchpadPageIndicator.text = "${currentPageIndex + 1} / ${pages.size}"
+        binding.tvScratchpadPageIndicator.text = "${currentPageIndex + 1} / ${pages.size.coerceAtLeast(1)}"
     }
 
     // ── Touch dispatch ────────────────────────────────────────────────────────
 
     override fun dispatchTouchEvent(event: MotionEvent): Boolean {
-        // Release the EPD writing overlay when the user touches the chrome bar or
-        // the toolbar so button state changes are visible immediately on e-ink.
-        if (event.actionMasked == MotionEvent.ACTION_DOWN
-            && event.getToolType(0) == MotionEvent.TOOL_TYPE_FINGER) {
-            if (isTouchInView(event, binding.chromeBar) ||
-                isTouchInView(event, binding.scratchpadToolbar)) {
-                drawingView.releaseRender()
+        if (event.getToolType(0) == MotionEvent.TOOL_TYPE_FINGER) {
+            // Release EPD overlay when touching chrome or toolbar.
+            if (event.actionMasked == MotionEvent.ACTION_DOWN) {
+                if (isTouchInView(event, binding.chromeBar) ||
+                    isTouchInView(event, binding.scratchpadToolbar)) {
+                    drawingView.releaseRender()
+                }
+            }
+            // Only run swipe detection inside the drawing area (not chrome/toolbar).
+            if (!isTouchInView(event, binding.chromeBar) &&
+                !isTouchInView(event, binding.scratchpadToolbar)) {
+                handlePageSwipe(event)
             }
         }
         return super.dispatchTouchEvent(event)
