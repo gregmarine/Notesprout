@@ -8,6 +8,9 @@
 > debug build + install on **G102** (`b7a46e13`), a device test checklist, and — once the user
 > confirms tests pass — a status update + commit (no push). The final session documents the feature
 > and pushes.
+>
+> **Commit rule:** do **not** commit at the end of a session until all checklist items pass and any
+> issues discovered during testing are fully resolved. Fix first, then commit.
 
 ---
 
@@ -186,7 +189,7 @@ carries the "paste this on return" payload back to the notebook.
 3. (Optional dev check) `adb -s b7a46e13 pull …/files/notesprout.db` and confirm a `scratchpad` table
    exists (`.schema scratchpad`).
 
-**Exit:** tests pass → mark Session 1 ✅ in the tracker → commit (no push).
+**Exit:** all checklist items pass and any issues are resolved → mark Session 1 ✅ in the tracker → commit (no push).
 
 ---
 
@@ -246,7 +249,7 @@ sized, bordered scratch-pad window with chrome + a placeholder toolbar. No drawi
 4. Chrome shows "Scratch Pad" + "1 / 1" + arrows; toolbar shows placeholder buttons.
 5. Back/outside dismiss closes it cleanly and returns to the prior screen with no EPD artifacts.
 
-**Exit:** tests pass → Session 2 ✅ → commit.
+**Exit:** all checklist items pass and any issues are resolved → Session 2 ✅ → commit.
 
 ---
 
@@ -294,7 +297,7 @@ per page.
    intact** (no EPD corruption from the overlapping surfaces).
 6. (Generic device, optional — e.g. Wacom) writing works there too.
 
-**Exit:** tests pass → Session 3 ✅ → commit.
+**Exit:** all checklist items pass and any issues are resolved → Session 3 ✅ → commit.
 
 ---
 
@@ -331,7 +334,7 @@ per page.
 6. Navigate to page 2, close, reopen → reopens on page 2 (current-page persistence).
 7. Swipe does not fire while writing with the stylus.
 
-**Exit:** tests pass → Session 4 ✅ → commit.
+**Exit:** all checklist items pass and any issues are resolved → Session 4 ✅ → commit.
 
 ---
 
@@ -370,7 +373,7 @@ scribble-erase, all reusing the existing clipboard.
    notebook (shared clipboard).
 7. Paste across scratch pad pages (copy on page 1, navigate, paste on page 2).
 
-**Exit:** tests pass → Session 5 ✅ → commit.
+**Exit:** all checklist items pass and any issues are resolved → Session 5 ✅ → commit.
 
 ---
 
@@ -410,7 +413,7 @@ and a new-page/current-page prompt.
    proceeds.
 6. Mixed-type selection (e.g. strokes + a text object) sends all types.
 
-**Exit:** tests pass → Session 6 ✅ → commit.
+**Exit:** all checklist items pass and any issues are resolved → Session 6 ✅ → commit.
 
 ---
 
@@ -448,7 +451,7 @@ closing the scratch pad and leaving the content selected on the notebook.
 4. Launch scratch pad from MainActivity → neither Send-to-Notebook control is present.
 5. After return, the notebook canvas + EPD state are clean; undo works on the pasted content.
 
-**Exit:** tests pass → Session 7 ✅ → commit.
+**Exit:** all checklist items pass and any issues are resolved → Session 7 ✅ → commit.
 
 ---
 
