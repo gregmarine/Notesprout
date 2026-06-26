@@ -14,6 +14,31 @@
 
 ---
 
+## Sticky Notes — deferred items
+
+> From the retired `STICKY_NOTE_PLAN.md` (all 7 sessions shipped). Items below were explicitly
+> deferred during build or noted as non-goals for v1.
+
+- **Cross-size content scaling.** When the editor window size differs from the authored
+  `contentWidth/Height` (rotation, cross-device paste), proportionally rescale embedded content
+  instead of rendering as-authored + clipping.
+- **In-editor autosave / process-death durability.** The editor holds content in memory until close;
+  an OS kill mid-edit loses unsaved strokes. Persist incrementally (or on `onPause`) so a kill is
+  recoverable. (Short sessions, same process as the paused host — acceptable for v1.)
+- **Multi-page sticky notes.** D1 chose single page; multi-page would need in-window page nav/add/delete.
+- **Native text/line insertion inside the editor.** D2 chose pen / eraser / lasso + paste only.
+  Adding the text and line insertion buttons inside the window is a follow-on decision.
+- **Content affordance on the icon.** Currently one static sticker icon regardless of whether the
+  note has content. A "has content" indicator or mini-preview would improve discoverability.
+- **Sticky-note content in search / TOC.** Content is hidden and intentionally excluded from ML Kit
+  search and page-name/TOC rules for v1. An explicit opt-in search over embedded content is future work.
+- **Live undo inside the editor.** D3: only one before/after undo action per window session. Live
+  in-window undo (stroke-level) is a follow-on feature.
+- **Endnote pagination / fit.** S6 renders each note's content onto a single endnote page sized to
+  the content; content larger than one page is not split across multiple endnote pages (acceptable for v1).
+
+---
+
 ## Scratch Pad — phase 2 / deferred
 
 > From the completed `SCRATCHPAD_PLAN.md` (all 8 sessions shipped). Items below were explicitly
