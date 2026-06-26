@@ -1,5 +1,6 @@
 package com.notesprout.android
 
+import android.content.Intent
 import android.graphics.PointF
 import android.graphics.Rect
 import android.graphics.RectF
@@ -11,6 +12,7 @@ import android.view.VelocityTracker
 import android.view.View
 import android.view.ViewConfiguration
 import android.widget.FrameLayout
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.doOnLayout
@@ -27,13 +29,18 @@ import com.notesprout.android.data.LinkRender
 import com.notesprout.android.data.LiveStroke
 import com.notesprout.android.data.PageData
 import com.notesprout.android.data.ScratchpadRepository
+import com.notesprout.android.data.StickyNoteObject
+import com.notesprout.android.data.StickyNoteRender
+import com.notesprout.android.data.TYPE_STICKY_NOTE
 import com.notesprout.android.data.TextObject
 import com.notesprout.android.data.TextRender
 import com.notesprout.android.data.toBoundingBoxJson
 import com.notesprout.android.data.toLinkObject
+import com.notesprout.android.data.toStickyNoteObject
+import com.notesprout.android.data.translate
 import com.notesprout.android.data.index.NotesproutIndex
 import com.notesprout.android.data.index.ScratchpadEntity
-import com.notesprout.android.data.translate
+import com.notesprout.android.notebook.STICKY_NOTE_ICON_SIZE_DP
 import com.notesprout.android.databinding.ActivityScratchpadBinding
 import com.notesprout.android.notebook.ActiveTool
 import com.notesprout.android.notebook.GenericNotebookView
@@ -74,6 +81,14 @@ class ScratchpadActivity : AppCompatActivity() {
     private var pageSwipeStartY = 0f
     private var pageSwipeVelocityTracker: VelocityTracker? = null
 
+    // ── Sticky note finger-tap state ──────────────────────────────────────────
+    private var stickyNoteTapCandidate: StickyNoteRender? = null
+    private var stickyNoteTapDownX = 0f
+    private var stickyNoteTapDownY = 0f
+    private var stickyNoteTapDownTime = 0L
+    private var stickyNoteTapMoved = false
+    private val stickyNoteTouchSlopPx by lazy { ViewConfiguration.get(this).scaledTouchSlop }
+
     private lateinit var binding: ActivityScratchpadBinding
     private lateinit var drawingView: NotebookView
     private lateinit var repository: ScratchpadRepository
@@ -87,6 +102,61 @@ class ScratchpadActivity : AppCompatActivity() {
 
     /** Non-null only when launched from a notebook — determines Send-to-Notebook visibility. */
     private var fromNotebookId: String? = null
+
+    // ── Sticky note editor state ──────────────────────────────────────────────
+    private var pendingStickyNote: StickyNoteRender? = null
+    private var pendingStickyInitialCreate = false
+
+    private val editorLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { _ ->
+        val out = StickyNoteEditorTransfer.output
+        StickyNoteEditorTransfer.input  = null
+        StickyNoteEditorTransfer.output = null
+        val pending          = pendingStickyNote ?: return@registerForActivityResult
+        pendingStickyNote    = null
+        val wasInitialCreate = pendingStickyInitialCreate
+        pendingStickyInitialCreate = false
+
+        val afterRender = if (out != null) {
+            StickyNoteRender(
+                id            = pending.id,
+                boundingBox   = pending.boundingBox,
+                strokes       = out.strokes,
+                headings      = out.headings,
+                textObjects   = out.textObjects,
+                lines         = out.lines,
+                contentWidth  = out.contentWidth,
+                contentHeight = out.contentHeight,
+            )
+        } else {
+            pending
+        }
+
+        val layerId = currentLayerId.takeIf { it.isNotEmpty() } ?: return@registerForActivityResult
+        val density = resources.displayMetrics.density
+
+        if (out != null) {
+            val afterData  = afterRender.toStickyNoteObject(density).toJson()
+            val beforeData = pending.toStickyNoteObject(density).toJson()
+            if (afterData != beforeData) {
+                lifecycleScope.launch {
+                    val dao = NotesproutIndex.scratchpadDao()
+                    withContext(Dispatchers.IO) {
+                        dao.updateData(pending.id, afterData, System.currentTimeMillis())
+                    }
+                    val updatedNotes = drawingView.getStickyNotes().map {
+                        if (it.id == afterRender.id) afterRender else it
+                    }
+                    drawingView.loadStickyNotes(updatedNotes)
+                    rebuildBitmap()
+                    if (wasInitialCreate) selectStickyNoteIcon(afterRender)
+                }
+                return@registerForActivityResult
+            }
+        }
+        if (wasInitialCreate) selectStickyNoteIcon(afterRender)
+    }
 
     // ── Lasso state ───────────────────────────────────────────────────────────
     private var isLassoMode = false
@@ -146,6 +216,10 @@ class ScratchpadActivity : AppCompatActivity() {
                 binding.btnScratchPen.isSelected    = true
                 binding.btnScratchEraser.isSelected = false
             }
+        }
+
+        binding.btnScratchStickyNote.setOnClickListener {
+            lifecycleScope.launch { insertStickyNote() }
         }
 
         binding.btnSendToNotebook.setOnClickListener { sendPageToNotebook() }
@@ -253,6 +327,14 @@ class ScratchpadActivity : AppCompatActivity() {
             }
         }
 
+        drawingView.onStickyNoteErased = { noteObject ->
+            val deletedAt = System.currentTimeMillis()
+            lifecycleScope.launch(Dispatchers.IO) {
+                NotesproutIndex.scratchpadDao().softDelete(noteObject.id, deletedAt)
+                withContext(Dispatchers.Main) { lifecycleScope.launch { rebuildBitmap() } }
+            }
+        }
+
         drawingView.onPenLifted = {
             lifecycleScope.launch {
                 withContext(Dispatchers.IO) { saveStrokes() }
@@ -276,11 +358,12 @@ class ScratchpadActivity : AppCompatActivity() {
             drawnPath.close()
 
             selectedObjectIds.clear()
-            val strokeSnapshot  = drawingView.getStrokes()
-            val headingSnapshot = drawingView.getHeadings()
-            val textSnapshot    = drawingView.getTextObjects()
-            val lineSnapshot    = drawingView.getLineObjects()
-            val linkSnapshot    = drawingView.getLinks()
+            val strokeSnapshot      = drawingView.getStrokes()
+            val headingSnapshot     = drawingView.getHeadings()
+            val textSnapshot        = drawingView.getTextObjects()
+            val lineSnapshot        = drawingView.getLineObjects()
+            val linkSnapshot        = drawingView.getLinks()
+            val stickyNoteSnapshot  = drawingView.getStickyNotes()
             lifecycleScope.launch(Dispatchers.Default) {
                 val lassoBounds = RectF()
                 drawnPath.computeBounds(lassoBounds, true)
@@ -344,6 +427,14 @@ class ScratchpadActivity : AppCompatActivity() {
                     }
                 }
 
+                for (note in stickyNoteSnapshot) {
+                    if (!RectF.intersects(lassoBounds, note.boundingBox)) continue
+                    if (LassoGeometry.regionIntersectsBox(lassoRegion, note.boundingBox)) {
+                        hitIds.add(note.id)
+                        unionBounds.union(note.boundingBox)
+                    }
+                }
+
                 withContext(Dispatchers.Main) {
                     if (hitIds.isEmpty()) return@withContext
                     selectedObjectIds.clear()
@@ -381,7 +472,7 @@ class ScratchpadActivity : AppCompatActivity() {
             hideFloatingSelectionToolbar()
         }
 
-        drawingView.onStrokesMoved = { _, movedStrokes, _, movedHeadings, _, movedTextObjects, _, movedLineObjects, _, movedLinks, _, _ ->
+        drawingView.onStrokesMoved = { _, movedStrokes, _, movedHeadings, _, movedTextObjects, _, movedLineObjects, _, movedLinks, _, movedStickyNotes ->
             lifecycleScope.launch {
                 val now     = System.currentTimeMillis()
                 val density = resources.displayMetrics.density
@@ -403,6 +494,9 @@ class ScratchpadActivity : AppCompatActivity() {
                     for (lk in movedLinks) {
                         dao.updateObjectData(lk.id, lk.boundingBox.toBoundingBoxJson(), lk.toLinkObject(density).toJson(), now)
                     }
+                    for (note in movedStickyNotes) {
+                        dao.updateObjectData(note.id, note.boundingBox.toBoundingBoxJson(), note.toStickyNoteObject(density).toJson(), now)
+                    }
                 }
                 val newBox = RectF()
                 movedStrokes.forEach { newBox.union(it.boundingBox) }
@@ -410,6 +504,7 @@ class ScratchpadActivity : AppCompatActivity() {
                 movedTextObjects.forEach { newBox.union(it.boundingBox) }
                 movedLineObjects.forEach { newBox.union(it.boundingBox) }
                 movedLinks.forEach { newBox.union(it.boundingBox) }
+                movedStickyNotes.forEach { newBox.union(it.boundingBox) }
                 val pad = 8f * resources.displayMetrics.density
                 newBox.inset(-pad, -pad)
                 updateFloatingSelectionToolbar(newBox)
@@ -430,14 +525,15 @@ class ScratchpadActivity : AppCompatActivity() {
             drawingView.lassoSelectedIds = selectedObjectIds.toSet()
             val pad          = 8f * resources.displayMetrics.density
             val paddedBounds = RectF(unionBounds).also { it.inset(-pad, -pad) }
-            val currentStrokes  = drawingView.getStrokes()
-            val currentHeadings = drawingView.getHeadings()
-            val currentTexts    = drawingView.getTextObjects()
-            val currentLines    = drawingView.getLineObjects()
-            val currentLinks    = drawingView.getLinks()
+            val currentStrokes      = drawingView.getStrokes()
+            val currentHeadings     = drawingView.getHeadings()
+            val currentTexts        = drawingView.getTextObjects()
+            val currentLines        = drawingView.getLineObjects()
+            val currentLinks        = drawingView.getLinks()
+            val currentStickyNotes  = drawingView.getStickyNotes()
             lifecycleScope.launch {
                 val bitmap = withContext(Dispatchers.IO) {
-                    drawingView.buildRenderBitmap(currentStrokes, null, currentHeadings, currentTexts, currentLines, currentLinks)
+                    drawingView.buildRenderBitmap(currentStrokes, null, currentHeadings, currentTexts, currentLines, currentLinks, stickyNotes = currentStickyNotes)
                 }
                 if (bitmap != null) {
                     drawingView.loadStrokesWithBitmap(currentStrokes, bitmap, null)
@@ -447,28 +543,31 @@ class ScratchpadActivity : AppCompatActivity() {
             }
         }
 
-        drawingView.onScribbleEraseComplete = { erasedObjectIds, erasedHeadings, erasedTextObjects, erasedLineObjects, erasedLinks, _ ->
+        drawingView.onScribbleEraseComplete = { erasedObjectIds, erasedHeadings, erasedTextObjects, erasedLineObjects, erasedLinks, erasedStickyNotes ->
             if (erasedObjectIds.isNotEmpty()) {
                 lifecycleScope.launch {
                     withContext(Dispatchers.IO) { repository.softDeleteObjects(erasedObjectIds) }
-                    val erasedHeadingIds = erasedHeadings.mapTo(mutableSetOf()) { it.id }
-                    val erasedTextIds    = erasedTextObjects.mapTo(mutableSetOf()) { it.id }
-                    val erasedLineIds    = erasedLineObjects.mapTo(mutableSetOf()) { it.id }
-                    val erasedLinkIds    = erasedLinks.mapTo(mutableSetOf()) { it.id }
-                    val erasedSet        = erasedObjectIds.toSet()
-                    val updatedStrokes   = drawingView.getStrokes().filter { it.id !in erasedSet }
-                    val updatedHeadings  = drawingView.getHeadings().filter { it.id !in erasedHeadingIds }
-                    val updatedTexts     = drawingView.getTextObjects().filter { it.id !in erasedTextIds }
-                    val updatedLines     = drawingView.getLineObjects().filter { it.id !in erasedLineIds }
-                    val updatedLinks     = drawingView.getLinks().filter { it.id !in erasedLinkIds }
-                    persistedStrokeIds.removeAll(erasedSet - erasedHeadingIds - erasedTextIds - erasedLineIds - erasedLinkIds)
+                    val erasedHeadingIds    = erasedHeadings.mapTo(mutableSetOf()) { it.id }
+                    val erasedTextIds       = erasedTextObjects.mapTo(mutableSetOf()) { it.id }
+                    val erasedLineIds       = erasedLineObjects.mapTo(mutableSetOf()) { it.id }
+                    val erasedLinkIds       = erasedLinks.mapTo(mutableSetOf()) { it.id }
+                    val erasedStickyIds     = erasedStickyNotes.mapTo(mutableSetOf()) { it.id }
+                    val erasedSet           = erasedObjectIds.toSet()
+                    val updatedStrokes      = drawingView.getStrokes().filter { it.id !in erasedSet }
+                    val updatedHeadings     = drawingView.getHeadings().filter { it.id !in erasedHeadingIds }
+                    val updatedTexts        = drawingView.getTextObjects().filter { it.id !in erasedTextIds }
+                    val updatedLines        = drawingView.getLineObjects().filter { it.id !in erasedLineIds }
+                    val updatedLinks        = drawingView.getLinks().filter { it.id !in erasedLinkIds }
+                    val updatedStickyNotes  = drawingView.getStickyNotes().filter { it.id !in erasedStickyIds }
+                    persistedStrokeIds.removeAll(erasedSet - erasedHeadingIds - erasedTextIds - erasedLineIds - erasedLinkIds - erasedStickyIds)
                     drawingView.setStrokeListSilently(updatedStrokes)
                     drawingView.loadHeadings(updatedHeadings)
                     drawingView.loadTextObjects(updatedTexts)
                     drawingView.loadLineObjects(updatedLines)
                     drawingView.loadLinks(updatedLinks)
+                    drawingView.loadStickyNotes(updatedStickyNotes)
                     val bitmap = withContext(Dispatchers.IO) {
-                        drawingView.buildRenderBitmap(updatedStrokes, null, updatedHeadings, updatedTexts, updatedLines, updatedLinks)
+                        drawingView.buildRenderBitmap(updatedStrokes, null, updatedHeadings, updatedTexts, updatedLines, updatedLinks, stickyNotes = updatedStickyNotes)
                     }
                     if (bitmap != null) {
                         drawingView.loadStrokesWithBitmap(updatedStrokes, bitmap, null)
@@ -548,12 +647,13 @@ class ScratchpadActivity : AppCompatActivity() {
     private fun performLassoCopy() {
         val ids = drawingView.lassoSelectedIds
         if (ids.isEmpty()) return
-        val strokes     = drawingView.getStrokes().filter { it.id in ids }
-        val headings    = drawingView.getHeadings().filter { it.id in ids }
-        val textObjects = drawingView.getTextObjects().filter { it.id in ids }
-        val lineObjects = drawingView.getLineObjects().filter { it.id in ids }
-        val links       = drawingView.getLinks().filter { it.id in ids }
-        if (strokes.isEmpty() && headings.isEmpty() && textObjects.isEmpty() && lineObjects.isEmpty() && links.isEmpty()) return
+        val strokes      = drawingView.getStrokes().filter { it.id in ids }
+        val headings     = drawingView.getHeadings().filter { it.id in ids }
+        val textObjects  = drawingView.getTextObjects().filter { it.id in ids }
+        val lineObjects  = drawingView.getLineObjects().filter { it.id in ids }
+        val links        = drawingView.getLinks().filter { it.id in ids }
+        val stickyNotes  = drawingView.getStickyNotes().filter { it.id in ids }
+        if (strokes.isEmpty() && headings.isEmpty() && textObjects.isEmpty() && lineObjects.isEmpty() && links.isEmpty() && stickyNotes.isEmpty()) return
 
         val box = RectF()
         strokes.forEach { box.union(it.boundingBox) }
@@ -561,6 +661,7 @@ class ScratchpadActivity : AppCompatActivity() {
         textObjects.forEach { box.union(it.boundingBox) }
         lineObjects.forEach { box.union(it.boundingBox) }
         links.forEach { box.union(it.boundingBox) }
+        stickyNotes.forEach { box.union(it.boundingBox) }
 
         NotesproutClipboard.content = NotesproutClipboard.ClipboardContent(
             strokes = strokes.map { LiveStroke(it.id, it.points.map { pt -> PointF(pt.x, pt.y) }) },
@@ -573,6 +674,7 @@ class ScratchpadActivity : AppCompatActivity() {
             textObjects = textObjects.map { t -> TextRender(t.id, RectF(t.boundingBox), t.text, t.strokes) },
             lineObjects = lineObjects.map { l -> l.copy(boundingBox = RectF(l.boundingBox)) },
             links = links.map { it.translate(0f, 0f) },
+            stickyNotes = stickyNotes.map { it.translate(0f, 0f) },
         )
         updateLassoButtonIcon()
         selectedObjectIds.clear()
@@ -584,12 +686,13 @@ class ScratchpadActivity : AppCompatActivity() {
     private fun performLassoCut() {
         val ids = drawingView.lassoSelectedIds
         if (ids.isEmpty()) return
-        val strokes     = drawingView.getStrokes().filter { it.id in ids }
-        val headings    = drawingView.getHeadings().filter { it.id in ids }
-        val textObjects = drawingView.getTextObjects().filter { it.id in ids }
-        val lineObjects = drawingView.getLineObjects().filter { it.id in ids }
-        val links       = drawingView.getLinks().filter { it.id in ids }
-        if (strokes.isEmpty() && headings.isEmpty() && textObjects.isEmpty() && lineObjects.isEmpty() && links.isEmpty()) return
+        val strokes      = drawingView.getStrokes().filter { it.id in ids }
+        val headings     = drawingView.getHeadings().filter { it.id in ids }
+        val textObjects  = drawingView.getTextObjects().filter { it.id in ids }
+        val lineObjects  = drawingView.getLineObjects().filter { it.id in ids }
+        val links        = drawingView.getLinks().filter { it.id in ids }
+        val stickyNotes  = drawingView.getStickyNotes().filter { it.id in ids }
+        if (strokes.isEmpty() && headings.isEmpty() && textObjects.isEmpty() && lineObjects.isEmpty() && links.isEmpty() && stickyNotes.isEmpty()) return
 
         val box = RectF()
         strokes.forEach { box.union(it.boundingBox) }
@@ -597,6 +700,7 @@ class ScratchpadActivity : AppCompatActivity() {
         textObjects.forEach { box.union(it.boundingBox) }
         lineObjects.forEach { box.union(it.boundingBox) }
         links.forEach { box.union(it.boundingBox) }
+        stickyNotes.forEach { box.union(it.boundingBox) }
 
         NotesproutClipboard.content = NotesproutClipboard.ClipboardContent(
             strokes = strokes.map { LiveStroke(it.id, it.points.map { pt -> PointF(pt.x, pt.y) }) },
@@ -609,30 +713,33 @@ class ScratchpadActivity : AppCompatActivity() {
             textObjects = textObjects.map { t -> TextRender(t.id, RectF(t.boundingBox), t.text, t.strokes) },
             lineObjects = lineObjects.map { l -> l.copy(boundingBox = RectF(l.boundingBox)) },
             links = links.map { it.translate(0f, 0f) },
+            stickyNotes = stickyNotes.map { it.translate(0f, 0f) },
         )
         updateLassoButtonIcon()
         val allIds = strokes.map { it.id } + headings.map { it.id } + textObjects.map { it.id } +
-                     lineObjects.map { it.id } + links.map { it.id }
+                     lineObjects.map { it.id } + links.map { it.id } + stickyNotes.map { it.id }
         lifecycleScope.launch {
             withContext(Dispatchers.IO) { repository.softDeleteObjects(allIds) }
-            val erasedSet = allIds.toSet()
-            val updatedStrokes  = drawingView.getStrokes().filter { it.id !in erasedSet }
-            val updatedHeadings = drawingView.getHeadings().filter { it.id !in erasedSet }
-            val updatedTexts    = drawingView.getTextObjects().filter { it.id !in erasedSet }
-            val updatedLines    = drawingView.getLineObjects().filter { it.id !in erasedSet }
-            val updatedLinks    = drawingView.getLinks().filter { it.id !in erasedSet }
+            val erasedSet          = allIds.toSet()
+            val updatedStrokes     = drawingView.getStrokes().filter { it.id !in erasedSet }
+            val updatedHeadings    = drawingView.getHeadings().filter { it.id !in erasedSet }
+            val updatedTexts       = drawingView.getTextObjects().filter { it.id !in erasedSet }
+            val updatedLines       = drawingView.getLineObjects().filter { it.id !in erasedSet }
+            val updatedLinks       = drawingView.getLinks().filter { it.id !in erasedSet }
+            val updatedStickyNotes = drawingView.getStickyNotes().filter { it.id !in erasedSet }
             persistedStrokeIds.removeAll(erasedSet)
             drawingView.setStrokeListSilently(updatedStrokes)
             drawingView.loadHeadings(updatedHeadings)
             drawingView.loadTextObjects(updatedTexts)
             drawingView.loadLineObjects(updatedLines)
             drawingView.loadLinks(updatedLinks)
+            drawingView.loadStickyNotes(updatedStickyNotes)
             selectedObjectIds.clear()
             drawingView.lassoSelectedIds = emptySet()
             drawingView.setLassoOverlay(null, null)
             hideFloatingSelectionToolbar()
             val bitmap = withContext(Dispatchers.IO) {
-                drawingView.buildRenderBitmap(updatedStrokes, null, updatedHeadings, updatedTexts, updatedLines, updatedLinks)
+                drawingView.buildRenderBitmap(updatedStrokes, null, updatedHeadings, updatedTexts, updatedLines, updatedLinks, stickyNotes = updatedStickyNotes)
             }
             if (bitmap != null) {
                 drawingView.loadStrokesWithBitmap(updatedStrokes, bitmap, null)
@@ -649,28 +756,31 @@ class ScratchpadActivity : AppCompatActivity() {
                       drawingView.getHeadings().filter { it.id in ids }.map { it.id } +
                       drawingView.getTextObjects().filter { it.id in ids }.map { it.id } +
                       drawingView.getLineObjects().filter { it.id in ids }.map { it.id } +
-                      drawingView.getLinks().filter { it.id in ids }.map { it.id })
+                      drawingView.getLinks().filter { it.id in ids }.map { it.id } +
+                      drawingView.getStickyNotes().filter { it.id in ids }.map { it.id })
         if (allIds.isEmpty()) return
         lifecycleScope.launch {
             withContext(Dispatchers.IO) { repository.softDeleteObjects(allIds) }
-            val erasedSet = allIds.toSet()
-            val updatedStrokes  = drawingView.getStrokes().filter { it.id !in erasedSet }
-            val updatedHeadings = drawingView.getHeadings().filter { it.id !in erasedSet }
-            val updatedTexts    = drawingView.getTextObjects().filter { it.id !in erasedSet }
-            val updatedLines    = drawingView.getLineObjects().filter { it.id !in erasedSet }
-            val updatedLinks    = drawingView.getLinks().filter { it.id !in erasedSet }
+            val erasedSet          = allIds.toSet()
+            val updatedStrokes     = drawingView.getStrokes().filter { it.id !in erasedSet }
+            val updatedHeadings    = drawingView.getHeadings().filter { it.id !in erasedSet }
+            val updatedTexts       = drawingView.getTextObjects().filter { it.id !in erasedSet }
+            val updatedLines       = drawingView.getLineObjects().filter { it.id !in erasedSet }
+            val updatedLinks       = drawingView.getLinks().filter { it.id !in erasedSet }
+            val updatedStickyNotes = drawingView.getStickyNotes().filter { it.id !in erasedSet }
             persistedStrokeIds.removeAll(erasedSet)
             drawingView.setStrokeListSilently(updatedStrokes)
             drawingView.loadHeadings(updatedHeadings)
             drawingView.loadTextObjects(updatedTexts)
             drawingView.loadLineObjects(updatedLines)
             drawingView.loadLinks(updatedLinks)
+            drawingView.loadStickyNotes(updatedStickyNotes)
             selectedObjectIds.clear()
             drawingView.lassoSelectedIds = emptySet()
             drawingView.setLassoOverlay(null, null)
             hideFloatingSelectionToolbar()
             val bitmap = withContext(Dispatchers.IO) {
-                drawingView.buildRenderBitmap(updatedStrokes, null, updatedHeadings, updatedTexts, updatedLines, updatedLinks)
+                drawingView.buildRenderBitmap(updatedStrokes, null, updatedHeadings, updatedTexts, updatedLines, updatedLinks, stickyNotes = updatedStickyNotes)
             }
             if (bitmap != null) {
                 drawingView.loadStrokesWithBitmap(updatedStrokes, bitmap, null)
@@ -685,12 +795,13 @@ class ScratchpadActivity : AppCompatActivity() {
     /** Toolbar button: send all objects on the current page to the notebook. */
     private fun sendPageToNotebook() {
         if (fromNotebookId == null) return
-        val strokes     = drawingView.getStrokes()
-        val headings    = drawingView.getHeadings()
-        val textObjects = drawingView.getTextObjects()
-        val lineObjects = drawingView.getLineObjects()
-        val links       = drawingView.getLinks()
-        if (strokes.isEmpty() && headings.isEmpty() && textObjects.isEmpty() && lineObjects.isEmpty() && links.isEmpty()) return
+        val strokes      = drawingView.getStrokes()
+        val headings     = drawingView.getHeadings()
+        val textObjects  = drawingView.getTextObjects()
+        val lineObjects  = drawingView.getLineObjects()
+        val links        = drawingView.getLinks()
+        val stickyNotes  = drawingView.getStickyNotes()
+        if (strokes.isEmpty() && headings.isEmpty() && textObjects.isEmpty() && lineObjects.isEmpty() && links.isEmpty() && stickyNotes.isEmpty()) return
 
         val box = RectF()
         strokes.forEach { box.union(it.boundingBox) }
@@ -698,6 +809,7 @@ class ScratchpadActivity : AppCompatActivity() {
         textObjects.forEach { box.union(it.boundingBox) }
         lineObjects.forEach { box.union(it.boundingBox) }
         links.forEach { box.union(it.boundingBox) }
+        stickyNotes.forEach { box.union(it.boundingBox) }
 
         ScratchpadTransfer.pending = NotesproutClipboard.ClipboardContent(
             strokes = strokes.map { LiveStroke(it.id, it.points.map { pt -> PointF(pt.x, pt.y) }) },
@@ -710,6 +822,7 @@ class ScratchpadActivity : AppCompatActivity() {
             textObjects = textObjects.map { t -> TextRender(t.id, RectF(t.boundingBox), t.text, t.strokes) },
             lineObjects = lineObjects.map { l -> l.copy(boundingBox = RectF(l.boundingBox)) },
             links = links.map { it.translate(0f, 0f) },
+            stickyNotes = stickyNotes.map { it.translate(0f, 0f) },
         )
         setResult(RESULT_OK)
         finish()
@@ -720,12 +833,13 @@ class ScratchpadActivity : AppCompatActivity() {
         if (fromNotebookId == null) return
         val ids = drawingView.lassoSelectedIds
         if (ids.isEmpty()) return
-        val strokes     = drawingView.getStrokes().filter { it.id in ids }
-        val headings    = drawingView.getHeadings().filter { it.id in ids }
-        val textObjects = drawingView.getTextObjects().filter { it.id in ids }
-        val lineObjects = drawingView.getLineObjects().filter { it.id in ids }
-        val links       = drawingView.getLinks().filter { it.id in ids }
-        if (strokes.isEmpty() && headings.isEmpty() && textObjects.isEmpty() && lineObjects.isEmpty() && links.isEmpty()) return
+        val strokes      = drawingView.getStrokes().filter { it.id in ids }
+        val headings     = drawingView.getHeadings().filter { it.id in ids }
+        val textObjects  = drawingView.getTextObjects().filter { it.id in ids }
+        val lineObjects  = drawingView.getLineObjects().filter { it.id in ids }
+        val links        = drawingView.getLinks().filter { it.id in ids }
+        val stickyNotes  = drawingView.getStickyNotes().filter { it.id in ids }
+        if (strokes.isEmpty() && headings.isEmpty() && textObjects.isEmpty() && lineObjects.isEmpty() && links.isEmpty() && stickyNotes.isEmpty()) return
 
         val box = RectF()
         strokes.forEach { box.union(it.boundingBox) }
@@ -733,6 +847,7 @@ class ScratchpadActivity : AppCompatActivity() {
         textObjects.forEach { box.union(it.boundingBox) }
         lineObjects.forEach { box.union(it.boundingBox) }
         links.forEach { box.union(it.boundingBox) }
+        stickyNotes.forEach { box.union(it.boundingBox) }
 
         ScratchpadTransfer.pending = NotesproutClipboard.ClipboardContent(
             strokes = strokes.map { LiveStroke(it.id, it.points.map { pt -> PointF(pt.x, pt.y) }) },
@@ -745,6 +860,7 @@ class ScratchpadActivity : AppCompatActivity() {
             textObjects = textObjects.map { t -> TextRender(t.id, RectF(t.boundingBox), t.text, t.strokes) },
             lineObjects = lineObjects.map { l -> l.copy(boundingBox = RectF(l.boundingBox)) },
             links = links.map { it.translate(0f, 0f) },
+            stickyNotes = stickyNotes.map { it.translate(0f, 0f) },
         )
         setResult(RESULT_OK)
         finish()
@@ -798,6 +914,7 @@ class ScratchpadActivity : AppCompatActivity() {
             )
         }
         val newLinks = clip.links.map { it.translate(dx, dy, newId = java.util.UUID.randomUUID().toString()) }
+        val newStickyNotes = clip.stickyNotes.map { it.translate(dx, dy, newId = java.util.UUID.randomUUID().toString()) }
         val translatedClip = NotesproutClipboard.ClipboardContent(
             strokes     = newStrokes,
             headings    = newHeadings,
@@ -806,29 +923,33 @@ class ScratchpadActivity : AppCompatActivity() {
             textObjects = newTextObjects,
             lineObjects = newLineObjects,
             links       = newLinks,
+            stickyNotes = newStickyNotes,
         )
 
         lifecycleScope.launch {
-            val existingStrokes  = drawingView.getStrokes()
-            val existingHeadings = drawingView.getHeadings()
-            val existingTexts    = drawingView.getTextObjects()
-            val existingLines    = drawingView.getLineObjects()
-            val existingLinks    = drawingView.getLinks()
+            val existingStrokes      = drawingView.getStrokes()
+            val existingHeadings     = drawingView.getHeadings()
+            val existingTexts        = drawingView.getTextObjects()
+            val existingLines        = drawingView.getLineObjects()
+            val existingLinks        = drawingView.getLinks()
+            val existingStickyNotes  = drawingView.getStickyNotes()
             withContext(Dispatchers.IO) { repository.insertObjects(layerId, translatedClip, density) }
             newStrokes.forEach { persistedStrokeIds.add(it.id) }
 
-            val allStrokes  = existingStrokes  + newStrokes
-            val allHeadings = existingHeadings + newHeadings
-            val allTexts    = existingTexts    + newTextObjects
-            val allLines    = existingLines    + newLineObjects
-            val allLinks    = existingLinks    + newLinks
+            val allStrokes      = existingStrokes     + newStrokes
+            val allHeadings     = existingHeadings    + newHeadings
+            val allTexts        = existingTexts       + newTextObjects
+            val allLines        = existingLines       + newLineObjects
+            val allLinks        = existingLinks       + newLinks
+            val allStickyNotes  = existingStickyNotes + newStickyNotes
             drawingView.loadHeadings(allHeadings)
             drawingView.loadTextObjects(allTexts)
             drawingView.loadLineObjects(allLines)
             drawingView.loadLinks(allLinks)
+            drawingView.loadStickyNotes(allStickyNotes)
 
             val bitmap = withContext(Dispatchers.IO) {
-                drawingView.buildRenderBitmap(allStrokes, null, allHeadings, allTexts, allLines, allLinks)
+                drawingView.buildRenderBitmap(allStrokes, null, allHeadings, allTexts, allLines, allLinks, stickyNotes = allStickyNotes)
             }
             if (bitmap != null) {
                 drawingView.loadStrokesWithBitmap(allStrokes, bitmap, null)
@@ -837,11 +958,12 @@ class ScratchpadActivity : AppCompatActivity() {
             }
 
             val newBox = RectF()
-            newStrokes.forEach  { newBox.union(it.boundingBox) }
-            newHeadings.forEach { newBox.union(it.boundingBox) }
-            newTextObjects.forEach { newBox.union(it.boundingBox) }
-            newLineObjects.forEach { newBox.union(it.boundingBox) }
-            newLinks.forEach { newBox.union(it.boundingBox) }
+            newStrokes.forEach      { newBox.union(it.boundingBox) }
+            newHeadings.forEach     { newBox.union(it.boundingBox) }
+            newTextObjects.forEach  { newBox.union(it.boundingBox) }
+            newLineObjects.forEach  { newBox.union(it.boundingBox) }
+            newLinks.forEach        { newBox.union(it.boundingBox) }
+            newStickyNotes.forEach  { newBox.union(it.boundingBox) }
             val pad = 8f * resources.displayMetrics.density
             newBox.inset(-pad, -pad)
             selectedObjectIds.clear()
@@ -850,6 +972,7 @@ class ScratchpadActivity : AppCompatActivity() {
             selectedObjectIds.addAll(newTextObjects.map { it.id })
             selectedObjectIds.addAll(newLineObjects.map { it.id })
             selectedObjectIds.addAll(newLinks.map { it.id })
+            selectedObjectIds.addAll(newStickyNotes.map { it.id })
             isSmartLassoSession = false
             // Re-assert lasso mode visually — onLassoTapToDismiss may have fired
             // synchronously just before paste and cleared button state.
@@ -865,11 +988,12 @@ class ScratchpadActivity : AppCompatActivity() {
     // ── Post-insert selection (from "Send to Scratch Pad") ───────────────────
 
     private fun selectInsertedObjects(ids: Set<String>) {
-        val strokes     = drawingView.getStrokes().filter { it.id in ids }
-        val headings    = drawingView.getHeadings().filter { it.id in ids }
-        val textObjects = drawingView.getTextObjects().filter { it.id in ids }
-        val lineObjects = drawingView.getLineObjects().filter { it.id in ids }
-        val links       = drawingView.getLinks().filter { it.id in ids }
+        val strokes      = drawingView.getStrokes().filter { it.id in ids }
+        val headings     = drawingView.getHeadings().filter { it.id in ids }
+        val textObjects  = drawingView.getTextObjects().filter { it.id in ids }
+        val lineObjects  = drawingView.getLineObjects().filter { it.id in ids }
+        val links        = drawingView.getLinks().filter { it.id in ids }
+        val stickyNotes  = drawingView.getStickyNotes().filter { it.id in ids }
 
         val hitIds = mutableSetOf<String>()
         strokes.mapTo(hitIds) { it.id }
@@ -877,6 +1001,7 @@ class ScratchpadActivity : AppCompatActivity() {
         textObjects.mapTo(hitIds) { it.id }
         lineObjects.mapTo(hitIds) { it.id }
         links.mapTo(hitIds) { it.id }
+        stickyNotes.mapTo(hitIds) { it.id }
         if (hitIds.isEmpty()) return
 
         val box = RectF()
@@ -885,6 +1010,7 @@ class ScratchpadActivity : AppCompatActivity() {
         textObjects.forEach { box.union(it.boundingBox) }
         lineObjects.forEach { box.union(it.boundingBox) }
         links.forEach { box.union(it.boundingBox) }
+        stickyNotes.forEach { box.union(it.boundingBox) }
 
         selectedObjectIds.clear()
         selectedObjectIds.addAll(hitIds)
@@ -965,6 +1091,7 @@ class ScratchpadActivity : AppCompatActivity() {
                 content.textObjects,
                 content.lineObjects,
                 content.links,
+                stickyNotes = content.stickyNotes,
             )
         }
 
@@ -973,6 +1100,7 @@ class ScratchpadActivity : AppCompatActivity() {
         drawingView.loadTextObjects(content.textObjects)
         drawingView.loadLineObjects(content.lineObjects)
         drawingView.loadLinks(content.links)
+        drawingView.loadStickyNotes(content.stickyNotes)
         if (bitmap != null) {
             drawingView.loadStrokesWithBitmap(content.strokes, bitmap, null)
         } else {
@@ -1006,13 +1134,14 @@ class ScratchpadActivity : AppCompatActivity() {
 
     /** Rebuild the render bitmap using the drawing view's current in-memory object lists. */
     private suspend fun rebuildBitmap() {
-        val strokes  = drawingView.getStrokes()
-        val headings = drawingView.getHeadings()
-        val texts    = drawingView.getTextObjects()
-        val lines    = drawingView.getLineObjects()
-        val links    = drawingView.getLinks()
+        val strokes      = drawingView.getStrokes()
+        val headings     = drawingView.getHeadings()
+        val texts        = drawingView.getTextObjects()
+        val lines        = drawingView.getLineObjects()
+        val links        = drawingView.getLinks()
+        val stickyNotes  = drawingView.getStickyNotes()
         val bitmap = withContext(Dispatchers.IO) {
-            drawingView.buildRenderBitmap(strokes, null, headings, texts, lines, links)
+            drawingView.buildRenderBitmap(strokes, null, headings, texts, lines, links, stickyNotes = stickyNotes)
         }
         if (bitmap != null) {
             drawingView.loadStrokesWithBitmap(strokes, bitmap, null)
@@ -1071,6 +1200,122 @@ class ScratchpadActivity : AppCompatActivity() {
         if (currentPageId.isNotEmpty()) {
             loadCurrentPage()
             if (isLassoMode) drawingView.setLassoMode(true)
+        }
+    }
+
+    // ── Sticky note helpers ───────────────────────────────────────────────────
+
+    private suspend fun insertStickyNote() {
+        val layerId = currentLayerId.takeIf { it.isNotEmpty() } ?: return
+        val pageW   = binding.drawingContainer.width.takeIf  { it > 0 } ?: return
+        val pageH   = binding.drawingContainer.height.takeIf { it > 0 } ?: return
+        val density = resources.displayMetrics.density
+
+        val iconSizePx = STICKY_NOTE_ICON_SIZE_DP * density
+        val left  = ((pageW - iconSizePx) / 2f).coerceAtLeast(0f)
+        val top   = ((pageH - iconSizePx) / 2f).coerceAtLeast(0f)
+        val bbox  = RectF(left, top, left + iconSizePx, top + iconSizePx)
+
+        val noteId = java.util.UUID.randomUUID().toString()
+        val now    = System.currentTimeMillis()
+
+        withContext(Dispatchers.IO) {
+            NotesproutIndex.scratchpadDao().insertObject(
+                ScratchpadEntity(
+                    id          = noteId,
+                    parentId    = layerId,
+                    boundingBox = bbox.toBoundingBoxJson(),
+                    sortOrder   = 0,
+                    createdAt   = now,
+                    updatedAt   = now,
+                    type        = TYPE_STICKY_NOTE,
+                    data        = StickyNoteObject().toJson(),
+                )
+            )
+        }
+
+        val noteRender   = StickyNoteRender(id = noteId, boundingBox = bbox)
+        val updatedNotes = drawingView.getStickyNotes() + noteRender
+        drawingView.loadStickyNotes(updatedNotes)
+        rebuildBitmap()
+        openStickyNote(noteRender, initialCreate = true)
+    }
+
+    private fun openStickyNote(note: StickyNoteRender, initialCreate: Boolean) {
+        StickyNoteEditorTransfer.input = StickyNoteEditorTransfer.Content(
+            strokes       = note.strokes,
+            headings      = note.headings,
+            textObjects   = note.textObjects,
+            lines         = note.lines,
+            contentWidth  = note.contentWidth,
+            contentHeight = note.contentHeight,
+        )
+        StickyNoteEditorTransfer.output = null
+        pendingStickyNote          = note
+        pendingStickyInitialCreate = initialCreate
+        editorLauncher.launch(Intent(this, StickyNoteEditorActivity::class.java))
+    }
+
+    private fun stickyNoteAt(x: Float, y: Float): StickyNoteRender? =
+        drawingView.getStickyNotes().lastOrNull { it.boundingBox.contains(x, y) }
+
+    private fun selectStickyNoteIcon(note: StickyNoteRender) {
+        if (!isLassoMode) enterLassoMode()
+        selectedObjectIds.clear()
+        selectedObjectIds.add(note.id)
+        drawingView.lassoSelectedIds = selectedObjectIds.toSet()
+        val pad = 8f * resources.displayMetrics.density
+        val selBox = RectF(note.boundingBox).apply { inset(-pad, -pad) }
+        drawingView.setLassoOverlay(null, selBox)
+        updateFloatingSelectionToolbar(selBox)
+    }
+
+    // ── Sticky note tap gesture ───────────────────────────────────────────────
+
+    private fun handleStickyNoteTapGesture(event: MotionEvent) {
+        // Convert window-relative event coordinates into drawing-container coordinates.
+        val containerLoc = IntArray(2)
+        binding.drawingContainer.getLocationInWindow(containerLoc)
+        val localX = event.x - containerLoc[0]
+        val localY = event.y - containerLoc[1]
+
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                stickyNoteTapDownX    = localX
+                stickyNoteTapDownY    = localY
+                stickyNoteTapDownTime = event.eventTime
+                stickyNoteTapMoved    = false
+                stickyNoteTapCandidate = if (!isLassoMode) stickyNoteAt(localX, localY) else null
+            }
+            MotionEvent.ACTION_POINTER_DOWN -> {
+                stickyNoteTapMoved     = true
+                stickyNoteTapCandidate = null
+            }
+            MotionEvent.ACTION_MOVE -> {
+                if (!stickyNoteTapMoved && stickyNoteTapCandidate != null) {
+                    val dx = localX - stickyNoteTapDownX
+                    val dy = localY - stickyNoteTapDownY
+                    if (Math.hypot(dx.toDouble(), dy.toDouble()) > stickyNoteTouchSlopPx) {
+                        stickyNoteTapMoved     = true
+                        stickyNoteTapCandidate = null
+                    }
+                }
+            }
+            MotionEvent.ACTION_UP -> {
+                val candidate = stickyNoteTapCandidate
+                stickyNoteTapCandidate = null
+                val isTap = candidate != null
+                    && !stickyNoteTapMoved
+                    && event.pointerCount == 1
+                    && event.eventTime - stickyNoteTapDownTime <= ViewConfiguration.getLongPressTimeout()
+                if (isTap && candidate != null && candidate.boundingBox.contains(localX, localY)) {
+                    openStickyNote(candidate, initialCreate = false)
+                }
+            }
+            MotionEvent.ACTION_CANCEL -> {
+                stickyNoteTapMoved     = true
+                stickyNoteTapCandidate = null
+            }
         }
     }
 
@@ -1151,18 +1396,23 @@ class ScratchpadActivity : AppCompatActivity() {
 
     override fun dispatchTouchEvent(event: MotionEvent): Boolean {
         if (event.getToolType(0) == MotionEvent.TOOL_TYPE_FINGER) {
+            val inChrome   = isTouchInView(event, binding.chromeBar)
+            val inToolbar  = isTouchInView(event, binding.scratchpadToolbar)
+            val inFloating = binding.floatingSelectionToolbar.visibility == View.VISIBLE &&
+                             isTouchInView(event, binding.floatingSelectionToolbar)
+
             // Release EPD overlay when touching chrome, toolbar, or floating toolbar.
             if (event.actionMasked == MotionEvent.ACTION_DOWN) {
-                if (isTouchInView(event, binding.chromeBar) ||
-                    isTouchInView(event, binding.scratchpadToolbar) ||
-                    (binding.floatingSelectionToolbar.visibility == View.VISIBLE &&
-                     isTouchInView(event, binding.floatingSelectionToolbar))) {
-                    drawingView.releaseRender()
-                }
+                if (inChrome || inToolbar || inFloating) drawingView.releaseRender()
             }
+
+            // Sticky note tap: finger down→up with minimal movement in the drawing area.
+            // Mirrors NotebookActivity.handleLinkFollowGesture — uses event.x/y (window-relative)
+            // with getLocationInWindow offset to convert into drawing-container coordinates.
+            handleStickyNoteTapGesture(event)
+
             // Swipe outside chrome/toolbar in any tool mode — lasso is stylus-only, finger navigates.
-            if (!isTouchInView(event, binding.chromeBar) &&
-                !isTouchInView(event, binding.scratchpadToolbar)) {
+            if (!inChrome && !inToolbar) {
                 handlePageSwipe(event)
             }
         }

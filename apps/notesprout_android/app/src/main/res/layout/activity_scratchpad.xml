@@ -162,6 +162,13 @@
                 android:contentDescription="Lasso" />
 
             <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnScratchStickyNote"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:layout_marginStart="4dp"
+                android:src="@drawable/ic_sticker_2"
+                android:contentDescription="Insert sticky note" />
+
+            <androidx.appcompat.widget.AppCompatImageButton
                 android:id="@+id/btnScratchAddPage"
                 style="@style/Widget.Notesprout.ToolbarButton"
                 android:layout_marginStart="4dp"

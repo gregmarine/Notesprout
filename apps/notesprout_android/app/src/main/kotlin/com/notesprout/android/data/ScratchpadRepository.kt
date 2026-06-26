@@ -16,6 +16,7 @@ data class ScratchpadPageContent(
     val textObjects: List<TextRender>,
     val lineObjects: List<LineRender>,
     val links: List<LinkRender>,
+    val stickyNotes: List<StickyNoteRender> = emptyList(),
 )
 
 class ScratchpadRepository(
@@ -153,7 +154,22 @@ class ScratchpadRepository(
             )
         }
 
-        ScratchpadPageContent(strokes, headings, textObjects, lineObjects, links)
+        val stickyNotes = dao.getStickyNotesForLayer(layerId).mapNotNull { row ->
+            val box = parseBoundingBox(row.boundingBox) ?: return@mapNotNull null
+            val obj = runCatching { StickyNoteObject.fromJson(row.data) }.getOrNull() ?: return@mapNotNull null
+            StickyNoteRender(
+                id            = row.id,
+                boundingBox   = box,
+                strokes       = obj.strokes,
+                headings      = obj.headings,
+                textObjects   = obj.textObjects,
+                lines         = obj.lines.map { it.toLineRender(density) },
+                contentWidth  = obj.contentWidth,
+                contentHeight = obj.contentHeight,
+            )
+        }
+
+        ScratchpadPageContent(strokes, headings, textObjects, lineObjects, links, stickyNotes)
     }
 
     // ── Save strokes ──────────────────────────────────────────────────────────
@@ -254,6 +270,20 @@ class ScratchpadRepository(
                         updatedAt   = now,
                         type        = TYPE_LINK,
                         data        = link.toLinkObject(density).toJson(),
+                    )
+                )
+            }
+            content.stickyNotes.forEach { note ->
+                dao.insertOrIgnore(
+                    ScratchpadEntity(
+                        id          = note.id,
+                        parentId    = layerId,
+                        boundingBox = note.boundingBox.toBoundingBoxJson(),
+                        sortOrder   = 0,
+                        createdAt   = now,
+                        updatedAt   = now,
+                        type        = TYPE_STICKY_NOTE,
+                        data        = note.toStickyNoteObject(density).toJson(),
                     )
                 )
             }
