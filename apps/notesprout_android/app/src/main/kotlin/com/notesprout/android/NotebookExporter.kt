@@ -8,10 +8,12 @@ import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.PointF
 import android.graphics.RectF
+import android.graphics.Typeface
 import android.graphics.pdf.PdfDocument
 import android.text.TextPaint
 import android.util.Base64
 import android.util.TypedValue
+import androidx.appcompat.content.res.AppCompatResources
 import com.notesprout.android.core.BitmapDecode
 import com.notesprout.android.crypto.SoilCrypto
 import com.notesprout.android.data.CoverObject
@@ -29,6 +31,8 @@ import com.notesprout.android.data.toLineRender
 import com.notesprout.android.data.LiveStroke
 import com.notesprout.android.data.NotebookDao
 import com.notesprout.android.data.NotebookObject
+import com.notesprout.android.data.StickyNoteObject
+import com.notesprout.android.data.StickyNoteRender
 import com.notesprout.android.data.TextObject
 import com.notesprout.android.data.TextRender
 import com.notesprout.android.data.NotebookMetadata
@@ -41,6 +45,15 @@ import java.io.File
 import java.io.FileOutputStream
 
 object NotebookExporter {
+
+    /** Collects one sticky note's export metadata for the pdfbox post-process pass. */
+    private data class StickyExport(
+        val pdfPageIndex: Int,   // 0-based index of the source page in the final PDF
+        val iconBox: RectF,      // icon bounding box in source-page pixels (top-left origin)
+        val note: StickyNoteRender,
+        val pageWidth: Int,      // source page width — fallback when contentWidth == 0
+        val pageHeight: Int,     // source page height — fallback when contentHeight == 0
+    )
 
     /**
      * Renders every page of [db] to a PDF and writes it to [context.cacheDir].
@@ -86,6 +99,8 @@ object NotebookExporter {
 
         val pdf = PdfDocument()
         var pdfPageNumber = 1
+        var pdfPageIndex = 0  // 0-based, tracks current page for annotation wiring
+        val stickyExports = mutableListOf<StickyExport>()
 
         // Cover
         if (coverBitmap != null) {
@@ -96,13 +111,18 @@ object NotebookExporter {
             pdfPage.canvas.drawBitmap(coverBitmap, 0f, 0f, null)
             pdf.finishPage(pdfPage)
             coverBitmap.recycle()
+            pdfPageIndex++
         }
 
         // Notebook pages
         for ((i, pageRow) in pages.withIndex()) {
             onProgress(i + 1, totalPages)
 
-            val (bitmap, templateBitmap) = renderPageBitmap(dao, pageRow, context)
+            val (bitmap, templateBitmap, stickyNotes) = renderPageBitmap(dao, pageRow, context)
+
+            for (note in stickyNotes) {
+                stickyExports += StickyExport(pdfPageIndex, RectF(note.boundingBox), note, bitmap.width, bitmap.height)
+            }
 
             val pageInfo = PdfDocument.PageInfo.Builder(bitmap.width, bitmap.height, pdfPageNumber++).create()
             val pdfPage = pdf.startPage(pageInfo)
@@ -111,19 +131,34 @@ object NotebookExporter {
 
             bitmap.recycle()
             templateBitmap?.recycle()
+            pdfPageIndex++
         }
 
         val outDir = File(context.cacheDir, "exported_pdfs").also { it.deleteRecursively(); it.mkdirs() }
         val outFile = File(outDir, "$safeTitle.pdf")
 
         if (exportPassword != null) {
-            val tmpFile = File(outDir, "${safeTitle}_tmp.pdf")
-            FileOutputStream(tmpFile).use { pdf.writeTo(it) }
+            // Order: annotate → encrypt
+            val tmpA = File(outDir, "${safeTitle}_tmp.pdf")
+            FileOutputStream(tmpA).use { pdf.writeTo(it) }
             pdf.close()
-            encryptPdfFile(tmpFile, outFile, exportPassword)
+            if (stickyExports.isNotEmpty()) {
+                val tmpB = File(outDir, "${safeTitle}_noted.pdf")
+                addStickyEndnotes(tmpA, tmpB, stickyExports, context)
+                encryptPdfFile(tmpB, outFile, exportPassword)
+            } else {
+                encryptPdfFile(tmpA, outFile, exportPassword)
+            }
         } else {
-            FileOutputStream(outFile).use { pdf.writeTo(it) }
-            pdf.close()
+            if (stickyExports.isNotEmpty()) {
+                val tmpA = File(outDir, "${safeTitle}_tmp.pdf")
+                FileOutputStream(tmpA).use { pdf.writeTo(it) }
+                pdf.close()
+                addStickyEndnotes(tmpA, outFile, stickyExports, context)
+            } else {
+                FileOutputStream(outFile).use { pdf.writeTo(it) }
+                pdf.close()
+            }
         }
 
         return outFile
@@ -158,12 +193,18 @@ object NotebookExporter {
             val dao = db.notebookDao()
             val pdf = PdfDocument()
             var pdfPageNumber = 1
+            var pdfPageIndex = 0
+            val stickyExports = mutableListOf<StickyExport>()
             val total = pageIds.size
 
             for ((i, pageId) in pageIds.withIndex()) {
                 onProgress(i + 1, total)
                 val pageRow = dao.getObjectById(pageId) ?: continue
-                val (bitmap, templateBitmap) = renderPageBitmap(dao, pageRow, context)
+                val (bitmap, templateBitmap, stickyNotes) = renderPageBitmap(dao, pageRow, context)
+
+                for (note in stickyNotes) {
+                    stickyExports += StickyExport(pdfPageIndex, RectF(note.boundingBox), note, bitmap.width, bitmap.height)
+                }
 
                 val pageInfo = PdfDocument.PageInfo.Builder(bitmap.width, bitmap.height, pdfPageNumber++).create()
                 val pdfPage = pdf.startPage(pageInfo)
@@ -173,19 +214,33 @@ object NotebookExporter {
                 // Recycle per-page bitmaps immediately to keep memory flat across large selections.
                 bitmap.recycle()
                 templateBitmap?.recycle()
+                pdfPageIndex++
             }
 
             val outDir = File(context.cacheDir, "exported_pdfs").also { it.deleteRecursively(); it.mkdirs() }
             val outFile = File(outDir, "$safeTitle.pdf")
 
             if (exportPassword != null) {
-                val tmpFile = File(outDir, "${safeTitle}_tmp.pdf")
-                FileOutputStream(tmpFile).use { pdf.writeTo(it) }
+                val tmpA = File(outDir, "${safeTitle}_tmp.pdf")
+                FileOutputStream(tmpA).use { pdf.writeTo(it) }
                 pdf.close()
-                encryptPdfFile(tmpFile, outFile, exportPassword)
+                if (stickyExports.isNotEmpty()) {
+                    val tmpB = File(outDir, "${safeTitle}_noted.pdf")
+                    addStickyEndnotes(tmpA, tmpB, stickyExports, context)
+                    encryptPdfFile(tmpB, outFile, exportPassword)
+                } else {
+                    encryptPdfFile(tmpA, outFile, exportPassword)
+                }
             } else {
-                FileOutputStream(outFile).use { pdf.writeTo(it) }
-                pdf.close()
+                if (stickyExports.isNotEmpty()) {
+                    val tmpA = File(outDir, "${safeTitle}_tmp.pdf")
+                    FileOutputStream(tmpA).use { pdf.writeTo(it) }
+                    pdf.close()
+                    addStickyEndnotes(tmpA, outFile, stickyExports, context)
+                } else {
+                    FileOutputStream(outFile).use { pdf.writeTo(it) }
+                    pdf.close()
+                }
             }
 
             return outFile
@@ -201,6 +256,7 @@ object NotebookExporter {
      * Opens a transient Room connection for [soilPath]; does not checkpoint on close.
      * [onProgress] is called on the IO thread with (current, total).
      * Returns the list of written [File]s in input order (null entries are skipped/absent).
+     * Note: sticky note icons are drawn on the page; endnote pages are PDF-only and not exported here.
      */
     suspend fun exportPagesPng(
         context: Context,
@@ -224,7 +280,7 @@ object NotebookExporter {
                 onProgress(i + 1, total)
 
                 val pageRow = dao.getObjectById(pageId) ?: continue
-                val (bitmap, templateBitmap) = renderPageBitmap(dao, pageRow, context)
+                val (bitmap, templateBitmap, _) = renderPageBitmap(dao, pageRow, context)
 
                 val outFile = File(outDir, "$fileBase.png")
                 FileOutputStream(outFile).use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
@@ -256,6 +312,147 @@ object NotebookExporter {
         doc.save(output)
         doc.close()
         input.delete()
+    }
+
+    /**
+     * pdfbox post-process: appends endnote pages for every sticky note in [stickyExports] and
+     * wires GoTo link annotations so tapping the on-page icon jumps to the endnote, and tapping
+     * the endnote caption returns to the source page. Deletes [input] after saving [output].
+     */
+    private fun addStickyEndnotes(
+        input: File,
+        output: File,
+        stickyExports: List<StickyExport>,
+        context: Context,
+    ) {
+        val doc = com.tom_roush.pdfbox.pdmodel.PDDocument.load(input)
+
+        data class EndnoteEntry(
+            val endnotePage: com.tom_roush.pdfbox.pdmodel.PDPage,
+            val sourcePdfPageIndex: Int,
+            val iconBox: RectF,
+        )
+        val entries = mutableListOf<EndnoteEntry>()
+
+        for ((idx, export) in stickyExports.withIndex()) {
+            val noteNumber = idx + 1
+            val sourcePageNumber = export.pdfPageIndex + 1  // 1-based for caption text
+
+            val contentW = export.note.contentWidth.takeIf { it > 0 } ?: export.pageWidth.toFloat()
+            val contentH = export.note.contentHeight.takeIf { it > 0 } ?: export.pageHeight.toFloat()
+
+            // Render the note's content to a bitmap using the same pipeline as full-page render.
+            val contentBitmap = renderPage(
+                contentW.toInt().coerceAtLeast(1),
+                contentH.toInt().coerceAtLeast(1),
+                null,
+                export.note.headings,
+                export.note.textObjects,
+                export.note.lines,
+                export.note.strokes,
+                context,
+            )
+
+            // Append a caption strip below the content so the back-link has a visible target.
+            val captionH = 60f
+            val totalH = contentH + captionH
+            val fullBitmap = Bitmap.createBitmap(
+                contentW.toInt().coerceAtLeast(1),
+                totalH.toInt().coerceAtLeast(1),
+                Bitmap.Config.ARGB_8888,
+            )
+            val fullCanvas = Canvas(fullBitmap)
+            fullCanvas.drawColor(Color.WHITE)
+            fullCanvas.drawBitmap(contentBitmap, 0f, 0f, null)
+            contentBitmap.recycle()
+
+            val captionPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.BLACK
+                textSize = 32f
+                typeface = Typeface.SANS_SERIF
+            }
+            fullCanvas.drawText(
+                "Note $noteNumber — from page $sourcePageNumber (tap to return)",
+                16f,
+                contentH + captionH * 0.68f,
+                captionPaint,
+            )
+
+            // Compress to JPEG for the PDF image stream.
+            val jpegOut = java.io.ByteArrayOutputStream()
+            fullBitmap.compress(Bitmap.CompressFormat.JPEG, 90, jpegOut)
+            fullBitmap.recycle()
+            val jpegBytes = jpegOut.toByteArray()
+
+            val endnotePage = com.tom_roush.pdfbox.pdmodel.PDPage(
+                com.tom_roush.pdfbox.pdmodel.common.PDRectangle(contentW, totalH),
+            )
+            doc.addPage(endnotePage)
+
+            val pdImage = com.tom_roush.pdfbox.pdmodel.graphics.image.JPEGFactory.createFromByteArray(doc, jpegBytes)
+            com.tom_roush.pdfbox.pdmodel.PDPageContentStream(
+                doc,
+                endnotePage,
+                com.tom_roush.pdfbox.pdmodel.PDPageContentStream.AppendMode.OVERWRITE,
+                false,
+            ).use { cs ->
+                cs.drawImage(pdImage, 0f, 0f, contentW, totalH)
+            }
+
+            entries += EndnoteEntry(endnotePage, export.pdfPageIndex, export.iconBox)
+        }
+
+        // Wire annotations now that all endnote pages exist in the document.
+        for ((noteIdx, entry) in entries.withIndex()) {
+            val endnotePage = entry.endnotePage
+            val sourcePdfPage = doc.pages[entry.sourcePdfPageIndex]
+            val sourcePageH = sourcePdfPage.mediaBox.height
+            val endnotePageH = endnotePage.mediaBox.height
+            val endnotePageW = endnotePage.mediaBox.width
+            val captionH = 60f
+            val iconBox = entry.iconBox
+
+            // Source page: icon area → jump to endnote page.
+            // Convert from top-left pixel coords to bottom-left PDF points (1px ≈ 1pt here).
+            val iconLink = com.tom_roush.pdfbox.pdmodel.interactive.annotation.PDAnnotationLink()
+            iconLink.rectangle = com.tom_roush.pdfbox.pdmodel.common.PDRectangle(
+                iconBox.left,
+                sourcePageH - iconBox.bottom,
+                iconBox.right,
+                sourcePageH - iconBox.top,
+            )
+            iconLink.borderStyle = invisibleBorder()
+            val iconDest = com.tom_roush.pdfbox.pdmodel.interactive.documentnavigation.destination.PDPageFitDestination()
+            iconDest.page = endnotePage
+            val iconAction = com.tom_roush.pdfbox.pdmodel.interactive.action.PDActionGoTo()
+            iconAction.destination = iconDest
+            iconLink.action = iconAction
+            sourcePdfPage.annotations.add(iconLink)
+
+            // Endnote page: caption strip → jump back to source page.
+            val backLink = com.tom_roush.pdfbox.pdmodel.interactive.annotation.PDAnnotationLink()
+            backLink.rectangle = com.tom_roush.pdfbox.pdmodel.common.PDRectangle(
+                0f, 0f, endnotePageW, captionH,
+            )
+            backLink.borderStyle = invisibleBorder()
+            val backDest = com.tom_roush.pdfbox.pdmodel.interactive.documentnavigation.destination.PDPageFitDestination()
+            backDest.page = sourcePdfPage
+            val backAction = com.tom_roush.pdfbox.pdmodel.interactive.action.PDActionGoTo()
+            backAction.destination = backDest
+            backLink.action = backAction
+            endnotePage.annotations.add(backLink)
+        }
+
+        doc.save(output)
+        doc.close()
+        input.delete()
+    }
+
+    /** Returns a new zero-width border style dictionary (invisible link border for e-ink). */
+    private fun invisibleBorder(): com.tom_roush.pdfbox.pdmodel.interactive.annotation.PDBorderStyleDictionary {
+        val b = com.tom_roush.pdfbox.pdmodel.interactive.annotation.PDBorderStyleDictionary()
+        b.width = 0f
+        return b
     }
 
     private fun parseLineRender(id: String, box: RectF, lo: LineObject, densityDp: Float): LineRender {
@@ -312,8 +509,9 @@ object NotebookExporter {
     /**
      * Shared per-page render used by [export], [exportPage], [exportPagesPdf], and
      * [exportPagesPng]. Loads every content layer from [dao] for [pageRow], renders the page
-     * to a new [Bitmap], and returns it together with the (possibly null) template bitmap so the
-     * caller can recycle both after drawing into the PDF or writing to disk.
+     * to a new [Bitmap], and returns it together with the (possibly null) template bitmap and
+     * the list of sticky notes on the page (for the pdfbox endnote pass). The caller is
+     * responsible for recycling both bitmaps after use.
      *
      * Must be called on a background (IO) dispatcher; never call from the UI thread.
      */
@@ -321,7 +519,7 @@ object NotebookExporter {
         dao: NotebookDao,
         pageRow: NotebookObject,
         context: Context,
-    ): Pair<Bitmap, Bitmap?> {
+    ): Triple<Bitmap, Bitmap?, List<StickyNoteRender>> {
         val (pw, ph) = parseDimensions(pageRow.boundingBox)
         val templateBitmap = loadTemplate(dao, pageRow.data, pw, ph)
         val density = context.resources.displayMetrics.density
@@ -370,6 +568,24 @@ object NotebookExporter {
             }
         } else emptyList()
 
+        val stickyNotes: List<StickyNoteRender> = if (layer != null) {
+            dao.getStickyNotesForLayer(layer.id).mapNotNull { row ->
+                val box = parseBoundingBox(row.boundingBox) ?: return@mapNotNull null
+                val obj = runCatching { StickyNoteObject.fromJson(row.data) }.getOrNull()
+                    ?: return@mapNotNull null
+                StickyNoteRender(
+                    id = row.id,
+                    boundingBox = box,
+                    strokes = obj.strokes,
+                    headings = obj.headings,
+                    textObjects = obj.textObjects,
+                    lines = obj.lines.map { it.toLineRender(density) },
+                    contentWidth = obj.contentWidth,
+                    contentHeight = obj.contentHeight,
+                )
+            }
+        } else emptyList()
+
         val strokes: List<LiveStroke> = if (layer != null) {
             dao.getStrokesForLayer(layer.id).mapNotNull { row ->
                 val sd = runCatching { StrokeData.fromJson(row.data) }.getOrNull()
@@ -378,8 +594,8 @@ object NotebookExporter {
             }
         } else emptyList()
 
-        val bitmap = renderPage(pw, ph, templateBitmap, headings, textObjects, lineObjects, strokes, context, links)
-        return Pair(bitmap, templateBitmap)
+        val bitmap = renderPage(pw, ph, templateBitmap, headings, textObjects, lineObjects, strokes, context, links, stickyNotes)
+        return Triple(bitmap, templateBitmap, stickyNotes)
     }
 
     private fun renderPage(
@@ -392,6 +608,7 @@ object NotebookExporter {
         strokes: List<LiveStroke>,
         context: Context,
         links: List<LinkRender> = emptyList(),
+        stickyNotes: List<StickyNoteRender> = emptyList(),
     ): Bitmap {
         val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bmp)
@@ -512,6 +729,16 @@ object NotebookExporter {
             drawStrokeList(link.strokes)
         }
 
+        // Sticky notes: render the icon only (content is on endnote pages in the PDF post-process).
+        // Placed after links, before top-level strokes — mirrors the on-screen render order.
+        for (note in stickyNotes) {
+            val box = note.boundingBox
+            AppCompatResources.getDrawable(context, R.drawable.ic_sticker_2)?.let { drawable ->
+                drawable.setBounds(box.left.toInt(), box.top.toInt(), box.right.toInt(), box.bottom.toInt())
+                drawable.draw(canvas)
+            }
+        }
+
         drawStrokeList(strokes)
 
         return bmp
@@ -544,7 +771,7 @@ object NotebookExporter {
             val pageRow = dao.getObjectById(pageId)
                 ?: throw IllegalStateException("Page not found: $pageId")
 
-            val (bitmap, templateBitmap) = renderPageBitmap(dao, pageRow, context)
+            val (bitmap, templateBitmap, _) = renderPageBitmap(dao, pageRow, context)
             templateBitmap?.recycle()
 
             val outDir = File(context.cacheDir, "exported_pngs").also { it.deleteRecursively(); it.mkdirs() }
