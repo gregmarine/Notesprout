@@ -37,6 +37,17 @@
                 android:paddingStart="16dp"
                 android:paddingEnd="16dp" />
 
+            <View
+                android:layout_width="0dp"
+                android:layout_height="0dp"
+                android:layout_weight="1" />
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnStickyNoteClose"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:src="@drawable/ic_x"
+                android:contentDescription="Close sticky note editor" />
+
         </LinearLayout>
 
         <!-- 1dp divider between chrome bar and canvas -->

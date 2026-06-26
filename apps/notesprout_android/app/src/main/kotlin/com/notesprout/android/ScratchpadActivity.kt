@@ -184,9 +184,7 @@ class ScratchpadActivity : AppCompatActivity() {
             binding.scratchpadWindow.layoutParams = lp
         }
 
-        // Tapping outside the bordered window dismisses; inside consumes the event.
-        binding.root.setOnClickListener { finish() }
-        binding.scratchpadWindow.setOnClickListener { }
+        binding.btnScratchpadClose.setOnClickListener { finish() }
 
         // ── Drawing view ──────────────────────────────────────────────────────
         drawingView = if (isBooxDevice()) OnyxNotebookView(this) else GenericNotebookView(this)

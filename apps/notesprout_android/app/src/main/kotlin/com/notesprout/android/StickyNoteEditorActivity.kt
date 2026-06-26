@@ -63,8 +63,7 @@ class StickyNoteEditorActivity : AppCompatActivity() {
             binding.stickyNoteEditorWindow.layoutParams = lp
         }
 
-        binding.root.setOnClickListener { finish() }
-        binding.stickyNoteEditorWindow.setOnClickListener { }
+        binding.btnStickyNoteClose.setOnClickListener { finish() }
 
         drawingView = if (isBooxDevice()) OnyxNotebookView(this) else GenericNotebookView(this)
         binding.drawingContainer.addView(
