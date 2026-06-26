@@ -1271,7 +1271,9 @@ class ScratchpadActivity : AppCompatActivity() {
 
     // ── Sticky note tap gesture ───────────────────────────────────────────────
 
-    private fun handleStickyNoteTapGesture(event: MotionEvent) {
+    // Returns true if the event was consumed (sticky note opened) so the caller can skip
+    // super.dispatchTouchEvent and prevent the lasso layer from processing the same tap.
+    private fun handleStickyNoteTapGesture(event: MotionEvent): Boolean {
         // Convert window-relative event coordinates into drawing-container coordinates.
         val containerLoc = IntArray(2)
         binding.drawingContainer.getLocationInWindow(containerLoc)
@@ -1284,7 +1286,9 @@ class ScratchpadActivity : AppCompatActivity() {
                 stickyNoteTapDownY    = localY
                 stickyNoteTapDownTime = event.eventTime
                 stickyNoteTapMoved    = false
-                stickyNoteTapCandidate = if (!isLassoMode) stickyNoteAt(localX, localY) else null
+                // Always hit-test sticky notes, including while in lasso mode, so a newly
+                // created note (which auto-enters lasso for placement) can still be reopened.
+                stickyNoteTapCandidate = stickyNoteAt(localX, localY)
             }
             MotionEvent.ACTION_POINTER_DOWN -> {
                 stickyNoteTapMoved     = true
@@ -1308,7 +1312,11 @@ class ScratchpadActivity : AppCompatActivity() {
                     && event.pointerCount == 1
                     && event.eventTime - stickyNoteTapDownTime <= ViewConfiguration.getLongPressTimeout()
                 if (isTap && candidate != null && candidate.boundingBox.contains(localX, localY)) {
+                    // Exit lasso mode before opening so the drawing view's lasso tap handler
+                    // doesn't also fire (paste / dismiss) on the same event.
+                    if (isLassoMode) exitLassoMode()
                     openStickyNote(candidate, initialCreate = false)
+                    return true
                 }
             }
             MotionEvent.ACTION_CANCEL -> {
@@ -1316,6 +1324,7 @@ class ScratchpadActivity : AppCompatActivity() {
                 stickyNoteTapCandidate = null
             }
         }
+        return false
     }
 
     // ── Page-swipe gesture ────────────────────────────────────────────────────
@@ -1408,7 +1417,8 @@ class ScratchpadActivity : AppCompatActivity() {
             // Sticky note tap: finger down→up with minimal movement in the drawing area.
             // Mirrors NotebookActivity.handleLinkFollowGesture — uses event.x/y (window-relative)
             // with getLocationInWindow offset to convert into drawing-container coordinates.
-            handleStickyNoteTapGesture(event)
+            // Returns true when a sticky note was opened; consume the event so lasso doesn't also fire.
+            if (handleStickyNoteTapGesture(event)) return true
 
             // Swipe outside chrome/toolbar in any tool mode — lasso is stylus-only, finger navigates.
             if (!inChrome && !inToolbar) {
