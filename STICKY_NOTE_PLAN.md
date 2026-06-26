@@ -483,6 +483,25 @@ pad objects; no undo here.)
 5. Clipboard is shared: copy a sticky note on the scratch pad, paste into a notebook page (and vice
    versa) → content intact.
 
+### Post-S5 bug fix — lasso mode not exited after notebook→scratch pad transfer
+
+When `performSendToScratchpad` inserts objects and launches `ScratchpadActivity`, the arrival flow
+calls `selectInsertedObjects` which enters lasso mode to pre-select the transferred objects. However,
+`selectInsertedObjects` did not set `isSmartLassoSession = true`. The `onLassoTapToDismiss` callback
+only calls `exitLassoMode()` when `isSmartLassoSession` is true, so tapping outside the selection
+cleared the visual overlay but left `isLassoMode = true` permanently. Since sticky note tap detection
+in `handleStickyNoteTapGesture` is guarded by `if (!isLassoMode)`, transferred sticky notes were
+never tappable without closing and reopening the scratch pad.
+
+**Fix:** added `isSmartLassoSession = true` immediately after `if (!isLassoMode) enterLassoMode()`
+in `selectInsertedObjects` (`ScratchpadActivity.kt`). This same guard also applied to any other
+object types transferred into the scratch pad, making the fix broadly correct.
+
+**Lesson for docs:** the `isSmartLassoSession` flag is the signal that a lasso selection has "live"
+objects that can be dismissed by tapping outside. Any code path that programmatically enters lasso
+mode with a pre-selection must set this flag; otherwise tapping elsewhere clears the overlay but
+leaves the app stuck in lasso mode with no exit path.
+
 ---
 
 ## Session 6 — PDF export: interactive footnote/endnote (icon → endnote page → back-link)

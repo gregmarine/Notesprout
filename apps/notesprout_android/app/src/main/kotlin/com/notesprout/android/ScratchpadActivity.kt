@@ -1015,6 +1015,7 @@ class ScratchpadActivity : AppCompatActivity() {
         selectedObjectIds.clear()
         selectedObjectIds.addAll(hitIds)
         if (!isLassoMode) enterLassoMode()
+        isSmartLassoSession = true
         val pad = 8f * resources.displayMetrics.density
         box.inset(-pad, -pad)
         drawingView.setLassoSelectedIds(hitIds, box)
