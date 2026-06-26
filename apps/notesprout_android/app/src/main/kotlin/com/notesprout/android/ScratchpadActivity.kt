@@ -15,6 +15,8 @@ import android.widget.FrameLayout
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.doOnLayout
 import androidx.lifecycle.lifecycleScope
 import com.notesprout.android.core.Slog
@@ -167,6 +169,12 @@ class ScratchpadActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         binding = ActivityScratchpadBinding.inflate(layoutInflater)
         setContentView(binding.root)
+
+        ViewCompat.setOnApplyWindowInsetsListener(binding.root) { v, insets ->
+            val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            v.setPadding(0, bars.top, 0, bars.bottom)
+            insets
+        }
 
         repository = ScratchpadRepository(NotesproutIndex.db(), NotesproutIndex.scratchpadDao())
 

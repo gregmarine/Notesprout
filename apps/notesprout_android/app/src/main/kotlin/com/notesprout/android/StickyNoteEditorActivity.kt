@@ -10,6 +10,8 @@ import android.view.MotionEvent
 import android.view.View
 import android.widget.FrameLayout
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.doOnLayout
 import androidx.lifecycle.lifecycleScope
 import com.notesprout.android.core.isBooxDevice
@@ -53,6 +55,12 @@ class StickyNoteEditorActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         binding = ActivityStickyNoteEditorBinding.inflate(layoutInflater)
         setContentView(binding.root)
+
+        ViewCompat.setOnApplyWindowInsetsListener(binding.root) { v, insets ->
+            val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            v.setPadding(0, bars.top, 0, bars.bottom)
+            insets
+        }
 
         if (resources.getBoolean(R.bool.is_large_screen)) {
             val dm = resources.displayMetrics
