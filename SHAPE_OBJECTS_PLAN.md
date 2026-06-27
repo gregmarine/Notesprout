@@ -239,7 +239,7 @@ data class ShapeRender(
 
 ## SESSION 1 — Data model, geometry & rendering
 
-**Status: NOT STARTED**
+**Status: DONE**
 
 **Goal:** Shape objects exist, persist, render correctly on screen and in PDF + PNG export — verified
 via a **temporary debug insertion menu** (no recognizer yet).

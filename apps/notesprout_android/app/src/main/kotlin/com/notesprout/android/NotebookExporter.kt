@@ -27,8 +27,11 @@ import com.notesprout.android.data.LineRender
 import com.notesprout.android.data.LineStyle
 import com.notesprout.android.data.LinkObject
 import com.notesprout.android.data.LinkRender
+import com.notesprout.android.data.ShapeObject
+import com.notesprout.android.data.ShapeRender
 import com.notesprout.android.data.toLineRender
 import com.notesprout.android.data.LiveStroke
+import com.notesprout.android.notebook.ShapeGeometry
 import com.notesprout.android.data.NotebookDao
 import com.notesprout.android.data.NotebookObject
 import com.notesprout.android.data.StickyNoteObject
@@ -559,6 +562,15 @@ object NotebookExporter {
             }
         } else emptyList()
 
+        val shapeObjects: List<ShapeRender> = if (layer != null) {
+            dao.getShapeObjectsForLayer(layer.id).mapNotNull { row ->
+                val box = parseBoundingBox(row.boundingBox) ?: return@mapNotNull null
+                val so = runCatching { ShapeObject.fromJson(row.data) }.getOrNull()
+                    ?: return@mapNotNull null
+                ShapeRender.from(row.id, so, density)
+            }
+        } else emptyList()
+
         val links: List<LinkRender> = if (layer != null) {
             dao.getLinkObjectsForLayer(layer.id).mapNotNull { row ->
                 val box = parseBoundingBox(row.boundingBox) ?: return@mapNotNull null
@@ -594,7 +606,7 @@ object NotebookExporter {
             }
         } else emptyList()
 
-        val bitmap = renderPage(pw, ph, templateBitmap, headings, textObjects, lineObjects, strokes, context, links, stickyNotes)
+        val bitmap = renderPage(pw, ph, templateBitmap, headings, textObjects, lineObjects, strokes, context, links, stickyNotes, shapeObjects)
         return Triple(bitmap, templateBitmap, stickyNotes)
     }
 
@@ -609,6 +621,7 @@ object NotebookExporter {
         context: Context,
         links: List<LinkRender> = emptyList(),
         stickyNotes: List<StickyNoteRender> = emptyList(),
+        shapeObjects: List<ShapeRender> = emptyList(),
     ): Bitmap {
         val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bmp)
@@ -704,6 +717,19 @@ object NotebookExporter {
             }
         }
 
+        fun drawShapeList(list: List<ShapeRender>) {
+            for (shape in list) {
+                val shapePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                    style = Paint.Style.STROKE
+                    color = Color.BLACK
+                    strokeWidth = shape.strokeWidthPx
+                    strokeJoin = Paint.Join.ROUND
+                    strokeCap = Paint.Cap.ROUND
+                }
+                canvas.drawPath(ShapeGeometry.pathFor(shape), shapePaint)
+            }
+        }
+
         fun drawStrokeList(list: List<LiveStroke>) {
             for (liveStroke in list) {
                 val pts = liveStroke.points
@@ -718,6 +744,7 @@ object NotebookExporter {
         drawHeadingList(headings)
         drawTextList(textObjects)
         drawLineList(lineObjects)
+        drawShapeList(shapeObjects)
 
         // Links render their embedded content only — NO chrome (per Session 5 / export rule).
         // Mirrors the view's drawLinkObject order (headings → text → lines → strokes), after the

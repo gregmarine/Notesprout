@@ -10,6 +10,7 @@ import com.notesprout.android.data.HeadingStroke
 import com.notesprout.android.data.LineRender
 import com.notesprout.android.data.LinkRender
 import com.notesprout.android.data.LiveStroke
+import com.notesprout.android.data.ShapeRender
 import com.notesprout.android.data.StickyNoteRender
 import com.notesprout.android.data.TextRender
 
@@ -335,6 +336,26 @@ interface NotebookView {
     fun compositeStickyNotes(bitmap: Bitmap) {}
 
     /**
+     * Replace the in-memory shape object list with [shapeObjects] loaded from the database.
+     * Call before [loadStrokes] or [loadStrokesWithBitmap] so shapes are included in the
+     * next canvas redraw.  Must be called on the main thread.
+     */
+    fun loadShapeObjects(shapeObjects: List<ShapeRender>) {}
+
+    /**
+     * Return the current in-memory shape object list.
+     * Safe to call from any thread — shape objects are replaced atomically.
+     */
+    fun getShapeObjects(): List<ShapeRender> = emptyList()
+
+    /**
+     * Paint the current [shapeObjects] onto [bitmap].
+     * Called from displayPage on the snapshot fast-path: shapes are always loaded fresh from DB
+     * (identical reason to text/line/link objects).  Must be called on the main thread after [loadShapeObjects].
+     */
+    fun compositeShapeObjects(bitmap: Bitmap) {}
+
+    /**
      * Fired on the main thread when a fast, closed pen gesture in pen mode encloses or
      * crosses at least one object on the current layer (smart-lasso detection).
      * Fires INSTEAD OF [onPenLifted] or [onScribbleEraseComplete] — it is the first gate
@@ -440,6 +461,17 @@ interface NotebookView {
         set(value) {}
 
     /**
+     * Fired on the main thread when the eraser path intersects a shape object's bounding box.
+     * The shape has already been removed from the view's in-memory list before this fires.
+     * NotebookActivity wires this to soft-delete the row from the DB and push an undo action.
+     * The full [ShapeRender] is passed so the caller has its data for undo restoration.
+     */
+    var onShapeErased: ((shape: ShapeRender) -> Unit)?
+        get() = null
+        @Suppress("UNUSED_PARAMETER")
+        set(value) {}
+
+    /**
      * Replace the in-memory stroke list with [strokes] loaded from the database,
      * then redraw the canvas bitmap immediately.
      * Must be called on the main thread (triggers invalidate).
@@ -501,6 +533,7 @@ interface NotebookView {
         lineObjects: List<LineRender>? = null,
         links: List<LinkRender>? = null,
         stickyNotes: List<StickyNoteRender>? = null,
+        shapeObjects: List<ShapeRender>? = null,
     ): Bitmap?
 
     /**

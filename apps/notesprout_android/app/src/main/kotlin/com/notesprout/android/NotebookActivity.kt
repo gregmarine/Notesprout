@@ -183,6 +183,7 @@ class NotebookActivity : AppCompatActivity() {
         val lineObjects: List<LineRender> = emptyList(),
         val links: List<LinkRender> = emptyList(),
         val stickyNotes: List<StickyNoteRender> = emptyList(),
+        val shapeObjects: List<com.notesprout.android.data.ShapeRender> = emptyList(),
     )
 
     private lateinit var binding: ActivityNotebookBinding
@@ -1083,6 +1084,14 @@ class NotebookActivity : AppCompatActivity() {
         binding.btnExport.setOnClickListener {
             val db = soilDatabase ?: return@setOnClickListener
             startExport(db)
+        }
+        // TODO(S3): remove debug shape insert
+        if (com.notesprout.android.BuildConfig.DEBUG) {
+            binding.btnExport.setOnLongClickListener {
+                val db = soilDatabase ?: return@setOnLongClickListener false
+                debugInsertShapes(db)
+                true
+            }
         }
 
         binding.btnPin.setOnClickListener {
@@ -3727,13 +3736,14 @@ class NotebookActivity : AppCompatActivity() {
         val lineObjects     = loadLineObjectsFromDb(db, currentLayerId)
         val links           = loadLinksFromDb(db, currentLayerId)
         val stickyNotes     = loadStickyNotesFromDb(db, currentLayerId)
+        val shapeObjects    = loadShapeObjectsFromDb(db, currentLayerId)
         val snapshotBitmap  = tryLoadSnapshotBitmap(db, templateBitmap)
         return if (snapshotBitmap != null) {
-            PageLoadResult(emptyList(), templateBitmap, snapshotBitmap, usedSnapshot = true, headings = headings, textObjects = textObjects, lineObjects = lineObjects, links = links, stickyNotes = stickyNotes)
+            PageLoadResult(emptyList(), templateBitmap, snapshotBitmap, usedSnapshot = true, headings = headings, textObjects = textObjects, lineObjects = lineObjects, links = links, stickyNotes = stickyNotes, shapeObjects = shapeObjects)
         } else {
             val strokes      = deserializeStrokesFromDb(db)
-            val renderBitmap = drawingView.buildRenderBitmap(strokes, templateBitmap, headings, textObjects, lineObjects, links, stickyNotes)
-            PageLoadResult(strokes, templateBitmap, renderBitmap, usedSnapshot = false, headings = headings, textObjects = textObjects, lineObjects = lineObjects, links = links, stickyNotes = stickyNotes)
+            val renderBitmap = drawingView.buildRenderBitmap(strokes, templateBitmap, headings, textObjects, lineObjects, links, stickyNotes, shapeObjects)
+            PageLoadResult(strokes, templateBitmap, renderBitmap, usedSnapshot = false, headings = headings, textObjects = textObjects, lineObjects = lineObjects, links = links, stickyNotes = stickyNotes, shapeObjects = shapeObjects)
         }
     }
 
@@ -3831,6 +3841,18 @@ class NotebookActivity : AppCompatActivity() {
         }
     }
 
+    private suspend fun loadShapeObjectsFromDb(db: SoilDatabase, layerId: String): List<com.notesprout.android.data.ShapeRender> {
+        if (layerId.isEmpty()) return emptyList()
+        val density = resources.displayMetrics.density
+        val rows = db.notebookDao().getShapeObjectsForLayer(layerId)
+        return rows.mapNotNull { row ->
+            val box = row.parseBoundingBox() ?: return@mapNotNull null
+            val shapeObj = runCatching { com.notesprout.android.data.ShapeObject.fromJson(row.data) }.getOrNull()
+                ?: return@mapNotNull null
+            com.notesprout.android.data.ShapeRender.from(row.id, shapeObj, density)
+        }
+    }
+
     private fun NotebookObject.parseBoundingBox(): android.graphics.RectF? =
         com.notesprout.android.data.parseBoundingBox(boundingBox)
 
@@ -3843,15 +3865,17 @@ class NotebookActivity : AppCompatActivity() {
         drawingView.loadHeadings(result.headings)
         drawingView.loadTextObjects(result.textObjects)
         drawingView.loadLineObjects(result.lineObjects)
+        drawingView.loadShapeObjects(result.shapeObjects)
         drawingView.loadLinks(result.links)
         drawingView.loadStickyNotes(result.stickyNotes)
         val bitmap = result.displayBitmap
         if (bitmap != null) {
             // On the snapshot fast-path the snapshot bitmap contains strokes + headings but
-            // NOT text/line/link/sticky-note objects (always loaded fresh from DB). Composite them now.
+            // NOT text/line/link/sticky-note/shape objects (always loaded fresh from DB). Composite them now.
             if (result.usedSnapshot) {
                 drawingView.compositeTextObjects(bitmap)
                 drawingView.compositeLineObjects(bitmap)
+                drawingView.compositeShapeObjects(bitmap)
                 drawingView.compositeLinks(bitmap)
                 drawingView.compositeStickyNotes(bitmap)
             }
@@ -10449,6 +10473,98 @@ class NotebookActivity : AppCompatActivity() {
      */
     private fun undoRedoPersistenceFile(notebookPath: String): java.io.File =
         java.io.File(filesDir, "undo_redo_${notebookPath.hashCode()}.json")
+
+    // TODO(S3): remove debug shape insert
+    private fun debugInsertShapes(db: SoilDatabase) {
+        val pageId  = currentPageId.takeIf  { it.isNotEmpty() } ?: return
+        val layerId = currentLayerId.takeIf { it.isNotEmpty() } ?: return
+        val density = resources.displayMetrics.density
+        val w = drawingView.asView().width.toFloat()
+        val h = drawingView.asView().height.toFloat()
+        val cellW = w / 5f
+        val cellH = h / 3f
+        val strokeWidthDp = 2f
+
+        val shapeSpecs: List<Pair<com.notesprout.android.data.ShapeType, Boolean>> = listOf(
+            com.notesprout.android.data.ShapeType.RECTANGLE to false,
+            com.notesprout.android.data.ShapeType.RECTANGLE to true,      // square
+            com.notesprout.android.data.ShapeType.ELLIPSE   to false,
+            com.notesprout.android.data.ShapeType.ELLIPSE   to true,      // circle
+            com.notesprout.android.data.ShapeType.TRIANGLE  to false,
+            com.notesprout.android.data.ShapeType.DIAMOND   to false,
+            com.notesprout.android.data.ShapeType.TRAPEZOID to false,
+            com.notesprout.android.data.ShapeType.PENTAGON  to false,
+            com.notesprout.android.data.ShapeType.HEXAGON   to false,
+            com.notesprout.android.data.ShapeType.STAR      to true,
+            com.notesprout.android.data.ShapeType.ARCH      to false,
+            com.notesprout.android.data.ShapeType.LINE      to false,
+            com.notesprout.android.data.ShapeType.ARROW     to false,
+        )
+
+        lifecycleScope.launch {
+            val newShapes = mutableListOf<com.notesprout.android.data.ShapeRender>()
+            withContext(kotlinx.coroutines.Dispatchers.IO) {
+                val now = System.currentTimeMillis()
+                shapeSpecs.forEachIndexed { idx, (type, aspectLocked) ->
+                    val col = idx % 5
+                    val row = idx / 5
+                    val cx = cellW * col + cellW / 2f
+                    val cy = cellH * row + cellH / 2f
+                    val sw = minOf(cellW, cellH) * 0.6f
+                    val sh = if (aspectLocked) sw else minOf(cellW, cellH) * 0.45f
+                    // Rotate the last row slightly for variety
+                    val rotDeg = if (row == 2) 15f else 0f
+                    val shapeObj = com.notesprout.android.data.ShapeObject(
+                        type = type,
+                        centerX = cx,
+                        centerY = cy,
+                        width = sw,
+                        height = sh,
+                        rotationDeg = rotDeg,
+                        strokeWidthDp = strokeWidthDp,
+                        aspectLocked = aspectLocked,
+                        pointCount = 5,
+                    )
+                    val id = java.util.UUID.randomUUID().toString()
+                    val render = com.notesprout.android.data.ShapeRender.from(id, shapeObj, density)
+                    val bbox = render.boundingBox.toBoundingBoxJson()
+                    db.notebookDao().insertObject(
+                        NotebookObject(
+                            id = id,
+                            parentId = layerId,
+                            type = "shape",
+                            sortOrder = idx,
+                            boundingBox = bbox,
+                            data = shapeObj.toJson(),
+                            createdAt = now + idx,
+                            updatedAt = now + idx,
+                        )
+                    )
+                    newShapes.add(render)
+                }
+                invalidatePageSnapshot(db, pageId)
+            }
+            val allShapes = drawingView.getShapeObjects() + newShapes
+            drawingView.loadShapeObjects(allShapes)
+            val strokes = drawingView.getStrokes()
+            val bitmap = withContext(kotlinx.coroutines.Dispatchers.IO) {
+                drawingView.buildRenderBitmap(
+                    strokes,
+                    currentTemplateBitmap,
+                    drawingView.getHeadings(),
+                    drawingView.getTextObjects(),
+                    drawingView.getLineObjects(),
+                    drawingView.getLinks(),
+                    drawingView.getStickyNotes(),
+                    allShapes,
+                )
+            }
+            if (bitmap != null) {
+                drawingView.loadStrokesWithBitmap(strokes, bitmap, currentTemplateBitmap)
+            }
+            android.widget.Toast.makeText(this@NotebookActivity, "DEBUG: ${newShapes.size} shapes inserted", android.widget.Toast.LENGTH_SHORT).show()
+        }
+    }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 

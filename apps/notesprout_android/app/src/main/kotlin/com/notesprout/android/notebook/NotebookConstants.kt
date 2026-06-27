@@ -2,6 +2,11 @@ package com.notesprout.android.notebook
 
 const val DRAG_THRESHOLD_DP = 8f
 
+// ── Shape object constants ────────────────────────────────────────────────────
+
+/** Inner-to-outer radius ratio for STAR shape points. */
+const val STAR_INNER_RATIO = 0.5f
+
 /** Fixed icon size (dp) for a sticky note on the page. Tunable after device testing. */
 const val STICKY_NOTE_ICON_SIZE_DP = 72f
 

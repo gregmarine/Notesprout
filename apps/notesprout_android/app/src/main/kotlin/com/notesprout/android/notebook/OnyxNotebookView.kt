@@ -26,6 +26,7 @@ import com.notesprout.android.data.LineRender
 import com.notesprout.android.data.LineStyle
 import com.notesprout.android.data.LinkChrome
 import com.notesprout.android.data.LinkRender
+import com.notesprout.android.data.ShapeRender
 import com.notesprout.android.data.StickyNoteRender
 import com.notesprout.android.data.translate
 import com.notesprout.android.data.LiveStroke
@@ -111,6 +112,9 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
     // Sticky note store — populated from type="sticky_note" rows at page load time.
     private var stickyNotes: List<StickyNoteRender> = emptyList()
 
+    // Shape object store — populated from type="shape" rows at page load time.
+    private var shapeObjects: List<ShapeRender> = emptyList()
+
     private val textObjectTextSizePx = android.util.TypedValue.applyDimension(
         android.util.TypedValue.COMPLEX_UNIT_SP, 24f, resources.displayMetrics
     )
@@ -184,6 +188,7 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
     private var dragOriginalLineObjects: List<LineRender> = emptyList()
     private var dragOriginalLinks: List<LinkRender> = emptyList()
     private var dragOriginalStickyNotes: List<StickyNoteRender> = emptyList()
+    private var dragOriginalShapeObjects: List<ShapeRender> = emptyList()
     // Backing bitmap: non-selected strokes/headings/textObjects + template, built once at drag start.
     private var dragBackingBitmap: Bitmap? = null
     private var activeSnapGuides: List<SnapGuide> = emptyList()
@@ -236,6 +241,7 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
     override var onLineErased: ((LineRender) -> Unit)? = null
     override var onLinkErased: ((LinkRender) -> Unit)? = null
     override var onStickyNoteErased: ((StickyNoteRender) -> Unit)? = null
+    override var onShapeErased: ((ShapeRender) -> Unit)? = null
     override var onScribbleEraseComplete: ((List<String>, List<HeadingStroke>, List<TextRender>, List<LineRender>, List<LinkRender>, List<StickyNoteRender>) -> Unit)? = null
     override var onSmartLassoComplete: ((List<String>, RectF) -> Unit)? = null
 
@@ -566,6 +572,17 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
         }
     }
 
+    private fun drawShapeObject(canvas: Canvas, shape: ShapeRender) {
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE
+            color = android.graphics.Color.BLACK
+            strokeWidth = shape.strokeWidthPx
+            strokeJoin = Paint.Join.ROUND
+            strokeCap = Paint.Cap.ROUND
+        }
+        canvas.drawPath(ShapeGeometry.pathFor(shape), paint)
+    }
+
     /**
      * Render a type="link" object onto [canvas]: its embedded content (headings, text, lines,
      * strokes) painted via the existing per-type helpers, then the chrome around the union bbox.
@@ -688,6 +705,9 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
         }
         for (lineObj in lineObjects) {
             drawLineObject(canvas, lineObj)
+        }
+        for (shape in shapeObjects) {
+            drawShapeObject(canvas, shape)
         }
         for (link in links) {
             drawLinkObject(canvas, link, width)
@@ -1449,6 +1469,9 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
             for (lineObj in dragOriginalLineObjects) {
                 drawLineObject(canvas, lineObj)
             }
+            for (shape in dragOriginalShapeObjects) {
+                drawShapeObject(canvas, shape)
+            }
             for (link in dragOriginalLinks) {
                 drawLinkObject(canvas, link, width)
             }
@@ -1890,6 +1913,7 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
         headings = emptyList()
         textObjects = emptyList()
         lineObjects = emptyList()
+        shapeObjects = emptyList()
         links = emptyList()
         stickyNotes = emptyList()
         if (isSetup) {
@@ -1985,6 +2009,20 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
         }
     }
 
+    override fun loadShapeObjects(shapeObjects: List<ShapeRender>) {
+        this.shapeObjects = shapeObjects
+    }
+
+    override fun getShapeObjects(): List<ShapeRender> = shapeObjects
+
+    override fun compositeShapeObjects(bitmap: Bitmap) {
+        if (shapeObjects.isEmpty()) return
+        val canvas = android.graphics.Canvas(bitmap)
+        for (shape in shapeObjects) {
+            drawShapeObject(canvas, shape)
+        }
+    }
+
     override fun loadStrokes(strokes: List<LiveStroke>) {
         val loadStart = System.currentTimeMillis()
         epd { "LOAD_STROKES_START strokeCount=${strokes.size}" }
@@ -2011,6 +2049,7 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
         lineObjects: List<LineRender>?,
         links: List<LinkRender>?,
         stickyNotes: List<StickyNoteRender>?,
+        shapeObjects: List<ShapeRender>?,
     ): Bitmap? {
         val buildStart = System.currentTimeMillis()
         epd { "BUILD_RENDER_BITMAP_START strokeCount=${strokes.size} hasTemplate=${templateBitmap != null}" }
@@ -2024,6 +2063,7 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
         val effectiveLineObjects = lineObjects ?: this.lineObjects
         val effectiveLinks = links ?: this.links
         val effectiveStickyNotes = stickyNotes ?: this.stickyNotes
+        val effectiveShapeObjects = shapeObjects ?: this.shapeObjects
         val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
         val canvas = android.graphics.Canvas(bmp)
         canvas.drawColor(android.graphics.Color.WHITE)
@@ -2046,6 +2086,9 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
         }
         for (lineObj in effectiveLineObjects) {
             drawLineObject(canvas, lineObj)
+        }
+        for (shape in effectiveShapeObjects) {
+            drawShapeObject(canvas, shape)
         }
         for (link in effectiveLinks) {
             drawLinkObject(canvas, link, w)

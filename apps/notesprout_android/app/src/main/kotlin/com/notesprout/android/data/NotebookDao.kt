@@ -107,6 +107,14 @@ interface NotebookDao {
     suspend fun getStickyNotesForLayer(layerId: String): List<NotebookObject>
 
     /**
+     * All non-deleted shape objects belonging to [layerId], sorted by `order` ascending.
+     * Each row's [NotebookObject.data] is a serialized [com.notesprout.android.data.ShapeObject]
+     * carrying the geometry (type, center, extents, rotation, strokeWidth, aspectLocked).
+     */
+    @Query("SELECT * FROM notebook WHERE parentId = :layerId AND type = 'shape' AND deletedAt IS NULL ORDER BY \"order\" ASC")
+    suspend fun getShapeObjectsForLayer(layerId: String): List<NotebookObject>
+
+    /**
      * First non-deleted row of [type], or null if none exist.
      * Useful for retrieving the single page or layer in a fresh notebook.
      */
@@ -290,7 +298,7 @@ interface NotebookDao {
      * [NotebookObject.updatedAt], the stored snapshot pre-dates a content change and
      * must be discarded in favour of a full re-render.
      */
-    @Query("SELECT MAX(updatedAt) FROM notebook WHERE type IN ('stroke', 'heading', 'text', 'line', 'link', 'sticky_note') AND parentId = :layerId")
+    @Query("SELECT MAX(updatedAt) FROM notebook WHERE type IN ('stroke', 'heading', 'text', 'line', 'link', 'sticky_note', 'shape') AND parentId = :layerId")
     suspend fun getMaxContentUpdatedAt(layerId: String): Long?
 
     /**
