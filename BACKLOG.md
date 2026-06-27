@@ -175,6 +175,25 @@
 
 ---
 
+## Shape Objects — deferred items
+
+> From the active `sprout` branch shape-objects work (S1 data model + geometry shipped; S2 recognizer
+> in progress). Items below were noted during build and are not yet scheduled.
+
+- **"Convert to Shape" in lasso context menu.** The debug `[→ Shape]` button already exists in the
+  lasso toolbar. Promote it to a non-debug lasso context-menu action so users can manually trigger
+  stroke→shape conversion for strokes that didn't auto-trigger (drawn too slowly, missed confidence
+  threshold, or the user changed their mind after drawing). Decide icon and label ("Convert to Shape"
+  or "Recognize Shape"); handle the same undo/redo path as the auto-trigger.
+- **1:1 aspect ratio snap for shape objects.** Add a "Square it" / "Make uniform" toggle in the lasso
+  context menu for selected shape objects. Not a hard lock — a one-shot snap that resizes the shape to
+  a 1:1 bounding box around its current center, then deselects (or re-selects with the new size).
+  Especially useful for circles, squares, stars, and diamonds where slight drawing asymmetry produces
+  obviously uneven shapes. The regularized() function already handles aspect-ratio normalization
+  internally; this just exposes a manual user-triggered version of that normalization.
+
+---
+
 ## Operational task — migrate legacy on-device PNG templates into the index
 
 > From the retired `TEMPLATE_MIGRATION_RUNBOOK.md`. The template system moved from flat PNG files

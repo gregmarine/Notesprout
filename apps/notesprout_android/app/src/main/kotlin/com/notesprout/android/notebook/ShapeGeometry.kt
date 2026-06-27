@@ -90,20 +90,18 @@ object ShapeGeometry {
             }
 
             ShapeType.STAR -> {
+                // Pentagram: connect N outer tips in skip order (step=2), e.g. A→C→E→B→D→A.
+                // This produces the visible crossing lines through the center that match the
+                // hand-drawn skip-pattern stroke, rather than a clean 10-point star outline.
                 val n = r.pointCount
-                val outerHw = hw
-                val outerHh = hh
-                val innerHw = hw * STAR_INNER_RATIO
-                val innerHh = hh * STAR_INNER_RATIO
                 val startAngle = (-Math.PI / 2).toFloat()
-                val totalPoints = n * 2
-                for (i in 0 until totalPoints) {
-                    val theta = startAngle + i * Math.PI.toFloat() / n
-                    val isOuter = (i % 2 == 0)
-                    val rHw = if (isOuter) outerHw else innerHw
-                    val rHh = if (isOuter) outerHh else innerHh
-                    val x = cx + rHw * cos(theta)
-                    val y = cy + rHh * sin(theta)
+                val angleStep = 2f * Math.PI.toFloat() / n
+                val tips = Array(n) { i ->
+                    val theta = startAngle + i * angleStep
+                    Pair(cx + hw * cos(theta), cy + hh * sin(theta))
+                }
+                for (i in 0 until n) {
+                    val (x, y) = tips[(i * 2) % n]
                     if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
                 }
                 path.close()

@@ -8,6 +8,7 @@ import com.notesprout.android.data.LinkRender
 import com.notesprout.android.data.LinkTarget
 import com.notesprout.android.data.LiveStroke
 import com.notesprout.android.data.RectFSerializer
+import com.notesprout.android.data.ShapeRender
 import com.notesprout.android.data.StickyNoteRender
 import com.notesprout.android.data.TextRender
 import kotlinx.serialization.Serializable
@@ -648,6 +649,26 @@ sealed class UndoRedoAction {
         val pageId: String,
         val before: StickyNoteRender,
         val after: StickyNoteRender,
+    ) : UndoRedoAction()
+
+    /**
+     * User (or dwell gesture) converted a single drawn stroke into a shape object.
+     *
+     * Undo: soft-delete the shape row; restore (or re-insert) the original stroke.
+     * Redo: soft-delete the original stroke; restore the shape row.
+     *
+     * [deletedAt] is 0 when the original stroke was never persisted to the DB — in that case
+     * undo re-inserts the stroke row; otherwise undo just clears deletedAt.
+     * [originalStroke] is the ONLY place the raw drawn stroke is kept after conversion.
+     */
+    @Serializable
+    data class ShapeCreated(
+        val shapeId: String,
+        val pageId: String,
+        val layerId: String,
+        val deletedAt: Long,
+        val originalStroke: LiveStroke,
+        val shape: ShapeRender,
     ) : UndoRedoAction()
 
     /**

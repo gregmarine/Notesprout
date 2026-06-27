@@ -313,11 +313,27 @@ column (gotcha **B**). **Mark every debug addition with `// TODO(S3): remove deb
 
 ## SESSION 2 — Shape recognizer + conversion + ShapeCreated undo
 
-**Status: NOT STARTED**
+**Status: DONE**
 
 **Goal:** A single stroke can be converted into a regularized shape object, with full undo/redo —
 verified via a **temporary debug "Convert to shape"** action on a single-stroke lasso selection.
 (The real dwell gesture comes in S3.)
+
+> **As-built deviations from spec (record for S7 tuning pass):**
+> - `SHAPE_RDP_EPS_RATIO = 0.08f` (spec 0.045) — looser epsilon needed to reliably reduce regular
+>   polygon outlines to the correct corner count without over-segmenting pen wobble.
+> - `SHAPE_ELLIPSE_CV = 0.18f` (spec 0.12) — raised to tolerate hand-drawn ellipses; regular polygons
+>   (pentagon CV ≈ 0.08, hexagon ≈ 0.06) are still well below the threshold.
+> - `SHAPE_CLOSURE_RATIO = 0.35f` (spec 0.20) — raised to catch closed shapes where the pen lifts
+>   slightly away from the start point.
+> - **Fine-RDP flatness check added** (not in spec): polygon candidates with 5–9 corners are
+>   confirmed by re-running RDP at `eps/2`. Polygon flat sides add ≈0 new corners; curved ellipse
+>   arcs roughly double. Threshold 1.9×. This replaced a radial-CV guard that failed because regular
+>   polygon CVs are indistinguishable from smooth ellipses.
+> - **`classifyConvexPolygon` corner range 5–9** (spec said 5/6 only) — extended to absorb ±2 noise
+>   corners from a hand-drawn pentagon or hexagon.
+> - **Trapezoid `widthRatio` threshold 0.65f** (spec implied 0.50) — raised so typical hand-drawn
+>   trapezoids (narrow edge at 55–75% of wide edge) are caught; clean rectangles rarely dip below 0.70.
 
 ### Files to create
 - `notebook/ShapeRecognizer.kt` —

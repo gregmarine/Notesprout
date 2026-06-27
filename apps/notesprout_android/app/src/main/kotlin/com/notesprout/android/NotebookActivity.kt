@@ -1973,6 +1973,25 @@ class NotebookActivity : AppCompatActivity() {
             lifecycleScope.launch { performSendToScratchpad() }
         }
 
+        // TODO(S3): remove debug shape convert button
+        if (BuildConfig.DEBUG) {
+            binding.btnDebugToShape.setOnClickListener {
+                val ids = drawingView.lassoSelectedIds
+                val selStrokes = drawingView.getStrokes().filter { it.id in ids }
+                if (selStrokes.size != 1) return@setOnClickListener
+                val stroke = selStrokes.first()
+                val points = stroke.points
+                if (points.isEmpty()) return@setOnClickListener
+                val density = resources.displayMetrics.density
+                val result = com.notesprout.android.notebook.ShapeRecognizer.recognize(points, density)
+                if (result == null) {
+                    android.widget.Toast.makeText(this, "DEBUG: no shape", android.widget.Toast.LENGTH_SHORT).show()
+                } else {
+                    lifecycleScope.launch(Dispatchers.IO) { convertStrokeToShape(stroke, result) }
+                }
+            }
+        }
+
         // Wire the lasso popup Clear Clipboard button.
         binding.btnLassoClearClipboard.setOnClickListener {
             clearClipboard()
@@ -6019,6 +6038,104 @@ class NotebookActivity : AppCompatActivity() {
     }
 
     /**
+     * Convert [stroke] into a shape object using [result] from [ShapeRecognizer].
+     * Soft-deletes the original stroke row (or skips DB delete if unpersisted),
+     * inserts the shape row, and pushes [UndoRedoAction.ShapeCreated].
+     * Must be called on [Dispatchers.IO]; switches to Main for in-memory + UI updates.
+     */
+    // TODO(S3): remove debug convert (callers added in S3)
+    private suspend fun convertStrokeToShape(
+        stroke: com.notesprout.android.data.LiveStroke,
+        result: com.notesprout.android.notebook.ShapeRecognizer.Result,
+    ) {
+        val db      = soilDatabase ?: return
+        val layerId = currentLayerId.takeIf { it.isNotEmpty() } ?: return
+        val pageId  = currentPageId.takeIf  { it.isNotEmpty() } ?: return
+        val density = resources.displayMetrics.density
+
+        val shapeId = UUID.randomUUID().toString()
+        val now     = System.currentTimeMillis()
+
+        val shapeObj = com.notesprout.android.data.ShapeObject(
+            type          = result.type,
+            centerX       = result.centerX,
+            centerY       = result.centerY,
+            width         = result.width,
+            height        = result.height,
+            rotationDeg   = result.rotationDeg,
+            strokeWidthDp = stroke.strokeWidth / density,
+            aspectLocked  = result.aspectLocked,
+            pointCount    = result.pointCount,
+        )
+        val shapeRender = com.notesprout.android.data.ShapeRender.from(shapeId, shapeObj, density)
+
+        // Was the stroke already persisted to the DB?
+        val wasInDb      = stroke.id in persistedStrokeIds
+        val strokeDeletedAt = if (wasInDb) now else 0L
+
+        db.withTransaction {
+            val dao = db.notebookDao()
+            if (wasInDb) dao.softDeleteById(stroke.id, now)
+            dao.insertObject(
+                com.notesprout.android.data.NotebookObject(
+                    id          = shapeId,
+                    parentId    = layerId,
+                    type        = com.notesprout.android.data.TYPE_SHAPE,
+                    boundingBox = shapeRender.boundingBox.toBoundingBoxJson(),
+                    sortOrder   = 0,
+                    createdAt   = now,
+                    updatedAt   = now,
+                    deletedAt   = null,
+                    data        = shapeObj.toJson(),
+                )
+            )
+        }
+        invalidatePageSnapshot(db, pageId)
+
+        withContext(Dispatchers.Main) {
+            val erasedSet      = setOf(stroke.id)
+            val updatedStrokes = drawingView.getStrokes().filter { it.id !in erasedSet }
+            persistedStrokeIds.removeAll(erasedSet)
+
+            val updatedShapes = drawingView.getShapeObjects() + shapeRender
+            drawingView.loadShapeObjects(updatedShapes)
+
+            undoRedoManager.push(
+                UndoRedoAction.ShapeCreated(
+                    shapeId        = shapeId,
+                    pageId         = pageId,
+                    layerId        = layerId,
+                    deletedAt      = strokeDeletedAt,
+                    originalStroke = stroke,
+                    shape          = shapeRender,
+                )
+            )
+            updateUndoRedoButtons()
+
+            val templateBmp     = currentTemplateBitmap
+            val currentHeadings = drawingView.getHeadings()
+            val currentTexts    = drawingView.getTextObjects()
+            val currentLines    = drawingView.getLineObjects()
+            val bitmap = withContext(Dispatchers.IO) {
+                drawingView.buildRenderBitmap(updatedStrokes, templateBmp, currentHeadings, currentTexts, currentLines, shapeObjects = updatedShapes)
+            }
+            if (bitmap != null) {
+                drawingView.loadStrokesWithBitmap(updatedStrokes, bitmap, templateBmp)
+            } else {
+                drawingView.loadStrokes(updatedStrokes)
+            }
+
+            if (!isLassoMode) enterLassoMode()
+            val pad = 8f * density
+            val selBox = RectF(shapeRender.boundingBox).apply { inset(-pad, -pad) }
+            drawingView.setLassoSelectedIds(setOf(shapeId), selBox)
+            selectedObjectIds.clear()
+            selectedObjectIds.add(shapeId)
+            updateFloatingSelectionToolbar(selBox)
+        }
+    }
+
+    /**
      * Remove a heading, re-inserting its embedded strokes as individual live rows on the
      * current layer.  Must be called on [Dispatchers.IO]; switches to Main for UI updates.
      */
@@ -6825,6 +6942,12 @@ class NotebookActivity : AppCompatActivity() {
         binding.btnLinkEdit.visibility = if (selectionIsSingleLink) View.VISIBLE else View.GONE
         binding.btnUnlink.visibility   = if (selectionIsSingleLink) View.VISIBLE else View.GONE
         binding.linkDivider.visibility = if (canAddLink || selectionIsSingleLink) View.VISIBLE else View.GONE
+        // TODO(S3): remove debug shape convert button visibility
+        val showDebugShape = BuildConfig.DEBUG &&
+            selStrokes.size == 1 && selHeadings.isEmpty() && selTextObjects.isEmpty() &&
+            selLines.isEmpty() && selLinks.isEmpty()
+        binding.btnDebugToShape.visibility  = if (showDebugShape) View.VISIBLE else View.GONE
+        binding.debugShapeDivider.visibility = if (showDebugShape) View.VISIBLE else View.GONE
         binding.floatingSelectionToolbar.visibility = View.VISIBLE
         binding.floatingSelectionToolbar.post {
             positionPopover(binding.floatingSelectionToolbar, selectionBox)
@@ -7631,6 +7754,7 @@ class NotebookActivity : AppCompatActivity() {
             is UndoRedoAction.TextEdited       -> action.pageId
             is UndoRedoAction.TextRemoved      -> action.pageId
             is UndoRedoAction.TextConverted    -> action.pageId
+            is UndoRedoAction.ShapeCreated     -> action.pageId
             is UndoRedoAction.ScribbleErased   -> action.pageId
             is UndoRedoAction.LinesInserted    -> action.pageId
             is UndoRedoAction.LinesRemoved     -> action.pageId
@@ -8945,6 +9069,105 @@ class NotebookActivity : AppCompatActivity() {
             return true
         }
 
+        // ── Cross-page ShapeCreated: two-phase display ───────────────────────
+        // Undo: shape row soft-deleted, original stroke restored — page shows stroke, no shape.
+        // Redo: original stroke soft-deleted, shape row restored — page shows shape, no stroke.
+        if (action is UndoRedoAction.ShapeCreated) {
+            val snapshot      = drawingView.captureSnapshot()
+            val leavingPageId = currentPageId
+            withContext(Dispatchers.IO) {
+                if (snapshot != null && leavingPageId.isNotEmpty()) {
+                    persistSnapshot(db, leavingPageId, snapshot)
+                }
+                saveStrokes(db)
+            }
+            currentPageIndex = pages.indexOfFirst { it.id == action.pageId }.coerceAtLeast(0)
+
+            val templateBmp: Bitmap?
+            val preUndoStrokes: List<LiveStroke>
+            val preUndoHeadings: List<HeadingStroke>
+            val preUndoTexts: List<TextRender>
+            val preUndoShapes: List<com.notesprout.android.data.ShapeRender>
+            withContext(Dispatchers.IO) {
+                setupPageIds(db)
+                templateBmp     = loadPageTemplateFromDb(db)
+                preUndoStrokes  = deserializeStrokesFromDb(db)
+                preUndoHeadings = loadHeadingsFromDb(db, currentLayerId)
+                preUndoTexts    = loadTextObjectsFromDb(db, currentLayerId)
+                preUndoShapes   = loadShapeObjectsFromDb(db, currentLayerId)
+            }
+            drawingView.loadHeadings(preUndoHeadings)
+            drawingView.loadTextObjects(preUndoTexts)
+            drawingView.loadShapeObjects(preUndoShapes)
+            val preUndobitmap = withContext(Dispatchers.IO) {
+                drawingView.buildRenderBitmap(preUndoStrokes, templateBmp, preUndoHeadings, preUndoTexts, shapeObjects = preUndoShapes)
+            }
+            if (preUndobitmap != null) {
+                drawingView.loadStrokesWithBitmap(preUndoStrokes, preUndobitmap, templateBmp)
+            } else {
+                drawingView.loadStrokes(preUndoStrokes)
+            }
+            currentTemplateBitmap = templateBmp
+            updatePageIndicator()
+            saveLastOpenedPage(currentPageId)
+
+            withContext(Dispatchers.IO) {
+                if (isUndo) {
+                    dao.softDeleteById(action.shapeId, now)
+                    if (action.deletedAt == 0L) {
+                        // Stroke was never persisted — re-insert it
+                        val stroke = action.originalStroke
+                        val sd = stroke.toStrokeData(now)
+                        dao.insertObject(
+                            com.notesprout.android.data.NotebookObject(
+                                id          = stroke.id,
+                                parentId    = action.layerId,
+                                type        = com.notesprout.android.data.TYPE_STROKE,
+                                boundingBox = stroke.boundingBox.toBoundingBoxJson(),
+                                sortOrder   = 0,
+                                createdAt   = now,
+                                updatedAt   = now,
+                                deletedAt   = null,
+                                data        = sd.toJson(),
+                            )
+                        )
+                    } else {
+                        dao.restoreById(action.originalStroke.id, now)
+                    }
+                } else {
+                    dao.softDeleteById(action.originalStroke.id, now)
+                    dao.restoreById(action.shapeId, now)
+                }
+                invalidatePageSnapshot(db, action.pageId)
+            }
+
+            val updatedStrokes: List<LiveStroke>
+            val updatedShapes: List<com.notesprout.android.data.ShapeRender>
+            if (isUndo) {
+                updatedShapes  = preUndoShapes.filter { it.id != action.shapeId }
+                updatedStrokes = buildList { addAll(preUndoStrokes); add(action.originalStroke) }
+                persistedStrokeIds.add(action.originalStroke.id)
+            } else {
+                updatedStrokes = preUndoStrokes.filter { it.id != action.originalStroke.id }
+                persistedStrokeIds.remove(action.originalStroke.id)
+                updatedShapes  = preUndoShapes + action.shape
+            }
+            drawingView.loadShapeObjects(updatedShapes)
+            val bitmap = withContext(Dispatchers.IO) {
+                drawingView.buildRenderBitmap(updatedStrokes, templateBmp, preUndoHeadings, preUndoTexts, shapeObjects = updatedShapes)
+            }
+            if (bitmap != null) {
+                drawingView.loadStrokesWithBitmap(updatedStrokes, bitmap, templateBmp)
+            } else {
+                drawingView.loadStrokes(updatedStrokes)
+            }
+            selectedObjectIds.clear()
+            drawingView.lassoSelectedIds = emptySet()
+            drawingView.setLassoOverlay(null, null)
+            hideFloatingSelectionToolbar()
+            return true
+        }
+
         return false
     }
 
@@ -9378,6 +9601,34 @@ class NotebookActivity : AppCompatActivity() {
                 } else {
                     action.originalStrokeIds.forEach { dao.softDeleteById(it, now) }
                     dao.restoreById(action.textId, now)
+                }
+                invalidatePageSnapshot(db, action.pageId)
+            }
+
+            is UndoRedoAction.ShapeCreated -> withContext(Dispatchers.IO) {
+                if (isUndo) {
+                    dao.softDeleteById(action.shapeId, now)
+                    if (action.deletedAt == 0L) {
+                        val stroke = action.originalStroke
+                        dao.insertObject(
+                            com.notesprout.android.data.NotebookObject(
+                                id          = stroke.id,
+                                parentId    = action.layerId,
+                                type        = com.notesprout.android.data.TYPE_STROKE,
+                                boundingBox = stroke.boundingBox.toBoundingBoxJson(),
+                                sortOrder   = 0,
+                                createdAt   = now,
+                                updatedAt   = now,
+                                deletedAt   = null,
+                                data        = stroke.toStrokeData(now).toJson(),
+                            )
+                        )
+                    } else {
+                        dao.restoreById(action.originalStroke.id, now)
+                    }
+                } else {
+                    dao.softDeleteById(action.originalStroke.id, now)
+                    dao.restoreById(action.shapeId, now)
                 }
                 invalidatePageSnapshot(db, action.pageId)
             }
@@ -10243,6 +10494,53 @@ class NotebookActivity : AppCompatActivity() {
                 drawingView.lassoSelectedIds = selectedObjectIds.toSet()
                 val pad = 8f * resources.displayMetrics.density
                 val selBox = RectF(action.textRender.boundingBox).apply { inset(-pad, -pad) }
+                drawingView.setLassoOverlay(null, selBox)
+                updateFloatingSelectionToolbar(selBox)
+            }
+            updatePageIndicator()
+            saveLastOpenedPage(currentPageId)
+            return true
+        }
+
+        // ── Step 3a-shape-created: Same-page ShapeCreated — in-memory update ──
+        if (action is UndoRedoAction.ShapeCreated) {
+            val updatedStrokes: List<LiveStroke>
+            val updatedShapes: List<com.notesprout.android.data.ShapeRender>
+            if (isUndo) {
+                // Undo: shape row soft-deleted, original stroke back in memory
+                updatedShapes  = drawingView.getShapeObjects().filter { it.id != action.shapeId }
+                updatedStrokes = buildList { addAll(drawingView.getStrokes()); add(action.originalStroke) }
+                persistedStrokeIds.add(action.originalStroke.id)
+            } else {
+                // Redo: stroke soft-deleted, shape back in memory
+                updatedStrokes = drawingView.getStrokes().filter { it.id != action.originalStroke.id }
+                persistedStrokeIds.remove(action.originalStroke.id)
+                updatedShapes  = drawingView.getShapeObjects() + action.shape
+            }
+            drawingView.loadShapeObjects(updatedShapes)
+            val templateBmp     = currentTemplateBitmap
+            val currentHeadings = drawingView.getHeadings()
+            val currentTexts    = drawingView.getTextObjects()
+            val bitmap = withContext(Dispatchers.IO) {
+                drawingView.buildRenderBitmap(updatedStrokes, templateBmp, currentHeadings, currentTexts, shapeObjects = updatedShapes)
+            }
+            if (bitmap != null) {
+                drawingView.loadStrokesWithBitmap(updatedStrokes, bitmap, templateBmp)
+            } else {
+                drawingView.loadStrokes(updatedStrokes)
+            }
+            if (isUndo) {
+                selectedObjectIds.clear()
+                drawingView.lassoSelectedIds = emptySet()
+                drawingView.setLassoOverlay(null, null)
+                hideFloatingSelectionToolbar()
+            } else {
+                if (!isLassoMode) enterLassoMode()
+                selectedObjectIds.clear()
+                selectedObjectIds.add(action.shapeId)
+                drawingView.lassoSelectedIds = selectedObjectIds.toSet()
+                val pad = 8f * resources.displayMetrics.density
+                val selBox = RectF(action.shape.boundingBox).apply { inset(-pad, -pad) }
                 drawingView.setLassoOverlay(null, selBox)
                 updateFloatingSelectionToolbar(selBox)
             }

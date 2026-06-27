@@ -7,6 +7,41 @@ const val DRAG_THRESHOLD_DP = 8f
 /** Inner-to-outer radius ratio for STAR shape points. */
 const val STAR_INNER_RATIO = 0.5f
 
+// ── Shape recognizer constants ────────────────────────────────────────────────
+
+/** Minimum stroke diagonal (dp) for a stroke to qualify for shape recognition. */
+const val SHAPE_MIN_DIAGONAL_DP = 24f
+
+/** Max first-to-last / diagonal ratio for a stroke to be considered closed. */
+const val SHAPE_CLOSURE_RATIO = 0.35f
+
+/** Max perpendicular deviation / length ratio for a straight line classification. */
+const val SHAPE_LINE_STRAIGHTNESS = 0.10f
+
+/** Ramer–Douglas–Peucker epsilon as a fraction of the stroke diagonal. */
+const val SHAPE_RDP_EPS_RATIO = 0.08f
+
+/** Max radial coefficient-of-variation to classify a closed shape as an ellipse. */
+const val SHAPE_ELLIPSE_CV = 0.18f
+
+/**
+ * Max mean normalized ellipse-fit error for the fit-quality gate.
+ * When radial CV is high (elongated ovals have inherently high CV from center),
+ * the recognizer falls back to checking how well the points actually fit an ellipse.
+ * A perfect ellipse scores 0; hand-drawn ovals typically score < 0.08;
+ * true polygons with flat sides score > 0.12.
+ */
+const val SHAPE_ELLIPSE_FIT_THRESHOLD = 0.08f
+
+/** Max (|w−h|/max(w,h)) ratio for snapping to a square/circle/regular polygon. */
+const val SHAPE_SQUARE_SNAP = 0.15f
+
+/** Orientation angle (°) within which a shape is snapped upright (always 0 in v1). */
+const val SHAPE_UPRIGHT_SNAP_DEG = 8f
+
+/** Minimum recognizer confidence score [0,1] required to emit a non-null result. */
+const val SHAPE_MIN_CONFIDENCE = 0.55f
+
 /** Fixed icon size (dp) for a sticky note on the page. Tunable after device testing. */
 const val STICKY_NOTE_ICON_SIZE_DP = 72f
 
