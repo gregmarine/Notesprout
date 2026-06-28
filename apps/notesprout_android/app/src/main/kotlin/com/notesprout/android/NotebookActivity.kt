@@ -14,6 +14,7 @@ import android.graphics.Region
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.SystemClock
 import android.util.Base64
 import android.util.Log
 import android.util.TypedValue
@@ -244,6 +245,23 @@ class NotebookActivity : AppCompatActivity() {
     private var twoFingerSwipeStartX = 0f
     private var twoFingerSwipeStartY = 0f
     private var twoFingerSwipeVelocityTracker: VelocityTracker? = null
+
+    // ── Multi-finger double-tap: 2-finger = undo, 3-finger = redo ─────────────
+    // Stationary (tap slop) and short (long-press timeout). Movement guard ensures
+    // no conflict with 2-finger swipe (page insert). Peak-count tracking ensures
+    // 3-finger gestures never trigger the 2-finger undo branch.
+    private var mfTapPeakCount = 0
+    private var mfTapArmed = false
+    private var mfTapMoved = false
+    private var mfTapDownTime = 0L
+    private var mfTapCentroidStartX = 0f
+    private var mfTapCentroidStartY = 0f
+    private var twoFingerTapFirstTime = 0L
+    private var twoFingerTapFirstX = 0f
+    private var twoFingerTapFirstY = 0f
+    private var threeFingerTapFirstTime = 0L
+    private var threeFingerTapFirstX = 0f
+    private var threeFingerTapFirstY = 0f
 
     // ── Toolbar hide/show double-tap gesture (Session 7) ──────────────────────
     // A one-finger double-tap on the canvas collapses/restores the toolbar. Finger-only and
@@ -2355,6 +2373,7 @@ class NotebookActivity : AppCompatActivity() {
             handlePageSwipe(event)
             handleLinkFollowGesture(event)
             handleToolbarToggleGesture(event)
+            handleMultiFingerDoubleTap(event)
         }
 
         // ── Overflow: deferred close after button UP (fixes finger click + stylus click) ──
@@ -2831,6 +2850,135 @@ class NotebookActivity : AppCompatActivity() {
             MotionEvent.ACTION_CANCEL -> {
                 toggleTapMoved = true
                 toggleFirstTapTime = 0L
+            }
+        }
+    }
+
+    /**
+     * Multi-finger stationary double-tap: 2 fingers = undo, 3 fingers = redo.
+     *
+     * Arms on the first [ACTION_POINTER_DOWN] (second finger lands). Evaluates at [ACTION_UP]
+     * (all fingers lifted) only when the centroid stayed within tap slop and the total gesture
+     * duration was short. Peak pointer count distinguishes the two cases — a 3-finger gesture
+     * never triggers the 2-finger undo branch. The movement guard keeps this completely clear
+     * of the 2-finger swipe (page insert), which requires significant centroid travel.
+     *
+     * 4+ fingers cancel silently. [ACTION_CANCEL] resets first-tap memory so an interrupted
+     * double-tap doesn't linger and fire on the next independent gesture.
+     */
+    private fun handleMultiFingerDoubleTap(event: MotionEvent) {
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                mfTapPeakCount = 1
+                mfTapArmed = false
+                mfTapMoved = false
+            }
+            MotionEvent.ACTION_POINTER_DOWN -> {
+                val count = event.pointerCount
+                if (count > mfTapPeakCount) mfTapPeakCount = count
+                if (count >= 4) {
+                    mfTapArmed = false
+                    mfTapMoved = true
+                    return
+                }
+                if (!mfTapArmed) {
+                    mfTapArmed = true
+                    mfTapDownTime = event.eventTime
+                }
+                // Always update the centroid baseline when finger count changes so that MOVE
+                // events with N fingers are compared against an N-finger baseline — not the
+                // 2-finger centroid recorded when the second finger landed.  Without this, a
+                // third finger landing at a different position shifts the centroid past slop
+                // and incorrectly marks the gesture as moved.
+                mfTapCentroidStartX = (0 until count).map { event.getX(it) }.average().toFloat()
+                mfTapCentroidStartY = (0 until count).map { event.getY(it) }.average().toFloat()
+            }
+            MotionEvent.ACTION_MOVE -> {
+                if (mfTapArmed && !mfTapMoved && event.pointerCount >= 2) {
+                    val count = event.pointerCount
+                    val cx = (0 until count).map { event.getX(it) }.average().toFloat()
+                    val cy = (0 until count).map { event.getY(it) }.average().toFloat()
+                    val dx = cx - mfTapCentroidStartX
+                    val dy = cy - mfTapCentroidStartY
+                    if (Math.hypot(dx.toDouble(), dy.toDouble()) > toggleTouchSlopPx) mfTapMoved = true
+                }
+            }
+            MotionEvent.ACTION_UP -> {
+                if (mfTapArmed && !mfTapMoved) {
+                    val duration = event.eventTime - mfTapDownTime
+                    if (duration <= ViewConfiguration.getLongPressTimeout()) {
+                        val now = event.eventTime
+                        when (mfTapPeakCount) {
+                            2 -> {
+                                val withinTime = twoFingerTapFirstTime != 0L
+                                    && now - twoFingerTapFirstTime <= ViewConfiguration.getDoubleTapTimeout()
+                                val withinSlop = twoFingerTapFirstTime != 0L
+                                    && Math.hypot(
+                                        (mfTapCentroidStartX - twoFingerTapFirstX).toDouble(),
+                                        (mfTapCentroidStartY - twoFingerTapFirstY).toDouble(),
+                                    ) <= toggleDoubleTapSlopPx
+                                if (withinTime && withinSlop) {
+                                    twoFingerTapFirstTime = 0L
+                                    drawingView.releaseRender()
+                                    performUndo()
+                                } else {
+                                    twoFingerTapFirstTime = now
+                                    twoFingerTapFirstX = mfTapCentroidStartX
+                                    twoFingerTapFirstY = mfTapCentroidStartY
+                                }
+                            }
+                            3 -> {
+                                val withinTime = threeFingerTapFirstTime != 0L
+                                    && now - threeFingerTapFirstTime <= ViewConfiguration.getDoubleTapTimeout()
+                                val withinSlop = threeFingerTapFirstTime != 0L
+                                    && Math.hypot(
+                                        (mfTapCentroidStartX - threeFingerTapFirstX).toDouble(),
+                                        (mfTapCentroidStartY - threeFingerTapFirstY).toDouble(),
+                                    ) <= toggleDoubleTapSlopPx
+                                if (withinTime && withinSlop) {
+                                    threeFingerTapFirstTime = 0L
+                                    drawingView.releaseRender()
+                                    performRedo()
+                                } else {
+                                    threeFingerTapFirstTime = now
+                                    threeFingerTapFirstX = mfTapCentroidStartX
+                                    threeFingerTapFirstY = mfTapCentroidStartY
+                                }
+                            }
+                        }
+                    }
+                }
+                mfTapArmed = false
+                mfTapMoved = false
+            }
+            MotionEvent.ACTION_CANCEL -> {
+                // On BOOX the Onyx SDK intercepts 3-finger touches and immediately cancels the
+                // gesture — ACTION_UP never fires. Treat a cancel on an armed, stationary
+                // 3-finger gesture as a valid tap completion so double-tap redo can work.
+                if (mfTapArmed && !mfTapMoved && mfTapPeakCount == 3) {
+                    val now = SystemClock.uptimeMillis()
+                    val withinTime = threeFingerTapFirstTime != 0L
+                        && now - threeFingerTapFirstTime <= ViewConfiguration.getDoubleTapTimeout()
+                    val withinSlop = threeFingerTapFirstTime != 0L
+                        && Math.hypot(
+                            (mfTapCentroidStartX - threeFingerTapFirstX).toDouble(),
+                            (mfTapCentroidStartY - threeFingerTapFirstY).toDouble(),
+                        ) <= toggleDoubleTapSlopPx
+                    if (withinTime && withinSlop) {
+                        threeFingerTapFirstTime = 0L
+                        drawingView.releaseRender()
+                        performRedo()
+                    } else {
+                        threeFingerTapFirstTime = now
+                        threeFingerTapFirstX = mfTapCentroidStartX
+                        threeFingerTapFirstY = mfTapCentroidStartY
+                    }
+                } else {
+                    twoFingerTapFirstTime = 0L
+                    threeFingerTapFirstTime = 0L
+                }
+                mfTapArmed = false
+                mfTapMoved = false
             }
         }
     }
