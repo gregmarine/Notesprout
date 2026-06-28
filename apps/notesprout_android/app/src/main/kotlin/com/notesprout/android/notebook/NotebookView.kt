@@ -136,6 +136,8 @@ interface NotebookView {
         movedLinks: List<LinkRender>,
         originalStickyNotes: List<StickyNoteRender>,
         movedStickyNotes: List<StickyNoteRender>,
+        originalShapes: List<ShapeRender>,
+        movedShapes: List<ShapeRender>,
     ) -> Unit)?
         get() = null
         @Suppress("UNUSED_PARAMETER")
@@ -400,6 +402,7 @@ interface NotebookView {
         erasedLineObjects: List<LineRender>,
         erasedLinks: List<LinkRender>,
         erasedStickyNotes: List<StickyNoteRender>,
+        erasedShapes: List<ShapeRender>,
     ) -> Unit)?
         get() = null
         @Suppress("UNUSED_PARAMETER")

@@ -10,8 +10,8 @@ import kotlinx.serialization.Serializable
  *
  * [boundingBox] is the union of every embedded object's box; the chrome (none / underline /
  * dotted box + chevron) is drawn around it. The embedded objects reuse the existing render
- * models ([LiveStroke], [HeadingStroke], [TextRender], [LineRender]) so the view's existing
- * draw helpers paint them with no special-casing.
+ * models ([LiveStroke], [HeadingStroke], [TextRender], [LineRender], [ShapeRender]) so the
+ * view's existing draw helpers paint them with no special-casing.
  *
  * [@Serializable] so link data can ride in undo/redo actions (like [HeadingStroke] / [LineRender]).
  * [boundingBox] uses [RectFSerializer] from HeadingStroke.kt.
@@ -27,6 +27,7 @@ data class LinkRender(
     val headings: List<HeadingStroke> = emptyList(),
     val textObjects: List<TextRender> = emptyList(),
     val lines: List<LineRender> = emptyList(),
+    val shapes: List<ShapeRender> = emptyList(),
 )
 
 /**
@@ -57,11 +58,19 @@ fun LinkRender.translate(dx: Float, dy: Float, newId: String = id): LinkRender =
             endX = l.endX + dx, endY = l.endY + dy,
         )
     },
+    shapes = shapes.map { s ->
+        s.copy(
+            centerX = s.centerX + dx,
+            centerY = s.centerY + dy,
+            boundingBox = RectF(s.boundingBox).apply { offset(dx, dy) },
+        )
+    },
 )
 
 /**
- * Serialize this render-time link back into a [LinkObject] for the `data` column. Embedded lines are
- * captured as density-independent [EmbeddedLine]s for the given [density] (mirrors link creation).
+ * Serialize this render-time link back into a [LinkObject] for the `data` column. Embedded lines
+ * and shapes are captured as density-independent carriers for the given [density] (mirrors link
+ * creation).
  */
 fun LinkRender.toLinkObject(density: Float): LinkObject = LinkObject(
     target = target,
@@ -70,4 +79,5 @@ fun LinkRender.toLinkObject(density: Float): LinkObject = LinkObject(
     headings = headings,
     textObjects = textObjects,
     lines = lines.map { it.toEmbeddedLine(density) },
+    shapes = shapes.map { it.toEmbeddedShape(density) },
 )

@@ -202,7 +202,7 @@ class StickyNoteEditorActivity : AppCompatActivity() {
         }
 
         // Scribble erase: batch removal, same pattern as lasso eraser (no undo in editor).
-        drawingView.onScribbleEraseComplete = { erasedObjectIds, erasedHeadings, erasedTextObjects, erasedLineObjects, erasedLinks, _ ->
+        drawingView.onScribbleEraseComplete = { erasedObjectIds, erasedHeadings, erasedTextObjects, erasedLineObjects, erasedLinks, _, _ ->
             if (erasedObjectIds.isNotEmpty()) {
                 val erasedHIds  = erasedHeadings.mapTo(mutableSetOf()) { it.id }
                 val erasedTIds  = erasedTextObjects.mapTo(mutableSetOf()) { it.id }
@@ -310,7 +310,7 @@ class StickyNoteEditorActivity : AppCompatActivity() {
 
         drawingView.onDragStarted = { hideFloatingSelectionToolbar() }
 
-        drawingView.onStrokesMoved = { _, movedStrokes, _, movedHeadings, _, movedTextObjects, _, movedLineObjects, _, movedLinks, _, _ ->
+        drawingView.onStrokesMoved = { _, movedStrokes, _, movedHeadings, _, movedTextObjects, _, movedLineObjects, _, movedLinks, _, _, _, _ ->
             // No DB persistence — just reposition the floating toolbar.
             val newBox = RectF()
             movedStrokes.forEach { newBox.union(it.boundingBox) }

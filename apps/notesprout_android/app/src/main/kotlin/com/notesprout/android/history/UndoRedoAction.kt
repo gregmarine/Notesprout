@@ -236,6 +236,8 @@ sealed class UndoRedoAction {
         val links: List<LinkRender> = emptyList(),
         val stickyNoteIds: List<String> = emptyList(),
         val stickyNotes: List<StickyNoteRender> = emptyList(),
+        val shapeIds: List<String> = emptyList(),
+        val shapes: List<ShapeRender> = emptyList(),
     ) : UndoRedoAction()
 
     /**
@@ -262,6 +264,8 @@ sealed class UndoRedoAction {
         val movedLinks: List<LinkRender> = emptyList(),
         val originalStickyNotes: List<StickyNoteRender> = emptyList(),
         val movedStickyNotes: List<StickyNoteRender> = emptyList(),
+        val originalShapes: List<ShapeRender> = emptyList(),
+        val movedShapes: List<ShapeRender> = emptyList(),
     ) : UndoRedoAction()
 
     /**
@@ -288,6 +292,8 @@ sealed class UndoRedoAction {
         val links: List<LinkRender> = emptyList(),
         val stickyNoteIds: List<String> = emptyList(),
         val stickyNotes: List<StickyNoteRender> = emptyList(),
+        val shapeIds: List<String> = emptyList(),
+        val shapes: List<ShapeRender> = emptyList(),
     ) : UndoRedoAction()
 
     /**
@@ -319,6 +325,8 @@ sealed class UndoRedoAction {
         val links: List<LinkRender> = emptyList(),
         val stickyNoteIds: List<String> = emptyList(),
         val stickyNotes: List<StickyNoteRender> = emptyList(),
+        val shapeIds: List<String> = emptyList(),
+        val shapes: List<ShapeRender> = emptyList(),
     ) : UndoRedoAction()
 
     /**
@@ -346,6 +354,8 @@ sealed class UndoRedoAction {
         val links: List<LinkRender> = emptyList(),
         val stickyNoteIds: List<String> = emptyList(),
         val stickyNotes: List<StickyNoteRender> = emptyList(),
+        val shapeIds: List<String> = emptyList(),
+        val shapes: List<ShapeRender> = emptyList(),
     ) : UndoRedoAction()
 
     /**
@@ -521,6 +531,8 @@ sealed class UndoRedoAction {
         val links: List<LinkRender> = emptyList(),
         val stickyNoteIds: List<String> = emptyList(),
         val stickyNotes: List<StickyNoteRender> = emptyList(),
+        val shapeIds: List<String> = emptyList(),
+        val shapes: List<ShapeRender> = emptyList(),
     ) : UndoRedoAction()
 
     /**

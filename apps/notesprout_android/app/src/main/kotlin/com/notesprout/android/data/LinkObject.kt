@@ -7,11 +7,11 @@ import kotlinx.serialization.json.Json
 /**
  * Serialized payload of a `type = "link"` row (the `data` column), mirroring the heading
  * "holds objects" pattern but **heterogeneously**: a link wraps any mix of strokes, headings,
- * text objects, and lines captured at link-creation time (fresh-UUID copies).
+ * text objects, lines, and shapes captured at link-creation time (fresh-UUID copies).
  *
  * Embedded strokes/headings/text reuse the existing [@Serializable] render models so the
- * view's draw helpers can paint them unchanged. Lines use [EmbeddedLine] — a density-independent
- * carrier storing dp values + bbox — because [LineRender] stores device-dependent px.
+ * view's draw helpers can paint them unchanged. Lines use [EmbeddedLine] and shapes use
+ * [EmbeddedShape] — density-independent carriers storing dp values + bbox.
  */
 @Serializable
 data class LinkObject(
@@ -21,6 +21,7 @@ data class LinkObject(
     val headings: List<HeadingStroke> = emptyList(),
     val textObjects: List<TextRender> = emptyList(),
     val lines: List<EmbeddedLine> = emptyList(),
+    val shapes: List<EmbeddedShape> = emptyList(),
 ) {
     fun toJson(): String = Json.encodeToString(serializer(), this)
 
@@ -69,3 +70,51 @@ fun EmbeddedLine.toLineRender(density: Float): LineRender {
 /** Capture a render-time [LineRender] as a density-independent [EmbeddedLine] for storage in a link. */
 fun LineRender.toEmbeddedLine(density: Float): EmbeddedLine =
     EmbeddedLine(id, RectF(boundingBox), style, orientation, strokeWidthDp, dotSpacingPx / density)
+
+/**
+ * Density-independent serialized carrier for a shape held inside a link.
+ * Stores dp-based geometry so the link round-trips correctly across differing display densities.
+ */
+@Serializable
+data class EmbeddedShape(
+    val id: String,
+    @Serializable(with = RectFSerializer::class)
+    val boundingBox: RectF,
+    val type: ShapeType,
+    val centerX: Float,
+    val centerY: Float,
+    val width: Float,
+    val height: Float,
+    val rotationDeg: Float,
+    val strokeWidthDp: Float,
+    val aspectLocked: Boolean,
+    val pointCount: Int = 5,
+)
+
+fun EmbeddedShape.toShapeRender(density: Float): ShapeRender = ShapeRender(
+    id = id,
+    boundingBox = RectF(boundingBox),
+    type = type,
+    centerX = centerX,
+    centerY = centerY,
+    width = width,
+    height = height,
+    rotationDeg = rotationDeg,
+    strokeWidthPx = strokeWidthDp * density,
+    aspectLocked = aspectLocked,
+    pointCount = pointCount,
+)
+
+fun ShapeRender.toEmbeddedShape(density: Float): EmbeddedShape = EmbeddedShape(
+    id = id,
+    boundingBox = RectF(boundingBox),
+    type = type,
+    centerX = centerX,
+    centerY = centerY,
+    width = width,
+    height = height,
+    rotationDeg = rotationDeg,
+    strokeWidthDp = strokeWidthPx / density,
+    aspectLocked = aspectLocked,
+    pointCount = pointCount,
+)

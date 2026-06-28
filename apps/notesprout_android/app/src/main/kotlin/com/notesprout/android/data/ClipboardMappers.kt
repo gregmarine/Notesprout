@@ -47,6 +47,12 @@ fun NotesproutClipboard.ClipboardContent.toPayload(
             clipCodec.encodeToString(StickyNoteRender.serializer(), sn),
         )
     }
+    shapeObjects.forEach { shape ->
+        items += ClipItem(
+            TYPE_SHAPE, BoundingBoxData.from(shape.boundingBox),
+            clipCodec.encodeToString(ShapeRender.serializer(), shape),
+        )
+    }
     return ClipboardPayload(
         items = items,
         boundingBox = BoundingBoxData.from(boundingBox),
@@ -64,6 +70,7 @@ fun ClipboardPayload.toClipboardContent(): NotesproutClipboard.ClipboardContent?
     val lineObjects  = mutableListOf<LineRender>()
     val links        = mutableListOf<LinkRender>()
     val stickyNotes  = mutableListOf<StickyNoteRender>()
+    val shapes       = mutableListOf<ShapeRender>()
     for (item in items) {
         when (item.type) {
             TYPE_STROKE       -> strokes.add(clipCodec.decodeFromString(LiveStroke.serializer(), item.data))
@@ -72,9 +79,10 @@ fun ClipboardPayload.toClipboardContent(): NotesproutClipboard.ClipboardContent?
             TYPE_LINE         -> lineObjects.add(clipCodec.decodeFromString(LineRender.serializer(), item.data))
             TYPE_LINK         -> links.add(clipCodec.decodeFromString(LinkRender.serializer(), item.data))
             TYPE_STICKY_NOTE  -> stickyNotes.add(clipCodec.decodeFromString(StickyNoteRender.serializer(), item.data))
+            TYPE_SHAPE        -> shapes.add(clipCodec.decodeFromString(ShapeRender.serializer(), item.data))
         }
     }
-    if (strokes.isEmpty() && headings.isEmpty() && textObjects.isEmpty() && lineObjects.isEmpty() && links.isEmpty() && stickyNotes.isEmpty()) return null
+    if (strokes.isEmpty() && headings.isEmpty() && textObjects.isEmpty() && lineObjects.isEmpty() && links.isEmpty() && stickyNotes.isEmpty() && shapes.isEmpty()) return null
     return NotesproutClipboard.ClipboardContent(
         strokes = strokes,
         headings = headings,
@@ -83,5 +91,6 @@ fun ClipboardPayload.toClipboardContent(): NotesproutClipboard.ClipboardContent?
         lineObjects = lineObjects,
         links = links,
         stickyNotes = stickyNotes,
+        shapeObjects = shapes,
     )
 }

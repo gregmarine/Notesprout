@@ -493,7 +493,7 @@ requires high velocity; scribble requires zig-zag density):
 
 ## SESSION 4 — Transform mode (resize, rotate, toggles)
 
-**Status: NOT STARTED**
+**Status: DONE**
 
 **Goal:** Tapping a lasso-selected single shape enters **transform mode**: 8 resize handles, a rotate
 knob, aspect-lock / circle-oval toggle, with vector-constant stroke width and full undo. Notebook only
@@ -568,7 +568,7 @@ and:
 
 ## SESSION 5 — Lasso, clipboard, erase & export integration (notebook)
 
-**Status: NOT STARTED**
+**Status: DONE**
 
 **Goal:** Shapes are full citizens of every selection/erase/transfer action with undo — in the
 notebook. (This is mostly the mechanical "mirror the line/sticky pattern" rule from §1.)
