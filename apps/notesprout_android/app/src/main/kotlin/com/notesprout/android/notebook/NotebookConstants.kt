@@ -88,6 +88,14 @@ const val SCRIBBLE_BBOX_PENETRATION_DP = 14f
  */
 const val SCRIBBLE_STROKE_TOUCH_RADIUS_DP = 8f
 
+// ── Shape dwell-trigger constants ────────────────────────────────────────────
+
+/** Minimum dwell time (ms) at pen lift to trigger shape recognition. */
+const val SHAPE_DWELL_MS = 700L
+
+/** Radius (dp) within which stylus jitter is ignored when tracking dwell stillness. */
+const val SHAPE_DWELL_RADIUS_DP = 6f
+
 // ── Smart Lasso detection constants ──────────────────────────────────────────
 
 /**

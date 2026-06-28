@@ -191,12 +191,19 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
     override var onLinkErased: ((LinkRender) -> Unit)? = null
     override var onStickyNoteErased: ((StickyNoteRender) -> Unit)? = null
     override var onShapeErased: ((ShapeRender) -> Unit)? = null
+    override var onShapeRecognized: ((LiveStroke, ShapeRecognizer.Result) -> Unit)? = null
     override var onScribbleEraseComplete: ((List<String>, List<HeadingStroke>, List<TextRender>, List<LineRender>, List<LinkRender>, List<StickyNoteRender>) -> Unit)? = null
     override var onSmartLassoComplete: ((List<String>, RectF) -> Unit)? = null
     override var onPenLifted: (() -> Unit)? = null
 
     // Wall-clock time of the last ACTION_DOWN, used to compute gesture duration for smart-lasso velocity.
     private var strokeStartTimeMs = 0L
+
+    // Dwell tracking: how long the stylus was still at the end of the stroke.
+    private var dwellAnchorX   = 0f
+    private var dwellAnchorY   = 0f
+    private var lastMoveTimeMs = 0L
+    private var dwellMs        = 0L
     override var onSnapshotReady: ((String) -> Unit)? = null
     override var onLassoComplete: ((Path, PointF) -> Unit)? = null
     override var onLassoTapToDismiss: (() -> Unit)? = null
@@ -249,6 +256,10 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
                 activePoints.clear()
                 activePoints.add(PointF(event.x, event.y))
                 strokeStartTimeMs = System.currentTimeMillis()
+                dwellAnchorX   = event.x
+                dwellAnchorY   = event.y
+                lastMoveTimeMs = System.currentTimeMillis()
+                dwellMs        = 0L
                 invalidate()
             }
             MotionEvent.ACTION_MOVE -> {
@@ -261,6 +272,18 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
                     eraseAtPath(newPoints)
                 } else {
                     activePoints.addAll(newPoints)
+                    // Update dwell anchor: if any point moves beyond the dwell radius, reset.
+                    val dwellRadiusPx = SHAPE_DWELL_RADIUS_DP * resources.displayMetrics.density
+                    val now = System.currentTimeMillis()
+                    for (pt in newPoints) {
+                        val dx = pt.x - dwellAnchorX
+                        val dy = pt.y - dwellAnchorY
+                        if (dx * dx + dy * dy > dwellRadiusPx * dwellRadiusPx) {
+                            dwellAnchorX   = pt.x
+                            dwellAnchorY   = pt.y
+                            lastMoveTimeMs = now
+                        }
+                    }
                     invalidate()
                 }
             }
@@ -275,7 +298,9 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
                     commitActiveStroke()
                     activePoints.clear()
                     invalidate()
-                    val durationMs = (System.currentTimeMillis() - strokeStartTimeMs).coerceAtLeast(1L)
+                    val now = System.currentTimeMillis()
+                    dwellMs = now - lastMoveTimeMs
+                    val durationMs = (now - strokeStartTimeMs).coerceAtLeast(1L)
                     checkAndDispatchGesture(durationMs)
                 }
             }
@@ -971,11 +996,12 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
         return dx * dx + dy * dy
     }
 
-    // ── Gesture detection at pen lift (smart-lasso → scribble-to-erase → normal) ──────────
+    // ── Gesture detection at pen lift (shape-dwell → smart-lasso → scribble-to-erase → normal) ──
 
     /**
      * Called after [commitActiveStroke] on every non-eraser pen lift. Runs the detection
      * gate chain in priority order on a single background thread:
+     *   Gate 0 — Shape dwell: single stroke held still ≥ [SHAPE_DWELL_MS] → shape object.
      *   Gate 1 — Smart lasso: fast closed circle enclosing ≥1 object → enter lasso selection.
      *   Gate 2 — Scribble-to-erase: dense back-and-forth crossing ≥1 object → erase.
      *   Default — Normal stroke: fire [onPenLifted] so the activity saves the stroke to DB.
@@ -988,9 +1014,12 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
         val density   = resources.displayMetrics.density
         val strokeId  = lastStroke.id
 
-        val isSmartLasso = isSmartLassoCandidate(points, durationMs, density)
-        val isScribble   = !isSmartLasso && isScribbleCandidate(points)
-        if (!isSmartLasso && !isScribble) { onPenLifted?.invoke(); return }
+        // ── Gate 0 pre-check: single-stroke dwell candidate → always spawn a thread ──
+        val dwellCandidate = dwellMs >= SHAPE_DWELL_MS
+
+        val isSmartLasso = !dwellCandidate && isSmartLassoCandidate(points, durationMs, density)
+        val isScribble   = !dwellCandidate && !isSmartLasso && isScribbleCandidate(points)
+        if (!dwellCandidate && !isSmartLasso && !isScribble) { onPenLifted?.invoke(); return }
 
         val strokeSnapshot      = strokes.filter { it.id != strokeId }.toList()
         val headingSnapshot     = headings.toList()
@@ -1000,8 +1029,29 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
         val stickyNoteSnapshot  = stickyNotes.toList()
 
         Thread {
+            // ── Gate 0: Shape dwell trigger ────────────────────────────────────────
+            // Runs first; on null falls through to gates 1 and 2.
+            var runSmartLasso = isSmartLasso
+            if (dwellCandidate) {
+                val result = ShapeRecognizer.recognize(points, density)
+                if (result != null) {
+                    post {
+                        strokes.removeAll { it.id == strokeId }
+                        onShapeRecognized?.invoke(lastStroke, result)
+                    }
+                    return@Thread
+                }
+                // No shape recognized — check gates 1 and 2 for this stroke.
+                runSmartLasso = isSmartLassoCandidate(points, durationMs, density)
+                val runScribble = !runSmartLasso && isScribbleCandidate(points)
+                if (!runSmartLasso && !runScribble) {
+                    post { onPenLifted?.invoke() }
+                    return@Thread
+                }
+            }
+
             // ── Gate 1: Smart lasso ────────────────────────────────────────────────
-            if (isSmartLasso) {
+            if (runSmartLasso) {
                 val path = Path().also { p ->
                     p.moveTo(points[0].x, points[0].y)
                     for (i in 1 until points.size) p.lineTo(points[i].x, points[i].y)

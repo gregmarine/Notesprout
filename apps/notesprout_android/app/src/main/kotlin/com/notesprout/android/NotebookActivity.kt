@@ -1085,14 +1085,6 @@ class NotebookActivity : AppCompatActivity() {
             val db = soilDatabase ?: return@setOnClickListener
             startExport(db)
         }
-        // TODO(S3): remove debug shape insert
-        if (com.notesprout.android.BuildConfig.DEBUG) {
-            binding.btnExport.setOnLongClickListener {
-                val db = soilDatabase ?: return@setOnLongClickListener false
-                debugInsertShapes(db)
-                true
-            }
-        }
 
         binding.btnPin.setOnClickListener {
             val nbId = notebookId.takeIf { it.isNotEmpty() } ?: return@setOnClickListener
@@ -1704,6 +1696,13 @@ class NotebookActivity : AppCompatActivity() {
             }
         }
 
+        // Smart-shape dwell recognized — convert the stroke to a shape object.
+        // The view already removed the gesture stroke from in-memory; convertStrokeToShape
+        // handles the DB insert, undo action, and bitmap rebuild.
+        drawingView.onShapeRecognized = { stroke, result ->
+            lifecycleScope.launch(Dispatchers.IO) { convertStrokeToShape(stroke, result) }
+        }
+
         // Lasso move gesture complete — persist translated coordinates and push undo action.
         drawingView.onStrokesMoved = { originalStrokes, movedStrokes, originalHeadings, movedHeadings, originalTextObjects, movedTextObjects, originalLineObjects, movedLineObjects, originalLinks, movedLinks, originalStickyNotes, movedStickyNotes ->
             val pageId = currentPageId.takeIf { it.isNotEmpty() }
@@ -1971,25 +1970,6 @@ class NotebookActivity : AppCompatActivity() {
 
         binding.btnLassoSendToScratchpad.setOnClickListener {
             lifecycleScope.launch { performSendToScratchpad() }
-        }
-
-        // TODO(S3): remove debug shape convert button
-        if (BuildConfig.DEBUG) {
-            binding.btnDebugToShape.setOnClickListener {
-                val ids = drawingView.lassoSelectedIds
-                val selStrokes = drawingView.getStrokes().filter { it.id in ids }
-                if (selStrokes.size != 1) return@setOnClickListener
-                val stroke = selStrokes.first()
-                val points = stroke.points
-                if (points.isEmpty()) return@setOnClickListener
-                val density = resources.displayMetrics.density
-                val result = com.notesprout.android.notebook.ShapeRecognizer.recognize(points, density)
-                if (result == null) {
-                    android.widget.Toast.makeText(this, "DEBUG: no shape", android.widget.Toast.LENGTH_SHORT).show()
-                } else {
-                    lifecycleScope.launch(Dispatchers.IO) { convertStrokeToShape(stroke, result) }
-                }
-            }
         }
 
         // Wire the lasso popup Clear Clipboard button.
@@ -6043,7 +6023,6 @@ class NotebookActivity : AppCompatActivity() {
      * inserts the shape row, and pushes [UndoRedoAction.ShapeCreated].
      * Must be called on [Dispatchers.IO]; switches to Main for in-memory + UI updates.
      */
-    // TODO(S3): remove debug convert (callers added in S3)
     private suspend fun convertStrokeToShape(
         stroke: com.notesprout.android.data.LiveStroke,
         result: com.notesprout.android.notebook.ShapeRecognizer.Result,
@@ -6942,12 +6921,6 @@ class NotebookActivity : AppCompatActivity() {
         binding.btnLinkEdit.visibility = if (selectionIsSingleLink) View.VISIBLE else View.GONE
         binding.btnUnlink.visibility   = if (selectionIsSingleLink) View.VISIBLE else View.GONE
         binding.linkDivider.visibility = if (canAddLink || selectionIsSingleLink) View.VISIBLE else View.GONE
-        // TODO(S3): remove debug shape convert button visibility
-        val showDebugShape = BuildConfig.DEBUG &&
-            selStrokes.size == 1 && selHeadings.isEmpty() && selTextObjects.isEmpty() &&
-            selLines.isEmpty() && selLinks.isEmpty()
-        binding.btnDebugToShape.visibility  = if (showDebugShape) View.VISIBLE else View.GONE
-        binding.debugShapeDivider.visibility = if (showDebugShape) View.VISIBLE else View.GONE
         binding.floatingSelectionToolbar.visibility = View.VISIBLE
         binding.floatingSelectionToolbar.post {
             positionPopover(binding.floatingSelectionToolbar, selectionBox)
@@ -10771,98 +10744,6 @@ class NotebookActivity : AppCompatActivity() {
      */
     private fun undoRedoPersistenceFile(notebookPath: String): java.io.File =
         java.io.File(filesDir, "undo_redo_${notebookPath.hashCode()}.json")
-
-    // TODO(S3): remove debug shape insert
-    private fun debugInsertShapes(db: SoilDatabase) {
-        val pageId  = currentPageId.takeIf  { it.isNotEmpty() } ?: return
-        val layerId = currentLayerId.takeIf { it.isNotEmpty() } ?: return
-        val density = resources.displayMetrics.density
-        val w = drawingView.asView().width.toFloat()
-        val h = drawingView.asView().height.toFloat()
-        val cellW = w / 5f
-        val cellH = h / 3f
-        val strokeWidthDp = 2f
-
-        val shapeSpecs: List<Pair<com.notesprout.android.data.ShapeType, Boolean>> = listOf(
-            com.notesprout.android.data.ShapeType.RECTANGLE to false,
-            com.notesprout.android.data.ShapeType.RECTANGLE to true,      // square
-            com.notesprout.android.data.ShapeType.ELLIPSE   to false,
-            com.notesprout.android.data.ShapeType.ELLIPSE   to true,      // circle
-            com.notesprout.android.data.ShapeType.TRIANGLE  to false,
-            com.notesprout.android.data.ShapeType.DIAMOND   to false,
-            com.notesprout.android.data.ShapeType.TRAPEZOID to false,
-            com.notesprout.android.data.ShapeType.PENTAGON  to false,
-            com.notesprout.android.data.ShapeType.HEXAGON   to false,
-            com.notesprout.android.data.ShapeType.STAR      to true,
-            com.notesprout.android.data.ShapeType.ARCH      to false,
-            com.notesprout.android.data.ShapeType.LINE      to false,
-            com.notesprout.android.data.ShapeType.ARROW     to false,
-        )
-
-        lifecycleScope.launch {
-            val newShapes = mutableListOf<com.notesprout.android.data.ShapeRender>()
-            withContext(kotlinx.coroutines.Dispatchers.IO) {
-                val now = System.currentTimeMillis()
-                shapeSpecs.forEachIndexed { idx, (type, aspectLocked) ->
-                    val col = idx % 5
-                    val row = idx / 5
-                    val cx = cellW * col + cellW / 2f
-                    val cy = cellH * row + cellH / 2f
-                    val sw = minOf(cellW, cellH) * 0.6f
-                    val sh = if (aspectLocked) sw else minOf(cellW, cellH) * 0.45f
-                    // Rotate the last row slightly for variety
-                    val rotDeg = if (row == 2) 15f else 0f
-                    val shapeObj = com.notesprout.android.data.ShapeObject(
-                        type = type,
-                        centerX = cx,
-                        centerY = cy,
-                        width = sw,
-                        height = sh,
-                        rotationDeg = rotDeg,
-                        strokeWidthDp = strokeWidthDp,
-                        aspectLocked = aspectLocked,
-                        pointCount = 5,
-                    )
-                    val id = java.util.UUID.randomUUID().toString()
-                    val render = com.notesprout.android.data.ShapeRender.from(id, shapeObj, density)
-                    val bbox = render.boundingBox.toBoundingBoxJson()
-                    db.notebookDao().insertObject(
-                        NotebookObject(
-                            id = id,
-                            parentId = layerId,
-                            type = "shape",
-                            sortOrder = idx,
-                            boundingBox = bbox,
-                            data = shapeObj.toJson(),
-                            createdAt = now + idx,
-                            updatedAt = now + idx,
-                        )
-                    )
-                    newShapes.add(render)
-                }
-                invalidatePageSnapshot(db, pageId)
-            }
-            val allShapes = drawingView.getShapeObjects() + newShapes
-            drawingView.loadShapeObjects(allShapes)
-            val strokes = drawingView.getStrokes()
-            val bitmap = withContext(kotlinx.coroutines.Dispatchers.IO) {
-                drawingView.buildRenderBitmap(
-                    strokes,
-                    currentTemplateBitmap,
-                    drawingView.getHeadings(),
-                    drawingView.getTextObjects(),
-                    drawingView.getLineObjects(),
-                    drawingView.getLinks(),
-                    drawingView.getStickyNotes(),
-                    allShapes,
-                )
-            }
-            if (bitmap != null) {
-                drawingView.loadStrokesWithBitmap(strokes, bitmap, currentTemplateBitmap)
-            }
-            android.widget.Toast.makeText(this@NotebookActivity, "DEBUG: ${newShapes.size} shapes inserted", android.widget.Toast.LENGTH_SHORT).show()
-        }
-    }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 

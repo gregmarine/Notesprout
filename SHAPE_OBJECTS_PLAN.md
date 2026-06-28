@@ -433,10 +433,16 @@ debug toast "no shape". Mark `// TODO(S3): remove debug convert`.
 
 ## SESSION 3 — Smart-shape dwell trigger (draw → hold → lift)
 
-**Status: NOT STARTED**
+**Status: DONE**
 
 **Goal:** Drawing a single shape, holding the stylus still ~1 s, then lifting auto-converts it — in
 the **notebook** (scratch pad / sticky come in S6). Remove all S1/S2 debug affordances.
+
+> **Revisit note (post-S3):** The dwell trigger fires intermittently (timing feels unreliable on
+> BOOX devices) and shape recognition accuracy has degraded from S2 baselines. Both warrant a
+> dedicated tuning pass before S4 (or as a standalone S3-polish session): tighten the recognizer
+> scoring, re-evaluate `SHAPE_DWELL_MS` / `SHAPE_DWELL_RADIUS_DP` constants, and add more robust
+> fallback behavior when recognition returns a low-confidence result.
 
 ### Dwell detection (both drawing views)
 Track the stylus "settling" during a stroke:

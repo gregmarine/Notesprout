@@ -242,6 +242,7 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
     override var onLinkErased: ((LinkRender) -> Unit)? = null
     override var onStickyNoteErased: ((StickyNoteRender) -> Unit)? = null
     override var onShapeErased: ((ShapeRender) -> Unit)? = null
+    override var onShapeRecognized: ((LiveStroke, ShapeRecognizer.Result) -> Unit)? = null
     override var onScribbleEraseComplete: ((List<String>, List<HeadingStroke>, List<TextRender>, List<LineRender>, List<LinkRender>, List<StickyNoteRender>) -> Unit)? = null
     override var onSmartLassoComplete: ((List<String>, RectF) -> Unit)? = null
 
@@ -249,6 +250,12 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
     // Used for per-gesture scribble candidate detection after all points are collected.
     private val currentGesturePoints    = mutableListOf<PointF>()
     private val currentGestureStrokeIds = mutableListOf<String>()
+
+    // Dwell tracking: how long the stylus was still at the end of the stroke.
+    private var dwellAnchorX    = 0f
+    private var dwellAnchorY    = 0f
+    private var lastMoveTimeMs  = 0L
+    private var dwellMs         = 0L
 
     /**
      * Invoked (on main thread) immediately after each pen lift (onEndRawDrawing).
@@ -284,6 +291,10 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
             currentGestureStrokeIds.clear()
             beginRawDrawingTimeMs = System.currentTimeMillis()
             strokeRenderCount = 0
+            dwellAnchorX   = touchPoint.x
+            dwellAnchorY   = touchPoint.y
+            lastMoveTimeMs = System.currentTimeMillis()
+            dwellMs        = 0L
             epd { "ON_BEGIN_RAW_DRAWING_DONE beginTimeMs=$beginRawDrawingTimeMs" }
         }
 
@@ -301,9 +312,11 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
                 epd { "PEN_LIFTED caller=onEndRawDrawing_eraser" }
                 onPenLifted?.invoke()
             } else {
-                // Pen mode: smart-lasso → scribble-to-erase → normal stroke.
+                // Pen mode: shape-dwell → smart-lasso → scribble-to-erase → normal stroke.
                 epd { "PEN_LIFTED caller=onEndRawDrawing_pen gestureCheck" }
-                val durationMs = System.currentTimeMillis() - beginRawDrawingTimeMs
+                val now = System.currentTimeMillis()
+                dwellMs = now - lastMoveTimeMs
+                val durationMs = now - beginRawDrawingTimeMs
                 checkAndDispatchGesture(durationMs)
             }
         }
@@ -371,9 +384,22 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
         val strokeId = UUID.randomUUID().toString()
         val strokePoints = points.map { PointF(it.x, it.y) }
         strokes.add(LiveStroke(strokeId, strokePoints))
-        // Accumulate for end-of-gesture scribble detection.
+        // Accumulate for end-of-gesture scribble/shape detection.
         currentGesturePoints.addAll(strokePoints)
         currentGestureStrokeIds.add(strokeId)
+        // Update dwell anchor using per-point timestamps so the batch-delivery pattern
+        // (all points arrive at once at pen-lift) doesn't collapse the dwell window to ~0ms.
+        val dwellRadiusPx = SHAPE_DWELL_RADIUS_DP * resources.displayMetrics.density
+        val now = System.currentTimeMillis()
+        for (raw in points) {
+            val dx = raw.x - dwellAnchorX
+            val dy = raw.y - dwellAnchorY
+            if (dx * dx + dy * dy > dwellRadiusPx * dwellRadiusPx) {
+                dwellAnchorX   = raw.x
+                dwellAnchorY   = raw.y
+                lastMoveTimeMs = if (raw.timestamp > 0L) raw.timestamp else now
+            }
+        }
         val path = Path()
         path.moveTo(strokePoints[0].x, strokePoints[0].y)
         for (i in 1 until strokePoints.size) {
@@ -382,7 +408,6 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
         canvas.drawPath(path, strokePaint)
 
         strokeRenderCount++
-        val now = System.currentTimeMillis()
         if (strokeRenderCount == 1 && beginRawDrawingTimeMs > 0) {
             epd { "FIRST_STROKE_AFTER_BEGIN delta=${now - beginRawDrawingTimeMs}ms strokeId=${strokeId.take(8)}" }
         }
@@ -751,11 +776,12 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
         return dx * dx + dy * dy
     }
 
-    // ── Gesture detection at pen lift (smart-lasso → scribble-to-erase → normal) ───────────
+    // ── Gesture detection at pen lift (shape-dwell → smart-lasso → scribble-to-erase → normal) ──
 
     /**
      * Called at the end of every non-eraser pen gesture.  Runs the detection gate chain
      * in priority order on a single background thread:
+     *   Gate 0 — Shape dwell: single stroke held still ≥ [SHAPE_DWELL_MS] → shape object.
      *   Gate 1 — Smart lasso: fast closed circle enclosing ≥1 object → enter lasso selection.
      *   Gate 2 — Scribble-to-erase: dense back-and-forth crossing ≥1 object → erase.
      *   Default — Normal stroke: fire [onPenLifted] so the activity saves the stroke to DB.
@@ -774,10 +800,28 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
         val density      = resources.displayMetrics.density
         val gestureIdSet = gestureStrokeIds.toSet()
 
-        // Cheap synchronous geometry checks — avoid thread spawn for the common case.
-        val isSmartLasso = isSmartLassoCandidate(gesturePoints, durationMs, density)
-        val isScribble   = !isSmartLasso && isScribbleCandidate(gesturePoints)
-        if (!isSmartLasso && !isScribble) {
+        // ── Gate 0 pre-check: dwell candidate → always spawn a thread ─────────
+        // On Onyx, a single pen contact produces multiple renderStroke batches
+        // (multiple IDs in gestureStrokeIds). All batches belong to the same gesture,
+        // so no stroke-count check — just the dwell time.
+        val dwellCandidate = dwellMs >= SHAPE_DWELL_MS
+        // Merge all gesture points into one synthetic stroke for undo restoration.
+        // None of the gesture strokes are persisted (onPenLifted never fires for them).
+        val mergedStroke: com.notesprout.android.data.LiveStroke? = if (dwellCandidate) {
+            val strokeWidth = strokes.firstOrNull { it.id == gestureStrokeIds.firstOrNull() }?.strokeWidth
+                ?: com.notesprout.android.data.LiveStroke.DEFAULT_STROKE_WIDTH
+            com.notesprout.android.data.LiveStroke(
+                id     = gestureStrokeIds.firstOrNull() ?: UUID.randomUUID().toString(),
+                points = gesturePoints,
+                strokeWidth = strokeWidth,
+            )
+        } else null
+
+        // Cheap synchronous geometry checks — skip when already a dwell candidate (re-run
+        // inside the thread on the null-recognition fallthrough path).
+        val isSmartLasso = !dwellCandidate && isSmartLassoCandidate(gesturePoints, durationMs, density)
+        val isScribble   = !dwellCandidate && !isSmartLasso && isScribbleCandidate(gesturePoints)
+        if (!dwellCandidate && !isSmartLasso && !isScribble) {
             onPenLifted?.invoke()
             return
         }
@@ -790,8 +834,35 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
         val stickyNoteSnapshot = stickyNotes.toList()
 
         Thread {
+            // ── Gate 0: Shape dwell trigger ────────────────────────────────────────
+            // Runs first; on null falls through to gates 1 and 2.
+            var runSmartLasso = isSmartLasso
+            if (dwellCandidate && mergedStroke != null) {
+                val result = ShapeRecognizer.recognize(gesturePoints, density)
+                if (result != null) {
+                    post {
+                        strokes.removeAll { it.id in gestureIdSet }
+                        if (isSetup) {
+                            touchHelper.setRawDrawingRenderEnabled(false)
+                            epd { "RENDER_DISABLED caller=shapeDwell" }
+                            invalidate()
+                            epd { "INVALIDATE caller=shapeDwell" }
+                        }
+                        onShapeRecognized?.invoke(mergedStroke, result)
+                    }
+                    return@Thread
+                }
+                // No shape recognized — check gates 1 and 2 for this stroke.
+                runSmartLasso = isSmartLassoCandidate(gesturePoints, durationMs, density)
+                val runScribble = !runSmartLasso && isScribbleCandidate(gesturePoints)
+                if (!runSmartLasso && !runScribble) {
+                    post { onPenLifted?.invoke() }
+                    return@Thread
+                }
+            }
+
             // ── Gate 1: Smart lasso ────────────────────────────────────────────────
-            if (isSmartLasso) {
+            if (runSmartLasso) {
                 val path = Path().also { p ->
                     p.moveTo(gesturePoints[0].x, gesturePoints[0].y)
                     for (i in 1 until gesturePoints.size) p.lineTo(gesturePoints[i].x, gesturePoints[i].y)

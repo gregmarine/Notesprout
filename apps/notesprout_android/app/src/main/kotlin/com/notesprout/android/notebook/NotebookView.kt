@@ -472,6 +472,20 @@ interface NotebookView {
         set(value) {}
 
     /**
+     * Fired on the main thread when a single-stroke dwell gesture is recognized as a shape.
+     * The gesture stroke has already been removed from the view's in-memory list before this fires
+     * and is NEVER persisted. The activity wires this to [convertStrokeToShape] to insert the
+     * shape row and push a [ShapeCreated] undo action.
+     *
+     * [originalStroke] — the full in-memory stroke (points + id) for undo restoration.
+     * [result] — the regularized geometry from [ShapeRecognizer].
+     */
+    var onShapeRecognized: ((originalStroke: LiveStroke, result: ShapeRecognizer.Result) -> Unit)?
+        get() = null
+        @Suppress("UNUSED_PARAMETER")
+        set(value) {}
+
+    /**
      * Replace the in-memory stroke list with [strokes] loaded from the database,
      * then redraw the canvas bitmap immediately.
      * Must be called on the main thread (triggers invalidate).
