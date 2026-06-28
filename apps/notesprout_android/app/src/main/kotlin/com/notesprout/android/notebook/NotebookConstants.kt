@@ -18,6 +18,14 @@ const val SHAPE_CLOSURE_RATIO = 0.35f
 /** Max perpendicular deviation / length ratio for a straight line classification. */
 const val SHAPE_LINE_STRAIGHTNESS = 0.10f
 
+/**
+ * Max *average* (across polygon sides) of per-side max-deviation/length for the
+ * sidesAreStraight polygon gate. Averaging tolerates one wobbly side without failing
+ * the whole polygon. Circle arcs average 0.134 (6-corner) to 0.207 (4-corner); a
+ * hexagon with one 0.20-ratio side and five 0.04-ratio sides averages ~0.07.
+ */
+const val SHAPE_SIDE_STRAIGHTNESS_AVG = 0.12f
+
 /** Ramer–Douglas–Peucker epsilon as a fraction of the stroke diagonal. */
 const val SHAPE_RDP_EPS_RATIO = 0.08f
 

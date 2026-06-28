@@ -159,7 +159,7 @@ Shaft (first 80%) + tail (last 20%) split:
 | `SHAPE_RDP_EPS_RATIO` | 0.045 | **0.08** | Looser epsilon needed to reliably reduce regular polygon outlines to the correct corner count without over-segmenting pen wobble |
 | `SHAPE_ELLIPSE_CV` | 0.12 | **0.18** | Raised to tolerate hand-drawn ellipses; regular pentagons/hexagons (CV ≈ 0.06–0.08) remain well below this threshold |
 | `SHAPE_CLOSURE_RATIO` | 0.20 | **0.35** | Catches closed shapes where the pen lifts slightly away from the start point |
-| Fine-RDP flatness check | not in spec | **added** | Polygon candidates (5–9 corners) re-run RDP at `eps/2`; threshold 1.9×. Replaced a radial-CV guard that failed because polygon CVs are indistinguishable from smooth ovals |
+| `sidesAreStraight` polygon gate | not in spec | **added** | All polygon candidates (3–9 corners) pass through `sidesAreStraight()`: for each side, any resampled point inside the segment must have perpendicular deviation ≤ `SHAPE_LINE_STRAIGHTNESS` × side length. Circle arcs score 0.13–0.21 at the 4–7-corner counts RDP produces; true polygon sides score < 0.05. Replaced a fine-RDP corner-count ratio check (fine/coarse ≤ 1.9×) that failed because the circle ratio at `eps/2` is only ~1.4×, below any safe threshold |
 | `classifyConvexPolygon` corner range | 5–6 only | **5–9** | Extended to absorb ±2 noise corners from a hand-drawn pentagon or hexagon |
 | Trapezoid `widthRatio` threshold | ~0.50 | **0.65** | Raised so typical hand-drawn trapezoids (narrow edge at 55–75% of wide) are caught; rectangles rarely dip below 0.70 |
 

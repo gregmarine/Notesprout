@@ -355,23 +355,13 @@ object ShapeRecognizer {
 
         val polyResult = classifyByCorners(prunedCorners, bbox, diag)
 
-        // 3–4 corner confirmed polygons always win (triangles, quads, trapezoids, rectangles).
-        // 5–9 corner polygon candidates: verify flat sides via a finer RDP pass at eps/2.
-        // Polygon sides are straight so the finer pass adds few or no corners. Curved shapes
-        // (circles/ovals) have curvature the coarse pass glossed over; the finer pass reveals
-        // it as extra corners. Regular pentagons and hexagons have radial CV ≈ 0.06–0.08, well
-        // below SHAPE_ELLIPSE_CV = 0.18, so CV alone cannot distinguish them from smooth ovals.
-        if (polyResult != null && prunedCorners.size <= 4) return polyResult
-        if (polyResult != null && prunedCorners.size in 5..9) {
-            val fineEps = eps / 2f
-            val fineSimp = rdp(pts, fineEps)
-            val fineCorners = pruneLinearCorners(
-                if (fineSimp.size > 1 && dist(fineSimp.first(), fineSimp.last()) < fineEps * 2)
-                    fineSimp.dropLast(1) else fineSimp
-            )
-            // Polygon flat side: fine count ≈ coarse count. Curved side: fine count >> coarse.
-            if (fineCorners.size <= prunedCorners.size * 1.9f) return polyResult
-        }
+        // Gate every polygon candidate on side flatness measured against the full resampled pts.
+        // True polygon sides are straight (deviation/length < SHAPE_LINE_STRAIGHTNESS = 0.10).
+        // Circle arcs score 0.13–0.21 at the corner counts RDP produces (4–7), so they fail
+        // the gate and fall through to the ellipse block below.
+        // Previously the 5–9 path used a fine-RDP corner-count ratio, but the circle ratio
+        // (~1.4×) was too close to the threshold; sidesAreStraight is a direct measurement.
+        if (polyResult != null && sidesAreStraight(pts, prunedCorners)) return polyResult
 
         // Ellipse / circle: three tiers by CV and corner context, plus a fit-quality fallback.
         //   Tier 1 (cv ≤ 0.18): clearly smooth — any corner count
@@ -613,6 +603,39 @@ object ShapeRecognizer {
     }
 
     // ── Corner pruning ────────────────────────────────────────────────────────
+
+    /**
+     * Returns true when every side of the [corners] polygon is actually flat against the full
+     * resampled [pts]. For each side A→B, any resampled point whose projection falls strictly
+     * inside the segment is checked; if its perpendicular deviation exceeds
+     * SHAPE_LINE_STRAIGHTNESS * side_length the side is curved (→ circle/oval, not a polygon).
+     */
+    private fun sidesAreStraight(pts: List<PointF>, corners: List<PointF>): Boolean {
+        val n = corners.size
+        var ratioSum = 0f
+        var checked = 0
+        for (i in 0 until n) {
+            val a = corners[i]
+            val b = corners[(i + 1) % n]
+            val dx = b.x - a.x; val dy = b.y - a.y
+            val segLen = sqrt((dx * dx + dy * dy).toDouble()).toFloat()
+            if (segLen == 0f) continue
+            val ux = dx / segLen; val uy = dy / segLen
+            var maxDev = 0f
+            for (pt in pts) {
+                val t = (pt.x - a.x) * ux + (pt.y - a.y) * uy
+                if (t <= 0f || t >= segLen) continue
+                val dev = abs((pt.x - a.x) * uy - (pt.y - a.y) * ux)
+                if (dev > maxDev) maxDev = dev
+            }
+            ratioSum += maxDev / segLen
+            checked++
+        }
+        // Average max-deviation ratio across sides. A circle's sides all score ~0.134+ (6-corner)
+        // to 0.207 (4-corner). One wobbly polygon side raises the average only slightly — a hexagon
+        // with one bad side (0.20) and five clean sides (0.04) averages to ~0.07, well below 0.12.
+        return checked == 0 || (ratioSum / checked) <= SHAPE_SIDE_STRAIGHTNESS_AVG
+    }
 
     /** Remove corners whose interior angle is > [maxAngleDeg] — they lie on an edge, not at a real corner. */
     private fun pruneLinearCorners(corners: List<PointF>, maxAngleDeg: Float = 150f): List<PointF> {

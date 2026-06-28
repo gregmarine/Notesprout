@@ -195,6 +195,9 @@ class NotebookActivity : AppCompatActivity() {
     private var toolbarConfig: ToolbarConfig = ToolbarConfig()
     /** True while we're waiting for ACTION_UP to close the overflow menu after a button tap. */
     private var overflowCloseOnUp = false
+    /** True when the DOWN that set [overflowCloseOnUp] landed on [btnInsertShape] — the overflow
+     *  must stay open so all three toolbars (main, overflow, shapes) remain on screen together. */
+    private var overflowKeepOpenForShapePicker = false
     private var isEraserActive = false
 
     // ── Snap-to-guide mode ────────────────────────────────────────────────────
@@ -969,6 +972,7 @@ class NotebookActivity : AppCompatActivity() {
         // Pen tool button — activates pen mode (default)
         binding.btnPen.setOnClickListener {
             hideLassoPopupToolbar()
+            hideShapeInsertToolbar()
             if (isShapeTransformMode) exitShapeTransformMode()
             if (isLassoMode) exitLassoMode()
             if (isLassoEraserMode) exitLassoEraserMode()
@@ -985,6 +989,7 @@ class NotebookActivity : AppCompatActivity() {
 
         binding.btnEraser.setOnClickListener {
             hideLassoPopupToolbar()
+            hideShapeInsertToolbar()
             if (isShapeTransformMode) exitShapeTransformMode()
             if (isLassoMode) exitLassoMode()
             if (isLassoEraserMode) exitLassoEraserMode()
@@ -999,6 +1004,7 @@ class NotebookActivity : AppCompatActivity() {
 
         binding.btnLassoEraser.setOnClickListener {
             hideLassoPopupToolbar()
+            hideShapeInsertToolbar()
             if (!isLassoEraserMode) {
                 enterLassoEraserMode()
                 ToolPreferencesManager.save(this, ActiveTool.LASSO_ERASER)
@@ -1029,6 +1035,48 @@ class NotebookActivity : AppCompatActivity() {
 
         binding.btnInsertStickyNote.setOnClickListener {
             insertStickyNote()
+        }
+
+        binding.btnInsertShape.setOnClickListener {
+            if (binding.shapeInsertToolbar.visibility == View.VISIBLE) {
+                hideShapeInsertToolbar()
+            } else {
+                showShapeInsertToolbar()
+            }
+        }
+
+        binding.btnInsertShapeRectangle.setOnClickListener {
+            insertShape(com.notesprout.android.data.ShapeType.RECTANGLE)
+        }
+        binding.btnInsertShapeEllipse.setOnClickListener {
+            insertShape(com.notesprout.android.data.ShapeType.ELLIPSE)
+        }
+        binding.btnInsertShapeTriangle.setOnClickListener {
+            insertShape(com.notesprout.android.data.ShapeType.TRIANGLE)
+        }
+        binding.btnInsertShapeDiamond.setOnClickListener {
+            insertShape(com.notesprout.android.data.ShapeType.DIAMOND)
+        }
+        binding.btnInsertShapeTrapezoid.setOnClickListener {
+            insertShape(com.notesprout.android.data.ShapeType.TRAPEZOID)
+        }
+        binding.btnInsertShapePentagon.setOnClickListener {
+            insertShape(com.notesprout.android.data.ShapeType.PENTAGON)
+        }
+        binding.btnInsertShapeHexagon.setOnClickListener {
+            insertShape(com.notesprout.android.data.ShapeType.HEXAGON)
+        }
+        binding.btnInsertShapeStar.setOnClickListener {
+            insertShape(com.notesprout.android.data.ShapeType.STAR)
+        }
+        binding.btnInsertShapeArch.setOnClickListener {
+            insertShape(com.notesprout.android.data.ShapeType.ARCH)
+        }
+        binding.btnInsertShapeLine.setOnClickListener {
+            insertShape(com.notesprout.android.data.ShapeType.LINE)
+        }
+        binding.btnInsertShapeArrow.setOnClickListener {
+            insertShape(com.notesprout.android.data.ShapeType.ARROW)
         }
 
         binding.btnLasso.setOnClickListener {
@@ -1365,8 +1413,9 @@ class NotebookActivity : AppCompatActivity() {
 
         // Lasso gesture complete — auto-close the path and run hit test off main thread.
         drawingView.onLassoComplete = { drawnPath, startPoint ->
-            // Dismiss popup whenever a lasso gesture completes.
+            // Dismiss popups whenever a lasso gesture completes.
             hideLassoPopupToolbar()
+            hideShapeInsertToolbar()
 
             // Auto-close: straight line from end back to start, then close polygon.
             drawnPath.lineTo(startPoint.x, startPoint.y)
@@ -2111,7 +2160,8 @@ class NotebookActivity : AppCompatActivity() {
             // by height (e.g. rotation). Either edge moving can change the available main-axis extent.
             val sizeChanged = (right - left) != (oldRight - oldLeft) || (bottom - top) != (oldBottom - oldTop)
             if (sizeChanged) {
-                closeOverflowMenu() // restore exclusion zone if menu was open
+                closeOverflowMenu()     // restore exclusion zone if menu was open
+                hideShapeInsertToolbar() // position would be stale after layout change
                 // Defer the reparenting recalc out of this layout traversal — see recalcOverflowAfterLayout.
                 recalcOverflowAfterLayout()
             }
@@ -2315,8 +2365,15 @@ class NotebookActivity : AppCompatActivity() {
             && (event.actionMasked == MotionEvent.ACTION_UP
                 || event.actionMasked == MotionEvent.ACTION_CANCEL)) {
             overflowCloseOnUp = false
-            val result = super.dispatchTouchEvent(event) // button gets UP → click fires
-            closeOverflowMenu()                          // then hide the menu + restore EPD zone
+            // Capture the flag before dispatching — the click is posted asynchronously
+            // (View.post(mPerformClick)), so checking visibility *after* super returns would
+            // always see the old state and incorrectly close the overflow.
+            val keepOpen = overflowKeepOpenForShapePicker
+            overflowKeepOpenForShapePicker = false
+            val result = super.dispatchTouchEvent(event) // button gets UP → click fires (async)
+            if (!keepOpen) {
+                closeOverflowMenu()                      // hide the menu + restore EPD zone
+            }
             return result
         }
 
@@ -2327,10 +2384,14 @@ class NotebookActivity : AppCompatActivity() {
                 val m = binding.overflowMenu
                 event.x >= m.left && event.x < m.right && event.y >= m.top && event.y < m.bottom
             }
+            val inShapeInsertToolbar = binding.shapeInsertToolbar.visibility == View.VISIBLE
+                && isTouchInView(event, binding.shapeInsertToolbar)
 
-            // Release the EPD writing overlay on any finger touch within the toolbar or
-            // overflow menu so button state changes are visible immediately on e-ink.
-            if (isFinger && (inToolbar || inOverflowMenu)) {
+            // Release the EPD writing overlay on any touch within the toolbar, overflow menu,
+            // or shape insert toolbar so button state changes are visible immediately on e-ink.
+            // Shape insert toolbar releases for both finger and stylus — it's a UI surface, not
+            // a drawing surface, so we always want to flush the current EPD frame on entry.
+            if ((isFinger && (inToolbar || inOverflowMenu)) || inShapeInsertToolbar) {
                 drawingView.releaseRender()
             }
 
@@ -2344,14 +2405,26 @@ class NotebookActivity : AppCompatActivity() {
                         // Tapped an overflow button — defer close until ACTION_UP so the
                         // click listener fires before the menu is hidden.
                         overflowCloseOnUp = true
+                        // If the tapped button is the shape picker, flag that the overflow
+                        // must stay open so all three toolbars remain on screen together.
+                        if (isTouchInView(event, binding.btnInsertShape)) {
+                            overflowKeepOpenForShapePicker = true
+                        }
                     }
                     inToolbar -> {
                         // Tapped a regular toolbar button — close immediately (no click timing issue).
                         closeOverflowMenu()
                     }
+                    inShapeInsertToolbar -> {
+                        // Tapped inside the shape insert toolbar while overflow is open — keep
+                        // the overflow visible so all three toolbars stay on screen together.
+                        // The shape insert toolbar's own dismiss logic handles its lifecycle.
+                    }
                     else -> {
                         // Outside toolbar and overflow — dismiss-only.
                         closeOverflowMenu()
+                        // Shape insert toolbar closes too when the overflow is dismissed from outside.
+                        hideShapeInsertToolbar()
                         // Consume finger taps to avoid accidental canvas interaction; let
                         // stylus events through so a drawing stroke can start immediately.
                         if (isFinger) return true
@@ -2383,6 +2456,26 @@ class NotebookActivity : AppCompatActivity() {
                 hideLassoPopupToolbar()
             }
         }
+
+        // Dismiss the shape insert toolbar when touching outside it, unless the touch is on
+        // btnInsertShape itself (its click listener handles the toggle).  Any other toolbar
+        // button, overflow button, or canvas tap should close the picker.
+        if (event.actionMasked == MotionEvent.ACTION_DOWN
+            && binding.shapeInsertToolbar.visibility == View.VISIBLE) {
+            val loc = IntArray(2)
+            binding.shapeInsertToolbar.getLocationOnScreen(loc)
+            val shapeToolbarRect = Rect(
+                loc[0], loc[1],
+                loc[0] + binding.shapeInsertToolbar.width,
+                loc[1] + binding.shapeInsertToolbar.height,
+            )
+            val inShapeToolbar = shapeToolbarRect.contains(event.rawX.toInt(), event.rawY.toInt())
+            val inBtnInsertShape = isTouchInView(event, binding.btnInsertShape)
+            if (!inShapeToolbar && !inBtnInsertShape) {
+                hideShapeInsertToolbar()
+            }
+        }
+
         return super.dispatchTouchEvent(event)
     }
 
@@ -2429,6 +2522,8 @@ class NotebookActivity : AppCompatActivity() {
      * overflow state. The toolbar and drawing view share the root FrameLayout's origin, so the
      * toolbar's bounds *are* the rect. An open overflow menu extends the rect away from the anchored
      * edge (down for a top bar, up for a bottom bar, right for a left bar, left for a right bar).
+     * When the shape insert toolbar is visible its bounds are also unioned in so the BOOX pen driver
+     * does not capture stylus taps on its buttons as drawing strokes.
      */
     private fun computeToolbarExclusionRect(): Rect {
         // Collapsed: the bar is hidden, so nothing is excluded — the whole canvas is writable.
@@ -2436,7 +2531,7 @@ class NotebookActivity : AppCompatActivity() {
         val tb = binding.drawingToolbar
         val ext =
             if (overflowManager.isOverflowMenuOpen()) overflowManager.expectedOverflowMenuExtent() else 0
-        return when (toolbarConfig.placement) {
+        val base = when (toolbarConfig.placement) {
             ToolbarPlacement.BOTTOM -> Rect(tb.left, tb.top - ext, tb.right, tb.bottom)
             ToolbarPlacement.LEFT   -> Rect(tb.left, tb.top, tb.right + ext, tb.bottom)
             ToolbarPlacement.RIGHT  -> Rect(tb.left - ext, tb.top, tb.right, tb.bottom)
@@ -2454,6 +2549,17 @@ class NotebookActivity : AppCompatActivity() {
             }
             else                    -> Rect(tb.left, tb.top, tb.right, tb.bottom + ext) // TOP
         }
+        // Extend to cover the shape insert toolbar when it is visible and fully laid out.
+        val sit = binding.shapeInsertToolbar
+        if (sit.visibility == View.VISIBLE && sit.width > 0 && sit.height > 0) {
+            base.union(
+                sit.x.toInt(),
+                sit.y.toInt(),
+                (sit.x + sit.width).toInt(),
+                (sit.y + sit.height).toInt(),
+            )
+        }
+        return base
     }
 
     /** Push the current toolbar exclusion rect to the drawing view (BOOX pen layer). */
@@ -7468,6 +7574,151 @@ class NotebookActivity : AppCompatActivity() {
         binding.lassoPopupToolbar.visibility = View.GONE
     }
 
+    private fun showShapeInsertToolbar() {
+        val btnLoc  = IntArray(2).also { binding.btnInsertShape.getLocationOnScreen(it) }
+        val rootLoc = IntArray(2).also { binding.root.getLocationOnScreen(it) }
+        val left = (btnLoc[0] - rootLoc[0]).toFloat()
+        val top  = (btnLoc[1] - rootLoc[1]).toFloat()
+        val btn = RectF(left, top, left + binding.btnInsertShape.width, top + binding.btnInsertShape.height)
+        val dpGap = 8f * resources.displayMetrics.density
+        binding.shapeInsertToolbar.visibility = View.VISIBLE
+        binding.btnInsertShape.isSelected = true
+        binding.shapeInsertToolbar.post {
+            val w = binding.shapeInsertToolbar.measuredWidth.toFloat()
+            val h = binding.shapeInsertToolbar.measuredHeight.toFloat()
+            val screenW = binding.root.width.toFloat()
+            val screenH = binding.root.height.toFloat()
+            val (px, py) = when (toolbarConfig.placement) {
+                ToolbarPlacement.LEFT ->
+                    (btn.right + dpGap) to (btn.centerY() - h / 2f)
+                ToolbarPlacement.RIGHT ->
+                    (btn.left - dpGap - w) to (btn.centerY() - h / 2f)
+                ToolbarPlacement.BOTTOM ->
+                    (btn.centerX() - w / 2f) to (btn.top - dpGap - h)
+                else ->
+                    (btn.centerX() - w / 2f) to (btn.bottom + dpGap)
+            }
+            binding.shapeInsertToolbar.x = px.coerceIn(0f, (screenW - w).coerceAtLeast(0f))
+            binding.shapeInsertToolbar.y = py.coerceIn(0f, (screenH - h).coerceAtLeast(0f))
+            // Update the BOOX pen exclusion zone now that the toolbar is positioned and measured.
+            pushToolbarExclusion()
+        }
+    }
+
+    private fun hideShapeInsertToolbar() {
+        binding.shapeInsertToolbar.visibility = View.GONE
+        binding.btnInsertShape.isSelected = false
+        // Restore the pen exclusion zone to the toolbar only (no longer need to cover the popup).
+        pushToolbarExclusion()
+    }
+
+    private fun insertShape(type: com.notesprout.android.data.ShapeType) {
+        hideShapeInsertToolbar()
+        closeOverflowMenu()
+        val db      = soilDatabase ?: return
+        val layerId = currentLayerId.takeIf { it.isNotEmpty() } ?: return
+        val pageId  = currentPageId.takeIf  { it.isNotEmpty() } ?: return
+        val pageW   = drawingView.asView().width.takeIf  { it > 0 } ?: return
+        val pageH   = drawingView.asView().height.takeIf { it > 0 } ?: return
+        val density = resources.displayMetrics.density
+
+        lifecycleScope.launch {
+            val isOpenShape = type == com.notesprout.android.data.ShapeType.LINE
+                || type == com.notesprout.android.data.ShapeType.ARROW
+                || type == com.notesprout.android.data.ShapeType.ARCH
+
+            val width: Float
+            val height: Float
+            val aspectLocked: Boolean
+
+            if (isOpenShape) {
+                val openWidth = pageW * 0.5f
+                width = openWidth
+                height = when (type) {
+                    com.notesprout.android.data.ShapeType.ARCH -> openWidth * 0.5f
+                    else -> 1f
+                }
+                aspectLocked = false
+            } else {
+                val closedSize = STICKY_NOTE_ICON_SIZE_DP * density
+                width = closedSize
+                height = closedSize
+                aspectLocked = type == com.notesprout.android.data.ShapeType.ELLIPSE
+                    || type == com.notesprout.android.data.ShapeType.RECTANGLE
+                    || type == com.notesprout.android.data.ShapeType.STAR
+            }
+
+            val cx = pageW / 2f
+            val cy = pageH / 2f
+
+            val shapeObj = com.notesprout.android.data.ShapeObject(
+                type          = type,
+                centerX       = cx,
+                centerY       = cy,
+                width         = width,
+                height        = height,
+                rotationDeg   = 0f,
+                strokeWidthDp = 2f,
+                aspectLocked  = aspectLocked,
+                pointCount    = 5,
+            )
+            val shapeId     = UUID.randomUUID().toString()
+            val now         = System.currentTimeMillis()
+            val shapeRender = com.notesprout.android.data.ShapeRender.from(shapeId, shapeObj, density)
+
+            withContext(Dispatchers.IO) {
+                db.notebookDao().insertObject(
+                    com.notesprout.android.data.NotebookObject(
+                        id          = shapeId,
+                        parentId    = layerId,
+                        type        = com.notesprout.android.data.TYPE_SHAPE,
+                        boundingBox = shapeRender.boundingBox.toBoundingBoxJson(),
+                        sortOrder   = 0,
+                        createdAt   = now,
+                        updatedAt   = now,
+                        deletedAt   = null,
+                        data        = shapeObj.toJson(),
+                    )
+                )
+                invalidatePageSnapshot(db, pageId)
+            }
+
+            val updatedShapes = drawingView.getShapeObjects() + shapeRender
+            drawingView.loadShapeObjects(updatedShapes)
+
+            val templateBmp     = currentTemplateBitmap
+            val currentStrokes  = drawingView.getStrokes()
+            val currentHeadings = drawingView.getHeadings()
+            val currentTexts    = drawingView.getTextObjects()
+            val currentLines    = drawingView.getLineObjects()
+            val bitmap = withContext(Dispatchers.IO) {
+                drawingView.buildRenderBitmap(currentStrokes, templateBmp, currentHeadings, currentTexts, currentLines, shapeObjects = updatedShapes)
+            }
+            if (bitmap != null) {
+                drawingView.loadStrokesWithBitmap(currentStrokes, bitmap, templateBmp)
+            } else {
+                drawingView.loadStrokes(currentStrokes)
+            }
+
+            undoRedoManager.push(UndoRedoAction.ShapeInserted(
+                shapeId = shapeId,
+                pageId  = pageId,
+                layerId = layerId,
+                shape   = shapeRender,
+            ))
+            updateUndoRedoButtons()
+
+            if (!isLassoMode) enterLassoMode()
+            isSmartLassoSession = true
+            val pad = 8f * density
+            val selBox = RectF(shapeRender.boundingBox).apply { inset(-pad, -pad) }
+            drawingView.setLassoSelectedIds(setOf(shapeId), selBox)
+            selectedObjectIds.clear()
+            selectedObjectIds.add(shapeId)
+            updateFloatingSelectionToolbar(selBox)
+        }
+    }
+
     // ── Lasso mode helpers ────────────────────────────────────────────────────
 
     private fun enterLassoMode() {
@@ -8121,6 +8372,7 @@ class NotebookActivity : AppCompatActivity() {
             is UndoRedoAction.LinkEdited          -> action.pageId
             is UndoRedoAction.StickyNoteInserted       -> action.pageId
             is UndoRedoAction.StickyNoteContentEdited  -> action.pageId
+            is UndoRedoAction.ShapeInserted            -> action.pageId
             else                                       -> null
         }
         val isCrossPage = targetPageId != null && targetPageId != currentPageId
@@ -10212,6 +10464,15 @@ class NotebookActivity : AppCompatActivity() {
                 dao.updateData(action.noteId, target.toStickyNoteObject(density).toJson(), now)
                 invalidatePageSnapshot(db, action.pageId)
             }
+
+            is UndoRedoAction.ShapeInserted -> withContext(Dispatchers.IO) {
+                if (isUndo) {
+                    dao.softDeleteById(action.shapeId, now)
+                } else {
+                    dao.restoreById(action.shapeId, now)
+                }
+                invalidatePageSnapshot(db, action.pageId)
+            }
         }
     }
 
@@ -11219,6 +11480,48 @@ class NotebookActivity : AppCompatActivity() {
                 drawingView.lassoSelectedIds = emptySet()
                 drawingView.setLassoOverlay(null, null)
                 hideFloatingSelectionToolbar()
+            }
+            updatePageIndicator()
+            saveLastOpenedPage(currentPageId)
+            return true
+        }
+
+        // ── Step 3a-shape-inserted: Same-page ShapeInserted — in-memory update ─
+        if (action is UndoRedoAction.ShapeInserted) {
+            val updatedShapes: List<com.notesprout.android.data.ShapeRender>
+            if (isUndo) {
+                updatedShapes = drawingView.getShapeObjects().filter { it.id != action.shapeId }
+            } else {
+                updatedShapes = drawingView.getShapeObjects() + action.shape
+            }
+            drawingView.loadShapeObjects(updatedShapes)
+            val templateBmp     = currentTemplateBitmap
+            val currentStrokes  = drawingView.getStrokes()
+            val currentHeadings = drawingView.getHeadings()
+            val currentTexts    = drawingView.getTextObjects()
+            val currentLines    = drawingView.getLineObjects()
+            val bitmap = withContext(Dispatchers.IO) {
+                drawingView.buildRenderBitmap(currentStrokes, templateBmp, currentHeadings, currentTexts, currentLines, shapeObjects = updatedShapes)
+            }
+            if (bitmap != null) {
+                drawingView.loadStrokesWithBitmap(currentStrokes, bitmap, templateBmp)
+            } else {
+                drawingView.loadStrokes(currentStrokes)
+            }
+            if (isUndo) {
+                selectedObjectIds.clear()
+                drawingView.lassoSelectedIds = emptySet()
+                drawingView.setLassoOverlay(null, null)
+                hideFloatingSelectionToolbar()
+            } else {
+                if (!isLassoMode) enterLassoMode()
+                selectedObjectIds.clear()
+                selectedObjectIds.add(action.shapeId)
+                drawingView.lassoSelectedIds = selectedObjectIds.toSet()
+                val pad = 8f * resources.displayMetrics.density
+                val selBox = RectF(action.shape.boundingBox).apply { inset(-pad, -pad) }
+                drawingView.setLassoOverlay(null, selBox)
+                updateFloatingSelectionToolbar(selBox)
             }
             updatePageIndicator()
             saveLastOpenedPage(currentPageId)

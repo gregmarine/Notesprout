@@ -731,4 +731,18 @@ sealed class UndoRedoAction {
         val newChrome: LinkChrome,
         val newTarget: LinkTarget,
     ) : UndoRedoAction()
+
+    /**
+     * User inserted a shape object directly via the toolbar shape picker (no original stroke).
+     *
+     * Undo: soft-delete the shape row; clear the in-memory selection.
+     * Redo: restore the shape row; re-add it to the in-memory list and re-select it.
+     */
+    @Serializable
+    data class ShapeInserted(
+        val shapeId: String,
+        val pageId: String,
+        val layerId: String,
+        val shape: ShapeRender,
+    ) : UndoRedoAction()
 }

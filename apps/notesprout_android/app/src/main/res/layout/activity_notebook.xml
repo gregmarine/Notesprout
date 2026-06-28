@@ -151,6 +151,14 @@
             android:src="@drawable/ic_sticker_2"
             android:contentDescription="Insert sticky note" />
 
+        <!-- Insert shape — opens shapeInsertToolbar secondary popup -->
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnInsertShape"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:layout_marginStart="4dp"
+            android:src="@drawable/ic_convert_shape"
+            android:contentDescription="Insert shape" />
+
         <!-- Lasso selection tool -->
         <androidx.appcompat.widget.AppCompatImageButton
             android:id="@+id/btnLasso"
@@ -555,6 +563,101 @@
             style="@style/Widget.Notesprout.ToggleTextButton"
             android:text="Done"
             android:contentDescription="Finish shape transform" />
+
+    </LinearLayout>
+
+    <!-- Shape insert secondary toolbar — appears anchored to btnInsertShape.
+         One button per shape type, in a single horizontal row. -->
+    <LinearLayout
+        android:id="@+id/shapeInsertToolbar"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:visibility="gone"
+        android:background="@drawable/shape_bordered"
+        android:padding="4dp"
+        android:elevation="0dp">
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnInsertShapeRectangle"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:src="@drawable/ic_shape_rectangle"
+            android:contentDescription="Insert Rectangle" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnInsertShapeEllipse"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:layout_marginStart="4dp"
+            android:src="@drawable/ic_shape_ellipse"
+            android:contentDescription="Insert Ellipse" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnInsertShapeTriangle"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:layout_marginStart="4dp"
+            android:src="@drawable/ic_shape_triangle"
+            android:contentDescription="Insert Triangle" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnInsertShapeDiamond"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:layout_marginStart="4dp"
+            android:src="@drawable/ic_shape_diamond"
+            android:contentDescription="Insert Diamond" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnInsertShapeTrapezoid"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:layout_marginStart="4dp"
+            android:src="@drawable/ic_shape_trapezoid"
+            android:contentDescription="Insert Trapezoid" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnInsertShapePentagon"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:layout_marginStart="4dp"
+            android:src="@drawable/ic_shape_pentagon"
+            android:contentDescription="Insert Pentagon" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnInsertShapeHexagon"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:layout_marginStart="4dp"
+            android:src="@drawable/ic_shape_hexagon"
+            android:contentDescription="Insert Hexagon" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnInsertShapeStar"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:layout_marginStart="4dp"
+            android:src="@drawable/ic_shape_star"
+            android:contentDescription="Insert Star" />
+
+        <View
+            android:layout_width="1dp"
+            android:layout_height="28dp"
+            android:layout_marginHorizontal="2dp"
+            android:background="@color/inkBlack" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnInsertShapeArch"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:src="@drawable/ic_shape_arch"
+            android:contentDescription="Insert Arch" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnInsertShapeLine"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:layout_marginStart="4dp"
+            android:src="@drawable/ic_shape_line"
+            android:contentDescription="Insert Line" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnInsertShapeArrow"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:layout_marginStart="4dp"
+            android:src="@drawable/ic_shape_arrow"
+            android:contentDescription="Insert Arrow" />
 
     </LinearLayout>
 
