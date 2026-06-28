@@ -205,6 +205,7 @@ class NotebookActivity : AppCompatActivity() {
     // ── Lasso selection state ─────────────────────────────────────────────────
     private var isLassoMode = false
     private var isLassoEraserMode = false
+    private var isShapeTransformMode = false
     /** True when lasso mode was entered via a smart-lasso gesture (not by tapping the lasso button).
      *  Dismissing the selection exits lasso mode and returns to pen mode instead of staying in lasso. */
     private var isSmartLassoSession = false
@@ -964,6 +965,7 @@ class NotebookActivity : AppCompatActivity() {
         // Pen tool button — activates pen mode (default)
         binding.btnPen.setOnClickListener {
             hideLassoPopupToolbar()
+            if (isShapeTransformMode) exitShapeTransformMode()
             if (isLassoMode) exitLassoMode()
             if (isLassoEraserMode) exitLassoEraserMode()
             if (isEraserActive) {
@@ -979,6 +981,7 @@ class NotebookActivity : AppCompatActivity() {
 
         binding.btnEraser.setOnClickListener {
             hideLassoPopupToolbar()
+            if (isShapeTransformMode) exitShapeTransformMode()
             if (isLassoMode) exitLassoMode()
             if (isLassoEraserMode) exitLassoEraserMode()
             isEraserActive = !isEraserActive
@@ -1484,7 +1487,16 @@ class NotebookActivity : AppCompatActivity() {
 
         // Stylus tap in lasso mode — trigger paste if clipboard has content and no selection.
         drawingView.onLassoTap = tap@{ tapX, tapY ->
-            // Heading text edit tap — checked first, before paste or dismiss logic.
+            // Shape tap-to-transform: single shape selected, tap inside its bbox.
+            if (selectedObjectIds.size == 1) {
+                val selId = selectedObjectIds.first()
+                val selShape = drawingView.getShapeObjects().find { it.id == selId }
+                if (selShape != null && selShape.boundingBox.contains(tapX, tapY)) {
+                    enterShapeTransformMode(selShape)
+                    return@tap
+                }
+            }
+            // Heading text edit tap — checked after shape, before paste or dismiss logic.
             if (selectedObjectIds.size == 1) {
                 val selectedId = selectedObjectIds.first()
                 val selectedHeading = drawingView.getHeadings().find {
@@ -1701,6 +1713,32 @@ class NotebookActivity : AppCompatActivity() {
         // handles the DB insert, undo action, and bitmap rebuild.
         drawingView.onShapeRecognized = { stroke, result ->
             lifecycleScope.launch(Dispatchers.IO) { convertStrokeToShape(stroke, result) }
+        }
+
+        // Shape transform committed — persist geometry change and push undo action.
+        drawingView.onShapeTransformed = { before, after ->
+            lifecycleScope.launch(Dispatchers.IO) { persistShapeTransform(before, after) }
+        }
+
+        // Tap outside the shape transform overlay — commit and clear selection.
+        drawingView.onShapeTransformTapOutside = {
+            exitShapeTransformMode(clearSelection = true)
+        }
+
+        // Shape drag/resize started — hide the transform toolbar (mirrors regular lasso drag).
+        drawingView.onShapeTransformDragStarted = {
+            binding.shapeTransformToolbar.visibility = View.GONE
+        }
+
+        // Shape moved/resized — update the lasso overlay to the new position and restore toolbar.
+        drawingView.onShapeTransformMoved = { newBbox ->
+            val pad = 8f * resources.displayMetrics.density
+            val selBox = RectF(newBbox).apply { inset(-pad, -pad) }
+            drawingView.setLassoOverlay(null, selBox)
+            binding.shapeTransformToolbar.visibility = View.VISIBLE
+            binding.shapeTransformToolbar.post {
+                positionPopover(binding.shapeTransformToolbar, newBbox)
+            }
         }
 
         // Lasso move gesture complete — persist translated coordinates and push undo action.
@@ -1977,6 +2015,15 @@ class NotebookActivity : AppCompatActivity() {
             clearClipboard()
             updateLassoButtonIcon()
             hideLassoPopupToolbar()
+        }
+
+        // Shape transform toolbar buttons.
+        binding.btnShapeAspectLock.setOnClickListener {
+            val updated = drawingView.toggleShapeAspectLock() ?: return@setOnClickListener
+            updateShapeTransformToggle(updated)
+        }
+        binding.btnShapeTransformDone.setOnClickListener {
+            exitShapeTransformMode(clearSelection = false)
         }
 
         // Compute the lasso popup anchor point once the toolbar has been laid out.
@@ -6105,12 +6152,77 @@ class NotebookActivity : AppCompatActivity() {
             }
 
             if (!isLassoMode) enterLassoMode()
+            // Shape created from pen → treat as a smart session so tap-outside returns to pen.
+            isSmartLassoSession = true
             val pad = 8f * density
             val selBox = RectF(shapeRender.boundingBox).apply { inset(-pad, -pad) }
             drawingView.setLassoSelectedIds(setOf(shapeId), selBox)
             selectedObjectIds.clear()
             selectedObjectIds.add(shapeId)
             updateFloatingSelectionToolbar(selBox)
+        }
+    }
+
+    /**
+     * Persist a shape transform (resize/rotate/aspect toggle) and push the undo action.
+     * Called on [Dispatchers.IO] via the [drawingView.onShapeTransformed] callback.
+     */
+    private suspend fun persistShapeTransform(
+        before: com.notesprout.android.data.ShapeRender,
+        after: com.notesprout.android.data.ShapeRender,
+    ) {
+        val db     = soilDatabase ?: return
+        val pageId = currentPageId.takeIf { it.isNotEmpty() } ?: return
+        val now    = System.currentTimeMillis()
+        val density = resources.displayMetrics.density
+
+        if (before.centerX == after.centerX && before.centerY == after.centerY &&
+            before.width == after.width && before.height == after.height &&
+            before.rotationDeg == after.rotationDeg && before.aspectLocked == after.aspectLocked
+        ) return  // No change — nothing to persist.
+
+        val bboxJson = after.boundingBox.toBoundingBoxJson()
+        val dataJson = after.toShapeObject(density).toJson()
+        db.withTransaction {
+            db.notebookDao().updateHeadingData(after.id, bboxJson, dataJson, now)
+        }
+        invalidatePageSnapshot(db, pageId)
+
+        withContext(Dispatchers.Main) {
+            undoRedoManager.push(UndoRedoAction.ShapeTransformed(
+                shapeId = after.id,
+                pageId  = pageId,
+                before  = before,
+                after   = after,
+            ))
+            updateUndoRedoButtons()
+
+            // Rebuild bitmap so the shape renders at its new geometry.
+            val updatedShapes = drawingView.getShapeObjects().map { if (it.id == after.id) after else it }
+            drawingView.loadShapeObjects(updatedShapes)
+            val templateBmp     = currentTemplateBitmap
+            val currentStrokes  = drawingView.getStrokes()
+            val currentHeadings = drawingView.getHeadings()
+            val currentTexts    = drawingView.getTextObjects()
+            val currentLines    = drawingView.getLineObjects()
+            val bitmap = withContext(Dispatchers.IO) {
+                drawingView.buildRenderBitmap(currentStrokes, templateBmp, currentHeadings, currentTexts, currentLines, shapeObjects = updatedShapes)
+            }
+            if (bitmap != null) {
+                drawingView.loadStrokesWithBitmap(currentStrokes, bitmap, templateBmp)
+            } else {
+                drawingView.loadStrokes(currentStrokes)
+            }
+
+            // Re-show floating selection toolbar at the shape's new bounds if still in lasso mode.
+            if (isLassoMode && after.id in selectedObjectIds) {
+                val pad = 8f * density
+                val selBox = RectF(after.boundingBox).apply { inset(-pad, -pad) }
+                drawingView.setLassoOverlay(null, selBox)
+                updateFloatingSelectionToolbar(selBox)
+            }
+            updatePageIndicator()
+            saveLastOpenedPage(currentPageId)
         }
     }
 
@@ -7210,6 +7322,7 @@ class NotebookActivity : AppCompatActivity() {
         binding.btnLasso.isSelected = false
         hideFloatingSelectionToolbar()
         hideLassoPopupToolbar()
+        hideShapeTransformToolbar()
     }
 
     private fun enterLassoEraserMode() {
@@ -7230,6 +7343,85 @@ class NotebookActivity : AppCompatActivity() {
         isLassoEraserMode = false
         drawingView.setLassoEraserMode(false)
         binding.btnLassoEraser.isSelected = false
+    }
+
+    // ── Shape transform mode helpers ──────────────────────────────────────────
+
+    private fun enterShapeTransformMode(shape: com.notesprout.android.data.ShapeRender) {
+        isShapeTransformMode = true
+        // Clear the lasso selection overlay — the transform controller draws its own
+        // oriented bounding box and handles on top of the bitmap.
+        drawingView.setLassoOverlay(null, null)
+        drawingView.enterShapeTransform(shape)
+        hideFloatingSelectionToolbar()
+        showShapeTransformToolbar(shape.boundingBox)
+        // Async rebuild bitmap without the transforming shape so the original doesn't ghost
+        // behind the moving handles.
+        val shapesExcluded = drawingView.getShapeObjects().filter { it.id != shape.id }
+        val templateBmp = currentTemplateBitmap
+        val strokes = drawingView.getStrokes()
+        val headings = drawingView.getHeadings()
+        val texts = drawingView.getTextObjects()
+        val lines = drawingView.getLineObjects()
+        lifecycleScope.launch {
+            val bitmap = withContext(Dispatchers.IO) {
+                drawingView.buildRenderBitmap(strokes, templateBmp, headings, texts, lines,
+                    shapeObjects = shapesExcluded)
+            }
+            if (bitmap != null && isShapeTransformMode) {
+                drawingView.loadStrokesWithBitmap(strokes, bitmap, templateBmp)
+            }
+        }
+    }
+
+    private fun exitShapeTransformMode(clearSelection: Boolean = false) {
+        val finalRender = drawingView.getShapeTransformWorkingRender()
+        isShapeTransformMode = false
+        // exitShapeTransform fires onShapeTransformed → persistShapeTransform
+        drawingView.exitShapeTransform()
+        hideShapeTransformToolbar()
+        if (clearSelection || finalRender == null) {
+            // Tap outside — clear selection and mirror the normal lasso tap-to-dismiss behavior.
+            selectedObjectIds.clear()
+            drawingView.lassoSelectedIds = emptySet()
+            drawingView.setLassoOverlay(null, null)
+            hideFloatingSelectionToolbar()
+            if (isSmartLassoSession) {
+                exitLassoMode()
+                drawingView.enableDrawing()
+                binding.btnPen.isSelected = true
+            }
+        } else {
+            // Done — keep the shape selected at its new bounding box.
+            val pad = 8f * resources.displayMetrics.density
+            val selBox = RectF(finalRender.boundingBox).apply { inset(-pad, -pad) }
+            drawingView.setLassoOverlay(null, selBox)
+            updateFloatingSelectionToolbar(selBox)
+        }
+    }
+
+    private fun showShapeTransformToolbar(selBox: android.graphics.RectF) {
+        binding.shapeTransformToolbar.visibility = android.view.View.VISIBLE
+        binding.shapeTransformToolbar.post {
+            positionPopover(binding.shapeTransformToolbar, selBox)
+        }
+        val working = drawingView.getShapeTransformWorkingRender()
+        if (working != null) updateShapeTransformToggle(working)
+    }
+
+    private fun hideShapeTransformToolbar() {
+        binding.shapeTransformToolbar.visibility = android.view.View.GONE
+    }
+
+    private fun updateShapeTransformToggle(shape: com.notesprout.android.data.ShapeRender) {
+        val isLocked = shape.aspectLocked
+        val label = if (shape.type == com.notesprout.android.data.ShapeType.ELLIPSE) {
+            if (isLocked) "Circle" else "Oval"
+        } else {
+            if (isLocked) "Locked" else "Lock ratio"
+        }
+        binding.btnShapeAspectLock.text = label
+        binding.btnShapeAspectLock.isSelected = isLocked
     }
 
     // ── Text placement mode helpers ───────────────────────────────────────────
@@ -7727,7 +7919,8 @@ class NotebookActivity : AppCompatActivity() {
             is UndoRedoAction.TextEdited       -> action.pageId
             is UndoRedoAction.TextRemoved      -> action.pageId
             is UndoRedoAction.TextConverted    -> action.pageId
-            is UndoRedoAction.ShapeCreated     -> action.pageId
+            is UndoRedoAction.ShapeCreated      -> action.pageId
+            is UndoRedoAction.ShapeTransformed  -> action.pageId
             is UndoRedoAction.ScribbleErased   -> action.pageId
             is UndoRedoAction.LinesInserted    -> action.pageId
             is UndoRedoAction.LinesRemoved     -> action.pageId
@@ -9141,6 +9334,72 @@ class NotebookActivity : AppCompatActivity() {
             return true
         }
 
+        // ── Cross-page ShapeTransformed: navigate to the shape's page and apply geometry ──
+        if (action is UndoRedoAction.ShapeTransformed) {
+            val snapshot      = drawingView.captureSnapshot()
+            val leavingPageId = currentPageId
+            withContext(Dispatchers.IO) {
+                if (snapshot != null && leavingPageId.isNotEmpty()) {
+                    persistSnapshot(db, leavingPageId, snapshot)
+                }
+                saveStrokes(db)
+            }
+            currentPageIndex = pages.indexOfFirst { it.id == action.pageId }.coerceAtLeast(0)
+
+            val templateBmp: Bitmap?
+            val preUndoStrokes: List<LiveStroke>
+            val preUndoHeadings: List<HeadingStroke>
+            val preUndoTexts: List<TextRender>
+            val preUndoShapes: List<com.notesprout.android.data.ShapeRender>
+            withContext(Dispatchers.IO) {
+                setupPageIds(db)
+                templateBmp     = loadPageTemplateFromDb(db)
+                preUndoStrokes  = deserializeStrokesFromDb(db)
+                preUndoHeadings = loadHeadingsFromDb(db, currentLayerId)
+                preUndoTexts    = loadTextObjectsFromDb(db, currentLayerId)
+                preUndoShapes   = loadShapeObjectsFromDb(db, currentLayerId)
+            }
+            drawingView.loadHeadings(preUndoHeadings)
+            drawingView.loadTextObjects(preUndoTexts)
+            drawingView.loadShapeObjects(preUndoShapes)
+            val preUndobitmap = withContext(Dispatchers.IO) {
+                drawingView.buildRenderBitmap(preUndoStrokes, templateBmp, preUndoHeadings, preUndoTexts, shapeObjects = preUndoShapes)
+            }
+            if (preUndobitmap != null) {
+                drawingView.loadStrokesWithBitmap(preUndoStrokes, preUndobitmap, templateBmp)
+            } else {
+                drawingView.loadStrokes(preUndoStrokes)
+            }
+            currentTemplateBitmap = templateBmp
+            updatePageIndicator()
+            saveLastOpenedPage(currentPageId)
+
+            val density = resources.displayMetrics.density
+            val target = if (isUndo) action.before else action.after
+            withContext(Dispatchers.IO) {
+                db.notebookDao().updateHeadingData(
+                    target.id, target.boundingBox.toBoundingBoxJson(), target.toShapeObject(density).toJson(), now,
+                )
+                invalidatePageSnapshot(db, action.pageId)
+            }
+
+            val updatedShapes = preUndoShapes.map { if (it.id == target.id) target else it }
+            drawingView.loadShapeObjects(updatedShapes)
+            val bitmap = withContext(Dispatchers.IO) {
+                drawingView.buildRenderBitmap(preUndoStrokes, templateBmp, preUndoHeadings, preUndoTexts, shapeObjects = updatedShapes)
+            }
+            if (bitmap != null) {
+                drawingView.loadStrokesWithBitmap(preUndoStrokes, bitmap, templateBmp)
+            } else {
+                drawingView.loadStrokes(preUndoStrokes)
+            }
+            selectedObjectIds.clear()
+            drawingView.lassoSelectedIds = emptySet()
+            drawingView.setLassoOverlay(null, null)
+            hideFloatingSelectionToolbar()
+            return true
+        }
+
         return false
     }
 
@@ -9603,6 +9862,15 @@ class NotebookActivity : AppCompatActivity() {
                     dao.softDeleteById(action.originalStroke.id, now)
                     dao.restoreById(action.shapeId, now)
                 }
+                invalidatePageSnapshot(db, action.pageId)
+            }
+
+            is UndoRedoAction.ShapeTransformed -> withContext(Dispatchers.IO) {
+                val target  = if (isUndo) action.before else action.after
+                val density = resources.displayMetrics.density
+                dao.updateHeadingData(
+                    target.id, target.boundingBox.toBoundingBoxJson(), target.toShapeObject(density).toJson(), now,
+                )
                 invalidatePageSnapshot(db, action.pageId)
             }
 
@@ -10517,6 +10785,37 @@ class NotebookActivity : AppCompatActivity() {
                 drawingView.setLassoOverlay(null, selBox)
                 updateFloatingSelectionToolbar(selBox)
             }
+            updatePageIndicator()
+            saveLastOpenedPage(currentPageId)
+            return true
+        }
+
+        // ── Step 3a-shape-transformed: Same-page ShapeTransformed — in-memory update ─
+        if (action is UndoRedoAction.ShapeTransformed) {
+            val target = if (isUndo) action.before else action.after
+            val updatedShapes = drawingView.getShapeObjects().map { if (it.id == target.id) target else it }
+            drawingView.loadShapeObjects(updatedShapes)
+            val templateBmp     = currentTemplateBitmap
+            val currentStrokes  = drawingView.getStrokes()
+            val currentHeadings = drawingView.getHeadings()
+            val currentTexts    = drawingView.getTextObjects()
+            val currentLines    = drawingView.getLineObjects()
+            val bitmap = withContext(Dispatchers.IO) {
+                drawingView.buildRenderBitmap(currentStrokes, templateBmp, currentHeadings, currentTexts, currentLines, shapeObjects = updatedShapes)
+            }
+            if (bitmap != null) {
+                drawingView.loadStrokesWithBitmap(currentStrokes, bitmap, templateBmp)
+            } else {
+                drawingView.loadStrokes(currentStrokes)
+            }
+            if (!isLassoMode) enterLassoMode()
+            selectedObjectIds.clear()
+            selectedObjectIds.add(target.id)
+            drawingView.lassoSelectedIds = selectedObjectIds.toSet()
+            val pad = 8f * resources.displayMetrics.density
+            val selBox = RectF(target.boundingBox).apply { inset(-pad, -pad) }
+            drawingView.setLassoOverlay(null, selBox)
+            updateFloatingSelectionToolbar(selBox)
             updatePageIndicator()
             saveLastOpenedPage(currentPageId)
             return true

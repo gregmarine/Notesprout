@@ -672,6 +672,20 @@ sealed class UndoRedoAction {
     ) : UndoRedoAction()
 
     /**
+     * User transformed a shape (resize, rotate, or aspect toggle) via shape transform mode.
+     *
+     * Undo: write [before] geometry to the DB row (boundingBox + data); update in-memory list; rebuild bitmap.
+     * Redo: write [after] geometry to the DB row (boundingBox + data); update in-memory list; rebuild bitmap.
+     */
+    @Serializable
+    data class ShapeTransformed(
+        val shapeId: String,
+        val pageId: String,
+        val before: ShapeRender,
+        val after: ShapeRender,
+    ) : UndoRedoAction()
+
+    /**
      * User removed a link, dispersing its embedded held objects back onto the layer as their own
      * live rows (fresh UUIDs).
      *

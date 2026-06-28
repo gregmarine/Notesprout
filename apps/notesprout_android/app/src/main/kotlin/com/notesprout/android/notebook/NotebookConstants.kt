@@ -88,6 +88,23 @@ const val SCRIBBLE_BBOX_PENETRATION_DP = 14f
  */
 const val SCRIBBLE_STROKE_TOUCH_RADIUS_DP = 8f
 
+// ── Shape transform constants ─────────────────────────────────────────────────
+
+/** Visual size (dp) of each resize handle square. */
+const val SHAPE_HANDLE_SIZE_DP = 10f
+
+/** Touch hit radius (dp) for handle + rotate-knob hit tests. */
+const val SHAPE_HANDLE_TOUCH_DP = 22f
+
+/** Distance (dp) the rotate knob sits above the top-center resize handle. */
+const val SHAPE_ROTATE_OFFSET_DP = 36f
+
+/** Within this many degrees of 0/90/180/270 the rotation snaps to the axis. */
+const val SHAPE_ROTATE_SNAP_DEG = 5f
+
+/** Minimum width or height (dp) a shape can be resized to. */
+const val SHAPE_MIN_SIZE_DP = 24f
+
 // ── Shape dwell-trigger constants ────────────────────────────────────────────
 
 /** Minimum dwell time (ms) at pen lift to trigger shape recognition. */

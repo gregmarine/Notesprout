@@ -486,6 +486,74 @@ interface NotebookView {
         set(value) {}
 
     /**
+     * Enter shape transform mode for [render], displaying resize handles and a rotate knob.
+     * The Onyx EPD overlay is disabled (like lasso mode) so the handles render via Canvas.
+     * Touch events are routed to [ShapeTransformController] until [exitShapeTransform] is called.
+     * Must be called on the main thread.
+     */
+    fun enterShapeTransform(render: ShapeRender) {}
+
+    /**
+     * Commit the current working geometry and exit shape transform mode.
+     * Fires [onShapeTransformed] with the before and after [ShapeRender] snapshots,
+     * then restores the drawing mode (re-enables EPD on Onyx devices).
+     * Must be called on the main thread.
+     */
+    fun exitShapeTransform() {}
+
+    /**
+     * Fired on the main thread when shape transform mode commits (via [exitShapeTransform]
+     * or a tap-outside). The activity wires this to persist the new geometry to the DB
+     * and push a [UndoRedoAction.ShapeTransformed] action.
+     */
+    var onShapeTransformed: ((before: ShapeRender, after: ShapeRender) -> Unit)?
+        get() = null
+        @Suppress("UNUSED_PARAMETER")
+        set(value) {}
+
+    /**
+     * Fired on the main thread when a stylus tap in shape transform mode lands outside the
+     * controller's hit area (no handle / body hit). Fires AFTER [onShapeTransformed].
+     * The activity uses this to also clear the lasso selection and return to pen mode.
+     */
+    var onShapeTransformTapOutside: (() -> Unit)?
+        get() = null
+        @Suppress("UNUSED_PARAMETER")
+        set(value) {}
+
+    /**
+     * Fired on the main thread when a non-outside grab begins in shape transform mode
+     * (body drag or handle resize/rotate). The activity uses this to hide the toolbar
+     * during the interaction, mirroring regular lasso drag behaviour.
+     */
+    var onShapeTransformDragStarted: (() -> Unit)?
+        get() = null
+        @Suppress("UNUSED_PARAMETER")
+        set(value) {}
+
+    /**
+     * Fired on the main thread after each stylus-up in shape transform mode so the activity
+     * can reposition the transform toolbar to track the shape's new bounding box.
+     */
+    var onShapeTransformMoved: ((newBoundingBox: android.graphics.RectF) -> Unit)?
+        get() = null
+        @Suppress("UNUSED_PARAMETER")
+        set(value) {}
+
+    /**
+     * Toggle [ShapeRender.aspectLocked] on the currently transforming shape and return the updated
+     * render, or null if not in transform mode. Also snaps ELLIPSE w=h when locking.
+     * Must be called on the main thread; triggers a canvas redraw.
+     */
+    fun toggleShapeAspectLock(): ShapeRender? = null
+
+    /**
+     * Return the current working [ShapeRender] from the active transform session, or null
+     * if not in transform mode. Safe to call from the main thread.
+     */
+    fun getShapeTransformWorkingRender(): ShapeRender? = null
+
+    /**
      * Replace the in-memory stroke list with [strokes] loaded from the database,
      * then redraw the canvas bitmap immediately.
      * Must be called on the main thread (triggers invalidate).

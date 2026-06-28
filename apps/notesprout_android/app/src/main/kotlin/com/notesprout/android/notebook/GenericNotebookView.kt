@@ -127,6 +127,7 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
     private var lassoGestureStartPoint: PointF? = null
     private var lassoGesturePath: Path? = null
     private var lassoGestureHadSelection = false
+    private var lassoPreClearSelectionBox: RectF? = null
     private var lastLassoRefreshMs = 0L
 
     private var lassoEraserDisplayPath: Path? = null
@@ -192,6 +193,15 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
     override var onStickyNoteErased: ((StickyNoteRender) -> Unit)? = null
     override var onShapeErased: ((ShapeRender) -> Unit)? = null
     override var onShapeRecognized: ((LiveStroke, ShapeRecognizer.Result) -> Unit)? = null
+    override var onShapeTransformed: ((ShapeRender, ShapeRender) -> Unit)? = null
+    override var onShapeTransformTapOutside: (() -> Unit)? = null
+    override var onShapeTransformDragStarted: (() -> Unit)? = null
+    override var onShapeTransformMoved: ((android.graphics.RectF) -> Unit)? = null
+
+    // ── Shape transform mode ─────────────────────────────────────────────────
+    private var isShapeTransformMode = false
+    private var transformBeforeRender: ShapeRender? = null
+    private val transformController by lazy { ShapeTransformController(resources.displayMetrics.density) }
     override var onScribbleEraseComplete: ((List<String>, List<HeadingStroke>, List<TextRender>, List<LineRender>, List<LinkRender>, List<StickyNoteRender>) -> Unit)? = null
     override var onSmartLassoComplete: ((List<String>, RectF) -> Unit)? = null
     override var onPenLifted: (() -> Unit)? = null
@@ -234,7 +244,7 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
         // In any mode that bypasses the SDK raw-drawing path, intercept stylus button/eraser-end
         // events before the per-mode handler drops them. Check both TOOL_TYPE_ERASER and
         // BUTTON_STYLUS_PRIMARY to cover all platform/stylus variants.
-        if (isTextPlacementMode || isLassoMode || isLassoEraserMode) {
+        if (isTextPlacementMode || isLassoMode || isLassoEraserMode || isShapeTransformMode) {
             val t = event.getToolType(0)
             if (t == MotionEvent.TOOL_TYPE_ERASER
                 || (t == MotionEvent.TOOL_TYPE_STYLUS
@@ -242,6 +252,7 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
                 return handleBarrelButtonErase(event)
             }
         }
+        if (isShapeTransformMode) return handleShapeTransformTouch(event)
         if (isLassoMode) return handleLassoTouch(event)
         if (isLassoEraserMode) return handleLassoEraserTouch(event)
 
@@ -397,6 +408,7 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
                 }
                 // Normal lasso: clear any existing selection so the user sees immediate feedback.
                 lassoGestureHadSelection = lassoSelectionBox != null
+                lassoPreClearSelectionBox = lassoSelectionBox?.let { RectF(it) }
                 lassoSelectionBox = null
                 lassoOverlayPath  = null
                 invalidate()
@@ -553,10 +565,17 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
                 if (gestureBounds.width() < thresholdPx && gestureBounds.height() < thresholdPx) {
                     val hadSelection = lassoGestureHadSelection
                     lassoGestureHadSelection = false
-                    onLassoTapToDismiss?.invoke()
-                    if (!hadSelection) onLassoTap?.invoke(event.x, event.y)
+                    val savedBox = lassoPreClearSelectionBox
+                    lassoPreClearSelectionBox = null
+                    if (hadSelection && savedBox != null && savedBox.contains(event.x, event.y)) {
+                        onLassoTap?.invoke(event.x, event.y)
+                    } else {
+                        onLassoTapToDismiss?.invoke()
+                        if (!hadSelection) onLassoTap?.invoke(event.x, event.y)
+                    }
                 } else {
                     lassoGestureHadSelection = false
+                    lassoPreClearSelectionBox = null
                     onLassoComplete?.invoke(path, start)
                 }
             }
@@ -621,6 +640,15 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
 
         canvas.drawColor(Color.WHITE)
         renderBitmap?.let { canvas.drawBitmap(it, 0f, 0f, null) }
+
+        // Shape transform overlay — drawn on top of the bitmap.
+        if (isShapeTransformMode) {
+            val r = transformController.getWorkingRender()
+            if (r != null) {
+                drawShapeObject(canvas, r)
+                transformController.draw(canvas)
+            }
+        }
 
         if (!isEraserActive && !isLassoMode && activePoints.size >= 2) {
             val path = Path()
@@ -1308,6 +1336,66 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
             invalidate()
         }
     }
+
+    // ── Shape transform mode ─────────────────────────────────────────────────
+
+    override fun enterShapeTransform(render: ShapeRender) {
+        transformBeforeRender = render
+        transformController.attach(render)
+        isShapeTransformMode = true
+        invalidate()
+    }
+
+    override fun exitShapeTransform() {
+        val before = transformBeforeRender ?: return
+        val after  = transformController.getWorkingRender() ?: before
+        onShapeTransformed?.invoke(before, after)
+        transformBeforeRender = null
+        isShapeTransformMode  = false
+        invalidate()
+    }
+
+    private fun handleShapeTransformTouch(event: MotionEvent): Boolean {
+        if (event.getToolType(0) != MotionEvent.TOOL_TYPE_STYLUS) return false
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                val grab = transformController.onDown(event.x, event.y)
+                if (grab == ShapeTransformController.Grab.NONE) {
+                    exitShapeTransform()
+                    post { onShapeTransformTapOutside?.invoke() }
+                } else {
+                    onShapeTransformDragStarted?.invoke()
+                }
+                invalidate()
+            }
+            MotionEvent.ACTION_MOVE -> {
+                transformController.onMove(event.x, event.y)
+                invalidate()
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                transformController.onUp()
+                if (event.actionMasked == MotionEvent.ACTION_UP) {
+                    transformController.getWorkingRender()?.let {
+                        onShapeTransformMoved?.invoke(it.boundingBox)
+                    }
+                }
+                invalidate()
+            }
+        }
+        return true
+    }
+
+    override fun toggleShapeAspectLock(): ShapeRender? {
+        if (!isShapeTransformMode) return null
+        val updated = transformController.toggleAspectLock()
+        if (updated != null) invalidate()
+        return updated
+    }
+
+    override fun getShapeTransformWorkingRender(): ShapeRender? =
+        if (isShapeTransformMode) transformController.getWorkingRender() else null
+
+    // ── Lasso eraser ─────────────────────────────────────────────────────────
 
     private fun handleLassoEraserTouch(event: MotionEvent): Boolean {
         if (event.getToolType(0) != MotionEvent.TOOL_TYPE_STYLUS) return false

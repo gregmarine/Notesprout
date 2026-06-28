@@ -509,6 +509,39 @@
 
     </LinearLayout>
 
+    <!-- Shape transform toolbar — appears near the selected shape when in transform mode.
+         Lock-ratio / Circle-Oval toggle + Done button.
+         Positioned programmatically via positionPopover(). -->
+    <LinearLayout
+        android:id="@+id/shapeTransformToolbar"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:visibility="gone"
+        android:background="@drawable/shape_bordered"
+        android:padding="4dp"
+        android:elevation="0dp">
+
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/btnShapeAspectLock"
+            style="@style/Widget.Notesprout.ToggleTextButton"
+            android:text="Lock ratio"
+            android:contentDescription="Toggle aspect ratio lock" />
+
+        <View
+            android:layout_width="1dp"
+            android:layout_height="28dp"
+            android:layout_marginHorizontal="4dp"
+            android:background="@color/inkBlack" />
+
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/btnShapeTransformDone"
+            style="@style/Widget.Notesprout.ToggleTextButton"
+            android:text="Done"
+            android:contentDescription="Finish shape transform" />
+
+    </LinearLayout>
+
     <!-- Opening overlay — shown only while an encrypted notebook is unlocking + loading the first
          page. Intercepts all touches while visible. Never shown for plaintext notebooks. -->
     <FrameLayout
