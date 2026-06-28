@@ -192,15 +192,52 @@ a `ShapeTransformed` undo action.
 
 ---
 
+## Insert Shape Toolbar
+
+The toolbar button `btnInsertShape` (icon `ic_convert_shape`) opens a secondary shape picker
+(`shapeInsertToolbar`) anchored to the button. The picker contains one button per shape type and
+stays on screen alongside the main toolbar and overflow (all three surfaces coexist). Tapping a
+shape button inserts the shape at page centre, selects it in lasso mode, and shows the floating
+selection toolbar so the user can act on it immediately. The overflow closes and the picker
+dismisses in one step; tapping any other toolbar button or outside all toolbar surfaces also
+dismisses the picker.
+
+### Default sizes on insert
+
+| Shape class | Width | Height | `aspectLocked` |
+|---|---|---|---|
+| `LINE`, `ARROW` | 50% of page width | 1 px (degenerate — rotate to use) | `false` |
+| `ARCH` | 50% of page width | 25% of page width (half the width) | `false` |
+| All closed shapes | `STICKY_NOTE_ICON_SIZE_DP` (72 dp × density) | same | `true` for ELLIPSE, RECTANGLE, STAR; `false` otherwise |
+
+### Toolbar interaction rules
+
+- **Three-toolbar coexistence**: when `btnInsertShape` is in the overflow, the `overflowKeepOpenForShapePicker`
+  flag is set at `ACTION_DOWN` time. On `ACTION_UP` the flag is read before dispatching (avoiding the
+  async `post(mPerformClick)` race) and `closeOverflowMenu()` is skipped.
+- **Dismiss**: picker closes when any of these fires — a shape button is tapped, any other toolbar
+  button is tapped, or a touch lands outside all toolbar surfaces. Only `btnInsertShape` itself is
+  exempted (its click listener toggles the picker).
+- **BOOX EPD exclusion**: `computeToolbarExclusionRect()` unions the picker's bounds when visible, preventing
+  the Onyx EPD layer from capturing stylus events over it. Called in `showShapeInsertToolbar().post{}`
+  after positioning and again in `hideShapeInsertToolbar()`.
+
+### Undo / redo
+
+Insert is recorded as a `ShapeInserted` undo action. Undo soft-deletes the shape and clears the
+selection; redo re-inserts the shape and re-enters lasso mode with the shape selected.
+
+---
+
 ## Host Coverage
 
 Shape objects are fully supported in all three drawing hosts:
 
-| Host | Dwell trigger | Lasso/erase | Lasso convert | Transform | Clipboard | Export |
-|---|---|---|---|---|---|---|
-| `NotebookActivity` (Onyx + Generic) | Yes | Yes | Yes | Yes | Yes | PDF |
-| `ScratchpadActivity` | Yes | Yes | Yes | Yes | Yes | PNG/PDF |
-| `StickyNoteEditorActivity` | Yes | Yes | Yes | Yes | Yes | (in sticky note) |
+| Host | Dwell trigger | Insert toolbar | Lasso/erase | Lasso convert | Transform | Clipboard | Export |
+|---|---|---|---|---|---|---|---|
+| `NotebookActivity` (Onyx + Generic) | Yes | Yes | Yes | Yes | Yes | Yes | PDF |
+| `ScratchpadActivity` | Yes | No | Yes | Yes | Yes | Yes | PNG/PDF |
+| `StickyNoteEditorActivity` | Yes | No | Yes | Yes | Yes | Yes | (in sticky note) |
 
 Cross-host clipboard (notebook ↔ scratch pad ↔ sticky) carries `ShapeRender` objects; the
 receiving host reconstructs them via `ShapeRender.from()`.
@@ -252,6 +289,7 @@ path. Shape data never travels in Intent extras or unencrypted channels. See
 | Action | Session | Carries | Undo / Redo |
 |---|---|---|---|
 | `ShapeCreated` | S2 | `originalStroke` (full stroke), `shape` (ShapeRender), `deletedAt` | undo → restore stroke, soft-delete shape; redo → re-insert shape, soft-delete stroke |
+| `ShapeInserted` | S9 | `shapeId`, `pageId`, `layerId`, `shape` (ShapeRender) | undo → soft-delete shape, clear selection; redo → restore shape, enter lasso + select |
 | `ShapeTransformed` | S4 | `before`, `after` (ShapeRender) | undo → write `before`; redo → write `after` |
 | `StrokesMoved` (extended) | S5 | `originalShapes`/`movedShapes` | undo/redo repositions shapes alongside strokes |
 | `LassoErased/Pasted/Cut/Deleted/ScribbleErased` (extended) | S5 | `shapeIds`/`shapes` | mirror the existing stroke/heading/text fields |
@@ -272,3 +310,4 @@ path. Shape data never travels in Intent extras or unencrypted channels. See
 | `notebook/NotebookConstants.kt` | All `SHAPE_*` and `STAR_*` tuning constants |
 | `notebook/OnyxNotebookView.kt` | Onyx EPD host; dwell tracking, gate 0 dispatch |
 | `notebook/GenericNotebookView.kt` | Generic host (Wacom, Supernote); same gate order |
+| `res/drawable/ic_shape_*.xml` | Per-type icons for the insert toolbar (Tabler stroke style, 24×24 dp) |
