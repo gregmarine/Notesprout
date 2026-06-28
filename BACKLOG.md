@@ -177,20 +177,34 @@
 
 ## Shape Objects — deferred items
 
-> From the active `sprout` branch shape-objects work (S1 data model + geometry shipped; S2 recognizer
-> in progress). Items below were noted during build and are not yet scheduled.
+> Shape objects are complete through S7 (all three hosts: notebook, scratch pad, sticky note editor).
+> Items below were identified during build and are not yet scheduled.
 
-- **"Convert to Shape" in lasso context menu.** The debug `[→ Shape]` button already exists in the
-  lasso toolbar. Promote it to a non-debug lasso context-menu action so users can manually trigger
-  stroke→shape conversion for strokes that didn't auto-trigger (drawn too slowly, missed confidence
-  threshold, or the user changed their mind after drawing). Decide icon and label ("Convert to Shape"
-  or "Recognize Shape"); handle the same undo/redo path as the auto-trigger.
+- **"Convert to Shape" in lasso context menu.** Add a lasso context-menu action so users can manually
+  trigger stroke→shape conversion for strokes that didn't auto-trigger (drawn too slowly, missed
+  confidence threshold, or the user changed their mind after drawing). Decide icon and label ("Convert
+  to Shape" or "Recognize Shape"); handle the same `ShapeCreated` undo/redo path as the dwell trigger.
+  Show only when the selection is a single stroke.
 - **1:1 aspect ratio snap for shape objects.** Add a "Square it" / "Make uniform" toggle in the lasso
   context menu for selected shape objects. Not a hard lock — a one-shot snap that resizes the shape to
   a 1:1 bounding box around its current center, then deselects (or re-selects with the new size).
   Especially useful for circles, squares, stars, and diamonds where slight drawing asymmetry produces
-  obviously uneven shapes. The regularized() function already handles aspect-ratio normalization
-  internally; this just exposes a manual user-triggered version of that normalization.
+  obviously uneven shapes. The `regularized()` function in `ShapeRecognizer` already handles
+  aspect-ratio normalization internally; this just exposes a manual user-triggered version of it.
+- **Multi-stroke shape assembly.** The recognizer currently requires a single stroke. Composite shapes
+  (e.g. two lines forming a cross, or a rectangle with a diagonal inside) cannot be recognized.
+  Future: accumulate dwell-held strokes, merge their point sets, then feed to the recognizer.
+- **Toolbar "insert shape" button.** An explicit palette button (overflow toolbar, or a dedicated
+  "insert" entry) that lets the user tap to place a pre-set shape without drawing — useful on
+  non-stylus devices and for precise shapes.
+- **Fill option.** `ShapeObject` and `ShapeGeometry.pathFor` support only stroke rendering. Add an
+  optional `fillAlpha` field (0=no fill, 1=solid) and a fill-style toggle in the transform toolbar.
+  E-ink restriction: only `paperWhite` or very light grays look correct; no dark fills.
+- **Snap-target support.** Shape objects are lasso-moveable but do not yet act as snap targets
+  (the snap-to-guide system only snaps *to* margin guides, not *to* other objects). A future
+  alignment pass could add object-edge snap targets alongside the existing margin guides.
+- **Per-shape stroke-width picker.** Currently the shape inherits the stroke width from the drawn
+  stroke. A post-transform style picker (like the pen-tool width) could let users adjust it.
 
 ---
 

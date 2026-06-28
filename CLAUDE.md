@@ -30,6 +30,7 @@ matching doc before working in that area:**
 | Backup: local (SAF) + Google Drive (REST API v3 + WebView OAuth PKCE), per-device subfolder, incremental-by-timestamp, index-last | [`docs/backup.md`](docs/backup.md) |
 | Scratch Pad: data model, host window, canvas reuse, multi-page, lasso, both transfer directions, encryption note | [`docs/scratchpad.md`](docs/scratchpad.md) |
 | Sticky Notes: data model, two coordinate spaces, editor transfer-singleton, on-page icon, tap-to-open, lasso/undo parity, create-flow, scratch pad parity, PDF footnote/endnote export, encryption note | [`docs/sticky-notes.md`](docs/sticky-notes.md) |
+| Shape objects: data model, oriented box vs AABB, recognizer pipeline + as-built constants, dwell trigger + gate order, transform mode, aspect/circle-oval toggle, lasso/clipboard/erase/export parity, host coverage, undo actions | [`docs/shape-objects.md`](docs/shape-objects.md) |
 
 Backlog at monorepo root: `BACKLOG.md` — consolidated deferred/future items harvested from the
 completed-and-retired feature plans (toolbar Session-8 polish, multi-page Phase 2, encryption Phase 3,

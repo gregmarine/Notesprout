@@ -678,7 +678,7 @@ data and nothing crosses into the global index.
 
 ## SESSION 7 — Polish, docs & cleanup
 
-**Status: NOT STARTED**
+**Status: DONE**
 
 **Goal:** Final hardening, documentation, and backlog capture.
 
