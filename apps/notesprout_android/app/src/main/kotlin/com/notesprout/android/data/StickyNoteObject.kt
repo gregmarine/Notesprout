@@ -2,6 +2,7 @@ package com.notesprout.android.data
 
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import com.notesprout.android.data.ShapeRender
 
 /**
  * Serialized payload of a `type = "sticky_note"` row (the `data` column).
@@ -23,6 +24,7 @@ data class StickyNoteObject(
     val headings: List<HeadingStroke> = emptyList(),
     val textObjects: List<TextRender> = emptyList(),
     val lines: List<EmbeddedLine> = emptyList(),
+    val shapes: List<ShapeRender> = emptyList(),
     val contentWidth: Float = 0f,
     val contentHeight: Float = 0f,
 ) {

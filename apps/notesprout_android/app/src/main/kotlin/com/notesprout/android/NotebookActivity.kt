@@ -761,6 +761,7 @@ class NotebookActivity : AppCompatActivity() {
                 headings      = out.headings,
                 textObjects   = out.textObjects,
                 lines         = out.lines,
+                shapes        = out.shapes,
                 contentWidth  = out.contentWidth,
                 contentHeight = out.contentHeight,
             )
@@ -5276,6 +5277,15 @@ class NotebookActivity : AppCompatActivity() {
         }
         val newLinks = content.links.map { it.translate(dx, dy, newId = java.util.UUID.randomUUID().toString()) }
         val newStickyNotes = content.stickyNotes.map { it.translate(dx, dy, newId = java.util.UUID.randomUUID().toString()) }
+        val newShapes = content.shapeObjects.map { s ->
+            s.copy(
+                id          = java.util.UUID.randomUUID().toString(),
+                centerX     = s.centerX + dx,
+                centerY     = s.centerY + dy,
+                boundingBox = RectF(s.boundingBox.left + dx, s.boundingBox.top + dy,
+                                    s.boundingBox.right + dx, s.boundingBox.bottom + dy),
+            )
+        }
         val density = resources.displayMetrics.density
 
         lifecycleScope.launch {
@@ -5383,8 +5393,23 @@ class NotebookActivity : AppCompatActivity() {
                             )
                         )
                     }
+                    newShapes.forEach { shape ->
+                        dao.insertOrIgnore(
+                            NotebookObject(
+                                id          = shape.id,
+                                type        = TYPE_SHAPE,
+                                parentId    = layerId,
+                                boundingBox = shape.boundingBox.toBoundingBoxJson(),
+                                sortOrder   = 0,
+                                createdAt   = now,
+                                updatedAt   = now,
+                                deletedAt   = null,
+                                data        = shape.toShapeObject(density).toJson(),
+                            )
+                        )
+                    }
                 }
-                if (newLinks.isNotEmpty() || newStickyNotes.isNotEmpty()) invalidatePageSnapshot(db, pageId)
+                if (newLinks.isNotEmpty() || newStickyNotes.isNotEmpty() || newShapes.isNotEmpty()) invalidatePageSnapshot(db, pageId)
             }
 
             val allStrokes      = existingStrokes + newStrokes
@@ -5393,12 +5418,14 @@ class NotebookActivity : AppCompatActivity() {
             val allLines        = drawingView.getLineObjects() + newLineObjects
             val allLinks        = drawingView.getLinks() + newLinks
             val allStickyNotes  = drawingView.getStickyNotes() + newStickyNotes
+            val allShapes       = drawingView.getShapeObjects() + newShapes
             newStrokes.forEach { persistedStrokeIds.add(it.id) }
             drawingView.loadHeadings(allHeadings)
             drawingView.loadTextObjects(allTexts)
             drawingView.loadLineObjects(allLines)
             drawingView.loadLinks(allLinks)
             drawingView.loadStickyNotes(allStickyNotes)
+            drawingView.loadShapeObjects(allShapes)
 
             undoRedoManager.push(UndoRedoAction.LassoPasted(
                 strokeIds      = newStrokes.map { it.id },
@@ -5413,12 +5440,14 @@ class NotebookActivity : AppCompatActivity() {
                 links          = newLinks,
                 stickyNoteIds  = newStickyNotes.map { it.id },
                 stickyNotes    = newStickyNotes,
+                shapeIds       = newShapes.map { it.id },
+                shapes         = newShapes,
             ))
             updateUndoRedoButtons()
 
             val templateBmp = currentTemplateBitmap
             val bitmap = withContext(Dispatchers.IO) {
-                drawingView.buildRenderBitmap(allStrokes, templateBmp, allHeadings, allTexts, allLines, allLinks, stickyNotes = allStickyNotes)
+                drawingView.buildRenderBitmap(allStrokes, templateBmp, allHeadings, allTexts, allLines, allLinks, stickyNotes = allStickyNotes, shapeObjects = allShapes)
             }
             if (bitmap != null) {
                 drawingView.loadStrokesWithBitmap(allStrokes, bitmap, templateBmp)
@@ -5431,6 +5460,7 @@ class NotebookActivity : AppCompatActivity() {
             newLineObjects.forEach { newBox.union(it.boundingBox) }
             newLinks.forEach { newBox.union(it.boundingBox) }
             newStickyNotes.forEach { newBox.union(it.boundingBox) }
+            newShapes.forEach { newBox.union(it.boundingBox) }
             val pad = 8f * resources.displayMetrics.density
             newBox.inset(-pad, -pad)
             selectedObjectIds.clear()
@@ -5440,6 +5470,7 @@ class NotebookActivity : AppCompatActivity() {
             selectedObjectIds.addAll(newLineObjects.map { it.id })
             selectedObjectIds.addAll(newLinks.map { it.id })
             selectedObjectIds.addAll(newStickyNotes.map { it.id })
+            selectedObjectIds.addAll(newShapes.map { it.id })
             isSmartLassoSession = false
             if (!isLassoMode) enterLassoMode()
             drawingView.setLassoSelectedIds(selectedObjectIds.toSet(), newBox)
@@ -7489,6 +7520,27 @@ class NotebookActivity : AppCompatActivity() {
             drawingView.setLassoOverlay(null, selBox)
             updateFloatingSelectionToolbar(selBox)
         }
+        // Rebuild bitmap immediately with the final shape included. persistShapeTransform
+        // (fired async via onShapeTransformed) early-returns when geometry is unchanged,
+        // which would leave the shape invisible since enterShapeTransformMode excluded it.
+        val updatedShapes = if (finalRender != null) {
+            drawingView.getShapeObjects().map { if (it.id == finalRender.id) finalRender else it }
+        } else {
+            drawingView.getShapeObjects()
+        }
+        if (finalRender != null) drawingView.loadShapeObjects(updatedShapes)
+        val templateBmp = currentTemplateBitmap
+        val strokes     = drawingView.getStrokes()
+        val headings    = drawingView.getHeadings()
+        val texts       = drawingView.getTextObjects()
+        val lines       = drawingView.getLineObjects()
+        lifecycleScope.launch {
+            val bitmap = withContext(Dispatchers.IO) {
+                drawingView.buildRenderBitmap(strokes, templateBmp, headings, texts, lines, shapeObjects = updatedShapes)
+            }
+            if (bitmap != null) drawingView.loadStrokesWithBitmap(strokes, bitmap, templateBmp)
+            else drawingView.loadStrokes(strokes)
+        }
     }
 
     private fun showShapeTransformToolbar(selBox: android.graphics.RectF) {
@@ -7709,6 +7761,7 @@ class NotebookActivity : AppCompatActivity() {
             headings      = note.headings,
             textObjects   = note.textObjects,
             lines         = note.lines,
+            shapes        = note.shapes,
             contentWidth  = note.contentWidth,
             contentHeight = note.contentHeight,
         )

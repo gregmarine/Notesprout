@@ -354,6 +354,7 @@ object NotebookExporter {
                 export.note.lines,
                 export.note.strokes,
                 context,
+                shapeObjects = export.note.shapes,
             )
 
             // Append a caption strip below the content so the back-link has a visible target.
@@ -592,6 +593,7 @@ object NotebookExporter {
                     headings = obj.headings,
                     textObjects = obj.textObjects,
                     lines = obj.lines.map { it.toLineRender(density) },
+                    shapes = obj.shapes,
                     contentWidth = obj.contentWidth,
                     contentHeight = obj.contentHeight,
                 )

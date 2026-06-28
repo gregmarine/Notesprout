@@ -9,6 +9,9 @@ import com.notesprout.android.data.index.ScratchpadEntity
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.util.UUID
+import com.notesprout.android.data.ShapeObject
+import com.notesprout.android.data.ShapeRender
+import com.notesprout.android.data.TYPE_SHAPE
 
 data class ScratchpadPageContent(
     val strokes: List<LiveStroke>,
@@ -17,6 +20,7 @@ data class ScratchpadPageContent(
     val lineObjects: List<LineRender>,
     val links: List<LinkRender>,
     val stickyNotes: List<StickyNoteRender> = emptyList(),
+    val shapeObjects: List<ShapeRender> = emptyList(),
 )
 
 class ScratchpadRepository(
@@ -164,12 +168,19 @@ class ScratchpadRepository(
                 headings      = obj.headings,
                 textObjects   = obj.textObjects,
                 lines         = obj.lines.map { it.toLineRender(density) },
+                shapes        = obj.shapes,
                 contentWidth  = obj.contentWidth,
                 contentHeight = obj.contentHeight,
             )
         }
 
-        ScratchpadPageContent(strokes, headings, textObjects, lineObjects, links, stickyNotes)
+        val shapeObjects = dao.getShapeObjectsForLayer(layerId).mapNotNull { row ->
+            val box = parseBoundingBox(row.boundingBox) ?: return@mapNotNull null
+            val obj = runCatching { ShapeObject.fromJson(row.data) }.getOrNull() ?: return@mapNotNull null
+            ShapeRender.from(row.id, obj, density)
+        }
+
+        ScratchpadPageContent(strokes, headings, textObjects, lineObjects, links, stickyNotes, shapeObjects)
     }
 
     // ── Save strokes ──────────────────────────────────────────────────────────
@@ -284,6 +295,21 @@ class ScratchpadRepository(
                         updatedAt   = now,
                         type        = TYPE_STICKY_NOTE,
                         data        = note.toStickyNoteObject(density).toJson(),
+                    )
+                )
+            }
+            content.shapeObjects.forEach { shape ->
+                val shapeObj = shape.toShapeObject(density)
+                dao.insertOrIgnore(
+                    ScratchpadEntity(
+                        id          = shape.id,
+                        parentId    = layerId,
+                        boundingBox = shape.boundingBox.toBoundingBoxJson(),
+                        sortOrder   = 0,
+                        createdAt   = now,
+                        updatedAt   = now,
+                        type        = TYPE_SHAPE,
+                        data        = shapeObj.toJson(),
                     )
                 )
             }

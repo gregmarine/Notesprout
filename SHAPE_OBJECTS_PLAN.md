@@ -625,7 +625,7 @@ notebook. (This is mostly the mechanical "mirror the line/sticky pattern" rule f
 
 ## SESSION 6 — Scratch pad & sticky-note editor hosts
 
-**Status: NOT STARTED**
+**Status: DONE**
 
 **Goal:** Smart-shape creation, transform mode, and the lasso/clipboard/erase wiring all work inside
 the **scratch pad** (`ScratchpadActivity`) and the **sticky-note editor** (`StickyNoteEditorActivity`),

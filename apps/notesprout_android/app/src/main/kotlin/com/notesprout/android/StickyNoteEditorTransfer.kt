@@ -3,6 +3,7 @@ package com.notesprout.android
 import com.notesprout.android.data.HeadingStroke
 import com.notesprout.android.data.LineRender
 import com.notesprout.android.data.LiveStroke
+import com.notesprout.android.data.ShapeRender
 import com.notesprout.android.data.TextRender
 
 /**
@@ -18,6 +19,7 @@ object StickyNoteEditorTransfer {
         val headings: List<HeadingStroke>,
         val textObjects: List<TextRender>,
         val lines: List<LineRender>,
+        val shapes: List<ShapeRender> = emptyList(),
         val contentWidth: Float,
         val contentHeight: Float,
     )

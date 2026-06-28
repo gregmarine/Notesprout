@@ -48,6 +48,9 @@ interface ScratchpadDao {
     @Query("SELECT * FROM scratchpad WHERE type = 'sticky_note' AND parentId = :layerId AND deletedAt IS NULL ORDER BY `order` ASC")
     suspend fun getStickyNotesForLayer(layerId: String): List<ScratchpadEntity>
 
+    @Query("SELECT * FROM scratchpad WHERE type = 'shape' AND parentId = :layerId AND deletedAt IS NULL ORDER BY `order` ASC")
+    suspend fun getShapeObjectsForLayer(layerId: String): List<ScratchpadEntity>
+
     @Query("SELECT COUNT(*) FROM scratchpad WHERE parentId = :rootId AND type = 'page' AND deletedAt IS NULL")
     suspend fun getPageCount(rootId: String): Int
 

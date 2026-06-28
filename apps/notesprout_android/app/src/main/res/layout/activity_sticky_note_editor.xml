@@ -93,6 +93,21 @@
                     android:src="@drawable/ic_lasso_delete"
                     android:contentDescription="Delete selection" />
 
+                <!-- Shape transform controls — visible only in shape transform mode -->
+                <androidx.appcompat.widget.AppCompatButton
+                    android:id="@+id/btnShapeAspectLock"
+                    style="@style/Widget.Notesprout.ToggleTextButton"
+                    android:text="Lock ratio"
+                    android:contentDescription="Toggle aspect ratio lock"
+                    android:visibility="gone" />
+
+                <androidx.appcompat.widget.AppCompatButton
+                    android:id="@+id/btnShapeTransformDone"
+                    style="@style/Widget.Notesprout.ToggleTextButton"
+                    android:text="Done"
+                    android:contentDescription="Finish shape transform"
+                    android:visibility="gone" />
+
             </LinearLayout>
 
         </FrameLayout>

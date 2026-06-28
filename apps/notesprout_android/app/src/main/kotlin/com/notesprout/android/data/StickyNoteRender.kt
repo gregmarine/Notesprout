@@ -23,6 +23,7 @@ data class StickyNoteRender(
     val headings: List<HeadingStroke> = emptyList(),
     val textObjects: List<TextRender> = emptyList(),
     val lines: List<LineRender> = emptyList(),
+    val shapes: List<ShapeRender> = emptyList(),
     val contentWidth: Float = 0f,
     val contentHeight: Float = 0f,
 )
@@ -40,6 +41,7 @@ fun StickyNoteRender.translate(dx: Float, dy: Float, newId: String = id): Sticky
     headings = headings,
     textObjects = textObjects,
     lines = lines,
+    shapes = shapes,
 )
 
 /**
@@ -51,6 +53,7 @@ fun StickyNoteRender.toStickyNoteObject(density: Float): StickyNoteObject = Stic
     headings = headings,
     textObjects = textObjects,
     lines = lines.map { it.toEmbeddedLine(density) },
+    shapes = shapes,
     contentWidth = contentWidth,
     contentHeight = contentHeight,
 )
