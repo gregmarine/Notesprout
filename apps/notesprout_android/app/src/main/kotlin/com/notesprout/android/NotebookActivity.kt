@@ -128,6 +128,7 @@ import com.notesprout.android.toc.TocDialog
 import com.notesprout.android.toc.TocRepository
 import com.notesprout.android.core.isBooxDevice
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -2019,6 +2020,12 @@ class NotebookActivity : AppCompatActivity() {
             lifecycleScope.launch(Dispatchers.IO) {
                 convertLassoToText(selectedStrokes, box)
             }
+        }
+
+        binding.btnConvertShape.setOnClickListener {
+            val stroke = shapeConvertStroke ?: return@setOnClickListener
+            val result = shapeConvertResult ?: return@setOnClickListener
+            lifecycleScope.launch(Dispatchers.IO) { convertStrokeToShape(stroke, result) }
         }
 
         binding.btnAlignLeft.setOnClickListener {
@@ -7113,6 +7120,11 @@ class NotebookActivity : AppCompatActivity() {
     private var pendingHeadingStrokes: List<LiveStroke> = emptyList()
     private var pendingHeadingBox: RectF? = null
 
+    // "Convert to Shape" lasso button: cached recognizer result for the currently-selected stroke.
+    private var shapeConvertJob: Job? = null
+    private var shapeConvertStroke: LiveStroke? = null
+    private var shapeConvertResult: com.notesprout.android.notebook.ShapeRecognizer.Result? = null
+
     // S4: disambiguate shared H1/H2/H3 buttons between convert-from-strokes (S3) and change-level (S4).
     private enum class HeadingSubmenuMode { CONVERT, CHANGE }
     private var headingSubmenuMode = HeadingSubmenuMode.CONVERT
@@ -7132,6 +7144,7 @@ class NotebookActivity : AppCompatActivity() {
         val selTextObjects = drawingView.getTextObjects().filter { it.id in drawingView.lassoSelectedIds }
         val selLines = drawingView.getLineObjects().filter { it.id in drawingView.lassoSelectedIds }
         val selLinks = drawingView.getLinks().filter { it.id in drawingView.lassoSelectedIds }
+        val selShapes = drawingView.getShapeObjects().filter { it.id in drawingView.lassoSelectedIds }
         val selectionIsSingleHeading = selHeadings.size == 1 && selStrokes.isEmpty()
         val selectionIsPureStrokes   = selStrokes.isNotEmpty() && selHeadings.isEmpty()
         val selectionIsNonStrokeGroup = selStrokes.isEmpty() && (selHeadings.size + selTextObjects.size + selLines.size) >= 2
@@ -7143,6 +7156,41 @@ class NotebookActivity : AppCompatActivity() {
             if (selectionIsPureStrokes || selectionIsSingleHeading) View.VISIBLE else View.GONE
         binding.btnConvertText.visibility   = if (selectionIsPureStrokes) View.VISIBLE else View.GONE
         binding.textConvertDivider.visibility = if (selectionIsPureStrokes) View.VISIBLE else View.GONE
+        // "Convert to Shape": show only for a single stroke with no other objects selected.
+        // Run recognition on a background thread; reveal the button only if a shape is detected.
+        val isSingleStrokeOnly = selStrokes.size == 1
+            && selHeadings.isEmpty() && selTextObjects.isEmpty()
+            && selLines.isEmpty() && selLinks.isEmpty() && selShapes.isEmpty()
+            && drawingView.lassoSelectedIds.size == 1
+        shapeConvertJob?.cancel()
+        if (isSingleStrokeOnly) {
+            val stroke = selStrokes.first()
+            val density = resources.displayMetrics.density
+            // Hide until recognition completes (or re-use cached result for the same stroke).
+            if (shapeConvertStroke?.id != stroke.id) {
+                binding.btnConvertShape.visibility  = View.GONE
+                binding.shapeConvertDivider.visibility = View.GONE
+                shapeConvertStroke = stroke
+                shapeConvertResult = null
+                shapeConvertJob = lifecycleScope.launch(Dispatchers.IO) {
+                    val result = com.notesprout.android.notebook.ShapeRecognizer.recognize(stroke.points, density)
+                    withContext(Dispatchers.Main) {
+                        if (shapeConvertStroke?.id == stroke.id) {
+                            shapeConvertResult = result
+                            val visible = if (result != null) View.VISIBLE else View.GONE
+                            binding.btnConvertShape.visibility  = visible
+                            binding.shapeConvertDivider.visibility = visible
+                        }
+                    }
+                }
+            }
+            // If the same stroke is already recognized, button visibility is already correct.
+        } else {
+            shapeConvertStroke = null
+            shapeConvertResult = null
+            binding.btnConvertShape.visibility  = View.GONE
+            binding.shapeConvertDivider.visibility = View.GONE
+        }
         binding.alignDivider.visibility = if (selectionIsNonStrokeGroup) View.VISIBLE else View.GONE
         binding.btnAlignLeft.visibility = if (selectionIsNonStrokeGroup) View.VISIBLE else View.GONE
         binding.btnAlignTop.visibility  = if (selectionIsNonStrokeGroup) View.VISIBLE else View.GONE

@@ -364,6 +364,22 @@
             android:contentDescription="Convert to Text"
             android:visibility="gone" />
 
+        <!-- Separator before convert-to-shape action — visible only for single-stroke selections that pass recognition -->
+        <View
+            android:id="@+id/shapeConvertDivider"
+            android:layout_width="1dp"
+            android:layout_height="28dp"
+            android:layout_marginHorizontal="2dp"
+            android:background="@color/inkBlack"
+            android:visibility="gone" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnConvertShape"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:src="@drawable/ic_convert_shape"
+            android:contentDescription="Convert to Shape"
+            android:visibility="gone" />
+
         <!-- Separator before align actions — visible only for multi-object non-stroke selections -->
         <View
             android:id="@+id/alignDivider"

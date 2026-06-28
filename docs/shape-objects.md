@@ -196,11 +196,11 @@ a `ShapeTransformed` undo action.
 
 Shape objects are fully supported in all three drawing hosts:
 
-| Host | Dwell trigger | Lasso/erase | Transform | Clipboard | Export |
-|---|---|---|---|---|---|
-| `NotebookActivity` (Onyx + Generic) | Yes | Yes | Yes | Yes | PDF |
-| `ScratchpadActivity` | Yes | Yes | Yes | Yes | PNG/PDF |
-| `StickyNoteEditorActivity` | Yes | Yes | Yes | Yes | (in sticky note) |
+| Host | Dwell trigger | Lasso/erase | Lasso convert | Transform | Clipboard | Export |
+|---|---|---|---|---|---|---|
+| `NotebookActivity` (Onyx + Generic) | Yes | Yes | Yes | Yes | Yes | PDF |
+| `ScratchpadActivity` | Yes | Yes | Yes | Yes | Yes | PNG/PDF |
+| `StickyNoteEditorActivity` | Yes | Yes | Yes | Yes | Yes | (in sticky note) |
 
 Cross-host clipboard (notebook ↔ scratch pad ↔ sticky) carries `ShapeRender` objects; the
 receiving host reconstructs them via `ShapeRender.from()`.
@@ -218,6 +218,12 @@ text objects, lines, links, and sticky notes:
 - **Scribble erase** — `shapeIds` in `ScribbleErased`
 - **Erase all / page delete** — type-agnostic soft-delete; restored by `deletedAt` timestamp
 - **Send to Scratch Pad** — shapes travel with the lasso selection
+- **"Convert to Shape" lasso button** — appears in the floating selection toolbar when exactly one
+  stroke is selected and no other objects share the selection. Runs `ShapeRecognizer.recognize()` on
+  a background thread; the button (`btnConvertShape`, icon `ic_convert_shape`) is revealed only if
+  the recognizer returns a confident result (confidence ≥ `SHAPE_MIN_CONFIDENCE`). Tapping it calls
+  `convertStrokeToShape()` using the cached result — same path as the dwell trigger. Available in
+  all three drawing hosts: `NotebookActivity`, `ScratchpadActivity`, `StickyNoteEditorActivity`.
 - **AABB hit-test caveat**: lasso intersection uses the shape's AABB, not the rotated outline. A
   rotated rectangle's AABB is larger than the shape, so the lasso over-selects slightly. This is
   acceptable behavior; document it to future contributors.

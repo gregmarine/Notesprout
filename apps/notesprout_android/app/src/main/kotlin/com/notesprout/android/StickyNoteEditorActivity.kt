@@ -31,6 +31,7 @@ import com.notesprout.android.notebook.OnyxNotebookView
 import com.notesprout.android.notebook.ShapeRecognizer
 import com.notesprout.android.notebook.ToolPreferencesManager
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -55,6 +56,10 @@ class StickyNoteEditorActivity : AppCompatActivity() {
     private val selectedObjectIds = mutableSetOf<String>()
     private var isEraserActive = false
     private var isShapeTransformMode = false
+
+    private var shapeConvertJob: Job? = null
+    private var shapeConvertStroke: com.notesprout.android.data.LiveStroke? = null
+    private var shapeConvertResult: ShapeRecognizer.Result? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -108,6 +113,11 @@ class StickyNoteEditorActivity : AppCompatActivity() {
         binding.btnLassoCopy.setOnClickListener { performLassoCopy() }
         binding.btnLassoCut.setOnClickListener  { performLassoCut() }
         binding.btnLassoDelete.setOnClickListener { performLassoDelete() }
+        binding.btnConvertShape.setOnClickListener {
+            val stroke = shapeConvertStroke ?: return@setOnClickListener
+            val result = shapeConvertResult ?: return@setOnClickListener
+            convertStrokeToShape(stroke, result)
+        }
 
         binding.btnShapeAspectLock.setOnClickListener {
             val updated = drawingView.toggleShapeAspectLock() ?: return@setOnClickListener
@@ -821,6 +831,8 @@ class StickyNoteEditorActivity : AppCompatActivity() {
         binding.btnLassoCopy.visibility             = View.GONE
         binding.btnLassoCut.visibility              = View.GONE
         binding.btnLassoDelete.visibility           = View.GONE
+        binding.btnConvertShape.visibility          = View.GONE
+        binding.shapeConvertDivider.visibility      = View.GONE
         binding.btnShapeAspectLock.visibility       = View.VISIBLE
         binding.btnShapeTransformDone.visibility    = View.VISIBLE
         binding.floatingSelectionToolbar.visibility = View.VISIBLE
@@ -873,6 +885,35 @@ class StickyNoteEditorActivity : AppCompatActivity() {
     // ── Floating selection toolbar ────────────────────────────────────────────
 
     private fun updateFloatingSelectionToolbar(selectionBox: RectF) {
+        val selStrokes = drawingView.getStrokes().filter { it.id in drawingView.lassoSelectedIds }
+        val isSingleStrokeOnly = drawingView.lassoSelectedIds.size == 1 && selStrokes.size == 1
+        shapeConvertJob?.cancel()
+        if (isSingleStrokeOnly) {
+            val stroke = selStrokes.first()
+            val density = resources.displayMetrics.density
+            if (shapeConvertStroke?.id != stroke.id) {
+                binding.btnConvertShape.visibility  = View.GONE
+                binding.shapeConvertDivider.visibility = View.GONE
+                shapeConvertStroke = stroke
+                shapeConvertResult = null
+                shapeConvertJob = lifecycleScope.launch(Dispatchers.IO) {
+                    val result = ShapeRecognizer.recognize(stroke.points, density)
+                    withContext(Dispatchers.Main) {
+                        if (shapeConvertStroke?.id == stroke.id) {
+                            shapeConvertResult = result
+                            val visible = if (result != null) View.VISIBLE else View.GONE
+                            binding.btnConvertShape.visibility  = visible
+                            binding.shapeConvertDivider.visibility = visible
+                        }
+                    }
+                }
+            }
+        } else {
+            shapeConvertStroke = null
+            shapeConvertResult = null
+            binding.btnConvertShape.visibility  = View.GONE
+            binding.shapeConvertDivider.visibility = View.GONE
+        }
         binding.floatingSelectionToolbar.visibility = View.VISIBLE
         binding.floatingSelectionToolbar.post { positionFloatingToolbar(selectionBox) }
     }

@@ -93,6 +93,22 @@
                     android:src="@drawable/ic_lasso_delete"
                     android:contentDescription="Delete selection" />
 
+                <!-- Visible only for single-stroke selections that pass shape recognition -->
+                <View
+                    android:id="@+id/shapeConvertDivider"
+                    android:layout_width="1dp"
+                    android:layout_height="28dp"
+                    android:layout_marginHorizontal="2dp"
+                    android:background="@color/inkBlack"
+                    android:visibility="gone" />
+
+                <androidx.appcompat.widget.AppCompatImageButton
+                    android:id="@+id/btnConvertShape"
+                    style="@style/Widget.Notesprout.ToolbarButton"
+                    android:src="@drawable/ic_convert_shape"
+                    android:contentDescription="Convert to Shape"
+                    android:visibility="gone" />
+
                 <!-- Shape transform controls — visible only in shape transform mode -->
                 <androidx.appcompat.widget.AppCompatButton
                     android:id="@+id/btnShapeAspectLock"
