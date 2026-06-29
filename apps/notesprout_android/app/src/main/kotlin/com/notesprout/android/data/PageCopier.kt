@@ -978,3 +978,180 @@ suspend fun movePagesAcrossNotebooks(
         sourceDeletedPageIds = sourcePageIds,
     )
 }
+
+// ── Calendar → notebook page export ──────────────────────────────────────────
+
+/** One content object to insert onto an exported calendar page's layer. */
+data class CalendarExportChild(val type: String, val bbox: String, val order: Int, val data: String)
+
+/**
+ * One notebook page produced from a calendar view: the grid/timeline becomes the page's template
+ * (a fresh `type="template"` row in the dest `.soil`, NOT a library template), at [width]×[height]
+ * (the calendar canvas size). [children] are the calendar view's content objects copied verbatim
+ * (empty for a template-only export).
+ */
+data class CalendarExportPage(
+    val templateName: String,
+    val templateImageBase64: String,
+    val width: Int,
+    val height: Int,
+    val children: List<CalendarExportChild>,
+)
+
+/**
+ * Reads the ordered live page ids of the notebook at [notebookPath] (used to drive the calendar
+ * export's insert-position picker). Returns null on failure. Must be called on [Dispatchers.IO].
+ */
+suspend fun loadNotebookPageIds(
+    notebookPath: String,
+    passphrase: String? = null,
+): List<String>? = withContext(Dispatchers.IO) {
+    var db: SoilRawDb? = null
+    try {
+        db = SoilCrypto.openRaw(File(notebookPath), passphrase)
+        db.rawQuery(
+            "SELECT id FROM notebook WHERE type = 'page' AND deletedAt IS NULL ORDER BY `order` ASC",
+            null,
+        ).use { c ->
+            val list = mutableListOf<String>()
+            while (c.moveToNext()) list.add(c.getString(0))
+            list
+        }
+    } catch (e: Exception) {
+        Log.e(TAG, "loadNotebookPageIds failed for $notebookPath", e)
+        null
+    } finally {
+        db?.close()
+        cleanStrayJournal(notebookPath)
+    }
+}
+
+/**
+ * Inserts the calendar-derived [exportPages] into the `.soil` at [notebookPath] as a contiguous
+ * block before/after [anchorPageId] (append to end when [anchorPageId] is null or not found).
+ *
+ * Each page gets a fresh `type="template"` row holding the baked grid image, a `type="page"` row
+ * whose `data.template` points at it (sized to the calendar canvas), a content layer, and any
+ * [CalendarExportPage.children] copied verbatim with fresh UUIDs. No library template is created.
+ *
+ * Returns one [Pair] per new page (newPageId, 0-based index after insertion) or null on failure.
+ * On failure the transaction rolls back; no partial writes remain. Must be called on
+ * [Dispatchers.IO].
+ */
+suspend fun insertCalendarPagesIntoNotebook(
+    notebookPath: String,
+    passphrase: String?,
+    anchorPageId: String?,
+    before: Boolean,
+    exportPages: List<CalendarExportPage>,
+): List<Pair<String, Int>>? = withContext(Dispatchers.IO) {
+    if (exportPages.isEmpty()) return@withContext emptyList()
+    var db: SoilRawDb? = null
+    try {
+        db = SoilCrypto.openRaw(File(notebookPath), passphrase)
+
+        val notebookParentId = db.rawQuery(
+            "SELECT id FROM notebook WHERE type = 'notebook' LIMIT 1", null,
+        ).use { c -> if (c.moveToFirst()) c.getString(0) else null } ?: UUID.randomUUID().toString()
+
+        data class PageOrder(val id: String, val order: Int)
+        val allPages: List<PageOrder> = db.rawQuery(
+            "SELECT id, `order` FROM notebook WHERE type = 'page' AND deletedAt IS NULL ORDER BY `order` ASC",
+            null,
+        ).use { c ->
+            val list = mutableListOf<PageOrder>()
+            while (c.moveToNext()) list.add(PageOrder(c.getString(0), c.getInt(1)))
+            list
+        }
+
+        val targetIdx = if (anchorPageId != null) allPages.indexOfFirst { it.id == anchorPageId } else -1
+        val insertionIndex = if (targetIdx >= 0) {
+            if (before) targetIdx else targetIdx + 1
+        } else allPages.size
+
+        val now = System.currentTimeMillis()
+        val newPageIds = mutableListOf<String>()
+
+        db.beginTransaction()
+        try {
+            // Shift existing pages at or after the insertion slot to make room.
+            val shift = exportPages.size
+            for (i in (insertionIndex until allPages.size).reversed()) {
+                db.update("notebook", ContentValues().apply { put("`order`", i + shift) },
+                    "id = ?", arrayOf(allPages[i].id))
+            }
+
+            exportPages.forEachIndexed { offset, ep ->
+                val newTemplateId = UUID.randomUUID().toString()
+                val newPageId     = UUID.randomUUID().toString()
+                val newLayerId    = UUID.randomUUID().toString()
+                newPageIds.add(newPageId)
+
+                val bbox = BoundingBox(0f, 0f, ep.width.toFloat(), ep.height.toFloat()).toJson()
+
+                db.insert("notebook", null, ContentValues().apply {
+                    put("id",          newTemplateId)
+                    put("parentId",    notebookParentId)
+                    put("type",        "template")
+                    put("boundingBox", bbox)
+                    put("`order`",     0)
+                    put("createdAt",   now)
+                    put("updatedAt",   now)
+                    putNull("deletedAt")
+                    put("data",        TemplateData(ep.width, ep.height, ep.templateName, ep.templateImageBase64).toJson())
+                })
+
+                db.insert("notebook", null, ContentValues().apply {
+                    put("id",          newPageId)
+                    put("parentId",    notebookParentId)
+                    put("type",        "page")
+                    put("boundingBox", bbox)
+                    put("`order`",     insertionIndex + offset)
+                    put("createdAt",   now)
+                    put("updatedAt",   now)
+                    putNull("deletedAt")
+                    put("data",        PageData(width = ep.width.toFloat(), height = ep.height.toFloat(), template = newTemplateId).toJson())
+                })
+
+                db.insert("notebook", null, ContentValues().apply {
+                    put("id",          newLayerId)
+                    put("parentId",    newPageId)
+                    put("type",        "layer")
+                    put("boundingBox", bbox)
+                    put("`order`",     0)
+                    put("createdAt",   now)
+                    put("updatedAt",   now)
+                    putNull("deletedAt")
+                    put("data",        """{"label":"Content","isLocked":false,"isVisible":true}""")
+                })
+
+                for (child in ep.children) {
+                    db.insert("notebook", null, ContentValues().apply {
+                        put("id",          UUID.randomUUID().toString())
+                        put("parentId",    newLayerId)
+                        put("type",        child.type)
+                        put("boundingBox", child.bbox)
+                        put("`order`",     child.order)
+                        put("createdAt",   now)
+                        put("updatedAt",   now)
+                        putNull("deletedAt")
+                        put("data",        child.data)
+                    })
+                }
+            }
+
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
+
+        db.checkpointAndVacuum()
+        newPageIds.mapIndexed { offset, id -> id to (insertionIndex + offset) }
+    } catch (e: Exception) {
+        Log.e(TAG, "insertCalendarPagesIntoNotebook failed for $notebookPath", e)
+        null
+    } finally {
+        db?.close()
+        cleanStrayJournal(notebookPath)
+    }
+}

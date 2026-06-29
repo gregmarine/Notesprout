@@ -138,6 +138,14 @@
             android:src="@drawable/ic_sketching"
             android:contentDescription="Scratch Pad" />
 
+        <!-- Send the current view to a notebook as a new page (template + optional writing) -->
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnCalSendPage"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:layout_marginStart="2dp"
+            android:src="@drawable/ic_page_add"
+            android:contentDescription="Send page to notebook" />
+
         <!-- Flexible spacer pushes nav controls to the right -->
         <Space
             android:layout_width="0dp"

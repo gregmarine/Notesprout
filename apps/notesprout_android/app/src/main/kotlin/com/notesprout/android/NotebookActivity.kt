@@ -737,12 +737,20 @@ class NotebookActivity : AppCompatActivity() {
         }
     }
 
-    /** Re-read the page list after an external picker may have inserted current-notebook pages. */
-    private fun reloadPagesPreservingCurrent() {
+    /**
+     * Re-read the page list after an external picker may have inserted current-notebook pages.
+     * When [gotoPageId] resolves to a page, navigate to it (used by the calendar page export's
+     * "Open" action); otherwise keep the currently-open page.
+     */
+    private fun reloadPagesPreservingCurrent(gotoPageId: String? = null) {
         val db = soilDatabase ?: return
         lifecycleScope.launch {
             val refreshed = withContext(Dispatchers.IO) { db.notebookDao().getPagesSorted() }
             pages = refreshed.toMutableList()
+            if (gotoPageId != null) {
+                val gi = pages.indexOfFirst { it.id == gotoPageId }
+                if (gi >= 0) { navigateToPage(gi); return@launch }
+            }
             val idx = pages.indexOfFirst { it.id == currentPageId }
             if (idx >= 0) currentPageIndex = idx
             updatePageIndicator()
@@ -769,10 +777,20 @@ class NotebookActivity : AppCompatActivity() {
         performScratchpadTransfer(content)
     }
 
-    /** Calendar "Send to Notebook → this notebook" hand-off (calendar opened from this notebook). */
+    /**
+     * Calendar hand-off (calendar opened from this notebook). Two paths can return here:
+     * - "Send to Notebook → this notebook": paste [CalendarTransfer.pending] onto the current page.
+     * - "Send page to notebook" export into this notebook: the calendar wrote new pages into this
+     *   `.soil` directly, so reload the page list (navigating to the new page if "Open" was chosen).
+     */
     private val calendarLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
+        // Always refresh — the calendar export may have inserted pages into this notebook's .soil
+        // even when the user stayed in the calendar (RESULT_CANCELED) or chose "Open".
+        val gotoPageId = result.data?.getStringExtra(CalendarActivity.EXTRA_RESULT_GOTO_PAGE_ID)
+        reloadPagesPreservingCurrent(gotoPageId)
+
         if (result.resultCode != RESULT_OK) return@registerForActivityResult
         val content = CalendarTransfer.pending ?: return@registerForActivityResult
         CalendarTransfer.pending = null

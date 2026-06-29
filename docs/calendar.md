@@ -63,7 +63,8 @@ their own page keys (e.g. `cal-daynote-YYYY-MM-DD`) under the same `calendar` ta
 |---|---|
 | `data/index/CalendarEntity.kt` | Room `@Entity` for the `calendar` table (schema = `ScratchpadEntity`) |
 | `data/index/CalendarDao.kt` | CRUD queries (mirrors `ScratchpadDao`; + `getAllChildrenForLayer` / `deleteChildren` for undo snapshots) |
-| `data/CalendarRepository.kt` | Higher-level API (`ensureBootstrap`, `getOrCreatePageLayer`, `loadPage`, `saveStrokes`, `insertObjects`, `softDeleteObjects`, `setPageSize`, `snapshotLayer`/`restoreLayer`) |
+| `data/CalendarRepository.kt` | Higher-level API (`ensureBootstrap`, `getOrCreatePageLayer`, `loadPage`, `saveStrokes`, `insertObjects`, `serializeForExport`, `softDeleteObjects`, `setPageSize`, `snapshotLayer`/`restoreLayer`) |
+| `data/PageCopier.kt` | `insertCalendarPagesIntoNotebook` / `loadNotebookPageIds` + `CalendarExportPage`/`CalendarExportChild` carriers — the engine for the full-view export (below) |
 | `data/index/ListIds.kt` | `CALENDAR_ROOT_ID` constant |
 | `data/index/NotesproutDatabase.kt` | `version=3`; `CalendarEntity` in `@Database entities`; `MIGRATION_2_3` |
 | `data/index/NotesproutIndex.kt` | registers `MIGRATION_2_3`; `calendarDao()` accessor |
@@ -122,7 +123,7 @@ LinearLayout (vertical, paperWhite)
   ├── calendarToolbar (56dp)
   │     btnBack │ btnToday │ btnMonthView · btnWeekView · btnDayView │
   │     btnCalPen · btnCalEraser · btnCalStickyNote · btnCalLassoEraser · btnCalLasso ·
-  │     btnCalErasePage · btnCalUndo · btnCalRedo · btnCalScratchpad
+  │     btnCalErasePage · btnCalUndo · btnCalRedo · btnCalScratchpad · btnCalSendPage
   │     ─ spacer ─ btnPrev · tvMonthYear (tap → month/year picker) · btnNext
   ├── 1dp divider
   └── calendarContent (FrameLayout — drawing view added programmatically)
@@ -245,6 +246,55 @@ Sends the current lasso selection (copy, not move) to a notebook via `CalendarTr
   pastes on return) or "Other notebook…" (notebook picker).
 - **Opened from MainActivity:** notebook picker → `openNotebookWithPaste` launches the chosen notebook
   with `EXTRA_PASTE_PENDING`; `NotebookActivity` pastes once its initial page is laid out.
+
+### Send page to notebook — full-view export (`btnCalSendPage` → `sendPageToNotebook`)
+
+Turns the **whole current view** into new notebook page(s): the grid/timeline becomes the page's
+**template**, and (optionally) the view's writing is copied as page content. Neither mode touches the
+template **library** — the template is written as a plain `type="template"` row inside the destination
+`.soil`.
+
+**Flow**
+
+1. **Mode** (AlertDialog) — `With writing` (grid template + all content objects) · `Template only`
+   (grid template, blank layer) · Cancel.
+2. **Destination** — opened from a notebook (`fromNotebookId != null`): "‹This notebook›" / "Other
+   notebook…" / Cancel. From MainActivity: straight to the notebook picker
+   (`exportNotebookPickerLauncher`, separate from the Send-to-Notebook picker).
+3. **Position** — "Insert into ‹Notebook›" list: **End of notebook**, or tap any **Page N** →
+   **Insert before / after**. Empty notebook appends automatically. Page order is read live via
+   `loadNotebookPageIds`.
+4. **After insert** — "Added N page(s) to ‹Notebook›" → **Open ‹Notebook›** / **Stay**. Open returns to
+   the source notebook (`EXTRA_RESULT_GOTO_PAGE_ID`) or launches the dest at the new page
+   (`EXTRA_INITIAL_PAGE_ID`); either way the source notebook reloads its page list on return
+   (`reloadPagesPreservingCurrent`) so new pages appear even on "Stay".
+
+**Day view = two pages.** `exportSources()` always emits both AM (`dayHalf=0`) and PM (`dayHalf=1`)
+regardless of the half on screen; the off-screen half's content is read straight from the DB.
+
+**Native canvas size + toolbar top-margin.** New pages are the calendar canvas's exact pixel size, so
+content copies 1:1 with zero scaling. **But** the calendar canvas sits *below* its 56dp toolbar, while a
+notebook page's drawing area is full-screen with the toolbar **overlaid** on top. So the export reserves
+a blank top strip of height `root.height − calendarContent.height` (the toolbar + 1dp border):
+
+- page height grows to `canvasH + topOffset`;
+- the grid is composited into the taller bitmap at `y = topOffset` (blank white above);
+- **content is translated down by `topOffset`** so it clears the notebook's floating toolbar instead of
+  landing under it.
+
+Content translation goes through the existing `regenIds(clip, 0f, topOffset)` path (fresh UUIDs +
+correct per-type geometry shift — strokes, heading strokes, line/shape centers, **and nested link/sticky
+embedded geometry**, not just bounding boxes; a bbox-only shift would orphan link contents). The page is
+loaded as typed objects via `loadPage`, run through `regenIds`, then serialized by
+`CalendarRepository.serializeForExport` (mirrors `insertObjects`) into `CalendarExportChild` rows.
+
+**Clean grid.** The baked template renders with `highlights = false` (`CalendarTemplateRenderer.render`
+gains a `highlights` flag), omitting the today-circle and selection border.
+
+**Encryption.** The destination key is resolved once via `KeySession.getFor` ?: `KeyResolver`
+(prompting if locked) and held in memory through the whole flow — a passphrase never crosses an Intent.
+`insertCalendarPagesIntoNotebook` opens the dest `.soil` raw, computes the insertion index, shifts page
+orders, and writes template + page + layer + children in one transaction, then checkpoint-vacuums.
 
 ### Launch surfaces
 

@@ -38,12 +38,17 @@ object CalendarTemplateRenderer {
     private const val DOW_HEADER_DP = 40f
     private const val DAY_GUTTER_DP = 80f   // day-view time-label gutter
 
-    fun render(spec: Spec, widthPx: Int, heightPx: Int, density: Float): Bitmap {
+    /**
+     * Renders the grid/timeline. [highlights] draws the filled "today" circle and the selected-day
+     * border (true for the live calendar canvas); pass false when baking a template for export so a
+     * transient date highlight isn't frozen permanently onto a notebook page.
+     */
+    fun render(spec: Spec, widthPx: Int, heightPx: Int, density: Float, highlights: Boolean = true): Bitmap {
         val bmp = Bitmap.createBitmap(widthPx.coerceAtLeast(1), heightPx.coerceAtLeast(1), Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bmp)
         when (spec.view) {
-            CalView.MONTH -> drawMonth(canvas, spec, widthPx, heightPx, density)
-            CalView.WEEK  -> drawWeek(canvas, spec, widthPx, heightPx, density)
+            CalView.MONTH -> drawMonth(canvas, spec, widthPx, heightPx, density, highlights)
+            CalView.WEEK  -> drawWeek(canvas, spec, widthPx, heightPx, density, highlights)
             CalView.DAY   -> drawDay(canvas, spec, widthPx, heightPx, density)
         }
         return bmp
@@ -109,7 +114,7 @@ object CalendarTemplateRenderer {
 
     // ── Month ──────────────────────────────────────────────────────────────────
 
-    private fun drawMonth(canvas: Canvas, spec: Spec, w: Int, h: Int, d: Float) {
+    private fun drawMonth(canvas: Canvas, spec: Spec, w: Int, h: Int, d: Float, highlights: Boolean) {
         val p = Paint(Paint.ANTI_ALIAS_FLAG)
         val g = monthGeometry(w, h, d)
 
@@ -131,7 +136,7 @@ object CalendarTemplateRenderer {
                 val inMonth = date.year == spec.calYear && date.monthValue == spec.calMonth
                 val left = g.pitchX * col
                 val top = g.gridTop + g.pitchY * row
-                drawDayCell(canvas, p, left, top, g.cellW, g.cellH, date, false, inMonth, spec.selectedDate, spec.today, d)
+                drawDayCell(canvas, p, left, top, g.cellW, g.cellH, date, false, inMonth, spec.selectedDate, spec.today, d, highlights)
                 if (col > 0) drawVLine(canvas, p, left - 1f, g.gridTop, g.gridTop + g.gridH)
             }
             if (row > 0) drawHLine(canvas, p, 0f, g.gridTop + g.pitchY * row - 1f, w.toFloat())
@@ -145,7 +150,7 @@ object CalendarTemplateRenderer {
 
     // ── Week ───────────────────────────────────────────────────────────────────
 
-    private fun drawWeek(canvas: Canvas, spec: Spec, w: Int, h: Int, d: Float) {
+    private fun drawWeek(canvas: Canvas, spec: Spec, w: Int, h: Int, d: Float, highlights: Boolean) {
         val p = Paint(Paint.ANTI_ALIAS_FLAG)
         val g = weekGeometry(w, h, d)
         val weekStart = sundayOf(spec.selectedDate)
@@ -157,7 +162,7 @@ object CalendarTemplateRenderer {
                 val top = g.pitchY * row
                 if (idx < 7) {
                     val date = weekStart.plusDays(idx.toLong())
-                    drawDayCell(canvas, p, left, top, g.cellW, g.cellH, date, true, true, spec.selectedDate, spec.today, d)
+                    drawDayCell(canvas, p, left, top, g.cellW, g.cellH, date, true, true, spec.selectedDate, spec.today, d, highlights)
                 }
                 if (col > 0) drawVLine(canvas, p, left - 1f, 0f, g.cellsAreaH)
             }
@@ -209,10 +214,10 @@ object CalendarTemplateRenderer {
         canvas: Canvas, p: Paint,
         left: Float, top: Float, cellW: Float, cellH: Float,
         date: LocalDate, showDayOfWeek: Boolean, inMonth: Boolean,
-        selectedDate: LocalDate, today: LocalDate, d: Float,
+        selectedDate: LocalDate, today: LocalDate, d: Float, highlights: Boolean = true,
     ) {
-        val isToday = date == today
-        val isSel = date == selectedDate
+        val isToday = highlights && date == today
+        val isSel = highlights && date == selectedDate
         val topPad = 5f * d
         val leftPad = 5f * d
         val bounds = Rect()

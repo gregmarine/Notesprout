@@ -3,18 +3,26 @@ package com.notesprout.android
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Color
 import android.graphics.PointF
 import android.graphics.Rect
 import android.graphics.RectF
 import android.graphics.Region
 import android.os.Bundle
 import android.os.SystemClock
+import android.util.Base64
+import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewConfiguration
 import android.widget.FrameLayout
+import android.widget.LinearLayout
+import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
+import androidx.appcompat.widget.AppCompatTextView
+import androidx.core.content.ContextCompat
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
@@ -26,8 +34,12 @@ import androidx.core.view.WindowInsetsControllerCompat
 import androidx.core.view.doOnLayout
 import androidx.lifecycle.lifecycleScope
 import com.notesprout.android.core.isBooxDevice
+import com.notesprout.android.crypto.KeyResolver
+import com.notesprout.android.crypto.KeySession
 import com.notesprout.android.data.BoundingBox
+import com.notesprout.android.data.CalendarExportPage
 import com.notesprout.android.data.CalendarRepository
+import com.notesprout.android.data.ScratchpadPageContent
 import com.notesprout.android.data.HeadingObject
 import com.notesprout.android.data.HeadingStroke
 import com.notesprout.android.data.LineObject
@@ -44,7 +56,11 @@ import com.notesprout.android.data.TYPE_STICKY_NOTE
 import com.notesprout.android.data.TextObject
 import com.notesprout.android.data.TextRender
 import com.notesprout.android.data.index.CalendarEntity
+import com.notesprout.android.data.index.IndexRepository
 import com.notesprout.android.data.index.NotesproutIndex
+import com.notesprout.android.data.insertCalendarPagesIntoNotebook
+import com.notesprout.android.data.loadNotebookPageIds
+import com.notesprout.android.data.soilFile
 import com.notesprout.android.data.toBoundingBoxJson
 import com.notesprout.android.data.toLinkObject
 import com.notesprout.android.data.toStickyNoteObject
@@ -64,6 +80,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.ByteArrayOutputStream
 import java.time.LocalDate
 import java.time.LocalTime
 import java.time.Month
@@ -89,6 +106,13 @@ class CalendarActivity : AppCompatActivity() {
         const val EXTRA_FROM_NOTEBOOK_NAME      = "from_notebook_name"
         const val EXTRA_FROM_NOTEBOOK_ENCRYPTED = "from_notebook_encrypted"
 
+        /**
+         * Result extra (String, page UUID): set when the user exports calendar page(s) into the
+         * notebook they launched the calendar from and chooses "Open" — [NotebookActivity] reloads
+         * its page list and navigates to this page.
+         */
+        const val EXTRA_RESULT_GOTO_PAGE_ID = "cal_result_goto_page_id"
+
         // Last-position persistence (view + date restored on next open).
         private const val PREFS_CALENDAR = "calendar_state"
         private const val KEY_VIEW       = "last_view"
@@ -112,6 +136,10 @@ class CalendarActivity : AppCompatActivity() {
     private lateinit var binding: ActivityCalendarBinding
     private lateinit var drawingView: NotebookView
     private lateinit var repository: CalendarRepository
+    private val indexRepo: IndexRepository by lazy { IndexRepository(NotesproutIndex.dao()) }
+
+    /** Whether the in-flight page export should copy the view's writing (true) or only the grid template. */
+    private var pendingExportIncludeContent = false
 
     // Navigation state
     private var currentView = CalView.MONTH
@@ -241,6 +269,16 @@ class CalendarActivity : AppCompatActivity() {
         openNotebookWithPaste(destId, destName, content)
     }
 
+    private val exportNotebookPickerLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        val data = result.data
+        if (result.resultCode != RESULT_OK || data == null) return@registerForActivityResult
+        val destId   = data.getStringExtra(NotebookPickerActivity.RESULT_NOTEBOOK_ID) ?: return@registerForActivityResult
+        val destName = data.getStringExtra(NotebookPickerActivity.RESULT_NOTEBOOK_NAME) ?: ""
+        beginExport(destId, destName, pendingExportIncludeContent)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         WindowCompat.setDecorFitsSystemWindows(window, false)
@@ -314,6 +352,7 @@ class CalendarActivity : AppCompatActivity() {
         binding.btnNext.setOnClickListener { stepForward() }
         binding.tvMonthYear.setOnClickListener { showMonthYearPicker() }
         binding.btnCalScratchpad.setOnClickListener { openScratchpad() }
+        binding.btnCalSendPage.setOnClickListener { sendPageToNotebook() }
         binding.btnCalErasePage.setOnClickListener { confirmErasePage() }
         binding.btnCalUndo.setOnClickListener { undo() }
         binding.btnCalRedo.setOnClickListener { redo() }
@@ -1034,6 +1073,25 @@ class CalendarActivity : AppCompatActivity() {
     }
 
     /** Translate clipboard content by (dx,dy) and assign fresh UUIDs to every object. */
+    /** Bundle a whole loaded page into a [NotesproutClipboard.ClipboardContent] so it can be run
+     *  through [regenIds] (translate + fresh ids). The union box is only used by [regenIds]'s own
+     *  bookkeeping; export serialization reads each object's own bbox. */
+    private fun clipFromPage(c: ScratchpadPageContent): NotesproutClipboard.ClipboardContent {
+        val box = RectF()
+        c.strokes.forEach { box.union(it.boundingBox) }
+        c.headings.forEach { box.union(it.boundingBox) }
+        c.textObjects.forEach { box.union(it.boundingBox) }
+        c.lineObjects.forEach { box.union(it.boundingBox) }
+        c.links.forEach { box.union(it.boundingBox) }
+        c.stickyNotes.forEach { box.union(it.boundingBox) }
+        c.shapeObjects.forEach { box.union(it.boundingBox) }
+        return NotesproutClipboard.ClipboardContent(
+            strokes = c.strokes, headings = c.headings, boundingBox = box,
+            textObjects = c.textObjects, lineObjects = c.lineObjects,
+            links = c.links, stickyNotes = c.stickyNotes, shapeObjects = c.shapeObjects,
+        )
+    }
+
     private fun regenIds(clip: NotesproutClipboard.ClipboardContent, dx: Float, dy: Float): NotesproutClipboard.ClipboardContent {
         val newStrokes = clip.strokes.map { s ->
             s.copy(id = java.util.UUID.randomUUID().toString(), points = s.points.map { PointF(it.x + dx, it.y + dy) })
@@ -1156,6 +1214,250 @@ class CalendarActivity : AppCompatActivity() {
                 .putExtra(NotebookActivity.EXTRA_PASTE_PENDING, true)
         )
         finish()
+    }
+
+    // ── Send page to notebook (export view as page) ──────────────────────────────
+
+    /**
+     * Export the current view (Month / Week, or both Day halves) into a notebook as new page(s).
+     * The grid becomes each page's template; "With writing" also copies the view's content objects.
+     * Neither mode creates a library template.
+     */
+    private fun sendPageToNotebook() {
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("Send page to notebook")
+            .setPositiveButton("With writing") { _, _ -> chooseExportDestination(includeContent = true) }
+            .setNeutralButton("Template only") { _, _ -> chooseExportDestination(includeContent = false) }
+            .setNegativeButton("Cancel", null)
+            .show()
+        dialog.window?.setElevation(0f)
+        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+    }
+
+    /** Pick the destination notebook (this-notebook prompt when launched from one; else the picker). */
+    private fun chooseExportDestination(includeContent: Boolean) {
+        val fromId = fromNotebookId
+        if (fromId != null) {
+            val dialog = AlertDialog.Builder(this)
+                .setTitle("Send page to notebook")
+                .setPositiveButton(fromNotebookName ?: "This notebook") { _, _ ->
+                    beginExport(fromId, fromNotebookName ?: "This notebook", includeContent)
+                }
+                .setNeutralButton("Other notebook…") { _, _ -> launchExportPicker(includeContent, excludeId = fromId) }
+                .setNegativeButton("Cancel", null)
+                .show()
+            dialog.window?.setElevation(0f)
+            dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+        } else {
+            launchExportPicker(includeContent, excludeId = null)
+        }
+    }
+
+    private fun launchExportPicker(includeContent: Boolean, excludeId: String?) {
+        pendingExportIncludeContent = includeContent
+        val intent = Intent(this, NotebookPickerActivity::class.java)
+        if (excludeId != null) intent.putExtra(NotebookPickerActivity.EXTRA_EXCLUDE_NOTEBOOK_ID, excludeId)
+        exportNotebookPickerLauncher.launch(intent)
+    }
+
+    /** Resolve the destination key, load its pages, then prompt for the insert position. */
+    private fun beginExport(destId: String, destName: String, includeContent: Boolean) {
+        lifecycleScope.launch {
+            val info = withContext(Dispatchers.IO) { indexRepo.getEncryptionInfo(destId) }
+            val destPass: String? = if (info.encrypted) {
+                KeySession.getFor(destId) ?: KeyResolver.resolveForOpen(this@CalendarActivity, destId, info)
+            } else null
+            if (info.encrypted && destPass == null) { toast("Notebook is locked"); return@launch }
+
+            val destPath = soilFile(this@CalendarActivity, destId).absolutePath
+            val pageIds = withContext(Dispatchers.IO) { loadNotebookPageIds(destPath, destPass) }
+            if (pageIds == null) { toast("Couldn't open notebook"); return@launch }
+
+            showInsertPositionPicker(destName, pageIds) { anchorPageId, before ->
+                performExport(destId, destName, destPath, destPass, anchorPageId, before, includeContent)
+            }
+        }
+    }
+
+    /**
+     * Position picker (mirrors the page-index copy/move flow): "End of notebook", or tap a page then
+     * choose Before / After. [onChosen] is called with the anchor page id (null = append) + before.
+     */
+    private fun showInsertPositionPicker(
+        destName: String,
+        pageIds: List<String>,
+        onChosen: (anchorPageId: String?, before: Boolean) -> Unit,
+    ) {
+        if (pageIds.isEmpty()) { onChosen(null, false); return }  // empty notebook → append
+
+        val inkBlack = ContextCompat.getColor(this, R.color.inkBlack)
+        val pad = (16 * density).toInt()
+        val rowPadV = (14 * density).toInt()
+
+        val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        val scroll = ScrollView(this).apply { addView(list) }
+
+        var dlg: AlertDialog? = null
+
+        fun addRow(label: String, bold: Boolean, onClick: () -> Unit) {
+            if (list.childCount > 0) {
+                list.addView(View(this).apply { setBackgroundColor(inkBlack) },
+                    LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, (1 * density).toInt()))
+            }
+            val tv = AppCompatTextView(this).apply {
+                text = label
+                textSize = 16f
+                setTextColor(inkBlack)
+                if (bold) setTypeface(typeface, android.graphics.Typeface.BOLD)
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(pad, rowPadV, pad, rowPadV)
+                isClickable = true
+                isFocusable = true
+                setOnClickListener { onClick() }
+            }
+            list.addView(tv, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+        }
+
+        addRow("End of notebook", bold = true) { dlg?.dismiss(); onChosen(null, false) }
+        pageIds.forEachIndexed { i, pid ->
+            addRow("Page ${i + 1}", bold = false) {
+                dlg?.dismiss()
+                showBeforeAfterPicker(i + 1) { before -> onChosen(pid, before) }
+            }
+        }
+
+        dlg = AlertDialog.Builder(this)
+            .setTitle("Insert into $destName")
+            .setView(scroll)
+            .setNegativeButton("Cancel", null)
+            .create()
+        dlg.show()
+        dlg.window?.setElevation(0f)
+        dlg.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+    }
+
+    private fun showBeforeAfterPicker(pageNumber: Int, onChosen: (before: Boolean) -> Unit) {
+        val options = arrayOf("Insert before Page $pageNumber", "Insert after Page $pageNumber")
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("Page $pageNumber")
+            .setItems(options) { _, which -> onChosen(which == 0) }
+            .setNegativeButton("Cancel", null)
+            .show()
+        dialog.window?.setElevation(0f)
+        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+    }
+
+    /** The page key(s) + render spec(s) the current view exports (Day = AM + PM). */
+    private fun exportSources(): List<Pair<String, CalendarTemplateRenderer.Spec>> {
+        val today = LocalDate.now()
+        return when (currentView) {
+            CalView.MONTH -> listOf(
+                "cal-month-%04d-%02d".format(calYear, calMonth) to
+                    CalendarTemplateRenderer.Spec(CalView.MONTH, calYear, calMonth, selectedDate, 0, today)
+            )
+            CalView.WEEK -> listOf(
+                "cal-week-${sundayOf(selectedDate)}" to
+                    CalendarTemplateRenderer.Spec(CalView.WEEK, calYear, calMonth, selectedDate, 0, today)
+            )
+            CalView.DAY -> listOf(
+                "cal-day-$selectedDate-AM" to
+                    CalendarTemplateRenderer.Spec(CalView.DAY, calYear, calMonth, selectedDate, 0, today),
+                "cal-day-$selectedDate-PM" to
+                    CalendarTemplateRenderer.Spec(CalView.DAY, calYear, calMonth, selectedDate, 1, today),
+            )
+        }
+    }
+
+    private fun templateNameFor(spec: CalendarTemplateRenderer.Spec): String {
+        val monthName = Month.of(spec.calMonth).getDisplayName(TextStyle.FULL, Locale.getDefault())
+        return when (spec.view) {
+            CalView.MONTH -> "Calendar — $monthName ${spec.calYear}"
+            CalView.WEEK -> "Calendar — Week of ${sundayOf(spec.selectedDate)}"
+            CalView.DAY -> "Calendar — ${spec.selectedDate} ${if (spec.dayHalf == 0) "AM" else "PM"}"
+        }
+    }
+
+    private fun encodePngBase64(bitmap: Bitmap): String {
+        val baos = ByteArrayOutputStream()
+        bitmap.compress(Bitmap.CompressFormat.PNG, 100, baos)
+        return Base64.encodeToString(baos.toByteArray(), Base64.NO_WRAP)
+    }
+
+    private fun performExport(
+        destId: String, destName: String, destPath: String, destPass: String?,
+        anchorPageId: String?, before: Boolean, includeContent: Boolean,
+    ) {
+        val w = binding.calendarContent.width
+        val h = binding.calendarContent.height
+        if (w <= 0 || h <= 0) { toast("Calendar not ready"); return }
+
+        // The calendar canvas sits *below* its 56dp toolbar (vertical layout), but a notebook page's
+        // drawing area is full-screen with the toolbar overlaid on top. Reserve that toolbar height as
+        // a blank top margin so the exported grid + writing clear the notebook's floating toolbar
+        // instead of landing under it (the "off by exactly the toolbar size" alignment).
+        val topOffset = (binding.root.height - h).coerceAtLeast(0)
+        val topOffsetF = topOffset.toFloat()
+        val pageH = h + topOffset
+
+        lifecycleScope.launch {
+            withContext(Dispatchers.IO) { saveStrokes() }  // flush the visible canvas to the DB first
+
+            val exportPages = exportSources().map { (key, spec) ->
+                repository.getOrCreatePageLayer(key)
+                val children = if (includeContent) {
+                    val content = withContext(Dispatchers.IO) { repository.loadPage(key, density) }
+                    val translated = regenIds(clipFromPage(content), 0f, topOffsetF)
+                    repository.serializeForExport(translated, density)
+                } else emptyList()
+                val imageB64 = withContext(Dispatchers.Default) {
+                    val grid = CalendarTemplateRenderer.render(spec, w, h, density, highlights = false)
+                    val page = Bitmap.createBitmap(w, pageH, Bitmap.Config.ARGB_8888)
+                    Canvas(page).apply {
+                        drawColor(Color.WHITE)            // blank toolbar-height strip at top
+                        drawBitmap(grid, 0f, topOffsetF, null)
+                    }
+                    grid.recycle()
+                    val s = encodePngBase64(page)
+                    page.recycle()
+                    s
+                }
+                CalendarExportPage(templateNameFor(spec), imageB64, w, pageH, children)
+            }
+
+            val results = withContext(Dispatchers.IO) {
+                insertCalendarPagesIntoNotebook(destPath, destPass, anchorPageId, before, exportPages)
+            }
+            if (results.isNullOrEmpty()) { toast("Couldn't add pages"); return@launch }
+
+            showPostExportDialog(destId, destName, results.size, results.first().first)
+        }
+    }
+
+    private fun showPostExportDialog(destId: String, destName: String, count: Int, firstPageId: String) {
+        val noun = if (count == 1) "page" else "pages"
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("Added $count $noun to $destName")
+            .setPositiveButton("Open $destName") { _, _ -> openExportedNotebook(destId, destName, firstPageId) }
+            .setNegativeButton("Stay", null)
+            .show()
+        dialog.window?.setElevation(0f)
+        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+    }
+
+    private fun openExportedNotebook(destId: String, destName: String, firstPageId: String) {
+        if (destId == fromNotebookId) {
+            // Launched from this same notebook — return to it and navigate to the new page.
+            setResult(RESULT_OK, Intent().putExtra(EXTRA_RESULT_GOTO_PAGE_ID, firstPageId))
+            finish()
+        } else {
+            startActivity(
+                Intent(this, NotebookActivity::class.java)
+                    .putExtra(NotebookActivity.EXTRA_NOTEBOOK_ID, destId)
+                    .putExtra(NotebookActivity.EXTRA_NOTEBOOK_NAME, destName)
+                    .putExtra(NotebookActivity.EXTRA_INITIAL_PAGE_ID, firstPageId)
+            )
+            finish()
+        }
     }
 
     // ── Sticky notes ────────────────────────────────────────────────────────────

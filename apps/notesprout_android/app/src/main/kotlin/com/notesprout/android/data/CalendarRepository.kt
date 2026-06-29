@@ -314,6 +314,68 @@ class CalendarRepository(
         }
     }
 
+    // ── Serialize for calendar → notebook export ───────────────────────────────
+
+    /**
+     * Serialize already-positioned clipboard [content] into [CalendarExportChild] rows for a
+     * foreign `.soil`. Mirrors [insertObjects]'s per-type serialization exactly, but produces
+     * detached rows (no DB write) so the caller can insert them into another notebook. Geometry
+     * is taken as-is — translate [content] (e.g. for the toolbar top-margin) before calling.
+     */
+    fun serializeForExport(
+        content: NotesproutClipboard.ClipboardContent,
+        density: Float,
+    ): List<CalendarExportChild> {
+        val now = System.currentTimeMillis()
+        val out = ArrayList<CalendarExportChild>()
+        content.strokes.forEach { stroke ->
+            val bbox = stroke.boundingBox
+            out += CalendarExportChild(
+                type = "stroke",
+                bbox = BoundingBox(bbox.left, bbox.top, bbox.width(), bbox.height()).toJson(),
+                order = 0,
+                data = stroke.toStrokeData(now).toJson(),
+            )
+        }
+        content.headings.forEach { heading ->
+            out += CalendarExportChild(
+                TYPE_HEADING, heading.boundingBox.toBoundingBoxJson(), 0,
+                HeadingObject(heading.strokes, heading.recognizedText, heading.level).toJson(),
+            )
+        }
+        content.textObjects.forEach { textObj ->
+            out += CalendarExportChild(
+                TYPE_TEXT, textObj.boundingBox.toBoundingBoxJson(), 0,
+                TextObject(text = textObj.text, strokes = textObj.strokes).toJson(),
+            )
+        }
+        content.lineObjects.forEach { lineObj ->
+            out += CalendarExportChild(
+                TYPE_LINE, lineObj.boundingBox.toBoundingBoxJson(), 0,
+                LineObject(lineObj.style, lineObj.orientation, lineObj.strokeWidthDp, lineObj.dotSpacingPx / density).toJson(),
+            )
+        }
+        content.links.forEach { link ->
+            out += CalendarExportChild(
+                TYPE_LINK, link.boundingBox.toBoundingBoxJson(), 0,
+                link.toLinkObject(density).toJson(),
+            )
+        }
+        content.stickyNotes.forEach { note ->
+            out += CalendarExportChild(
+                TYPE_STICKY_NOTE, note.boundingBox.toBoundingBoxJson(), 0,
+                note.toStickyNoteObject(density).toJson(),
+            )
+        }
+        content.shapeObjects.forEach { shape ->
+            out += CalendarExportChild(
+                TYPE_SHAPE, shape.boundingBox.toBoundingBoxJson(), 0,
+                shape.toShapeObject(density).toJson(),
+            )
+        }
+        return out
+    }
+
     // ── Soft delete ───────────────────────────────────────────────────────────
 
     suspend fun softDeleteObjects(ids: List<String>) = withContext(Dispatchers.IO) {
