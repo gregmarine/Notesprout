@@ -237,10 +237,13 @@ class CalendarActivity : AppCompatActivity() {
         root.addView(header)
         root.addView(hDivider())
 
-        // 6-row × 7-column grid
+        // Square day cells: cell height = cell width
+        val cellW = squareCellWidth()
+        val gridH = 6 * cellW + 5  // 6 rows + 5 1px horizontal dividers between rows
+
         val grid = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            layoutParams = LinearLayout.LayoutParams(MATCH, 0, 1f)
+            layoutParams = LinearLayout.LayoutParams(MATCH, gridH)
         }
 
         val ym = YearMonth.of(calYear, calMonth)
@@ -280,6 +283,14 @@ class CalendarActivity : AppCompatActivity() {
         }
 
         root.addView(grid)
+
+        // Notes section — whatever vertical space remains after the square grid
+        val notesH = notesHeight()
+        if (notesH > 0) {
+            root.addView(hDivider())
+            root.addView(buildNotesSection(notesH))
+        }
+
         return root
     }
 
@@ -287,13 +298,19 @@ class CalendarActivity : AppCompatActivity() {
 
     private fun buildWeekView(): View {
         val weekStart = sundayOf(selectedDate)
+        val notesH = notesHeight()
 
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             layoutParams = frameMatch()
         }
 
-        // 2 rows × 4 cols; 7 day cells + 1 blank
+        // 2 rows × 4 cols; 7 day cells + 1 blank — fill all space above the notes section
+        val cellsArea = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutParams = LinearLayout.LayoutParams(MATCH, 0, 1f)
+        }
+
         for (row in 0 until 2) {
             val rowView = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
@@ -318,8 +335,15 @@ class CalendarActivity : AppCompatActivity() {
                     })
                 }
             }
-            root.addView(rowView)
-            if (row == 0) root.addView(hDivider())
+            cellsArea.addView(rowView)
+            if (row == 0) cellsArea.addView(hDivider())
+        }
+
+        root.addView(cellsArea)
+
+        if (notesH > 0) {
+            root.addView(hDivider())
+            root.addView(buildNotesSection(notesH))
         }
 
         return root
@@ -540,6 +564,44 @@ class CalendarActivity : AppCompatActivity() {
             p.color = Color.BLACK
             canvas.drawRect(0f, dividerY, width.toFloat(), dividerY + 1f, p)
         }
+    }
+
+    // ── Notes Section ─────────────────────────────────────────────────────────────
+
+    /** Width of one day column (screen width minus 6 vertical 1px dividers, divided by 7). */
+    private fun squareCellWidth() = (resources.displayMetrics.widthPixels - 6) / 7
+
+    /**
+     * Height available for the notes region, computed so that the month-calendar day cells
+     * are perfectly square.  The same height is reused in the week view so both notes
+     * sections are identical in size.
+     *
+     * Layout budget:
+     *   toolbar (56dp) + its bottom border (1px)
+     *   + DOW header (40dp) + its bottom border (1px)
+     *   + grid (6 × cellW + 5 dividers)
+     *   + border above notes (1px)
+     *   + notes (this value)
+     *   = screen height
+     */
+    private fun notesHeight(): Int {
+        val screenH = resources.displayMetrics.heightPixels
+        val contentH = screenH - dp(56) - 1          // minus toolbar + its border
+        val cellW = squareCellWidth()
+        val gridH = 6 * cellW + 5                    // 6 rows + 5 inter-row dividers
+        return contentH - dp(40) - 1 - gridH - 1     // minus header + border + grid + border
+    }
+
+    private fun buildNotesSection(height: Int): View = LinearLayout(this).apply {
+        orientation = LinearLayout.VERTICAL
+        layoutParams = LinearLayout.LayoutParams(MATCH, height)
+        setPadding(dp(8), dp(4), 0, 0)
+        addView(TextView(this@CalendarActivity).apply {
+            text = "Notes"
+            textSize = 14f
+            setTextColor(android.graphics.Color.GRAY)
+            layoutParams = LinearLayout.LayoutParams(WRAP, WRAP)
+        })
     }
 
     // ── Helpers ────────────────────────────────────────────────────────────────────
