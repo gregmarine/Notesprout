@@ -60,6 +60,14 @@ interface ScratchpadDao {
     @Query("SELECT * FROM scratchpad WHERE id = :id LIMIT 1")
     suspend fun getObjectById(id: String): ScratchpadEntity?
 
+    /** All live content objects on a layer (any type) — used to snapshot for undo/redo. */
+    @Query("SELECT * FROM scratchpad WHERE parentId = :layerId AND type != 'layer' AND deletedAt IS NULL")
+    suspend fun getAllChildrenForLayer(layerId: String): List<ScratchpadEntity>
+
+    /** Hard-delete every child row of a layer (used by undo/redo restore — scratch pad is local). */
+    @Query("DELETE FROM scratchpad WHERE parentId = :layerId")
+    suspend fun deleteChildren(layerId: String)
+
     // ── Update ───────────────────────────────────────────────────────────────
 
     @Query("UPDATE scratchpad SET `order` = :order WHERE id = :id")

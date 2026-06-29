@@ -5,9 +5,11 @@ import android.graphics.Rect
 import android.graphics.RectF
 import android.graphics.Region
 import android.os.Bundle
+import android.os.SystemClock
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
+import android.view.ViewConfiguration
 import android.widget.FrameLayout
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.ViewCompat
@@ -61,6 +63,36 @@ class StickyNoteEditorActivity : AppCompatActivity() {
     private var shapeConvertStroke: com.notesprout.android.data.LiveStroke? = null
     private var shapeConvertResult: ShapeRecognizer.Result? = null
 
+    // ── Undo/redo — in-memory full-content snapshot history ──────────────────────
+    private data class EditorSnapshot(
+        val strokes: List<LiveStroke>,
+        val headings: List<HeadingStroke>,
+        val texts: List<TextRender>,
+        val lines: List<LineRender>,
+        val shapes: List<ShapeRender>,
+    )
+    private val undoStack = ArrayDeque<EditorSnapshot>()
+    private val redoStack = ArrayDeque<EditorSnapshot>()
+    private val historyCap = 50
+    private var currentSnapshot = EditorSnapshot(emptyList(), emptyList(), emptyList(), emptyList(), emptyList())
+
+    private val touchSlopPx by lazy { ViewConfiguration.get(this).scaledTouchSlop }
+    private val doubleTapSlopPx by lazy { ViewConfiguration.get(this).scaledDoubleTapSlop }
+
+    // ── Multi-finger double-tap: 2-finger = undo, 3-finger = redo (mirrors NotebookActivity) ──
+    private var mfTapPeakCount = 0
+    private var mfTapArmed = false
+    private var mfTapMoved = false
+    private var mfTapDownTime = 0L
+    private var mfTapCentroidStartX = 0f
+    private var mfTapCentroidStartY = 0f
+    private var twoFingerTapFirstTime = 0L
+    private var twoFingerTapFirstX = 0f
+    private var twoFingerTapFirstY = 0f
+    private var threeFingerTapFirstTime = 0L
+    private var threeFingerTapFirstX = 0f
+    private var threeFingerTapFirstY = 0f
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityStickyNoteEditorBinding.inflate(layoutInflater)
@@ -109,6 +141,9 @@ class StickyNoteEditorActivity : AppCompatActivity() {
                 binding.btnStickyEraser.isSelected = false
             }
         }
+
+        binding.btnStickyUndo.setOnClickListener { undo() }
+        binding.btnStickyRedo.setOnClickListener { redo() }
 
         binding.btnLassoCopy.setOnClickListener { performLassoCopy() }
         binding.btnLassoCut.setOnClickListener  { performLassoCut() }
@@ -163,12 +198,70 @@ class StickyNoteEditorActivity : AppCompatActivity() {
                 drawingView.setTemplate(null)
                 drawingView.loadStrokes(input.strokes)
             }
+            initHistory()
         }
     }
 
     private fun recordCanvasSize() {
         contentWidth  = binding.drawingContainer.width.toFloat()
         contentHeight = binding.drawingContainer.height.toFloat()
+        initHistory()
+    }
+
+    // ── Undo / redo (in-memory full-content snapshot history) ────────────────────
+
+    /** Deep-copy the current canvas content so later in-place mutations can't corrupt the snapshot. */
+    private fun captureState(): EditorSnapshot = EditorSnapshot(
+        strokes  = drawingView.getStrokes().map { it.copy(points = it.points.map { p -> PointF(p.x, p.y) }) },
+        headings = drawingView.getHeadings().map { h ->
+            h.copy(boundingBox = RectF(h.boundingBox),
+                   strokes = h.strokes.map { s -> s.copy(points = s.points.map { p -> PointF(p.x, p.y) }) })
+        },
+        texts    = drawingView.getTextObjects().map { t ->
+            t.copy(boundingBox = RectF(t.boundingBox),
+                   strokes = t.strokes?.map { s -> s.copy(points = s.points.map { p -> PointF(p.x, p.y) }) })
+        },
+        lines    = drawingView.getLineObjects().map { it.copy(boundingBox = RectF(it.boundingBox)) },
+        shapes   = drawingView.getShapeObjects().map { it.copy(boundingBox = RectF(it.boundingBox)) },
+    )
+
+    private fun initHistory() {
+        currentSnapshot = captureState()
+        undoStack.clear()
+        redoStack.clear()
+    }
+
+    /** Capture post-change state, pushing the prior state onto the undo stack. */
+    private fun pushHistory() {
+        undoStack.addLast(currentSnapshot)
+        while (undoStack.size > historyCap) undoStack.removeFirst()
+        currentSnapshot = captureState()
+        redoStack.clear()
+    }
+
+    private fun applySnapshot(snap: EditorSnapshot) {
+        if (isLassoMode) exitLassoMode()
+        drawingView.setStrokeListSilently(snap.strokes)
+        drawingView.loadHeadings(snap.headings)
+        drawingView.loadTextObjects(snap.texts)
+        drawingView.loadLineObjects(snap.lines)
+        drawingView.loadShapeObjects(snap.shapes)
+        // Re-isolate currentSnapshot from the view's now-shared object references so a
+        // later in-place move/resize can't corrupt the history entry.
+        currentSnapshot = captureState()
+        lifecycleScope.launch { rebuildBitmap() }
+    }
+
+    private fun undo() {
+        if (undoStack.isEmpty()) return
+        redoStack.addLast(currentSnapshot)
+        applySnapshot(undoStack.removeLast())
+    }
+
+    private fun redo() {
+        if (redoStack.isEmpty()) return
+        undoStack.addLast(currentSnapshot)
+        applySnapshot(redoStack.removeLast())
     }
 
     private fun writeTransferOutput() {
@@ -189,21 +282,22 @@ class StickyNoteEditorActivity : AppCompatActivity() {
 
     private fun wireDrawingCallbacks() {
         // Pen strokes accumulate in the view's in-memory list — no DB save needed.
-        drawingView.onPenLifted = { }
+        drawingView.onPenLifted = { pushHistory() }
 
         // Hardware / scribble eraser: view already removed the item from its internal lists;
         // just rebuild the render bitmap so the canvas reflects the change.
-        drawingView.onStrokeErased = { lifecycleScope.launch { rebuildBitmap() } }
-        drawingView.onHeadingErased = { lifecycleScope.launch { rebuildBitmap() } }
-        drawingView.onTextErased = { lifecycleScope.launch { rebuildBitmap() } }
-        drawingView.onLineErased = { lifecycleScope.launch { rebuildBitmap() } }
-        drawingView.onLinkErased = { lifecycleScope.launch { rebuildBitmap() } }
+        drawingView.onStrokeErased = { lifecycleScope.launch { rebuildBitmap() }; pushHistory() }
+        drawingView.onHeadingErased = { lifecycleScope.launch { rebuildBitmap() }; pushHistory() }
+        drawingView.onTextErased = { lifecycleScope.launch { rebuildBitmap() }; pushHistory() }
+        drawingView.onLineErased = { lifecycleScope.launch { rebuildBitmap() }; pushHistory() }
+        drawingView.onLinkErased = { lifecycleScope.launch { rebuildBitmap() }; pushHistory() }
 
         // Shape hardware/scribble erased — remove from in-memory list and rebuild.
         drawingView.onShapeErased = { erasedShape ->
             val updatedShapes = drawingView.getShapeObjects().filter { it.id != erasedShape.id }
             drawingView.loadShapeObjects(updatedShapes)
             lifecycleScope.launch { rebuildBitmap() }
+            pushHistory()
         }
 
         // Shape recognized from a held stroke — convert in-memory, no DB.
@@ -231,6 +325,7 @@ class StickyNoteEditorActivity : AppCompatActivity() {
                     drawingView.setLassoOverlay(null, selBox)
                     updateFloatingSelectionToolbar(selBox)
                 }
+                pushHistory()
             }
         }
 
@@ -277,6 +372,7 @@ class StickyNoteEditorActivity : AppCompatActivity() {
                     }
                     if (bitmap != null) drawingView.loadStrokesWithBitmap(updStrokes, bitmap, null)
                     else drawingView.loadStrokes(updStrokes)
+                    pushHistory()
                 }
             }
         }
@@ -305,6 +401,7 @@ class StickyNoteEditorActivity : AppCompatActivity() {
                     }
                     if (bitmap != null) drawingView.loadStrokesWithBitmap(updStrokes, bitmap, null)
                     else drawingView.loadStrokes(updStrokes)
+                    pushHistory()
                 }
             }
         }
@@ -418,6 +515,7 @@ class StickyNoteEditorActivity : AppCompatActivity() {
             val pad = 8f * resources.displayMetrics.density
             newBox.inset(-pad, -pad)
             updateFloatingSelectionToolbar(newBox)
+            pushHistory()
         }
 
         drawingView.onLassoSelectionCleared = { hideFloatingSelectionToolbar() }
@@ -594,6 +692,7 @@ class StickyNoteEditorActivity : AppCompatActivity() {
             }
             if (bitmap != null) drawingView.loadStrokesWithBitmap(updStrokes, bitmap, null)
             else drawingView.loadStrokes(updStrokes)
+            pushHistory()
         }
     }
 
@@ -627,6 +726,7 @@ class StickyNoteEditorActivity : AppCompatActivity() {
             }
             if (bitmap != null) drawingView.loadStrokesWithBitmap(updStrokes, bitmap, null)
             else drawingView.loadStrokes(updStrokes)
+            pushHistory()
         }
     }
 
@@ -721,6 +821,7 @@ class StickyNoteEditorActivity : AppCompatActivity() {
             binding.btnStickyEraser.isSelected = false
             drawingView.setLassoSelectedIds(selectedObjectIds.toSet(), newBox)
             updateFloatingSelectionToolbar(newBox)
+            pushHistory()
         }
     }
 
@@ -765,6 +866,7 @@ class StickyNoteEditorActivity : AppCompatActivity() {
             selectedObjectIds.clear()
             selectedObjectIds.add(shapeId)
             updateFloatingSelectionToolbar(selBox)
+            pushHistory()
         }
     }
 
@@ -941,14 +1043,15 @@ class StickyNoteEditorActivity : AppCompatActivity() {
     // ── Touch dispatch ────────────────────────────────────────────────────────
 
     override fun dispatchTouchEvent(event: MotionEvent): Boolean {
-        if (event.getToolType(0) == MotionEvent.TOOL_TYPE_FINGER
-            && event.actionMasked == MotionEvent.ACTION_DOWN) {
-            if (isTouchInView(event, binding.chromeBar) ||
-                isTouchInView(event, binding.editorToolbar) ||
-                (binding.floatingSelectionToolbar.visibility == View.VISIBLE &&
-                 isTouchInView(event, binding.floatingSelectionToolbar))) {
+        if (event.getToolType(0) == MotionEvent.TOOL_TYPE_FINGER) {
+            val inChrome   = isTouchInView(event, binding.chromeBar)
+            val inToolbar  = isTouchInView(event, binding.editorToolbar)
+            val inFloating = binding.floatingSelectionToolbar.visibility == View.VISIBLE &&
+                isTouchInView(event, binding.floatingSelectionToolbar)
+            if (event.actionMasked == MotionEvent.ACTION_DOWN && (inChrome || inToolbar || inFloating)) {
                 drawingView.releaseRender()
             }
+            if (!inChrome && !inToolbar && !inFloating) handleMultiFingerDoubleTap(event)
         }
         return super.dispatchTouchEvent(event)
     }
@@ -958,6 +1061,107 @@ class StickyNoteEditorActivity : AppCompatActivity() {
         view.getLocationOnScreen(loc)
         val x = event.rawX; val y = event.rawY
         return x >= loc[0] && x < loc[0] + view.width && y >= loc[1] && y < loc[1] + view.height
+    }
+
+    /**
+     * Multi-finger stationary double-tap: 2 fingers = undo, 3 fingers = redo. Ported from
+     * [NotebookActivity]. Arms on the first pointer-down, evaluates on UP (or CANCEL for the
+     * BOOX 3-finger interception case) when the centroid stayed within tap slop and the gesture
+     * was short. Peak pointer count distinguishes the two cases.
+     */
+    private fun handleMultiFingerDoubleTap(event: MotionEvent) {
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                mfTapPeakCount = 1
+                mfTapArmed = false
+                mfTapMoved = false
+            }
+            MotionEvent.ACTION_POINTER_DOWN -> {
+                val count = event.pointerCount
+                if (count > mfTapPeakCount) mfTapPeakCount = count
+                if (count >= 4) {
+                    mfTapArmed = false
+                    mfTapMoved = true
+                    return
+                }
+                if (!mfTapArmed) {
+                    mfTapArmed = true
+                    mfTapDownTime = event.eventTime
+                }
+                mfTapCentroidStartX = (0 until count).map { event.getX(it) }.average().toFloat()
+                mfTapCentroidStartY = (0 until count).map { event.getY(it) }.average().toFloat()
+            }
+            MotionEvent.ACTION_MOVE -> {
+                if (mfTapArmed && !mfTapMoved && event.pointerCount >= 2) {
+                    val count = event.pointerCount
+                    val cx = (0 until count).map { event.getX(it) }.average().toFloat()
+                    val cy = (0 until count).map { event.getY(it) }.average().toFloat()
+                    val dx = cx - mfTapCentroidStartX
+                    val dy = cy - mfTapCentroidStartY
+                    if (Math.hypot(dx.toDouble(), dy.toDouble()) > touchSlopPx) mfTapMoved = true
+                }
+            }
+            MotionEvent.ACTION_UP -> {
+                if (mfTapArmed && !mfTapMoved) {
+                    val duration = event.eventTime - mfTapDownTime
+                    if (duration <= ViewConfiguration.getLongPressTimeout()) {
+                        evaluateMultiFingerTap(event.eventTime)
+                    }
+                }
+                mfTapArmed = false
+                mfTapMoved = false
+            }
+            MotionEvent.ACTION_CANCEL -> {
+                if (mfTapArmed && !mfTapMoved && mfTapPeakCount == 3) {
+                    evaluateMultiFingerTap(SystemClock.uptimeMillis(), threeOnly = true)
+                } else {
+                    twoFingerTapFirstTime = 0L
+                    threeFingerTapFirstTime = 0L
+                }
+                mfTapArmed = false
+                mfTapMoved = false
+            }
+        }
+    }
+
+    /** Shared tap-completion logic for [handleMultiFingerDoubleTap]. */
+    private fun evaluateMultiFingerTap(now: Long, threeOnly: Boolean = false) {
+        when (if (threeOnly) 3 else mfTapPeakCount) {
+            2 -> {
+                val withinTime = twoFingerTapFirstTime != 0L &&
+                    now - twoFingerTapFirstTime <= ViewConfiguration.getDoubleTapTimeout()
+                val withinSlop = twoFingerTapFirstTime != 0L && Math.hypot(
+                    (mfTapCentroidStartX - twoFingerTapFirstX).toDouble(),
+                    (mfTapCentroidStartY - twoFingerTapFirstY).toDouble(),
+                ) <= doubleTapSlopPx
+                if (withinTime && withinSlop) {
+                    twoFingerTapFirstTime = 0L
+                    drawingView.releaseRender()
+                    undo()
+                } else {
+                    twoFingerTapFirstTime = now
+                    twoFingerTapFirstX = mfTapCentroidStartX
+                    twoFingerTapFirstY = mfTapCentroidStartY
+                }
+            }
+            3 -> {
+                val withinTime = threeFingerTapFirstTime != 0L &&
+                    now - threeFingerTapFirstTime <= ViewConfiguration.getDoubleTapTimeout()
+                val withinSlop = threeFingerTapFirstTime != 0L && Math.hypot(
+                    (mfTapCentroidStartX - threeFingerTapFirstX).toDouble(),
+                    (mfTapCentroidStartY - threeFingerTapFirstY).toDouble(),
+                ) <= doubleTapSlopPx
+                if (withinTime && withinSlop) {
+                    threeFingerTapFirstTime = 0L
+                    drawingView.releaseRender()
+                    redo()
+                } else {
+                    threeFingerTapFirstTime = now
+                    threeFingerTapFirstX = mfTapCentroidStartX
+                    threeFingerTapFirstY = mfTapCentroidStartY
+                }
+            }
+        }
     }
 
     // ── Lifecycle ─────────────────────────────────────────────────────────────

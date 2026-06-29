@@ -6,6 +6,7 @@ import android.graphics.Rect
 import android.graphics.RectF
 import android.graphics.Region
 import android.os.Bundle
+import android.os.SystemClock
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.VelocityTracker
@@ -95,6 +96,27 @@ class ScratchpadActivity : AppCompatActivity() {
     private var stickyNoteTapDownTime = 0L
     private var stickyNoteTapMoved = false
     private val stickyNoteTouchSlopPx by lazy { ViewConfiguration.get(this).scaledTouchSlop }
+    private val doubleTapSlopPx by lazy { ViewConfiguration.get(this).scaledDoubleTapSlop }
+
+    // ── Undo/redo — full-layer snapshot history (per page; reset on navigation) ──
+    private val undoStack = ArrayDeque<List<ScratchpadEntity>>()
+    private val redoStack = ArrayDeque<List<ScratchpadEntity>>()
+    private val historyCap = 50
+    private var currentSnapshot: List<ScratchpadEntity> = emptyList()
+
+    // ── Multi-finger double-tap: 2-finger = undo, 3-finger = redo (mirrors NotebookActivity) ──
+    private var mfTapPeakCount = 0
+    private var mfTapArmed = false
+    private var mfTapMoved = false
+    private var mfTapDownTime = 0L
+    private var mfTapCentroidStartX = 0f
+    private var mfTapCentroidStartY = 0f
+    private var twoFingerTapFirstTime = 0L
+    private var twoFingerTapFirstX = 0f
+    private var twoFingerTapFirstY = 0f
+    private var threeFingerTapFirstTime = 0L
+    private var threeFingerTapFirstX = 0f
+    private var threeFingerTapFirstY = 0f
 
     private lateinit var binding: ActivityScratchpadBinding
     private lateinit var drawingView: NotebookView
@@ -158,6 +180,7 @@ class ScratchpadActivity : AppCompatActivity() {
                     }
                     drawingView.loadStickyNotes(updatedNotes)
                     rebuildBitmap()
+                    pushHistory()
                     if (wasInitialCreate) selectStickyNoteIcon(afterRender)
                 }
                 return@registerForActivityResult
@@ -255,6 +278,8 @@ class ScratchpadActivity : AppCompatActivity() {
             dialog.window?.setElevation(0f)
             dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
         }
+        binding.btnScratchUndo.setOnClickListener { undo() }
+        binding.btnScratchRedo.setOnClickListener { redo() }
         binding.btnScratchpadPrev.setOnClickListener {
             if (currentPageIndex > 0) lifecycleScope.launch { navigateTo(currentPageIndex - 1) }
         }
@@ -301,11 +326,13 @@ class ScratchpadActivity : AppCompatActivity() {
 
             if (binding.drawingContainer.width > 0) {
                 loadCurrentPage()
+                initHistory()
                 if (selectIds != null) selectInsertedObjects(selectIds)
             } else {
                 binding.drawingContainer.doOnLayout {
                     lifecycleScope.launch {
                         loadCurrentPage()
+                        initHistory()
                         if (selectIds != null) selectInsertedObjects(selectIds)
                     }
                 }
@@ -322,6 +349,7 @@ class ScratchpadActivity : AppCompatActivity() {
                 withContext(Dispatchers.IO) {
                     NotesproutIndex.scratchpadDao().softDelete(strokeId, System.currentTimeMillis())
                 }
+                pushHistory()
             }
         }
 
@@ -329,7 +357,7 @@ class ScratchpadActivity : AppCompatActivity() {
             val deletedAt = System.currentTimeMillis()
             lifecycleScope.launch(Dispatchers.IO) {
                 NotesproutIndex.scratchpadDao().softDelete(heading.id, deletedAt)
-                withContext(Dispatchers.Main) { lifecycleScope.launch { rebuildBitmap() } }
+                withContext(Dispatchers.Main) { lifecycleScope.launch { rebuildBitmap(); pushHistory() } }
             }
         }
 
@@ -337,7 +365,7 @@ class ScratchpadActivity : AppCompatActivity() {
             val deletedAt = System.currentTimeMillis()
             lifecycleScope.launch(Dispatchers.IO) {
                 NotesproutIndex.scratchpadDao().softDelete(textObject.id, deletedAt)
-                withContext(Dispatchers.Main) { lifecycleScope.launch { rebuildBitmap() } }
+                withContext(Dispatchers.Main) { lifecycleScope.launch { rebuildBitmap(); pushHistory() } }
             }
         }
 
@@ -345,7 +373,7 @@ class ScratchpadActivity : AppCompatActivity() {
             val deletedAt = System.currentTimeMillis()
             lifecycleScope.launch(Dispatchers.IO) {
                 NotesproutIndex.scratchpadDao().softDelete(lineObject.id, deletedAt)
-                withContext(Dispatchers.Main) { lifecycleScope.launch { rebuildBitmap() } }
+                withContext(Dispatchers.Main) { lifecycleScope.launch { rebuildBitmap(); pushHistory() } }
             }
         }
 
@@ -353,7 +381,7 @@ class ScratchpadActivity : AppCompatActivity() {
             val deletedAt = System.currentTimeMillis()
             lifecycleScope.launch(Dispatchers.IO) {
                 NotesproutIndex.scratchpadDao().softDelete(linkObject.id, deletedAt)
-                withContext(Dispatchers.Main) { lifecycleScope.launch { rebuildBitmap() } }
+                withContext(Dispatchers.Main) { lifecycleScope.launch { rebuildBitmap(); pushHistory() } }
             }
         }
 
@@ -361,7 +389,7 @@ class ScratchpadActivity : AppCompatActivity() {
             val deletedAt = System.currentTimeMillis()
             lifecycleScope.launch(Dispatchers.IO) {
                 NotesproutIndex.scratchpadDao().softDelete(noteObject.id, deletedAt)
-                withContext(Dispatchers.Main) { lifecycleScope.launch { rebuildBitmap() } }
+                withContext(Dispatchers.Main) { lifecycleScope.launch { rebuildBitmap(); pushHistory() } }
             }
         }
 
@@ -369,7 +397,7 @@ class ScratchpadActivity : AppCompatActivity() {
             val deletedAt = System.currentTimeMillis()
             lifecycleScope.launch(Dispatchers.IO) {
                 NotesproutIndex.scratchpadDao().softDelete(shape.id, deletedAt)
-                withContext(Dispatchers.Main) { lifecycleScope.launch { rebuildBitmap() } }
+                withContext(Dispatchers.Main) { lifecycleScope.launch { rebuildBitmap(); pushHistory() } }
             }
         }
 
@@ -398,7 +426,8 @@ class ScratchpadActivity : AppCompatActivity() {
 
         drawingView.onPenLifted = {
             lifecycleScope.launch {
-                withContext(Dispatchers.IO) { saveStrokes() }
+                val saved = withContext(Dispatchers.IO) { saveStrokes() }
+                if (saved) pushHistory()
             }
         }
 
@@ -590,6 +619,7 @@ class ScratchpadActivity : AppCompatActivity() {
                 val pad = 8f * resources.displayMetrics.density
                 newBox.inset(-pad, -pad)
                 updateFloatingSelectionToolbar(newBox)
+                pushHistory()
             }
         }
 
@@ -660,6 +690,7 @@ class ScratchpadActivity : AppCompatActivity() {
                     } else {
                         drawingView.loadStrokes(updatedStrokes)
                     }
+                    pushHistory()
                 }
             }
         }
@@ -841,6 +872,7 @@ class ScratchpadActivity : AppCompatActivity() {
             } else {
                 drawingView.loadStrokes(updatedStrokes)
             }
+            pushHistory()
         }
     }
 
@@ -885,6 +917,7 @@ class ScratchpadActivity : AppCompatActivity() {
             } else {
                 drawingView.loadStrokes(updatedStrokes)
             }
+            pushHistory()
         }
     }
 
@@ -1101,6 +1134,7 @@ class ScratchpadActivity : AppCompatActivity() {
             binding.btnScratchEraser.isSelected = false
             drawingView.setLassoSelectedIds(selectedObjectIds.toSet(), newBox)
             updateFloatingSelectionToolbar(newBox)
+            pushHistory()
         }
     }
 
@@ -1266,17 +1300,69 @@ class ScratchpadActivity : AppCompatActivity() {
         persistedStrokeIds.addAll(content.strokes.map { it.id })
     }
 
+    // ── Undo / redo (full-layer snapshot history) ───────────────────────────────
+
+    private suspend fun initHistory() {
+        val layerId = currentLayerId.takeIf { it.isNotEmpty() }
+        currentSnapshot = if (layerId != null) repository.snapshotLayer(layerId) else emptyList()
+        undoStack.clear()
+        redoStack.clear()
+    }
+
+    /** Capture the post-change layer state, pushing the prior state onto the undo stack. */
+    private fun pushHistory() {
+        val layerId = currentLayerId.takeIf { it.isNotEmpty() } ?: return
+        lifecycleScope.launch {
+            val snap = repository.snapshotLayer(layerId)
+            undoStack.addLast(currentSnapshot)
+            while (undoStack.size > historyCap) undoStack.removeFirst()
+            currentSnapshot = snap
+            redoStack.clear()
+        }
+    }
+
+    private fun undo() {
+        if (undoStack.isEmpty()) return
+        val layerId = currentLayerId.takeIf { it.isNotEmpty() } ?: return
+        if (isLassoMode) clearLassoSelectionForNavigation()
+        lifecycleScope.launch {
+            redoStack.addLast(currentSnapshot)
+            val prev = undoStack.removeLast()
+            currentSnapshot = prev
+            withContext(Dispatchers.IO) { repository.restoreLayer(layerId, prev) }
+            // No eraseAll() — loadCurrentPage swaps the full render bitmap in one repaint,
+            // avoiding the extra white-flash a separate eraseAll would cause on EPD.
+            loadCurrentPage()
+            if (isLassoMode) drawingView.setLassoMode(true)
+        }
+    }
+
+    private fun redo() {
+        if (redoStack.isEmpty()) return
+        val layerId = currentLayerId.takeIf { it.isNotEmpty() } ?: return
+        if (isLassoMode) clearLassoSelectionForNavigation()
+        lifecycleScope.launch {
+            undoStack.addLast(currentSnapshot)
+            val next = redoStack.removeLast()
+            currentSnapshot = next
+            withContext(Dispatchers.IO) { repository.restoreLayer(layerId, next) }
+            loadCurrentPage()
+            if (isLassoMode) drawingView.setLassoMode(true)
+        }
+    }
+
     // ── Save ──────────────────────────────────────────────────────────────────
 
-    // Must be called on Dispatchers.IO.
-    private suspend fun saveStrokes() {
-        val layerId = currentLayerId.takeIf { it.isNotEmpty() } ?: return
+    // Must be called on Dispatchers.IO. Returns true if any new strokes were persisted.
+    private suspend fun saveStrokes(): Boolean {
+        val layerId = currentLayerId.takeIf { it.isNotEmpty() } ?: return false
         val currentStrokes = drawingView.getStrokes()
         val alreadyPersisted = persistedStrokeIds.toHashSet()
         val newStrokes = currentStrokes.filter { it.id !in alreadyPersisted }
-        if (newStrokes.isEmpty()) return
+        if (newStrokes.isEmpty()) return false
         repository.saveStrokes(layerId, newStrokes)
         persistedStrokeIds.addAll(newStrokes.map { it.id })
+        return true
     }
 
     private suspend fun persistSnapshot(pageId: String, snapshot: String) {
@@ -1320,6 +1406,7 @@ class ScratchpadActivity : AppCompatActivity() {
         drawingView.eraseAll()
         updatePageIndicator()
         loadCurrentPage()
+        initHistory()
         if (isLassoMode) drawingView.setLassoMode(true)
     }
 
@@ -1336,6 +1423,7 @@ class ScratchpadActivity : AppCompatActivity() {
         drawingView.eraseAll()
         updatePageIndicator()
         loadCurrentPage()
+        initHistory()
         if (isLassoMode) drawingView.setLassoMode(true)
     }
 
@@ -1354,7 +1442,10 @@ class ScratchpadActivity : AppCompatActivity() {
         updatePageIndicator()
         if (currentPageId.isNotEmpty()) {
             loadCurrentPage()
+            initHistory()
             if (isLassoMode) drawingView.setLassoMode(true)
+        } else {
+            initHistory()
         }
     }
 
@@ -1393,6 +1484,7 @@ class ScratchpadActivity : AppCompatActivity() {
         val updatedNotes = drawingView.getStickyNotes() + noteRender
         drawingView.loadStickyNotes(updatedNotes)
         rebuildBitmap()
+        pushHistory()
         openStickyNote(noteRender, initialCreate = true)
     }
 
@@ -1579,6 +1671,7 @@ class ScratchpadActivity : AppCompatActivity() {
 
             // Swipe outside chrome/toolbar in any tool mode — lasso is stylus-only, finger navigates.
             if (!inChrome && !inToolbar) {
+                if (!inFloating) handleMultiFingerDoubleTap(event)
                 handlePageSwipe(event)
             }
         }
@@ -1590,6 +1683,107 @@ class ScratchpadActivity : AppCompatActivity() {
         view.getLocationOnScreen(loc)
         val x = event.rawX; val y = event.rawY
         return x >= loc[0] && x < loc[0] + view.width && y >= loc[1] && y < loc[1] + view.height
+    }
+
+    /**
+     * Multi-finger stationary double-tap: 2 fingers = undo, 3 fingers = redo. Ported from
+     * [NotebookActivity]. Arms on the first pointer-down, evaluates on UP (or CANCEL for the
+     * BOOX 3-finger interception case) when the centroid stayed within tap slop and the gesture
+     * was short. Peak pointer count distinguishes the two cases.
+     */
+    private fun handleMultiFingerDoubleTap(event: MotionEvent) {
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                mfTapPeakCount = 1
+                mfTapArmed = false
+                mfTapMoved = false
+            }
+            MotionEvent.ACTION_POINTER_DOWN -> {
+                val count = event.pointerCount
+                if (count > mfTapPeakCount) mfTapPeakCount = count
+                if (count >= 4) {
+                    mfTapArmed = false
+                    mfTapMoved = true
+                    return
+                }
+                if (!mfTapArmed) {
+                    mfTapArmed = true
+                    mfTapDownTime = event.eventTime
+                }
+                mfTapCentroidStartX = (0 until count).map { event.getX(it) }.average().toFloat()
+                mfTapCentroidStartY = (0 until count).map { event.getY(it) }.average().toFloat()
+            }
+            MotionEvent.ACTION_MOVE -> {
+                if (mfTapArmed && !mfTapMoved && event.pointerCount >= 2) {
+                    val count = event.pointerCount
+                    val cx = (0 until count).map { event.getX(it) }.average().toFloat()
+                    val cy = (0 until count).map { event.getY(it) }.average().toFloat()
+                    val dx = cx - mfTapCentroidStartX
+                    val dy = cy - mfTapCentroidStartY
+                    if (Math.hypot(dx.toDouble(), dy.toDouble()) > stickyNoteTouchSlopPx) mfTapMoved = true
+                }
+            }
+            MotionEvent.ACTION_UP -> {
+                if (mfTapArmed && !mfTapMoved) {
+                    val duration = event.eventTime - mfTapDownTime
+                    if (duration <= ViewConfiguration.getLongPressTimeout()) {
+                        evaluateMultiFingerTap(event.eventTime)
+                    }
+                }
+                mfTapArmed = false
+                mfTapMoved = false
+            }
+            MotionEvent.ACTION_CANCEL -> {
+                if (mfTapArmed && !mfTapMoved && mfTapPeakCount == 3) {
+                    evaluateMultiFingerTap(SystemClock.uptimeMillis(), threeOnly = true)
+                } else {
+                    twoFingerTapFirstTime = 0L
+                    threeFingerTapFirstTime = 0L
+                }
+                mfTapArmed = false
+                mfTapMoved = false
+            }
+        }
+    }
+
+    /** Shared tap-completion logic for [handleMultiFingerDoubleTap]. */
+    private fun evaluateMultiFingerTap(now: Long, threeOnly: Boolean = false) {
+        when (if (threeOnly) 3 else mfTapPeakCount) {
+            2 -> {
+                val withinTime = twoFingerTapFirstTime != 0L &&
+                    now - twoFingerTapFirstTime <= ViewConfiguration.getDoubleTapTimeout()
+                val withinSlop = twoFingerTapFirstTime != 0L && Math.hypot(
+                    (mfTapCentroidStartX - twoFingerTapFirstX).toDouble(),
+                    (mfTapCentroidStartY - twoFingerTapFirstY).toDouble(),
+                ) <= doubleTapSlopPx
+                if (withinTime && withinSlop) {
+                    twoFingerTapFirstTime = 0L
+                    drawingView.releaseRender()
+                    undo()
+                } else {
+                    twoFingerTapFirstTime = now
+                    twoFingerTapFirstX = mfTapCentroidStartX
+                    twoFingerTapFirstY = mfTapCentroidStartY
+                }
+            }
+            3 -> {
+                val withinTime = threeFingerTapFirstTime != 0L &&
+                    now - threeFingerTapFirstTime <= ViewConfiguration.getDoubleTapTimeout()
+                val withinSlop = threeFingerTapFirstTime != 0L && Math.hypot(
+                    (mfTapCentroidStartX - threeFingerTapFirstX).toDouble(),
+                    (mfTapCentroidStartY - threeFingerTapFirstY).toDouble(),
+                ) <= doubleTapSlopPx
+                if (withinTime && withinSlop) {
+                    threeFingerTapFirstTime = 0L
+                    drawingView.releaseRender()
+                    redo()
+                } else {
+                    threeFingerTapFirstTime = now
+                    threeFingerTapFirstX = mfTapCentroidStartX
+                    threeFingerTapFirstY = mfTapCentroidStartY
+                }
+            }
+        }
     }
 
     // ── Shape conversion ──────────────────────────────────────────────────────
@@ -1656,6 +1850,7 @@ class ScratchpadActivity : AppCompatActivity() {
             selectedObjectIds.clear()
             selectedObjectIds.add(shapeId)
             updateFloatingSelectionToolbar(selBox)
+            pushHistory()
         }
     }
 
@@ -1694,6 +1889,7 @@ class ScratchpadActivity : AppCompatActivity() {
                 drawingView.setLassoOverlay(null, selBox)
                 updateFloatingSelectionToolbar(selBox)
             }
+            pushHistory()
         }
     }
 

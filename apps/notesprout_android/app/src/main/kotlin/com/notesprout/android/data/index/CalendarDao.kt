@@ -1,0 +1,79 @@
+package com.notesprout.android.data.index
+
+import androidx.room.Dao
+import androidx.room.Insert
+import androidx.room.OnConflictStrategy
+import androidx.room.Query
+
+/** CRUD for the `calendar` table — mirrors [ScratchpadDao] against the calendar table. */
+@Dao
+interface CalendarDao {
+
+    // ── Insert ───────────────────────────────────────────────────────────────
+
+    @Insert
+    suspend fun insertObject(obj: CalendarEntity)
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertOrIgnore(obj: CalendarEntity)
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertAll(objects: List<CalendarEntity>)
+
+    // ── Select ───────────────────────────────────────────────────────────────
+
+    @Query("SELECT * FROM calendar WHERE type = 'layer' AND parentId = :pageId AND deletedAt IS NULL LIMIT 1")
+    suspend fun getLayerForPage(pageId: String): CalendarEntity?
+
+    @Query("SELECT * FROM calendar WHERE type = 'stroke' AND parentId = :layerId AND deletedAt IS NULL ORDER BY `order` ASC")
+    suspend fun getStrokesForLayer(layerId: String): List<CalendarEntity>
+
+    @Query("SELECT * FROM calendar WHERE type = 'heading' AND parentId = :layerId AND deletedAt IS NULL ORDER BY `order` ASC")
+    suspend fun getHeadingsForLayer(layerId: String): List<CalendarEntity>
+
+    @Query("SELECT * FROM calendar WHERE type = 'text' AND parentId = :layerId AND deletedAt IS NULL ORDER BY `order` ASC")
+    suspend fun getTextObjectsForLayer(layerId: String): List<CalendarEntity>
+
+    @Query("SELECT * FROM calendar WHERE type = 'line' AND parentId = :layerId AND deletedAt IS NULL ORDER BY `order` ASC")
+    suspend fun getLineObjectsForLayer(layerId: String): List<CalendarEntity>
+
+    @Query("SELECT * FROM calendar WHERE type = 'link' AND parentId = :layerId AND deletedAt IS NULL ORDER BY `order` ASC")
+    suspend fun getLinkObjectsForLayer(layerId: String): List<CalendarEntity>
+
+    @Query("SELECT * FROM calendar WHERE type = 'sticky_note' AND parentId = :layerId AND deletedAt IS NULL ORDER BY `order` ASC")
+    suspend fun getStickyNotesForLayer(layerId: String): List<CalendarEntity>
+
+    @Query("SELECT * FROM calendar WHERE type = 'shape' AND parentId = :layerId AND deletedAt IS NULL ORDER BY `order` ASC")
+    suspend fun getShapeObjectsForLayer(layerId: String): List<CalendarEntity>
+
+    @Query("SELECT COUNT(*) FROM calendar WHERE type = 'calendar_root' AND deletedAt IS NULL")
+    suspend fun getRootCount(): Int
+
+    @Query("SELECT * FROM calendar WHERE id = :id LIMIT 1")
+    suspend fun getObjectById(id: String): CalendarEntity?
+
+    /** All live content objects on a layer (any type) — used to snapshot for undo/redo. */
+    @Query("SELECT * FROM calendar WHERE parentId = :layerId AND type != 'layer' AND deletedAt IS NULL")
+    suspend fun getAllChildrenForLayer(layerId: String): List<CalendarEntity>
+
+    /** Hard-delete every child row of a layer (used by undo/redo restore — calendar is local). */
+    @Query("DELETE FROM calendar WHERE parentId = :layerId")
+    suspend fun deleteChildren(layerId: String)
+
+    // ── Update ───────────────────────────────────────────────────────────────
+
+    @Query("UPDATE calendar SET deletedAt = :deletedAt, updatedAt = :deletedAt WHERE id = :id")
+    suspend fun softDelete(id: String, deletedAt: Long)
+
+    @Query("UPDATE calendar SET deletedAt = :deletedAt, updatedAt = :deletedAt WHERE parentId = :parentId AND deletedAt IS NULL")
+    suspend fun softDeleteByParentId(parentId: String, deletedAt: Long)
+
+    @Query("UPDATE calendar SET data = :data, updatedAt = :updatedAt WHERE id = :id")
+    suspend fun updateData(id: String, data: String, updatedAt: Long)
+
+    @Query("UPDATE calendar SET boundingBox = :boundingBox, data = :data, updatedAt = :updatedAt WHERE id = :id")
+    suspend fun updatePageSize(id: String, boundingBox: String, data: String, updatedAt: Long)
+
+    @Query("UPDATE calendar SET boundingBox = :boundingBox, data = :data, updatedAt = :updatedAt WHERE id = :id")
+    suspend fun updateObjectData(id: String, boundingBox: String, data: String, updatedAt: Long)
+}

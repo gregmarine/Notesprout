@@ -164,6 +164,20 @@
                 android:src="@drawable/ic_lasso"
                 android:contentDescription="Lasso" />
 
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnStickyUndo"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:layout_marginStart="4dp"
+                android:src="@drawable/ic_undo"
+                android:contentDescription="Undo" />
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnStickyRedo"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:layout_marginStart="4dp"
+                android:src="@drawable/ic_redo"
+                android:contentDescription="Redo" />
+
         </LinearLayout>
 
     </LinearLayout>

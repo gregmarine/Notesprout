@@ -31,6 +31,7 @@ matching doc before working in that area:**
 | Scratch Pad: data model, host window, canvas reuse, multi-page, lasso, both transfer directions, encryption note | [`docs/scratchpad.md`](docs/scratchpad.md) |
 | Sticky Notes: data model, two coordinate spaces, editor transfer-singleton, on-page icon, tap-to-open, lasso/undo parity, create-flow, scratch pad parity, PDF footnote/endnote export, encryption note | [`docs/sticky-notes.md`](docs/sticky-notes.md) |
 | Shape objects: data model, oriented box vs AABB, recognizer pipeline + as-built constants, dwell trigger + gate order, transform mode, aspect/circle-oval toggle, lasso/clipboard/erase/export parity, host coverage, undo actions | [`docs/shape-objects.md`](docs/shape-objects.md) |
+| Calendar: handwriting-first Month/Week/Day canvas, `calendar` table (v3) + keyed pages, template renderer (grid/timeline + hit-test), page-load contract, finger gestures (swipe/tap/multi-finger undo-redo), last-position persistence, lasso/clipboard parity, Send to Notebook | [`docs/calendar.md`](docs/calendar.md) |
 
 Backlog at monorepo root: `BACKLOG.md` — consolidated deferred/future items harvested from the
 completed-and-retired feature plans (toolbar Session-8 polish, multi-page Phase 2, encryption Phase 3,

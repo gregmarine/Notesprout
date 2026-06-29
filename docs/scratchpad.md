@@ -49,7 +49,7 @@ scratchpad_root  (type="scratchpad_root", parentId="", fixed id SCRATCHPAD_ROOT_
 | `data/index/ScratchpadDao.kt` | CRUD queries (insert, select by type/parent, soft-delete, update) |
 | `data/ScratchpadRepository.kt` | Higher-level API (`ensureBootstrap`, `loadPage`, `saveStrokes`, `insertObjects`, `addPage`, `deletePage`, `setPageSize`) |
 | `data/index/ListIds.kt` | `SCRATCHPAD_ROOT_ID` constant |
-| `data/index/NotesproutDatabase.kt` | `version=2`; `ScratchpadEntity` in `@Database entities`; `MIGRATION_1_2` |
+| `data/index/NotesproutDatabase.kt` | `ScratchpadEntity` in `@Database entities`; `MIGRATION_1_2` (DB is now `version=3` — see `docs/calendar.md`) |
 
 ---
 

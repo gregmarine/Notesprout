@@ -40,6 +40,19 @@ CREATE INDEX idx_objects_parent_type_deleted
     ON objects(parentId, type, deletedAt);
 ```
 
+### Auxiliary tables (same `notesprout.db`, Room `version = 3`)
+
+Beyond `objects`, the global index DB holds two object-canvas tables that share the universal
+row schema (`id/parentId/type/boundingBox/order/createdAt/updatedAt/deletedAt/data`) so every
+`.soil` object serializer works unchanged. Both are plaintext (the global index is never encrypted).
+
+- **`scratchpad`** — added in `MIGRATION_1_2`. See [`docs/scratchpad.md`](scratchpad.md).
+- **`calendar`** — added in `MIGRATION_2_3` (keyed pages: month/week/day-AM/day-PM). See
+  [`docs/calendar.md`](calendar.md).
+
+`NotesproutDatabase` (`@Database entities = [ObjectEntity, ScratchpadEntity, CalendarEntity]`,
+`version = 3`) registers both migrations in `NotesproutIndex`.
+
 ### Key Classes
 
 - `ObjectEntity` (`data/index/ObjectEntity.kt`) — Room entity; universal index row

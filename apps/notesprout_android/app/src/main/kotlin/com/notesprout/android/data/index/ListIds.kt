@@ -14,3 +14,6 @@ const val BACKUP_CONFIG_ID = "00000000-0000-0000-0000-6261636b7570"
 
 // "scrtch" in hex as the last UUID group: 73 63 72 74 63 68
 const val SCRATCHPAD_ROOT_ID = "00000000-0000-0000-0000-736372746368"
+
+// "calndr" in hex as the last UUID group: 63 61 6c 6e 64 72
+const val CALENDAR_ROOT_ID = "00000000-0000-0000-0000-63616c6e6472"

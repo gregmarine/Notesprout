@@ -161,6 +161,12 @@ class NotebookActivity : AppCompatActivity() {
          */
         const val EXTRA_INITIAL_PAGE_ID = "initial_page_id"
 
+        /**
+         * Intent extra (Boolean) — when true, paste [CalendarTransfer.pending] onto the current page
+         * once the initial page has loaded. Set by CalendarActivity's "Send to Notebook → other".
+         */
+        const val EXTRA_PASTE_PENDING = "paste_pending"
+
         // One-finger page-turn gesture thresholds.
         private const val PAGE_SWIPE_MIN_DISTANCE_FRAC  = 0.30f  // min |dx| to qualify at all
         private const val PAGE_SWIPE_LONG_DISTANCE_FRAC = 0.50f  // |dx| that qualifies regardless of velocity
@@ -763,6 +769,16 @@ class NotebookActivity : AppCompatActivity() {
         performScratchpadTransfer(content)
     }
 
+    /** Calendar "Send to Notebook → this notebook" hand-off (calendar opened from this notebook). */
+    private val calendarLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode != RESULT_OK) return@registerForActivityResult
+        val content = CalendarTransfer.pending ?: return@registerForActivityResult
+        CalendarTransfer.pending = null
+        performScratchpadTransfer(content)
+    }
+
     /** Launched when opening a sticky note's content editor. */
     private val editorLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -1182,7 +1198,9 @@ class NotebookActivity : AppCompatActivity() {
         binding.btnPageIndex.setOnClickListener { openPageIndex() }
 
         binding.btnCalendar.setOnClickListener {
-            CalendarActivity.launchFromNotebook(this, notebookId, notebookDisplayName)
+            calendarLauncher.launch(
+                CalendarActivity.intentFromNotebook(this, notebookId, notebookDisplayName, encryptionInfo.encrypted)
+            )
         }
 
         binding.btnScratchpad.setOnClickListener {
@@ -3965,6 +3983,15 @@ class NotebookActivity : AppCompatActivity() {
             updatePageIndicator()
             postDisplayWork(db, result)
             if (linkedPageMissing) toast("Linked page is unavailable.")
+
+            // Calendar "Send to Notebook → other/from-main": paste the handed-off content once the
+            // initial page is loaded and the canvas is laid out.
+            if (intent.getBooleanExtra(EXTRA_PASTE_PENDING, false)) {
+                intent.removeExtra(EXTRA_PASTE_PENDING)
+                val pending = CalendarTransfer.pending
+                CalendarTransfer.pending = null
+                if (pending != null) binding.drawingContainer.post { performScratchpadTransfer(pending) }
+            }
         }
     }
 

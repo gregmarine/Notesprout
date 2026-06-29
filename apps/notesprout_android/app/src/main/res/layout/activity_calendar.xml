@@ -67,6 +67,77 @@
             android:text="Day"
             android:contentDescription="Day view" />
 
+        <!-- Divider between view toggles and drawing tools -->
+        <View
+            android:layout_width="1dp"
+            android:layout_height="28dp"
+            android:background="@color/inkBlack"
+            android:layout_marginStart="4dp"
+            android:layout_marginEnd="4dp" />
+
+        <!-- Drawing tools -->
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnCalPen"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:src="@drawable/ic_pen"
+            android:contentDescription="Pen" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnCalEraser"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:layout_marginStart="2dp"
+            android:src="@drawable/ic_eraser"
+            android:contentDescription="Eraser" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnCalStickyNote"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:layout_marginStart="2dp"
+            android:src="@drawable/ic_sticker_2"
+            android:contentDescription="Insert sticky note" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnCalLassoEraser"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:layout_marginStart="2dp"
+            android:src="@drawable/ic_lasso_eraser"
+            android:contentDescription="Lasso eraser" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnCalLasso"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:layout_marginStart="2dp"
+            android:src="@drawable/ic_lasso"
+            android:contentDescription="Lasso select" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnCalErasePage"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:layout_marginStart="2dp"
+            android:src="@drawable/ic_erase_all"
+            android:contentDescription="Erase page" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnCalUndo"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:layout_marginStart="2dp"
+            android:src="@drawable/ic_undo"
+            android:contentDescription="Undo" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnCalRedo"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:layout_marginStart="2dp"
+            android:src="@drawable/ic_redo"
+            android:contentDescription="Redo" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnCalScratchpad"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:layout_marginStart="2dp"
+            android:src="@drawable/ic_sketching"
+            android:contentDescription="Scratch Pad" />
+
         <!-- Flexible spacer pushes nav controls to the right -->
         <Space
             android:layout_width="0dp"
@@ -112,11 +183,83 @@
         android:layout_height="1dp"
         android:background="@color/inkBlack" />
 
-    <!-- Calendar content area — filled programmatically by CalendarActivity -->
+    <!-- Calendar content area — drawing view added programmatically; floating toolbar overlaid here -->
     <FrameLayout
         android:id="@+id/calendarContent"
         android:layout_width="match_parent"
         android:layout_height="0dp"
-        android:layout_weight="1" />
+        android:layout_weight="1"
+        android:background="@color/paperWhite">
+
+        <!-- Floating selection context toolbar — positioned programmatically on lasso selection -->
+        <LinearLayout
+            android:id="@+id/floatingSelectionToolbar"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:visibility="gone"
+            android:background="@drawable/shape_bordered"
+            android:padding="4dp"
+            android:elevation="0dp">
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnLassoCopy"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:src="@drawable/ic_copy_plus"
+                android:contentDescription="Copy selection" />
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnLassoCut"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:src="@drawable/ic_cut"
+                android:contentDescription="Cut selection" />
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnLassoDelete"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:src="@drawable/ic_lasso_delete"
+                android:contentDescription="Delete selection" />
+
+            <!-- Visible only for single-stroke selections that pass shape recognition -->
+            <View
+                android:id="@+id/shapeConvertDivider"
+                android:layout_width="1dp"
+                android:layout_height="28dp"
+                android:layout_marginHorizontal="2dp"
+                android:background="@color/inkBlack"
+                android:visibility="gone" />
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnConvertShape"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:src="@drawable/ic_convert_shape"
+                android:contentDescription="Convert to Shape"
+                android:visibility="gone" />
+
+            <!-- Send selection to a notebook -->
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnLassoSendToNotebook"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:src="@drawable/ic_sketching_receive"
+                android:contentDescription="Send selection to Notebook" />
+
+            <!-- Shape transform controls — visible only in shape transform mode -->
+            <androidx.appcompat.widget.AppCompatButton
+                android:id="@+id/btnShapeAspectLock"
+                style="@style/Widget.Notesprout.ToggleTextButton"
+                android:text="Lock ratio"
+                android:contentDescription="Toggle aspect ratio lock"
+                android:visibility="gone" />
+
+            <androidx.appcompat.widget.AppCompatButton
+                android:id="@+id/btnShapeTransformDone"
+                style="@style/Widget.Notesprout.ToggleTextButton"
+                android:text="Done"
+                android:contentDescription="Finish shape transform"
+                android:visibility="gone" />
+
+        </LinearLayout>
+
+    </FrameLayout>
 
 </LinearLayout>
