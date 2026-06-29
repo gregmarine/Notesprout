@@ -68,6 +68,13 @@
             </intent-filter>
         </activity>
 
+        <!-- Calendar — full-screen date navigation screen, launchable from MainActivity and NotebookActivity -->
+        <activity
+            android:name=".CalendarActivity"
+            android:exported="false"
+            android:configChanges="orientation|keyboardHidden|screenSize|smallestScreenSize|screenLayout|density"
+            android:windowSoftInputMode="stateHidden" />
+
         <!-- Notebook screen — prevent recreation on rotation/resize so bitmap survives -->
         <activity
             android:name=".NotebookActivity"

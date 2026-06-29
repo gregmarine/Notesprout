@@ -1181,6 +1181,10 @@ class NotebookActivity : AppCompatActivity() {
 
         binding.btnPageIndex.setOnClickListener { openPageIndex() }
 
+        binding.btnCalendar.setOnClickListener {
+            CalendarActivity.launchFromNotebook(this, notebookId, notebookDisplayName)
+        }
+
         binding.btnScratchpad.setOnClickListener {
             val intent = Intent(this, ScratchpadActivity::class.java).apply {
                 putExtra(ScratchpadActivity.EXTRA_FROM_NOTEBOOK_ID,        notebookId)

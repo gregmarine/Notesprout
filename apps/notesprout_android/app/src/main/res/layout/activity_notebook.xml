@@ -245,6 +245,14 @@
             android:src="@drawable/ic_adjustments"
             android:contentDescription="Customize toolbar" />
 
+        <!-- Calendar launcher -->
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnCalendar"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:layout_marginStart="4dp"
+            android:src="@drawable/ic_calendar"
+            android:contentDescription="Calendar" />
+
         <!-- Scratch pad launcher -->
         <androidx.appcompat.widget.AppCompatImageButton
             android:id="@+id/btnScratchpad"

@@ -334,8 +334,15 @@
         android:visibility="gone">
 
         <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnCalendar"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:src="@drawable/ic_calendar"
+            android:contentDescription="Calendar" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
             android:id="@+id/btnImport"
             style="@style/Widget.Notesprout.ToolbarButton"
+            android:layout_marginStart="4dp"
             android:src="@drawable/ic_import"
             android:contentDescription="Import Notebook" />
 

@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@color/paperWhite">
+
+    <!-- Top toolbar -->
+    <LinearLayout
+        android:id="@+id/calendarToolbar"
+        android:layout_width="match_parent"
+        android:layout_height="56dp"
+        android:orientation="horizontal"
+        android:background="@color/paperWhite"
+        android:gravity="center_vertical"
+        android:paddingStart="4dp"
+        android:paddingEnd="4dp">
+
+        <!-- Back button -->
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnBack"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:src="@drawable/ic_arrow_left"
+            android:contentDescription="Back" />
+
+        <!-- Divider between back and view-toggle group -->
+        <View
+            android:layout_width="1dp"
+            android:layout_height="28dp"
+            android:background="@color/inkBlack"
+            android:layout_marginStart="4dp"
+            android:layout_marginEnd="4dp" />
+
+        <!-- Today button -->
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/btnToday"
+            style="@style/Widget.Notesprout.ToggleTextButton"
+            android:text="Today"
+            android:contentDescription="Go to today" />
+
+        <!-- Divider between Today and view toggles -->
+        <View
+            android:layout_width="1dp"
+            android:layout_height="28dp"
+            android:background="@color/inkBlack"
+            android:layout_marginStart="4dp"
+            android:layout_marginEnd="4dp" />
+
+        <!-- View-mode toggle buttons -->
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/btnMonthView"
+            style="@style/Widget.Notesprout.ToggleTextButton"
+            android:text="Month"
+            android:contentDescription="Month view" />
+
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/btnWeekView"
+            style="@style/Widget.Notesprout.ToggleTextButton"
+            android:layout_marginStart="2dp"
+            android:text="Week"
+            android:contentDescription="Week view" />
+
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/btnDayView"
+            style="@style/Widget.Notesprout.ToggleTextButton"
+            android:layout_marginStart="2dp"
+            android:text="Day"
+            android:contentDescription="Day view" />
+
+        <!-- Flexible spacer pushes nav controls to the right -->
+        <Space
+            android:layout_width="0dp"
+            android:layout_height="1dp"
+            android:layout_weight="1" />
+
+        <!-- Previous period (reuses existing chevron-left icon) -->
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnPrev"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:src="@drawable/ic_page_prev"
+            android:contentDescription="Previous" />
+
+        <!-- Month/year label — tappable to open picker -->
+        <TextView
+            android:id="@+id/tvMonthYear"
+            android:layout_width="wrap_content"
+            android:layout_height="44dp"
+            android:minWidth="148dp"
+            android:gravity="center"
+            android:textSize="16sp"
+            android:textColor="@color/inkBlack"
+            android:textStyle="bold"
+            android:paddingStart="8dp"
+            android:paddingEnd="8dp"
+            android:clickable="true"
+            android:focusable="true"
+            android:background="@drawable/bg_toolbar_button"
+            android:text="June 2026" />
+
+        <!-- Next period -->
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnNext"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:src="@drawable/ic_page_next"
+            android:contentDescription="Next" />
+
+    </LinearLayout>
+
+    <!-- 1dp border below toolbar -->
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="@color/inkBlack" />
+
+    <!-- Calendar content area — filled programmatically by CalendarActivity -->
+    <FrameLayout
+        android:id="@+id/calendarContent"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1" />
+
+</LinearLayout>

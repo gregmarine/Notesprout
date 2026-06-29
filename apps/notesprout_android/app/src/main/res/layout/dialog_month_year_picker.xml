@@ -1,0 +1,163 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:padding="16dp">
+
+    <!-- Year selector row: [<] [2026] [>] -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="56dp"
+        android:orientation="horizontal"
+        android:gravity="center">
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnYearMinus"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:src="@drawable/ic_page_prev"
+            android:contentDescription="Previous year" />
+
+        <TextView
+            android:id="@+id/tvPickerYear"
+            android:layout_width="88dp"
+            android:layout_height="wrap_content"
+            android:gravity="center"
+            android:textSize="20sp"
+            android:textColor="@color/inkBlack"
+            android:textStyle="bold"
+            android:text="2026" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnYearPlus"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:src="@drawable/ic_page_next"
+            android:contentDescription="Next year" />
+
+    </LinearLayout>
+
+    <!-- Divider -->
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="@color/inkBlack"
+        android:layout_marginTop="8dp"
+        android:layout_marginBottom="8dp" />
+
+    <!-- Month grid: 4 rows × 3 columns -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
+            <androidx.appcompat.widget.AppCompatButton
+                android:id="@+id/btnPickMonth01"
+                style="@style/Widget.Notesprout.ToggleTextButton"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_margin="3dp"
+                android:text="Jan" />
+            <androidx.appcompat.widget.AppCompatButton
+                android:id="@+id/btnPickMonth02"
+                style="@style/Widget.Notesprout.ToggleTextButton"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_margin="3dp"
+                android:text="Feb" />
+            <androidx.appcompat.widget.AppCompatButton
+                android:id="@+id/btnPickMonth03"
+                style="@style/Widget.Notesprout.ToggleTextButton"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_margin="3dp"
+                android:text="Mar" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
+            <androidx.appcompat.widget.AppCompatButton
+                android:id="@+id/btnPickMonth04"
+                style="@style/Widget.Notesprout.ToggleTextButton"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_margin="3dp"
+                android:text="Apr" />
+            <androidx.appcompat.widget.AppCompatButton
+                android:id="@+id/btnPickMonth05"
+                style="@style/Widget.Notesprout.ToggleTextButton"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_margin="3dp"
+                android:text="May" />
+            <androidx.appcompat.widget.AppCompatButton
+                android:id="@+id/btnPickMonth06"
+                style="@style/Widget.Notesprout.ToggleTextButton"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_margin="3dp"
+                android:text="Jun" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
+            <androidx.appcompat.widget.AppCompatButton
+                android:id="@+id/btnPickMonth07"
+                style="@style/Widget.Notesprout.ToggleTextButton"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_margin="3dp"
+                android:text="Jul" />
+            <androidx.appcompat.widget.AppCompatButton
+                android:id="@+id/btnPickMonth08"
+                style="@style/Widget.Notesprout.ToggleTextButton"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_margin="3dp"
+                android:text="Aug" />
+            <androidx.appcompat.widget.AppCompatButton
+                android:id="@+id/btnPickMonth09"
+                style="@style/Widget.Notesprout.ToggleTextButton"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_margin="3dp"
+                android:text="Sep" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
+            <androidx.appcompat.widget.AppCompatButton
+                android:id="@+id/btnPickMonth10"
+                style="@style/Widget.Notesprout.ToggleTextButton"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_margin="3dp"
+                android:text="Oct" />
+            <androidx.appcompat.widget.AppCompatButton
+                android:id="@+id/btnPickMonth11"
+                style="@style/Widget.Notesprout.ToggleTextButton"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_margin="3dp"
+                android:text="Nov" />
+            <androidx.appcompat.widget.AppCompatButton
+                android:id="@+id/btnPickMonth12"
+                style="@style/Widget.Notesprout.ToggleTextButton"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_margin="3dp"
+                android:text="Dec" />
+        </LinearLayout>
+
+    </LinearLayout>
+
+</LinearLayout>

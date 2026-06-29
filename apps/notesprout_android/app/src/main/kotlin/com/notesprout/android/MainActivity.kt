@@ -771,6 +771,10 @@ class MainActivity : AppCompatActivity() {
         binding.btnNewNotebook.setOnClickListener    { showNewNotebookDialog() }
         binding.btnNewFolder.setOnClickListener      { showNewFolderDialog() }
         binding.btnMore.setOnClickListener           { toggleOverflowToolbar() }
+        binding.btnCalendar?.setOnClickListener      {
+            closeOverflowToolbar()
+            CalendarActivity.launch(this)
+        }
         binding.btnImport.setOnClickListener         {
             closeOverflowToolbar()
             importSoilLauncher.launch(arrayOf("application/octet-stream", "*/*"))
