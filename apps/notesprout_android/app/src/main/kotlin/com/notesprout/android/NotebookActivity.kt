@@ -4255,6 +4255,14 @@ class NotebookActivity : AppCompatActivity() {
         drawingView.loadShapeObjects(result.shapeObjects)
         drawingView.loadLinks(result.links)
         drawingView.loadStickyNotes(result.stickyNotes)
+        // Preserve any ink the user wrote during the eraseAll → loadCurrentPage window.
+        // eraseAll() re-enables EPD drawing asynchronously (post { post { setRawDrawingEnabled }}),
+        // so a fast writer can lay down strokes before the new page is swapped in. Those strokes
+        // carry fresh UUIDs not yet in persistedStrokeIds; merging them here stops loadStrokes /
+        // loadStrokesWithBitmap from silently discarding them (the cross-notebook-nav data-loss bug).
+        val earlyStrokes = drawingView.getStrokes().filterNot { it.id in persistedStrokeIds }
+        val mergedStrokes = if (earlyStrokes.isEmpty()) result.strokes else result.strokes + earlyStrokes
+
         val bitmap = result.displayBitmap
         if (bitmap != null) {
             // On the snapshot fast-path the snapshot bitmap contains strokes + headings but
@@ -4266,10 +4274,15 @@ class NotebookActivity : AppCompatActivity() {
                 drawingView.compositeLinks(bitmap)
                 drawingView.compositeStickyNotes(bitmap)
             }
-            drawingView.loadStrokesWithBitmap(result.strokes, bitmap, result.templateBitmap)
+            // The pre-built bitmap was rendered from result.strokes only — draw the preserved
+            // early ink onto it so it stays visible after the swap (loadStrokesWithBitmap does
+            // not redraw the stroke list).
+            if (earlyStrokes.isNotEmpty()) drawingView.compositeStrokes(bitmap, earlyStrokes)
+            drawingView.loadStrokesWithBitmap(mergedStrokes, bitmap, result.templateBitmap)
         } else {
+            // Full path: loadStrokes() redraws the whole list, so the merged early ink renders.
             drawingView.setTemplate(result.templateBitmap)
-            drawingView.loadStrokes(result.strokes)
+            drawingView.loadStrokes(mergedStrokes)
         }
     }
 
@@ -4290,8 +4303,14 @@ class NotebookActivity : AppCompatActivity() {
             val pageId = currentPageId
             lifecycleScope.launch {
                 val strokes = withContext(Dispatchers.IO) { deserializeStrokesFromDb(db) }
-                Slog.d(TAG) { "postDisplayWork(snapshot): silently loaded ${strokes.size} strokes for $pageId" }
-                drawingView.setStrokeListSilently(strokes)
+                // deserializeStrokesFromDb() reset persistedStrokeIds to the DB set, so anything
+                // in the view not in that set is unsaved ink written during the load window — keep
+                // it alongside the DB strokes so the silent replace doesn't drop it. Both calls run
+                // synchronously on the main thread, so no stroke can slip in between them.
+                val earlyStrokes = drawingView.getStrokes().filterNot { it.id in persistedStrokeIds }
+                val merged = if (earlyStrokes.isEmpty()) strokes else strokes + earlyStrokes
+                Slog.d(TAG) { "postDisplayWork(snapshot): silently loaded ${strokes.size} strokes (+${earlyStrokes.size} early) for $pageId" }
+                drawingView.setStrokeListSilently(merged)
             }
         } else {
             // Full render just completed — capture snapshot for next time.

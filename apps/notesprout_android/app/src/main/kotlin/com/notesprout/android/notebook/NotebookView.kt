@@ -578,6 +578,15 @@ interface NotebookView {
     fun setStrokeListSilently(strokes: List<LiveStroke>)
 
     /**
+     * Draw [strokes] directly onto [bitmap] using the standard stroke paint, with no change
+     * to the in-memory stroke list and no EPD repaint. Used to composite unsaved ink that
+     * was written during a page-load window onto a freshly built page bitmap before it is
+     * swapped in, so the ink isn't visually wiped. Safe to call from any thread (operates
+     * only on the supplied bitmap).
+     */
+    fun compositeStrokes(bitmap: Bitmap, strokes: List<LiveStroke>)
+
+    /**
      * Capture the current strokes as a base64-encoded PNG with a transparent background.
      * The template is NOT included — the rendering stack is: template → snapshot → new strokes.
      * Returns null if there are no strokes or the view is not yet laid out.

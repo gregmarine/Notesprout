@@ -1872,6 +1872,19 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
         // No redraw — the snapshot composite bitmap already shows the correct visual state.
     }
 
+    override fun compositeStrokes(bitmap: Bitmap, strokes: List<LiveStroke>) {
+        if (strokes.isEmpty()) return
+        val canvas = Canvas(bitmap)
+        for (liveStroke in strokes) {
+            val points = liveStroke.points
+            if (points.size < 2) continue
+            val path = Path()
+            path.moveTo(points[0].x, points[0].y)
+            for (i in 1 until points.size) path.lineTo(points[i].x, points[i].y)
+            canvas.drawPath(path, strokePaint)
+        }
+    }
+
     override fun releaseResources() {
         renderBitmap?.recycle()
         renderBitmap = null
