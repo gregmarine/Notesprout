@@ -53,24 +53,28 @@ calendar_root  (type="calendar_root", parentId="", fixed id CALENDAR_ROOT_ID)
 | Month | `cal-month-YYYY-MM` | one per month |
 | Week  | `cal-week-YYYY-MM-DD` (Sunday of the week) | one per week |
 | Day   | `cal-day-YYYY-MM-DD-AM` / `-PM` | **two** per day (AM = 00–12, PM = 12–24) |
+| Day detail | `cal-daynote-YYYY-MM-DD` | **one** per day (see [Day detail](#day-detail--cal-daynote-)) |
 
-Future day-notes (tap a day cell) is out of scope but the model leaves room: day-notes would become
-their own page keys (e.g. `cal-daynote-YYYY-MM-DD`) under the same `calendar` table/root.
+Pages are shared across the `calendar` table/root regardless of view, so a single day can carry
+month-cell writing, week-cell writing, both AM/PM timeline halves, **and** its day-detail page —
+all independent, all keyed.
 
 ### Key files
 
 | File | Role |
 |---|---|
 | `data/index/CalendarEntity.kt` | Room `@Entity` for the `calendar` table (schema = `ScratchpadEntity`) |
-| `data/index/CalendarDao.kt` | CRUD queries (mirrors `ScratchpadDao`; + `getAllChildrenForLayer` / `deleteChildren` for undo snapshots) |
-| `data/CalendarRepository.kt` | Higher-level API (`ensureBootstrap`, `getOrCreatePageLayer`, `loadPage`, `saveStrokes`, `insertObjects`, `serializeForExport`, `softDeleteObjects`, `setPageSize`, `snapshotLayer`/`restoreLayer`) |
+| `data/index/CalendarDao.kt` | CRUD queries (mirrors `ScratchpadDao`; + `getAllChildrenForLayer` / `deleteChildren` for undo snapshots; + `getTemplatesSorted` / `getTemplateById` for day-detail templates) |
+| `data/CalendarRepository.kt` | Higher-level API (`ensureBootstrap`, `getOrCreatePageLayer`, `loadPage`, `saveStrokes`, `insertObjects`, `serializeForExport`, `softDeleteObjects`, `setPageSize`, `snapshotLayer`/`restoreLayer`, `insertTemplateRow`/`getTemplateById`/`setPageTemplate`) |
 | `data/PageCopier.kt` | `insertCalendarPagesIntoNotebook` / `loadNotebookPageIds` + `CalendarExportPage`/`CalendarExportChild` carriers — the engine for the full-view export (below) |
 | `data/index/ListIds.kt` | `CALENDAR_ROOT_ID` constant |
 | `data/index/NotesproutDatabase.kt` | `version=3`; `CalendarEntity` in `@Database entities`; `MIGRATION_2_3` |
 | `data/index/NotesproutIndex.kt` | registers `MIGRATION_2_3`; `calendarDao()` accessor |
 | `notebook/CalendarTemplateRenderer.kt` | bakes the grid/timeline bitmap + finger hit-test geometry |
-| `CalendarActivity.kt` | the host screen (canvas, tools, navigation, gestures, undo/redo, transfer) |
-| `CalendarTransfer.kt` | one-field in-memory singleton for Calendar → Notebook hand-off |
+| `CalendarActivity.kt` | the host screen (canvas, tools, navigation, gestures, undo/redo, transfer); launches `DayDetailActivity` on double-tap |
+| `DayDetailActivity.kt` | full-screen single-page day canvas (see [Day detail](#day-detail--cal-daynote-)) |
+| `DayTemplateDialog.kt` | day-detail template quick-picker (reads `type="template"` rows from the `calendar` table) |
+| `CalendarTransfer.kt` | one-field in-memory singleton for Calendar / Day-detail → Notebook hand-off |
 
 `CalendarRepository.loadPage` returns the shared `ScratchpadPageContent` (reused to avoid churn).
 
@@ -158,6 +162,10 @@ real canvas pixel size via `setPageSize`.
 - **Finger swipe** (canvas) — horizontal swipe ≥ 60dp (and dx > 1.5·dy) steps the period.
 - **Finger tap** (canvas, Month/Week) — `hitTest` → select that day (re-renders template); tapping an
   out-of-month day in Month view navigates to that month.
+- **Single-finger double-tap** → opens the day's full-page canvas ([`DayDetailActivity`](#day-detail--cal-daynote-)).
+  Month/Week: double-tap a day **cell** (`hitTest` resolves the date; `lastDayTapDate`/`lastDayTapTime`
+  match the second tap). Day: double-tap **anywhere** opens `selectedDate` (no cell hit-test). First tap
+  still selects/navigates as before; the second within `getDoubleTapTimeout()` opens.
 
 ### Last-position persistence
 
@@ -231,6 +239,43 @@ Per-page snapshot history, identical shape to the calendar's sibling canvases:
 `loadCanvasContent` swaps the full render bitmap in a single `handwritingRepaint`; a separate
 `eraseAll()` would add a second full-screen repaint (double white-flash on EPD). This matches the
 sticky-note editor's clean single-repaint feel.
+
+---
+
+## Day detail (`cal-daynote-…`)
+
+A full-screen, single-page handwriting canvas "into" one day, opened by single-finger double-tap
+(Month/Week day cell, or anywhere in Day view — see [Touch routing](#touch-routing-dispatchtouchevent)).
+Behaves like the scratch pad: one page, freely writable, with an optional ruling template. Hosted by
+**`DayDetailActivity`** (registered full-screen in the manifest, `exported="false"`, `configChanges`
+set so the canvas survives rotation). Launched via `DayDetailActivity.intent(ctx, date, fromNotebook*)`
+from `CalendarActivity.openDayDetail`; the source-notebook identity is carried through so Send-to-Notebook
+can offer "this notebook". Back arrow = `finish()` → returns to the paused calendar on the exact
+view/date it came from.
+
+- **Page:** key `cal-daynote-YYYY-MM-DD`, one page in the `calendar` table under `CALENDAR_ROOT_ID`,
+  created lazily by the shared `getOrCreatePageLayer`. All canvas machinery (drawing callbacks, save,
+  per-page undo/redo snapshots, lasso/clipboard, sticky notes, shape convert/transform, snapshot
+  persistence, multi-finger undo/redo, sticky-tap routing) is ported from `CalendarActivity`; period
+  navigation is dropped.
+- **Toolbar** (`res/layout/activity_day_detail.xml`): `btnDayBack` · pen · eraser · lasso-eraser ·
+  lasso · undo · redo · sticky · template · insert-shape · scratch-pad · `tvDayDate` (full date, right).
+  Floating selection toolbar = copy/cut/delete/convert-to-shape/send-to-notebook + shape-transform.
+  `dayShapeInsertToolbar` is the shape-insert secondary popup (ported from `NotebookActivity`).
+- **Template (copy-into-table model).** Day pages store a real ruling template. The picker
+  (`DayTemplateDialog`, a calendar-table variant of `TemplateDialog`) lists **Blank + `type="template"`
+  rows already in the `calendar` table + "Browse Templates…"**. Browsing launches `TemplateBrowserActivity`
+  MODE_PICK; the chosen library template is **copied into the calendar table** as a `type="template"`
+  row via `CalendarRepository.insertTemplateRow` (exactly how notebooks copy into their `.soil` — so
+  deleting the library template never blanks an existing day page). `PageData.template` holds the
+  calendar-table row id (`""` = Blank); `applyTemplate` writes it via `setPageTemplate` (preserving
+  `width/height/snapshot`), then `loadTemplateBitmap` decodes the row's base64 PNG (bounded to the view
+  size via `BitmapDecode.decodeSampled`) and `rebuildCanvas` repaints. The drawing view scales any-size
+  template to fill the canvas (`GenericNotebookView` draws it into the full `0,0–w,h` rect).
+- **Send to Notebook** uses the always-launch-fresh path (`openNotebookWithPaste` → launches
+  `NotebookActivity` with `EXTRA_PASTE_PENDING`, `CalendarTransfer.pending`, then `finish()`); "this
+  notebook" routes to `fromNotebookId`, otherwise the `NotebookPickerActivity`. Day detail does **not**
+  use the for-result hand-off (its immediate parent is the calendar, not the notebook).
 
 ---
 

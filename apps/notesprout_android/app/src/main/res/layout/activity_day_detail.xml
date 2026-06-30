@@ -1,0 +1,314 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@color/paperWhite">
+
+    <!-- Top toolbar -->
+    <LinearLayout
+        android:id="@+id/dayToolbar"
+        android:layout_width="match_parent"
+        android:layout_height="56dp"
+        android:orientation="horizontal"
+        android:background="@color/paperWhite"
+        android:gravity="center_vertical"
+        android:paddingStart="4dp"
+        android:paddingEnd="4dp">
+
+        <!-- Back to the calendar view we came from -->
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnDayBack"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:src="@drawable/ic_arrow_left"
+            android:contentDescription="Back to calendar" />
+
+        <View
+            android:layout_width="1dp"
+            android:layout_height="28dp"
+            android:background="@color/inkBlack"
+            android:layout_marginStart="4dp"
+            android:layout_marginEnd="4dp" />
+
+        <!-- Drawing tools -->
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnDayPen"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:src="@drawable/ic_pen"
+            android:contentDescription="Pen" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnDayEraser"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:layout_marginStart="2dp"
+            android:src="@drawable/ic_eraser"
+            android:contentDescription="Eraser" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnDayLassoEraser"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:layout_marginStart="2dp"
+            android:src="@drawable/ic_lasso_eraser"
+            android:contentDescription="Lasso eraser" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnDayLasso"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:layout_marginStart="2dp"
+            android:src="@drawable/ic_lasso"
+            android:contentDescription="Lasso select" />
+
+        <View
+            android:layout_width="1dp"
+            android:layout_height="28dp"
+            android:background="@color/inkBlack"
+            android:layout_marginStart="4dp"
+            android:layout_marginEnd="4dp" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnDayUndo"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:src="@drawable/ic_undo"
+            android:contentDescription="Undo" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnDayRedo"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:layout_marginStart="2dp"
+            android:src="@drawable/ic_redo"
+            android:contentDescription="Redo" />
+
+        <View
+            android:layout_width="1dp"
+            android:layout_height="28dp"
+            android:background="@color/inkBlack"
+            android:layout_marginStart="4dp"
+            android:layout_marginEnd="4dp" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnDayStickyNote"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:src="@drawable/ic_sticker_2"
+            android:contentDescription="Insert sticky note" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnDayTemplate"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:layout_marginStart="2dp"
+            android:src="@drawable/ic_template"
+            android:contentDescription="Template" />
+
+        <!-- Insert shape — opens dayShapeInsertToolbar secondary popup -->
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnDayInsertShape"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:layout_marginStart="2dp"
+            android:src="@drawable/ic_convert_shape"
+            android:contentDescription="Insert shape" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnDayScratchpad"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:layout_marginStart="2dp"
+            android:src="@drawable/ic_sketching"
+            android:contentDescription="Scratch Pad" />
+
+        <!-- Flexible spacer pushes the date label to the right -->
+        <Space
+            android:layout_width="0dp"
+            android:layout_height="1dp"
+            android:layout_weight="1" />
+
+        <!-- Date label -->
+        <TextView
+            android:id="@+id/tvDayDate"
+            android:layout_width="wrap_content"
+            android:layout_height="44dp"
+            android:minWidth="148dp"
+            android:gravity="center"
+            android:textSize="16sp"
+            android:textColor="@color/inkBlack"
+            android:textStyle="bold"
+            android:paddingStart="8dp"
+            android:paddingEnd="8dp"
+            android:text="" />
+
+    </LinearLayout>
+
+    <!-- 1dp border below toolbar -->
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="@color/inkBlack" />
+
+    <!-- Content area — drawing view added programmatically; popups overlaid here -->
+    <FrameLayout
+        android:id="@+id/dayContent"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:background="@color/paperWhite">
+
+        <!-- Floating selection context toolbar — positioned programmatically on lasso selection -->
+        <LinearLayout
+            android:id="@+id/floatingSelectionToolbar"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:visibility="gone"
+            android:background="@drawable/shape_bordered"
+            android:padding="4dp"
+            android:elevation="0dp">
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnLassoCopy"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:src="@drawable/ic_copy_plus"
+                android:contentDescription="Copy selection" />
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnLassoCut"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:src="@drawable/ic_cut"
+                android:contentDescription="Cut selection" />
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnLassoDelete"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:src="@drawable/ic_lasso_delete"
+                android:contentDescription="Delete selection" />
+
+            <View
+                android:id="@+id/shapeConvertDivider"
+                android:layout_width="1dp"
+                android:layout_height="28dp"
+                android:layout_marginHorizontal="2dp"
+                android:background="@color/inkBlack"
+                android:visibility="gone" />
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnConvertShape"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:src="@drawable/ic_convert_shape"
+                android:contentDescription="Convert to Shape"
+                android:visibility="gone" />
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnLassoSendToNotebook"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:src="@drawable/ic_sketching_receive"
+                android:contentDescription="Send selection to Notebook" />
+
+            <androidx.appcompat.widget.AppCompatButton
+                android:id="@+id/btnShapeAspectLock"
+                style="@style/Widget.Notesprout.ToggleTextButton"
+                android:text="Lock ratio"
+                android:contentDescription="Toggle aspect ratio lock"
+                android:visibility="gone" />
+
+            <androidx.appcompat.widget.AppCompatButton
+                android:id="@+id/btnShapeTransformDone"
+                style="@style/Widget.Notesprout.ToggleTextButton"
+                android:text="Done"
+                android:contentDescription="Finish shape transform"
+                android:visibility="gone" />
+
+        </LinearLayout>
+
+        <!-- Shape insert secondary toolbar — anchored to btnDayInsertShape -->
+        <LinearLayout
+            android:id="@+id/dayShapeInsertToolbar"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:visibility="gone"
+            android:background="@drawable/shape_bordered"
+            android:padding="4dp"
+            android:elevation="0dp">
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnInsertShapeRectangle"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:src="@drawable/ic_shape_rectangle"
+                android:contentDescription="Insert Rectangle" />
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnInsertShapeEllipse"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:layout_marginStart="4dp"
+                android:src="@drawable/ic_shape_ellipse"
+                android:contentDescription="Insert Ellipse" />
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnInsertShapeTriangle"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:layout_marginStart="4dp"
+                android:src="@drawable/ic_shape_triangle"
+                android:contentDescription="Insert Triangle" />
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnInsertShapeDiamond"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:layout_marginStart="4dp"
+                android:src="@drawable/ic_shape_diamond"
+                android:contentDescription="Insert Diamond" />
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnInsertShapeTrapezoid"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:layout_marginStart="4dp"
+                android:src="@drawable/ic_shape_trapezoid"
+                android:contentDescription="Insert Trapezoid" />
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnInsertShapePentagon"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:layout_marginStart="4dp"
+                android:src="@drawable/ic_shape_pentagon"
+                android:contentDescription="Insert Pentagon" />
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnInsertShapeHexagon"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:layout_marginStart="4dp"
+                android:src="@drawable/ic_shape_hexagon"
+                android:contentDescription="Insert Hexagon" />
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnInsertShapeStar"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:layout_marginStart="4dp"
+                android:src="@drawable/ic_shape_star"
+                android:contentDescription="Insert Star" />
+
+            <View
+                android:layout_width="1dp"
+                android:layout_height="28dp"
+                android:layout_marginHorizontal="2dp"
+                android:background="@color/inkBlack" />
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnInsertShapeArch"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:src="@drawable/ic_shape_arch"
+                android:contentDescription="Insert Arch" />
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnInsertShapeLine"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:layout_marginStart="4dp"
+                android:src="@drawable/ic_shape_line"
+                android:contentDescription="Insert Line" />
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnInsertShapeArrow"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:layout_marginStart="4dp"
+                android:src="@drawable/ic_shape_arrow"
+                android:contentDescription="Insert Arrow" />
+
+        </LinearLayout>
+
+    </FrameLayout>
+
+</LinearLayout>

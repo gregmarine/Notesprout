@@ -3,8 +3,6 @@ package com.notesprout.android
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
-import android.graphics.Canvas
-import android.graphics.Color
 import android.graphics.PointF
 import android.graphics.Rect
 import android.graphics.RectF
@@ -12,40 +10,30 @@ import android.graphics.Region
 import android.os.Bundle
 import android.os.SystemClock
 import android.util.Base64
-import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewConfiguration
 import android.widget.FrameLayout
-import android.widget.LinearLayout
-import android.widget.ScrollView
-import android.widget.TextView
 import android.widget.Toast
-import androidx.appcompat.widget.AppCompatTextView
-import androidx.core.content.ContextCompat
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
-import androidx.appcompat.widget.AppCompatButton
-import androidx.appcompat.widget.AppCompatImageButton
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.core.view.doOnLayout
 import androidx.lifecycle.lifecycleScope
+import com.notesprout.android.core.BitmapDecode
 import com.notesprout.android.core.isBooxDevice
-import com.notesprout.android.crypto.KeyResolver
-import com.notesprout.android.crypto.KeySession
 import com.notesprout.android.data.BoundingBox
-import com.notesprout.android.data.CalendarExportPage
 import com.notesprout.android.data.CalendarRepository
-import com.notesprout.android.data.ScratchpadPageContent
 import com.notesprout.android.data.HeadingObject
 import com.notesprout.android.data.HeadingStroke
 import com.notesprout.android.data.LineObject
 import com.notesprout.android.data.LineRender
 import com.notesprout.android.data.LiveStroke
 import com.notesprout.android.data.PageData
+import com.notesprout.android.data.ScratchpadPageContent
 import com.notesprout.android.data.ShapeObject
 import com.notesprout.android.data.ShapeRender
 import com.notesprout.android.data.ShapeType
@@ -55,20 +43,17 @@ import com.notesprout.android.data.TYPE_SHAPE
 import com.notesprout.android.data.TYPE_STICKY_NOTE
 import com.notesprout.android.data.TextObject
 import com.notesprout.android.data.TextRender
+import com.notesprout.android.data.TemplateData
 import com.notesprout.android.data.index.CalendarEntity
 import com.notesprout.android.data.index.IndexRepository
 import com.notesprout.android.data.index.NotesproutIndex
-import com.notesprout.android.data.insertCalendarPagesIntoNotebook
-import com.notesprout.android.data.loadNotebookPageIds
-import com.notesprout.android.data.soilFile
+import com.notesprout.android.data.index.TemplateObject as IndexTemplateObject
 import com.notesprout.android.data.toBoundingBoxJson
 import com.notesprout.android.data.toLinkObject
 import com.notesprout.android.data.toStickyNoteObject
 import com.notesprout.android.data.translate
-import com.notesprout.android.databinding.ActivityCalendarBinding
+import com.notesprout.android.databinding.ActivityDayDetailBinding
 import com.notesprout.android.notebook.ActiveTool
-import com.notesprout.android.notebook.CalendarTemplateRenderer
-import com.notesprout.android.notebook.CalendarTemplateRenderer.CalView
 import com.notesprout.android.notebook.GenericNotebookView
 import com.notesprout.android.notebook.LassoGeometry
 import com.notesprout.android.notebook.NotebookView
@@ -80,77 +65,53 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.io.ByteArrayOutputStream
 import java.time.LocalDate
-import java.time.LocalTime
 import java.time.Month
 import java.time.format.TextStyle
 import java.util.Locale
-import kotlin.math.abs
+import java.util.UUID
 import kotlin.math.hypot
 
 /**
- * Calendar with handwriting on every view. Each view is a template-backed drawing canvas keyed by a
- * deterministic page id: month = one page per month, week = one page per week (Sunday), day = two
- * pages per day (AM / PM). Content lives in the `calendar` table of notesprout.db (plaintext) and
- * shares the universal object model + clipboard with notebooks, scratch pad, sticky notes & shapes.
+ * A full-screen, single-page handwriting canvas "into" one calendar day, opened by single-finger
+ * double-tap on a day in [CalendarActivity]'s Month / Week view. Behaves like the scratch pad: one
+ * page, freely writable, with an optional ruling template. Content is stored in the `calendar`
+ * table (plaintext) under the key `cal-daynote-YYYY-MM-DD`, sharing the universal object model +
+ * clipboard with notebooks, the scratch pad, sticky notes & shapes.
  *
- * The grid/timeline is drawn into a template bitmap behind the ink (see [CalendarTemplateRenderer]).
- * Stylus draws; finger-tap selects/navigates a day (reserved for future day-notes); finger-swipe
- * steps the period. Modeled on [ScratchpadActivity]'s canvas machinery.
+ * Canvas machinery (drawing callbacks, save, per-page undo/redo, lasso, sticky notes, shape
+ * convert/transform, snapshot) is ported from [CalendarActivity]; period navigation is dropped, and
+ * a template picker + shape-insert secondary toolbar + Send-to-Notebook are added.
  */
-class CalendarActivity : AppCompatActivity() {
+class DayDetailActivity : AppCompatActivity() {
 
     companion object {
+        const val EXTRA_DATE                    = "day_detail_date"
         const val EXTRA_FROM_NOTEBOOK_ID        = "from_notebook_id"
         const val EXTRA_FROM_NOTEBOOK_NAME      = "from_notebook_name"
         const val EXTRA_FROM_NOTEBOOK_ENCRYPTED = "from_notebook_encrypted"
 
-        /**
-         * Result extra (String, page UUID): set when the user exports calendar page(s) into the
-         * notebook they launched the calendar from and chooses "Open" — [NotebookActivity] reloads
-         * its page list and navigates to this page.
-         */
-        const val EXTRA_RESULT_GOTO_PAGE_ID = "cal_result_goto_page_id"
-
-        // Last-position persistence (view + date restored on next open).
-        private const val PREFS_CALENDAR = "calendar_state"
-        private const val KEY_VIEW       = "last_view"
-        private const val KEY_DATE       = "last_date"
-        private const val KEY_CAL_YEAR   = "last_cal_year"
-        private const val KEY_CAL_MONTH  = "last_cal_month"
-        private const val KEY_DAY_HALF   = "last_day_half"
-
-        fun launch(context: Context) {
-            context.startActivity(Intent(context, CalendarActivity::class.java))
-        }
-
-        /** Intent for launching from a notebook (used with NotebookActivity's for-result launcher). */
-        fun intentFromNotebook(context: Context, id: String, name: String, encrypted: Boolean): Intent =
-            Intent(context, CalendarActivity::class.java)
-                .putExtra(EXTRA_FROM_NOTEBOOK_ID, id)
-                .putExtra(EXTRA_FROM_NOTEBOOK_NAME, name)
-                .putExtra(EXTRA_FROM_NOTEBOOK_ENCRYPTED, encrypted)
+        fun intent(
+            context: Context, date: LocalDate,
+            fromNotebookId: String?, fromNotebookName: String?, fromNotebookEncrypted: Boolean,
+        ): Intent = Intent(context, DayDetailActivity::class.java)
+            .putExtra(EXTRA_DATE, date.toString())
+            .putExtra(EXTRA_FROM_NOTEBOOK_ID, fromNotebookId)
+            .putExtra(EXTRA_FROM_NOTEBOOK_NAME, fromNotebookName)
+            .putExtra(EXTRA_FROM_NOTEBOOK_ENCRYPTED, fromNotebookEncrypted)
     }
 
-    private lateinit var binding: ActivityCalendarBinding
+    private lateinit var binding: ActivityDayDetailBinding
     private lateinit var drawingView: NotebookView
     private lateinit var repository: CalendarRepository
     private val indexRepo: IndexRepository by lazy { IndexRepository(NotesproutIndex.dao()) }
 
-    /** Whether the in-flight page export should copy the view's writing (true) or only the grid template. */
-    private var pendingExportIncludeContent = false
-
-    // Navigation state
-    private var currentView = CalView.MONTH
     private var selectedDate: LocalDate = LocalDate.now()
-    private var calYear: Int = LocalDate.now().year
-    private var calMonth: Int = LocalDate.now().monthValue
-    private var dayHalf = 0  // 0 = AM (00–12), 1 = PM (12–24)
 
     // Canvas / page state
     private var currentPageId = ""
     private var currentLayerId = ""
+    private var currentTemplateId = ""
     private val persistedStrokeIds = mutableSetOf<String>()
     private var currentTemplateBitmap: Bitmap? = null
 
@@ -166,12 +127,12 @@ class CalendarActivity : AppCompatActivity() {
     private var shapeConvertStroke: LiveStroke? = null
     private var shapeConvertResult: ShapeRecognizer.Result? = null
 
-    // Source notebook (non-null only when launched from a notebook)
+    // Source notebook (non-null only when the calendar was launched from a notebook)
     private var fromNotebookId: String? = null
     private var fromNotebookName: String? = null
     private var fromNotebookEncrypted = false
 
-    // Undo/redo — full-layer snapshot history (per page; reset on navigation)
+    // Undo/redo — full-layer snapshot history (single page)
     private var currentSnapshot: List<CalendarEntity> = emptyList()
     private val undoStack = ArrayDeque<List<CalendarEntity>>()
     private val redoStack = ArrayDeque<List<CalendarEntity>>()
@@ -184,20 +145,7 @@ class CalendarActivity : AppCompatActivity() {
     private var pendingStickyNote: StickyNoteRender? = null
     private var pendingStickyInitialCreate = false
 
-    // Finger gesture tracking (calendar nav)
-    private var calDownX = 0f
-    private var calDownY = 0f
-    private var calDownTime = 0L
-    private var calMoved = false
-    private var calMultiTouch = false
-
-    // Single-finger double-tap on a day cell (Month/Week) → open that day's full-page canvas.
-    private var lastDayTapDate: LocalDate? = null
-    private var lastDayTapTime = 0L
-    private val touchSlopPx by lazy { ViewConfiguration.get(this).scaledTouchSlop }
-    private val doubleTapSlopPx by lazy { ViewConfiguration.get(this).scaledDoubleTapSlop }
-
-    // Multi-finger double-tap: 2-finger = undo, 3-finger = redo (mirrors NotebookActivity).
+    // Multi-finger double-tap: 2-finger = undo, 3-finger = redo (mirrors CalendarActivity).
     private var mfTapPeakCount = 0
     private var mfTapArmed = false
     private var mfTapMoved = false
@@ -218,6 +166,8 @@ class CalendarActivity : AppCompatActivity() {
     private var stickyNoteTapDownTime = 0L
     private var stickyNoteTapMoved = false
 
+    private val touchSlopPx by lazy { ViewConfiguration.get(this).scaledTouchSlop }
+    private val doubleTapSlopPx by lazy { ViewConfiguration.get(this).scaledDoubleTapSlop }
     private val density get() = resources.displayMetrics.density
 
     private val editorLauncher = registerForActivityResult(
@@ -273,14 +223,12 @@ class CalendarActivity : AppCompatActivity() {
         openNotebookWithPaste(destId, destName, content)
     }
 
-    private val exportNotebookPickerLauncher = registerForActivityResult(
+    private val templatePickLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
-        val data = result.data
-        if (result.resultCode != RESULT_OK || data == null) return@registerForActivityResult
-        val destId   = data.getStringExtra(NotebookPickerActivity.RESULT_NOTEBOOK_ID) ?: return@registerForActivityResult
-        val destName = data.getStringExtra(NotebookPickerActivity.RESULT_NOTEBOOK_NAME) ?: ""
-        beginExport(destId, destName, pendingExportIncludeContent)
+        if (result.resultCode != RESULT_OK) return@registerForActivityResult
+        val templateId = result.data?.getStringExtra(TemplateBrowserActivity.RESULT_TEMPLATE_ID) ?: return@registerForActivityResult
+        onLibraryTemplatePicked(templateId)
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -291,7 +239,7 @@ class CalendarActivity : AppCompatActivity() {
         insetsController.systemBarsBehavior =
             WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
 
-        binding = ActivityCalendarBinding.inflate(layoutInflater)
+        binding = ActivityDayDetailBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
         repository = CalendarRepository(NotesproutIndex.db(), NotesproutIndex.calendarDao())
@@ -299,230 +247,94 @@ class CalendarActivity : AppCompatActivity() {
         fromNotebookId        = intent.getStringExtra(EXTRA_FROM_NOTEBOOK_ID)
         fromNotebookName      = intent.getStringExtra(EXTRA_FROM_NOTEBOOK_NAME)
         fromNotebookEncrypted = intent.getBooleanExtra(EXTRA_FROM_NOTEBOOK_ENCRYPTED, false)
+        selectedDate = runCatching { LocalDate.parse(intent.getStringExtra(EXTRA_DATE) ?: "") }
+            .getOrDefault(LocalDate.now())
 
-        // Restore the last-used view + date so the calendar reopens where the user left off.
-        // Falls back to today's month view (AM/PM by clock) on a fresh install.
-        val today = LocalDate.now()
-        val prefs = getSharedPreferences(PREFS_CALENDAR, MODE_PRIVATE)
-        currentView = runCatching { CalView.valueOf(prefs.getString(KEY_VIEW, "") ?: "") }
-            .getOrDefault(CalView.MONTH)
-        selectedDate = runCatching { LocalDate.parse(prefs.getString(KEY_DATE, "") ?: "") }
-            .getOrDefault(today)
-        calYear = prefs.getInt(KEY_CAL_YEAR, selectedDate.year)
-        calMonth = prefs.getInt(KEY_CAL_MONTH, selectedDate.monthValue)
-        dayHalf = prefs.getInt(KEY_DAY_HALF, if (LocalTime.now().hour >= 12) 1 else 0)
-
-        // Drawing view
         drawingView = if (isBooxDevice()) OnyxNotebookView(this) else GenericNotebookView(this)
-        binding.calendarContent.addView(
+        binding.dayContent.addView(
             drawingView.asView(),
             FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT),
         )
         binding.floatingSelectionToolbar.bringToFront()
+        binding.dayShapeInsertToolbar.bringToFront()
 
+        updateDateLabel()
         setupToolbar()
         wireDrawingCallbacks()
         wireToolButtons()
         updateLassoButtonIcon()
 
-        // Restore last-used tool
         when (ToolPreferencesManager.load(this)) {
             ActiveTool.ERASER -> {
                 isEraserActive = true
                 drawingView.setEraserMode(true)
-                binding.btnCalPen.isSelected = false
-                binding.btnCalEraser.isSelected = true
+                binding.btnDayPen.isSelected = false
+                binding.btnDayEraser.isSelected = true
             }
             else -> {
-                binding.btnCalPen.isSelected = true
-                binding.btnCalEraser.isSelected = false
+                binding.btnDayPen.isSelected = true
+                binding.btnDayEraser.isSelected = false
             }
         }
 
-        binding.calendarContent.doOnLayout {
-            lifecycleScope.launch { repository.ensureBootstrap(); navigateCanvas(firstLoad = true) }
+        binding.dayContent.doOnLayout {
+            lifecycleScope.launch { repository.ensureBootstrap(); loadDayPage() }
         }
+    }
+
+    private fun pageKey(): String = "cal-daynote-$selectedDate"
+
+    private fun updateDateLabel() {
+        val dow = selectedDate.dayOfWeek.getDisplayName(TextStyle.FULL, Locale.getDefault())
+        val monthName = Month.of(selectedDate.monthValue).getDisplayName(TextStyle.FULL, Locale.getDefault())
+        binding.tvDayDate.text = "$dow, ${selectedDate.dayOfMonth} $monthName ${selectedDate.year}"
     }
 
     // ── Toolbar ──────────────────────────────────────────────────────────────────
 
     private fun setupToolbar() {
-        binding.btnBack.setOnClickListener { finish() }
-        binding.btnMonthView.setOnClickListener { switchView(CalView.MONTH) }
-        binding.btnWeekView.setOnClickListener { switchView(CalView.WEEK) }
-        binding.btnDayView.setOnClickListener { switchView(CalView.DAY) }
-        binding.btnToday.setOnClickListener { goToToday() }
-        binding.btnPrev.setOnClickListener { stepBack() }
-        binding.btnNext.setOnClickListener { stepForward() }
-        binding.tvMonthYear.setOnClickListener { showMonthYearPicker() }
-        binding.btnCalScratchpad.setOnClickListener { openScratchpad() }
-        binding.btnCalSendPage.setOnClickListener { sendPageToNotebook() }
-        binding.btnCalErasePage.setOnClickListener { confirmErasePage() }
-        binding.btnCalUndo.setOnClickListener { undo() }
-        binding.btnCalRedo.setOnClickListener { redo() }
-        syncViewToggles()
-        updateMonthYearLabel()
+        binding.btnDayBack.setOnClickListener { finish() }
+        binding.btnDayScratchpad.setOnClickListener { startActivity(Intent(this, ScratchpadActivity::class.java)) }
+        binding.btnDayUndo.setOnClickListener { undo() }
+        binding.btnDayRedo.setOnClickListener { redo() }
+        binding.btnDayTemplate.setOnClickListener { showTemplatePicker() }
     }
 
-    private fun syncViewToggles() {
-        binding.btnMonthView.isSelected = currentView == CalView.MONTH
-        binding.btnWeekView.isSelected  = currentView == CalView.WEEK
-        binding.btnDayView.isSelected   = currentView == CalView.DAY
+    // ── Page load ────────────────────────────────────────────────────────────────
+
+    private suspend fun loadDayPage() {
+        val (pid, lid) = repository.getOrCreatePageLayer(pageKey())
+        currentPageId = pid
+        currentLayerId = lid
+        persistedStrokeIds.clear()
+        loadTemplateBitmap()
+        loadCanvasContent()
+        initHistory()
     }
 
-    private fun updateMonthYearLabel() {
-        binding.tvMonthYear.text = if (currentView == CalView.DAY) {
-            val monthName = Month.of(selectedDate.monthValue).getDisplayName(TextStyle.FULL, Locale.getDefault())
-            val half = if (dayHalf == 0) "AM" else "PM"
-            "${selectedDate.dayOfMonth} $monthName ${selectedDate.year} ($half)"
-        } else {
-            val monthName = Month.of(calMonth).getDisplayName(TextStyle.FULL, Locale.getDefault())
-            "$monthName $calYear"
+    private suspend fun loadTemplateBitmap() {
+        val pageId = currentPageId.takeIf { it.isNotEmpty() } ?: return
+        val view = drawingView.asView()
+        val reqW = view.width.takeIf { it > 0 } ?: BitmapDecode.MAX_DIMENSION
+        val reqH = view.height.takeIf { it > 0 } ?: BitmapDecode.MAX_DIMENSION
+        val (templateId, bitmap) = withContext(Dispatchers.IO) {
+            val pageRow = NotesproutIndex.calendarDao().getObjectById(pageId)
+            val tid = pageRow?.let { PageData.fromJson(it.data).template } ?: ""
+            if (tid.isEmpty()) return@withContext "" to null
+            val tRow = repository.getTemplateById(tid) ?: return@withContext "" to null
+            val b64 = TemplateData.fromJson(tRow.data)?.image?.takeIf { it.isNotEmpty() }
+                ?: return@withContext "" to null
+            val bytes = Base64.decode(b64, Base64.DEFAULT)
+            tid to BitmapDecode.decodeSampled(bytes, reqW, reqH)
         }
-    }
-
-    private fun switchView(view: CalView) {
-        if (currentView == view) return
-        currentView = view
-        calYear = selectedDate.year
-        calMonth = selectedDate.monthValue
-        syncViewToggles()
-        updateMonthYearLabel()
-        navigateCanvas()
-    }
-
-    private fun stepBack() {
-        when (currentView) {
-            CalView.MONTH -> { calMonth--; if (calMonth < 1) { calMonth = 12; calYear-- } }
-            CalView.WEEK -> { selectedDate = selectedDate.minusDays(7); calYear = selectedDate.year; calMonth = selectedDate.monthValue }
-            CalView.DAY -> {
-                if (dayHalf == 1) dayHalf = 0
-                else { dayHalf = 1; selectedDate = selectedDate.minusDays(1); calYear = selectedDate.year; calMonth = selectedDate.monthValue }
-            }
-        }
-        updateMonthYearLabel()
-        navigateCanvas()
-    }
-
-    private fun stepForward() {
-        when (currentView) {
-            CalView.MONTH -> { calMonth++; if (calMonth > 12) { calMonth = 1; calYear++ } }
-            CalView.WEEK -> { selectedDate = selectedDate.plusDays(7); calYear = selectedDate.year; calMonth = selectedDate.monthValue }
-            CalView.DAY -> {
-                if (dayHalf == 0) dayHalf = 1
-                else { dayHalf = 0; selectedDate = selectedDate.plusDays(1); calYear = selectedDate.year; calMonth = selectedDate.monthValue }
-            }
-        }
-        updateMonthYearLabel()
-        navigateCanvas()
-    }
-
-    private fun goToToday() {
-        val today = LocalDate.now()
-        selectedDate = today
-        calYear = today.year
-        calMonth = today.monthValue
-        updateMonthYearLabel()
-        navigateCanvas()
-    }
-
-    private fun showMonthYearPicker() {
-        var pickerYear = calYear
-        val view = layoutInflater.inflate(R.layout.dialog_month_year_picker, null)
-        val tvYear = view.findViewById<TextView>(R.id.tvPickerYear)
-        tvYear.text = pickerYear.toString()
-        var dlg: AlertDialog? = null
-
-        view.findViewById<AppCompatImageButton>(R.id.btnYearMinus).setOnClickListener {
-            pickerYear--; tvYear.text = pickerYear.toString()
-        }
-        view.findViewById<AppCompatImageButton>(R.id.btnYearPlus).setOnClickListener {
-            pickerYear++; tvYear.text = pickerYear.toString()
-        }
-
-        val monthIds = intArrayOf(
-            R.id.btnPickMonth01, R.id.btnPickMonth02, R.id.btnPickMonth03,
-            R.id.btnPickMonth04, R.id.btnPickMonth05, R.id.btnPickMonth06,
-            R.id.btnPickMonth07, R.id.btnPickMonth08, R.id.btnPickMonth09,
-            R.id.btnPickMonth10, R.id.btnPickMonth11, R.id.btnPickMonth12,
-        )
-        view.findViewById<AppCompatButton>(monthIds[calMonth - 1]).isSelected = true
-        monthIds.forEachIndexed { i, id ->
-            view.findViewById<AppCompatButton>(id).setOnClickListener {
-                calYear = pickerYear
-                calMonth = i + 1
-                selectedDate = LocalDate.of(calYear, calMonth, 1)
-                updateMonthYearLabel()
-                navigateCanvas()
-                dlg?.dismiss()
-            }
-        }
-
-        dlg = AlertDialog.Builder(this)
-            .setTitle("Select Month & Year")
-            .setView(view)
-            .setNegativeButton("Cancel", null)
-            .create()
-        dlg.show()
-        dlg.window?.setElevation(0f)
-        dlg.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
-    }
-
-    // ── Page key / spec ────────────────────────────────────────────────────────
-
-    private fun currentSpec() = CalendarTemplateRenderer.Spec(
-        view = currentView, calYear = calYear, calMonth = calMonth,
-        selectedDate = selectedDate, dayHalf = dayHalf, today = LocalDate.now(),
-    )
-
-    private fun pageKey(): String = when (currentView) {
-        CalView.MONTH -> "cal-month-%04d-%02d".format(calYear, calMonth)
-        CalView.WEEK -> "cal-week-${sundayOf(selectedDate)}"
-        CalView.DAY -> "cal-day-$selectedDate-${if (dayHalf == 0) "AM" else "PM"}"
-    }
-
-    private fun sundayOf(date: LocalDate): LocalDate {
-        val dow = date.dayOfWeek.value % 7
-        return date.minusDays(dow.toLong())
-    }
-
-    // ── Canvas navigation / load ───────────────────────────────────────────────
-
-    private fun navigateCanvas(firstLoad: Boolean = false) {
-        lifecycleScope.launch {
-            withContext(Dispatchers.IO) { saveStrokes() }
-            if (isLassoMode) clearLassoSelectionForNavigation()
-            if (isShapeTransformMode) { isShapeTransformMode = false; drawingView.exitShapeTransform(); hideShapeTransformButtons() }
-            val (pid, lid) = repository.getOrCreatePageLayer(pageKey())
-            currentPageId = pid
-            currentLayerId = lid
-            persistedStrokeIds.clear()
-            if (!firstLoad) drawingView.eraseAll()
-            renderTemplateBitmap()
-            loadCanvasContent()
-            initHistory()
-            if (isLassoMode) drawingView.setLassoMode(true)
-        }
-    }
-
-    private fun renderTemplateBitmap() {
-        val w = binding.calendarContent.width
-        val h = binding.calendarContent.height
-        currentTemplateBitmap = if (w > 0 && h > 0) {
-            CalendarTemplateRenderer.render(currentSpec(), w, h, density)
-        } else null
-    }
-
-    /** Re-render the template (e.g. selection changed) and rebuild the canvas with current content. */
-    private fun refreshTemplate() {
-        renderTemplateBitmap()
-        lifecycleScope.launch { rebuildCanvas() }
+        currentTemplateId = templateId
+        currentTemplateBitmap = bitmap
     }
 
     private suspend fun loadCanvasContent() {
         val pageId = currentPageId.takeIf { it.isNotEmpty() } ?: return
-        val containerW = binding.calendarContent.width.toFloat()
-        val containerH = binding.calendarContent.height.toFloat()
+        val containerW = binding.dayContent.width.toFloat()
+        val containerH = binding.dayContent.height.toFloat()
 
         val content = withContext(Dispatchers.IO) {
             if (containerW > 0 && containerH > 0) {
@@ -576,6 +388,48 @@ class CalendarActivity : AppCompatActivity() {
         else { drawingView.setTemplate(template); drawingView.loadStrokes(strokes) }
     }
 
+    // ── Templates ──────────────────────────────────────────────────────────────
+
+    private fun showTemplatePicker() {
+        DayTemplateDialog(
+            activity = this,
+            lifecycleScope = lifecycleScope,
+            dao = NotesproutIndex.calendarDao(),
+            currentTemplateId = currentTemplateId,
+            onConfirm = { templateId, _ -> applyTemplate(templateId) },
+            onBrowseLibrary = {
+                templatePickLauncher.launch(
+                    Intent(this, TemplateBrowserActivity::class.java)
+                        .putExtra(TemplateBrowserActivity.EXTRA_MODE, TemplateBrowserActivity.MODE_PICK)
+                )
+            },
+        ).show()
+    }
+
+    /** A library template was picked from the browser — copy it into the calendar table, then apply. */
+    private fun onLibraryTemplatePicked(libraryTemplateId: String) {
+        if (libraryTemplateId.isEmpty()) { applyTemplate(""); return }
+        lifecycleScope.launch {
+            val newId = withContext(Dispatchers.IO) {
+                val entity = indexRepo.getTemplate(libraryTemplateId) ?: return@withContext null
+                val tObj = IndexTemplateObject.fromJson(entity.data) ?: return@withContext null
+                if (tObj.image.isEmpty()) return@withContext null
+                repository.insertTemplateRow(entity.name, tObj.width, tObj.height, tObj.image)
+            } ?: run { toast("Couldn't load template"); return@launch }
+            applyTemplate(newId)
+        }
+    }
+
+    /** Set the page's template (id "" = Blank), reload its bitmap from the DB, and repaint. */
+    private fun applyTemplate(templateId: String) {
+        val pageId = currentPageId.takeIf { it.isNotEmpty() } ?: return
+        lifecycleScope.launch {
+            withContext(Dispatchers.IO) { repository.setPageTemplate(pageId, templateId) }
+            loadTemplateBitmap()
+            rebuildCanvas()
+        }
+    }
+
     // ── Save ───────────────────────────────────────────────────────────────────
 
     private suspend fun saveStrokes() {
@@ -596,7 +450,6 @@ class CalendarActivity : AppCompatActivity() {
         redoStack.clear()
     }
 
-    /** Capture the post-change layer state, pushing the prior state onto the undo stack. */
     private fun pushHistory() {
         val layerId = currentLayerId.takeIf { it.isNotEmpty() } ?: return
         lifecycleScope.launch {
@@ -616,8 +469,6 @@ class CalendarActivity : AppCompatActivity() {
             val prev = undoStack.removeLast()
             currentSnapshot = prev
             withContext(Dispatchers.IO) { repository.restoreLayer(layerId, prev) }
-            // No eraseAll() — loadCanvasContent swaps the full render bitmap in one repaint,
-            // avoiding the extra white-flash a separate eraseAll would cause on EPD.
             loadCanvasContent()
         }
     }
@@ -838,42 +689,61 @@ class CalendarActivity : AppCompatActivity() {
     // ── Tool buttons ───────────────────────────────────────────────────────────
 
     private fun wireToolButtons() {
-        binding.btnCalPen.setOnClickListener {
+        binding.btnDayPen.setOnClickListener {
             if (isLassoMode) exitLassoMode()
+            hideShapeInsertToolbar()
             isEraserActive = false; isLassoEraserActive = false
             drawingView.setEraserMode(false); drawingView.setLassoEraserMode(false)
-            binding.btnCalPen.isSelected = true
-            binding.btnCalEraser.isSelected = false
-            binding.btnCalLassoEraser.isSelected = false
+            binding.btnDayPen.isSelected = true
+            binding.btnDayEraser.isSelected = false
+            binding.btnDayLassoEraser.isSelected = false
             drawingView.releaseRender()
             ToolPreferencesManager.save(this, ActiveTool.PEN)
         }
-        binding.btnCalEraser.setOnClickListener {
+        binding.btnDayEraser.setOnClickListener {
             if (isLassoMode) exitLassoMode()
+            hideShapeInsertToolbar()
             isLassoEraserActive = false; drawingView.setLassoEraserMode(false)
-            binding.btnCalLassoEraser.isSelected = false
+            binding.btnDayLassoEraser.isSelected = false
             isEraserActive = !isEraserActive
             drawingView.setEraserMode(isEraserActive)
-            binding.btnCalEraser.isSelected = isEraserActive
-            binding.btnCalPen.isSelected = !isEraserActive
+            binding.btnDayEraser.isSelected = isEraserActive
+            binding.btnDayPen.isSelected = !isEraserActive
             drawingView.releaseRender()
             ToolPreferencesManager.save(this, if (isEraserActive) ActiveTool.ERASER else ActiveTool.PEN)
         }
-        binding.btnCalLassoEraser.setOnClickListener {
+        binding.btnDayLassoEraser.setOnClickListener {
             if (isLassoMode) exitLassoMode()
+            hideShapeInsertToolbar()
             isEraserActive = false; drawingView.setEraserMode(false)
             isLassoEraserActive = !isLassoEraserActive
             drawingView.setLassoEraserMode(isLassoEraserActive)
-            binding.btnCalLassoEraser.isSelected = isLassoEraserActive
-            binding.btnCalPen.isSelected = !isLassoEraserActive
-            binding.btnCalEraser.isSelected = false
+            binding.btnDayLassoEraser.isSelected = isLassoEraserActive
+            binding.btnDayPen.isSelected = !isLassoEraserActive
+            binding.btnDayEraser.isSelected = false
             drawingView.releaseRender()
         }
-        binding.btnCalLasso.setOnClickListener {
+        binding.btnDayLasso.setOnClickListener {
+            hideShapeInsertToolbar()
             if (!isLassoMode) enterLassoMode() else exitLassoMode()
             drawingView.releaseRender()
         }
-        binding.btnCalStickyNote.setOnClickListener { lifecycleScope.launch { insertStickyNote() } }
+        binding.btnDayStickyNote.setOnClickListener { hideShapeInsertToolbar(); lifecycleScope.launch { insertStickyNote() } }
+        binding.btnDayInsertShape.setOnClickListener {
+            if (binding.dayShapeInsertToolbar.visibility == View.VISIBLE) hideShapeInsertToolbar() else showShapeInsertToolbar()
+        }
+
+        binding.btnInsertShapeRectangle.setOnClickListener { insertShape(ShapeType.RECTANGLE) }
+        binding.btnInsertShapeEllipse.setOnClickListener { insertShape(ShapeType.ELLIPSE) }
+        binding.btnInsertShapeTriangle.setOnClickListener { insertShape(ShapeType.TRIANGLE) }
+        binding.btnInsertShapeDiamond.setOnClickListener { insertShape(ShapeType.DIAMOND) }
+        binding.btnInsertShapeTrapezoid.setOnClickListener { insertShape(ShapeType.TRAPEZOID) }
+        binding.btnInsertShapePentagon.setOnClickListener { insertShape(ShapeType.PENTAGON) }
+        binding.btnInsertShapeHexagon.setOnClickListener { insertShape(ShapeType.HEXAGON) }
+        binding.btnInsertShapeStar.setOnClickListener { insertShape(ShapeType.STAR) }
+        binding.btnInsertShapeArch.setOnClickListener { insertShape(ShapeType.ARCH) }
+        binding.btnInsertShapeLine.setOnClickListener { insertShape(ShapeType.LINE) }
+        binding.btnInsertShapeArrow.setOnClickListener { insertShape(ShapeType.ARROW) }
 
         binding.btnLassoCopy.setOnClickListener { performLassoCopy() }
         binding.btnLassoCut.setOnClickListener { performLassoCut() }
@@ -896,10 +766,10 @@ class CalendarActivity : AppCompatActivity() {
         if (isEraserActive) { isEraserActive = false; drawingView.setEraserMode(false) }
         if (isLassoEraserActive) { isLassoEraserActive = false; drawingView.setLassoEraserMode(false) }
         drawingView.setLassoMode(true)
-        binding.btnCalLasso.isSelected = true
-        binding.btnCalPen.isSelected = false
-        binding.btnCalEraser.isSelected = false
-        binding.btnCalLassoEraser.isSelected = false
+        binding.btnDayLasso.isSelected = true
+        binding.btnDayPen.isSelected = false
+        binding.btnDayEraser.isSelected = false
+        binding.btnDayLassoEraser.isSelected = false
     }
 
     private fun exitLassoMode() {
@@ -909,17 +779,9 @@ class CalendarActivity : AppCompatActivity() {
         drawingView.lassoSelectedIds = emptySet()
         drawingView.setLassoOverlay(null, null)
         drawingView.setLassoMode(false)
-        binding.btnCalLasso.isSelected = false
-        binding.btnCalPen.isSelected = !isEraserActive
-        binding.btnCalEraser.isSelected = isEraserActive
-        hideFloatingSelectionToolbar()
-    }
-
-    private fun clearLassoSelectionForNavigation() {
-        isSmartLassoSession = false
-        selectedObjectIds.clear()
-        drawingView.lassoSelectedIds = emptySet()
-        drawingView.setLassoOverlay(null, null)
+        binding.btnDayLasso.isSelected = false
+        binding.btnDayPen.isSelected = !isEraserActive
+        binding.btnDayEraser.isSelected = isEraserActive
         hideFloatingSelectionToolbar()
     }
 
@@ -1067,60 +929,40 @@ class CalendarActivity : AppCompatActivity() {
             translated.shapeObjects.forEach { selectedObjectIds.add(it.id) }
             isSmartLassoSession = false
             if (!isLassoMode) enterLassoMode()
-            binding.btnCalLasso.isSelected = true
-            binding.btnCalPen.isSelected = false
-            binding.btnCalEraser.isSelected = false
+            binding.btnDayLasso.isSelected = true
+            binding.btnDayPen.isSelected = false
+            binding.btnDayEraser.isSelected = false
             drawingView.setLassoSelectedIds(selectedObjectIds.toSet(), newBox)
             updateFloatingSelectionToolbar(newBox)
             pushHistory()
         }
     }
 
-    /** Translate clipboard content by (dx,dy) and assign fresh UUIDs to every object. */
-    /** Bundle a whole loaded page into a [NotesproutClipboard.ClipboardContent] so it can be run
-     *  through [regenIds] (translate + fresh ids). The union box is only used by [regenIds]'s own
-     *  bookkeeping; export serialization reads each object's own bbox. */
-    private fun clipFromPage(c: ScratchpadPageContent): NotesproutClipboard.ClipboardContent {
-        val box = RectF()
-        c.strokes.forEach { box.union(it.boundingBox) }
-        c.headings.forEach { box.union(it.boundingBox) }
-        c.textObjects.forEach { box.union(it.boundingBox) }
-        c.lineObjects.forEach { box.union(it.boundingBox) }
-        c.links.forEach { box.union(it.boundingBox) }
-        c.stickyNotes.forEach { box.union(it.boundingBox) }
-        c.shapeObjects.forEach { box.union(it.boundingBox) }
-        return NotesproutClipboard.ClipboardContent(
-            strokes = c.strokes, headings = c.headings, boundingBox = box,
-            textObjects = c.textObjects, lineObjects = c.lineObjects,
-            links = c.links, stickyNotes = c.stickyNotes, shapeObjects = c.shapeObjects,
-        )
-    }
-
     private fun regenIds(clip: NotesproutClipboard.ClipboardContent, dx: Float, dy: Float): NotesproutClipboard.ClipboardContent {
         val newStrokes = clip.strokes.map { s ->
-            s.copy(id = java.util.UUID.randomUUID().toString(), points = s.points.map { PointF(it.x + dx, it.y + dy) })
+            s.copy(id = UUID.randomUUID().toString(), points = s.points.map { PointF(it.x + dx, it.y + dy) })
         }
         val newHeadings = clip.headings.map { h ->
             HeadingStroke(
-                id = java.util.UUID.randomUUID().toString(),
+                id = UUID.randomUUID().toString(),
                 boundingBox = RectF(h.boundingBox.left + dx, h.boundingBox.top + dy, h.boundingBox.right + dx, h.boundingBox.bottom + dy),
-                strokes = h.strokes.map { s -> s.copy(id = java.util.UUID.randomUUID().toString(), points = s.points.map { PointF(it.x + dx, it.y + dy) }) },
+                strokes = h.strokes.map { s -> s.copy(id = UUID.randomUUID().toString(), points = s.points.map { PointF(it.x + dx, it.y + dy) }) },
                 recognizedText = h.recognizedText, level = h.level,
             )
         }
         val newTexts = clip.textObjects.map { t ->
-            TextRender(java.util.UUID.randomUUID().toString(),
+            TextRender(UUID.randomUUID().toString(),
                 RectF(t.boundingBox.left + dx, t.boundingBox.top + dy, t.boundingBox.right + dx, t.boundingBox.bottom + dy), t.text, t.strokes)
         }
         val newLines = clip.lineObjects.map { l ->
-            l.copy(id = java.util.UUID.randomUUID().toString(),
+            l.copy(id = UUID.randomUUID().toString(),
                 boundingBox = RectF(l.boundingBox.left + dx, l.boundingBox.top + dy, l.boundingBox.right + dx, l.boundingBox.bottom + dy),
                 startX = l.startX + dx, startY = l.startY + dy, endX = l.endX + dx, endY = l.endY + dy)
         }
-        val newLinks = clip.links.map { it.translate(dx, dy, newId = java.util.UUID.randomUUID().toString()) }
-        val newStickies = clip.stickyNotes.map { it.translate(dx, dy, newId = java.util.UUID.randomUUID().toString()) }
+        val newLinks = clip.links.map { it.translate(dx, dy, newId = UUID.randomUUID().toString()) }
+        val newStickies = clip.stickyNotes.map { it.translate(dx, dy, newId = UUID.randomUUID().toString()) }
         val newShapes = clip.shapeObjects.map { s ->
-            s.copy(id = java.util.UUID.randomUUID().toString(), centerX = s.centerX + dx, centerY = s.centerY + dy,
+            s.copy(id = UUID.randomUUID().toString(), centerX = s.centerX + dx, centerY = s.centerY + dy,
                 boundingBox = RectF(s.boundingBox.left + dx, s.boundingBox.top + dy, s.boundingBox.right + dx, s.boundingBox.bottom + dy))
         }
         return NotesproutClipboard.ClipboardContent(
@@ -1128,54 +970,6 @@ class CalendarActivity : AppCompatActivity() {
             boundingBox = RectF(clip.boundingBox.left + dx, clip.boundingBox.top + dy, clip.boundingBox.right + dx, clip.boundingBox.bottom + dy),
             textObjects = newTexts, lineObjects = newLines, links = newLinks, stickyNotes = newStickies, shapeObjects = newShapes,
         )
-    }
-
-    // ── Scratch Pad ──────────────────────────────────────────────────────────────
-
-    /** Open the scratch pad as its own window (matches the notebook's scratch pad launcher). */
-    private fun openScratchpad() {
-        startActivity(Intent(this, ScratchpadActivity::class.java))
-    }
-
-    // ── Erase page ──────────────────────────────────────────────────────────────
-
-    private fun confirmErasePage() {
-        if (currentLayerId.isEmpty()) return
-        val hasContent = drawingView.getStrokes().isNotEmpty() || drawingView.getHeadings().isNotEmpty() ||
-                drawingView.getTextObjects().isNotEmpty() || drawingView.getLineObjects().isNotEmpty() ||
-                drawingView.getLinks().isNotEmpty() || drawingView.getStickyNotes().isNotEmpty() ||
-                drawingView.getShapeObjects().isNotEmpty()
-        if (!hasContent) { toast("Nothing to erase"); return }
-        val label = when (currentView) {
-            CalView.MONTH -> "this month"
-            CalView.WEEK -> "this week"
-            CalView.DAY -> "this ${if (dayHalf == 0) "AM" else "PM"} page"
-        }
-        val dialog = AlertDialog.Builder(this)
-            .setTitle("Erase Page")
-            .setMessage("Erase all writing on $label? This can be undone.")
-            .setPositiveButton("Erase") { _, _ -> erasePage() }
-            .setNegativeButton("Cancel", null)
-            .show()
-        dialog.window?.setElevation(0f)
-        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
-    }
-
-    private fun erasePage() {
-        val layerId = currentLayerId.takeIf { it.isNotEmpty() } ?: return
-        lifecycleScope.launch {
-            selectedObjectIds.clear()
-            drawingView.lassoSelectedIds = emptySet()
-            drawingView.setLassoOverlay(null, null)
-            hideFloatingSelectionToolbar()
-            withContext(Dispatchers.IO) {
-                NotesproutIndex.calendarDao().softDeleteByParentId(layerId, System.currentTimeMillis())
-            }
-            persistedStrokeIds.clear()
-            drawingView.eraseAll()
-            loadCanvasContent()
-            pushHistory()
-        }
     }
 
     // ── Send to Notebook ────────────────────────────────────────────────────────
@@ -1187,11 +981,7 @@ class CalendarActivity : AppCompatActivity() {
         if (fromId != null) {
             val dialog = AlertDialog.Builder(this)
                 .setTitle("Send to Notebook")
-                .setPositiveButton(fromNotebookName ?: "This notebook") { _, _ ->
-                    CalendarTransfer.pending = content
-                    setResult(RESULT_OK)
-                    finish()
-                }
+                .setPositiveButton(fromNotebookName ?: "This notebook") { _, _ -> openNotebookWithPaste(fromId, fromNotebookName ?: "", content) }
                 .setNeutralButton("Other notebook…") { _, _ -> launchNotebookPicker(content, excludeId = fromId) }
                 .setNegativeButton("Cancel", null)
                 .show()
@@ -1220,261 +1010,17 @@ class CalendarActivity : AppCompatActivity() {
         finish()
     }
 
-    // ── Send page to notebook (export view as page) ──────────────────────────────
-
-    /**
-     * Export the current view (Month / Week, or both Day halves) into a notebook as new page(s).
-     * The grid becomes each page's template; "With writing" also copies the view's content objects.
-     * Neither mode creates a library template.
-     */
-    private fun sendPageToNotebook() {
-        val dialog = AlertDialog.Builder(this)
-            .setTitle("Send page to notebook")
-            .setPositiveButton("With writing") { _, _ -> chooseExportDestination(includeContent = true) }
-            .setNeutralButton("Template only") { _, _ -> chooseExportDestination(includeContent = false) }
-            .setNegativeButton("Cancel", null)
-            .show()
-        dialog.window?.setElevation(0f)
-        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
-    }
-
-    /** Pick the destination notebook (this-notebook prompt when launched from one; else the picker). */
-    private fun chooseExportDestination(includeContent: Boolean) {
-        val fromId = fromNotebookId
-        if (fromId != null) {
-            val dialog = AlertDialog.Builder(this)
-                .setTitle("Send page to notebook")
-                .setPositiveButton(fromNotebookName ?: "This notebook") { _, _ ->
-                    beginExport(fromId, fromNotebookName ?: "This notebook", includeContent)
-                }
-                .setNeutralButton("Other notebook…") { _, _ -> launchExportPicker(includeContent, excludeId = fromId) }
-                .setNegativeButton("Cancel", null)
-                .show()
-            dialog.window?.setElevation(0f)
-            dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
-        } else {
-            launchExportPicker(includeContent, excludeId = null)
-        }
-    }
-
-    private fun launchExportPicker(includeContent: Boolean, excludeId: String?) {
-        pendingExportIncludeContent = includeContent
-        val intent = Intent(this, NotebookPickerActivity::class.java)
-        if (excludeId != null) intent.putExtra(NotebookPickerActivity.EXTRA_EXCLUDE_NOTEBOOK_ID, excludeId)
-        exportNotebookPickerLauncher.launch(intent)
-    }
-
-    /** Resolve the destination key, load its pages, then prompt for the insert position. */
-    private fun beginExport(destId: String, destName: String, includeContent: Boolean) {
-        lifecycleScope.launch {
-            val info = withContext(Dispatchers.IO) { indexRepo.getEncryptionInfo(destId) }
-            val destPass: String? = if (info.encrypted) {
-                KeySession.getFor(destId) ?: KeyResolver.resolveForOpen(this@CalendarActivity, destId, info)
-            } else null
-            if (info.encrypted && destPass == null) { toast("Notebook is locked"); return@launch }
-
-            val destPath = soilFile(this@CalendarActivity, destId).absolutePath
-            val pageIds = withContext(Dispatchers.IO) { loadNotebookPageIds(destPath, destPass) }
-            if (pageIds == null) { toast("Couldn't open notebook"); return@launch }
-
-            showInsertPositionPicker(destName, pageIds) { anchorPageId, before ->
-                performExport(destId, destName, destPath, destPass, anchorPageId, before, includeContent)
-            }
-        }
-    }
-
-    /**
-     * Position picker (mirrors the page-index copy/move flow): "End of notebook", or tap a page then
-     * choose Before / After. [onChosen] is called with the anchor page id (null = append) + before.
-     */
-    private fun showInsertPositionPicker(
-        destName: String,
-        pageIds: List<String>,
-        onChosen: (anchorPageId: String?, before: Boolean) -> Unit,
-    ) {
-        if (pageIds.isEmpty()) { onChosen(null, false); return }  // empty notebook → append
-
-        val inkBlack = ContextCompat.getColor(this, R.color.inkBlack)
-        val pad = (16 * density).toInt()
-        val rowPadV = (14 * density).toInt()
-
-        val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        val scroll = ScrollView(this).apply { addView(list) }
-
-        var dlg: AlertDialog? = null
-
-        fun addRow(label: String, bold: Boolean, onClick: () -> Unit) {
-            if (list.childCount > 0) {
-                list.addView(View(this).apply { setBackgroundColor(inkBlack) },
-                    LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, (1 * density).toInt()))
-            }
-            val tv = AppCompatTextView(this).apply {
-                text = label
-                textSize = 16f
-                setTextColor(inkBlack)
-                if (bold) setTypeface(typeface, android.graphics.Typeface.BOLD)
-                gravity = Gravity.CENTER_VERTICAL
-                setPadding(pad, rowPadV, pad, rowPadV)
-                isClickable = true
-                isFocusable = true
-                setOnClickListener { onClick() }
-            }
-            list.addView(tv, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
-        }
-
-        addRow("End of notebook", bold = true) { dlg?.dismiss(); onChosen(null, false) }
-        pageIds.forEachIndexed { i, pid ->
-            addRow("Page ${i + 1}", bold = false) {
-                dlg?.dismiss()
-                showBeforeAfterPicker(i + 1) { before -> onChosen(pid, before) }
-            }
-        }
-
-        dlg = AlertDialog.Builder(this)
-            .setTitle("Insert into $destName")
-            .setView(scroll)
-            .setNegativeButton("Cancel", null)
-            .create()
-        dlg.show()
-        dlg.window?.setElevation(0f)
-        dlg.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
-    }
-
-    private fun showBeforeAfterPicker(pageNumber: Int, onChosen: (before: Boolean) -> Unit) {
-        val options = arrayOf("Insert before Page $pageNumber", "Insert after Page $pageNumber")
-        val dialog = AlertDialog.Builder(this)
-            .setTitle("Page $pageNumber")
-            .setItems(options) { _, which -> onChosen(which == 0) }
-            .setNegativeButton("Cancel", null)
-            .show()
-        dialog.window?.setElevation(0f)
-        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
-    }
-
-    /** The page key(s) + render spec(s) the current view exports (Day = AM + PM). */
-    private fun exportSources(): List<Pair<String, CalendarTemplateRenderer.Spec>> {
-        val today = LocalDate.now()
-        return when (currentView) {
-            CalView.MONTH -> listOf(
-                "cal-month-%04d-%02d".format(calYear, calMonth) to
-                    CalendarTemplateRenderer.Spec(CalView.MONTH, calYear, calMonth, selectedDate, 0, today)
-            )
-            CalView.WEEK -> listOf(
-                "cal-week-${sundayOf(selectedDate)}" to
-                    CalendarTemplateRenderer.Spec(CalView.WEEK, calYear, calMonth, selectedDate, 0, today)
-            )
-            CalView.DAY -> listOf(
-                "cal-day-$selectedDate-AM" to
-                    CalendarTemplateRenderer.Spec(CalView.DAY, calYear, calMonth, selectedDate, 0, today),
-                "cal-day-$selectedDate-PM" to
-                    CalendarTemplateRenderer.Spec(CalView.DAY, calYear, calMonth, selectedDate, 1, today),
-            )
-        }
-    }
-
-    private fun templateNameFor(spec: CalendarTemplateRenderer.Spec): String {
-        val monthName = Month.of(spec.calMonth).getDisplayName(TextStyle.FULL, Locale.getDefault())
-        return when (spec.view) {
-            CalView.MONTH -> "Calendar — $monthName ${spec.calYear}"
-            CalView.WEEK -> "Calendar — Week of ${sundayOf(spec.selectedDate)}"
-            CalView.DAY -> "Calendar — ${spec.selectedDate} ${if (spec.dayHalf == 0) "AM" else "PM"}"
-        }
-    }
-
-    private fun encodePngBase64(bitmap: Bitmap): String {
-        val baos = ByteArrayOutputStream()
-        bitmap.compress(Bitmap.CompressFormat.PNG, 100, baos)
-        return Base64.encodeToString(baos.toByteArray(), Base64.NO_WRAP)
-    }
-
-    private fun performExport(
-        destId: String, destName: String, destPath: String, destPass: String?,
-        anchorPageId: String?, before: Boolean, includeContent: Boolean,
-    ) {
-        val w = binding.calendarContent.width
-        val h = binding.calendarContent.height
-        if (w <= 0 || h <= 0) { toast("Calendar not ready"); return }
-
-        // The calendar canvas sits *below* its 56dp toolbar (vertical layout), but a notebook page's
-        // drawing area is full-screen with the toolbar overlaid on top. Reserve that toolbar height as
-        // a blank top margin so the exported grid + writing clear the notebook's floating toolbar
-        // instead of landing under it (the "off by exactly the toolbar size" alignment).
-        val topOffset = (binding.root.height - h).coerceAtLeast(0)
-        val topOffsetF = topOffset.toFloat()
-        val pageH = h + topOffset
-
-        lifecycleScope.launch {
-            withContext(Dispatchers.IO) { saveStrokes() }  // flush the visible canvas to the DB first
-
-            val exportPages = exportSources().map { (key, spec) ->
-                repository.getOrCreatePageLayer(key)
-                val children = if (includeContent) {
-                    val content = withContext(Dispatchers.IO) { repository.loadPage(key, density) }
-                    val translated = regenIds(clipFromPage(content), 0f, topOffsetF)
-                    repository.serializeForExport(translated, density)
-                } else emptyList()
-                val imageB64 = withContext(Dispatchers.Default) {
-                    val grid = CalendarTemplateRenderer.render(spec, w, h, density, highlights = false)
-                    val page = Bitmap.createBitmap(w, pageH, Bitmap.Config.ARGB_8888)
-                    Canvas(page).apply {
-                        drawColor(Color.WHITE)            // blank toolbar-height strip at top
-                        drawBitmap(grid, 0f, topOffsetF, null)
-                    }
-                    grid.recycle()
-                    val s = encodePngBase64(page)
-                    page.recycle()
-                    s
-                }
-                CalendarExportPage(templateNameFor(spec), imageB64, w, pageH, children)
-            }
-
-            val results = withContext(Dispatchers.IO) {
-                insertCalendarPagesIntoNotebook(destPath, destPass, anchorPageId, before, exportPages)
-            }
-            if (results.isNullOrEmpty()) { toast("Couldn't add pages"); return@launch }
-
-            showPostExportDialog(destId, destName, results.size, results.first().first)
-        }
-    }
-
-    private fun showPostExportDialog(destId: String, destName: String, count: Int, firstPageId: String) {
-        val noun = if (count == 1) "page" else "pages"
-        val dialog = AlertDialog.Builder(this)
-            .setTitle("Added $count $noun to $destName")
-            .setPositiveButton("Open $destName") { _, _ -> openExportedNotebook(destId, destName, firstPageId) }
-            .setNegativeButton("Stay", null)
-            .show()
-        dialog.window?.setElevation(0f)
-        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
-    }
-
-    private fun openExportedNotebook(destId: String, destName: String, firstPageId: String) {
-        if (destId == fromNotebookId) {
-            // Launched from this same notebook — return to it and navigate to the new page.
-            setResult(RESULT_OK, Intent().putExtra(EXTRA_RESULT_GOTO_PAGE_ID, firstPageId))
-            finish()
-        } else {
-            startActivity(
-                Intent(this, NotebookActivity::class.java)
-                    .putExtra(NotebookActivity.EXTRA_NOTEBOOK_ID, destId)
-                    .putExtra(NotebookActivity.EXTRA_NOTEBOOK_NAME, destName)
-                    .putExtra(NotebookActivity.EXTRA_INITIAL_PAGE_ID, firstPageId)
-            )
-            finish()
-        }
-    }
-
     // ── Sticky notes ────────────────────────────────────────────────────────────
 
     private suspend fun insertStickyNote() {
         val layerId = currentLayerId.takeIf { it.isNotEmpty() } ?: return
-        val pageW = binding.calendarContent.width.takeIf { it > 0 } ?: return
-        val pageH = binding.calendarContent.height.takeIf { it > 0 } ?: return
+        val pageW = binding.dayContent.width.takeIf { it > 0 } ?: return
+        val pageH = binding.dayContent.height.takeIf { it > 0 } ?: return
         val iconSizePx = STICKY_NOTE_ICON_SIZE_DP * density
         val left = ((pageW - iconSizePx) / 2f).coerceAtLeast(0f)
         val top = ((pageH - iconSizePx) / 2f).coerceAtLeast(0f)
         val bbox = RectF(left, top, left + iconSizePx, top + iconSizePx)
-        val noteId = java.util.UUID.randomUUID().toString()
+        val noteId = UUID.randomUUID().toString()
         val now = System.currentTimeMillis()
         withContext(Dispatchers.IO) {
             NotesproutIndex.calendarDao().insertObject(
@@ -1517,11 +1063,78 @@ class CalendarActivity : AppCompatActivity() {
         updateFloatingSelectionToolbar(selBox)
     }
 
-    // ── Shape conversion / transform ────────────────────────────────────────────
+    // ── Shape insert / conversion / transform ────────────────────────────────────
+
+    private fun showShapeInsertToolbar() {
+        if (isLassoMode) exitLassoMode()
+        val btnLoc = IntArray(2).also { binding.btnDayInsertShape.getLocationOnScreen(it) }
+        val contentLoc = IntArray(2).also { binding.dayContent.getLocationOnScreen(it) }
+        val btnCx = (btnLoc[0] - contentLoc[0]) + binding.btnDayInsertShape.width / 2f
+        val gap = 8f * density
+        binding.dayShapeInsertToolbar.visibility = View.VISIBLE
+        binding.btnDayInsertShape.isSelected = true
+        binding.dayShapeInsertToolbar.post {
+            val w = binding.dayShapeInsertToolbar.measuredWidth.toFloat()
+            val contentW = binding.dayContent.width.toFloat()
+            binding.dayShapeInsertToolbar.x = (btnCx - w / 2f).coerceIn(0f, (contentW - w).coerceAtLeast(0f))
+            binding.dayShapeInsertToolbar.y = gap
+        }
+    }
+
+    private fun hideShapeInsertToolbar() {
+        binding.dayShapeInsertToolbar.visibility = View.GONE
+        binding.btnDayInsertShape.isSelected = false
+    }
+
+    private fun insertShape(type: ShapeType) {
+        hideShapeInsertToolbar()
+        val layerId = currentLayerId.takeIf { it.isNotEmpty() } ?: return
+        val pageW = binding.dayContent.width.takeIf { it > 0 } ?: return
+        val pageH = binding.dayContent.height.takeIf { it > 0 } ?: return
+        lifecycleScope.launch {
+            val isOpenShape = type == ShapeType.LINE || type == ShapeType.ARROW || type == ShapeType.ARCH
+            val width: Float; val height: Float; val aspectLocked: Boolean
+            if (isOpenShape) {
+                val openWidth = pageW * 0.5f
+                width = openWidth
+                height = if (type == ShapeType.ARCH) openWidth * 0.5f else 1f
+                aspectLocked = false
+            } else {
+                val closedSize = STICKY_NOTE_ICON_SIZE_DP * density
+                width = closedSize
+                height = closedSize
+                aspectLocked = type == ShapeType.ELLIPSE || type == ShapeType.RECTANGLE || type == ShapeType.STAR
+            }
+            val shapeObj = ShapeObject(
+                type = type, centerX = pageW / 2f, centerY = pageH / 2f,
+                width = width, height = height, rotationDeg = 0f,
+                strokeWidthDp = 2f, aspectLocked = aspectLocked, pointCount = 5,
+            )
+            val shapeId = UUID.randomUUID().toString()
+            val now = System.currentTimeMillis()
+            val shapeRender = ShapeRender.from(shapeId, shapeObj, density)
+            withContext(Dispatchers.IO) {
+                NotesproutIndex.calendarDao().insertObject(
+                    CalendarEntity(id = shapeId, parentId = layerId, boundingBox = shapeRender.boundingBox.toBoundingBoxJson(),
+                        sortOrder = 0, createdAt = now, updatedAt = now, type = TYPE_SHAPE, data = shapeObj.toJson())
+                )
+            }
+            drawingView.loadShapeObjects(drawingView.getShapeObjects() + shapeRender)
+            rebuildCanvas()
+            if (!isLassoMode) enterLassoMode()
+            isSmartLassoSession = true
+            val pad = 8f * density
+            val selBox = RectF(shapeRender.boundingBox).apply { inset(-pad, -pad) }
+            drawingView.setLassoSelectedIds(setOf(shapeId), selBox)
+            selectedObjectIds.clear(); selectedObjectIds.add(shapeId)
+            updateFloatingSelectionToolbar(selBox)
+            pushHistory()
+        }
+    }
 
     private suspend fun convertStrokeToShape(stroke: LiveStroke, result: ShapeRecognizer.Result) {
         val layerId = currentLayerId.takeIf { it.isNotEmpty() } ?: return
-        val shapeId = java.util.UUID.randomUUID().toString()
+        val shapeId = UUID.randomUUID().toString()
         val now = System.currentTimeMillis()
         val shapeObj = ShapeObject(
             type = result.type, centerX = result.centerX, centerY = result.centerY,
@@ -1655,7 +1268,7 @@ class CalendarActivity : AppCompatActivity() {
     // ── Floating selection toolbar ───────────────────────────────────────────────
 
     private fun updateLassoButtonIcon() {
-        binding.btnCalLasso.setImageResource(
+        binding.btnDayLasso.setImageResource(
             if (NotesproutClipboard.hasContent()) R.drawable.ic_lasso_clipboard else R.drawable.ic_lasso
         )
     }
@@ -1701,8 +1314,8 @@ class CalendarActivity : AppCompatActivity() {
         val view = binding.floatingSelectionToolbar
         val viewW = view.measuredWidth.toFloat()
         val viewH = view.measuredHeight.toFloat()
-        val containerW = binding.calendarContent.width.toFloat()
-        val containerH = binding.calendarContent.height.toFloat()
+        val containerW = binding.dayContent.width.toFloat()
+        val containerH = binding.dayContent.height.toFloat()
         val dpGap = 8f * density
         var x = selectionBox.centerX() - viewW / 2f
         var y = selectionBox.bottom + dpGap
@@ -1726,25 +1339,27 @@ class CalendarActivity : AppCompatActivity() {
 
     override fun dispatchTouchEvent(event: MotionEvent): Boolean {
         if (event.getToolType(0) == MotionEvent.TOOL_TYPE_FINGER) {
-            val inToolbar = isTouchInView(event, binding.calendarToolbar)
+            val inToolbar = isTouchInView(event, binding.dayToolbar)
             val inFloating = binding.floatingSelectionToolbar.visibility == View.VISIBLE &&
                     isTouchInView(event, binding.floatingSelectionToolbar)
-            if (event.actionMasked == MotionEvent.ACTION_DOWN && (inToolbar || inFloating)) drawingView.releaseRender()
+            val inShapeToolbar = binding.dayShapeInsertToolbar.visibility == View.VISIBLE &&
+                    isTouchInView(event, binding.dayShapeInsertToolbar)
+            if (event.actionMasked == MotionEvent.ACTION_DOWN) {
+                if (inToolbar || inFloating || inShapeToolbar) drawingView.releaseRender()
+                // Dismiss the shape-insert popup when tapping outside it (and outside its trigger button).
+                if (binding.dayShapeInsertToolbar.visibility == View.VISIBLE &&
+                    !inShapeToolbar && !isTouchInView(event, binding.btnDayInsertShape)) {
+                    hideShapeInsertToolbar()
+                }
+            }
             if (handleStickyNoteTapGesture(event)) return true
-            if (!inToolbar && !inFloating) {
+            if (!inToolbar && !inFloating && !inShapeToolbar) {
                 handleMultiFingerDoubleTap(event)
-                if (handleCalendarFingerGesture(event)) return true
             }
         }
         return super.dispatchTouchEvent(event)
     }
 
-    /**
-     * Multi-finger stationary double-tap: 2 fingers = undo, 3 fingers = redo. Ported from
-     * [NotebookActivity]. Arms on the first pointer-down, evaluates on UP (or CANCEL for the
-     * BOOX 3-finger interception case) when the centroid stayed within tap slop and the gesture
-     * was short. Peak pointer count distinguishes the two cases.
-     */
     private fun handleMultiFingerDoubleTap(event: MotionEvent) {
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
@@ -1774,7 +1389,7 @@ class CalendarActivity : AppCompatActivity() {
                     val cy = (0 until count).map { event.getY(it) }.average().toFloat()
                     val dx = cx - mfTapCentroidStartX
                     val dy = cy - mfTapCentroidStartY
-                    if (Math.hypot(dx.toDouble(), dy.toDouble()) > touchSlopPx) mfTapMoved = true
+                    if (hypot(dx.toDouble(), dy.toDouble()) > touchSlopPx) mfTapMoved = true
                 }
             }
             MotionEvent.ACTION_UP -> {
@@ -1788,9 +1403,6 @@ class CalendarActivity : AppCompatActivity() {
                 mfTapMoved = false
             }
             MotionEvent.ACTION_CANCEL -> {
-                // On BOOX the Onyx SDK intercepts 3-finger touches and immediately cancels —
-                // ACTION_UP never fires. Treat a cancel on an armed, stationary 3-finger gesture
-                // as a valid tap completion so double-tap redo can work.
                 if (mfTapArmed && !mfTapMoved && mfTapPeakCount == 3) {
                     evaluateMultiFingerTap(SystemClock.uptimeMillis(), threeOnly = true)
                 } else {
@@ -1803,13 +1415,12 @@ class CalendarActivity : AppCompatActivity() {
         }
     }
 
-    /** Shared tap-completion logic for [handleMultiFingerDoubleTap]. */
     private fun evaluateMultiFingerTap(now: Long, threeOnly: Boolean = false) {
         when (if (threeOnly) 3 else mfTapPeakCount) {
             2 -> {
                 val withinTime = twoFingerTapFirstTime != 0L &&
                     now - twoFingerTapFirstTime <= ViewConfiguration.getDoubleTapTimeout()
-                val withinSlop = twoFingerTapFirstTime != 0L && Math.hypot(
+                val withinSlop = twoFingerTapFirstTime != 0L && hypot(
                     (mfTapCentroidStartX - twoFingerTapFirstX).toDouble(),
                     (mfTapCentroidStartY - twoFingerTapFirstY).toDouble(),
                 ) <= doubleTapSlopPx
@@ -1826,7 +1437,7 @@ class CalendarActivity : AppCompatActivity() {
             3 -> {
                 val withinTime = threeFingerTapFirstTime != 0L &&
                     now - threeFingerTapFirstTime <= ViewConfiguration.getDoubleTapTimeout()
-                val withinSlop = threeFingerTapFirstTime != 0L && Math.hypot(
+                val withinSlop = threeFingerTapFirstTime != 0L && hypot(
                     (mfTapCentroidStartX - threeFingerTapFirstX).toDouble(),
                     (mfTapCentroidStartY - threeFingerTapFirstY).toDouble(),
                 ) <= doubleTapSlopPx
@@ -1850,91 +1461,9 @@ class CalendarActivity : AppCompatActivity() {
         return x >= loc[0] && x < loc[0] + view.width && y >= loc[1] && y < loc[1] + view.height
     }
 
-    /** Finger gestures over the canvas: horizontal swipe steps the period; a tap selects a day. */
-    private fun handleCalendarFingerGesture(event: MotionEvent): Boolean {
-        when (event.actionMasked) {
-            MotionEvent.ACTION_DOWN -> { calDownX = event.x; calDownY = event.y; calDownTime = event.eventTime; calMoved = false; calMultiTouch = false }
-            MotionEvent.ACTION_POINTER_DOWN -> { calMoved = true; calMultiTouch = true }
-            MotionEvent.ACTION_MOVE -> {
-                if (!calMoved && hypot((event.x - calDownX).toDouble(), (event.y - calDownY).toDouble()) > touchSlopPx) calMoved = true
-            }
-            MotionEvent.ACTION_UP -> {
-                val dx = event.x - calDownX
-                val dy = event.y - calDownY
-                // !calMultiTouch guard: a 2-/3-finger gesture (undo/redo double-tap) sets the flag
-                // on POINTER_DOWN, so it never registers as a single-finger navigation swipe.
-                if (!calMultiTouch && abs(dx) >= dp(60) && abs(dx) > abs(dy) * 1.5f) {
-                    if (dx < 0) stepForward() else stepBack()
-                    return true
-                }
-                val quick = event.eventTime - calDownTime <= ViewConfiguration.getLongPressTimeout()
-                if (!calMoved && quick && event.pointerCount == 1) {
-                    val loc = IntArray(2)
-                    binding.calendarContent.getLocationInWindow(loc)
-                    handleDayTap(event.x - loc[0], event.y - loc[1])
-                    return true
-                }
-            }
-            MotionEvent.ACTION_CANCEL -> calMoved = true
-        }
-        return false
-    }
-
-    private fun handleDayTap(localX: Float, localY: Float) {
-        // Day timeline view: a double-tap anywhere opens this day's full-page canvas (no cell hit-test).
-        if (currentView == CalView.DAY) {
-            val nowD = SystemClock.uptimeMillis()
-            if (selectedDate == lastDayTapDate && nowD - lastDayTapTime <= ViewConfiguration.getDoubleTapTimeout()) {
-                lastDayTapDate = null
-                openDayDetail(selectedDate)
-            } else {
-                lastDayTapDate = selectedDate
-                lastDayTapTime = nowD
-            }
-            return
-        }
-        val w = binding.calendarContent.width
-        val h = binding.calendarContent.height
-        val date = CalendarTemplateRenderer.hitTest(currentSpec(), localX, localY, w, h, density) ?: return
-        // Second quick tap on the same day → open that day's full-page canvas.
-        val now = SystemClock.uptimeMillis()
-        if (date == lastDayTapDate && now - lastDayTapTime <= ViewConfiguration.getDoubleTapTimeout()) {
-            lastDayTapDate = null
-            openDayDetail(date)
-            return
-        }
-        lastDayTapDate = date
-        lastDayTapTime = now
-        if (currentView == CalView.MONTH && (date.year != calYear || date.monthValue != calMonth)) {
-            // Out-of-month day → navigate to that month (different page)
-            selectedDate = date
-            calYear = date.year
-            calMonth = date.monthValue
-            updateMonthYearLabel()
-            navigateCanvas()
-        } else {
-            selectedDate = date
-            refreshTemplate()
-        }
-    }
-
-    /** Open the full-page day canvas for [date], carrying the source-notebook identity through. */
-    private fun openDayDetail(date: LocalDate) {
-        startActivity(
-            DayDetailActivity.intent(
-                this, date,
-                fromNotebookId = fromNotebookId,
-                fromNotebookName = fromNotebookName,
-                fromNotebookEncrypted = fromNotebookEncrypted,
-            )
-        )
-    }
-
-    // ── Sticky note tap gesture (ported from ScratchpadActivity) ─────────────────
-
     private fun handleStickyNoteTapGesture(event: MotionEvent): Boolean {
         val containerLoc = IntArray(2)
-        binding.calendarContent.getLocationInWindow(containerLoc)
+        binding.dayContent.getLocationInWindow(containerLoc)
         val localX = event.x - containerLoc[0]
         val localY = event.y - containerLoc[1]
         when (event.actionMasked) {
@@ -1977,29 +1506,13 @@ class CalendarActivity : AppCompatActivity() {
 
     override fun onPause() {
         super.onPause()
-        saveCalendarPosition()
         lifecycleScope.launch { withContext(Dispatchers.IO) { saveStrokes() } }
-    }
-
-    /** Persist the current view + date so the next open restores this exact position. */
-    private fun saveCalendarPosition() {
-        getSharedPreferences(PREFS_CALENDAR, MODE_PRIVATE).edit()
-            .putString(KEY_VIEW, currentView.name)
-            .putString(KEY_DATE, selectedDate.toString())
-            .putInt(KEY_CAL_YEAR, calYear)
-            .putInt(KEY_CAL_MONTH, calMonth)
-            .putInt(KEY_DAY_HALF, dayHalf)
-            .apply()
     }
 
     override fun onDestroy() {
         super.onDestroy()
         drawingView.releaseResources()
     }
-
-    // ── Helpers ────────────────────────────────────────────────────────────────────
-
-    private fun dp(v: Int) = (v * density + 0.5f).toInt()
 
     private fun toast(msg: String) = Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
 }

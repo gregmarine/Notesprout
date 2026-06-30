@@ -49,6 +49,14 @@ interface CalendarDao {
     @Query("SELECT COUNT(*) FROM calendar WHERE type = 'calendar_root' AND deletedAt IS NULL")
     suspend fun getRootCount(): Int
 
+    /** All non-deleted template rows in the calendar table, oldest first (day-page template picker). */
+    @Query("SELECT * FROM calendar WHERE type = 'template' AND deletedAt IS NULL ORDER BY createdAt ASC")
+    suspend fun getTemplatesSorted(): List<CalendarEntity>
+
+    /** A single non-deleted template row by [id], or null — used to render a day page's template. */
+    @Query("SELECT * FROM calendar WHERE type = 'template' AND id = :id AND deletedAt IS NULL LIMIT 1")
+    suspend fun getTemplateById(id: String): CalendarEntity?
+
     @Query("SELECT * FROM calendar WHERE id = :id LIMIT 1")
     suspend fun getObjectById(id: String): CalendarEntity?
 

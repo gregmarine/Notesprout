@@ -92,6 +92,45 @@ class CalendarRepository(
         pageKey to layerId
     }
 
+    // ── Templates (day-detail pages) ────────────────────────────────────────────
+
+    /**
+     * Copy a template image into the calendar table as a `type="template"` row (parent =
+     * calendar root) and return its id. Mirrors the notebook's "copy library template into the
+     * .soil" model so a day page keeps its ruling even if the source library template is deleted.
+     */
+    suspend fun insertTemplateRow(name: String, width: Int, height: Int, imageBase64: String): String =
+        withContext(Dispatchers.IO) {
+            val id = UUID.randomUUID().toString()
+            val now = System.currentTimeMillis()
+            dao.insertObject(
+                CalendarEntity(
+                    id          = id,
+                    parentId    = CALENDAR_ROOT_ID,
+                    boundingBox = BoundingBox(0f, 0f, width.toFloat(), height.toFloat()).toJson(),
+                    sortOrder   = 0,
+                    createdAt   = now,
+                    updatedAt   = now,
+                    type        = "template",
+                    data        = TemplateData(width, height, name, imageBase64).toJson(),
+                )
+            )
+            id
+        }
+
+    /** A single non-deleted calendar template row, or null. */
+    suspend fun getTemplateById(id: String): CalendarEntity? = withContext(Dispatchers.IO) {
+        dao.getTemplateById(id)
+    }
+
+    /** Set (or clear, with "") the [templateId] on a page row, preserving its size + snapshot. */
+    suspend fun setPageTemplate(pageId: String, templateId: String) = withContext(Dispatchers.IO) {
+        val now = System.currentTimeMillis()
+        val pageRow = dao.getObjectById(pageId) ?: return@withContext
+        val updatedData = PageData.fromJson(pageRow.data).copy(template = templateId).toJson()
+        dao.updateData(pageId, updatedData, now)
+    }
+
     // ── Page size ─────────────────────────────────────────────────────────────
 
     suspend fun setPageSize(pageId: String, w: Float, h: Float) = withContext(Dispatchers.IO) {
