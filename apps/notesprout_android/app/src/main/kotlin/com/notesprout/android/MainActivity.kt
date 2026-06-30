@@ -2475,12 +2475,21 @@ class MainActivity : AppCompatActivity() {
     private fun startExportFromMain(entity: ObjectEntity) {
         ActionSheetDialog(this)
             .title("Export")
-            .addAction(R.drawable.ic_export,   "Export as PDF")          { startPdfExportFromMain(entity) }
+            .addAction(R.drawable.ic_export,   "Export as PDF")          { choosePdfTemplateFromMain(entity) }
             .addAction(R.drawable.ic_notebook, "Export Notebook (.soil)") { startSoilExportFromMain(entity) }
             .show()
     }
 
-    private fun startPdfExportFromMain(entity: ObjectEntity) {
+    /** PDF sub-choice: render with the page template or just the handwriting (strokes only). */
+    private fun choosePdfTemplateFromMain(entity: ObjectEntity) {
+        ActionSheetDialog(this)
+            .title("Export as PDF")
+            .addAction(null, "With template")              { startPdfExportFromMain(entity, includeTemplate = true) }
+            .addAction(null, "Strokes only (no template)") { startPdfExportFromMain(entity, includeTemplate = false) }
+            .show()
+    }
+
+    private fun startPdfExportFromMain(entity: ObjectEntity, includeTemplate: Boolean) {
         val file = soilFile(this, entity.id)
 
         lifecycleScope.launch {
@@ -2547,12 +2556,13 @@ class MainActivity : AppCompatActivity() {
                     val db = builder.build()
                     try {
                         NotebookExporter.export(
-                            context        = this@MainActivity,
-                            db             = db,
-                            onProgress     = { current, total ->
+                            context         = this@MainActivity,
+                            db              = db,
+                            onProgress      = { current, total ->
                                 handler.post { tvMessage.text = "Exporting page $current of $total…" }
                             },
-                            exportPassword = exportPassword,
+                            exportPassword  = exportPassword,
+                            includeTemplate = includeTemplate,
                         )
                     } finally {
                         db.close()

@@ -4601,12 +4601,21 @@ class NotebookActivity : AppCompatActivity() {
     private fun startExport(db: SoilDatabase) {
         ActionSheetDialog(this)
             .title("Export")
-            .addAction(R.drawable.ic_export,   "Export as PDF")          { startPdfExport(db) }
+            .addAction(R.drawable.ic_export,   "Export as PDF")          { choosePdfTemplate(db) }
             .addAction(R.drawable.ic_notebook, "Export Notebook (.soil)") { startSoilExport(db) }
             .show()
     }
 
-    private fun startPdfExport(db: SoilDatabase) {
+    /** PDF sub-choice: render with the page template or just the handwriting (strokes only). */
+    private fun choosePdfTemplate(db: SoilDatabase) {
+        ActionSheetDialog(this)
+            .title("Export as PDF")
+            .addAction(null, "With template")              { startPdfExport(db, includeTemplate = true) }
+            .addAction(null, "Strokes only (no template)") { startPdfExport(db, includeTemplate = false) }
+            .show()
+    }
+
+    private fun startPdfExport(db: SoilDatabase, includeTemplate: Boolean) {
         lifecycleScope.launch {
             // 1. For encrypted notebooks only: offer PDF password protection first.
             //    If the user declines a password, warn that the export will be unencrypted.
@@ -4639,7 +4648,7 @@ class NotebookActivity : AppCompatActivity() {
 
             // 3. Flush current page strokes so the export reflects the latest content.
             withContext(Dispatchers.IO) { saveStrokes(db) }
-            runExport(db, exportPassword)
+            runExport(db, exportPassword, includeTemplate)
         }
     }
 
@@ -4682,7 +4691,7 @@ class NotebookActivity : AppCompatActivity() {
         }
     }
 
-    private fun runExport(db: SoilDatabase, exportPassword: String? = null) {
+    private fun runExport(db: SoilDatabase, exportPassword: String? = null, includeTemplate: Boolean = true) {
         val tvMessage = android.widget.TextView(this).apply {
             text = "Exporting…"
             setPadding(64, 48, 64, 48)
@@ -4709,6 +4718,7 @@ class NotebookActivity : AppCompatActivity() {
                             handler.post { tvMessage.text = "Exporting page $current of $total…" }
                         },
                         exportPassword = exportPassword,
+                        includeTemplate = includeTemplate,
                     )
                 }
             } catch (e: Exception) {

@@ -87,12 +87,29 @@ Fuzzy match against all notebooks: substring (3) > all words present (2) > prefi
 Both `MainActivity` (long-press → Export) and `NotebookActivity` (toolbar Export button) first
 present a **format chooser** `ActionSheetDialog` with two rows before starting any export:
 
-- **Export as PDF** → existing PDF path (encrypted-unencrypted warning + optional PDF password)
+- **Export as PDF** → **template sub-choice** (see below) → existing PDF path (encrypted-unencrypted warning + optional PDF password)
 - **Export Notebook (.soil)** → full-notebook copy via `NotebookPackager`
+
+### Strokes-only (no-template) export
+
+Every **raster** export path (PDF + PNG, notebook-level and page-index) first offers an
+`ActionSheetDialog` template sub-choice: **"With template"** / **"Strokes only (no template)"**. This
+threads a single `includeTemplate: Boolean` flag through `NotebookExporter` (`export`,
+`exportPagesPdf`, `exportPagesPng`, `exportPage` → `renderPageBitmap`); when false,
+`renderPageBitmap` skips `loadTemplate` so the page renders content layers on white with **no
+template image**. Only the page template (lines/grid) is suppressed — headings, text, line/shape
+objects, links, sticky-note icons, and pen strokes all still render. Use case: writing on a lined
+template but exporting just the handwriting (blog posts, letters). No data-model or schema change.
+
+- Sub-choice entry points: MainActivity Export → "Export as PDF"; NotebookActivity Export → "Export
+  as PDF"; PageIndex single-page Export (PNG); PageIndex multi Export → PDF; PageIndex multi Export →
+  PNG → Save images. **PNG → Save as templates is excluded** (a saved template keeps its lines/grid —
+  always `includeTemplate=true`). Notebook-level export is PDF-only; whole-notebook strokes-only PNG
+  is reached via page index → Select All → Export → PNG → Save images → Strokes only.
 
 ### PDF Export
 
-- `NotebookExporter` renders all pages off-screen on `Dispatchers.IO` using white→template→headings→text→strokes pipeline
+- `NotebookExporter` renders all pages off-screen on `Dispatchers.IO` using white→template→headings→text→strokes pipeline (template skipped for strokes-only)
 - Output to `context.cacheDir/<title>.pdf`; FileProvider (`${applicationId}.fileprovider`) used for both save and share paths
 - Share intent **must** include `clipData = ClipData.newRawUri("", uri)` alongside `FLAG_GRANT_READ_URI_PERMISSION` — on Android 12+, the chooser intermediary does not forward URI permissions without `ClipData` (causes silent Google Drive upload failure on NA5C)
 - Progress dialog: "Exporting page X of N…" via `Handler(Looper.getMainLooper())`
@@ -225,9 +242,12 @@ destination mode is entered. Back / system-back cancels destination mode → act
 
 ### Export (single vs. multi)
 
-`executeExport()` routes by selection size:
+`executeExport()` routes by selection size. Every raster sub-path first asks the **template
+sub-choice** (`chooseExportTemplate(title) { includeTemplate -> … }` — "With template" / "Strokes
+only (no template)") before rendering; the chosen `includeTemplate` flows to the matching
+`NotebookExporter` call. See **Strokes-only export** above.
 
-- **Single** (`selectedCount() == 1`) → the richer `showExportChoice`: Save to device
+- **Single** (`selectedCount() == 1`) → template sub-choice → the richer `showExportChoice`: Save to device
   (`savePngLauncher`, `CreateDocument("image/png")`) / Save as Template (`MODE_SAVE_TARGET`) / Share.
   Render via `NotebookExporter.exportPage(...)`.
 - **Multi** (`> 1`) → `showMultiExportDialog`: **PDF** / **PNG** / Cancel.

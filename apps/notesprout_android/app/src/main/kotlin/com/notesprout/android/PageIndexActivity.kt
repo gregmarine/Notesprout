@@ -1409,7 +1409,9 @@ class PageIndexActivity : AppCompatActivity() {
                     }
                     if (!confirmed) return@launch
                 }
-                executeSingleExport()
+                chooseExportTemplate("Export as PNG") { includeTemplate ->
+                    executeSingleExport(includeTemplate)
+                }
             }
         } else {
             // Multi-page: each format path handles its own warning.
@@ -1417,8 +1419,20 @@ class PageIndexActivity : AppCompatActivity() {
         }
     }
 
+    /**
+     * Template sub-choice shared by every raster export path: render with the page template
+     * (lines/grid) or just the handwriting ("strokes only"). [title] names the format being exported.
+     */
+    private fun chooseExportTemplate(title: String, onChosen: (includeTemplate: Boolean) -> Unit) {
+        ActionSheetDialog(this)
+            .title(title)
+            .addAction(null, "With template")              { onChosen(true) }
+            .addAction(null, "Strokes only (no template)") { onChosen(false) }
+            .show()
+    }
+
     /** Single-page export — renders a PNG then offers Save / Template / Share. */
-    private fun executeSingleExport() {
+    private fun executeSingleExport(includeTemplate: Boolean) {
         val pageId = selectedPageIds.singleOrNull() ?: return
         val pageEntry = pages.firstOrNull { it.id == pageId } ?: return
         val path = notebookSoilPath ?: return
@@ -1448,6 +1462,7 @@ class PageIndexActivity : AppCompatActivity() {
                         pageNumber = pageEntry.pageNumber,
                         notebookTitle = notebookName,
                         passphrase = KeySession.getFor(notebookId),
+                        includeTemplate = includeTemplate,
                     )
                 }
             } catch (e: Exception) {
@@ -1474,7 +1489,9 @@ class PageIndexActivity : AppCompatActivity() {
         val n = selectedCount()
         val d = AlertDialog.Builder(this)
             .setTitle("Export $n pages")
-            .setPositiveButton("PDF") { _, _ -> exportMultiAsPdf() }
+            .setPositiveButton("PDF") { _, _ ->
+                chooseExportTemplate("Export as PDF") { exportMultiAsPdf(it) }
+            }
             .setNeutralButton("PNG") { _, _ ->
                 // PNG is always unencrypted — warn upfront if the notebook is encrypted.
                 lifecycleScope.launch {
@@ -1510,7 +1527,9 @@ class PageIndexActivity : AppCompatActivity() {
     private fun showPngSubchoiceDialog() {
         val d = AlertDialog.Builder(this)
             .setTitle("PNG export")
-            .setPositiveButton("Save images") { _, _ -> exportMultiAsPngFiles() }
+            .setPositiveButton("Save images") { _, _ ->
+                chooseExportTemplate("PNG images") { exportMultiAsPngFiles(it) }
+            }
             .setNeutralButton("Save as templates") { _, _ -> exportMultiAsPngTemplates() }
             .setNegativeButton("Cancel", null)
             .create()
@@ -1534,7 +1553,7 @@ class PageIndexActivity : AppCompatActivity() {
      * Export all selected pages to a single PDF. Offers optional password protection before
      * showing the progress dialog; afterwards offers Save to device ([savePdfLauncher]) and Share.
      */
-    private fun exportMultiAsPdf() {
+    private fun exportMultiAsPdf(includeTemplate: Boolean) {
         val entries = orderedSelectedEntries() ?: return
         val path    = notebookSoilPath ?: return
         val notebookName = intent.getStringExtra(EXTRA_NOTEBOOK_NAME) ?: "notebook"
@@ -1599,6 +1618,7 @@ class PageIndexActivity : AppCompatActivity() {
                         },
                         passphrase     = KeySession.getFor(notebookId),
                         exportPassword = exportPassword,
+                        includeTemplate = includeTemplate,
                     )
                 }
             } catch (e: Exception) {
@@ -1645,7 +1665,7 @@ class PageIndexActivity : AppCompatActivity() {
      * Renders to cache first (with a progress dialog), then prompts for a destination folder
      * once via [openDocumentTreeLauncher]. No per-file prompts.
      */
-    private fun exportMultiAsPngFiles() {
+    private fun exportMultiAsPngFiles(includeTemplate: Boolean) {
         val entries = orderedSelectedEntries() ?: return
         val path    = notebookSoilPath ?: return
         val notebookName = intent.getStringExtra(EXTRA_NOTEBOOK_NAME) ?: "notebook"
@@ -1691,6 +1711,7 @@ class PageIndexActivity : AppCompatActivity() {
                             handler.post { tvMessage.text = "Exporting page $current of $total…" }
                         },
                         passphrase = KeySession.getFor(notebookId),
+                        includeTemplate = includeTemplate,
                     )
                 }
             } catch (e: Exception) {

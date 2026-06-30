@@ -72,6 +72,7 @@ object NotebookExporter {
         db: SoilDatabase,
         onProgress: (current: Int, total: Int) -> Unit,
         exportPassword: String? = null,
+        includeTemplate: Boolean = true,
     ): File {
         val dao = db.notebookDao()
 
@@ -121,7 +122,7 @@ object NotebookExporter {
         for ((i, pageRow) in pages.withIndex()) {
             onProgress(i + 1, totalPages)
 
-            val (bitmap, templateBitmap, stickyNotes) = renderPageBitmap(dao, pageRow, context)
+            val (bitmap, templateBitmap, stickyNotes) = renderPageBitmap(dao, pageRow, context, includeTemplate)
 
             for (note in stickyNotes) {
                 stickyExports += StickyExport(pdfPageIndex, RectF(note.boundingBox), note, bitmap.width, bitmap.height)
@@ -184,6 +185,7 @@ object NotebookExporter {
         onProgress: (current: Int, total: Int) -> Unit,
         passphrase: String? = null,
         exportPassword: String? = null,
+        includeTemplate: Boolean = true,
     ): File {
         val safeTitle = notebookTitle.replace(Regex("[^a-zA-Z0-9_\\-. ]"), "_").trim('_', ' ')
             .ifBlank { "notebook" }
@@ -203,7 +205,7 @@ object NotebookExporter {
             for ((i, pageId) in pageIds.withIndex()) {
                 onProgress(i + 1, total)
                 val pageRow = dao.getObjectById(pageId) ?: continue
-                val (bitmap, templateBitmap, stickyNotes) = renderPageBitmap(dao, pageRow, context)
+                val (bitmap, templateBitmap, stickyNotes) = renderPageBitmap(dao, pageRow, context, includeTemplate)
 
                 for (note in stickyNotes) {
                     stickyExports += StickyExport(pdfPageIndex, RectF(note.boundingBox), note, bitmap.width, bitmap.height)
@@ -267,6 +269,7 @@ object NotebookExporter {
         pages: List<Pair<String, String>>,   // (pageId, filenameBase)
         onProgress: (current: Int, total: Int) -> Unit,
         passphrase: String? = null,
+        includeTemplate: Boolean = true,
     ): List<File> {
         val builder = SoilDatabase.builder(context, soilPath)
         if (passphrase != null) builder.openHelperFactory(SoilCrypto.roomFactory(passphrase))
@@ -283,7 +286,7 @@ object NotebookExporter {
                 onProgress(i + 1, total)
 
                 val pageRow = dao.getObjectById(pageId) ?: continue
-                val (bitmap, templateBitmap, _) = renderPageBitmap(dao, pageRow, context)
+                val (bitmap, templateBitmap, _) = renderPageBitmap(dao, pageRow, context, includeTemplate)
 
                 val outFile = File(outDir, "$fileBase.png")
                 FileOutputStream(outFile).use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
@@ -517,15 +520,20 @@ object NotebookExporter {
      * the list of sticky notes on the page (for the pdfbox endnote pass). The caller is
      * responsible for recycling both bitmaps after use.
      *
+     * When [includeTemplate] is false the page template image (lines/grid) is suppressed — only
+     * the content layers (headings, text, lines, shapes, links, sticky icons, strokes) render on
+     * white. Used by the "strokes only" export option.
+     *
      * Must be called on a background (IO) dispatcher; never call from the UI thread.
      */
     private suspend fun renderPageBitmap(
         dao: NotebookDao,
         pageRow: NotebookObject,
         context: Context,
+        includeTemplate: Boolean = true,
     ): Triple<Bitmap, Bitmap?, List<StickyNoteRender>> {
         val (pw, ph) = parseDimensions(pageRow.boundingBox)
-        val templateBitmap = loadTemplate(dao, pageRow.data, pw, ph)
+        val templateBitmap = if (includeTemplate) loadTemplate(dao, pageRow.data, pw, ph) else null
         val density = context.resources.displayMetrics.density
 
         val layer = dao.getLayerForPage(pageRow.id)
@@ -787,6 +795,7 @@ object NotebookExporter {
         pageNumber: Int,
         notebookTitle: String,
         passphrase: String? = null,
+        includeTemplate: Boolean = true,
     ): File {
         val safeTitle = notebookTitle.replace(Regex("[^a-zA-Z0-9_\\-. ]"), "_").trim('_', ' ')
             .ifBlank { "notebook" }
@@ -800,7 +809,7 @@ object NotebookExporter {
             val pageRow = dao.getObjectById(pageId)
                 ?: throw IllegalStateException("Page not found: $pageId")
 
-            val (bitmap, templateBitmap, _) = renderPageBitmap(dao, pageRow, context)
+            val (bitmap, templateBitmap, _) = renderPageBitmap(dao, pageRow, context, includeTemplate)
             templateBitmap?.recycle()
 
             val outDir = File(context.cacheDir, "exported_pngs").also { it.deleteRecursively(); it.mkdirs() }
