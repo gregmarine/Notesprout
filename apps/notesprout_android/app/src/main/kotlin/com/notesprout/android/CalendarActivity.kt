@@ -79,8 +79,11 @@ import com.notesprout.android.notebook.ToolPreferencesManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.ByteArrayOutputStream
+import java.util.concurrent.ConcurrentHashMap
 import java.time.LocalDate
 import java.time.LocalTime
 import java.time.Month
@@ -151,7 +154,11 @@ class CalendarActivity : AppCompatActivity() {
     // Canvas / page state
     private var currentPageId = ""
     private var currentLayerId = ""
-    private val persistedStrokeIds = mutableSetOf<String>()
+    // Thread-safe: mutated from main-thread coroutines (navigation/erase) and IO save coroutines.
+    private val persistedStrokeIds: MutableSet<String> = ConcurrentHashMap.newKeySet()
+    // Serializes saveStrokes() so concurrent callers (rapid pen-lifts, onPause, navigation,
+    // onDestroy) can't race the persistedStrokeIds read-modify-write and double-insert / drop.
+    private val saveMutex = Mutex()
     private var currentTemplateBitmap: Bitmap? = null
 
     // Tool state
@@ -490,7 +497,9 @@ class CalendarActivity : AppCompatActivity() {
 
     private fun navigateCanvas(firstLoad: Boolean = false) {
         lifecycleScope.launch {
-            withContext(Dispatchers.IO) { saveStrokes() }
+            // Flush the leaving page on appScope so the write completes even if this Activity is
+            // destroyed mid-navigation; join so we don't clear persistedStrokeIds before it lands.
+            NotesproutApplication.appScope.launch { saveStrokes() }.join()
             if (isLassoMode) clearLassoSelectionForNavigation()
             if (isShapeTransformMode) { isShapeTransformMode = false; drawingView.exitShapeTransform(); hideShapeTransformButtons() }
             val (pid, lid) = repository.getOrCreatePageLayer(pageKey())
@@ -578,12 +587,12 @@ class CalendarActivity : AppCompatActivity() {
 
     // ── Save ───────────────────────────────────────────────────────────────────
 
-    private suspend fun saveStrokes() {
-        val layerId = currentLayerId.takeIf { it.isNotEmpty() } ?: return
+    private suspend fun saveStrokes() = saveMutex.withLock {
+        val layerId = currentLayerId.takeIf { it.isNotEmpty() } ?: return@withLock
         val currentStrokes = drawingView.getStrokes()
         val alreadyPersisted = persistedStrokeIds.toHashSet()
         val newStrokes = currentStrokes.filter { it.id !in alreadyPersisted }
-        if (newStrokes.isEmpty()) return
+        if (newStrokes.isEmpty()) return@withLock
         repository.saveStrokes(layerId, newStrokes)
         persistedStrokeIds.addAll(newStrokes.map { it.id })
     }
@@ -667,7 +676,9 @@ class CalendarActivity : AppCompatActivity() {
 
         drawingView.onPenLifted = {
             lifecycleScope.launch {
-                withContext(Dispatchers.IO) { saveStrokes() }
+                // Persist on appScope so a stroke survives even if the user leaves immediately
+                // after lifting; join so pushHistory snapshots the layer with the new stroke in it.
+                NotesproutApplication.appScope.launch { saveStrokes() }.join()
                 pushHistory()
             }
         }
@@ -1978,7 +1989,9 @@ class CalendarActivity : AppCompatActivity() {
     override fun onPause() {
         super.onPause()
         saveCalendarPosition()
-        lifecycleScope.launch { withContext(Dispatchers.IO) { saveStrokes() } }
+        // appScope (not lifecycleScope): the save must complete even as the Activity is paused
+        // and torn down. lifecycleScope would be cancelled at onDestroy, dropping the write.
+        NotesproutApplication.appScope.launch { saveStrokes() }
     }
 
     /** Persist the current view + date so the next open restores this exact position. */
@@ -1994,6 +2007,10 @@ class CalendarActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
+        // Final safety-net flush. appScope outlives this Activity so the write still lands;
+        // releaseResources only recycles bitmaps (stroke data is untouched), so the async
+        // getStrokes() read stays valid even though release runs right after.
+        NotesproutApplication.appScope.launch { saveStrokes() }
         drawingView.releaseResources()
     }
 

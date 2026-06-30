@@ -58,8 +58,12 @@ import com.notesprout.android.notebook.ScratchpadPreferences
 import com.notesprout.android.notebook.ToolPreferencesManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.abs
 
 class ScratchpadActivity : AppCompatActivity() {
@@ -126,7 +130,11 @@ class ScratchpadActivity : AppCompatActivity() {
     private var currentPageIndex: Int = 0
     private var currentPageId: String = ""
     private var currentLayerId: String = ""
-    private val persistedStrokeIds = mutableSetOf<String>()
+    // Thread-safe: mutated from main-thread coroutines (navigation/erase) and IO save coroutines.
+    private val persistedStrokeIds: MutableSet<String> = ConcurrentHashMap.newKeySet()
+    // Serializes saveStrokes() so concurrent callers (rapid pen-lifts, onPause, navigation,
+    // onDestroy) can't race the persistedStrokeIds read-modify-write and double-insert / drop.
+    private val saveMutex = Mutex()
     private var isEraserActive = false
 
     /** Non-null only when launched from a notebook — determines Send-to-Notebook visibility. */
@@ -426,7 +434,9 @@ class ScratchpadActivity : AppCompatActivity() {
 
         drawingView.onPenLifted = {
             lifecycleScope.launch {
-                val saved = withContext(Dispatchers.IO) { saveStrokes() }
+                // Persist on appScope so a stroke survives even if the user leaves immediately
+                // after lifting; await so pushHistory snapshots the layer with the new stroke in it.
+                val saved = NotesproutApplication.appScope.async { saveStrokes() }.await()
                 if (saved) pushHistory()
             }
         }
@@ -1354,15 +1364,15 @@ class ScratchpadActivity : AppCompatActivity() {
     // ── Save ──────────────────────────────────────────────────────────────────
 
     // Must be called on Dispatchers.IO. Returns true if any new strokes were persisted.
-    private suspend fun saveStrokes(): Boolean {
-        val layerId = currentLayerId.takeIf { it.isNotEmpty() } ?: return false
+    private suspend fun saveStrokes(): Boolean = saveMutex.withLock {
+        val layerId = currentLayerId.takeIf { it.isNotEmpty() } ?: return@withLock false
         val currentStrokes = drawingView.getStrokes()
         val alreadyPersisted = persistedStrokeIds.toHashSet()
         val newStrokes = currentStrokes.filter { it.id !in alreadyPersisted }
-        if (newStrokes.isEmpty()) return false
+        if (newStrokes.isEmpty()) return@withLock false
         repository.saveStrokes(layerId, newStrokes)
         persistedStrokeIds.addAll(newStrokes.map { it.id })
-        return true
+        true
     }
 
     private suspend fun persistSnapshot(pageId: String, snapshot: String) {
@@ -1395,7 +1405,9 @@ class ScratchpadActivity : AppCompatActivity() {
 
     /** Two-phase navigate: save leaving page, erase, load target. Main-thread coroutine only. */
     private suspend fun navigateTo(newIndex: Int) {
-        withContext(Dispatchers.IO) { saveStrokes() }
+        // Flush on appScope so the write survives Activity teardown mid-navigation; join so we
+        // don't clear persistedStrokeIds before it lands.
+        NotesproutApplication.appScope.launch { saveStrokes() }.join()
         if (isLassoMode) clearLassoSelectionForNavigation()
         currentPageIndex = newIndex
         ScratchpadPreferences.saveCurrentPageIndex(this, currentPageIndex)
@@ -1411,7 +1423,8 @@ class ScratchpadActivity : AppCompatActivity() {
     }
 
     private suspend fun addPage() {
-        withContext(Dispatchers.IO) { saveStrokes() }
+        // Flush on appScope (durable across teardown); join before mutating page state.
+        NotesproutApplication.appScope.launch { saveStrokes() }.join()
         if (isLassoMode) clearLassoSelectionForNavigation()
         val newPageId = repository.addPage(afterIndex = currentPageIndex)
         pages = repository.getPages()
@@ -2009,13 +2022,16 @@ class ScratchpadActivity : AppCompatActivity() {
     override fun onPause() {
         super.onPause()
         ScratchpadPreferences.saveCurrentPageIndex(this, currentPageIndex)
-        lifecycleScope.launch {
-            withContext(Dispatchers.IO) { saveStrokes() }
-        }
+        // appScope (not lifecycleScope): the save must complete even as the Activity is paused
+        // and torn down. lifecycleScope would be cancelled at onDestroy, dropping the write.
+        NotesproutApplication.appScope.launch { saveStrokes() }
     }
 
     override fun onDestroy() {
         super.onDestroy()
+        // Final safety-net flush on appScope (outlives this Activity). releaseResources only
+        // recycles bitmaps, so the async getStrokes() read stays valid.
+        NotesproutApplication.appScope.launch { saveStrokes() }
         drawingView.releaseResources()
     }
 }

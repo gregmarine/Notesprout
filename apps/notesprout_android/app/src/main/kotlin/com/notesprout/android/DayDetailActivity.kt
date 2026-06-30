@@ -64,11 +64,14 @@ import com.notesprout.android.notebook.ToolPreferencesManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.time.LocalDate
 import java.time.Month
 import java.time.format.TextStyle
 import java.util.Locale
+import java.util.concurrent.ConcurrentHashMap
 import java.util.UUID
 import kotlin.math.hypot
 
@@ -112,7 +115,11 @@ class DayDetailActivity : AppCompatActivity() {
     private var currentPageId = ""
     private var currentLayerId = ""
     private var currentTemplateId = ""
-    private val persistedStrokeIds = mutableSetOf<String>()
+    // Thread-safe: mutated from main-thread coroutines (load/erase) and IO save coroutines.
+    private val persistedStrokeIds: MutableSet<String> = ConcurrentHashMap.newKeySet()
+    // Serializes saveStrokes() so concurrent callers can't race the persistedStrokeIds
+    // read-modify-write and double-insert / drop strokes.
+    private val saveMutex = Mutex()
     private var currentTemplateBitmap: Bitmap? = null
 
     // Tool state
@@ -432,12 +439,12 @@ class DayDetailActivity : AppCompatActivity() {
 
     // ── Save ───────────────────────────────────────────────────────────────────
 
-    private suspend fun saveStrokes() {
-        val layerId = currentLayerId.takeIf { it.isNotEmpty() } ?: return
+    private suspend fun saveStrokes() = saveMutex.withLock {
+        val layerId = currentLayerId.takeIf { it.isNotEmpty() } ?: return@withLock
         val currentStrokes = drawingView.getStrokes()
         val alreadyPersisted = persistedStrokeIds.toHashSet()
         val newStrokes = currentStrokes.filter { it.id !in alreadyPersisted }
-        if (newStrokes.isEmpty()) return
+        if (newStrokes.isEmpty()) return@withLock
         repository.saveStrokes(layerId, newStrokes)
         persistedStrokeIds.addAll(newStrokes.map { it.id })
     }
@@ -518,7 +525,9 @@ class DayDetailActivity : AppCompatActivity() {
 
         drawingView.onPenLifted = {
             lifecycleScope.launch {
-                withContext(Dispatchers.IO) { saveStrokes() }
+                // Persist on appScope so a stroke survives even if the user leaves immediately
+                // after lifting; join so pushHistory snapshots the layer with the new stroke in it.
+                NotesproutApplication.appScope.launch { saveStrokes() }.join()
                 pushHistory()
             }
         }
@@ -1506,11 +1515,16 @@ class DayDetailActivity : AppCompatActivity() {
 
     override fun onPause() {
         super.onPause()
-        lifecycleScope.launch { withContext(Dispatchers.IO) { saveStrokes() } }
+        // appScope (not lifecycleScope): the save must complete even as the Activity is paused
+        // and torn down. lifecycleScope would be cancelled at onDestroy, dropping the write.
+        NotesproutApplication.appScope.launch { saveStrokes() }
     }
 
     override fun onDestroy() {
         super.onDestroy()
+        // Final safety-net flush on appScope (outlives this Activity). releaseResources only
+        // recycles bitmaps, so the async getStrokes() read stays valid.
+        NotesproutApplication.appScope.launch { saveStrokes() }
         drawingView.releaseResources()
     }
 
