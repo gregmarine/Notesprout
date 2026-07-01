@@ -322,6 +322,76 @@
             android:layout_height="match_parent"
             android:visibility="gone">
 
+            <!-- Paginated notebook card list (Notebooks mode; History Opened/Edited/Created in S4) -->
+            <LinearLayout
+                android:id="@+id/dayListPanel"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:orientation="vertical"
+                android:visibility="gone">
+
+                <!-- Grid host — snapshot cards laid out per page in code (mirrors MainActivity) -->
+                <FrameLayout
+                    android:id="@+id/dayListRows"
+                    android:layout_width="match_parent"
+                    android:layout_height="0dp"
+                    android:layout_weight="1" />
+
+                <!-- 1dp inkBlack divider above pagination -->
+                <View
+                    android:layout_width="match_parent"
+                    android:layout_height="1dp"
+                    android:background="@color/inkBlack" />
+
+                <!-- Pagination row -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="56dp"
+                    android:orientation="horizontal"
+                    android:gravity="center"
+                    android:paddingStart="8dp"
+                    android:paddingEnd="8dp">
+
+                    <androidx.appcompat.widget.AppCompatImageButton
+                        android:id="@+id/btnDayListFirst"
+                        style="@style/Widget.Notesprout.ToolbarButton"
+                        android:src="@drawable/ic_page_first"
+                        android:contentDescription="First page" />
+
+                    <androidx.appcompat.widget.AppCompatImageButton
+                        android:id="@+id/btnDayListPrev"
+                        style="@style/Widget.Notesprout.ToolbarButton"
+                        android:layout_marginStart="4dp"
+                        android:src="@drawable/ic_page_prev"
+                        android:contentDescription="Previous page" />
+
+                    <androidx.appcompat.widget.AppCompatTextView
+                        android:id="@+id/tvDayListPageIndicator"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:gravity="center"
+                        android:textSize="16sp"
+                        android:textColor="@color/inkBlack"
+                        android:text="" />
+
+                    <androidx.appcompat.widget.AppCompatImageButton
+                        android:id="@+id/btnDayListNext"
+                        style="@style/Widget.Notesprout.ToolbarButton"
+                        android:layout_marginEnd="4dp"
+                        android:src="@drawable/ic_page_next"
+                        android:contentDescription="Next page" />
+
+                    <androidx.appcompat.widget.AppCompatImageButton
+                        android:id="@+id/btnDayListLast"
+                        style="@style/Widget.Notesprout.ToolbarButton"
+                        android:src="@drawable/ic_page_last"
+                        android:contentDescription="Last page" />
+
+                </LinearLayout>
+
+            </LinearLayout>
+
             <TextView
                 android:id="@+id/tvDayPlaceholder"
                 android:layout_width="wrap_content"

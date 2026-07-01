@@ -5,12 +5,14 @@ import com.notesprout.android.data.index.CalendarDao
 import com.notesprout.android.data.index.IndexRepository
 import com.notesprout.android.data.index.NotebookActivityDao
 import com.notesprout.android.data.index.NotebookActivityEntity
+import com.notesprout.android.data.index.NotebookObject
 import com.notesprout.android.data.index.NotesproutIndex
 import com.notesprout.android.data.index.ObjectEntity
 import com.notesprout.android.data.index.ObjectType
 import com.notesprout.android.data.recents.ResolvedRecent
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.Json
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -34,6 +36,12 @@ class DayHistoryRepository(
 
     /** What a caller asks for. CREATED is derived; OPENED/EDITED read the activity log. */
     enum class Kind { OPENED, EDITED, CREATED }
+
+    /**
+     * Card cover info for a notebook: [encrypted] notebooks show a lock icon and expose no
+     * [snapshotB64] (plaintext-leak guard, matching MainActivity's list rendering).
+     */
+    data class NotebookCover(val encrypted: Boolean, val snapshotB64: String?)
 
     // region Logging
 
@@ -90,6 +98,17 @@ class DayHistoryRepository(
                 }
             }
         }
+
+    /**
+     * Cover for a notebook card. Missing / undecodable rows resolve to a plain notebook icon
+     * (no cover, not encrypted). Encrypted notebooks never expose a snapshot.
+     */
+    suspend fun coverFor(notebookId: String): NotebookCover = withContext(Dispatchers.IO) {
+        val entity = indexRepo.getNotebook(notebookId) ?: return@withContext NotebookCover(false, null)
+        val obj = runCatching { Json.decodeFromString<NotebookObject>(entity.data) }.getOrNull()
+            ?: return@withContext NotebookCover(false, null)
+        NotebookCover(obj.encrypted, if (obj.encrypted) null else obj.snapshot)
+    }
 
     /**
      * The page id (`cal-daynote-YYYY-MM-DD`) of the read-only day note for [date], if one exists and

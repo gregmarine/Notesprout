@@ -3,24 +3,35 @@ package com.notesprout.android
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.PointF
 import android.graphics.Rect
 import android.graphics.RectF
 import android.graphics.Region
 import android.os.Bundle
 import android.os.SystemClock
+import android.text.TextUtils
+import android.text.format.DateFormat
 import android.util.Base64
+import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewConfiguration
 import android.widget.FrameLayout
+import android.widget.ImageView
+import android.widget.LinearLayout
+import android.widget.Space
 import android.widget.Toast
+import androidx.appcompat.widget.AppCompatImageView
+import androidx.appcompat.widget.AppCompatTextView
+import androidx.core.content.ContextCompat
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import android.view.ViewTreeObserver
 import androidx.core.view.doOnLayout
 import androidx.core.view.isVisible
 import androidx.lifecycle.lifecycleScope
@@ -50,6 +61,7 @@ import com.notesprout.android.data.index.CalendarEntity
 import com.notesprout.android.data.index.IndexRepository
 import com.notesprout.android.data.index.NotesproutIndex
 import com.notesprout.android.data.index.TemplateObject as IndexTemplateObject
+import com.notesprout.android.data.recents.ResolvedRecent
 import com.notesprout.android.data.toBoundingBoxJson
 import com.notesprout.android.data.toLinkObject
 import com.notesprout.android.data.toStickyNoteObject
@@ -73,8 +85,10 @@ import java.time.LocalDate
 import java.time.Month
 import java.time.format.TextStyle
 import java.util.Locale
+import java.util.Date
 import java.util.concurrent.ConcurrentHashMap
 import java.util.UUID
+import kotlin.math.ceil
 import kotlin.math.hypot
 
 /**
@@ -124,6 +138,27 @@ class DayDetailActivity : AppCompatActivity() {
     private var historyYear = LocalDate.now().year - 1
     // Monotonic token so a slow count query can't overwrite the placeholder after the mode changed.
     private var placeholderToken = 0
+
+    // Notebooks card-grid state (Notebooks mode; History Opened/Edited/Created reuse in Session 4).
+    private var listCards: List<ResolvedRecent> = emptyList()
+    private var listPage = 0
+    private var gridSpec: GridSpec? = null
+    // Bumped on each fresh load so a slow query can't render into a since-changed grid.
+    private var listRenderToken = 0
+    // Cover-load coroutines, cancelled on each grid re-render (mirrors MainActivity).
+    private val coverLoadJobs = mutableListOf<Job>()
+    private val inkBlackColor by lazy { ContextCompat.getColor(this, R.color.inkBlack) }
+    private val inkLightColor by lazy { ContextCompat.getColor(this, R.color.inkLight) }
+
+    /** Card grid layout for the Notebooks list — mirrors MainActivity's notebook grid. */
+    private data class GridSpec(
+        val cols: Int, val rows: Int,
+        val cardWidthPx: Int, val cardHeightPx: Int,
+        val gutterPx: Int, val rowGapPx: Int, val labelHeightPx: Int,
+        val paddingHPx: Int, val paddingVPx: Int,
+    ) {
+        val itemsPerPage: Int get() = cols * rows
+    }
 
     // Canvas / page state
     private var currentPageId = ""
@@ -282,6 +317,7 @@ class DayDetailActivity : AppCompatActivity() {
         updateDateLabel()
         setupToolbar()
         setupViewToggles()
+        setupNotebooksList()
         wireDrawingCallbacks()
         wireToolButtons()
         updateLassoButtonIcon()
@@ -372,6 +408,10 @@ class DayDetailActivity : AppCompatActivity() {
         drawingView.asView().isVisible = isNote
         binding.dayListContainer.isVisible = !isNote
         binding.historyNoteImage.isVisible = false
+        // Notebooks mode → real card list; History still uses the placeholder (Session 4).
+        val showList = viewMode == ViewMode.NOTEBOOKS
+        binding.dayListPanel.isVisible = showList
+        binding.tvDayPlaceholder.isVisible = viewMode == ViewMode.HISTORY
 
         // Secondary control bar.
         binding.daySubBarContainer.isVisible = !isNote
@@ -391,7 +431,7 @@ class DayDetailActivity : AppCompatActivity() {
         binding.btnDayHistEdited.isSelected = historySub == HistSub.EDITED
         binding.btnDayHistCreated.isSelected = historySub == HistSub.CREATED
 
-        updatePlaceholder()
+        if (showList) renderNotebooksList(resetPage = true) else updatePlaceholder()
         drawingView.releaseRender()
     }
 
@@ -457,6 +497,260 @@ class DayDetailActivity : AppCompatActivity() {
     /** [historyYear] applied to the selected month/day; null when invalid (e.g. Feb 29 non-leap). */
     private fun historyDate(): LocalDate? =
         runCatching { LocalDate.of(historyYear, selectedDate.monthValue, selectedDate.dayOfMonth) }.getOrNull()
+
+    // ── Notebooks card grid (paginated; reused by History Opened/Edited/Created in Session 4) ──
+
+    private fun setupNotebooksList() {
+        binding.btnDayListFirst.setOnClickListener { listPage = 0; renderGridPage() }
+        binding.btnDayListPrev.setOnClickListener { listPage -= 1; renderGridPage() }
+        binding.btnDayListNext.setOnClickListener { listPage += 1; renderGridPage() }
+        binding.btnDayListLast.setOnClickListener {
+            val ipp = (gridSpec?.itemsPerPage ?: 1).coerceAtLeast(1)
+            listPage = (ceil(listCards.size.toDouble() / ipp).toInt() - 1).coerceAtLeast(0)
+            renderGridPage()
+        }
+    }
+
+    /**
+     * Load and render the Notebooks grid for the current sub-toggle + selected day.
+     * [resetPage] true when the toggle/day changed; false when merely refreshing (e.g. returning
+     * from an opened notebook) so the reader stays on the same page. Rendering always runs inside a
+     * [doOnLayout] pass so the grid spec is computed against a laid-out host.
+     */
+    private fun renderNotebooksList(resetPage: Boolean) {
+        val kind = when (notebooksSub) {
+            NbSub.OPENED -> DayHistoryRepository.Kind.OPENED
+            NbSub.EDITED -> DayHistoryRepository.Kind.EDITED
+            NbSub.CREATED -> DayHistoryRepository.Kind.CREATED
+        }
+        val token = ++listRenderToken
+        if (resetPage) listPage = 0
+        lifecycleScope.launch {
+            val cards = withContext(Dispatchers.IO) { dayHistoryRepo.notebooksFor(selectedDate, kind) }
+            if (token != listRenderToken) return@launch
+            listCards = cards
+            renderGridWhenMeasured(token)
+        }
+    }
+
+    /**
+     * Compute the grid spec against the (possibly just-shown) host and render. The host starts GONE,
+     * so on first entry it may not be measured yet; a self-removing [ViewTreeObserver.OnGlobalLayoutListener]
+     * waits until it reports real dimensions (mirrors MainActivity's grid bootstrap). This is more
+     * robust than `doOnLayout`, whose fallback only fires on a bounds *change* of this exact view and
+     * so raced the GONE→VISIBLE pass on first entry.
+     */
+    private fun renderGridWhenMeasured(token: Int) {
+        val host = binding.dayListRows
+        if (host.width > 0 && host.height > 0) {
+            gridSpec = computeGridSpec(host.width, host.height)
+            renderGridPage()
+            return
+        }
+        host.viewTreeObserver.addOnGlobalLayoutListener(object : ViewTreeObserver.OnGlobalLayoutListener {
+            override fun onGlobalLayout() {
+                val w = host.width
+                val h = host.height
+                if (w <= 0 || h <= 0) return
+                host.viewTreeObserver.removeOnGlobalLayoutListener(this)
+                if (token != listRenderToken) return
+                gridSpec = computeGridSpec(w, h)
+                renderGridPage()
+            }
+        })
+    }
+
+    private fun computeGridSpec(availableWidth: Int, availableHeight: Int): GridSpec {
+        val d = density
+        val gutterPx = (12 * d).toInt()
+        val paddingHPx = (16 * d).toInt()
+        val paddingVPx = (16 * d).toInt()
+        val rowGapPx = (6 * d).toInt()
+        val labelHeightPx = (32 * d).toInt()
+
+        val screenWidthDp = availableWidth / d
+        val cols = if (screenWidthDp >= 480f) 3 else 2
+
+        val dm = resources.displayMetrics
+        val aspectRatio = dm.heightPixels.toFloat() / dm.widthPixels.coerceAtLeast(1)
+
+        val innerWidth = availableWidth - 2 * paddingHPx
+        val innerHeight = availableHeight - 2 * paddingVPx
+        val cardWidth = (innerWidth - (cols - 1) * gutterPx) / cols
+        val cardHeight = (cardWidth * aspectRatio).toInt()
+        val cellHeight = cardHeight + rowGapPx + labelHeightPx
+        val rows = ((innerHeight + gutterPx) / (cellHeight + gutterPx)).coerceAtLeast(1)
+
+        return GridSpec(cols, rows, cardWidth, cardHeight, gutterPx, rowGapPx, labelHeightPx, paddingHPx, paddingVPx)
+    }
+
+    private fun renderGridPage() {
+        coverLoadJobs.forEach { it.cancel() }
+        coverLoadJobs.clear()
+        val host = binding.dayListRows
+        host.removeAllViews()
+        val spec = gridSpec
+        val cards = listCards
+
+        if (cards.isEmpty() || spec == null) {
+            host.addView(
+                AppCompatTextView(this).apply {
+                    text = emptyListMessage()
+                    setTextColor(inkLightColor)
+                    textSize = 14f
+                    gravity = Gravity.CENTER
+                },
+                FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.CENTER,
+                ),
+            )
+            updateListPagination(if (cards.isEmpty()) 0 else 1)
+            return
+        }
+
+        val ipp = spec.itemsPerPage
+        val totalPages = ceil(cards.size.toDouble() / ipp).toInt()
+        listPage = listPage.coerceIn(0, totalPages - 1)
+        val start = listPage * ipp
+        val end = minOf(start + ipp, cards.size)
+        val pageItems = cards.subList(start, end)
+
+        val grid = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_HORIZONTAL
+        }
+        val rowCount = (pageItems.size + spec.cols - 1) / spec.cols
+        for (rowIdx in 0 until rowCount) {
+            if (rowIdx > 0) grid.addView(Space(this), LinearLayout.LayoutParams(0, spec.gutterPx))
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+            }
+            for (colIdx in 0 until spec.cols) {
+                if (colIdx > 0) row.addView(Space(this), LinearLayout.LayoutParams(spec.gutterPx, 0))
+                val itemIdx = rowIdx * spec.cols + colIdx
+                if (itemIdx < pageItems.size) {
+                    row.addView(buildCardGroup(pageItems[itemIdx], spec))
+                } else {
+                    val totalCellHeight = spec.cardHeightPx + spec.rowGapPx + spec.labelHeightPx
+                    row.addView(Space(this), LinearLayout.LayoutParams(spec.cardWidthPx, totalCellHeight))
+                }
+            }
+            grid.addView(row, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT,
+            ))
+        }
+        host.addView(grid, FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT,
+            Gravity.TOP or Gravity.CENTER_HORIZONTAL,
+        ).apply { topMargin = spec.paddingVPx })
+
+        updateListPagination(totalPages)
+    }
+
+    private fun buildCardGroup(entry: ResolvedRecent, spec: GridSpec): LinearLayout {
+        val group = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_HORIZONTAL
+            setOnClickListener { openNotebookFromList(entry.notebookId, entry.notebookName) }
+        }
+
+        val card = FrameLayout(this).apply { setBackgroundResource(R.drawable.shape_bordered) }
+        group.addView(card, LinearLayout.LayoutParams(spec.cardWidthPx, spec.cardHeightPx))
+        val pad1dp = (density + 0.5f).toInt()
+        card.setPadding(pad1dp, pad1dp, pad1dp, pad1dp)
+
+        val iconSize = (minOf(spec.cardWidthPx, spec.cardHeightPx) * 0.45f).toInt()
+        val coverImage = AppCompatImageView(this).apply {
+            scaleType = ImageView.ScaleType.CENTER_CROP
+            visibility = View.GONE
+        }
+        card.addView(coverImage, FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT,
+        ))
+        val icon = AppCompatImageView(this).apply { setImageResource(R.drawable.ic_notebook) }
+        card.addView(icon, FrameLayout.LayoutParams(iconSize, iconSize, Gravity.CENTER))
+        loadCoverInto(entry.notebookId, coverImage, icon)
+
+        group.addView(
+            buildCardLabel(entry, spec),
+            LinearLayout.LayoutParams(spec.cardWidthPx, spec.labelHeightPx).also { it.topMargin = spec.rowGapPx },
+        )
+        return group
+    }
+
+    /** Two-line card label: "folder › notebook" over the activity date/time (mirrors recents). */
+    private fun buildCardLabel(entry: ResolvedRecent, spec: GridSpec): LinearLayout {
+        val parent = entry.folderPath.substringAfterLast(" › ")
+        val d = Date(entry.timestamp)
+        val dateStr = DateFormat.getMediumDateFormat(this).format(d)
+        val timeStr = DateFormat.getTimeFormat(this).format(d)
+        return LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            addView(AppCompatTextView(this@DayDetailActivity).apply {
+                text = "$parent › ${entry.notebookName}"
+                maxLines = 1
+                ellipsize = TextUtils.TruncateAt.END
+                gravity = Gravity.CENTER
+                textSize = 13f
+                setTextColor(inkBlackColor)
+            })
+            addView(AppCompatTextView(this@DayDetailActivity).apply {
+                text = "$dateStr, $timeStr"
+                maxLines = 1
+                ellipsize = TextUtils.TruncateAt.END
+                gravity = Gravity.CENTER
+                textSize = 11f
+                setTextColor(inkLightColor)
+            })
+        }
+    }
+
+    /** Populate a card cover: snapshot bitmap when present, lock icon when encrypted, else the
+     *  default notebook icon. Job tracked so it's cancelled on the next grid re-render. */
+    private fun loadCoverInto(notebookId: String, cover: AppCompatImageView, icon: AppCompatImageView) {
+        val job = lifecycleScope.launch {
+            val info = dayHistoryRepo.coverFor(notebookId)
+            if (info.encrypted) { icon.setImageResource(R.drawable.ic_lock_cover); return@launch }
+            val b64 = info.snapshotB64 ?: return@launch
+            val bitmap = withContext(Dispatchers.IO) {
+                runCatching {
+                    val bytes = Base64.decode(b64, Base64.DEFAULT)
+                    BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                }.getOrNull()
+            }
+            if (bitmap != null) {
+                cover.setImageBitmap(bitmap)
+                cover.visibility = View.VISIBLE
+                icon.visibility = View.GONE
+            }
+        }
+        coverLoadJobs.add(job)
+    }
+
+    private fun updateListPagination(totalPages: Int) {
+        binding.tvDayListPageIndicator.text = if (totalPages > 0) "${listPage + 1} / $totalPages" else ""
+        binding.btnDayListFirst.isEnabled = listPage > 0
+        binding.btnDayListPrev.isEnabled = listPage > 0
+        binding.btnDayListNext.isEnabled = listPage < totalPages - 1
+        binding.btnDayListLast.isEnabled = listPage < totalPages - 1
+    }
+
+    private fun emptyListMessage(): String {
+        val what = when (notebooksSub) {
+            NbSub.OPENED -> "opened"; NbSub.EDITED -> "edited"; NbSub.CREATED -> "created"
+        }
+        return "No notebooks $what on this day"
+    }
+
+    private fun openNotebookFromList(notebookId: String, notebookName: String) {
+        startActivity(
+            Intent(this, NotebookActivity::class.java)
+                .putExtra(NotebookActivity.EXTRA_NOTEBOOK_ID, notebookId)
+                .putExtra(NotebookActivity.EXTRA_NOTEBOOK_NAME, notebookName)
+        )
+    }
 
     // ── Page load ────────────────────────────────────────────────────────────────
 
@@ -1663,6 +1957,9 @@ class DayDetailActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         if (viewMode == ViewMode.NOTE) drawingView.enableDrawing()
+        // Returning from an opened notebook: refresh the list (it may have new activity) but keep
+        // the reader on the same page.
+        if (viewMode == ViewMode.NOTEBOOKS) renderNotebooksList(resetPage = false)
         updateLassoButtonIcon()
     }
 
