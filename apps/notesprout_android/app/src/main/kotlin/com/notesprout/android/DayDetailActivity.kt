@@ -22,6 +22,7 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.core.view.doOnLayout
+import androidx.core.view.isVisible
 import androidx.lifecycle.lifecycleScope
 import com.notesprout.android.core.BitmapDecode
 import com.notesprout.android.core.isBooxDevice
@@ -110,6 +111,15 @@ class DayDetailActivity : AppCompatActivity() {
     private val indexRepo: IndexRepository by lazy { IndexRepository(NotesproutIndex.dao()) }
 
     private var selectedDate: LocalDate = LocalDate.now()
+
+    // View mode — Note (editable canvas) / Notebooks (activity lists) / History (past years).
+    private enum class ViewMode { NOTE, NOTEBOOKS, HISTORY }
+    private enum class NbSub { OPENED, EDITED, CREATED }
+    private enum class HistSub { NOTES, OPENED, EDITED, CREATED }
+    private var viewMode = ViewMode.NOTE
+    private var notebooksSub = NbSub.OPENED
+    private var historySub = HistSub.NOTES
+    private var historyYear = LocalDate.now().year - 1
 
     // Canvas / page state
     private var currentPageId = ""
@@ -267,9 +277,11 @@ class DayDetailActivity : AppCompatActivity() {
 
         updateDateLabel()
         setupToolbar()
+        setupViewToggles()
         wireDrawingCallbacks()
         wireToolButtons()
         updateLassoButtonIcon()
+        applyViewMode()
 
         when (ToolPreferencesManager.load(this)) {
             ActiveTool.ERASER -> {
@@ -291,10 +303,12 @@ class DayDetailActivity : AppCompatActivity() {
 
     private fun pageKey(): String = "cal-daynote-$selectedDate"
 
-    private fun updateDateLabel() {
+    private fun updateDateLabel() { binding.tvDayDate.text = dayDateText() }
+
+    private fun dayDateText(): String {
         val dow = selectedDate.dayOfWeek.getDisplayName(TextStyle.FULL, Locale.getDefault())
         val monthName = Month.of(selectedDate.monthValue).getDisplayName(TextStyle.FULL, Locale.getDefault())
-        binding.tvDayDate.text = "$dow, ${selectedDate.dayOfMonth} $monthName ${selectedDate.year}"
+        return "$dow, ${selectedDate.dayOfMonth} $monthName ${selectedDate.year}"
     }
 
     // ── Toolbar ──────────────────────────────────────────────────────────────────
@@ -305,6 +319,99 @@ class DayDetailActivity : AppCompatActivity() {
         binding.btnDayUndo.setOnClickListener { undo() }
         binding.btnDayRedo.setOnClickListener { redo() }
         binding.btnDayTemplate.setOnClickListener { showTemplatePicker() }
+    }
+
+    // ── View modes (Note / Notebooks / History) ──────────────────────────────────
+
+    private fun setupViewToggles() {
+        binding.btnDayViewNote.setOnClickListener { switchViewMode(ViewMode.NOTE) }
+        binding.btnDayViewNotebooks.setOnClickListener { switchViewMode(ViewMode.NOTEBOOKS) }
+        binding.btnDayViewHistory.setOnClickListener { switchViewMode(ViewMode.HISTORY) }
+
+        binding.btnDaySubOpened.setOnClickListener { notebooksSub = NbSub.OPENED; applyViewMode() }
+        binding.btnDaySubEdited.setOnClickListener { notebooksSub = NbSub.EDITED; applyViewMode() }
+        binding.btnDaySubCreated.setOnClickListener { notebooksSub = NbSub.CREATED; applyViewMode() }
+
+        binding.btnDayHistNotes.setOnClickListener { historySub = HistSub.NOTES; applyViewMode() }
+        binding.btnDayHistOpened.setOnClickListener { historySub = HistSub.OPENED; applyViewMode() }
+        binding.btnDayHistEdited.setOnClickListener { historySub = HistSub.EDITED; applyViewMode() }
+        binding.btnDayHistCreated.setOnClickListener { historySub = HistSub.CREATED; applyViewMode() }
+
+        // Session 1: free stepping; Session 4 restricts to years-with-data.
+        binding.btnDayYearPrev.setOnClickListener { historyYear -= 1; applyViewMode() }
+        binding.btnDayYearNext.setOnClickListener { historyYear += 1; applyViewMode() }
+    }
+
+    private fun switchViewMode(mode: ViewMode) {
+        if (mode == viewMode) return
+        // Leaving Note mode: settle the canvas and flush ink so nothing is lost.
+        if (viewMode == ViewMode.NOTE) {
+            if (isShapeTransformMode) exitShapeTransformMode(clearSelection = true)
+            if (isLassoMode) exitLassoMode()
+            hideShapeInsertToolbar()
+            hideFloatingSelectionToolbar()
+            NotesproutApplication.appScope.launch { saveStrokes() }
+        }
+        viewMode = mode
+        applyViewMode()
+    }
+
+    /** Reflect [viewMode] + sub-state into toolbar visibility, content swap, and toggle chrome. */
+    private fun applyViewMode() {
+        val isNote = viewMode == ViewMode.NOTE
+
+        // Drawing tools live only in Note mode.
+        binding.dayToolsGroup.isVisible = isNote
+        binding.dayToolsDivider.isVisible = isNote
+
+        // Content swap: canvas vs. list/placeholder. (History▸Notes bitmap arrives in Session 4.)
+        drawingView.asView().isVisible = isNote
+        binding.dayListContainer.isVisible = !isNote
+        binding.historyNoteImage.isVisible = false
+
+        // Secondary control bar.
+        binding.daySubBarContainer.isVisible = !isNote
+        binding.daySubNotebooks.isVisible = viewMode == ViewMode.NOTEBOOKS
+        binding.daySubHistory.isVisible = viewMode == ViewMode.HISTORY
+        binding.tvDayYear.text = historyYear.toString()
+
+        // Toggle chrome.
+        binding.btnDayViewNote.isSelected = viewMode == ViewMode.NOTE
+        binding.btnDayViewNotebooks.isSelected = viewMode == ViewMode.NOTEBOOKS
+        binding.btnDayViewHistory.isSelected = viewMode == ViewMode.HISTORY
+        binding.btnDaySubOpened.isSelected = notebooksSub == NbSub.OPENED
+        binding.btnDaySubEdited.isSelected = notebooksSub == NbSub.EDITED
+        binding.btnDaySubCreated.isSelected = notebooksSub == NbSub.CREATED
+        binding.btnDayHistNotes.isSelected = historySub == HistSub.NOTES
+        binding.btnDayHistOpened.isSelected = historySub == HistSub.OPENED
+        binding.btnDayHistEdited.isSelected = historySub == HistSub.EDITED
+        binding.btnDayHistCreated.isSelected = historySub == HistSub.CREATED
+
+        updatePlaceholder()
+        drawingView.releaseRender()
+    }
+
+    // Session 1 placeholder — replaced by real card lists / day-note bitmap in later sessions.
+    private fun updatePlaceholder() {
+        val dateStr = dayDateText()
+        binding.tvDayPlaceholder.text = when (viewMode) {
+            ViewMode.NOTE -> ""
+            ViewMode.NOTEBOOKS -> {
+                val what = when (notebooksSub) {
+                    NbSub.OPENED -> "opened"; NbSub.EDITED -> "edited"; NbSub.CREATED -> "created"
+                }
+                "Notebooks $what on $dateStr\n(coming soon)"
+            }
+            ViewMode.HISTORY -> {
+                val md = "${selectedDate.dayOfMonth} ${Month.of(selectedDate.monthValue).getDisplayName(TextStyle.FULL, Locale.getDefault())}"
+                when (historySub) {
+                    HistSub.NOTES -> "Day note for $md, $historyYear\n(coming soon)"
+                    HistSub.OPENED -> "Notebooks opened on $md, $historyYear\n(coming soon)"
+                    HistSub.EDITED -> "Notebooks edited on $md, $historyYear\n(coming soon)"
+                    HistSub.CREATED -> "Notebooks created on $md, $historyYear\n(coming soon)"
+                }
+            }
+        }
     }
 
     // ── Page load ────────────────────────────────────────────────────────────────
@@ -1347,7 +1454,9 @@ class DayDetailActivity : AppCompatActivity() {
     // ── Touch dispatch ───────────────────────────────────────────────────────────
 
     override fun dispatchTouchEvent(event: MotionEvent): Boolean {
-        if (event.getToolType(0) == MotionEvent.TOOL_TYPE_FINGER) {
+        // Canvas gestures (sticky-tap, multi-finger undo/redo, EPD release) apply only to the
+        // editable Note canvas; in Notebooks/History the list handles its own touches.
+        if (viewMode == ViewMode.NOTE && event.getToolType(0) == MotionEvent.TOOL_TYPE_FINGER) {
             val inToolbar = isTouchInView(event, binding.dayToolbar)
             val inFloating = binding.floatingSelectionToolbar.visibility == View.VISIBLE &&
                     isTouchInView(event, binding.floatingSelectionToolbar)
@@ -1509,7 +1618,7 @@ class DayDetailActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
-        drawingView.enableDrawing()
+        if (viewMode == ViewMode.NOTE) drawingView.enableDrawing()
         updateLassoButtonIcon()
     }
 

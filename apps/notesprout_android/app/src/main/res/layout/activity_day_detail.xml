@@ -30,88 +30,127 @@
             android:layout_marginStart="4dp"
             android:layout_marginEnd="4dp" />
 
-        <!-- Drawing tools -->
-        <androidx.appcompat.widget.AppCompatImageButton
-            android:id="@+id/btnDayPen"
-            style="@style/Widget.Notesprout.ToolbarButton"
-            android:src="@drawable/ic_pen"
-            android:contentDescription="Pen" />
+        <!-- View-mode toggles: Note / Notebooks / History -->
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/btnDayViewNote"
+            style="@style/Widget.Notesprout.ToggleTextButton"
+            android:text="Note"
+            android:contentDescription="Note view" />
 
-        <androidx.appcompat.widget.AppCompatImageButton
-            android:id="@+id/btnDayEraser"
-            style="@style/Widget.Notesprout.ToolbarButton"
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/btnDayViewNotebooks"
+            style="@style/Widget.Notesprout.ToggleTextButton"
             android:layout_marginStart="2dp"
-            android:src="@drawable/ic_eraser"
-            android:contentDescription="Eraser" />
+            android:text="Notebooks"
+            android:contentDescription="Notebooks view" />
 
-        <androidx.appcompat.widget.AppCompatImageButton
-            android:id="@+id/btnDayLassoEraser"
-            style="@style/Widget.Notesprout.ToolbarButton"
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/btnDayViewHistory"
+            style="@style/Widget.Notesprout.ToggleTextButton"
             android:layout_marginStart="2dp"
-            android:src="@drawable/ic_lasso_eraser"
-            android:contentDescription="Lasso eraser" />
+            android:text="History"
+            android:contentDescription="History view" />
 
-        <androidx.appcompat.widget.AppCompatImageButton
-            android:id="@+id/btnDayLasso"
-            style="@style/Widget.Notesprout.ToolbarButton"
-            android:layout_marginStart="2dp"
-            android:src="@drawable/ic_lasso"
-            android:contentDescription="Lasso select" />
-
+        <!-- Divider between view toggles and drawing tools (hidden outside Note mode) -->
         <View
+            android:id="@+id/dayToolsDivider"
             android:layout_width="1dp"
             android:layout_height="28dp"
             android:background="@color/inkBlack"
             android:layout_marginStart="4dp"
             android:layout_marginEnd="4dp" />
 
-        <androidx.appcompat.widget.AppCompatImageButton
-            android:id="@+id/btnDayUndo"
-            style="@style/Widget.Notesprout.ToolbarButton"
-            android:src="@drawable/ic_undo"
-            android:contentDescription="Undo" />
+        <!-- Drawing tools — toggled as a unit; visible only in Note mode -->
+        <LinearLayout
+            android:id="@+id/dayToolsGroup"
+            android:layout_width="wrap_content"
+            android:layout_height="match_parent"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
 
-        <androidx.appcompat.widget.AppCompatImageButton
-            android:id="@+id/btnDayRedo"
-            style="@style/Widget.Notesprout.ToolbarButton"
-            android:layout_marginStart="2dp"
-            android:src="@drawable/ic_redo"
-            android:contentDescription="Redo" />
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnDayPen"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:src="@drawable/ic_pen"
+                android:contentDescription="Pen" />
 
-        <View
-            android:layout_width="1dp"
-            android:layout_height="28dp"
-            android:background="@color/inkBlack"
-            android:layout_marginStart="4dp"
-            android:layout_marginEnd="4dp" />
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnDayEraser"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:layout_marginStart="2dp"
+                android:src="@drawable/ic_eraser"
+                android:contentDescription="Eraser" />
 
-        <androidx.appcompat.widget.AppCompatImageButton
-            android:id="@+id/btnDayStickyNote"
-            style="@style/Widget.Notesprout.ToolbarButton"
-            android:src="@drawable/ic_sticker_2"
-            android:contentDescription="Insert sticky note" />
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnDayLassoEraser"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:layout_marginStart="2dp"
+                android:src="@drawable/ic_lasso_eraser"
+                android:contentDescription="Lasso eraser" />
 
-        <androidx.appcompat.widget.AppCompatImageButton
-            android:id="@+id/btnDayTemplate"
-            style="@style/Widget.Notesprout.ToolbarButton"
-            android:layout_marginStart="2dp"
-            android:src="@drawable/ic_template"
-            android:contentDescription="Template" />
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnDayLasso"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:layout_marginStart="2dp"
+                android:src="@drawable/ic_lasso"
+                android:contentDescription="Lasso select" />
 
-        <!-- Insert shape — opens dayShapeInsertToolbar secondary popup -->
-        <androidx.appcompat.widget.AppCompatImageButton
-            android:id="@+id/btnDayInsertShape"
-            style="@style/Widget.Notesprout.ToolbarButton"
-            android:layout_marginStart="2dp"
-            android:src="@drawable/ic_convert_shape"
-            android:contentDescription="Insert shape" />
+            <View
+                android:layout_width="1dp"
+                android:layout_height="28dp"
+                android:background="@color/inkBlack"
+                android:layout_marginStart="4dp"
+                android:layout_marginEnd="4dp" />
 
-        <androidx.appcompat.widget.AppCompatImageButton
-            android:id="@+id/btnDayScratchpad"
-            style="@style/Widget.Notesprout.ToolbarButton"
-            android:layout_marginStart="2dp"
-            android:src="@drawable/ic_sketching"
-            android:contentDescription="Scratch Pad" />
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnDayUndo"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:src="@drawable/ic_undo"
+                android:contentDescription="Undo" />
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnDayRedo"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:layout_marginStart="2dp"
+                android:src="@drawable/ic_redo"
+                android:contentDescription="Redo" />
+
+            <View
+                android:layout_width="1dp"
+                android:layout_height="28dp"
+                android:background="@color/inkBlack"
+                android:layout_marginStart="4dp"
+                android:layout_marginEnd="4dp" />
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnDayStickyNote"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:src="@drawable/ic_sticker_2"
+                android:contentDescription="Insert sticky note" />
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnDayTemplate"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:layout_marginStart="2dp"
+                android:src="@drawable/ic_template"
+                android:contentDescription="Template" />
+
+            <!-- Insert shape — opens dayShapeInsertToolbar secondary popup -->
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnDayInsertShape"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:layout_marginStart="2dp"
+                android:src="@drawable/ic_convert_shape"
+                android:contentDescription="Insert shape" />
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnDayScratchpad"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:layout_marginStart="2dp"
+                android:src="@drawable/ic_sketching"
+                android:contentDescription="Scratch Pad" />
+
+        </LinearLayout>
 
         <!-- Flexible spacer pushes the date label to the right -->
         <Space
@@ -141,6 +180,133 @@
         android:layout_height="1dp"
         android:background="@color/inkBlack" />
 
+    <!-- Secondary control bar — visible only in Notebooks / History modes -->
+    <LinearLayout
+        android:id="@+id/daySubBarContainer"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:visibility="gone">
+
+        <LinearLayout
+            android:id="@+id/daySubBar"
+            android:layout_width="match_parent"
+            android:layout_height="52dp"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:background="@color/paperWhite"
+            android:paddingStart="8dp"
+            android:paddingEnd="8dp">
+
+            <!-- Notebooks sub-toggles -->
+            <LinearLayout
+                android:id="@+id/daySubNotebooks"
+                android:layout_width="wrap_content"
+                android:layout_height="match_parent"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:visibility="gone">
+
+                <androidx.appcompat.widget.AppCompatButton
+                    android:id="@+id/btnDaySubOpened"
+                    style="@style/Widget.Notesprout.ToggleTextButton"
+                    android:text="Opened"
+                    android:contentDescription="Notebooks opened this day" />
+
+                <androidx.appcompat.widget.AppCompatButton
+                    android:id="@+id/btnDaySubEdited"
+                    style="@style/Widget.Notesprout.ToggleTextButton"
+                    android:layout_marginStart="2dp"
+                    android:text="Edited"
+                    android:contentDescription="Notebooks edited this day" />
+
+                <androidx.appcompat.widget.AppCompatButton
+                    android:id="@+id/btnDaySubCreated"
+                    style="@style/Widget.Notesprout.ToggleTextButton"
+                    android:layout_marginStart="2dp"
+                    android:text="Created"
+                    android:contentDescription="Notebooks created this day" />
+
+            </LinearLayout>
+
+            <!-- History controls: year stepper + Notes/Opened/Edited/Created -->
+            <LinearLayout
+                android:id="@+id/daySubHistory"
+                android:layout_width="wrap_content"
+                android:layout_height="match_parent"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:visibility="gone">
+
+                <androidx.appcompat.widget.AppCompatButton
+                    android:id="@+id/btnDayYearPrev"
+                    style="@style/Widget.Notesprout.ToggleTextButton"
+                    android:text="◀"
+                    android:contentDescription="Previous year" />
+
+                <TextView
+                    android:id="@+id/tvDayYear"
+                    android:layout_width="wrap_content"
+                    android:layout_height="44dp"
+                    android:minWidth="64dp"
+                    android:gravity="center"
+                    android:textSize="16sp"
+                    android:textStyle="bold"
+                    android:textColor="@color/inkBlack"
+                    android:text="" />
+
+                <androidx.appcompat.widget.AppCompatButton
+                    android:id="@+id/btnDayYearNext"
+                    style="@style/Widget.Notesprout.ToggleTextButton"
+                    android:text="▶"
+                    android:contentDescription="Next year" />
+
+                <View
+                    android:layout_width="1dp"
+                    android:layout_height="28dp"
+                    android:background="@color/inkBlack"
+                    android:layout_marginStart="6dp"
+                    android:layout_marginEnd="6dp" />
+
+                <androidx.appcompat.widget.AppCompatButton
+                    android:id="@+id/btnDayHistNotes"
+                    style="@style/Widget.Notesprout.ToggleTextButton"
+                    android:text="Notes"
+                    android:contentDescription="Day note from this year" />
+
+                <androidx.appcompat.widget.AppCompatButton
+                    android:id="@+id/btnDayHistOpened"
+                    style="@style/Widget.Notesprout.ToggleTextButton"
+                    android:layout_marginStart="2dp"
+                    android:text="Opened"
+                    android:contentDescription="Notebooks opened this day that year" />
+
+                <androidx.appcompat.widget.AppCompatButton
+                    android:id="@+id/btnDayHistEdited"
+                    style="@style/Widget.Notesprout.ToggleTextButton"
+                    android:layout_marginStart="2dp"
+                    android:text="Edited"
+                    android:contentDescription="Notebooks edited this day that year" />
+
+                <androidx.appcompat.widget.AppCompatButton
+                    android:id="@+id/btnDayHistCreated"
+                    style="@style/Widget.Notesprout.ToggleTextButton"
+                    android:layout_marginStart="2dp"
+                    android:text="Created"
+                    android:contentDescription="Notebooks created this day that year" />
+
+            </LinearLayout>
+
+        </LinearLayout>
+
+        <!-- 1dp border below sub bar -->
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="@color/inkBlack" />
+
+    </LinearLayout>
+
     <!-- Content area — drawing view added programmatically; popups overlaid here -->
     <FrameLayout
         android:id="@+id/dayContent"
@@ -148,6 +314,33 @@
         android:layout_height="0dp"
         android:layout_weight="1"
         android:background="@color/paperWhite">
+
+        <!-- Notebooks / History card list (and placeholder) — shown outside Note mode -->
+        <FrameLayout
+            android:id="@+id/dayListContainer"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:visibility="gone">
+
+            <TextView
+                android:id="@+id/tvDayPlaceholder"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center"
+                android:textSize="16sp"
+                android:textColor="@color/inkLight"
+                android:text="" />
+
+        </FrameLayout>
+
+        <!-- History ▸ Notes: read-only day-note bitmap from a past year -->
+        <ImageView
+            android:id="@+id/historyNoteImage"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:scaleType="fitCenter"
+            android:visibility="gone"
+            android:contentDescription="Day note from a past year" />
 
         <!-- Floating selection context toolbar — positioned programmatically on lasso selection -->
         <LinearLayout
