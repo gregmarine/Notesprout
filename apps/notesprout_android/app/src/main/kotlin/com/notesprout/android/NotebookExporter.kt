@@ -39,6 +39,7 @@ import com.notesprout.android.data.StickyNoteRender
 import com.notesprout.android.data.TextObject
 import com.notesprout.android.data.TextRender
 import com.notesprout.android.data.NotebookMetadata
+import com.notesprout.android.data.ScratchpadPageContent
 import com.notesprout.android.data.SoilDatabase
 import com.notesprout.android.data.StrokeData
 import com.notesprout.android.R
@@ -619,6 +620,24 @@ object NotebookExporter {
         val bitmap = renderPage(pw, ph, templateBitmap, headings, textObjects, lineObjects, strokes, context, links, stickyNotes, shapeObjects)
         return Triple(bitmap, templateBitmap, stickyNotes)
     }
+
+    /**
+     * Render already-loaded page content (template + every object layer) to a standalone [Bitmap]
+     * at [w]×[h] on white — no live drawing engine. Used by the Day-Detail History▸Notes read-only
+     * view to show a past year's day note. Caller owns the returned bitmap (recycle when done).
+     * Pure Canvas work; safe to call off the UI thread.
+     */
+    fun renderContentBitmap(
+        w: Int,
+        h: Int,
+        templateBitmap: Bitmap?,
+        content: ScratchpadPageContent,
+        context: Context,
+    ): Bitmap = renderPage(
+        w, h, templateBitmap,
+        content.headings, content.textObjects, content.lineObjects, content.strokes,
+        context, content.links, content.stickyNotes, content.shapeObjects,
+    )
 
     private fun renderPage(
         w: Int,

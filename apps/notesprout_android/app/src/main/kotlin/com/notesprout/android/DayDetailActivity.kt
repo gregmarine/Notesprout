@@ -136,8 +136,11 @@ class DayDetailActivity : AppCompatActivity() {
     private var notebooksSub = NbSub.OPENED
     private var historySub = HistSub.NOTES
     private var historyYear = LocalDate.now().year - 1
-    // Monotonic token so a slow count query can't overwrite the placeholder after the mode changed.
-    private var placeholderToken = 0
+    // Years (descending) with any data for this month/day — drives the History year stepper.
+    private var historyYears: List<Int> = emptyList()
+    private var historyYearsLoaded = false
+    // Bumped per History▸Notes load so a slow render can't paint into a since-changed view.
+    private var historyNoteToken = 0
 
     // Notebooks card-grid state (Notebooks mode; History Opened/Edited/Created reuse in Session 4).
     private var listCards: List<ResolvedRecent> = emptyList()
@@ -377,9 +380,9 @@ class DayDetailActivity : AppCompatActivity() {
         binding.btnDayHistEdited.setOnClickListener { historySub = HistSub.EDITED; applyViewMode() }
         binding.btnDayHistCreated.setOnClickListener { historySub = HistSub.CREATED; applyViewMode() }
 
-        // Session 1: free stepping; Session 4 restricts to years-with-data.
-        binding.btnDayYearPrev.setOnClickListener { historyYear -= 1; applyViewMode() }
-        binding.btnDayYearNext.setOnClickListener { historyYear += 1; applyViewMode() }
+        // Stepper walks only years-with-data (◀ older, ▶ newer); no-op at the ends.
+        binding.btnDayYearPrev.setOnClickListener { stepHistoryYear(older = true) }
+        binding.btnDayYearNext.setOnClickListener { stepHistoryYear(older = false) }
     }
 
     private fun switchViewMode(mode: ViewMode) {
@@ -393,31 +396,63 @@ class DayDetailActivity : AppCompatActivity() {
             NotesproutApplication.appScope.launch { saveStrokes() }
         }
         viewMode = mode
+        // History picker is keyed to this day's month/day (static for the activity) — load once,
+        // choosing the default year, then paint.
+        if (mode == ViewMode.HISTORY && !historyYearsLoaded) loadHistoryYearsThenApply()
+        else applyViewMode()
+    }
+
+    /** Load years-with-data for this month/day once, pick the default year, then repaint. */
+    private fun loadHistoryYearsThenApply() {
+        lifecycleScope.launch {
+            val years = withContext(Dispatchers.IO) {
+                dayHistoryRepo.yearsWithData(selectedDate.monthValue, selectedDate.dayOfMonth)
+            }
+            historyYears = years
+            historyYearsLoaded = true
+            historyYear = pickDefaultHistoryYear(years)
+            applyViewMode()
+        }
+    }
+
+    /** Default = current−1 if it has data, else the newest year-with-data ≤ current−1, else newest. */
+    private fun pickDefaultHistoryYear(years: List<Int>): Int {
+        val target = LocalDate.now().year - 1
+        return when {
+            years.isEmpty() -> target
+            target in years -> target
+            else -> years.firstOrNull { it <= target } ?: years.first()
+        }
+    }
+
+    /** Step to the adjacent year-with-data. [older] = smaller year (◀); else larger (▶). */
+    private fun stepHistoryYear(older: Boolean) {
+        if (historyYears.isEmpty()) return
+        val idx = historyYears.indexOf(historyYear).takeIf { it >= 0 } ?: 0
+        // historyYears is descending: idx 0 = newest, so older → +1, newer → −1.
+        val newIdx = (idx + if (older) 1 else -1).coerceIn(0, historyYears.lastIndex)
+        if (newIdx == idx) return
+        historyYear = historyYears[newIdx]
         applyViewMode()
     }
 
     /** Reflect [viewMode] + sub-state into toolbar visibility, content swap, and toggle chrome. */
     private fun applyViewMode() {
         val isNote = viewMode == ViewMode.NOTE
+        val isHistoryNotes = viewMode == ViewMode.HISTORY && historySub == HistSub.NOTES
 
         // Drawing tools live only in Note mode.
         binding.dayToolsGroup.isVisible = isNote
         binding.dayToolsDivider.isVisible = isNote
 
-        // Content swap: canvas vs. list/placeholder. (History▸Notes bitmap arrives in Session 4.)
+        // Editable canvas only in Note mode; the list / read-only note surfaces are set per branch below.
         drawingView.asView().isVisible = isNote
-        binding.dayListContainer.isVisible = !isNote
-        binding.historyNoteImage.isVisible = false
-        // Notebooks mode → real card list; History still uses the placeholder (Session 4).
-        val showList = viewMode == ViewMode.NOTEBOOKS
-        binding.dayListPanel.isVisible = showList
-        binding.tvDayPlaceholder.isVisible = viewMode == ViewMode.HISTORY
 
         // Secondary control bar.
         binding.daySubBarContainer.isVisible = !isNote
         binding.daySubNotebooks.isVisible = viewMode == ViewMode.NOTEBOOKS
         binding.daySubHistory.isVisible = viewMode == ViewMode.HISTORY
-        binding.tvDayYear.text = historyYear.toString()
+        binding.tvDayYear.text = if (historyYearsLoaded && historyYears.isEmpty()) "—" else historyYear.toString()
 
         // Toggle chrome.
         binding.btnDayViewNote.isSelected = viewMode == ViewMode.NOTE
@@ -431,72 +466,94 @@ class DayDetailActivity : AppCompatActivity() {
         binding.btnDayHistEdited.isSelected = historySub == HistSub.EDITED
         binding.btnDayHistCreated.isSelected = historySub == HistSub.CREATED
 
-        if (showList) renderNotebooksList(resetPage = true) else updatePlaceholder()
+        // Content swap: Note → canvas; History▸Notes → read-only bitmap; everything else → card grid.
+        when {
+            isNote -> {
+                binding.dayListContainer.isVisible = false
+                binding.historyNoteImage.isVisible = false
+            }
+            isHistoryNotes -> renderHistoryNote()
+            else -> {
+                binding.historyNoteImage.isVisible = false
+                binding.dayListContainer.isVisible = true
+                binding.dayListPanel.isVisible = true
+                binding.tvDayPlaceholder.isVisible = false
+                renderList(resetPage = true)
+            }
+        }
         drawingView.releaseRender()
-    }
-
-    // Session 2 placeholder — shows live activity counts to prove the data layer end-to-end.
-    // Replaced by real card lists / day-note bitmap in Sessions 3–4.
-    private fun updatePlaceholder() {
-        if (viewMode == ViewMode.NOTE) {
-            binding.tvDayPlaceholder.text = ""
-            return
-        }
-        val dateStr = dayDateText()
-        val md = "${selectedDate.dayOfMonth} ${Month.of(selectedDate.monthValue).getDisplayName(TextStyle.FULL, Locale.getDefault())}"
-        val header = when (viewMode) {
-            ViewMode.NOTEBOOKS -> {
-                val what = when (notebooksSub) {
-                    NbSub.OPENED -> "opened"; NbSub.EDITED -> "edited"; NbSub.CREATED -> "created"
-                }
-                "Notebooks $what on $dateStr"
-            }
-            else -> when (historySub) {
-                HistSub.NOTES -> "Day note for $md, $historyYear"
-                HistSub.OPENED -> "Notebooks opened on $md, $historyYear"
-                HistSub.EDITED -> "Notebooks edited on $md, $historyYear"
-                HistSub.CREATED -> "Notebooks created on $md, $historyYear"
-            }
-        }
-        binding.tvDayPlaceholder.text = "$header\n…"
-
-        // Resolve a live count off-thread; ignore the result if the view state moved on.
-        val token = ++placeholderToken
-        val mode = viewMode
-        val nbSub = notebooksSub
-        val hSub = historySub
-        val targetDate = if (mode == ViewMode.HISTORY) historyDate() else selectedDate
-        lifecycleScope.launch {
-            val detail = withContext(Dispatchers.IO) {
-                when {
-                    targetDate == null -> "none"
-                    mode == ViewMode.NOTEBOOKS -> {
-                        val kind = when (nbSub) {
-                            NbSub.OPENED -> DayHistoryRepository.Kind.OPENED
-                            NbSub.EDITED -> DayHistoryRepository.Kind.EDITED
-                            NbSub.CREATED -> DayHistoryRepository.Kind.CREATED
-                        }
-                        "${dayHistoryRepo.notebooksFor(targetDate, kind).size} found"
-                    }
-                    hSub == HistSub.NOTES ->
-                        if (dayHistoryRepo.dayNotePageId(targetDate) != null) "note present" else "no note"
-                    else -> {
-                        val kind = when (hSub) {
-                            HistSub.OPENED -> DayHistoryRepository.Kind.OPENED
-                            HistSub.EDITED -> DayHistoryRepository.Kind.EDITED
-                            else -> DayHistoryRepository.Kind.CREATED
-                        }
-                        "${dayHistoryRepo.notebooksFor(targetDate, kind).size} found"
-                    }
-                }
-            }
-            if (token == placeholderToken) binding.tvDayPlaceholder.text = "$header\n$detail"
-        }
     }
 
     /** [historyYear] applied to the selected month/day; null when invalid (e.g. Feb 29 non-leap). */
     private fun historyDate(): LocalDate? =
         runCatching { LocalDate.of(historyYear, selectedDate.monthValue, selectedDate.dayOfMonth) }.getOrNull()
+
+    // ── History ▸ Notes (read-only day-note bitmap from a past year) ───────────────
+
+    /**
+     * Render the chosen year's `cal-daynote-…` page as a static bitmap into [historyNoteImage].
+     * While it loads (or when absent / invalid) a centered empty message shows via the list
+     * container's placeholder. A [historyNoteToken] guards against a slow render painting after
+     * the year/sub toggle moved on.
+     */
+    private fun renderHistoryNote() {
+        val token = ++historyNoteToken
+        binding.historyNoteImage.setImageDrawable(null)
+        binding.historyNoteImage.isVisible = false
+        binding.dayListPanel.isVisible = false
+        binding.dayListContainer.isVisible = true
+        binding.tvDayPlaceholder.isVisible = true
+        binding.tvDayPlaceholder.text = ""
+
+        val date = historyDate()
+        if (date == null) { binding.tvDayPlaceholder.text = emptyNoteMessage(); return }
+        val containerW = binding.dayContent.width
+        val containerH = binding.dayContent.height
+        lifecycleScope.launch {
+            val bitmap = withContext(Dispatchers.IO) { renderDayNoteBitmap(date, containerW, containerH) }
+            if (token != historyNoteToken) { bitmap?.recycle(); return@launch }
+            if (bitmap != null) {
+                binding.historyNoteImage.setImageBitmap(bitmap)
+                binding.historyNoteImage.isVisible = true
+                binding.dayListContainer.isVisible = false
+            } else {
+                binding.tvDayPlaceholder.text = emptyNoteMessage()
+            }
+        }
+    }
+
+    /** Compose the day note for [date] (template + content) to a bitmap, or null if it has none. */
+    private suspend fun renderDayNoteBitmap(date: LocalDate, containerW: Int, containerH: Int): Bitmap? {
+        val pageId = dayHistoryRepo.dayNotePageId(date) ?: return null
+        val dao = NotesproutIndex.calendarDao()
+        val pageRow = dao.getObjectById(pageId) ?: return null
+        val pd = PageData.fromJson(pageRow.data)
+        // Prefer the page's authored size; fall back to the current container.
+        val w = pd.width.toInt().takeIf { it > 0 } ?: containerW.takeIf { it > 0 } ?: return null
+        val h = pd.height.toInt().takeIf { it > 0 } ?: containerH.takeIf { it > 0 } ?: return null
+        val template = loadTemplateBitmapFor(pageRow, w, h)
+        return try {
+            val content = repository.loadPage(pageId, density)
+            NotebookExporter.renderContentBitmap(w, h, template, content, this)
+        } finally {
+            template?.recycle()
+        }
+    }
+
+    /** Decode a page row's template image to a bitmap sized to [reqW]×[reqH]; null if none. */
+    private suspend fun loadTemplateBitmapFor(pageRow: CalendarEntity, reqW: Int, reqH: Int): Bitmap? =
+        withContext(Dispatchers.IO) {
+            val tid = PageData.fromJson(pageRow.data).template.takeIf { it.isNotEmpty() } ?: return@withContext null
+            val tRow = repository.getTemplateById(tid) ?: return@withContext null
+            val b64 = TemplateData.fromJson(tRow.data)?.image?.takeIf { it.isNotEmpty() } ?: return@withContext null
+            val bytes = Base64.decode(b64, Base64.DEFAULT)
+            BitmapDecode.decodeSampled(bytes, reqW, reqH)
+        }
+
+    private fun emptyNoteMessage(): String {
+        val md = "${selectedDate.dayOfMonth} ${Month.of(selectedDate.monthValue).getDisplayName(TextStyle.FULL, Locale.getDefault())}"
+        return if (historyYearsLoaded && historyYears.isEmpty()) "No day note for $md" else "No day note for $md, $historyYear"
+    }
 
     // ── Notebooks card grid (paginated; reused by History Opened/Edited/Created in Session 4) ──
 
@@ -511,22 +568,48 @@ class DayDetailActivity : AppCompatActivity() {
         }
     }
 
-    /**
-     * Load and render the Notebooks grid for the current sub-toggle + selected day.
-     * [resetPage] true when the toggle/day changed; false when merely refreshing (e.g. returning
-     * from an opened notebook) so the reader stays on the same page. Rendering always runs inside a
-     * [doOnLayout] pass so the grid spec is computed against a laid-out host.
-     */
-    private fun renderNotebooksList(resetPage: Boolean) {
-        val kind = when (notebooksSub) {
-            NbSub.OPENED -> DayHistoryRepository.Kind.OPENED
-            NbSub.EDITED -> DayHistoryRepository.Kind.EDITED
-            NbSub.CREATED -> DayHistoryRepository.Kind.CREATED
+    /** The (kind, date) the card grid should show for the current mode + sub-toggle; null when the
+     *  active view isn't a card grid (Note, History▸Notes, or an invalid history date). */
+    private data class ListQuery(val kind: DayHistoryRepository.Kind, val date: LocalDate)
+
+    private fun currentListQuery(): ListQuery? = when (viewMode) {
+        ViewMode.NOTE -> null
+        ViewMode.NOTEBOOKS -> ListQuery(
+            when (notebooksSub) {
+                NbSub.OPENED -> DayHistoryRepository.Kind.OPENED
+                NbSub.EDITED -> DayHistoryRepository.Kind.EDITED
+                NbSub.CREATED -> DayHistoryRepository.Kind.CREATED
+            },
+            selectedDate,
+        )
+        ViewMode.HISTORY -> {
+            val d = historyDate()
+            when {
+                d == null || historySub == HistSub.NOTES -> null
+                historySub == HistSub.OPENED -> ListQuery(DayHistoryRepository.Kind.OPENED, d)
+                historySub == HistSub.EDITED -> ListQuery(DayHistoryRepository.Kind.EDITED, d)
+                else -> ListQuery(DayHistoryRepository.Kind.CREATED, d)
+            }
         }
+    }
+
+    /**
+     * Load and render the card grid for the current sub-toggle + target day ([currentListQuery]),
+     * shared by Notebooks and History▸Opened/Edited/Created. [resetPage] true when the toggle/day/year
+     * changed; false when merely refreshing (e.g. returning from an opened notebook) so the reader
+     * stays on the same page.
+     */
+    private fun renderList(resetPage: Boolean) {
         val token = ++listRenderToken
         if (resetPage) listPage = 0
+        val query = currentListQuery()
+        if (query == null) {
+            listCards = emptyList()
+            renderGridWhenMeasured(token)
+            return
+        }
         lifecycleScope.launch {
-            val cards = withContext(Dispatchers.IO) { dayHistoryRepo.notebooksFor(selectedDate, kind) }
+            val cards = withContext(Dispatchers.IO) { dayHistoryRepo.notebooksFor(query.date, query.kind) }
             if (token != listRenderToken) return@launch
             listCards = cards
             renderGridWhenMeasured(token)
@@ -738,10 +821,13 @@ class DayDetailActivity : AppCompatActivity() {
     }
 
     private fun emptyListMessage(): String {
-        val what = when (notebooksSub) {
+        val what = if (viewMode == ViewMode.HISTORY) when (historySub) {
+            HistSub.OPENED -> "opened"; HistSub.EDITED -> "edited"; else -> "created"
+        } else when (notebooksSub) {
             NbSub.OPENED -> "opened"; NbSub.EDITED -> "edited"; NbSub.CREATED -> "created"
         }
-        return "No notebooks $what on this day"
+        val where = if (viewMode == ViewMode.HISTORY) "in $historyYear" else "on this day"
+        return "No notebooks $what $where"
     }
 
     private fun openNotebookFromList(notebookId: String, notebookName: String) {
@@ -1957,9 +2043,9 @@ class DayDetailActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         if (viewMode == ViewMode.NOTE) drawingView.enableDrawing()
-        // Returning from an opened notebook: refresh the list (it may have new activity) but keep
-        // the reader on the same page.
-        if (viewMode == ViewMode.NOTEBOOKS) renderNotebooksList(resetPage = false)
+        // Returning from an opened notebook: refresh the card grid (it may have new activity) but
+        // keep the reader on the same page. History▸Notes is a static bitmap — nothing to refresh.
+        else if (!(viewMode == ViewMode.HISTORY && historySub == HistSub.NOTES)) renderList(resetPage = false)
         updateLassoButtonIcon()
     }
 
