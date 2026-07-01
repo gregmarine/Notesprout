@@ -25,6 +25,7 @@ import android.widget.Toast
 import androidx.appcompat.widget.AppCompatImageView
 import androidx.appcompat.widget.AppCompatTextView
 import androidx.core.content.ContextCompat
+import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
@@ -326,6 +327,11 @@ class DayDetailActivity : AppCompatActivity() {
         updateLassoButtonIcon()
         applyViewMode()
 
+        // Route system / predictive Back through the same step-out logic as the toolbar arrow.
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() { handleBackNavigation() }
+        })
+
         when (ToolPreferencesManager.load(this)) {
             ActiveTool.ERASER -> {
                 isEraserActive = true
@@ -357,7 +363,7 @@ class DayDetailActivity : AppCompatActivity() {
     // ── Toolbar ──────────────────────────────────────────────────────────────────
 
     private fun setupToolbar() {
-        binding.btnDayBack.setOnClickListener { finish() }
+        binding.btnDayBack.setOnClickListener { handleBackNavigation() }
         binding.btnDayScratchpad.setOnClickListener { startActivity(Intent(this, ScratchpadActivity::class.java)) }
         binding.btnDayUndo.setOnClickListener { undo() }
         binding.btnDayRedo.setOnClickListener { redo() }
@@ -383,6 +389,20 @@ class DayDetailActivity : AppCompatActivity() {
         // Stepper walks only years-with-data (◀ older, ▶ newer); no-op at the ends.
         binding.btnDayYearPrev.setOnClickListener { stepHistoryYear(older = true) }
         binding.btnDayYearNext.setOnClickListener { stepHistoryYear(older = false) }
+    }
+
+    /**
+     * Back steps out of a sub-view before leaving the day: Notebooks/History → Note (one step),
+     * then a modal shape overlay if one is open, then finish. Shared by the toolbar arrow and the
+     * system/predictive Back gesture.
+     */
+    private fun handleBackNavigation() {
+        when {
+            viewMode != ViewMode.NOTE -> switchViewMode(ViewMode.NOTE)
+            isShapeTransformMode -> exitShapeTransformMode(clearSelection = true)
+            binding.dayShapeInsertToolbar.isVisible -> hideShapeInsertToolbar()
+            else -> finish()
+        }
     }
 
     private fun switchViewMode(mode: ViewMode) {
@@ -481,6 +501,9 @@ class DayDetailActivity : AppCompatActivity() {
                 renderList(resetPage = true)
             }
         }
+        // The pen layer follows the mode: armed only in Note, fully off in Notebooks/History so a
+        // stray pen touch can't be captured (invisibly) under the hidden card grid / read-only note.
+        if (isNote) drawingView.enableDrawing() else drawingView.disableDrawing()
         drawingView.releaseRender()
     }
 
