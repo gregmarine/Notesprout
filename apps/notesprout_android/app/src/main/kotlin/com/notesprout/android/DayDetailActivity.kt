@@ -1426,10 +1426,17 @@ class DayDetailActivity : AppCompatActivity() {
                 drawingView.getStickyNotes().filter { it.id in ids }.map { it.id } +
                 drawingView.getShapeObjects().filter { it.id in ids }.map { it.id })
         if (allIds.isEmpty()) return
-        deleteIdsAndRefresh(allIds)
+        deleteIdsAndRefresh(allIds, returnToPen = true)
     }
 
-    private fun deleteIdsAndRefresh(allIds: List<String>) {
+    /**
+     * Soft-delete [allIds], refresh the canvas, and clear the lasso selection.
+     * When [returnToPen] is true and this was a smart-lasso session, step back out to the
+     * pen tool once the delete completes — mirroring NotebookActivity's performLassoDelete.
+     * Cut leaves [returnToPen] false so lasso mode persists for the paste workflow.
+     */
+    private fun deleteIdsAndRefresh(allIds: List<String>, returnToPen: Boolean = false) {
+        val wasSmartLassoSession = isSmartLassoSession
         lifecycleScope.launch {
             withContext(Dispatchers.IO) { repository.softDeleteObjects(allIds) }
             val erasedSet = allIds.toSet()
@@ -1447,6 +1454,10 @@ class DayDetailActivity : AppCompatActivity() {
             hideFloatingSelectionToolbar()
             rebuildCanvas()
             pushHistory()
+            if (returnToPen && wasSmartLassoSession) {
+                exitLassoMode()
+                drawingView.enableDrawing()
+            }
         }
     }
 
