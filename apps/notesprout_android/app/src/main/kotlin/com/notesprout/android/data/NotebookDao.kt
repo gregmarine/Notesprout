@@ -302,6 +302,14 @@ interface NotebookDao {
     suspend fun getMaxContentUpdatedAt(layerId: String): Long?
 
     /**
+     * Count of content rows (any layer) whose [NotebookObject.updatedAt] is at or after [since].
+     * Soft-deleted rows carry `updatedAt = deletedAt`, so erases count as edits too. Used at seal
+     * time to decide whether this session should log an EDITED activity event.
+     */
+    @Query("SELECT COUNT(*) FROM notebook WHERE type IN ('stroke', 'heading', 'text', 'line', 'link', 'sticky_note', 'shape') AND updatedAt >= :since")
+    suspend fun countContentModifiedSince(since: Long): Int
+
+    /**
      * Hard-delete all soft-deleted rows whose [NotebookObject.deletedAt] predates [before].
      * Called at seal time with the session-start timestamp so only rows soft-deleted in
      * previous sessions are purged — current-session deletes (still undoable) are left intact.

@@ -6,8 +6,8 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
-    entities = [ObjectEntity::class, ScratchpadEntity::class, CalendarEntity::class],
-    version = 3,
+    entities = [ObjectEntity::class, ScratchpadEntity::class, CalendarEntity::class, NotebookActivityEntity::class],
+    version = 4,
     exportSchema = false,
 )
 abstract class NotesproutDatabase : RoomDatabase() {
@@ -15,6 +15,7 @@ abstract class NotesproutDatabase : RoomDatabase() {
     abstract fun objectDao(): ObjectDao
     abstract fun scratchpadDao(): ScratchpadDao
     abstract fun calendarDao(): CalendarDao
+    abstract fun notebookActivityDao(): NotebookActivityDao
 
     companion object {
         val MIGRATION_1_2 = object : Migration(1, 2) {
@@ -64,6 +65,33 @@ abstract class NotesproutDatabase : RoomDatabase() {
                     """
                     CREATE INDEX IF NOT EXISTS idx_calendar_parent_order
                         ON calendar(parentId, "order", deletedAt)
+                    """.trimIndent()
+                )
+            }
+        }
+
+        val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS notebook_activity (
+                        id           TEXT    NOT NULL PRIMARY KEY,
+                        notebookId   TEXT    NOT NULL,
+                        activityType TEXT    NOT NULL,
+                        timestamp    INTEGER NOT NULL
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    CREATE INDEX IF NOT EXISTS index_notebook_activity_activityType_timestamp
+                        ON notebook_activity(activityType, timestamp)
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    CREATE INDEX IF NOT EXISTS index_notebook_activity_notebookId
+                        ON notebook_activity(notebookId)
                     """.trimIndent()
                 )
             }

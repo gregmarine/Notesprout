@@ -50,6 +50,7 @@ import com.notesprout.android.crypto.SoilCrypto
 import com.notesprout.android.crypto.SoilMigrator
 import com.notesprout.android.data.BoundingBox
 import com.notesprout.android.data.CoverObject
+import com.notesprout.android.data.DayHistoryRepository
 import com.notesprout.android.data.copyPageAfter
 import com.notesprout.android.data.HeadingObject
 import com.notesprout.android.data.HeadingStroke
@@ -312,6 +313,7 @@ class NotebookActivity : AppCompatActivity() {
 
     /** Lazy access to the index repository for snapshot/page-count/updatedAt sync. */
     private val indexRepo: IndexRepository by lazy { IndexRepository(NotesproutIndex.dao()) }
+    private val dayHistoryRepo: DayHistoryRepository by lazy { DayHistoryRepository() }
 
     /** Lazy access to the scratch pad repository — used for "Send to Scratch Pad". */
     private val scratchpadRepo: ScratchpadRepository by lazy {
@@ -2281,6 +2283,8 @@ class NotebookActivity : AppCompatActivity() {
             title = notebookDisplayName
             // Record this open in the device-local recents store (see RecentsManager).
             RecentsManager.recordOpen(this, notebookId)
+            // Log an OPENED activity event for the Day-Detail history views (fire-and-forget).
+            NotesproutApplication.appScope.launch { dayHistoryRepo.logOpened(notebookId) }
             val nbId = notebookId
             lifecycleScope.launch {
                 val pinned = withContext(Dispatchers.IO) { indexRepo.isNotebookPinned(nbId) }
@@ -3915,6 +3919,14 @@ class NotebookActivity : AppCompatActivity() {
         runCatching {
             NotebookMetaStore.refresh(db, indexRepo, nbId)
         }.onFailure { Slog.d(TAG) { "meta refresh on seal failed: ${it.message}" } }
+        // Log an EDITED activity event if any content row was modified this session. Must run
+        // BEFORE the .soil is closed below (queries the just-sealed DB). Soft-deleted rows carry
+        // updatedAt = deletedAt, so erases count as edits too.
+        if (nbId.isNotEmpty()) runCatching {
+            if (db.notebookDao().countContentModifiedSince(sessionStart) > 0) {
+                dayHistoryRepo.logEdited(nbId)
+            }
+        }.onFailure { Slog.d(TAG) { "edited-activity log failed: ${it.message}" } }
         // Hard-delete rows soft-deleted before this session — they predate the undo stack
         // and can never be restored, so they are dead weight. Current-session soft-deletes
         // (deletedAt >= sessionStart) are kept for undo/redo safety on abnormal teardown.

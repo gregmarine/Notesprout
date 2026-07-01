@@ -28,6 +28,7 @@ import com.notesprout.android.core.BitmapDecode
 import com.notesprout.android.core.isBooxDevice
 import com.notesprout.android.data.BoundingBox
 import com.notesprout.android.data.CalendarRepository
+import com.notesprout.android.data.DayHistoryRepository
 import com.notesprout.android.data.HeadingObject
 import com.notesprout.android.data.HeadingStroke
 import com.notesprout.android.data.LineObject
@@ -109,6 +110,7 @@ class DayDetailActivity : AppCompatActivity() {
     private lateinit var drawingView: NotebookView
     private lateinit var repository: CalendarRepository
     private val indexRepo: IndexRepository by lazy { IndexRepository(NotesproutIndex.dao()) }
+    private val dayHistoryRepo: DayHistoryRepository by lazy { DayHistoryRepository() }
 
     private var selectedDate: LocalDate = LocalDate.now()
 
@@ -120,6 +122,8 @@ class DayDetailActivity : AppCompatActivity() {
     private var notebooksSub = NbSub.OPENED
     private var historySub = HistSub.NOTES
     private var historyYear = LocalDate.now().year - 1
+    // Monotonic token so a slow count query can't overwrite the placeholder after the mode changed.
+    private var placeholderToken = 0
 
     // Canvas / page state
     private var currentPageId = ""
@@ -391,28 +395,68 @@ class DayDetailActivity : AppCompatActivity() {
         drawingView.releaseRender()
     }
 
-    // Session 1 placeholder — replaced by real card lists / day-note bitmap in later sessions.
+    // Session 2 placeholder — shows live activity counts to prove the data layer end-to-end.
+    // Replaced by real card lists / day-note bitmap in Sessions 3–4.
     private fun updatePlaceholder() {
+        if (viewMode == ViewMode.NOTE) {
+            binding.tvDayPlaceholder.text = ""
+            return
+        }
         val dateStr = dayDateText()
-        binding.tvDayPlaceholder.text = when (viewMode) {
-            ViewMode.NOTE -> ""
+        val md = "${selectedDate.dayOfMonth} ${Month.of(selectedDate.monthValue).getDisplayName(TextStyle.FULL, Locale.getDefault())}"
+        val header = when (viewMode) {
             ViewMode.NOTEBOOKS -> {
                 val what = when (notebooksSub) {
                     NbSub.OPENED -> "opened"; NbSub.EDITED -> "edited"; NbSub.CREATED -> "created"
                 }
-                "Notebooks $what on $dateStr\n(coming soon)"
+                "Notebooks $what on $dateStr"
             }
-            ViewMode.HISTORY -> {
-                val md = "${selectedDate.dayOfMonth} ${Month.of(selectedDate.monthValue).getDisplayName(TextStyle.FULL, Locale.getDefault())}"
-                when (historySub) {
-                    HistSub.NOTES -> "Day note for $md, $historyYear\n(coming soon)"
-                    HistSub.OPENED -> "Notebooks opened on $md, $historyYear\n(coming soon)"
-                    HistSub.EDITED -> "Notebooks edited on $md, $historyYear\n(coming soon)"
-                    HistSub.CREATED -> "Notebooks created on $md, $historyYear\n(coming soon)"
-                }
+            else -> when (historySub) {
+                HistSub.NOTES -> "Day note for $md, $historyYear"
+                HistSub.OPENED -> "Notebooks opened on $md, $historyYear"
+                HistSub.EDITED -> "Notebooks edited on $md, $historyYear"
+                HistSub.CREATED -> "Notebooks created on $md, $historyYear"
             }
         }
+        binding.tvDayPlaceholder.text = "$header\n…"
+
+        // Resolve a live count off-thread; ignore the result if the view state moved on.
+        val token = ++placeholderToken
+        val mode = viewMode
+        val nbSub = notebooksSub
+        val hSub = historySub
+        val targetDate = if (mode == ViewMode.HISTORY) historyDate() else selectedDate
+        lifecycleScope.launch {
+            val detail = withContext(Dispatchers.IO) {
+                when {
+                    targetDate == null -> "none"
+                    mode == ViewMode.NOTEBOOKS -> {
+                        val kind = when (nbSub) {
+                            NbSub.OPENED -> DayHistoryRepository.Kind.OPENED
+                            NbSub.EDITED -> DayHistoryRepository.Kind.EDITED
+                            NbSub.CREATED -> DayHistoryRepository.Kind.CREATED
+                        }
+                        "${dayHistoryRepo.notebooksFor(targetDate, kind).size} found"
+                    }
+                    hSub == HistSub.NOTES ->
+                        if (dayHistoryRepo.dayNotePageId(targetDate) != null) "note present" else "no note"
+                    else -> {
+                        val kind = when (hSub) {
+                            HistSub.OPENED -> DayHistoryRepository.Kind.OPENED
+                            HistSub.EDITED -> DayHistoryRepository.Kind.EDITED
+                            else -> DayHistoryRepository.Kind.CREATED
+                        }
+                        "${dayHistoryRepo.notebooksFor(targetDate, kind).size} found"
+                    }
+                }
+            }
+            if (token == placeholderToken) binding.tvDayPlaceholder.text = "$header\n$detail"
+        }
     }
+
+    /** [historyYear] applied to the selected month/day; null when invalid (e.g. Feb 29 non-leap). */
+    private fun historyDate(): LocalDate? =
+        runCatching { LocalDate.of(historyYear, selectedDate.monthValue, selectedDate.dayOfMonth) }.getOrNull()
 
     // ── Page load ────────────────────────────────────────────────────────────────
 

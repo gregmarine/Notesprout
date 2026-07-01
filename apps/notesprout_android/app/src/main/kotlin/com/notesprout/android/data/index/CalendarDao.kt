@@ -60,6 +60,20 @@ interface CalendarDao {
     @Query("SELECT * FROM calendar WHERE id = :id LIMIT 1")
     suspend fun getObjectById(id: String): CalendarEntity?
 
+    /**
+     * Day-note page ids (`cal-daynote-YYYY-MM-DD`) that actually hold content, matching [idPattern]
+     * (e.g. `cal-daynote-____-06-30` — four `_` wildcards for the year). Only pages whose content
+     * layer has at least one live non-layer child are returned, so blank auto-created day pages are
+     * excluded. Powers the Day-Detail History year picker + read-only note lookup.
+     */
+    @Query(
+        "SELECT DISTINCT p.id FROM calendar p " +
+            "JOIN calendar l ON l.parentId = p.id AND l.type = 'layer' AND l.deletedAt IS NULL " +
+            "JOIN calendar c ON c.parentId = l.id AND c.type != 'layer' AND c.deletedAt IS NULL " +
+            "WHERE p.type = 'page' AND p.deletedAt IS NULL AND p.id LIKE :idPattern"
+    )
+    suspend fun dayNotePagesWithContent(idPattern: String): List<String>
+
     /** All live content objects on a layer (any type) — used to snapshot for undo/redo. */
     @Query("SELECT * FROM calendar WHERE parentId = :layerId AND type != 'layer' AND deletedAt IS NULL")
     suspend fun getAllChildrenForLayer(layerId: String): List<CalendarEntity>
