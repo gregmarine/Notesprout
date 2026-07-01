@@ -1,6 +1,10 @@
 # Day Detail — Notebooks & History Enhancement Plan
 
-Status: **in progress** · Branch: `sprout` · Target test device: **G102** (`b7a46e13`)
+Status: **complete** (Sessions 1–6 shipped on `sprout`, 2026-06-30) · Target test device: **G102**
+(`b7a46e13`) · As-built reference: `docs/calendar.md` → "Day detail — the day window".
+
+**Deferred (not done):** narrow-screen toolbar pass + full Tier-1 QA sweep (needs Go 7 `17845014` /
+Palma2 Pro `287d2364` connected to measure). Year-label tap-to-list was dropped — stepper only.
 
 Enhance `DayDetailActivity` from a single writing canvas into a three-view "day window":
 
@@ -131,8 +135,8 @@ Each session ends with: **clean build → install on G102 → stop for user test
   repaint, back-stack across modes, last-mode persistence (optional — confirm with user).
 - Install + sanity-check on Tier 1 (G10, G102, Note Max, Go 7, Palma2 Pro).
 
-### Session 6 — Wrap-up
-- Update `docs/calendar.md` (Day-detail section) + `CLAUDE.md` calendar row + memory index.
+### Session 6 — Wrap-up ✅
+- Update `docs/calendar.md` (Day-detail section) + `CLAUDE.md` calendar row + memory index. **Done.**
 - Final commit + push.
 
 ---

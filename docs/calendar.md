@@ -68,11 +68,13 @@ all independent, all keyed.
 | `data/CalendarRepository.kt` | Higher-level API (`ensureBootstrap`, `getOrCreatePageLayer`, `loadPage`, `saveStrokes`, `insertObjects`, `serializeForExport`, `softDeleteObjects`, `setPageSize`, `snapshotLayer`/`restoreLayer`, `insertTemplateRow`/`getTemplateById`/`setPageTemplate`) |
 | `data/PageCopier.kt` | `insertCalendarPagesIntoNotebook` / `loadNotebookPageIds` + `CalendarExportPage`/`CalendarExportChild` carriers — the engine for the full-view export (below) |
 | `data/index/ListIds.kt` | `CALENDAR_ROOT_ID` constant |
-| `data/index/NotesproutDatabase.kt` | `version=3`; `CalendarEntity` in `@Database entities`; `MIGRATION_2_3` |
-| `data/index/NotesproutIndex.kt` | registers `MIGRATION_2_3`; `calendarDao()` accessor |
+| `data/index/NotesproutDatabase.kt` | `version=4`; `CalendarEntity` + `NotebookActivityEntity` in `@Database entities`; `MIGRATION_2_3`, `MIGRATION_3_4` |
+| `data/index/NotesproutIndex.kt` | registers `MIGRATION_2_3` + `MIGRATION_3_4`; `calendarDao()` / `notebookActivityDao()` accessors |
+| `data/index/NotebookActivityEntity.kt` / `NotebookActivityDao.kt` | `notebook_activity` log (OPENED/EDITED) — see [Day window](#day-detail--the-day-window) |
+| `data/DayHistoryRepository.kt` | query + logging layer for the Notebooks / History views |
 | `notebook/CalendarTemplateRenderer.kt` | bakes the grid/timeline bitmap + finger hit-test geometry |
 | `CalendarActivity.kt` | the host screen (canvas, tools, navigation, gestures, undo/redo, transfer); launches `DayDetailActivity` on double-tap |
-| `DayDetailActivity.kt` | full-screen single-page day canvas (see [Day detail](#day-detail--cal-daynote-)) |
+| `DayDetailActivity.kt` | full-screen **three-view day window** (Note / Notebooks / History — see [Day window](#day-detail--the-day-window)) |
 | `DayTemplateDialog.kt` | day-detail template quick-picker (reads `type="template"` rows from the `calendar` table) |
 | `CalendarTransfer.kt` | one-field in-memory singleton for Calendar / Day-detail → Notebook hand-off |
 
@@ -242,16 +244,41 @@ sticky-note editor's clean single-repaint feel.
 
 ---
 
-## Day detail (`cal-daynote-…`)
+## Day detail — the day window
 
-A full-screen, single-page handwriting canvas "into" one day, opened by single-finger double-tap
-(Month/Week day cell, or anywhere in Day view — see [Touch routing](#touch-routing-dispatchtouchevent)).
-Behaves like the scratch pad: one page, freely writable, with an optional ruling template. Hosted by
+A full-screen "window into one day," opened by single-finger double-tap (Month/Week day cell, or
+anywhere in Day view — see [Touch routing](#touch-routing-dispatchtouchevent)). Hosted by
 **`DayDetailActivity`** (registered full-screen in the manifest, `exported="false"`, `configChanges`
 set so the canvas survives rotation). Launched via `DayDetailActivity.intent(ctx, date, fromNotebook*)`
 from `CalendarActivity.openDayDetail`; the source-notebook identity is carried through so Send-to-Notebook
-can offer "this notebook". Back arrow = `finish()` → returns to the paused calendar on the exact
-view/date it came from.
+can offer "this notebook".
+
+The window has **three views**, chosen by a toggle group in the top toolbar placed **after the Back
+arrow and before the drawing tools, separated by dividers** (mirrors the Month/Week/Day toggles):
+
+| View | What it shows | Tools toolbar |
+|---|---|---|
+| **Note** *(default)* | the editable day-note canvas | visible |
+| **Notebooks** | notebooks **Opened / Edited / Created** on this calendar day (paginated card grid) | hidden |
+| **History** | this month/day **in a chosen past year** — a leading **Notes** (read-only day-note bitmap) then **Opened / Edited / Created** | hidden |
+
+State: `ViewMode {NOTE, NOTEBOOKS, HISTORY}` + sub-toggles `NbSub {OPENED, EDITED, CREATED}` /
+`HistSub {NOTES, OPENED, EDITED, CREATED}`. **Reopening a day always resets to Note** — the active
+view is not persisted. `daySubNotebooks` / `daySubHistory` sub-bars are visible only in their mode;
+`dayToolsGroup` is visible only in Note mode (`applyViewMode` drives all show/hide + `isSelected`).
+
+- **Back is a step-out, not always an exit** (`handleBackNavigation`, shared by the toolbar arrow and
+  the system/predictive gesture via `onBackPressedDispatcher` + `OnBackPressedCallback`): Notebooks/
+  History → Note (one step) → close any open shape-transform / shape-insert overlay → `finish()`.
+  `finish()` returns to the paused calendar on the exact view/date it came from.
+- **The pen layer follows the mode** (`applyViewMode` tail): `drawingView.enableDrawing()` in Note,
+  `disableDrawing()` in Notebooks/History (so a stray pen touch can't be captured *invisibly* under the
+  hidden card grid / read-only note), then `releaseRender()` for a clean EPD repaint.
+
+### Note view (`cal-daynote-…`)
+
+The original editable canvas — behaves like the scratch pad: one page, freely writable, with an
+optional ruling template.
 
 - **Page:** key `cal-daynote-YYYY-MM-DD`, one page in the `calendar` table under `CALENDAR_ROOT_ID`,
   created lazily by the shared `getOrCreatePageLayer`. All canvas machinery (drawing callbacks, save,
@@ -276,6 +303,52 @@ view/date it came from.
   `NotebookActivity` with `EXTRA_PASTE_PENDING`, `CalendarTransfer.pending`, then `finish()`); "this
   notebook" routes to `fromNotebookId`, otherwise the `NotebookPickerActivity`. Day detail does **not**
   use the for-result hand-off (its immediate parent is the calendar, not the notebook).
+
+### Notebooks view (Opened / Edited / Created)
+
+A paginated card grid (`setupNotebooksList` → `renderList`/`renderGridPage`, first/prev/next/last
+paging) reusing the recents-card look: notebook name, folder breadcrumb, that day's activity time, and
+snapshot cover. Cards resolve through `DayHistoryRepository`:
+
+- **Opened / Edited** read the `notebook_activity` log, grouped by notebook within `[dayStart, dayEnd)`
+  (device-default zone), newest kept per notebook — **one card per notebook per list**. Missing /
+  soft-deleted / non-notebook rows are pruned.
+- **Created** is derived from the index (`ObjectEntity.createdAt` inside the day) — no rows are logged,
+  so it is inherently retroactive.
+- **Encrypted notebooks never expose a snapshot** (`coverFor` returns `snapshotB64 = null` + a lock,
+  matching MainActivity's list — plaintext-leak guard).
+- Tapping a card opens the notebook through the normal `NotebookActivity` flow (encrypted → its unlock
+  path); on return the view/sub-toggle/page are unchanged.
+
+### History view (past-year year picker)
+
+Same month/day, a **chosen past year**. The year control is a **stepper** (`btnDayYearPrev`/`Next` →
+`stepHistoryYear`) that walks **only years-with-data** (`yearsWithData`: any activity row, notebook
+created that day, or day-note-with-content for that month/day, descending). `tvDayYear` is a
+display-only label. Default year = **current − 1** if it has data, else the newest year-with-data ≤
+current−1, else the newest (`pickDefaultHistoryYear`); loaded once per open (`loadHistoryYearsThenApply`,
+`historyYearsLoaded`).
+
+- **Notes** (`renderHistoryNote` → `renderDayNoteBitmap`): the chosen year's `cal-daynote-…` page
+  composed to a **static bitmap** (template + content via `NotebookExporter.renderContentBitmap`) in
+  `historyNoteImage` — no live drawing engine, inherently read-only. A `historyNoteToken` discards a
+  slow render if the year/sub-toggle moved on; empty state (`emptyNoteMessage`) when the year has none.
+- **Opened / Edited / Created** reuse the Notebooks card grid, keyed to the chosen year's month/day.
+  Opened/Edited are **forward-only** — empty for years before the log existed; **Notes** and **Created**
+  still populate retroactively.
+
+### Activity log (`notebook_activity`)
+
+Plaintext table in the global index (`notesprout.db`, Room **v3 → v4**, `MIGRATION_3_4`), columns
+`id` / `notebookId` / `activityType` (`OPENED`|`EDITED`) / `timestamp`, indexed on
+`(activityType, timestamp)` and `notebookId`. *Not* named "events" — that word is reserved for a future
+calendar-events system (birthdays / anniversaries / appointments).
+
+- **OPENED** — written in `NotebookActivity.onCreate` (next to `RecentsManager.recordOpen`) via
+  `DayHistoryRepository.logOpened`.
+- **EDITED** — written at seal (`sealNotebook`) only when `countContentModifiedSince(sessionStart) > 0`,
+  i.e. a **content** row (stroke/heading/text/line/link/sticky/shape) changed this session. `updatedAt`
+  is bumped on *every* close, so it can't define an edit — hence the session-scoped content check.
 
 ---
 
