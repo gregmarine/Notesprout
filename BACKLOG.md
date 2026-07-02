@@ -9,8 +9,58 @@
 > Standing design docs that are **not** folded in here (read them directly):
 > - `SUPERNOTE_SUPPORT_PLAN.md` — full Supernote (Ratta) ink-path design, not started.
 > - `NOTEBOOK_SIZE_RESEARCH.md` — `.soil` size-reduction + backup-compaction research (no plan yet).
+> - `docs/handwriting-recognition.md` — page-text / whole-notebook recognition (segmentation layer,
+>   `page_text` cache, RTR mode, export path), not started. Decision/deferred items summarized below.
 >
 > Nothing here is scheduled. Pull an item into its own plan before building it.
+
+---
+
+## Handwriting → Text: page-text, RTR & export recognition
+
+> **Proposed design (not started).** Full design in `docs/handwriting-recognition.md`. Today's ML Kit
+> recognizer only does single-selection heading / text-box conversion; extending it to whole-page and
+> whole-notebook text needs a segmentation layer it doesn't provide out of the box. Items below are the
+> decisions already made and the pieces explicitly deferred. Pull a phase into its own plan before building.
+
+**Phase 1 — core + export-only (lowest risk, do first):**
+- **`StrokeSegmenter`** (`recognition/StrokeSegmenter.kt`) — pure geometry, unit-testable: median-height
+  line grouping → intra-line ordering + word gaps → paragraph breaks. Feeds only `stroke` rows; merges
+  headings / text-objects (which already carry `recognizedText`) by vertical position.
+- **Interface change** — add `suspend fun recognizeSegment(strokes, bounds, preContext)` to
+  `HandwritingRecognizer`; `MlKitHandwritingRecognizer` currently hardcodes `setPreContext("")`, losing
+  the free per-line context-chaining accuracy win. Keep the callback `recognize` for the single-shot path.
+- **`PageTextRecognizer`** (`recognition/PageTextRecognizer.kt`) — segments a page, recognizes each line
+  with chained `preContext`, assembles reading-order text.
+- **`page_text` object** — `NotebookObject(type = "page_text", parentId = pageId)`, `data = PageText`
+  JSON (`text`, `engine`, `recognizedAt`, `sourceMaxUpdatedAt`, `schema`). **No schema migration** (type
+  is a string discriminator). Staleness reuses `NotebookDao.getMaxContentUpdatedAt(layerId)`; encrypted
+  at rest and portable on export/import for free.
+- **Export-only path** — foreground "Export as text/markdown" with determinate progress + cancel; reuses
+  fresh `page_text` rows when present. Rides alongside `NotebookExporter`.
+
+**Phase 2 — RTR (real-time background):**
+- **Scheduler** — hook `saveStrokes(db)` + erase completion in `NotebookActivity`; idle-debounced (~2 s)
+  + on page-seal, **not** per-stroke. Runs on `NotesproutApplication.appScope` (IO), conflated per page
+  with a `saveMutex`-style lock; cancel superseded jobs.
+- **`rtrEnabled` toggle** — per-notebook, in `NotebookMetadata` (travels on export). **Decision:**
+  convertible any time (not creation-only) with a creation default of **OFF**; enable kicks a backfill
+  batch over existing pages, disable stops scheduling and keeps the cache. Optional global "new notebooks
+  use real-time text" default.
+- **Read-only text viewer** — secondary screen modeled on `DayDetailActivity`'s day-window pattern;
+  "stale/updating" badge from `sourceMaxUpdatedAt`.
+
+**Other paths (share the core):**
+- **On-demand single-page / "copy page as text."**
+- **Backfill-on-enable** = the export batch run in background with progress.
+
+**Deferred / open questions:**
+- **Editable recognized text** (reconciling edits back onto ink) — read-only in v1.
+- **Multi-column / tables** — single-column assembly; horizontal-gap data captured but unused.
+- **Full-text search** over `page_text` — a natural future consumer (ties into the Encryption Phase-3
+  "opt-in encrypted search index" item); not built here.
+- **Hard vs. soft line breaks**, **baseline skew** (per-line least-squares), **multi-language models**
+  (only `en-US` today), and the **Onyx HWR engine** swap (the `engine` field leaves the door open).
 
 ---
 
