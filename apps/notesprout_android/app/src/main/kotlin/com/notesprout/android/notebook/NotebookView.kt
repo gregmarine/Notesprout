@@ -37,6 +37,26 @@ interface NotebookView {
 
     fun enableDrawing()
     fun disableDrawing()
+
+    /**
+     * Called from the host Activity's onResume to (re)claim the drawing surface after the Activity
+     * was paused or stopped. On BOOX this reclaims the single **process-global** raw-drawing
+     * pipeline WITHOUT depending on the window-focus event (which is unreliable on e-ink):
+     * it reopens the pipeline if it was released, restarts it if another drawing screen claimed it
+     * while we were away (e.g. a translucent scratch pad / sticky note overlay), or just re-enables
+     * input if we still own a live session. Generic devices: defaults to [enableDrawing].
+     */
+    fun resumeDrawing() { enableDrawing() }
+
+    /**
+     * Called by the outgoing screen immediately before it launches (and finishes into) ANOTHER
+     * drawing screen, so the shared pen pipeline is released cleanly BEFORE the successor opens its
+     * own. On BOOX this closes this view's raw-drawing session while it still owns the global
+     * pipeline — preventing a dangling session and giving the successor a clean claim, instead of
+     * relying on the ownership guard to defuse a late close in onDestroy. Generic devices: no-op.
+     */
+    fun releaseForHandoff() {}
+
     fun resetOverlay() {}
 
     // Release the EPD writing overlay so the next screen refresh shows toolbar changes.

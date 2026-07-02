@@ -1168,7 +1168,7 @@ class StickyNoteEditorActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
-        drawingView.enableDrawing()
+        drawingView.resumeDrawing()
         updateLassoButtonIcon()
     }
 

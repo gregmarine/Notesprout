@@ -48,9 +48,17 @@
 **setTemplate() EPD handoff:**
 - `setRawDrawingRenderEnabled(false)` → `redrawCanvas()` → `EpdController.handwritingRepaint()` → `setRawDrawingEnabled(true)`. Without `handwritingRepaint`, the template change is invisible on e-ink.
 
+**Process-global pen ownership (cross-activity handoff):**
+- The BOOX raw-drawing pipeline (`TouchHelper` → `EpdController` raw input) is a **single process-global hardware resource** — only one `OnyxNotebookView` can own it at a time, even though every drawing host (notebook, calendar, day-detail, scratch pad, sticky note) builds its own view + `TouchHelper`. All hosts are `standard`-launch Activities, so **two live drawing views coexist during any transition.**
+- **The hazard:** Android runs the incoming screen's `openRawDrawing()` *before* the outgoing screen's `onDestroy → closeRawDrawing()`. The outgoing view's late close then tears down the pipeline the incoming view just claimed → the canvas silently stops accepting the stylus until a focus cycle re-arms it. Seen when switching calendar↔notebook, notebook↔notebook (recents/link), moving/copying pages, or closing a scratch-pad/sticky overlay. Intermittent because the incoming open is async (layout/focus-driven) while the outgoing close is synchronous in `onDestroy`.
+- **Ownership guard (`OnyxNotebookView.penOwner`, companion `@Volatile`):** `openRawDrawing()` sets `penOwner = this`; both close sites (`onDetachedFromWindow`, `releaseResources`) route through `closeRawDrawingIfOwner()`, which calls `touchHelper.closeRawDrawing()` **only when `penOwner === this`** and otherwise skips (dropping local `isSetup` only). A superseded view can never close the live view's session. All access is main-thread — it is purely an ordering guard, no locking. This is the backbone; it makes every teardown ordering safe on its own.
+- **Focus-independent reclaim (`resumeDrawing()`):** hosts call this from `onResume` (**not** `enableDrawing()`) so the surviving screen reclaims the pipeline without depending on the BOOX-flaky `onWindowFocusChanged(true)` event — reopen if released, restart if superseded (an overlay took it), else just re-enable. DayDetail also calls it when entering **Note** mode (`setViewMode`).
+- **Clean handoff (`releaseForHandoff()`):** the opaque "open another drawing screen and finish" paths — calendar/day-detail → notebook (paste/send), notebook → notebook (recents-switch / link-follow), encrypt/decrypt reopen — call this immediately before `startActivity` so the outgoing view closes its session *while still the owner*, leaving no dangling raw-input session. The ownership guard remains the safety net for paths that don't (translucent overlays, backgrounding).
+- **Diagnostics (`EPD_TIMING`):** `PEN_OWNER_CLAIMED`, `CLOSE_RAW_DRAWING_SKIPPED reason=notOwner` (guard catching a would-be clobber), `RESUME_DRAWING`, `RELEASE_FOR_HANDOFF`.
+
 ## Tool-State Invariants (OnyxNotebookView)
 
-When a Dialog is shown over NotebookActivity, focus changes trigger `onWindowFocusChanged(false)` → `setRawDrawingEnabled(false)`. On return: `onWindowFocusChanged(true)` → `openRawDrawing()`. Also triggered by `onResume()` → `enableDrawing()`.
+When a Dialog is shown over NotebookActivity, focus changes trigger `onWindowFocusChanged(false)` → `setRawDrawingEnabled(false)`. On return: `onWindowFocusChanged(true)` → `openRawDrawing()`. Also triggered by `onResume()` → `resumeDrawing()` (which reclaims the process-global pen pipeline — see the pen-ownership rule above).
 
 | Active tool | `setRawDrawingEnabled` | `setRawDrawingRenderEnabled` |
 |---|---|---|

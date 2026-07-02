@@ -503,7 +503,9 @@ class DayDetailActivity : AppCompatActivity() {
         }
         // The pen layer follows the mode: armed only in Note, fully off in Notebooks/History so a
         // stray pen touch can't be captured (invisibly) under the hidden card grid / read-only note.
-        if (isNote) drawingView.enableDrawing() else drawingView.disableDrawing()
+        // resumeDrawing (not enableDrawing) so entering Note reclaims the global pen pipeline if a
+        // scratch pad / sticky overlay took it while we were in another view mode.
+        if (isNote) drawingView.resumeDrawing() else drawingView.disableDrawing()
         drawingView.releaseRender()
     }
 
@@ -1575,6 +1577,10 @@ class DayDetailActivity : AppCompatActivity() {
 
     private fun openNotebookWithPaste(destId: String, destName: String, content: NotesproutClipboard.ClipboardContent) {
         CalendarTransfer.pending = content
+        // Hand the shared BOOX pen pipeline to the destination notebook cleanly before it opens its
+        // own — otherwise this view's late onDestroy close is merely skipped by the ownership guard,
+        // leaving a dangling raw-input session.
+        drawingView.releaseForHandoff()
         startActivity(
             Intent(this, NotebookActivity::class.java)
                 .putExtra(NotebookActivity.EXTRA_NOTEBOOK_ID, destId)
@@ -2076,7 +2082,7 @@ class DayDetailActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
-        if (viewMode == ViewMode.NOTE) drawingView.enableDrawing()
+        if (viewMode == ViewMode.NOTE) drawingView.resumeDrawing()
         // Returning from an opened notebook: refresh the card grid (it may have new activity) but
         // keep the reader on the same page. History▸Notes is a static bitmap — nothing to refresh.
         else if (!(viewMode == ViewMode.HISTORY && historySub == HistSub.NOTES)) renderList(resetPage = false)

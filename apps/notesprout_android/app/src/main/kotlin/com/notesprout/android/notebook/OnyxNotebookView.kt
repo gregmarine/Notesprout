@@ -51,6 +51,25 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
         private const val ERASER_RADIUS_PX = 15f
         private const val ERASE_REDRAW_INTERVAL_MS = 60L
         private const val LASSO_REFRESH_INTERVAL_MS = 60L
+
+        /**
+         * Process-global owner of the single Onyx raw-drawing pipeline.
+         *
+         * The BOOX pen layer (`TouchHelper` → `EpdController` raw input) is a **process-global
+         * hardware resource**: only one surface can own it at a time, even though each
+         * [OnyxNotebookView] holds its own [TouchHelper]. When screen A launches screen B and
+         * finishes, Android runs B's `openRawDrawing()` *before* A's `onDestroy →
+         * closeRawDrawing()`. A's late close would then tear down the pipeline **B** just claimed,
+         * leaving the visible screen unable to accept stylus input until a focus cycle re-arms it —
+         * the "canvas goes dead after switching screens / moving-copying pages" bug.
+         *
+         * Every successful [openRawDrawing] claims ownership here; every close routes through
+         * [closeRawDrawingIfOwner], which skips the global close when this view is no longer the
+         * owner. All access is on the main thread (view + lifecycle callbacks); [Volatile] is
+         * defensive belt-and-suspenders.
+         */
+        @Volatile
+        private var penOwner: OnyxNotebookView? = null
     }
 
     // ── EPD diagnostic helpers ───────────────────────────────────────────────
@@ -1641,11 +1660,29 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
     override fun onDetachedFromWindow() {
         epd { "ON_DETACHED_FROM_WINDOW isSetup=$isSetup" }
         super.onDetachedFromWindow()
-        if (isSetup) {
+        closeRawDrawingIfOwner("onDetachedFromWindow")
+    }
+
+    /**
+     * Close the global Onyx raw-drawing pipeline — but ONLY if this view still owns it.
+     *
+     * The pipeline is a single process-global resource (see [penOwner]). If a newer
+     * [OnyxNotebookView] has already claimed it (`penOwner !== this`), calling
+     * [TouchHelper.closeRawDrawing] here would tear down THAT view's live pen session — the
+     * "canvas goes dead after switching screens" bug. In that case we skip the global close and
+     * only drop our own [isSetup] flag; the current owner manages its own teardown. When we ARE the
+     * owner we close cleanly and relinquish ownership. Idempotent via the [isSetup] guard.
+     */
+    private fun closeRawDrawingIfOwner(caller: String) {
+        if (!isSetup) return
+        if (penOwner === this) {
             touchHelper.closeRawDrawing()
-            epd { "CLOSE_RAW_DRAWING caller=onDetachedFromWindow" }
-            isSetup = false
+            penOwner = null
+            epd { "CLOSE_RAW_DRAWING caller=$caller owner=self" }
+        } else {
+            epd { "CLOSE_RAW_DRAWING_SKIPPED caller=$caller reason=notOwner" }
         }
+        isSetup = false
     }
 
     // ── NotebookView interface ────────────────────────────────────────────────
@@ -1686,6 +1723,29 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
             touchHelper.setRawDrawingEnabled(false)
             epd { "RAW_DRAWING_ENABLED false caller=disableDrawing" }
         }
+    }
+
+    override fun resumeDrawing() {
+        epd { "RESUME_DRAWING isSetup=$isSetup isOwner=${penOwner === this} size=${width}x${height}" }
+        when {
+            // Pipeline was released (our onStop/handoff closed it, or it was never opened): reopen
+            // once the view is laid out. Before layout, openRawDrawing() runs from the global-layout
+            // listener in onAttachedToWindow instead.
+            !isSetup -> if (width > 0 && height > 0) openRawDrawing()
+            // Still marked open, but another drawing screen claimed the global pipeline while we were
+            // paused (typically a translucent scratch pad / sticky note overlay). onResume runs
+            // before that overlay's onDestroy, so the pipeline is still live here — openRawDrawing()
+            // restarts it and re-claims ownership; the overlay's later close is then skipped by the
+            // ownership guard. This reclaim is focus-event-independent (the BOOX-flaky path).
+            penOwner !== this -> openRawDrawing()
+            // We already own a live session: just re-enable input — lightweight, no EPD churn.
+            else -> enableDrawing()
+        }
+    }
+
+    override fun releaseForHandoff() {
+        epd { "RELEASE_FOR_HANDOFF isSetup=$isSetup isOwner=${penOwner === this}" }
+        closeRawDrawingIfOwner("releaseForHandoff")
     }
 
     override fun releaseRender() {
@@ -2460,11 +2520,7 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
 
     override fun releaseResources() {
         epd { "RELEASE_RESOURCES isSetup=$isSetup" }
-        if (isSetup) {
-            touchHelper.closeRawDrawing()
-            epd { "CLOSE_RAW_DRAWING caller=releaseResources" }
-            isSetup = false
-        }
+        closeRawDrawingIfOwner("releaseResources")
         renderBitmap?.recycle()
         renderBitmap = null
         renderCanvas = null
@@ -2512,6 +2568,10 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
             touchHelper.restartRawDrawing()
             epd { "RESTART_RAW_DRAWING caller=openRawDrawing_alreadySetup" }
         }
+        // This view now owns the single process-global raw-drawing pipeline (see [penOwner]).
+        // Any older view's pending close is neutralised by [closeRawDrawingIfOwner].
+        penOwner = this
+        epd { "PEN_OWNER_CLAIMED caller=openRawDrawing" }
         if (!isLassoMode && !isLassoEraserMode && !isTextPlacementMode) {
             touchHelper.setRawDrawingEnabled(true)
             epd { "RAW_DRAWING_ENABLED true caller=openRawDrawing" }

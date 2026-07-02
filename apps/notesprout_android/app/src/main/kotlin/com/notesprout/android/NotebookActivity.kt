@@ -2381,7 +2381,7 @@ class NotebookActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
-        drawingView.enableDrawing()
+        drawingView.resumeDrawing()
         updateLassoButtonIcon()
     }
 
@@ -3720,6 +3720,8 @@ class NotebookActivity : AppCompatActivity() {
             withContext(Dispatchers.IO) { SoilMigrator.encryptInPlace(file, key) }
             withContext(Dispatchers.IO) { indexRepo.setEncryptionState(nbId, encrypted = true, keyScope = scope) }
             dialog.dismiss()
+            // Clean pen-pipeline handoff before reopening this notebook under its new encryption state.
+            drawingView.releaseForHandoff()
             startActivity(
                 Intent(this, NotebookActivity::class.java).apply {
                     putExtra(EXTRA_NOTEBOOK_ID,   nbId)
@@ -3756,6 +3758,8 @@ class NotebookActivity : AppCompatActivity() {
             withContext(Dispatchers.IO) { SoilMigrator.decryptInPlace(file, key) }
             withContext(Dispatchers.IO) { indexRepo.setEncryptionState(nbId, encrypted = false, keyScope = null) }
             dialog.dismiss()
+            // Clean pen-pipeline handoff before reopening this notebook under its new encryption state.
+            drawingView.releaseForHandoff()
             startActivity(
                 Intent(this, NotebookActivity::class.java).apply {
                     putExtra(EXTRA_NOTEBOOK_ID,   nbId)
@@ -3793,6 +3797,9 @@ class NotebookActivity : AppCompatActivity() {
 
             // Seal the current notebook (records close), then open the selected one directly.
             closeNotebook()
+            // Clean pen-pipeline handoff before the destination notebook opens (the ownership guard
+            // still covers the late onDestroy close as a safety net).
+            drawingView.releaseForHandoff()
             startActivity(
                 Intent(this@NotebookActivity, NotebookActivity::class.java).apply {
                     putExtra(EXTRA_NOTEBOOK_ID,   entity.id)
@@ -3875,6 +3882,9 @@ class NotebookActivity : AppCompatActivity() {
             AppStateManager.save(this@NotebookActivity, AppViewState(entity.parentId, false, lastOpenedNotebookId = entity.id))
 
             closeNotebook()
+            // Clean pen-pipeline handoff before the linked notebook opens (the ownership guard still
+            // covers the late onDestroy close as a safety net).
+            drawingView.releaseForHandoff()
             startActivity(
                 Intent(this@NotebookActivity, NotebookActivity::class.java).apply {
                     putExtra(EXTRA_NOTEBOOK_ID,   entity.id)
