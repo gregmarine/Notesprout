@@ -40,6 +40,11 @@ interface HandwritingRecognizer : AutoCloseable {
      * into the model for per-line context chaining — the single biggest free accuracy win
      * for page-scale recognition. Suspends until the model returns.
      *
+     * [lineHeightHint], when > 0, is used as the recognizer's writing-area height instead of the
+     * line's tight [bounds] height. ML Kit interprets glyph meaning by size relative to the writing
+     * area, so a page-consistent line-height (from [StrokeSegmenter.PageLayout.medianLineHeight])
+     * is a better reference than a bbox that shrinks on lines with no ascenders/descenders.
+     *
      * Returns the recognized string, or [FALLBACK_TEXT] if recognition fails or the
      * recognizer is not ready. Safe to call off the main thread.
      *
@@ -49,6 +54,7 @@ interface HandwritingRecognizer : AutoCloseable {
         strokes: List<LiveStroke>,
         bounds: RectF,
         preContext: String,
+        lineHeightHint: Float = 0f,
     ): String
 
     companion object {

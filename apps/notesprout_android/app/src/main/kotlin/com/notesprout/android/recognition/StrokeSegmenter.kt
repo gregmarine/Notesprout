@@ -52,8 +52,16 @@ object StrokeSegmenter {
             }
     }
 
-    /** Whole-page layout, top → bottom. */
-    data class PageLayout(val paragraphs: List<Paragraph>)
+    /**
+     * Whole-page layout, top → bottom.
+     *
+     * [medianLineHeight] is the page's typical single-line height (page px), 0 when there is no
+     * writing. Hand this to the recognizer as the `WritingArea` height: ML Kit judges a glyph's
+     * meaning by its size relative to the writing area (lowercase "o" vs "O", comma vs slash), so a
+     * *consistent* line-height reference beats each line's own tight bounding box — a line of only
+     * short letters would otherwise report a too-small area and skew toward tall/capital glyphs.
+     */
+    data class PageLayout(val paragraphs: List<Paragraph>, val medianLineHeight: Float = 0f)
 
     fun segment(strokes: List<LiveStroke>): PageLayout {
         val usable = strokes.filter { it.points.size >= 2 && it.boundingBox.height() >= 0f }
@@ -159,7 +167,7 @@ object StrokeSegmenter {
             "segment: ${usable.size} strokes → ${segments.size} lines / ${paragraphs.size} paras " +
                 "(medStrokeH=${medianStrokeH.roundToInt()}, peak=$peak, thr=$threshold, bands=${bands.size})"
         }
-        return PageLayout(paragraphs)
+        return PageLayout(paragraphs, medianLineH)
     }
 
     /** Build a [Segment] from strokes: order left→right and union their bounds. */

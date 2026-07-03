@@ -121,6 +121,7 @@ class MlKitHandwritingRecognizer : HandwritingRecognizer {
         strokes: List<LiveStroke>,
         bounds: RectF,
         preContext: String,
+        lineHeightHint: Float,
     ): String {
         val r = recognizer
         if (!modelReady || r == null || strokes.isEmpty()) {
@@ -136,7 +137,10 @@ class MlKitHandwritingRecognizer : HandwritingRecognizer {
             inkBuilder.addStroke(strokeBuilder.build())
         }
 
-        val writingArea = WritingArea(bounds.width().coerceAtLeast(1f), bounds.height().coerceAtLeast(1f))
+        // Prefer a page-consistent line height as the writing-area reference (see interface doc);
+        // fall back to the line's own bbox height when no hint is supplied.
+        val areaHeight = (if (lineHeightHint > 0f) lineHeightHint else bounds.height()).coerceAtLeast(1f)
+        val writingArea = WritingArea(bounds.width().coerceAtLeast(1f), areaHeight)
         val recognitionContext = RecognitionContext.builder()
             .setPreContext(preContext.takeLast(MAX_PRECONTEXT_CHARS))
             .setWritingArea(writingArea)
@@ -164,7 +168,8 @@ class MlKitHandwritingRecognizer : HandwritingRecognizer {
 
     companion object {
         private const val TAG = "MlKitHwRecognizer"
-        /** Cap the pre-context handed to ML Kit — only the tail matters, and long strings hurt latency. */
-        private const val MAX_PRECONTEXT_CHARS = 40
+        /** Cap the pre-context handed to ML Kit — only the tail matters, and long strings hurt latency.
+         *  Google's guidance: as many chars as possible up to ~20; beyond that gives no benefit. */
+        private const val MAX_PRECONTEXT_CHARS = 20
     }
 }

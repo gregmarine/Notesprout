@@ -49,11 +49,12 @@ class PageTextRecognizer(private val hwr: HandwritingRecognizer) {
 
         // 1. Handwriting strokes → segmented, per-line-recognized paragraphs (context-chained).
         val layout = StrokeSegmenter.segment(content.strokes)
+        val lineHeight = layout.medianLineHeight
         var pre = ""
         for (para in layout.paragraphs) {
             val lines = mutableListOf<String>()
             for (line in para.lines) {
-                val t = hwr.recognizeSegment(line.strokes, line.bounds, pre)
+                val t = hwr.recognizeSegment(line.strokes, line.bounds, pre, lineHeight)
                 // Never log the recognized text itself (privacy rule) — only structure/length.
                 Slog.d(TAG) { "line ${line.strokes.size} strokes @${line.bounds.top.toInt()} → ${t.length} chars" }
                 if (t.isNotBlank() && t != HandwritingRecognizer.FALLBACK_TEXT) {

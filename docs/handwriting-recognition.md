@@ -22,6 +22,13 @@ real-time background recognition (RTR) mode, and an export-time recognition path
 >   on real journal handwriting (769 strokes → 19 lines / 5 paras, near-perfect transcription).
 > - Segmenter constants: `BAND_COVERAGE_FRAC = 0.15`, `MERGE_OVERLAP_FRAC = 0.4`,
 >   `FRAGMENT_MAX_STROKES = 3`, `PARA_GAP_FRAC = 0.9` (the "noticeable gap = new paragraph" rule).
+> - **ML Kit tuning (per Google guidance, 2026-07-03):** `recognizeSegment` sets the `WritingArea`
+>   height from the page's **consistent** median line height (`PageLayout.medianLineHeight`), not
+>   each line's tight ink bbox — ML Kit interprets glyph size *relative to the writing area* (o vs O,
+>   comma vs slash), so a line of only short letters no longer reports a too-small area and skews
+>   toward tall/capital readings. `preContext` cap lowered 40 → 20 chars (Google's stated optimum;
+>   more gives no benefit and adds latency). **Measured effect on real handwriting: negligible** —
+>   kept because it's correct usage and free, but it does not close the gap with cloud vision models.
 > - Remaining errors are ML Kit character-level misreads (same class as the single-shot convert
 >   tool), not pipeline issues. `Slog.d` traces log stroke/line **counts only — never the
 >   recognized text** (privacy rule).
