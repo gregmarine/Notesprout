@@ -38,7 +38,7 @@ import androidx.core.view.WindowInsetsControllerCompat
 import androidx.core.view.doOnLayout
 import androidx.lifecycle.lifecycleScope
 import com.notesprout.android.data.NotebookMetaStore
-import com.notesprout.android.data.StrokeCompactor
+import com.notesprout.android.data.NotebookCompactor
 import androidx.room.withTransaction
 import com.notesprout.android.core.BitmapDecode
 import com.notesprout.android.core.Slog
@@ -3942,14 +3942,14 @@ class NotebookActivity : AppCompatActivity() {
         // and can never be restored, so they are dead weight. Current-session soft-deletes
         // (deletedAt >= sessionStart) are kept for undo/redo safety on abnormal teardown.
         db.notebookDao().hardDeleteOldSoftDeleted(before = sessionStart)
-        // One-time legacy-ts compaction: strip dead per-point timestamps from stored strokes
-        // and VACUUM to reclaim the space (~29% on heavy notebooks). Self-limiting — after the
-        // first pass strokeRowsWithLegacyTimestamp() is empty, so this is a cheap scan on later
-        // seals. touchNotebook() below already flags the shrunk file for the next backup.
+        // One-time transitional compaction: strip dead per-point ts AND re-encode PNG/lossless-WEBP
+        // images (snapshots/templates/covers) to WEBP q100, then VACUUM to reclaim the space.
+        // Self-limiting — once a notebook is converted the scans find nothing, so this is a cheap
+        // scan on later seals. touchNotebook() below already flags the shrunk file for backup.
         runCatching {
-            val stripped = StrokeCompactor.compact(db)
-            if (stripped > 0) Slog.d(TAG) { "ts-compaction sealed: stripped $stripped stroke rows + VACUUM" }
-        }.onFailure { Slog.d(TAG) { "ts-compaction failed: ${it.message}" } }
+            val r = NotebookCompactor.compact(db)
+            if (r.changed) Slog.d(TAG) { "compaction sealed: ${r.tsRows} ts rows + ${r.imageRows} images → WEBP + VACUUM" }
+        }.onFailure { Slog.d(TAG) { "compaction failed: ${it.message}" } }
         db.openHelper.writableDatabase.apply {
             query("PRAGMA incremental_vacuum").use { it.moveToFirst() }
             query("PRAGMA wal_checkpoint(TRUNCATE)").use { it.moveToFirst() }

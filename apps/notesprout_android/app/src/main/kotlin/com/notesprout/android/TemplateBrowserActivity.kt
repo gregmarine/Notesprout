@@ -33,6 +33,7 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.lifecycleScope
 import com.notesprout.android.core.BitmapDecode
+import com.notesprout.android.core.ImageCodec
 import com.notesprout.android.core.Slog
 import com.notesprout.android.data.index.IndexRepository
 import com.notesprout.android.data.index.NotesproutIndex
@@ -693,7 +694,9 @@ class TemplateBrowserActivity : AppCompatActivity() {
                     val w = boundsOpts.outWidth
                     val h = boundsOpts.outHeight
                     if (w <= 0 || h <= 0) throw IllegalStateException("Not a valid image")
-                    val base64 = Base64.encodeToString(bytes, Base64.NO_WRAP)
+                    // Store as lossless WEBP; fall back to the original bytes if it can't be decoded.
+                    val base64 = ImageCodec.transcodeBytesToWebpBase64(bytes)
+                        ?: Base64.encodeToString(bytes, Base64.NO_WRAP)
                     val siblings = repository.getTemplates(destFolderId)
                     val finalName = makeUniqueName(name, siblings.map { it.name })
                     repository.createTemplate(finalName, destFolderId, w, h, base64)
@@ -1830,8 +1833,9 @@ class TemplateBrowserActivity : AppCompatActivity() {
                     val h = boundsOpts.outHeight
                     if (w <= 0 || h <= 0) throw IllegalStateException("Not a valid image")
 
-                    // 4. Base64-encode NO_WRAP.
-                    val base64 = Base64.encodeToString(bytes, Base64.NO_WRAP)
+                    // 4. Encode as lossless WEBP base64; fall back to original bytes if undecodable.
+                    val base64 = ImageCodec.transcodeBytesToWebpBase64(bytes)
+                        ?: Base64.encodeToString(bytes, Base64.NO_WRAP)
 
                     // 5. Uniqueness check — append (2), (3), … if needed.
                     val siblings = repository.getTemplates(currentParentId)

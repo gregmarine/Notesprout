@@ -35,7 +35,7 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.lifecycleScope
 import com.notesprout.android.crypto.EncryptionInfo
 import com.notesprout.android.crypto.KeyResolver
-import com.notesprout.android.data.StrokeCompactor
+import com.notesprout.android.data.NotebookCompactor
 import com.notesprout.android.crypto.KeyScope
 import com.notesprout.android.crypto.KeySession
 import com.notesprout.android.crypto.PassphraseCache
@@ -2248,9 +2248,10 @@ class MainActivity : AppCompatActivity() {
         AlertDialog.Builder(this)
             .setTitle("Compact Notebooks")
             .setMessage(
-                "Rewrites stored notebooks to drop legacy per-point timestamps and reclaims the " +
-                "freed space. Unencrypted and globally-unlocked notebooks are done now; " +
-                "notebook-scoped encrypted ones compact themselves next time you open them."
+                "Rewrites stored notebooks and the index to drop legacy per-point timestamps and " +
+                "re-encode images as WEBP, reclaiming the freed space. Unencrypted and " +
+                "globally-unlocked notebooks are done now; notebook-scoped encrypted ones compact " +
+                "themselves next time you open them."
             )
             .setPositiveButton("Compact") { _, _ -> lifecycleScope.launch { runCompactNotebooksSweep() } }
             .setNegativeButton("Cancel", null)
@@ -2259,9 +2260,10 @@ class MainActivity : AppCompatActivity() {
 
     /**
      * One-off bulk compaction: opens every notebook that can be unlocked without a prompt
-     * (plaintext or GLOBAL scope with a cached passphrase), strips legacy stroke `ts`, VACUUMs,
-     * and flags the shrunk file for the next backup. NOTEBOOK-scope encrypted notebooks are
-     * skipped — they self-compact at seal the next time they are opened.
+     * (plaintext or GLOBAL scope with a cached passphrase), strips legacy stroke `ts`, transcodes
+     * PNG images to WEBP, VACUUMs, and flags the shrunk file for the next backup. Then compacts the
+     * global index the same way. NOTEBOOK-scope encrypted notebooks are skipped — they self-compact
+     * at seal the next time they are opened.
      */
     private suspend fun runCompactNotebooksSweep() {
         val tvMessage = android.widget.TextView(this).apply {
@@ -2282,6 +2284,7 @@ class MainActivity : AppCompatActivity() {
         var bytesFreed = 0L
         var skippedEncrypted = 0
         var errors = 0
+        var indexRows = 0
 
         withContext(Dispatchers.IO) {
             val notebooks = repository.getAllNotebooks()
@@ -2301,8 +2304,8 @@ class MainActivity : AppCompatActivity() {
                     val builder = SoilDatabase.builder(this@MainActivity, file.absolutePath)
                     if (key != null) builder.openHelperFactory(com.notesprout.android.crypto.SoilCrypto.roomFactory(key))
                     val db = builder.build()
-                    val stripped = try { StrokeCompactor.compact(db) } finally { db.close() }
-                    if (stripped > 0) {
+                    val result = try { NotebookCompactor.compact(db) } finally { db.close() }
+                    if (result.changed) {
                         compacted++
                         bytesFreed += (before - file.length()).coerceAtLeast(0L)
                         repository.touchNotebook(nb.id)
@@ -2310,11 +2313,17 @@ class MainActivity : AppCompatActivity() {
                 }.onFailure { errors++; Slog.d("MainActivity") { "compact sweep failed for ${nb.id}: ${it.message}" } }
                 withContext(Dispatchers.Main) { tvMessage.text = "Compacting notebooks…\n${i + 1} / ${notebooks.size}" }
             }
+            // Finally, transcode the global index's own PNG images (template library + covers).
+            withContext(Dispatchers.Main) { tvMessage.text = "Compacting index…" }
+            runCatching { indexRows = NotebookCompactor.compactIndex() }
+                .onFailure { errors++; Slog.d("MainActivity") { "index compaction failed: ${it.message}" } }
         }
 
         dialog.dismiss()
         val freedMb = "%.1f".format(bytesFreed / (1024.0 * 1024.0))
         val summary = StringBuilder("Compacted $compacted notebook${if (compacted == 1) "" else "s"} — freed $freedMb MB.")
+        if (indexRows > 0)
+            summary.append("\n\nConverted $indexRows index image${if (indexRows == 1) "" else "s"} to WEBP.")
         if (skippedEncrypted > 0)
             summary.append("\n\n$skippedEncrypted encrypted notebook${if (skippedEncrypted == 1) "" else "s"} skipped — they compact when you open them.")
         if (errors > 0)

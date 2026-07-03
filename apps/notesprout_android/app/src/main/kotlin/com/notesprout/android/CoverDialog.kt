@@ -15,6 +15,7 @@ import androidx.appcompat.widget.AppCompatImageView
 import androidx.appcompat.widget.AppCompatTextView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.LifecycleCoroutineScope
+import com.notesprout.android.core.ImageCodec
 import com.notesprout.android.data.BoundingBox
 import com.notesprout.android.data.CoverObject
 import com.notesprout.android.data.NotebookMetadata
@@ -389,11 +390,10 @@ class CoverDialog(
                 }
             }
 
-            val out = ByteArrayOutputStream()
-            scaled.compress(Bitmap.CompressFormat.PNG, 100, out)
+            val b64 = ImageCodec.encodeBase64(scaled)
             if (scaled !== sampled) scaled.recycle()
 
-            Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP)
+            b64
         } catch (_: Exception) {
             null
         }

@@ -86,7 +86,7 @@ The reusable **template library** lives in the global index — not the filesyst
   ```kotlin
   data class TemplateObject(val width: Int = 0, val height: Int = 0, val image: String = "")
   ```
-  `image` is the full-resolution PNG as base64 (`NO_WRAP`), stored in `ObjectEntity.data` — same pattern
+  `image` is the full-resolution image as base64 (`NO_WRAP`), stored in `ObjectEntity.data` — same pattern
   as `NotebookObject.snapshot`. The template **name lives in `ObjectEntity.name`** (the top-level
   column), like notebooks/folders — *not* inside the JSON. (Contrast the `.soil` `TemplateData`, which
   keeps name in JSON; that class is unchanged and still used inside `.soil`.)
@@ -143,7 +143,13 @@ The reusable **template library** lives in the global index — not the filesyst
 - **One file per notebook.** Each `.soil` file is a self-contained SQLite database.
 - **Single table.** Everything — pages, layers, strokes, images, text, metadata — is a row in one `notebook` table.
 - **Everything is an object.** No type special-casing at the schema level — type behavior lives in Kotlin.
-- **Assets are base64 strings.** No external files. Images stored inline in the `data` TEXT column.
+- **Assets are base64 strings.** No external files. Images stored inline in the `data` TEXT column as
+  **WEBP q100** (page snapshots, covers, templates) — encoded via `core/ImageCodec`. q100 lossy is
+  used deliberately: on transparent-alpha ink content it measured ~47% smaller than PNG and visually
+  lossless, whereas Android's `WEBP_LOSSLESS` bloats to 2–6× PNG. Legacy blobs are PNG (or the earlier
+  mistaken lossless-WEBP); decode is format-agnostic (`BitmapFactory` reads the header), so all coexist
+  with no format flag. A transitional sweep re-encodes old PNG/lossless-WEBP in place (see
+  `NotebookCompactor`, BACKLOG "TEMP").
 - **Decode embedded images bounded.** Route all embedded-asset decodes through `core/BitmapDecode.decodeSampled(bytes, reqW, reqH)` — never `BitmapFactory.decodeByteArray` directly on `.soil`-sourced bytes (OOM risk on e-ink). `MAX_DIMENSION=4096` fallback when there's no natural target.
 - **SQLite must stay clean.** A file browser should show only `.soil` files — no WAL/SHM/journal sidecars.
   - `PRAGMA journal_mode = WAL`; `PRAGMA wal_autocheckpoint = 100`; `PRAGMA auto_vacuum = INCREMENTAL`

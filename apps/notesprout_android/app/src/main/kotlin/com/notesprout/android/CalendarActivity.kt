@@ -33,6 +33,7 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.core.view.doOnLayout
 import androidx.lifecycle.lifecycleScope
+import com.notesprout.android.core.ImageCodec
 import com.notesprout.android.core.isBooxDevice
 import com.notesprout.android.crypto.KeyResolver
 import com.notesprout.android.crypto.KeySession
@@ -1407,11 +1408,8 @@ class CalendarActivity : AppCompatActivity() {
         }
     }
 
-    private fun encodePngBase64(bitmap: Bitmap): String {
-        val baos = ByteArrayOutputStream()
-        bitmap.compress(Bitmap.CompressFormat.PNG, 100, baos)
-        return Base64.encodeToString(baos.toByteArray(), Base64.NO_WRAP)
-    }
+    private fun encodeSnapshotBase64(bitmap: Bitmap): String =
+        ImageCodec.encodeBase64(bitmap)
 
     private fun performExport(
         destId: String, destName: String, destPath: String, destPass: String?,
@@ -1447,7 +1445,7 @@ class CalendarActivity : AppCompatActivity() {
                         drawBitmap(grid, 0f, topOffsetF, null)
                     }
                     grid.recycle()
-                    val s = encodePngBase64(page)
+                    val s = encodeSnapshotBase64(page)
                     page.recycle()
                     s
                 }

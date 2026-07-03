@@ -25,6 +25,7 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.lifecycleScope
+import com.notesprout.android.core.ImageCodec
 import com.notesprout.android.core.Slog
 import com.notesprout.android.crypto.KeyResolver
 import com.notesprout.android.crypto.KeySession
@@ -1870,7 +1871,8 @@ class PageIndexActivity : AppCompatActivity() {
                             android.util.Log.w("PageIndexActivity", "Template import: invalid bounds for ${file.name}")
                             continue
                         }
-                        val base64 = Base64.encodeToString(bytes, Base64.NO_WRAP)
+                        val base64 = ImageCodec.transcodeBytesToWebpBase64(bytes)
+                            ?: Base64.encodeToString(bytes, Base64.NO_WRAP)
                         indexRepo.createTemplate(finalName, parentId, w, h, base64)
                         Slog.d("PageIndexActivity") { "Imported template '$finalName' (${w}x${h})" }
                         count++

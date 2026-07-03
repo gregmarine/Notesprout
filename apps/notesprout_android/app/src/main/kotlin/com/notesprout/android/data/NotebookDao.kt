@@ -317,24 +317,43 @@ interface NotebookDao {
     @Query("DELETE FROM notebook WHERE deletedAt IS NOT NULL AND deletedAt < :before")
     suspend fun hardDeleteOldSoftDeleted(before: Long)
 
-    // ── Legacy-ts compaction ──────────────────────────────────────────────────
+    // ── Transitional compaction (legacy-ts strip + PNG→WEBP transcode) ─────────
 
     /**
      * Every stroke row (regardless of soft-delete status) whose `data` still contains a
      * legacy per-point `"ts"`. The `LIKE` filter means already-compacted notebooks return
-     * an empty list cheaply, so [StrokeCompactor] can run on every seal without cost.
+     * an empty list cheaply, so [NotebookCompactor] can run on every seal without cost.
      */
     @Query("SELECT id, data FROM notebook WHERE type = 'stroke' AND data LIKE '%\"ts\":%'")
     suspend fun strokeRowsWithLegacyTimestamp(): List<StrokeRowData>
 
     /**
-     * Overwrite a stroke row's [data] WITHOUT touching [NotebookObject.updatedAt].
-     * Used only by [StrokeCompactor]: dropping dead `ts` is not a content edit, and bumping
-     * `updatedAt` would falsely invalidate the page snapshot (see [getMaxContentUpdatedAt]).
+     * Cheap header projection for every image-bearing row (page snapshot / embedded template /
+     * cover): id, type, and only the first 80 base64 chars of `data` (= 60 raw bytes — enough to
+     * read the PNG/WEBP magic and the WEBP codec chunk). [NotebookCompactor] decides from the head
+     * whether the row needs a WEBP re-encode, then pulls the full [imageDataForId] only for those,
+     * so already-converted notebooks do no heavy work. The 4000-char (3000-byte) window is generous
+     * enough to walk past a VP8X header + embedded ICC profile to the VP8L/VP8 codec chunk.
+     */
+    @Query("SELECT id, type, substr(data, 1, 4000) AS head FROM notebook WHERE type IN ('page', 'template', 'cover')")
+    suspend fun imageRowHeads(): List<ImageRowHead>
+
+    /** Full `data` for a single row — pulled only for rows [NotebookCompactor] decides to re-encode. */
+    @Query("SELECT data FROM notebook WHERE id = :id")
+    suspend fun imageDataForId(id: String): String?
+
+    /**
+     * Overwrite a row's [data] WITHOUT touching [NotebookObject.updatedAt].
+     * Used only by [NotebookCompactor]: stripping dead `ts` and re-encoding a snapshot to WEBP are
+     * not content edits, and bumping `updatedAt` would falsely invalidate the page snapshot
+     * (see [getMaxContentUpdatedAt]).
      */
     @Query("UPDATE notebook SET data = :data WHERE id = :id")
-    suspend fun rewriteStrokeDataKeepingTimestamp(id: String, data: String)
+    suspend fun rewriteObjectDataKeepingTimestamp(id: String, data: String)
 }
 
 /** Minimal id/data projection for [NotebookDao.strokeRowsWithLegacyTimestamp]. */
 data class StrokeRowData(val id: String, val data: String)
+
+/** id/type/base64-head projection for [NotebookDao.imageRowHeads] (type selects the image field). */
+data class ImageRowHead(val id: String, val type: String, val head: String)

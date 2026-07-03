@@ -16,23 +16,30 @@
 
 ---
 
-## TEMP — legacy-`ts` stroke compaction (remove after all my devices are compacted)
+## TEMP — legacy-`ts` + PNG→WEBP compaction (remove after all my devices are compacted)
 
 > Transitional single-user migration, **not** a permanent feature. New writes already omit the dead
-> per-point `ts` (see `StrokePoint.timestamp` / `LiveStroke.toStrokeData`); this backfills existing
-> `.soil` files (~29% smaller on heavy notebooks). Delete the whole path once every device I use has
-> been swept **and** the WEBP image change has landed (so the final pass does `ts` + WEBP in one go).
+> per-point `ts` (see `StrokePoint.timestamp` / `LiveStroke.toStrokeData`) and store images as WEBP
+> q100 (see `core/ImageCodec.kt`); this backfills existing `.soil` files **and** the `notesprout.db`
+> index. The image pass re-encodes both legacy PNG **and** the earlier mistaken lossless-WEBP blobs
+> (detected via `NotebookCompactor.needsWebpReencode`) to q100, skipping already-lossy rows. Delete
+> the whole compaction path once every device I use has been swept.
 
-- **Manual sweep** (the transitional UI to delete first): `btnCompact` in `activity_main.xml`,
-  `ic_compact.xml`, and `showCompactNotebooksDialog()` / `runCompactNotebooksSweep()` in `MainActivity`.
-- **Auto-at-close hook**: the `StrokeCompactor.compact(db)` call in `NotebookActivity.sealNotebook`.
-  Cheap and self-limiting (a `LIKE '%"ts":%'` scan once notebooks are clean) — safe to leave a while,
-  but it's part of the same transitional path.
-- **Core + DAO**: `data/StrokeCompactor.kt` and its two `NotebookDao` methods
-  (`strokeRowsWithLegacyTimestamp`, `rewriteStrokeDataKeepingTimestamp`) + `StrokeRowData`.
-- **Keep** `StrokePoint.timestamp` nullable — that schema change is permanent and correct.
-- Only `type='stroke'` rows are stripped; `ts` embedded in headings/text/links/sticky-notes is a small
-  tail left untouched. Fold it in here only if a future pass makes it worthwhile.
+- **Manual sweep** (the transitional UI to delete first): `btnCompact` in `activity_main.xml`
+  (all three variants), `ic_compact.xml`, and `showCompactNotebooksDialog()` /
+  `runCompactNotebooksSweep()` in `MainActivity`.
+- **Auto-at-close hook**: the `NotebookCompactor.compact(db)` call in `NotebookActivity.sealNotebook`.
+  Cheap and self-limiting (`LIKE '%"ts":%'` for ts; a 60-byte header check per image row once
+  notebooks are clean) — safe to leave a while, but it's part of the same transitional path.
+- **Core + DAO**: `data/NotebookCompactor.kt` (incl. `needsWebpReencode`); `NotebookDao`
+  `strokeRowsWithLegacyTimestamp` / `imageRowHeads` / `imageDataForId` /
+  `rewriteObjectDataKeepingTimestamp` (+ `StrokeRowData` / `ImageRowHead`); `ObjectDao`
+  `imageRowHeads` / `imageDataForId` / `rewriteObjectData` (+ `IndexImageHead`).
+- **Keep** `StrokePoint.timestamp` nullable and **keep** `core/ImageCodec.kt` — those (the schema
+  change and the WEBP encoder) are permanent and correct; only the backfill/compaction goes away.
+- Only `type='stroke'` rows are `ts`-stripped; images re-encoded are PNG + lossless-WEBP (lossy-WEBP
+  and JPEG covers left alone). `ts` embedded in headings/text/links/sticky-notes is a small untouched
+  tail; fold it in only if a future pass makes it worthwhile.
 
 ---
 

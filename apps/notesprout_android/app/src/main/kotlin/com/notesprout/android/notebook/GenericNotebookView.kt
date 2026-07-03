@@ -17,6 +17,7 @@ import android.util.TypedValue
 import android.graphics.Region
 import android.view.MotionEvent
 import android.view.View
+import com.notesprout.android.core.ImageCodec
 import com.notesprout.android.core.markdown.TextObjectRenderer
 import com.notesprout.android.data.HeadingStroke
 import com.notesprout.android.data.LineObject
@@ -1855,10 +1856,9 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
             for (i in 1 until points.size) path.lineTo(points[i].x, points[i].y)
             snapshotCanvas.drawPath(path, strokePaint)
         }
-        val stream = ByteArrayOutputStream()
-        bmp.compress(Bitmap.CompressFormat.PNG, 100, stream)
+        val b64 = ImageCodec.encodeBase64(bmp)
         bmp.recycle()
-        return Base64.encodeToString(stream.toByteArray(), Base64.DEFAULT)
+        return b64
     }
 
     /**
