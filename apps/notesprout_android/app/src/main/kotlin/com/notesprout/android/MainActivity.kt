@@ -2243,6 +2243,20 @@ class MainActivity : AppCompatActivity() {
 
     // ── TEMP: legacy-ts compaction sweep (remove after all devices compacted — see BACKLOG.md) ──
 
+    /**
+     * The explicit cover image (base64) for an open [db], or null if none is set. Looks the cover
+     * row up by the .soil notebook-row id — which differs from the global id on imported/copied
+     * notebooks, the case the grid-cover bug hinges on.
+     */
+    private suspend fun readCoverImageIfSet(db: SoilDatabase): String? {
+        val nbObj = db.notebookDao().getNotebookObject() ?: return null
+        val meta = try { NotebookMetadata.fromJson(nbObj.id, nbObj.data) } catch (_: Exception) { return null }
+        if (meta.cover.isEmpty()) return null
+        return db.notebookDao().getCoverForNotebook(nbObj.id)
+            ?.let { com.notesprout.android.data.CoverObject.fromJson(it.data)?.image }
+            ?.takeIf { it.isNotEmpty() }
+    }
+
     /** Confirmation for the one-off "compact my whole library" migration button. */
     private fun showCompactNotebooksDialog() {
         AlertDialog.Builder(this)
@@ -2285,6 +2299,7 @@ class MainActivity : AppCompatActivity() {
         var skippedEncrypted = 0
         var errors = 0
         var indexRows = 0
+        var coversSynced = 0
 
         withContext(Dispatchers.IO) {
             val notebooks = repository.getAllNotebooks()
@@ -2304,7 +2319,15 @@ class MainActivity : AppCompatActivity() {
                     val builder = SoilDatabase.builder(this@MainActivity, file.absolutePath)
                     if (key != null) builder.openHelperFactory(com.notesprout.android.crypto.SoilCrypto.roomFactory(key))
                     val db = builder.build()
-                    val result = try { NotebookCompactor.compact(db) } finally { db.close() }
+                    var coverB64: String? = null
+                    val result = try {
+                        val r = NotebookCompactor.compact(db)
+                        coverB64 = readCoverImageIfSet(db)
+                        r
+                    } finally { db.close() }
+                    // Self-heal covers: imported/copied notebooks whose cover never reached the
+                    // grid (id-mismatch bug) get their cover image pushed to the index now.
+                    coverB64?.let { runCatching { repository.updateNotebookSnapshot(nb.id, it); coversSynced++ } }
                     if (result.changed) {
                         compacted++
                         bytesFreed += (before - file.length()).coerceAtLeast(0L)
@@ -2324,6 +2347,8 @@ class MainActivity : AppCompatActivity() {
         val summary = StringBuilder("Compacted $compacted notebook${if (compacted == 1) "" else "s"} — freed $freedMb MB.")
         if (indexRows > 0)
             summary.append("\n\nConverted $indexRows index image${if (indexRows == 1) "" else "s"} to WEBP.")
+        if (coversSynced > 0)
+            summary.append("\n\nRestored $coversSynced notebook cover${if (coversSynced == 1) "" else "s"} to the grid.")
         if (skippedEncrypted > 0)
             summary.append("\n\n$skippedEncrypted encrypted notebook${if (skippedEncrypted == 1) "" else "s"} skipped — they compact when you open them.")
         if (errors > 0)

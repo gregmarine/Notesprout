@@ -3918,13 +3918,22 @@ class NotebookActivity : AppCompatActivity() {
         // Persist snapshot for the page we are closing (mirrors navigateToPage).
         if (snapshot != null && pageId.isNotEmpty()) {
             persistSnapshot(db, pageId, snapshot)
-            // Keep the index cover current so MainActivity grid doesn't need to open the .soil.
-            // Skip when an explicit cover exists: the cover already owns the index snapshot field
-            // (written by MainActivity.reloadCoverForNotebook) and the page thumbnail must not
-            // clobber it — otherwise the card reverts to the page image after every close (M9).
-            if (nbId.isNotEmpty() && notebookMetadata?.cover.isNullOrEmpty()) {
-                cacheSnapshotIfAllowed(nbId, snapshot)
-            }
+        }
+        // Keep the index cover current so the MainActivity grid doesn't need to open the .soil. This
+        // runs on every seal (not only when a page snapshot was captured): push the cover image when
+        // an explicit cover is set, otherwise the page snapshot. Pushing the cover *actively* — rather
+        // than merely skipping the page thumbnail (M9) — self-heals notebooks whose cover was set by
+        // an older build that never propagated it to the index, or whose id mismatch (imported/copied
+        // notebooks: cover rows are parented by the .soil row id `meta.id`, not the global `nbId`)
+        // left the grid frozen on a stale thumbnail.
+        if (nbId.isNotEmpty()) {
+            val meta = notebookMetadata
+            val coverB64 = if (meta != null && meta.cover.isNotEmpty()) {
+                runCatching { db.notebookDao().getCoverForNotebook(meta.id) }.getOrNull()
+                    ?.let { CoverObject.fromJson(it.data)?.image }?.takeIf { it.isNotEmpty() }
+            } else null
+            val toCache = coverB64 ?: snapshot
+            if (toCache != null) cacheSnapshotIfAllowed(nbId, toCache)
         }
         saveStrokes(db)
         runCatching {
@@ -4635,8 +4644,10 @@ class NotebookActivity : AppCompatActivity() {
             withContext(Dispatchers.IO) {
                 val meta = loadNotebookMetadataFromDb(db)
                 notebookMetadata = meta   // keep the close-path cover guard accurate
-                val coverB64 = if (!meta?.cover.isNullOrEmpty()) {
-                    db.notebookDao().getCoverForNotebook(nbId)
+                // Look up the cover by the .soil notebook-row id (meta.id), not the global nbId —
+                // they differ for imported/copied notebooks, which would otherwise find no cover.
+                val coverB64 = if (meta != null && meta.cover.isNotEmpty()) {
+                    db.notebookDao().getCoverForNotebook(meta.id)
                         ?.let { CoverObject.fromJson(it.data)?.image }
                         ?.takeIf { it.isNotEmpty() }
                 } else null
