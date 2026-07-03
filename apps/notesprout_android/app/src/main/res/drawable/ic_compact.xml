@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Two arrows meeting a centre line: compact / reclaim space -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+
+    <!-- Centre line -->
+    <path
+        android:fillColor="@android:color/transparent"
+        android:strokeColor="@color/inkBlack"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:pathData="M4,12 L20,12" />
+
+    <!-- Top arrow, pointing down toward the centre -->
+    <path
+        android:fillColor="@android:color/transparent"
+        android:strokeColor="@color/inkBlack"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M12,3 L12,9 M9,6 L12,9 L15,6" />
+
+    <!-- Bottom arrow, pointing up toward the centre -->
+    <path
+        android:fillColor="@android:color/transparent"
+        android:strokeColor="@color/inkBlack"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M12,21 L12,15 M9,18 L12,15 L15,18" />
+
+</vector>

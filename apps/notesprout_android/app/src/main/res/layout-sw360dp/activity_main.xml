@@ -368,6 +368,14 @@
             android:src="@drawable/ic_backup"
             android:contentDescription="Backup" />
 
+        <!-- TEMP: legacy-ts compaction sweep — remove after all devices compacted (see BACKLOG.md) -->
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnCompact"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:layout_marginStart="4dp"
+            android:src="@drawable/ic_compact"
+            android:contentDescription="Compact Notebooks" />
+
     </LinearLayout>
 
     <!--

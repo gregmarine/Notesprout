@@ -316,4 +316,25 @@ interface NotebookDao {
      */
     @Query("DELETE FROM notebook WHERE deletedAt IS NOT NULL AND deletedAt < :before")
     suspend fun hardDeleteOldSoftDeleted(before: Long)
+
+    // ── Legacy-ts compaction ──────────────────────────────────────────────────
+
+    /**
+     * Every stroke row (regardless of soft-delete status) whose `data` still contains a
+     * legacy per-point `"ts"`. The `LIKE` filter means already-compacted notebooks return
+     * an empty list cheaply, so [StrokeCompactor] can run on every seal without cost.
+     */
+    @Query("SELECT id, data FROM notebook WHERE type = 'stroke' AND data LIKE '%\"ts\":%'")
+    suspend fun strokeRowsWithLegacyTimestamp(): List<StrokeRowData>
+
+    /**
+     * Overwrite a stroke row's [data] WITHOUT touching [NotebookObject.updatedAt].
+     * Used only by [StrokeCompactor]: dropping dead `ts` is not a content edit, and bumping
+     * `updatedAt` would falsely invalidate the page snapshot (see [getMaxContentUpdatedAt]).
+     */
+    @Query("UPDATE notebook SET data = :data WHERE id = :id")
+    suspend fun rewriteStrokeDataKeepingTimestamp(id: String, data: String)
 }
+
+/** Minimal id/data projection for [NotebookDao.strokeRowsWithLegacyTimestamp]. */
+data class StrokeRowData(val id: String, val data: String)

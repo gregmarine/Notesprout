@@ -16,6 +16,26 @@
 
 ---
 
+## TEMP — legacy-`ts` stroke compaction (remove after all my devices are compacted)
+
+> Transitional single-user migration, **not** a permanent feature. New writes already omit the dead
+> per-point `ts` (see `StrokePoint.timestamp` / `LiveStroke.toStrokeData`); this backfills existing
+> `.soil` files (~29% smaller on heavy notebooks). Delete the whole path once every device I use has
+> been swept **and** the WEBP image change has landed (so the final pass does `ts` + WEBP in one go).
+
+- **Manual sweep** (the transitional UI to delete first): `btnCompact` in `activity_main.xml`,
+  `ic_compact.xml`, and `showCompactNotebooksDialog()` / `runCompactNotebooksSweep()` in `MainActivity`.
+- **Auto-at-close hook**: the `StrokeCompactor.compact(db)` call in `NotebookActivity.sealNotebook`.
+  Cheap and self-limiting (a `LIKE '%"ts":%'` scan once notebooks are clean) — safe to leave a while,
+  but it's part of the same transitional path.
+- **Core + DAO**: `data/StrokeCompactor.kt` and its two `NotebookDao` methods
+  (`strokeRowsWithLegacyTimestamp`, `rewriteStrokeDataKeepingTimestamp`) + `StrokeRowData`.
+- **Keep** `StrokePoint.timestamp` nullable — that schema change is permanent and correct.
+- Only `type='stroke'` rows are stripped; `ts` embedded in headings/text/links/sticky-notes is a small
+  tail left untouched. Fold it in here only if a future pass makes it worthwhile.
+
+---
+
 ## Handwriting → Text: page-text, RTR & export recognition
 
 > **Proposed design (not started).** Full design in `docs/handwriting-recognition.md`. Today's ML Kit

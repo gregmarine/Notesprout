@@ -35,6 +35,7 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.lifecycleScope
 import com.notesprout.android.crypto.EncryptionInfo
 import com.notesprout.android.crypto.KeyResolver
+import com.notesprout.android.data.StrokeCompactor
 import com.notesprout.android.crypto.KeyScope
 import com.notesprout.android.crypto.KeySession
 import com.notesprout.android.crypto.PassphraseCache
@@ -793,6 +794,11 @@ class MainActivity : AppCompatActivity() {
         binding.btnBackup.setOnClickListener {
             closeOverflowToolbar()
             startActivity(Intent(this, BackupSettingsActivity::class.java))
+        }
+        // TEMP: legacy-ts compaction sweep — remove after all devices compacted (see BACKLOG.md).
+        binding.btnCompact.setOnClickListener {
+            closeOverflowToolbar()
+            showCompactNotebooksDialog()
         }
         binding.btnBreadcrumbBack.setOnClickListener { navigateUpOneLevel() }
     }
@@ -2234,6 +2240,91 @@ class MainActivity : AppCompatActivity() {
             db.close()
         }
     }.onFailure { Slog.d("MainActivity") { "refreshNotebookMeta failed for $notebookId: ${it.message}" } }
+
+    // ── TEMP: legacy-ts compaction sweep (remove after all devices compacted — see BACKLOG.md) ──
+
+    /** Confirmation for the one-off "compact my whole library" migration button. */
+    private fun showCompactNotebooksDialog() {
+        AlertDialog.Builder(this)
+            .setTitle("Compact Notebooks")
+            .setMessage(
+                "Rewrites stored notebooks to drop legacy per-point timestamps and reclaims the " +
+                "freed space. Unencrypted and globally-unlocked notebooks are done now; " +
+                "notebook-scoped encrypted ones compact themselves next time you open them."
+            )
+            .setPositiveButton("Compact") { _, _ -> lifecycleScope.launch { runCompactNotebooksSweep() } }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    /**
+     * One-off bulk compaction: opens every notebook that can be unlocked without a prompt
+     * (plaintext or GLOBAL scope with a cached passphrase), strips legacy stroke `ts`, VACUUMs,
+     * and flags the shrunk file for the next backup. NOTEBOOK-scope encrypted notebooks are
+     * skipped — they self-compact at seal the next time they are opened.
+     */
+    private suspend fun runCompactNotebooksSweep() {
+        val tvMessage = android.widget.TextView(this).apply {
+            text = "Compacting notebooks…"
+            setPadding(64, 48, 64, 48)
+            setTextColor(android.graphics.Color.BLACK)
+            textSize = 16f
+        }
+        val dialog = AlertDialog.Builder(this)
+            .setView(tvMessage)
+            .setCancelable(false)
+            .create()
+        dialog.show()
+        dialog.window?.setElevation(0f)
+        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+
+        var compacted = 0
+        var bytesFreed = 0L
+        var skippedEncrypted = 0
+        var errors = 0
+
+        withContext(Dispatchers.IO) {
+            val notebooks = repository.getAllNotebooks()
+            for ((i, nb) in notebooks.withIndex()) {
+                runCatching {
+                    val info = repository.getEncryptionInfo(nb.id)
+                    val key: String? = when {
+                        !info.encrypted -> null
+                        info.keyScope == KeyScope.GLOBAL ->
+                            com.notesprout.android.crypto.PassphraseStore.getGlobalPassphrase(this@MainActivity)
+                                ?: run { skippedEncrypted++; return@runCatching }
+                        else -> { skippedEncrypted++; return@runCatching }
+                    }
+                    val file = soilFile(this@MainActivity, nb.id)
+                    if (!file.exists()) return@runCatching
+                    val before = file.length()
+                    val builder = SoilDatabase.builder(this@MainActivity, file.absolutePath)
+                    if (key != null) builder.openHelperFactory(com.notesprout.android.crypto.SoilCrypto.roomFactory(key))
+                    val db = builder.build()
+                    val stripped = try { StrokeCompactor.compact(db) } finally { db.close() }
+                    if (stripped > 0) {
+                        compacted++
+                        bytesFreed += (before - file.length()).coerceAtLeast(0L)
+                        repository.touchNotebook(nb.id)
+                    }
+                }.onFailure { errors++; Slog.d("MainActivity") { "compact sweep failed for ${nb.id}: ${it.message}" } }
+                withContext(Dispatchers.Main) { tvMessage.text = "Compacting notebooks…\n${i + 1} / ${notebooks.size}" }
+            }
+        }
+
+        dialog.dismiss()
+        val freedMb = "%.1f".format(bytesFreed / (1024.0 * 1024.0))
+        val summary = StringBuilder("Compacted $compacted notebook${if (compacted == 1) "" else "s"} — freed $freedMb MB.")
+        if (skippedEncrypted > 0)
+            summary.append("\n\n$skippedEncrypted encrypted notebook${if (skippedEncrypted == 1) "" else "s"} skipped — they compact when you open them.")
+        if (errors > 0)
+            summary.append("\n\n$errors notebook${if (errors == 1) "" else "s"} could not be processed.")
+        AlertDialog.Builder(this)
+            .setTitle("Compaction Complete")
+            .setMessage(summary.toString())
+            .setPositiveButton("OK", null)
+            .show()
+    }
 
     private suspend fun deleteFolderRecursively(folderId: String) {
         val children = repository.getChildren(folderId)
