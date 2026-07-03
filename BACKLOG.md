@@ -45,10 +45,12 @@
 
 ## Handwriting → Text: page-text, RTR & export recognition
 
-> **Proposed design (not started).** Full design in `docs/handwriting-recognition.md`. Today's ML Kit
-> recognizer only does single-selection heading / text-box conversion; extending it to whole-page and
-> whole-notebook text needs a segmentation layer it doesn't provide out of the box. Items below are the
-> decisions already made and the pieces explicitly deferred. Pull a phase into its own plan before building.
+> **Phases 1 & 2 SHIPPED on `sprout` (2026-07-03), device-verified.** Full detail + as-built notes in
+> `docs/handwriting-recognition.md`. `StrokeSegmenter` (rewritten to a vertical projection profile),
+> `recognizeSegment(preContext)`, `PageTextRecognizer`, the `page_text` cache, Markdown/text export
+> (whole-notebook + selected/single page), RTR (`RtrScheduler` + `rtrEnabled` toggle + backfill), and
+> the read-only `PageTextViewerActivity` are all done. The Phase 1/2 bullets below are retained for
+> reference; **only the "Deferred / open questions" items remain.**
 
 **Phase 1 — core + export-only (lowest risk, do first):**
 - **`StrokeSegmenter`** (`recognition/StrokeSegmenter.kt`) — pure geometry, unit-testable: median-height
@@ -82,6 +84,13 @@
 - **Backfill-on-enable** = the export batch run in background with progress.
 
 **Deferred / open questions:**
+- **List recognition (numbered / bulleted / checkbox)** — v1 takes ML Kit's line text verbatim, so a
+  list only becomes Markdown when ML Kit returns a clean `N. ` / `- ` prefix. Unreliable for two reasons:
+  (1) **marker mangling** — handwritten `1.` comes back as `1`/`l.`/`I.`/`1)`, and a drawn bullet/checkbox
+  isn't recognized as `•`/`☐`; (2) a list is a **spatial** pattern (marker in margin → gap → hanging text),
+  not a text one. A real fix is a structure-detection pass that reads the hanging-indent geometry from
+  stroke positions and normalizes the marker — comparable effort to the deferred size-based heading
+  inference, and must not false-positive on dates/times (`6:30`) or measurements. Own focused task.
 - **Editable recognized text** (reconciling edits back onto ink) — read-only in v1.
 - **Multi-column / tables** — single-column assembly; horizontal-gap data captured but unused.
 - **Full-text search** over `page_text` — a natural future consumer (ties into the Encryption Phase-3

@@ -324,6 +324,41 @@ class PageIndexActivity : AppCompatActivity() {
         }
     }
 
+    // Two launchers so the SAF mime matches the extension — a text/plain launcher on a ".md" name
+    // makes the picker append ".txt" (→ "notebook.md.txt"). Route .md through text/markdown.
+    private val saveTextLauncher = registerForActivityResult(
+        ActivityResultContracts.CreateDocument("text/plain")
+    ) { uri -> writePendingExportTo(uri) }
+
+    private val saveMarkdownLauncher = registerForActivityResult(
+        ActivityResultContracts.CreateDocument("text/markdown")
+    ) { uri -> writePendingExportTo(uri) }
+
+    private fun writePendingExportTo(uri: android.net.Uri?) {
+        val file = pendingExportFile ?: return
+        if (uri == null) return
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                contentResolver.openOutputStream(uri)?.use { out ->
+                    file.inputStream().use { it.copyTo(out) }
+                }
+            } catch (e: Exception) {
+                android.os.Handler(android.os.Looper.getMainLooper()).post {
+                    android.widget.Toast.makeText(
+                        this@PageIndexActivity, "Save failed: ${e.message}", android.widget.Toast.LENGTH_LONG
+                    ).show()
+                }
+            }
+        }
+    }
+
+    /** Launch the SAF create-document flow with the mime matching [file]'s extension. */
+    private fun launchTextSave(file: java.io.File) {
+        pendingExportFile = file
+        if (file.extension.equals("md", ignoreCase = true)) saveMarkdownLauncher.launch(file.name)
+        else saveTextLauncher.launch(file.name)
+    }
+
     /**
      * Folder picker for batch PNG export. Once the user selects a folder, all [pendingPngFiles]
      * are written into it via [DocumentsContract.createDocument], one file per page.
@@ -1392,31 +1427,40 @@ class PageIndexActivity : AppCompatActivity() {
     private fun executeExport() {
         if (!inActionMode()) return
         if (selectedCount() == 1) {
-            // Single-page export is always PNG — warn upfront if encrypted.
-            lifecycleScope.launch {
-                if (KeySession.getFor(notebookId) != null) {
-                    val confirmed = suspendCancellableCoroutine<Boolean> { cont ->
-                        val d = AlertDialog.Builder(this@PageIndexActivity)
-                            .setTitle("Export encrypted notebook")
-                            .setMessage("This notebook is encrypted. The exported file will be unencrypted — anyone with access to the exported file will be able to read its contents.")
-                            .setPositiveButton("Export anyway") { _, _ -> if (cont.isActive) cont.resume(true) }
-                            .setNegativeButton("Cancel") { _, _ -> if (cont.isActive) cont.resume(false) }
-                            .setOnCancelListener { if (cont.isActive) cont.resume(false) }
-                            .create()
-                        d.show()
-                        d.window?.setElevation(0f)
-                        d.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
-                        cont.invokeOnCancellation { d.dismiss() }
-                    }
-                    if (!confirmed) return@launch
-                }
-                chooseExportTemplate("Export as PNG") { includeTemplate ->
-                    executeSingleExport(includeTemplate)
-                }
-            }
+            // Single-page: choose raster (PNG) or Text. (PDF remains a multi-page-only format.)
+            ActionSheetDialog(this)
+                .title("Export page")
+                .addAction(null, "PNG image") { exportSinglePng() }
+                .addAction(null, "Text")      { exportSelectedAsText() }
+                .show()
         } else {
             // Multi-page: each format path handles its own warning.
             showMultiExportDialog()
+        }
+    }
+
+    /** Single-page PNG export — warns if encrypted, then offers the template sub-choice. */
+    private fun exportSinglePng() {
+        lifecycleScope.launch {
+            if (KeySession.getFor(notebookId) != null) {
+                val confirmed = suspendCancellableCoroutine<Boolean> { cont ->
+                    val d = AlertDialog.Builder(this@PageIndexActivity)
+                        .setTitle("Export encrypted notebook")
+                        .setMessage("This notebook is encrypted. The exported file will be unencrypted — anyone with access to the exported file will be able to read its contents.")
+                        .setPositiveButton("Export anyway") { _, _ -> if (cont.isActive) cont.resume(true) }
+                        .setNegativeButton("Cancel") { _, _ -> if (cont.isActive) cont.resume(false) }
+                        .setOnCancelListener { if (cont.isActive) cont.resume(false) }
+                        .create()
+                    d.show()
+                    d.window?.setElevation(0f)
+                    d.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+                    cont.invokeOnCancellation { d.dismiss() }
+                }
+                if (!confirmed) return@launch
+            }
+            chooseExportTemplate("Export as PNG") { includeTemplate ->
+                executeSingleExport(includeTemplate)
+            }
         }
     }
 
@@ -1488,12 +1532,12 @@ class PageIndexActivity : AppCompatActivity() {
      */
     private fun showMultiExportDialog() {
         val n = selectedCount()
-        val d = AlertDialog.Builder(this)
-            .setTitle("Export $n pages")
-            .setPositiveButton("PDF") { _, _ ->
+        ActionSheetDialog(this)
+            .title("Export $n pages")
+            .addAction(R.drawable.ic_export,           "PDF")  {
                 chooseExportTemplate("Export as PDF") { exportMultiAsPdf(it) }
             }
-            .setNeutralButton("PNG") { _, _ ->
+            .addAction(null,                           "PNG")  {
                 // PNG is always unencrypted — warn upfront if the notebook is encrypted.
                 lifecycleScope.launch {
                     if (KeySession.getFor(notebookId) != null) {
@@ -1515,7 +1559,105 @@ class PageIndexActivity : AppCompatActivity() {
                     showPngSubchoiceDialog()
                 }
             }
-            .setNegativeButton("Cancel", null)
+            .addAction(R.drawable.ic_text_recognition, "Text") { exportSelectedAsText() }
+            .show()
+    }
+
+    /**
+     * Text export for the current selection (1..N pages, in page order). Offers Markdown / Text-only,
+     * warns if encrypted (output is unencrypted), recognizes with progress, then Save / Share.
+     * Reuses fresh cached page_text so RTR-recognized pages export instantly.
+     */
+    private fun exportSelectedAsText() {
+        if (orderedSelectedEntries() == null) return
+        ActionSheetDialog(this)
+            .title("Export as Text")
+            .addAction(null, "Markdown (.md)")   { runSelectedTextExport(NotebookTextExporter.Format.MARKDOWN) }
+            .addAction(null, "Text only (.txt)") { runSelectedTextExport(NotebookTextExporter.Format.PLAIN) }
+            .show()
+    }
+
+    private fun runSelectedTextExport(format: NotebookTextExporter.Format) {
+        val entries = orderedSelectedEntries() ?: return
+        val path = notebookSoilPath ?: return
+        val notebookName = intent.getStringExtra(EXTRA_NOTEBOOK_NAME) ?: "notebook"
+        val pageIds = entries.map { it.id }
+
+        lifecycleScope.launch {
+            if (KeySession.getFor(notebookId) != null) {
+                val confirmed = suspendCancellableCoroutine<Boolean> { cont ->
+                    val dlg = AlertDialog.Builder(this@PageIndexActivity)
+                        .setTitle("Export encrypted notebook")
+                        .setMessage("This notebook is encrypted. The exported file will be unencrypted — anyone with access to the exported file will be able to read its contents.")
+                        .setPositiveButton("Export anyway") { _, _ -> if (cont.isActive) cont.resume(true) }
+                        .setNegativeButton("Cancel") { _, _ -> if (cont.isActive) cont.resume(false) }
+                        .setOnCancelListener { if (cont.isActive) cont.resume(false) }
+                        .create()
+                    dlg.show()
+                    dlg.window?.setElevation(0f)
+                    dlg.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+                    cont.invokeOnCancellation { dlg.dismiss() }
+                }
+                if (!confirmed) return@launch
+            }
+
+            val hwrReady = com.notesprout.android.recognition.HandwritingRecognizerProvider.instance?.isReady() == true
+            val tvMessage = android.widget.TextView(this@PageIndexActivity).apply {
+                text = "Recognizing…"
+                setPadding(64, 48, 64, 48)
+                setTextColor(android.graphics.Color.BLACK)
+                textSize = 16f
+            }
+            val progressDialog = AlertDialog.Builder(this@PageIndexActivity)
+                .setView(tvMessage).setCancelable(false).create()
+            progressDialog.show()
+            progressDialog.window?.setElevation(0f)
+            progressDialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+            val handler = android.os.Handler(android.os.Looper.getMainLooper())
+
+            val file = try {
+                withContext(Dispatchers.IO) {
+                    NotebookTextExporter.exportFromPath(
+                        context = this@PageIndexActivity,
+                        soilPath = path,
+                        pageIds = pageIds,
+                        notebookTitle = notebookName,
+                        format = format,
+                        onProgress = { current, total ->
+                            handler.post { tvMessage.text = "Recognizing page $current of $total…" }
+                        },
+                        passphrase = KeySession.getFor(notebookId),
+                    )
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("PageIndexActivity", "Text export failed", e)
+                progressDialog.dismiss()
+                android.widget.Toast.makeText(this@PageIndexActivity, "Export failed: ${e.message}", android.widget.Toast.LENGTH_LONG).show()
+                return@launch
+            }
+            progressDialog.dismiss()
+            exitActionMode()
+            if (!hwrReady) {
+                android.widget.Toast.makeText(this@PageIndexActivity, "Handwriting model not ready — exported cached text only.", android.widget.Toast.LENGTH_LONG).show()
+            }
+            showTextExportChoice(file)
+        }
+    }
+
+    private fun showTextExportChoice(file: java.io.File) {
+        val d = AlertDialog.Builder(this)
+            .setTitle("Export Text")
+            .setPositiveButton("Save to device") { _, _ -> launchTextSave(file) }
+            .setNegativeButton("Share") { _, _ ->
+                val uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", file)
+                val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                    type = if (file.extension == "md") "text/markdown" else "text/plain"
+                    putExtra(Intent.EXTRA_STREAM, uri)
+                    clipData = ClipData.newRawUri("", uri)
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+                startActivity(Intent.createChooser(shareIntent, "Share Text"))
+            }
             .create()
         d.show()
         d.window?.setElevation(0f)

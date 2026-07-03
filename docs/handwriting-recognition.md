@@ -5,9 +5,37 @@ ML Kit recognizer used for heading / text-box conversion) and the **proposed des
 it to whole-page and whole-notebook text: a segmentation layer, a persisted per-page text cache, a
 real-time background recognition (RTR) mode, and an export-time recognition path.
 
-> **Status.** The single-shot recognizer (§ Current State) is **shipped**. Everything from
-> § The Gap onward is **proposed design — not yet built.** Pull a phase into its own plan before
-> building it (see § Phasing and the matching `BACKLOG.md` section).
+> **Status.** The single-shot recognizer (§ Current State) is **shipped**. The shared core
+> (`StrokeSegmenter`, context-aware `recognizeSegment`, `PageTextRecognizer`, the `page_text`
+> object), **Path 2 export** (Markdown default + text-only via `MarkdownText`; whole-notebook from
+> MainActivity + NotebookActivity), **Path 1 RTR** (`RtrScheduler`, `rtrEnabled` on
+> `NotebookMetadata`, idle/seal-debounced + backfill-on-enable), and the **read-only viewer**
+> (`PageTextViewerActivity`) are **shipped on `sprout` (2026-07-03)**. As-built notes:
+> - **Headings** come only from existing `heading` objects (their `level`); no size inference.
+> - **Horizontal rules** come from roughly-horizontal `ShapeType.LINE` shapes → `---`. The Lines
+>   tool (`type = "line"`) is template ruling and is **not** fed to recognition.
+> - **Line detection uses a vertical projection profile** (coverage histogram over Y → dense
+>   writing "bands" separated by whitespace; each stroke assigned to its band). This replaced an
+>   initial sort-by-centerY greedy merge that interleaved strokes across adjacent lines
+>   (descenders/ascenders) and fragmented clean sentences. A guarded post-pass merges a tiny
+>   fragment (≤3 strokes) into a vertically-overlapping neighbor (stray trailing marks). Verified
+>   on real journal handwriting (769 strokes → 19 lines / 5 paras, near-perfect transcription).
+> - Segmenter constants: `BAND_COVERAGE_FRAC = 0.15`, `MERGE_OVERLAP_FRAC = 0.4`,
+>   `FRAGMENT_MAX_STROKES = 3`, `PARA_GAP_FRAC = 0.9` (the "noticeable gap = new paragraph" rule).
+> - Remaining errors are ML Kit character-level misreads (same class as the single-shot convert
+>   tool), not pipeline issues. `Slog.d` traces log stroke/line **counts only — never the
+>   recognized text** (privacy rule).
+> - **`.md` save bug fixed:** SAF `CreateDocument` mime must match the extension, so `.md` routes
+>   through a `text/markdown` launcher and `.txt` through `text/plain` (a `text/plain` launcher on a
+>   `.md` name made the picker append `.txt` → `notebook.md.txt`).
+> - Viewer reads via `freshOrRecognizeReadOnly` (no writes) so it can open its own connection while
+>   the notebook is still open.
+> - **Export surfaces:** whole-notebook (MainActivity library + NotebookActivity Export sheet) **and
+>   selected-page / single-page** from `PageIndexActivity` (Text option in the single- and
+>   multi-select export menus, reusing `exportFromPath` with the selected page ids).
+>
+> **Not yet built (deferred):** "copy page as text" to clipboard; multi-column, editable text,
+> search index, Onyx HWR. Remaining unbuilt design below is future work.
 
 ---
 
@@ -296,6 +324,14 @@ Behavior:
 - **Editable recognized text** — reconciling text edits back onto ink is out of scope; the viewer is
   read-only in v1.
 - **Multi-column / tables** — single-column assembly only; horizontal-gap data is captured but unused.
+- **List recognition (numbered / bulleted / checkbox)** — v1 takes ML Kit's line text verbatim, so a
+  list only becomes Markdown when ML Kit happens to return a clean `N. ` / `- ` prefix. Two failure
+  modes make this unreliable: (1) **marker mangling** — handwritten `1.` often comes back as `1`,
+  `l.`, `I.`, or `1)`, and a hand-drawn bullet/checkbox isn't recognized as `•`/`☐` at all; (2) a list
+  is a **spatial pattern** (marker in the margin, gap, hanging text), not a text one. A real fix is a
+  structure-detection pass: detect the hanging-indent geometry from stroke positions and normalize the
+  marker ourselves — comparable in effort to the deliberately-deferred size-based heading inference.
+  Must avoid false positives on dates/times (`6:30`) and measurements. Deferred as its own focused task.
 - **Hard vs. soft line breaks** — v1 emits a newline per detected line (faithful for notes); detecting
   wrapped vs. intentional breaks is a refinement.
 - **Baseline skew** — median-band grouping tolerates slight drift; per-line least-squares baselines

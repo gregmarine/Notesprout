@@ -273,6 +273,39 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    // Two launchers so the SAF mime matches the extension — a text/plain launcher on a ".md" name
+    // makes the picker append ".txt" (→ "notebook.md.txt"). Route .md through text/markdown.
+    private val saveTextLauncher = registerForActivityResult(
+        ActivityResultContracts.CreateDocument("text/plain")
+    ) { uri -> writePendingExportTo(uri) }
+
+    private val saveMarkdownLauncher = registerForActivityResult(
+        ActivityResultContracts.CreateDocument("text/markdown")
+    ) { uri -> writePendingExportTo(uri) }
+
+    private fun writePendingExportTo(uri: android.net.Uri?) {
+        val file = pendingExportFile ?: return
+        if (uri == null) return
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                contentResolver.openOutputStream(uri)?.use { out ->
+                    file.inputStream().use { it.copyTo(out) }
+                }
+            } catch (e: Exception) {
+                android.os.Handler(android.os.Looper.getMainLooper()).post {
+                    Toast.makeText(this@MainActivity, "Save failed: ${e.message}", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+    }
+
+    /** Launch the SAF create-document flow with the mime matching [file]'s extension. */
+    private fun launchTextSave(file: java.io.File) {
+        pendingExportFile = file
+        if (file.extension.equals("md", ignoreCase = true)) saveMarkdownLauncher.launch(file.name)
+        else saveTextLauncher.launch(file.name)
+    }
+
     // ── Import launcher ───────────────────────────────────────────────────────
 
     private val importSoilLauncher = registerForActivityResult(
@@ -2600,9 +2633,90 @@ class MainActivity : AppCompatActivity() {
     private fun startExportFromMain(entity: ObjectEntity) {
         ActionSheetDialog(this)
             .title("Export")
-            .addAction(R.drawable.ic_export,   "Export as PDF")          { choosePdfTemplateFromMain(entity) }
-            .addAction(R.drawable.ic_notebook, "Export Notebook (.soil)") { startSoilExportFromMain(entity) }
+            .addAction(R.drawable.ic_export,           "Export as PDF")          { choosePdfTemplateFromMain(entity) }
+            .addAction(R.drawable.ic_text_recognition, "Export as Text")         { chooseTextFormatFromMain(entity) }
+            .addAction(R.drawable.ic_notebook,         "Export Notebook (.soil)") { startSoilExportFromMain(entity) }
             .show()
+    }
+
+    /** Text-export sub-choice: Markdown (default) or plain text (markdown stripped). */
+    private fun chooseTextFormatFromMain(entity: ObjectEntity) {
+        ActionSheetDialog(this)
+            .title("Export as Text")
+            .addAction(null, "Markdown (.md)")   { startTextExportFromMain(entity, NotebookTextExporter.Format.MARKDOWN) }
+            .addAction(null, "Text only (.txt)") { startTextExportFromMain(entity, NotebookTextExporter.Format.PLAIN) }
+            .show()
+    }
+
+    private fun startTextExportFromMain(entity: ObjectEntity, format: NotebookTextExporter.Format) {
+        val file = soilFile(this, entity.id)
+        lifecycleScope.launch {
+            val info = withContext(Dispatchers.IO) { repository.getEncryptionInfo(entity.id) }
+            val key = KeyResolver.resolveForOpen(this@MainActivity, entity.id, info)
+            if (info.encrypted && key == null) {
+                Toast.makeText(this@MainActivity, "Notebook is locked", Toast.LENGTH_SHORT).show()
+                return@launch
+            }
+            val hwrReady = com.notesprout.android.recognition.HandwritingRecognizerProvider.instance?.isReady() == true
+
+            val tvMessage = android.widget.TextView(this@MainActivity).apply {
+                text = "Recognizing…"
+                setPadding(64, 48, 64, 48)
+                setTextColor(android.graphics.Color.BLACK)
+                textSize = 16f
+            }
+            val dialog = AlertDialog.Builder(this@MainActivity)
+                .setView(tvMessage).setCancelable(false).create()
+            dialog.show()
+            dialog.window?.setElevation(0f)
+            dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+            val handler = android.os.Handler(android.os.Looper.getMainLooper())
+
+            val outFile = try {
+                withContext(Dispatchers.IO) {
+                    NotebookTextExporter.exportFromPath(
+                        context = this@MainActivity,
+                        soilPath = file.absolutePath,
+                        pageIds = null,   // whole notebook
+                        notebookTitle = entity.name,
+                        format = format,
+                        onProgress = { current, total ->
+                            handler.post { tvMessage.text = "Recognizing page $current of $total…" }
+                        },
+                        passphrase = key,
+                    )
+                }
+            } catch (e: Exception) {
+                dialog.dismiss()
+                Toast.makeText(this@MainActivity, "Export failed: ${e.message}", Toast.LENGTH_LONG).show()
+                return@launch
+            }
+            dialog.dismiss()
+            if (!hwrReady) {
+                Toast.makeText(this@MainActivity, "Handwriting model not ready — exported cached text only.", Toast.LENGTH_LONG).show()
+            }
+            showTextExportChoiceFromMain(outFile)
+        }
+    }
+
+    private fun showTextExportChoiceFromMain(file: java.io.File) {
+        val d = AlertDialog.Builder(this)
+            .setTitle("Export Text")
+            .setPositiveButton("Save to device") { _, _ -> launchTextSave(file) }
+            .setNegativeButton("Share") { _, _ ->
+                val uri = androidx.core.content.FileProvider.getUriForFile(this, "$packageName.fileprovider", file)
+                val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                    type = if (file.extension == "md") "text/markdown" else "text/plain"
+                    putExtra(Intent.EXTRA_STREAM, uri)
+                    clipData = android.content.ClipData.newRawUri("", uri)
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+                startActivity(Intent.createChooser(shareIntent, "Share Text"))
+            }
+            .create()
+        d.show()
+        d.window?.setElevation(0f)
+        d.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
     }
 
     /** PDF sub-choice: render with the page template or just the handwriting (strokes only). */

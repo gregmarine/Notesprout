@@ -76,3 +76,5 @@ const val TYPE_LINE         = "line"
 const val TYPE_LINK         = "link"
 const val TYPE_STICKY_NOTE  = "sticky_note"
 const val TYPE_SHAPE        = "shape"
+/** Cached, reading-order recognized text for one page. One row per page; parentId = pageId. */
+const val TYPE_PAGE_TEXT    = "page_text"

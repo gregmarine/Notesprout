@@ -284,6 +284,17 @@ interface NotebookDao {
     @Query("SELECT * FROM notebook WHERE type = 'page' AND deletedAt IS NULL ORDER BY `order` ASC")
     suspend fun getAllPages(): List<NotebookObject>
 
+    // ── Page text (recognized-text cache) ─────────────────────────────────────
+
+    /**
+     * The single cached [PageText] row for [pageId] (parentId = pageId), or null if the page
+     * has never been recognized. Not filtered on soft-delete: the cache is upserted in place,
+     * never soft-deleted. Deliberately excluded from [getMaxContentUpdatedAt] — page_text is a
+     * derived product, not source content, so it must not invalidate itself.
+     */
+    @Query("SELECT * FROM notebook WHERE type = 'page_text' AND parentId = :pageId LIMIT 1")
+    suspend fun getPageTextRow(pageId: String): NotebookObject?
+
     // ── Snapshot staleness check ──────────────────────────────────────────────
 
     /**

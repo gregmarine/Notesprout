@@ -35,6 +35,22 @@ interface HandwritingRecognizer : AutoCloseable {
         onResult: (String) -> Unit
     )
 
+    /**
+     * Recognize a single text line, feeding [preContext] (the previously recognized line)
+     * into the model for per-line context chaining — the single biggest free accuracy win
+     * for page-scale recognition. Suspends until the model returns.
+     *
+     * Returns the recognized string, or [FALLBACK_TEXT] if recognition fails or the
+     * recognizer is not ready. Safe to call off the main thread.
+     *
+     * Used by the page/notebook text pipeline (StrokeSegmenter → PageTextRecognizer).
+     */
+    suspend fun recognizeSegment(
+        strokes: List<LiveStroke>,
+        bounds: RectF,
+        preContext: String,
+    ): String
+
     companion object {
         /** Returned when recognition fails or the model is unavailable. */
         const val FALLBACK_TEXT = "unrecognized"

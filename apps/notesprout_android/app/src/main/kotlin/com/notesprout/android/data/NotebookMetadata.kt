@@ -34,6 +34,14 @@ data class NotebookMetadata(
     val cover: String = "",
     @SerialName("last_opened_page")
     val lastOpenedPage: String? = null,
+    /**
+     * Real-time recognition (RTR): when true, a debounced background job keeps each page's
+     * `page_text` cache fresh as the user writes. Per-notebook so it travels with the file;
+     * default OFF (opt-in) per the calm/weak-e-ink-CPU philosophy.
+     * See docs/handwriting-recognition.md § "RTR lifecycle".
+     */
+    @SerialName("rtr_enabled")
+    val rtrEnabled: Boolean = false,
 ) {
     /** Serialize to the JSON string stored in [NotebookObject.data]. */
     fun toJson(): String = codec.encodeToString(serializer(), this)

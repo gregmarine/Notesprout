@@ -96,6 +96,13 @@
             android:configChanges="orientation|keyboardHidden|screenSize|smallestScreenSize|screenLayout|density"
             android:windowSoftInputMode="stateHidden" />
 
+        <!-- Recognized-text viewer — read-only handwriting-to-text (This Page / Whole Notebook) -->
+        <activity
+            android:name=".PageTextViewerActivity"
+            android:exported="false"
+            android:configChanges="orientation|keyboardHidden|screenSize|smallestScreenSize|screenLayout|density"
+            android:windowSoftInputMode="stateHidden" />
+
         <!-- Notebook picker — folder-browse list for cross-notebook page copy/move destination -->
         <activity
             android:name=".NotebookPickerActivity"

@@ -342,6 +342,11 @@ class NotebookActivity : AppCompatActivity() {
      */
     private var notebookMetadata: NotebookMetadata? = null
 
+    // ── Real-time recognition (RTR) ─────────────────────────────────────────────
+
+    /** Non-null only while RTR is enabled for this notebook and the recognizer is ready. */
+    private var rtrScheduler: com.notesprout.android.recognition.RtrScheduler? = null
+
     // ── Page state ────────────────────────────────────────────────────────────
 
     /** All live pages in sorted order. Populated (and refreshed) by [setupPageIds]. */
@@ -907,6 +912,42 @@ class NotebookActivity : AppCompatActivity() {
                 }
             }
         }
+    }
+
+    // Two launchers so the SAF mime matches the extension — a text/plain launcher on a ".md" name
+    // makes the picker append ".txt" (→ "notebook.md.txt"). Route .md through text/markdown.
+    private val saveTextLauncher = registerForActivityResult(
+        ActivityResultContracts.CreateDocument("text/plain")
+    ) { uri -> writePendingExportTo(uri) }
+
+    private val saveMarkdownLauncher = registerForActivityResult(
+        ActivityResultContracts.CreateDocument("text/markdown")
+    ) { uri -> writePendingExportTo(uri) }
+
+    /** Copy [pendingExportFile] into the SAF-picked [uri]. Shared by the text/markdown launchers. */
+    private fun writePendingExportTo(uri: android.net.Uri?) {
+        val file = pendingExportFile ?: return
+        if (uri == null) return
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                contentResolver.openOutputStream(uri)?.use { out ->
+                    file.inputStream().use { it.copyTo(out) }
+                }
+            } catch (e: Exception) {
+                android.os.Handler(android.os.Looper.getMainLooper()).post {
+                    android.widget.Toast.makeText(
+                        this@NotebookActivity, "Save failed: ${e.message}", android.widget.Toast.LENGTH_LONG
+                    ).show()
+                }
+            }
+        }
+    }
+
+    /** Launch the SAF create-document flow with the mime matching [file]'s extension. */
+    private fun launchTextSave(file: java.io.File) {
+        pendingExportFile = file
+        if (file.extension.equals("md", ignoreCase = true)) saveMarkdownLauncher.launch(file.name)
+        else saveTextLauncher.launch(file.name)
     }
 
     // ── Activity lifecycle ────────────────────────────────────────────────────
@@ -2346,6 +2387,8 @@ class NotebookActivity : AppCompatActivity() {
 
     override fun onStop() {
         super.onStop()
+        // Stop pending RTR jobs from firing against a DB that may be torn down while backgrounded.
+        rtrScheduler?.cancelAll()
         if (encryptionInfo.encrypted) {
             // Persist undo/redo state inside the encrypted .soil so process death while
             // backgrounded doesn't lose history. Write even when empty to clear stale state.
@@ -3927,6 +3970,18 @@ class NotebookActivity : AppCompatActivity() {
             if (toCache != null) cacheSnapshotIfAllowed(nbId, toCache)
         }
         saveStrokes(db)
+        // RTR: stop pending debounce jobs and flush the sealed page's text synchronously, on this
+        // IO context, so it completes before the DB is closed below (the "run once at page-seal" hook).
+        rtrScheduler?.let { scheduler ->
+            scheduler.cancelAll()
+            val hwr = com.notesprout.android.recognition.HandwritingRecognizerProvider.instance
+                ?.takeIf { it.isReady() }
+            if (hwr != null && pageId.isNotEmpty()) runCatching {
+                com.notesprout.android.recognition.PageTextRepository.recognizeAndCache(
+                    db.notebookDao(), pageId, com.notesprout.android.recognition.PageTextRecognizer(hwr)
+                )
+            }.onFailure { Slog.d(TAG) { "RTR seal flush failed: ${it.message}" } }
+        }
         runCatching {
             NotebookMetaStore.refresh(db, indexRepo, nbId)
         }.onFailure { Slog.d(TAG) { "meta refresh on seal failed: ${it.message}" } }
@@ -4031,6 +4086,7 @@ class NotebookActivity : AppCompatActivity() {
             }
             updatePageIndicator()
             postDisplayWork(db, result)
+            syncRtrScheduler()
             if (linkedPageMissing) toast("Linked page is unavailable.")
 
             // Calendar "Send to Notebook → other/from-main": paste the handed-off content once the
@@ -4479,7 +4535,47 @@ class NotebookActivity : AppCompatActivity() {
         // Extend the registry so subsequent saves skip these IDs immediately.
         val newIds = newStrokes.map { it.id }
         persistedStrokeIds.addAll(newIds)
+
+        // RTR: new ink landed — schedule a debounced re-recognition of this page.
+        rtrScheduler?.noteEdit(currentPageId)
         return newIds
+    }
+
+    // ── Real-time recognition (RTR) ─────────────────────────────────────────────
+
+    /**
+     * (Re)build [rtrScheduler] to match the notebook's `rtrEnabled` flag and recognizer readiness.
+     * Idempotent — safe to call after open, after page load, and after toggling the setting.
+     * When it first switches on, it seeds the cache for any missing/stale page (backfill-on-open).
+     */
+    private fun syncRtrScheduler() {
+        val enabled = notebookMetadata?.rtrEnabled == true
+        val hwr = com.notesprout.android.recognition.HandwritingRecognizerProvider.instance
+            ?.takeIf { it.isReady() }
+        if (enabled && hwr != null) {
+            if (rtrScheduler == null) {
+                rtrScheduler = com.notesprout.android.recognition.RtrScheduler(
+                    scope = NotesproutApplication.appScope,
+                    recognizer = com.notesprout.android.recognition.PageTextRecognizer(hwr),
+                    dbProvider = { soilDatabase },
+                )
+                rtrBackfillInBackground()
+            }
+        } else {
+            rtrScheduler?.cancelAll()
+            rtrScheduler = null
+        }
+    }
+
+    /** Backfill every missing/stale page's text without UI (silent seed on open / enable). */
+    private fun rtrBackfillInBackground() {
+        val scheduler = rtrScheduler ?: return
+        val db = soilDatabase ?: return
+        NotesproutApplication.appScope.launch {
+            val pageIds = runCatching { db.notebookDao().getPagesSorted().map { it.id } }
+                .getOrNull() ?: return@launch
+            scheduler.backfill(pageIds)
+        }
     }
 
     /**
@@ -4651,11 +4747,131 @@ class NotebookActivity : AppCompatActivity() {
     }
 
     private fun startExport(db: SoilDatabase) {
+        val rtrOn = notebookMetadata?.rtrEnabled == true
         ActionSheetDialog(this)
             .title("Export")
-            .addAction(R.drawable.ic_export,   "Export as PDF")          { choosePdfTemplate(db) }
-            .addAction(R.drawable.ic_notebook, "Export Notebook (.soil)") { startSoilExport(db) }
+            .addAction(R.drawable.ic_export,             "Export as PDF")          { choosePdfTemplate(db) }
+            .addAction(R.drawable.ic_text_recognition,   "Export as Text")         { chooseTextFormat(db) }
+            .addAction(R.drawable.ic_notebook,           "Export Notebook (.soil)") { startSoilExport(db) }
+            .addAction(R.drawable.ic_text_recognition,   "View recognized text")   { openTextViewer(db) }
+            .addAction(
+                R.drawable.ic_text_recognition,
+                if (rtrOn) "Real-time text: On" else "Real-time text: Off",
+            ) { toggleRtr(db) }
             .show()
+    }
+
+    /** Text-export sub-choice: Markdown (default, keeps `#`/`---`/lists) or plain text (stripped). */
+    private fun chooseTextFormat(db: SoilDatabase) {
+        ActionSheetDialog(this)
+            .title("Export as Text")
+            .addAction(null, "Markdown (.md)") { startTextExport(db, NotebookTextExporter.Format.MARKDOWN) }
+            .addAction(null, "Text only (.txt)") { startTextExport(db, NotebookTextExporter.Format.PLAIN) }
+            .show()
+    }
+
+    private fun startTextExport(db: SoilDatabase, format: NotebookTextExporter.Format) {
+        val hwrReady = com.notesprout.android.recognition.HandwritingRecognizerProvider.instance?.isReady() == true
+        val tvMessage = android.widget.TextView(this).apply {
+            text = "Recognizing…"
+            setPadding(64, 48, 64, 48)
+            setTextColor(android.graphics.Color.BLACK)
+            textSize = 16f
+        }
+        val dialog = AlertDialog.Builder(this)
+            .setView(tvMessage)
+            .setCancelable(false)
+            .create()
+        dialog.show()
+        dialog.window?.setElevation(0f)
+        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+
+        val handler = android.os.Handler(android.os.Looper.getMainLooper())
+        lifecycleScope.launch {
+            val file = try {
+                withContext(Dispatchers.IO) {
+                    saveStrokes(db)   // flush current-page ink so it is recognized
+                    val pageIds = db.notebookDao().getPagesSorted().map { it.id }
+                    NotebookTextExporter.export(
+                        context = this@NotebookActivity,
+                        db = db,
+                        pageIds = pageIds,
+                        notebookTitle = notebookDisplayName,
+                        format = format,
+                        onProgress = { current, total ->
+                            handler.post { tvMessage.text = "Recognizing page $current of $total…" }
+                        },
+                    )
+                }
+            } catch (e: Exception) {
+                dialog.dismiss()
+                toast("Export failed: ${e.message}")
+                return@launch
+            }
+            dialog.dismiss()
+            if (!hwrReady) {
+                toast("Handwriting model not ready — exported cached text only.")
+            }
+            showTextExportChoice(file)
+        }
+    }
+
+    private fun showTextExportChoice(file: java.io.File) {
+        val d = AlertDialog.Builder(this)
+            .setTitle("Export Text")
+            .setPositiveButton("Save to device") { _, _ -> launchTextSave(file) }
+            .setNegativeButton("Share") { _, _ -> shareText(file) }
+            .create()
+        d.show()
+        d.window?.setElevation(0f)
+        d.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+    }
+
+    private fun shareText(file: java.io.File) {
+        val uri = androidx.core.content.FileProvider.getUriForFile(this, "$packageName.fileprovider", file)
+        val intent = Intent(Intent.ACTION_SEND).apply {
+            type = if (file.extension == "md") "text/markdown" else "text/plain"
+            putExtra(Intent.EXTRA_STREAM, uri)
+            clipData = android.content.ClipData.newRawUri("", uri)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        startActivity(Intent.createChooser(intent, "Share Text"))
+    }
+
+    /** Open the read-only recognized-text viewer for this notebook (flush current ink first). */
+    private fun openTextViewer(db: SoilDatabase) {
+        lifecycleScope.launch {
+            withContext(Dispatchers.IO) { saveStrokes(db) }
+            val i = Intent(this@NotebookActivity, PageTextViewerActivity::class.java).apply {
+                putExtra(PageTextViewerActivity.EXTRA_NOTEBOOK_ID, notebookId)
+                putExtra(PageTextViewerActivity.EXTRA_NOTEBOOK_NAME, notebookDisplayName)
+                putExtra(PageTextViewerActivity.EXTRA_CURRENT_PAGE_ID, currentPageId)
+            }
+            startActivity(i)
+        }
+    }
+
+    /**
+     * Flip the per-notebook RTR flag. Enabling kicks a progress-tracked backfill of every page;
+     * disabling stops scheduling but keeps existing cached text (non-destructive).
+     */
+    private fun toggleRtr(db: SoilDatabase) {
+        val meta = notebookMetadata ?: run { toast("Real-time text unavailable for this notebook."); return }
+        val enabling = !meta.rtrEnabled
+        if (enabling && com.notesprout.android.recognition.HandwritingRecognizerProvider.instance?.isReady() != true) {
+            toast("Handwriting model not ready — connect once to download it.")
+            return
+        }
+        val updated = meta.copy(rtrEnabled = enabling)
+        notebookMetadata = updated
+        lifecycleScope.launch {
+            withContext(Dispatchers.IO) {
+                val row = db.notebookDao().getNotebookObject() ?: return@withContext
+                db.notebookDao().upsertNotebookObject(row.copy(data = updated.toJson(), updatedAt = System.currentTimeMillis()))
+            }
+            syncRtrScheduler()   // creates the scheduler + kicks a backfill of missing/stale pages
+            toast(if (enabling) "Real-time text on — recognizing existing pages…" else "Real-time text off.")
+        }
     }
 
     /** PDF sub-choice: render with the page template or just the handwriting (strokes only). */
@@ -11658,6 +11874,9 @@ class NotebookActivity : AppCompatActivity() {
      * Must be called on [Dispatchers.IO].
      */
     private suspend fun invalidatePageSnapshot(db: SoilDatabase, pageId: String) {
+        // Common commit point for erases, deletes, moves, and object edits — schedule RTR here so
+        // the recognized-text cache tracks all mutations, not just freshly drawn ink (saveStrokes).
+        rtrScheduler?.noteEdit(pageId)
         val page = db.notebookDao().getObjectById(pageId) ?: return
         val data = PageData.fromJson(page.data)
         if (data.snapshot == null) return   // nothing to remove

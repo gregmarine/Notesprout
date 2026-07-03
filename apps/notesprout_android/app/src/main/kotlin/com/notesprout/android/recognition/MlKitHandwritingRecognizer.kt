@@ -13,6 +13,8 @@ import com.google.mlkit.common.model.DownloadConditions
 import com.google.mlkit.common.model.RemoteModelManager
 import com.notesprout.android.core.Slog
 import com.notesprout.android.data.LiveStroke
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlin.coroutines.resume
 
 class MlKitHandwritingRecognizer : HandwritingRecognizer {
 
@@ -115,6 +117,45 @@ class MlKitHandwritingRecognizer : HandwritingRecognizer {
             }
     }
 
+    override suspend fun recognizeSegment(
+        strokes: List<LiveStroke>,
+        bounds: RectF,
+        preContext: String,
+    ): String {
+        val r = recognizer
+        if (!modelReady || r == null || strokes.isEmpty()) {
+            return HandwritingRecognizer.FALLBACK_TEXT
+        }
+
+        val inkBuilder = Ink.builder()
+        for (liveStroke in strokes) {
+            val strokeBuilder = Ink.Stroke.builder()
+            for (point in liveStroke.points) {
+                strokeBuilder.addPoint(Ink.Point.create(point.x, point.y))
+            }
+            inkBuilder.addStroke(strokeBuilder.build())
+        }
+
+        val writingArea = WritingArea(bounds.width().coerceAtLeast(1f), bounds.height().coerceAtLeast(1f))
+        val recognitionContext = RecognitionContext.builder()
+            .setPreContext(preContext.takeLast(MAX_PRECONTEXT_CHARS))
+            .setWritingArea(writingArea)
+            .build()
+
+        return suspendCancellableCoroutine { cont ->
+            r.recognize(inkBuilder.build(), recognitionContext)
+                .addOnSuccessListener { result ->
+                    val text = result.candidates.firstOrNull()?.text
+                    val recognized = if (!text.isNullOrBlank()) text else HandwritingRecognizer.FALLBACK_TEXT
+                    if (cont.isActive) cont.resume(recognized)
+                }
+                .addOnFailureListener { e ->
+                    Log.e(TAG, "Segment recognition failed", e)
+                    if (cont.isActive) cont.resume(HandwritingRecognizer.FALLBACK_TEXT)
+                }
+        }
+    }
+
     override fun close() {
         recognizer?.close()
         recognizer = null
@@ -123,5 +164,7 @@ class MlKitHandwritingRecognizer : HandwritingRecognizer {
 
     companion object {
         private const val TAG = "MlKitHwRecognizer"
+        /** Cap the pre-context handed to ML Kit — only the tail matters, and long strings hurt latency. */
+        private const val MAX_PRECONTEXT_CHARS = 40
     }
 }
