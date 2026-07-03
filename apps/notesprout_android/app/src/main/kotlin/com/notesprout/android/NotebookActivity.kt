@@ -1885,7 +1885,7 @@ class NotebookActivity : AppCompatActivity() {
                     withContext(Dispatchers.IO) {
                         db.withTransaction {
                             for (moved in movedStrokes) {
-                                db.notebookDao().updateStrokeData(moved.id, moved.toStrokeData(now).toJson(), now)
+                                db.notebookDao().updateStrokeData(moved.id, moved.toStrokeData().toJson(), now)
                             }
                             for (heading in movedHeadings) {
                                 val bboxJson = heading.boundingBox.toBoundingBoxJson()
@@ -4449,7 +4449,7 @@ class NotebookActivity : AppCompatActivity() {
                 val maxY = points.maxOf { it.y }
                 val bboxJson = BoundingBox(minX, minY, maxX - minX, maxY - minY).toJson()
 
-                val strokeData = liveStroke.toStrokeData(now)
+                val strokeData = liveStroke.toStrokeData()
 
                 dao.insertOrIgnore(
                     NotebookObject(
@@ -5401,7 +5401,7 @@ class NotebookActivity : AppCompatActivity() {
                         val maxX = points.maxOf { it.x }
                         val maxY = points.maxOf { it.y }
                         val bboxJson = BoundingBox(minX, minY, maxX - minX, maxY - minY).toJson()
-                        val strokeData = stroke.toStrokeData(now)
+                        val strokeData = stroke.toStrokeData()
                         dao.insertOrIgnore(
                             NotebookObject(
                                 id          = stroke.id,
@@ -5664,7 +5664,7 @@ class NotebookActivity : AppCompatActivity() {
                         val maxX = points.maxOf { it.x }
                         val maxY = points.maxOf { it.y }
                         val bboxJson = BoundingBox(minX, minY, maxX - minX, maxY - minY).toJson()
-                        val strokeData = stroke.toStrokeData(now)
+                        val strokeData = stroke.toStrokeData()
                         dao.insertOrIgnore(
                             NotebookObject(
                                 id          = stroke.id,
@@ -6730,7 +6730,7 @@ class NotebookActivity : AppCompatActivity() {
             // 2. Re-insert each embedded stroke as a new live row on the current layer.
             restoredStrokes.forEach { stroke ->
                 val bboxJson = stroke.boundingBox.toBoundingBoxJson()
-                val strokeData = stroke.toStrokeData(now)
+                val strokeData = stroke.toStrokeData()
                 dao.insertObject(NotebookObject(
                     id          = stroke.id,
                     parentId    = currentLayerId,
@@ -7141,7 +7141,7 @@ class NotebookActivity : AppCompatActivity() {
             val dao = db.notebookDao()
             dao.softDeleteById(link.id, now)
             restoredStrokes.forEach { s ->
-                dao.insertObject(NotebookObject(s.id, layerId, s.boundingBox.toBoundingBoxJson(), 0, now, now, null, "stroke", s.toStrokeData(now).toJson()))
+                dao.insertObject(NotebookObject(s.id, layerId, s.boundingBox.toBoundingBoxJson(), 0, now, now, null, "stroke", s.toStrokeData().toJson()))
             }
             restoredHeadings.forEach { h ->
                 val data = HeadingObject(strokes = h.strokes, recognizedText = h.recognizedText, level = h.level).toJson()
@@ -9833,7 +9833,7 @@ class NotebookActivity : AppCompatActivity() {
                 val density = resources.displayMetrics.density
                 db.withTransaction {
                     for (stroke in targetStrokes) {
-                        dao.updateStrokeData(stroke.id, stroke.toStrokeData(ts).toJson(), ts)
+                        dao.updateStrokeData(stroke.id, stroke.toStrokeData().toJson(), ts)
                     }
                     for (heading in targetHeadings) {
                         val bboxJson = heading.boundingBox.toBoundingBoxJson()
@@ -10030,7 +10030,7 @@ class NotebookActivity : AppCompatActivity() {
                     if (action.deletedAt == 0L) {
                         // Stroke was never persisted — re-insert it
                         val stroke = action.originalStroke
-                        val sd = stroke.toStrokeData(now)
+                        val sd = stroke.toStrokeData()
                         dao.insertObject(
                             com.notesprout.android.data.NotebookObject(
                                 id          = stroke.id,
@@ -10470,7 +10470,7 @@ class NotebookActivity : AppCompatActivity() {
                 val density            = resources.displayMetrics.density
                 db.withTransaction {
                     for (stroke in targetStrokes) {
-                        dao.updateStrokeData(stroke.id, stroke.toStrokeData(now).toJson(), now)
+                        dao.updateStrokeData(stroke.id, stroke.toStrokeData().toJson(), now)
                     }
                     for (heading in targetHeadings) {
                         val bb = heading.boundingBox
@@ -10611,7 +10611,7 @@ class NotebookActivity : AppCompatActivity() {
                                 createdAt   = now,
                                 updatedAt   = now,
                                 deletedAt   = null,
-                                data        = stroke.toStrokeData(now).toJson(),
+                                data        = stroke.toStrokeData().toJson(),
                             )
                         )
                     } else {

@@ -235,7 +235,7 @@ class CalendarRepository(
                 createdAt   = now,
                 updatedAt   = now,
                 type        = "stroke",
-                data        = stroke.toStrokeData(now).toJson(),
+                data        = stroke.toStrokeData().toJson(),
             )
         }
         db.withTransaction { dao.insertAll(entities) }
@@ -261,7 +261,7 @@ class CalendarRepository(
                         createdAt   = now,
                         updatedAt   = now,
                         type        = "stroke",
-                        data        = stroke.toStrokeData(now).toJson(),
+                        data        = stroke.toStrokeData().toJson(),
                     )
                 )
             }
@@ -365,7 +365,6 @@ class CalendarRepository(
         content: NotesproutClipboard.ClipboardContent,
         density: Float,
     ): List<CalendarExportChild> {
-        val now = System.currentTimeMillis()
         val out = ArrayList<CalendarExportChild>()
         content.strokes.forEach { stroke ->
             val bbox = stroke.boundingBox
@@ -373,7 +372,7 @@ class CalendarRepository(
                 type = "stroke",
                 bbox = BoundingBox(bbox.left, bbox.top, bbox.width(), bbox.height()).toJson(),
                 order = 0,
-                data = stroke.toStrokeData(now).toJson(),
+                data = stroke.toStrokeData().toJson(),
             )
         }
         content.headings.forEach { heading ->

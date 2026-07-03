@@ -198,7 +198,7 @@ class ScratchpadRepository(
                 createdAt   = now,
                 updatedAt   = now,
                 type        = "stroke",
-                data        = stroke.toStrokeData(now).toJson(),
+                data        = stroke.toStrokeData().toJson(),
             )
         }
         db.withTransaction { dao.insertAll(entities) }
@@ -224,7 +224,7 @@ class ScratchpadRepository(
                         createdAt   = now,
                         updatedAt   = now,
                         type        = "stroke",
-                        data        = stroke.toStrokeData(now).toJson(),
+                        data        = stroke.toStrokeData().toJson(),
                     )
                 )
             }

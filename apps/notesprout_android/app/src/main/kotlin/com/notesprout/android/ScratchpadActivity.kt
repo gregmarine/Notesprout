@@ -597,7 +597,7 @@ class ScratchpadActivity : AppCompatActivity() {
                 withContext(Dispatchers.IO) {
                     for (s in movedStrokes) {
                         val bbox = s.boundingBox
-                        dao.updateObjectData(s.id, BoundingBox(bbox.left, bbox.top, bbox.width(), bbox.height()).toJson(), s.toStrokeData(now).toJson(), now)
+                        dao.updateObjectData(s.id, BoundingBox(bbox.left, bbox.top, bbox.width(), bbox.height()).toJson(), s.toStrokeData().toJson(), now)
                     }
                     for (h in movedHeadings) {
                         dao.updateObjectData(h.id, h.boundingBox.toBoundingBoxJson(), HeadingObject(h.strokes, h.recognizedText, h.level).toJson(), now)

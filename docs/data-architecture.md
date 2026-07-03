@@ -12,7 +12,7 @@
 - Hierarchy: Notebook → Pages → Layers → Content Objects
 - Layers: base layer (template, locked) and content layers
 - Every object carries: id, parentId, boundingBox, order, createdAt, updatedAt, deletedAt, data
-- Stroke data: proprietary point arrays (x, y, pressure, tilt, timestamp), stored as JSON in the `data` TEXT column
+- Stroke data: proprietary point arrays (x, y; optional pressure/tilt), stored as JSON in the `data` TEXT column
 - Soft deletes with cleanup process; stable UUIDs everywhere
 - Activities receive notebook identity as `EXTRA_NOTEBOOK_ID` (entity UUID) + `EXTRA_NOTEBOOK_NAME` — never a `File` object
 

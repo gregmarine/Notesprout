@@ -47,11 +47,12 @@ data class LiveStroke(
     val strokeWidth: Float = DEFAULT_STROKE_WIDTH,
 
     /**
-     * The original captured samples (x/y/pressure/tilt/timestamp) this stroke was
-     * loaded from, or null for strokes created this session with no persisted source.
-     * Carries pressure/tilt/timestamp through moves so they are not destroyed on
-     * re-save. [toStrokeData] reads x/y from [points] (which may have been translated)
-     * and pressure/tilt/timestamp from here when the two are index-aligned.
+     * The original captured samples (x/y/pressure/tilt) this stroke was loaded from,
+     * or null for strokes created this session with no persisted source. Carries
+     * pressure/tilt through moves so they are not destroyed on re-save. [toStrokeData]
+     * reads x/y from [points] (which may have been translated) and pressure/tilt from
+     * here when the two are index-aligned. (A legacy per-point `ts` may still ride along
+     * on rows loaded from old data, but it is never re-written — see [StrokePoint].)
      */
     val srcPoints: List<StrokePoint>? = null,
 ) {
@@ -74,20 +75,21 @@ data class LiveStroke(
 
     /**
      * Re-serialize this stroke to its persisted form, preserving colour, width, and
-     * per-point pressure/tilt/timestamp from [srcPoints] when available. Current x/y
-     * always come from [points] (so translated strokes save their new position).
+     * per-point pressure/tilt from [srcPoints] when available. Current x/y always come
+     * from [points] (so translated strokes save their new position).
      *
-     * [fallbackTimestamp] is stamped only on points with no preserved source — i.e.
-     * freshly drawn strokes that have never been persisted.
+     * Per-point timestamps are intentionally not written (see [StrokePoint.timestamp]):
+     * they were dead weight, and a stroke's creation time already lives on its row's
+     * `createdAt`. Old rows that still carry `"ts"` shed it here on their next save.
      */
-    fun toStrokeData(fallbackTimestamp: Long): StrokeData {
+    fun toStrokeData(): StrokeData {
         val src = srcPoints
         val outPoints = if (src != null && src.size == points.size) {
             points.mapIndexed { i, p ->
-                StrokePoint(x = p.x, y = p.y, pressure = src[i].pressure, tilt = src[i].tilt, timestamp = src[i].timestamp)
+                StrokePoint(x = p.x, y = p.y, pressure = src[i].pressure, tilt = src[i].tilt)
             }
         } else {
-            points.map { p -> StrokePoint(x = p.x, y = p.y, pressure = null, tilt = null, timestamp = fallbackTimestamp) }
+            points.map { p -> StrokePoint(x = p.x, y = p.y) }
         }
         return StrokeData(color = color, strokeWidth = strokeWidth, points = outPoints)
     }
