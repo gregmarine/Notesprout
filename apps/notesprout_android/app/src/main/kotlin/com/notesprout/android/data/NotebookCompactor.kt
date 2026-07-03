@@ -13,7 +13,7 @@ import kotlinx.serialization.json.Json
 
 /**
  * One-time, idempotent **transitional** compaction of stored notebooks and the global index.
- * Two independent migrations share one pass so a single VACUUM reclaims both:
+ * Three independent migrations share one pass so a single VACUUM reclaims them all:
  *
  * 1. **Legacy-`ts` strip.** Every [StrokePoint] used to carry a per-point `ts` that was never read
  *    (~40% of a stroke's JSON). New writes no longer emit it; this rewrites the rows that still have
@@ -22,6 +22,11 @@ import kotlinx.serialization.json.Json
  *    template/cover images are re-encoded to WEBP q100 (see [ImageCodec]). This catches both legacy
  *    **PNG** and the earlier, mistaken **lossless-WEBP** blobs (Android's Skia lossless encoder
  *    bloated to 2–6× PNG), converting both to the compact q100 form. Already-q100 rows are skipped.
+ * 3. **Dead heading/text strokes strip.** Recognized headings and converted text objects used to
+ *    embed a full copy of their original handwriting strokes that was never read again (headings
+ *    once supported un-heading; text never reverted). Both now drop those strokes on conversion;
+ *    this rewrites the legacy rows that still carry them. Unrecognized fallbacks — where the strokes
+ *    ARE the visual — keep theirs. See [HeadingObject] / [TextObject].
  *
  * Both are safe to run opportunistically:
  * - **Self-limiting.** ts rows are found by a `LIKE '%"ts":%'` scan; image rows are decided from a
@@ -46,8 +51,8 @@ import kotlinx.serialization.json.Json
 object NotebookCompactor {
 
     /** Per-notebook outcome: rows rewritten by each pass. [changed] gates the VACUUM / re-backup. */
-    data class Result(val tsRows: Int, val imageRows: Int) {
-        val changed: Boolean get() = tsRows > 0 || imageRows > 0
+    data class Result(val tsRows: Int, val imageRows: Int, val deadStrokeRows: Int = 0) {
+        val changed: Boolean get() = tsRows > 0 || imageRows > 0 || deadStrokeRows > 0
     }
 
     /**
@@ -77,11 +82,39 @@ object NotebookCompactor {
             imageRows++
         }
 
-        if (tsRows.isNotEmpty() || imageRows > 0) {
+        // Pass 3 — drop dead embedded strokes from recognized headings / converted text objects.
+        var deadStrokeRows = 0
+        for (r in dao.headingTextRowsWithStrokes()) {
+            val newData = stripDeadStrokes(r.type, r.data) ?: continue
+            dao.rewriteObjectDataKeepingTimestamp(r.id, newData)
+            deadStrokeRows++
+        }
+
+        if (tsRows.isNotEmpty() || imageRows > 0 || deadStrokeRows > 0) {
             val raw: SupportSQLiteDatabase = db.openHelper.writableDatabase
             raw.execSQL("VACUUM")
         }
-        return Result(tsRows.size, imageRows)
+        return Result(tsRows.size, imageRows, deadStrokeRows)
+    }
+
+    /**
+     * Strip the dead embedded `strokes` from a recognized `heading`/`text` row, keeping the rest of
+     * the JSON intact. Returns null (skip) for unrecognized fallbacks — a stroke-only heading
+     * (`recognizedText == null`) or a blank-text object — where the strokes are the visual content
+     * and must stay. Empty strokes are omitted on re-encode (default field, `encodeDefaults = false`).
+     */
+    private fun stripDeadStrokes(type: String, data: String): String? = when (type) {
+        "heading" -> {
+            val h = HeadingObject.fromJson(data)
+            if (h.recognizedText == null || h.strokes.isEmpty()) null
+            else h.copy(strokes = emptyList()).toJson()
+        }
+        "text" -> {
+            val t = TextObject.fromJson(data)
+            if (t.text.isBlank() || t.strokes.isNullOrEmpty()) null
+            else t.copy(strokes = null).toJson()
+        }
+        else -> null
     }
 
     /**

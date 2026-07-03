@@ -3,9 +3,18 @@ package com.notesprout.android.data
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
+/**
+ * Serialized `type = "heading"` payload.
+ *
+ * [strokes] holds the original handwriting **only** for the ML-Kit-failed fallback
+ * (`recognizedText == null`), where the strokes are the sole visual representation.
+ * Once a heading is recognized ([recognizedText] non-null) it renders as canvas text and the
+ * strokes are dropped — [strokes] is [emptyList] and, with `encodeDefaults = false`, omitted
+ * from the JSON entirely. Headings are never revertible back to strokes (parity with text objects).
+ */
 @Serializable
 data class HeadingObject(
-    val strokes: List<LiveStroke>,
+    val strokes: List<LiveStroke> = emptyList(),
     val recognizedText: String? = null,
     val level: Int = 1,
 ) {

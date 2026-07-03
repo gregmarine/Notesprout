@@ -343,6 +343,17 @@ interface NotebookDao {
     suspend fun imageDataForId(id: String): String?
 
     /**
+     * Every heading/text row (regardless of soft-delete status) whose `data` still carries a
+     * non-empty embedded `strokes` array. Recognized headings and text objects no longer retain
+     * their strokes (they render from text and never revert), so [NotebookCompactor] strips the
+     * dead strokes from these. Unrecognized fallbacks — which legitimately keep strokes — are
+     * filtered out in the compactor by decoding. The `LIKE` means already-stripped notebooks return
+     * an empty list cheaply, so this can run on every seal.
+     */
+    @Query("SELECT id, type, data FROM notebook WHERE type IN ('heading', 'text') AND data LIKE '%\"strokes\":[{%'")
+    suspend fun headingTextRowsWithStrokes(): List<ObjectRowData>
+
+    /**
      * Overwrite a row's [data] WITHOUT touching [NotebookObject.updatedAt].
      * Used only by [NotebookCompactor]: stripping dead `ts` and re-encoding a snapshot to WEBP are
      * not content edits, and bumping `updatedAt` would falsely invalidate the page snapshot
@@ -354,6 +365,9 @@ interface NotebookDao {
 
 /** Minimal id/data projection for [NotebookDao.strokeRowsWithLegacyTimestamp]. */
 data class StrokeRowData(val id: String, val data: String)
+
+/** id/type/data projection for [NotebookDao.headingTextRowsWithStrokes] (type selects heading vs text decode). */
+data class ObjectRowData(val id: String, val type: String, val data: String)
 
 /** id/type/base64-head projection for [NotebookDao.imageRowHeads] (type selects the image field). */
 data class ImageRowHead(val id: String, val type: String, val head: String)

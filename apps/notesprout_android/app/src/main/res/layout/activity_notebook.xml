@@ -480,7 +480,7 @@
     <!-- Heading-type submenu — appears below (or above) the selection box when the heading button
          in the floating selection toolbar is tapped. Positioned programmatically via positionPopover().
          Shared between S3 (pure-stroke selection → convert to H1/H2/H3) and S4 (single-heading
-         selection → change level / un-heading). The un-heading button is hidden in S3. -->
+         selection → change level). -->
     <LinearLayout
         android:id="@+id/headingTypeSubmenu"
         android:layout_width="wrap_content"
@@ -508,13 +508,6 @@
             style="@style/Widget.Notesprout.ToolbarButton"
             android:src="@drawable/ic_h_3"
             android:contentDescription="Heading 3" />
-
-        <androidx.appcompat.widget.AppCompatImageButton
-            android:id="@+id/btnHeadingUnheading"
-            style="@style/Widget.Notesprout.ToolbarButton"
-            android:src="@drawable/ic_heading_off"
-            android:contentDescription="Remove Heading"
-            android:visibility="gone" />
 
     </LinearLayout>
 

@@ -2019,7 +2019,6 @@ class NotebookActivity : AppCompatActivity() {
             pendingHeadingStrokes = strokes
             pendingHeadingBox = box
             headingSubmenuMode = HeadingSubmenuMode.CONVERT
-            binding.btnHeadingUnheading.visibility = View.GONE   // convert mode — no un-heading
             applyHeadingLevelHighlight(0)                        // no level pre-selected in convert mode
             binding.headingTypeSubmenu.visibility = View.VISIBLE
             binding.headingTypeSubmenu.post {
@@ -2041,7 +2040,6 @@ class NotebookActivity : AppCompatActivity() {
             val heading = selectedHeadings.firstOrNull() ?: return@setOnClickListener
             pendingChangeHeading = heading
             headingSubmenuMode = HeadingSubmenuMode.CHANGE
-            binding.btnHeadingUnheading.visibility = View.VISIBLE  // un-heading available in change mode
             applyHeadingLevelHighlight(heading.level)               // highlight current level
             binding.headingTypeSubmenu.visibility = View.VISIBLE
             binding.headingTypeSubmenu.post {
@@ -2078,13 +2076,6 @@ class NotebookActivity : AppCompatActivity() {
         binding.btnHeadingH1.setOnClickListener { onHeadingLevelPicked(1) }
         binding.btnHeadingH2.setOnClickListener { onHeadingLevelPicked(2) }
         binding.btnHeadingH3.setOnClickListener { onHeadingLevelPicked(3) }
-        binding.btnHeadingUnheading.setOnClickListener {
-            val heading = selectedHeadings.firstOrNull() ?: return@setOnClickListener
-            hideHeadingTypeSubmenu()
-            lifecycleScope.launch(Dispatchers.IO) {
-                removeHeading(heading)
-            }
-        }
 
         binding.btnLink.setOnClickListener {
             val ids = drawingView.lassoSelectedIds
@@ -3957,7 +3948,7 @@ class NotebookActivity : AppCompatActivity() {
         // scan on later seals. touchNotebook() below already flags the shrunk file for backup.
         runCatching {
             val r = NotebookCompactor.compact(db)
-            if (r.changed) Slog.d(TAG) { "compaction sealed: ${r.tsRows} ts rows + ${r.imageRows} images → WEBP + VACUUM" }
+            if (r.changed) Slog.d(TAG) { "compaction sealed: ${r.tsRows} ts rows + ${r.imageRows} images → WEBP + ${r.deadStrokeRows} dead-stroke rows + VACUUM" }
         }.onFailure { Slog.d(TAG) { "compaction failed: ${it.message}" } }
         db.openHelper.writableDatabase.apply {
             query("PRAGMA incremental_vacuum").use { it.moveToFirst() }
@@ -6366,9 +6357,10 @@ class NotebookActivity : AppCompatActivity() {
         val headingId  = UUID.randomUUID().toString()
         val originalStrokeIds = strokesToConvert.map { it.id }
 
-        // Fresh UUIDs for embedded strokes — the same instances go into both the
-        // HeadingObject (DB) and the HeadingCreated undo action.
-        val embeddedStrokes = strokesToConvert.map { stroke ->
+        // Retain embedded strokes ONLY when recognition failed (fallback) — a recognized heading
+        // renders as canvas text and never reverts to strokes, so its strokes are dead weight.
+        // Parity with text objects (see convertLassoToText). Fresh UUIDs for the fallback copies.
+        val storedStrokes = if (isRecognized) emptyList() else strokesToConvert.map { stroke ->
             stroke.copy(id = UUID.randomUUID().toString(), points = stroke.points.map { PointF(it.x, it.y) })
         }
 
@@ -6377,7 +6369,7 @@ class NotebookActivity : AppCompatActivity() {
             originalStrokeIds.forEach { dao.softDeleteById(it, deletedAt) }
             val now        = System.currentTimeMillis()
             val bboxJson   = boundsToConvert.toBoundingBoxJson()
-            val headingObj = HeadingObject(strokes = embeddedStrokes, recognizedText = storedText, level = level)
+            val headingObj = HeadingObject(strokes = storedStrokes, recognizedText = storedText, level = level)
             dao.insertObject(
                 NotebookObject(
                     id          = headingId,
@@ -6402,7 +6394,7 @@ class NotebookActivity : AppCompatActivity() {
             val updatedStrokes = drawingView.getStrokes().filter { it.id !in erasedSet }
             persistedStrokeIds.removeAll(erasedSet)
 
-            val newHeading    = HeadingStroke(id = headingId, boundingBox = boundsToConvert, strokes = embeddedStrokes, recognizedText = storedText, level = level)
+            val newHeading    = HeadingStroke(id = headingId, boundingBox = boundsToConvert, strokes = storedStrokes, recognizedText = storedText, level = level)
             val updatedHeadings = drawingView.getHeadings() + newHeading
             drawingView.loadHeadings(updatedHeadings)
 
@@ -6413,7 +6405,7 @@ class NotebookActivity : AppCompatActivity() {
                     layerId           = layerId,
                     deletedAt         = deletedAt,
                     originalStrokeIds = originalStrokeIds,
-                    embeddedStrokes   = embeddedStrokes,
+                    embeddedStrokes   = storedStrokes,
                     recognizedText    = storedText,
                     level             = level,
                 )
@@ -6496,8 +6488,10 @@ class NotebookActivity : AppCompatActivity() {
         val textId      = UUID.randomUUID().toString()
         val originalStrokeIds = strokesToConvert.map { it.id }
 
-        // Fresh UUIDs for embedded strokes (same pattern as heading conversion).
-        val embeddedStrokes = strokesToConvert.map { stroke ->
+        // Retain embedded strokes ONLY when recognition failed — a recognized text object renders
+        // its markdown and never reverts to strokes, so keeping them is dead weight. Fresh UUIDs for
+        // the fallback copies (same pattern as heading conversion).
+        val embeddedStrokes = if (isRecognized) null else strokesToConvert.map { stroke ->
             stroke.copy(id = UUID.randomUUID().toString(), points = stroke.points.map { PointF(it.x, it.y) })
         }
 
@@ -6726,80 +6720,6 @@ class NotebookActivity : AppCompatActivity() {
             }
             updatePageIndicator()
             saveLastOpenedPage(currentPageId)
-        }
-    }
-
-    /**
-     * Remove a heading, re-inserting its embedded strokes as individual live rows on the
-     * current layer.  Must be called on [Dispatchers.IO]; switches to Main for UI updates.
-     */
-    private suspend fun removeHeading(heading: HeadingStroke) {
-        val db     = soilDatabase ?: return
-        val pageId = currentPageId.takeIf { it.isNotEmpty() } ?: return
-        val now    = System.currentTimeMillis()
-
-        // Fresh-UUID copies of the embedded strokes to re-insert as live rows.
-        val restoredStrokes = heading.strokes.map { embedded ->
-            embedded.copy(id = UUID.randomUUID().toString())
-        }
-
-        db.withTransaction {
-            val dao = db.notebookDao()
-            // 1. Soft-delete the heading row.
-            dao.softDeleteById(heading.id, now)
-            // 2. Re-insert each embedded stroke as a new live row on the current layer.
-            restoredStrokes.forEach { stroke ->
-                val bboxJson = stroke.boundingBox.toBoundingBoxJson()
-                val strokeData = stroke.toStrokeData()
-                dao.insertObject(NotebookObject(
-                    id          = stroke.id,
-                    parentId    = currentLayerId,
-                    type        = "stroke",
-                    boundingBox = bboxJson,
-                    sortOrder   = 0,
-                    createdAt   = now,
-                    updatedAt   = now,
-                    deletedAt   = null,
-                    data        = strokeData.toJson(),
-                ))
-            }
-        }
-
-        withContext(Dispatchers.Main) {
-            undoRedoManager.push(UndoRedoAction.HeadingRemoved(
-                headingId       = heading.id,
-                pageId          = pageId,
-                restoredStrokes = restoredStrokes,
-                embeddedStrokes = heading.strokes,
-                recognizedText  = heading.recognizedText,
-                level           = heading.level,
-            ))
-            updateUndoRedoButtons()
-
-            val updatedHeadings = drawingView.getHeadings().filter { it.id != heading.id }
-            drawingView.loadHeadings(updatedHeadings)
-            val updatedStrokes = drawingView.getStrokes() + restoredStrokes
-            drawingView.setStrokeListSilently(updatedStrokes)
-            restoredStrokes.forEach { persistedStrokeIds.add(it.id) }
-
-            val templateBmp = currentTemplateBitmap
-            val bitmap = withContext(Dispatchers.IO) {
-                drawingView.buildRenderBitmap(updatedStrokes, templateBmp, updatedHeadings)
-            }
-            if (bitmap != null) {
-                drawingView.loadStrokesWithBitmap(updatedStrokes, bitmap, templateBmp)
-            } else {
-                drawingView.loadStrokes(updatedStrokes)
-            }
-
-            // Select the restored strokes so the user can act on them immediately.
-            val selBox = computeUnionBoundingBox(restoredStrokes, emptyList())
-            val pad = 8f * resources.displayMetrics.density
-            selBox.inset(-pad, -pad)
-            selectedObjectIds.clear()
-            selectedObjectIds.addAll(restoredStrokes.map { it.id })
-            drawingView.setLassoSelectedIds(selectedObjectIds.toSet(), selBox)
-            updateFloatingSelectionToolbar(selBox)
         }
     }
 
@@ -7141,8 +7061,8 @@ class NotebookActivity : AppCompatActivity() {
     }
 
     /**
-     * Remove a link, re-inserting its embedded held objects as their own live rows (fresh UUIDs),
-     * mirroring [removeHeading]. The link row is soft-deleted. Must be called on [Dispatchers.IO];
+     * Remove a link, re-inserting its embedded held objects as their own live rows (fresh UUIDs).
+     * The link row is soft-deleted. Must be called on [Dispatchers.IO];
      * switches to Main for UI updates.
      */
     private suspend fun removeLink(link: LinkRender) {
@@ -7523,8 +7443,7 @@ class NotebookActivity : AppCompatActivity() {
         val selectionIsPureStrokes   = selStrokes.isNotEmpty() && selHeadings.isEmpty()
         val selectionIsNonStrokeGroup = selStrokes.isEmpty() && (selHeadings.size + selTextObjects.size + selLines.size) >= 2
         binding.btnMakeHeading.visibility  = if (selectionIsPureStrokes)   View.VISIBLE else View.GONE
-        // S4: btnHeadingMenu opens the submenu in CHANGE mode for a single heading.
-        // (Un-heading lives inside that submenu now — there is no standalone un-heading button.)
+        // S4: btnHeadingMenu opens the submenu in CHANGE mode for a single heading (change level).
         binding.btnHeadingMenu.visibility  = if (selectionIsSingleHeading) View.VISIBLE else View.GONE
         binding.headingDivider.visibility =
             if (selectionIsPureStrokes || selectionIsSingleHeading) View.VISIBLE else View.GONE
@@ -8623,7 +8542,6 @@ class NotebookActivity : AppCompatActivity() {
             is UndoRedoAction.TemplateChanged  -> action.pageId
             is UndoRedoAction.PageEraseAll     -> action.pageId
             is UndoRedoAction.HeadingCreated      -> action.pageId
-            is UndoRedoAction.HeadingRemoved      -> action.pageId
             is UndoRedoAction.HeadingTextEdited   -> action.pageId
             is UndoRedoAction.HeadingLevelChanged -> action.pageId
             is UndoRedoAction.TextInserted     -> action.pageId
@@ -9423,89 +9341,6 @@ class NotebookActivity : AppCompatActivity() {
                 val headingBox = headingBoundingBox(action.embeddedStrokes, action.recognizedText)
                 val newHeading = HeadingStroke(id = action.headingId, boundingBox = headingBox, strokes = action.embeddedStrokes, recognizedText = action.recognizedText, level = action.level)
                 updatedHeadings = preUndoHeadings + newHeading
-            }
-            drawingView.loadHeadings(updatedHeadings)
-            val bitmap = withContext(Dispatchers.IO) {
-                drawingView.buildRenderBitmap(updatedStrokes, templateBmp, updatedHeadings)
-            }
-            if (bitmap != null) {
-                drawingView.loadStrokesWithBitmap(updatedStrokes, bitmap, templateBmp)
-            } else {
-                drawingView.loadStrokes(updatedStrokes)
-            }
-            selectedObjectIds.clear()
-            drawingView.lassoSelectedIds = emptySet()
-            drawingView.setLassoOverlay(null, null)
-            hideFloatingSelectionToolbar()
-            return true
-        }
-
-        // ── Cross-page HeadingRemoved: two-phase display ─────────────────────
-        // Undo: restoredStrokes soft-deleted, heading restored — page shows heading.
-        // Redo: heading soft-deleted, restoredStrokes restored — page shows strokes.
-        if (action is UndoRedoAction.HeadingRemoved) {
-            val snapshot      = drawingView.captureSnapshot()
-            val leavingPageId = currentPageId
-            withContext(Dispatchers.IO) {
-                if (snapshot != null && leavingPageId.isNotEmpty()) {
-                    persistSnapshot(db, leavingPageId, snapshot)
-                }
-                saveStrokes(db)
-            }
-            currentPageIndex = pages.indexOfFirst { it.id == action.pageId }.coerceAtLeast(0)
-
-            val templateBmp: Bitmap?
-            val preUndoStrokes: List<LiveStroke>
-            val preUndoHeadings: List<HeadingStroke>
-            withContext(Dispatchers.IO) {
-                setupPageIds(db)
-                templateBmp     = loadPageTemplateFromDb(db)
-                preUndoStrokes  = deserializeStrokesFromDb(db)
-                preUndoHeadings = loadHeadingsFromDb(db, currentLayerId)
-            }
-            drawingView.loadHeadings(preUndoHeadings)
-            val preUndobitmap = withContext(Dispatchers.IO) {
-                drawingView.buildRenderBitmap(preUndoStrokes, templateBmp, preUndoHeadings)
-            }
-            if (preUndobitmap != null) {
-                drawingView.loadStrokesWithBitmap(preUndoStrokes, preUndobitmap, templateBmp)
-            } else {
-                drawingView.loadStrokes(preUndoStrokes)
-            }
-            currentTemplateBitmap = templateBmp
-            updatePageIndicator()
-            saveLastOpenedPage(currentPageId)
-
-            withContext(Dispatchers.IO) {
-                if (isUndo) {
-                    // Undo: soft-delete restored strokes, restore heading row.
-                    action.restoredStrokes.forEach { dao.softDeleteById(it.id, now) }
-                    dao.restoreById(action.headingId, now)
-                } else {
-                    // Redo: soft-delete heading row, restore restored strokes.
-                    dao.softDeleteById(action.headingId, now)
-                    action.restoredStrokes.forEach { dao.restoreById(it.id, now) }
-                }
-            }
-
-            val updatedStrokes: List<LiveStroke>
-            val updatedHeadings: List<HeadingStroke>
-            if (isUndo) {
-                // Undo: strokes removed, heading re-appears.
-                val restoredIds = action.restoredStrokes.mapTo(mutableSetOf()) { it.id }
-                updatedStrokes = preUndoStrokes.filter { it.id !in restoredIds }
-                persistedStrokeIds.removeAll(restoredIds)
-                val headingBox = headingBoundingBox(action.embeddedStrokes, action.recognizedText)
-                val heading = HeadingStroke(id = action.headingId, boundingBox = headingBox, strokes = action.embeddedStrokes, recognizedText = action.recognizedText, level = action.level)
-                updatedHeadings = preUndoHeadings + heading
-            } else {
-                // Redo: heading removed, strokes re-appear.
-                updatedHeadings = preUndoHeadings.filter { it.id != action.headingId }
-                val restoredStrokes = action.restoredStrokes.map { s ->
-                    LiveStroke(id = s.id, points = s.points.map { pt -> PointF(pt.x, pt.y) })
-                }
-                updatedStrokes = buildList { addAll(preUndoStrokes); addAll(restoredStrokes) }
-                restoredStrokes.forEach { persistedStrokeIds.add(it.id) }
             }
             drawingView.loadHeadings(updatedHeadings)
             val bitmap = withContext(Dispatchers.IO) {
@@ -10532,18 +10367,6 @@ class NotebookActivity : AppCompatActivity() {
                 }
             }
 
-            is UndoRedoAction.HeadingRemoved -> withContext(Dispatchers.IO) {
-                if (isUndo) {
-                    // Undo: soft-delete restored strokes, restore heading row.
-                    action.restoredStrokes.forEach { dao.softDeleteById(it.id, now) }
-                    dao.restoreById(action.headingId, now)
-                } else {
-                    // Redo: soft-delete heading row, restore restored strokes.
-                    dao.softDeleteById(action.headingId, now)
-                    action.restoredStrokes.forEach { dao.restoreById(it.id, now) }
-                }
-            }
-
             is UndoRedoAction.HeadingTextEdited -> {
                 val pageWidthForEdit = resources.displayMetrics.widthPixels
                 withContext(Dispatchers.IO) {
@@ -11189,46 +11012,6 @@ class NotebookActivity : AppCompatActivity() {
                 val headingBox = headingBoundingBox(action.embeddedStrokes, action.recognizedText)
                 val newHeading = HeadingStroke(id = action.headingId, boundingBox = headingBox, strokes = action.embeddedStrokes, recognizedText = action.recognizedText, level = action.level)
                 updatedHeadings = drawingView.getHeadings() + newHeading
-            }
-            drawingView.loadHeadings(updatedHeadings)
-            val templateBmp = currentTemplateBitmap
-            val bitmap = withContext(Dispatchers.IO) {
-                drawingView.buildRenderBitmap(updatedStrokes, templateBmp, updatedHeadings)
-            }
-            if (bitmap != null) {
-                drawingView.loadStrokesWithBitmap(updatedStrokes, bitmap, templateBmp)
-            } else {
-                drawingView.loadStrokes(updatedStrokes)
-            }
-            selectedObjectIds.clear()
-            drawingView.lassoSelectedIds = emptySet()
-            drawingView.setLassoOverlay(null, null)
-            hideFloatingSelectionToolbar()
-            updatePageIndicator()
-            saveLastOpenedPage(currentPageId)
-            return true
-        }
-
-        // ── Step 3a-unheading: Same-page HeadingRemoved — optimised in-memory update ─
-        if (action is UndoRedoAction.HeadingRemoved) {
-            val updatedStrokes: List<LiveStroke>
-            val updatedHeadings: List<HeadingStroke>
-            if (isUndo) {
-                // Undo: remove restored strokes, re-add heading.
-                val restoredIds = action.restoredStrokes.mapTo(mutableSetOf()) { it.id }
-                updatedStrokes = drawingView.getStrokes().filter { it.id !in restoredIds }
-                persistedStrokeIds.removeAll(restoredIds)
-                val headingBox = headingBoundingBox(action.embeddedStrokes, action.recognizedText)
-                val heading = HeadingStroke(id = action.headingId, boundingBox = headingBox, strokes = action.embeddedStrokes, recognizedText = action.recognizedText, level = action.level)
-                updatedHeadings = drawingView.getHeadings() + heading
-            } else {
-                // Redo: remove heading, add restored strokes back.
-                updatedHeadings = drawingView.getHeadings().filter { it.id != action.headingId }
-                val restoredStrokes = action.restoredStrokes.map { s ->
-                    LiveStroke(id = s.id, points = s.points.map { pt -> PointF(pt.x, pt.y) })
-                }
-                updatedStrokes = buildList { addAll(drawingView.getStrokes()); addAll(restoredStrokes) }
-                restoredStrokes.forEach { persistedStrokeIds.add(it.id) }
             }
             drawingView.loadHeadings(updatedHeadings)
             val templateBmp = currentTemplateBitmap
