@@ -1,292 +1,339 @@
 # Notebook Size Research — In-Use Reduction & Backup Compaction
 
-> **Status:** Research only. No plan, no implementation. Captured 2026-06-22 for a future
-> "us" to review as the Garden grows. Nothing here has been decided or scheduled.
+> **Status:** Research only — nothing decided or scheduled.
+> Originally captured **2026-06-22** from reasoned estimates (no device was connected).
+> **Re-measured 2026-07-02** against real notebooks pulled from a device (BOOX Go 10.3 Gen 2,
+> `b7a46e13`). The 6/22 estimates that measurement contradicted have been **removed** — this
+> file now reflects measured reality, not guesses.
 >
-> **Question that prompted this:** Why are `.soil` files so big, where can we reduce them
-> in active use, and how can we further compact them for backups (which are archives and do
-> not need display-optimized data like snapshots)?
+> **Question that prompted this:** Why are `.soil` files so big, where can we reduce them in
+> active use, and how can we further compact them for backups (which are archives and do not
+> need display-optimized data like snapshots)?
 
 ---
 
-## TL;DR
+## TL;DR (measured)
 
-- **Page snapshots dominate both problems.** They are a full-device-resolution, 32-bit,
-  PNG-quality-100, base64 raster cache stored *inside* the canonical store — and they are
-  100% reconstructable from strokes + template.
-- **In active use**, the highest-leverage wins are: reformat/shrink snapshots, drop the
-  unused per-point timestamp, and quantize coordinate precision.
-- **For backups specifically**, stripping snapshots (plus VACUUM, plus optional gzip) is the
-  big archival lever — *fully available for plaintext notebooks, but gated by the
-  ciphertext-byte-copy model for encrypted ones.* That encryption constraint is the key
-  decision to make before any of this becomes a plan.
+- **The 6/22 premise was backwards.** It claimed *"page snapshots dominate."* They don't.
+  On a real heavy notebook, **stroke JSON is 73% of the file**; snapshots are 9%. On a light,
+  template-heavy notebook, **templates are 38%**; strokes 33%; snapshots 13%. Snapshots are a
+  secondary driver in both. What dominates depends on the payload mix.
+- **Biggest lever — stroke JSON.** The per-point `ts` timestamp is **100% redundant** (every
+  point in a stroke carries the *same* value — the save-time `now`) and is ~39% of each point.
+  Nothing reads it, and the only useful thing it could encode — *when the stroke was drawn* — is
+  already in the row's `createdAt` column. So **drop it entirely**; combined with quantizing
+  coordinates to 1 decimal, stroke JSON shrinks by **~52%** — with no visible or functional change.
+- **WEBP lossless is a large, low-risk image win.** Real re-compression: snapshots **−50 to −70%**,
+  templates **−88 to −96%**. Lossless (not lossy) is the right mode for this black-on-transparent
+  line art, and the read path is already format-agnostic (no migration, old PNG files still decode).
+- **base64 → BLOB** recovers a further ~33% on image bytes but needs a schema migration and bends a
+  core rule; it's a *secondary* lever, after WEBP.
+- **Backups** compress spectacularly: a real 63 MiB notebook → **7 MiB** with transform + gzip
+  (−89%), or 11 MiB with gzip alone (−82%) — *but still gated by the encryption byte-copy model.*
+- **Vacuum is not the lever it was assumed to be.** On a cleanly-closed file it reclaimed 0.6 MiB
+  of 63. The residual ~10 MiB overhead is inherent to having 10k+ separate rows, not slack.
+
+---
+
+## 0. Measured reality (2026-07-02)
+
+**Method.** Pulled real `.soil` files over ADB and analysed with `sqlite3` + Python/Pillow
+(libwebp — the same encoder Android's `Bitmap.compress` uses, so format numbers are representative).
+Two notebooks of opposite profile, plus one encrypted.
+
+### 0.1 Byte split — where the bytes actually are
+
+**Heavy-writing notebook** — 66 MB file, plaintext, 29 pages, **10,174 strokes / 986,559 points:**
+
+| Payload | Bytes | Share of file |
+|---|---:|---:|
+| **Stroke JSON** | **45.8 MB** | **73%** |
+| Page snapshots | 5.5 MB | 9% |
+| SQLite overhead (post-vacuum) | ~10 MB | 16% |
+| Headings / links / templates | ~0.7 MB | 1% |
+
+**Light notebook** — 2.5 MB file, plaintext, 13 pages, 288 strokes, **12 templates:**
+
+| Payload | Bytes | Share of file |
+|---|---:|---:|
+| **Templates** | **0.94 MB** | **38%** |
+| Stroke JSON | 0.83 MB | 33% |
+| Page snapshots | 0.33 MB | 13% |
+
+A third notebook (28 MB) was **encrypted** and would not open (`file is not a database` —
+SQLCipher whole-file encryption), confirming the encryption constraint in §4.1 is real and current.
+
+### 0.2 What only measurement revealed
+
+- **`ts` is byte-for-byte redundant, not merely unread.** In **100%** of strokes in *both*
+  notebooks, every point in a stroke shares one identical `ts` (a whole stroke is captured under a
+  single `fallbackTimestamp`). Real sample:
+  `{"x":257.9762,"y":390.0,"ts":1781441240786},{"x":257.85718,"y":390.0,"ts":1781441240786},…`
+  — the 13-digit value repeats for the whole stroke. It is ~39% of every point (~48.6 B/point avg).
+- **Vacuum barely helps a cleanly-closed file** (reclaimed 0.6 MiB of 63). The 6/22 doc's framing
+  of vacuum/WAL slack as a "big lever" was an over-estimate for the normal close path.
+- **Coordinates carry meaningless precision** — `389.88095`, `257.9762` — Float artifacts. At the
+  panel's 227 DPI, 1 px ≈ 0.11 mm; sub-pixel precision is imperceptible.
+
+### 0.3 Image format comparison (real snapshots & templates, WEBP **lossless**)
+
+Stored as base64 in a TEXT column today, so the "now" column includes the +33% base64 tax:
+
+| Content | Now (base64 PNG-100) | WEBP lossless (base64) | Saving |
+|---|---:|---:|---:|
+| Snapshots (heavy nb) | 5.5 MB | 2.7 MB | **−50%** |
+| Snapshots (light nb) | 0.33 MB | 0.10 MB | **−70%** |
+| Templates (heavy nb) | 45 KB | 1.9 KB | **−96%** |
+| Templates (light nb) | 942 KB | 114 KB | **−88%** |
+
+- **Lossless beats lossy here.** These are sparse black-on-transparent strokes/line-grids; WEBP
+  lossless is both *smaller* than WEBP lossy *and* pixel-identical. Lossy wastes bits smoothing
+  already-sharp edges and adds gray halos around ink — no reason to use it for this content.
+- **Read path is format-agnostic.** Every decode routes through `BitmapDecode.decodeSampled` →
+  `BitmapFactory.decodeByteArray`, which auto-detects PNG/WEBP. Switching the *write* format needs
+  **no** DB migration and **no** format flag; old PNG rows and new WEBP rows coexist.
+- **minSdk = 29 caveat.** `Bitmap.CompressFormat.WEBP_LOSSLESS` is API 30+. On API 29 use the
+  deprecated `Bitmap.CompressFormat.WEBP` at quality 100 (that *is* lossless). One `if (SDK_INT>=30)`
+  branch, or just use the legacy constant everywhere.
+
+### 0.4 Stroke-JSON reduction (measured on the heavy notebook's 45.8 MB of strokes)
+
+| Change | Result | Saving |
+|---|---:|---:|
+| Drop per-point `ts` | 27.9 MB | −39% |
+| Quantize coords to 1 decimal + drop `ts` | 21.9 MB | **−52%** |
+| Quantize to integer + drop `ts` | 18.2 MB | −60% |
+| Keep **one** `ts` per stroke (for reference only) | 28.1 MB | −39% |
+
+The light notebook matched almost exactly (−38.7% / −52.6% / −60.8%). The stroke-level-`ts` row is
+shown only for comparison — **it is not the recommendation.** A stroke's creation time is already
+stored on its row (`createdAt`, which — unlike `ts` — survives moves), so there is nothing to
+preserve by keeping a stroke-level timestamp. **Drop `ts` outright.**
+
+### 0.5 Real before/after (transforms applied to a real 63.0 MiB copy, then measured)
+
+| Configuration | File size | Saving |
+|---|---:|---:|
+| **Original** | 63.0 MiB | — |
+| Vacuum only | 62.4 MiB | −1% |
+| WEBP images only | 59.5 MiB | −6% |
+| Stroke shrink only (q1 + drop-`ts`) | 38.3 MiB | −39% |
+| **All: q1 + drop-`ts` + WEBP** | **35.4 MiB** | **−44%** |
+| All with integer coords | 30.6 MiB | −51% |
+| **All + gzip (backup archive)** | **7.0 MiB** | **−89%** |
+| Original + gzip (no transform) | 11.3 MiB | −82% |
 
 ---
 
 ## 1. Anatomy of a `.soil` file
 
 Each notebook is one SQLite database (`.soil` extension) at
-`getExternalFilesDir(null)/Garden/<uuid>.soil`. One `notebook` table; everything (pages,
-layers, strokes, images, text, templates, metadata) is a row with a `data` TEXT column
-holding JSON. Schema and rules: [`docs/data-architecture.md`](docs/data-architecture.md).
+`getExternalFilesDir(null)/Garden/<uuid>.soil`. One `notebook` table; everything (pages, layers,
+strokes, images, text, templates, metadata) is a row with a `data` TEXT column holding JSON. Schema
+and rules: [`docs/data-architecture.md`](docs/data-architecture.md).
 
-The on-disk weight lives in three JSON payloads plus structural overhead:
+The on-disk weight lives in these JSON payloads plus structural overhead:
 
-| Payload | Where | Shape |
-|---|---|---|
-| **Page snapshot** | `PageData.snapshot` on each `type="page"` row | base64 PNG string |
-| **Stroke points** | `StrokeData.points` on each stroke row | JSON array of `{x,y,ts,…}` |
-| **Template image** | `TemplateData.image` on each `type="template"` row | base64 PNG string |
-| Embedded cover | `notebook_meta` (schema v3) single row | base64 PNG (plaintext only) |
-| SQLite overhead | WAL, free pages, journal | — |
+| Payload | Where | Shape | Measured rank |
+|---|---|---|---|
+| **Stroke points** | `StrokeData.points` on each stroke row | JSON array of `{x,y,ts}` | #1 (heavy notebooks) |
+| **Template image** | `TemplateData.image` on each `type="template"` row | base64 PNG | #1 (light/template-heavy) |
+| **Page snapshot** | `PageData.snapshot` on each `type="page"` row | base64 PNG | secondary in both |
+| SQLite overhead | page structure, index, WAL, free pages | — | ~16% (not reclaimable by vacuum on clean files) |
+| Embedded cover | `notebook_meta` (schema v3) single row | base64 PNG (plaintext only) | small |
 
 Relevant model files:
-- `data/ObjectData.kt` — `PageData` (`{width,height,template,snapshot}`), `TemplateData`,
-  `BoundingBox`.
-- `data/StrokeData.kt` — `StrokeData(color, strokeWidth, points)`.
+- `data/ObjectData.kt` — `PageData` (`{width,height,template,snapshot}`, `:56`), `TemplateData` (`:73`).
+- `data/StrokeData.kt` — `StrokeData(color, strokeWidth, points)`; `toPointFs()` (`:42`) drops
+  `ts`/`pressure`/`tilt` for rendering.
 - `data/StrokePoint.kt` — `StrokePoint(x, y, pressure?, tilt?, @SerialName("ts") timestamp)`.
+- `data/LiveStroke.kt` — `toStrokeData()` (`:83`) is the only thing that writes `ts` (copies
+  `srcPoints` ts forward, or stamps one `fallbackTimestamp` per fresh stroke → the uniformity above).
 - `data/NotebookMeta.kt` / `data/NotebookMetaStore.kt` — embedded identity + cover.
 
 ---
 
-## 2. Active-use size drivers (ranked)
+## 2. Active-use size drivers (ranked by **measured** leverage)
 
-### 2.1 Page snapshots — biggest driver, pure redundancy
+### 2.1 Stroke JSON — the dominant driver
 
-`captureSnapshot()` exists in both engines:
-- `notebook/OnyxNotebookView.kt:2013`
-- `notebook/GenericNotebookView.kt:1491`
-- interface: `notebook/NotebookView.kt:433`
+73% of the heavy notebook, 33% of the light one. Two independent, compounding wins, both safe
+because nothing reads `ts` for rendering (`StrokeData.toPointFs()` ignores it) and sub-pixel
+precision is invisible:
 
-Both do the same thing: render the **full device-resolution** page into an
-`ARGB_8888` bitmap (transparent base) and:
+1. **`ts` — dead *and* redundant, so drop it.** 100% uniform per stroke (the save-time `now`,
+   stamped on every point), ~39% of every point, and **read by nothing** — the only code touching a
+   stored point's `ts` is the round-trip that rewrites it unchanged (`LiveStroke.kt:83`). Live drawing
+   uses real hardware timestamps for shape-dwell detection (`OnyxNotebookView.kt:429`), but those are
+   the live pen event, consumed on the spot and never persisted. The field's stated intent — a
+   placeholder "for future devices" enabling ink replay / velocity-derived line weight / temporal
+   recognition — was never built, and as populated it carries no per-point timing anyway. Its one
+   useful signal, *when the stroke was drawn*, is already on the row (`createdAt`, `:7144` — and
+   `createdAt` survives moves, whereas `ts` is clobbered with a fresh `now` on every re-save). So
+   **drop it entirely**; a future device that captures real timing can add the field back then.
+2. **Coordinate quantization.** Round to 1 decimal at serialize time (invisible at 227 DPI). Integer
+   saves more (−60% combined) but 1-decimal (−52% combined) is the conservative default.
 
-```kotlin
-bmp.compress(Bitmap.CompressFormat.PNG, 100, stream)   // OnyxNotebookView.kt:2053
-return Base64.encodeToString(stream.toByteArray(), Base64.DEFAULT)
-```
+Decoder already tolerates missing keys (`ignoreUnknownKeys = true`; `pressure`/`tilt` nullable and
+already omitted when null), so reads stay forward/backward compatible. The one code change: make
+`StrokePoint.timestamp` defaulted/nullable so it can be omitted from output.
 
-Four compounding costs:
+### 2.2 Images — snapshots + templates (format, then base64)
 
-1. **Resolution × depth × quality.** Full-page (e.g. Note Max ~1650×2200) × 32-bit ARGB ×
-   lossless PNG-100. A moderately-to-heavily filled page can be hundreds of KB to >1 MB.
-2. **Base64 inflation** — another ~33% on top, since it lives in a TEXT column.
-3. **Reconstructable.** The snapshot is *only* a fast-load raster cache for e-ink. It is
-   fully rebuildable from strokes + template on next open. See the two-phase page load in
-   [`docs/drawing-engine.md`](docs/drawing-engine.md) ("Page Snapshot System"):
-   white → template → snapshot PNG → new content. Functionally it is a cache stored inside
-   the source of truth.
-4. **Churn multiplier.** A snapshot is re-persisted on close, dialog overlay, page nav,
-   `setTemplate`, `setEraserMode(true)`, etc. (capture triggers listed in
-   `drawing-engine.md`). Every rewrite frees the previous snapshot's SQLite pages, which sit
-   in the free list / WAL until `PRAGMA incremental_vacuum` + `wal_checkpoint(TRUNCATE)` run
-   on clean close (`NotebookActivity.kt:3278`). A heavily-edited notebook bloats well beyond
-   its logical content between vacuums.
+Snapshots are full-device-resolution (e.g. 1860×2480), 32-bit ARGB, transparent-base, PNG-100.
+Templates are simple line-grids. Both are line art that WEBP lossless compresses far better than
+PNG (§0.3). Two levers:
 
-**Why it exists (do not casually remove):** snapshots are the e-ink fast-path. On load, a
-snapshot hit lets the page display immediately while strokes deserialize in the background
-(`NotebookActivity.loadCurrentPage`, fast vs. full path). Removing snapshots entirely would
-regress cold-open latency on large pages. The opportunity is to make them *cheaper*, not to
-delete them from live files.
+1. **WEBP lossless** (highest image leverage, low risk): −50 to −96%. Read-transparent, lossless,
+   no migration. **Pair with a threading fix:** `captureSnapshot()` currently renders **and**
+   compresses on the **main thread** during page nav/close (`NotebookActivity.navigateToPageInternal`
+   `:5162`, `saveAndSwitchPage` `:5199`). WEBP encodes slower than PNG, so split the compress+base64
+   off to `Dispatchers.IO` (return the `Bitmap` from the main thread, encode on IO) — a good refactor
+   regardless, and it protects page-turn smoothness on slower e-ink SoCs.
+2. **base64 → BLOB** (secondary): recovers the +33% TEXT tax on image bytes. After WEBP shrinks the
+   images, the absolute saving is smaller (e.g. heavy-nb snapshots 2.7 MB → 2.1 MB). Needs a Room
+   v3→v4 migration touching every image read/write site, and bends the "assets are base64 in `data`"
+   rule (stays inline / single-table). Do **after** WEBP, not instead.
 
-### 2.2 Per-point timestamp (`ts`) — dead weight in stroke JSON
+**Why snapshots exist (do not delete from live files):** they are the e-ink fast-load cache. On a
+snapshot hit the page displays immediately while strokes deserialize in the background
+(`NotebookActivity.tryLoadSnapshotBitmap` `:4091`, two-phase load in
+[`docs/drawing-engine.md`](docs/drawing-engine.md)). The opportunity is to make them *cheaper*, not
+to remove them.
 
-Each point serializes (from `StrokeData.kt` / `StrokePoint.kt`) as:
+### 2.3 SQLite overhead / vacuum — minor for clean files
 
-```json
-{ "x": 100.0, "y": 200.0, "ts": 1716000000000 }
-```
-
-`pressure` / `tilt` are nullable and **already omitted** when null (`explicitNulls = false`),
-and hardware capture is not implemented, so they cost nothing today. But **`ts` is written
-on every point** — a 13-digit epoch-millis `Long`, often larger than the coordinates it
-accompanies — and it is **never read for rendering or any logic**.
-
-Confirmed by grep: the only consumers of a point's `timestamp` are storage round-trips:
-- `data/LiveStroke.kt:87` copies `src[i].timestamp` forward on re-serialize.
-- `data/LiveStroke.kt:90` stamps a `fallbackTimestamp` on fresh strokes.
-- `StrokeData.toPointFs()` (`StrokeData.kt:42`) — used for rendering — **ignores** `ts`,
-  `pressure`, and `tilt` entirely (returns only `PointF(x, y)`).
-
-So on a stroke of thousands of densely-sampled points, `ts` is frequently the single largest
-component of each point object while contributing nothing functional. (Original intent: keep
-the field for "future devices" — see the `StrokePoint` KDoc.)
-
-### 2.3 Coordinate precision
-
-`StrokePoint.x` / `.y` are raw input `Float`s serialized at full precision by
-kotlinx.serialization (e.g. `127.38492279052734`). On an e-ink canvas, sub-pixel precision
-beyond ~1 decimal place is not perceptible. Rounding to integer or 1 decimal would shrink
-every point with no visible effect.
+~16% of the heavy file, but vacuum on a **cleanly-closed** notebook reclaimed only 0.6 MiB — the
+close path already runs `hardDeleteOldSoftDeleted` + `incremental_vacuum` + `wal_checkpoint(TRUNCATE)`
+(`NotebookActivity.sealNotebook` `:3909`, `:3943–3946`). The residual is real per-row structure
+(10k+ stroke rows, each with id/parentId/boundingBox/type/3 timestamps + index), not reclaimable
+slack. Materially reducing it would mean changing how points are batched into rows — a large
+architectural change, out of scope here.
 
 ### 2.4 Template duplication across notebooks
 
-Applying a library template copies its **full-resolution PNG** into the notebook's `.soil`
-as a `type="template"` row (`TemplateData.image`, base64). See the Template System section of
-[`docs/drawing-engine.md`](docs/drawing-engine.md) and Templates in
-[`docs/data-architecture.md`](docs/data-architecture.md).
-
-- **Within one notebook:** pages sharing a template reference one `.soil` template row — good,
-  no duplication.
-- **Across notebooks:** the *same* template image is duplicated in every `.soil` that uses
-  it, **and again** in the global index library (`TemplateObject.image` in `notesprout.db`).
-  Heavy template users carry many byte-for-byte copies of the same image.
-
-Content-hash dedup (one stored copy, referenced by hash) is a larger architectural change —
-flagged as an opportunity, not low-hanging fruit.
+Applying a library template copies its full-resolution image into the `.soil` as a `type="template"`
+row **and** the same image lives in the global index library (`TemplateObject.image` in
+`notesprout.db`). Within one notebook, pages sharing a template reference one row (good); across
+notebooks the image is duplicated byte-for-byte. WEBP shrinks every copy; **content-hash dedup**
+(one stored copy per unique image, referenced by hash) is the structural fix — larger change, flagged
+as an opportunity, not low-hanging fruit.
 
 ### 2.5 Soft-deletes — mostly handled
 
-- `hardDeleteOldSoftDeleted(before = sessionStart)` purges pre-session soft-deletes on clean
-  close (`data/NotebookDao.kt:293`, called at `NotebookActivity.kt:3277`).
-- Current-session soft-deletes are intentionally retained for undo/redo safety on abnormal
-  teardown.
-- Reclamation depends on a **clean close** running `incremental_vacuum` +
-  `wal_checkpoint(TRUNCATE)`. Not a major standing driver, but worth knowing the space is
-  only actually returned when the close path completes.
-
-### 2.6 Embedded images / assets
-
-Per the core rules, all assets are base64 inline in `data` — no external files. Embedded
-image decodes are bounded through `core/BitmapDecode.decodeSampled(...)` (OOM guard), but the
-**stored** bytes are whatever was embedded. Photos/large rasters embedded into a notebook are
-a direct size cost. (Not the current dominant driver versus snapshots, but the same base64
-inflation applies.)
+`hardDeleteOldSoftDeleted(before = sessionStart)` (`data/NotebookDao.kt:318`) purges pre-session
+soft-deletes on clean close; current-session soft-deletes are retained for undo safety. Space is only
+returned when the close path completes. Not a standing driver.
 
 ---
 
-## 3. Reductions that apply to files *in active use*
+## 3. Reduction options for files *in active use* (ranked by measured leverage)
 
-Ordered by leverage. **All of these change live files**, so each has a compatibility note.
+1. **Stroke JSON: drop per-point `ts` + quantize coords to 1-dec.** −52% of stroke bytes; the dominant
+   real win. Risk: low (nothing reads `ts`; `createdAt` already holds stroke timing). Effort: small
+   (`StrokePoint`, `StrokeData`, `LiveStroke.toStrokeData`). Converges as pages are re-saved — no
+   forced migration.
+2. **WEBP lossless for snapshots + templates + cover.** −50 to −96% of image bytes. Risk: low (read
+   path unchanged, lossless). Effort: small (both `captureSnapshot()` encoders, template-save, cover).
+   Pair with moving the compress off the main thread (§2.2).
+3. **base64 → BLOB for images.** Further −33% of image bytes. Risk: medium (Room v3→v4 migration,
+   bends a core rule). After #2.
+4. **Template content-hash dedup** across notebooks + index. Architectural; matters for heavy reuse.
 
-1. **Snapshot format (highest leverage).** The snapshot is grayscale/black-on-transparent
-   e-ink content stored as 32-bit PNG-100. Levers that keep the fast-load behavior intact:
-   - Lossless **WEBP** instead of PNG.
-   - A **lower bitmap config** (the content is effectively 1-bit/grayscale + alpha).
-   - **Cap snapshot resolution** below full device resolution.
-   Any of these shrinks the single largest payload without touching the vector source of truth.
+> **Wire-format caveat.** `StrokeData.kt`/`ObjectData.kt` document the JSON as byte-compatible with
+> the original org.json output. Items 1 change *newly written* rows only; reads stay compatible (codec
+> tolerates missing/extra keys). Decide whether to lazy-rewrite on open, one-shot migrate, or let it
+> converge as pages are touched. WEBP (item 2) needs no migration at all.
 
-2. **Drop or delta-encode per-point `ts`.** Nothing reads it. Cleanest win is to stop
-   writing it; if the "future hardware" intent is to be preserved, store one stroke-level
-   base timestamp plus small deltas. Decoder already tolerates missing keys
-   (`ignoreUnknownKeys = true`, nullable/defaulted fields), so reads stay compatible.
-
-3. **Quantize coordinates** to int or 1 decimal at serialization time.
-
-4. **Template content-hash dedup** (architectural) — one stored copy per unique image,
-   referenced by hash, across `.soil` files and the index.
-
-> **Wire-format caveat.** `StrokeData.kt` and `ObjectData.kt` both document the JSON as
-> "byte-compatible with the previous org.json output, no DB migration required." Items 2 and 3
-> change *newly written* rows. Reading stays forward/backward compatible (the codec tolerates
-> missing/extra keys), but old and new rows would differ on disk. Be deliberate — decide
-> whether to lazy-rewrite on open, one-shot migrate, or simply let it converge as pages are
-> touched.
+**Suggested slice:** #1 + #2 together — low-risk, no forced migration, and they take the worst real
+notebook from 63 → ~35 MiB (−44%) while shrinking template-heavy notebooks even more.
 
 ---
 
 ## 4. Backup-specific compaction (the archive angle)
 
-**Premise (correct):** a backup is an *archive*, not a display-optimized live file. A
-restored/imported `.soil` regenerates every snapshot on first open (the load path rebuilds on
-a snapshot miss). So data that exists purely for display can be dropped from backups without
-loss.
+**Premise (still correct):** a backup is an *archive*, not a display-optimized live file. A
+restored/imported `.soil` regenerates every snapshot on first open (the load path rebuilds on a
+snapshot miss), so display-only data can be dropped from backups without loss.
 
-Current backup model (see [`docs/backup.md`](docs/backup.md)):
-- **Pure file copy**, byte-for-byte. No transform.
-- **Incremental by timestamp** — a notebook is re-copied only when `updatedAt >`
-  last-backed-up time (`data/backup/BackupPredicates.kt`).
-- **Drive replace-in-place** by UUID filename (PATCH existing file ID).
-- **Index copied last** after all per-notebook timestamps are stamped.
+Current backup model (see [`docs/backup.md`](docs/backup.md)): **pure byte-for-byte file copy**, no
+transform (`data/backup/BackupEngine.kt` → `SafBackupWriter.replaceFile` / `DriveBackupWriter.replaceFile`);
+**incremental by timestamp** (`data/backup/BackupPredicates.kt`); index copied last.
 
-Archival reductions, biggest first:
+Archival reductions, biggest first (measured on the 63 MiB notebook):
 
-1. **Strip snapshots.** Remove the `snapshot` field from every page row in the backup copy.
-   Likely the single largest backup-size reduction available, and lossless in archival terms
-   (regenerated on first open after restore). Same logic applies to:
-   - the embedded `notebook_meta` **cover snapshot** (regenerable), and
-   - the **`undo_redo_state`** table (schema v2 — encrypted-notebook session undo history;
-     meaningless in an archive). See `docs/data-architecture.md` "Schema Version 2/3".
-   - *Caveat:* the cover snapshot is what lets MainActivity render the card without opening
-     the `.soil`, and `notebook_meta` is used by import for portable display. Decide whether a
-     restored notebook should show a placeholder until first open, or whether the small cover
-     is worth keeping while stripping only the per-page snapshots.
-
-2. **VACUUM the backup copy.** Collapse free pages / WAL slack accumulated from snapshot
-   churn (§2.1). A freshly-vacuumed copy is materially smaller than the live file *even before
-   stripping*.
-
-3. **Compress the archive (gzip/zstd the `.soil`).** Stroke JSON is highly repetitive and
-   compresses extremely well; gzip also recovers much of base64's ~25% overhead. PNG
-   snapshots compress poorly, so this pairs best **with** snapshot-stripping. Trade-off:
-   backups become `.soil.gz` (or similar) rather than drop-in `.soil` files — the
-   import/restore path would need to inflate first.
+1. **gzip the archive → 7 MiB with transform, 11 MiB without (−89% / −82%).** Stroke JSON and repeated
+   `ts` values compress extremely well; gzip also recovers most of base64's overhead. Trade-off:
+   backups become `.soil.gz`, so the import/restore path must inflate first.
+2. **Strip snapshots** (and the `notebook_meta` cover, and `undo_redo_state`) — regenerated on first
+   open. Pairs with gzip (PNG/WEBP compress poorly, so removing them helps the gzip result). Decide
+   whether a restored notebook shows a placeholder card until first open (the cover is what lets
+   MainActivity render the card without opening the file).
+3. **Re-serialize (drop `ts`, quantize) + VACUUM** the backup copy — but if items 1/2 already run, most
+   of this value is captured.
 
 ### 4.1 The hard constraint: encryption byte-copy model
 
-This cuts across **every** backup-compaction idea above.
+Encrypted notebooks are backed up as a **byte-level ciphertext copy** — no decrypt, no passphrase
+prompt (SQLCipher encrypts the whole file; confirmed by the 28 MB notebook that would not open).
+Stripping/vacuum/re-serialize all require opening and rewriting the DB, which is impossible without
+the key. So compaction splits in two:
 
-Encrypted notebooks are currently backed up as a **byte-level ciphertext copy** — no
-decrypt, no passphrase prompt (`docs/backup.md` D10; SQLCipher encrypts the whole file). But
-stripping snapshots, VACUUM, and re-serialization all require **opening and rewriting the
-DB**, which is impossible without the key. So compaction splits into two worlds:
-
-| | Plaintext notebooks | Encrypted notebooks |
+| | Plaintext | Encrypted |
 |---|---|---|
-| Strip snapshots / cover / undo | ✅ open, strip, copy | ❌ needs key |
-| VACUUM | ✅ | ❌ needs key |
-| Re-serialize (drop `ts`, quantize) | ✅ | ❌ needs key |
-| Outer compression (gzip ciphertext) | ✅ | ⚠️ possible but SQLCipher ciphertext compresses poorly |
+| Strip snapshots / cover / undo | ✅ | ❌ needs key |
+| VACUUM · re-serialize | ✅ | ❌ needs key |
+| Outer gzip | ✅ | ⚠️ SQLCipher ciphertext compresses poorly |
 
-Reducing encrypted notebooks would mean either **decrypting during backup** (a
-security-model change — passphrases are never logged, never in Intent extras, never in the
-index; see [`docs/encryption.md`](docs/encryption.md)) or **accepting that encrypted backups
-stay large.**
+Reducing encrypted backups means either **decrypting during backup** (a security-model change —
+passphrases are never logged, never in Intent extras, never in the index; see
+[`docs/encryption.md`](docs/encryption.md)) or **accepting that encrypted backups stay large.**
 
 ### 4.2 Model trade-offs to weigh later
 
-- A strip/vacuum/compress pipeline makes backups **transformed copies**, not pure copies:
-  more CPU per notebook, and the backed-up file differs from the live one.
-- **Incremental-by-timestamp** still works (keyed on live `updatedAt`), but the transform
-  cost is paid on every changed notebook each run.
-- **Round-trip the restore/import path** with stripped (and possibly compressed) files before
-  committing — confirm the full-notebook import pipeline tolerates a missing `snapshot`,
-  missing cover, and absent `undo_redo_state`. (Restore is still future work per
-  `docs/backup.md`; the import path is the de facto restore today.)
+- Transform-on-backup makes backups **transformed copies**, not pure copies — more CPU per notebook,
+  and the file differs from the live one. Incremental-by-timestamp still works.
+- **Round-trip the import/restore path** with stripped + gzipped files before committing — confirm it
+  tolerates a missing `snapshot`, missing cover, and absent `undo_redo_state`. (Import is the de facto
+  restore today.)
 
 ---
 
 ## 5. Open questions for future "us"
 
-- **Measure, don't guess.** Pull real notebooks and compute the actual byte split:
-  snapshots vs. stroke JSON vs. templates vs. SQLite slack. ADB pull path:
-  `/sdcard/Android/data/com.notesprout.android.dev/files/Garden/<uuid>.soil`. (No devices were
-  connected when this was written, so all magnitudes here are reasoned estimates.)
-- What is the real snapshot-to-stroke byte ratio on a heavily-used notebook? That ratio
-  decides whether snapshots alone justify a project.
-- Does the import/restore path already tolerate a stripped `.soil` (no snapshot/cover/undo)?
-  Trace it before assuming.
-- Is decrypt-during-backup ever acceptable for encrypted notebooks, or do we commit to "big
-  encrypted backups" as a permanent trade-off?
-- Should snapshot reformatting (WEBP / lower depth / capped res) be an **in-use** change
-  (benefits live files too) or only a **backup-time** transform (keeps live fast-path
-  untouched)?
+Answered by the 2026-07-02 measurement (kept for the record):
+- *Real snapshot-to-stroke ratio?* → On a heavy notebook, strokes are ~8× snapshots. Snapshots do
+  **not** dominate; stroke JSON does.
+- *Is snapshot reformatting worth it?* → Yes: WEBP lossless −50 to −96%, read-transparent, no migration.
+- *Are encrypted notebooks a hard constraint?* → Yes, confirmed (won't open without key).
+
+Still open:
+- **BLOB vs base64:** worth a Room v3→v4 migration for the remaining ~33% on image bytes, or not?
+- **Decrypt-during-backup:** ever acceptable for encrypted notebooks, or commit to large encrypted
+  backups permanently?
+- **Stroke-JSON rollout:** lazy-rewrite on open, one-shot migrate, or converge-on-touch?
+- **Backup format:** switch to `.soil.gz` (needs restore-side inflate) or keep drop-in `.soil`?
+- **Row-count overhead:** is the ~16% per-row SQLite overhead ever worth a batched-points redesign?
 
 ---
 
-## 6. Key code references
+## 6. Key code references (verified 2026-07-02)
 
 | Concern | File:line |
 |---|---|
-| Snapshot capture (Onyx) | `notebook/OnyxNotebookView.kt:2013` (compress `:2053`) |
-| Snapshot capture (Generic) | `notebook/GenericNotebookView.kt:1491` (compress `:1531`) |
-| Snapshot interface | `notebook/NotebookView.kt:433` |
-| Page/Template/Bbox JSON | `data/ObjectData.kt` (`PageData:55`, `TemplateData:72`) |
+| Snapshot capture (Onyx) | `notebook/OnyxNotebookView.kt:2450` (compress `:2492`, base64 `:2494`) |
+| Snapshot capture (Generic) | `notebook/GenericNotebookView.kt:1817` (compress `:1859`, base64 `:1861`) |
+| Snapshot interface | `notebook/NotebookView.kt:615` |
+| Snapshot compress on **main thread** (nav/close) | `NotebookActivity.kt:5162`, `:5199` |
+| Snapshot fast-load (decode is format-agnostic) | `NotebookActivity.tryLoadSnapshotBitmap:4091` |
+| Bounded, format-agnostic decode | `core/BitmapDecode.kt` (`decodeSampled`) |
+| Page/Template JSON | `data/ObjectData.kt` (`PageData:56`, `snapshot:60`, `TemplateData:73`, `image:77`) |
 | Stroke JSON codec | `data/StrokeData.kt` (`toPointFs:42` drops ts/pressure/tilt) |
 | Point shape | `data/StrokePoint.kt` (`ts` = SerialName for `timestamp`) |
-| `ts` round-trip (only consumers) | `data/LiveStroke.kt:87`, `:90` |
-| Soft-delete purge on close | `data/NotebookDao.kt:293`; called `NotebookActivity.kt:3277` |
-| Close-path vacuum/checkpoint | `NotebookActivity.kt:3278-3281` |
+| Only writer of `ts` (source of per-stroke uniformity) | `data/LiveStroke.kt:83` (`toStrokeData`) |
+| Soft-delete purge + vacuum on close | `NotebookActivity.sealNotebook:3909` (`:3943–3946`) |
 | Embedded meta/cover | `data/NotebookMeta.kt`, `data/NotebookMetaStore.kt` |
-| Backup engine / predicates | `data/backup/BackupEngine.kt`, `data/backup/BackupPredicates.kt` |
-| Encrypted byte-copy rule | `docs/backup.md` (D10), `docs/encryption.md` |
+| Backup engine (pure byte-copy) | `data/backup/BackupEngine.kt`; predicates `data/backup/BackupPredicates.kt` |
+| minSdk (WEBP_LOSSLESS gate) | `app/build.gradle.kts:19` (`minSdk = 29`) |
+</content>
+</invoke>
