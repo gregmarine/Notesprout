@@ -3,9 +3,10 @@ import 'package:flutter/services.dart';
 /// One pen event pushed up from the native Onyx surface at pen-lift.
 /// [points] is interleaved [x0,y0,x1,y1,...] in NATIVE (physical px) view coordinates.
 class PenEvent {
-  PenEvent(this.type, this.points);
+  PenEvent(this.type, this.points, {this.durationMs = 0});
   final String type; // 'stroke' | 'erase'
   final List<double> points;
+  final int durationMs; // pen-contact time; drives the smart-lasso velocity gate
 }
 
 /// Dart side of the native pen bridge. Commands go Dart→native; committed strokes / eraser paths
@@ -31,6 +32,7 @@ class PenBridge {
       onEvent?.call(PenEvent(
         m['type'] as String,
         (m['points'] as List).cast<double>(),
+        durationMs: (m['durationMs'] as num?)?.toInt() ?? 0,
       ));
     }
     return null;

@@ -17,8 +17,9 @@ class FlutterInkSurface extends StatefulWidget {
   /// Device pixel ratio — points are reported in physical px (`logical * dpr`) to match the model.
   final double dpr;
 
-  /// Called on pointer-up with the finished stroke as interleaved physical-px coordinates.
-  final void Function(List<double> pointsPx) onStroke;
+  /// Called on pointer-up with the finished stroke as interleaved physical-px coordinates and the
+  /// pointer-contact duration in ms (feeds the smart-lasso velocity gate).
+  final void Function(List<double> pointsPx, int durationMs) onStroke;
 
   /// Width of the live preview stroke, in physical px.
   final double strokeWidthPx;
@@ -30,9 +31,11 @@ class FlutterInkSurface extends StatefulWidget {
 class _FlutterInkSurfaceState extends State<FlutterInkSurface> {
   final List<Offset> _current = []; // logical-space points of the in-flight stroke
   bool _drawing = false;
+  int _downMs = 0;
 
   void _down(PointerDownEvent e) {
     _drawing = true;
+    _downMs = DateTime.now().millisecondsSinceEpoch;
     setState(() => _current
       ..clear()
       ..add(e.localPosition));
@@ -51,7 +54,7 @@ class _FlutterInkSurfaceState extends State<FlutterInkSurface> {
       for (final p in _current) {
         pts..add(p.dx * widget.dpr)..add(p.dy * widget.dpr);
       }
-      widget.onStroke(pts);
+      widget.onStroke(pts, DateTime.now().millisecondsSinceEpoch - _downMs);
     }
     setState(() => _current.clear());
   }

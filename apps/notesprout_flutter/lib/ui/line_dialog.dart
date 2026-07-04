@@ -18,6 +18,7 @@ Future<List<PlacedLine>?> showLineDialog(
         BuildContext context, double pageW, double pageH, double dpr) =>
     showDialog<List<PlacedLine>>(
       context: context,
+      barrierColor: Colors.transparent, // e-ink: no page-dimming scrim (reads as a shadow)
       builder: (_) => _LineDialog(pageW: pageW, pageH: pageH, dpr: dpr),
     );
 
@@ -71,6 +72,9 @@ class _LineDialogState extends State<_LineDialog> {
   Widget build(BuildContext context) {
     return Dialog(
       backgroundColor: Colors.white,
+      elevation: 0,
+      shadowColor: Colors.transparent,
+      surfaceTintColor: Colors.transparent,
       shape: RoundedRectangleBorder(
         side: const BorderSide(color: Colors.black, width: 1),
         borderRadius: BorderRadius.circular(4),

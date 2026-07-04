@@ -44,8 +44,13 @@ class OnyxSpikeView(context: Context) : View(context) {
      */
     private var drawingPaused = false
 
+    /** Pen-down wall-clock time, so we can report the stroke's contact duration to Dart (the
+     *  smart-lasso velocity gate = pathLength / durationMs). Mirrors native beginRawDrawingTimeMs. */
+    private var beginTimeMs = 0L
+
     private val rawInputCallback = object : RawInputCallback() {
         override fun onBeginRawDrawing(shortcut: Boolean, point: TouchPoint) {
+            beginTimeMs = System.currentTimeMillis()
             if (isSetup && !isEraserMode) touchHelper.setRawDrawingRenderEnabled(true)
         }
 
@@ -80,7 +85,8 @@ class OnyxSpikeView(context: Context) : View(context) {
         // Interleaved [x0,y0,x1,y1,...] as doubles — compact over the channel.
         val coords = ArrayList<Double>(pts.size * 2)
         for (p in pts) { coords.add(p.x.toDouble()); coords.add(p.y.toDouble()) }
-        onEvent?.invoke(mapOf("type" to type, "points" to coords))
+        val durationMs = if (beginTimeMs > 0L) System.currentTimeMillis() - beginTimeMs else 0L
+        onEvent?.invoke(mapOf("type" to type, "points" to coords, "durationMs" to durationMs))
     }
 
     // ── Tool commands (from Dart) ──────────────────────────────────────────────

@@ -11,6 +11,7 @@ import '../core/markdown/markdown_render.dart';
 ///  - the markdown source on Save with content.
 Future<String?> showTextDialog(BuildContext context, {String initial = ''}) => showDialog<String>(
       context: context,
+      barrierColor: Colors.transparent, // e-ink: no page-dimming scrim (reads as a shadow)
       builder: (_) => _TextDialog(initial: initial),
     );
 
@@ -36,6 +37,9 @@ class _TextDialogState extends State<_TextDialog> {
   Widget build(BuildContext context) {
     return Dialog(
       backgroundColor: Colors.white,
+      elevation: 0,
+      shadowColor: Colors.transparent,
+      surfaceTintColor: Colors.transparent,
       insetPadding: const EdgeInsets.all(24),
       shape: RoundedRectangleBorder(
         side: const BorderSide(color: Colors.black, width: 1),

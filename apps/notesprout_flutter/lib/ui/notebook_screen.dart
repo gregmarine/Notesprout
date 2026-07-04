@@ -7,11 +7,12 @@ import 'package:uuid/uuid.dart';
 
 import 'dart:math' as math;
 
-import '../core/geometry.dart';
+import '../core/lasso_geometry.dart';
 import '../core/markdown/markdown_parser.dart';
 import '../core/markdown/markdown_render.dart';
 import '../core/undo_manager.dart';
 import '../data/db_worker.dart';
+import '../recognition/handwriting_recognizer.dart';
 import '../data/soil_database.dart';
 import '../domain/objects.dart';
 import '../domain/page_object.dart';
@@ -24,12 +25,19 @@ import 'text_dialog.dart';
 
 const _uuid = Uuid();
 
-enum _Tool { pen, eraser }
+/// The active editing mode. Pen/eraser keep the Onyx overlay live (fast e-ink ink); lasso and text
+/// suspend it so Flutter can own pointer input (loop capture / selection drag / tap-to-place).
+enum _Mode { pen, eraser, lasso, text }
 
 /// One open notebook. Pen strokes update the in-memory model + fire a background `.soil` write; the
 /// live Onyx overlay shows them while writing, so we do NOT touch the EPD panel per stroke. A single
 /// quality refresh (`repaintPanel`) reconciles Flutter's committed layer only at transitions —
-/// page flip, erase, clear, back — matching how the native app keeps writing smooth.
+/// page flip, erase, clear, gesture resolve, back — matching how the native app keeps writing smooth.
+///
+/// Lasso follows the native model (see docs/lasso-and-gestures.md): in pen mode every stroke is
+/// classified at pen-lift (smart-lasso → scribble-erase → normal); an explicit Lasso tool lets the
+/// user draw a deliberate selection loop. A loop always draws on the fast Onyx overlay; only once a
+/// selection is *active* do we suspend the pen and let Flutter handle drag-to-move / tap-to-dismiss.
 class NotebookScreen extends StatefulWidget {
   const NotebookScreen(
       {super.key, required this.worker, required this.notebookId, required this.title});
@@ -55,15 +63,22 @@ class _NotebookScreenState extends State<NotebookScreen> {
   List<PageRef> _pages = [];
   int _pageIndex = 0;
   final List<PageObject> _objects = [];
-  _Tool _tool = _Tool.pen;
-  bool _textMode = false; // tap-to-place / tap-to-edit text objects (pen input suspended)
-  bool _lassoMode = false; // stylus draws a selection loop; finger drags the selection
+  _Mode _mode = _Mode.pen;
+
+  // ── Selection state ─────────────────────────────────────────────────────────
   final List<PageObject> _selection = [];
   final List<PageObject> _clipboard = [];
-  // Finger-drag move state (lasso mode): snapshot of pre-drag objects + cumulative px delta.
+  BoundingBox? _selBounds; // padded union of the selection (px); drives overlay + floating toolbar
+  bool _smartSession = false; // selection came from a smart-lasso in pen mode → dismiss returns to pen
+  bool _recognizing = false; // handwriting recognition in flight (convert tools)
+
+  // Selection drag-move state.
   final Map<String, PageObject> _moveBefore = {};
   Offset _dragTotal = Offset.zero;
-  bool _moving = false;
+  bool _movingSel = false;
+  bool _pendingDismiss = false;
+  int _lastPanelMs = 0; // throttle for live e-ink feedback during a drag
+
   double _dpr = 1.0;
   bool _ready = false;
 
@@ -72,6 +87,8 @@ class _NotebookScreenState extends State<NotebookScreen> {
   /// BOOX Android hosts the Onyx EPD overlay; every other platform (desktop now, iPad/web later)
   /// draws with the pure-Flutter [FlutterInkSurface] and skips all EPD/bridge handoffs.
   bool get _useOnyx => defaultTargetPlatform == TargetPlatform.android;
+
+  bool get _selectionActive => _mode == _Mode.lasso && _selection.isNotEmpty;
 
   @override
   void initState() {
@@ -102,48 +119,81 @@ class _NotebookScreenState extends State<NotebookScreen> {
     if (mounted) setState(() {});
   }
 
+  void _repaintPanelNextFrame() =>
+      WidgetsBinding.instance.addPostFrameCallback((_) => _bridge.repaintPanel());
+
+  // ── Pen input ────────────────────────────────────────────────────────────────
+
   void _onPen(PenEvent e) {
     if (!_ready) return;
+    // While a selection is active the pen is suspended (Flutter drives drag/dismiss), so nothing
+    // should arrive here. Guard defensively.
+    if (_selectionActive) return;
+
     final pts = <StrokePoint>[];
     for (var i = 0; i + 1 < e.points.length; i += 2) {
       pts.add(StrokePoint(e.points[i], e.points[i + 1]));
     }
     if (pts.isEmpty) return;
 
-    if (_lassoMode) {
-      // The pen loop is a selection gesture, never committed ink. Compute the selection and hand
-      // the panel back to Flutter so the transient loop ink clears.
-      if (e.type == 'stroke') _applyLasso(pts);
-      WidgetsBinding.instance.addPostFrameCallback((_) => _bridge.repaintPanel());
+    // ── Lasso tool: any stroke is a deliberate selection loop (no gesture gates) ──
+    if (_mode == _Mode.lasso) {
+      if (e.type == 'stroke') {
+        final hit = lassoHitTest(pts, _objects, _dpr);
+        if (hit.ids.isNotEmpty) {
+          _enterSelection(hit, smart: false);
+        }
+      }
+      _repaintPanelNextFrame(); // clear the transient loop ink from the Onyx overlay
       return;
     }
 
     if (e.type == 'stroke') {
-      // Overlay already shows the ink — just record + persist in the background. No repaint, no
-      // EPD refresh: reconciliation happens at the next transition. The id is pre-assigned here so
-      // a same-session erase can delete the persisted row.
+      // ── Pen mode: classify at pen-lift, native gate order ──────────────────────
+      // Gate 1: smart-lasso — a fast closed loop enclosing content becomes a selection.
+      if (isSmartLassoCandidate(pts, e.durationMs, _dpr)) {
+        final hit = lassoHitTest(pts, _objects, _dpr);
+        if (hit.ids.isNotEmpty) {
+          _enterSelection(hit, smart: true);
+          _repaintPanelNextFrame(); // discard the loop stroke (never persisted)
+          return;
+        }
+      }
+      // Gate 2: scribble-to-erase — a dense zigzag crossing content erases it.
+      if (isScribbleCandidate(pts, _dpr)) {
+        final hitIds = scribbleHitTest(pts, _objects, _dpr).toSet();
+        if (hitIds.isNotEmpty) {
+          final gone = _objects.where((o) => hitIds.contains(o.id)).toList();
+          widget.worker.softDelete(widget.notebookId, [for (final o in gone) o.id]);
+          _objects.removeWhere(gone.contains);
+          _pushDelete(gone);
+          setState(() {});
+          _repaintPanelNextFrame(); // discard the scribble stroke + reveal the erase
+          return;
+        }
+      }
+      // Gate 3: normal stroke. Overlay already shows the ink — just record + persist. No repaint.
       final data = StrokeData(points: pts);
       final strokeId = _uuid.v4();
       final obj = StrokeObject(strokeId, BoundingBox.ofPoints(pts), data);
       _objects.add(obj);
       widget.worker.insertStroke(widget.notebookId, _layerId, strokeId, data);
       _pushInsert([obj]);
-      // On BOOX the Onyx overlay already shows the ink; elsewhere we must repaint to reveal it.
-      if (!_useOnyx) setState(() {});
+      if (!_useOnyx) setState(() {}); // off-BOOX has no overlay → must repaint to reveal the ink
     } else if (e.type == 'erase') {
-      // The eraser tool only removes strokes; objects (headings/text/lines) are erased via the
-      // lasso eraser (2D). Hit-test committed strokes by point proximity.
+      // Eraser tool: remove strokes by point proximity (objects are erased via scribble/lasso).
       final r2 = (15 * _dpr) * (15 * _dpr);
       final hits = _objects
           .whereType<StrokeObject>()
           .where((c) => _hit(c.data.points, pts, r2))
           .toList();
       if (hits.isEmpty) return;
-      widget.worker.softDelete(widget.notebookId, [for (final h in hits) if (h.id.isNotEmpty) h.id]);
+      widget.worker
+          .softDelete(widget.notebookId, [for (final h in hits) if (h.id.isNotEmpty) h.id]);
       _objects.removeWhere(hits.contains);
       _pushDelete(hits);
       setState(() {});
-      WidgetsBinding.instance.addPostFrameCallback((_) => _bridge.repaintPanel());
+      _repaintPanelNextFrame();
     }
   }
 
@@ -227,7 +277,7 @@ class _NotebookScreenState extends State<NotebookScreen> {
     _undo.undo();
     _histVersion.value++;
     setState(() {});
-    WidgetsBinding.instance.addPostFrameCallback((_) => _bridge.repaintPanel());
+    _repaintPanelNextFrame();
   }
 
   void _doRedo() {
@@ -235,56 +285,108 @@ class _NotebookScreenState extends State<NotebookScreen> {
     _undo.redo();
     _histVersion.value++;
     setState(() {});
-    WidgetsBinding.instance.addPostFrameCallback((_) => _bridge.repaintPanel());
+    _repaintPanelNextFrame();
   }
 
-  // ── Lasso: select / move / delete / copy-paste ─────────────────────────────
+  // ── Mode switching ───────────────────────────────────────────────────────────
 
-  void _toggleLassoMode() {
-    if (!_ready) return;
+  void _setMode(_Mode m) {
     setState(() {
-      _lassoMode = !_lassoMode;
-      _textMode = false;
-      if (!_lassoMode) _selection.clear();
+      _mode = m;
+      if (m != _Mode.lasso) {
+        _selection.clear();
+        _selBounds = null;
+        _smartSession = false;
+      }
+      _movingSel = false;
+      _pendingDismiss = false;
     });
-    if (_lassoMode) {
-      _bridge.setDrawingEnabled(true);
-      _bridge.setPen(); // render on so the loop is visible while drawn
+    switch (m) {
+      case _Mode.pen:
+        _bridge.setDrawingEnabled(true);
+        _bridge.setPen();
+      case _Mode.eraser:
+        _bridge.setDrawingEnabled(true);
+        _bridge.setEraser();
+      case _Mode.lasso:
+        // Loops draw as fast overlay ink; a selection then suspends the pen (see _enterSelection).
+        _bridge.setDrawingEnabled(true);
+        _bridge.setPen();
+      case _Mode.text:
+        _bridge.setDrawingEnabled(false);
+    }
+    _repaintPanelNextFrame();
+  }
+
+  // ── Selection: enter / move / dismiss ────────────────────────────────────────
+
+  BoundingBox? _computeSelBounds() {
+    if (_selection.isEmpty) return null;
+    var minX = _selection.first.box.x, minY = _selection.first.box.y;
+    var maxX = minX, maxY = minY;
+    for (final o in _selection) {
+      minX = math.min(minX, o.box.x);
+      minY = math.min(minY, o.box.y);
+      maxX = math.max(maxX, o.box.x + o.box.width);
+      maxY = math.max(maxY, o.box.y + o.box.height);
+    }
+    final pad = kLassoOverlayPadDp * _dpr;
+    return BoundingBox(minX - pad, minY - pad, (maxX - minX) + 2 * pad, (maxY - minY) + 2 * pad);
+  }
+
+  /// Adopt a lasso hit-test result as the active selection: suspend the pen (so it now drags/
+  /// dismisses via Flutter), show the dashed overlay + floating toolbar. [smart] flags a pen-mode
+  /// smart-lasso session (dismiss returns to pen; tool-initiated stays in lasso).
+  void _enterSelection(LassoHit hit, {required bool smart}) {
+    setState(() {
+      _mode = _Mode.lasso;
+      _smartSession = smart;
+      _selection
+        ..clear()
+        ..addAll(_objects.where((o) => hit.ids.contains(o.id)));
+      _selBounds = hit.bounds;
+    });
+    _bridge.setDrawingEnabled(false);
+    _repaintPanelNextFrame();
+  }
+
+  /// The selection is gone (deleted / dismissed): restore the pen. Smart-lasso sessions and Delete
+  /// return to pen mode; a plain dismiss in the lasso tool stays in lasso (ready to draw again).
+  void _endSelection({required bool toPen}) {
+    final wasSmart = _smartSession;
+    setState(() {
+      _selection.clear();
+      _selBounds = null;
+      _smartSession = false;
+      _movingSel = false;
+      _pendingDismiss = false;
+    });
+    if (toPen || wasSmart) {
+      _setMode(_Mode.pen);
     } else {
-      _tool == _Tool.pen ? _bridge.setPen() : _bridge.setEraser();
-      WidgetsBinding.instance.addPostFrameCallback((_) => _bridge.repaintPanel());
+      _bridge.setDrawingEnabled(true); // back to loop-drawing in the lasso tool
+      _repaintPanelNextFrame();
     }
   }
 
-  /// The pen loop selects every object whose center falls inside the polygon.
-  void _applyLasso(List<StrokePoint> loop) {
-    if (loop.length < 3) return;
-    final sel = <PageObject>[];
-    for (final o in _objects) {
-      final cx = o.box.x + o.box.width / 2;
-      final cy = o.box.y + o.box.height / 2;
-      if (pointInPolygon(cx, cy, loop)) sel.add(o);
+  void _selDown(PointerDownEvent e) {
+    final px = e.localPosition.dx * _dpr, py = e.localPosition.dy * _dpr;
+    if (_selBounds != null && _inBox(_selBounds!, px, py)) {
+      _movingSel = true;
+      _pendingDismiss = false;
+      _dragTotal = Offset.zero;
+      _moveBefore
+        ..clear()
+        ..addEntries(_selection.map((o) => MapEntry(o.id, o)));
+    } else {
+      _movingSel = false;
+      _pendingDismiss = true; // tap outside the selection → dismiss on up
     }
-    setState(() => _selection
-      ..clear()
-      ..addAll(sel));
   }
 
-  // Finger-drag move (touch pointers only, so the stylus stays free to draw new loops).
-  void _onLassoPointerDown(PointerDownEvent e) {
-    if (e.kind != PointerDeviceKind.touch) return;
-    _dragTotal = Offset.zero;
-    _moving = false;
-    _moveBefore
-      ..clear()
-      ..addEntries(_selection.map((o) => MapEntry(o.id, o)));
-  }
-
-  void _onLassoPointerMove(PointerMoveEvent e) {
-    if (e.kind != PointerDeviceKind.touch || _selection.isEmpty) return;
+  void _selMove(PointerMoveEvent e) {
+    if (!_movingSel) return;
     _dragTotal += Offset(e.delta.dx * _dpr, e.delta.dy * _dpr);
-    if (!_moving && _dragTotal.distance < 8 * _dpr) return; // ignore jitter → keep tap-to-clear
-    _moving = true;
     setState(() {
       for (var i = 0; i < _selection.length; i++) {
         final before = _moveBefore[_selection[i].id];
@@ -294,25 +396,36 @@ class _NotebookScreenState extends State<NotebookScreen> {
         if (oi >= 0) _objects[oi] = moved;
         _selection[i] = moved;
       }
+      _selBounds = _computeSelBounds();
     });
+    _throttledPanelRepaint(); // coarse live feedback on e-ink during the drag
   }
 
-  void _onLassoPointerUp(PointerUpEvent e) {
-    if (e.kind != PointerDeviceKind.touch) return;
-    if (_moving) {
-      final pairs = <(PageObject, PageObject)>[];
-      for (final after in _selection) {
-        final before = _moveBefore[after.id];
-        if (before == null) continue;
-        widget.worker.updateObject(widget.notebookId, after.id, after.box, _objDataJson(after));
-        pairs.add((before, after));
+  void _selUp(PointerUpEvent e) {
+    if (_movingSel) {
+      _movingSel = false;
+      if (_dragTotal.distance >= 8 * _dpr) {
+        final pairs = <(PageObject, PageObject)>[];
+        for (final after in _selection) {
+          final before = _moveBefore[after.id];
+          if (before == null) continue;
+          widget.worker.updateObject(widget.notebookId, after.id, after.box, _objDataJson(after));
+          pairs.add((before, after));
+        }
+        if (pairs.isNotEmpty) _pushMove(pairs);
       }
-      if (pairs.isNotEmpty) _pushMove(pairs);
-      _moving = false;
-      WidgetsBinding.instance.addPostFrameCallback((_) => _bridge.repaintPanel());
-    } else if (_selection.isNotEmpty) {
-      setState(() => _selection.clear()); // tap outside → deselect
-      WidgetsBinding.instance.addPostFrameCallback((_) => _bridge.repaintPanel());
+      _repaintPanelNextFrame();
+    } else if (_pendingDismiss) {
+      _pendingDismiss = false;
+      _endSelection(toPen: false); // tap outside → dismiss
+    }
+  }
+
+  void _throttledPanelRepaint() {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    if (now - _lastPanelMs >= 120) {
+      _lastPanelMs = now;
+      _repaintPanelNextFrame();
     }
   }
 
@@ -335,9 +448,14 @@ class _NotebookScreenState extends State<NotebookScreen> {
     ));
   }
 
-  void _reselect(List<String> ids) => _selection
-    ..clear()
-    ..addAll(_objects.where((o) => ids.contains(o.id)));
+  void _reselect(List<String> ids) {
+    _selection
+      ..clear()
+      ..addAll(_objects.where((o) => ids.contains(o.id)));
+    _selBounds = _computeSelBounds();
+  }
+
+  // ── Selection actions ────────────────────────────────────────────────────────
 
   void _deleteSelection() {
     if (_selection.isEmpty) return;
@@ -345,15 +463,14 @@ class _NotebookScreenState extends State<NotebookScreen> {
     widget.worker.softDelete(widget.notebookId, [for (final o in gone) o.id]);
     _objects.removeWhere(gone.contains);
     _pushDelete(gone);
-    setState(() => _selection.clear());
-    WidgetsBinding.instance.addPostFrameCallback((_) => _bridge.repaintPanel());
+    _endSelection(toPen: true); // native: Delete exits lasso mode
   }
 
   void _copySelection() {
     _clipboard
       ..clear()
       ..addAll(_selection);
-    setState(() {});
+    setState(() {}); // keep the selection highlighted; enables the main-toolbar Paste
   }
 
   void _cutSelection() {
@@ -369,15 +486,21 @@ class _NotebookScreenState extends State<NotebookScreen> {
       final id = _uuid.v4();
       final copy = _withId(_translate(o, off, off), id);
       _objects.add(copy);
-      widget.worker
-          .insertObject(widget.notebookId, _layerId, id, _typeOf(copy), copy.box, _objDataJson(copy));
+      widget.worker.insertObject(
+          widget.notebookId, _layerId, id, _typeOf(copy), copy.box, _objDataJson(copy));
       pasted.add(copy);
     }
     _pushInsert(pasted);
-    setState(() => _selection
-      ..clear()
-      ..addAll(pasted));
-    WidgetsBinding.instance.addPostFrameCallback((_) => _bridge.repaintPanel());
+    setState(() {
+      _mode = _Mode.lasso;
+      _smartSession = false;
+      _selection
+        ..clear()
+        ..addAll(pasted);
+      _selBounds = _computeSelBounds();
+    });
+    _bridge.setDrawingEnabled(false); // pasted objects are the active selection
+    _repaintPanelNextFrame();
   }
 
   String _typeOf(PageObject o) => switch (o) {
@@ -415,32 +538,7 @@ class _NotebookScreenState extends State<NotebookScreen> {
     };
   }
 
-  void _selectTool(_Tool t) {
-    final wasSuspended = _textMode; // text mode had pen input paused
-    setState(() {
-      _tool = t;
-      _textMode = false;
-      _lassoMode = false;
-      _selection.clear();
-    });
-    if (wasSuspended) _bridge.setDrawingEnabled(true);
-    t == _Tool.pen ? _bridge.setPen() : _bridge.setEraser();
-  }
-
-  void _toggleTextMode() {
-    if (!_ready) return;
-    setState(() {
-      _textMode = !_textMode;
-      _lassoMode = false;
-      _selection.clear();
-    });
-    if (_textMode) {
-      _bridge.setDrawingEnabled(false); // stylus stops drawing; taps place/edit text
-    } else {
-      _bridge.setDrawingEnabled(true);
-      _tool == _Tool.pen ? _bridge.setPen() : _bridge.setEraser();
-    }
-  }
+  // ── Text placement ───────────────────────────────────────────────────────────
 
   /// A tap while in text mode: edit the text object under the point, or place a new one there.
   Future<void> _onPlacementTap(TapUpDetails d) async {
@@ -483,7 +581,7 @@ class _NotebookScreenState extends State<NotebookScreen> {
       return; // new + empty → nothing
     }
     setState(() {});
-    WidgetsBinding.instance.addPostFrameCallback((_) => _bridge.repaintPanel());
+    _repaintPanelNextFrame();
   }
 
   /// Natural bounding box for [markdown] anchored at (x,y) px, wrapping within the page's right edge.
@@ -497,6 +595,128 @@ class _NotebookScreenState extends State<NotebookScreen> {
   bool _inBox(BoundingBox b, double px, double py) =>
       px >= b.x && px <= b.x + b.width && py >= b.y && py <= b.y + b.height;
 
+  // ── Handwriting recognition — convert a pure-stroke selection to Text / Heading ────────────
+  bool get _selectionIsPureStrokes =>
+      _selection.isNotEmpty && _selection.every((o) => o is StrokeObject);
+
+  BoundingBox _selectionStrokeBounds(List<StrokeObject> strokes) {
+    var minX = strokes.first.box.x, minY = strokes.first.box.y;
+    var maxX = minX, maxY = minY;
+    for (final s in strokes) {
+      minX = math.min(minX, s.box.x);
+      minY = math.min(minY, s.box.y);
+      maxX = math.max(maxX, s.box.x + s.box.width);
+      maxY = math.max(maxY, s.box.y + s.box.height);
+    }
+    return BoundingBox(minX, minY, maxX - minX, maxY - minY);
+  }
+
+  Future<String?> _recognizeSelection(List<StrokeObject> strokes) async {
+    setState(() => _recognizing = true);
+    final text = await Recognition.instance.recognize([for (final s in strokes) s.data]);
+    if (!mounted) return null;
+    setState(() => _recognizing = false);
+    if (text == kFallbackText) {
+      _snack(Recognition.instance.isReady
+          ? "Couldn't recognize that handwriting"
+          : 'Handwriting model still preparing — try again in a moment');
+      return null;
+    }
+    return text;
+  }
+
+  Future<void> _convertToText() async {
+    if (!_selectionIsPureStrokes || _recognizing) return;
+    final strokes = _selection.whereType<StrokeObject>().toList();
+    final text = await _recognizeSelection(strokes);
+    if (text == null || !mounted) return;
+    final b = _selectionStrokeBounds(strokes);
+    final box = _measureBox(text, b.x, b.y, _pages[_pageIndex].data.width);
+    final data = TextObject(text: text);
+    _replaceStrokesWith(strokes, TextRender(_uuid.v4(), box, data), 'text', data.toJson());
+  }
+
+  Future<void> _convertToHeading(int level) async {
+    if (!_selectionIsPureStrokes || _recognizing) return;
+    final strokes = _selection.whereType<StrokeObject>().toList();
+    final raw = await _recognizeSelection(strokes);
+    if (raw == null || !mounted) return;
+    final prefixed = HeadingObject.applyLevel(raw, level)!; // e.g. "## Title"
+    final b = _selectionStrokeBounds(strokes);
+    final box = _measureBox(prefixed, b.x, b.y, _pages[_pageIndex].data.width);
+    final data = HeadingObject(recognizedText: prefixed, level: level);
+    _replaceStrokesWith(strokes, HeadingRender(_uuid.v4(), box, data), 'heading', data.toJson());
+  }
+
+  /// Atomically swap a pure-stroke selection for the recognized [obj]; one undo step.
+  void _replaceStrokesWith(
+      List<StrokeObject> strokes, PageObject obj, String type, String dataJson) {
+    final ids = [for (final s in strokes) s.id];
+    widget.worker.softDelete(widget.notebookId, ids);
+    widget.worker.insertObject(widget.notebookId, _layerId, obj.id, type, obj.box, dataJson);
+    _objects.removeWhere(strokes.contains);
+    _objects.add(obj);
+    _record(UndoAction(
+      undo: () {
+        _objects.remove(obj);
+        widget.worker.setDeleted(widget.notebookId, [obj.id], true);
+        _objects.addAll(strokes);
+        widget.worker.setDeleted(widget.notebookId, ids, false);
+        _reselect(ids);
+      },
+      redo: () {
+        _objects.removeWhere(strokes.contains);
+        widget.worker.setDeleted(widget.notebookId, ids, true);
+        _objects.add(obj);
+        widget.worker.setDeleted(widget.notebookId, [obj.id], false);
+        _reselect([obj.id]);
+      },
+    ));
+    setState(() {
+      _selection
+        ..clear()
+        ..add(obj);
+      _selBounds = _computeSelBounds();
+    });
+    _repaintPanelNextFrame();
+  }
+
+  void _snack(String msg) => ScaffoldMessenger.of(context)
+      .showSnackBar(SnackBar(content: Text(msg), duration: const Duration(seconds: 2)));
+
+  Future<int?> _chooseHeadingLevel() => showDialog<int>(
+        context: context,
+        // E-ink: no full-screen dim behind the dialog (the default black54 scrim reads as a shadow
+        // over the page). The 1dp border carries the separation. See library_screen dialogs.
+        barrierColor: Colors.transparent,
+        builder: (ctx) => Dialog(
+          backgroundColor: Colors.white,
+          elevation: 0,
+          shadowColor: Colors.transparent,
+          surfaceTintColor: Colors.transparent,
+          shape: RoundedRectangleBorder(
+            side: const BorderSide(color: Colors.black, width: 1),
+            borderRadius: BorderRadius.circular(4),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              const Text('Heading level',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.black)),
+              const SizedBox(height: 12),
+              Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                for (final lvl in const [1, 2, 3]) ...[
+                  _btn('H$lvl', false, () => Navigator.pop(ctx, lvl)),
+                  if (lvl != 3) const SizedBox(width: 8),
+                ],
+              ]),
+            ]),
+          ),
+        ),
+      );
+
+  // ── Lines / clear / page nav ─────────────────────────────────────────────────
+
   Future<void> _insertLines() async {
     if (!_ready) return;
     final page = _pages[_pageIndex].data;
@@ -508,22 +728,25 @@ class _NotebookScreenState extends State<NotebookScreen> {
       final obj = LineRender(id, pl.box, pl.line);
       _objects.add(obj);
       created.add(obj);
-      widget.worker
-          .insertObject(widget.notebookId, _layerId, id, 'line', pl.box, pl.line.toJson());
+      widget.worker.insertObject(widget.notebookId, _layerId, id, 'line', pl.box, pl.line.toJson());
     }
     _pushInsert(created);
     setState(() {});
-    WidgetsBinding.instance.addPostFrameCallback((_) => _bridge.repaintPanel());
+    _repaintPanelNextFrame();
   }
 
   void _clear() {
     if (_objects.isNotEmpty) {
       final cleared = List<PageObject>.of(_objects);
-      widget.worker.softDelete(widget.notebookId, [for (final o in cleared) if (o.id.isNotEmpty) o.id]);
+      widget.worker
+          .softDelete(widget.notebookId, [for (final o in cleared) if (o.id.isNotEmpty) o.id]);
       _objects.clear();
       _pushDelete(cleared);
     }
-    setState(() {});
+    setState(() {
+      _selection.clear();
+      _selBounds = null;
+    });
     WidgetsBinding.instance.addPostFrameCallback((_) => _bridge.clear());
   }
 
@@ -532,8 +755,11 @@ class _NotebookScreenState extends State<NotebookScreen> {
     if (next < 0 || next >= _pages.length) return;
     _pageIndex = next;
     _undo.clear(); // undo is page-scoped for now (cross-page undo deferred)
+    _histVersion.value++;
+    _selection.clear();
+    _selBounds = null;
     await _loadPage();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _bridge.repaintPanel());
+    _repaintPanelNextFrame();
   }
 
   Future<void> _addPage() async {
@@ -542,9 +768,14 @@ class _NotebookScreenState extends State<NotebookScreen> {
     _pages.add(p);
     _pageIndex = _pages.length - 1;
     _undo.clear();
+    _histVersion.value++;
+    _selection.clear();
+    _selBounds = null;
     await _loadPage();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _bridge.repaintPanel());
+    _repaintPanelNextFrame();
   }
+
+  // ── Build ─────────────────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
@@ -556,44 +787,43 @@ class _NotebookScreenState extends State<NotebookScreen> {
           children: [
             _toolbar(),
             const Divider(height: 1, thickness: 1, color: Colors.black),
-            if (_lassoMode) ...[
-              _lassoBar(),
-              const Divider(height: 1, thickness: 1, color: Colors.black),
-            ],
             Expanded(
-              child: Stack(
-                children: [
-                  Positioned.fill(
-                    child: CustomPaint(
-                      painter: PagePainter(List.of(_objects), _dpr,
-                          selection: [for (final o in _selection) o.box]),
-                    ),
-                  ),
-                  Positioned.fill(child: _surface()),
-                  // In text mode, a transparent layer above the Onyx surface captures the
-                  // placement/edit tap (pen input is suspended natively so the stylus won't draw).
-                  if (_textMode)
+              child: LayoutBuilder(builder: (context, constraints) {
+                return Stack(
+                  children: [
                     Positioned.fill(
-                      child: GestureDetector(
-                        behavior: HitTestBehavior.opaque,
-                        onTapUp: _onPlacementTap,
+                      child: CustomPaint(
+                        painter: PagePainter(List.of(_objects), _dpr,
+                            selection: _selBounds != null ? [_selBounds!] : const []),
                       ),
                     ),
-                  // In lasso mode on BOOX, a translucent layer handles FINGER drags (move) / taps
-                  // (deselect) while the stylus passes through to Onyx to draw new selection loops.
-                  // On desktop the single pointer both draws loops and would conflict, so drag-move
-                  // is Onyx-only for now (desktop still selects + Cut/Copy/Paste/Delete).
-                  if (_lassoMode && _useOnyx)
-                    Positioned.fill(
-                      child: Listener(
-                        behavior: HitTestBehavior.translucent,
-                        onPointerDown: _onLassoPointerDown,
-                        onPointerMove: _onLassoPointerMove,
-                        onPointerUp: _onLassoPointerUp,
+                    Positioned.fill(child: _surface()),
+                    // Text mode: a transparent layer above the (suspended) Onyx surface captures the
+                    // placement/edit tap.
+                    if (_mode == _Mode.text)
+                      Positioned.fill(
+                        child: GestureDetector(
+                          behavior: HitTestBehavior.opaque,
+                          onTapUp: _onPlacementTap,
+                        ),
                       ),
-                    ),
-                ],
-              ),
+                    // Selection active: the pen is suspended, so Flutter owns drag-to-move /
+                    // tap-to-dismiss. (Loop-drawing in the lasso tool stays on the Onyx overlay and
+                    // arrives via _onPen, so there is NO capture layer when nothing is selected.)
+                    if (_selectionActive) ...[
+                      Positioned.fill(
+                        child: Listener(
+                          behavior: HitTestBehavior.opaque,
+                          onPointerDown: _selDown,
+                          onPointerMove: _selMove,
+                          onPointerUp: _selUp,
+                        ),
+                      ),
+                      _floatingToolbar(constraints),
+                    ],
+                  ],
+                );
+              }),
             ),
           ],
         ),
@@ -602,6 +832,7 @@ class _NotebookScreenState extends State<NotebookScreen> {
   }
 
   Widget _toolbar() {
+    final hasClip = _clipboard.isNotEmpty;
     return Container(
       height: 56,
       color: Colors.white,
@@ -622,17 +853,21 @@ class _NotebookScreenState extends State<NotebookScreen> {
             ),
           ),
           const SizedBox(width: 12),
-          _btn('Pen', _tool == _Tool.pen, () => _selectTool(_Tool.pen)),
+          _btn('Pen', _mode == _Mode.pen, () => _setMode(_Mode.pen)),
           const SizedBox(width: 8),
-          _btn('Eraser', _tool == _Tool.eraser, () => _selectTool(_Tool.eraser)),
+          _btn('Eraser', _mode == _Mode.eraser, () => _setMode(_Mode.eraser)),
           const SizedBox(width: 8),
           _btn('Clear', false, _clear),
           const SizedBox(width: 8),
-          _btn('Text', _textMode, _toggleTextMode),
+          _btn('Text', _mode == _Mode.text, () => _setMode(_Mode.text)),
           const SizedBox(width: 8),
-          _btn('Lasso', _lassoMode, _toggleLassoMode),
+          _btn('Lasso', _mode == _Mode.lasso, () => _setMode(_Mode.lasso)),
           const SizedBox(width: 8),
           _btn('Lines', false, _insertLines),
+          if (hasClip) ...[
+            const SizedBox(width: 8),
+            _btn('Paste', false, _pasteClipboard),
+          ],
           const Spacer(),
           _btn('‹', false, () => _switchPage(-1)),
           Padding(
@@ -667,29 +902,44 @@ class _NotebookScreenState extends State<NotebookScreen> {
     );
   }
 
-  Widget _lassoBar() {
-    final has = _selection.isNotEmpty;
-    return Container(
-      height: 48,
-      color: Colors.white,
-      padding: const EdgeInsets.symmetric(horizontal: 8),
-      child: Row(
-        children: [
-          Text(
-            has
-                ? '${_selection.length} selected · drag to move'
-                : 'Draw a loop with the pen to select',
-            style: const TextStyle(fontSize: 13, color: Color(0xFF888888)),
-          ),
-          const Spacer(),
-          _actionBtn('Cut', has, _cutSelection),
-          const SizedBox(width: 8),
-          _actionBtn('Copy', has, _copySelection),
-          const SizedBox(width: 8),
-          _actionBtn('Paste', _clipboard.isNotEmpty, _pasteClipboard),
-          const SizedBox(width: 8),
-          _actionBtn('Delete', has, _deleteSelection),
-        ],
+  /// A floating action bar anchored to the active selection (native's floating selection toolbar).
+  Widget _floatingToolbar(BoxConstraints constraints) {
+    const barW = 260.0, barH = 46.0;
+    final double leftL =
+        (_selBounds!.x / _dpr).clamp(4.0, math.max(4.0, constraints.maxWidth - barW)).toDouble();
+    final aboveTop = _selBounds!.y / _dpr - barH - 6;
+    final belowTop = (_selBounds!.y + _selBounds!.height) / _dpr + 6;
+    final double top = (aboveTop >= 4 ? aboveTop : belowTop)
+        .clamp(4.0, math.max(4.0, constraints.maxHeight - barH))
+        .toDouble();
+    final canConvert = _selectionIsPureStrokes && Recognition.instance.supported && !_recognizing;
+    return Positioned(
+      left: leftL,
+      top: top,
+      child: Container(
+        height: barH,
+        padding: const EdgeInsets.symmetric(horizontal: 6),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          border: Border.all(color: Colors.black, width: 1),
+          borderRadius: BorderRadius.circular(4),
+        ),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          if (_selectionIsPureStrokes && Recognition.instance.supported) ...[
+            _actionBtn(_recognizing ? '…' : '→Text', canConvert, _convertToText),
+            const SizedBox(width: 6),
+            _actionBtn('→H', canConvert, () async {
+              final lvl = await _chooseHeadingLevel();
+              if (lvl != null) await _convertToHeading(lvl);
+            }),
+            const SizedBox(width: 6),
+          ],
+          _actionBtn('Cut', true, _cutSelection),
+          const SizedBox(width: 6),
+          _actionBtn('Copy', true, _copySelection),
+          const SizedBox(width: 6),
+          _actionBtn('Delete', true, _deleteSelection),
+        ]),
       ),
     );
   }
@@ -700,7 +950,7 @@ class _NotebookScreenState extends State<NotebookScreen> {
     return GestureDetector(
       onTap: enabled ? onTap : null,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
         decoration: BoxDecoration(
           color: Colors.white,
           border: Border.all(color: enabled ? Colors.black : const Color(0xFF888888), width: 1),
@@ -709,7 +959,7 @@ class _NotebookScreenState extends State<NotebookScreen> {
         child: Text(label,
             style: TextStyle(
                 color: enabled ? Colors.black : const Color(0xFF888888),
-                fontSize: 16,
+                fontSize: 15,
                 fontWeight: FontWeight.w600)),
       ),
     );
@@ -717,13 +967,13 @@ class _NotebookScreenState extends State<NotebookScreen> {
 
   Widget _surface() {
     // Off-BOOX: pure-Flutter ink. A finished stroke routes through the same _onPen path, tagged by
-    // the current tool (eraser → 'erase'); lasso mode is handled inside _onPen regardless of tag.
+    // the current tool (eraser → 'erase'); lasso/smart-lasso are handled inside _onPen regardless.
     if (!_useOnyx) {
       return FlutterInkSurface(
         dpr: _dpr,
         strokeWidthPx: 3 * _dpr,
-        onStroke: (pts) =>
-            _onPen(PenEvent(_tool == _Tool.eraser ? 'erase' : 'stroke', pts)),
+        onStroke: (pts, durationMs) => _onPen(
+            PenEvent(_mode == _Mode.eraser ? 'erase' : 'stroke', pts, durationMs: durationMs)),
       );
     }
     return PlatformViewLink(
