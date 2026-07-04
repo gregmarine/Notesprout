@@ -22,14 +22,16 @@ class NotebookRepository {
     if (!d.existsSync()) d.createSync(recursive: true);
   }
 
-  /// Create a blank notebook: index row + a fully bootstrapped `.soil` (one page, one layer).
+  /// Create a blank notebook under [parentId] (null == root): index row + a fully bootstrapped
+  /// `.soil` (one page, one layer).
   NotebookEntry createBlankNotebook(
     String name, {
     required double pageWidth,
     required double pageHeight,
+    String? parentId,
   }) {
     _ensureGarden();
-    final id = index.createNotebook(name);
+    final id = index.createNotebook(name, parentId: parentId);
     final soil = SoilDatabase.open(soilPath(id));
     try {
       soil.bootstrapBlank(title: name, width: pageWidth, height: pageHeight);
@@ -38,6 +40,16 @@ class NotebookRepository {
     }
     return index.notebooks().firstWhere((n) => n.id == id);
   }
+
+  /// Create a folder under [parentId] (null == root). Returns the folder id.
+  String createFolder(String name, {String? parentId}) =>
+      index.createFolder(name, parentId: parentId);
+
+  /// Direct children (folders + notebooks) of [parentId] for the library grid.
+  List<LibraryEntry> browse(String? parentId) => index.children(parentId);
+
+  /// Breadcrumb trail from root to [folderId].
+  List<Crumb> breadcrumb(String? folderId) => index.breadcrumb(folderId);
 
   List<NotebookEntry> listNotebooks() => index.notebooks();
 

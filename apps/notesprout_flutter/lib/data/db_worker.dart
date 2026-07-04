@@ -53,8 +53,19 @@ class DbWorker {
   void _fire(String op, [Map<String, dynamic> args = const {}]) => _tx.send(_Req(-1, op, args));
 
   Future<List<NotebookEntry>> listNotebooks() => _call('listNotebooks');
-  Future<NotebookEntry> createNotebook(String name, double w, double h) =>
-      _call('createNotebook', {'name': name, 'w': w, 'h': h});
+
+  /// Direct children (folders + notebooks) of [parentId] (null == root) for the library grid.
+  Future<List<LibraryEntry>> browse(String? parentId) => _call('browse', {'parentId': parentId});
+
+  /// Breadcrumb trail from root down to [folderId].
+  Future<List<Crumb>> breadcrumb(String? folderId) =>
+      _call('breadcrumb', {'folderId': folderId});
+
+  Future<String> createFolder(String name, String? parentId) =>
+      _call('createFolder', {'name': name, 'parentId': parentId});
+
+  Future<NotebookEntry> createNotebook(String name, double w, double h, {String? parentId}) =>
+      _call('createNotebook', {'name': name, 'w': w, 'h': h, 'parentId': parentId});
   Future<List<PageRef>> openNotebook(String id) => _call('openNotebook', {'id': id});
   Future<PageRef> addPage(String id, double w, double h) =>
       _call('addPage', {'id': id, 'w': w, 'h': h});
@@ -135,9 +146,18 @@ void _entry(_Init init) {
       switch (req.op) {
         case 'listNotebooks':
           r = repo.listNotebooks();
+        case 'browse':
+          r = repo.browse(req.args['parentId'] as String?);
+        case 'breadcrumb':
+          r = repo.breadcrumb(req.args['folderId'] as String?);
+        case 'createFolder':
+          r = repo.createFolder(req.args['name'] as String,
+              parentId: req.args['parentId'] as String?);
         case 'createNotebook':
           r = repo.createBlankNotebook(req.args['name'] as String,
-              pageWidth: req.args['w'] as double, pageHeight: req.args['h'] as double);
+              pageWidth: req.args['w'] as double,
+              pageHeight: req.args['h'] as double,
+              parentId: req.args['parentId'] as String?);
         case 'openNotebook':
           r = soil(req.args['id'] as String).pages();
         case 'addPage':

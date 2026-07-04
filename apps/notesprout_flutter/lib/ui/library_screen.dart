@@ -4,7 +4,9 @@ import '../data/db_worker.dart';
 import '../data/index_database.dart';
 import 'notebook_screen.dart';
 
-/// The library: the notebook list from the global index + create-new. Tapping a notebook opens it.
+/// The library: a browsable folder + notebook tree from the global index. Folders and notebooks
+/// show as cards; tap a folder to descend, a breadcrumb to climb out, a notebook to open. Ports the
+/// core browse experience of the native `MainActivity` (search/sort/recents/covers come later).
 class LibraryScreen extends StatefulWidget {
   const LibraryScreen({super.key, required this.worker});
 
@@ -15,7 +17,9 @@ class LibraryScreen extends StatefulWidget {
 }
 
 class _LibraryScreenState extends State<LibraryScreen> {
-  List<NotebookEntry> _notebooks = [];
+  String? _folderId; // null == root
+  List<LibraryEntry> _entries = [];
+  List<Crumb> _crumbs = [const Crumb(null, 'Notebooks')];
 
   @override
   void initState() {
@@ -24,30 +28,78 @@ class _LibraryScreenState extends State<LibraryScreen> {
   }
 
   Future<void> _refresh() async {
-    final list = await widget.worker.listNotebooks();
-    if (mounted) setState(() => _notebooks = list);
+    final entries = await widget.worker.browse(_folderId);
+    final crumbs = await widget.worker.breadcrumb(_folderId);
+    if (mounted) {
+      setState(() {
+        _entries = entries;
+        _crumbs = crumbs;
+      });
+    }
   }
 
-  Future<void> _create() async {
-    final name = await _promptName();
+  void _navigateTo(String? folderId) {
+    if (folderId == _folderId) return;
+    setState(() => _folderId = folderId);
+    _refresh();
+  }
+
+  /// True while inside a folder — back should climb one level instead of leaving the app.
+  bool get _canClimb => _folderId != null;
+
+  void _climbOut() {
+    // Parent is the crumb just before the current one (root when at depth 1).
+    final parent = _crumbs.length >= 2 ? _crumbs[_crumbs.length - 2] : const Crumb(null, 'Notebooks');
+    _navigateTo(parent.id);
+  }
+
+  Future<void> _newNotebook() async {
+    final name = await _promptName('New notebook');
     if (name == null || name.trim().isEmpty || !mounted) return;
-    final size = MediaQuery.of(context).size;
     final dpr = MediaQuery.of(context).devicePixelRatio;
-    await widget.worker.createNotebook(name.trim(), size.width * dpr, size.height * dpr);
+    final size = MediaQuery.of(context).size;
+    await widget.worker.createNotebook(
+      name.trim(),
+      size.width * dpr,
+      size.height * dpr,
+      parentId: _folderId,
+    );
     await _refresh();
   }
 
-  Future<String?> _promptName() {
+  Future<void> _newFolder() async {
+    final name = await _promptName('New folder');
+    if (name == null || name.trim().isEmpty || !mounted) return;
+    await widget.worker.createFolder(name.trim(), _folderId);
+    await _refresh();
+  }
+
+  Future<void> _open(LibraryEntry nb) async {
+    await Navigator.of(context).push(MaterialPageRoute(
+      builder: (_) => NotebookScreen(worker: widget.worker, notebookId: nb.id, title: nb.name),
+    ));
+    await _refresh(); // updatedAt / page count may have changed
+  }
+
+  Future<String?> _promptName(String title) {
     final controller = TextEditingController();
     return showDialog<String>(
       context: context,
+      // E-ink: no full-screen dim behind the dialog (the default black54 scrim renders as a gray
+      // wash over the whole page). The dialog's 1dp border provides all the separation we need.
+      barrierColor: Colors.transparent,
       builder: (ctx) => AlertDialog(
         backgroundColor: Colors.white,
+        // E-ink: no drop shadow, no M3 surface tint — a flat white box with a 1dp inkBlack border
+        // (matches native's `elevation 0` + `shape_bordered`).
+        elevation: 0,
+        shadowColor: Colors.transparent,
+        surfaceTintColor: Colors.transparent,
         shape: RoundedRectangleBorder(
           side: const BorderSide(color: Colors.black, width: 1),
           borderRadius: BorderRadius.circular(4),
         ),
-        title: const Text('New notebook'),
+        title: Text(title, style: const TextStyle(color: Colors.black)),
         content: TextField(
           controller: controller,
           autofocus: true,
@@ -73,46 +125,25 @@ class _LibraryScreenState extends State<LibraryScreen> {
     );
   }
 
-  Future<void> _open(NotebookEntry nb) async {
-    await Navigator.of(context).push(MaterialPageRoute(
-      builder: (_) => NotebookScreen(worker: widget.worker, notebookId: nb.id, title: nb.name),
-    ));
-    await _refresh(); // updatedAt / page count may have changed
-  }
-
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.white,
-      body: SafeArea(
-        child: Column(
-          children: [
-            _header(),
-            const Divider(height: 1, thickness: 1, color: Colors.black),
-            Expanded(
-              child: _notebooks.isEmpty
-                  ? const Center(
-                      child: Text('No notebooks yet.\nTap “New” to plant one. 🌱',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(fontSize: 16, color: Colors.black)))
-                  : ListView.separated(
-                      itemCount: _notebooks.length,
-                      separatorBuilder: (_, _) =>
-                          const Divider(height: 1, thickness: 1, color: Colors.black),
-                      itemBuilder: (_, i) {
-                        final nb = _notebooks[i];
-                        return ListTile(
-                          title: Text(nb.name,
-                              style: const TextStyle(
-                                  fontSize: 17, fontWeight: FontWeight.w600, color: Colors.black)),
-                          subtitle: Text('${nb.pageCount} page${nb.pageCount == 1 ? '' : 's'}',
-                              style: const TextStyle(color: Colors.black)),
-                          onTap: () => _open(nb),
-                        );
-                      },
-                    ),
-            ),
-          ],
+    return PopScope(
+      canPop: !_canClimb,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop && _canClimb) _climbOut();
+      },
+      child: Scaffold(
+        backgroundColor: Colors.white,
+        body: SafeArea(
+          child: Column(
+            children: [
+              _header(),
+              const Divider(height: 1, thickness: 1, color: Colors.black),
+              _breadcrumbBar(),
+              const Divider(height: 1, thickness: 1, color: Colors.black),
+              Expanded(child: _entries.isEmpty ? _emptyState() : _grid()),
+            ],
+          ),
         ),
       ),
     );
@@ -128,20 +159,124 @@ class _LibraryScreenState extends State<LibraryScreen> {
           const Text('Notesprout',
               style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700, color: Colors.black)),
           const Spacer(),
-          GestureDetector(
-            onTap: _create,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-              decoration: BoxDecoration(
-                border: Border.all(color: Colors.black, width: 1),
-                borderRadius: BorderRadius.circular(4),
-              ),
-              child: const Text('New',
-                  style: TextStyle(
-                      fontSize: 16, fontWeight: FontWeight.w600, color: Colors.black)),
-            ),
-          ),
+          _actionButton('New Folder', _newFolder),
+          const SizedBox(width: 8),
+          _actionButton('New Notebook', _newNotebook),
         ],
+      ),
+    );
+  }
+
+  Widget _actionButton(String label, VoidCallback onTap) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        decoration: BoxDecoration(
+          border: Border.all(color: Colors.black, width: 1),
+          borderRadius: BorderRadius.circular(4),
+        ),
+        child: Text(label,
+            style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: Colors.black)),
+      ),
+    );
+  }
+
+  Widget _breadcrumbBar() {
+    final children = <Widget>[];
+    for (var i = 0; i < _crumbs.length; i++) {
+      final c = _crumbs[i];
+      final isLast = i == _crumbs.length - 1;
+      if (i > 0) {
+        children.add(const Padding(
+          padding: EdgeInsets.symmetric(horizontal: 6),
+          child: Text('›', style: TextStyle(fontSize: 16, color: Colors.black)),
+        ));
+      }
+      children.add(GestureDetector(
+        onTap: isLast ? null : () => _navigateTo(c.id),
+        child: Text(
+          c.name,
+          style: TextStyle(
+            fontSize: 15,
+            color: Colors.black,
+            fontWeight: isLast ? FontWeight.w700 : FontWeight.w400,
+          ),
+        ),
+      ));
+    }
+    return Container(
+      height: 40,
+      alignment: Alignment.centerLeft,
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        reverse: true, // keep the current (deepest) folder visible when the trail overflows
+        child: Row(children: children),
+      ),
+    );
+  }
+
+  Widget _emptyState() {
+    final msg = _folderId == null
+        ? 'No notebooks yet.\nTap “New Notebook” to plant one. 🌱'
+        : 'This folder is empty.';
+    return Center(
+      child: Text(msg,
+          textAlign: TextAlign.center,
+          style: const TextStyle(fontSize: 16, color: Colors.black)),
+    );
+  }
+
+  Widget _grid() {
+    return GridView.builder(
+      padding: const EdgeInsets.all(16),
+      gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+        maxCrossAxisExtent: 180,
+        childAspectRatio: 0.82,
+        crossAxisSpacing: 12,
+        mainAxisSpacing: 12,
+      ),
+      itemCount: _entries.length,
+      itemBuilder: (_, i) => _card(_entries[i]),
+    );
+  }
+
+  Widget _card(LibraryEntry e) {
+    return GestureDetector(
+      onTap: () => e.isFolder ? _navigateTo(e.id) : _open(e),
+      child: Container(
+        decoration: BoxDecoration(
+          color: Colors.white,
+          border: Border.all(color: Colors.black, width: 1),
+          borderRadius: BorderRadius.circular(4),
+        ),
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Expanded(
+              child: Center(
+                child: Icon(
+                  e.isFolder ? Icons.folder_outlined : Icons.description_outlined,
+                  size: 48,
+                  color: Colors.black,
+                ),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              e.name,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                  fontSize: 15, fontWeight: FontWeight.w600, color: Colors.black),
+            ),
+            if (!e.isFolder)
+              Text('${e.pageCount} page${e.pageCount == 1 ? '' : 's'}',
+                  style: const TextStyle(fontSize: 12, color: Colors.black)),
+          ],
+        ),
       ),
     );
   }

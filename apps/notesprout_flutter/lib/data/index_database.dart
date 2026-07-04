@@ -14,6 +14,33 @@ class NotebookEntry {
   final int pageCount;
 }
 
+/// A row in the browsable library tree — a folder or a notebook. The library shows folders and
+/// notebooks side by side (ports the native `ObjectEntity` folder/notebook rows). `pageCount` is
+/// meaningful only for notebooks.
+class LibraryEntry {
+  LibraryEntry({
+    required this.id,
+    required this.name,
+    required this.isFolder,
+    required this.parentId,
+    required this.updatedAt,
+    this.pageCount = 0,
+  });
+  final String id;
+  final String name;
+  final bool isFolder;
+  final String? parentId;
+  final int updatedAt;
+  final int pageCount;
+}
+
+/// One segment of the breadcrumb trail. Root is `Crumb(null, 'Notebooks')`.
+class Crumb {
+  const Crumb(this.id, this.name);
+  final String? id; // null == root
+  final String name;
+}
+
 /// The global index (`notesprout.db`) — the universal `objects` table. Owns the notebook/folder
 /// tree; plaintext, always open. Ports the used slice of `NotesproutDatabase` + `IndexRepository`.
 class IndexDatabase {
@@ -54,6 +81,64 @@ class IndexDatabase {
       [id, 'notebook', name, parentId, now, now, jsonEncode({'pageCount': 1, 'encrypted': false})],
     );
     return id;
+  }
+
+  /// Create a folder index row under [parentId] (null == root). Returns the folder id.
+  String createFolder(String name, {String? parentId}) {
+    final id = _uuid.v4();
+    final now = _now;
+    _db.execute(
+      'INSERT INTO objects (id, type, name, parentId, createdAt, updatedAt, deletedAt, data) '
+      "VALUES (?, 'folder', ?, ?, ?, ?, NULL, '{}')",
+      [id, name, parentId, now, now],
+    );
+    return id;
+  }
+
+  /// Direct children (folders + notebooks) of [parentId] (null == root), folders first, then each
+  /// group alphabetical. `parentId IS ?` is null-safe, so a null bind matches root rows.
+  List<LibraryEntry> children(String? parentId) {
+    final rows = _db.select(
+      "SELECT id, type, name, parentId, updatedAt, data FROM objects "
+      "WHERE deletedAt IS NULL AND type IN ('folder','notebook') AND parentId IS ? "
+      "ORDER BY CASE type WHEN 'folder' THEN 0 ELSE 1 END, name COLLATE NOCASE",
+      [parentId],
+    );
+    return rows.map((r) {
+      final isFolder = r['type'] == 'folder';
+      var pages = 0;
+      if (!isFolder) {
+        final data = jsonDecode(r['data'] as String) as Map<String, dynamic>;
+        pages = (data['pageCount'] as num?)?.toInt() ?? 1;
+      }
+      return LibraryEntry(
+        id: r['id'] as String,
+        name: r['name'] as String,
+        isFolder: isFolder,
+        parentId: r['parentId'] as String?,
+        updatedAt: r['updatedAt'] as int,
+        pageCount: pages,
+      );
+    }).toList();
+  }
+
+  /// The breadcrumb trail from root down to [folderId] (null == root → just the root crumb).
+  /// Walks the `parentId` chain; stops if a link is missing/deleted (stale folder → partial trail).
+  List<Crumb> breadcrumb(String? folderId) {
+    final trail = <Crumb>[];
+    var cur = folderId;
+    while (cur != null) {
+      final rows = _db.select(
+        "SELECT id, name, parentId FROM objects WHERE id = ? AND type = 'folder' AND deletedAt IS NULL",
+        [cur],
+      );
+      if (rows.isEmpty) break;
+      final r = rows.first;
+      trail.insert(0, Crumb(r['id'] as String, r['name'] as String));
+      cur = r['parentId'] as String?;
+    }
+    trail.insert(0, const Crumb(null, 'Notebooks'));
+    return trail;
   }
 
   /// All live notebooks, most-recently-updated first.
