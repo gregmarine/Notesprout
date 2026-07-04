@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 
@@ -6,8 +8,12 @@ import 'ui/library_screen.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  // Android app-external files dir == getExternalFilesDir(null): notesprout.db + Garden/ live here.
-  final dir = await getExternalStorageDirectory();
+  // On Android use the app-external files dir (== getExternalFilesDir(null)) so .soil files can be
+  // side-loaded via adb; on desktop use the per-user app-support dir. Either way notesprout.db +
+  // Garden/ live under [base].
+  final dir = Platform.isAndroid
+      ? await getExternalStorageDirectory()
+      : await getApplicationSupportDirectory();
   final base = dir!.path;
   final worker = await DbWorker.start(indexPath: '$base/notesprout.db', gardenDir: '$base/Garden');
   runApp(NotesproutApp(worker: worker));

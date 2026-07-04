@@ -17,6 +17,7 @@ import '../domain/objects.dart';
 import '../domain/page_object.dart';
 import '../domain/stroke.dart';
 import '../platform/pen_bridge.dart';
+import 'flutter_ink_surface.dart';
 import 'line_dialog.dart';
 import 'page_painter.dart';
 import 'text_dialog.dart';
@@ -67,6 +68,10 @@ class _NotebookScreenState extends State<NotebookScreen> {
   bool _ready = false;
 
   String get _layerId => _pages[_pageIndex].layerId;
+
+  /// BOOX Android hosts the Onyx EPD overlay; every other platform (desktop now, iPad/web later)
+  /// draws with the pure-Flutter [FlutterInkSurface] and skips all EPD/bridge handoffs.
+  bool get _useOnyx => defaultTargetPlatform == TargetPlatform.android;
 
   @override
   void initState() {
@@ -123,6 +128,8 @@ class _NotebookScreenState extends State<NotebookScreen> {
       _objects.add(obj);
       widget.worker.insertStroke(widget.notebookId, _layerId, strokeId, data);
       _pushInsert([obj]);
+      // On BOOX the Onyx overlay already shows the ink; elsewhere we must repaint to reveal it.
+      if (!_useOnyx) setState(() {});
     } else if (e.type == 'erase') {
       // The eraser tool only removes strokes; objects (headings/text/lines) are erased via the
       // lasso eraser (2D). Hit-test committed strokes by point proximity.
@@ -572,9 +579,11 @@ class _NotebookScreenState extends State<NotebookScreen> {
                         onTapUp: _onPlacementTap,
                       ),
                     ),
-                  // In lasso mode, a translucent layer handles FINGER drags (move) / taps (deselect)
-                  // while the stylus passes through to Onyx to draw new selection loops.
-                  if (_lassoMode)
+                  // In lasso mode on BOOX, a translucent layer handles FINGER drags (move) / taps
+                  // (deselect) while the stylus passes through to Onyx to draw new selection loops.
+                  // On desktop the single pointer both draws loops and would conflict, so drag-move
+                  // is Onyx-only for now (desktop still selects + Cut/Copy/Paste/Delete).
+                  if (_lassoMode && _useOnyx)
                     Positioned.fill(
                       child: Listener(
                         behavior: HitTestBehavior.translucent,
@@ -707,6 +716,16 @@ class _NotebookScreenState extends State<NotebookScreen> {
   }
 
   Widget _surface() {
+    // Off-BOOX: pure-Flutter ink. A finished stroke routes through the same _onPen path, tagged by
+    // the current tool (eraser → 'erase'); lasso mode is handled inside _onPen regardless of tag.
+    if (!_useOnyx) {
+      return FlutterInkSurface(
+        dpr: _dpr,
+        strokeWidthPx: 3 * _dpr,
+        onStroke: (pts) =>
+            _onPen(PenEvent(_tool == _Tool.eraser ? 'erase' : 'stroke', pts)),
+      );
+    }
     return PlatformViewLink(
       viewType: _viewType,
       surfaceFactory: (context, controller) => AndroidViewSurface(
