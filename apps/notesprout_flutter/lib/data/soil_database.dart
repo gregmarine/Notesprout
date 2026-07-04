@@ -1,6 +1,8 @@
 import 'package:sqlite3/sqlite3.dart';
 import 'package:uuid/uuid.dart';
 
+import '../domain/objects.dart';
+import '../domain/page_object.dart';
 import '../domain/stroke.dart';
 
 const _uuid = Uuid();
@@ -145,6 +147,51 @@ class SoilDatabase {
         .toList();
   }
 
+  /// All non-deleted content objects on [layerId] (strokes, headings, text, lines), in draw order.
+  /// Rows whose `type` isn't a known content object are skipped.
+  List<PageObject> objectsForLayer(String layerId) {
+    final rows = _db.select(
+        "SELECT id, type, boundingBox, data FROM notebook "
+        "WHERE parentId = ? AND deletedAt IS NULL AND type IN ('stroke','heading','text','line') "
+        "ORDER BY \"order\" ASC",
+        [layerId]);
+    final out = <PageObject>[];
+    for (final r in rows) {
+      final id = r['id'] as String;
+      final box = BoundingBox.fromJson(r['boundingBox'] as String);
+      final data = r['data'] as String;
+      switch (r['type'] as String) {
+        case 'stroke':
+          out.add(StrokeObject(id, box, StrokeData.fromJson(data)));
+        case 'heading':
+          out.add(HeadingRender(id, box, HeadingObject.fromJson(data)));
+        case 'text':
+          out.add(TextRender(id, box, TextObject.fromJson(data)));
+        case 'line':
+          out.add(LineRender(id, box, LineObject.fromJson(data)));
+      }
+    }
+    return out;
+  }
+
+  /// Persist one content object of [type] with the given [box] and serialized [dataJson] under
+  /// [layerId]. [id] lets the caller pre-assign the row id; returns it.
+  String insertObject(String layerId, String type, BoundingBox box, String dataJson, {String? id}) {
+    id ??= _uuid.v4();
+    final now = _now;
+    final order = _nextOrder(layerId);
+    _db.execute(_insert, [id, layerId, box.toJson(), order, now, now, null, type, dataJson]);
+    return id;
+  }
+
+  /// Update an existing object's bounding box + data (e.g. a text edit or a move). No-op if the row
+  /// is gone. `updatedAt` is bumped so staleness detection works.
+  void updateObject(String id, BoundingBox box, String dataJson) {
+    final now = _now;
+    _db.execute('UPDATE notebook SET boundingBox = ?, data = ?, updatedAt = ? WHERE id = ?',
+        [box.toJson(), dataJson, now, id]);
+  }
+
   /// Persist one committed stroke under [layerId]. [id] lets the caller pre-assign the row id
   /// (so its in-memory model can reference/erase the stroke before any reload). Returns the id.
   String insertStroke(String layerId, StrokeData stroke, {String? id}) {
@@ -157,11 +204,15 @@ class SoilDatabase {
   }
 
   /// Soft-delete strokes by id (eraser). `updatedAt = deletedAt` so staleness detection works.
-  void softDeleteStrokes(Iterable<String> ids) {
+  void softDeleteStrokes(Iterable<String> ids) => setDeleted(ids, true);
+
+  /// Set or clear the soft-delete mark on rows by id. Clearing ([deleted] = false) restores an object
+  /// — the row is never physically removed, so undo/redo just toggles `deletedAt`.
+  void setDeleted(Iterable<String> ids, bool deleted) {
     final now = _now;
     final stmt = _db.prepare('UPDATE notebook SET deletedAt = ?, updatedAt = ? WHERE id = ?');
     for (final id in ids) {
-      stmt.execute([now, now, id]);
+      stmt.execute([deleted ? now : null, now, id]);
     }
     stmt.close();
   }

@@ -43,6 +43,14 @@ class PenBridge {
   /// Hand the panel off to Flutter's committed layer — call AFTER Dart has painted its frame.
   Future<void> repaintPanel() => _invoke('repaintPanel');
 
+  /// Suspend (false) or resume (true) raw pen input — used while placing/editing a text object so
+  /// the stylus doesn't draw. Dart captures the placement tap instead.
+  Future<void> setDrawingEnabled(bool enabled) async {
+    try {
+      await _method.invokeMethod('setDrawingEnabled', enabled);
+    } catch (_) {}
+  }
+
   void dispose() {
     _method.setMethodCallHandler(null);
     onEvent = null;

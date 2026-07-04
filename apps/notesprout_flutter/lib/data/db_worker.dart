@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:isolate';
 
+import '../domain/page_object.dart';
 import '../domain/stroke.dart';
 import 'index_database.dart';
 import 'notebook_repository.dart';
@@ -60,11 +61,35 @@ class DbWorker {
   Future<List<StrokeRow>> strokes(String id, String layerId) =>
       _call('strokes', {'id': id, 'layer': layerId});
 
+  /// All content objects (strokes, headings, text, lines) on a layer, in draw order.
+  Future<List<PageObject>> objects(String id, String layerId) =>
+      _call('objects', {'id': id, 'layer': layerId});
+
   void insertStroke(String id, String layerId, String strokeId, StrokeData data) =>
       _fire('insertStroke',
           {'id': id, 'layer': layerId, 'strokeId': strokeId, 'json': data.toJson()});
+
+  /// Insert any content object (heading/text/line) with a pre-assigned [objectId].
+  void insertObject(String id, String layerId, String objectId, String type, BoundingBox box,
+          String dataJson) =>
+      _fire('insertObject', {
+        'id': id,
+        'layer': layerId,
+        'objectId': objectId,
+        'type': type,
+        'box': box.toJson(),
+        'json': dataJson,
+      });
+
+  /// Update an existing object's box + data (text edit / move).
+  void updateObject(String id, String objectId, BoundingBox box, String dataJson) => _fire(
+      'updateObject', {'id': id, 'objectId': objectId, 'box': box.toJson(), 'json': dataJson});
   void softDelete(String id, List<String> strokeIds) =>
       _fire('softDelete', {'id': id, 'ids': strokeIds});
+
+  /// Set/clear the soft-delete mark (undo/redo restore).
+  void setDeleted(String id, List<String> ids, bool deleted) =>
+      _fire('setDeleted', {'id': id, 'ids': ids, 'deleted': deleted});
   void closeNotebook(String id, int pageCount) =>
       _fire('closeNotebook', {'id': id, 'count': pageCount});
 }
@@ -120,13 +145,28 @@ void _entry(_Init init) {
               .addPage(width: req.args['w'] as double, height: req.args['h'] as double);
         case 'strokes':
           r = soil(req.args['id'] as String).strokesForLayer(req.args['layer'] as String);
+        case 'objects':
+          r = soil(req.args['id'] as String).objectsForLayer(req.args['layer'] as String);
         case 'insertStroke':
           soil(req.args['id'] as String).insertStroke(
               req.args['layer'] as String, StrokeData.fromJson(req.args['json'] as String),
               id: req.args['strokeId'] as String);
+        case 'insertObject':
+          soil(req.args['id'] as String).insertObject(
+              req.args['layer'] as String,
+              req.args['type'] as String,
+              BoundingBox.fromJson(req.args['box'] as String),
+              req.args['json'] as String,
+              id: req.args['objectId'] as String);
+        case 'updateObject':
+          soil(req.args['id'] as String).updateObject(req.args['objectId'] as String,
+              BoundingBox.fromJson(req.args['box'] as String), req.args['json'] as String);
         case 'softDelete':
           soil(req.args['id'] as String)
               .softDeleteStrokes((req.args['ids'] as List).cast<String>());
+        case 'setDeleted':
+          soil(req.args['id'] as String).setDeleted(
+              (req.args['ids'] as List).cast<String>(), req.args['deleted'] as bool);
         case 'closeNotebook':
           open_.remove(req.args['id'] as String)?.close();
           index.touchNotebook(req.args['id'] as String, pageCount: req.args['count'] as int);

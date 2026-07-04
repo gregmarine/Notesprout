@@ -37,6 +37,13 @@ class OnyxSpikeView(context: Context) : View(context) {
     private var isSetup = false
     private var isEraserMode = false
 
+    /**
+     * When true, raw pen input is suspended so the stylus does NOT draw — used while placing/editing
+     * a text object (Dart captures the tap instead). Survives focus/size re-openings so a paused
+     * surface never silently re-enables drawing under a dialog.
+     */
+    private var drawingPaused = false
+
     private val rawInputCallback = object : RawInputCallback() {
         override fun onBeginRawDrawing(shortcut: Boolean, point: TouchPoint) {
             if (isSetup && !isEraserMode) touchHelper.setRawDrawingRenderEnabled(true)
@@ -111,6 +118,22 @@ class OnyxSpikeView(context: Context) : View(context) {
     /** Clear = Dart empties its model + repaints blank, then this refreshes the panel. */
     fun clear() = repaintPanel()
 
+    /**
+     * Suspend or resume raw pen input. While suspended the stylus produces no strokes (text
+     * placement mode); resuming restores the current tool's render state. Idempotent.
+     */
+    fun setDrawingEnabled(enabled: Boolean) {
+        drawingPaused = !enabled
+        if (!isSetup) return
+        touchHelper.setRawDrawingEnabled(enabled)
+        if (enabled) {
+            touchHelper.setRawDrawingRenderEnabled(!isEraserMode)
+        } else {
+            touchHelper.setRawDrawingRenderEnabled(false)
+        }
+        invalidate()
+    }
+
     // ── Onyx pipeline lifecycle ────────────────────────────────────────────────
 
     private fun applyLimitRect() {
@@ -138,8 +161,9 @@ class OnyxSpikeView(context: Context) : View(context) {
             applyLimitRect()
             touchHelper.restartRawDrawing()
         }
-        touchHelper.setRawDrawingEnabled(true)
-        if (isEraserMode) touchHelper.setRawDrawingRenderEnabled(false)
+        // Respect a paused state across re-openings (e.g. focus regained under a text dialog).
+        touchHelper.setRawDrawingEnabled(!drawingPaused)
+        if (isEraserMode || drawingPaused) touchHelper.setRawDrawingRenderEnabled(false)
         EpdController.setUpdListSize(EPD_UPDATE_LIST_SIZE)
     }
 

@@ -40,6 +40,10 @@ class OnyxDrawingPlatformView(
             "setEraser" -> { spikeView.setEraser(); result.success(null) }
             "clear" -> { spikeView.clear(); result.success(null) }
             "repaintPanel" -> { spikeView.repaintPanel(); result.success(null) }
+            "setDrawingEnabled" -> {
+                spikeView.setDrawingEnabled(call.arguments as? Boolean ?: true)
+                result.success(null)
+            }
             else -> result.notImplemented()
         }
     }
