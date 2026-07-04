@@ -18,13 +18,19 @@ import '../domain/stroke.dart';
 /// then headings, then strokes on top. (Text-object bodies land in Phase 2B with the markdown
 /// engine; their embedded stroke fallback still draws here.)
 class PagePainter extends CustomPainter {
-  PagePainter(this.objects, this.dpr, {this.selection = const []});
+  PagePainter(this.objects, this.dpr,
+      {this.selection = const [], this.guidesV = const [], this.guidesH = const []});
 
   final List<PageObject> objects;
   final double dpr;
 
   /// Bounding boxes (px) to outline as the current lasso selection.
   final List<BoundingBox> selection;
+
+  /// Active snap guide lines (px) drawn full-span during a lasso drag: [guidesV] vertical (x),
+  /// [guidesH] horizontal (y).
+  final List<double> guidesV;
+  final List<double> guidesH;
 
   static const _inkLight = Color(0xFF888888);
 
@@ -48,6 +54,20 @@ class PagePainter extends CustomPainter {
 
     for (final b in selection) {
       _drawSelection(canvas, b);
+    }
+
+    if (guidesV.isNotEmpty || guidesH.isNotEmpty) {
+      final gp = Paint()
+        ..color = Colors.black
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = math.max(dpr, 1);
+      final wPx = size.width * dpr, hPx = size.height * dpr;
+      for (final x in guidesV) {
+        _dash(canvas, Offset(x, 0), Offset(x, hPx), gp, 12 * dpr, 8 * dpr);
+      }
+      for (final y in guidesH) {
+        _dash(canvas, Offset(0, y), Offset(wPx, y), gp, 12 * dpr, 8 * dpr);
+      }
     }
 
     canvas.restore();

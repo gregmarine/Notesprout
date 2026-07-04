@@ -8,9 +8,11 @@ import 'package:uuid/uuid.dart';
 import 'dart:math' as math;
 
 import '../core/lasso_geometry.dart';
+import '../core/snap_engine.dart';
 import '../core/markdown/markdown_parser.dart';
 import '../core/markdown/markdown_render.dart';
 import '../core/undo_manager.dart';
+import '../data/app_settings.dart';
 import '../data/db_worker.dart';
 import '../recognition/handwriting_recognizer.dart';
 import '../data/soil_database.dart';
@@ -20,6 +22,7 @@ import '../domain/stroke.dart';
 import '../platform/pen_bridge.dart';
 import 'flutter_ink_surface.dart';
 import 'line_dialog.dart';
+import 'overflow_toolbar.dart';
 import 'page_painter.dart';
 import 'text_dialog.dart';
 
@@ -78,6 +81,12 @@ class _NotebookScreenState extends State<NotebookScreen> {
   bool _movingSel = false;
   bool _pendingDismiss = false;
   int _lastPanelMs = 0; // throttle for live e-ink feedback during a drag
+
+  // Snap-to-guide — default off; persisted device-local (mirrors native SnapPreferences).
+  bool _snapEnabled = AppSettings.instance.snapEnabled;
+  BoundingBox? _dragOriginBox; // unpadded selection bbox at drag start (snap anchors)
+  List<double> _guidesV = const []; // active vertical snap guides (px) during a drag
+  List<double> _guidesH = const [];
 
   double _dpr = 1.0;
   bool _ready = false;
@@ -300,6 +309,9 @@ class _NotebookScreenState extends State<NotebookScreen> {
       }
       _movingSel = false;
       _pendingDismiss = false;
+      _dragOriginBox = null;
+      _guidesV = const [];
+      _guidesH = const [];
     });
     switch (m) {
       case _Mode.pen:
@@ -320,18 +332,26 @@ class _NotebookScreenState extends State<NotebookScreen> {
 
   // ── Selection: enter / move / dismiss ────────────────────────────────────────
 
-  BoundingBox? _computeSelBounds() {
-    if (_selection.isEmpty) return null;
-    var minX = _selection.first.box.x, minY = _selection.first.box.y;
-    var maxX = minX, maxY = minY;
-    for (final o in _selection) {
+  /// Unpadded union of [objs] boxes (px) — the true content bounds.
+  BoundingBox? _rawBounds(Iterable<PageObject> objs) {
+    if (objs.isEmpty) return null;
+    final first = objs.first.box;
+    var minX = first.x, minY = first.y, maxX = first.x + first.width, maxY = first.y + first.height;
+    for (final o in objs) {
       minX = math.min(minX, o.box.x);
       minY = math.min(minY, o.box.y);
       maxX = math.max(maxX, o.box.x + o.box.width);
       maxY = math.max(maxY, o.box.y + o.box.height);
     }
+    return BoundingBox(minX, minY, maxX - minX, maxY - minY);
+  }
+
+  /// Padded union of the selection — used for the touch target + floating-toolbar anchor.
+  BoundingBox? _computeSelBounds() {
+    final raw = _rawBounds(_selection);
+    if (raw == null) return null;
     final pad = kLassoOverlayPadDp * _dpr;
-    return BoundingBox(minX - pad, minY - pad, (maxX - minX) + 2 * pad, (maxY - minY) + 2 * pad);
+    return BoundingBox(raw.x - pad, raw.y - pad, raw.width + 2 * pad, raw.height + 2 * pad);
   }
 
   /// Adopt a lasso hit-test result as the active selection: suspend the pen (so it now drags/
@@ -360,6 +380,9 @@ class _NotebookScreenState extends State<NotebookScreen> {
       _smartSession = false;
       _movingSel = false;
       _pendingDismiss = false;
+      _dragOriginBox = null;
+      _guidesV = const [];
+      _guidesH = const [];
     });
     if (toPen || wasSmart) {
       _setMode(_Mode.pen);
@@ -375,6 +398,7 @@ class _NotebookScreenState extends State<NotebookScreen> {
       _movingSel = true;
       _pendingDismiss = false;
       _dragTotal = Offset.zero;
+      _dragOriginBox = _rawBounds(_selection);
       _moveBefore
         ..clear()
         ..addEntries(_selection.map((o) => MapEntry(o.id, o)));
@@ -387,11 +411,36 @@ class _NotebookScreenState extends State<NotebookScreen> {
   void _selMove(PointerMoveEvent e) {
     if (!_movingSel) return;
     _dragTotal += Offset(e.delta.dx * _dpr, e.delta.dy * _dpr);
+
+    // Snap-to-guide: adjust the raw delta so the nearest anchor pulls flush to a guide.
+    var dx = _dragTotal.dx, dy = _dragTotal.dy;
+    if (_snapEnabled && _dragOriginBox != null) {
+      final page = _pages[_pageIndex].data;
+      final targets = [
+        for (final o in _objects)
+          if ((o is HeadingRender || o is TextRender) && !_selection.contains(o)) o.box
+      ];
+      final r = computeSnap(
+        box: _dragOriginBox!,
+        rawDx: _dragTotal.dx,
+        rawDy: _dragTotal.dy,
+        pageWidth: page.width,
+        pageHeight: page.height,
+        marginPx: kSnapMarginDp * _dpr,
+        thresholdPx: kSnapThresholdDp * _dpr,
+        objectTargets: targets,
+      );
+      dx = r.dx;
+      dy = r.dy;
+      _guidesV = [for (final g in r.guides) if (g is VerticalGuide) g.x];
+      _guidesH = [for (final g in r.guides) if (g is HorizontalGuide) g.y];
+    }
+
     setState(() {
       for (var i = 0; i < _selection.length; i++) {
         final before = _moveBefore[_selection[i].id];
         if (before == null) continue;
-        final moved = _translate(before, _dragTotal.dx, _dragTotal.dy);
+        final moved = _translate(before, dx, dy);
         final oi = _objects.indexWhere((o) => o.id == moved.id);
         if (oi >= 0) _objects[oi] = moved;
         _selection[i] = moved;
@@ -401,9 +450,19 @@ class _NotebookScreenState extends State<NotebookScreen> {
     _throttledPanelRepaint(); // coarse live feedback on e-ink during the drag
   }
 
+  void _clearGuides() {
+    if (_guidesV.isEmpty && _guidesH.isEmpty) return;
+    setState(() {
+      _guidesV = const [];
+      _guidesH = const [];
+    });
+  }
+
   void _selUp(PointerUpEvent e) {
     if (_movingSel) {
       _movingSel = false;
+      _dragOriginBox = null;
+      _clearGuides();
       if (_dragTotal.distance >= 8 * _dpr) {
         final pairs = <(PageObject, PageObject)>[];
         for (final after in _selection) {
@@ -500,6 +559,50 @@ class _NotebookScreenState extends State<NotebookScreen> {
       _selBounds = _computeSelBounds();
     });
     _bridge.setDrawingEnabled(false); // pasted objects are the active selection
+    _repaintPanelNextFrame();
+  }
+
+  /// Align & distribute is offered for ≥2 non-stroke objects (headings/text/lines) — native's rule.
+  bool get _alignEligible =>
+      _selection.length >= 2 && _selection.every((o) => o is! StrokeObject);
+
+  /// Align one edge to the selection bbox and distribute with equal gaps along the other axis
+  /// ([vertical] = align-left + stack top→bottom; else align-top + spread left→right). One undo step.
+  void _align(bool vertical) {
+    if (!_alignEligible) return;
+    final box = _rawBounds(_selection);
+    if (box == null) return;
+    final items = List<PageObject>.of(_selection)
+      ..sort((a, b) => vertical
+          ? (a.box.y + a.box.height / 2).compareTo(b.box.y + b.box.height / 2)
+          : (a.box.x + a.box.width / 2).compareTo(b.box.x + b.box.width / 2));
+
+    final pairs = <(PageObject, PageObject)>[];
+    if (vertical) {
+      final sumH = items.fold(0.0, (s, o) => s + o.box.height);
+      final gap = items.length > 1 ? (box.height - sumH) / (items.length - 1) : 0.0;
+      var y = box.y;
+      for (final o in items) {
+        final moved = _translate(o, box.x - o.box.x, y - o.box.y);
+        pairs.add((o, moved));
+        y += o.box.height + gap;
+      }
+    } else {
+      final sumW = items.fold(0.0, (s, o) => s + o.box.width);
+      final gap = items.length > 1 ? (box.width - sumW) / (items.length - 1) : 0.0;
+      var x = box.x;
+      for (final o in items) {
+        final moved = _translate(o, x - o.box.x, box.y - o.box.y);
+        pairs.add((o, moved));
+        x += o.box.width + gap;
+      }
+    }
+    for (final (_, a) in pairs) {
+      _replaceObject(a);
+      widget.worker.updateObject(widget.notebookId, a.id, a.box, _objDataJson(a));
+    }
+    _pushMove(pairs);
+    setState(() => _reselect([for (final (_, a) in pairs) a.id]));
     _repaintPanelNextFrame();
   }
 
@@ -793,8 +896,14 @@ class _NotebookScreenState extends State<NotebookScreen> {
                   children: [
                     Positioned.fill(
                       child: CustomPaint(
+                        // The painter pads the outline itself, so pass the raw (unpadded) bounds.
                         painter: PagePainter(List.of(_objects), _dpr,
-                            selection: _selBounds != null ? [_selBounds!] : const []),
+                            selection: () {
+                              final raw = _rawBounds(_selection);
+                              return raw != null ? [raw] : const <BoundingBox>[];
+                            }(),
+                            guidesV: _guidesV,
+                            guidesH: _guidesH),
                       ),
                     ),
                     Positioned.fill(child: _surface()),
@@ -832,7 +941,15 @@ class _NotebookScreenState extends State<NotebookScreen> {
   }
 
   Widget _toolbar() {
-    final hasClip = _clipboard.isNotEmpty;
+    final tools = <TbButton>[
+      TbButton('Pen', selected: _mode == _Mode.pen, onTap: () => _setMode(_Mode.pen)),
+      TbButton('Eraser', selected: _mode == _Mode.eraser, onTap: () => _setMode(_Mode.eraser)),
+      TbButton('Clear', onTap: _clear),
+      TbButton('Text', selected: _mode == _Mode.text, onTap: () => _setMode(_Mode.text)),
+      TbButton('Lasso', selected: _mode == _Mode.lasso, onTap: () => _setMode(_Mode.lasso)),
+      TbButton('Lines', onTap: _insertLines),
+      if (_clipboard.isNotEmpty) TbButton('Paste', onTap: _pasteClipboard),
+    ];
     return Container(
       height: 56,
       color: Colors.white,
@@ -853,22 +970,9 @@ class _NotebookScreenState extends State<NotebookScreen> {
             ),
           ),
           const SizedBox(width: 12),
-          _btn('Pen', _mode == _Mode.pen, () => _setMode(_Mode.pen)),
+          // Tool cluster: fills the middle, collapsing extras into a ⋯ overflow rather than scrolling.
+          Expanded(child: OverflowToolbar(tools, height: 56)),
           const SizedBox(width: 8),
-          _btn('Eraser', _mode == _Mode.eraser, () => _setMode(_Mode.eraser)),
-          const SizedBox(width: 8),
-          _btn('Clear', false, _clear),
-          const SizedBox(width: 8),
-          _btn('Text', _mode == _Mode.text, () => _setMode(_Mode.text)),
-          const SizedBox(width: 8),
-          _btn('Lasso', _mode == _Mode.lasso, () => _setMode(_Mode.lasso)),
-          const SizedBox(width: 8),
-          _btn('Lines', false, _insertLines),
-          if (hasClip) ...[
-            const SizedBox(width: 8),
-            _btn('Paste', false, _pasteClipboard),
-          ],
-          const Spacer(),
           _btn('‹', false, () => _switchPage(-1)),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 10),
@@ -903,45 +1007,59 @@ class _NotebookScreenState extends State<NotebookScreen> {
   }
 
   /// A floating action bar anchored to the active selection (native's floating selection toolbar).
+  /// Horizontally scrollable + width-bounded so a crowded selection never overflows the page.
   Widget _floatingToolbar(BoxConstraints constraints) {
-    const barW = 260.0, barH = 46.0;
+    const barH = 46.0;
     final double leftL =
-        (_selBounds!.x / _dpr).clamp(4.0, math.max(4.0, constraints.maxWidth - barW)).toDouble();
+        (_selBounds!.x / _dpr).clamp(4.0, math.max(4.0, constraints.maxWidth - 120)).toDouble();
+    final maxBarW = math.max(120.0, constraints.maxWidth - leftL - 4);
     final aboveTop = _selBounds!.y / _dpr - barH - 6;
     final belowTop = (_selBounds!.y + _selBounds!.height) / _dpr + 6;
     final double top = (aboveTop >= 4 ? aboveTop : belowTop)
         .clamp(4.0, math.max(4.0, constraints.maxHeight - barH))
         .toDouble();
     final canConvert = _selectionIsPureStrokes && Recognition.instance.supported && !_recognizing;
+    final items = <TbButton>[
+      TbButton('Snap', selected: _snapEnabled, onTap: _toggleSnap),
+      if (_selectionIsPureStrokes && Recognition.instance.supported) ...[
+        TbButton(_recognizing ? '…' : '→Text', enabled: canConvert, onTap: _convertToText),
+        TbButton('→H', enabled: canConvert, onTap: () async {
+          final lvl = await _chooseHeadingLevel();
+          if (lvl != null) await _convertToHeading(lvl);
+        }),
+      ],
+      if (_alignEligible) ...[
+        TbButton('Align↓', onTap: () => _align(true)),
+        TbButton('Align→', onTap: () => _align(false)),
+      ],
+      TbButton('Cut', onTap: _cutSelection),
+      TbButton('Copy', onTap: _copySelection),
+      TbButton('Delete', onTap: _deleteSelection),
+    ];
     return Positioned(
       left: leftL,
       top: top,
       child: Container(
         height: barH,
-        padding: const EdgeInsets.symmetric(horizontal: 6),
         decoration: BoxDecoration(
           color: Colors.white,
           border: Border.all(color: Colors.black, width: 1),
           borderRadius: BorderRadius.circular(4),
         ),
-        child: Row(mainAxisSize: MainAxisSize.min, children: [
-          if (_selectionIsPureStrokes && Recognition.instance.supported) ...[
-            _actionBtn(_recognizing ? '…' : '→Text', canConvert, _convertToText),
-            const SizedBox(width: 6),
-            _actionBtn('→H', canConvert, () async {
-              final lvl = await _chooseHeadingLevel();
-              if (lvl != null) await _convertToHeading(lvl);
-            }),
-            const SizedBox(width: 6),
-          ],
-          _actionBtn('Cut', true, _cutSelection),
-          const SizedBox(width: 6),
-          _actionBtn('Copy', true, _copySelection),
-          const SizedBox(width: 6),
-          _actionBtn('Delete', true, _deleteSelection),
-        ]),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 6),
+          child: ConstrainedBox(
+            constraints: BoxConstraints(maxWidth: maxBarW - 12),
+            child: OverflowToolbar(items, height: barH),
+          ),
+        ),
       ),
     );
+  }
+
+  void _toggleSnap() {
+    setState(() => _snapEnabled = !_snapEnabled);
+    AppSettings.instance.setSnapEnabled(_snapEnabled);
   }
 
   /// A momentary action button that dims its label to inkLight when [enabled] is false (a disabled

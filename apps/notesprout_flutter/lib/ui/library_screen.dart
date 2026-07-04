@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../data/db_worker.dart';
 import '../data/index_database.dart';
 import 'notebook_screen.dart';
+import 'overflow_toolbar.dart';
 
 /// The library: a browsable folder + notebook tree from the global index. Folders and notebooks
 /// show as cards; tap a folder to descend, a breadcrumb to climb out, a notebook to open. Ports the
@@ -183,38 +184,65 @@ class _LibraryScreenState extends State<LibraryScreen> {
   }
 
   Widget _breadcrumbBar() {
-    final children = <Widget>[];
-    for (var i = 0; i < _crumbs.length; i++) {
-      final c = _crumbs[i];
-      final isLast = i == _crumbs.length - 1;
-      if (i > 0) {
-        children.add(const Padding(
-          padding: EdgeInsets.symmetric(horizontal: 6),
-          child: Text('›', style: TextStyle(fontSize: 16, color: Colors.black)),
-        ));
-      }
-      children.add(GestureDetector(
-        onTap: isLast ? null : () => _navigateTo(c.id),
-        child: Text(
-          c.name,
-          style: TextStyle(
-            fontSize: 15,
-            color: Colors.black,
-            fontWeight: isLast ? FontWeight.w700 : FontWeight.w400,
-          ),
-        ),
-      ));
-    }
     return Container(
       height: 40,
       alignment: Alignment.centerLeft,
       padding: const EdgeInsets.symmetric(horizontal: 16),
-      child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        reverse: true, // keep the current (deepest) folder visible when the trail overflows
-        child: Row(children: children),
-      ),
+      child: LayoutBuilder(builder: (context, constraints) {
+        final crumbs = _crumbs;
+        final sepW = _textWidth(' › ');
+        final full =
+            crumbs.fold(0.0, (a, c) => a + _textWidth(c.name)) + sepW * (crumbs.length - 1);
+        // Never scroll: show the whole trail when it fits, else collapse the middle into a "…"
+        // menu (keeping root + current visible) — the breadcrumb form of toolbar overflow.
+        if (crumbs.length <= 1 || full <= constraints.maxWidth) {
+          final children = <Widget>[];
+          for (var i = 0; i < crumbs.length; i++) {
+            if (i > 0) children.add(_sep());
+            children.add(_crumb(crumbs[i], isLast: i == crumbs.length - 1));
+          }
+          return Row(mainAxisSize: MainAxisSize.min, children: children);
+        }
+        final hidden = crumbs.sublist(1, crumbs.length - 1);
+        return Row(mainAxisSize: MainAxisSize.min, children: [
+          _crumb(crumbs.first, isLast: false),
+          _sep(),
+          Builder(
+            builder: (btnCtx) => GestureDetector(
+              onTap: hidden.isEmpty
+                  ? null
+                  : () => showOverflowMenu(btnCtx,
+                      [for (final c in hidden) TbButton(c.name, onTap: () => _navigateTo(c.id))]),
+              child: const Text('…', style: TextStyle(fontSize: 15, color: Colors.black)),
+            ),
+          ),
+          _sep(),
+          _crumb(crumbs.last, isLast: true),
+        ]);
+      }),
     );
+  }
+
+  Widget _crumb(Crumb c, {required bool isLast}) => GestureDetector(
+        onTap: isLast ? null : () => _navigateTo(c.id),
+        child: Text(c.name,
+            style: TextStyle(
+                fontSize: 15,
+                color: Colors.black,
+                fontWeight: isLast ? FontWeight.w700 : FontWeight.w400)),
+      );
+
+  Widget _sep() => const Padding(
+        padding: EdgeInsets.symmetric(horizontal: 6),
+        child: Text('›', style: TextStyle(fontSize: 16, color: Colors.black)),
+      );
+
+  double _textWidth(String s) {
+    final tp = TextPainter(
+      text: TextSpan(text: s, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+      textDirection: TextDirection.ltr,
+    )..layout();
+    return tp.width;
   }
 
   Widget _emptyState() {
