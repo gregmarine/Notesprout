@@ -356,6 +356,8 @@ class CalendarActivity : AppCompatActivity() {
 
     private fun setupToolbar() {
         binding.btnBack.setOnClickListener { finish() }
+        binding.btnCalHome.setOnClickListener { goToLibrary(newNotebook = false) }
+        binding.btnCalNewNotebook.setOnClickListener { goToLibrary(newNotebook = true) }
         binding.btnMonthView.setOnClickListener { switchView(CalView.MONTH) }
         binding.btnWeekView.setOnClickListener { switchView(CalView.WEEK) }
         binding.btnDayView.setOnClickListener { switchView(CalView.DAY) }
@@ -1151,6 +1153,24 @@ class CalendarActivity : AppCompatActivity() {
             boundingBox = RectF(clip.boundingBox.left + dx, clip.boundingBox.top + dy, clip.boundingBox.right + dx, clip.boundingBox.bottom + dy),
             textObjects = newTexts, lineObjects = newLines, links = newLinks, stickyNotes = newStickies, shapeObjects = newShapes,
         )
+    }
+
+    // ── Library navigation ────────────────────────────────────────────────────────
+
+    /**
+     * Jump to the notebook/folder library ([MainActivity]). Uses CLEAR_TOP + SINGLE_TOP so the
+     * existing MainActivity (always the task root) is brought to front via onNewIntent, clearing
+     * the calendar (and any notebook the calendar was opened from) off the stack.
+     *
+     * When [newNotebook] is true, MainActivity opens straight into the "pick a folder, then create"
+     * new-notebook flow.
+     */
+    private fun goToLibrary(newNotebook: Boolean) {
+        val intent = Intent(this, MainActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+        if (newNotebook) intent.putExtra(MainActivity.EXTRA_START_NEW_NOTEBOOK, true)
+        startActivity(intent)
+        finish()
     }
 
     // ── Scratch Pad ──────────────────────────────────────────────────────────────

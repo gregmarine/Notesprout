@@ -127,7 +127,7 @@ pitfalls). Navigation swaps the page content + template bitmap into the same vie
 ```
 LinearLayout (vertical, paperWhite)
   ├── calendarToolbar (56dp)
-  │     btnBack │ btnToday │ btnMonthView · btnWeekView · btnDayView │
+  │     btnBack · btnCalHome · btnCalNewNotebook │ btnToday │ btnMonthView · btnWeekView · btnDayView │
   │     btnCalPen · btnCalEraser · btnCalStickyNote · btnCalLassoEraser · btnCalLasso ·
   │     btnCalErasePage · btnCalUndo · btnCalRedo · btnCalScratchpad · btnCalSendPage
   │     ─ spacer ─ btnPrev · tvMonthYear (tap → month/year picker) · btnNext
@@ -140,6 +140,25 @@ LinearLayout (vertical, paperWhite)
 
 `btnCalScratchpad` launches the global scratch pad (`ScratchpadActivity`, plain — no from-notebook
 extras). Tool state (pen/eraser) is restored from and persisted to the shared `ToolPreferencesManager`.
+
+### Library shortcuts (`btnCalHome` / `btnCalNewNotebook`)
+
+Two toolbar buttons (immediately after `btnBack`) jump to the notebook/folder library. Both route
+through `goToLibrary(newNotebook)`, which launches `MainActivity` with
+`FLAG_ACTIVITY_CLEAR_TOP | FLAG_ACTIVITY_SINGLE_TOP` (MainActivity is always the task root, so this
+brings the existing instance to front via `onNewIntent` — clearing the calendar, and any notebook the
+calendar was opened from, off the stack) then `finish()`.
+
+- **`btnCalHome`** (`ic_notebook`) — straight to the library list.
+- **`btnCalNewNotebook`** (`ic_new_notebook`) — passes `MainActivity.EXTRA_START_NEW_NOTEBOOK=true`.
+  MainActivity's `handleNewNotebookIntent` consumes the extra once (then `removeExtra`) and enters
+  **`DestinationPickerState.NewNotebook`** — the existing folder-navigation picker (same chrome as
+  Move/Copy/Import), titled *"New notebook here"* / *"Create here"*. The user navigates to (or creates)
+  the destination folder; **"Create here"** exits the picker and calls the normal `showNewNotebookDialog()`
+  (template browser + name), which creates the notebook in the navigated-to folder and opens it. A
+  `pendingNewNotebookPicker` flag defers picker entry to the cold-launch case where the grid isn't laid
+  out / browse state isn't restored yet (`tryStartPendingNewNotebookPicker`, retried from the layout
+  listener and the state-restore tail).
 
 ### Page load contract (`navigateCanvas`)
 

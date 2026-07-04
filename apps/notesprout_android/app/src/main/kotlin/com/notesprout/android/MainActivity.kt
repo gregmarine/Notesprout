@@ -98,6 +98,12 @@ class MainActivity : AppCompatActivity() {
          */
         const val NIL_UUID = "00000000-0000-0000-0000-000000000000"
 
+        /**
+         * Boolean intent extra: launch straight into the "pick a folder for a new notebook" picker
+         * (used by [CalendarActivity]'s New Notebook button). Consumed once, then removed.
+         */
+        const val EXTRA_START_NEW_NOTEBOOK = "start_new_notebook"
+
         private val lenientJson = Json { ignoreUnknownKeys = true }
     }
 
@@ -125,6 +131,9 @@ class MainActivity : AppCompatActivity() {
     private var currentPage = 0
     private var gridSpec: GridSpec? = null
     private var pendingScan = false
+
+    /** Set when launched with [EXTRA_START_NEW_NOTEBOOK] but the grid isn't laid out / restored yet. */
+    private var pendingNewNotebookPicker = false
 
     /**
      * Navigation stack — null represents the root level; a non-null ObjectEntity represents a
@@ -410,19 +419,24 @@ class MainActivity : AppCompatActivity() {
                     } else {
                         renderPage()
                     }
+                    tryStartPendingNewNotebookPicker()
                 }
             }
         )
 
         // Handle .soil open-with / share-to on cold launch only; config-change recreations
         // must not re-trigger the import pipeline.
-        if (savedInstanceState == null) handleIncomingIntent(intent)
+        if (savedInstanceState == null) {
+            handleIncomingIntent(intent)
+            handleNewNotebookIntent(intent)
+        }
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
         handleIncomingIntent(intent)
+        handleNewNotebookIntent(intent)
     }
 
     override fun onResume() {
@@ -763,6 +777,7 @@ class MainActivity : AppCompatActivity() {
                 isRecentsMode -> renderRecentsList()
                 else          -> scanAndRender()
             }
+            tryStartPendingNewNotebookPicker()
         }
         // If gridSpec is still null, the layout listener will handle the render now that
         // isStateRestored is true.
@@ -2048,6 +2063,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun updatePickerTitle() {
         val (title, confirmLabel) = when (destinationPickerState) {
+            is DestinationPickerState.NewNotebook    -> "New notebook here"   to "Create here"
             is DestinationPickerState.CopyNotebook   -> "Copy notebook here"  to "Copy here"
             is DestinationPickerState.MoveNotebook   -> "Move notebook here"  to "Move here"
             is DestinationPickerState.CopyFolder     -> "Copy folder here"    to "Copy here"
@@ -2066,6 +2082,14 @@ class MainActivity : AppCompatActivity() {
         // Import picker: separate branch — no "source entity", just the in-flight import context.
         if (state is DestinationPickerState.ImportNotebook) {
             confirmImportPickerDestination(state)
+            return
+        }
+
+        // New-notebook picker: the current folder is the destination. Exit the picker (keeping the
+        // navigated-to folder as currentParent) and hand off to the normal new-notebook flow.
+        if (state is DestinationPickerState.NewNotebook) {
+            exitPickerMode()
+            showNewNotebookDialog()
             return
         }
 
@@ -2917,6 +2941,25 @@ class MainActivity : AppCompatActivity() {
      * Handle an incoming .soil URI from ACTION_VIEW or ACTION_SEND.
      * Called from onCreate (cold launch) and onNewIntent (app already open).
      */
+    /**
+     * Handle [EXTRA_START_NEW_NOTEBOOK] (from the calendar's New Notebook button): enter the
+     * folder-picker so the user chooses where the notebook lands, then the normal new-notebook
+     * flow. Consumed once — the extra is removed so config-change recreations don't re-trigger it.
+     */
+    private fun handleNewNotebookIntent(intent: Intent) {
+        if (!intent.getBooleanExtra(EXTRA_START_NEW_NOTEBOOK, false)) return
+        intent.removeExtra(EXTRA_START_NEW_NOTEBOOK)
+        pendingNewNotebookPicker = true
+        tryStartPendingNewNotebookPicker()
+    }
+
+    /** Enters the new-notebook folder picker once the grid is laid out and browse state restored. */
+    private fun tryStartPendingNewNotebookPicker() {
+        if (!pendingNewNotebookPicker || gridSpec == null || !isStateRestored) return
+        pendingNewNotebookPicker = false
+        enterPickerMode(DestinationPickerState.NewNotebook)
+    }
+
     private fun handleIncomingIntent(intent: Intent) {
         val uri: Uri = when (intent.action) {
             Intent.ACTION_VIEW -> intent.data

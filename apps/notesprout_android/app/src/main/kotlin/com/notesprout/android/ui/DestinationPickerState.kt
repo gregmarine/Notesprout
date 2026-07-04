@@ -6,6 +6,8 @@ import java.io.File
 
 sealed class DestinationPickerState {
     object None : DestinationPickerState()
+    /** User chose "New Notebook" from the calendar — pick the destination folder, then create. */
+    object NewNotebook : DestinationPickerState()
     data class CopyNotebook(val source: ObjectEntity) : DestinationPickerState()
     data class MoveNotebook(val source: ObjectEntity) : DestinationPickerState()
     data class CopyFolder(val source: ObjectEntity) : DestinationPickerState()

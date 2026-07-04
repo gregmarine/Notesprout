@@ -23,6 +23,22 @@
             android:src="@drawable/ic_arrow_left"
             android:contentDescription="Back" />
 
+        <!-- Go to the notebook / folder library (MainActivity) -->
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnCalHome"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:layout_marginStart="2dp"
+            android:src="@drawable/ic_notebook"
+            android:contentDescription="Notebook library" />
+
+        <!-- Create a new notebook (pick a folder first, then the new-notebook screen) -->
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnCalNewNotebook"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:layout_marginStart="2dp"
+            android:src="@drawable/ic_new_notebook"
+            android:contentDescription="New notebook" />
+
         <!-- Divider between back and view-toggle group -->
         <View
             android:layout_width="1dp"
