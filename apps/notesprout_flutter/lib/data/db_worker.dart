@@ -1,0 +1,141 @@
+import 'dart:async';
+import 'dart:isolate';
+
+import '../domain/stroke.dart';
+import 'index_database.dart';
+import 'notebook_repository.dart';
+import 'soil_database.dart';
+
+/// All SQLite access runs on a dedicated background isolate so the UI/EPD thread never blocks on
+/// disk I/O — mirroring the native app's `Dispatchers.IO` DB work. The UI isolate holds NO database
+/// connection; it sends commands here and awaits results (reads) or fires-and-forgets (writes).
+class DbWorker {
+  DbWorker._(this._tx);
+
+  final SendPort _tx;
+  final _pending = <int, Completer<dynamic>>{};
+  int _seq = 0;
+
+  static Future<DbWorker> start({required String indexPath, required String gardenDir}) async {
+    final rx = ReceivePort();
+    final ready = Completer<SendPort>();
+    final replies = StreamController<_Res>.broadcast();
+
+    rx.listen((msg) {
+      if (msg is SendPort) {
+        ready.complete(msg);
+      } else if (msg is _Res) {
+        replies.add(msg);
+      }
+    });
+
+    await Isolate.spawn(_entry, _Init(rx.sendPort, indexPath, gardenDir));
+    final worker = DbWorker._(await ready.future);
+    replies.stream.listen((res) {
+      final c = worker._pending.remove(res.id);
+      if (c == null) return;
+      res.error != null ? c.completeError(res.error!) : c.complete(res.result);
+    });
+    return worker;
+  }
+
+  Future<T> _call<T>(String op, [Map<String, dynamic> args = const {}]) {
+    final id = _seq++;
+    final c = Completer<T>();
+    _pending[id] = c;
+    _tx.send(_Req(id, op, args));
+    return c.future;
+  }
+
+  /// Fire-and-forget (writes) — the isolate processes messages FIFO, so a later read/close always
+  /// observes earlier writes.
+  void _fire(String op, [Map<String, dynamic> args = const {}]) => _tx.send(_Req(-1, op, args));
+
+  Future<List<NotebookEntry>> listNotebooks() => _call('listNotebooks');
+  Future<NotebookEntry> createNotebook(String name, double w, double h) =>
+      _call('createNotebook', {'name': name, 'w': w, 'h': h});
+  Future<List<PageRef>> openNotebook(String id) => _call('openNotebook', {'id': id});
+  Future<PageRef> addPage(String id, double w, double h) =>
+      _call('addPage', {'id': id, 'w': w, 'h': h});
+  Future<List<StrokeRow>> strokes(String id, String layerId) =>
+      _call('strokes', {'id': id, 'layer': layerId});
+
+  void insertStroke(String id, String layerId, String strokeId, StrokeData data) =>
+      _fire('insertStroke',
+          {'id': id, 'layer': layerId, 'strokeId': strokeId, 'json': data.toJson()});
+  void softDelete(String id, List<String> strokeIds) =>
+      _fire('softDelete', {'id': id, 'ids': strokeIds});
+  void closeNotebook(String id, int pageCount) =>
+      _fire('closeNotebook', {'id': id, 'count': pageCount});
+}
+
+// ── Isolate protocol ─────────────────────────────────────────────────────────
+
+class _Init {
+  _Init(this.tx, this.indexPath, this.gardenDir);
+  final SendPort tx;
+  final String indexPath;
+  final String gardenDir;
+}
+
+class _Req {
+  _Req(this.id, this.op, this.args);
+  final int id; // -1 = fire-and-forget
+  final String op;
+  final Map<String, dynamic> args;
+}
+
+class _Res {
+  _Res(this.id, this.result, this.error);
+  final int id;
+  final dynamic result;
+  final String? error;
+}
+
+void _entry(_Init init) {
+  // sqlite3's default Android open() does DynamicLibrary.open('libsqlite3.so'), which resolves the
+  // lib bundled by sqlite3_flutter_libs from any isolate — no per-isolate override needed here.
+  final rx = ReceivePort();
+  init.tx.send(rx.sendPort);
+
+  final index = IndexDatabase.open(init.indexPath);
+  final repo = NotebookRepository(index: index, gardenDir: init.gardenDir);
+  final open_ = <String, SoilDatabase>{};
+  SoilDatabase soil(String id) => open_.putIfAbsent(id, () => repo.openNotebook(id));
+
+  rx.listen((msg) {
+    final req = msg as _Req;
+    try {
+      dynamic r;
+      switch (req.op) {
+        case 'listNotebooks':
+          r = repo.listNotebooks();
+        case 'createNotebook':
+          r = repo.createBlankNotebook(req.args['name'] as String,
+              pageWidth: req.args['w'] as double, pageHeight: req.args['h'] as double);
+        case 'openNotebook':
+          r = soil(req.args['id'] as String).pages();
+        case 'addPage':
+          r = soil(req.args['id'] as String)
+              .addPage(width: req.args['w'] as double, height: req.args['h'] as double);
+        case 'strokes':
+          r = soil(req.args['id'] as String).strokesForLayer(req.args['layer'] as String);
+        case 'insertStroke':
+          soil(req.args['id'] as String).insertStroke(
+              req.args['layer'] as String, StrokeData.fromJson(req.args['json'] as String),
+              id: req.args['strokeId'] as String);
+        case 'softDelete':
+          soil(req.args['id'] as String)
+              .softDeleteStrokes((req.args['ids'] as List).cast<String>());
+        case 'closeNotebook':
+          open_.remove(req.args['id'] as String)?.close();
+          index.touchNotebook(req.args['id'] as String, pageCount: req.args['count'] as int);
+      }
+      if (req.id >= 0) init.tx.send(_Res(req.id, r, null));
+    } catch (e, st) {
+      // ignore: avoid_print
+      print('DbWorker op=${req.op} failed: $e\n$st');
+      if (req.id >= 0) init.tx.send(_Res(req.id, null, '$e'));
+    }
+  });
+}
