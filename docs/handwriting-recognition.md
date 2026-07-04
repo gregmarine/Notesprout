@@ -37,9 +37,24 @@ real-time background recognition (RTR) mode, and an export-time recognition path
 >   `.md` name made the picker append `.txt` → `notebook.md.txt`).
 > - Viewer reads via `freshOrRecognizeReadOnly` (no writes) so it can open its own connection while
 >   the notebook is still open.
-> - **Export surfaces:** whole-notebook (MainActivity library + NotebookActivity Export sheet) **and
->   selected-page / single-page** from `PageIndexActivity` (Text option in the single- and
->   multi-select export menus, reusing `exportFromPath` with the selected page ids).
+> - **Export surfaces:** whole-notebook (MainActivity library + NotebookActivity Export sheet),
+>   **selected-page / single-page** from `PageIndexActivity` (Text option in the single- and
+>   multi-select export menus, reusing `exportFromPath` with the selected page ids), **and the
+>   read-only viewer itself** (`PageTextViewerActivity` header **Export** button). The viewer export
+>   is instant — it writes the **already-recognized in-memory Markdown** for whatever view is showing
+>   (This Page vs Whole Notebook), no re-recognition; then Markdown/Plain format choice (Plain via
+>   `MarkdownText.toPlainText`) → encrypted-source warning → Save (SAF, mime-per-extension) / Share.
+> - **Viewer rendering:** `MarkdownRenderer.render` takes an opt-in `blockGapPx` (a sized blank line
+>   inserted between blocks). On-page text objects (`TextObjectRenderer`) pass the default `0` and
+>   stay compact; the viewer passes a positive gap plus a larger body size (18sp) and 1.15× line
+>   spacing so paragraphs/headings read like a document.
+> - **Plain-text (`.txt`) is a faithful *structural* flatten, not a line-for-line copy** of the
+>   Markdown. Because `MarkdownText.toPlainText` parses to blocks first, a run of lines separated by
+>   **single** newlines is one paragraph → joined with spaces; only **blank-line**-separated lines
+>   stay on separate lines (same rule as CommonMark, and as the viewer preview). Markdown export keeps
+>   the raw breaks. `MarkdownTextReproTest` pins both this and full multi-block survival (a heading +
+>   paragraphs + a Markdown text object with list/blockquote must never collapse to the first line).
+>   (Note: BOOX **NeoReader** may *paginate* a long `.txt` — that is the reader, not a truncated file.)
 >
 > **Not yet built (deferred):** "copy page as text" to clipboard; multi-column, editable text,
 > search index, Onyx HWR. Remaining unbuilt design below is future work.

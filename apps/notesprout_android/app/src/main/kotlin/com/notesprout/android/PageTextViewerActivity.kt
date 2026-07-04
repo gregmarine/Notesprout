@@ -1,6 +1,9 @@
 package com.notesprout.android
 
+import android.content.ClipData
+import android.content.Intent
 import android.graphics.Color
+import android.net.Uri
 import android.os.Bundle
 import android.text.TextPaint
 import android.util.TypedValue
@@ -9,10 +12,14 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.LinearLayout
 import android.widget.ScrollView
+import android.widget.Toast
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.AppCompatButton
 import androidx.appcompat.widget.AppCompatTextView
 import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
 import androidx.lifecycle.lifecycleScope
 import com.notesprout.android.crypto.KeyResolver
 import com.notesprout.android.crypto.KeySession
@@ -24,11 +31,13 @@ import com.notesprout.android.data.index.IndexRepository
 import com.notesprout.android.data.index.NotesproutIndex
 import com.notesprout.android.data.soilFile
 import com.notesprout.android.recognition.HandwritingRecognizerProvider
+import com.notesprout.android.recognition.MarkdownText
 import com.notesprout.android.recognition.PageTextRecognizer
 import com.notesprout.android.recognition.PageTextRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.File
 
 /**
  * Read-only recognized-text viewer for a notebook. Modeled on the DayDetail "day window": a
@@ -57,11 +66,24 @@ class PageTextViewerActivity : AppCompatActivity() {
     private var showingWhole = false
     private var loaded = false
 
+    private var notebookName: String = "Notebook"
+    private var encrypted = false
+
+    // File staged for a SAF save; the mime launcher matches the extension so the picker
+    // doesn't append a second one (see PageIndexActivity).
+    private var pendingExportFile: File? = null
+    private val saveTextLauncher = registerForActivityResult(
+        ActivityResultContracts.CreateDocument("text/plain")
+    ) { uri -> writePendingExportTo(uri) }
+    private val saveMarkdownLauncher = registerForActivityResult(
+        ActivityResultContracts.CreateDocument("text/markdown")
+    ) { uri -> writePendingExportTo(uri) }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
         val notebookId = intent.getStringExtra(EXTRA_NOTEBOOK_ID).orEmpty()
-        val notebookName = intent.getStringExtra(EXTRA_NOTEBOOK_NAME).orEmpty().ifBlank { "Notebook" }
+        notebookName = intent.getStringExtra(EXTRA_NOTEBOOK_NAME).orEmpty().ifBlank { "Notebook" }
         val currentPageId = intent.getStringExtra(EXTRA_CURRENT_PAGE_ID).orEmpty()
 
         setContentView(buildUi(notebookName))
@@ -103,6 +125,15 @@ class PageTextViewerActivity : AppCompatActivity() {
             textSize = 18f
             layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
         }
+        val export = AppCompatButton(this).apply {
+            text = "Export"
+            setTextColor(ink)
+            setBackgroundResource(R.drawable.shape_bordered)
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply { marginEnd = dp(8) }
+            setOnClickListener { onExportClicked() }
+        }
         val done = AppCompatButton(this).apply {
             text = "Done"
             setTextColor(ink)
@@ -110,6 +141,7 @@ class PageTextViewerActivity : AppCompatActivity() {
             setOnClickListener { finish() }
         }
         header.addView(title)
+        header.addView(export)
         header.addView(done)
         root.addView(header)
 
@@ -149,12 +181,14 @@ class PageTextViewerActivity : AppCompatActivity() {
         }
         root.addView(statusText)
 
-        // Scrollable body
+        // Scrollable body. A slightly larger body size + line spacing reads like a document
+        // rather than a cramped label; block spacing between paragraphs is added by the renderer.
         contentText = AppCompatTextView(this).apply {
             setTextColor(ink)
-            textSize = 16f
+            textSize = 18f
+            setLineSpacing(0f, 1.15f)
             setTextIsSelectable(true)
-            setPadding(dp(16), dp(8), dp(16), dp(24))
+            setPadding(dp(20), dp(12), dp(20), dp(32))
         }
         val scroll = ScrollView(this).apply {
             isFillViewport = true
@@ -182,9 +216,11 @@ class PageTextViewerActivity : AppCompatActivity() {
             return
         }
         val paint = TextPaint().apply { color = Color.BLACK; textSize = contentText.textSize }
-        val widthPx = (resources.displayMetrics.widthPixels - dp(32)).coerceAtLeast(dp(200))
+        val widthPx = (resources.displayMetrics.widthPixels - dp(40)).coerceAtLeast(dp(200))
         val blocks = MarkdownParser.parse(md)
-        contentText.text = MarkdownRenderer.render(blocks, widthPx, paint, resources.displayMetrics.density)
+        contentText.text = MarkdownRenderer.render(
+            blocks, widthPx, paint, resources.displayMetrics.density, blockGapPx = dp(10),
+        )
     }
 
     // ── Load ─────────────────────────────────────────────────────────────────────
@@ -193,6 +229,7 @@ class PageTextViewerActivity : AppCompatActivity() {
         lifecycleScope.launch {
             val hwr = HandwritingRecognizerProvider.instance?.takeIf { it.isReady() }
             val info = withContext(Dispatchers.IO) { indexRepo.getEncryptionInfo(notebookId) }
+            encrypted = info.encrypted
             val key = KeyResolver.resolveForOpen(this@PageTextViewerActivity, notebookId, info)
             if (info.encrypted && key == null) {
                 statusText.text = "Notebook is locked."
@@ -236,6 +273,108 @@ class PageTextViewerActivity : AppCompatActivity() {
                 else -> "Read-only. Recognized from your handwriting."
             }
             render()
+        }
+    }
+
+    // ── Export ─────────────────────────────────────────────────────────────────────
+    // Exports exactly what the user is looking at (This Page vs Whole Notebook) from the
+    // already-recognized in-memory text — no re-recognition, so it's instant.
+
+    private fun onExportClicked() {
+        if (!loaded) {
+            Toast.makeText(this, "Still recognizing…", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val md = (if (showingWhole) wholeNotebookMarkdown else thisPageMarkdown).trim()
+        if (md.isBlank()) {
+            Toast.makeText(this, "Nothing to export yet.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        if (encrypted) confirmEncryptedThen { chooseFormatThen(md) } else chooseFormatThen(md)
+    }
+
+    private fun confirmEncryptedThen(proceed: () -> Unit) {
+        val dlg = AlertDialog.Builder(this)
+            .setTitle("Export encrypted notebook")
+            .setMessage("This notebook is encrypted. The exported file will be unencrypted — anyone with access to the exported file will be able to read its contents.")
+            .setPositiveButton("Export anyway") { _, _ -> proceed() }
+            .setNegativeButton("Cancel", null)
+            .create()
+        dlg.show()
+        dlg.window?.setElevation(0f)
+        dlg.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+    }
+
+    private fun chooseFormatThen(md: String) {
+        val scope = if (showingWhole) "notebook" else "page"
+        val dlg = AlertDialog.Builder(this)
+            .setTitle("Export this $scope as")
+            .setItems(arrayOf("Markdown (.md)", "Text only (.txt)")) { _, which ->
+                if (which == 0) buildAndOffer(md, NotebookTextExporter.Format.MARKDOWN)
+                else buildAndOffer(MarkdownText.toPlainText(md), NotebookTextExporter.Format.PLAIN)
+            }
+            .create()
+        dlg.show()
+        dlg.window?.setElevation(0f)
+        dlg.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+    }
+
+    /** Write [body] to a cache file named after the notebook, then offer Save/Share. */
+    private fun buildAndOffer(body: String, format: NotebookTextExporter.Format) {
+        val safeTitle = notebookName.replace(Regex("[^a-zA-Z0-9_\\-. ]"), "_").trim('_', ' ')
+            .ifBlank { "notebook" }
+        val scopeSuffix = if (showingWhole) "" else " - page"
+        val file = try {
+            val outDir = File(cacheDir, "exported_text").also { it.deleteRecursively(); it.mkdirs() }
+            File(outDir, "$safeTitle$scopeSuffix.${format.extension}").apply {
+                writeText(body.trim() + "\n")
+            }
+        } catch (e: Exception) {
+            Toast.makeText(this, "Export failed: ${e.message}", Toast.LENGTH_LONG).show()
+            return
+        }
+        showTextExportChoice(file)
+    }
+
+    private fun showTextExportChoice(file: File) {
+        val dlg = AlertDialog.Builder(this)
+            .setTitle("Export Text")
+            .setPositiveButton("Save to device") { _, _ ->
+                pendingExportFile = file
+                if (file.extension.equals("md", ignoreCase = true)) saveMarkdownLauncher.launch(file.name)
+                else saveTextLauncher.launch(file.name)
+            }
+            .setNegativeButton("Share") { _, _ ->
+                val uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", file)
+                val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                    type = if (file.extension == "md") "text/markdown" else "text/plain"
+                    putExtra(Intent.EXTRA_STREAM, uri)
+                    clipData = ClipData.newRawUri("", uri)
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+                startActivity(Intent.createChooser(shareIntent, "Share Text"))
+            }
+            .create()
+        dlg.show()
+        dlg.window?.setElevation(0f)
+        dlg.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+    }
+
+    private fun writePendingExportTo(uri: Uri?) {
+        val file = pendingExportFile ?: return
+        if (uri == null) return
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                contentResolver.openOutputStream(uri)?.use { out ->
+                    file.inputStream().use { it.copyTo(out) }
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(
+                        this@PageTextViewerActivity, "Save failed: ${e.message}", Toast.LENGTH_LONG
+                    ).show()
+                }
+            }
         }
     }
 }

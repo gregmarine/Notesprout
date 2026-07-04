@@ -6,6 +6,7 @@ import android.graphics.Paint
 import android.text.SpannableStringBuilder
 import android.text.Spanned
 import android.text.TextPaint
+import android.text.style.AbsoluteSizeSpan
 import android.text.style.LeadingMarginSpan
 import android.text.style.QuoteSpan
 import android.text.style.RelativeSizeSpan
@@ -28,6 +29,9 @@ import android.text.style.ReplacementSpan
  * @param availableWidthPx content width in pixels — used to size [HorizontalRuleSpan].
  * @param density screen density from [android.util.DisplayMetrics.density] — used for
  *   dp-to-pixel conversions in list indents, blockquote stripes, and HR height.
+ * @param blockGapPx vertical gap in pixels inserted **between** blocks (a sized blank line).
+ *   Defaults to `0` for compact on-page text objects; the read-only text viewer passes a
+ *   positive value so paragraphs/headings breathe like a document.
  */
 object MarkdownRenderer {
 
@@ -36,11 +40,13 @@ object MarkdownRenderer {
         availableWidthPx: Int,
         paint: TextPaint,
         density: Float,
+        blockGapPx: Int = 0,
     ): SpannableStringBuilder {
         val sb = SpannableStringBuilder()
         val indentStepPx = (16f * density).toInt()
 
-        for (block in blocks) {
+        for ((index, block) in blocks.withIndex()) {
+            if (blockGapPx > 0 && index > 0) appendBlockGap(sb, blockGapPx)
             val blockStart = sb.length
             when (block) {
                 is Block.Heading -> renderHeading(sb, block, blockStart)
@@ -52,6 +58,16 @@ object MarkdownRenderer {
         }
 
         return sb
+    }
+
+    /**
+     * Appends a blank line whose height is [gapPx], creating visual separation between blocks.
+     * The `\n` sits on its own line; sizing that single character sizes the line it occupies.
+     */
+    private fun appendBlockGap(sb: SpannableStringBuilder, gapPx: Int) {
+        val start = sb.length
+        sb.append('\n')
+        sb.setSpan(AbsoluteSizeSpan(gapPx, false), start, sb.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
     }
 
     // ── Block renderers ───────────────────────────────────────────────────────
