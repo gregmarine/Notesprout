@@ -24,6 +24,7 @@ import '../domain/stroke.dart';
 import '../platform/pen_bridge.dart';
 import 'flutter_ink_surface.dart';
 import 'line_dialog.dart';
+import 'nb_icons.dart';
 import 'overflow_toolbar.dart';
 import 'page_painter.dart';
 import 'text_dialog.dart';
@@ -115,6 +116,8 @@ class _NotebookScreenState extends State<NotebookScreen> {
   Duration? _tap1Time, _tap2Time, _tap3Time;
   Offset _tap1Pos = Offset.zero, _tap2Pos = Offset.zero, _tap3Pos = Offset.zero;
   bool _toolbarHidden = false; // 1-finger double-tap hides the floating toolbar; pen reclaims strip
+  double _toolbarLogicalH = _kToolbarH; // live toolbar height (grows when the overflow row is open)
+  bool _overflowOpen = false; // secondary overflow row visible; dismissed on any page interaction
 
   static const double _kTapSlopPx = 18; // logical px; movement past this → not a tap
   static const double _kDoubleTapSlopPx = 48; // second tap must land within this of the first
@@ -196,6 +199,8 @@ class _NotebookScreenState extends State<NotebookScreen> {
 
   void _onPen(PenEvent e) {
     if (!_ready) return;
+    // Any stylus stroke on the page dismisses an open overflow row (it draws below the toolbar).
+    _dismissOverflow();
     // While a selection is active the pen is suspended (Flutter drives drag/dismiss), so nothing
     // should arrive here. Guard defensively.
     if (_selectionActive) return;
@@ -929,22 +934,12 @@ class _NotebookScreenState extends State<NotebookScreen> {
     _pageBusy = false;
   }
 
-  Future<void> _addPage() async {
-    final size = MediaQuery.of(context).size;
-    final p = await widget.worker.addPage(widget.notebookId, size.width * _dpr, size.height * _dpr);
-    _pages.add(p);
-    _pageIndex = _pages.length - 1;
-    _undo.clear();
-    _histVersion.value++;
-    _selection.clear();
-    _selBounds = null;
-    await _loadPage();
-    _repaintPanelNextFrame();
-  }
-
   // ── Finger swipes: 1-finger flip / 2-finger insert (touch only; stylus draws via Onyx) ──────
   void _onSwipeDown(PointerDownEvent e) {
     if (e.kind != PointerDeviceKind.touch) return;
+    // A finger touch on the page (below the toolbar) dismisses an open overflow row. Touches within
+    // the toolbar band fall through to its buttons and must NOT dismiss.
+    if (_overflowOpen && e.localPosition.dy >= _toolbarLogicalH) _dismissOverflow();
     _activeTouches++;
     if (_activeTouches > _peakTouches) _peakTouches = _activeTouches;
     if (_swipeFinger == null) {
@@ -1057,8 +1052,20 @@ class _NotebookScreenState extends State<NotebookScreen> {
   /// strip (setToolbarInset 0); when shown it is excluded again so stylus taps hit the buttons.
   void _toggleToolbar() {
     setState(() => _toolbarHidden = !_toolbarHidden);
-    _bridge.setToolbarInset(_toolbarHidden ? 0 : _kToolbarH * _dpr);
+    _applyToolbarInset();
   }
+
+  /// Reported by [StackedToolbar] whenever its total height changes (overflow row open/closed).
+  /// The pen must exclude the whole stacked toolbar, so re-push the inset.
+  void _onToolbarHeight(double h) {
+    if (h == _toolbarLogicalH) return;
+    _toolbarLogicalH = h;
+    _applyToolbarInset();
+  }
+
+  /// Exclude the current toolbar height from the pen region (0 when the bar is hidden).
+  void _applyToolbarInset() =>
+      _bridge.setToolbarInset(_toolbarHidden ? 0 : _toolbarLogicalH * _dpr);
 
   Future<void> _insertPageBySwipe({required bool after}) async {
     if (_pageBusy || !_ready) return;
@@ -1157,54 +1164,83 @@ class _NotebookScreenState extends State<NotebookScreen> {
       );
   }
 
+  void _comingSoon(String label) => _snack('$label — coming soon');
+
+  /// The full native toolbar (`ToolbarButtonRegistry` order), grouped with auto-dividers, as icon
+  /// buttons. Close and the Customize gear are pinned (always visible); everything else lives in the
+  /// overflow row. Features not yet ported toast "coming soon". Rebuilds on history changes so
+  /// Undo/Redo enablement stays live (stroke commits deliberately skip setState).
   Widget _toolbar() {
-    final tools = <TbButton>[
-      TbButton('Pen', selected: _mode == _Mode.pen, onTap: () => _setMode(_Mode.pen)),
-      TbButton('Eraser', selected: _mode == _Mode.eraser, onTap: () => _setMode(_Mode.eraser)),
-      TbButton('Clear', onTap: _clear),
-      TbButton('Text', selected: _mode == _Mode.text, onTap: () => _setMode(_Mode.text)),
-      TbButton('Lasso', selected: _mode == _Mode.lasso, onTap: () => _setMode(_Mode.lasso)),
-      TbButton('Lines', onTap: _insertLines),
-      if (_clipboard.isNotEmpty) TbButton('Paste', onTap: _pasteClipboard),
+    final m = _mode;
+    final middle = <TbButton>[
+      // FILE (Close is pinned at the lead)
+      TbButton('Recents', icon: NbIcons.recents, onTap: () => _comingSoon('Recents')),
+      const TbButton.divider(),
+      // NOTEBOOK
+      TbButton('Table of Contents', icon: NbIcons.toc, onTap: () => _comingSoon('Table of Contents')),
+      TbButton('Set Cover', icon: NbIcons.cover, onTap: () => _comingSoon('Set Cover')),
+      TbButton('Export', icon: NbIcons.export, onTap: () => _comingSoon('Export')),
+      TbButton('Pin', icon: NbIcons.pin, onTap: () => _comingSoon('Pin')),
+      TbButton('Encrypt', icon: NbIcons.lock, onTap: () => _comingSoon('Encrypt')),
+      TbButton('Scratch Pad', icon: NbIcons.scratchpad, onTap: () => _comingSoon('Scratch Pad')),
+      TbButton('Calendar', icon: NbIcons.calendar, onTap: () => _comingSoon('Calendar')),
+      const TbButton.divider(),
+      // TOOLS
+      TbButton('Pen', icon: NbIcons.pen, selected: m == _Mode.pen, onTap: () => _setMode(_Mode.pen)),
+      TbButton('Eraser', icon: NbIcons.eraser, selected: m == _Mode.eraser, onTap: () => _setMode(_Mode.eraser)),
+      TbButton('Lasso Eraser', icon: NbIcons.lassoEraser, onTap: () => _comingSoon('Lasso Eraser')),
+      TbButton('Erase All', icon: NbIcons.eraseAll, onTap: _clear),
+      TbButton('Insert Text', icon: NbIcons.insertText, selected: m == _Mode.text, onTap: () => _setMode(_Mode.text)),
+      TbButton('Insert Lines', icon: NbIcons.insertLines, onTap: _insertLines),
+      TbButton('Lasso', icon: NbIcons.lasso, selected: m == _Mode.lasso, onTap: () => _setMode(_Mode.lasso)),
+      TbButton('Insert Sticky Note', icon: NbIcons.stickyNote, onTap: () => _comingSoon('Sticky Note')),
+      TbButton('Insert Shape', icon: NbIcons.insertShape, onTap: () => _comingSoon('Insert Shape')),
+      const TbButton.divider(),
+      // HISTORY
+      TbButton('Undo', icon: NbIcons.undo, enabled: _undo.canUndo, onTap: _doUndo),
+      TbButton('Redo', icon: NbIcons.redo, enabled: _undo.canRedo, onTap: _doRedo),
+      const TbButton.divider(),
+      // PAGE VIEW
+      TbButton('Template', icon: NbIcons.template, onTap: () => _comingSoon('Template')),
+      TbButton('Page Index', icon: NbIcons.pageIndex, onTap: () => _comingSoon('Page Index')),
+      const TbButton.divider(),
+      // PAGE EDIT
+      TbButton('Insert Page Before', icon: NbIcons.insertPageBefore, onTap: () => _insertPageBySwipe(after: false)),
+      TbButton('Insert Page After', icon: NbIcons.insertPageAfter, onTap: () => _insertPageBySwipe(after: true)),
+      TbButton('Delete Page', icon: NbIcons.deletePage, onTap: () => _comingSoon('Delete Page')),
+      TbButton('Copy Page', icon: NbIcons.copyPage, onTap: () => _comingSoon('Copy Page')),
+      TbButton('Paste Page', icon: NbIcons.pastePage, onTap: () => _comingSoon('Paste Page')),
+      // Object clipboard (populated by a selection Copy) — only shown when there's something to paste.
+      if (_clipboard.isNotEmpty) ...[
+        const TbButton.divider(),
+        TbButton('Paste Selection', icon: NbIcons.pastePage, onTap: _pasteClipboard),
+      ],
     ];
-    return Container(
-      height: _kToolbarH,
-      decoration: const BoxDecoration(
-        color: Colors.white,
-        border: Border(bottom: BorderSide(color: Colors.black, width: 1)),
-      ),
-      padding: const EdgeInsets.symmetric(horizontal: 8),
-      child: Row(
-        children: [
-          _btn('‹ Back', false, () => Navigator.of(context).pop()),
-          const SizedBox(width: 12),
-          ValueListenableBuilder<int>(
-            valueListenable: _histVersion,
-            builder: (context, version, child) => Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                _actionBtn('↶', _undo.canUndo, _doUndo),
-                const SizedBox(width: 8),
-                _actionBtn('↷', _undo.canRedo, _doRedo),
-              ],
-            ),
-          ),
-          const SizedBox(width: 12),
-          // Tool cluster: fills the middle, collapsing extras into a ⋯ overflow rather than scrolling.
-          Expanded(child: OverflowToolbar(tools, height: 56)),
-          const SizedBox(width: 8),
-          _btn('‹', false, () => _switchPage(-1)),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 10),
-            child: Text(_ready ? '${_pageIndex + 1} / ${_pages.length}' : '…',
-                style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
-          ),
-          _btn('›', false, () => _switchPage(1)),
-          const SizedBox(width: 8),
-          _btn('+ Page', false, _addPage),
+    return ValueListenableBuilder<int>(
+      valueListenable: _histVersion,
+      builder: (context, _, _) => StackedToolbar(
+        leading: [
+          TbButton('Close', icon: NbIcons.close, onTap: () => Navigator.of(context).pop()),
         ],
+        items: middle,
+        trailing: [
+          TbButton('Customize Toolbar',
+              icon: NbIcons.settings, onTap: () => _comingSoon('Customize Toolbar')),
+        ],
+        trailingLabel: _ready ? '${_pageIndex + 1}/${_pages.length}' : '…',
+        expanded: _overflowOpen,
+        onExpandedChanged: (v) => setState(() => _overflowOpen = v),
+        rowHeight: _kToolbarH,
+        spacing: 3,
+        onHeight: _onToolbarHeight,
       ),
     );
+  }
+
+  /// Collapse the secondary overflow row (called on any page interaction — finger tap below the
+  /// toolbar, or a committed stylus stroke).
+  void _dismissOverflow() {
+    if (_overflowOpen) setState(() => _overflowOpen = false);
   }
 
   Widget _btn(String label, bool selected, VoidCallback onTap) {
@@ -1234,7 +1270,7 @@ class _NotebookScreenState extends State<NotebookScreen> {
         (_selBounds!.x / _dpr).clamp(4.0, math.max(4.0, constraints.maxWidth - 120)).toDouble();
     final maxBarW = math.max(120.0, constraints.maxWidth - leftL - 4);
     // Keep clear of the floating main toolbar strip at the top (unless it's hidden).
-    final minTop = _toolbarHidden ? 4.0 : _kToolbarH + 4;
+    final minTop = _toolbarHidden ? 4.0 : _toolbarLogicalH + 4;
     final aboveTop = _selBounds!.y / _dpr - barH - 6;
     final belowTop = (_selBounds!.y + _selBounds!.height) / _dpr + 6;
     final double top = (aboveTop >= minTop ? aboveTop : belowTop)
@@ -1284,27 +1320,6 @@ class _NotebookScreenState extends State<NotebookScreen> {
     AppSettings.instance.setSnapEnabled(_snapEnabled);
   }
 
-  /// A momentary action button that dims its label to inkLight when [enabled] is false (a disabled
-  /// *fill* would be invisible on e-ink; a lighter label reads clearly). Taps are ignored when off.
-  Widget _actionBtn(String label, bool enabled, VoidCallback onTap) {
-    return GestureDetector(
-      onTap: enabled ? onTap : null,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          border: Border.all(color: enabled ? Colors.black : const Color(0xFF888888), width: 1),
-          borderRadius: BorderRadius.circular(4),
-        ),
-        child: Text(label,
-            style: TextStyle(
-                color: enabled ? Colors.black : const Color(0xFF888888),
-                fontSize: 15,
-                fontWeight: FontWeight.w600)),
-      ),
-    );
-  }
-
   Widget _surface() {
     // Off-BOOX: pure-Flutter ink. A finished stroke routes through the same _onPen path, tagged by
     // the current tool (eraser → 'erase'); lasso/smart-lasso are handled inside _onPen regardless.
@@ -1333,8 +1348,8 @@ class _NotebookScreenState extends State<NotebookScreen> {
         )
           ..addOnPlatformViewCreatedListener((id) {
             params.onPlatformViewCreated(id);
-            // Surface + channel now exist → exclude the floating-toolbar strip from the pen region.
-            _bridge.setToolbarInset(_kToolbarH * _dpr);
+            // Surface + channel now exist → exclude the current toolbar height from the pen region.
+            _applyToolbarInset();
           })
           ..create();
         return controller;
