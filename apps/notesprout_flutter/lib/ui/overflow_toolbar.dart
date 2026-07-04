@@ -135,6 +135,10 @@ class StackedToolbar extends StatefulWidget {
     this.trailingLabel,
     this.expanded = false,
     this.onExpandedChanged,
+    this.axis = Axis.horizontal,
+    this.mainBorder = const Border(bottom: BorderSide(color: Colors.black, width: 1)),
+    this.secondaryBefore = false,
+    this.spread = true,
     this.rowHeight = 56,
     this.spacing = 3,
     this.padding = 6,
@@ -146,14 +150,31 @@ class StackedToolbar extends StatefulWidget {
   final List<TbButton> trailing;
   final String? trailingLabel;
 
-  /// Whether the secondary overflow row is open. Controlled by the host so it can also be dismissed
+  /// Whether the secondary overflow line is open. Controlled by the host so it can also be dismissed
   /// externally (e.g. on a page tap / stroke).
   final bool expanded;
   final ValueChanged<bool>? onExpandedChanged;
 
-  final double rowHeight;
+  /// Main axis of the bar: horizontal (TOP/BOTTOM) or vertical (LEFT/RIGHT).
+  final Axis axis;
+
+  /// Border on the main line's inner edge (bottom for TOP, top for BOTTOM, right for LEFT, …).
+  final Border mainBorder;
+
+  /// Whether the secondary overflow line sits BEFORE the main line in layout order (true for BOTTOM
+  /// and RIGHT, where the inner/page side is toward the start).
+  final bool secondaryBefore;
+
+  /// Anchored bars (true) fill their track and push the trailing cluster to the far edge; a floating
+  /// bar (false) hugs its content — no trailing spacer.
+  final bool spread;
+
+  final double rowHeight; // cross-axis thickness of the main line
   final double spacing;
   final double padding;
+
+  /// Reports the bar's total cross-axis extent (thickness + open secondary line) so the host can
+  /// exclude the whole stack from the pen region.
   final ValueChanged<double>? onHeight;
 
   @override
@@ -166,6 +187,11 @@ const _kLabelStyleSmall = TextStyle(fontSize: 14, fontWeight: FontWeight.w600);
 class _StackedToolbarState extends State<StackedToolbar> {
   double? _lastReported;
 
+  bool get _vert => widget.axis == Axis.vertical;
+
+  /// A gap along the bar's main axis.
+  Widget _gap(double s) => SizedBox(width: _vert ? 0 : s, height: _vert ? s : 0);
+
   double _sumRow(List<TbButton> row) {
     if (row.isEmpty) return 0;
     var w = 0.0;
@@ -176,39 +202,42 @@ class _StackedToolbarState extends State<StackedToolbar> {
     return w;
   }
 
-  double _labelWidth(String? s) {
+  double _labelExtent(String? s) {
     if (s == null) return 0;
     final tp = TextPainter(
       text: TextSpan(text: s, style: _kLabelStyleSmall),
       textDirection: TextDirection.ltr,
     )..layout();
-    return tp.width;
+    return _vert ? tp.height : tp.width;
   }
 
-  double _secondaryHeight(double maxW, int hiddenCount) {
-    final availWrap = maxW - widget.padding * 2;
-    final per = math.max(1, ((availWrap + widget.spacing) / (_kIconBtnW + widget.spacing)).floor());
-    final rows = (hiddenCount / per).ceil();
-    return rows * _kIconBtnH + (rows - 1) * 6 + 12; // runSpacing 6 + 6px vertical padding each side
+  /// Cross-axis extent (thickness) added by the open secondary line, given the main-axis space
+  /// available to the wrap.
+  double _secondaryExtent(double mainAvail, int hiddenCount) {
+    final avail = mainAvail - widget.padding * 2;
+    final per = math.max(1, ((avail + widget.spacing) / (_kIconBtnW + widget.spacing)).floor());
+    final lines = (hiddenCount / per).ceil();
+    return lines * _kIconBtnH + (lines - 1) * 6 + 12; // runSpacing 6 + 6px padding each side
   }
 
   @override
   Widget build(BuildContext context) {
     return LayoutBuilder(builder: (context, c) {
-      final maxW = c.maxWidth;
       final sp = widget.spacing;
+      final mainMax = _vert ? c.maxHeight : c.maxWidth; // the bounded dimension for our axis
 
       final leadW = _sumRow(widget.leading);
       final trailW = _sumRow(widget.trailing);
-      final labelW = _labelWidth(widget.trailingLabel);
+      final labelExt = _labelExtent(widget.trailingLabel);
       final labelGap = widget.trailingLabel != null ? 6.0 : 0.0;
       final leadDiv = widget.leading.isNotEmpty ? _kDividerBlockW : 0.0;
       final trailDiv = widget.trailing.isNotEmpty ? _kDividerBlockW : 0.0;
 
-      final fixed = widget.padding * 2 +
-          leadW + (leadW > 0 ? sp : 0) + leadDiv +
-          trailDiv + (trailW > 0 ? sp : 0) + trailW + labelGap + labelW;
-      final availMiddle = math.max(0.0, maxW - fixed);
+      // No inter-item spacing is rendered around the pinned dividers (they carry their own margins),
+      // so `fixed` must not add it — over-reserving would push a button into overflow early.
+      final fixed =
+          widget.padding * 2 + leadW + leadDiv + trailDiv + trailW + labelGap + labelExt;
+      final availMiddle = math.max(0.0, mainMax - fixed);
 
       final middle = widget.items;
       final widths = [for (final it in middle) _itemWidth(it)];
@@ -248,17 +277,17 @@ class _StackedToolbarState extends State<StackedToolbar> {
       final hidden = [for (final it in middle.sublist(k)) if (!it.isDivider) it];
       final showSecondary = widget.expanded && overflow && hidden.isNotEmpty;
 
-      // ── Main row ──
-      final row = <Widget>[];
+      // ── Main line (Flex along the axis) ──
+      final line = <Widget>[];
       var prevButton = false;
       void pushButton(Widget w) {
-        if (prevButton) row.add(SizedBox(width: sp));
-        row.add(w);
+        if (prevButton) line.add(_gap(sp));
+        line.add(w);
         prevButton = true;
       }
 
       void pushDivider() {
-        row.add(_dividerWidget());
+        line.add(_dividerWidget(axis: widget.axis));
         prevButton = false;
       }
 
@@ -276,54 +305,77 @@ class _StackedToolbarState extends State<StackedToolbar> {
       if (overflow) {
         pushButton(_overflowToggle());
       }
-      row.add(const Spacer());
+      // No trailing Spacer: content left-packs and any slack falls at the far edge (native's
+      // left-packed layout), instead of a button-sized gap between the tools and the pinned cluster.
       prevButton = false;
       if (widget.trailing.isNotEmpty) pushDivider();
       for (final it in widget.trailing) {
         pushButton(it.icon != null ? _iconButton(it) : _textButton(it));
       }
       if (widget.trailingLabel != null) {
-        row.add(SizedBox(width: labelGap));
-        row.add(Text(widget.trailingLabel!, style: _kLabelStyleSmall));
+        // Pin the page indicator to the far edge on anchored bars (the trailing space is its home,
+        // with room to grow past 99 pages); keep it inline on a content-hugging float bar.
+        if (widget.spread) {
+          line.add(const Spacer());
+        } else {
+          line.add(_gap(labelGap));
+        }
+        line.add(Text(widget.trailingLabel!, style: _kLabelStyleSmall));
+        if (widget.spread) line.add(_gap(2));
       }
 
-      final totalH = widget.rowHeight + (showSecondary ? _secondaryHeight(maxW, hidden.length) : 0);
+      final totalExtent =
+          widget.rowHeight + (showSecondary ? _secondaryExtent(mainMax, hidden.length) : 0);
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
-        if (_lastReported != totalH) {
-          _lastReported = totalH;
-          widget.onHeight?.call(totalH);
+        if (_lastReported != totalExtent) {
+          _lastReported = totalExtent;
+          widget.onHeight?.call(totalExtent);
         }
       });
 
-      return Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            height: widget.rowHeight,
-            decoration: const BoxDecoration(
-              color: Colors.white,
-              border: Border(bottom: BorderSide(color: Colors.black, width: 1)),
-            ),
-            padding: EdgeInsets.symmetric(horizontal: widget.padding),
-            child: Row(children: row),
-          ),
-          if (showSecondary)
-            Container(
-              width: double.infinity,
-              decoration: const BoxDecoration(
-                color: Colors.white,
-                border: Border(bottom: BorderSide(color: Colors.black, width: 1)),
-              ),
-              padding: EdgeInsets.symmetric(horizontal: widget.padding, vertical: 6),
-              child: Wrap(
-                spacing: sp,
-                runSpacing: 6,
-                children: [for (final it in hidden) _iconButton(it)],
-              ),
-            ),
-        ],
+      final mainDeco = BoxDecoration(color: Colors.white, border: widget.mainBorder);
+      final mainLine = Container(
+        width: _vert ? widget.rowHeight : null,
+        height: _vert ? null : widget.rowHeight,
+        decoration: mainDeco,
+        padding: _vert
+            ? EdgeInsets.symmetric(vertical: widget.padding)
+            : EdgeInsets.symmetric(horizontal: widget.padding),
+        child: Flex(
+          direction: widget.axis,
+          mainAxisSize: widget.spread ? MainAxisSize.max : MainAxisSize.min,
+          children: line,
+        ),
       );
+
+      Widget? secondary;
+      if (showSecondary) {
+        secondary = Container(
+          decoration: mainDeco,
+          padding: _vert
+              ? EdgeInsets.symmetric(horizontal: 6, vertical: widget.padding)
+              : EdgeInsets.symmetric(vertical: 6, horizontal: widget.padding),
+          child: Wrap(
+            direction: widget.axis,
+            spacing: sp,
+            runSpacing: 6,
+            children: [for (final it in hidden) _iconButton(it)],
+          ),
+        );
+      }
+
+      final stack = <Widget>[
+        if (secondary != null && widget.secondaryBefore) secondary,
+        mainLine,
+        if (secondary != null && !widget.secondaryBefore) secondary,
+      ];
+      // Anchored bars stretch to fill their track; a floating bar hugs its content (start-aligned),
+      // otherwise CrossAxisAlignment.stretch would force it to the full available width.
+      final cross = widget.spread ? CrossAxisAlignment.stretch : CrossAxisAlignment.start;
+      return _vert
+          ? Row(mainAxisSize: MainAxisSize.min, crossAxisAlignment: cross, children: stack)
+          : Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: cross, children: stack);
     });
   }
 
@@ -353,12 +405,21 @@ Widget tbIconButton(TbButton it) => _iconButton(it);
 /// A standalone group divider, for use between pinned buttons and the overflow row.
 Widget tbDivider() => _dividerWidget();
 
-Widget _dividerWidget() => Container(
-      width: 1,
-      height: _kDividerH,
-      margin: const EdgeInsets.symmetric(horizontal: _kDividerMargin),
-      color: Colors.black,
-    );
+/// A group divider oriented for the bar's [axis]: a vertical rule (1×26) in a horizontal bar, a
+/// horizontal rule (26×1) in a vertical bar, with margins along the main axis.
+Widget _dividerWidget({Axis axis = Axis.horizontal}) => axis == Axis.vertical
+    ? Container(
+        width: _kDividerH,
+        height: 1,
+        margin: const EdgeInsets.symmetric(vertical: _kDividerMargin),
+        color: Colors.black,
+      )
+    : Container(
+        width: 1,
+        height: _kDividerH,
+        margin: const EdgeInsets.symmetric(horizontal: _kDividerMargin),
+        color: Colors.black,
+      );
 
 /// Icon button — native `bg_toolbar_button`: white fill, no border by default, 1.5dp black border
 /// when selected (persistent active-tool state). Disabled dims the glyph to inkLight.

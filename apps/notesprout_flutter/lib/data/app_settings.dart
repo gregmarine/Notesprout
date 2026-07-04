@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'toolbar_config.dart';
+
 /// Device-local app settings persisted as a small JSON file (mirrors the native app's
 /// SharedPreferences-style stores — NOT in any `.soil` or the global index). Loaded once at
 /// startup; reads are synchronous from the in-memory cache, writes fire-and-forget to disk.
@@ -30,6 +32,17 @@ class AppSettings {
   bool get snapEnabled => _data['snapEnabled'] == true;
   Future<void> setSnapEnabled(bool v) async {
     _data['snapEnabled'] = v;
+    await _save();
+  }
+
+  /// Global notebook-toolbar customization (order, hidden, placement, float, mini, collapsed).
+  ToolbarConfig get toolbarConfig {
+    final j = _data['toolbarConfig'];
+    return j is Map ? ToolbarConfig.fromJson(j.cast<String, dynamic>()) : ToolbarConfig();
+  }
+
+  Future<void> setToolbarConfig(ToolbarConfig c) async {
+    _data['toolbarConfig'] = c.toJson();
     await _save();
   }
 

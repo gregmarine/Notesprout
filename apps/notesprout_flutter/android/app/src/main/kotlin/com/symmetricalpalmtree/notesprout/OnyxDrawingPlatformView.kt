@@ -44,8 +44,10 @@ class OnyxDrawingPlatformView(
                 spikeView.setDrawingEnabled(call.arguments as? Boolean ?: true)
                 result.success(null)
             }
-            "setToolbarInset" -> {
-                spikeView.setToolbarInset((call.arguments as? Number)?.toInt() ?: 0)
+            "setToolbarExclusion" -> {
+                val a = call.arguments as? List<*>
+                fun px(i: Int) = (a?.getOrNull(i) as? Number)?.toInt() ?: 0
+                spikeView.setToolbarExclusion(px(0), px(1), px(2), px(3))
                 result.success(null)
             }
             else -> result.notImplemented()

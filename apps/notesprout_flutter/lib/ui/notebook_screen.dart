@@ -15,6 +15,7 @@ import '../core/markdown/markdown_parser.dart';
 import '../core/markdown/markdown_render.dart';
 import '../core/undo_manager.dart';
 import '../data/app_settings.dart';
+import '../data/toolbar_config.dart';
 import '../data/db_worker.dart';
 import '../recognition/handwriting_recognizer.dart';
 import '../data/soil_database.dart';
@@ -23,9 +24,11 @@ import '../domain/page_object.dart';
 import '../domain/stroke.dart';
 import '../platform/pen_bridge.dart';
 import 'flutter_ink_surface.dart';
+import 'customize_toolbar_dialog.dart';
 import 'line_dialog.dart';
 import 'nb_icons.dart';
 import 'overflow_toolbar.dart';
+import 'toolbar_registry.dart';
 import 'page_painter.dart';
 import 'text_dialog.dart';
 
@@ -116,8 +119,12 @@ class _NotebookScreenState extends State<NotebookScreen> {
   Duration? _tap1Time, _tap2Time, _tap3Time;
   Offset _tap1Pos = Offset.zero, _tap2Pos = Offset.zero, _tap3Pos = Offset.zero;
   bool _toolbarHidden = false; // 1-finger double-tap hides the floating toolbar; pen reclaims strip
-  double _toolbarLogicalH = _kToolbarH; // live toolbar height (grows when the overflow row is open)
+  double _toolbarExtent = _kToolbarH; // live toolbar cross-axis extent (grows when overflow opens)
   bool _overflowOpen = false; // secondary overflow row visible; dismissed on any page interaction
+  ToolbarConfig _tbConfig = AppSettings.instance.toolbarConfig; // customized toolbar (device-local)
+  Offset? _floatPos; // live top-left of the floating bar (null → center on first layout)
+  final GlobalKey _floatKey = GlobalKey(); // measures the float bar's rect for the pen exclusion
+  Rect? _floatRect; // last measured float-bar rect (logical) — exclusion + page hit-test source
 
   static const double _kTapSlopPx = 18; // logical px; movement past this → not a tap
   static const double _kDoubleTapSlopPx = 48; // second tap must land within this of the first
@@ -138,6 +145,7 @@ class _NotebookScreenState extends State<NotebookScreen> {
     // Full-screen immersive page, matching native NotebookActivity (hide system bars; swipe reveals).
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
     _bridge.onEvent = _onPen;
+    if (_tbConfig.floatX >= 0) _floatPos = Offset(_tbConfig.floatX, _tbConfig.floatY);
     _init();
   }
 
@@ -939,7 +947,7 @@ class _NotebookScreenState extends State<NotebookScreen> {
     if (e.kind != PointerDeviceKind.touch) return;
     // A finger touch on the page (below the toolbar) dismisses an open overflow row. Touches within
     // the toolbar band fall through to its buttons and must NOT dismiss.
-    if (_overflowOpen && e.localPosition.dy >= _toolbarLogicalH) _dismissOverflow();
+    if (_overflowOpen && _pointOnPage(e.localPosition)) _dismissOverflow();
     _activeTouches++;
     if (_activeTouches > _peakTouches) _peakTouches = _activeTouches;
     if (_swipeFinger == null) {
@@ -1048,24 +1056,69 @@ class _NotebookScreenState extends State<NotebookScreen> {
     _tap1Time = _tap2Time = _tap3Time = null;
   }
 
-  /// 1-finger double-tap: hide/show the floating toolbar. When hidden the pen reclaims the top
-  /// strip (setToolbarInset 0); when shown it is excluded again so stylus taps hit the buttons.
+  ToolbarPlacement get _placement => _tbConfig.placement;
+  bool get _isFloat => _placement == ToolbarPlacement.float;
+  bool get _tbVertical => _isFloat
+      ? _tbConfig.floatAxis == ToolbarAxis.vertical
+      : (_placement == ToolbarPlacement.left || _placement == ToolbarPlacement.right);
+  bool get _tbMini => _tbConfig.miniEnabled && _isFloat;
+
+  /// 1-finger double-tap: hide/show the toolbar. When hidden the pen reclaims the whole screen;
+  /// when shown the bar's rect is excluded again so stylus taps hit the buttons.
   void _toggleToolbar() {
     setState(() => _toolbarHidden = !_toolbarHidden);
-    _applyToolbarInset();
+    _applyToolbarExclusion();
   }
 
-  /// Reported by [StackedToolbar] whenever its total height changes (overflow row open/closed).
-  /// The pen must exclude the whole stacked toolbar, so re-push the inset.
-  void _onToolbarHeight(double h) {
-    if (h == _toolbarLogicalH) return;
-    _toolbarLogicalH = h;
-    _applyToolbarInset();
+  /// Reported by [StackedToolbar] whenever its cross-axis extent changes (overflow open/closed).
+  void _onToolbarHeight(double ext) {
+    if (ext == _toolbarExtent) return;
+    _toolbarExtent = ext;
+    _applyToolbarExclusion();
   }
 
-  /// Exclude the current toolbar height from the pen region (0 when the bar is hidden).
-  void _applyToolbarInset() =>
-      _bridge.setToolbarInset(_toolbarHidden ? 0 : _toolbarLogicalH * _dpr);
+  /// Exclude the toolbar's rectangle from the pen region per placement (cleared when hidden).
+  void _applyToolbarExclusion() {
+    if (_toolbarHidden || !mounted) {
+      _bridge.setToolbarExclusion(0, 0, 0, 0);
+      return;
+    }
+    if (_isFloat) {
+      // The float bar's rect is measured after layout (its size hugs content); see _measureFloat.
+      final r = _floatRect;
+      if (r == null) {
+        _bridge.setToolbarExclusion(0, 0, 0, 0);
+      } else {
+        _bridge.setToolbarExclusion(
+            r.left * _dpr, r.top * _dpr, r.right * _dpr, r.bottom * _dpr);
+      }
+      return;
+    }
+    final size = MediaQuery.of(context).size;
+    final ext = _toolbarExtent * _dpr;
+    final wPx = size.width * _dpr, hPx = size.height * _dpr;
+    final (double l, double t, double r, double b) = switch (_placement) {
+      ToolbarPlacement.top => (0, 0, wPx, ext),
+      ToolbarPlacement.bottom => (0, hPx - ext, wPx, hPx),
+      ToolbarPlacement.left => (0, 0, ext, hPx),
+      ToolbarPlacement.right => (wPx - ext, 0, wPx, hPx),
+      ToolbarPlacement.float => (0, 0, 0, 0),
+    };
+    _bridge.setToolbarExclusion(l, t, r, b);
+  }
+
+  /// True if [p] (logical, screen coords) lands on the page — outside the toolbar band.
+  bool _pointOnPage(Offset p) {
+    final size = MediaQuery.of(context).size;
+    final ext = _toolbarExtent;
+    return switch (_placement) {
+      ToolbarPlacement.top => p.dy >= ext,
+      ToolbarPlacement.bottom => p.dy <= size.height - ext,
+      ToolbarPlacement.left => p.dx >= ext,
+      ToolbarPlacement.right => p.dx <= size.width - ext,
+      ToolbarPlacement.float => !(_floatRect?.contains(p) ?? false),
+    };
+  }
 
   Future<void> _insertPageBySwipe({required bool after}) async {
     if (_pageBusy || !_ready) return;
@@ -1158,7 +1211,7 @@ class _NotebookScreenState extends State<NotebookScreen> {
             ),
             // The toolbar floats over the full-screen page (the pen region excludes this strip).
             // 1-finger double-tap hides it; the pen then reclaims the full screen.
-            if (!_toolbarHidden) Positioned(top: 0, left: 0, right: 0, child: _toolbar()),
+            if (!_toolbarHidden) _positionedToolbar(),
           ],
         ),
       );
@@ -1166,68 +1219,115 @@ class _NotebookScreenState extends State<NotebookScreen> {
 
   void _comingSoon(String label) => _snack('$label — coming soon');
 
-  /// The full native toolbar (`ToolbarButtonRegistry` order), grouped with auto-dividers, as icon
-  /// buttons. Close and the Customize gear are pinned (always visible); everything else lives in the
-  /// overflow row. Features not yet ported toast "coming soon". Rebuilds on history changes so
-  /// Undo/Redo enablement stays live (stroke commits deliberately skip setState).
-  Widget _toolbar() {
+  /// A [TbButton] for a registry [key], wiring its behaviour + selected/enabled state. Features not
+  /// yet ported toast "coming soon".
+  TbButton _buttonForKey(String key) {
+    final spec = ToolbarRegistry.spec(key)!;
+    final icon = spec.icon;
+    final label = spec.label;
     final m = _mode;
-    final middle = <TbButton>[
-      // FILE (Close is pinned at the lead)
-      TbButton('Recents', icon: NbIcons.recents, onTap: () => _comingSoon('Recents')),
-      const TbButton.divider(),
-      // NOTEBOOK
-      TbButton('Table of Contents', icon: NbIcons.toc, onTap: () => _comingSoon('Table of Contents')),
-      TbButton('Set Cover', icon: NbIcons.cover, onTap: () => _comingSoon('Set Cover')),
-      TbButton('Export', icon: NbIcons.export, onTap: () => _comingSoon('Export')),
-      TbButton('Pin', icon: NbIcons.pin, onTap: () => _comingSoon('Pin')),
-      TbButton('Encrypt', icon: NbIcons.lock, onTap: () => _comingSoon('Encrypt')),
-      TbButton('Scratch Pad', icon: NbIcons.scratchpad, onTap: () => _comingSoon('Scratch Pad')),
-      TbButton('Calendar', icon: NbIcons.calendar, onTap: () => _comingSoon('Calendar')),
-      const TbButton.divider(),
-      // TOOLS
-      TbButton('Pen', icon: NbIcons.pen, selected: m == _Mode.pen, onTap: () => _setMode(_Mode.pen)),
-      TbButton('Eraser', icon: NbIcons.eraser, selected: m == _Mode.eraser, onTap: () => _setMode(_Mode.eraser)),
-      TbButton('Lasso Eraser', icon: NbIcons.lassoEraser, onTap: () => _comingSoon('Lasso Eraser')),
-      TbButton('Erase All', icon: NbIcons.eraseAll, onTap: _clear),
-      TbButton('Insert Text', icon: NbIcons.insertText, selected: m == _Mode.text, onTap: () => _setMode(_Mode.text)),
-      TbButton('Insert Lines', icon: NbIcons.insertLines, onTap: _insertLines),
-      TbButton('Lasso', icon: NbIcons.lasso, selected: m == _Mode.lasso, onTap: () => _setMode(_Mode.lasso)),
-      TbButton('Insert Sticky Note', icon: NbIcons.stickyNote, onTap: () => _comingSoon('Sticky Note')),
-      TbButton('Insert Shape', icon: NbIcons.insertShape, onTap: () => _comingSoon('Insert Shape')),
-      const TbButton.divider(),
-      // HISTORY
-      TbButton('Undo', icon: NbIcons.undo, enabled: _undo.canUndo, onTap: _doUndo),
-      TbButton('Redo', icon: NbIcons.redo, enabled: _undo.canRedo, onTap: _doRedo),
-      const TbButton.divider(),
-      // PAGE VIEW
-      TbButton('Template', icon: NbIcons.template, onTap: () => _comingSoon('Template')),
-      TbButton('Page Index', icon: NbIcons.pageIndex, onTap: () => _comingSoon('Page Index')),
-      const TbButton.divider(),
-      // PAGE EDIT
-      TbButton('Insert Page Before', icon: NbIcons.insertPageBefore, onTap: () => _insertPageBySwipe(after: false)),
-      TbButton('Insert Page After', icon: NbIcons.insertPageAfter, onTap: () => _insertPageBySwipe(after: true)),
-      TbButton('Delete Page', icon: NbIcons.deletePage, onTap: () => _comingSoon('Delete Page')),
-      TbButton('Copy Page', icon: NbIcons.copyPage, onTap: () => _comingSoon('Copy Page')),
-      TbButton('Paste Page', icon: NbIcons.pastePage, onTap: () => _comingSoon('Paste Page')),
-      // Object clipboard (populated by a selection Copy) — only shown when there's something to paste.
-      if (_clipboard.isNotEmpty) ...[
-        const TbButton.divider(),
-        TbButton('Paste Selection', icon: NbIcons.pastePage, onTap: _pasteClipboard),
-      ],
-    ];
+    switch (key) {
+      case 'close':
+        return TbButton(label, icon: icon, onTap: () => Navigator.of(context).pop());
+      case 'pen':
+        return TbButton(label, icon: icon, selected: m == _Mode.pen, onTap: () => _setMode(_Mode.pen));
+      case 'eraser':
+        return TbButton(label,
+            icon: icon, selected: m == _Mode.eraser, onTap: () => _setMode(_Mode.eraser));
+      case 'eraseAll':
+        return TbButton(label, icon: icon, onTap: _clear);
+      case 'insertText':
+        return TbButton(label,
+            icon: icon, selected: m == _Mode.text, onTap: () => _setMode(_Mode.text));
+      case 'insertLines':
+        return TbButton(label, icon: icon, onTap: _insertLines);
+      case 'lasso':
+        return TbButton(label,
+            icon: icon, selected: m == _Mode.lasso, onTap: () => _setMode(_Mode.lasso));
+      case 'undo':
+        return TbButton(label, icon: icon, enabled: _undo.canUndo, onTap: _doUndo);
+      case 'redo':
+        return TbButton(label, icon: icon, enabled: _undo.canRedo, onTap: _doRedo);
+      case 'insertPageBefore':
+        return TbButton(label, icon: icon, onTap: () => _insertPageBySwipe(after: false));
+      case 'insertPageAfter':
+        return TbButton(label, icon: icon, onTap: () => _insertPageBySwipe(after: true));
+      case 'toolbarSettings':
+        return TbButton(label, icon: icon, onTap: _openCustomizeToolbar);
+      default:
+        return TbButton(label, icon: icon, onTap: () => _comingSoon(label));
+    }
+  }
+
+  /// Build the middle button run from resolved [keys], inserting an auto-divider between buttons
+  /// whose registry group differs.
+  List<TbButton> _middleItems(List<String> keys) {
+    final out = <TbButton>[];
+    String? prevGroup;
+    for (final k in keys) {
+      final spec = ToolbarRegistry.spec(k);
+      if (spec == null) continue;
+      if (prevGroup != null && spec.group != prevGroup) out.add(const TbButton.divider());
+      out.add(_buttonForKey(k));
+      prevGroup = spec.group;
+    }
+    return out;
+  }
+
+  Future<void> _openCustomizeToolbar() async {
+    final updated = await showCustomizeToolbarDialog(context, _tbConfig);
+    if (updated == null || !mounted) return;
+    setState(() {
+      _tbConfig = updated;
+      _floatPos = updated.floatX >= 0 ? Offset(updated.floatX, updated.floatY) : null;
+      _floatRect = null; // force a re-measure/centre for the (possibly new) float bar
+    });
+    await AppSettings.instance.setToolbarConfig(updated);
+    _applyToolbarExclusion(); // placement may have changed → re-exclude the correct rect
+  }
+
+  /// The customizable notebook toolbar, resolved from [_tbConfig] (order − hidden; Close pinned at
+  /// the lead, Customize gear at the trail). Rebuilds on history changes so Undo/Redo enablement
+  /// stays live (stroke commits deliberately skip setState).
+  Widget _toolbar() {
+    final keys = ToolbarRegistry.resolveVisible(
+      order: _tbConfig.order,
+      hidden: _tbConfig.hidden,
+      miniSet: _tbConfig.miniSet,
+      mini: _tbMini,
+    );
+    final leadKey = keys.first; // close (guaranteed by resolveVisible)
+    final trailKey = keys.last; // gear
+    final middle = _middleItems(keys.sublist(1, keys.length - 1));
+    // Object clipboard (populated by a selection Copy) — contextual, not part of the customized set.
+    if (_clipboard.isNotEmpty) {
+      middle
+        ..add(const TbButton.divider())
+        ..add(TbButton('Paste Selection', icon: NbIcons.pastePage, onTap: _pasteClipboard));
+    }
+    final float = _isFloat;
+    const side = BorderSide(color: Colors.black, width: 1);
+    final border = switch (_placement) {
+      ToolbarPlacement.top => const Border(bottom: side),
+      ToolbarPlacement.bottom => const Border(top: side),
+      ToolbarPlacement.left => const Border(right: side),
+      ToolbarPlacement.right => const Border(left: side),
+      ToolbarPlacement.float => const Border(), // outer float container carries the border
+    };
+    // The overflow line sits on the page-facing side of the bar (before the main line for BOTTOM/RIGHT).
+    final secondaryBefore =
+        _placement == ToolbarPlacement.bottom || _placement == ToolbarPlacement.right;
     return ValueListenableBuilder<int>(
       valueListenable: _histVersion,
       builder: (context, _, _) => StackedToolbar(
-        leading: [
-          TbButton('Close', icon: NbIcons.close, onTap: () => Navigator.of(context).pop()),
-        ],
+        leading: [_buttonForKey(leadKey)],
         items: middle,
-        trailing: [
-          TbButton('Customize Toolbar',
-              icon: NbIcons.settings, onTap: () => _comingSoon('Customize Toolbar')),
-        ],
-        trailingLabel: _ready ? '${_pageIndex + 1}/${_pages.length}' : '…',
+        trailing: [_buttonForKey(trailKey)],
+        trailingLabel: float ? null : (_ready ? '${_pageIndex + 1}/${_pages.length}' : '…'),
+        axis: _tbVertical ? Axis.vertical : Axis.horizontal,
+        mainBorder: border,
+        secondaryBefore: secondaryBefore,
+        spread: !float, // a floating bar hugs its content
         expanded: _overflowOpen,
         onExpandedChanged: (v) => setState(() => _overflowOpen = v),
         rowHeight: _kToolbarH,
@@ -1235,6 +1335,116 @@ class _NotebookScreenState extends State<NotebookScreen> {
         onHeight: _onToolbarHeight,
       ),
     );
+  }
+
+  /// Position the toolbar at its anchored edge (full-screen page behind it), or as a draggable
+  /// floating bar.
+  Widget _positionedToolbar() => switch (_placement) {
+        ToolbarPlacement.top => Positioned(top: 0, left: 0, right: 0, child: _toolbar()),
+        ToolbarPlacement.bottom => Positioned(bottom: 0, left: 0, right: 0, child: _toolbar()),
+        ToolbarPlacement.left => Positioned(top: 0, bottom: 0, left: 0, child: _toolbar()),
+        ToolbarPlacement.right => Positioned(top: 0, bottom: 0, right: 0, child: _toolbar()),
+        ToolbarPlacement.float => _floatPositioned(),
+      };
+
+  // ── Floating toolbar (draggable, position-persisted) ────────────────────────────────────────
+  Widget _floatPositioned() {
+    final p = _floatPos;
+    return Positioned(left: p?.dx ?? 0, top: p?.dy ?? 0, child: _floatBar());
+  }
+
+  Widget _floatBar() {
+    final axis = _tbVertical ? Axis.vertical : Axis.horizontal;
+    final size = MediaQuery.of(context).size;
+    // Bound the bar to 85% of the matching screen dimension so a long full bar overflows internally.
+    final maxMain = (axis == Axis.horizontal ? size.width : size.height) * 0.85;
+    WidgetsBinding.instance.addPostFrameCallback((_) => _measureFloat());
+    // ClipRRect clips the white content (grip divider / toolbar bg) to the rounded rect; the border
+    // is drawn on top via foregroundDecoration so no square corner pokes out.
+    return Container(
+      key: _floatKey,
+      foregroundDecoration: BoxDecoration(
+        border: Border.all(color: Colors.black, width: 1),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(6),
+        child: ColoredBox(
+          color: Colors.white,
+          child: Flex(
+            direction: axis,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _floatGrip(axis),
+              ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxWidth: axis == Axis.horizontal ? maxMain : double.infinity,
+                  maxHeight: axis == Axis.vertical ? maxMain : double.infinity,
+                ),
+                child: _toolbar(),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _floatGrip(Axis axis) {
+    const side = BorderSide(color: Colors.black, width: 1);
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onPanUpdate: _onFloatDrag,
+      onPanEnd: (_) => _persistFloatPos(),
+      child: Container(
+        width: axis == Axis.horizontal ? 30 : _kToolbarH,
+        height: axis == Axis.horizontal ? _kToolbarH : 30,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          border: axis == Axis.horizontal
+              ? const Border(right: side)
+              : const Border(bottom: side),
+        ),
+        child: const Icon(Icons.drag_indicator, size: 22, color: Color(0xFF888888)),
+      ),
+    );
+  }
+
+  void _onFloatDrag(DragUpdateDetails d) {
+    final size = MediaQuery.of(context).size;
+    final w = _floatRect?.width ?? 200, h = _floatRect?.height ?? _kToolbarH;
+    final cur = _floatPos ?? Offset((size.width - w) / 2, (size.height - h) / 2);
+    final np = cur + d.delta;
+    setState(() => _floatPos = Offset(
+          np.dx.clamp(0.0, math.max(0.0, size.width - w)),
+          np.dy.clamp(0.0, math.max(0.0, size.height - h)),
+        ));
+  }
+
+  void _persistFloatPos() {
+    final p = _floatPos;
+    if (p == null) return;
+    _tbConfig = _tbConfig.copyWith(floatX: p.dx, floatY: p.dy);
+    AppSettings.instance.setToolbarConfig(_tbConfig);
+  }
+
+  /// Measure the floating bar's rect (logical) after layout → centre it on first show, then keep the
+  /// pen exclusion in sync with its live position/size.
+  void _measureFloat() {
+    if (!mounted || !_isFloat) return;
+    final box = _floatKey.currentContext?.findRenderObject() as RenderBox?;
+    if (box == null || !box.hasSize) return;
+    final rect = box.localToGlobal(Offset.zero) & box.size;
+    if (_floatPos == null) {
+      final size = MediaQuery.of(context).size;
+      setState(() => _floatPos =
+          Offset((size.width - rect.width) / 2, (size.height - rect.height) / 2));
+      return; // re-measures next frame at the centred position
+    }
+    if (_floatRect != rect) {
+      _floatRect = rect;
+      _applyToolbarExclusion();
+    }
   }
 
   /// Collapse the secondary overflow row (called on any page interaction — finger tap below the
@@ -1270,7 +1480,8 @@ class _NotebookScreenState extends State<NotebookScreen> {
         (_selBounds!.x / _dpr).clamp(4.0, math.max(4.0, constraints.maxWidth - 120)).toDouble();
     final maxBarW = math.max(120.0, constraints.maxWidth - leftL - 4);
     // Keep clear of the floating main toolbar strip at the top (unless it's hidden).
-    final minTop = _toolbarHidden ? 4.0 : _toolbarLogicalH + 4;
+    // Only the TOP bar overlaps the selection toolbar's anchor zone; clear it then.
+    final minTop = (_toolbarHidden || _placement != ToolbarPlacement.top) ? 4.0 : _toolbarExtent + 4;
     final aboveTop = _selBounds!.y / _dpr - barH - 6;
     final belowTop = (_selBounds!.y + _selBounds!.height) / _dpr + 6;
     final double top = (aboveTop >= minTop ? aboveTop : belowTop)
@@ -1348,8 +1559,8 @@ class _NotebookScreenState extends State<NotebookScreen> {
         )
           ..addOnPlatformViewCreatedListener((id) {
             params.onPlatformViewCreated(id);
-            // Surface + channel now exist → exclude the current toolbar height from the pen region.
-            _applyToolbarInset();
+            // Surface + channel now exist → exclude the current toolbar rect from the pen region.
+            _applyToolbarExclusion();
           })
           ..create();
         return controller;

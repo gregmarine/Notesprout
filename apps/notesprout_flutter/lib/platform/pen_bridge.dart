@@ -53,11 +53,13 @@ class PenBridge {
     } catch (_) {}
   }
 
-  /// Exclude the top [px] (the floating toolbar strip) from the pen region, so the page is
+  /// Exclude the toolbar rectangle [l,t,r,b] (view px) from the pen region, so the page is
   /// full-screen behind the toolbar yet stylus taps hit the toolbar buttons instead of drawing.
-  Future<void> setToolbarInset(double px) async {
+  /// A degenerate rect (all zero) clears the exclusion (whole canvas writable).
+  Future<void> setToolbarExclusion(double l, double t, double r, double b) async {
     try {
-      await _method.invokeMethod('setToolbarInset', px);
+      await _method.invokeMethod('setToolbarExclusion',
+          [l.round(), t.round(), r.round(), b.round()]);
     } catch (_) {}
   }
 

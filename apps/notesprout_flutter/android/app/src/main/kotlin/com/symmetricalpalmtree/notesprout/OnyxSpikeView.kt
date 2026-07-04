@@ -48,9 +48,10 @@ class OnyxSpikeView(context: Context) : View(context) {
      *  smart-lasso velocity gate = pathLength / durationMs). Mirrors native beginRawDrawingTimeMs. */
     private var beginTimeMs = 0L
 
-    /** Height (px) of the floating toolbar strip at the top, excluded from the pen region so the
-     *  page is full-screen behind it yet stylus taps on the toolbar hit the buttons (not draw). */
-    private var excludeTopPx = 0
+    /** The floating-toolbar rectangle (view px) excluded from the pen region so the page is
+     *  full-screen behind it yet stylus taps on the toolbar hit the buttons (not draw). Null = none.
+     *  A rect (not just a top strip) so the bar can anchor to any edge (top/bottom/left/right). */
+    private var excludeRect: Rect? = null
 
     private val rawInputCallback = object : RawInputCallback() {
         override fun onBeginRawDrawing(shortcut: Boolean, point: TouchPoint) {
@@ -145,18 +146,19 @@ class OnyxSpikeView(context: Context) : View(context) {
     }
 
     /**
-     * Set the floating-toolbar exclude strip (px from the top). The pen won't draw there and stylus
-     * taps fall through to the toolbar buttons. setLimitRect is ignored on a live session, so we
-     * must restartRawDrawing for it to take effect (matches the native limit-rect rule).
+     * Set the floating-toolbar exclude rect (view px; empty/degenerate = none). The pen won't draw
+     * there and stylus taps fall through to the toolbar buttons. setLimitRect is ignored on a live
+     * session, so we must restartRawDrawing for it to take effect (native limit-rect rule).
      */
-    fun setToolbarInset(px: Int) {
-        if (px == excludeTopPx) return
-        excludeTopPx = px
+    fun setToolbarExclusion(l: Int, t: Int, r: Int, b: Int) {
+        val rect = if (r > l && b > t) Rect(l, t, r, b) else null
+        if (rect == excludeRect) return
+        excludeRect = rect
         if (isSetup) {
             applyLimitRect()
             touchHelper.restartRawDrawing()
             // restartRawDrawing resets the pen's enabled/render state — restore it (mirrors
-            // openRawDrawing), otherwise the stylus goes dead after the first inset change.
+            // openRawDrawing), otherwise the stylus goes dead after the first change.
             touchHelper.setRawDrawingEnabled(!drawingPaused)
             touchHelper.setRawDrawingRenderEnabled(!isEraserMode && !drawingPaused)
         }
@@ -175,8 +177,8 @@ class OnyxSpikeView(context: Context) : View(context) {
             minOf(width, frame.right - loc[0]),
             minOf(height, frame.bottom - loc[1]),
         )
-        // Exclude the floating-toolbar strip so the pen never draws under it.
-        val exclude = if (excludeTopPx > 0) Rect(0, 0, width, excludeTopPx) else Rect(-1, -1, 0, 0)
+        // Exclude the floating-toolbar rect so the pen never draws under it.
+        val exclude = excludeRect ?: Rect(-1, -1, 0, 0)
         touchHelper.setLimitRect(limitRect, listOf(exclude))
     }
 
