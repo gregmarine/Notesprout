@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:sqlite3/sqlite3.dart';
 import 'package:uuid/uuid.dart';
 
@@ -113,6 +115,50 @@ class SoilDatabase {
     final r = _db.select(
         'SELECT COALESCE(MAX("order"), -1) + 1 AS next FROM notebook WHERE type = \'page\'');
     return r.first['next'] as int;
+  }
+
+  /// Insert a new blank page relative to [refPageId] ([before] ? before : after it), shifting the
+  /// order of the following pages up by one. Returns the new page.
+  PageRef insertPage(String refPageId, bool before,
+      {required double width, required double height}) {
+    final now = _now;
+    final notebookRowId =
+        _db.select("SELECT id FROM notebook WHERE type = 'notebook' LIMIT 1").first['id'] as String;
+    final refRows =
+        _db.select('SELECT "order" FROM notebook WHERE id = ? AND type = \'page\'', [refPageId]);
+    final refOrder = refRows.isEmpty ? _nextPageOrder() - 1 : refRows.first['order'] as int;
+    final at = before ? refOrder : refOrder + 1;
+    _db.execute('UPDATE notebook SET "order" = "order" + 1 WHERE type = \'page\' AND "order" >= ?',
+        [at]);
+    final bbox = BoundingBox(0, 0, width, height).toJson();
+    final pageId = _uuid.v4();
+    final layerId = _uuid.v4();
+    _db.execute(_insert, [
+      pageId, notebookRowId, bbox, at, now, now, null, 'page',
+      PageData(width: width, height: height, template: '').toJson(),
+    ]);
+    _db.execute(_insert, [
+      layerId, pageId, bbox, 0, now, now, null, 'layer',
+      '{"label":"Content","isLocked":false,"isVisible":true}',
+    ]);
+    return PageRef(pageId, layerId, PageData(width: width, height: height), at);
+  }
+
+  /// The base64 PNG of a `type="template"` row (native `TemplateData.image`), or null for blank /
+  /// missing. Rendered as the page background.
+  String? templateImage(String templateId) {
+    if (templateId.isEmpty) return null;
+    final rows = _db.select(
+        "SELECT data FROM notebook WHERE id = ? AND type = 'template' AND deletedAt IS NULL LIMIT 1",
+        [templateId]);
+    if (rows.isEmpty) return null;
+    try {
+      final m = jsonDecode(rows.first['data'] as String) as Map<String, dynamic>;
+      final img = m['image'] as String?;
+      return (img == null || img.isEmpty) ? null : img;
+    } catch (_) {
+      return null;
+    }
   }
 
   /// All non-deleted pages (each with its content layer), in canonical order.

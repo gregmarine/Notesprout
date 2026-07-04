@@ -5,7 +5,9 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:uuid/uuid.dart';
 
+import 'dart:convert';
 import 'dart:math' as math;
+import 'dart:ui' as ui;
 
 import '../core/lasso_geometry.dart';
 import '../core/snap_engine.dart';
@@ -55,6 +57,7 @@ class NotebookScreen extends StatefulWidget {
 
 class _NotebookScreenState extends State<NotebookScreen> {
   static const _viewType = 'notesprout/onyx_drawing';
+  static const _kToolbarH = 56.0; // floating-toolbar height; also the pen exclude strip
 
   final _bridge = PenBridge();
   final _undo = UndoStack();
@@ -91,6 +94,33 @@ class _NotebookScreenState extends State<NotebookScreen> {
   double _dpr = 1.0;
   bool _ready = false;
 
+  // Page template (read-only): decoded bitmap cache keyed by template-row id + the current page's.
+  final Map<String, ui.Image?> _templateCache = {};
+  ui.Image? _template;
+
+  // Finger-swipe gesture state (touch pointers only; stylus draws via Onyx). 1 finger flips pages,
+  // 2 fingers inserts a page.
+  int? _swipeFinger;
+  Offset _swipeStart = Offset.zero;
+  Offset _swipeLast = Offset.zero;
+  int _activeTouches = 0;
+  int _peakTouches = 0;
+  bool _pageBusy = false; // guards page flip/insert against re-entrancy mid-gesture
+
+  // Double-tap gesture state (touch only). A stationary, short tap that is NOT a swipe arms a
+  // per-finger-count first-tap memory; a matching second tap within the double-tap window fires:
+  // 1 finger = toggle toolbar · 2 fingers = undo · 3 fingers = redo (native's multi-finger taps).
+  Duration _gestureDownTime = Duration.zero; // first pointer-down of the current gesture
+  bool _gestureMoved = false; // latched once the primary finger travels past the tap slop
+  Duration? _tap1Time, _tap2Time, _tap3Time;
+  Offset _tap1Pos = Offset.zero, _tap2Pos = Offset.zero, _tap3Pos = Offset.zero;
+  bool _toolbarHidden = false; // 1-finger double-tap hides the floating toolbar; pen reclaims strip
+
+  static const double _kTapSlopPx = 18; // logical px; movement past this → not a tap
+  static const double _kDoubleTapSlopPx = 48; // second tap must land within this of the first
+  static const int _kTapMaxMs = 500; // a tap must lift within this (long-press timeout)
+  static const int _kDoubleTapMaxMs = 300; // second tap must follow within this window
+
   String get _layerId => _pages[_pageIndex].layerId;
 
   /// BOOX Android hosts the Onyx EPD overlay; every other platform (desktop now, iPad/web later)
@@ -102,6 +132,8 @@ class _NotebookScreenState extends State<NotebookScreen> {
   @override
   void initState() {
     super.initState();
+    // Full-screen immersive page, matching native NotebookActivity (hide system bars; swipe reveals).
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
     _bridge.onEvent = _onPen;
     _init();
   }
@@ -114,6 +146,8 @@ class _NotebookScreenState extends State<NotebookScreen> {
 
   @override
   void dispose() {
+    // Restore system bars for the (non-immersive) library.
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     _bridge.dispose();
     _histVersion.dispose();
     widget.worker.closeNotebook(widget.notebookId, _pages.length);
@@ -126,6 +160,33 @@ class _NotebookScreenState extends State<NotebookScreen> {
       ..clear()
       ..addAll(rows);
     if (mounted) setState(() {});
+    await _loadTemplate();
+  }
+
+  /// Load the current page's template bitmap (read-only). Decoded images are cached by template id
+  /// so flipping between pages that share a template doesn't re-decode.
+  Future<void> _loadTemplate() async {
+    final tid = _pages[_pageIndex].data.template;
+    if (tid.isEmpty) {
+      if (mounted) setState(() => _template = null);
+      return;
+    }
+    if (_templateCache.containsKey(tid)) {
+      if (mounted) setState(() => _template = _templateCache[tid]);
+      return;
+    }
+    ui.Image? img;
+    final b64 = await widget.worker.templateImage(widget.notebookId, tid);
+    if (b64 != null) {
+      try {
+        final codec = await ui.instantiateImageCodec(base64Decode(b64));
+        img = (await codec.getNextFrame()).image;
+      } catch (_) {
+        img = null;
+      }
+    }
+    _templateCache[tid] = img;
+    if (mounted) setState(() => _template = img);
   }
 
   void _repaintPanelNextFrame() =>
@@ -854,8 +915,10 @@ class _NotebookScreenState extends State<NotebookScreen> {
   }
 
   Future<void> _switchPage(int delta) async {
+    if (_pageBusy) return;
     final next = _pageIndex + delta;
     if (next < 0 || next >= _pages.length) return;
+    _pageBusy = true;
     _pageIndex = next;
     _undo.clear(); // undo is page-scoped for now (cross-page undo deferred)
     _histVersion.value++;
@@ -863,6 +926,7 @@ class _NotebookScreenState extends State<NotebookScreen> {
     _selBounds = null;
     await _loadPage();
     _repaintPanelNextFrame();
+    _pageBusy = false;
   }
 
   Future<void> _addPage() async {
@@ -878,6 +942,145 @@ class _NotebookScreenState extends State<NotebookScreen> {
     _repaintPanelNextFrame();
   }
 
+  // ── Finger swipes: 1-finger flip / 2-finger insert (touch only; stylus draws via Onyx) ──────
+  void _onSwipeDown(PointerDownEvent e) {
+    if (e.kind != PointerDeviceKind.touch) return;
+    _activeTouches++;
+    if (_activeTouches > _peakTouches) _peakTouches = _activeTouches;
+    if (_swipeFinger == null) {
+      _swipeFinger = e.pointer;
+      _swipeStart = e.localPosition;
+      _swipeLast = e.localPosition;
+      _gestureDownTime = e.timeStamp;
+      _gestureMoved = false;
+    }
+  }
+
+  void _onSwipeMove(PointerMoveEvent e) {
+    if (e.kind != PointerDeviceKind.touch || e.pointer != _swipeFinger) return;
+    _swipeLast = e.localPosition;
+    if (!_gestureMoved && (e.localPosition - _swipeStart).distance > _kTapSlopPx) {
+      _gestureMoved = true; // travelled too far to be a tap
+    }
+  }
+
+  void _onSwipeEnd(PointerEvent e) {
+    if (e.kind != PointerDeviceKind.touch) return;
+    if (_activeTouches > 0) _activeTouches--;
+    if (_activeTouches > 0) return; // wait until all fingers lift
+    final peak = _peakTouches;
+    final moved = _gestureMoved;
+    final durMs = (e.timeStamp - _gestureDownTime).inMilliseconds;
+    final endPos = _swipeLast;
+    final dx = _swipeLast.dx - _swipeStart.dx;
+    final dy = _swipeLast.dy - _swipeStart.dy;
+    _swipeFinger = null;
+    _peakTouches = 0;
+    _activeTouches = 0;
+    _gestureMoved = false;
+
+    // BOOX intercepts 3-finger touches and cancels the gesture (no UP) — treat a stationary,
+    // short 3-finger cancel as a completed tap so double-tap redo still works (matches native).
+    if (e is PointerCancelEvent) {
+      if (peak == 3 && !moved && durMs <= _kTapMaxMs) {
+        _handleTap(3, endPos, e.timeStamp);
+      } else {
+        _resetTaps();
+      }
+      return;
+    }
+
+    // Swipe (horizontal-dominant, past native's min-distance fraction) → flip / insert.
+    if (dx.abs() > dy.abs() && dx.abs() / MediaQuery.of(context).size.width >= 0.30) {
+      _resetTaps();
+      if (peak == 1) {
+        _switchPage(dx < 0 ? 1 : -1); // left → next page, right → prev
+      } else if (peak >= 2) {
+        _insertPageBySwipe(after: dx < 0); // left → insert after, right → insert before
+      }
+      return;
+    }
+
+    // Otherwise: a stationary short touch is a tap → feed the double-tap detector.
+    if (!moved && durMs <= _kTapMaxMs) {
+      _handleTap(peak, endPos, e.timeStamp);
+    } else {
+      _resetTaps();
+    }
+  }
+
+  /// A completed tap with [count] fingers. A second tap of the same count within the double-tap
+  /// window (and near the first) fires the action; otherwise this becomes the new first tap.
+  void _handleTap(int count, Offset pos, Duration now) {
+    if (count < 1 || count > 3) {
+      _resetTaps();
+      return;
+    }
+    final (Duration? lastTime, Offset lastPos) = switch (count) {
+      1 => (_tap1Time, _tap1Pos),
+      2 => (_tap2Time, _tap2Pos),
+      _ => (_tap3Time, _tap3Pos),
+    };
+    final isDouble = lastTime != null &&
+        (now - lastTime).inMilliseconds <= _kDoubleTapMaxMs &&
+        (pos - lastPos).distance <= _kDoubleTapSlopPx;
+    _resetTaps();
+    if (isDouble) {
+      switch (count) {
+        case 1:
+          _toggleToolbar();
+        case 2:
+          _doUndo();
+        default:
+          _doRedo();
+      }
+    } else {
+      switch (count) {
+        case 1:
+          _tap1Time = now;
+          _tap1Pos = pos;
+        case 2:
+          _tap2Time = now;
+          _tap2Pos = pos;
+        default:
+          _tap3Time = now;
+          _tap3Pos = pos;
+      }
+    }
+  }
+
+  void _resetTaps() {
+    _tap1Time = _tap2Time = _tap3Time = null;
+  }
+
+  /// 1-finger double-tap: hide/show the floating toolbar. When hidden the pen reclaims the top
+  /// strip (setToolbarInset 0); when shown it is excluded again so stylus taps hit the buttons.
+  void _toggleToolbar() {
+    setState(() => _toolbarHidden = !_toolbarHidden);
+    _bridge.setToolbarInset(_toolbarHidden ? 0 : _kToolbarH * _dpr);
+  }
+
+  Future<void> _insertPageBySwipe({required bool after}) async {
+    if (_pageBusy || !_ready) return;
+    _pageBusy = true;
+    final ref = _pages[_pageIndex];
+    final size = MediaQuery.of(context).size;
+    final w = ref.data.width > 0 ? ref.data.width : size.width * _dpr;
+    final h = ref.data.height > 0 ? ref.data.height : size.height * _dpr;
+    final created = await widget.worker.insertPage(widget.notebookId, ref.pageId, !after, w, h);
+    _pages = await widget.worker.openNotebook(widget.notebookId);
+    final i = _pages.indexWhere((p) => p.pageId == created.pageId);
+    _pageIndex = i < 0 ? _pageIndex : i;
+    _undo.clear();
+    _histVersion.value++;
+    _selection.clear();
+    _selBounds = null;
+    await _loadPage();
+    _repaintPanelNextFrame();
+    _pageBusy = false;
+    if (mounted) _snack(after ? 'Inserted page after' : 'Inserted page before');
+  }
+
   // ── Build ─────────────────────────────────────────────────────────────────────
 
   @override
@@ -885,19 +1088,19 @@ class _NotebookScreenState extends State<NotebookScreen> {
     _dpr = MediaQuery.of(context).devicePixelRatio;
     return Scaffold(
       backgroundColor: Colors.white,
-      body: SafeArea(
-        child: Column(
-          children: [
-            _toolbar(),
-            const Divider(height: 1, thickness: 1, color: Colors.black),
-            Expanded(
-              child: LayoutBuilder(builder: (context, constraints) {
-                return Stack(
-                  children: [
-                    Positioned.fill(
-                      child: CustomPaint(
+      // The page is full-screen; the toolbar floats over it (matching native), and the pen region
+      // excludes the toolbar strip (setToolbarInset) so stylus taps hit the buttons.
+      body: Stack(
+        children: [
+          Positioned.fill(
+            child: LayoutBuilder(builder: (context, constraints) {
+              return Stack(
+                children: [
+                  Positioned.fill(
+                    child: CustomPaint(
                         // The painter pads the outline itself, so pass the raw (unpadded) bounds.
                         painter: PagePainter(List.of(_objects), _dpr,
+                            template: _template,
                             selection: () {
                               final raw = _rawBounds(_selection);
                               return raw != null ? [raw] : const <BoundingBox>[];
@@ -907,6 +1110,18 @@ class _NotebookScreenState extends State<NotebookScreen> {
                       ),
                     ),
                     Positioned.fill(child: _surface()),
+                    // Finger-swipe layer: translucent + touch-filtered, so the stylus still reaches
+                    // Onyx and the surface below. Sits under the text/selection overlays, which take
+                    // priority when present. 1-finger = flip page, 2-finger = insert page.
+                    Positioned.fill(
+                      child: Listener(
+                        behavior: HitTestBehavior.translucent,
+                        onPointerDown: _onSwipeDown,
+                        onPointerMove: _onSwipeMove,
+                        onPointerUp: _onSwipeEnd,
+                        onPointerCancel: _onSwipeEnd,
+                      ),
+                    ),
                     // Text mode: a transparent layer above the (suspended) Onyx surface captures the
                     // placement/edit tap.
                     if (_mode == _Mode.text)
@@ -934,10 +1149,12 @@ class _NotebookScreenState extends State<NotebookScreen> {
                 );
               }),
             ),
+            // The toolbar floats over the full-screen page (the pen region excludes this strip).
+            // 1-finger double-tap hides it; the pen then reclaims the full screen.
+            if (!_toolbarHidden) Positioned(top: 0, left: 0, right: 0, child: _toolbar()),
           ],
         ),
-      ),
-    );
+      );
   }
 
   Widget _toolbar() {
@@ -951,8 +1168,11 @@ class _NotebookScreenState extends State<NotebookScreen> {
       if (_clipboard.isNotEmpty) TbButton('Paste', onTap: _pasteClipboard),
     ];
     return Container(
-      height: 56,
-      color: Colors.white,
+      height: _kToolbarH,
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        border: Border(bottom: BorderSide(color: Colors.black, width: 1)),
+      ),
       padding: const EdgeInsets.symmetric(horizontal: 8),
       child: Row(
         children: [
@@ -1013,10 +1233,12 @@ class _NotebookScreenState extends State<NotebookScreen> {
     final double leftL =
         (_selBounds!.x / _dpr).clamp(4.0, math.max(4.0, constraints.maxWidth - 120)).toDouble();
     final maxBarW = math.max(120.0, constraints.maxWidth - leftL - 4);
+    // Keep clear of the floating main toolbar strip at the top (unless it's hidden).
+    final minTop = _toolbarHidden ? 4.0 : _kToolbarH + 4;
     final aboveTop = _selBounds!.y / _dpr - barH - 6;
     final belowTop = (_selBounds!.y + _selBounds!.height) / _dpr + 6;
-    final double top = (aboveTop >= 4 ? aboveTop : belowTop)
-        .clamp(4.0, math.max(4.0, constraints.maxHeight - barH))
+    final double top = (aboveTop >= minTop ? aboveTop : belowTop)
+        .clamp(minTop, math.max(minTop, constraints.maxHeight - barH))
         .toDouble();
     final canConvert = _selectionIsPureStrokes && Recognition.instance.supported && !_recognizing;
     final items = <TbButton>[
@@ -1109,7 +1331,11 @@ class _NotebookScreenState extends State<NotebookScreen> {
           creationParamsCodec: const StandardMessageCodec(),
           onFocus: () => params.onFocusChanged(true),
         )
-          ..addOnPlatformViewCreatedListener(params.onPlatformViewCreated)
+          ..addOnPlatformViewCreatedListener((id) {
+            params.onPlatformViewCreated(id);
+            // Surface + channel now exist → exclude the floating-toolbar strip from the pen region.
+            _bridge.setToolbarInset(_kToolbarH * _dpr);
+          })
           ..create();
         return controller;
       },

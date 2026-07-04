@@ -44,6 +44,10 @@ class OnyxDrawingPlatformView(
                 spikeView.setDrawingEnabled(call.arguments as? Boolean ?: true)
                 result.success(null)
             }
+            "setToolbarInset" -> {
+                spikeView.setToolbarInset((call.arguments as? Number)?.toInt() ?: 0)
+                result.success(null)
+            }
             else -> result.notImplemented()
         }
     }

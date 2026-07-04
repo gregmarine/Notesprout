@@ -53,6 +53,14 @@ class PenBridge {
     } catch (_) {}
   }
 
+  /// Exclude the top [px] (the floating toolbar strip) from the pen region, so the page is
+  /// full-screen behind the toolbar yet stylus taps hit the toolbar buttons instead of drawing.
+  Future<void> setToolbarInset(double px) async {
+    try {
+      await _method.invokeMethod('setToolbarInset', px);
+    } catch (_) {}
+  }
+
   void dispose() {
     _method.setMethodCallHandler(null);
     onEvent = null;

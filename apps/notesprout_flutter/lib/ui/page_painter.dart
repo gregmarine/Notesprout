@@ -1,4 +1,5 @@
 import 'dart:math' as math;
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 
@@ -19,10 +20,17 @@ import '../domain/stroke.dart';
 /// engine; their embedded stroke fallback still draws here.)
 class PagePainter extends CustomPainter {
   PagePainter(this.objects, this.dpr,
-      {this.selection = const [], this.guidesV = const [], this.guidesH = const []});
+      {this.template,
+      this.selection = const [],
+      this.guidesV = const [],
+      this.guidesH = const []});
 
   final List<PageObject> objects;
   final double dpr;
+
+  /// The page's template (ruling/grid/background) — a decoded bitmap stretched to fill the page,
+  /// drawn underneath all content. Null for a blank page.
+  final ui.Image? template;
 
   /// Bounding boxes (px) to outline as the current lasso selection.
   final List<BoundingBox> selection;
@@ -38,6 +46,15 @@ class PagePainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     canvas.save();
     canvas.scale(1 / dpr);
+
+    // Template underlay: stretch the bitmap to fill the whole page area (px), matching native which
+    // draws it to the drawing-view rect. Drawn first so all content sits on top.
+    final t = template;
+    if (t != null) {
+      final dst = Rect.fromLTWH(0, 0, size.width * dpr, size.height * dpr);
+      final src = Rect.fromLTWH(0, 0, t.width.toDouble(), t.height.toDouble());
+      canvas.drawImageRect(t, src, dst, Paint()..filterQuality = FilterQuality.medium);
+    }
 
     for (final o in objects) {
       if (o is LineRender) _drawLine(canvas, o);
@@ -131,22 +148,19 @@ class PagePainter extends CustomPainter {
   void _drawHeading(Canvas canvas, HeadingRender h) {
     final rt = h.data.recognizedText;
     if (rt != null) {
-      // Recognized → scaled bold canvas text anchored at the box top-left. (Full markdown styling
-      // for multi-block text arrives in 2B; a heading is a single line, so this is faithful.)
-      final scale = switch (h.data.level) { 2 => 1.75, 3 => 1.5, _ => 2.0 };
-      final tp = TextPainter(
-        text: TextSpan(
-          text: HeadingObject.stripHeadingPrefix(rt),
-          style: TextStyle(
-            color: Colors.black,
-            fontSize: 24 * scale * dpr,
-            fontWeight: FontWeight.bold,
-            height: 1.0,
-          ),
-        ),
-        textDirection: TextDirection.ltr,
-      )..layout(maxWidth: h.box.width > 0 ? h.box.width : double.infinity);
-      tp.paint(canvas, Offset(h.box.x, h.box.y));
+      // Recognized → render the "## Title" markdown through the SAME path that measured the box,
+      // so heading font metrics match exactly. Width is unbounded because a heading is a single
+      // line and must never wrap (native draws it with maxLines=1). Feeding box.width back in wraps
+      // the last glyph: computeLineMetrics().width (the measured width) is fractionally narrower
+      // than the maxWidth TextPainter needs to keep the line unbroken.
+      MarkdownRender.layout(
+        canvas,
+        MarkdownParser.parse(rt),
+        widthPx: double.infinity,
+        basePx: 24 * dpr,
+        dpr: dpr,
+        origin: Offset(h.box.x, h.box.y),
+      );
     } else {
       for (final s in h.data.strokes) {
         _drawStroke(canvas, s.toStrokeData());

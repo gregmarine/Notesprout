@@ -69,6 +69,14 @@ class DbWorker {
   Future<List<PageRef>> openNotebook(String id) => _call('openNotebook', {'id': id});
   Future<PageRef> addPage(String id, double w, double h) =>
       _call('addPage', {'id': id, 'w': w, 'h': h});
+
+  /// Insert a page relative to [refPageId] ([before] ? before : after). Returns the new page.
+  Future<PageRef> insertPage(String id, String refPageId, bool before, double w, double h) =>
+      _call('insertPage', {'id': id, 'ref': refPageId, 'before': before, 'w': w, 'h': h});
+
+  /// Base64 PNG of a page's template (or null for blank/missing).
+  Future<String?> templateImage(String id, String templateId) =>
+      _call('templateImage', {'id': id, 'templateId': templateId});
   Future<List<StrokeRow>> strokes(String id, String layerId) =>
       _call('strokes', {'id': id, 'layer': layerId});
 
@@ -163,6 +171,12 @@ void _entry(_Init init) {
         case 'addPage':
           r = soil(req.args['id'] as String)
               .addPage(width: req.args['w'] as double, height: req.args['h'] as double);
+        case 'insertPage':
+          r = soil(req.args['id'] as String).insertPage(
+              req.args['ref'] as String, req.args['before'] as bool,
+              width: req.args['w'] as double, height: req.args['h'] as double);
+        case 'templateImage':
+          r = soil(req.args['id'] as String).templateImage(req.args['templateId'] as String);
         case 'strokes':
           r = soil(req.args['id'] as String).strokesForLayer(req.args['layer'] as String);
         case 'objects':
