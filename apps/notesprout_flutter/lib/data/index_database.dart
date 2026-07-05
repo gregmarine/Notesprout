@@ -3,6 +3,8 @@ import 'dart:convert';
 import 'package:sqlite3/sqlite3.dart';
 import 'package:uuid/uuid.dart';
 
+import 'recents.dart';
+
 const _uuid = Uuid();
 
 /// One notebook entry as seen by the global index (folder/notebook tree lives here, never on disk).
@@ -154,6 +156,24 @@ class IndexDatabase {
         (data['pageCount'] as num?)?.toInt() ?? 1,
       );
     }).toList();
+  }
+
+  /// Resolve device-local recent entries against the index (ports native `RecentsManager.resolve`):
+  /// drops entries whose notebook is missing/deleted, keeps input order (already newest-first), and
+  /// attaches the display name + full folder breadcrumb (`"Notebooks › A › B"`).
+  List<ResolvedRecent> resolveRecents(List<RecentEntry> entries) {
+    final out = <ResolvedRecent>[];
+    for (final e in entries) {
+      final rows = _db.select(
+        "SELECT name, parentId FROM objects WHERE id = ? AND type = 'notebook' AND deletedAt IS NULL",
+        [e.notebookId],
+      );
+      if (rows.isEmpty) continue; // pruned: notebook gone
+      final folderPath =
+          breadcrumb(rows.first['parentId'] as String?).map((c) => c.name).join(' › ');
+      out.add(ResolvedRecent(e.notebookId, rows.first['name'] as String, folderPath, e.timestamp));
+    }
+    return out;
   }
 
   /// Bump updatedAt (call after edits so the notebook sorts to the top).

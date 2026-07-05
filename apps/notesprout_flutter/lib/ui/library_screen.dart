@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../data/db_worker.dart';
 import '../data/index_database.dart';
+import '../main.dart';
 import 'notebook_screen.dart';
 import 'overflow_toolbar.dart';
 
@@ -17,7 +19,7 @@ class LibraryScreen extends StatefulWidget {
   State<LibraryScreen> createState() => _LibraryScreenState();
 }
 
-class _LibraryScreenState extends State<LibraryScreen> {
+class _LibraryScreenState extends State<LibraryScreen> with RouteAware {
   String? _folderId; // null == root
   List<LibraryEntry> _entries = [];
   List<Crumb> _crumbs = [const Crumb(null, 'Notebooks')];
@@ -27,6 +29,24 @@ class _LibraryScreenState extends State<LibraryScreen> {
     super.initState();
     _refresh();
   }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final route = ModalRoute.of(context);
+    if (route is PageRoute) appRouteObserver.subscribe(this, route);
+  }
+
+  @override
+  void dispose() {
+    appRouteObserver.unsubscribe(this);
+    super.dispose();
+  }
+
+  // Returning to the library from a notebook: restore the system bars the notebook hid (it runs
+  // immersive; see appRouteObserver in main.dart for why this lives here, not in the notebook).
+  @override
+  void didPopNext() => SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
 
   Future<void> _refresh() async {
     final entries = await widget.worker.browse(_folderId);

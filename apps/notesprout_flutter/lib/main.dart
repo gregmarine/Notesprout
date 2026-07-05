@@ -8,6 +8,12 @@ import 'data/db_worker.dart';
 import 'recognition/handwriting_recognizer.dart';
 import 'ui/library_screen.dart';
 
+/// App-wide page-route observer so screens can react to becoming front-most again. Used to restore
+/// the system nav/status bars when returning to the library (the notebook screen is immersive) —
+/// doing it here rather than in the notebook's dispose avoids a race with an incoming notebook
+/// during a Recents switch (pushReplacement runs the new screen's initState before the old dispose).
+final RouteObserver<PageRoute<dynamic>> appRouteObserver = RouteObserver<PageRoute<dynamic>>();
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   // On Android use the app-external files dir (== getExternalFilesDir(null)) so .soil files can be
@@ -35,6 +41,7 @@ class NotesproutApp extends StatelessWidget {
     return MaterialApp(
       title: 'Notesprout',
       debugShowCheckedModeBanner: false,
+      navigatorObservers: [appRouteObserver],
       theme: ThemeData(
         scaffoldBackgroundColor: Colors.white,
         splashFactory: NoSplash.splashFactory,

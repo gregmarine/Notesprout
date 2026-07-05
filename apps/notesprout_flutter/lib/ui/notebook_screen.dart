@@ -31,6 +31,7 @@ import 'nb_icons.dart';
 import 'overflow_toolbar.dart';
 import 'toolbar_registry.dart';
 import 'page_painter.dart';
+import 'recents_panel.dart';
 import 'text_dialog.dart';
 import 'toc_panel.dart';
 
@@ -148,6 +149,7 @@ class _NotebookScreenState extends State<NotebookScreen> {
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
     _bridge.onEvent = _onPen;
     if (_tbConfig.floatX >= 0) _floatPos = Offset(_tbConfig.floatX, _tbConfig.floatY);
+    AppSettings.instance.recordRecentOpen(widget.notebookId); // device-local recents (fire-and-forget)
     _init();
   }
 
@@ -159,11 +161,12 @@ class _NotebookScreenState extends State<NotebookScreen> {
 
   @override
   void dispose() {
-    // Restore system bars for the (non-immersive) library.
-    SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+    // Note: system bars are restored by the library (via appRouteObserver.didPopNext), NOT here —
+    // doing it in dispose would clobber an incoming notebook's immersive mode during a Recents switch.
     _bridge.dispose();
     _histVersion.dispose();
     widget.worker.closeNotebook(widget.notebookId, _pages.length);
+    AppSettings.instance.recordRecentClose(widget.notebookId); // refresh recents timestamp
     super.dispose();
   }
 
@@ -1268,6 +1271,8 @@ class _NotebookScreenState extends State<NotebookScreen> {
         return TbButton(label, icon: icon, onTap: () => _insertPageBySwipe(after: true));
       case 'toc':
         return TbButton(label, icon: icon, onTap: _openToc);
+      case 'recents':
+        return TbButton(label, icon: icon, onTap: _openRecents);
       case 'toolbarSettings':
         return TbButton(label, icon: icon, onTap: _openCustomizeToolbar);
       default:
@@ -1307,6 +1312,37 @@ class _NotebookScreenState extends State<NotebookScreen> {
     if (pageId == null || !mounted) return;
     final idx = _pages.indexWhere((p) => p.pageId == pageId);
     if (idx >= 0 && idx != _pageIndex) await _switchPage(idx - _pageIndex);
+  }
+
+  /// Recent Notebooks switcher: resolve the device-local list (excluding the open notebook), let the
+  /// user pick one, and switch to it via `pushReplacement` (this screen's dispose closes the current
+  /// notebook + refreshes its recents timestamp; the new screen records its own open).
+  Future<void> _openRecents() async {
+    if (!_ready) return;
+    final entries =
+        AppSettings.instance.recents.where((e) => e.notebookId != widget.notebookId).toList();
+    final resolved = await widget.worker.resolveRecents(entries);
+    if (!mounted) return;
+    // Prune any entries the index couldn't resolve (notebook deleted/missing).
+    final live = resolved.map((r) => r.notebookId).toSet();
+    final missing = entries.map((e) => e.notebookId).where((id) => !live.contains(id));
+    if (missing.isNotEmpty) AppSettings.instance.pruneRecents(missing);
+
+    await _bridge.setDrawingEnabled(false);
+    if (!mounted) {
+      await _bridge.setDrawingEnabled(true);
+      return;
+    }
+    final picked = await showRecentsPanel(context, resolved);
+    await _bridge.setDrawingEnabled(true);
+    if (picked == null || !mounted) return;
+    Navigator.of(context).pushReplacement(MaterialPageRoute(
+      builder: (_) => NotebookScreen(
+        worker: widget.worker,
+        notebookId: picked.notebookId,
+        title: picked.name,
+      ),
+    ));
   }
 
   Future<void> _openCustomizeToolbar() async {

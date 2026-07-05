@@ -5,6 +5,7 @@ import '../domain/page_object.dart';
 import '../domain/stroke.dart';
 import 'index_database.dart';
 import 'notebook_repository.dart';
+import 'recents.dart';
 import 'soil_database.dart';
 
 /// All SQLite access runs on a dedicated background isolate so the UI/EPD thread never blocks on
@@ -60,6 +61,10 @@ class DbWorker {
   /// Breadcrumb trail from root down to [folderId].
   Future<List<Crumb>> breadcrumb(String? folderId) =>
       _call('breadcrumb', {'folderId': folderId});
+
+  /// Resolve device-local recent entries into display rows (drops missing/deleted, keeps order).
+  Future<List<ResolvedRecent>> resolveRecents(List<RecentEntry> entries) =>
+      _call('resolveRecents', {'entries': [for (final e in entries) e.toJson()]});
 
   Future<String> createFolder(String name, String? parentId) =>
       _call('createFolder', {'name': name, 'parentId': parentId});
@@ -161,6 +166,10 @@ void _entry(_Init init) {
           r = repo.browse(req.args['parentId'] as String?);
         case 'breadcrumb':
           r = repo.breadcrumb(req.args['folderId'] as String?);
+        case 'resolveRecents':
+          r = repo.resolveRecents([
+            for (final m in (req.args['entries'] as List)) RecentEntry.fromJson(m as Map),
+          ]);
         case 'createFolder':
           r = repo.createFolder(req.args['name'] as String,
               parentId: req.args['parentId'] as String?);

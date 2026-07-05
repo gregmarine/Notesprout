@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'index_database.dart';
+import 'recents.dart';
 import 'soil_database.dart';
 
 /// Higher-level API over the global index + per-notebook `.soil` files. Mirrors the split in the
@@ -52,6 +53,9 @@ class NotebookRepository {
   List<Crumb> breadcrumb(String? folderId) => index.breadcrumb(folderId);
 
   List<NotebookEntry> listNotebooks() => index.notebooks();
+
+  /// Resolve device-local recent entries (id + timestamp) into display-ready rows.
+  List<ResolvedRecent> resolveRecents(List<RecentEntry> entries) => index.resolveRecents(entries);
 
   /// Open a notebook's `.soil` for reading/writing. Caller must [SoilDatabase.close] when done.
   SoilDatabase openNotebook(String notebookId) => SoilDatabase.open(soilPath(notebookId));
