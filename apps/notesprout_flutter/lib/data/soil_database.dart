@@ -25,6 +25,18 @@ class StrokeRow {
   final StrokeData data;
 }
 
+/// A recognized heading resolved for the Table of Contents: its id, owning [layerId] (→ page), the
+/// bounding-box top/left (document-order sort keys), level, and prefix-stripped title.
+class HeadingRow {
+  HeadingRow(this.id, this.layerId, this.top, this.left, this.level, this.title);
+  final String id;
+  final String layerId;
+  final double top;
+  final double left;
+  final int level;
+  final String title; // recognizedText with the "## " prefix stripped; "" if unrecognized
+}
+
 /// A single notebook's `.soil` file — the universal `notebook` table. Schema/DDL is byte-identical
 /// to the native app's `NotebookFactory.createBlankNotebook`, so files interoperate both ways.
 class SoilDatabase {
@@ -216,6 +228,23 @@ class SoilDatabase {
         case 'line':
           out.add(LineRender(id, box, LineObject.fromJson(data)));
       }
+    }
+    return out;
+  }
+
+  /// All non-deleted headings across the whole notebook, for the Table of Contents. Each is resolved
+  /// to its layer (→ page by the caller). Boxes are parsed to top/left for document-order sorting.
+  List<HeadingRow> headings() {
+    final rows = _db.select(
+        "SELECT id, parentId, boundingBox, data FROM notebook WHERE type = 'heading' AND deletedAt IS NULL");
+    final out = <HeadingRow>[];
+    for (final r in rows) {
+      final box = BoundingBox.fromJson(r['boundingBox'] as String);
+      final h = HeadingObject.fromJson(r['data'] as String);
+      final title = h.recognizedText == null
+          ? ''
+          : HeadingObject.stripHeadingPrefix(h.recognizedText!);
+      out.add(HeadingRow(r['id'] as String, r['parentId'] as String, box.y, box.x, h.level, title));
     }
     return out;
   }

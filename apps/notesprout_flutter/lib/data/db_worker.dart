@@ -84,6 +84,9 @@ class DbWorker {
   Future<List<PageObject>> objects(String id, String layerId) =>
       _call('objects', {'id': id, 'layer': layerId});
 
+  /// All recognized headings across the notebook, for the Table of Contents.
+  Future<List<HeadingRow>> headings(String id) => _call('headings', {'id': id});
+
   void insertStroke(String id, String layerId, String strokeId, StrokeData data) =>
       _fire('insertStroke',
           {'id': id, 'layer': layerId, 'strokeId': strokeId, 'json': data.toJson()});
@@ -181,6 +184,8 @@ void _entry(_Init init) {
           r = soil(req.args['id'] as String).strokesForLayer(req.args['layer'] as String);
         case 'objects':
           r = soil(req.args['id'] as String).objectsForLayer(req.args['layer'] as String);
+        case 'headings':
+          r = soil(req.args['id'] as String).headings();
         case 'insertStroke':
           soil(req.args['id'] as String).insertStroke(
               req.args['layer'] as String, StrokeData.fromJson(req.args['json'] as String),

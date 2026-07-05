@@ -11,6 +11,7 @@ import 'dart:ui' as ui;
 
 import '../core/lasso_geometry.dart';
 import '../core/snap_engine.dart';
+import '../core/toc.dart';
 import '../core/markdown/markdown_parser.dart';
 import '../core/markdown/markdown_render.dart';
 import '../core/undo_manager.dart';
@@ -31,6 +32,7 @@ import 'overflow_toolbar.dart';
 import 'toolbar_registry.dart';
 import 'page_painter.dart';
 import 'text_dialog.dart';
+import 'toc_panel.dart';
 
 const _uuid = Uuid();
 
@@ -993,14 +995,21 @@ class _NotebookScreenState extends State<NotebookScreen> {
       return;
     }
 
-    // Swipe (horizontal-dominant, past native's min-distance fraction) → flip / insert.
-    if (dx.abs() > dy.abs() && dx.abs() / MediaQuery.of(context).size.width >= 0.30) {
+    final size = MediaQuery.of(context).size;
+    // Horizontal-dominant swipe past the min-distance fraction → flip / insert.
+    if (dx.abs() > dy.abs() && dx.abs() / size.width >= 0.30) {
       _resetTaps();
       if (peak == 1) {
         _switchPage(dx < 0 ? 1 : -1); // left → next page, right → prev
       } else if (peak >= 2) {
         _insertPageBySwipe(after: dx < 0); // left → insert after, right → insert before
       }
+      return;
+    }
+    // 1-finger swipe DOWN (vertical-dominant, past the min-distance fraction) → Table of Contents.
+    if (peak == 1 && dy > 0 && dy.abs() > dx.abs() && dy.abs() / size.height >= 0.30) {
+      _resetTaps();
+      _openToc();
       return;
     }
 
@@ -1252,6 +1261,8 @@ class _NotebookScreenState extends State<NotebookScreen> {
         return TbButton(label, icon: icon, onTap: () => _insertPageBySwipe(after: false));
       case 'insertPageAfter':
         return TbButton(label, icon: icon, onTap: () => _insertPageBySwipe(after: true));
+      case 'toc':
+        return TbButton(label, icon: icon, onTap: _openToc);
       case 'toolbarSettings':
         return TbButton(label, icon: icon, onTap: _openCustomizeToolbar);
       default:
@@ -1272,6 +1283,25 @@ class _NotebookScreenState extends State<NotebookScreen> {
       prevGroup = spec.group;
     }
     return out;
+  }
+
+  /// Build the ToC tree off the worker and show the panel; navigate to the picked page. The pen is
+  /// suspended while the panel is up so a stylus can't draw on the canvas behind it.
+  Future<void> _openToc() async {
+    if (!_ready) return;
+    final headings = await widget.worker.headings(widget.notebookId);
+    if (!mounted) return;
+    final nodes = buildTocTree(headings, _pages);
+    await _bridge.setDrawingEnabled(false);
+    if (!mounted) {
+      await _bridge.setDrawingEnabled(true);
+      return;
+    }
+    final pageId = await showTocPanel(context, nodes, _pageIndex);
+    await _bridge.setDrawingEnabled(true);
+    if (pageId == null || !mounted) return;
+    final idx = _pages.indexWhere((p) => p.pageId == pageId);
+    if (idx >= 0 && idx != _pageIndex) await _switchPage(idx - _pageIndex);
   }
 
   Future<void> _openCustomizeToolbar() async {
