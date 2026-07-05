@@ -26,6 +26,7 @@ import '../domain/stroke.dart';
 import '../platform/pen_bridge.dart';
 import 'flutter_ink_surface.dart';
 import 'customize_toolbar_dialog.dart';
+import 'heading_dialog.dart';
 import 'line_dialog.dart';
 import 'nb_icons.dart';
 import 'overflow_toolbar.dart';
@@ -96,6 +97,7 @@ class _NotebookScreenState extends State<NotebookScreen> {
   Offset _dragTotal = Offset.zero;
   bool _movingSel = false;
   bool _pendingDismiss = false;
+  bool _selDownStylus = false; // the active selection touch is a stylus → a tap can open the editor
   int _lastPanelMs = 0; // throttle for live e-ink feedback during a drag
 
   // Snap-to-guide — default off; persisted device-local (mirrors native SnapPreferences).
@@ -481,6 +483,8 @@ class _NotebookScreenState extends State<NotebookScreen> {
 
   void _selDown(PointerDownEvent e) {
     if (_headingMenu != null) setState(() => _headingMenu = null); // any touch closes the popover
+    _selDownStylus =
+        e.kind == PointerDeviceKind.stylus || e.kind == PointerDeviceKind.invertedStylus;
     final px = e.localPosition.dx * _dpr, py = e.localPosition.dy * _dpr;
     if (_selBounds != null && _inBox(_selBounds!, px, py)) {
       _movingSel = true;
@@ -560,6 +564,9 @@ class _NotebookScreenState extends State<NotebookScreen> {
           pairs.add((before, after));
         }
         if (pairs.isNotEmpty) _pushMove(pairs);
+      } else if (_selDownStylus) {
+        // A stylus tap (no drag) on a single selected heading/text opens its editor.
+        _maybeEditOnTap(e.localPosition);
       }
       _repaintPanelNextFrame();
     } else if (_pendingDismiss) {
@@ -915,6 +922,60 @@ class _NotebookScreenState extends State<NotebookScreen> {
       setState(() => _headingMenu = null);
       await _convertToHeading(level);
     }
+  }
+
+  // ── Tap-to-edit a selected heading / text object ─────────────────────────────
+  /// A stylus tap inside a single selected heading/text object opens its editor (native's tap-on-
+  /// selected-object edit). Multi-object selections and taps outside the object's box are ignored.
+  void _maybeEditOnTap(Offset localPosition) {
+    if (_selection.length != 1) return;
+    final o = _selection.first;
+    final px = localPosition.dx * _dpr, py = localPosition.dy * _dpr;
+    if (!_inBox(o.box, px, py)) return;
+    if (o is HeadingRender) {
+      _editHeading(o);
+    } else if (o is TextRender) {
+      _editText(o);
+    }
+  }
+
+  /// Edit a heading's text via the simple dialog. The field shows only the words (no `#` prefix); the
+  /// level stays controlled by the H1/H2/H3 popover, and the prefix is re-applied canonically on save
+  /// so the stored text and level always agree (port of native `updateHeadingText`).
+  Future<void> _editHeading(HeadingRender h) async {
+    final result =
+        await showHeadingDialog(context, initial: HeadingObject.stripHeadingPrefix(h.data.recognizedText ?? ''));
+    if (result == null || !mounted) return;
+    final words = HeadingObject.stripHeadingPrefix(result.trim()); // tolerate a typed prefix
+    if (words.isEmpty) return; // native: blank → no change
+    final prefixed = HeadingObject.applyLevel(words, h.data.level)!;
+    final box = _measureBox(prefixed, h.box.x, h.box.y, _pages[_pageIndex].data.width);
+    final after = HeadingRender(h.id, box, HeadingObject(recognizedText: prefixed, level: h.data.level));
+    _replaceObject(after);
+    widget.worker.updateObject(widget.notebookId, h.id, box, after.data.toJson());
+    _pushUpdate(h, after);
+    setState(() => _reselect([h.id]));
+    _repaintPanelNextFrame();
+  }
+
+  /// Edit a text object via the same markdown dialog used to create one. Empty result deletes it.
+  Future<void> _editText(TextRender t) async {
+    final result = await showTextDialog(context, initial: t.data.text);
+    if (result == null || !mounted) return; // cancelled
+    if (result.isEmpty) {
+      widget.worker.softDelete(widget.notebookId, [t.id]);
+      _objects.remove(t);
+      _pushDelete([t]);
+      _endSelection(toPen: false);
+    } else {
+      final box = _measureBox(result, t.box.x, t.box.y, _pages[_pageIndex].data.width);
+      final after = TextRender(t.id, box, TextObject(text: result, strokes: t.data.strokes));
+      _replaceObject(after);
+      widget.worker.updateObject(widget.notebookId, t.id, box, after.data.toJson());
+      _pushUpdate(t, after);
+      setState(() => _reselect([t.id]));
+    }
+    _repaintPanelNextFrame();
   }
 
   // ── Lines / clear / page nav ─────────────────────────────────────────────────
