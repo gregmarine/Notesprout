@@ -2,12 +2,45 @@ import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 
 import '../core/markdown/markdown_parser.dart';
 import '../core/markdown/markdown_render.dart';
 import '../domain/objects.dart';
 import '../domain/page_object.dart';
 import '../domain/stroke.dart';
+
+/// One-time rasterization of the `sticker-2` glyph to a `ui.Image`, so [PagePainter] can composite
+/// a sticky-note icon into each note's box (the SVG is rendered once at a high resolution and scaled
+/// down per box). Kept off the paint path — the host loads it up front and passes the ready image in.
+class StickerIcon {
+  StickerIcon._();
+
+  static const _rasterPx = 256;
+  static ui.Image? _image;
+  static Future<void>? _loading;
+
+  /// The rasterized black glyph on transparent — null until [ensureLoaded] completes.
+  static ui.Image? get image => _image;
+
+  static Future<void> ensureLoaded() {
+    if (_image != null) return Future<void>.value();
+    return _loading ??= _load();
+  }
+
+  static Future<void> _load() async {
+    final info = await vg.loadPicture(
+        const SvgAssetLoader('assets/icons/ic_sticker_2.svg'), null);
+    final recorder = ui.PictureRecorder();
+    Canvas(recorder)
+      ..scale(_rasterPx / 24.0) // SVG viewBox is 24×24
+      ..drawPicture(info.picture);
+    final pic = recorder.endRecording();
+    _image = await pic.toImage(_rasterPx, _rasterPx);
+    info.picture.dispose();
+    pic.dispose();
+  }
+}
 
 /// Renders a page's committed content objects (the canonical `.soil` model) on every platform.
 ///
@@ -21,12 +54,17 @@ import '../domain/stroke.dart';
 class PagePainter extends CustomPainter {
   PagePainter(this.objects, this.dpr,
       {this.template,
+      this.stickerIcon,
       this.selection = const [],
       this.guidesV = const [],
       this.guidesH = const []});
 
   final List<PageObject> objects;
   final double dpr;
+
+  /// Rasterized `sticker-2` glyph (from [StickerIcon]) composited into each sticky note's box; null
+  /// until it has loaded (the icon simply doesn't paint that frame).
+  final ui.Image? stickerIcon;
 
   /// The page's template (ruling/grid/background) — a decoded bitmap stretched to fill the page,
   /// drawn underneath all content. Null for a blank page.
@@ -64,6 +102,13 @@ class PagePainter extends CustomPainter {
     }
     for (final o in objects) {
       if (o is TextRender) _drawText(canvas, o);
+    }
+    // Sticky-note icons — the embedded content is NEVER drawn on the page; only the icon (matching
+    // native, painted before the top-level strokes loop).
+    if (stickerIcon != null) {
+      for (final o in objects) {
+        if (o is StickyNoteRender) _drawStickyIcon(canvas, o);
+      }
     }
     for (final o in objects) {
       if (o is StrokeObject) _drawStroke(canvas, o.data);
@@ -187,6 +232,15 @@ class PagePainter extends CustomPainter {
         _drawStroke(canvas, s.toStrokeData());
       }
     }
+  }
+
+  // ── Sticky-note icon ──────────────────────────────────────────────────────
+  void _drawStickyIcon(Canvas canvas, StickyNoteRender n) {
+    final img = stickerIcon!;
+    final b = n.box;
+    final src = Rect.fromLTWH(0, 0, img.width.toDouble(), img.height.toDouble());
+    final dst = Rect.fromLTWH(b.x, b.y, b.width, b.height);
+    canvas.drawImageRect(img, src, dst, Paint()..filterQuality = FilterQuality.medium);
   }
 
   // ── Lines (page guides) ───────────────────────────────────────────────────

@@ -17,11 +17,14 @@ class PenEvent {
 /// registration-ordering race. (An EventChannel subscribed in initState reaches no native handler
 /// until the PlatformView is created later, silently dropping every event.)
 class PenBridge {
-  PenBridge() {
+  /// [channel] selects the native overlay: the notebook page uses the default `notesprout/onyx`;
+  /// the sticky-note editor uses its own `notesprout/onyx_sticky` so the two overlays' handlers never
+  /// clobber each other (a shared name would orphan the notebook's handler when the editor closes).
+  PenBridge({String channel = 'notesprout/onyx'}) : _method = MethodChannel(channel) {
     _method.setMethodCallHandler(_onCall);
   }
 
-  static const _method = MethodChannel('notesprout/onyx');
+  final MethodChannel _method;
 
   /// Set by the host screen to receive committed-stroke / eraser events.
   void Function(PenEvent event)? onEvent;
@@ -41,6 +44,10 @@ class PenBridge {
   Future<void> setPen() => _invoke('setPen');
   Future<void> setEraser() => _invoke('setEraser');
   Future<void> clear() => _invoke('clear');
+
+  /// Re-acquire the shared Onyx raw-drawing pipeline after a sub-editor (which owns its own overlay)
+  /// has closed — the native "gate" hands ownership back to this view. No-op off-BOOX.
+  Future<void> resume() => _invoke('resume');
 
   /// Hand the panel off to Flutter's committed layer — call AFTER Dart has painted its frame.
   Future<void> repaintPanel() => _invoke('repaintPanel');

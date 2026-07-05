@@ -28,6 +28,18 @@ class OnyxSpikeView(context: Context) : View(context) {
     companion object {
         private const val TAG = "OnyxSpike"
         private const val EPD_UPDATE_LIST_SIZE = 512
+
+        /**
+         * The view that currently OWNS the shared Onyx raw-drawing pipeline. The Onyx SDK exposes a
+         * single global EPD raw-drawing resource, so when two overlays coexist in one window (the
+         * notebook page + the sticky-note content editor), only one may hold an open session. This
+         * ownership token is the "gate": acquiring transfers ownership and closes the previous
+         * owner's session, and a view tears its session down on detach ONLY if it is still the owner.
+         * That way handing the pipeline between screens never releases the INCOMING view's fresh
+         * session (which a naive close-on-detach would do, leaving the returned-to screen unable to
+         * write until the notebook is fully reopened).
+         */
+        private var owner: OnyxSpikeView? = null
     }
 
     /** Emits pen events up to the PlatformView → Dart EventChannel. Set by the host. */
@@ -184,7 +196,12 @@ class OnyxSpikeView(context: Context) : View(context) {
 
     private fun openRawDrawing() {
         if (width == 0 || height == 0) return
-        Log.d(TAG, "openRawDrawing isSetup=$isSetup size=${width}x$height")
+        Log.d(TAG, "openRawDrawing isSetup=$isSetup size=${width}x$height owner=${owner === this}")
+        // Take ownership of the shared pipeline, closing whoever held it (the gate). Doing this
+        // BEFORE opening ours means a hand-off between screens can't leave two sessions fighting.
+        val prev = owner
+        if (prev != null && prev !== this) prev.closeRawDrawing()
+        owner = this
         if (!isSetup) {
             applyLimitRect()
             touchHelper.setStrokeWidth(3.0f).setStrokeColor(Color.BLACK).openRawDrawing()
@@ -198,6 +215,13 @@ class OnyxSpikeView(context: Context) : View(context) {
         if (isEraserMode || drawingPaused) touchHelper.setRawDrawingRenderEnabled(false)
         EpdController.setUpdListSize(EPD_UPDATE_LIST_SIZE)
     }
+
+    /**
+     * Re-acquire the shared raw-drawing pipeline on return to this view — another overlay (the
+     * sticky-note editor) may have owned it while we were away. Called by the host after a sub-editor
+     * closes; mirrors the native app regaining window focus on Activity resume.
+     */
+    fun resume() = openRawDrawing()
 
     private fun closeRawDrawing() {
         if (!isSetup) return
@@ -228,12 +252,26 @@ class OnyxSpikeView(context: Context) : View(context) {
 
     override fun onWindowFocusChanged(hasWindowFocus: Boolean) {
         super.onWindowFocusChanged(hasWindowFocus)
-        if (hasWindowFocus) openRawDrawing()
-        else if (isSetup) touchHelper.setRawDrawingEnabled(false)
+        // Regain focus (e.g. app returns to foreground): re-open only if we already own the pipeline
+        // or it's free — never STEAL it from another live overlay (the editor) on a focus event, or
+        // both views would thrash for ownership while the editor is up.
+        if (hasWindowFocus) {
+            if (owner == null || owner === this) openRawDrawing()
+        } else if (isSetup) {
+            touchHelper.setRawDrawingEnabled(false)
+        }
     }
 
     override fun onDetachedFromWindow() {
         super.onDetachedFromWindow()
-        closeRawDrawing()
+        // Release the shared pipeline ONLY if we still own it — if another view already took over
+        // (the gate), our session was closed on that hand-off and tearing down again would kill the
+        // new owner's session.
+        if (owner === this) {
+            closeRawDrawing()
+            owner = null
+        } else {
+            isSetup = false
+        }
     }
 }

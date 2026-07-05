@@ -8,9 +8,10 @@ import io.flutter.plugin.platform.PlatformViewFactory
 
 class OnyxDrawingPlatformViewFactory(
     private val messenger: BinaryMessenger,
+    private val channelName: String = "notesprout/onyx",
 ) : PlatformViewFactory(StandardMessageCodec.INSTANCE) {
 
     override fun create(context: Context, viewId: Int, args: Any?): PlatformView {
-        return OnyxDrawingPlatformView(context, messenger)
+        return OnyxDrawingPlatformView(context, messenger, channelName)
     }
 }

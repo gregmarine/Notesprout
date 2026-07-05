@@ -29,3 +29,11 @@ class LineRender extends PageObject {
   const LineRender(super.id, super.box, this.data);
   final LineObject data;
 }
+
+/// A `type = "sticky_note"` row. The [box] is the icon's fixed rect on the page (what lasso/move
+/// hit-test); the embedded content in [data] lives in its own pixel space and is edited in the
+/// content window — never drawn on the page (only the icon renders).
+class StickyNoteRender extends PageObject {
+  const StickyNoteRender(super.id, super.box, this.data);
+  final StickyNoteObject data;
+}

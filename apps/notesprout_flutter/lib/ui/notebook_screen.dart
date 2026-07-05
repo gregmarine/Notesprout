@@ -26,6 +26,7 @@ import '../domain/stroke.dart';
 import '../platform/pen_bridge.dart';
 import 'flutter_ink_surface.dart';
 import 'customize_toolbar_dialog.dart';
+import 'finger_gestures.dart';
 import 'heading_dialog.dart';
 import 'line_dialog.dart';
 import 'nb_icons.dart';
@@ -33,6 +34,7 @@ import 'overflow_toolbar.dart';
 import 'toolbar_registry.dart';
 import 'page_painter.dart';
 import 'recents_panel.dart';
+import 'sticky_note_editor.dart';
 import 'text_dialog.dart';
 import 'toc_panel.dart';
 
@@ -100,6 +102,13 @@ class _NotebookScreenState extends State<NotebookScreen> {
   bool _selDownStylus = false; // the active selection touch is a stylus → a tap can open the editor
   int _lastPanelMs = 0; // throttle for live e-ink feedback during a drag
 
+  // Lasso-tool loop capture. Like native (`setLassoMode`), the lasso tool SUSPENDS the SDK pen and
+  // captures the loop as Flutter stylus points (a live preview, NO EPD ink) — the old approach drew
+  // the loop as raw-drawing overlay ink, which left a phantom stroke and selected unreliably.
+  final List<Offset> _lassoPreview = []; // logical-space points of the in-flight loop
+  bool _lassoDrawing = false;
+  int _lastLassoMs = 0; // throttle live preview repaints on e-ink
+
   // Snap-to-guide — default off; persisted device-local (mirrors native SnapPreferences).
   bool _snapEnabled = AppSettings.instance.snapEnabled;
   BoundingBox? _dragOriginBox; // unpadded selection bbox at drag start (snap anchors)
@@ -108,27 +117,39 @@ class _NotebookScreenState extends State<NotebookScreen> {
 
   double _dpr = 1.0;
   bool _ready = false;
+  bool _stickerReady = false; // sticker-2 glyph rasterized → sticky-note icons can paint
 
   // Page template (read-only): decoded bitmap cache keyed by template-row id + the current page's.
   final Map<String, ui.Image?> _templateCache = {};
   ui.Image? _template;
 
-  // Finger-swipe gesture state (touch pointers only; stylus draws via Onyx). 1 finger flips pages,
-  // 2 fingers inserts a page.
-  int? _swipeFinger;
-  Offset _swipeStart = Offset.zero;
-  Offset _swipeLast = Offset.zero;
-  int _activeTouches = 0;
-  int _peakTouches = 0;
+  // Finger (touch-only) gestures — 1-finger swipe flips pages / opens ToC, 2-finger swipe inserts,
+  // multi-finger double-taps toggle the toolbar (1) / undo (2) / redo (3). The SAME shared recognizer
+  // the sticky-note editor uses, so gestures behave identically across both (native reuses its views).
+  late final FingerGestures _fingers = FingerGestures(
+    screenSize: () => MediaQuery.of(context).size,
+    onFingerDown: (pos) {
+      if (_overflowOpen && _pointOnPage(pos)) _dismissOverflow();
+    },
+    onFingerTapConsume: (pos) {
+      final note = _stickyNoteAt(pos);
+      if (note != null) {
+        _openStickyNote(note);
+        return true;
+      }
+      return false;
+    },
+    onToggleToolbar: _toggleToolbar,
+    onUndo: _doUndo,
+    onRedo: _doRedo,
+    onPageFlip: _switchPage,
+    onPageInsert: (after) => _insertPageBySwipe(after: after),
+    onTocOpen: _openToc,
+    debugLabel: 'NB_FINGER',
+  );
   bool _pageBusy = false; // guards page flip/insert against re-entrancy mid-gesture
+  bool _subEditorOpen = false; // a sticky-note editor route owns the EPD pipeline → suppress our surface
 
-  // Double-tap gesture state (touch only). A stationary, short tap that is NOT a swipe arms a
-  // per-finger-count first-tap memory; a matching second tap within the double-tap window fires:
-  // 1 finger = toggle toolbar · 2 fingers = undo · 3 fingers = redo (native's multi-finger taps).
-  Duration _gestureDownTime = Duration.zero; // first pointer-down of the current gesture
-  bool _gestureMoved = false; // latched once the primary finger travels past the tap slop
-  Duration? _tap1Time, _tap2Time, _tap3Time;
-  Offset _tap1Pos = Offset.zero, _tap2Pos = Offset.zero, _tap3Pos = Offset.zero;
   bool _toolbarHidden = false; // 1-finger double-tap hides the floating toolbar; pen reclaims strip
   double _toolbarExtent = _kToolbarH; // live toolbar cross-axis extent (grows when overflow opens)
   bool _overflowOpen = false; // secondary overflow row visible; dismissed on any page interaction
@@ -136,11 +157,6 @@ class _NotebookScreenState extends State<NotebookScreen> {
   Offset? _floatPos; // live top-left of the floating bar (null → center on first layout)
   final GlobalKey _floatKey = GlobalKey(); // measures the float bar's rect for the pen exclusion
   Rect? _floatRect; // last measured float-bar rect (logical) — exclusion + page hit-test source
-
-  static const double _kTapSlopPx = 18; // logical px; movement past this → not a tap
-  static const double _kDoubleTapSlopPx = 48; // second tap must land within this of the first
-  static const int _kTapMaxMs = 500; // a tap must lift within this (long-press timeout)
-  static const int _kDoubleTapMaxMs = 300; // second tap must follow within this window
 
   String get _layerId => _pages[_pageIndex].layerId;
 
@@ -158,6 +174,10 @@ class _NotebookScreenState extends State<NotebookScreen> {
     _bridge.onEvent = _onPen;
     if (_tbConfig.floatX >= 0) _floatPos = Offset(_tbConfig.floatX, _tbConfig.floatY);
     AppSettings.instance.recordRecentOpen(widget.notebookId); // device-local recents (fire-and-forget)
+    // Rasterize the sticky-note glyph once; repaint when ready so existing notes' icons appear.
+    StickerIcon.ensureLoaded().then((_) {
+      if (mounted) setState(() => _stickerReady = true);
+    });
     _init();
   }
 
@@ -360,6 +380,7 @@ class _NotebookScreenState extends State<NotebookScreen> {
         HeadingRender h => h.data.toJson(),
         TextRender t => t.data.toJson(),
         LineRender l => l.data.toJson(),
+        StickyNoteRender s => s.data.toJson(),
       };
 
   /// Record an already-applied action and refresh the ↶/↷ buttons.
@@ -399,6 +420,8 @@ class _NotebookScreenState extends State<NotebookScreen> {
       _dragOriginBox = null;
       _guidesV = const [];
       _guidesH = const [];
+      _lassoDrawing = false;
+      _lassoPreview.clear();
     });
     switch (m) {
       case _Mode.pen:
@@ -408,9 +431,9 @@ class _NotebookScreenState extends State<NotebookScreen> {
         _bridge.setDrawingEnabled(true);
         _bridge.setEraser();
       case _Mode.lasso:
-        // Loops draw as fast overlay ink; a selection then suspends the pen (see _enterSelection).
-        _bridge.setDrawingEnabled(true);
-        _bridge.setPen();
+        // Native lasso: SUSPEND the SDK pen so Flutter captures the loop (live preview, no EPD ink);
+        // a selection then keeps it suspended (see _enterSelection). Restores on exit via setMode(pen).
+        _bridge.setDrawingEnabled(false);
       case _Mode.text:
         _bridge.setDrawingEnabled(false);
     }
@@ -583,6 +606,38 @@ class _NotebookScreenState extends State<NotebookScreen> {
     }
   }
 
+  // ── Lasso-tool loop capture (stylus; SDK pen suspended, native setLassoMode parity) ──────────
+  static bool _isStylus(PointerDeviceKind k) =>
+      k == PointerDeviceKind.stylus || k == PointerDeviceKind.invertedStylus;
+
+  void _lassoDown(PointerDownEvent e) {
+    _lassoDrawing = true;
+    _lassoPreview
+      ..clear()
+      ..add(e.localPosition);
+    setState(() {});
+  }
+
+  void _lassoMove(PointerMoveEvent e) {
+    if (!_lassoDrawing) return;
+    _lassoPreview.add(e.localPosition);
+    final now = DateTime.now().millisecondsSinceEpoch;
+    if (now - _lastLassoMs >= 50) {
+      _lastLassoMs = now;
+      setState(() {});
+    }
+  }
+
+  void _lassoUp(PointerUpEvent e) {
+    if (!_lassoDrawing) return;
+    _lassoDrawing = false;
+    final pts = [for (final p in _lassoPreview) StrokePoint(p.dx * _dpr, p.dy * _dpr)];
+    setState(() => _lassoPreview.clear());
+    if (pts.length < 3) return;
+    final hit = lassoHitTest(pts, _objects, _dpr);
+    if (hit.ids.isNotEmpty) _enterSelection(hit, smart: false);
+  }
+
   void _pushMove(List<(PageObject, PageObject)> pairs) {
     _record(UndoAction(
       undo: () {
@@ -706,6 +761,7 @@ class _NotebookScreenState extends State<NotebookScreen> {
         HeadingRender _ => 'heading',
         TextRender _ => 'text',
         LineRender _ => 'line',
+        StickyNoteRender _ => 'sticky_note',
       };
 
   PageObject _withId(PageObject o, String id) => switch (o) {
@@ -713,6 +769,7 @@ class _NotebookScreenState extends State<NotebookScreen> {
         HeadingRender h => HeadingRender(id, h.box, h.data),
         TextRender t => TextRender(id, t.box, t.data),
         LineRender l => LineRender(id, l.box, l.data),
+        StickyNoteRender s => StickyNoteRender(id, s.box, s.data),
       };
 
   /// A translated copy of [o] (px). Strokes shift their points too; other objects just shift the box.
@@ -733,6 +790,7 @@ class _NotebookScreenState extends State<NotebookScreen> {
       HeadingRender h => HeadingRender(h.id, b, h.data),
       TextRender t => TextRender(t.id, b, t.data),
       LineRender l => LineRender(l.id, b, l.data),
+      StickyNoteRender s => StickyNoteRender(s.id, b, s.data),
     };
   }
 
@@ -998,6 +1056,85 @@ class _NotebookScreenState extends State<NotebookScreen> {
     _repaintPanelNextFrame();
   }
 
+  // ── Sticky notes ──────────────────────────────────────────────────────────────
+  static const double _kStickyIconSizeDp = 72; // native STICKY_NOTE_ICON_SIZE_DP
+
+  /// The topmost sticky-note icon whose box contains [logical] (screen-logical px), or null. Used by
+  /// the finger tap-to-open path.
+  StickyNoteRender? _stickyNoteAt(Offset logical) {
+    final px = logical.dx * _dpr, py = logical.dy * _dpr;
+    for (final o in _objects.reversed) {
+      if (o is StickyNoteRender && _inBox(o.box, px, py)) return o;
+    }
+    return null;
+  }
+
+  /// Insert a sticky note (native `insertStickyNote`): a fixed-size square icon box centered on the
+  /// page, then immediately open the editor so the user draws before placing it. On return the icon
+  /// is auto-selected in lasso mode, ready to drag into place.
+  Future<void> _insertStickyNote() async {
+    if (!_ready) return;
+    _dismissOverflow();
+    final page = _pages[_pageIndex].data;
+    final size = _kStickyIconSizeDp * _dpr;
+    final x = ((page.width - size) / 2).clamp(0.0, math.max(0.0, page.width - size)).toDouble();
+    final y = ((page.height - size) / 2).clamp(0.0, math.max(0.0, page.height - size)).toDouble();
+    final box = BoundingBox(x, y, size, size);
+    final id = _uuid.v4();
+    const data = StickyNoteObject();
+    final obj = StickyNoteRender(id, box, data);
+    _objects.add(obj);
+    widget.worker.insertObject(widget.notebookId, _layerId, id, 'sticky_note', box, data.toJson());
+    _pushInsert([obj]);
+    setState(() {});
+    await _openStickyNote(obj, initialCreate: true);
+  }
+
+  /// Open the sticky-note content editor for [note] (fully in-memory). The page overlay is suspended
+  /// while the editor route owns its own overlay; on return the page tool is restored and, if the
+  /// content changed, the new data JSON is persisted as one undo step. For an [initialCreate] the
+  /// icon is auto-selected in lasso mode for placement regardless of whether anything was drawn.
+  Future<void> _openStickyNote(StickyNoteRender note, {bool initialCreate = false}) async {
+    await _bridge.setDrawingEnabled(false); // suspend the page overlay; editor drives its own
+    if (!mounted) return;
+    // Single Onyx view at a time: stop building the page's platform view while the editor is on top,
+    // so only the editor's EPD surface is alive (two live overlays deliver conflicting touch streams).
+    setState(() => _subEditorOpen = true);
+    final edited = await Navigator.of(context).push<StickyNoteObject>(MaterialPageRoute(
+      builder: (_) => StickyNoteEditorScreen(initial: note.data),
+      fullscreenDialog: true,
+    ));
+    if (!mounted) return;
+    setState(() => _subEditorOpen = false); // remount the page's platform view
+    await _bridge.resume(); // re-acquire the EPD pipeline from the editor (native ownership gate)
+    _setMode(_mode); // re-enable the page overlay + restore the current tool
+    _applyToolbarExclusion();
+
+    var current = note;
+    if (edited != null && edited.toJson() != note.data.toJson()) {
+      final after = StickyNoteRender(note.id, note.box, edited);
+      _replaceObject(after);
+      widget.worker.updateObject(widget.notebookId, note.id, note.box, edited.toJson());
+      _pushUpdate(note, after);
+      current = after;
+    }
+
+    if (initialCreate) {
+      setState(() {
+        _mode = _Mode.lasso;
+        _smartSession = false;
+        _selection
+          ..clear()
+          ..add(current);
+        _selBounds = _computeSelBounds();
+      });
+      _bridge.setDrawingEnabled(false); // selection active → page pen stays suspended
+    } else if (edited != null) {
+      setState(() {});
+    }
+    _repaintPanelNextFrame();
+  }
+
   void _clear() {
     if (_objects.isNotEmpty) {
       final cleared = List<PageObject>.of(_objects);
@@ -1026,127 +1163,6 @@ class _NotebookScreenState extends State<NotebookScreen> {
     await _loadPage();
     _repaintPanelNextFrame();
     _pageBusy = false;
-  }
-
-  // ── Finger swipes: 1-finger flip / 2-finger insert (touch only; stylus draws via Onyx) ──────
-  void _onSwipeDown(PointerDownEvent e) {
-    if (e.kind != PointerDeviceKind.touch) return;
-    // A finger touch on the page (below the toolbar) dismisses an open overflow row. Touches within
-    // the toolbar band fall through to its buttons and must NOT dismiss.
-    if (_overflowOpen && _pointOnPage(e.localPosition)) _dismissOverflow();
-    _activeTouches++;
-    if (_activeTouches > _peakTouches) _peakTouches = _activeTouches;
-    if (_swipeFinger == null) {
-      _swipeFinger = e.pointer;
-      _swipeStart = e.localPosition;
-      _swipeLast = e.localPosition;
-      _gestureDownTime = e.timeStamp;
-      _gestureMoved = false;
-    }
-  }
-
-  void _onSwipeMove(PointerMoveEvent e) {
-    if (e.kind != PointerDeviceKind.touch || e.pointer != _swipeFinger) return;
-    _swipeLast = e.localPosition;
-    if (!_gestureMoved && (e.localPosition - _swipeStart).distance > _kTapSlopPx) {
-      _gestureMoved = true; // travelled too far to be a tap
-    }
-  }
-
-  void _onSwipeEnd(PointerEvent e) {
-    if (e.kind != PointerDeviceKind.touch) return;
-    if (_activeTouches > 0) _activeTouches--;
-    if (_activeTouches > 0) return; // wait until all fingers lift
-    final peak = _peakTouches;
-    final moved = _gestureMoved;
-    final durMs = (e.timeStamp - _gestureDownTime).inMilliseconds;
-    final endPos = _swipeLast;
-    final dx = _swipeLast.dx - _swipeStart.dx;
-    final dy = _swipeLast.dy - _swipeStart.dy;
-    _swipeFinger = null;
-    _peakTouches = 0;
-    _activeTouches = 0;
-    _gestureMoved = false;
-
-    // BOOX intercepts 3-finger touches and cancels the gesture (no UP) — treat a stationary,
-    // short 3-finger cancel as a completed tap so double-tap redo still works (matches native).
-    if (e is PointerCancelEvent) {
-      if (peak == 3 && !moved && durMs <= _kTapMaxMs) {
-        _handleTap(3, endPos, e.timeStamp);
-      } else {
-        _resetTaps();
-      }
-      return;
-    }
-
-    final size = MediaQuery.of(context).size;
-    // Horizontal-dominant swipe past the min-distance fraction → flip / insert.
-    if (dx.abs() > dy.abs() && dx.abs() / size.width >= 0.30) {
-      _resetTaps();
-      if (peak == 1) {
-        _switchPage(dx < 0 ? 1 : -1); // left → next page, right → prev
-      } else if (peak >= 2) {
-        _insertPageBySwipe(after: dx < 0); // left → insert after, right → insert before
-      }
-      return;
-    }
-    // 1-finger swipe DOWN (vertical-dominant, past the min-distance fraction) → Table of Contents.
-    if (peak == 1 && dy > 0 && dy.abs() > dx.abs() && dy.abs() / size.height >= 0.30) {
-      _resetTaps();
-      _openToc();
-      return;
-    }
-
-    // Otherwise: a stationary short touch is a tap → feed the double-tap detector.
-    if (!moved && durMs <= _kTapMaxMs) {
-      _handleTap(peak, endPos, e.timeStamp);
-    } else {
-      _resetTaps();
-    }
-  }
-
-  /// A completed tap with [count] fingers. A second tap of the same count within the double-tap
-  /// window (and near the first) fires the action; otherwise this becomes the new first tap.
-  void _handleTap(int count, Offset pos, Duration now) {
-    if (count < 1 || count > 3) {
-      _resetTaps();
-      return;
-    }
-    final (Duration? lastTime, Offset lastPos) = switch (count) {
-      1 => (_tap1Time, _tap1Pos),
-      2 => (_tap2Time, _tap2Pos),
-      _ => (_tap3Time, _tap3Pos),
-    };
-    final isDouble = lastTime != null &&
-        (now - lastTime).inMilliseconds <= _kDoubleTapMaxMs &&
-        (pos - lastPos).distance <= _kDoubleTapSlopPx;
-    _resetTaps();
-    if (isDouble) {
-      switch (count) {
-        case 1:
-          _toggleToolbar();
-        case 2:
-          _doUndo();
-        default:
-          _doRedo();
-      }
-    } else {
-      switch (count) {
-        case 1:
-          _tap1Time = now;
-          _tap1Pos = pos;
-        case 2:
-          _tap2Time = now;
-          _tap2Pos = pos;
-        default:
-          _tap3Time = now;
-          _tap3Pos = pos;
-      }
-    }
-  }
-
-  void _resetTaps() {
-    _tap1Time = _tap2Time = _tap3Time = null;
   }
 
   ToolbarPlacement get _placement => _tbConfig.placement;
@@ -1254,6 +1270,7 @@ class _NotebookScreenState extends State<NotebookScreen> {
                         // The painter pads the outline itself, so pass the raw (unpadded) bounds.
                         painter: PagePainter(List.of(_objects), _dpr,
                             template: _template,
+                            stickerIcon: _stickerReady ? StickerIcon.image : null,
                             selection: () {
                               final raw = _rawBounds(_selection);
                               return raw != null ? [raw] : const <BoundingBox>[];
@@ -1262,17 +1279,19 @@ class _NotebookScreenState extends State<NotebookScreen> {
                             guidesH: _guidesH),
                       ),
                     ),
-                    Positioned.fill(child: _surface()),
+                    // Suppressed while a sub-editor (sticky note) route owns the EPD pipeline, so the
+                    // page never runs a second live Onyx overlay behind it.
+                    if (!_subEditorOpen) Positioned.fill(child: _surface()),
                     // Finger-swipe layer: translucent + touch-filtered, so the stylus still reaches
                     // Onyx and the surface below. Sits under the text/selection overlays, which take
                     // priority when present. 1-finger = flip page, 2-finger = insert page.
                     Positioned.fill(
                       child: Listener(
                         behavior: HitTestBehavior.translucent,
-                        onPointerDown: _onSwipeDown,
-                        onPointerMove: _onSwipeMove,
-                        onPointerUp: _onSwipeEnd,
-                        onPointerCancel: _onSwipeEnd,
+                        onPointerDown: _fingers.down,
+                        onPointerMove: _fingers.move,
+                        onPointerUp: _fingers.end,
+                        onPointerCancel: _fingers.end,
                       ),
                     ),
                     // Text mode: a STYLUS-ONLY layer above the (suspended) Onyx surface captures the
@@ -1289,9 +1308,33 @@ class _NotebookScreenState extends State<NotebookScreen> {
                           onTapUp: (d) => _onPlacementTap(d.localPosition),
                         ),
                       ),
+                    // Lasso tool, no selection yet: the SDK pen is suspended, so Flutter captures the
+                    // stylus loop directly (live preview, no EPD ink) — native setLassoMode parity.
+                    // Off-BOOX the mouse loop still routes through FlutterInkSurface → _onPen instead.
+                    if (_mode == _Mode.lasso && _selection.isEmpty) ...[
+                      if (_lassoPreview.length > 1)
+                        Positioned.fill(
+                          child: IgnorePointer(
+                            child: CustomPaint(painter: _LassoPreviewPainter(List.of(_lassoPreview))),
+                          ),
+                        ),
+                      Positioned.fill(
+                        child: Listener(
+                          behavior: HitTestBehavior.translucent,
+                          onPointerDown: (e) {
+                            if (_isStylus(e.kind)) _lassoDown(e);
+                          },
+                          onPointerMove: (e) {
+                            if (_isStylus(e.kind)) _lassoMove(e);
+                          },
+                          onPointerUp: (e) {
+                            if (_isStylus(e.kind)) _lassoUp(e);
+                          },
+                        ),
+                      ),
+                    ],
                     // Selection active: the pen is suspended, so Flutter owns drag-to-move /
-                    // tap-to-dismiss. (Loop-drawing in the lasso tool stays on the Onyx overlay and
-                    // arrives via _onPen, so there is NO capture layer when nothing is selected.)
+                    // tap-to-dismiss.
                     if (_selectionActive) ...[
                       Positioned.fill(
                         child: Listener(
@@ -1339,6 +1382,8 @@ class _NotebookScreenState extends State<NotebookScreen> {
             icon: icon, selected: m == _Mode.text, onTap: () => _setMode(_Mode.text));
       case 'insertLines':
         return TbButton(label, icon: icon, onTap: _insertLines);
+      case 'stickyNote':
+        return TbButton(label, icon: icon, onTap: _insertStickyNote);
       case 'lasso':
         return TbButton(label,
             icon: icon, selected: m == _Mode.lasso, onTap: () => _setMode(_Mode.lasso));
@@ -1765,5 +1810,44 @@ class _NotebookScreenState extends State<NotebookScreen> {
         return controller;
       },
     );
+  }
+}
+
+/// Live preview of the in-flight lasso-tool loop, drawn in logical space above the surface (the SDK
+/// pen is suspended in lasso mode, so this is the only ink shown — no EPD stroke). Dashed to match
+/// native's `lassoPaint` (`DashPathEffect(12, 8)`), so it reads as a selection loop, not real ink.
+class _LassoPreviewPainter extends CustomPainter {
+  _LassoPreviewPainter(this.points);
+  final List<Offset> points;
+
+  @override
+  void paint(Canvas canvas, Size size) => paintLassoPreview(canvas, points);
+
+  @override
+  bool shouldRepaint(_LassoPreviewPainter old) => true;
+}
+
+/// Shared dashed-polyline rendering for the lasso preview (notebook + sticky editor).
+void paintLassoPreview(Canvas canvas, List<Offset> points) {
+  if (points.length < 2) return;
+  final paint = Paint()
+    ..color = Colors.black
+    ..style = PaintingStyle.stroke
+    ..strokeWidth = 1.5
+    ..strokeCap = StrokeCap.round
+    ..strokeJoin = StrokeJoin.round
+    ..isAntiAlias = true;
+  final full = Path()..moveTo(points.first.dx, points.first.dy);
+  for (var i = 1; i < points.length; i++) {
+    full.lineTo(points[i].dx, points[i].dy);
+  }
+  const dash = 10.0, gap = 6.0;
+  for (final metric in full.computeMetrics()) {
+    var d = 0.0;
+    while (d < metric.length) {
+      final end = math.min(d + dash, metric.length);
+      canvas.drawPath(metric.extractPath(d, end), paint);
+      d += dash + gap;
+    }
   }
 }

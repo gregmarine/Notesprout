@@ -186,3 +186,80 @@ class LineObject {
   static LineOrientation _orientation(String? s) =>
       s == 'VERTICAL' ? LineOrientation.vertical : LineOrientation.horizontal;
 }
+
+/// `type = "sticky_note"` payload — the note's embedded content, which travels inside the row's
+/// `data` JSON (the LinkObject precedent) so copy/cut/paste, page copy, and export all carry it.
+/// Wire-compatible with native `data/StickyNoteObject.kt` (kotlinx default `Json`,
+/// `encodeDefaults = false` → every field equal to its default is OMITTED on write, and the native
+/// decoder rejects unknown keys, so we emit ONLY the known keys).
+///
+/// Two coordinate spaces: the row's `boundingBox` is the icon rect on the page; the embedded content
+/// lives in the content window's own pixel space, recorded via [contentWidth]/[contentHeight].
+///
+/// The Flutter editor authors [strokes] only (native deferred in-editor heading/text/line insertion).
+/// The [headings]/[textObjects]/[lines]/[shapes] lists — which a native-authored note may carry — are
+/// preserved as **opaque passthrough** (raw decoded JSON, re-emitted verbatim) so a note round-trips
+/// losslessly without the port needing those embedded carriers yet.
+class StickyNoteObject {
+  const StickyNoteObject({
+    this.strokes = const [],
+    this.contentWidth = 0,
+    this.contentHeight = 0,
+    this.headings = const [],
+    this.textObjects = const [],
+    this.lines = const [],
+    this.shapes = const [],
+  });
+
+  final List<LiveStroke> strokes;
+  final double contentWidth;
+  final double contentHeight;
+
+  // Opaque passthrough — raw JSON maps preserved verbatim across a round-trip.
+  final List<dynamic> headings;
+  final List<dynamic> textObjects;
+  final List<dynamic> lines;
+  final List<dynamic> shapes;
+
+  StickyNoteObject copyWith({
+    List<LiveStroke>? strokes,
+    double? contentWidth,
+    double? contentHeight,
+  }) =>
+      StickyNoteObject(
+        strokes: strokes ?? this.strokes,
+        contentWidth: contentWidth ?? this.contentWidth,
+        contentHeight: contentHeight ?? this.contentHeight,
+        headings: headings,
+        textObjects: textObjects,
+        lines: lines,
+        shapes: shapes,
+      );
+
+  Map<String, dynamic> toMap() => {
+        if (strokes.isNotEmpty) 'strokes': strokes.map((s) => s.toMap()).toList(),
+        if (headings.isNotEmpty) 'headings': headings,
+        if (textObjects.isNotEmpty) 'textObjects': textObjects,
+        if (lines.isNotEmpty) 'lines': lines,
+        if (shapes.isNotEmpty) 'shapes': shapes,
+        if (contentWidth != 0) 'contentWidth': contentWidth,
+        if (contentHeight != 0) 'contentHeight': contentHeight,
+      };
+
+  String toJson() => jsonEncode(toMap());
+
+  static StickyNoteObject fromJson(String json) =>
+      fromMap(jsonDecode(json) as Map<String, dynamic>);
+
+  static StickyNoteObject fromMap(Map<String, dynamic> m) => StickyNoteObject(
+        strokes: ((m['strokes'] as List?) ?? const [])
+            .map((e) => LiveStroke.fromMap(e as Map<String, dynamic>))
+            .toList(),
+        contentWidth: (m['contentWidth'] as num?)?.toDouble() ?? 0,
+        contentHeight: (m['contentHeight'] as num?)?.toDouble() ?? 0,
+        headings: (m['headings'] as List?) ?? const [],
+        textObjects: (m['textObjects'] as List?) ?? const [],
+        lines: (m['lines'] as List?) ?? const [],
+        shapes: (m['shapes'] as List?) ?? const [],
+      );
+}

@@ -17,10 +17,11 @@ import io.flutter.plugin.platform.PlatformView
 class OnyxDrawingPlatformView(
     context: Context,
     messenger: BinaryMessenger,
+    channelName: String = "notesprout/onyx",
 ) : PlatformView, MethodChannel.MethodCallHandler {
 
     private val spikeView = OnyxSpikeView(context)
-    private val channel = MethodChannel(messenger, "notesprout/onyx").apply {
+    private val channel = MethodChannel(messenger, channelName).apply {
         setMethodCallHandler(this@OnyxDrawingPlatformView)
     }
 
@@ -40,6 +41,7 @@ class OnyxDrawingPlatformView(
             "setEraser" -> { spikeView.setEraser(); result.success(null) }
             "clear" -> { spikeView.clear(); result.success(null) }
             "repaintPanel" -> { spikeView.repaintPanel(); result.success(null) }
+            "resume" -> { spikeView.resume(); result.success(null) }
             "setDrawingEnabled" -> {
                 spikeView.setDrawingEnabled(call.arguments as? Boolean ?: true)
                 result.success(null)

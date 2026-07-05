@@ -210,7 +210,7 @@ class SoilDatabase {
   List<PageObject> objectsForLayer(String layerId) {
     final rows = _db.select(
         "SELECT id, type, boundingBox, data FROM notebook "
-        "WHERE parentId = ? AND deletedAt IS NULL AND type IN ('stroke','heading','text','line') "
+        "WHERE parentId = ? AND deletedAt IS NULL AND type IN ('stroke','heading','text','line','sticky_note') "
         "ORDER BY \"order\" ASC",
         [layerId]);
     final out = <PageObject>[];
@@ -227,6 +227,8 @@ class SoilDatabase {
           out.add(TextRender(id, box, TextObject.fromJson(data)));
         case 'line':
           out.add(LineRender(id, box, LineObject.fromJson(data)));
+        case 'sticky_note':
+          out.add(StickyNoteRender(id, box, StickyNoteObject.fromJson(data)));
       }
     }
     return out;
