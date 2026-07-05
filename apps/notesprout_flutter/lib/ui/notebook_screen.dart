@@ -720,9 +720,9 @@ class _NotebookScreenState extends State<NotebookScreen> {
   // ── Text placement ───────────────────────────────────────────────────────────
 
   /// A tap while in text mode: edit the text object under the point, or place a new one there.
-  Future<void> _onPlacementTap(TapUpDetails d) async {
-    final px = d.localPosition.dx * _dpr;
-    final py = d.localPosition.dy * _dpr;
+  Future<void> _onPlacementTap(Offset localPosition) async {
+    final px = localPosition.dx * _dpr;
+    final py = localPosition.dy * _dpr;
     TextRender? hit;
     for (final o in _objects.reversed) {
       if (o is TextRender && _inBox(o.box, px, py)) {
@@ -1191,13 +1191,18 @@ class _NotebookScreenState extends State<NotebookScreen> {
                         onPointerCancel: _onSwipeEnd,
                       ),
                     ),
-                    // Text mode: a transparent layer above the (suspended) Onyx surface captures the
-                    // placement/edit tap.
+                    // Text mode: a STYLUS-ONLY layer above the (suspended) Onyx surface captures the
+                    // placement/edit tap. It's translucent and restricted to stylus so finger touches
+                    // fall through to the gesture layer below (page swipes / double-tap toolbar etc.).
                     if (_mode == _Mode.text)
                       Positioned.fill(
                         child: GestureDetector(
-                          behavior: HitTestBehavior.opaque,
-                          onTapUp: _onPlacementTap,
+                          behavior: HitTestBehavior.translucent,
+                          supportedDevices: const {
+                            PointerDeviceKind.stylus,
+                            PointerDeviceKind.invertedStylus,
+                          },
+                          onTapUp: (d) => _onPlacementTap(d.localPosition),
                         ),
                       ),
                     // Selection active: the pen is suspended, so Flutter owns drag-to-move /
