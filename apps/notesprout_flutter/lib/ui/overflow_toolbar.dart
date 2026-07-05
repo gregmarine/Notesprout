@@ -47,6 +47,38 @@ double _itemWidth(TbButton it) {
   return tp.width + _kHPad * 2 + 2; // text + horizontal padding + 1dp border each side
 }
 
+/// Natural (uncollapsed) content width of [items] as laid out by [OverflowToolbar]: the sum of item
+/// widths plus one [spacing] between each pair of *buttons* (dividers sit flush, no surrounding gap).
+/// Callers add their own container padding/border. Lets a floating bar be centred on an anchor
+/// without a measure pass.
+double toolbarContentWidth(List<TbButton> items, {double spacing = 8}) {
+  var w = 0.0, buttons = 0;
+  for (final it in items) {
+    w += _itemWidth(it);
+    if (!it.isDivider) {
+      if (buttons > 0) w += spacing;
+      buttons++;
+    }
+  }
+  return w;
+}
+
+/// X-offset of the centre of `items[index]` from the row's left edge, using the same widths + spacing
+/// rules as [OverflowToolbar] (dividers flush; one [spacing] before each button after the first).
+/// Lets a sub-popover be anchored under the exact button that launched it.
+double toolbarButtonCenter(List<TbButton> items, int index, {double spacing = 8}) {
+  var x = 0.0, buttons = 0;
+  for (var i = 0; i < items.length; i++) {
+    final it = items[i];
+    final gap = (!it.isDivider && buttons > 0) ? spacing : 0.0;
+    final w = _itemWidth(it);
+    if (i == index) return x + gap + w / 2;
+    x += gap + w;
+    if (!it.isDivider) buttons++;
+  }
+  return x;
+}
+
 /// A single-row toolbar that never scrolls: it lays out as many [items] as fit the available width
 /// and collapses the rest behind a trailing "⋯" button that opens them in a popup menu (the native
 /// toolbar overflow pattern). Group dividers at the visible/hidden boundary are dropped so the row

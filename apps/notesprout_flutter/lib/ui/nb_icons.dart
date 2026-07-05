@@ -33,4 +33,18 @@ class NbIcons {
   static const stickyNote = '${_b}ic_sticker_2.svg';
   static const insertShape = '${_b}ic_convert_shape.svg';
   static const calendar = '${_b}ic_calendar.svg';
+
+  // Floating selection (lasso) context toolbar + heading-type submenu.
+  static const lassoCopy = '${_b}ic_copy_plus.svg';
+  static const lassoCut = '${_b}ic_cut.svg';
+  static const lassoDelete = '${_b}ic_lasso_delete.svg';
+  static const heading = '${_b}ic_heading.svg';
+  static const convertText = '${_b}ic_text_recognition.svg';
+  static const alignLeft = '${_b}ic_box_align_left.svg';
+  static const alignTop = '${_b}ic_box_align_top.svg';
+  static const snapOn = '${_b}ic_snap_on.svg';
+  static const snapOff = '${_b}ic_snap_off.svg';
+  static const h1 = '${_b}ic_h_1.svg';
+  static const h2 = '${_b}ic_h_2.svg';
+  static const h3 = '${_b}ic_h_3.svg';
 }

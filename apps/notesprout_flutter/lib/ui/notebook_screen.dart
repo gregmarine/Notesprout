@@ -41,6 +41,11 @@ const _uuid = Uuid();
 /// suspend it so Flutter can own pointer input (loop capture / selection drag / tap-to-place).
 enum _Mode { pen, eraser, lasso, text }
 
+/// Which mode the shared heading-type popover (H1/H2/H3) is in — mirrors native's `headingSubmenuMode`:
+/// [create] converts a pure-stroke selection to a heading at the picked level; [change] re-levels an
+/// existing single heading (its current level shown highlighted). Null → popover hidden.
+enum _HeadingMenu { create, change }
+
 /// One open notebook. Pen strokes update the in-memory model + fire a background `.soil` write; the
 /// live Onyx overlay shows them while writing, so we do NOT touch the EPD panel per stroke. A single
 /// quality refresh (`repaintPanel`) reconciles Flutter's committed layer only at transitions —
@@ -84,6 +89,7 @@ class _NotebookScreenState extends State<NotebookScreen> {
   BoundingBox? _selBounds; // padded union of the selection (px); drives overlay + floating toolbar
   bool _smartSession = false; // selection came from a smart-lasso in pen mode → dismiss returns to pen
   bool _recognizing = false; // handwriting recognition in flight (convert tools)
+  _HeadingMenu? _headingMenu; // shared H1/H2/H3 popover, anchored under the selection toolbar
 
   // Selection drag-move state.
   final Map<String, PageObject> _moveBefore = {};
@@ -444,6 +450,7 @@ class _NotebookScreenState extends State<NotebookScreen> {
         ..clear()
         ..addAll(_objects.where((o) => hit.ids.contains(o.id)));
       _selBounds = hit.bounds;
+      _headingMenu = null;
     });
     _bridge.setDrawingEnabled(false);
     _repaintPanelNextFrame();
@@ -460,6 +467,7 @@ class _NotebookScreenState extends State<NotebookScreen> {
       _movingSel = false;
       _pendingDismiss = false;
       _dragOriginBox = null;
+      _headingMenu = null;
       _guidesV = const [];
       _guidesH = const [];
     });
@@ -472,6 +480,7 @@ class _NotebookScreenState extends State<NotebookScreen> {
   }
 
   void _selDown(PointerDownEvent e) {
+    if (_headingMenu != null) setState(() => _headingMenu = null); // any touch closes the popover
     final px = e.localPosition.dx * _dpr, py = e.localPosition.dy * _dpr;
     if (_selBounds != null && _inBox(_selBounds!, px, py)) {
       _movingSel = true;
@@ -866,36 +875,47 @@ class _NotebookScreenState extends State<NotebookScreen> {
   void _snack(String msg) => ScaffoldMessenger.of(context)
       .showSnackBar(SnackBar(content: Text(msg), duration: const Duration(seconds: 2)));
 
-  Future<int?> _chooseHeadingLevel() => showDialog<int>(
-        context: context,
-        // E-ink: no full-screen dim behind the dialog (the default black54 scrim reads as a shadow
-        // over the page). The 1dp border carries the separation. See library_screen dialogs.
-        barrierColor: Colors.transparent,
-        builder: (ctx) => Dialog(
-          backgroundColor: Colors.white,
-          elevation: 0,
-          shadowColor: Colors.transparent,
-          surfaceTintColor: Colors.transparent,
-          shape: RoundedRectangleBorder(
-            side: const BorderSide(color: Colors.black, width: 1),
-            borderRadius: BorderRadius.circular(4),
-          ),
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(mainAxisSize: MainAxisSize.min, children: [
-              const Text('Heading level',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.black)),
-              const SizedBox(height: 12),
-              Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-                for (final lvl in const [1, 2, 3]) ...[
-                  _btn('H$lvl', false, () => Navigator.pop(ctx, lvl)),
-                  if (lvl != 3) const SizedBox(width: 8),
-                ],
-              ]),
-            ]),
-          ),
-        ),
-      );
+  /// The single selected heading, or null — drives the change-level popover button (native's
+  /// `btnHeadingMenu`, shown only when the selection is exactly one heading).
+  HeadingRender? get _selectedHeading =>
+      _selection.length == 1 && _selection.first is HeadingRender
+          ? _selection.first as HeadingRender
+          : null;
+
+  /// Re-level an existing heading (port of native `changeHeadingLevel`): re-prefix its recognizedText
+  /// via `applyLevel` (null stays null → a stroke-only heading keeps its box), re-measure for text
+  /// headings, apply as one undo step, and keep it selected.
+  void _changeHeadingLevel(HeadingRender heading, int newLevel) {
+    if (heading.data.level == newLevel) return;
+    final newText = HeadingObject.applyLevel(heading.data.recognizedText, newLevel); // null stays null
+    final box = newText == null
+        ? heading.box
+        : _measureBox(newText, heading.box.x, heading.box.y, _pages[_pageIndex].data.width);
+    final after =
+        HeadingRender(heading.id, box, HeadingObject(recognizedText: newText, level: newLevel));
+    _replaceObject(after);
+    widget.worker.updateObject(widget.notebookId, heading.id, box, after.data.toJson());
+    _pushUpdate(heading, after);
+    setState(() {
+      _reselect([heading.id]);
+      _headingMenu = null;
+    });
+    _repaintPanelNextFrame();
+  }
+
+  /// A level picked from the shared H1/H2/H3 popover: create a heading from strokes, or re-level the
+  /// selected heading, per [_headingMenu] mode.
+  Future<void> _pickHeadingLevel(int level) async {
+    final mode = _headingMenu;
+    if (mode == _HeadingMenu.change) {
+      final h = _selectedHeading;
+      setState(() => _headingMenu = null);
+      if (h != null) _changeHeadingLevel(h, level);
+    } else {
+      setState(() => _headingMenu = null);
+      await _convertToHeading(level);
+    }
+  }
 
   // ── Lines / clear / page nav ─────────────────────────────────────────────────
 
@@ -1524,32 +1544,13 @@ class _NotebookScreenState extends State<NotebookScreen> {
     if (_overflowOpen) setState(() => _overflowOpen = false);
   }
 
-  Widget _btn(String label, bool selected, VoidCallback onTap) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
-        decoration: BoxDecoration(
-          color: selected ? Colors.black : Colors.white,
-          border: Border.all(color: Colors.black, width: 1),
-          borderRadius: BorderRadius.circular(4),
-        ),
-        child: Text(label,
-            style: TextStyle(
-                color: selected ? Colors.white : Colors.black,
-                fontSize: 15,
-                fontWeight: FontWeight.w600)),
-      ),
-    );
-  }
-
-  /// A floating action bar anchored to the active selection (native's floating selection toolbar).
-  /// Horizontally scrollable + width-bounded so a crowded selection never overflows the page.
+  /// A floating action bar anchored to the active selection (native's floating selection toolbar) —
+  /// icon buttons in native order/visibility, width-bounded so a crowded selection overflows into the
+  /// "⋯" menu rather than off-page. Below/above it, the shared H1/H2/H3 popover when open.
   Widget _floatingToolbar(BoxConstraints constraints) {
     const barH = 46.0;
-    final double leftL =
-        (_selBounds!.x / _dpr).clamp(4.0, math.max(4.0, constraints.maxWidth - 120)).toDouble();
-    final maxBarW = math.max(120.0, constraints.maxWidth - leftL - 4);
+    const chrome = 14.0; // container horizontal padding (6×2) + 1dp border each side
+    const rowInset = 7.0; // border(1) + padding(6): row's left edge inside the bar
     // Keep clear of the floating main toolbar strip at the top (unless it's hidden).
     // Only the TOP bar overlaps the selection toolbar's anchor zone; clear it then.
     final minTop = (_toolbarHidden || _placement != ToolbarPlacement.top) ? 4.0 : _toolbarExtent + 4;
@@ -1558,28 +1559,96 @@ class _NotebookScreenState extends State<NotebookScreen> {
     final double top = (aboveTop >= minTop ? aboveTop : belowTop)
         .clamp(minTop, math.max(minTop, constraints.maxHeight - barH))
         .toDouble();
+    // Centre on the RAW content bounds — the same box PagePainter draws — not the (possibly lasso-
+    // shaped, off-centre) padded _selBounds.
+    final raw = _rawBounds(_selection) ?? _selBounds!;
+    final selCenter = (raw.x + raw.width / 2) / _dpr;
+    // Widest a centred bar can be: page minus 4px side margins.
+    final maxContentW = math.max(60.0, constraints.maxWidth - 8 - chrome);
+    // Left edge for a bar of [items] centred on [centerX], clamped to the page. Width comes from the
+    // TRUE rendered content (toolbarContentWidth), not OverflowToolbar's divider-inflated estimate.
+    double leftFor(List<TbButton> items, double centerX) {
+      final w = math.min(toolbarContentWidth(items), maxContentW) + chrome;
+      return (centerX - w / 2).clamp(4.0, math.max(4.0, constraints.maxWidth - w - 4)).toDouble();
+    }
+
     final canConvert = _selectionIsPureStrokes && Recognition.instance.supported && !_recognizing;
+    final heading = _selectedHeading;
     final items = <TbButton>[
-      TbButton('Snap', selected: _snapEnabled, onTap: _toggleSnap),
+      TbButton('Copy', icon: NbIcons.lassoCopy, onTap: _copySelection),
+      TbButton('Cut', icon: NbIcons.lassoCut, onTap: _cutSelection),
+      TbButton('Delete', icon: NbIcons.lassoDelete, onTap: _deleteSelection),
+      // Pure-stroke selection → convert to heading / text (native btnMakeHeading + btnConvertText).
       if (_selectionIsPureStrokes && Recognition.instance.supported) ...[
-        TbButton(_recognizing ? '…' : '→Text', enabled: canConvert, onTap: _convertToText),
-        TbButton('→H', enabled: canConvert, onTap: () async {
-          final lvl = await _chooseHeadingLevel();
-          if (lvl != null) await _convertToHeading(lvl);
-        }),
+        const TbButton.divider(),
+        TbButton('Make Heading',
+            icon: NbIcons.heading,
+            enabled: canConvert,
+            selected: _headingMenu == _HeadingMenu.create,
+            onTap: () => setState(() =>
+                _headingMenu = _headingMenu == _HeadingMenu.create ? null : _HeadingMenu.create)),
+        const TbButton.divider(),
+        TbButton('Convert to Text',
+            icon: NbIcons.convertText, enabled: canConvert, onTap: _convertToText),
       ],
+      // Single existing heading → change level (native btnHeadingMenu).
+      if (heading != null) ...[
+        const TbButton.divider(),
+        TbButton('Change heading level',
+            icon: NbIcons.heading,
+            selected: _headingMenu == _HeadingMenu.change,
+            onTap: () => setState(() =>
+                _headingMenu = _headingMenu == _HeadingMenu.change ? null : _HeadingMenu.change)),
+      ],
+      // ≥2 non-stroke objects → align & distribute (native btnAlignLeft + btnAlignTop).
       if (_alignEligible) ...[
-        TbButton('Align↓', onTap: () => _align(true)),
-        TbButton('Align→', onTap: () => _align(false)),
+        const TbButton.divider(),
+        TbButton('Align left', icon: NbIcons.alignLeft, onTap: () => _align(true)),
+        TbButton('Align top', icon: NbIcons.alignTop, onTap: () => _align(false)),
       ],
-      TbButton('Cut', onTap: _cutSelection),
-      TbButton('Copy', onTap: _copySelection),
-      TbButton('Delete', onTap: _deleteSelection),
+      const TbButton.divider(),
+      // Native shows the toggle *target* icon (off-icon when snap is on), no highlight.
+      TbButton(_snapEnabled ? 'Snap off' : 'Snap on',
+          icon: _snapEnabled ? NbIcons.snapOff : NbIcons.snapOn, onTap: _toggleSnap),
     ];
-    return Positioned(
-      left: leftL,
-      top: top,
-      child: Container(
+
+    final barLeft = leftFor(items, selCenter);
+    final bar = Positioned(left: barLeft, top: top, child: _selBar(barH, maxContentW, items));
+
+    // The shared H1/H2/H3 popover — stacked just past the bar, centred under the heading button that
+    // launched it, flipped above if it would clip the page.
+    Widget? popover;
+    final showPopover = (_headingMenu == _HeadingMenu.create && _selectionIsPureStrokes) ||
+        (_headingMenu == _HeadingMenu.change && heading != null);
+    if (showPopover) {
+      final curLevel = _headingMenu == _HeadingMenu.change ? heading!.data.level : null;
+      final pItems = <TbButton>[
+        for (final lvl in const [1, 2, 3])
+          TbButton('H$lvl',
+              icon: lvl == 1
+                  ? NbIcons.h1
+                  : lvl == 2
+                      ? NbIcons.h2
+                      : NbIcons.h3,
+              selected: curLevel == lvl,
+              onTap: () => _pickHeadingLevel(lvl)),
+      ];
+      final belowPop = top + barH + 6;
+      final abovePop = top - barH - 6;
+      final pTop = (belowPop + barH <= constraints.maxHeight - 4) ? belowPop : math.max(4.0, abovePop);
+      // Centre the popover on the launching heading button (its glyph is NbIcons.heading).
+      final hi = items.indexWhere((it) => it.icon == NbIcons.heading);
+      final headingCenterX = barLeft + rowInset + toolbarButtonCenter(items, hi);
+      final popLeft = leftFor(pItems, headingCenterX);
+      popover = Positioned(left: popLeft, top: pTop, child: _selBar(barH, maxContentW, pItems));
+    }
+
+    return Positioned.fill(child: Stack(children: [bar, ?popover]));
+  }
+
+  /// The bordered white pill shared by the selection toolbar and the heading popover; [maxContentW]
+  /// bounds the inner row so it overflows into the "⋯" menu rather than off-page.
+  Widget _selBar(double barH, double maxContentW, List<TbButton> items) => Container(
         height: barH,
         decoration: BoxDecoration(
           color: Colors.white,
@@ -1589,13 +1658,11 @@ class _NotebookScreenState extends State<NotebookScreen> {
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 6),
           child: ConstrainedBox(
-            constraints: BoxConstraints(maxWidth: maxBarW - 12),
+            constraints: BoxConstraints(maxWidth: maxContentW),
             child: OverflowToolbar(items, height: barH),
           ),
         ),
-      ),
-    );
-  }
+      );
 
   void _toggleSnap() {
     setState(() => _snapEnabled = !_snapEnabled);
