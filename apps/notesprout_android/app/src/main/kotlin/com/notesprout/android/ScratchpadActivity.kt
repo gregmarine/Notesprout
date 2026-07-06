@@ -1279,32 +1279,15 @@ class ScratchpadActivity : AppCompatActivity() {
             repository.loadPage(pageId, density)
         }
 
-        val bitmap = withContext(Dispatchers.IO) {
-            drawingView.buildRenderBitmap(
-                content.strokes,
-                null, // scratch pad has no template
-                content.headings,
-                content.textObjects,
-                content.lineObjects,
-                content.links,
-                stickyNotes  = content.stickyNotes,
-                shapeObjects = content.shapeObjects,
-            )
-        }
-
-        // Apply on main thread.
+        // GPU path: load objects first, then loadStrokesWithBitmap records the committed node from the
+        // in-memory content (no off-thread buildRenderBitmap needed).
         drawingView.loadHeadings(content.headings)
         drawingView.loadTextObjects(content.textObjects)
         drawingView.loadLineObjects(content.lineObjects)
         drawingView.loadLinks(content.links)
         drawingView.loadStickyNotes(content.stickyNotes)
         drawingView.loadShapeObjects(content.shapeObjects)
-        if (bitmap != null) {
-            drawingView.loadStrokesWithBitmap(content.strokes, bitmap, null)
-        } else {
-            drawingView.setTemplate(null)
-            drawingView.loadStrokes(content.strokes)
-        }
+        drawingView.loadStrokesWithBitmap(content.strokes, null, null)
 
         persistedStrokeIds.clear()
         persistedStrokeIds.addAll(content.strokes.map { it.id })
@@ -1415,7 +1398,7 @@ class ScratchpadActivity : AppCompatActivity() {
         currentPageId   = page.id
         currentLayerId  = repository.getLayerForPage(currentPageId)?.id ?: ""
         persistedStrokeIds.clear()
-        drawingView.eraseAll()
+        drawingView.clearForPageLoad()
         updatePageIndicator()
         loadCurrentPage()
         initHistory()
@@ -1433,7 +1416,7 @@ class ScratchpadActivity : AppCompatActivity() {
         currentLayerId  = repository.getLayerForPage(newPageId)?.id ?: ""
         persistedStrokeIds.clear()
         ScratchpadPreferences.saveCurrentPageIndex(this, currentPageIndex)
-        drawingView.eraseAll()
+        drawingView.clearForPageLoad()
         updatePageIndicator()
         loadCurrentPage()
         initHistory()
@@ -1451,7 +1434,7 @@ class ScratchpadActivity : AppCompatActivity() {
         currentLayerId  = if (currentPageId.isNotEmpty()) repository.getLayerForPage(currentPageId)?.id ?: "" else ""
         persistedStrokeIds.clear()
         ScratchpadPreferences.saveCurrentPageIndex(this, currentPageIndex)
-        drawingView.eraseAll()
+        drawingView.clearForPageLoad()
         updatePageIndicator()
         if (currentPageId.isNotEmpty()) {
             loadCurrentPage()

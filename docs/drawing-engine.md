@@ -1,11 +1,11 @@
 # Drawing Engine Architecture
 
 > Referenced from `CLAUDE.md`. Covers the two drawing engines, EPD/overlay rules, tool-state
-> invariants, performance rules, and the page snapshot system.
+> invariants, performance rules, and the committed-content render model.
 
 ## Files
 
-- `notebook/NotebookView.kt` — interface for both engines; all drawing, lasso, heading, snapshot ops
+- `notebook/NotebookView.kt` — interface for both engines; all drawing, lasso, heading, render ops
 - `notebook/OnyxNotebookView.kt` — BOOX: TouchHelper, RawInputCallback. `onPenLifted` fires on `onEndRawDrawing`. `onBeginRawDrawing` re-enables render guarded by `!isEraserMode`.
 - `notebook/GenericNotebookView.kt` — standard Canvas: two-layer Bitmap, stylus-only (`TOOL_TYPE_STYLUS` + `TOOL_TYPE_ERASER`), historical point capture. `onPenLifted` fires on `ACTION_UP`.
 - `NotebookActivity.kt` — fullscreen immersive, multi-page state, incremental save via `insertOrIgnore`. One-finger deliberate swipe for page navigation (three guards: distance ≥50% screen width, velocity ≥1.5× fling threshold, horizontal dominance). Two-finger swipe left/right inserts a page after/before current and navigates to it (same guards). Two-finger stationary double-tap = undo; three-finger stationary double-tap = redo. On BOOX the Onyx SDK intercepts 3-finger touches and sends `ACTION_CANCEL` before `ACTION_UP` — the 3-finger detector treats a cancel on an armed, stationary 3-finger gesture as tap completion.
@@ -77,41 +77,76 @@ The BOOX stylus barrel button is reported to Android as `TOOL_TYPE_ERASER` (not 
 
 **Save path:** Wrap INSERT OR IGNORE loops in `db.withTransaction {}`; track `persistedStrokeIds` set and skip `toJson()` for already-persisted strokes.
 
-**Load path:** `buildRenderBitmap()` on `Dispatchers.IO` — pre-builds white → template → strokes off the main thread; `loadStrokesWithBitmap()` on main thread swaps the pre-built bitmap (~12ms cost).
+**Load path:** deserialize objects + strokes off the main thread, then hand the in-memory lists to the view on the main thread (`loadStrokesWithBitmap(strokes, null, template)`) which records the committed `RenderNode` (see the render model below). No bitmap is rasterized at load. Stroke JSON parse is the dominant cost, so it is prefetched and cached (see "Neighbor prefetch cache").
 
 **Erase path:** `LiveStroke.boundingBox: RectF` pre-computed at creation; `eraseAtPath` builds an AABB and rejects non-intersecting strokes in O(4 floats). `throttledEraseRedraw()` redraws at most once per 60ms; `finalizeEraseRedraw()` forces one clean redraw on gesture end before `handwritingRepaint`.
 
 ---
 
-## Page Snapshot System
+## Committed-Content Render Model (RenderNode)
 
-Each page row's `data` JSON carries an optional `"snapshot"` field — a base64-encoded transparent-background PNG of all content (no schema change).
+Committed page content is drawn through a hardware `RenderNode` — the native equivalent of the
+Flutter port's retained Skia layer (API 29+; our `minSdk` is 29). There is **no** on-screen render
+bitmap and **no** on-load snapshot fast-path. Page load is: read objects + strokes from DB → record
+the node → draw.
 
-Rendering order: white → template → snapshot PNG → new content drawn this session.
+**The node (`committedNode = RenderNode("committed")`, both engines):**
+- `redrawCanvas()` records it: `committedNode.setPosition(0,0,w,h)` → `beginRecording(w,h)` →
+  `drawCommittedContent(rc)` → `endRecording()` → `invalidate()`. Sized in `onSizeChanged`.
+  (`GenericNotebookView` calls the recording from `commitActiveStroke` / its own `redrawCanvas`.)
+- `drawCommittedContent(canvas)` is the extracted draw routine: white → template → headings → text →
+  lines → shapes → links → sticky → strokes. It is used **both** to record the node and as the
+  software fallback below.
+- `onDraw` branches by canvas type:
+  `if (canvas.isHardwareAccelerated && committedNode.hasDisplayList()) canvas.drawRenderNode(committedNode) else drawCommittedContent(canvas)`.
+  A `RenderNode` can only be drawn on a hardware canvas; the software branch keeps the Onyx
+  `handwritingRepaint` panel-capture path correct (it re-draws the view through a software canvas).
+- The node is re-recorded only when committed content actually changes (stroke commit, erase finalize,
+  template change, load, undo/redo). During active writing only `invalidate()` fires — live ink is the
+  Onyx overlay, and `onDraw` just re-blits the cached node (a GPU texture blit, no per-stroke path
+  re-tessellation). `releaseResources()` calls `committedNode.discardDisplayList()`.
 
-**Snapshot rules:**
-- Transparent background only — do NOT fill white or draw the template.
-- `captureSnapshot()` returns `null` if strokes/headings/textObjects are all empty, or view isn't laid out (w=0/h=0).
+**Page-turn hold:** `clearForPageLoad()` (override) clears the in-memory lists and disables render but
+does **not** re-record the node or refresh — the outgoing page stays visible until the incoming page's
+`loadStrokesWithBitmap(...)` records the new node, so there is no blank flash between pages. Nav sites
+call `clearForPageLoad()` instead of `eraseAll()`.
 
-**When snapshots are captured:**
-- `setEraserMode(true)` — BEFORE `isEraserActive = true`
-- `setTemplate(bitmap)` — BEFORE `templateBitmap = bitmap`
-- `onWindowFocusChanged(false)` — backgrounded or dialog overlay
-- Page navigation — BEFORE `eraseAll()`
-- Close/back — synchronously in `closeNotebook()` on the main thread BEFORE `sealNotebook()` is dispatched to IO
+### Cover / thumbnail snapshot (persistence only — not the render path)
 
-**Critical:** `onWindowFocusChanged(false)` fires AFTER `finish()` — `soilDatabase` is already null. Any path that calls `closeNotebook()` must capture the snapshot itself. Never rely on `onWindowFocusChanged` as the close-path snapshot trigger.
+The page row's `data.snapshot` field (base64 PNG) still exists, but **only** as the cover/thumbnail
+asset — `CoverLoader`, page-index / link-picker thumbnails, `syncCoverToIndex(captureSnapshot())`,
+`NotebookMetaStore`, `DayHistoryRepository`, `NotebookCompactor`. `captureSnapshot()` builds its own
+self-contained bitmap independent of any render layer.
 
-**NOT on:** user-initiated `eraseAll()` or page delete — content is being discarded.
+**When captured:** close/back (synchronously in `closeNotebook()` before `sealNotebook()` dispatches
+to IO) and `syncCoverToIndex`. `captureSnapshot()` returns `null` if content is empty or the view
+isn't laid out (w=0/h=0). **NOT** on user-initiated `eraseAll()` or page delete.
+**Critical:** `onWindowFocusChanged(false)` fires AFTER `finish()` (`soilDatabase` already null), so
+any `closeNotebook()` path must capture the snapshot itself — never rely on `onWindowFocusChanged`.
 
-**Stale detection:** `NotebookDao.getMaxStrokeUpdatedAt(layerId)` — `SELECT MAX(updatedAt)` with **no** `deletedAt IS NULL` filter. Soft-deleted strokes have `updatedAt = deletedAt`, so erasures are detected as changes. If `maxStroke > page.updatedAt`, snapshot is stale. `persistSnapshot()` bumps `page.updatedAt`.
+*(Disabled fast-path code — `USE_SNAPSHOT_LOAD_CACHE = false`, `tryLoadSnapshotBitmap`,
+`PageLoadResult.usedSnapshot` — is left in place as harmless dead code behind the flag.)*
 
-**Two-phase page load (`NotebookActivity.loadCurrentPage`):**
-1. `setupPageIds(db)` — resolves `currentPageId` / `currentLayerId`
-2. `loadPageTemplateFromDb(db)` — decodes template bitmap (or null for blank)
-3. `tryLoadSnapshotBitmap(db, templateBitmap)` — staleness check + composite. Returns null on miss.
-4. **Fast path** (hit): display composite immediately; deserialize strokes in background via `setStrokeListSilently()`.
-5. **Full path** (miss): deserialize + `buildRenderBitmap` off-thread; capture and persist snapshot for next load.
+### Neighbor prefetch cache (`NotebookActivity`)
+
+Stroke JSON parse (~260–480ms on heavy pages) is the dominant load cost, so it is cached and
+prefetched:
+- `strokeCache` — LRU `LinkedHashMap` (access-order, bounded to `MAX_CACHED_PAGES = 6`), keyed by
+  `pageId`, guarded by `strokeCacheLock`. Each entry is `CachedStrokes(strokes, version)`.
+- **Version = `NotebookDao.getMaxContentUpdatedAt(layerId)`** — `SELECT MAX(updatedAt)` with **no**
+  `deletedAt IS NULL` filter, so soft-deleted (erased) strokes bump it. A ~10ms query, so the cache
+  is self-invalidating: any edit changes the version and the stale entry is discarded.
+- `deserializeStrokesFromDb(db)` — cache lookup validated inline against the current version; a hit
+  skips the parse entirely.
+- `parseStrokesForLayer(db, layerId)` — parses in parallel chunks across `Dispatchers.Default` when
+  the row count ≥ `PARALLEL_PARSE_THRESHOLD = 300`. `parseStrokeRow` takes a lean JSON path
+  (`LiveStroke.fromPointsJson`) when the row has no `pressure`/`tilt` fields.
+- `prefetchNeighbors()` — after a page displays, parses N-1 / N+1 into `strokeCache` (stale-while-
+  revalidate) so the next turn is a cache hit.
+
+**Leaving-page cover capture (`pageNeedsSnapshot`):** on navigation the outgoing page's snapshot is
+re-captured only when its content version (`getMaxContentUpdatedAt` vs `page.updatedAt`) shows a
+change since the last capture — dirty-gated so clean turns skip the work.
 
 ---
 
@@ -121,9 +156,9 @@ Rendering order: white → template → snapshot PNG → new content drawn this 
 - `history/UndoRedoAction.kt` — sealed class: stroke add/erase, page add/delete/clear/copy/paste/move, lasso erase/cut/delete/paste/move, heading create/remove/text-edit, text insert/edit/remove/convert, **scribble erase**
 - `history/UndoRedoManager.kt` — `undoStack` / `redoStack` as `ArrayDeque`. Redo stack cleared on any new user action.
 
-**Cross-page actions:** Never call `saveAndSwitchPage()` — it calls `eraseAll()` which wipes in-memory strokes. Use the two-phase approach: save/snapshot the leaving page inline → navigate → load from DB → apply the action → rebuild bitmap.
+**Cross-page actions:** Never call `saveAndSwitchPage()` — it calls `eraseAll()` which wipes in-memory strokes. Use the two-phase approach: capture the leaving page's cover snapshot inline (dirty-gated) → navigate → load from DB → apply the action → re-record the committed node.
 
-**Same-page stroke path:** Never calls `eraseAll()`. Updates in-memory stroke list directly, rebuilds bitmap off-thread with `currentTemplateBitmap` (`NotebookActivity` field set in `displayPage()`), swaps via `loadStrokesWithBitmap`. Keep `persistedStrokeIds` in sync.
+**Same-page stroke path:** Never calls `eraseAll()`. Updates the in-memory stroke list directly and re-records the committed node via `loadStrokesWithBitmap(strokes, null, currentTemplateBitmap)` (`NotebookActivity` field set in `displayPage()`). Keep `persistedStrokeIds` in sync.
 
 ---
 

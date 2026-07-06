@@ -911,25 +911,15 @@ class DayDetailActivity : AppCompatActivity() {
         }
 
         val template = currentTemplateBitmap
-        val bitmap = withContext(Dispatchers.IO) {
-            drawingView.buildRenderBitmap(
-                content.strokes, template, content.headings, content.textObjects,
-                content.lineObjects, content.links,
-                stickyNotes = content.stickyNotes, shapeObjects = content.shapeObjects,
-            )
-        }
+        // GPU path: load objects first, then loadStrokesWithBitmap records the committed node from the
+        // in-memory content (no off-thread buildRenderBitmap needed).
         drawingView.loadHeadings(content.headings)
         drawingView.loadTextObjects(content.textObjects)
         drawingView.loadLineObjects(content.lineObjects)
         drawingView.loadLinks(content.links)
         drawingView.loadStickyNotes(content.stickyNotes)
         drawingView.loadShapeObjects(content.shapeObjects)
-        if (bitmap != null) {
-            drawingView.loadStrokesWithBitmap(content.strokes, bitmap, template)
-        } else {
-            drawingView.setTemplate(template)
-            drawingView.loadStrokes(content.strokes)
-        }
+        drawingView.loadStrokesWithBitmap(content.strokes, null, template)
         persistedStrokeIds.clear()
         persistedStrokeIds.addAll(content.strokes.map { it.id })
     }

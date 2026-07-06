@@ -132,6 +132,9 @@ import com.notesprout.android.toc.TocRepository
 import com.notesprout.android.core.isBooxDevice
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -145,6 +148,20 @@ class NotebookActivity : AppCompatActivity() {
 
     companion object {
         private const val TAG = "Notesprout"
+
+        /**
+         * When true, page load uses the persisted `data.snapshot` PNG as an on-screen render cache
+         * (the pre-GPU fast path). The GPU RenderNode committed layer makes full object+stroke load
+         * fast enough that this cache is no longer needed for display; the snapshot is still written
+         * as the cover/thumbnail asset. Kept as a toggle during the spike rollout.
+         */
+        private const val USE_SNAPSHOT_LOAD_CACHE = false
+
+        /** Page-load stroke counts at/above this parse in parallel across cores; below, inline. */
+        private const val PARALLEL_PARSE_THRESHOLD = 300
+
+        /** Max pages of parsed strokes held in the prefetch LRU cache (current + neighbours + slack). */
+        private const val MAX_CACHED_PAGES = 6
 
         /** Intent extra key — the index UUID for the notebook (ObjectEntity id). */
         const val EXTRA_NOTEBOOK_ID   = "notebook_id"
@@ -360,6 +377,25 @@ class NotebookActivity : AppCompatActivity() {
 
     /** ID of the content layer under [currentPageId]. Set by [setupPageIds]. */
     private var currentLayerId: String = ""
+
+    // ── Prefetch stroke cache ─────────────────────────────────────────────────
+    /** Parsed strokes for a page + the [getMaxContentUpdatedAt] version they were parsed at. */
+    private class CachedStrokes(val strokes: List<LiveStroke>, val version: Long)
+
+    /**
+     * LRU cache of parsed strokes keyed by pageId, so a page turn to a prefetched (or recently
+     * visited) neighbour skips the ~260ms JSON parse. Bounded to [MAX_CACHED_PAGES]. Entries are
+     * validated on use against the DB content version, so an edit (which bumps the version) forces a
+     * re-parse — sharing the cached [LiveStroke]s with the view is safe because nothing mutates a
+     * stroke's points in place (moves create new strokes). Guarded by [strokeCacheLock] (touched from
+     * the load path and the prefetch coroutine).
+     */
+    private val strokeCache = object : LinkedHashMap<String, CachedStrokes>(8, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, CachedStrokes>): Boolean =
+            size > MAX_CACHED_PAGES
+    }
+    private val strokeCacheLock = Any()
+    private var prefetchJob: Job? = null
 
     // ── Persisted stroke tracking ─────────────────────────────────────────────
 
@@ -999,7 +1035,7 @@ class NotebookActivity : AppCompatActivity() {
                             UndoRedoAction.PageDeleted(deletedPageId, deletedPageIndex, deletedAt)
                         )
                         updateUndoRedoButtons()
-                        drawingView.eraseAll()
+                        drawingView.clearForPageLoad()
                         val result = withContext(Dispatchers.IO) { loadCurrentPage(db) }
                         displayPage(result)
                         updatePageIndicator()
@@ -3434,7 +3470,7 @@ class NotebookActivity : AppCompatActivity() {
                     selectedObjectIds.clear()
                     drawingView.setLassoOverlay(null, null)
                     hideFloatingSelectionToolbar()
-                    drawingView.eraseAll()
+                    drawingView.clearForPageLoad()
                     val result = withContext(Dispatchers.IO) { loadCurrentPage(db) }
                     displayPage(result)
                     updatePageIndicator()
@@ -3581,7 +3617,7 @@ class NotebookActivity : AppCompatActivity() {
             }
             undoRedoManager.push(UndoRedoAction.PageAdded(currentPageId, currentPageIndex))
             updateUndoRedoButtons()
-            drawingView.eraseAll()
+            drawingView.clearForPageLoad()
             val result = withContext(Dispatchers.IO) { loadCurrentPage(db) }
             displayPage(result)
             updatePageIndicator()
@@ -3603,7 +3639,7 @@ class NotebookActivity : AppCompatActivity() {
             }
             undoRedoManager.push(UndoRedoAction.PageAdded(currentPageId, currentPageIndex, insertedBefore = true))
             updateUndoRedoButtons()
-            drawingView.eraseAll()
+            drawingView.clearForPageLoad()
             val result = withContext(Dispatchers.IO) { loadCurrentPage(db) }
             displayPage(result)
             updatePageIndicator()
@@ -4130,21 +4166,85 @@ class NotebookActivity : AppCompatActivity() {
      * Also repopulates [persistedStrokeIds].
      * Must be called on [Dispatchers.IO] AFTER [setupPageIds] has set [currentLayerId].
      */
+    private fun parseStrokeRow(id: String, data: String): LiveStroke? = try {
+        // Fast path: rows with no per-point pressure/tilt (all current data) parse straight into PointF,
+        // skipping the StrokePoint allocation. Fall back to the full model when those samples exist.
+        if (data.indexOf("pressure") < 0 && data.indexOf("tilt") < 0) {
+            LiveStroke.fromPointsJson(id, data)
+        } else {
+            LiveStroke.fromStrokeData(id, StrokeData.fromJson(data))
+        }
+    } catch (e: Exception) {
+        Log.e(TAG, "deserializeStrokesFromDb: failed to parse stroke $id", e)
+        null
+    }
+
+    /**
+     * Parse every stroke row for [layerId] into [LiveStroke]s. Pure — no view/[persistedStrokeIds]
+     * side effects, so it is safe to call for the current page OR a prefetched neighbour. The JSON
+     * parse is CPU-bound and independent per stroke (the dominant page-load cost on dense pages), so
+     * it fans out across cores for big pages; chunk order is preserved (chunked → awaitAll → flatten)
+     * so stroke z-order is unchanged. Small pages parse inline to avoid dispatch overhead.
+     */
+    private suspend fun parseStrokesForLayer(db: SoilDatabase, layerId: String): List<LiveStroke> = coroutineScope {
+        val strokeObjects = db.notebookDao().getStrokesForLayer(layerId)
+        if (strokeObjects.size < PARALLEL_PARSE_THRESHOLD) {
+            strokeObjects.mapNotNull { parseStrokeRow(it.id, it.data) }
+        } else {
+            val cores = Runtime.getRuntime().availableProcessors().coerceIn(2, 8)
+            val chunkSize = (strokeObjects.size + cores - 1) / cores
+            strokeObjects.chunked(chunkSize)
+                .map { chunk -> async(Dispatchers.Default) { chunk.mapNotNull { parseStrokeRow(it.id, it.data) } } }
+                .awaitAll()
+                .flatten()
+        }
+    }
+
+    /**
+     * Load the current page's strokes, using the prefetch cache when valid. The cache is keyed by
+     * pageId and validated inline against [getMaxContentUpdatedAt] — a ~10ms query — so a hit is
+     * always fresh (any edit bumps the version → miss → re-parse). Neighbour pages are populated by
+     * [prefetchNeighbors], making sequential turns validated cache hits that skip the ~260ms parse.
+     */
     private suspend fun deserializeStrokesFromDb(db: SoilDatabase): List<LiveStroke> {
         val layerId = currentLayerId.takeIf { it.isNotEmpty() } ?: return emptyList()
-        val strokeObjects = db.notebookDao().getStrokesForLayer(layerId)
-        Slog.d(TAG) { "deserializeStrokesFromDb: found ${strokeObjects.size} rows" }
-        val result = strokeObjects.mapNotNull { obj ->
-            try {
-                LiveStroke.fromStrokeData(obj.id, StrokeData.fromJson(obj.data))
-            } catch (e: Exception) {
-                Log.e(TAG, "deserializeStrokesFromDb: failed to parse stroke ${obj.id}", e)
-                null
-            }
+        val pageId  = currentPageId
+        val version = db.notebookDao().getMaxContentUpdatedAt(layerId) ?: 0L
+        val cached  = synchronized(strokeCacheLock) { strokeCache[pageId] }
+        val result: List<LiveStroke>
+        if (cached != null && cached.version == version) {
+            result = cached.strokes
+        } else {
+            result = parseStrokesForLayer(db, layerId)
+            synchronized(strokeCacheLock) { strokeCache[pageId] = CachedStrokes(result, version) }
         }
         persistedStrokeIds.clear()
         persistedStrokeIds.addAll(result.map { it.id })
         return result
+    }
+
+    /**
+     * After a page displays, parse the immediate neighbours (N-1, N+1) into [strokeCache] so the next
+     * sequential turn is a validated cache hit. A cheap version check skips already-cached neighbours;
+     * the job is cancelled when navigation moves on. Call on the main thread.
+     */
+    private fun prefetchNeighbors() {
+        val db = soilDatabase ?: return
+        val ids = listOf(currentPageIndex - 1, currentPageIndex + 1)
+            .filter { it in pages.indices }
+            .map { pages[it].id }
+        if (ids.isEmpty()) return
+        prefetchJob?.cancel()
+        prefetchJob = lifecycleScope.launch(Dispatchers.IO) {
+            for (pageId in ids) {
+                val layer   = db.notebookDao().getLayerForPage(pageId) ?: continue
+                val version = db.notebookDao().getMaxContentUpdatedAt(layer.id) ?: 0L
+                val fresh   = synchronized(strokeCacheLock) { strokeCache[pageId]?.version == version }
+                if (fresh) continue
+                val parsed = parseStrokesForLayer(db, layer.id)
+                synchronized(strokeCacheLock) { strokeCache[pageId] = CachedStrokes(parsed, version) }
+            }
+        }
     }
 
     /**
@@ -4153,6 +4253,24 @@ class NotebookActivity : AppCompatActivity() {
      * laid out yet — callers fall through to the full render path.
      * Must be called on [Dispatchers.IO] AFTER [setupPageIds].
      */
+    /**
+     * True if [pageId]'s persisted cover snapshot is missing or stale (content changed since it was
+     * captured) — i.e. a fresh [captureSnapshot] is warranted when leaving the page. Reuses the same
+     * staleness signal the old load fast-path used ([getMaxContentUpdatedAt] vs page.updatedAt, which
+     * [persistSnapshot] bumps). Lets flip-through navigation skip the ~600ms main-thread PNG encode on
+     * unmodified pages. Must be called on [Dispatchers.IO].
+     */
+    private suspend fun pageNeedsSnapshot(db: SoilDatabase, pageId: String, layerId: String): Boolean {
+        if (pageId.isEmpty()) return false
+        val page = db.notebookDao().getObjectById(pageId) ?: return false
+        val hasSnapshot = try {
+            PageData.fromJson(page.data).snapshot?.isNotEmpty() == true
+        } catch (e: Exception) { false }
+        if (!hasSnapshot) return true
+        val maxContent = db.notebookDao().getMaxContentUpdatedAt(layerId) ?: 0L
+        return maxContent > page.updatedAt
+    }
+
     private suspend fun tryLoadSnapshotBitmap(db: SoilDatabase, templateBitmap: Bitmap?): Bitmap? {
         val pageId  = currentPageId.takeIf  { it.isNotEmpty() } ?: return null
         val layerId = currentLayerId.takeIf { it.isNotEmpty() } ?: return null
@@ -4211,13 +4329,17 @@ class NotebookActivity : AppCompatActivity() {
         val links           = loadLinksFromDb(db, currentLayerId)
         val stickyNotes     = loadStickyNotesFromDb(db, currentLayerId)
         val shapeObjects    = loadShapeObjectsFromDb(db, currentLayerId)
-        val snapshotBitmap  = tryLoadSnapshotBitmap(db, templateBitmap)
+        // GPU render path: always take the full object+stroke load (the view records its RenderNode
+        // committed layer); the on-load snapshot display cache is bypassed. captureSnapshot still
+        // writes page `data.snapshot` as the cover/thumbnail asset. Flip to re-enable the old cache.
+        val snapshotBitmap  = if (USE_SNAPSHOT_LOAD_CACHE) tryLoadSnapshotBitmap(db, templateBitmap) else null
         return if (snapshotBitmap != null) {
             PageLoadResult(emptyList(), templateBitmap, snapshotBitmap, usedSnapshot = true, headings = headings, textObjects = textObjects, lineObjects = lineObjects, links = links, stickyNotes = stickyNotes, shapeObjects = shapeObjects)
         } else {
+            // GPU path: deserialize strokes only. No off-thread buildRenderBitmap — the view records
+            // its committed RenderNode from these lists in displayPage → loadStrokesWithBitmap.
             val strokes      = deserializeStrokesFromDb(db)
-            val renderBitmap = drawingView.buildRenderBitmap(strokes, templateBitmap, headings, textObjects, lineObjects, links, stickyNotes, shapeObjects)
-            PageLoadResult(strokes, templateBitmap, renderBitmap, usedSnapshot = false, headings = headings, textObjects = textObjects, lineObjects = lineObjects, links = links, stickyNotes = stickyNotes, shapeObjects = shapeObjects)
+            PageLoadResult(strokes, templateBitmap, null, usedSnapshot = false, headings = headings, textObjects = textObjects, lineObjects = lineObjects, links = links, stickyNotes = stickyNotes, shapeObjects = shapeObjects)
         }
     }
 
@@ -4350,27 +4472,12 @@ class NotebookActivity : AppCompatActivity() {
         val earlyStrokes = drawingView.getStrokes().filterNot { it.id in persistedStrokeIds }
         val mergedStrokes = if (earlyStrokes.isEmpty()) result.strokes else result.strokes + earlyStrokes
 
-        val bitmap = result.displayBitmap
-        if (bitmap != null) {
-            // On the snapshot fast-path the snapshot bitmap contains strokes + headings but
-            // NOT text/line/link/sticky-note/shape objects (always loaded fresh from DB). Composite them now.
-            if (result.usedSnapshot) {
-                drawingView.compositeTextObjects(bitmap)
-                drawingView.compositeLineObjects(bitmap)
-                drawingView.compositeShapeObjects(bitmap)
-                drawingView.compositeLinks(bitmap)
-                drawingView.compositeStickyNotes(bitmap)
-            }
-            // The pre-built bitmap was rendered from result.strokes only — draw the preserved
-            // early ink onto it so it stays visible after the swap (loadStrokesWithBitmap does
-            // not redraw the stroke list).
-            if (earlyStrokes.isNotEmpty()) drawingView.compositeStrokes(bitmap, earlyStrokes)
-            drawingView.loadStrokesWithBitmap(mergedStrokes, bitmap, result.templateBitmap)
-        } else {
-            // Full path: loadStrokes() redraws the whole list, so the merged early ink renders.
-            drawingView.setTemplate(result.templateBitmap)
-            drawingView.loadStrokes(mergedStrokes)
-        }
+        // GPU path: loadStrokesWithBitmap records the committed RenderNode from the in-memory lists
+        // (set above) + mergedStrokes (which folds in any early ink), and does ONE EPD refresh.
+        drawingView.loadStrokesWithBitmap(mergedStrokes, null, result.templateBitmap)
+
+        // Warm the cache for the neighbouring pages so the next sequential turn is a validated hit.
+        prefetchNeighbors()
     }
 
     /**
@@ -4399,17 +4506,13 @@ class NotebookActivity : AppCompatActivity() {
                 Slog.d(TAG) { "postDisplayWork(snapshot): silently loaded ${strokes.size} strokes (+${earlyStrokes.size} early) for $pageId" }
                 drawingView.setStrokeListSilently(merged)
             }
-        } else {
-            // Full render just completed — capture snapshot for next time.
-            val snapshot = drawingView.captureSnapshot()
-            val pageId   = currentPageId
-            if (snapshot != null && pageId.isNotEmpty()) {
-                lifecycleScope.launch {
-                    withContext(Dispatchers.IO) { persistSnapshot(db, pageId, snapshot) }
-                    Slog.d(TAG) { "postDisplayWork(full): persisted snapshot for $pageId" }
-                }
-            }
         }
+        // GPU path: no capture-on-arrival. The old code captured the just-displayed page's snapshot
+        // here to feed the load fast-path — which no longer exists — and captureSnapshot() on the main
+        // thread (~600ms for a heavy page) was blocking the queued handwritingRepaint, stalling the
+        // page turn. The arriving page is unchanged from DB, so its persisted snapshot is already
+        // current; freshness is maintained by the leaving-page capture (navigateToPageInternal) and
+        // the close/cover-sync path.
     }
 
     /**
@@ -4658,7 +4761,7 @@ class NotebookActivity : AppCompatActivity() {
             updateCopyPasteButtons()
             undoRedoManager.push(UndoRedoAction.PagePasted(currentPageId, currentPageIndex))
             updateUndoRedoButtons()
-            drawingView.eraseAll()
+            drawingView.clearForPageLoad()
             val result = withContext(Dispatchers.IO) { loadCurrentPage(db) }
             displayPage(result)
             updatePageIndicator()
@@ -5385,22 +5488,25 @@ class NotebookActivity : AppCompatActivity() {
      */
     private suspend fun navigateToPageInternal(newIndex: Int) {
         val db = soilDatabase ?: return
-        // Capture snapshot of the page we are leaving — must be on the main thread.
-        val snapshot      = drawingView.captureSnapshot()
-        val leavingPageId = currentPageId
-
-        withContext(Dispatchers.IO) {
-            if (snapshot != null && leavingPageId.isNotEmpty()) {
-                persistSnapshot(db, leavingPageId, snapshot)
-            }
+        val leavingPageId  = currentPageId
+        val leavingLayerId = currentLayerId
+        // Persist any unsaved ink first, then decide whether the leaving page needs a fresh cover
+        // snapshot. captureSnapshot() is a ~600ms main-thread PNG encode; skipping it on pages that
+        // weren't modified since their last snapshot removes it from flip-through navigation entirely.
+        val needSnapshot = withContext(Dispatchers.IO) {
             saveStrokes(db)
+            pageNeedsSnapshot(db, leavingPageId, leavingLayerId)
+        }
+        val snapshot = if (needSnapshot) drawingView.captureSnapshot() else null
+        if (snapshot != null && leavingPageId.isNotEmpty()) {
+            withContext(Dispatchers.IO) { persistSnapshot(db, leavingPageId, snapshot) }
         }
 
         currentPageIndex = newIndex
         selectedObjectIds.clear()
         drawingView.setLassoOverlay(null, null)
         hideFloatingSelectionToolbar()
-        drawingView.eraseAll()
+        drawingView.clearForPageLoad()
 
         val result = withContext(Dispatchers.IO) { loadCurrentPage(db) }
         displayPage(result)
@@ -5432,7 +5538,7 @@ class NotebookActivity : AppCompatActivity() {
             saveStrokes(db)
         }
         currentPageIndex = newIndex
-        drawingView.eraseAll()
+        drawingView.clearForPageLoad()
     }
 
     /** Refresh the page indicator overlay text. Call on the main thread. */
@@ -8818,7 +8924,7 @@ class NotebookActivity : AppCompatActivity() {
         }
 
         persistedStrokeIds.clear()
-        drawingView.eraseAll()
+        drawingView.clearForPageLoad()
         val result = withContext(Dispatchers.IO) { loadCurrentPage(db) }
         displayPage(result)
         updatePageIndicator()

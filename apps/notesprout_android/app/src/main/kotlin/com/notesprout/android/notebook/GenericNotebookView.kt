@@ -12,6 +12,7 @@ import android.graphics.Path
 import android.graphics.PointF
 import android.graphics.Rect
 import android.graphics.RectF
+import android.graphics.RenderNode
 import android.util.Base64
 import android.util.TypedValue
 import android.graphics.Region
@@ -48,8 +49,13 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
     }
 
     private val activePoints = ArrayList<PointF>()
-    private var renderBitmap: Bitmap? = null
-    private var renderCanvas: Canvas? = null
+    /**
+     * Committed content (template + objects + strokes) as a hardware [RenderNode] — the retained GPU
+     * layer, replacing the old software committed bitmap. Recorded by [redrawCanvas] on content
+     * changes; blitted in [onDraw]. Mirrors OnyxNotebookView (minus the EPD handoffs). Off-screen
+     * bitmaps (export, cover snapshot, drag backing) still build their own bitmaps.
+     */
+    private val committedNode = RenderNode("committed")
     private var isEraserActive = false
 
     private var lastEraseRedrawMs = 0L
@@ -230,13 +236,9 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
         if (w == 0 || h == 0) return
-        renderBitmap?.recycle()
-        val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
-        renderBitmap = bmp
-        renderCanvas = Canvas(bmp)
-        // redrawCanvas handles white → template → strokes in one pass.
-        // This ensures any strokes already loaded before layout (race with loadStrokes())
-        // are not lost when the bitmap is first created.
+        committedNode.setPosition(0, 0, w, h)
+        // redrawCanvas records white → template → strokes into the node in one pass, so any strokes
+        // loaded before layout (race with loadStrokes()) are not lost on first record.
         redrawCanvas()
     }
 
@@ -655,10 +657,15 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
             return
         }
 
-        canvas.drawColor(Color.WHITE)
-        renderBitmap?.let { canvas.drawBitmap(it, 0f, 0f, null) }
+        // Committed content: blit the cached hardware RenderNode; fall back to drawing the vector
+        // content directly on a software canvas or before the node's first record.
+        if (canvas.isHardwareAccelerated && committedNode.hasDisplayList()) {
+            canvas.drawRenderNode(committedNode)
+        } else {
+            drawCommittedContent(canvas)
+        }
 
-        // Shape transform overlay — drawn on top of the bitmap.
+        // Shape transform overlay — drawn on top of the committed content.
         if (isShapeTransformMode) {
             val r = transformController.getWorkingRender()
             if (r != null) {
@@ -686,17 +693,12 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
     }
 
     private fun commitActiveStroke() {
-        val canvas = renderCanvas ?: return
         if (activePoints.size < 2) return
         val strokeId = UUID.randomUUID().toString()
         val strokePoints = activePoints.toList()
         strokes.add(LiveStroke(strokeId, strokePoints))
-        val path = Path()
-        path.moveTo(strokePoints[0].x, strokePoints[0].y)
-        for (i in 1 until strokePoints.size) {
-            path.lineTo(strokePoints[i].x, strokePoints[i].y)
-        }
-        canvas.drawPath(path, strokePaint)
+        // Re-record the committed node so the finished stroke is baked in (records a display list only).
+        redrawCanvas()
     }
 
     private fun eraseAtPath(eraserPoints: List<PointF>) {
@@ -983,7 +985,21 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
     }
 
     private fun redrawCanvas() {
-        val canvas = renderCanvas ?: return
+        val w = width; val h = height
+        if (w == 0 || h == 0) return
+        committedNode.setPosition(0, 0, w, h)
+        val rc = committedNode.beginRecording(w, h)
+        try {
+            drawCommittedContent(rc)
+        } finally {
+            committedNode.endRecording()
+        }
+        invalidate()
+    }
+
+    /** Draw the full committed page onto [canvas] — records the node and serves as the [onDraw]
+     *  software fallback (a [RenderNode] can't be drawn on a software canvas). */
+    private fun drawCommittedContent(canvas: Canvas) {
         canvas.drawColor(Color.WHITE)
         templateBitmap?.let { tb ->
             canvas.drawBitmap(tb, null, RectF(0f, 0f, width.toFloat(), height.toFloat()), null)
@@ -1026,7 +1042,6 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
             }
             canvas.drawPath(path, strokePaint)
         }
-        invalidate()
     }
 
     // Minimum squared distance from point p to segment a→b.
@@ -1623,14 +1638,8 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
         shapeObjects = emptyList()
         links = emptyList()
         stickyNotes = emptyList()
-        // Clear to white then re-apply template so the template persists after erase.
-        renderCanvas?.let { canvas ->
-            canvas.drawColor(Color.WHITE)
-            templateBitmap?.let { tb ->
-                canvas.drawBitmap(tb, null, RectF(0f, 0f, width.toFloat(), height.toFloat()), null)
-            }
-        }
-        invalidate()
+        // Re-record the (now empty) committed node: white → template only. redrawCanvas invalidates.
+        redrawCanvas()
     }
 
     override fun loadHeadings(headings: List<HeadingStroke>) {
@@ -1645,41 +1654,17 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
 
     override fun getTextObjects(): List<TextRender> = textObjects
 
-    override fun compositeTextObjects(bitmap: Bitmap) {
-        if (textObjects.isEmpty()) return
-        val canvas = Canvas(bitmap)
-        for (textObj in textObjects) {
-            drawTextObject(canvas, textObj, bitmap.width)
-        }
-    }
-
     override fun loadLineObjects(lineObjects: List<LineRender>) {
         this.lineObjects = lineObjects
     }
 
     override fun getLineObjects(): List<LineRender> = lineObjects
 
-    override fun compositeLineObjects(bitmap: Bitmap) {
-        if (lineObjects.isEmpty()) return
-        val canvas = Canvas(bitmap)
-        for (lineObj in lineObjects) {
-            drawLineObject(canvas, lineObj)
-        }
-    }
-
     override fun loadLinks(links: List<LinkRender>) {
         this.links = links
     }
 
     override fun getLinks(): List<LinkRender> = links
-
-    override fun compositeLinks(bitmap: Bitmap) {
-        if (links.isEmpty()) return
-        val canvas = Canvas(bitmap)
-        for (link in links) {
-            drawLinkObject(canvas, link, bitmap.width)
-        }
-    }
 
     override fun loadStickyNotes(stickyNotes: List<StickyNoteRender>) {
         this.stickyNotes = stickyNotes
@@ -1689,27 +1674,11 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
 
     override fun getStickyNotes(): List<StickyNoteRender> = stickyNotes
 
-    override fun compositeStickyNotes(bitmap: Bitmap) {
-        if (stickyNotes.isEmpty()) return
-        val canvas = Canvas(bitmap)
-        for (note in stickyNotes) {
-            drawStickyNoteObject(canvas, note)
-        }
-    }
-
     override fun loadShapeObjects(shapeObjects: List<ShapeRender>) {
         this.shapeObjects = shapeObjects
     }
 
     override fun getShapeObjects(): List<ShapeRender> = shapeObjects
-
-    override fun compositeShapeObjects(bitmap: Bitmap) {
-        if (shapeObjects.isEmpty()) return
-        val canvas = Canvas(bitmap)
-        for (shape in shapeObjects) {
-            drawShapeObject(canvas, shape)
-        }
-    }
 
     override fun loadStrokes(strokes: List<LiveStroke>) {
         this.strokes.clear()
@@ -1783,19 +1752,18 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
         return bmp
     }
 
-    /** Swap in a pre-built bitmap on the main thread — skips the O(N) redraw. */
+    /** Load the page's content and record the committed node. Any off-thread-built [bitmap] is not
+     *  needed for display in the GPU path — released. */
     override fun loadStrokesWithBitmap(
         strokes: List<LiveStroke>,
-        bitmap: Bitmap,
+        bitmap: Bitmap?,
         templateBitmap: Bitmap?,
     ) {
         this.strokes.clear()
         this.strokes.addAll(strokes)
         this.templateBitmap = templateBitmap
-        renderBitmap?.recycle()
-        renderBitmap = bitmap
-        renderCanvas = Canvas(bitmap)
-        invalidate()
+        bitmap?.recycle()
+        redrawCanvas()
     }
 
     /**
@@ -1872,23 +1840,8 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
         // No redraw — the snapshot composite bitmap already shows the correct visual state.
     }
 
-    override fun compositeStrokes(bitmap: Bitmap, strokes: List<LiveStroke>) {
-        if (strokes.isEmpty()) return
-        val canvas = Canvas(bitmap)
-        for (liveStroke in strokes) {
-            val points = liveStroke.points
-            if (points.size < 2) continue
-            val path = Path()
-            path.moveTo(points[0].x, points[0].y)
-            for (i in 1 until points.size) path.lineTo(points[i].x, points[i].y)
-            canvas.drawPath(path, strokePaint)
-        }
-    }
-
     override fun releaseResources() {
-        renderBitmap?.recycle()
-        renderBitmap = null
-        renderCanvas = null
+        committedNode.discardDisplayList()
         dragBackingBitmap?.recycle()
         dragBackingBitmap = null
     }

@@ -19,7 +19,7 @@ matching doc before working in that area:**
 | Global index (`notesprout.db`) + `.soil` file rules, Room/WAL, template library | [`docs/data-architecture.md`](docs/data-architecture.md) |
 | Full e-ink design system, AlertDialog / IME patterns | [`docs/design-system.md`](docs/design-system.md) |
 | Toolbar: base, overflow, full customization layer | [`docs/toolbar.md`](docs/toolbar.md) |
-| Drawing engines, EPD rules, perf, page snapshots, templates, undo/redo | [`docs/drawing-engine.md`](docs/drawing-engine.md) |
+| Drawing engines, EPD rules, perf, committed-content RenderNode render model + neighbor prefetch cache + cover snapshots, templates, undo/redo | [`docs/drawing-engine.md`](docs/drawing-engine.md) |
 | Heading / Text (+ markdown) / Line objects | [`docs/content-objects.md`](docs/content-objects.md) |
 | Link objects: data model, chrome, follow, back-stack, lasso/undo | [`docs/links.md`](docs/links.md) |
 | Scribble-erase, smart lasso, snap-to-guide, align & distribute | [`docs/lasso-and-gestures.md`](docs/lasso-and-gestures.md) |

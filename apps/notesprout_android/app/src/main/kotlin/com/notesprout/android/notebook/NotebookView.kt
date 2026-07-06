@@ -65,6 +65,16 @@ interface NotebookView {
     fun releaseRender() {}
 
     fun eraseAll()
+
+    /**
+     * Clear the in-memory content for a page navigation WITHOUT an EPD white-flash: the currently
+     * displayed page stays on the panel until [loadStrokesWithBitmap] swaps in the new page's content
+     * with a single EPD refresh. This replaces [eraseAll] on page-turn/load paths (where erasing to
+     * white then repainting caused a visible double-flash and two full-panel refreshes). Default: fall
+     * back to [eraseAll] for engines with no e-ink flash to avoid (e.g. Generic/LCD).
+     */
+    fun clearForPageLoad() { eraseAll() }
+
     fun setEraserMode(active: Boolean) {}
     fun releaseResources()
 
@@ -289,14 +299,6 @@ interface NotebookView {
     fun getTextObjects(): List<TextRender> = emptyList()
 
     /**
-     * Paint the current [textObjects] onto [bitmap] using the view's text paint.
-     * Called from displayPage on the snapshot fast-path: the snapshot bitmap contains
-     * strokes and headings but NOT text objects (which are always loaded fresh from DB).
-     * Must be called on the main thread after [loadTextObjects].
-     */
-    fun compositeTextObjects(bitmap: Bitmap) {}
-
-    /**
      * Replace the in-memory line object list with [lineObjects] loaded from the database.
      * Call before [loadStrokes] or [loadStrokesWithBitmap] so lines are included in the
      * next canvas redraw.  Must be called on the main thread.
@@ -308,13 +310,6 @@ interface NotebookView {
      * Safe to call from any thread — line objects are replaced atomically.
      */
     fun getLineObjects(): List<LineRender> = emptyList()
-
-    /**
-     * Paint the current [lineObjects] onto [bitmap].
-     * Called from displayPage on the snapshot fast-path: lines are always loaded fresh from DB
-     * (identical reason to text objects).  Must be called on the main thread after [loadLineObjects].
-     */
-    fun compositeLineObjects(bitmap: Bitmap) {}
 
     /**
      * Replace the in-memory link object list with [links] loaded from the database.
@@ -330,13 +325,6 @@ interface NotebookView {
     fun getLinks(): List<LinkRender> = emptyList()
 
     /**
-     * Paint the current links onto [bitmap].
-     * Called from displayPage on the snapshot fast-path: links are always loaded fresh from DB
-     * (identical reason to text/line objects).  Must be called on the main thread after [loadLinks].
-     */
-    fun compositeLinks(bitmap: Bitmap) {}
-
-    /**
      * Replace the in-memory sticky note list with [stickyNotes] loaded from the database.
      * Call before [loadStrokes] or [loadStrokesWithBitmap] so the icons are included in the
      * next canvas redraw.  Must be called on the main thread.
@@ -350,14 +338,6 @@ interface NotebookView {
     fun getStickyNotes(): List<StickyNoteRender> = emptyList()
 
     /**
-     * Paint the current sticky note icons onto [bitmap].
-     * Called from displayPage on the snapshot fast-path: sticky notes are always loaded fresh
-     * from DB (identical reason to text/line/link objects).  Must be called on the main thread
-     * after [loadStickyNotes].
-     */
-    fun compositeStickyNotes(bitmap: Bitmap) {}
-
-    /**
      * Replace the in-memory shape object list with [shapeObjects] loaded from the database.
      * Call before [loadStrokes] or [loadStrokesWithBitmap] so shapes are included in the
      * next canvas redraw.  Must be called on the main thread.
@@ -369,13 +349,6 @@ interface NotebookView {
      * Safe to call from any thread — shape objects are replaced atomically.
      */
     fun getShapeObjects(): List<ShapeRender> = emptyList()
-
-    /**
-     * Paint the current [shapeObjects] onto [bitmap].
-     * Called from displayPage on the snapshot fast-path: shapes are always loaded fresh from DB
-     * (identical reason to text/line/link objects).  Must be called on the main thread after [loadShapeObjects].
-     */
-    fun compositeShapeObjects(bitmap: Bitmap) {}
 
     /**
      * Fired on the main thread when a fast, closed pen gesture in pen mode encloses or
@@ -598,15 +571,6 @@ interface NotebookView {
     fun setStrokeListSilently(strokes: List<LiveStroke>)
 
     /**
-     * Draw [strokes] directly onto [bitmap] using the standard stroke paint, with no change
-     * to the in-memory stroke list and no EPD repaint. Used to composite unsaved ink that
-     * was written during a page-load window onto a freshly built page bitmap before it is
-     * swapped in, so the ink isn't visually wiped. Safe to call from any thread (operates
-     * only on the supplied bitmap).
-     */
-    fun compositeStrokes(bitmap: Bitmap, strokes: List<LiveStroke>)
-
-    /**
      * Capture the current strokes as a base64-encoded PNG with a transparent background.
      * The template is NOT included — the rendering stack is: template → snapshot → new strokes.
      * Returns null if there are no strokes or the view is not yet laid out.
@@ -658,5 +622,5 @@ interface NotebookView {
      * Must be called on the main thread — triggers invalidate (and EPD handoff on
      * Onyx devices).
      */
-    fun loadStrokesWithBitmap(strokes: List<LiveStroke>, bitmap: Bitmap, templateBitmap: Bitmap?)
+    fun loadStrokesWithBitmap(strokes: List<LiveStroke>, bitmap: Bitmap?, templateBitmap: Bitmap?)
 }

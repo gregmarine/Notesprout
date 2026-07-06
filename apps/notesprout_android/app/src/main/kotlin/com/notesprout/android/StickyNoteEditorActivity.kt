@@ -181,23 +181,14 @@ class StickyNoteEditorActivity : AppCompatActivity() {
         contentHeight = if (input.contentHeight > 0f) input.contentHeight else canvasH
 
         lifecycleScope.launch {
+            // GPU path: load objects first, then loadStrokesWithBitmap records the committed node from
+            // the in-memory content (no off-thread buildRenderBitmap needed).
             drawingView.loadHeadings(input.headings)
             drawingView.loadTextObjects(input.textObjects)
             drawingView.loadLineObjects(input.lines)
             drawingView.loadLinks(emptyList())
             drawingView.loadShapeObjects(input.shapes)
-            val bitmap = withContext(Dispatchers.IO) {
-                drawingView.buildRenderBitmap(
-                    input.strokes, null, input.headings, input.textObjects, input.lines,
-                    shapeObjects = input.shapes,
-                )
-            }
-            if (bitmap != null) {
-                drawingView.loadStrokesWithBitmap(input.strokes, bitmap, null)
-            } else {
-                drawingView.setTemplate(null)
-                drawingView.loadStrokes(input.strokes)
-            }
+            drawingView.loadStrokesWithBitmap(input.strokes, null, null)
             initHistory()
         }
     }

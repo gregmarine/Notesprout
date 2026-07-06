@@ -13,6 +13,7 @@ import android.graphics.PointF
 import android.graphics.Rect
 import android.graphics.RectF
 import android.graphics.Region
+import android.graphics.RenderNode
 import android.util.Base64
 import android.util.TypedValue
 import android.view.MotionEvent
@@ -94,8 +95,16 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
 
     // ── View state ───────────────────────────────────────────────────────────
 
-    private var renderBitmap: Bitmap? = null
-    private var renderCanvas: Canvas? = null
+    /**
+     * Committed content (template + all objects + strokes) as a hardware [RenderNode] — the native
+     * equivalent of the Flutter port's retained GPU layer. Recorded (as vector paths, not a CPU
+     * bitmap) by [redrawCanvas] on every content change; blitted in [onDraw] via
+     * [Canvas.drawRenderNode] on a hardware canvas. Rasterization is deferred to the GPU/RenderThread
+     * and cached, so a static page is not re-rasterized frame to frame. The old software
+     * `renderBitmap`/`renderCanvas` blit is gone — off-screen bitmaps (export, cover snapshot, drag
+     * backing) still build their own bitmaps in [buildRenderBitmap] / [captureSnapshot].
+     */
+    private val committedNode = RenderNode("committed")
     /** Toolbar exclusion zone in view coords; the BOOX pen layer never captures inside it. */
     private var toolbarExclusion: Rect? = null
 
@@ -408,7 +417,6 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
     // ── Drawing helpers ──────────────────────────────────────────────────────
 
     private fun renderStroke(pointList: TouchPointList) {
-        val canvas = renderCanvas ?: return
         val points = pointList.points
         if (points.isNullOrEmpty()) return
         val strokeId = UUID.randomUUID().toString()
@@ -430,13 +438,6 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
                 lastMoveTimeMs = if (raw.timestamp > 0L) raw.timestamp else now
             }
         }
-        val path = Path()
-        path.moveTo(strokePoints[0].x, strokePoints[0].y)
-        for (i in 1 until strokePoints.size) {
-            path.lineTo(strokePoints[i].x, strokePoints[i].y)
-        }
-        canvas.drawPath(path, strokePaint)
-
         strokeRenderCount++
         if (strokeRenderCount == 1 && beginRawDrawingTimeMs > 0) {
             epd { "FIRST_STROKE_AFTER_BEGIN delta=${now - beginRawDrawingTimeMs}ms strokeId=${strokeId.take(8)}" }
@@ -445,7 +446,10 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
             epd { "RENDER_STROKE_SAMPLE count=$strokeRenderCount strokeId=${strokeId.take(8)}" }
         }
 
-        invalidate()
+        // Re-record the committed layer so the just-finished stroke is baked into the node,
+        // keeping the Android canvas current with the EPD overlay (which shows the live ink).
+        // The node re-record builds a display list only; GPU rasterization is deferred/cached.
+        redrawCanvas(caller = "renderStroke")
         if (strokeRenderCount == 1 || strokeRenderCount % 10 == 0) {
             epd { "INVALIDATE caller=renderStroke count=$strokeRenderCount" }
         }
@@ -728,16 +732,39 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
     }
 
     /**
-     * Redraws the render bitmap from scratch: white base → template → all current strokes.
-     * Call whenever strokes are added/removed or the template changes.
+     * Re-records the committed [RenderNode] from scratch: white base → template → all objects →
+     * strokes. Call whenever strokes/objects are added/removed or the template changes. Only builds
+     * a display list (GPU rasterization is deferred); [onDraw] blits the node.
      */
     private fun redrawCanvas(caller: String = "unknown") {
         val redrawStart = System.currentTimeMillis()
         epd { "REDRAW_CANVAS_START caller=$caller strokeCount=${strokes.size}" }
-        val canvas = renderCanvas ?: run {
-            epd { "REDRAW_CANVAS_ABORT caller=$caller reason=nullCanvas" }
+        val w = width; val h = height
+        if (w == 0 || h == 0) {
+            epd { "REDRAW_CANVAS_ABORT caller=$caller reason=zeroSize" }
             return
         }
+        committedNode.setPosition(0, 0, w, h)
+        val rc = committedNode.beginRecording(w, h)
+        try {
+            drawCommittedContent(rc)
+        } finally {
+            committedNode.endRecording()
+        }
+        invalidate()
+        epd { "INVALIDATE caller=redrawCanvas($caller)" }
+        val elapsed = System.currentTimeMillis() - redrawStart
+        epd { "REDRAW_CANVAS_END caller=$caller elapsed=${elapsed}ms strokeCount=${strokes.size}" }
+    }
+
+    /**
+     * Draw the full committed page (white → template → headings → text → lines → shapes → links →
+     * sticky icons → strokes) onto [canvas]. Used both to record the committed [RenderNode] (hardware)
+     * and as the [onDraw] software fallback — the latter matters if the Onyx SDK ever captures the
+     * view through a software canvas (e.g. inside [EpdController.handwritingRepaint]), where a
+     * [RenderNode] cannot be drawn.
+     */
+    private fun drawCommittedContent(canvas: Canvas) {
         canvas.drawColor(Color.WHITE)
         templateBitmap?.let { tb ->
             canvas.drawBitmap(tb, null, RectF(0f, 0f, width.toFloat(), height.toFloat()), null)
@@ -780,10 +807,6 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
             }
             canvas.drawPath(path, strokePaint)
         }
-        invalidate()
-        epd { "INVALIDATE caller=redrawCanvas($caller)" }
-        val elapsed = System.currentTimeMillis() - redrawStart
-        epd { "REDRAW_CANVAS_END caller=$caller elapsed=${elapsed}ms strokeCount=${strokes.size}" }
     }
 
     // Minimum squared distance from point p to segment a→b.
@@ -1234,13 +1257,10 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
         if (w == 0 || h == 0) return
-        renderBitmap?.recycle()
-        val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
-        renderBitmap = bmp
-        renderCanvas = Canvas(bmp)
-        // redrawCanvas handles white → template → strokes in one pass.
+        committedNode.setPosition(0, 0, w, h)
+        // redrawCanvas records white → template → strokes into the node in one pass.
         // This ensures any strokes already loaded before layout (race with loadStrokes())
-        // are not lost when the bitmap is first created.
+        // are not lost when the node is first recorded.
         redrawCanvas(caller = "onSizeChanged")
     }
 
@@ -1638,9 +1658,16 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
             return
         }
 
-        renderBitmap?.let { canvas.drawBitmap(it, 0f, 0f, null) } ?: canvas.drawColor(Color.WHITE)
+        // Committed content: blit the cached hardware RenderNode on a hardware canvas; fall back to
+        // drawing the vector content directly on a software canvas (e.g. if the Onyx SDK captures the
+        // view through a software canvas) or before the node's first record.
+        if (canvas.isHardwareAccelerated && committedNode.hasDisplayList()) {
+            canvas.drawRenderNode(committedNode)
+        } else {
+            drawCommittedContent(canvas)
+        }
 
-        // Shape transform overlay — drawn on top of the bitmap, below lasso chrome.
+        // Shape transform overlay — drawn on top of the committed content, below lasso chrome.
         if (isShapeTransformMode) {
             val r = transformController.getWorkingRender()
             if (r != null) {
@@ -2123,8 +2150,14 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
     }
 
     override fun setLassoOverlay(path: Path?, selectionBox: RectF?) {
+        // Skip the full-panel EPD refresh when nothing was showing and nothing will show (e.g. a
+        // page turn clears a selection that isn't there) — avoids a wasted refresh. Still refreshes
+        // when actually dismissing a visible selection box (wasEmpty == false).
+        val wasEmpty = lassoOverlayPath == null && lassoSelectionBox == null
+        val isEmpty  = path == null && selectionBox == null
         lassoOverlayPath  = path
         lassoSelectionBox = selectionBox
+        if (wasEmpty && isEmpty) return
         invalidate()
         epd { "INVALIDATE caller=setLassoOverlay" }
         post {
@@ -2191,6 +2224,29 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
         }
     }
 
+    /**
+     * Clear in-memory content for a page navigation with NO EPD refresh: the current page stays
+     * visible on the panel (the committed node is left intact) until the incoming page's
+     * [loadStrokesWithBitmap] swaps it in with a single refresh — eliminating the erase-to-white
+     * double-flash. Raw-drawing render is disabled so stray pen input during the load window does not
+     * land on the outgoing page; [loadStrokesWithBitmap] re-arms it.
+     */
+    override fun clearForPageLoad() {
+        epd { "CLEAR_FOR_PAGE_LOAD isSetup=$isSetup strokeCountBefore=${strokes.size}" }
+        strokes.clear()
+        headings = emptyList()
+        textObjects = emptyList()
+        lineObjects = emptyList()
+        shapeObjects = emptyList()
+        links = emptyList()
+        stickyNotes = emptyList()
+        if (isSetup) {
+            touchHelper.setRawDrawingRenderEnabled(false)
+            epd { "RENDER_DISABLED caller=clearForPageLoad" }
+        }
+        // Deliberately no redrawCanvas / invalidate / handwritingRepaint — keep the old node on screen.
+    }
+
     override fun eraseAll() {
         epd { "ERASE_ALL_START isSetup=$isSetup strokeCountBefore=${strokes.size}" }
         strokes.clear()
@@ -2204,16 +2260,8 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
             touchHelper.setRawDrawingRenderEnabled(false)
             epd { "RENDER_DISABLED caller=eraseAll" }
         }
-        // Clear to white then re-apply template so the template persists after erase.
-        renderCanvas?.let { canvas ->
-            canvas.drawColor(Color.WHITE)
-            epd { "WHITE_BITMAP_FILL caller=eraseAll" }
-            templateBitmap?.let { tb ->
-                canvas.drawBitmap(tb, null, RectF(0f, 0f, width.toFloat(), height.toFloat()), null)
-            }
-        }
-        invalidate()
-        epd { "INVALIDATE caller=eraseAll" }
+        // Re-record the (now empty) committed layer: white → template only. redrawCanvas invalidates.
+        redrawCanvas(caller = "eraseAll")
         post {
             EpdController.handwritingRepaint(this, Rect(0, 0, width, height))
             epd { "HANDWRITING_REPAINT caller=eraseAll" }
@@ -2242,41 +2290,17 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
 
     override fun getTextObjects(): List<TextRender> = textObjects
 
-    override fun compositeTextObjects(bitmap: Bitmap) {
-        if (textObjects.isEmpty()) return
-        val canvas = android.graphics.Canvas(bitmap)
-        for (textObj in textObjects) {
-            drawTextObject(canvas, textObj, bitmap.width)
-        }
-    }
-
     override fun loadLineObjects(lineObjects: List<LineRender>) {
         this.lineObjects = lineObjects
     }
 
     override fun getLineObjects(): List<LineRender> = lineObjects
 
-    override fun compositeLineObjects(bitmap: Bitmap) {
-        if (lineObjects.isEmpty()) return
-        val canvas = android.graphics.Canvas(bitmap)
-        for (lineObj in lineObjects) {
-            drawLineObject(canvas, lineObj)
-        }
-    }
-
     override fun loadLinks(links: List<LinkRender>) {
         this.links = links
     }
 
     override fun getLinks(): List<LinkRender> = links
-
-    override fun compositeLinks(bitmap: Bitmap) {
-        if (links.isEmpty()) return
-        val canvas = android.graphics.Canvas(bitmap)
-        for (link in links) {
-            drawLinkObject(canvas, link, bitmap.width)
-        }
-    }
 
     override fun loadStickyNotes(stickyNotes: List<StickyNoteRender>) {
         this.stickyNotes = stickyNotes
@@ -2285,27 +2309,11 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
 
     override fun getStickyNotes(): List<StickyNoteRender> = stickyNotes
 
-    override fun compositeStickyNotes(bitmap: Bitmap) {
-        if (stickyNotes.isEmpty()) return
-        val canvas = android.graphics.Canvas(bitmap)
-        for (note in stickyNotes) {
-            drawStickyNoteObject(canvas, note)
-        }
-    }
-
     override fun loadShapeObjects(shapeObjects: List<ShapeRender>) {
         this.shapeObjects = shapeObjects
     }
 
     override fun getShapeObjects(): List<ShapeRender> = shapeObjects
-
-    override fun compositeShapeObjects(bitmap: Bitmap) {
-        if (shapeObjects.isEmpty()) return
-        val canvas = android.graphics.Canvas(bitmap)
-        for (shape in shapeObjects) {
-            drawShapeObject(canvas, shape)
-        }
-    }
 
     override fun loadStrokes(strokes: List<LiveStroke>) {
         val loadStart = System.currentTimeMillis()
@@ -2400,7 +2408,7 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
      */
     override fun loadStrokesWithBitmap(
         strokes: List<LiveStroke>,
-        bitmap: Bitmap,
+        bitmap: Bitmap?,
         templateBitmap: Bitmap?,
     ) {
         val loadStart = System.currentTimeMillis()
@@ -2415,14 +2423,12 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
             epd { "RENDER_DISABLED caller=loadStrokesWithBitmap" }
         }
 
-        // Swap in the pre-built bitmap and bind a new renderCanvas to it so future
-        // stroke commits via renderStroke() draw to the correct surface.
-        renderBitmap?.recycle()
-        renderBitmap = bitmap
-        renderCanvas = android.graphics.Canvas(bitmap)
-
-        invalidate()
-        epd { "INVALIDATE caller=loadStrokesWithBitmap" }
+        // GPU path: the content is already in the in-memory lists (strokes above; headings/text/
+        // lines/shapes/links/sticky set by the caller before this call), so record the committed node
+        // directly. Any off-thread-built [bitmap] is not needed for display — release it. redrawCanvas
+        // invalidates.
+        bitmap?.recycle()
+        redrawCanvas(caller = "loadStrokesWithBitmap")
         post {
             EpdController.handwritingRepaint(this, Rect(0, 0, width, height))
             epd { "HANDWRITING_REPAINT caller=loadStrokesWithBitmap" }
@@ -2505,25 +2511,10 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
         // No redraw — the snapshot composite bitmap already shows the correct visual state.
     }
 
-    override fun compositeStrokes(bitmap: Bitmap, strokes: List<LiveStroke>) {
-        if (strokes.isEmpty()) return
-        val canvas = android.graphics.Canvas(bitmap)
-        for (liveStroke in strokes) {
-            val points = liveStroke.points
-            if (points.size < 2) continue
-            val path = Path()
-            path.moveTo(points[0].x, points[0].y)
-            for (i in 1 until points.size) path.lineTo(points[i].x, points[i].y)
-            canvas.drawPath(path, strokePaint)
-        }
-    }
-
     override fun releaseResources() {
         epd { "RELEASE_RESOURCES isSetup=$isSetup" }
         closeRawDrawingIfOwner("releaseResources")
-        renderBitmap?.recycle()
-        renderBitmap = null
-        renderCanvas = null
+        committedNode.discardDisplayList()
         dragBackingBitmap?.recycle()
         dragBackingBitmap = null
     }

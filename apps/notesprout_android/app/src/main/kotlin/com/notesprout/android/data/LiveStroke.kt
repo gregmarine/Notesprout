@@ -9,6 +9,7 @@ import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.descriptors.SerialDescriptor
 import kotlinx.serialization.encoding.Decoder
 import kotlinx.serialization.encoding.Encoder
+import kotlinx.serialization.json.Json
 
 /**
  * An in-memory stroke with a stable UUID.
@@ -109,8 +110,37 @@ data class LiveStroke(
             strokeWidth = sd.strokeWidth,
             srcPoints = sd.points,
         )
+
+        private val leanCodec = Json { ignoreUnknownKeys = true }
+
+        /**
+         * Lean load path for stroke rows with NO per-point pressure/tilt (all current data — hardware
+         * capture is unimplemented). Parses `points` straight into [PointF] via [PointFListSerializer],
+         * skipping the intermediate [StrokePoint] allocation — one object per point instead of two,
+         * roughly halving the per-point garbage that dominates dense-page load. [srcPoints] is null
+         * (nothing to preserve). Callers MUST gate on the absence of pressure/tilt and fall back to
+         * [fromStrokeData] otherwise, so those samples are never silently dropped.
+         */
+        fun fromPointsJson(id: String, json: String): LiveStroke {
+            val lean = leanCodec.decodeFromString(LeanStrokeSurrogate.serializer(), json)
+            return LiveStroke(
+                id = id,
+                points = lean.points,
+                color = lean.color,
+                strokeWidth = lean.strokeWidth,
+                srcPoints = null,
+            )
+        }
     }
 }
+
+/** Minimal stroke surrogate whose `points` decode directly to [PointF] (see [LiveStroke.fromPointsJson]). */
+@Serializable
+private data class LeanStrokeSurrogate(
+    val color: String = LiveStroke.DEFAULT_COLOR,
+    val strokeWidth: Float = LiveStroke.DEFAULT_STROKE_WIDTH,
+    @Serializable(with = PointFListSerializer::class) val points: List<PointF> = emptyList(),
+)
 
 // ── Serialization support for android.graphics.PointF ────────────────────────
 
