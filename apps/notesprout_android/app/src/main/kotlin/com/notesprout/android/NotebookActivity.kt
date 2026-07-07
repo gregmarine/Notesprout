@@ -50,7 +50,6 @@ import com.notesprout.android.crypto.PassphraseCache
 import com.notesprout.android.crypto.SoilCrypto
 import com.notesprout.android.crypto.SoilMigrator
 import com.notesprout.android.data.BoundingBox
-import com.notesprout.android.data.CoverObject
 import com.notesprout.android.data.DayHistoryRepository
 import com.notesprout.android.data.copyPageAfter
 import com.notesprout.android.data.HeadingObject
@@ -149,14 +148,6 @@ class NotebookActivity : AppCompatActivity() {
     companion object {
         private const val TAG = "Notesprout"
 
-        /**
-         * When true, page load uses the persisted `data.snapshot` PNG as an on-screen render cache
-         * (the pre-GPU fast path). The GPU RenderNode committed layer makes full object+stroke load
-         * fast enough that this cache is no longer needed for display; the snapshot is still written
-         * as the cover/thumbnail asset. Kept as a toggle during the spike rollout.
-         */
-        private const val USE_SNAPSHOT_LOAD_CACHE = false
-
         /** Page-load stroke counts at/above this parse in parallel across cores; below, inline. */
         private const val PARALLEL_PARSE_THRESHOLD = 300
 
@@ -193,19 +184,12 @@ class NotebookActivity : AppCompatActivity() {
     }
 
     /**
-     * Result of [loadCurrentPage]: carries everything needed to display a page and
-     * decide whether a background stroke-deserialization pass is needed.
-     *
-     * [usedSnapshot] = true  → [strokes] is empty; display [displayBitmap] then
-     *                          deserialize strokes in background via [postDisplayWork].
-     * [usedSnapshot] = false → [strokes] is fully populated; [displayBitmap] was built
-     *                          from scratch; [postDisplayWork] captures a snapshot.
+     * Result of [loadCurrentPage]: everything needed to display a page. The GPU RenderNode
+     * committed layer records directly from these in-memory lists (see [displayPage]).
      */
     private data class PageLoadResult(
         val strokes: List<LiveStroke>,
         val templateBitmap: Bitmap?,
-        val displayBitmap: Bitmap?,
-        val usedSnapshot: Boolean,
         val headings: List<HeadingStroke> = emptyList(),
         val textObjects: List<TextRender> = emptyList(),
         val lineObjects: List<LineRender> = emptyList(),
@@ -432,17 +416,6 @@ class NotebookActivity : AppCompatActivity() {
      * cleared and file deleted on [closeNotebook].
      */
     private var undoRedoManager = UndoRedoManager()
-
-    // ── Cover image picker ────────────────────────────────────────────────────
-
-    /** Set by openCoverDialog(); called when the image picker returns a URI. */
-    private var onCoverImagePicked: ((Uri) -> Unit)? = null
-
-    private val coverPickerLauncher = registerForActivityResult(
-        ActivityResultContracts.GetContent()
-    ) { uri ->
-        if (uri != null) onCoverImagePicked?.invoke(uri)
-    }
 
     // ── Template library pick launcher ───────────────────────────────────────
 
@@ -747,10 +720,7 @@ class NotebookActivity : AppCompatActivity() {
     ) {
         val db = soilDatabase ?: return
         lifecycleScope.launch {
-            val snapshot  = drawingView.captureSnapshot()
-            val pageId    = currentPageId
             withContext(Dispatchers.IO) {
-                if (snapshot != null && pageId.isNotEmpty()) persistSnapshot(db, pageId, snapshot)
                 saveStrokes(db)
             }
             val intent = Intent(this@NotebookActivity, LinkTargetPickerActivity::class.java).apply {
@@ -880,7 +850,7 @@ class NotebookActivity : AppCompatActivity() {
                 lifecycleScope.launch {
                     withContext(Dispatchers.IO) {
                         db.notebookDao().updateData(pending.id, afterData, System.currentTimeMillis())
-                        invalidatePageSnapshot(db, pageId)
+                        noteContentEdit(db, pageId)
                     }
                     val updatedNotes = drawingView.getStickyNotes().map {
                         if (it.id == afterRender.id) afterRender else it
@@ -1079,10 +1049,8 @@ class NotebookActivity : AppCompatActivity() {
                                 // Soft-delete all layer children (strokes, headings, any future types)
                                 // with a shared timestamp so restoreChildrenDeletedSince recovers everything atomically.
                                 db.notebookDao().softDeleteByParentId(eraseAllLayerId, deletedAt)
-                                // Invalidate the snapshot: tryLoadSnapshotBitmap checks only type='stroke' rows
-                                // for staleness, so a heading-only erase would leave the old snapshot live.
-                                // Removing it forces the full render path on next navigation back.
-                                invalidatePageSnapshot(db, eraseAllPageId)
+                                // Schedule RTR so the recognized-text cache tracks this erase.
+                                noteContentEdit(db, eraseAllPageId)
                             }
                             // Record the erase as a single undoable action after the DB writes succeed.
                             // headingIds stored so undo can restore them explicitly by ID (belt-and-suspenders
@@ -1264,10 +1232,6 @@ class NotebookActivity : AppCompatActivity() {
             }
         }
 
-        binding.btnCover.setOnClickListener {
-            openCoverDialog()
-        }
-
         binding.btnExport.setOnClickListener {
             val db = soilDatabase ?: return@setOnClickListener
             startExport(db)
@@ -1446,7 +1410,7 @@ class NotebookActivity : AppCompatActivity() {
                 val captured = linkObject.translate(0f, 0f)
                 lifecycleScope.launch(Dispatchers.IO) {
                     db.notebookDao().softDeleteById(linkObject.id, deletedAt)
-                    invalidatePageSnapshot(db, pageId)
+                    noteContentEdit(db, pageId)
                     withContext(Dispatchers.Main) {
                         if (pageId.isNotEmpty()) {
                             // strokeIds is the union of ALL erased IDs; linkIds is the typed subset.
@@ -1473,7 +1437,7 @@ class NotebookActivity : AppCompatActivity() {
                 val captured = noteObject.translate(0f, 0f)
                 lifecycleScope.launch(Dispatchers.IO) {
                     db.notebookDao().softDeleteById(noteObject.id, deletedAt)
-                    invalidatePageSnapshot(db, pageId)
+                    noteContentEdit(db, pageId)
                     withContext(Dispatchers.Main) {
                         if (pageId.isNotEmpty()) {
                             undoRedoManager.push(UndoRedoAction.LassoErased(
@@ -1532,19 +1496,6 @@ class NotebookActivity : AppCompatActivity() {
                         }
                         if (newIds.isNotEmpty()) updateUndoRedoButtons()
                     }
-                }
-            }
-        }
-
-        // Snapshot callback — fired by the drawing view at non-writing transitions
-        // (eraser mode, template change, window focus loss).  Persist to the page's
-        // data JSON so the next page load can use the fast snapshot path.
-        drawingView.onSnapshotReady = { snapshot ->
-            val db = soilDatabase
-            val pageId = currentPageId
-            if (db != null && pageId.isNotEmpty()) {
-                lifecycleScope.launch {
-                    withContext(Dispatchers.IO) { persistSnapshot(db, pageId, snapshot) }
                 }
             }
         }
@@ -1820,7 +1771,7 @@ class NotebookActivity : AppCompatActivity() {
                         db.withTransaction {
                             erasedObjectIds.forEach { db.notebookDao().softDeleteById(it, deletedAt) }
                         }
-                        invalidatePageSnapshot(db, pageId)
+                        noteContentEdit(db, pageId)
                     }
                     val erasedHeadingIds = erasedHeadings.mapTo(mutableSetOf()) { it.id }
                     val capturedHeadings = erasedHeadings.map { h ->
@@ -2001,7 +1952,7 @@ class NotebookActivity : AppCompatActivity() {
                                 )
                             }
                         }
-                        if (movedLinks.isNotEmpty() || movedStickyNotes.isNotEmpty() || movedShapes.isNotEmpty()) invalidatePageSnapshot(db, pageId)
+                        if (movedLinks.isNotEmpty() || movedStickyNotes.isNotEmpty() || movedShapes.isNotEmpty()) noteContentEdit(db, pageId)
                     }
                     undoRedoManager.push(
                         UndoRedoAction.StrokesMoved(
@@ -3457,12 +3408,7 @@ class NotebookActivity : AppCompatActivity() {
                 // Already on the last page — insert a new page (same as the + button).
                 val db = soilDatabase ?: return
                 lifecycleScope.launch {
-                    val snapshot = drawingView.captureSnapshot()
-                    val leavingPageId = currentPageId
                     withContext(Dispatchers.IO) {
-                        if (snapshot != null && leavingPageId.isNotEmpty()) {
-                            persistSnapshot(db, leavingPageId, snapshot)
-                        }
                         addPage(db)
                     }
                     undoRedoManager.push(UndoRedoAction.PageAdded(currentPageId, currentPageIndex))
@@ -3607,12 +3553,7 @@ class NotebookActivity : AppCompatActivity() {
     private fun insertPageAfterCurrentAndNavigate() {
         val db = soilDatabase ?: return
         lifecycleScope.launch {
-            val snapshot = drawingView.captureSnapshot()
-            val leavingPageId = currentPageId
             withContext(Dispatchers.IO) {
-                if (snapshot != null && leavingPageId.isNotEmpty()) {
-                    persistSnapshot(db, leavingPageId, snapshot)
-                }
                 addPage(db)
             }
             undoRedoManager.push(UndoRedoAction.PageAdded(currentPageId, currentPageIndex))
@@ -3629,12 +3570,7 @@ class NotebookActivity : AppCompatActivity() {
     private fun insertPageBeforeCurrentAndNavigate() {
         val db = soilDatabase ?: return
         lifecycleScope.launch {
-            val snapshot = drawingView.captureSnapshot()
-            val leavingPageId = currentPageId
             withContext(Dispatchers.IO) {
-                if (snapshot != null && leavingPageId.isNotEmpty()) {
-                    persistSnapshot(db, leavingPageId, snapshot)
-                }
                 addPageBefore(db)
             }
             undoRedoManager.push(UndoRedoAction.PageAdded(currentPageId, currentPageIndex, insertedBefore = true))
@@ -3651,13 +3587,13 @@ class NotebookActivity : AppCompatActivity() {
     // ── Notebook DB lifecycle ─────────────────────────────────────────────────
 
     /**
-     * Tears down the open notebook: captures a final snapshot, then seals the file
-     * (save strokes, housekeeping PRAGMAs, close the Room DB, delete the stray -journal).
+     * Tears down the open notebook: captures the current page as the library-grid cover, then seals
+     * the file (save strokes, housekeeping PRAGMAs, close the Room DB, delete the stray -journal).
      *
-     * Snapshot is captured here on the main thread (before [soilDatabase] is cleared) so
-     * the close button and back-press paths always persist the current page state.
-     * [onWindowFocusChanged] fires AFTER [finish], so its [onSnapshotReady] callback would
-     * find [soilDatabase] already null — capturing here is the only reliable close-path hook.
+     * The cover snapshot is captured here on the main thread (before [soilDatabase] is cleared, and
+     * View work must run on the main thread) so the close button and back-press paths always update
+     * the grid cover. [onWindowFocusChanged] fires AFTER [finish], when [soilDatabase] is already
+     * null — capturing here is the only reliable close-path hook.
      *
      * The heavy seal ([sealNotebook]) runs on [Dispatchers.IO]:
      * - [blocking] = false (user-initiated close): launched on [NotesproutApplication.appScope]
@@ -3973,9 +3909,10 @@ class NotebookActivity : AppCompatActivity() {
     }
 
     /**
-     * Heavy file-seal: persist the page snapshot + any new strokes, run housekeeping PRAGMAs,
-     * close the Room database, and delete the stray -journal Android leaves during DB init.
-     * All IO — runs on [Dispatchers.IO] regardless of the calling dispatcher.
+     * Heavy file-seal: cache the closing page as the notebook's library-grid cover, flush any new
+     * strokes, run housekeeping PRAGMAs, compact, close the Room database, and delete the stray
+     * -journal Android leaves during DB init. All IO — runs on [Dispatchers.IO] regardless of the
+     * calling dispatcher.
      */
     private suspend fun sealNotebook(
         db: SoilDatabase,
@@ -3985,25 +3922,11 @@ class NotebookActivity : AppCompatActivity() {
         nbId: String,
         sessionStart: Long,
     ) = withContext(Dispatchers.IO) {
-        // Persist snapshot for the page we are closing (mirrors navigateToPage).
-        if (snapshot != null && pageId.isNotEmpty()) {
-            persistSnapshot(db, pageId, snapshot)
-        }
-        // Keep the index cover current so the MainActivity grid doesn't need to open the .soil. This
-        // runs on every seal (not only when a page snapshot was captured): push the cover image when
-        // an explicit cover is set, otherwise the page snapshot. Pushing the cover *actively* — rather
-        // than merely skipping the page thumbnail (M9) — self-heals notebooks whose cover was set by
-        // an older build that never propagated it to the index, or whose id mismatch (imported/copied
-        // notebooks: cover rows are parented by the .soil row id `meta.id`, not the global `nbId`)
-        // left the grid frozen on a stale thumbnail.
-        if (nbId.isNotEmpty()) {
-            val meta = notebookMetadata
-            val coverB64 = if (meta != null && meta.cover.isNotEmpty()) {
-                runCatching { db.notebookDao().getCoverForNotebook(meta.id) }.getOrNull()
-                    ?.let { CoverObject.fromJson(it.data)?.image }?.takeIf { it.isNotEmpty() }
-            } else null
-            val toCache = coverB64 ?: snapshot
-            if (toCache != null) cacheSnapshotIfAllowed(nbId, toCache)
+        // Keep the index cover current so the MainActivity grid doesn't need to open the .soil: push
+        // the current page's snapshot (captured on the main thread in closeNotebook) as the cover.
+        // Unencrypted only — cacheSnapshotIfAllowed guards the plaintext-leak case.
+        if (nbId.isNotEmpty() && snapshot != null) {
+            cacheSnapshotIfAllowed(nbId, snapshot)
         }
         saveStrokes(db)
         // RTR: stop pending debounce jobs and flush the sealed page's text synchronously, on this
@@ -4033,13 +3956,18 @@ class NotebookActivity : AppCompatActivity() {
         // and can never be restored, so they are dead weight. Current-session soft-deletes
         // (deletedAt >= sessionStart) are kept for undo/redo safety on abnormal teardown.
         db.notebookDao().hardDeleteOldSoftDeleted(before = sessionStart)
-        // One-time transitional compaction: strip dead per-point ts AND re-encode PNG/lossless-WEBP
-        // images (snapshots/templates/covers) to WEBP q100, then VACUUM to reclaim the space.
-        // Self-limiting — once a notebook is converted the scans find nothing, so this is a cheap
-        // scan on later seals. touchNotebook() below already flags the shrunk file for backup.
+        // One-time transitional compaction: strip dead per-point ts, re-encode template images to
+        // WEBP q100, strip dead heading/text strokes, strip legacy per-page snapshots, and delete
+        // legacy custom-cover rows — then VACUUM to reclaim the space. Runs on every seal (including
+        // encrypted notebooks, whose key is only available while open), but self-limiting: once a
+        // notebook is converted the scans find nothing. touchNotebook() below flags the shrunk file
+        // for backup.
         runCatching {
             val r = NotebookCompactor.compact(db)
-            if (r.changed) Slog.d(TAG) { "compaction sealed: ${r.tsRows} ts rows + ${r.imageRows} images → WEBP + ${r.deadStrokeRows} dead-stroke rows + VACUUM" }
+            if (r.changed) Slog.d(TAG) {
+                "compaction sealed: ${r.tsRows} ts + ${r.imageRows} images→WEBP + ${r.deadStrokeRows} dead-stroke + " +
+                    "${r.snapshotRows} snapshots stripped + ${r.coverRows} cover rows deleted + VACUUM"
+            }
         }.onFailure { Slog.d(TAG) { "compaction failed: ${it.message}" } }
         db.openHelper.writableDatabase.apply {
             query("PRAGMA incremental_vacuum").use { it.moveToFirst() }
@@ -4254,71 +4182,10 @@ class NotebookActivity : AppCompatActivity() {
      * Must be called on [Dispatchers.IO] AFTER [setupPageIds].
      */
     /**
-     * True if [pageId]'s persisted cover snapshot is missing or stale (content changed since it was
-     * captured) — i.e. a fresh [captureSnapshot] is warranted when leaving the page. Reuses the same
-     * staleness signal the old load fast-path used ([getMaxContentUpdatedAt] vs page.updatedAt, which
-     * [persistSnapshot] bumps). Lets flip-through navigation skip the ~600ms main-thread PNG encode on
-     * unmodified pages. Must be called on [Dispatchers.IO].
-     */
-    private suspend fun pageNeedsSnapshot(db: SoilDatabase, pageId: String, layerId: String): Boolean {
-        if (pageId.isEmpty()) return false
-        val page = db.notebookDao().getObjectById(pageId) ?: return false
-        val hasSnapshot = try {
-            PageData.fromJson(page.data).snapshot?.isNotEmpty() == true
-        } catch (e: Exception) { false }
-        if (!hasSnapshot) return true
-        val maxContent = db.notebookDao().getMaxContentUpdatedAt(layerId) ?: 0L
-        return maxContent > page.updatedAt
-    }
-
-    private suspend fun tryLoadSnapshotBitmap(db: SoilDatabase, templateBitmap: Bitmap?): Bitmap? {
-        val pageId  = currentPageId.takeIf  { it.isNotEmpty() } ?: return null
-        val layerId = currentLayerId.takeIf { it.isNotEmpty() } ?: return null
-
-        val page    = db.notebookDao().getObjectById(pageId) ?: return null
-        val b64     = PageData.fromJson(page.data).snapshot?.takeIf { it.isNotEmpty() } ?: return null
-
-        // Stale check: any stroke (including soft-deleted) updated after the snapshot?
-        // Soft-deleted rows have updatedAt = deletedAt, so erased strokes are also detected.
-        val maxStroke = db.notebookDao().getMaxContentUpdatedAt(layerId) ?: 0L
-        if (maxStroke > page.updatedAt) {
-            Slog.d(TAG) { "tryLoadSnapshotBitmap: stale (maxStroke=$maxStroke > page=${page.updatedAt})" }
-            return null
-        }
-
-        val w = drawingView.asView().width
-        val h = drawingView.asView().height
-        if (w == 0 || h == 0) return null
-
-        val bytes       = try { Base64.decode(b64, Base64.DEFAULT) } catch (e: Exception) { return null }
-        // Bounded decode (M-1): cap to the view size so a crafted/oversized snapshot can't OOM.
-        val snapshotBmp = BitmapDecode.decodeSampled(bytes, w, h) ?: return null
-
-        // Build composite: white → template → strokes-only snapshot (transparent PNG)
-        val composite = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
-        val c = Canvas(composite)
-        c.drawColor(Color.WHITE)
-        templateBitmap?.let { c.drawBitmap(it, null, RectF(0f, 0f, w.toFloat(), h.toFloat()), null) }
-        c.drawBitmap(snapshotBmp, null, RectF(0f, 0f, w.toFloat(), h.toFloat()), null)
-        snapshotBmp.recycle()
-
-        Slog.d(TAG) { "tryLoadSnapshotBitmap: hit for page $pageId" }
-        return composite
-    }
-
-    /**
-     * Load the current page with optional snapshot fast path.  Calls [setupPageIds] to
-     * resolve the current page/layer IDs from [currentPageIndex].
-     *
-     * Fast path (snapshot valid): returns a [PageLoadResult] with empty [strokes] and
-     * a composite [displayBitmap] ready for immediate display.  Stroke deserialization
-     * is deferred to [postDisplayWork].
-     *
-     * Full path (no/stale snapshot): deserializes strokes, builds render bitmap, returns
-     * fully populated [PageLoadResult].  [postDisplayWork] captures and persists a fresh
-     * snapshot after display.
-     *
-     * Must be called on [Dispatchers.IO].
+     * Load the current page. Calls [setupPageIds] to resolve the current page/layer IDs from
+     * [currentPageIndex], then deserializes strokes + objects. The GPU RenderNode committed layer
+     * records directly from these lists in [displayPage] → `loadStrokesWithBitmap`; no bitmap is
+     * rasterized here. Must be called on [Dispatchers.IO].
      */
     private suspend fun loadCurrentPage(db: SoilDatabase): PageLoadResult {
         setupPageIds(db)
@@ -4329,18 +4196,8 @@ class NotebookActivity : AppCompatActivity() {
         val links           = loadLinksFromDb(db, currentLayerId)
         val stickyNotes     = loadStickyNotesFromDb(db, currentLayerId)
         val shapeObjects    = loadShapeObjectsFromDb(db, currentLayerId)
-        // GPU render path: always take the full object+stroke load (the view records its RenderNode
-        // committed layer); the on-load snapshot display cache is bypassed. captureSnapshot still
-        // writes page `data.snapshot` as the cover/thumbnail asset. Flip to re-enable the old cache.
-        val snapshotBitmap  = if (USE_SNAPSHOT_LOAD_CACHE) tryLoadSnapshotBitmap(db, templateBitmap) else null
-        return if (snapshotBitmap != null) {
-            PageLoadResult(emptyList(), templateBitmap, snapshotBitmap, usedSnapshot = true, headings = headings, textObjects = textObjects, lineObjects = lineObjects, links = links, stickyNotes = stickyNotes, shapeObjects = shapeObjects)
-        } else {
-            // GPU path: deserialize strokes only. No off-thread buildRenderBitmap — the view records
-            // its committed RenderNode from these lists in displayPage → loadStrokesWithBitmap.
-            val strokes      = deserializeStrokesFromDb(db)
-            PageLoadResult(strokes, templateBitmap, null, usedSnapshot = false, headings = headings, textObjects = textObjects, lineObjects = lineObjects, links = links, stickyNotes = stickyNotes, shapeObjects = shapeObjects)
-        }
+        val strokes         = deserializeStrokesFromDb(db)
+        return PageLoadResult(strokes, templateBitmap, headings = headings, textObjects = textObjects, lineObjects = lineObjects, links = links, stickyNotes = stickyNotes, shapeObjects = shapeObjects)
     }
 
     /**
@@ -4481,38 +4338,14 @@ class NotebookActivity : AppCompatActivity() {
     }
 
     /**
-     * Work to run after [displayPage] returns, depending on which load path was taken.
-     *
-     * Snapshot path ([PageLoadResult.usedSnapshot] = true): deserialize strokes in the
-     * background and silently inject them into the drawing view — no visual redraw since
-     * the snapshot composite is already displayed.
-     *
-     * Full path: capture and persist a snapshot so the next load can use the fast path.
-     *
-     * Must be called on the main thread (launches IO coroutines internally).
+     * Work to run after [displayPage] returns. In the GPU render path there is nothing to do:
+     * [loadCurrentPage] already deserialized the strokes, [displayPage] recorded the committed
+     * RenderNode from them, and no per-page snapshot is captured on arrival (the library-grid cover
+     * is captured only at close). Retained as a call-site hook for the navigation paths.
      */
+    @Suppress("UNUSED_PARAMETER")
     private fun postDisplayWork(db: SoilDatabase, result: PageLoadResult) {
-        if (result.usedSnapshot) {
-            // Background stroke deserialization — strokes needed for erase / export / save.
-            val pageId = currentPageId
-            lifecycleScope.launch {
-                val strokes = withContext(Dispatchers.IO) { deserializeStrokesFromDb(db) }
-                // deserializeStrokesFromDb() reset persistedStrokeIds to the DB set, so anything
-                // in the view not in that set is unsaved ink written during the load window — keep
-                // it alongside the DB strokes so the silent replace doesn't drop it. Both calls run
-                // synchronously on the main thread, so no stroke can slip in between them.
-                val earlyStrokes = drawingView.getStrokes().filterNot { it.id in persistedStrokeIds }
-                val merged = if (earlyStrokes.isEmpty()) strokes else strokes + earlyStrokes
-                Slog.d(TAG) { "postDisplayWork(snapshot): silently loaded ${strokes.size} strokes (+${earlyStrokes.size} early) for $pageId" }
-                drawingView.setStrokeListSilently(merged)
-            }
-        }
-        // GPU path: no capture-on-arrival. The old code captured the just-displayed page's snapshot
-        // here to feed the load fast-path — which no longer exists — and captureSnapshot() on the main
-        // thread (~600ms for a heavy page) was blocking the queued handwritingRepaint, stalling the
-        // page turn. The arriving page is unchanged from DB, so its persisted snapshot is already
-        // current; freshness is maintained by the leaving-page capture (navigateToPageInternal) and
-        // the close/cover-sync path.
+        // No-op: GPU committed-content render needs no post-display work.
     }
 
     /**
@@ -4681,37 +4514,20 @@ class NotebookActivity : AppCompatActivity() {
         }
     }
 
-    /**
-     * Persist a [snapshot] base64 PNG into the `snapshot` field of the page row's
-     * `data` JSON.  Bumps [NotebookObject.updatedAt] so the stale-snapshot check in
-     * [tryLoadSnapshotBitmap] can detect subsequent stroke changes.
-     * Must be called on [Dispatchers.IO].
-     */
-    private suspend fun persistSnapshot(db: SoilDatabase, pageId: String, snapshot: String) {
-        val page    = db.notebookDao().getObjectById(pageId) ?: return
-        val updated = PageData.fromJson(page.data).copy(snapshot = snapshot)
-        db.notebookDao().updateData(pageId, updated.toJson(), System.currentTimeMillis())
-        Slog.d(TAG) { "persistSnapshot: saved for page $pageId (${snapshot.length} chars)" }
-    }
 
     // ── Template operations ───────────────────────────────────────────────────
 
     // ── Page index ────────────────────────────────────────────────────────────
 
     /**
-     * Saves the current page snapshot and strokes, then launches [PageIndexActivity].
-     * Snapshot is persisted first so PageIndexActivity reads the freshest state.
+     * Saves the current page's strokes, then launches [PageIndexActivity] (which renders its page
+     * thumbnails on demand from the freshly-saved content).
      */
     private fun openPageIndex() {
         val db = soilDatabase ?: return
         if (notebookId.isEmpty()) return
         lifecycleScope.launch {
-            val snapshot = drawingView.captureSnapshot()
-            val pageId   = currentPageId
             withContext(Dispatchers.IO) {
-                if (snapshot != null && pageId.isNotEmpty()) {
-                    persistSnapshot(db, pageId, snapshot)
-                }
                 saveStrokes(db)
             }
             val i = Intent(this@NotebookActivity, PageIndexActivity::class.java).apply {
@@ -4737,13 +4553,8 @@ class NotebookActivity : AppCompatActivity() {
         val db     = soilDatabase ?: return
         val copyId = pendingCopyPageId ?: return
         lifecycleScope.launch {
-            val snapshot = drawingView.captureSnapshot()
-            val leavingPageId = currentPageId
             var newPageId: String? = null
             withContext(Dispatchers.IO) {
-                if (snapshot != null && leavingPageId.isNotEmpty()) {
-                    persistSnapshot(db, leavingPageId, snapshot)
-                }
                 saveStrokes(db)
                 newPageId = copyPageAfter(copyId, currentPageId, db)
                 if (newPageId != null) {
@@ -4775,78 +4586,16 @@ class NotebookActivity : AppCompatActivity() {
         binding.btnPastePage.isEnabled  = pendingCopyPageId != null
     }
 
-    // ── Cover dialog ──────────────────────────────────────────────────────────
+    // ── Library-grid cover ──────────────────────────────────────────────────
 
     /**
-     * Opens [CoverDialog] for the current notebook.
-     * The current page snapshot is captured first so the "Last Opened Page" card
-     * shows the freshest possible preview.
-     */
-    private fun openCoverDialog() {
-        val notebookPath = notebookSoilPath ?: return
-        val snapshot = drawingView.captureSnapshot()
-        val snapshotBitmap: Bitmap? = snapshot?.let { b64 ->
-            try {
-                val bytes = Base64.decode(b64, Base64.DEFAULT)
-                BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
-            } catch (_: Exception) { null }
-        }
-
-        CoverDialog(
-            activity           = this,
-            lifecycleScope     = lifecycleScope,
-            soilFilePath       = notebookPath,
-            lastOpenedSnapshot = snapshotBitmap,
-            onRequestImagePick = { callback ->
-                onCoverImagePicked = callback
-                coverPickerLauncher.launch("image/*")
-            },
-            onCoverChanged = {
-                android.widget.Toast.makeText(this, "Cover updated", android.widget.Toast.LENGTH_SHORT).show()
-                // CoverDialog wrote the cover/metadata to the .soil. Propagate it to the index
-                // snapshot the grid card reads, and refresh in-memory metadata so the close-path
-                // guard (sealNotebook) sees the new cover state. Capture the page snapshot now
-                // (main thread) for the "cover removed" fallback.
-                syncCoverToIndex(drawingView.captureSnapshot())
-            },
-        ).show()
-    }
-
-    /**
-     * Write [snapshot] to the index only when the notebook is unencrypted.
-     * Encrypted notebooks must never cache page content in the plaintext global index.
+     * Write [snapshot] (the current page image, captured at close) to the global index as this
+     * notebook's library-grid cover — but only when the notebook is unencrypted. Encrypted
+     * notebooks must never cache page content in the plaintext global index.
      */
     private suspend fun cacheSnapshotIfAllowed(nbId: String, snapshot: String) {
         if (encryptionInfo.encrypted) return
         runCatching { indexRepo.updateNotebookSnapshot(nbId, snapshot) }
-    }
-
-    /**
-     * After an in-notebook cover change: re-read the notebook metadata + cover row from the open
-     * .soil, refresh [notebookMetadata], and update the index snapshot the MainActivity grid card
-     * displays — the cover image when one is set, otherwise [fallbackPageSnapshot]. Mirrors
-     * MainActivity.reloadCoverForNotebook for the toolbar-initiated path.
-     */
-    private fun syncCoverToIndex(fallbackPageSnapshot: String?) {
-        val db   = soilDatabase ?: return
-        val nbId = notebookId.takeIf { it.isNotEmpty() } ?: return
-        lifecycleScope.launch {
-            withContext(Dispatchers.IO) {
-                val meta = loadNotebookMetadataFromDb(db)
-                notebookMetadata = meta   // keep the close-path cover guard accurate
-                // Look up the cover by the .soil notebook-row id (meta.id), not the global nbId —
-                // they differ for imported/copied notebooks, which would otherwise find no cover.
-                val coverB64 = if (meta != null && meta.cover.isNotEmpty()) {
-                    db.notebookDao().getCoverForNotebook(meta.id)
-                        ?.let { CoverObject.fromJson(it.data)?.image }
-                        ?.takeIf { it.isNotEmpty() }
-                } else null
-                val newSnapshot = coverB64 ?: fallbackPageSnapshot
-                if (newSnapshot != null) {
-                    cacheSnapshotIfAllowed(nbId, newSnapshot)
-                }
-            }
-        }
     }
 
     private fun startExport(db: SoilDatabase) {
@@ -5482,25 +5231,13 @@ class NotebookActivity : AppCompatActivity() {
      * (e.g. undo/redo execution).  Saves the current page, clears the canvas, loads
      * the new page, and updates the UI — fully handling all thread context switches.
      *
-     * Must NOT be called while already inside a [withContext] block that holds the IO
-     * dispatcher, because it starts with main-thread View work ([captureSnapshot]).
      * Always call from the main-thread coroutine context.
      */
     private suspend fun navigateToPageInternal(newIndex: Int) {
         val db = soilDatabase ?: return
-        val leavingPageId  = currentPageId
-        val leavingLayerId = currentLayerId
-        // Persist any unsaved ink first, then decide whether the leaving page needs a fresh cover
-        // snapshot. captureSnapshot() is a ~600ms main-thread PNG encode; skipping it on pages that
-        // weren't modified since their last snapshot removes it from flip-through navigation entirely.
-        val needSnapshot = withContext(Dispatchers.IO) {
-            saveStrokes(db)
-            pageNeedsSnapshot(db, leavingPageId, leavingLayerId)
-        }
-        val snapshot = if (needSnapshot) drawingView.captureSnapshot() else null
-        if (snapshot != null && leavingPageId.isNotEmpty()) {
-            withContext(Dispatchers.IO) { persistSnapshot(db, leavingPageId, snapshot) }
-        }
+        // Persist any unsaved ink before leaving the page. No per-page snapshot is captured — the
+        // library-grid cover is captured to the global index only at notebook close.
+        withContext(Dispatchers.IO) { saveStrokes(db) }
 
         currentPageIndex = newIndex
         selectedObjectIds.clear()
@@ -5529,12 +5266,7 @@ class NotebookActivity : AppCompatActivity() {
      */
     private suspend fun saveAndSwitchPage(newIndex: Int) {
         val db = soilDatabase ?: return
-        val snapshot      = drawingView.captureSnapshot()
-        val leavingPageId = currentPageId
         withContext(Dispatchers.IO) {
-            if (snapshot != null && leavingPageId.isNotEmpty()) {
-                persistSnapshot(db, leavingPageId, snapshot)
-            }
             saveStrokes(db)
         }
         currentPageIndex = newIndex
@@ -5845,7 +5577,7 @@ class NotebookActivity : AppCompatActivity() {
                         )
                     }
                 }
-                if (newLinks.isNotEmpty() || newStickyNotes.isNotEmpty() || newShapes.isNotEmpty()) invalidatePageSnapshot(db, pageId)
+                if (newLinks.isNotEmpty() || newStickyNotes.isNotEmpty() || newShapes.isNotEmpty()) noteContentEdit(db, pageId)
             }
 
             val allStrokes      = existingStrokes + newStrokes
@@ -6103,7 +5835,7 @@ class NotebookActivity : AppCompatActivity() {
                         )
                     }
                 }
-                if (newLinks.isNotEmpty() || newStickyNotes.isNotEmpty() || newShapes.isNotEmpty()) invalidatePageSnapshot(db, pageId)
+                if (newLinks.isNotEmpty() || newStickyNotes.isNotEmpty() || newShapes.isNotEmpty()) noteContentEdit(db, pageId)
             }
 
             val allStrokes      = existingStrokes + newStrokes
@@ -6239,7 +5971,7 @@ class NotebookActivity : AppCompatActivity() {
             (strokeIds + headingIds + textIds + lineIds + linkIds + stickyNoteIds + shapeIds).forEach { id ->
                 soilDatabase?.notebookDao()?.softDeleteById(id, deletedAt)
             }
-            soilDatabase?.let { if (linkIds.isNotEmpty() || stickyNoteIds.isNotEmpty() || shapeIds.isNotEmpty()) invalidatePageSnapshot(it, pageId) }
+            soilDatabase?.let { if (linkIds.isNotEmpty() || stickyNoteIds.isNotEmpty() || shapeIds.isNotEmpty()) noteContentEdit(it, pageId) }
             withContext(Dispatchers.Main) {
                 val erasedStrokeSet      = strokeIds.toSet()
                 val erasedHeadingSet     = headingIds.toSet()
@@ -6563,7 +6295,7 @@ class NotebookActivity : AppCompatActivity() {
             (strokeIds + headingIds + textIds + lineIds + linkIds + stickyNoteIds + shapeIds).forEach { id ->
                 soilDatabase?.notebookDao()?.softDeleteById(id, deletedAt)
             }
-            soilDatabase?.let { if (linkIds.isNotEmpty() || stickyNoteIds.isNotEmpty() || shapeIds.isNotEmpty()) invalidatePageSnapshot(it, pageId) }
+            soilDatabase?.let { if (linkIds.isNotEmpty() || stickyNoteIds.isNotEmpty() || shapeIds.isNotEmpty()) noteContentEdit(it, pageId) }
             withContext(Dispatchers.Main) {
                 val erasedStrokeSet      = strokeIds.toSet()
                 val erasedHeadingSet     = headingIds.toSet()
@@ -6709,7 +6441,7 @@ class NotebookActivity : AppCompatActivity() {
 
         // Invalidate any existing page snapshot — it predates the heading.
         // The next close will capture a fresh snapshot via captureSnapshot().
-        invalidatePageSnapshot(db, pageId)
+        noteContentEdit(db, pageId)
 
         withContext(Dispatchers.Main) {
             val erasedSet = originalStrokeIds.toSet()
@@ -6839,7 +6571,7 @@ class NotebookActivity : AppCompatActivity() {
             )
         }
 
-        invalidatePageSnapshot(db, pageId)
+        noteContentEdit(db, pageId)
 
         withContext(Dispatchers.Main) {
             val erasedSet      = originalStrokeIds.toSet()
@@ -6935,7 +6667,7 @@ class NotebookActivity : AppCompatActivity() {
                 )
             )
         }
-        invalidatePageSnapshot(db, pageId)
+        noteContentEdit(db, pageId)
 
         withContext(Dispatchers.Main) {
             val erasedSet      = setOf(stroke.id)
@@ -7005,7 +6737,7 @@ class NotebookActivity : AppCompatActivity() {
         db.withTransaction {
             db.notebookDao().updateHeadingData(after.id, bboxJson, dataJson, now)
         }
-        invalidatePageSnapshot(db, pageId)
+        noteContentEdit(db, pageId)
 
         withContext(Dispatchers.Main) {
             undoRedoManager.push(UndoRedoAction.ShapeTransformed(
@@ -7203,7 +6935,7 @@ class NotebookActivity : AppCompatActivity() {
                 data        = linkObj.toJson(),
             ))
         }
-        invalidatePageSnapshot(db, pageId)
+        noteContentEdit(db, pageId)
 
         val newLink = LinkRender(linkId, RectF(unionBox), target, chrome,
             strokes = emptyList(), headings = emptyList(),
@@ -7328,7 +7060,7 @@ class NotebookActivity : AppCompatActivity() {
                 data        = linkObj.toJson(),
             ))
         }
-        invalidatePageSnapshot(db, pageId)
+        noteContentEdit(db, pageId)
 
         val newLink = LinkRender(linkId, RectF(unionBox), target, chrome, embeddedStrokes, embeddedHeadings, embeddedTexts, embeddedLineRenders)
 
@@ -7418,7 +7150,7 @@ class NotebookActivity : AppCompatActivity() {
                 dao.insertObject(NotebookObject(l.id, layerId, l.boundingBox.toBoundingBoxJson(), 0, now, now, null, TYPE_LINE, data))
             }
         }
-        invalidatePageSnapshot(db, pageId)
+        noteContentEdit(db, pageId)
 
         withContext(Dispatchers.Main) {
             undoRedoManager.push(UndoRedoAction.LinkRemoved(
@@ -7498,7 +7230,7 @@ class NotebookActivity : AppCompatActivity() {
         val updatedObj = obj.copy(chrome = newChrome, target = newTarget, textObjects = updatedTextObjects)
         val now = System.currentTimeMillis()
         dao.updateData(linkId, updatedObj.toJson(), now)
-        invalidatePageSnapshot(db, pageId)
+        noteContentEdit(db, pageId)
 
         withContext(Dispatchers.Main) {
             undoRedoManager.push(UndoRedoAction.LinkEdited(
@@ -7984,7 +7716,7 @@ class NotebookActivity : AppCompatActivity() {
                     )
                 }
             }
-            invalidatePageSnapshot(db, pageId)
+            noteContentEdit(db, pageId)
         }
 
         // Update in-memory state.
@@ -8189,7 +7921,7 @@ class NotebookActivity : AppCompatActivity() {
                         data        = shapeObj.toJson(),
                     )
                 )
-                invalidatePageSnapshot(db, pageId)
+                noteContentEdit(db, pageId)
             }
 
             val updatedShapes = drawingView.getShapeObjects() + shapeRender
@@ -8445,7 +8177,7 @@ class NotebookActivity : AppCompatActivity() {
                         data        = TextObject(text = markdown).toJson(),
                     )
                 )
-                invalidatePageSnapshot(db, pageId)
+                noteContentEdit(db, pageId)
             }
 
             val textRender     = TextRender(id = textId, boundingBox = bbox, text = markdown)
@@ -8532,7 +8264,7 @@ class NotebookActivity : AppCompatActivity() {
                         data        = StickyNoteObject().toJson(),
                     )
                 )
-                invalidatePageSnapshot(db, pageId)
+                noteContentEdit(db, pageId)
             }
 
             val noteRender     = StickyNoteRender(id = noteId, boundingBox = bbox)
@@ -8623,7 +8355,7 @@ class NotebookActivity : AppCompatActivity() {
                             )
                         )
                     }
-                    invalidatePageSnapshot(db, pageId)
+                    noteContentEdit(db, pageId)
                 }
             }
             val updatedLines = drawingView.getLineObjects() + lines
@@ -8699,7 +8431,7 @@ class NotebookActivity : AppCompatActivity() {
                 db.notebookDao().updateHeadingData(
                     textRender.id, bboxJson, TextObject(text = newMarkdown, strokes = textRender.strokes).toJson(), now
                 )
-                invalidatePageSnapshot(db, pageId)
+                noteContentEdit(db, pageId)
             }
 
             val newTextRender = TextRender(id = textRender.id, boundingBox = newBbox, text = newMarkdown, strokes = textRender.strokes)
@@ -8756,7 +8488,7 @@ class NotebookActivity : AppCompatActivity() {
             val deletedAt = System.currentTimeMillis()
             withContext(Dispatchers.IO) {
                 db.notebookDao().softDeleteById(textRender.id, deletedAt)
-                invalidatePageSnapshot(db, pageId)
+                noteContentEdit(db, pageId)
             }
 
             val updatedTexts    = drawingView.getTextObjects().filter { it.id != textRender.id }
@@ -8909,7 +8641,7 @@ class NotebookActivity : AppCompatActivity() {
             else                              -> null
         }
         if (snapshotPageId != null) {
-            withContext(Dispatchers.IO) { invalidatePageSnapshot(db, snapshotPageId) }
+            withContext(Dispatchers.IO) { noteContentEdit(db, snapshotPageId) }
         }
 
         // Link create/remove/edit undo/redo take the full-reload path (no optimised same-page
@@ -8947,12 +8679,7 @@ class NotebookActivity : AppCompatActivity() {
 
         // ── Cross-page LassoErased: two-phase display ─────────────────────────
         if (action is UndoRedoAction.LassoErased) {
-            val snapshot      = drawingView.captureSnapshot()
-            val leavingPageId = currentPageId
             withContext(Dispatchers.IO) {
-                if (snapshot != null && leavingPageId.isNotEmpty()) {
-                    persistSnapshot(db, leavingPageId, snapshot)
-                }
                 saveStrokes(db)
             }
             currentPageIndex = pages.indexOfFirst { it.id == action.pageId }.coerceAtLeast(0)
@@ -8999,7 +8726,7 @@ class NotebookActivity : AppCompatActivity() {
                     action.strokeIds.forEach { dao.softDeleteById(it, now) }
                     action.shapeIds.forEach { dao.softDeleteById(it, now) }
                 }
-                if (action.linkIds.isNotEmpty()) invalidatePageSnapshot(db, action.pageId)
+                if (action.linkIds.isNotEmpty()) noteContentEdit(db, action.pageId)
             }
 
             val idsSet        = action.strokeIds.toSet()
@@ -9068,12 +8795,7 @@ class NotebookActivity : AppCompatActivity() {
 
         // ── Cross-page ScribbleErased: two-phase display (mirrors LassoErased) ──────────────
         if (action is UndoRedoAction.ScribbleErased) {
-            val snapshot      = drawingView.captureSnapshot()
-            val leavingPageId = currentPageId
             withContext(Dispatchers.IO) {
-                if (snapshot != null && leavingPageId.isNotEmpty()) {
-                    persistSnapshot(db, leavingPageId, snapshot)
-                }
                 saveStrokes(db)
             }
             currentPageIndex = pages.indexOfFirst { it.id == action.pageId }.coerceAtLeast(0)
@@ -9120,7 +8842,7 @@ class NotebookActivity : AppCompatActivity() {
                     action.erasedObjectIds.forEach { dao.softDeleteById(it, now) }
                     action.shapeIds.forEach { dao.softDeleteById(it, now) }
                 }
-                if (action.linkIds.isNotEmpty()) invalidatePageSnapshot(db, action.pageId)
+                if (action.linkIds.isNotEmpty()) noteContentEdit(db, action.pageId)
             }
 
             val erasedIdsSet  = action.erasedObjectIds.toSet()
@@ -9180,12 +8902,7 @@ class NotebookActivity : AppCompatActivity() {
 
         // ── Cross-page LassoCut: two-phase display (same as LassoErased + clipboard on redo) ─
         if (action is UndoRedoAction.LassoCut) {
-            val snapshot      = drawingView.captureSnapshot()
-            val leavingPageId = currentPageId
             withContext(Dispatchers.IO) {
-                if (snapshot != null && leavingPageId.isNotEmpty()) {
-                    persistSnapshot(db, leavingPageId, snapshot)
-                }
                 saveStrokes(db)
             }
             currentPageIndex = pages.indexOfFirst { it.id == action.pageId }.coerceAtLeast(0)
@@ -9245,7 +8962,7 @@ class NotebookActivity : AppCompatActivity() {
                     action.stickyNoteIds.forEach { dao.softDeleteById(it, now) }
                     action.shapeIds.forEach { dao.softDeleteById(it, now) }
                 }
-                if (action.linkIds.isNotEmpty() || action.stickyNoteIds.isNotEmpty()) invalidatePageSnapshot(db, action.pageId)
+                if (action.linkIds.isNotEmpty() || action.stickyNoteIds.isNotEmpty()) noteContentEdit(db, action.pageId)
             }
 
             val idsSet            = action.strokeIds.toSet()
@@ -9329,12 +9046,7 @@ class NotebookActivity : AppCompatActivity() {
 
         // ── Cross-page LassoDeleted: two-phase display (identical to LassoErased — no clipboard) ─
         if (action is UndoRedoAction.LassoDeleted) {
-            val snapshot      = drawingView.captureSnapshot()
-            val leavingPageId = currentPageId
             withContext(Dispatchers.IO) {
-                if (snapshot != null && leavingPageId.isNotEmpty()) {
-                    persistSnapshot(db, leavingPageId, snapshot)
-                }
                 saveStrokes(db)
             }
             currentPageIndex = pages.indexOfFirst { it.id == action.pageId }.coerceAtLeast(0)
@@ -9389,7 +9101,7 @@ class NotebookActivity : AppCompatActivity() {
                     action.linkIds.forEach { dao.softDeleteById(it, now) }
                     action.shapeIds.forEach { dao.softDeleteById(it, now) }
                 }
-                if (action.linkIds.isNotEmpty()) invalidatePageSnapshot(db, action.pageId)
+                if (action.linkIds.isNotEmpty()) noteContentEdit(db, action.pageId)
             }
 
             val idsSet        = action.strokeIds.toSet()
@@ -9450,12 +9162,7 @@ class NotebookActivity : AppCompatActivity() {
         // Undo paste = remove strokes/headings/text objects (mirrors LassoErased redo).
         // Redo paste = restore strokes/headings/text objects (mirrors LassoErased undo).
         if (action is UndoRedoAction.LassoPasted) {
-            val snapshot      = drawingView.captureSnapshot()
-            val leavingPageId = currentPageId
             withContext(Dispatchers.IO) {
-                if (snapshot != null && leavingPageId.isNotEmpty()) {
-                    persistSnapshot(db, leavingPageId, snapshot)
-                }
                 saveStrokes(db)
             }
             currentPageIndex = pages.indexOfFirst { it.id == action.pageId }.coerceAtLeast(0)
@@ -9515,7 +9222,7 @@ class NotebookActivity : AppCompatActivity() {
                     action.stickyNoteIds.forEach { dao.restoreById(it, now) }
                     action.shapeIds.forEach { dao.restoreById(it, now) }
                 }
-                if (action.linkIds.isNotEmpty() || action.stickyNoteIds.isNotEmpty()) invalidatePageSnapshot(db, action.pageId)
+                if (action.linkIds.isNotEmpty() || action.stickyNoteIds.isNotEmpty()) noteContentEdit(db, action.pageId)
             }
 
             val idsSet            = action.strokeIds.toSet()
@@ -9598,12 +9305,7 @@ class NotebookActivity : AppCompatActivity() {
         // Undo: heading soft-deleted, original strokes restored — page shows strokes, no heading.
         // Redo: original strokes soft-deleted, heading restored — page shows heading, no strokes.
         if (action is UndoRedoAction.HeadingCreated) {
-            val snapshot      = drawingView.captureSnapshot()
-            val leavingPageId = currentPageId
             withContext(Dispatchers.IO) {
-                if (snapshot != null && leavingPageId.isNotEmpty()) {
-                    persistSnapshot(db, leavingPageId, snapshot)
-                }
                 saveStrokes(db)
             }
             currentPageIndex = pages.indexOfFirst { it.id == action.pageId }.coerceAtLeast(0)
@@ -9683,12 +9385,7 @@ class NotebookActivity : AppCompatActivity() {
         // ── Cross-page HeadingTextEdited: two-phase display ──────────────────
         if (action is UndoRedoAction.HeadingTextEdited) {
             val targetText = if (isUndo) action.previousText else action.newText
-            val snapshot      = drawingView.captureSnapshot()
-            val leavingPageId = currentPageId
             withContext(Dispatchers.IO) {
-                if (snapshot != null && leavingPageId.isNotEmpty()) {
-                    persistSnapshot(db, leavingPageId, snapshot)
-                }
                 saveStrokes(db)
             }
             currentPageIndex = pages.indexOfFirst { it.id == action.pageId }.coerceAtLeast(0)
@@ -9759,12 +9456,7 @@ class NotebookActivity : AppCompatActivity() {
             val targetLevel = if (isUndo) action.previousLevel else action.newLevel
             val targetText  = if (isUndo) action.previousText  else action.newText
             val targetBox   = if (isUndo) action.previousBox   else action.newBox
-            val snapshot      = drawingView.captureSnapshot()
-            val leavingPageId = currentPageId
             withContext(Dispatchers.IO) {
-                if (snapshot != null && leavingPageId.isNotEmpty()) {
-                    persistSnapshot(db, leavingPageId, snapshot)
-                }
                 saveStrokes(db)
             }
             currentPageIndex = pages.indexOfFirst { it.id == action.pageId }.coerceAtLeast(0)
@@ -9823,12 +9515,7 @@ class NotebookActivity : AppCompatActivity() {
         // Undo: text row soft-deleted, original strokes restored — page shows strokes, no text obj.
         // Redo: original strokes soft-deleted, text row restored — page shows text obj, no strokes.
         if (action is UndoRedoAction.TextConverted) {
-            val snapshot      = drawingView.captureSnapshot()
-            val leavingPageId = currentPageId
             withContext(Dispatchers.IO) {
-                if (snapshot != null && leavingPageId.isNotEmpty()) {
-                    persistSnapshot(db, leavingPageId, snapshot)
-                }
                 saveStrokes(db)
             }
             currentPageIndex = pages.indexOfFirst { it.id == action.pageId }.coerceAtLeast(0)
@@ -9865,7 +9552,7 @@ class NotebookActivity : AppCompatActivity() {
                     action.originalStrokeIds.forEach { dao.softDeleteById(it, now) }
                     dao.restoreById(action.textId, now)
                 }
-                invalidatePageSnapshot(db, action.pageId)
+                noteContentEdit(db, action.pageId)
             }
 
             val updatedStrokes: List<LiveStroke>
@@ -9908,12 +9595,7 @@ class NotebookActivity : AppCompatActivity() {
 
         // ── Cross-page TextEdited / TextRemoved: two-phase display ───────────
         if (action is UndoRedoAction.TextEdited || action is UndoRedoAction.TextRemoved) {
-            val snapshot      = drawingView.captureSnapshot()
-            val leavingPageId = currentPageId
             withContext(Dispatchers.IO) {
-                if (snapshot != null && leavingPageId.isNotEmpty()) {
-                    persistSnapshot(db, leavingPageId, snapshot)
-                }
                 saveStrokes(db)
             }
             val targetPage = when (action) {
@@ -9957,12 +9639,7 @@ class NotebookActivity : AppCompatActivity() {
 
         // ── Cross-page StrokesMoved: two-phase display ────────────────────────
         if (action is UndoRedoAction.StrokesMoved) {
-            val snapshot      = drawingView.captureSnapshot()
-            val leavingPageId = currentPageId
             withContext(Dispatchers.IO) {
-                if (snapshot != null && leavingPageId.isNotEmpty()) {
-                    persistSnapshot(db, leavingPageId, snapshot)
-                }
                 saveStrokes(db)
             }
             currentPageIndex = pages.indexOfFirst { it.id == action.pageId }.coerceAtLeast(0)
@@ -10030,7 +9707,7 @@ class NotebookActivity : AppCompatActivity() {
                         dao.updateHeadingData(link.id, link.boundingBox.toBoundingBoxJson(), link.toLinkObject(density).toJson(), ts)
                     }
                 }
-                if (targetLinks.isNotEmpty()) invalidatePageSnapshot(db, action.pageId)
+                if (targetLinks.isNotEmpty()) noteContentEdit(db, action.pageId)
             }
             val strokeById  = targetStrokes.associateBy { it.id }
             val headingById = targetHeadings.associateBy { it.id }
@@ -10074,12 +9751,7 @@ class NotebookActivity : AppCompatActivity() {
             }
 
             // ── Phase 1a: save and snapshot the page we are leaving ───────────
-            val snapshot      = drawingView.captureSnapshot()
-            val leavingPageId = currentPageId
             withContext(Dispatchers.IO) {
-                if (snapshot != null && leavingPageId.isNotEmpty()) {
-                    persistSnapshot(db, leavingPageId, snapshot)
-                }
                 saveStrokes(db)
             }
 
@@ -10163,12 +9835,7 @@ class NotebookActivity : AppCompatActivity() {
         // Undo: shape row soft-deleted, original stroke restored — page shows stroke, no shape.
         // Redo: original stroke soft-deleted, shape row restored — page shows shape, no stroke.
         if (action is UndoRedoAction.ShapeCreated) {
-            val snapshot      = drawingView.captureSnapshot()
-            val leavingPageId = currentPageId
             withContext(Dispatchers.IO) {
-                if (snapshot != null && leavingPageId.isNotEmpty()) {
-                    persistSnapshot(db, leavingPageId, snapshot)
-                }
                 saveStrokes(db)
             }
             currentPageIndex = pages.indexOfFirst { it.id == action.pageId }.coerceAtLeast(0)
@@ -10228,7 +9895,7 @@ class NotebookActivity : AppCompatActivity() {
                     dao.softDeleteById(action.originalStroke.id, now)
                     dao.restoreById(action.shapeId, now)
                 }
-                invalidatePageSnapshot(db, action.pageId)
+                noteContentEdit(db, action.pageId)
             }
 
             val updatedStrokes: List<LiveStroke>
@@ -10260,12 +9927,7 @@ class NotebookActivity : AppCompatActivity() {
 
         // ── Cross-page ShapeTransformed: navigate to the shape's page and apply geometry ──
         if (action is UndoRedoAction.ShapeTransformed) {
-            val snapshot      = drawingView.captureSnapshot()
-            val leavingPageId = currentPageId
             withContext(Dispatchers.IO) {
-                if (snapshot != null && leavingPageId.isNotEmpty()) {
-                    persistSnapshot(db, leavingPageId, snapshot)
-                }
                 saveStrokes(db)
             }
             currentPageIndex = pages.indexOfFirst { it.id == action.pageId }.coerceAtLeast(0)
@@ -10304,7 +9966,7 @@ class NotebookActivity : AppCompatActivity() {
                 db.notebookDao().updateHeadingData(
                     target.id, target.boundingBox.toBoundingBoxJson(), target.toShapeObject(density).toJson(), now,
                 )
-                invalidatePageSnapshot(db, action.pageId)
+                noteContentEdit(db, action.pageId)
             }
 
             val updatedShapes = preUndoShapes.map { if (it.id == target.id) target else it }
@@ -10394,7 +10056,7 @@ class NotebookActivity : AppCompatActivity() {
                         if (layer != null) {
                             dao.restoreChildrenDeletedSince(layer.id, ref.deletedAt, now)
                         }
-                        invalidatePageSnapshot(db, ref.pageId)
+                        noteContentEdit(db, ref.pageId)
                     }
                     // Land near the restored block; loadCurrentPage will coerce into range.
                     currentPageIndex = action.pages.minOf { it.pageIndex }
@@ -10419,7 +10081,7 @@ class NotebookActivity : AppCompatActivity() {
                         if (layer != null) {
                             dao.restoreChildrenDeletedSince(layer.id, action.deletedAt, now)
                         }
-                        invalidatePageSnapshot(db, pageId)
+                        noteContentEdit(db, pageId)
                     }
                 } else {
                     action.pageIds.forEach { pageId ->
@@ -10444,7 +10106,7 @@ class NotebookActivity : AppCompatActivity() {
                 action.changes.forEach { ref ->
                     val templateId = if (isUndo) ref.previousTemplateId else ref.newTemplateId
                     persistPageTemplate(dao, ref.pageId, templateId ?: "")
-                    invalidatePageSnapshot(db, ref.pageId)
+                    noteContentEdit(db, ref.pageId)
                 }
                 // Visual update for the open page is handled by the full page reload in step 3b below.
             }
@@ -10531,7 +10193,7 @@ class NotebookActivity : AppCompatActivity() {
                             }
                             // Invalidate snapshot for each restored page so the index shows
                             // current content (mirrors what single PagePasted does in step 3b).
-                            invalidatePageSnapshot(db, ref.pageId)
+                            noteContentEdit(db, ref.pageId)
                         }
                     }
                     currentPageIndex = action.pages.minOfOrNull { it.pageIndex }
@@ -10571,7 +10233,7 @@ class NotebookActivity : AppCompatActivity() {
                     action.stickyNoteIds.forEach { dao.softDeleteById(it, now) }
                     action.shapeIds.forEach { dao.softDeleteById(it, now) }
                 }
-                if (action.stickyNoteIds.isNotEmpty() || action.shapeIds.isNotEmpty()) invalidatePageSnapshot(db, action.pageId)
+                if (action.stickyNoteIds.isNotEmpty() || action.shapeIds.isNotEmpty()) noteContentEdit(db, action.pageId)
             }
 
             is UndoRedoAction.LassoCut -> withContext(Dispatchers.IO) {
@@ -10592,7 +10254,7 @@ class NotebookActivity : AppCompatActivity() {
                     action.stickyNoteIds.forEach { dao.softDeleteById(it, now) }
                     action.shapeIds.forEach { dao.softDeleteById(it, now) }
                 }
-                if (action.linkIds.isNotEmpty() || action.stickyNoteIds.isNotEmpty() || action.shapeIds.isNotEmpty()) invalidatePageSnapshot(db, action.pageId)
+                if (action.linkIds.isNotEmpty() || action.stickyNoteIds.isNotEmpty() || action.shapeIds.isNotEmpty()) noteContentEdit(db, action.pageId)
             }
 
             is UndoRedoAction.LassoDeleted -> withContext(Dispatchers.IO) {
@@ -10613,7 +10275,7 @@ class NotebookActivity : AppCompatActivity() {
                     action.stickyNoteIds.forEach { dao.softDeleteById(it, now) }
                     action.shapeIds.forEach { dao.softDeleteById(it, now) }
                 }
-                if (action.linkIds.isNotEmpty() || action.stickyNoteIds.isNotEmpty() || action.shapeIds.isNotEmpty()) invalidatePageSnapshot(db, action.pageId)
+                if (action.linkIds.isNotEmpty() || action.stickyNoteIds.isNotEmpty() || action.shapeIds.isNotEmpty()) noteContentEdit(db, action.pageId)
             }
 
             is UndoRedoAction.LassoPasted -> withContext(Dispatchers.IO) {
@@ -10634,7 +10296,7 @@ class NotebookActivity : AppCompatActivity() {
                     action.stickyNoteIds.forEach { dao.restoreById(it, now) }
                     action.shapeIds.forEach { dao.restoreById(it, now) }
                 }
-                if (action.linkIds.isNotEmpty() || action.stickyNoteIds.isNotEmpty() || action.shapeIds.isNotEmpty()) invalidatePageSnapshot(db, action.pageId)
+                if (action.linkIds.isNotEmpty() || action.stickyNoteIds.isNotEmpty() || action.shapeIds.isNotEmpty()) noteContentEdit(db, action.pageId)
             }
 
             is UndoRedoAction.StrokesMoved -> withContext(Dispatchers.IO) {
@@ -10676,7 +10338,7 @@ class NotebookActivity : AppCompatActivity() {
                         dao.updateHeadingData(shape.id, shape.boundingBox.toBoundingBoxJson(), shape.toShapeObject(density).toJson(), now)
                     }
                 }
-                if (action.movedLinks.isNotEmpty() || action.movedStickyNotes.isNotEmpty() || action.movedShapes.isNotEmpty()) invalidatePageSnapshot(db, action.pageId)
+                if (action.movedLinks.isNotEmpty() || action.movedStickyNotes.isNotEmpty() || action.movedShapes.isNotEmpty()) noteContentEdit(db, action.pageId)
             }
 
             is UndoRedoAction.HeadingCreated -> withContext(Dispatchers.IO) {
@@ -10730,7 +10392,7 @@ class NotebookActivity : AppCompatActivity() {
                 } else {
                     dao.restoreById(action.textId, now)
                 }
-                invalidatePageSnapshot(db, action.pageId)
+                noteContentEdit(db, action.pageId)
             }
 
             is UndoRedoAction.TextEdited -> withContext(Dispatchers.IO) {
@@ -10738,7 +10400,7 @@ class NotebookActivity : AppCompatActivity() {
                 val bb = target.boundingBox
                 val bboxJson = bb.toBoundingBoxJson()
                 dao.updateHeadingData(action.textId, bboxJson, TextObject(text = target.text, strokes = target.strokes).toJson(), now)
-                invalidatePageSnapshot(db, action.pageId)
+                noteContentEdit(db, action.pageId)
             }
 
             is UndoRedoAction.TextRemoved -> withContext(Dispatchers.IO) {
@@ -10747,7 +10409,7 @@ class NotebookActivity : AppCompatActivity() {
                 } else {
                     dao.softDeleteById(action.textId, action.deletedAt)
                 }
-                invalidatePageSnapshot(db, action.pageId)
+                noteContentEdit(db, action.pageId)
             }
 
             is UndoRedoAction.TextConverted -> withContext(Dispatchers.IO) {
@@ -10758,7 +10420,7 @@ class NotebookActivity : AppCompatActivity() {
                     action.originalStrokeIds.forEach { dao.softDeleteById(it, now) }
                     dao.restoreById(action.textId, now)
                 }
-                invalidatePageSnapshot(db, action.pageId)
+                noteContentEdit(db, action.pageId)
             }
 
             is UndoRedoAction.ShapeCreated -> withContext(Dispatchers.IO) {
@@ -10786,7 +10448,7 @@ class NotebookActivity : AppCompatActivity() {
                     dao.softDeleteById(action.originalStroke.id, now)
                     dao.restoreById(action.shapeId, now)
                 }
-                invalidatePageSnapshot(db, action.pageId)
+                noteContentEdit(db, action.pageId)
             }
 
             is UndoRedoAction.ShapeTransformed -> withContext(Dispatchers.IO) {
@@ -10795,7 +10457,7 @@ class NotebookActivity : AppCompatActivity() {
                 dao.updateHeadingData(
                     target.id, target.boundingBox.toBoundingBoxJson(), target.toShapeObject(density).toJson(), now,
                 )
-                invalidatePageSnapshot(db, action.pageId)
+                noteContentEdit(db, action.pageId)
             }
 
             is UndoRedoAction.ScribbleErased -> withContext(Dispatchers.IO) {
@@ -10804,7 +10466,7 @@ class NotebookActivity : AppCompatActivity() {
                 } else {
                     action.erasedObjectIds.forEach { dao.softDeleteById(it, now) }
                 }
-                invalidatePageSnapshot(db, action.pageId)
+                noteContentEdit(db, action.pageId)
             }
 
             is UndoRedoAction.LinesInserted -> withContext(Dispatchers.IO) {
@@ -10813,7 +10475,7 @@ class NotebookActivity : AppCompatActivity() {
                 } else {
                     action.lineIds.forEach { dao.restoreById(it, now) }
                 }
-                invalidatePageSnapshot(db, action.pageId)
+                noteContentEdit(db, action.pageId)
             }
 
             is UndoRedoAction.LinesRemoved -> withContext(Dispatchers.IO) {
@@ -10822,7 +10484,7 @@ class NotebookActivity : AppCompatActivity() {
                 } else {
                     action.lineIds.forEach { dao.softDeleteById(it, now) }
                 }
-                invalidatePageSnapshot(db, action.pageId)
+                noteContentEdit(db, action.pageId)
             }
 
             is UndoRedoAction.LinkCreated -> withContext(Dispatchers.IO) {
@@ -10834,7 +10496,7 @@ class NotebookActivity : AppCompatActivity() {
                     originalIds.forEach { dao.softDeleteById(it, now) }
                     dao.restoreById(action.linkId, now)
                 }
-                invalidatePageSnapshot(db, action.pageId)
+                noteContentEdit(db, action.pageId)
             }
 
             is UndoRedoAction.LinkRemoved -> withContext(Dispatchers.IO) {
@@ -10846,7 +10508,7 @@ class NotebookActivity : AppCompatActivity() {
                     dao.softDeleteById(action.linkId, now)
                     restoredIds.forEach { dao.restoreById(it, now) }
                 }
-                invalidatePageSnapshot(db, action.pageId)
+                noteContentEdit(db, action.pageId)
             }
 
             is UndoRedoAction.LinkEdited -> withContext(Dispatchers.IO) {
@@ -10859,7 +10521,7 @@ class NotebookActivity : AppCompatActivity() {
                         dao.updateData(action.linkId, obj.copy(chrome = chrome, target = target).toJson(), now)
                     }
                 }
-                invalidatePageSnapshot(db, action.pageId)
+                noteContentEdit(db, action.pageId)
             }
 
             is UndoRedoAction.StickyNoteInserted -> withContext(Dispatchers.IO) {
@@ -10868,14 +10530,14 @@ class NotebookActivity : AppCompatActivity() {
                 } else {
                     dao.restoreById(action.noteId, now)
                 }
-                invalidatePageSnapshot(db, action.pageId)
+                noteContentEdit(db, action.pageId)
             }
 
             is UndoRedoAction.StickyNoteContentEdited -> withContext(Dispatchers.IO) {
                 val density = resources.displayMetrics.density
                 val target  = if (isUndo) action.before else action.after
                 dao.updateData(action.noteId, target.toStickyNoteObject(density).toJson(), now)
-                invalidatePageSnapshot(db, action.pageId)
+                noteContentEdit(db, action.pageId)
             }
 
             is UndoRedoAction.ShapeInserted -> withContext(Dispatchers.IO) {
@@ -10884,7 +10546,7 @@ class NotebookActivity : AppCompatActivity() {
                 } else {
                     dao.restoreById(action.shapeId, now)
                 }
-                invalidatePageSnapshot(db, action.pageId)
+                noteContentEdit(db, action.pageId)
             }
         }
     }
@@ -11975,19 +11637,14 @@ class NotebookActivity : AppCompatActivity() {
     }
 
     /**
-     * Remove the `snapshot` field from the page row's `data` JSON, forcing the next
-     * [loadCurrentPage] to take the full render path and capture a fresh snapshot.
-     * Must be called on [Dispatchers.IO].
+     * Common commit point for erases, deletes, moves, and object edits: schedules real-time
+     * recognition (RTR) for [pageId] so the recognized-text cache tracks all mutations, not just
+     * freshly drawn ink (which [saveStrokes] covers). No longer touches any page snapshot — per-page
+     * snapshots are not stored. The [db] parameter is retained for call-site symmetry.
      */
-    private suspend fun invalidatePageSnapshot(db: SoilDatabase, pageId: String) {
-        // Common commit point for erases, deletes, moves, and object edits — schedule RTR here so
-        // the recognized-text cache tracks all mutations, not just freshly drawn ink (saveStrokes).
+    @Suppress("UNUSED_PARAMETER")
+    private suspend fun noteContentEdit(db: SoilDatabase, pageId: String) {
         rtrScheduler?.noteEdit(pageId)
-        val page = db.notebookDao().getObjectById(pageId) ?: return
-        val data = PageData.fromJson(page.data)
-        if (data.snapshot == null) return   // nothing to remove
-        db.notebookDao().updateData(pageId, data.copy(snapshot = null).toJson(), System.currentTimeMillis())
-        Slog.d(TAG) { "invalidatePageSnapshot: cleared for page $pageId" }
     }
 
     /**

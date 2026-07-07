@@ -7,10 +7,10 @@ import android.graphics.BitmapFactory
  * Bounded image decode helper for embedded `.soil` assets.
  *
  * `.soil` files are portable user documents, so an oversized or maliciously crafted embedded
- * image (template / snapshot / cover) decoded at full resolution can OOM-crash the app on open
- * or export — a low threshold on e-ink devices (M-1). These helpers decode bounds-first and
- * apply `inSampleSize`, so decode memory is capped to roughly the target dimensions instead of
- * the source's. Mirrors the sampling used in `CoverDialog.encodeImageFromUri`.
+ * image (e.g. a template) decoded at full resolution can OOM-crash the app on open or export —
+ * a low threshold on e-ink devices (M-1). These helpers decode bounds-first and apply
+ * `inSampleSize`, so decode memory is capped to roughly the target dimensions instead of the
+ * source's.
  */
 object BitmapDecode {
 

@@ -221,7 +221,6 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
     private var dwellAnchorY   = 0f
     private var lastMoveTimeMs = 0L
     private var dwellMs        = 0L
-    override var onSnapshotReady: ((String) -> Unit)? = null
     override var onLassoComplete: ((Path, PointF) -> Unit)? = null
     override var onLassoTapToDismiss: (() -> Unit)? = null
     override var onLassoEraseComplete: ((List<String>) -> Unit)? = null
@@ -1610,10 +1609,6 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
     }
 
     override fun setEraserMode(active: Boolean) {
-        if (active) {
-            // Capture snapshot BEFORE erasing begins — strokes still in memory at this point.
-            captureSnapshot()?.let { onSnapshotReady?.invoke(it) }
-        }
         isEraserActive = active
     }
 
@@ -1622,9 +1617,6 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
      * Null = plain white. Redraws the canvas immediately (strokes on top of new template).
      */
     override fun setTemplate(bitmap: Bitmap?) {
-        // Capture snapshot BEFORE the template changes — snapshot is strokes-only so it
-        // remains valid across template switches.  Must run before templateBitmap is updated.
-        captureSnapshot()?.let { onSnapshotReady?.invoke(it) }
         templateBitmap = bitmap
         redrawCanvas()
     }
@@ -1766,16 +1758,6 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
         redrawCanvas()
     }
 
-    /**
-     * Capture snapshot when the app loses window focus — equivalent non-writing transition
-     * boundary to OnyxNotebookView.onWindowFocusChanged(false).
-     */
-    override fun onWindowFocusChanged(hasWindowFocus: Boolean) {
-        super.onWindowFocusChanged(hasWindowFocus)
-        if (!hasWindowFocus) {
-            captureSnapshot()?.let { onSnapshotReady?.invoke(it) }
-        }
-    }
 
     /**
      * Capture the current strokes and heading backgrounds as a base64-encoded PNG with a
@@ -1788,8 +1770,14 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
         val w = width; val h = height
         if (w == 0 || h == 0) return null
         val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
-        // Transparent base — do NOT fill with white, do NOT paint the template.
+        // Complete cover image: white base + template + content. The snapshot's only consumer is the
+        // library-grid cover, shown directly (no compositing over a template at load), so it must
+        // paint the full page like the page-index/PDF render does.
         val snapshotCanvas = Canvas(bmp)
+        snapshotCanvas.drawColor(Color.WHITE)
+        templateBitmap?.let { tb ->
+            snapshotCanvas.drawBitmap(tb, null, RectF(0f, 0f, w.toFloat(), h.toFloat()), null)
+        }
         for (heading in headings) {
             if (heading.recognizedText != null) {
                 drawHeadingText(snapshotCanvas, heading)

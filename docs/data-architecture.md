@@ -144,7 +144,7 @@ The reusable **template library** lives in the global index — not the filesyst
 - **Single table.** Everything — pages, layers, strokes, images, text, metadata — is a row in one `notebook` table.
 - **Everything is an object.** No type special-casing at the schema level — type behavior lives in Kotlin.
 - **Assets are base64 strings.** No external files. Images stored inline in the `data` TEXT column as
-  **WEBP q100** (page snapshots, covers, templates) — encoded via `core/ImageCodec`. q100 lossy is
+  **WEBP q100** (templates, and the library-grid cover snapshot in the global index) — encoded via `core/ImageCodec`. q100 lossy is
   used deliberately: on transparent-alpha ink content it measured ~47% smaller than PNG and visually
   lossless, whereas Android's `WEBP_LOSSLESS` bloats to 2–6× PNG. Legacy blobs are PNG (or the earlier
   mistaken lossless-WEBP); decode is format-agnostic (`BitmapFactory` reads the header), so all coexist

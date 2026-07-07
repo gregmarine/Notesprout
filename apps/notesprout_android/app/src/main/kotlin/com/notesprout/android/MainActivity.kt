@@ -51,7 +51,6 @@ import com.notesprout.android.data.NotebookMetadata
 import com.notesprout.android.data.NotebookMetaStore
 import com.notesprout.android.data.PageData
 import com.notesprout.android.data.SoilDatabase
-import com.notesprout.android.data.checkpointTruncateAndClose
 import com.notesprout.android.data.index.IndexRepository
 import com.notesprout.android.data.index.PINNED_LIST_ID
 import com.notesprout.android.data.index.NotebookObject
@@ -203,16 +202,6 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         })
-    }
-
-    // ── Cover image picker launcher ───────────────────────────────────────────
-
-    private var onCoverImagePicked: ((Uri) -> Unit)? = null
-
-    private val coverPickerLauncher = registerForActivityResult(
-        ActivityResultContracts.GetContent()
-    ) { uri ->
-        if (uri != null) onCoverImagePicked?.invoke(uri)
     }
 
     // ── New notebook launcher (S6: launched from TemplateBrowserActivity) ─────
@@ -1661,7 +1650,6 @@ class MainActivity : AppCompatActivity() {
                     val notebookDataJson = NotebookMetadata(
                         id             = notebookId,
                         title          = name,
-                        cover          = "",
                         lastOpenedPage = pageId,
                     ).toJson()
                     exec(insertSql, arrayOf(notebookId, "", "{}", now, now, "notebook", notebookDataJson))
@@ -1773,9 +1761,6 @@ class MainActivity : AppCompatActivity() {
                 .addAction(R.drawable.ic_copy_page,       "Copy Notebook")   { enterPickerMode(DestinationPickerState.CopyNotebook(entity)) }
                 .addAction(R.drawable.ic_move_page,       "Move Notebook")   { enterPickerMode(DestinationPickerState.MoveNotebook(entity)) }
                 .addAction(R.drawable.ic_edit,            "Rename Notebook") { showRenameNotebookDialog(entity) }
-            if (!encInfo.encrypted) {
-                menu.addAction(R.drawable.ic_polaroid, "Set Cover") { openCoverDialog(entity) }
-            }
             if (!encInfo.encrypted) {
                 menu.addAction(R.drawable.ic_lock,     "Encrypt Notebook") { showEncryptNotebookDialog(entity) }
             } else {
@@ -2300,20 +2285,6 @@ class MainActivity : AppCompatActivity() {
 
     // ── TEMP: legacy-ts compaction sweep (remove after all devices compacted — see BACKLOG.md) ──
 
-    /**
-     * The explicit cover image (base64) for an open [db], or null if none is set. Looks the cover
-     * row up by the .soil notebook-row id — which differs from the global id on imported/copied
-     * notebooks, the case the grid-cover bug hinges on.
-     */
-    private suspend fun readCoverImageIfSet(db: SoilDatabase): String? {
-        val nbObj = db.notebookDao().getNotebookObject() ?: return null
-        val meta = try { NotebookMetadata.fromJson(nbObj.id, nbObj.data) } catch (_: Exception) { return null }
-        if (meta.cover.isEmpty()) return null
-        return db.notebookDao().getCoverForNotebook(nbObj.id)
-            ?.let { com.notesprout.android.data.CoverObject.fromJson(it.data)?.image }
-            ?.takeIf { it.isNotEmpty() }
-    }
-
     /** Confirmation for the one-off "compact my whole library" migration button. */
     private fun showCompactNotebooksDialog() {
         AlertDialog.Builder(this)
@@ -2356,7 +2327,6 @@ class MainActivity : AppCompatActivity() {
         var skippedEncrypted = 0
         var errors = 0
         var indexRows = 0
-        var coversSynced = 0
 
         withContext(Dispatchers.IO) {
             val notebooks = repository.getAllNotebooks()
@@ -2376,15 +2346,9 @@ class MainActivity : AppCompatActivity() {
                     val builder = SoilDatabase.builder(this@MainActivity, file.absolutePath)
                     if (key != null) builder.openHelperFactory(com.notesprout.android.crypto.SoilCrypto.roomFactory(key))
                     val db = builder.build()
-                    var coverB64: String? = null
                     val result = try {
-                        val r = NotebookCompactor.compact(db)
-                        coverB64 = readCoverImageIfSet(db)
-                        r
+                        NotebookCompactor.compact(db)
                     } finally { db.close() }
-                    // Self-heal covers: imported/copied notebooks whose cover never reached the
-                    // grid (id-mismatch bug) get their cover image pushed to the index now.
-                    coverB64?.let { runCatching { repository.updateNotebookSnapshot(nb.id, it); coversSynced++ } }
                     if (result.changed) {
                         compacted++
                         bytesFreed += (before - file.length()).coerceAtLeast(0L)
@@ -2393,7 +2357,7 @@ class MainActivity : AppCompatActivity() {
                 }.onFailure { errors++; Slog.d("MainActivity") { "compact sweep failed for ${nb.id}: ${it.message}" } }
                 withContext(Dispatchers.Main) { tvMessage.text = "Compacting notebooks…\n${i + 1} / ${notebooks.size}" }
             }
-            // Finally, transcode the global index's own PNG images (template library + covers).
+            // Finally, transcode the global index's own PNG images (template library + cover snapshots).
             withContext(Dispatchers.Main) { tvMessage.text = "Compacting index…" }
             runCatching { indexRows = NotebookCompactor.compactIndex() }
                 .onFailure { errors++; Slog.d("MainActivity") { "index compaction failed: ${it.message}" } }
@@ -2404,8 +2368,6 @@ class MainActivity : AppCompatActivity() {
         val summary = StringBuilder("Compacted $compacted notebook${if (compacted == 1) "" else "s"} — freed $freedMb MB.")
         if (indexRows > 0)
             summary.append("\n\nConverted $indexRows index image${if (indexRows == 1) "" else "s"} to WEBP.")
-        if (coversSynced > 0)
-            summary.append("\n\nRestored $coversSynced notebook cover${if (coversSynced == 1) "" else "s"} to the grid.")
         if (skippedEncrypted > 0)
             summary.append("\n\n$skippedEncrypted encrypted notebook${if (skippedEncrypted == 1) "" else "s"} skipped — they compact when you open them.")
         if (errors > 0)
@@ -2479,148 +2441,6 @@ class MainActivity : AppCompatActivity() {
     private fun deleteFolder(entity: ObjectEntity) {
         lifecycleScope.launch {
             withContext(Dispatchers.IO) { deleteFolderRecursively(entity.id) }
-            scanAndRender()
-        }
-    }
-
-    // ── Cover dialog ──────────────────────────────────────────────────────────
-
-    private fun openCoverDialog(entity: ObjectEntity) {
-        val snapshotB64 = try {
-            Json.decodeFromString<NotebookObject>(entity.data).snapshot
-        } catch (_: Exception) { null }
-
-        lifecycleScope.launch {
-            val snapshot: Bitmap? = if (snapshotB64 != null) {
-                withContext(Dispatchers.IO) {
-                    try {
-                        val bytes = Base64.decode(snapshotB64, Base64.DEFAULT)
-                        BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
-                    } catch (_: Exception) { null }
-                }
-            } else {
-                // Snapshot not in index yet — read from .soil and cache it.
-                withContext(Dispatchers.IO) { loadAndCacheSnapshot(entity) }
-            }
-
-            val dialog = CoverDialog(
-                activity           = this@MainActivity,
-                lifecycleScope     = lifecycleScope,
-                soilFilePath       = soilFile(this@MainActivity, entity.id).absolutePath,
-                lastOpenedSnapshot = snapshot,
-                onRequestImagePick = { callback ->
-                    onCoverImagePicked = callback
-                    coverPickerLauncher.launch("image/*")
-                },
-                onCoverChanged = { reloadCoverForNotebook(entity) },
-            )
-            dialog.show()
-        }
-    }
-
-    /**
-     * Reads the cover/snapshot from the .soil file and persists it to the index so
-     * future list renders can use the cached value without opening the .soil.
-     */
-    private suspend fun loadAndCacheSnapshot(entity: ObjectEntity): Bitmap? {
-        val isEncrypted = try {
-            Json.decodeFromString<NotebookObject>(entity.data).encrypted
-        } catch (_: Exception) { false }
-        if (isEncrypted) return null
-
-        val file = soilFile(this, entity.id)
-        if (!file.exists()) return null
-        var db: android.database.sqlite.SQLiteDatabase? = null
-        return try {
-            db = android.database.sqlite.SQLiteDatabase.openDatabase(
-                file.absolutePath, null,
-                android.database.sqlite.SQLiteDatabase.OPEN_READWRITE,
-            )
-            val (notebookId, metaJson) = db.rawQuery(
-                "SELECT id, data FROM notebook WHERE type = 'notebook' LIMIT 1", null
-            ).use { c ->
-                if (!c.moveToFirst()) return null
-                Pair(c.getString(0), c.getString(1))
-            }
-            val metadata = NotebookMetadata.fromJson(notebookId, metaJson)
-            val pageId = metadata.lastOpenedPage ?: return null
-            if (pageId.isEmpty()) return null
-
-            val pageJson = db.rawQuery(
-                "SELECT data FROM notebook WHERE id = ? AND deletedAt IS NULL LIMIT 1",
-                arrayOf(pageId)
-            ).use { c -> if (c.moveToFirst()) c.getString(0) else null } ?: return null
-
-            val snapshotB64 = PageData.fromJson(pageJson).snapshot ?: ""
-            if (snapshotB64.isEmpty()) return null
-
-            repository.updateNotebookSnapshot(entity.id, snapshotB64)
-
-            val bytes = Base64.decode(snapshotB64, Base64.DEFAULT)
-            BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
-        } catch (e: Exception) {
-            Log.e("MainActivity", "loadAndCacheSnapshot failed for ${entity.id}", e)
-            null
-        } finally {
-            db?.checkpointTruncateAndClose("MainActivity", file)
-        }
-    }
-
-    /**
-     * After a cover change in CoverDialog: reads the new cover from the .soil, persists the
-     * base64 to the index, then rescans so the grid card shows the updated image.
-     */
-    private fun reloadCoverForNotebook(entity: ObjectEntity) {
-        val isEncrypted = try {
-            Json.decodeFromString<NotebookObject>(entity.data).encrypted
-        } catch (_: Exception) { false }
-        if (isEncrypted) return
-
-        lifecycleScope.launch {
-            withContext(Dispatchers.IO) {
-                try {
-                    val file = soilFile(this@MainActivity, entity.id)
-                    if (!file.exists()) return@withContext
-                    var db: android.database.sqlite.SQLiteDatabase? = null
-                    try {
-                        db = android.database.sqlite.SQLiteDatabase.openDatabase(
-                            file.absolutePath, null,
-                            android.database.sqlite.SQLiteDatabase.OPEN_READWRITE,
-                        )
-                        // Read the explicit cover object if present.
-                        val (notebookId, metaJson) = db.rawQuery(
-                            "SELECT id, data FROM notebook WHERE type = 'notebook' LIMIT 1", null
-                        ).use { c ->
-                            if (!c.moveToFirst()) return@withContext
-                            Pair(c.getString(0), c.getString(1))
-                        }
-                        val metadata = NotebookMetadata.fromJson(notebookId, metaJson)
-
-                        val coverB64: String? = if (metadata.cover.isNotEmpty()) {
-                            db.rawQuery(
-                                "SELECT data FROM notebook WHERE parentId = ? AND type = 'cover' AND deletedAt IS NULL LIMIT 1",
-                                arrayOf(notebookId)
-                            ).use { c ->
-                                if (c.moveToFirst()) {
-                                    try {
-                                        val obj = lenientJson
-                                            .decodeFromString<com.notesprout.android.data.CoverObject>(c.getString(0))
-                                        obj.image.takeIf { it.isNotEmpty() }
-                                    } catch (_: Exception) { null }
-                                } else null
-                            }
-                        } else null
-
-                        if (coverB64 != null) {
-                            repository.updateNotebookSnapshot(entity.id, coverB64)
-                        }
-                    } finally {
-                        db?.checkpointTruncateAndClose("MainActivity", file)
-                    }
-                } catch (e: Exception) {
-                    Log.e("MainActivity", "reloadCoverForNotebook failed for ${entity.id}", e)
-                }
-            }
             scanAndRender()
         }
     }

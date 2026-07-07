@@ -304,12 +304,6 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
      */
     override var onPenLifted: (() -> Unit)? = null
 
-    /**
-     * Invoked (on main thread) at non-writing transition boundaries when a snapshot
-     * of the current strokes has been captured.  NotebookActivity wires this to persist
-     * the snapshot to the page's data JSON in the database.
-     */
-    override var onSnapshotReady: ((String) -> Unit)? = null
     override var onLassoComplete: ((Path, PointF) -> Unit)? = null
     override var onLassoTapToDismiss: (() -> Unit)? = null
     override var onLassoEraseComplete: ((List<String>) -> Unit)? = null
@@ -1243,8 +1237,6 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
                 epd { "INVALIDATE caller=onWindowFocusChanged_gained" }
             }
         } else {
-            // Capture snapshot when the app is backgrounded — non-writing transition boundary.
-            captureSnapshot()?.let { onSnapshotReady?.invoke(it) }
             if (isSetup) {
                 invalidate()
                 epd { "INVALIDATE caller=windowFocusLost" }
@@ -2168,11 +2160,6 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
 
     override fun setEraserMode(active: Boolean) {
         epd { "SET_ERASER_MODE active=$active isSetup=$isSetup" }
-        if (active) {
-            // Capture snapshot BEFORE releasing the overlay so strokes are still in memory.
-            // This is a non-writing transition boundary: the user is switching tools.
-            captureSnapshot()?.let { onSnapshotReady?.invoke(it) }
-        }
         isEraserMode = active
         if (isSetup) {
             touchHelper.setEraserRawDrawingEnabled(active, if (active) (ERASER_RADIUS_PX * 2).toInt() else 0)
@@ -2199,9 +2186,6 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
      */
     override fun setTemplate(bitmap: Bitmap?) {
         epd { "SET_TEMPLATE_START hasTemplate=${bitmap != null} isSetup=$isSetup" }
-        // Capture snapshot BEFORE the template changes — snapshot is strokes-only so it
-        // remains valid across template switches.  Must run before templateBitmap is updated.
-        captureSnapshot()?.let { onSnapshotReady?.invoke(it) }
         templateBitmap = bitmap
         if (isSetup) {
             touchHelper.setRawDrawingRenderEnabled(false)
@@ -2459,8 +2443,14 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
         val w = width; val h = height
         if (w == 0 || h == 0) return null
         val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
-        // Transparent base — do NOT fill with white, do NOT paint the template.
+        // Complete cover image: white base + template + content. The snapshot's only consumer is the
+        // library-grid cover, shown directly (no compositing over a template at load), so it must
+        // paint the full page like the page-index/PDF render does.
         val snapshotCanvas = Canvas(bmp)
+        snapshotCanvas.drawColor(Color.WHITE)
+        templateBitmap?.let { tb ->
+            snapshotCanvas.drawBitmap(tb, null, RectF(0f, 0f, w.toFloat(), h.toFloat()), null)
+        }
         for (heading in headings) {
             if (heading.recognizedText != null) {
                 drawHeadingText(snapshotCanvas, heading)

@@ -441,15 +441,6 @@ class ScratchpadActivity : AppCompatActivity() {
             }
         }
 
-        drawingView.onSnapshotReady = { snapshot ->
-            val pageId = currentPageId
-            if (pageId.isNotEmpty()) {
-                lifecycleScope.launch {
-                    withContext(Dispatchers.IO) { persistSnapshot(pageId, snapshot) }
-                }
-            }
-        }
-
         // ── Lasso callbacks ───────────────────────────────────────────────────
 
         drawingView.onLassoComplete = { drawnPath, startPoint ->
@@ -1356,13 +1347,6 @@ class ScratchpadActivity : AppCompatActivity() {
         repository.saveStrokes(layerId, newStrokes)
         persistedStrokeIds.addAll(newStrokes.map { it.id })
         true
-    }
-
-    private suspend fun persistSnapshot(pageId: String, snapshot: String) {
-        val dao = NotesproutIndex.scratchpadDao()
-        val row = dao.getObjectById(pageId) ?: return
-        val updated = PageData.fromJson(row.data).copy(snapshot = snapshot).toJson()
-        dao.updateData(pageId, updated, System.currentTimeMillis())
     }
 
     /** Rebuild the render bitmap using the drawing view's current in-memory object lists. */

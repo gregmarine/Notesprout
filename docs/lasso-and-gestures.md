@@ -51,7 +51,7 @@ Cross-page undo/redo uses the same two-phase approach as `LassoErased`.
 
 When hit test confirms a scribble erase (fires on main thread from `post {}`):
 1. `touchHelper.setRawDrawingRenderEnabled(false)` + `invalidate()` — releases hardware buffer before DB/bitmap work.
-2. Activity (`onScribbleEraseComplete`): calls `saveStrokes(db)` to insert scribble stroke rows, then soft-deletes scribble + erased objects in a transaction, invalidates page snapshot.
+2. Activity (`onScribbleEraseComplete`): calls `saveStrokes(db)` to insert scribble stroke rows, then soft-deletes scribble + erased objects in a transaction, and schedules real-time recognition (`noteContentEdit`).
 3. Rebuilds render bitmap off-thread (`buildRenderBitmap`) without scribble or erased objects.
 4. `loadStrokesWithBitmap` swaps bitmap, runs `handwritingRepaint`, re-enables raw drawing — identical to the `eraseAll` / `setTemplate` handoff sequence.
 
@@ -195,7 +195,7 @@ Available in the floating selection toolbar when ≥2 non-stroke objects (headin
 1. Capture original `HeadingStroke` and `TextRender` lists from the selection.
 2. Sort by center-Y (vertical) or center-X (horizontal).
 3. Compute new bounding boxes: first object anchored to `selBbox.left`/`selBbox.top`; last object's far edge at `selBbox.right`/`selBbox.bottom`; equal gaps between.
-4. Persist via `updateHeadingData` in a single `db.withTransaction {}`; call `invalidatePageSnapshot` after.
+4. Persist via `updateHeadingData` in a single `db.withTransaction {}`; call `noteContentEdit` after.
 5. Update in-memory heading/text lists, rebuild render bitmap off-thread, swap via `loadStrokesWithBitmap`.
 6. Refresh lasso overlay and floating toolbar position.
 7. Push `UndoRedoAction.StrokesMoved` with empty stroke lists and the before/after heading + text object snapshots — undo/redo is handled by the existing `StrokesMoved` path at no extra cost.

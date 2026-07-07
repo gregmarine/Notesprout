@@ -59,7 +59,6 @@ object ToolbarButtonRegistry {
         ButtonSpec(PINNED_KEY, R.id.btnClose, R.drawable.ic_close, "Close", GROUP_FILE, pinned = true),
         ButtonSpec("recents", R.id.btnRecents, R.drawable.ic_clock, "Recents", GROUP_FILE),
         ButtonSpec("toc", R.id.btnToc, R.drawable.ic_toc, "Table of Contents", GROUP_NOTEBOOK),
-        ButtonSpec("cover", R.id.btnCover, R.drawable.ic_polaroid, "Set Cover", GROUP_NOTEBOOK),
         ButtonSpec("export", R.id.btnExport, R.drawable.ic_export, "Export", GROUP_NOTEBOOK),
         ButtonSpec("pin", R.id.btnPin, R.drawable.ic_pinned, "Pin", GROUP_NOTEBOOK),
         ButtonSpec("lock", R.id.btnLock, R.drawable.ic_lock, "Encrypt", GROUP_NOTEBOOK),

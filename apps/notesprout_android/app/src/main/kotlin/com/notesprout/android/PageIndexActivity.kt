@@ -30,6 +30,7 @@ import com.notesprout.android.core.Slog
 import com.notesprout.android.crypto.KeyResolver
 import com.notesprout.android.crypto.KeySession
 import com.notesprout.android.crypto.SoilCrypto
+import com.notesprout.android.data.SoilDatabase
 import com.notesprout.android.data.index.IndexRepository
 import com.notesprout.android.data.index.NotesproutIndex
 import com.notesprout.android.data.index.TemplateObject
@@ -40,6 +41,7 @@ import com.notesprout.android.databinding.ActivityPageIndexBinding
 import kotlin.coroutines.resume
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
@@ -119,12 +121,7 @@ class PageIndexActivity : AppCompatActivity() {
 
     // ── Page data ─────────────────────────────────────────────────────────────
 
-    private data class PageEntry(val id: String, val pageNumber: Int, val snapshot: String?, val headingName: String? = null)
-
-    @Serializable
-    private data class PageSnapshot(val snapshot: String? = null)
-
-    private val pageCodec = Json { ignoreUnknownKeys = true }
+    private data class PageEntry(val id: String, val pageNumber: Int, val headingName: String? = null)
 
     // ── State ─────────────────────────────────────────────────────────────────
 
@@ -140,6 +137,21 @@ class PageIndexActivity : AppCompatActivity() {
     private val inkBlackColor by lazy { ContextCompat.getColor(this, R.color.inkBlack) }
 
     private val snapshotDecodeJobs = mutableListOf<Job>()
+
+    /** entry.id → the card's thumbnail ImageView for the current grid page; filled by
+     *  [buildCardGroup], consumed by [renderVisibleThumbnails] which renders on demand. */
+    private val thumbnailTargets = mutableMapOf<String, AppCompatImageView>()
+
+    /** Rendered page thumbnails, keyed by page id. Reused across state-only re-renders (selection,
+     *  action mode, destination highlight) so those never re-render a page bitmap. Invalidated
+     *  wholesale when [thumbEpoch] advances (any content/order reload — see [loadPagesFromSoil]) or
+     *  the card size changes; off-screen entries are evicted to bound memory to one grid page. */
+    private val thumbnailCache = mutableMapOf<String, android.graphics.Bitmap>()
+    /** Bumped on every [loadPagesFromSoil]; a mismatch invalidates [thumbnailCache]. */
+    private var thumbEpoch = 0
+    private var thumbCacheEpoch = -1
+    private var thumbCardW = 0
+    private var thumbCardH = 0
 
     // ── Action mode (long-press) and destination-picking mode ────────────────
 
@@ -491,6 +503,8 @@ class PageIndexActivity : AppCompatActivity() {
     }
 
     private fun loadPagesFromSoil(path: String, passphrase: String? = KeySession.getFor(notebookId)): List<PageEntry> {
+        // Any reload means page content/order may have changed → invalidate cached thumbnails.
+        thumbEpoch++
         var db: com.notesprout.android.crypto.SoilRawDb? = null
         return try {
             db = SoilCrypto.openRaw(java.io.File(path), passphrase)
@@ -502,12 +516,8 @@ class PageIndexActivity : AppCompatActivity() {
                 val result = mutableListOf<PageEntry>()
                 var number = 1
                 while (c.moveToNext()) {
-                    val id       = c.getString(0)
-                    val dataJson = c.getString(1)
-                    val snapshot = try {
-                        pageCodec.decodeFromString<PageSnapshot>(dataJson).snapshot
-                    } catch (_: Exception) { null }
-                    result.add(PageEntry(id, number++, snapshot, headingNames[id]))
+                    val id = c.getString(0)
+                    result.add(PageEntry(id, number++, headingNames[id]))
                 }
                 result
             }
@@ -568,6 +578,7 @@ class PageIndexActivity : AppCompatActivity() {
     private fun renderGridPage() {
         snapshotDecodeJobs.forEach { it.cancel() }
         snapshotDecodeJobs.clear()
+        thumbnailTargets.clear()
 
         val spec = gridSpec ?: return
         binding.gridContainer.removeAllViews()
@@ -622,6 +633,117 @@ class PageIndexActivity : AppCompatActivity() {
         binding.gridContainer.addView(gridLayout, containerLp)
 
         updatePaginationControls()
+
+        // Render thumbnails on demand for just the visible pagination page.
+        renderVisibleThumbnails(pageItems.toList(), spec)
+    }
+
+    /**
+     * Fill each currently-visible card with a page-preview thumbnail. On-demand replacement for the
+     * removed per-page snapshot, with a [thumbnailCache] so state-only re-renders (selection, action
+     * mode, destination highlight, before/after toggle) reuse already-rendered bitmaps instead of
+     * re-rendering. Cache hits are set immediately; only misses open a Room connection and render via
+     * [NotebookExporter.renderPageThumbnail], caching the result. The cache is invalidated wholesale
+     * when [thumbEpoch] advances (any content/order reload) or the card size changes, and off-screen
+     * entries are evicted so memory stays bounded to one grid page.
+     */
+    private fun renderVisibleThumbnails(items: List<PageEntry>, spec: GridSpec) {
+        val path = notebookSoilPath ?: return
+        if (items.isEmpty()) return
+
+        // Invalidate on content/order change or a card-size change; otherwise keep the cache.
+        if (thumbCacheEpoch != thumbEpoch || thumbCardW != spec.cardWidthPx || thumbCardH != spec.cardHeightPx) {
+            thumbnailCache.values.forEach { it.recycle() }
+            thumbnailCache.clear()
+            thumbCacheEpoch = thumbEpoch
+            thumbCardW = spec.cardWidthPx
+            thumbCardH = spec.cardHeightPx
+        }
+
+        // Evict off-screen thumbnails (bounds memory to the visible grid page). Their previous
+        // ImageViews were detached by renderGridPage's removeAllViews, so recycling is safe.
+        val visibleIds = items.mapTo(HashSet()) { it.id }
+        thumbnailCache.entries.removeAll { (id, bmp) ->
+            (id !in visibleIds).also { if (it) bmp.recycle() }
+        }
+
+        // Cache hits: set immediately, no render work. Collect misses for the async pass.
+        val misses = mutableListOf<PageEntry>()
+        for (entry in items) {
+            val cached = thumbnailCache[entry.id]
+            if (cached != null && !cached.isRecycled) {
+                thumbnailTargets[entry.id]?.apply {
+                    setImageBitmap(cached)
+                    visibility = android.view.View.VISIBLE
+                }
+            } else {
+                misses += entry
+            }
+        }
+        if (misses.isEmpty()) return
+
+        val key = KeySession.getFor(notebookId)
+        val job = lifecycleScope.launch {
+            withContext(Dispatchers.IO) {
+                var db: SoilDatabase? = null
+                try {
+                    val builder = SoilDatabase.builder(this@PageIndexActivity, path)
+                    if (key != null) builder.openHelperFactory(SoilCrypto.roomFactory(key))
+                    db = builder.build()
+                    val dao = db.notebookDao()
+                    // Render misses in parallel across a small worker pool sharing this one Room
+                    // connection (WAL allows concurrent reads). Each worker pulls the next index off
+                    // a shared cursor and posts its bitmap to Main as it finishes, so cards fill in
+                    // progressively. Bounded to the cores actually available to keep CPU-bound stroke
+                    // parse + rasterization from over-subscribing.
+                    val cursor = java.util.concurrent.atomic.AtomicInteger(0)
+                    val workers = minOf(
+                        misses.size,
+                        Runtime.getRuntime().availableProcessors().coerceAtLeast(1),
+                        4,
+                    )
+                    kotlinx.coroutines.coroutineScope {
+                        repeat(workers) {
+                            launch {
+                                while (isActive) {
+                                    val i = cursor.getAndIncrement()
+                                    if (i >= misses.size) break
+                                    val entry = misses[i]
+                                    // Per-page guard: one bad page must not blank the rest of the grid.
+                                    val bitmap = try {
+                                        val pageRow = dao.getObjectById(entry.id) ?: continue
+                                        NotebookExporter.renderPageThumbnail(
+                                            dao, pageRow, this@PageIndexActivity, spec.cardWidthPx, spec.cardHeightPx,
+                                        )
+                                    } catch (e: kotlinx.coroutines.CancellationException) {
+                                        throw e
+                                    } catch (e: Exception) {
+                                        Slog.d("PageIndex") { "thumbnail render failed for page ${entry.id}: ${e.message}" }
+                                        null
+                                    } ?: continue
+                                    withContext(Dispatchers.Main) {
+                                        if (isActive) {
+                                            thumbnailCache[entry.id] = bitmap
+                                            thumbnailTargets[entry.id]?.apply {
+                                                setImageBitmap(bitmap)
+                                                visibility = android.view.View.VISIBLE
+                                            }
+                                        } else bitmap.recycle()
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    Slog.d("PageIndex") { "thumbnail render pass failed: ${e.message}" }
+                } finally {
+                    db?.close()
+                }
+            }
+        }
+        snapshotDecodeJobs.add(job)
     }
 
     private fun renderEmptyState() {
@@ -735,7 +857,8 @@ class PageIndexActivity : AppCompatActivity() {
         val padPx   = if (highlighted) (3 * density + 0.5f).toInt() else pad1dp
         card.setPadding(padPx, padPx, padPx, padPx)
 
-        // Snapshot image — filled once the bitmap is decoded off the main thread.
+        // Thumbnail image — filled once the page is rendered on demand off the main thread
+        // ([renderVisibleThumbnails]). Registered by entry id so the render pass can target it.
         val snapshotImage = AppCompatImageView(this).apply {
             scaleType  = ImageView.ScaleType.CENTER_CROP
             visibility = android.view.View.GONE
@@ -744,6 +867,7 @@ class PageIndexActivity : AppCompatActivity() {
             FrameLayout.LayoutParams.MATCH_PARENT,
             FrameLayout.LayoutParams.MATCH_PARENT,
         ))
+        thumbnailTargets[entry.id] = snapshotImage
 
         // ── Insertion-bar preview ──────────────────────────────────────────────
         // For the pending destination, draw a bold inkBlack bar on the leading edge (insertBefore)
@@ -772,23 +896,6 @@ class PageIndexActivity : AppCompatActivity() {
         group.addView(label, LinearLayout.LayoutParams(spec.cardWidthPx, spec.labelHeightPx).also {
             it.topMargin = spec.rowGapPx
         })
-
-        // ── Snapshot decode coroutine ─────────────────────────────────────────
-        if (!entry.snapshot.isNullOrEmpty()) {
-            val job = lifecycleScope.launch {
-                val bitmap: Bitmap? = withContext(Dispatchers.IO) {
-                    try {
-                        val bytes = Base64.decode(entry.snapshot, Base64.DEFAULT)
-                        BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
-                    } catch (_: Exception) { null }
-                }
-                if (bitmap != null) {
-                    snapshotImage.setImageBitmap(bitmap)
-                    snapshotImage.visibility = android.view.View.VISIBLE
-                }
-            }
-            snapshotDecodeJobs.add(job)
-        }
 
         return group
     }

@@ -113,7 +113,7 @@ Engine is chosen via `isBooxDevice()` (same as the scratch pad).
 1. Computes a square icon box (`STICKY_NOTE_ICON_SIZE_DP × density`) centered on the canvas,
    clamped to page bounds.
 2. Inserts a `type = "sticky_note"` row with empty `StickyNoteObject().toJson()` and icon bbox.
-   Invalidates the page snapshot.
+   Schedules real-time recognition for the page (`noteContentEdit`).
 3. Pushes a `StickyNoteInserted` undo action.
 4. **Immediately opens the editor** (`openStickyNote(render, initialCreate = true)`) so the user
    draws before placing.

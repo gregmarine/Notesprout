@@ -136,9 +136,6 @@
 - **Per-pad pen style picker.** Phase 1 reuses the global `ToolPreferencesManager` pen settings.
   A scratch-pad-local pen style (separate from the notebook pen) would need its own prefs key and
   toolbar picker.
-- **Snapshot fast-load.** `PageData.snapshot` is persisted on `onSnapshotReady` but the load path
-  always does a full `buildRenderBitmap` (no snapshot-first shortcut). Could skip bitmap rebuild
-  when a valid snapshot exists.
 - **Move-vs-copy on "Send to Notebook".** Current behaviour: Send is a copy — content stays in the
   scratch pad after sending. A "move" variant (auto-clear the sent page after transfer) may be useful
   and was deferred pending UX decision.

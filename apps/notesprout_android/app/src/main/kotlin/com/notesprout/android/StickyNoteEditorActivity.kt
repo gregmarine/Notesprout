@@ -337,9 +337,6 @@ class StickyNoteEditorActivity : AppCompatActivity() {
             updateFloatingSelectionToolbar(selBox)
         }
 
-        // No snapshot persistence in the editor.
-        drawingView.onSnapshotReady = null
-
         // Lasso eraser: the view reports which IDs it erased; we filter our in-memory lists.
         drawingView.onLassoEraseComplete = { erasedIds ->
             if (erasedIds.isNotEmpty()) {

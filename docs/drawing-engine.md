@@ -111,21 +111,35 @@ does **not** re-record the node or refresh — the outgoing page stays visible u
 `loadStrokesWithBitmap(...)` records the new node, so there is no blank flash between pages. Nav sites
 call `clearForPageLoad()` instead of `eraseAll()`.
 
-### Cover / thumbnail snapshot (persistence only — not the render path)
+### Library-grid cover (index only — no per-page snapshot)
 
-The page row's `data.snapshot` field (base64 PNG) still exists, but **only** as the cover/thumbnail
-asset — `CoverLoader`, page-index / link-picker thumbnails, `syncCoverToIndex(captureSnapshot())`,
-`NotebookMetaStore`, `DayHistoryRepository`, `NotebookCompactor`. `captureSnapshot()` builds its own
-self-contained bitmap independent of any render layer.
+There is **no** per-page `data.snapshot` field anymore. The only snapshot is the **notebook's
+library-grid cover**, stored in the global index (`NotebookObject.snapshot` in `notesprout.db`), not
+in the `.soil`. `captureSnapshot()` (both engines) builds a self-contained bitmap of the current page
+independent of any render layer; it is called **once, at notebook close** and written to the index via
+`sealNotebook → cacheSnapshotIfAllowed(nbId, snapshot)` (unencrypted notebooks only — encrypted ones
+never cache page content in the plaintext index).
 
-**When captured:** close/back (synchronously in `closeNotebook()` before `sealNotebook()` dispatches
-to IO) and `syncCoverToIndex`. `captureSnapshot()` returns `null` if content is empty or the view
-isn't laid out (w=0/h=0). **NOT** on user-initiated `eraseAll()` or page delete.
+**When captured:** close/back only (synchronously in `closeNotebook()` on the main thread, before
+`sealNotebook()` dispatches to IO). `captureSnapshot()` returns `null` if content is empty or the view
+isn't laid out (w=0/h=0). **NOT** on navigation, `eraseAll()`, or page delete.
 **Critical:** `onWindowFocusChanged(false)` fires AFTER `finish()` (`soilDatabase` already null), so
-any `closeNotebook()` path must capture the snapshot itself — never rely on `onWindowFocusChanged`.
+`closeNotebook()` must capture the cover itself — never rely on a focus-loss hook.
 
-*(Disabled fast-path code — `USE_SNAPSHOT_LOAD_CACHE = false`, `tryLoadSnapshotBitmap`,
-`PageLoadResult.usedSnapshot` — is left in place as harmless dead code behind the flag.)*
+**Page-index / link-picker thumbnails** are rendered **on demand** from page content
+(`NotebookExporter.renderPageThumbnail`, only for the visible pagination page), not from any stored
+snapshot. Three things keep this fast: (1) each thumbnail rasterizes **directly at card scale** via
+`renderPageBitmap`'s `renderScale` (the canvas + template decode are scaled down, so a heavy page
+draws ~scale² fewer pixels than a full render + downscale); (2) the visible grid page renders across a
+**bounded worker pool** (up to `availableProcessors()`, capped at 4) sharing one Room/WAL connection,
+each worker posting its bitmap to Main as it finishes so cards fill in progressively; (3) thumbnails
+use the **lean stroke parse** (`LiveStroke.fromPointsJson`, points-only) since the thumbnail renderer
+draws plain fixed-width black paths and never reads pressure/tilt/color/width. Results are held in a
+per-screen `thumbnailCache` (keyed by page id) invalidated wholesale on content/order reload or a
+card-size change; off-screen entries are evicted (recycled) so memory stays bounded to one grid page.
+
+**Cleanup:** `NotebookCompactor` (runs on every seal, incl. encrypted, and the manual sweep) strips
+any legacy `data.snapshot` from page rows and hard-deletes legacy `type='cover'` rows.
 
 ### Neighbor prefetch cache (`NotebookActivity`)
 
@@ -144,9 +158,8 @@ prefetched:
 - `prefetchNeighbors()` — after a page displays, parses N-1 / N+1 into `strokeCache` (stale-while-
   revalidate) so the next turn is a cache hit.
 
-**Leaving-page cover capture (`pageNeedsSnapshot`):** on navigation the outgoing page's snapshot is
-re-captured only when its content version (`getMaxContentUpdatedAt` vs `page.updatedAt`) shows a
-change since the last capture — dirty-gated so clean turns skip the work.
+Navigation captures **no** snapshot — the library-grid cover is captured only at notebook close (see
+above), so page turns do zero PNG-encode work.
 
 ---
 

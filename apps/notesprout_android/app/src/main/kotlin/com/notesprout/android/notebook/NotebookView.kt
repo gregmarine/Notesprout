@@ -104,15 +104,6 @@ interface NotebookView {
      */
     var onPenLifted: (() -> Unit)?
 
-    /**
-     * Fired on the main thread when a snapshot has been captured at a non-writing
-     * transition boundary (eraser mode, template change, window focus loss).
-     * NotebookActivity wires this to [persistSnapshot] so the snapshot is written to
-     * the page's `data` JSON in the DB.
-     * Set this in onCreate; null by default.
-     */
-    var onSnapshotReady: ((snapshot: String) -> Unit)?
-
     // ── Lasso selection ───────────────────────────────────────────────────────
 
     /**

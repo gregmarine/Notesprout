@@ -13,32 +13,36 @@ import kotlinx.serialization.json.Json
 
 /**
  * One-time, idempotent **transitional** compaction of stored notebooks and the global index.
- * Three independent migrations share one pass so a single VACUUM reclaims them all:
+ * Independent migrations share one pass so a single VACUUM reclaims them all:
  *
  * 1. **Legacy-`ts` strip.** Every [StrokePoint] used to carry a per-point `ts` that was never read
  *    (~40% of a stroke's JSON). New writes no longer emit it; this rewrites the rows that still have
  *    it. See [StrokePoint.timestamp] / [LiveStroke.toStrokeData].
- * 2. **Image → WEBP q100.** Page snapshots, embedded page templates, covers, and the index's
- *    template/cover images are re-encoded to WEBP q100 (see [ImageCodec]). This catches both legacy
- *    **PNG** and the earlier, mistaken **lossless-WEBP** blobs (Android's Skia lossless encoder
- *    bloated to 2–6× PNG), converting both to the compact q100 form. Already-q100 rows are skipped.
+ * 2. **Image → WEBP q100.** Embedded page templates (and the index's template/cover images) are
+ *    re-encoded to WEBP q100 (see [ImageCodec]). This catches both legacy **PNG** and the earlier,
+ *    mistaken **lossless-WEBP** blobs (Android's Skia lossless encoder bloated to 2–6× PNG),
+ *    converting both to the compact q100 form. Already-q100 rows are skipped.
  * 3. **Dead heading/text strokes strip.** Recognized headings and converted text objects used to
  *    embed a full copy of their original handwriting strokes that was never read again (headings
  *    once supported un-heading; text never reverted). Both now drop those strokes on conversion;
  *    this rewrites the legacy rows that still carry them. Unrecognized fallbacks — where the strokes
  *    ARE the visual — keep theirs. See [HeadingObject] / [TextObject].
+ * 4. **Per-page snapshot strip.** Page rows used to cache a base64 `snapshot` PNG. Snapshots are no
+ *    longer stored per page (the library-grid cover is captured to the global index on close), so
+ *    this drops the dead blob from every page that still carries one. Runs on close for encrypted
+ *    notebooks too (their key is only available while open), cleaning them in place.
+ * 5. **Custom-cover removal.** The removed "set a custom cover image" feature stored `type='cover'`
+ *    rows referenced by the notebook row's `cover` pointer. This hard-deletes those rows and drops
+ *    the stale pointer.
  *
- * Both are safe to run opportunistically:
- * - **Self-limiting.** ts rows are found by a `LIKE '%"ts":%'` scan; image rows are decided from a
- *   cheap 60-byte header ([needsWebpReencode]) — PNG or lossless-WEBP get re-encoded, lossy-WEBP is
- *   skipped. Once converted a notebook does no heavy work beyond those scans, so this can run on
- *   every seal.
+ * All passes are safe to run opportunistically:
+ * - **Self-limiting.** ts / snapshot / cover rows are found by `LIKE` scans; template image rows are
+ *   decided from a cheap header ([needsWebpReencode]). Once converted a notebook does no heavy work
+ *   beyond those scans, so this can run on every seal.
  * - **`updatedAt` preserved.** Rewrites go through [NotebookDao.rewriteObjectDataKeepingTimestamp]
  *   (and [com.notesprout.android.data.index.ObjectDao.rewriteObjectData] for the index) so no row's
- *   `updatedAt` moves. Neither change is a content edit; bumping it would make
- *   [NotebookDao.getMaxContentUpdatedAt] exceed a page snapshot's timestamp and invalidate every
- *   page's fast-load snapshot — the opposite of what snapshots are for — and needlessly re-flag the
- *   file for backup.
+ *   `updatedAt` moves. None of these are content edits; bumping it would needlessly re-flag the file
+ *   for backup.
  *
  * Reclamation requires a full `VACUUM`: shrinking a TEXT value in place leaves the freed bytes as
  * internal page fragmentation, which `incremental_vacuum` does not return to the OS. VACUUM
@@ -51,8 +55,15 @@ import kotlinx.serialization.json.Json
 object NotebookCompactor {
 
     /** Per-notebook outcome: rows rewritten by each pass. [changed] gates the VACUUM / re-backup. */
-    data class Result(val tsRows: Int, val imageRows: Int, val deadStrokeRows: Int = 0) {
-        val changed: Boolean get() = tsRows > 0 || imageRows > 0 || deadStrokeRows > 0
+    data class Result(
+        val tsRows: Int,
+        val imageRows: Int,
+        val deadStrokeRows: Int = 0,
+        val snapshotRows: Int = 0,
+        val coverRows: Int = 0,
+    ) {
+        val changed: Boolean
+            get() = tsRows > 0 || imageRows > 0 || deadStrokeRows > 0 || snapshotRows > 0 || coverRows > 0
     }
 
     /**
@@ -90,11 +101,30 @@ object NotebookCompactor {
             deadStrokeRows++
         }
 
-        if (tsRows.isNotEmpty() || imageRows > 0 || deadStrokeRows > 0) {
+        // Pass 4 — strip legacy per-page `snapshot` blobs. Snapshots are no longer stored per page
+        // (the notebook cover on the library screen is captured to the global index on close). Re-
+        // serializing through PageData drops the now-unknown key. `updatedAt` is preserved.
+        var snapshotRows = 0
+        for (r in dao.pageRowsWithSnapshot()) {
+            dao.rewriteObjectDataKeepingTimestamp(r.id, PageData.fromJson(r.data).toJson())
+            snapshotRows++
+        }
+
+        // Pass 5 — delete legacy custom-cover objects and drop the notebook row's `cover` pointer.
+        val coverRows = dao.deleteCoverRows()
+        val nbRow = dao.getNotebookObject()
+        // Match the JSON key `"cover":` precisely (not a title value like "cover"). Re-serializing
+        // through NotebookMetadata (which no longer has a `cover` field) drops the stale key; the key
+        // is gone afterwards, so later seals skip this — no per-seal rewrite loop.
+        if (nbRow != null && nbRow.data.contains("\"cover\":")) {
+            dao.rewriteObjectDataKeepingTimestamp(nbRow.id, NotebookMetadata.fromJson(nbRow.id, nbRow.data).toJson())
+        }
+
+        if (tsRows.isNotEmpty() || imageRows > 0 || deadStrokeRows > 0 || snapshotRows > 0 || coverRows > 0) {
             val raw: SupportSQLiteDatabase = db.openHelper.writableDatabase
             raw.execSQL("VACUUM")
         }
-        return Result(tsRows.size, imageRows, deadStrokeRows)
+        return Result(tsRows.size, imageRows, deadStrokeRows, snapshotRows, coverRows)
     }
 
     /**
@@ -118,26 +148,15 @@ object NotebookCompactor {
     }
 
     /**
-     * Transcode the image inside a `.soil` `page`/`template`/`cover` row to WEBP q100, keeping the
-     * rest of the JSON intact. Returns null (skip) when the row holds no image or fails to decode.
-     * Reuses each type's own codec so the rewritten JSON is byte-shape-compatible.
+     * Transcode the image inside a `.soil` `template` row to WEBP q100, keeping the rest of the JSON
+     * intact. Returns null (skip) when the row holds no image or fails to decode. Page snapshots and
+     * cover objects no longer carry images, so only templates are transcoded.
      */
     private fun transcodeSoilRow(type: String, data: String): String? = when (type) {
-        "page" -> {
-            val pd = PageData.fromJson(data)
-            val snap = pd.snapshot ?: return null
-            val webp = ImageCodec.transcodeToWebpBase64(snap) ?: return null
-            pd.copy(snapshot = webp).toJson()
-        }
         "template" -> {
             val td = TemplateData.fromJson(data) ?: return null
             val webp = ImageCodec.transcodeToWebpBase64(td.image) ?: return null
             td.copy(image = webp).toJson()
-        }
-        "cover" -> {
-            val co = CoverObject.fromJson(data) ?: return null
-            val webp = ImageCodec.transcodeToWebpBase64(co.image) ?: return null
-            Json.encodeToString(CoverObject(image = webp))
         }
         else -> null
     }

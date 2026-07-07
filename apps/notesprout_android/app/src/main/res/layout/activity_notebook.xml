@@ -56,14 +56,6 @@
             android:src="@drawable/ic_toc"
             android:contentDescription="Table of Contents" />
 
-        <!-- Cover button: set notebook cover image -->
-        <androidx.appcompat.widget.AppCompatImageButton
-            android:id="@+id/btnCover"
-            style="@style/Widget.Notesprout.ToolbarButton"
-            android:layout_marginStart="4dp"
-            android:src="@drawable/ic_polaroid"
-            android:contentDescription="Set cover" />
-
         <!-- Export button: export notebook to PDF -->
         <androidx.appcompat.widget.AppCompatImageButton
             android:id="@+id/btnExport"

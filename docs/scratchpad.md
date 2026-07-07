@@ -105,8 +105,8 @@ binding.drawingContainer.addView(drawingView.asView(), MATCH_PARENT × MATCH_PAR
 - `repository.saveStrokes(layerId, newStrokes)` does insert-or-ignore in a transaction on `Dispatchers.IO`.
 - Also called in `onPause` and before every page navigation.
 
-**Snapshot:** `onSnapshotReady` persists the bitmap snapshot string into the page row's `PageData`
-via `ScratchpadDao.updateData`.
+**Snapshot:** none — the scratch pad stores no per-page snapshot (removed along with notebook page
+snapshots). Content is re-rendered from strokes/objects on load.
 
 **Page size:** on first layout (`drawingContainer.doOnLayout`) if `PageData.width == 0`, calls
 `repository.setPageSize(pageId, w, h)` to record the real canvas pixel dimensions.

@@ -250,23 +250,6 @@ interface NotebookDao {
     @Query("SELECT * FROM notebook WHERE type = 'layer' AND parentId = :pageId LIMIT 1")
     suspend fun getLayerForPageAny(pageId: String): NotebookObject?
 
-    // ── Cover loading ─────────────────────────────────────────────────────────
-
-    /**
-     * The non-deleted cover object for [notebookId], or null if none exists.
-     * Used by the cover loading path to retrieve the cover image for display in the grid.
-     */
-    @Query("SELECT * FROM notebook WHERE parentId = :notebookId AND type = 'cover' AND deletedAt IS NULL LIMIT 1")
-    suspend fun getCoverForNotebook(notebookId: String): NotebookObject?
-
-    /**
-     * The non-deleted page row for [pageId], or null if not found / soft-deleted.
-     * Used by the cover loading path to extract the page's `snapshot` field when no
-     * explicit cover object is present.
-     */
-    @Query("SELECT * FROM notebook WHERE id = :pageId AND deletedAt IS NULL LIMIT 1")
-    suspend fun getLastOpenedPageSnapshot(pageId: String): NotebookObject?
-
     // ── TOC queries ───────────────────────────────────────────────────────────
 
     /**
@@ -339,15 +322,32 @@ interface NotebookDao {
     suspend fun strokeRowsWithLegacyTimestamp(): List<StrokeRowData>
 
     /**
-     * Cheap header projection for every image-bearing row (page snapshot / embedded template /
-     * cover): id, type, and only the first 80 base64 chars of `data` (= 60 raw bytes — enough to
-     * read the PNG/WEBP magic and the WEBP codec chunk). [NotebookCompactor] decides from the head
-     * whether the row needs a WEBP re-encode, then pulls the full [imageDataForId] only for those,
-     * so already-converted notebooks do no heavy work. The 4000-char (3000-byte) window is generous
-     * enough to walk past a VP8X header + embedded ICC profile to the VP8L/VP8 codec chunk.
+     * Cheap header projection for every embedded-template row: id, type, and only the first 4000
+     * base64 chars of `data` (enough to read the PNG/WEBP magic + codec chunk past a VP8X header +
+     * ICC profile). [NotebookCompactor] decides from the head whether the row needs a WEBP re-encode,
+     * then pulls the full [imageDataForId] only for those, so already-converted notebooks do no heavy
+     * work. Page snapshots and cover objects no longer carry images (snapshots are stripped and cover
+     * rows deleted by the compactor), so only `template` rows are scanned.
      */
-    @Query("SELECT id, type, substr(data, 1, 4000) AS head FROM notebook WHERE type IN ('page', 'template', 'cover')")
+    @Query("SELECT id, type, substr(data, 1, 4000) AS head FROM notebook WHERE type = 'template'")
     suspend fun imageRowHeads(): List<ImageRowHead>
+
+    /**
+     * Every page row (regardless of soft-delete status) whose `data` still carries a legacy
+     * `snapshot` field. Per-page snapshots are no longer stored; [NotebookCompactor] strips them by
+     * re-serializing through [PageData] (which drops the now-unknown key). The `LIKE` means
+     * already-stripped notebooks return an empty list cheaply, so this can run on every seal.
+     */
+    @Query("SELECT id, data FROM notebook WHERE type = 'page' AND data LIKE '%\"snapshot\":%'")
+    suspend fun pageRowsWithSnapshot(): List<StrokeRowData>
+
+    /**
+     * Hard-delete every legacy `type='cover'` row (the removed custom-cover feature). Returns the
+     * number of rows deleted. Transitional cleanup — cover objects can never be recreated, so a
+     * hard delete (no undo) is correct.
+     */
+    @Query("DELETE FROM notebook WHERE type = 'cover'")
+    suspend fun deleteCoverRows(): Int
 
     /** Full `data` for a single row — pulled only for rows [NotebookCompactor] decides to re-encode. */
     @Query("SELECT data FROM notebook WHERE id = :id")

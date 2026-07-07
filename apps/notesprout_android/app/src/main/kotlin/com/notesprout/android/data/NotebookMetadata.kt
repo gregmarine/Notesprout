@@ -16,7 +16,6 @@ import kotlinx.serialization.json.Json
  * ```json
  * {
  *   "title": "My Journal",
- *   "cover": "",
  *   "last_opened_page": "uuid-of-last-page"
  * }
  * ```
@@ -31,7 +30,6 @@ data class NotebookMetadata(
      *  Not stored in the JSON; injected from the row's `id` column by [fromJson]. */
     @Transient val id: String = "",
     val title: String = "",
-    val cover: String = "",
     @SerialName("last_opened_page")
     val lastOpenedPage: String? = null,
     /**

@@ -15,7 +15,7 @@
   a post-result dup check as a harmless safety net. On result, `createNotebook(name, libraryTemplateId)`
   seeds the first page's template (see Templates below).
 - **Move:** index update only — `.soil` file stays at `Garden/<id>.soil` (UUID unchanged).
-- **Rename:** index update only via `repository.renameNotebook` / `renameFolder` (`.soil` file/UUID untouched, same as Move). Context-menu actions use `ic_edit` (Tabler `edit`): "Rename Notebook" between Move Notebook and Set Cover; "Rename Folder" between Move Folder and Delete. Dialog reuses `DialogNewNotebookBinding`, pre-filled with the current name (cursor at end). Notebook rename runs `validateNotebookName`; folder rename runs `validateFolderRename` — same whitelist + `.`/`..` reject, but duplicate check is against the folder's own `parentId` (not the current browse folder) and excludes itself. No-op when name is unchanged. After rename, `refreshActiveView()` re-renders the active mode (normal/search via `scanAndRender`, pinned, or recents).
+- **Rename:** index update only via `repository.renameNotebook` / `renameFolder` (`.soil` file/UUID untouched, same as Move). Context-menu actions use `ic_edit` (Tabler `edit`): "Rename Notebook" after Move Notebook; "Rename Folder" between Move Folder and Delete. Dialog reuses `DialogNewNotebookBinding`, pre-filled with the current name (cursor at end). Notebook rename runs `validateNotebookName`; folder rename runs `validateFolderRename` — same whitelist + `.`/`..` reject, but duplicate check is against the folder's own `parentId` (not the current browse folder) and excludes itself. No-op when name is unchanged. After rename, `refreshActiveView()` re-renders the active mode (normal/search via `scanAndRender`, pinned, or recents).
 - **Copy notebook:** new `ObjectEntity` + copy `.soil` to new UUID path via `soilFile()`.
 - **Copy folder:** recursively create new index entries and copy all descendant `.soil` files.
 - **Conflict check:** if a sibling with the same name exists at the destination, show AlertDialog "A [notebook/folder] named '[name]' already exists here. Replace it?" Replace proceeds; Cancel stays in picker mode.
@@ -162,7 +162,8 @@ See [`docs/full-notebook-export.md`](full-notebook-export.md) for the `.soil` fo
 
 ## Page Index — Multi-Page Selection (`PageIndexActivity`)
 
-The page index is a paginated grid of page snapshots. Long-press enters **action mode**; the user can
+The page index is a paginated grid of page thumbnails (rendered on demand from page content for the
+visible pagination page — there is no stored per-page snapshot). Long-press enters **action mode**; the user can
 then select any number of pages — across pagination — and apply every toolbar action to all of them at
 once. Calm/paper-like per `docs/design-system.md`: selection is shown with the existing card highlight
 (`bg_page_card_current`, 3dp inset border), no color, no Material chrome.

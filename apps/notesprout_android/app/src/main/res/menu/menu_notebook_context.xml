@@ -5,9 +5,6 @@
         <item
             android:id="@+id/action_export_notebook"
             android:title="Export" />
-        <item
-            android:id="@+id/action_set_cover"
-            android:title="Set Cover" />
     </group>
 
     <group android:id="@+id/group_destructive">

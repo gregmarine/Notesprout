@@ -147,7 +147,7 @@ AlertDialog pattern: `setSoftInputMode(SOFT_INPUT_STATE_VISIBLE | SOFT_INPUT_ADJ
 
 1. Measure markdown via `TextObjectRenderer.measure()` on `Dispatchers.Default`
 2. Compute bounding box centered on tap, clamped to page bounds
-3. Insert `type="text"` row + `invalidatePageSnapshot(db, pageId)` on `Dispatchers.IO`
+3. Insert `type="text"` row + `noteContentEdit(db, pageId)` on `Dispatchers.IO`
 4. Append `TextRender` to `drawingView.getTextObjects()` + `loadTextObjects(...)`
 5. Rebuild render bitmap off-thread → swap via `loadStrokesWithBitmap`
 6. Enter lasso mode, select new object, show floating toolbar

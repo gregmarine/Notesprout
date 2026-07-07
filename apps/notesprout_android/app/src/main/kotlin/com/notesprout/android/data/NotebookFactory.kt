@@ -76,7 +76,6 @@ suspend fun createBlankNotebook(
         val notebookDataJson = NotebookMetadata(
             id             = notebookRowId,
             title          = name,
-            cover          = "",
             lastOpenedPage = pageId,
         ).toJson()
         exec(insertSql, arrayOf(notebookRowId, "", "{}", now, now, "notebook", notebookDataJson))

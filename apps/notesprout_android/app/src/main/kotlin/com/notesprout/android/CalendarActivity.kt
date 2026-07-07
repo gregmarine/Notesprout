@@ -676,11 +676,6 @@ class CalendarActivity : AppCompatActivity() {
             }
         }
 
-        drawingView.onSnapshotReady = { snapshot ->
-            val pageId = currentPageId
-            if (pageId.isNotEmpty()) lifecycleScope.launch { withContext(Dispatchers.IO) { persistSnapshot(pageId, snapshot) } }
-        }
-
         wireLassoCallbacks()
     }
 
@@ -1747,15 +1742,6 @@ class CalendarActivity : AppCompatActivity() {
         x = x.coerceIn(0f, (containerW - viewW).coerceAtLeast(0f))
         view.x = x
         view.y = y
-    }
-
-    // ── Snapshot persistence ─────────────────────────────────────────────────────
-
-    private suspend fun persistSnapshot(pageId: String, snapshot: String) {
-        val dao = NotesproutIndex.calendarDao()
-        val row = dao.getObjectById(pageId) ?: return
-        val updated = PageData.fromJson(row.data).copy(snapshot = snapshot).toJson()
-        dao.updateData(pageId, updated, System.currentTimeMillis())
     }
 
     // ── Touch dispatch ───────────────────────────────────────────────────────────

@@ -16,7 +16,6 @@ import android.util.TypedValue
 import androidx.appcompat.content.res.AppCompatResources
 import com.notesprout.android.core.BitmapDecode
 import com.notesprout.android.crypto.SoilCrypto
-import com.notesprout.android.data.CoverObject
 import com.notesprout.android.core.markdown.TextObjectRenderer
 import com.notesprout.android.data.BoundingBox
 import com.notesprout.android.data.HeadingObject
@@ -47,6 +46,7 @@ import kotlinx.serialization.json.Json
 import com.notesprout.android.data.parseBoundingBox
 import java.io.File
 import java.io.FileOutputStream
+import kotlin.math.roundToInt
 
 object NotebookExporter {
 
@@ -61,7 +61,6 @@ object NotebookExporter {
 
     /**
      * Renders every page of [db] to a PDF and writes it to [context.cacheDir].
-     * If the notebook has a `type="cover"` object it becomes page 1 of the PDF.
      * [onProgress] is called on the calling thread (IO) with (currentPage, totalPages)
      * before each notebook page is rendered — callers must post to main thread for UI updates.
      * When [exportPassword] is non-null, post-processes the PDF with AES-128 password protection
@@ -85,20 +84,6 @@ object NotebookExporter {
         val safeTitle = title.replace(Regex("[^a-zA-Z0-9_\\-. ]"), "_").trim('_', ' ')
             .ifBlank { "notebook" }
 
-        // Cover page bitmap (null = no cover)
-        val notebookId = notebookObj?.id ?: ""
-        val coverBitmap: Bitmap? = if (notebookId.isNotEmpty()) {
-            val coverRow = dao.getCoverForNotebook(notebookId)
-            coverRow?.let { row ->
-                runCatching {
-                    val co = Json.decodeFromString<CoverObject>(row.data)
-                    val bytes = Base64.decode(co.image, Base64.DEFAULT)
-                    // Bounded decode (M-1): the cover sizes the PDF page, so cap to MAX_DIMENSION.
-                    BitmapDecode.decodeSampled(bytes, BitmapDecode.MAX_DIMENSION, BitmapDecode.MAX_DIMENSION)
-                }.getOrNull()
-            }
-        } else null
-
         val pages = dao.getPagesSorted()
         val totalPages = pages.size
 
@@ -106,18 +91,6 @@ object NotebookExporter {
         var pdfPageNumber = 1
         var pdfPageIndex = 0  // 0-based, tracks current page for annotation wiring
         val stickyExports = mutableListOf<StickyExport>()
-
-        // Cover
-        if (coverBitmap != null) {
-            val w = coverBitmap.width.coerceAtLeast(1)
-            val h = coverBitmap.height.coerceAtLeast(1)
-            val pageInfo = PdfDocument.PageInfo.Builder(w, h, pdfPageNumber++).create()
-            val pdfPage = pdf.startPage(pageInfo)
-            pdfPage.canvas.drawBitmap(coverBitmap, 0f, 0f, null)
-            pdf.finishPage(pdfPage)
-            coverBitmap.recycle()
-            pdfPageIndex++
-        }
 
         // Notebook pages
         for ((i, pageRow) in pages.withIndex()) {
@@ -532,9 +505,16 @@ object NotebookExporter {
         pageRow: NotebookObject,
         context: Context,
         includeTemplate: Boolean = true,
+        renderScale: Float = 1f,
+        leanStrokes: Boolean = false,
     ): Triple<Bitmap, Bitmap?, List<StickyNoteRender>> {
         val (pw, ph) = parseDimensions(pageRow.boundingBox)
-        val templateBitmap = if (includeTemplate) loadTemplate(dao, pageRow.data, pw, ph) else null
+        // For a scaled render (thumbnails) decode the template straight to the scaled size — it is
+        // stretched to the page rect and scaled with the canvas anyway, so the smaller decode is a
+        // pure win (less decode time + memory).
+        val tW = if (renderScale < 1f) (pw * renderScale).roundToInt().coerceAtLeast(1) else pw
+        val tH = if (renderScale < 1f) (ph * renderScale).roundToInt().coerceAtLeast(1) else ph
+        val templateBitmap = if (includeTemplate) loadTemplate(dao, pageRow.data, tW, tH) else null
         val density = context.resources.displayMetrics.density
 
         val layer = dao.getLayerForPage(pageRow.id)
@@ -611,14 +591,49 @@ object NotebookExporter {
 
         val strokes: List<LiveStroke> = if (layer != null) {
             dao.getStrokesForLayer(layer.id).mapNotNull { row ->
-                val sd = runCatching { StrokeData.fromJson(row.data) }.getOrNull()
-                    ?: return@mapNotNull null
-                LiveStroke.fromStrokeData(row.id, sd)
+                if (leanStrokes) {
+                    // Thumbnails draw plain fixed-width black paths (see renderPage → drawStrokeList),
+                    // so parse points only — skips the per-point StrokePoint allocation and the
+                    // pressure/tilt fields the thumbnail renderer never reads.
+                    runCatching { LiveStroke.fromPointsJson(row.id, row.data) }.getOrNull()
+                } else {
+                    val sd = runCatching { StrokeData.fromJson(row.data) }.getOrNull()
+                        ?: return@mapNotNull null
+                    LiveStroke.fromStrokeData(row.id, sd)
+                }
             }
         } else emptyList()
 
-        val bitmap = renderPage(pw, ph, templateBitmap, headings, textObjects, lineObjects, strokes, context, links, stickyNotes, shapeObjects)
+        val bitmap = renderPage(pw, ph, templateBitmap, headings, textObjects, lineObjects, strokes, context, links, stickyNotes, shapeObjects, renderScale)
         return Triple(bitmap, templateBitmap, stickyNotes)
+    }
+
+    /**
+     * Render page [pageRow] to a thumbnail [Bitmap] no larger than [maxW]×[maxH] (aspect preserved),
+     * for the Page Index / Link Picker grids — an on-demand replacement for the removed per-page
+     * snapshot. Renders **directly** at thumbnail scale (via [renderPageBitmap]'s `renderScale`) so a
+     * content-heavy page rasterizes ~(scale²) fewer pixels than a full-size render + downscale would.
+     * Returns null on failure. The caller owns the returned bitmap (recycle when done). Must be called
+     * on a background (IO) dispatcher; never call from the UI thread.
+     */
+    suspend fun renderPageThumbnail(
+        dao: NotebookDao,
+        pageRow: NotebookObject,
+        context: Context,
+        maxW: Int,
+        maxH: Int,
+    ): Bitmap? {
+        if (maxW <= 0 || maxH <= 0) return null
+        val (pw, ph) = parseDimensions(pageRow.boundingBox)
+        val scale = minOf(maxW.toFloat() / pw, maxH.toFloat() / ph, 1f)
+        return try {
+            val (bitmap, templateBitmap, _) =
+                renderPageBitmap(dao, pageRow, context, includeTemplate = true, renderScale = scale, leanStrokes = true)
+            templateBitmap?.recycle()
+            bitmap
+        } catch (e: Exception) {
+            null
+        }
     }
 
     /**
@@ -651,9 +666,16 @@ object NotebookExporter {
         links: List<LinkRender> = emptyList(),
         stickyNotes: List<StickyNoteRender> = emptyList(),
         shapeObjects: List<ShapeRender> = emptyList(),
+        scale: Float = 1f,
     ): Bitmap {
-        val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        // [scale] < 1 renders directly at a smaller size (thumbnails): the output bitmap is scaled,
+        // and the canvas is scaled so all draw code keeps using page coordinates. This rasterizes far
+        // fewer pixels than rendering full-size then downscaling — the win for content-heavy pages.
+        val outW = (w * scale).roundToInt().coerceAtLeast(1)
+        val outH = (h * scale).roundToInt().coerceAtLeast(1)
+        val bmp = Bitmap.createBitmap(outW, outH, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bmp)
+        if (outW != w || outH != h) canvas.scale(outW.toFloat() / w, outH.toFloat() / h)
 
         canvas.drawColor(Color.WHITE)
 
