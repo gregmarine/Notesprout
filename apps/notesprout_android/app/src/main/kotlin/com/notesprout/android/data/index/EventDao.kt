@@ -25,6 +25,13 @@ interface EventDao {
     )
     suspend fun nonRecurringOnDay(day: Long): List<EventEntity>
 
+    /** Non-recurring events whose span overlaps the inclusive day range `[rangeStart, rangeEnd]`. */
+    @Query(
+        "SELECT * FROM events WHERE deletedAt IS NULL AND recurring = 0 " +
+            "AND startEpochDay <= :rangeEnd AND endEpochDay >= :rangeStart"
+    )
+    suspend fun nonRecurringInRange(rangeStart: Long, rangeEnd: Long): List<EventEntity>
+
     /** All live recurring events (the expansion engine decides which cover a given day). */
     @Query("SELECT * FROM events WHERE deletedAt IS NULL AND recurring = 1")
     suspend fun allRecurring(): List<EventEntity>

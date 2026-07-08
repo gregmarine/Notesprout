@@ -446,12 +446,34 @@ occurrence preserves the anchor's **span length**, so an occurrence starting on 
   toggles / monthly day-vs-ordinal / Ends Never·On date·After N). e-ink styled (bordered dialog, no
   elevation); Delete shown only when editing.
 
+### Grid rendering (Month / Week / Day canvas)
+
+Events are **baked into the grid template bitmap** behind the ink (they need no live layer — same
+model as the ruling lines). `CalendarTemplateRenderer.render` takes an
+`eventsByDay: Map<LocalDate, List<DayEvent>>` (a neutral `DayEvent(label, allDay, startMinute, icon)`
+— the caller maps `EventEntity` rows, incl. `EventType → EventIcon` via `CalendarActivity.iconFor`);
+`highlights = false` export renders omit events (a notebook page shouldn't freeze them in).
+
+- **Month / Week cells** — small monochrome **type glyphs** on the day-number row, right-aligned
+  (numbers stay left-aligned). `EventIcon {CAKE, HEART, SUITCASE, PEOPLE, CLOCK, DOT}` (birthday /
+  anniversary / vacation / meeting / appointment / other), drawn programmatically with Canvas
+  primitives (no drawables → the renderer stays Context-free). **Distinct types only** (a day with two
+  birthdays shows one cake); a `+` caps overflow when the row is full. Deliberately *not* text — keeps
+  cells calm on e-ink.
+- **Day timeline** — all-day items stacked at the top of the gutter; timed items as a filled dot +
+  `time label` at the y matching their start minute, shown only for the half (AM/PM) on screen.
+
+`CalendarActivity.loadEventsForView()` (suspend) loads the visible period's range via
+`EventsRepository.eventsForRange` (one recurring-set + one range query, expanded per day) into
+`eventsByDay`, called before `renderTemplateBitmap()` in `navigateCanvas` and again in `onResume`
+(returning from the day window may have changed events → reload + `refreshTemplate`). Selection-only
+`refreshTemplate` reuses the cache (same period ⇒ same events).
+
 ### v1 scope / deferred
 
 - **Delete removes the whole series** (per-occurrence exceptions deferred).
-- Events surface **only in the day window** — rendering event markers onto the Month/Week/Day
-  *canvas* grid is a later iteration.
 - No edit-single-occurrence, no reminders/notifications, no import/export of events yet.
+- Grid markers are **not** carried into full-view notebook export (grid export stays event-free).
 
 ---
 

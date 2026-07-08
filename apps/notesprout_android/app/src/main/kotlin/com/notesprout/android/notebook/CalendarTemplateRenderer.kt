@@ -25,6 +25,22 @@ object CalendarTemplateRenderer {
 
     enum class CalView { MONTH, WEEK, DAY }
 
+    /** A small monochrome glyph drawn on a day cell to flag an event of a given kind. */
+    enum class EventIcon { CAKE, HEART, SUITCASE, PEOPLE, CLOCK, DOT }
+
+    /**
+     * A single event to paint into a day cell / timeline. Neutral of the data layer — the caller maps
+     * its `EventEntity` rows to these. [startMinute] is minute-of-day for timed events, null for
+     * all-day. [icon] flags the type in Month/Week cells. Callers pass them already sorted (all-day
+     * first, then by start time).
+     */
+    data class DayEvent(
+        val label: String,
+        val allDay: Boolean,
+        val startMinute: Int?,
+        val icon: EventIcon = EventIcon.DOT,
+    )
+
     /** Everything needed to render or hit-test a single calendar page. */
     data class Spec(
         val view: CalView,
@@ -43,13 +59,17 @@ object CalendarTemplateRenderer {
      * border (true for the live calendar canvas); pass false when baking a template for export so a
      * transient date highlight isn't frozen permanently onto a notebook page.
      */
-    fun render(spec: Spec, widthPx: Int, heightPx: Int, density: Float, highlights: Boolean = true): Bitmap {
+    fun render(
+        spec: Spec, widthPx: Int, heightPx: Int, density: Float,
+        highlights: Boolean = true,
+        eventsByDay: Map<LocalDate, List<DayEvent>> = emptyMap(),
+    ): Bitmap {
         val bmp = Bitmap.createBitmap(widthPx.coerceAtLeast(1), heightPx.coerceAtLeast(1), Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bmp)
         when (spec.view) {
-            CalView.MONTH -> drawMonth(canvas, spec, widthPx, heightPx, density, highlights)
-            CalView.WEEK  -> drawWeek(canvas, spec, widthPx, heightPx, density, highlights)
-            CalView.DAY   -> drawDay(canvas, spec, widthPx, heightPx, density)
+            CalView.MONTH -> drawMonth(canvas, spec, widthPx, heightPx, density, highlights, eventsByDay)
+            CalView.WEEK  -> drawWeek(canvas, spec, widthPx, heightPx, density, highlights, eventsByDay)
+            CalView.DAY   -> drawDay(canvas, spec, widthPx, heightPx, density, eventsByDay)
         }
         return bmp
     }
@@ -114,7 +134,10 @@ object CalendarTemplateRenderer {
 
     // ── Month ──────────────────────────────────────────────────────────────────
 
-    private fun drawMonth(canvas: Canvas, spec: Spec, w: Int, h: Int, d: Float, highlights: Boolean) {
+    private fun drawMonth(
+        canvas: Canvas, spec: Spec, w: Int, h: Int, d: Float, highlights: Boolean,
+        eventsByDay: Map<LocalDate, List<DayEvent>>,
+    ) {
         val p = Paint(Paint.ANTI_ALIAS_FLAG)
         val g = monthGeometry(w, h, d)
 
@@ -136,7 +159,7 @@ object CalendarTemplateRenderer {
                 val inMonth = date.year == spec.calYear && date.monthValue == spec.calMonth
                 val left = g.pitchX * col
                 val top = g.gridTop + g.pitchY * row
-                drawDayCell(canvas, p, left, top, g.cellW, g.cellH, date, false, inMonth, spec.selectedDate, spec.today, d, highlights)
+                drawDayCell(canvas, p, left, top, g.cellW, g.cellH, date, false, inMonth, spec.selectedDate, spec.today, d, highlights, eventsByDay[date].orEmpty())
                 if (col > 0) drawVLine(canvas, p, left - 1f, g.gridTop, g.gridTop + g.gridH)
             }
             if (row > 0) drawHLine(canvas, p, 0f, g.gridTop + g.pitchY * row - 1f, w.toFloat())
@@ -150,7 +173,10 @@ object CalendarTemplateRenderer {
 
     // ── Week ───────────────────────────────────────────────────────────────────
 
-    private fun drawWeek(canvas: Canvas, spec: Spec, w: Int, h: Int, d: Float, highlights: Boolean) {
+    private fun drawWeek(
+        canvas: Canvas, spec: Spec, w: Int, h: Int, d: Float, highlights: Boolean,
+        eventsByDay: Map<LocalDate, List<DayEvent>>,
+    ) {
         val p = Paint(Paint.ANTI_ALIAS_FLAG)
         val g = weekGeometry(w, h, d)
         val weekStart = sundayOf(spec.selectedDate)
@@ -162,7 +188,7 @@ object CalendarTemplateRenderer {
                 val top = g.pitchY * row
                 if (idx < 7) {
                     val date = weekStart.plusDays(idx.toLong())
-                    drawDayCell(canvas, p, left, top, g.cellW, g.cellH, date, true, true, spec.selectedDate, spec.today, d, highlights)
+                    drawDayCell(canvas, p, left, top, g.cellW, g.cellH, date, true, true, spec.selectedDate, spec.today, d, highlights, eventsByDay[date].orEmpty())
                 }
                 if (col > 0) drawVLine(canvas, p, left - 1f, 0f, g.cellsAreaH)
             }
@@ -177,7 +203,10 @@ object CalendarTemplateRenderer {
 
     // ── Day ────────────────────────────────────────────────────────────────────
 
-    private fun drawDay(canvas: Canvas, spec: Spec, w: Int, h: Int, d: Float) {
+    private fun drawDay(
+        canvas: Canvas, spec: Spec, w: Int, h: Int, d: Float,
+        eventsByDay: Map<LocalDate, List<DayEvent>>,
+    ) {
         val p = Paint(Paint.ANTI_ALIAS_FLAG)
         val gutter = DAY_GUTTER_DP * d
         val rowH = h / 24f
@@ -196,6 +225,52 @@ object CalendarTemplateRenderer {
             if (slot > 0) drawHLine(canvas, p, 0f, top, w.toFloat())
         }
         drawVLine(canvas, p, gutter, 0f, h.toFloat())
+
+        drawDayEvents(canvas, p, eventsByDay[spec.selectedDate].orEmpty(), gutter, w, rowH, startHour, d)
+    }
+
+    /**
+     * Day-view events: all-day items stacked at the very top-right of the gutter; timed items as a
+     * filled dot + label at the y matching their start time (only those falling inside this half's
+     * 12-hour window).
+     */
+    private fun drawDayEvents(
+        canvas: Canvas, p: Paint, events: List<DayEvent>,
+        gutter: Float, w: Int, rowH: Float, startHour: Int, d: Float,
+    ) {
+        if (events.isEmpty()) return
+        val x = gutter + 10f * d
+        val maxW = w - x - 10f * d
+        if (maxW <= 0f) return
+        val textSize = 12f * d
+        p.textSize = textSize
+        p.textAlign = Paint.Align.LEFT
+        val ascent = -p.ascent()
+        val lineH = textSize + 5f * d
+
+        // All-day band at the top.
+        var allDayLine = 0
+        events.filter { it.allDay || it.startMinute == null }.forEach { ev ->
+            p.style = Paint.Style.FILL; p.color = Color.BLACK
+            canvas.drawText(truncate(p, "• " + ev.label, maxW), x, 4f * d + allDayLine * lineH + ascent, p)
+            allDayLine++
+        }
+
+        // Timed events at their slot position within this half.
+        val windowStart = startHour * 60
+        val windowEnd = windowStart + 12 * 60
+        events.filter { !it.allDay && it.startMinute != null }.forEach { ev ->
+            val m = ev.startMinute!!
+            if (m < windowStart || m >= windowEnd) return@forEach
+            val y = ((m - windowStart) / 30f) * rowH
+            val r = 2.5f * d
+            p.style = Paint.Style.FILL; p.color = Color.BLACK
+            canvas.drawCircle(x + r, y + rowH / 2f, r, p)
+            canvas.drawText(
+                truncate(p, "${compactTime(m)} ${ev.label}", maxW - 3 * r),
+                x + 3 * r + 4f * d, y + rowH / 2f + ascent / 2f - p.descent() / 2f, p,
+            )
+        }
     }
 
     // ── Shared cell / notes drawing ──────────────────────────────────────────
@@ -215,6 +290,7 @@ object CalendarTemplateRenderer {
         left: Float, top: Float, cellW: Float, cellH: Float,
         date: LocalDate, showDayOfWeek: Boolean, inMonth: Boolean,
         selectedDate: LocalDate, today: LocalDate, d: Float, highlights: Boolean = true,
+        events: List<DayEvent> = emptyList(),
     ) {
         val isToday = highlights && date == today
         val isSel = highlights && date == selectedDate
@@ -275,6 +351,109 @@ object CalendarTemplateRenderer {
         val dividerY = numTopEdge + numH + topPad
         p.color = Color.BLACK
         canvas.drawRect(left, dividerY, left + cellW, dividerY + 1f, p)
+
+        if (events.isNotEmpty()) {
+            drawDayCellIcons(canvas, p, left, cellW, left + leftPad + numW, numCircleCy, numH.toFloat(), d, events)
+        }
+    }
+
+    /**
+     * Right-aligned type glyphs on the day-number row (numbers are left-aligned). Distinct event
+     * types only (a day with two birthdays shows one cake); a "+" caps overflow when the row is full.
+     */
+    private fun drawDayCellIcons(
+        canvas: Canvas, p: Paint,
+        cellLeft: Float, cellW: Float, numRight: Float, rowCy: Float, refH: Float, d: Float,
+        events: List<DayEvent>,
+    ) {
+        val distinct = LinkedHashSet<EventIcon>().apply { events.forEach { add(it.icon) } }.toList()
+        val iconSize = refH.coerceIn(10f * d, 16f * d)
+        val gap = 3f * d
+        val rightEdge = cellLeft + cellW - 5f * d
+        val leftEdge = numRight + 4f * d
+        val maxSlots = (((rightEdge - leftEdge) + gap) / (iconSize + gap)).toInt()
+        if (maxSlots <= 0) return
+
+        val overflow = distinct.size > maxSlots
+        val icons = if (overflow) distinct.take(maxSlots - 1) else distinct
+        val slots = icons.size + if (overflow) 1 else 0
+        var x = rightEdge - slots * iconSize - (slots - 1).coerceAtLeast(0) * gap
+        val top = rowCy - iconSize / 2f
+
+        for (icon in icons) {
+            drawEventIcon(canvas, p, icon, x, top, iconSize, d)
+            x += iconSize + gap
+        }
+        if (overflow) drawPlus(canvas, p, x, top, iconSize, d)
+    }
+
+    /** Draws [icon] as a monochrome glyph in the box [x, top, x+size, top+size]. */
+    private fun drawEventIcon(canvas: Canvas, p: Paint, icon: EventIcon, x: Float, y: Float, s: Float, d: Float) {
+        p.color = Color.BLACK
+        val stroke = (1.4f * d).coerceAtLeast(1.5f)
+        when (icon) {
+            EventIcon.CAKE -> {
+                p.style = Paint.Style.FILL
+                // Two candles + flame dots.
+                canvas.drawRect(x + 0.35f * s, y + 0.34f * s, x + 0.41f * s, y + 0.62f * s, p)
+                canvas.drawRect(x + 0.59f * s, y + 0.34f * s, x + 0.65f * s, y + 0.62f * s, p)
+                canvas.drawCircle(x + 0.38f * s, y + 0.26f * s, 0.06f * s, p)
+                canvas.drawCircle(x + 0.62f * s, y + 0.26f * s, 0.06f * s, p)
+                // Scalloped frosting top.
+                canvas.drawCircle(x + 0.26f * s, y + 0.62f * s, 0.13f * s, p)
+                canvas.drawCircle(x + 0.5f * s, y + 0.62f * s, 0.13f * s, p)
+                canvas.drawCircle(x + 0.74f * s, y + 0.62f * s, 0.13f * s, p)
+                // Body.
+                canvas.drawRect(x + 0.13f * s, y + 0.62f * s, x + 0.87f * s, y + 0.92f * s, p)
+            }
+            EventIcon.HEART -> {
+                p.style = Paint.Style.FILL
+                canvas.drawCircle(x + 0.32f * s, y + 0.36f * s, 0.2f * s, p)
+                canvas.drawCircle(x + 0.68f * s, y + 0.36f * s, 0.2f * s, p)
+                val path = android.graphics.Path().apply {
+                    moveTo(x + 0.11f * s, y + 0.44f * s)
+                    lineTo(x + 0.89f * s, y + 0.44f * s)
+                    lineTo(x + 0.5f * s, y + 0.9f * s)
+                    close()
+                }
+                canvas.drawPath(path, p)
+            }
+            EventIcon.SUITCASE -> {
+                p.style = Paint.Style.STROKE; p.strokeWidth = stroke
+                // Handle.
+                canvas.drawRect(x + 0.34f * s, y + 0.14f * s, x + 0.66f * s, y + 0.34f * s, p)
+                // Body.
+                canvas.drawRect(x + 0.14f * s, y + 0.32f * s, x + 0.86f * s, y + 0.9f * s, p)
+                canvas.drawLine(x + 0.5f * s, y + 0.32f * s, x + 0.5f * s, y + 0.9f * s, p)
+            }
+            EventIcon.PEOPLE -> {
+                p.style = Paint.Style.FILL
+                // Two heads + shoulders.
+                canvas.drawCircle(x + 0.33f * s, y + 0.34f * s, 0.16f * s, p)
+                canvas.drawCircle(x + 0.67f * s, y + 0.34f * s, 0.16f * s, p)
+                canvas.drawRoundRect(x + 0.13f * s, y + 0.56f * s, x + 0.53f * s, y + 0.95f * s, 0.12f * s, 0.12f * s, p)
+                canvas.drawRoundRect(x + 0.47f * s, y + 0.56f * s, x + 0.87f * s, y + 0.95f * s, 0.12f * s, 0.12f * s, p)
+            }
+            EventIcon.CLOCK -> {
+                p.style = Paint.Style.STROKE; p.strokeWidth = stroke
+                canvas.drawCircle(x + 0.5f * s, y + 0.5f * s, 0.4f * s, p)
+                canvas.drawLine(x + 0.5f * s, y + 0.5f * s, x + 0.5f * s, y + 0.24f * s, p)
+                canvas.drawLine(x + 0.5f * s, y + 0.5f * s, x + 0.7f * s, y + 0.56f * s, p)
+            }
+            EventIcon.DOT -> {
+                p.style = Paint.Style.FILL
+                canvas.drawCircle(x + 0.5f * s, y + 0.5f * s, 0.16f * s, p)
+            }
+        }
+        p.style = Paint.Style.FILL
+        p.strokeWidth = 0f
+    }
+
+    private fun drawPlus(canvas: Canvas, p: Paint, x: Float, y: Float, s: Float, d: Float) {
+        p.style = Paint.Style.STROKE; p.strokeWidth = (1.4f * d).coerceAtLeast(1.5f); p.color = Color.BLACK
+        canvas.drawLine(x + 0.5f * s, y + 0.28f * s, x + 0.5f * s, y + 0.72f * s, p)
+        canvas.drawLine(x + 0.28f * s, y + 0.5f * s, x + 0.72f * s, y + 0.5f * s, p)
+        p.style = Paint.Style.FILL; p.strokeWidth = 0f
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────────
@@ -298,6 +477,22 @@ object CalendarTemplateRenderer {
     private fun sundayOf(date: LocalDate): LocalDate {
         val dow = date.dayOfWeek.value % 7
         return date.minusDays(dow.toLong())
+    }
+
+    /** Compact minute-of-day, e.g. 540 → "9a", 870 → "2:30p". */
+    private fun compactTime(minute: Int): String {
+        val hour = minute / 60
+        val min = minute % 60
+        val h12 = when (val hh = hour % 12) { 0 -> 12; else -> hh }
+        val ap = if (hour < 12) "a" else "p"
+        return if (min == 0) "$h12$ap" else "$h12:%02d$ap".format(min)
+    }
+
+    /** Ellipsize [text] to fit [maxW] px under paint [p] (appends "…" when clipped). */
+    private fun truncate(p: Paint, text: String, maxW: Float): String {
+        if (p.measureText(text) <= maxW) return text
+        val n = p.breakText(text, true, maxW - p.measureText("…"), null)
+        return text.substring(0, n.coerceAtLeast(0)).trimEnd() + "…"
     }
 
     private fun slotLabel(hour: Int, minute: Int): String {

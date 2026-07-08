@@ -30,6 +30,33 @@ class EventsRepository(
         (direct + recurring).sortedWith(dayOrder)
     }
 
+    /**
+     * Every day in `[startDate, endDateInclusive]` mapped to its events (direct + recurring
+     * occurrences), each list sorted all-day-first then by start time. Loads the recurring set and the
+     * range's non-recurring set once, then expands per day — cheap enough for a month grid (42 days).
+     */
+    suspend fun eventsForRange(
+        startDate: LocalDate,
+        endDateInclusive: LocalDate,
+    ): Map<LocalDate, List<EventEntity>> = withContext(Dispatchers.IO) {
+        val startDay = startDate.toEpochDay()
+        val endDay = endDateInclusive.toEpochDay()
+        val direct = dao.nonRecurringInRange(startDay, endDay)
+        val recurring = dao.allRecurring().map { it to (EventPayload.fromJson(it.data).recurrence) }
+        val out = LinkedHashMap<LocalDate, List<EventEntity>>()
+        var day = startDay
+        while (day <= endDay) {
+            val date = LocalDate.ofEpochDay(day)
+            val onDay = direct.filter { it.startEpochDay <= day && it.endEpochDay >= day } +
+                recurring.filter { (row, rule) ->
+                    rule != null && EventRecurrence.occursOn(rule, row.startEpochDay, row.endEpochDay, day)
+                }.map { it.first }
+            if (onDay.isNotEmpty()) out[date] = onDay.sortedWith(dayOrder)
+            day++
+        }
+        out
+    }
+
     suspend fun get(id: String): EventEntity? = withContext(Dispatchers.IO) { dao.get(id) }
 
     suspend fun save(event: EventEntity) = withContext(Dispatchers.IO) { dao.upsert(event) }

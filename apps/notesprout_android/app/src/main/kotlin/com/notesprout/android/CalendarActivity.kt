@@ -40,6 +40,8 @@ import com.notesprout.android.crypto.KeySession
 import com.notesprout.android.data.BoundingBox
 import com.notesprout.android.data.CalendarExportPage
 import com.notesprout.android.data.CalendarRepository
+import com.notesprout.android.data.EventsRepository
+import com.notesprout.android.data.events.EventType
 import com.notesprout.android.data.ScratchpadPageContent
 import com.notesprout.android.data.HeadingObject
 import com.notesprout.android.data.HeadingStroke
@@ -140,6 +142,10 @@ class CalendarActivity : AppCompatActivity() {
     private lateinit var binding: ActivityCalendarBinding
     private lateinit var drawingView: NotebookView
     private lateinit var repository: CalendarRepository
+    private val eventsRepo: EventsRepository by lazy { EventsRepository() }
+    // Events for the visible period, keyed by day — baked into the grid template. Reloaded on
+    // period/view change and on return from the day window (events may have been added/removed).
+    private var eventsByDay: Map<LocalDate, List<CalendarTemplateRenderer.DayEvent>> = emptyMap()
     private val indexRepo: IndexRepository by lazy { IndexRepository(NotesproutIndex.dao()) }
 
     /** Whether the in-flight page export should copy the view's writing (true) or only the grid template. */
@@ -510,6 +516,7 @@ class CalendarActivity : AppCompatActivity() {
             currentLayerId = lid
             persistedStrokeIds.clear()
             if (!firstLoad) drawingView.clearForPageLoad()
+            loadEventsForView()
             renderTemplateBitmap()
             loadCanvasContent()
             initHistory()
@@ -521,8 +528,36 @@ class CalendarActivity : AppCompatActivity() {
         val w = binding.calendarContent.width
         val h = binding.calendarContent.height
         currentTemplateBitmap = if (w > 0 && h > 0) {
-            CalendarTemplateRenderer.render(currentSpec(), w, h, density)
+            CalendarTemplateRenderer.render(currentSpec(), w, h, density, eventsByDay = eventsByDay)
         } else null
+    }
+
+    /** Load the visible period's events into [eventsByDay] (baked into the grid on the next render). */
+    private suspend fun loadEventsForView() {
+        val (start, end) = when (currentView) {
+            CalView.MONTH -> {
+                val firstDay = java.time.YearMonth.of(calYear, calMonth).atDay(1)
+                val first = firstDay.minusDays((firstDay.dayOfWeek.value % 7).toLong()) // grid's Sunday
+                first to first.plusDays(41)                                             // 6×7 cells
+            }
+            CalView.WEEK -> sundayOf(selectedDate).let { it to it.plusDays(6) }
+            CalView.DAY -> selectedDate to selectedDate
+        }
+        eventsByDay = eventsRepo.eventsForRange(start, end).mapValues { (_, rows) ->
+            rows.map {
+                CalendarTemplateRenderer.DayEvent(it.title, it.allDay, it.startMinute, iconFor(it.type))
+            }
+        }
+    }
+
+    /** Maps an event type name to its Month/Week cell glyph. */
+    private fun iconFor(typeName: String): CalendarTemplateRenderer.EventIcon = when (EventType.fromName(typeName)) {
+        EventType.BIRTHDAY -> CalendarTemplateRenderer.EventIcon.CAKE
+        EventType.ANNIVERSARY -> CalendarTemplateRenderer.EventIcon.HEART
+        EventType.VACATION -> CalendarTemplateRenderer.EventIcon.SUITCASE
+        EventType.MEETING -> CalendarTemplateRenderer.EventIcon.PEOPLE
+        EventType.APPOINTMENT -> CalendarTemplateRenderer.EventIcon.CLOCK
+        EventType.OTHER -> CalendarTemplateRenderer.EventIcon.DOT
     }
 
     /** Re-render the template (e.g. selection changed) and rebuild the canvas with current content. */
@@ -1995,6 +2030,11 @@ class CalendarActivity : AppCompatActivity() {
         super.onResume()
         drawingView.resumeDrawing()
         updateLassoButtonIcon()
+        // Returning from the day window (or an event edit): events may have changed — reload and
+        // re-bake the grid. Skipped on the very first resume (no page/canvas yet).
+        if (currentPageId.isNotEmpty()) {
+            lifecycleScope.launch { loadEventsForView(); refreshTemplate() }
+        }
     }
 
     override fun onPause() {
