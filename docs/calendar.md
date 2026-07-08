@@ -77,6 +77,10 @@ all independent, all keyed.
 | `DayDetailActivity.kt` | full-screen **three-view day window** (Note / Notebooks / History — see [Day window](#day-detail--the-day-window)) |
 | `DayTemplateDialog.kt` | day-detail template quick-picker (reads `type="template"` rows from the `calendar` table) |
 | `CalendarTransfer.kt` | one-field in-memory singleton for Calendar / Day-detail → Notebook hand-off |
+| `data/index/EventEntity.kt` / `EventDao.kt` | Room `@Entity` + DAO for the `events` table (see [Events](#events--the-events-table)) |
+| `data/events/EventModels.kt` / `RecurrenceSummary.kt` / `EventRecurrence.kt` | `@Serializable` event models + summary + recurrence-expansion engine |
+| `data/EventsRepository.kt` | events CRUD + `eventsForDay` (sorted all-day-first) |
+| `EventsController.kt` / `EventEditorDialog.kt` | Events-view list controller + add/edit editor dialog |
 
 `CalendarRepository.loadPage` returns the shared `ScratchpadPageContent` (reused to avoid churn).
 
@@ -272,7 +276,7 @@ set so the canvas survives rotation). Launched via `DayDetailActivity.intent(ctx
 from `CalendarActivity.openDayDetail`; the source-notebook identity is carried through so Send-to-Notebook
 can offer "this notebook".
 
-The window has **three views**, chosen by a toggle group in the top toolbar placed **after the Back
+The window has **four views**, chosen by a toggle group in the top toolbar placed **after the Back
 arrow and before the drawing tools, separated by dividers** (mirrors the Month/Week/Day toggles):
 
 | View | What it shows | Tools toolbar |
@@ -280,8 +284,9 @@ arrow and before the drawing tools, separated by dividers** (mirrors the Month/W
 | **Note** *(default)* | the editable day-note canvas | visible |
 | **Notebooks** | notebooks **Opened / Edited / Created** on this calendar day (paginated card grid) | hidden |
 | **History** | this month/day **in a chosen past year** — a leading **Notes** (read-only day-note bitmap) then **Opened / Edited / Created** | hidden |
+| **Events** | birthdays / anniversaries / appointments **attached to this day** (incl. recurring occurrences) — list + add/edit/delete. See [Events](#events--the-events-table). | hidden |
 
-State: `ViewMode {NOTE, NOTEBOOKS, HISTORY}` + sub-toggles `NbSub {OPENED, EDITED, CREATED}` /
+State: `ViewMode {NOTE, NOTEBOOKS, HISTORY, EVENTS}` + sub-toggles `NbSub {OPENED, EDITED, CREATED}` /
 `HistSub {NOTES, OPENED, EDITED, CREATED}`. **Reopening a day always resets to Note** — the active
 view is not persisted. `daySubNotebooks` / `daySubHistory` sub-bars are visible only in their mode;
 `dayToolsGroup` is visible only in Note mode (`applyViewMode` drives all show/hide + `isSelected`).
@@ -360,14 +365,93 @@ current−1, else the newest (`pickDefaultHistoryYear`); loaded once per open (`
 
 Plaintext table in the global index (`notesprout.db`, Room **v3 → v4**, `MIGRATION_3_4`), columns
 `id` / `notebookId` / `activityType` (`OPENED`|`EDITED`) / `timestamp`, indexed on
-`(activityType, timestamp)` and `notebookId`. *Not* named "events" — that word is reserved for a future
-calendar-events system (birthdays / anniversaries / appointments).
+`(activityType, timestamp)` and `notebookId`. *Not* named "events" — that word is reserved for the
+calendar-**Events** system (birthdays / anniversaries / appointments), now built on the separate
+`events` table — see [Events](#events--the-events-table).
 
 - **OPENED** — written in `NotebookActivity.onCreate` (next to `RecentsManager.recordOpen`) via
   `DayHistoryRepository.logOpened`.
 - **EDITED** — written at seal (`sealNotebook`) only when `countContentModifiedSince(sessionStart) > 0`,
   i.e. a **content** row (stroke/heading/text/line/link/sticky/shape) changed this session. `updatedAt`
   is bumped on *every* close, so it can't define an edit — hence the session-scoped content check.
+
+---
+
+## Events — the `events` table
+
+Calendar **Events** are structured, recurrable day-anchored entries — birthdays, anniversaries,
+vacations, meetings, appointments, and one-off items. They are **not** handwriting; they live in the
+plaintext global index (`notesprout.db`), never in a `.soil` file, and surface as the **Events** view
+of the [day window](#day-detail--the-day-window). (Distinct from the `notebook_activity` telemetry log,
+which deliberately avoided the word "events" so this system could claim it.)
+
+### Data model
+
+Room `@Entity` **`events`** (`data/index/EventEntity.kt`), added in **`MIGRATION_4_5`**
+(`NotesproutDatabase` **v4 → v5**; `EventDao` registered in `NotesproutIndex.eventDao()`):
+
+```
+id · type · title
+startEpochDay · endEpochDay   (local epochDay; end == start for single-day, else inclusive multi-day span)
+allDay · startMinute · endMinute   (minute-of-day 0–1439; null when all-day / no time)
+recurring   (mirror of data.recurrence != null — lets the DAO pull only rows needing expansion)
+data   (EventPayload JSON: recurrence rule + notes)
+createdAt · updatedAt · deletedAt   (soft delete)
+```
+
+Indexed on `(startEpochDay, endEpochDay)`, `recurring`, `deletedAt`. Queryable fields are promoted to
+columns so a day's direct (non-recurring) events are found by SQL range-overlap; recurring events are
+fetched by the `recurring` flag and expanded in Kotlin.
+
+**Serializable models** (`data/events/EventModels.kt`, `kotlinx.serialization`):
+
+- `EventType` — fixed presets **Birthday · Anniversary · Vacation · Meeting · Appointment · Other**,
+  each carrying a `defaultFreq` (Birthday/Anniversary → `YEARLY`, rest → none) offered when creating.
+- `RecurrenceRule` — full RRULE-like: `freq {DAILY,WEEKLY,MONTHLY,YEARLY}` + `interval` (bi-weekly =
+  WEEKLY interval 2) + `weekdays` (ISO 1=Mon…7=Sun, WEEKLY only; empty = anchor's own weekday) +
+  `monthlyMode {DAY_OF_MONTH, ORDINAL_WEEKDAY}` ("day 14" vs "3rd Tuesday") + a flattened end
+  (`endMode {NEVER,UNTIL,COUNT}` + `endEpochDay` / `endCount`). `RecurrenceSummary` renders the list-row
+  description.
+- `EventPayload` — the `data`-column JSON (`recurrence` + `notes`).
+
+### Recurrence engine (`data/events/EventRecurrence.kt`)
+
+`occursOn(rule, anchorStart, anchorEnd, dayEpochDay)` decides whether an event covers a day. Each
+occurrence preserves the anchor's **span length**, so an occurrence starting on `O` covers
+`[O, O + spanDays]` inclusive.
+
+- **NEVER / UNTIL** rules test only the few candidate starts in `[day − spanDays, day]` via
+  `isValidStart` — O(spanDays), so a birthday anchored decades ago is effectively O(1).
+- **COUNT** rules enumerate the first *N* occurrences (`generateStarts`, N is user-small) and test
+  coverage directly.
+- Per-freq validity: DAILY interval-mod; WEEKLY weekday-set + ISO-Monday week-index mod; MONTHLY
+  month-index mod + (day-of-month, skipping short months / ORDINAL weekday, "5th"→"last"); YEARLY
+  year mod + same month+day (Feb 29 → leap years only).
+
+### Repository + UI
+
+- **`data/EventsRepository.kt`** — CRUD + `eventsForDay(date)`: direct rows (SQL overlap) ∪ recurring
+  rows the engine lands on the day, sorted **all-day first, then timed by start minute**, title
+  tiebreak (the ordering the user asked for). No encryption gate — plaintext-on-device like the
+  scratch pad.
+- **`EventsController.kt`** — drives the Events view: `refresh()` loads + renders bordered rows
+  (`item_event.xml`: time/all-day badge · title · meta = type · end-time · multi-day span · recurrence
+  summary), tap-to-edit, per-row delete (confirm; recurring → whole-series). Add button opens the
+  editor. Bound in `DayDetailActivity` (`ViewMode.EVENTS`, toolbar toggle `btnDayViewEvents`,
+  `dayEventsContainer` in `activity_day_detail.xml`; `applyViewMode` shows/refreshes it, `onResume`
+  re-refreshes).
+- **`EventEditorDialog.kt`** (+ `dialog_event_editor.xml`) — add/edit: type spinner (default recurrence
+  on type change for new events), title, start/end date, all-day switch + start/end time (long-press
+  end-time clears), and the full recurrence builder (Repeats spinner → `Every N units` + weekly weekday
+  toggles / monthly day-vs-ordinal / Ends Never·On date·After N). e-ink styled (bordered dialog, no
+  elevation); Delete shown only when editing.
+
+### v1 scope / deferred
+
+- **Delete removes the whole series** (per-occurrence exceptions deferred).
+- Events surface **only in the day window** — rendering event markers onto the Month/Week/Day
+  *canvas* grid is a later iteration.
+- No edit-single-occurrence, no reminders/notifications, no import/export of events yet.
 
 ---
 

@@ -51,6 +51,13 @@
             android:text="History"
             android:contentDescription="History view" />
 
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/btnDayViewEvents"
+            style="@style/Widget.Notesprout.ToggleTextButton"
+            android:layout_marginStart="2dp"
+            android:text="Events"
+            android:contentDescription="Events view" />
+
         <!-- Divider between view toggles and drawing tools (hidden outside Note mode) -->
         <View
             android:id="@+id/dayToolsDivider"
@@ -411,6 +418,73 @@
             android:scaleType="fitCenter"
             android:visibility="gone"
             android:contentDescription="Day note from a past year" />
+
+        <!-- Events list (Events mode) — day's attached events + add/delete -->
+        <LinearLayout
+            android:id="@+id/dayEventsContainer"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:orientation="vertical"
+            android:visibility="gone">
+
+            <!-- Header: title + Add -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="56dp"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:paddingStart="16dp"
+                android:paddingEnd="12dp">
+
+                <TextView
+                    style="@style/TextAppearance.Notesprout.TitleLarge"
+                    android:layout_width="0dp"
+                    android:layout_weight="1"
+                    android:layout_height="wrap_content"
+                    android:text="Events" />
+
+                <androidx.appcompat.widget.AppCompatImageButton
+                    android:id="@+id/btnAddEvent"
+                    style="@style/Widget.Notesprout.ToolbarButton"
+                    android:src="@drawable/ic_plus"
+                    android:contentDescription="Add event" />
+            </LinearLayout>
+
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:background="@color/inkBlack" />
+
+            <FrameLayout
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1">
+
+                <ScrollView
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:fillViewport="true">
+
+                    <LinearLayout
+                        android:id="@+id/dayEventsList"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical"
+                        android:padding="12dp" />
+                </ScrollView>
+
+                <TextView
+                    android:id="@+id/tvEventsEmpty"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="center"
+                    android:textSize="16sp"
+                    android:textColor="@color/inkLight"
+                    android:visibility="gone"
+                    android:text="No events on this day" />
+            </FrameLayout>
+
+        </LinearLayout>
 
         <!-- Floating selection context toolbar — positioned programmatically on lasso selection -->
         <LinearLayout

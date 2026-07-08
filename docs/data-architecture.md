@@ -40,18 +40,24 @@ CREATE INDEX idx_objects_parent_type_deleted
     ON objects(parentId, type, deletedAt);
 ```
 
-### Auxiliary tables (same `notesprout.db`, Room `version = 3`)
+### Auxiliary tables (same `notesprout.db`, Room `version = 5`)
 
-Beyond `objects`, the global index DB holds two object-canvas tables that share the universal
-row schema (`id/parentId/type/boundingBox/order/createdAt/updatedAt/deletedAt/data`) so every
-`.soil` object serializer works unchanged. Both are plaintext (the global index is never encrypted).
+Beyond `objects`, the global index DB holds several plaintext tables (the global index is never
+encrypted). The two object-canvas tables share the universal row schema
+(`id/parentId/type/boundingBox/order/createdAt/updatedAt/deletedAt/data`) so every `.soil` object
+serializer works unchanged.
 
 - **`scratchpad`** — added in `MIGRATION_1_2`. See [`docs/scratchpad.md`](scratchpad.md).
 - **`calendar`** — added in `MIGRATION_2_3` (keyed pages: month/week/day-AM/day-PM). See
   [`docs/calendar.md`](calendar.md).
+- **`notebook_activity`** — added in `MIGRATION_3_4`; OPENED/EDITED telemetry for the Day-window
+  Notebooks/History views. See [`docs/calendar.md`](calendar.md).
+- **`events`** — added in `MIGRATION_4_5`; calendar Events (birthdays/anniversaries/appointments) with
+  RRULE-like recurrence. Own column schema (not the universal row shape). See
+  [`docs/calendar.md`](calendar.md#events--the-events-table).
 
-`NotesproutDatabase` (`@Database entities = [ObjectEntity, ScratchpadEntity, CalendarEntity]`,
-`version = 3`) registers both migrations in `NotesproutIndex`.
+`NotesproutDatabase` (`@Database entities = [ObjectEntity, ScratchpadEntity, CalendarEntity,
+NotebookActivityEntity, EventEntity]`, `version = 5`) registers all migrations in `NotesproutIndex`.
 
 ### Key Classes
 

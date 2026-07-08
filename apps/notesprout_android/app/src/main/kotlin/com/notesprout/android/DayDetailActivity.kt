@@ -126,11 +126,13 @@ class DayDetailActivity : AppCompatActivity() {
     private lateinit var repository: CalendarRepository
     private val indexRepo: IndexRepository by lazy { IndexRepository(NotesproutIndex.dao()) }
     private val dayHistoryRepo: DayHistoryRepository by lazy { DayHistoryRepository() }
+    private lateinit var eventsController: EventsController
 
     private var selectedDate: LocalDate = LocalDate.now()
 
-    // View mode — Note (editable canvas) / Notebooks (activity lists) / History (past years).
-    private enum class ViewMode { NOTE, NOTEBOOKS, HISTORY }
+    // View mode — Note (editable canvas) / Notebooks (activity lists) / History (past years) /
+    // Events (birthdays, anniversaries, appointments… attached to this day).
+    private enum class ViewMode { NOTE, NOTEBOOKS, HISTORY, EVENTS }
     private enum class NbSub { OPENED, EDITED, CREATED }
     private enum class HistSub { NOTES, OPENED, EDITED, CREATED }
     private var viewMode = ViewMode.NOTE
@@ -318,6 +320,15 @@ class DayDetailActivity : AppCompatActivity() {
         binding.floatingSelectionToolbar.bringToFront()
         binding.dayShapeInsertToolbar.bringToFront()
 
+        eventsController = EventsController(
+            activity = this,
+            scope = lifecycleScope,
+            listView = binding.dayEventsList,
+            emptyView = binding.tvEventsEmpty,
+            addButton = binding.btnAddEvent,
+            date = { selectedDate },
+        )
+
         updateDateLabel()
         setupToolbar()
         setupViewToggles()
@@ -376,6 +387,7 @@ class DayDetailActivity : AppCompatActivity() {
         binding.btnDayViewNote.setOnClickListener { switchViewMode(ViewMode.NOTE) }
         binding.btnDayViewNotebooks.setOnClickListener { switchViewMode(ViewMode.NOTEBOOKS) }
         binding.btnDayViewHistory.setOnClickListener { switchViewMode(ViewMode.HISTORY) }
+        binding.btnDayViewEvents.setOnClickListener { switchViewMode(ViewMode.EVENTS) }
 
         binding.btnDaySubOpened.setOnClickListener { notebooksSub = NbSub.OPENED; applyViewMode() }
         binding.btnDaySubEdited.setOnClickListener { notebooksSub = NbSub.EDITED; applyViewMode() }
@@ -468,8 +480,8 @@ class DayDetailActivity : AppCompatActivity() {
         // Editable canvas only in Note mode; the list / read-only note surfaces are set per branch below.
         drawingView.asView().isVisible = isNote
 
-        // Secondary control bar.
-        binding.daySubBarContainer.isVisible = !isNote
+        // Secondary control bar — only the Notebooks / History sub-toggles use it (Events has none).
+        binding.daySubBarContainer.isVisible = viewMode == ViewMode.NOTEBOOKS || viewMode == ViewMode.HISTORY
         binding.daySubNotebooks.isVisible = viewMode == ViewMode.NOTEBOOKS
         binding.daySubHistory.isVisible = viewMode == ViewMode.HISTORY
         binding.tvDayYear.text = if (historyYearsLoaded && historyYears.isEmpty()) "—" else historyYear.toString()
@@ -478,6 +490,7 @@ class DayDetailActivity : AppCompatActivity() {
         binding.btnDayViewNote.isSelected = viewMode == ViewMode.NOTE
         binding.btnDayViewNotebooks.isSelected = viewMode == ViewMode.NOTEBOOKS
         binding.btnDayViewHistory.isSelected = viewMode == ViewMode.HISTORY
+        binding.btnDayViewEvents.isSelected = viewMode == ViewMode.EVENTS
         binding.btnDaySubOpened.isSelected = notebooksSub == NbSub.OPENED
         binding.btnDaySubEdited.isSelected = notebooksSub == NbSub.EDITED
         binding.btnDaySubCreated.isSelected = notebooksSub == NbSub.CREATED
@@ -486,11 +499,18 @@ class DayDetailActivity : AppCompatActivity() {
         binding.btnDayHistEdited.isSelected = historySub == HistSub.EDITED
         binding.btnDayHistCreated.isSelected = historySub == HistSub.CREATED
 
-        // Content swap: Note → canvas; History▸Notes → read-only bitmap; everything else → card grid.
+        // Content swap: Note → canvas; Events → events list; History▸Notes → read-only bitmap;
+        // everything else → card grid.
+        binding.dayEventsContainer.isVisible = viewMode == ViewMode.EVENTS
         when {
             isNote -> {
                 binding.dayListContainer.isVisible = false
                 binding.historyNoteImage.isVisible = false
+            }
+            viewMode == ViewMode.EVENTS -> {
+                binding.dayListContainer.isVisible = false
+                binding.historyNoteImage.isVisible = false
+                eventsController.refresh()
             }
             isHistoryNotes -> renderHistoryNote()
             else -> {
@@ -598,7 +618,7 @@ class DayDetailActivity : AppCompatActivity() {
     private data class ListQuery(val kind: DayHistoryRepository.Kind, val date: LocalDate)
 
     private fun currentListQuery(): ListQuery? = when (viewMode) {
-        ViewMode.NOTE -> null
+        ViewMode.NOTE, ViewMode.EVENTS -> null
         ViewMode.NOTEBOOKS -> ListQuery(
             when (notebooksSub) {
                 NbSub.OPENED -> DayHistoryRepository.Kind.OPENED
@@ -2060,6 +2080,7 @@ class DayDetailActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         if (viewMode == ViewMode.NOTE) drawingView.resumeDrawing()
+        else if (viewMode == ViewMode.EVENTS) eventsController.refresh()
         // Returning from an opened notebook: refresh the card grid (it may have new activity) but
         // keep the reader on the same page. History▸Notes is a static bitmap — nothing to refresh.
         else if (!(viewMode == ViewMode.HISTORY && historySub == HistSub.NOTES)) renderList(resetPage = false)

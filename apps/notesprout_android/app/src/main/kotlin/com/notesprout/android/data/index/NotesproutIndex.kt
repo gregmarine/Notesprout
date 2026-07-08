@@ -27,6 +27,7 @@ object NotesproutIndex {
                     NotesproutDatabase.MIGRATION_1_2,
                     NotesproutDatabase.MIGRATION_2_3,
                     NotesproutDatabase.MIGRATION_3_4,
+                    NotesproutDatabase.MIGRATION_4_5,
                 )
                 .build()
         }
@@ -42,6 +43,8 @@ object NotesproutIndex {
     fun calendarDao(): CalendarDao = db().calendarDao()
 
     fun notebookActivityDao(): NotebookActivityDao = db().notebookActivityDao()
+
+    fun eventDao(): EventDao = db().eventDao()
 
     suspend fun checkpointAndVacuum() = withContext(Dispatchers.IO) {
         try {

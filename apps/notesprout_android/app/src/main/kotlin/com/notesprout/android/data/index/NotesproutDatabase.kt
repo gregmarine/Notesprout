@@ -6,8 +6,14 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
-    entities = [ObjectEntity::class, ScratchpadEntity::class, CalendarEntity::class, NotebookActivityEntity::class],
-    version = 4,
+    entities = [
+        ObjectEntity::class,
+        ScratchpadEntity::class,
+        CalendarEntity::class,
+        NotebookActivityEntity::class,
+        EventEntity::class,
+    ],
+    version = 5,
     exportSchema = false,
 )
 abstract class NotesproutDatabase : RoomDatabase() {
@@ -16,6 +22,7 @@ abstract class NotesproutDatabase : RoomDatabase() {
     abstract fun scratchpadDao(): ScratchpadDao
     abstract fun calendarDao(): CalendarDao
     abstract fun notebookActivityDao(): NotebookActivityDao
+    abstract fun eventDao(): EventDao
 
     companion object {
         val MIGRATION_1_2 = object : Migration(1, 2) {
@@ -94,6 +101,36 @@ abstract class NotesproutDatabase : RoomDatabase() {
                         ON notebook_activity(notebookId)
                     """.trimIndent()
                 )
+            }
+        }
+
+        val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS events (
+                        id            TEXT    NOT NULL PRIMARY KEY,
+                        type          TEXT    NOT NULL,
+                        title         TEXT    NOT NULL,
+                        startEpochDay INTEGER NOT NULL,
+                        endEpochDay   INTEGER NOT NULL,
+                        allDay        INTEGER NOT NULL,
+                        startMinute   INTEGER,
+                        endMinute     INTEGER,
+                        recurring     INTEGER NOT NULL,
+                        data          TEXT    NOT NULL,
+                        createdAt     INTEGER NOT NULL,
+                        updatedAt     INTEGER NOT NULL,
+                        deletedAt     INTEGER
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS index_events_startEpochDay_endEpochDay " +
+                        "ON events(startEpochDay, endEpochDay)"
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_events_recurring ON events(recurring)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_events_deletedAt ON events(deletedAt)")
             }
         }
 
