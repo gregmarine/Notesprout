@@ -23,6 +23,10 @@
 
 ## EPD Rules — Never Violate These
 
+**First-stroke fast-mode (`HWR_APP_SCOPE`):**
+- The first stroke after opening a page / after a page-flip used to lag 1–2s on BOOX (G6/G102): the panel sits in a quality waveform and the first stroke pays a GC→handwriting mode-switch. Fix: `EpdController.applyAppScopeUpdate(HWR_APP_SCOPE, true, false, UpdateMode.HAND_WRITING_REPAINT_MODE, 0)` in `openRawDrawing` (pen branch only), pinning the app in the fast handwriting waveform so there's no switch. Proven the **sole** fix by an on-device sweep of every EPD mode (scribble / view-mode / system-fast all still lagged; only app-scope was instant, no ghosting).
+- Applied once when the pen pipeline opens; stays active across page-flips; **cleared in `closeRawDrawingIfOwner`** (`clearAppScopeUpdate()`) so menus / dialogs / other screens render in normal quality. It follows pen ownership across sticky / scratch-pad handoff automatically. Keep it out of the handoff/lifecycle code — the minimal apply-on-open / clear-on-close placement is deliberate.
+
 **Overlay lifetime:**
 - The overlay ("writing mode") stays active indefinitely while the user writes. No idle-release timer.
 - Legitimate handoff points: `setEraserMode(true)`, `eraseAll()`, `setTemplate()`, `loadStrokesWithBitmap()`, `onWindowFocusChanged(false)`, toolbar finger touch.

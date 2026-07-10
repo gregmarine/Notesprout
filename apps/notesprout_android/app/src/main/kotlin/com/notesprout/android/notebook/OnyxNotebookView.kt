@@ -50,6 +50,18 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
         // Suppresses EPD hardware auto-GC16 refresh mid-session; we control quality
         // refreshes explicitly via handwritingRepaint in eraseAll() and after erasing.
         private const val EPD_UPDATE_LIST_SIZE = 512
+
+        /**
+         * App-scope tag for the handwriting fast-mode that removes the first-stroke warm-up lag.
+         * Pinning the app's default update mode to [UpdateMode.HAND_WRITING_REPAINT_MODE] via
+         * [EpdController.applyAppScopeUpdate] keeps the panel in the fast handwriting waveform, so the
+         * first stroke after an open / page-flip no longer pays a GC→handwriting mode switch (1–2s on
+         * BOOX). Proven the sole fix by a device sweep of every EPD mode (scribble / view-mode /
+         * system-fast all still lagged; only app-scope was instant, no ghosting). Applied when the pen
+         * pipeline opens; cleared when this view relinquishes it ([closeRawDrawingIfOwner]).
+         */
+        private const val HWR_APP_SCOPE = "notesprout_hwr"
+
         private const val ERASER_RADIUS_PX = 15f
         private const val ERASE_REDRAW_INTERVAL_MS = 60L
         private const val LASSO_REFRESH_INTERVAL_MS = 60L
@@ -1698,6 +1710,9 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
         if (penOwner === this) {
             touchHelper.closeRawDrawing()
             penOwner = null
+            // Drop the handwriting fast-mode so menus / dialogs / other screens render in normal
+            // quality; the next owner re-applies it when it opens the pen pipeline.
+            EpdController.clearAppScopeUpdate()
             epd { "CLOSE_RAW_DRAWING caller=$caller owner=self" }
         } else {
             epd { "CLOSE_RAW_DRAWING_SKIPPED caller=$caller reason=notOwner" }
@@ -2559,6 +2574,14 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
             if (isEraserMode) {
                 touchHelper.setRawDrawingRenderEnabled(false)
                 epd { "RENDER_DISABLED caller=openRawDrawing_eraserMode" }
+            } else {
+                // First-stroke fix: pin the app into the fast handwriting waveform so the first stroke
+                // after this open / a page-flip doesn't pay a GC→handwriting mode-switch. Stays active
+                // for the whole pen session (across page flips); cleared in closeRawDrawingIfOwner.
+                EpdController.applyAppScopeUpdate(
+                    HWR_APP_SCOPE, true, false, UpdateMode.HAND_WRITING_REPAINT_MODE, 0
+                )
+                epd { "APP_SCOPE_FAST applied caller=openRawDrawing" }
             }
         }
         EpdController.setUpdListSize(EPD_UPDATE_LIST_SIZE)
