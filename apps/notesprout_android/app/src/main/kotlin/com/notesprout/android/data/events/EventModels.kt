@@ -52,6 +52,9 @@ enum class EndMode { NEVER, UNTIL, COUNT }
  *   own weekday.
  * @property monthlyMode [Freq.MONTHLY] only.
  * @property endMode / [endEpochDay] / [endCount] the stop condition (see [EndMode]).
+ * @property exceptionDates occurrence-START epoch-days removed from the series ("delete this
+ *   occurrence" / the date an override replaced). New field with an empty default, so pre-existing
+ *   `data`-JSON rows deserialize unchanged — no DB migration.
  */
 @Serializable
 data class RecurrenceRule(
@@ -62,6 +65,7 @@ data class RecurrenceRule(
     val endMode: EndMode = EndMode.NEVER,
     val endEpochDay: Long? = null,
     val endCount: Int? = null,
+    val exceptionDates: List<Long> = emptyList(),
 ) {
     /** A concise human summary for a list row, e.g. "Every 2 weeks on Mon, Wed · until 1 Jan 2027". */
     fun summary(): String = RecurrenceSummary.of(this)

@@ -85,22 +85,72 @@ class EventsController(
             activity = activity,
             date = date(),
             existing = existing,
-            onSaved = { entity -> scope.launch { repo.save(entity); refresh() } },
+            onSaved = { entity ->
+                if (existing != null && existing.recurring) {
+                    promptEditScope(original = existing, edited = entity)
+                } else {
+                    scope.launch { repo.save(entity); refresh() }
+                }
+            },
             onDeleted = { entity -> confirmDelete(entity) },
         )
     }
 
+    private fun promptEditScope(original: EventEntity, edited: EventEntity) {
+        val viewedDay = date().toEpochDay()
+        val options = arrayOf("This event only", "This and following events", "All events in the series")
+        styleAndShow(
+            AlertDialog.Builder(activity)
+                .setTitle("Edit repeating event")
+                .setItems(options) { _, which ->
+                    scope.launch {
+                        when (which) {
+                            0 -> repo.editOccurrence(original, edited, viewedDay)
+                            1 -> repo.editThisAndFollowing(original, edited, viewedDay)
+                            else -> repo.editSeries(edited, original)
+                        }
+                        refresh()
+                    }
+                }
+                .setNegativeButton("Cancel", null)
+                .create(),
+        )
+    }
+
     private fun confirmDelete(ev: EventEntity) {
-        val recurring = ev.recurring
-        val message = if (recurring)
-            "Delete “${ev.title}”? This removes the whole repeating series."
-        else "Delete “${ev.title}”?"
-        val dialog = AlertDialog.Builder(activity)
-            .setTitle("Delete event")
-            .setMessage(message)
-            .setPositiveButton("Delete") { _, _ -> scope.launch { repo.delete(ev.id); refresh() } }
-            .setNegativeButton("Cancel", null)
-            .create()
+        if (!ev.recurring) {
+            styleAndShow(
+                AlertDialog.Builder(activity)
+                    .setTitle("Delete event")
+                    .setMessage("Delete “${ev.title}”?")
+                    .setPositiveButton("Delete") { _, _ -> scope.launch { repo.delete(ev.id); refresh() } }
+                    .setNegativeButton("Cancel", null)
+                    .create(),
+            )
+            return
+        }
+        // Recurring: offer occurrence-scoped deletes.
+        val viewedDay = date().toEpochDay()
+        val options = arrayOf("This event only", "This and following events", "All events in the series")
+        styleAndShow(
+            AlertDialog.Builder(activity)
+                .setTitle("Delete repeating event")
+                .setItems(options) { _, which ->
+                    scope.launch {
+                        when (which) {
+                            0 -> repo.deleteOccurrence(ev, viewedDay)
+                            1 -> repo.deleteThisAndFollowing(ev, viewedDay)
+                            else -> repo.delete(ev.id)
+                        }
+                        refresh()
+                    }
+                }
+                .setNegativeButton("Cancel", null)
+                .create(),
+        )
+    }
+
+    private fun styleAndShow(dialog: AlertDialog) {
         dialog.show()
         dialog.window?.setElevation(0f)
         dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)

@@ -25,7 +25,9 @@ import java.util.UUID
 /**
  * Add / edit editor for a calendar [EventEntity]. E-ink styled (bordered dialog, no elevation).
  * Builds the entity locally and hands it back via [onSaved]; [onDeleted] powers the Delete button
- * shown only when editing an existing event (delete removes the whole series — v1).
+ * shown only when editing an existing event. For a *recurring* event the caller
+ * ([EventsController]) prompts an edit/delete scope (this occurrence / this-and-following / all)
+ * after the build — this editor is scope-agnostic and always returns the whole edited entity.
  */
 object EventEditorDialog {
 

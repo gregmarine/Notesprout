@@ -469,10 +469,29 @@ model as the ruling lines). `CalendarTemplateRenderer.render` takes an
 (returning from the day window may have changed events → reload + `refreshTemplate`). Selection-only
 `refreshTemplate` reuses the cache (same period ⇒ same events).
 
+### Per-occurrence edit / delete (recurring events)
+
+Editing or deleting a **recurring** event prompts a scope (`EventsController.promptEditScope` /
+`confirmDelete`): **this occurrence / this and following / all events**. Mechanics live in
+`EventsRepository`, keyed off the occurrence covering the viewed day
+(`EventRecurrence.occurrenceStartCovering`):
+
+- **This occurrence** — the occurrence's start epoch-day is added to `RecurrenceRule.exceptionDates`
+  (a new field with an empty default → **no DB migration**; rides in the existing `data` JSON). The
+  engine skips excluded starts. An *edit* additionally drops a standalone one-off override on that
+  occurrence's dates carrying the edited fields.
+- **This and following** — the series is truncated (`endMode = UNTIL`, `endEpochDay = occStart − 1`);
+  an *edit* also starts a fresh series at the occurrence (re-anchored, no inherited exceptions).
+  Splitting at the first occurrence collapses to a whole-series op.
+- **All events** — whole-series update / soft-delete; edits carry forward existing `exceptionDates`.
+
+**Known v1 limitation:** in the occurrence / this-and-following *edit* scopes, title/type/all-day/time
+edits apply but **changing the day is ignored** (the occurrence keeps its date/span); date changes
+take effect only in "all events". Moving one occurrence to another day = delete-this + add.
+
 ### v1 scope / deferred
 
-- **Delete removes the whole series** (per-occurrence exceptions deferred).
-- No edit-single-occurrence, no reminders/notifications, no import/export of events yet.
+- No reminders/notifications, no import/export of events yet.
 - Grid markers are **not** carried into full-view notebook export (grid export stays event-free).
 
 ---

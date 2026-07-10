@@ -16,17 +16,32 @@ import java.time.LocalDate
 object EventRecurrence {
 
     /** True if the event occurs on (covers) [dayEpochDay]. */
-    fun occursOn(rule: RecurrenceRule, anchorStart: Long, anchorEnd: Long, dayEpochDay: Long): Boolean {
+    fun occursOn(rule: RecurrenceRule, anchorStart: Long, anchorEnd: Long, dayEpochDay: Long): Boolean =
+        occurrenceStartCovering(rule, anchorStart, anchorEnd, dayEpochDay) != null
+
+    /**
+     * The START epoch-day of the occurrence that covers [dayEpochDay], or null if none does. Callers
+     * use this to add an exception ("delete this occurrence") or anchor an override at the real
+     * occurrence start — which, for a multi-day span, can precede the viewed day.
+     */
+    fun occurrenceStartCovering(
+        rule: RecurrenceRule, anchorStart: Long, anchorEnd: Long, dayEpochDay: Long,
+    ): Long? {
         val spanDays = (anchorEnd - anchorStart).coerceAtLeast(0L)
         val anchor = LocalDate.ofEpochDay(anchorStart)
+
+        // Occurrence starts the user has removed ("this occurrence" delete / a date an override
+        // replaced). An excluded start contributes no coverage on any day.
+        val excluded = rule.exceptionDates
 
         if (rule.endMode == EndMode.COUNT) {
             val n = (rule.endCount ?: 0).coerceAtLeast(0)
             for (start in generateStarts(rule, anchor, n)) {
                 val s = start.toEpochDay()
-                if (dayEpochDay in s..(s + spanDays)) return true
+                if (s in excluded) continue
+                if (dayEpochDay in s..(s + spanDays)) return s
             }
-            return false
+            return null
         }
 
         // NEVER / UNTIL: the only occurrence that can cover `day` starts in [day - spanDays, day].
@@ -34,10 +49,10 @@ object EventRecurrence {
         var o = maxOf(lo, anchorStart)
         while (o <= dayEpochDay) {
             val od = LocalDate.ofEpochDay(o)
-            if (isValidStart(rule, anchor, od) && withinUntil(rule, o)) return true
+            if (isValidStart(rule, anchor, od) && withinUntil(rule, o) && o !in excluded) return o
             o++
         }
-        return false
+        return null
     }
 
     private fun withinUntil(rule: RecurrenceRule, startEpochDay: Long): Boolean = when (rule.endMode) {
