@@ -16,6 +16,17 @@
         android:paddingStart="4dp"
         android:paddingEnd="4dp">
 
+        <!-- Left cluster (back/nav/tools) — managed by ToolbarOverflowManager. Weighted so it fills
+             the space up to the always-visible period-nav cluster; its trailing tools overflow into
+             calOverflowMenu when the bar is too narrow. -->
+        <LinearLayout
+            android:id="@+id/calLeftBar"
+            android:layout_width="0dp"
+            android:layout_weight="1"
+            android:layout_height="match_parent"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
         <!-- Back button -->
         <androidx.appcompat.widget.AppCompatImageButton
             android:id="@+id/btnBack"
@@ -162,11 +173,31 @@
             android:src="@drawable/ic_page_add"
             android:contentDescription="Send page to notebook" />
 
-        <!-- Flexible spacer pushes nav controls to the right -->
+        <!-- Flexible spacer pins the overflow controls (and, past them, the period nav) to the right -->
         <Space
             android:layout_width="0dp"
             android:layout_height="1dp"
             android:layout_weight="1" />
+
+        <!-- Overflow group divider — visible only when the overflow button is shown -->
+        <View
+            android:id="@+id/dividerCalOverflow"
+            android:layout_width="1dp"
+            android:layout_height="28dp"
+            android:background="@color/inkBlack"
+            android:layout_marginStart="4dp"
+            android:layout_marginEnd="4dp"
+            android:visibility="gone" />
+
+        <!-- Overflow button — reveals overflowed tools in a menu below the toolbar -->
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnCalOverflow"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:src="@drawable/ic_dots"
+            android:contentDescription="More actions"
+            android:visibility="gone" />
+
+        </LinearLayout>
 
         <!-- Previous period (reuses existing chevron-left icon) -->
         <androidx.appcompat.widget.AppCompatImageButton
@@ -214,6 +245,18 @@
         android:layout_height="0dp"
         android:layout_weight="1"
         android:background="@color/paperWhite">
+
+        <!-- Overflow menu — appears directly below the toolbar when overflow is active. Built by
+             ToolbarOverflowManager (rows of overflowed buttons). Brought to front in onCreate. -->
+        <LinearLayout
+            android:id="@+id/calOverflowMenu"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_gravity="top"
+            android:orientation="vertical"
+            android:visibility="gone"
+            android:background="@drawable/shape_bordered"
+            android:elevation="0dp" />
 
         <!-- Floating selection context toolbar — positioned programmatically on lasso selection -->
         <LinearLayout

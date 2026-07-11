@@ -76,6 +76,7 @@ import com.notesprout.android.notebook.OnyxNotebookView
 import com.notesprout.android.notebook.STICKY_NOTE_ICON_SIZE_DP
 import com.notesprout.android.notebook.ShapeRecognizer
 import com.notesprout.android.notebook.ToolPreferencesManager
+import com.notesprout.android.notebook.ToolbarOverflowManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
@@ -123,6 +124,10 @@ class DayDetailActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityDayDetailBinding
     private lateinit var drawingView: NotebookView
+    private lateinit var overflowManager: ToolbarOverflowManager
+    // True between a press inside the open overflow menu and its release, so the menu closes only
+    // after the tapped item's click has been dispatched.
+    private var pendingMenuTapClose = false
     private lateinit var repository: CalendarRepository
     private val indexRepo: IndexRepository by lazy { IndexRepository(NotesproutIndex.dao()) }
     private val dayHistoryRepo: DayHistoryRepository by lazy { DayHistoryRepository() }
@@ -319,6 +324,7 @@ class DayDetailActivity : AppCompatActivity() {
         )
         binding.floatingSelectionToolbar.bringToFront()
         binding.dayShapeInsertToolbar.bringToFront()
+        binding.dayOverflowMenu.bringToFront()
 
         eventsController = EventsController(
             activity = this,
@@ -331,6 +337,7 @@ class DayDetailActivity : AppCompatActivity() {
 
         updateDateLabel()
         setupToolbar()
+        setupOverflow()
         setupViewToggles()
         setupNotebooksList()
         wireDrawingCallbacks()
@@ -381,6 +388,48 @@ class DayDetailActivity : AppCompatActivity() {
         binding.btnDayUndo.setOnClickListener { undo() }
         binding.btnDayRedo.setOnClickListener { redo() }
         binding.btnDayTemplate.setOnClickListener { showTemplatePicker() }
+    }
+
+    // ── Tools overflow (reuses ToolbarOverflowManager over the Note-mode dayToolsGroup) ──────────
+
+    private fun setupOverflow() {
+        // dayToolsGroup holds only fixed-width image buttons + 1dp dividers, so no width-pinning is
+        // needed. It's the managed bar; its trailing tools overflow into dayOverflowMenu.
+        overflowManager = ToolbarOverflowManager(
+            toolbar = binding.dayToolsGroup,
+            overflowMenu = binding.dayOverflowMenu,
+            dividerOverflow = binding.dividerDayOverflow,
+            btnOverflow = binding.btnDayOverflow,
+        )
+        binding.btnDayOverflow.setOnClickListener {
+            if (overflowManager.isOverflowMenuOpen()) closeDayOverflowMenu() else openDayOverflowMenu()
+        }
+        binding.dayToolsGroup.doOnLayout {
+            overflowManager.initialize()
+            overflowManager.recalc()
+        }
+        binding.dayToolsGroup.addOnLayoutChangeListener { _, l, _, r, _, ol, _, or, _ ->
+            if (r - l != or - ol) { // tools-group width changed (rotation / view-mode) — refit
+                if (overflowManager.isOverflowMenuOpen()) closeDayOverflowMenu()
+                overflowManager.recalc()
+            }
+        }
+    }
+
+    private fun openDayOverflowMenu() {
+        overflowManager.openOverflowMenu()
+        binding.dayOverflowMenu.bringToFront()
+        // EPD: keep the pen from drawing under the menu overlay (also lets stylus taps reach its buttons).
+        drawingView.setToolbarExclusion(
+            Rect(0, 0, drawingView.asView().width, overflowManager.expectedOverflowMenuExtent()),
+        )
+        drawingView.releaseRender()
+    }
+
+    private fun closeDayOverflowMenu() {
+        overflowManager.closeOverflowMenu()
+        drawingView.setToolbarExclusion(null)
+        drawingView.releaseRender()
     }
 
     // ── View modes (Events default / Note / Notebooks / History) ─────────────────
@@ -505,9 +554,14 @@ class DayDetailActivity : AppCompatActivity() {
         val isNote = viewMode == ViewMode.NOTE
         val isHistoryNotes = viewMode == ViewMode.HISTORY && historySub == HistSub.NOTES
 
-        // Drawing tools live only in Note mode.
+        // Drawing tools live only in Note mode; the fallback spacer keeps the date label right-aligned
+        // when they're hidden. The tools group is weighted, so hiding it hands its space to the spacer.
         binding.dayToolsGroup.isVisible = isNote
         binding.dayToolsDivider.isVisible = isNote
+        binding.daySpacerB.isVisible = !isNote
+        if (!isNote && ::overflowManager.isInitialized && overflowManager.isOverflowMenuOpen()) {
+            closeDayOverflowMenu()
+        }
 
         // Editable canvas only in Note mode; the list / read-only note surfaces are set per branch below.
         drawingView.asView().isVisible = isNote
@@ -1947,24 +2001,51 @@ class DayDetailActivity : AppCompatActivity() {
     // ── Touch dispatch ───────────────────────────────────────────────────────────
 
     override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+        // Overflow-menu dismissal (Note mode) — any tool type, so a stylus outside the menu closes it.
+        if (viewMode == ViewMode.NOTE && ::overflowManager.isInitialized && overflowManager.isOverflowMenuOpen()) {
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    val onBtn = isTouchInView(event, binding.btnDayOverflow)
+                    val inMenu = isTouchInView(event, binding.dayOverflowMenu)
+                    val inBar = isTouchInView(event, binding.dayToolbar)
+                    drawingView.releaseRender()
+                    pendingMenuTapClose = false
+                    when {
+                        onBtn || inMenu -> pendingMenuTapClose = inMenu // btn toggles itself; item closes on release
+                        inBar -> closeDayOverflowMenu()                 // another toolbar button
+                        else -> { closeDayOverflowMenu(); return true }  // consume — don't start a stroke
+                    }
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    if (pendingMenuTapClose) {
+                        pendingMenuTapClose = false
+                        val handled = super.dispatchTouchEvent(event) // let the tapped item's click land first
+                        closeDayOverflowMenu()
+                        return handled
+                    }
+                }
+            }
+        }
         // Canvas gestures (sticky-tap, multi-finger undo/redo, EPD release) apply only to the
         // editable Note canvas; in Notebooks/History the list handles its own touches.
         if (viewMode == ViewMode.NOTE && event.getToolType(0) == MotionEvent.TOOL_TYPE_FINGER) {
             val inToolbar = isTouchInView(event, binding.dayToolbar)
+            val inMenu = binding.dayOverflowMenu.visibility == View.VISIBLE &&
+                    isTouchInView(event, binding.dayOverflowMenu)
             val inFloating = binding.floatingSelectionToolbar.visibility == View.VISIBLE &&
                     isTouchInView(event, binding.floatingSelectionToolbar)
             val inShapeToolbar = binding.dayShapeInsertToolbar.visibility == View.VISIBLE &&
                     isTouchInView(event, binding.dayShapeInsertToolbar)
             if (event.actionMasked == MotionEvent.ACTION_DOWN) {
-                if (inToolbar || inFloating || inShapeToolbar) drawingView.releaseRender()
+                if (inToolbar || inFloating || inShapeToolbar || inMenu) drawingView.releaseRender()
                 // Dismiss the shape-insert popup when tapping outside it (and outside its trigger button).
                 if (binding.dayShapeInsertToolbar.visibility == View.VISIBLE &&
                     !inShapeToolbar && !isTouchInView(event, binding.btnDayInsertShape)) {
                     hideShapeInsertToolbar()
                 }
             }
-            if (handleStickyNoteTapGesture(event)) return true
-            if (!inToolbar && !inFloating && !inShapeToolbar) {
+            if (!inMenu && handleStickyNoteTapGesture(event)) return true
+            if (!inToolbar && !inFloating && !inShapeToolbar && !inMenu) {
                 handleMultiFingerDoubleTap(event)
             }
         }
@@ -2121,6 +2202,7 @@ class DayDetailActivity : AppCompatActivity() {
 
     override fun onPause() {
         super.onPause()
+        if (::overflowManager.isInitialized && overflowManager.isOverflowMenuOpen()) closeDayOverflowMenu()
         // appScope (not lifecycleScope): the save must complete even as the Activity is paused
         // and torn down. lifecycleScope would be cancelled at onDestroy, dropping the write.
         NotesproutApplication.appScope.launch { saveStrokes() }

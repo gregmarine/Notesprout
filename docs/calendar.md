@@ -95,7 +95,7 @@ the ink** via the standard `buildRenderBitmap(..., template)` / `loadStrokesWith
 template)` path (same pattern as notebook ruling templates).
 
 - **Month:** Sun–Sat header strip + 6×7 grid of **square** day cells (cell width = full width / 7),
-  day numbers (gray when out-of-month), today drawn as a filled black circle with white number,
+  day numbers (gray when out-of-month), today drawn as a 2dp stroked **ring** around the (black) number,
   selection drawn as a 3dp stroked border, 1px dividers, then a **"Notes" band** filling the leftover
   height below the grid.
 - **Week:** 2×4 grid (7 days + 1 blank), each cell with a DOW label + number; the Notes band height
@@ -131,16 +131,29 @@ pitfalls). Navigation swaps the page content + template bitmap into the same vie
 ```
 LinearLayout (vertical, paperWhite)
   ├── calendarToolbar (56dp)
-  │     btnBack · btnCalHome · btnCalNewNotebook │ btnToday │ btnMonthView · btnWeekView · btnDayView │
-  │     btnCalPen · btnCalEraser · btnCalStickyNote · btnCalLassoEraser · btnCalLasso ·
-  │     btnCalErasePage · btnCalUndo · btnCalRedo · btnCalScratchpad · btnCalSendPage
-  │     ─ spacer ─ btnPrev · tvMonthYear (tap → month/year picker) · btnNext
+  │     calLeftBar (weight=1, managed by ToolbarOverflowManager):
+  │       btnBack · btnCalHome · btnCalNewNotebook │ btnToday │ btnMonthView · btnWeekView · btnDayView │
+  │       btnCalPen · btnCalEraser · btnCalStickyNote · btnCalLassoEraser · btnCalLasso ·
+  │       btnCalErasePage · btnCalUndo · btnCalRedo · btnCalScratchpad · btnCalSendPage
+  │       ─ spacer ─ dividerCalOverflow · btnCalOverflow (both gone until overflow)
+  │     btnPrev · tvMonthYear (tap → day picker) · btnNext   ← always-visible period nav, outside calLeftBar
   ├── 1dp divider
   └── calendarContent (FrameLayout — drawing view added programmatically)
+        ├── calOverflowMenu (gone; below-toolbar overflow rows; bringToFront() in onCreate)
         └── floatingSelectionToolbar (gone by default; bringToFront() in onCreate)
               btnLassoCopy · btnLassoCut · btnLassoDelete · [convert-shape divider + btnConvertShape] ·
               btnLassoSendToNotebook · [btnShapeAspectLock · btnShapeTransformDone]
 ```
+
+**Toolbar overflow.** The left cluster lives in a weighted `calLeftBar` driven by the notebook's
+[`ToolbarOverflowManager`](toolbar.md); the period-nav cluster (`btnPrev` · `tvMonthYear` · `btnNext`)
+sits **outside** it, always visible and right-aligned. When the tools don't fit, `btnCalOverflow` (⋯)
+appears and trailing tools drop into `calOverflowMenu` below the bar (tools overflow first; back/today/
+view-toggles last). Tapping a menu item runs it and closes the menu; tapping elsewhere / another toolbar
+button / leaving the screen (`onPause`) closes it. On EPD a pen-exclusion (`setToolbarExclusion`) covers
+the open menu so the stylus can't draw under it. The wrap-content text toggles (Today/Month/Week/Day)
+have their measured widths pinned once (`pinToggleWidths`) so the manager — which sizes by LayoutParams
+px — counts them. `tvMonthYear` opens the shared [`DayPickerDialog`](#date-picker) (picks a specific day).
 
 `btnCalScratchpad` launches the global scratch pad (`ScratchpadActivity`, plain — no from-notebook
 extras). Tool state (pen/eraser) is restored from and persisted to the shared `ToolPreferencesManager`.
@@ -183,14 +196,16 @@ real canvas pixel size via `setPageSize`.
 - **View toggles** (`switchView`) — Month/Week/Day; keeps `selectedDate`, recomputes `calYear/calMonth`.
 - **Prev / Next** (`stepBack` / `stepForward`) — month ±1 / week ±7 / day steps AM↔PM↔next-day.
 - **Today** (`goToToday`).
-- **Month/year picker** (`showMonthYearPicker`, tap `tvMonthYear`).
+- **Day picker** (`showMonthYearPicker` → the shared [`DayPickerDialog`](#date-picker), tap `tvMonthYear`) —
+  picks a specific day: sets `selectedDate` + `calYear/calMonth` and navigates. This is the **only** way
+  to change the selected day by pointing (see the tap note below).
 - **Finger swipe** (canvas) — horizontal swipe ≥ 60dp (and dx > 1.5·dy) steps the period.
-- **Finger tap** (canvas, Month/Week) — `hitTest` → select that day (re-renders template); tapping an
-  out-of-month day in Month view navigates to that month.
+- **Single-finger tap does *not* select a day** (`handleDayTap`). It once selected/navigated on a single
+  tap, but that caused accidental day switches while writing — day selection is the picker's job now. The
+  tap still records `lastDayTapDate`/`lastDayTapTime` purely to detect a double-tap.
 - **Single-finger double-tap** → opens the day's full-page canvas ([`DayDetailActivity`](#day-detail--cal-daynote-)).
-  Month/Week: double-tap a day **cell** (`hitTest` resolves the date; `lastDayTapDate`/`lastDayTapTime`
-  match the second tap). Day: double-tap **anywhere** opens `selectedDate` (no cell hit-test). First tap
-  still selects/navigates as before; the second within `getDoubleTapTimeout()` opens.
+  Month/Week: double-tap a day **cell** (`hitTest` resolves the date). Day: double-tap **anywhere** opens
+  `selectedDate` (no cell hit-test). Second tap within `getDoubleTapTimeout()` on the same day opens.
 
 ### Last-position persistence
 
@@ -198,6 +213,21 @@ real canvas pixel size via `setPageSize`.
 `last_cal_month` / `last_day_half`, written in `onPause` (`saveCalendarPosition`) and restored in
 `onCreate` (falls back to today's month view, AM/PM by clock, on a fresh install). Reopening the
 calendar lands on exactly the view + date the user left.
+
+### Date picker
+
+`DayPickerDialog` (`DayPickerDialog.kt` + `res/layout/dialog_day_picker.xml`) is a clean, monochrome,
+e-ink-styled calendar-grid picker shared by the calendar (`tvMonthYear`) and the day window
+(`tvDayDate` / see [day window](#day-detail--the-day-window)). It replaces the native
+`DatePickerDialog` (whose coloured header reads wrong on e-ink) and the old month/year-only dialog.
+
+- **Day-grid mode:** a Sun–Sat month; `‹ ›` step months; the initially-passed day is a **filled black
+  circle** (a true circle via a centred fixed-size square slot, so it never stretches to an ellipse),
+  today a **stroked ring**. Tapping a day picks it and dismisses.
+- **Month/year mode:** tap the header title to flip in; `‹ ›` then step **years** and a 3×4 month grid
+  is shown (selected month filled). Picking a month returns to that month's day grid.
+- Bordered dialog (`shape_bordered`) + `setElevation(0f)`, the standard e-ink dialog treatment.
+  Drawables: `bg_day_selected` (oval) / `bg_day_today` (ring) / `bg_month_selected` (filled chip).
 
 ---
 
@@ -296,9 +326,11 @@ drives all show/hide + `isSelected`).
 - **Back exits straight to the calendar**, on the exact view/date it came from (`handleBackNavigation`,
   shared by the toolbar arrow and the system/predictive gesture via `onBackPressedDispatcher` +
   `OnBackPressedCallback`): it closes any open shape-transform / shape-insert overlay (Note mode only)
-  first, then `finish()` — it does **not** step between day-window views. (A "Today" button + a
-  tap-the-date day picker are planned so the user can move between days without returning to the
-  calendar.)
+  first, then `finish()` — it does **not** step between day-window views.
+- **Move between days without leaving** (`switchToDate`): the toolbar **Today** button (`btnDayToday`)
+  and the tappable date label (`tvDayDate` → shared [`DayPickerDialog`](#date-picker)) reload the whole
+  window **in place** — flush the note page, swap the date, reset the History-year state, reload the
+  canvas, and re-apply the active view (current view mode preserved).
 - **The pen layer follows the mode** (`applyViewMode` tail): `drawingView.resumeDrawing()` in Note,
   `disableDrawing()` in every other view (so a stray pen touch can't be captured *invisibly* under the
   hidden card grid / read-only note / events list), then `releaseRender()` for a clean EPD repaint.
@@ -313,8 +345,14 @@ optional ruling template.
   per-page undo/redo snapshots, lasso/clipboard, sticky notes, shape convert/transform, snapshot
   persistence, multi-finger undo/redo, sticky-tap routing) is ported from `CalendarActivity`; period
   navigation is dropped.
-- **Toolbar** (`res/layout/activity_day_detail.xml`): `btnDayBack` · pen · eraser · lasso-eraser ·
-  lasso · undo · redo · sticky · template · insert-shape · scratch-pad · `tvDayDate` (full date, right).
+- **Toolbar** (`res/layout/activity_day_detail.xml`): `btnDayBack` │ `btnDayToday` │ view toggles │
+  the `dayToolsGroup` — pen · eraser · lasso-eraser · lasso · undo · redo · sticky · template ·
+  insert-shape · scratch-pad — then `tvDayDate` (full date, right). The **tools group is weighted and
+  overflows** exactly like the calendar: its trailing tools drop into `dayOverflowMenu` (below the bar)
+  behind `btnDayOverflow` (⋯) when the bar is narrow, via the shared
+  [`ToolbarOverflowManager`](toolbar.md). Overflow is **Note-mode-only** — outside Note the group is
+  hidden and the fallback `daySpacerB` keeps the date right-aligned. Same dismissal + EPD
+  `setToolbarExclusion` handling as the calendar; `onPause`/leaving Note closes the menu.
   Floating selection toolbar = copy/cut/delete/convert-to-shape/send-to-notebook + shape-transform.
   `dayShapeInsertToolbar` is the shape-insert secondary popup (ported from `NotebookActivity`).
 - **Template (copy-into-table model).** Day pages store a real ruling template. The picker

@@ -79,6 +79,7 @@ import com.notesprout.android.notebook.OnyxNotebookView
 import com.notesprout.android.notebook.STICKY_NOTE_ICON_SIZE_DP
 import com.notesprout.android.notebook.ShapeRecognizer
 import com.notesprout.android.notebook.ToolPreferencesManager
+import com.notesprout.android.notebook.ToolbarOverflowManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
@@ -140,6 +141,10 @@ class CalendarActivity : AppCompatActivity() {
     }
 
     private lateinit var binding: ActivityCalendarBinding
+    private lateinit var overflowManager: ToolbarOverflowManager
+    // True between a press inside the open overflow menu and its release, so the menu closes only
+    // after the tapped item's click has been dispatched.
+    private var pendingMenuTapClose = false
     private lateinit var drawingView: NotebookView
     private lateinit var repository: CalendarRepository
     private val eventsRepo: EventsRepository by lazy { EventsRepository() }
@@ -333,8 +338,10 @@ class CalendarActivity : AppCompatActivity() {
             FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT),
         )
         binding.floatingSelectionToolbar.bringToFront()
+        binding.calOverflowMenu.bringToFront()
 
         setupToolbar()
+        setupOverflow()
         wireDrawingCallbacks()
         wireToolButtons()
         updateLassoButtonIcon()
@@ -384,6 +391,59 @@ class CalendarActivity : AppCompatActivity() {
         binding.btnMonthView.isSelected = currentView == CalView.MONTH
         binding.btnWeekView.isSelected  = currentView == CalView.WEEK
         binding.btnDayView.isSelected   = currentView == CalView.DAY
+    }
+
+    // ── Toolbar overflow (reuses the notebook's ToolbarOverflowManager over calLeftBar) ──────────
+
+    private fun setupOverflow() {
+        overflowManager = ToolbarOverflowManager(
+            toolbar = binding.calLeftBar,
+            overflowMenu = binding.calOverflowMenu,
+            dividerOverflow = binding.dividerCalOverflow,
+            btnOverflow = binding.btnCalOverflow,
+        )
+        binding.btnCalOverflow.setOnClickListener {
+            if (overflowManager.isOverflowMenuOpen()) closeCalOverflowMenu() else openCalOverflowMenu()
+        }
+        // The text-toggle buttons (Today/Month/Week/Day) are wrap_content; the overflow manager sizes
+        // by LayoutParams px, so pin their measured widths once before the first fit pass.
+        binding.calLeftBar.doOnLayout {
+            pinToggleWidths()
+            overflowManager.initialize()
+            overflowManager.recalc()
+        }
+        binding.calLeftBar.addOnLayoutChangeListener { _, l, _, r, _, ol, _, or, _ ->
+            if (r - l != or - ol) { // bar width changed (rotation) — refit
+                if (overflowManager.isOverflowMenuOpen()) closeCalOverflowMenu()
+                overflowManager.recalc()
+            }
+        }
+    }
+
+    private fun pinToggleWidths() {
+        for (btn in listOf(binding.btnToday, binding.btnMonthView, binding.btnWeekView, binding.btnDayView)) {
+            val w = btn.width
+            if (w > 0) {
+                val lp = btn.layoutParams as LinearLayout.LayoutParams
+                if (lp.width != w) { lp.width = w; btn.layoutParams = lp }
+            }
+        }
+    }
+
+    private fun openCalOverflowMenu() {
+        overflowManager.openOverflowMenu()
+        binding.calOverflowMenu.bringToFront()
+        // EPD: keep the pen from drawing under the menu overlay (also lets stylus taps reach its buttons).
+        drawingView.setToolbarExclusion(
+            Rect(0, 0, drawingView.asView().width, overflowManager.expectedOverflowMenuExtent()),
+        )
+        drawingView.releaseRender()
+    }
+
+    private fun closeCalOverflowMenu() {
+        overflowManager.closeOverflowMenu()
+        drawingView.setToolbarExclusion(null)
+        drawingView.releaseRender()
     }
 
     private fun updateMonthYearLabel() {
@@ -1750,13 +1810,40 @@ class CalendarActivity : AppCompatActivity() {
     // ── Touch dispatch ───────────────────────────────────────────────────────────
 
     override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+        // Overflow-menu dismissal — any tool type, so a stylus outside the menu closes it too.
+        if (::overflowManager.isInitialized && overflowManager.isOverflowMenuOpen()) {
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    val onBtn = isTouchInView(event, binding.btnCalOverflow)
+                    val inMenu = isTouchInView(event, binding.calOverflowMenu)
+                    val inBar = isTouchInView(event, binding.calendarToolbar)
+                    drawingView.releaseRender()
+                    pendingMenuTapClose = false
+                    when {
+                        onBtn || inMenu -> pendingMenuTapClose = inMenu // btn toggles itself; item closes on release
+                        inBar -> closeCalOverflowMenu()                 // another toolbar button
+                        else -> { closeCalOverflowMenu(); return true }  // consume — don't start a stroke
+                    }
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    if (pendingMenuTapClose) {
+                        pendingMenuTapClose = false
+                        val handled = super.dispatchTouchEvent(event) // let the tapped item's click land first
+                        closeCalOverflowMenu()
+                        return handled
+                    }
+                }
+            }
+        }
         if (event.getToolType(0) == MotionEvent.TOOL_TYPE_FINGER) {
             val inToolbar = isTouchInView(event, binding.calendarToolbar)
+            val inMenu = binding.calOverflowMenu.visibility == View.VISIBLE &&
+                    isTouchInView(event, binding.calOverflowMenu)
             val inFloating = binding.floatingSelectionToolbar.visibility == View.VISIBLE &&
                     isTouchInView(event, binding.floatingSelectionToolbar)
-            if (event.actionMasked == MotionEvent.ACTION_DOWN && (inToolbar || inFloating)) drawingView.releaseRender()
-            if (handleStickyNoteTapGesture(event)) return true
-            if (!inToolbar && !inFloating) {
+            if (event.actionMasked == MotionEvent.ACTION_DOWN && (inToolbar || inFloating || inMenu)) drawingView.releaseRender()
+            if (!inMenu && handleStickyNoteTapGesture(event)) return true
+            if (!inToolbar && !inFloating && !inMenu) {
                 handleMultiFingerDoubleTap(event)
                 if (handleCalendarFingerGesture(event)) return true
             }
@@ -1875,7 +1962,7 @@ class CalendarActivity : AppCompatActivity() {
         return x >= loc[0] && x < loc[0] + view.width && y >= loc[1] && y < loc[1] + view.height
     }
 
-    /** Finger gestures over the canvas: horizontal swipe steps the period; a tap selects a day. */
+    /** Finger gestures over the canvas: horizontal swipe steps the period; a double-tap opens a day. */
     private fun handleCalendarFingerGesture(event: MotionEvent): Boolean {
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> { calDownX = event.x; calDownY = event.y; calDownTime = event.eventTime; calMoved = false; calMultiTouch = false }
@@ -1921,7 +2008,9 @@ class CalendarActivity : AppCompatActivity() {
         val w = binding.calendarContent.width
         val h = binding.calendarContent.height
         val date = CalendarTemplateRenderer.hitTest(currentSpec(), localX, localY, w, h, density) ?: return
-        // Second quick tap on the same day → open that day's full-page canvas.
+        // A single tap no longer selects/navigates a day (it caused accidental day switches while
+        // writing; day selection is the date picker's job now). Only a double-tap acts: it opens the
+        // tapped day's full-page window.
         val now = SystemClock.uptimeMillis()
         if (date == lastDayTapDate && now - lastDayTapTime <= ViewConfiguration.getDoubleTapTimeout()) {
             lastDayTapDate = null
@@ -1930,17 +2019,6 @@ class CalendarActivity : AppCompatActivity() {
         }
         lastDayTapDate = date
         lastDayTapTime = now
-        if (currentView == CalView.MONTH && (date.year != calYear || date.monthValue != calMonth)) {
-            // Out-of-month day → navigate to that month (different page)
-            selectedDate = date
-            calYear = date.year
-            calMonth = date.monthValue
-            updateMonthYearLabel()
-            navigateCanvas()
-        } else {
-            selectedDate = date
-            refreshTemplate()
-        }
     }
 
     /** Open the full-page day canvas for [date], carrying the source-notebook identity through. */
@@ -2007,6 +2085,7 @@ class CalendarActivity : AppCompatActivity() {
 
     override fun onPause() {
         super.onPause()
+        if (::overflowManager.isInitialized && overflowManager.isOverflowMenuOpen()) closeCalOverflowMenu()
         saveCalendarPosition()
         // appScope (not lifecycleScope): the save must complete even as the Activity is paused
         // and torn down. lifecycleScope would be cancelled at onDestroy, dropping the write.

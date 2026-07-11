@@ -55,7 +55,7 @@ object CalendarTemplateRenderer {
     private const val DAY_GUTTER_DP = 80f   // day-view time-label gutter
 
     /**
-     * Renders the grid/timeline. [highlights] draws the filled "today" circle and the selected-day
+     * Renders the grid/timeline. [highlights] draws the "today" ring and the selected-day
      * border (true for the live calendar canvas); pass false when baking a template for export so a
      * transient date highlight isn't frozen permanently onto a notebook page.
      */
@@ -333,16 +333,17 @@ object CalendarTemplateRenderer {
         }
 
         if (isToday) {
-            p.style = Paint.Style.FILL
+            p.style = Paint.Style.STROKE
+            p.strokeWidth = 2f * d
             p.color = Color.BLACK
             canvas.drawCircle(numCircleCx, numCircleCy, numH * 1.1f, p)
+            p.strokeWidth = 0f
         }
 
         p.style = Paint.Style.FILL
         p.textSize = numSize
         p.textAlign = Paint.Align.LEFT
         p.color = when {
-            isToday -> Color.WHITE
             !inMonth -> Color.GRAY
             else -> Color.BLACK
         }

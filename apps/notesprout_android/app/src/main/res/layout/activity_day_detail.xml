@@ -81,13 +81,16 @@
             android:layout_marginStart="4dp"
             android:layout_marginEnd="4dp" />
 
-        <!-- Drawing tools — toggled as a unit; visible only in Note mode -->
+        <!-- Drawing tools — visible only in Note mode; weighted so it fills the space up to the date
+             label and its trailing tools can overflow into dayOverflowMenu on a narrow bar. -->
         <LinearLayout
             android:id="@+id/dayToolsGroup"
-            android:layout_width="wrap_content"
+            android:layout_width="0dp"
+            android:layout_weight="1"
             android:layout_height="match_parent"
             android:orientation="horizontal"
-            android:gravity="center_vertical">
+            android:gravity="center_vertical"
+            android:visibility="gone">
 
             <androidx.appcompat.widget.AppCompatImageButton
                 android:id="@+id/btnDayPen"
@@ -171,10 +174,35 @@
                 android:src="@drawable/ic_sketching"
                 android:contentDescription="Scratch Pad" />
 
+            <!-- Pin: pushes the overflow controls to the trailing edge of the tools group -->
+            <Space
+                android:layout_width="0dp"
+                android:layout_height="1dp"
+                android:layout_weight="1" />
+
+            <!-- Overflow group divider — visible only when the overflow button is shown -->
+            <View
+                android:id="@+id/dividerDayOverflow"
+                android:layout_width="1dp"
+                android:layout_height="28dp"
+                android:background="@color/inkBlack"
+                android:layout_marginStart="4dp"
+                android:layout_marginEnd="4dp"
+                android:visibility="gone" />
+
+            <!-- Overflow button — reveals overflowed tools in a menu below the toolbar -->
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnDayOverflow"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:src="@drawable/ic_dots"
+                android:contentDescription="More actions"
+                android:visibility="gone" />
+
         </LinearLayout>
 
-        <!-- Flexible spacer pushes the date label to the right -->
+        <!-- Fallback spacer — pushes the date label right when the tools group is hidden (non-Note) -->
         <Space
+            android:id="@+id/daySpacerB"
             android:layout_width="0dp"
             android:layout_height="1dp"
             android:layout_weight="1" />
@@ -335,6 +363,18 @@
         android:layout_height="0dp"
         android:layout_weight="1"
         android:background="@color/paperWhite">
+
+        <!-- Overflow menu — appears below the toolbar (Note mode) when tools overflow. Built by
+             ToolbarOverflowManager; brought to front in onCreate. -->
+        <LinearLayout
+            android:id="@+id/dayOverflowMenu"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_gravity="top"
+            android:orientation="vertical"
+            android:visibility="gone"
+            android:background="@drawable/shape_bordered"
+            android:elevation="0dp" />
 
         <!-- Notebooks / History card list (and placeholder) — shown outside Note mode -->
         <FrameLayout
