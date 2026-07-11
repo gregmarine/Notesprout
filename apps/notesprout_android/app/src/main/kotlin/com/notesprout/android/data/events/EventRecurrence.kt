@@ -55,6 +55,40 @@ object EventRecurrence {
         return null
     }
 
+    /**
+     * The START epoch-day of the first occurrence beginning **strictly after** [afterDay] and no later
+     * than `afterDay + maxAheadDays`, or null if none falls in that window. Excluded ("this occurrence"
+     * removed) starts are skipped. Used by the Events look-ahead to decide how soon an event is coming.
+     *
+     * Bounded by [maxAheadDays] (the event's largest reminder lead), so the NEVER/UNTIL scan is short;
+     * COUNT rules read from the enumerated first-N starts.
+     */
+    fun nextOccurrenceStart(
+        rule: RecurrenceRule, anchorStart: Long, anchorEnd: Long,
+        afterDay: Long, maxAheadDays: Int,
+    ): Long? {
+        if (maxAheadDays <= 0) return null
+        val anchor = LocalDate.ofEpochDay(anchorStart)
+        val excluded = rule.exceptionDates
+        val ceiling = afterDay + maxAheadDays
+
+        if (rule.endMode == EndMode.COUNT) {
+            val n = (rule.endCount ?: 0).coerceAtLeast(0)
+            return generateStarts(rule, anchor, n)
+                .map { it.toEpochDay() }
+                .filter { it !in excluded && it > afterDay && it <= ceiling }
+                .minOrNull()
+        }
+
+        var o = afterDay + 1
+        while (o <= ceiling) {
+            val od = LocalDate.ofEpochDay(o)
+            if (isValidStart(rule, anchor, od) && withinUntil(rule, o) && o !in excluded) return o
+            o++
+        }
+        return null
+    }
+
     private fun withinUntil(rule: RecurrenceRule, startEpochDay: Long): Boolean = when (rule.endMode) {
         EndMode.NEVER -> true
         EndMode.UNTIL -> rule.endEpochDay?.let { startEpochDay <= it } ?: true

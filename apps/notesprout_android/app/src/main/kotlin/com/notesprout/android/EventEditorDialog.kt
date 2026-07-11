@@ -8,14 +8,19 @@ import android.view.View
 import android.view.WindowManager
 import android.widget.AdapterView
 import android.widget.ArrayAdapter
+import android.widget.LinearLayout
 import android.widget.Spinner
+import android.widget.TextView
 import androidx.appcompat.app.AlertDialog
+import androidx.core.content.ContextCompat
 import com.notesprout.android.data.events.EndMode
 import com.notesprout.android.data.events.EventPayload
 import com.notesprout.android.data.events.EventType
 import com.notesprout.android.data.events.Freq
 import com.notesprout.android.data.events.MonthlyMode
 import com.notesprout.android.data.events.RecurrenceRule
+import com.notesprout.android.data.events.Reminder
+import com.notesprout.android.data.events.ReminderUnit
 import com.notesprout.android.data.index.EventEntity
 import com.notesprout.android.databinding.DialogEventEditorBinding
 import java.time.LocalDate
@@ -57,11 +62,15 @@ object EventEditorDialog {
         }
         var monthlyMode = rule?.monthlyMode ?: MonthlyMode.DAY_OF_MONTH
         var untilDate: LocalDate = rule?.endEpochDay?.let { LocalDate.ofEpochDay(it) } ?: date.plusMonths(1)
+        val reminders = payload.reminders.toMutableList()
+
+        fun dp(v: Int): Int = (v * activity.resources.displayMetrics.density).toInt()
 
         // ── Adapters ────────────────────────────────────────────────────────────
         b.spType.attach(activity, EventType.entries.map { it.label })
         b.spRepeat.attach(activity, REPEAT_LABELS)
         b.spEnd.attach(activity, END_LABELS)
+        b.spRemindUnit.attach(activity, listOf("days", "weeks"))
 
         // ── Formatting ──────────────────────────────────────────────────────────
         val timeFmt = DateFormat.getTimeFormat(activity)
@@ -174,6 +183,47 @@ object EventEditorDialog {
             pickDate(activity, untilDate) { d -> untilDate = d; refresh() }
         }
 
+        // ── Reminders (paper-like look-ahead) ─────────────────────────────────────
+        fun renderReminders() {
+            b.llReminders.removeAllViews()
+            reminders.sortBy { it.leadDays }
+            for (r in reminders) {
+                val row = LinearLayout(activity).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = android.view.Gravity.CENTER_VERTICAL
+                    setBackgroundResource(R.drawable.shape_bordered)
+                    setPadding(dp(12), dp(6), dp(6), dp(6))
+                    layoutParams = LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT,
+                    ).apply { bottomMargin = dp(6) }
+                }
+                row.addView(TextView(activity).apply {
+                    text = r.label()
+                    setTextColor(ContextCompat.getColor(activity, R.color.inkBlack))
+                    textSize = 14f
+                    layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+                })
+                row.addView(TextView(activity).apply {
+                    text = "Remove"
+                    setTextColor(ContextCompat.getColor(activity, R.color.inkBlack))
+                    textSize = 13f
+                    setPadding(dp(8), dp(4), dp(8), dp(4))
+                    setOnClickListener { reminders.remove(r); renderReminders() }
+                })
+                b.llReminders.addView(row)
+            }
+        }
+        b.btnAddRemind.setOnClickListener {
+            val amount = b.etRemindAmount.text?.toString()?.toIntOrNull()?.coerceIn(1, 999) ?: 1
+            val unit = if (b.spRemindUnit.selectedItemPosition == 1) ReminderUnit.WEEKS else ReminderUnit.DAYS
+            val r = Reminder(amount, unit)
+            if (reminders.none { it.amount == r.amount && it.unit == r.unit }) {
+                reminders.add(r)
+                renderReminders()
+            }
+        }
+        renderReminders()
+
         refresh()
 
         // ── Build + dialog ──────────────────────────────────────────────────────
@@ -206,7 +256,11 @@ object EventEditorDialog {
                 startMinute = if (allDay) null else startMinute,
                 endMinute = if (allDay) null else endMinute,
                 recurring = builtRule != null,
-                data = EventPayload(recurrence = builtRule, notes = payload.notes).toJson(),
+                data = EventPayload(
+                    recurrence = builtRule,
+                    notes = payload.notes,
+                    reminders = reminders.toList(),
+                ).toJson(),
                 createdAt = existing?.createdAt ?: now,
                 updatedAt = now,
                 deletedAt = null,

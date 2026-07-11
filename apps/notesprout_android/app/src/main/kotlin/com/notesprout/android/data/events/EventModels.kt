@@ -71,11 +71,43 @@ data class RecurrenceRule(
     fun summary(): String = RecurrenceSummary.of(this)
 }
 
+/** Unit for a [Reminder] lead-time. Weeks are kept distinct from days purely to preserve display
+ *  ("1 week" vs "7 days"); [Reminder.leadDays] collapses both to a day count for the window math. */
+@Serializable
+enum class ReminderUnit(val label: String, val labelPlural: String) {
+    DAYS("day", "days"),
+    WEEKS("week", "weeks"),
+}
+
+/**
+ * A paper-like look-ahead lead-time on an event. **Not** a notification/alarm — it only controls how
+ * many days ahead the event begins surfacing in the *Upcoming* section of the Events screen: the event
+ * appears on every day D where `occurrence − leadDays ≤ D < occurrence`. An event may carry several.
+ *
+ * @property amount "N" units of lead (must be ≥ 1 to be meaningful).
+ * @property unit days or weeks (display-only distinction; see [ReminderUnit]).
+ */
+@Serializable
+data class Reminder(
+    val amount: Int,
+    val unit: ReminderUnit,
+) {
+    /** Lead time flattened to whole days (weeks × 7) — the value the window math uses. */
+    val leadDays: Int get() = amount * if (unit == ReminderUnit.WEEKS) 7 else 1
+
+    /** Concise label for an editor row, e.g. "1 week before" / "3 days before". */
+    fun label(): String =
+        "$amount ${if (amount == 1) unit.label else unit.labelPlural} before"
+}
+
 /** The `data`-column payload: everything not promoted to a queryable [EventEntity] column. */
 @Serializable
 data class EventPayload(
     val recurrence: RecurrenceRule? = null,
     @SerialName("notes") val notes: String = "",
+    /** Look-ahead lead-times (see [Reminder]). New field, empty default → pre-existing `data`-JSON
+     *  rows deserialize unchanged; no DB migration. */
+    val reminders: List<Reminder> = emptyList(),
 ) {
     fun toJson(): String = json.encodeToString(serializer(), this)
 

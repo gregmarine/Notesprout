@@ -30,10 +30,17 @@
             android:layout_marginStart="4dp"
             android:layout_marginEnd="4dp" />
 
-        <!-- View-mode toggles: Note / Notebooks / History -->
+        <!-- View-mode toggles: Events (default) / Note / Notebooks / History -->
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/btnDayViewEvents"
+            style="@style/Widget.Notesprout.ToggleTextButton"
+            android:text="Events"
+            android:contentDescription="Events view" />
+
         <androidx.appcompat.widget.AppCompatButton
             android:id="@+id/btnDayViewNote"
             style="@style/Widget.Notesprout.ToggleTextButton"
+            android:layout_marginStart="2dp"
             android:text="Note"
             android:contentDescription="Note view" />
 
@@ -50,13 +57,6 @@
             android:layout_marginStart="2dp"
             android:text="History"
             android:contentDescription="History view" />
-
-        <androidx.appcompat.widget.AppCompatButton
-            android:id="@+id/btnDayViewEvents"
-            style="@style/Widget.Notesprout.ToggleTextButton"
-            android:layout_marginStart="2dp"
-            android:text="Events"
-            android:contentDescription="Events view" />
 
         <!-- Divider between view toggles and drawing tools (hidden outside Note mode) -->
         <View

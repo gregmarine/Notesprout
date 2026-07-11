@@ -78,9 +78,9 @@ all independent, all keyed.
 | `DayTemplateDialog.kt` | day-detail template quick-picker (reads `type="template"` rows from the `calendar` table) |
 | `CalendarTransfer.kt` | one-field in-memory singleton for Calendar / Day-detail → Notebook hand-off |
 | `data/index/EventEntity.kt` / `EventDao.kt` | Room `@Entity` + DAO for the `events` table (see [Events](#events--the-events-table)) |
-| `data/events/EventModels.kt` / `RecurrenceSummary.kt` / `EventRecurrence.kt` | `@Serializable` event models + summary + recurrence-expansion engine |
-| `data/EventsRepository.kt` | events CRUD + `eventsForDay` (sorted all-day-first) |
-| `EventsController.kt` / `EventEditorDialog.kt` | Events-view list controller + add/edit editor dialog |
+| `data/events/EventModels.kt` / `RecurrenceSummary.kt` / `EventRecurrence.kt` | `@Serializable` event models (incl. `Reminder`/`ReminderUnit`) + summary + recurrence-expansion engine (`occursOn` / `occurrenceStartCovering` / `nextOccurrenceStart`) |
+| `data/EventsRepository.kt` | events CRUD + `eventsForDay` (sorted all-day-first) + `upcomingForDay` (reminder look-ahead → `UpcomingEvent`) |
+| `EventsController.kt` / `EventEditorDialog.kt` | Events-view list controller (Today + Upcoming sections) + add/edit editor dialog (incl. the "Remind me" builder) |
 
 `CalendarRepository.loadPage` returns the shared `ScratchpadPageContent` (reused to avoid churn).
 
@@ -277,27 +277,31 @@ from `CalendarActivity.openDayDetail`; the source-notebook identity is carried t
 can offer "this notebook".
 
 The window has **four views**, chosen by a toggle group in the top toolbar placed **after the Back
-arrow and before the drawing tools, separated by dividers** (mirrors the Month/Week/Day toggles):
+arrow and before the drawing tools, separated by dividers** (mirrors the Month/Week/Day toggles). The
+toolbar order is **Events · Note · Notebooks · History**:
 
 | View | What it shows | Tools toolbar |
 |---|---|---|
-| **Note** *(default)* | the editable day-note canvas | visible |
+| **Events** *(default)* | birthdays / anniversaries / appointments **attached to this day** (incl. recurring occurrences) + a **look-ahead** of upcoming events (see [Reminders](#reminders--paper-like-look-ahead)) — list + add/edit/delete. See [Events](#events--the-events-table). | hidden |
+| **Note** | the editable day-note canvas | visible |
 | **Notebooks** | notebooks **Opened / Edited / Created** on this calendar day (paginated card grid) | hidden |
 | **History** | this month/day **in a chosen past year** — a leading **Notes** (read-only day-note bitmap) then **Opened / Edited / Created** | hidden |
-| **Events** | birthdays / anniversaries / appointments **attached to this day** (incl. recurring occurrences) — list + add/edit/delete. See [Events](#events--the-events-table). | hidden |
 
-State: `ViewMode {NOTE, NOTEBOOKS, HISTORY, EVENTS}` + sub-toggles `NbSub {OPENED, EDITED, CREATED}` /
-`HistSub {NOTES, OPENED, EDITED, CREATED}`. **Reopening a day always resets to Note** — the active
-view is not persisted. `daySubNotebooks` / `daySubHistory` sub-bars are visible only in their mode;
-`dayToolsGroup` is visible only in Note mode (`applyViewMode` drives all show/hide + `isSelected`).
+State: `ViewMode {NOTE, NOTEBOOKS, HISTORY, EVENTS}` (initial value `EVENTS`) + sub-toggles
+`NbSub {OPENED, EDITED, CREATED}` / `HistSub {NOTES, OPENED, EDITED, CREATED}`. **Reopening a day
+always lands on Events** — the active view is not persisted. `daySubNotebooks` / `daySubHistory`
+sub-bars are visible only in their mode; `dayToolsGroup` is visible only in Note mode (`applyViewMode`
+drives all show/hide + `isSelected`).
 
-- **Back is a step-out, not always an exit** (`handleBackNavigation`, shared by the toolbar arrow and
-  the system/predictive gesture via `onBackPressedDispatcher` + `OnBackPressedCallback`): Notebooks/
-  History → Note (one step) → close any open shape-transform / shape-insert overlay → `finish()`.
-  `finish()` returns to the paused calendar on the exact view/date it came from.
-- **The pen layer follows the mode** (`applyViewMode` tail): `drawingView.enableDrawing()` in Note,
-  `disableDrawing()` in Notebooks/History (so a stray pen touch can't be captured *invisibly* under the
-  hidden card grid / read-only note), then `releaseRender()` for a clean EPD repaint.
+- **Back exits straight to the calendar**, on the exact view/date it came from (`handleBackNavigation`,
+  shared by the toolbar arrow and the system/predictive gesture via `onBackPressedDispatcher` +
+  `OnBackPressedCallback`): it closes any open shape-transform / shape-insert overlay (Note mode only)
+  first, then `finish()` — it does **not** step between day-window views. (A "Today" button + a
+  tap-the-date day picker are planned so the user can move between days without returning to the
+  calendar.)
+- **The pen layer follows the mode** (`applyViewMode` tail): `drawingView.resumeDrawing()` in Note,
+  `disableDrawing()` in every other view (so a stray pen touch can't be captured *invisibly* under the
+  hidden card grid / read-only note / events list), then `releaseRender()` for a clean EPD repaint.
 
 ### Note view (`cal-daynote-…`)
 
@@ -412,7 +416,11 @@ fetched by the `recurring` flag and expanded in Kotlin.
   `monthlyMode {DAY_OF_MONTH, ORDINAL_WEEKDAY}` ("day 14" vs "3rd Tuesday") + a flattened end
   (`endMode {NEVER,UNTIL,COUNT}` + `endEpochDay` / `endCount`). `RecurrenceSummary` renders the list-row
   description.
-- `EventPayload` — the `data`-column JSON (`recurrence` + `notes`).
+- `Reminder` / `ReminderUnit {DAYS, WEEKS}` — a paper-like look-ahead lead-time (see
+  [Reminders](#reminders--paper-like-look-ahead)). **Not** a notification: `amount` + `unit`, with
+  `leadDays` (weeks × 7) for window math and `label()` ("1 week before"). An event may carry several.
+- `EventPayload` — the `data`-column JSON (`recurrence` + `notes` + `reminders`). `reminders` is a new
+  field with an empty default, so pre-existing rows deserialize unchanged — **no DB migration**.
 
 ### Recurrence engine (`data/events/EventRecurrence.kt`)
 
@@ -427,24 +435,34 @@ occurrence preserves the anchor's **span length**, so an occurrence starting on 
 - Per-freq validity: DAILY interval-mod; WEEKLY weekday-set + ISO-Monday week-index mod; MONTHLY
   month-index mod + (day-of-month, skipping short months / ORDINAL weekday, "5th"→"last"); YEARLY
   year mod + same month+day (Feb 29 → leap years only).
+- `nextOccurrenceStart(rule, anchorStart, anchorEnd, afterDay, maxAheadDays)` — the START epoch-day of
+  the first occurrence **strictly after** `afterDay`, no later than `afterDay + maxAheadDays`, skipping
+  exceptions (COUNT reads the enumerated starts; NEVER/UNTIL forward-scans). Powers the Reminders
+  look-ahead.
 
 ### Repository + UI
 
 - **`data/EventsRepository.kt`** — CRUD + `eventsForDay(date)`: direct rows (SQL overlap) ∪ recurring
   rows the engine lands on the day, sorted **all-day first, then timed by start minute**, title
-  tiebreak (the ordering the user asked for). No encryption gate — plaintext-on-device like the
-  scratch pad.
-- **`EventsController.kt`** — drives the Events view: `refresh()` loads + renders bordered rows
-  (`item_event.xml`: time/all-day badge · title · meta = type · end-time · multi-day span · recurrence
-  summary), tap-to-edit, per-row delete (confirm; recurring → whole-series). Add button opens the
-  editor. Bound in `DayDetailActivity` (`ViewMode.EVENTS`, toolbar toggle `btnDayViewEvents`,
-  `dayEventsContainer` in `activity_day_detail.xml`; `applyViewMode` shows/refreshes it, `onResume`
-  re-refreshes).
+  tiebreak (the ordering the user asked for). Plus `upcomingForDay(date)` — the reminder look-ahead
+  (see [Reminders](#reminders--paper-like-look-ahead)). No encryption gate — plaintext-on-device like
+  the scratch pad.
+- **`EventsController.kt`** — drives the Events view: `refresh()` loads today's events **and**
+  `upcomingForDay`, rendering **two sections** — **Today** then **Upcoming** (black bold labels; the
+  "Today" label appears only when an Upcoming section follows it). Today rows (`item_event.xml`:
+  time/all-day badge · title · meta = type · end-time · multi-day span · recurrence summary) are
+  tap-to-edit with per-row delete; Upcoming rows show a countdown badge ("Tomorrow" / "In N days") +
+  `type · occurrence-date · time` meta and key their edit/delete scope to the **occurrence** day, not
+  the viewed day. Add button opens the editor. Bound in `DayDetailActivity` (`ViewMode.EVENTS`, toolbar
+  toggle `btnDayViewEvents`, `dayEventsContainer` in `activity_day_detail.xml`; `applyViewMode`
+  shows/refreshes it, `onResume` re-refreshes).
 - **`EventEditorDialog.kt`** (+ `dialog_event_editor.xml`) — add/edit: type spinner (default recurrence
   on type change for new events), title, start/end date, all-day switch + start/end time (long-press
-  end-time clears), and the full recurrence builder (Repeats spinner → `Every N units` + weekly weekday
-  toggles / monthly day-vs-ordinal / Ends Never·On date·After N). e-ink styled (bordered dialog, no
-  elevation); Delete shown only when editing.
+  end-time clears), the full recurrence builder (Repeats spinner → `Every N units` + weekly weekday
+  toggles / monthly day-vs-ordinal / Ends Never·On date·After N), and the **"Remind me"** builder
+  (`etRemindAmount` + `spRemindUnit` days/weeks + Add → removable bordered rows in `llReminders`,
+  deduped, sorted by lead). e-ink styled (bordered dialog, no elevation); Delete shown only when
+  editing.
 
 ### Grid rendering (Month / Week / Day canvas)
 
@@ -489,10 +507,38 @@ Editing or deleting a **recurring** event prompts a scope (`EventsController.pro
 edits apply but **changing the day is ignored** (the occurrence keeps its date/span); date changes
 take effect only in "all events". Moving one occurrence to another day = delete-this + add.
 
+### Reminders — paper-like look-ahead
+
+A **reminder** is a per-event **lead-time** (`Reminder` = `amount` + `ReminderUnit {DAYS, WEEKS}`) that
+makes an upcoming event **surface in the Events screen ahead of its date**. It is **not** a
+notification/alarm — there are no `AlarmManager`, no `POST_NOTIFICATIONS`, no receivers, nothing that
+interrupts. It is purely a query + list render: the user only ever sees it by *looking* at the Events
+screen (the calm/meditative philosophy — a paper planner you flip open, not a phone that buzzes). An
+event may carry several reminders.
+
+- **Surfacing rule.** For the Events screen of day *D*, an event surfaces under **Upcoming** when its
+  next occurrence `O` satisfies `O − lead ≤ D < O` for one of its reminders — i.e. it shows on **every
+  day in the lead window**, then drops into **Today** on `O`. One row per event (its soonest qualifying
+  occurrence), sorted nearest-first → all-day → title.
+- **Storage.** `EventPayload.reminders` (rides in the `data` JSON, empty default → **no DB migration**).
+  Weeks are stored distinct from days only for display; `Reminder.leadDays` (× 7) drives the math.
+- **Query** (`EventsRepository.upcomingForDay`). Non-recurring: events starting in `(D, D + 366]`
+  (`MAX_LOOKAHEAD_DAYS`), kept when a reminder's lead reaches back to *D*. Recurring: each row's next
+  start via `EventRecurrence.nextOccurrenceStart` (bounded by that event's largest lead), same lead
+  test. Returns `UpcomingEvent(event, occurrenceStart, daysUntil)`. Events without reminders never
+  surface. Recurrence-aware (honours `exceptionDates`).
+- **Editing an Upcoming row** keys its recurring scope to the **occurrence day** (`openEditor` /
+  `confirmDelete` take an explicit context day) — otherwise "this occurrence" would resolve against a
+  lead-up day with no occurrence and silently no-op.
+- **Grid canvas is unchanged** — reminders touch the Events *list* only; Month/Week/Day glyphs still
+  mark the actual event day, not the lead-up days.
+
 ### v1 scope / deferred
 
-- No reminders/notifications, no import/export of events yet.
+- No import/export of events yet.
 - Grid markers are **not** carried into full-view notebook export (grid export stays event-free).
+- **Planned day-window navigation:** a **Today** button in the day-detail toolbar + tap the date label
+  (upper-right) to pick another day — so the user can move between days without returning to the calendar.
 
 ---
 

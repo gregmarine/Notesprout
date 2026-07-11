@@ -135,7 +135,7 @@ class DayDetailActivity : AppCompatActivity() {
     private enum class ViewMode { NOTE, NOTEBOOKS, HISTORY, EVENTS }
     private enum class NbSub { OPENED, EDITED, CREATED }
     private enum class HistSub { NOTES, OPENED, EDITED, CREATED }
-    private var viewMode = ViewMode.NOTE
+    private var viewMode = ViewMode.EVENTS
     private var notebooksSub = NbSub.OPENED
     private var historySub = HistSub.NOTES
     private var historyYear = LocalDate.now().year - 1
@@ -381,7 +381,7 @@ class DayDetailActivity : AppCompatActivity() {
         binding.btnDayTemplate.setOnClickListener { showTemplatePicker() }
     }
 
-    // ── View modes (Note / Notebooks / History) ──────────────────────────────────
+    // ── View modes (Events default / Note / Notebooks / History) ─────────────────
 
     private fun setupViewToggles() {
         binding.btnDayViewNote.setOnClickListener { switchViewMode(ViewMode.NOTE) }
@@ -404,13 +404,13 @@ class DayDetailActivity : AppCompatActivity() {
     }
 
     /**
-     * Back steps out of a sub-view before leaving the day: Notebooks/History → Note (one step),
-     * then a modal shape overlay if one is open, then finish. Shared by the toolbar arrow and the
-     * system/predictive Back gesture.
+     * Back leaves the day window and returns to the calendar on the exact view/date it came from —
+     * regardless of which day-window view (Events/Note/Notebooks/History) is showing. A modal shape
+     * overlay (Note mode only) closes first so Back doesn't discard it. Shared by the toolbar arrow
+     * and the system/predictive Back gesture.
      */
     private fun handleBackNavigation() {
         when {
-            viewMode != ViewMode.NOTE -> switchViewMode(ViewMode.NOTE)
             isShapeTransformMode -> exitShapeTransformMode(clearSelection = true)
             binding.dayShapeInsertToolbar.isVisible -> hideShapeInsertToolbar()
             else -> finish()

@@ -59,6 +59,52 @@ class EventsRepository(
         out
     }
 
+    /**
+     * The *Upcoming* look-ahead for [date]: events not occurring on [date] itself but whose **next**
+     * occurrence starts within one of the event's own reminder lead-times — i.e. an event with a
+     * reminder of lead L surfaces on every day D where `occurrenceStart − L ≤ D < occurrenceStart`.
+     *
+     * One row per event (its soonest qualifying occurrence), sorted nearest-first, then all-day, then
+     * title. Events without reminders never surface here. Recurrence-aware (honours exceptions).
+     */
+    suspend fun upcomingForDay(date: LocalDate): List<UpcomingEvent> = withContext(Dispatchers.IO) {
+        val day = date.toEpochDay()
+        val out = ArrayList<UpcomingEvent>()
+
+        // Non-recurring events starting after the day, within the widest lead we bother to look ahead.
+        for (row in dao.nonRecurringInRange(day + 1, day + MAX_LOOKAHEAD_DAYS)) {
+            if (row.startEpochDay <= day) continue // in-progress/past span — not upcoming
+            addIfWithinLead(out, row, row.startEpochDay, day)
+        }
+
+        // Recurring events: probe each for its next start after the day, bounded by its own max lead.
+        for (row in dao.allRecurring()) {
+            val payload = EventPayload.fromJson(row.data)
+            val rule = payload.recurrence ?: continue
+            val maxLead = payload.reminders.maxOfOrNull { it.leadDays } ?: continue
+            val occStart = EventRecurrence.nextOccurrenceStart(
+                rule, row.startEpochDay, row.endEpochDay, day, minOf(maxLead, MAX_LOOKAHEAD_DAYS),
+            ) ?: continue
+            addIfWithinLead(out, row, occStart, day, payload)
+        }
+
+        out.sortedWith(upcomingOrder)
+    }
+
+    /** Add [row] to [out] as an [UpcomingEvent] iff some reminder's lead reaches [day] from [occStart]. */
+    private fun addIfWithinLead(
+        out: MutableList<UpcomingEvent>,
+        row: EventEntity,
+        occStart: Long,
+        day: Long,
+        payload: EventPayload = EventPayload.fromJson(row.data),
+    ) {
+        val daysUntil = (occStart - day).toInt()
+        if (daysUntil <= 0) return
+        if (payload.reminders.none { it.leadDays >= daysUntil }) return
+        out.add(UpcomingEvent(row, LocalDate.ofEpochDay(occStart), daysUntil))
+    }
+
     suspend fun get(id: String): EventEntity? = withContext(Dispatchers.IO) { dao.get(id) }
 
     suspend fun save(event: EventEntity) = withContext(Dispatchers.IO) { dao.upsert(event) }
@@ -198,9 +244,28 @@ class EventsRepository(
     }
 
     private companion object {
+        /** How far ahead the *Upcoming* look-ahead ever probes; a reminder lead beyond a year is
+         *  meaningless for a paper-like heads-up and would only slow the recurring scan. */
+        const val MAX_LOOKAHEAD_DAYS = 366
+
         /** All-day events first; then timed by start minute; then title (case-insensitive). */
         val dayOrder: Comparator<EventEntity> = compareByDescending<EventEntity> { it.allDay }
             .thenBy { it.startMinute ?: Int.MAX_VALUE }
             .thenBy(String.CASE_INSENSITIVE_ORDER) { it.title }
+
+        /** Nearest occurrence first; then all-day; then title (case-insensitive). */
+        val upcomingOrder: Comparator<UpcomingEvent> = compareBy<UpcomingEvent> { it.daysUntil }
+            .thenByDescending { it.event.allDay }
+            .thenBy(String.CASE_INSENSITIVE_ORDER) { it.event.title }
     }
 }
+
+/**
+ * A single *Upcoming* look-ahead row: an [event], the [occurrenceStart] date its next occurrence
+ * begins, and [daysUntil] (≥ 1) days from the viewed day to that start.
+ */
+data class UpcomingEvent(
+    val event: EventEntity,
+    val occurrenceStart: LocalDate,
+    val daysUntil: Int,
+)
