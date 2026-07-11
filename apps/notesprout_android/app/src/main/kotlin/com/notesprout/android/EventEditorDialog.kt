@@ -1,7 +1,6 @@
 package com.notesprout.android
 
 import android.app.Activity
-import android.app.DatePickerDialog
 import android.app.TimePickerDialog
 import android.text.format.DateFormat
 import android.view.View
@@ -39,12 +38,20 @@ object EventEditorDialog {
     private val REPEAT_LABELS = listOf("Does not repeat", "Daily", "Weekly", "Monthly", "Yearly")
     private val END_LABELS = listOf("Never", "On a date", "After a number of times")
 
+    /**
+     * [occurrenceStart] re-anchors the pre-filled start/end dates to the tapped occurrence of a
+     * recurring event (its parent anchor is a different, possibly long-past date). Supplying it lets
+     * the user *move* a single occurrence: an untouched date then equals that occurrence's own date,
+     * so a real edit is a real move (see [EventsRepository.editOccurrence] /
+     * [EventsRepository.editThisAndFollowing]). Null → pre-fill from [existing]'s own dates.
+     */
     fun show(
         activity: Activity,
         date: LocalDate,
         existing: EventEntity?,
         onSaved: (EventEntity) -> Unit,
         onDeleted: ((EventEntity) -> Unit)? = null,
+        occurrenceStart: Long? = null,
     ) {
         val b = DialogEventEditorBinding.inflate(activity.layoutInflater)
         val payload = existing?.let { EventPayload.fromJson(it.data) } ?: EventPayload()
@@ -52,8 +59,13 @@ object EventEditorDialog {
         val isNew = existing == null
 
         // ── Mutable working state ───────────────────────────────────────────────
-        var startDate = existing?.let { LocalDate.ofEpochDay(it.startEpochDay) } ?: date
-        var endDate = existing?.let { LocalDate.ofEpochDay(it.endEpochDay) } ?: date
+        // For a recurring occurrence, anchor the shown dates on that occurrence (preserving the span),
+        // not the series' parent anchor — so an untouched date stays put and an edited date moves it.
+        val span = existing?.let { it.endEpochDay - it.startEpochDay } ?: 0L
+        var startDate = occurrenceStart?.let { LocalDate.ofEpochDay(it) }
+            ?: existing?.let { LocalDate.ofEpochDay(it.startEpochDay) } ?: date
+        var endDate = occurrenceStart?.let { LocalDate.ofEpochDay(it + span) }
+            ?: existing?.let { LocalDate.ofEpochDay(it.endEpochDay) } ?: date
         var startMinute: Int? = existing?.startMinute
         var endMinute: Int? = existing?.endMinute
         val weekdays = sortedSetOf<Int>().apply {
@@ -307,12 +319,10 @@ object EventEditorDialog {
         }
     }
 
+    /** All date fields use the shared e-ink [DayPickerDialog] — the same calendar-grid picker the day
+     *  window and calendar views use for day navigation — instead of the native spinner. */
     private fun pickDate(activity: Activity, initial: LocalDate, onPicked: (LocalDate) -> Unit) {
-        DatePickerDialog(
-            activity,
-            { _, y, m, day -> onPicked(LocalDate.of(y, m + 1, day)) },
-            initial.year, initial.monthValue - 1, initial.dayOfMonth,
-        ).show()
+        DayPickerDialog.show(activity, initial, onPicked)
     }
 
     private fun pickTime(activity: Activity, initialMinute: Int, onPicked: (Int) -> Unit) {

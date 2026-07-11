@@ -14,6 +14,7 @@ import androidx.lifecycle.LifecycleCoroutineScope
 import com.notesprout.android.data.EventsRepository
 import com.notesprout.android.data.UpcomingEvent
 import com.notesprout.android.data.events.EventPayload
+import com.notesprout.android.data.events.EventRecurrence
 import com.notesprout.android.data.events.EventType
 import com.notesprout.android.data.index.EventEntity
 import com.notesprout.android.databinding.ItemEventBinding
@@ -142,10 +143,18 @@ class EventsController(
     /** [contextDay] is the occurrence day the edit/delete scopes key off — the viewed day for a
      *  today row, the occurrence day for an Upcoming row (so recurring scopes resolve correctly). */
     private fun openEditor(existing: EventEntity?, contextDay: Long = date().toEpochDay()) {
+        // For a recurring event, anchor the editor's dates on the tapped occurrence (not the series'
+        // parent anchor) so an untouched date stays put and a changed date moves that occurrence.
+        val occurrenceStart = existing?.takeIf { it.recurring }?.let { ev ->
+            EventPayload.fromJson(ev.data).recurrence?.let { rule ->
+                EventRecurrence.occurrenceStartCovering(rule, ev.startEpochDay, ev.endEpochDay, contextDay)
+            }
+        }
         EventEditorDialog.show(
             activity = activity,
             date = LocalDate.ofEpochDay(contextDay),
             existing = existing,
+            occurrenceStart = occurrenceStart,
             onSaved = { entity ->
                 if (existing != null && existing.recurring) {
                     promptEditScope(original = existing, edited = entity, viewedDay = contextDay)

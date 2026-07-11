@@ -161,9 +161,10 @@ class EventsRepository(
 
     /**
      * "Edit this occurrence": exception the tapped occurrence out of the recurring [original] and drop
-     * a standalone one-off carrying [edited]'s fields on that occurrence's own dates. Non-date edits
-     * (title/type/all-day/times) apply; the occurrence keeps its date + span (moving a single
-     * occurrence's day is deliberately out of scope for now — use delete-this + add).
+     * a standalone one-off carrying [edited]'s fields. The exception stays pinned to the occurrence's
+     * *original* start (that is the instance being removed from the series); the one-off lands on
+     * [edited]'s own start/end, so changing the date in the editor **moves** just this occurrence
+     * (and resizing the span carries through too).
      */
     suspend fun editOccurrence(original: EventEntity, edited: EventEntity, viewedDay: Long) =
         withContext(Dispatchers.IO) {
@@ -172,17 +173,14 @@ class EventsRepository(
             val occStart = EventRecurrence.occurrenceStartCovering(
                 rule, original.startEpochDay, original.endEpochDay, viewedDay,
             ) ?: return@withContext
-            val span = original.endEpochDay - original.startEpochDay
             val now = System.currentTimeMillis()
-            // 1) exception the parent at the occurrence start
+            // 1) exception the parent at the original occurrence start
             val parentRule = rule.copy(exceptionDates = (rule.exceptionDates + occStart).distinct())
             dao.upsert(original.copy(data = payload.copy(recurrence = parentRule).toJson(), updatedAt = now))
-            // 2) one-off override on the occurrence's own dates with the edited fields
+            // 2) one-off override on the edited dates (may differ from occStart = a moved occurrence)
             dao.upsert(
                 edited.copy(
                     id = UUID.randomUUID().toString(),
-                    startEpochDay = occStart,
-                    endEpochDay = occStart + span,
                     recurring = false,
                     data = EventPayload(recurrence = null, notes = EventPayload.fromJson(edited.data).notes).toJson(),
                     createdAt = now,
@@ -194,8 +192,11 @@ class EventsRepository(
 
     /**
      * "Edit this and following": end [original] just before the tapped occurrence and start a fresh
-     * series at that occurrence carrying [edited]'s fields + rule (re-anchored, no inherited
-     * exceptions). Splitting at the first occurrence collapses to a whole-series edit.
+     * series carrying [edited]'s fields + rule (re-anchored, no inherited exceptions). The original is
+     * always truncated at the *original* occurrence start; the new series anchors on [edited]'s own
+     * start/end, so changing the date moves this-and-following. Splitting at the first occurrence
+     * collapses to a whole-series edit. (Moving the anchor *earlier* than the split can overlap the
+     * truncated tail — accepted as a rare edge; use "all events" for a clean whole-series shift.)
      */
     suspend fun editThisAndFollowing(original: EventEntity, edited: EventEntity, viewedDay: Long) =
         withContext(Dispatchers.IO) {
@@ -208,18 +209,15 @@ class EventsRepository(
             if (occStart <= original.startEpochDay) {
                 return@withContext editSeries(edited, original)
             }
-            val span = original.endEpochDay - original.startEpochDay
             val editedPayload = EventPayload.fromJson(edited.data)
             val editedRule = editedPayload.recurrence
-            // 1) truncate the original series to end before the split
+            // 1) truncate the original series to end before the original occurrence start
             val truncated = rule.copy(endMode = EndMode.UNTIL, endEpochDay = occStart - 1, endCount = null)
             dao.upsert(original.copy(data = payload.copy(recurrence = truncated).toJson(), updatedAt = now))
-            // 2) new series anchored at the occurrence with the edited fields + rule
+            // 2) new series on the edited dates (may differ from occStart = a moved this-and-following)
             dao.upsert(
                 edited.copy(
                     id = UUID.randomUUID().toString(),
-                    startEpochDay = occStart,
-                    endEpochDay = occStart + span,
                     recurring = editedRule != null,
                     data = EventPayload(
                         recurrence = editedRule?.copy(exceptionDates = emptyList()),

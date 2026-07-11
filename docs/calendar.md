@@ -217,9 +217,11 @@ calendar lands on exactly the view + date the user left.
 ### Date picker
 
 `DayPickerDialog` (`DayPickerDialog.kt` + `res/layout/dialog_day_picker.xml`) is a clean, monochrome,
-e-ink-styled calendar-grid picker shared by the calendar (`tvMonthYear`) and the day window
-(`tvDayDate` / see [day window](#day-detail--the-day-window)). It replaces the native
-`DatePickerDialog` (whose coloured header reads wrong on e-ink) and the old month/year-only dialog.
+e-ink-styled calendar-grid picker shared by the calendar (`tvMonthYear`), the day window
+(`tvDayDate` / see [day window](#day-detail--the-day-window)), and **every date field in the event
+editor** (start/end date + recurrence "Ends on a date", via `EventEditorDialog.pickDate`). It replaces
+the native `DatePickerDialog` (whose coloured header reads wrong on e-ink) and the old month/year-only
+dialog.
 
 - **Day-grid mode:** a Sun–Sat month; `‹ ›` step months; the initially-passed day is a **filled black
   circle** (a true circle via a centred fixed-size square slot, so it never stretches to an ellipse),
@@ -500,7 +502,9 @@ occurrence preserves the anchor's **span length**, so an occurrence starting on 
   toggles / monthly day-vs-ordinal / Ends Never·On date·After N), and the **"Remind me"** builder
   (`etRemindAmount` + `spRemindUnit` days/weeks + Add → removable bordered rows in `llReminders`,
   deduped, sorted by lead). e-ink styled (bordered dialog, no elevation); Delete shown only when
-  editing.
+  editing. All date fields open the shared [`DayPickerDialog`](#date-picker) (not the native spinner).
+  For a recurring event the editor pre-fills dates from the **tapped occurrence** (`occurrenceStart`),
+  not the series anchor — see [occurrence day-move](#per-occurrence-edit--delete-recurring-events).
 
 ### Grid rendering (Month / Week / Day canvas)
 
@@ -541,9 +545,14 @@ Editing or deleting a **recurring** event prompts a scope (`EventsController.pro
   Splitting at the first occurrence collapses to a whole-series op.
 - **All events** — whole-series update / soft-delete; edits carry forward existing `exceptionDates`.
 
-**Known v1 limitation:** in the occurrence / this-and-following *edit* scopes, title/type/all-day/time
-edits apply but **changing the day is ignored** (the occurrence keeps its date/span); date changes
-take effect only in "all events". Moving one occurrence to another day = delete-this + add.
+**Moving an occurrence's day:** all edit scopes honour a date change. The editor pre-fills a recurring
+event's dates from the **tapped occurrence** (not the series' parent anchor — `EventsController.openEditor`
+passes `occurrenceStart` via `EventRecurrence.occurrenceStartCovering`), so an untouched date stays put
+and a changed date moves the instance. *This occurrence* re-homes the one-off override onto the edited
+dates (the exception stays pinned to the original occurrence start); *this and following* anchors the new
+series on the edited dates (the original is still truncated at the original occurrence start — moving the
+anchor *earlier* than the split can overlap the truncated tail, a rare edge; use "all events" for a clean
+whole-series shift). Span (multi-day) changes carry through the same way.
 
 ### Reminders — paper-like look-ahead
 
@@ -575,8 +584,6 @@ event may carry several reminders.
 
 - No import/export of events yet.
 - Grid markers are **not** carried into full-view notebook export (grid export stays event-free).
-- **Planned day-window navigation:** a **Today** button in the day-detail toolbar + tap the date label
-  (upper-right) to pick another day — so the user can move between days without returning to the calendar.
 
 ---
 
