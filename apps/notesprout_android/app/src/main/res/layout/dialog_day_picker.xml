@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Clean e-ink day-grid picker (shared by CalendarActivity + DayDetailActivity). The month
+     header + weekday row + 6×7 day grid are populated in code (DayPickerDialog). The dialog window
+     itself is given shape_bordered + zero elevation by the caller. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:padding="16dp">
+
+    <!-- Month selector row: [<] [Month YYYY] [>] -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="56dp"
+        android:orientation="horizontal"
+        android:gravity="center_vertical">
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnPrevMonth"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:src="@drawable/ic_page_prev"
+            android:contentDescription="Previous month" />
+
+        <TextView
+            android:id="@+id/tvPickerMonthYear"
+            android:layout_width="0dp"
+            android:layout_weight="1"
+            android:layout_height="wrap_content"
+            android:gravity="center"
+            android:textSize="18sp"
+            android:textColor="@color/inkBlack"
+            android:textStyle="bold"
+            android:text="Month 2026" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnNextMonth"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:src="@drawable/ic_page_next"
+            android:contentDescription="Next month" />
+
+    </LinearLayout>
+
+    <!-- Divider -->
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="@color/inkBlack"
+        android:layout_marginTop="8dp"
+        android:layout_marginBottom="8dp" />
+
+    <!-- Weekday header + week rows built in code -->
+    <LinearLayout
+        android:id="@+id/llDayGrid"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical" />
+
+</LinearLayout>

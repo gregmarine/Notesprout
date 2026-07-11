@@ -375,6 +375,8 @@ class DayDetailActivity : AppCompatActivity() {
 
     private fun setupToolbar() {
         binding.btnDayBack.setOnClickListener { handleBackNavigation() }
+        binding.btnDayToday.setOnClickListener { switchToDate(LocalDate.now()) }
+        binding.tvDayDate.setOnClickListener { showDayPicker() }
         binding.btnDayScratchpad.setOnClickListener { startActivity(Intent(this, ScratchpadActivity::class.java)) }
         binding.btnDayUndo.setOnClickListener { undo() }
         binding.btnDayRedo.setOnClickListener { redo() }
@@ -432,6 +434,36 @@ class DayDetailActivity : AppCompatActivity() {
         // choosing the default year, then paint.
         if (mode == ViewMode.HISTORY && !historyYearsLoaded) loadHistoryYearsThenApply()
         else applyViewMode()
+    }
+
+    /**
+     * Reload the whole day window **in place** for [newDate] (Today button / date-label picker): flush
+     * the current note page, swap the date, reset day-scoped state, reload the canvas, and re-apply the
+     * active view — so the user moves between days without returning to the calendar.
+     */
+    private fun switchToDate(newDate: LocalDate) {
+        if (newDate == selectedDate) return
+        if (isShapeTransformMode) exitShapeTransformMode(clearSelection = true)
+        if (isLassoMode) exitLassoMode()
+        hideShapeInsertToolbar()
+        hideFloatingSelectionToolbar()
+        lifecycleScope.launch {
+            saveStrokes() // flush the outgoing page before its ink is cleared off the canvas
+            selectedDate = newDate
+            updateDateLabel()
+            // History year data is keyed to the month/day → force a fresh load on next History entry.
+            historyYearsLoaded = false
+            historyYears = emptyList()
+            historyYear = LocalDate.now().year - 1
+            drawingView.eraseAll() // clear the previous day's ink/objects (page change, not undo)
+            loadDayPage()
+            if (viewMode == ViewMode.HISTORY) loadHistoryYearsThenApply() else applyViewMode()
+        }
+    }
+
+    /** Date picker on the toolbar date label → jump this day window to the chosen day. */
+    private fun showDayPicker() {
+        DayPickerDialog.show(this, selectedDate) { switchToDate(it) }
     }
 
     /** Load years-with-data for this month/day once, pick the default year, then repaint. */

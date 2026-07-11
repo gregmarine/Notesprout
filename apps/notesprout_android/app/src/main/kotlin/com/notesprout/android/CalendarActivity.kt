@@ -443,45 +443,13 @@ class CalendarActivity : AppCompatActivity() {
     }
 
     private fun showMonthYearPicker() {
-        var pickerYear = calYear
-        val view = layoutInflater.inflate(R.layout.dialog_month_year_picker, null)
-        val tvYear = view.findViewById<TextView>(R.id.tvPickerYear)
-        tvYear.text = pickerYear.toString()
-        var dlg: AlertDialog? = null
-
-        view.findViewById<AppCompatImageButton>(R.id.btnYearMinus).setOnClickListener {
-            pickerYear--; tvYear.text = pickerYear.toString()
+        DayPickerDialog.show(this, selectedDate) { date ->
+            selectedDate = date
+            calYear = date.year
+            calMonth = date.monthValue
+            updateMonthYearLabel()
+            navigateCanvas()
         }
-        view.findViewById<AppCompatImageButton>(R.id.btnYearPlus).setOnClickListener {
-            pickerYear++; tvYear.text = pickerYear.toString()
-        }
-
-        val monthIds = intArrayOf(
-            R.id.btnPickMonth01, R.id.btnPickMonth02, R.id.btnPickMonth03,
-            R.id.btnPickMonth04, R.id.btnPickMonth05, R.id.btnPickMonth06,
-            R.id.btnPickMonth07, R.id.btnPickMonth08, R.id.btnPickMonth09,
-            R.id.btnPickMonth10, R.id.btnPickMonth11, R.id.btnPickMonth12,
-        )
-        view.findViewById<AppCompatButton>(monthIds[calMonth - 1]).isSelected = true
-        monthIds.forEachIndexed { i, id ->
-            view.findViewById<AppCompatButton>(id).setOnClickListener {
-                calYear = pickerYear
-                calMonth = i + 1
-                selectedDate = LocalDate.of(calYear, calMonth, 1)
-                updateMonthYearLabel()
-                navigateCanvas()
-                dlg?.dismiss()
-            }
-        }
-
-        dlg = AlertDialog.Builder(this)
-            .setTitle("Select Month & Year")
-            .setView(view)
-            .setNegativeButton("Cancel", null)
-            .create()
-        dlg.show()
-        dlg.window?.setElevation(0f)
-        dlg.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
     }
 
     // ── Page key / spec ────────────────────────────────────────────────────────

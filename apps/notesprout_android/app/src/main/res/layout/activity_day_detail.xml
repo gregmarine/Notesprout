@@ -30,6 +30,20 @@
             android:layout_marginStart="4dp"
             android:layout_marginEnd="4dp" />
 
+        <!-- Jump this day window to today -->
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/btnDayToday"
+            style="@style/Widget.Notesprout.ToggleTextButton"
+            android:text="Today"
+            android:contentDescription="Go to today" />
+
+        <View
+            android:layout_width="1dp"
+            android:layout_height="28dp"
+            android:background="@color/inkBlack"
+            android:layout_marginStart="4dp"
+            android:layout_marginEnd="4dp" />
+
         <!-- View-mode toggles: Events (default) / Note / Notebooks / History -->
         <androidx.appcompat.widget.AppCompatButton
             android:id="@+id/btnDayViewEvents"

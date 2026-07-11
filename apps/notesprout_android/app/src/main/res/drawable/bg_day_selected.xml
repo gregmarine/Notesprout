@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Selected day in the day-grid picker: filled inkBlack circle (white number sits on top),
+     mirroring the calendar template's "today" mark. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="oval">
+    <solid android:color="@color/inkBlack" />
+</shape>
