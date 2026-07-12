@@ -1,17 +1,15 @@
 package com.notesprout.android.recognition
 
 import com.notesprout.android.core.Slog
-import com.notesprout.android.data.HeadingObject
 import com.notesprout.android.data.LiveStroke
 import com.notesprout.android.data.NotebookDao
 import com.notesprout.android.data.NotebookObject
 import com.notesprout.android.data.PageText
-import com.notesprout.android.data.ShapeObject
 import com.notesprout.android.data.ShapeType
-import com.notesprout.android.data.StrokeData
 import com.notesprout.android.data.TYPE_PAGE_TEXT
-import com.notesprout.android.data.TextObject
-import com.notesprout.android.data.parseBoundingBox
+import com.notesprout.android.data.toHeadingStroke
+import com.notesprout.android.data.toShapeRender
+import com.notesprout.android.data.toTextRender
 import java.util.UUID
 import kotlin.math.abs
 import kotlin.math.sin
@@ -36,33 +34,31 @@ object PageTextRepository {
             ?: return PageContent(emptyList(), emptyList(), emptyList(), emptyList())
 
         val strokes: List<LiveStroke> = dao.getStrokesForLayer(layer.id).mapNotNull { row ->
-            val sd = runCatching { StrokeData.fromJson(row.data) }.getOrNull() ?: return@mapNotNull null
-            LiveStroke.fromStrokeData(row.id, sd)
+            runCatching { LiveStroke.fromRow(row) }.getOrNull()
         }
 
         val headings = dao.getHeadingsForLayer(layer.id).mapNotNull { row ->
-            val box = parseBoundingBox(row.boundingBox) ?: return@mapNotNull null
-            val ho = runCatching { HeadingObject.fromJson(row.data) }.getOrNull() ?: return@mapNotNull null
-            val text = ho.recognizedText?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
-            PageContent.HeadingBlock(top = box.top, left = box.left, level = ho.level, text = text)
+            val h = row.toHeadingStroke() ?: return@mapNotNull null
+            val text = h.recognizedText?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+            PageContent.HeadingBlock(top = h.boundingBox.top, left = h.boundingBox.left, level = h.level, text = text)
         }
 
         val textBlocks = dao.getTextObjectsForLayer(layer.id).mapNotNull { row ->
-            val box = parseBoundingBox(row.boundingBox) ?: return@mapNotNull null
-            val to = runCatching { TextObject.fromJson(row.data) }.getOrNull() ?: return@mapNotNull null
-            val md = to.text.takeIf { it.isNotBlank() } ?: return@mapNotNull null
-            PageContent.TextBlock(top = box.top, left = box.left, markdown = md)
+            val t = row.toTextRender() ?: return@mapNotNull null
+            val md = t.text.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+            PageContent.TextBlock(top = t.boundingBox.top, left = t.boundingBox.left, markdown = md)
         }
 
         // Horizontal SHAPE lines → horizontal rules. The Lines tool (type = "line") is template
-        // ruling / guides and is intentionally NOT fed here.
+        // ruling / guides and is intentionally NOT fed here. Density is irrelevant here (we only read
+        // type / rotation / centerY, all density-independent), so decode with density = 1f.
         val ruleTops = dao.getShapeObjectsForLayer(layer.id).mapNotNull { row ->
-            val so = runCatching { ShapeObject.fromJson(row.data) }.getOrNull() ?: return@mapNotNull null
-            if (so.type != ShapeType.LINE) return@mapNotNull null
+            val sr = row.toShapeRender(1f) ?: return@mapNotNull null
+            if (sr.type != ShapeType.LINE) return@mapNotNull null
             // sin(rotation) ≈ 0 for horizontal (rotation near 0° or 180°).
-            val tilt = abs(sin(Math.toRadians(so.rotationDeg.toDouble())))
+            val tilt = abs(sin(Math.toRadians(sr.rotationDeg.toDouble())))
             if (tilt > sin(Math.toRadians(RULE_MAX_TILT_DEG.toDouble()))) return@mapNotNull null
-            so.centerY
+            sr.centerY
         }
 
         return PageContent(strokes, headings, textBlocks, ruleTops)

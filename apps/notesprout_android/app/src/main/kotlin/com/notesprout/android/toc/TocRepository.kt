@@ -5,7 +5,7 @@ import com.notesprout.android.data.HeadingObject
 import com.notesprout.android.data.HeadingStroke
 import com.notesprout.android.data.NotebookDao
 import com.notesprout.android.data.NotebookObject
-import com.notesprout.android.data.parseBoundingBox
+import com.notesprout.android.data.toHeadingStroke
 
 class TocRepository(private val dao: NotebookDao) {
 
@@ -45,22 +45,10 @@ class TocRepository(private val dao: NotebookDao) {
         val entries = mutableListOf<HeadingEntry>()
         for (row in headingRows) {
             val pageId = pageIdByLayerId[row.parentId] ?: continue
-            val box = row.parseBoundingBox() ?: continue
             val pageIndex = pageIndexById[pageId] ?: continue
             val pageNumber = pageNumberById[pageId] ?: continue
-            val headingObject = try {
-                HeadingObject.fromJson(row.data)
-            } catch (e: Exception) {
-                continue
-            }
-            val stroke = HeadingStroke(
-                id = row.id,
-                boundingBox = box,
-                strokes = headingObject.strokes,
-                recognizedText = headingObject.recognizedText,
-                level = headingObject.level,
-            )
-            entries += HeadingEntry(pageId, pageIndex, pageNumber, box, stroke)
+            val stroke = row.toHeadingStroke() ?: continue
+            entries += HeadingEntry(pageId, pageIndex, pageNumber, stroke.boundingBox, stroke)
         }
 
         // Document order: pageIndex asc, top asc, left asc
@@ -102,6 +90,4 @@ class TocRepository(private val dao: NotebookDao) {
 
         return roots
     }
-
-    private fun NotebookObject.parseBoundingBox(): RectF? = parseBoundingBox(boundingBox)
 }

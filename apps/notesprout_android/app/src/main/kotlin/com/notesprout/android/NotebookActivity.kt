@@ -9378,7 +9378,7 @@ class NotebookActivity : AppCompatActivity() {
             } else {
                 val strokeObj = withContext(Dispatchers.IO) { dao.getObjectById(strokeId) }
                 val restored = strokeObj?.let {
-                    try { LiveStroke.fromStrokeData(it.id, StrokeData.fromJson(it.data)) }
+                    try { LiveStroke.fromRow(it) }
                     catch (e: Exception) {
                         Log.e(TAG, "executeAction: failed to deserialize stroke $strokeId", e); null
                     }
@@ -11121,7 +11121,7 @@ class NotebookActivity : AppCompatActivity() {
             } else {
                 val strokeObj = withContext(Dispatchers.IO) { dao.getObjectById(strokeId) }
                 val restored = strokeObj?.let {
-                    try { LiveStroke.fromStrokeData(it.id, StrokeData.fromJson(it.data)) }
+                    try { LiveStroke.fromRow(it) }
                     catch (e: Exception) {
                         Log.e(TAG, "executeAction: failed to deserialize stroke $strokeId", e); null
                     }

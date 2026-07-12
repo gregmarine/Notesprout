@@ -44,21 +44,34 @@ fun topHeadingNamesByPageId(db: SoilRawDb): Map<String, String> {
     val bestAnyByPage = HashMap<String, Candidate>()
 
     db.rawQuery(
-        "SELECT parentId, boundingBox, data FROM notebook WHERE type = 'heading' AND deletedAt IS NULL",
+        "SELECT parentId, boundingBox, data, text, level, x, y, width, height " +
+            "FROM notebook WHERE type = 'heading' AND deletedAt IS NULL",
         null
     ).use { c ->
         while (c.moveToNext()) {
             val layerId = c.getString(0) ?: continue
             val pageId = pageIdByLayerId[layerId] ?: continue
-            val box = parseBoundingBox(c.getString(1) ?: continue) ?: continue
-            val data = c.getString(2) ?: continue
-            val headingObject = try {
-                HeadingObject.fromJson(data)
-            } catch (e: Exception) {
-                continue
+            val data = c.getString(2)
+            val box: RectF
+            val text: String?
+            val level: Int
+            if (data.isNullOrEmpty()) {
+                // Columnar heading row: geometry + recognizedText/level live in typed columns.
+                if (c.isNull(5) || c.isNull(6) || c.isNull(7) || c.isNull(8)) continue
+                val x = c.getFloat(5); val y = c.getFloat(6); val w = c.getFloat(7); val h = c.getFloat(8)
+                box = RectF(x, y, x + w, y + h)
+                text = if (c.isNull(3)) null else c.getString(3)
+                level = if (c.isNull(4)) 1 else c.getInt(4)
+            } else {
+                box = parseBoundingBox(c.getString(1) ?: continue) ?: continue
+                val headingObject = try {
+                    HeadingObject.fromJson(data)
+                } catch (e: Exception) {
+                    continue
+                }
+                text = headingObject.recognizedText
+                level = headingObject.level
             }
-            val text = headingObject.recognizedText
-            val level = headingObject.level
             val candidate = Candidate(box, text)
 
             // Update bestAny — top-left-most of any level
