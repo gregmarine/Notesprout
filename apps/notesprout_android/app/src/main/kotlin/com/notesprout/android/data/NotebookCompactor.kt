@@ -278,6 +278,37 @@ object NotebookCompactor {
         return changed
     }
 
+    /**
+     * Bulk-convert the legacy JSON strokes in the global index's `calendar` + `scratchpad` tables to
+     * the binary blob format (data-model-optimization Phase 3). Existing rows never convert on normal
+     * use (their saveStrokes path is INSERT-OR-IGNORE, so an edit re-inserts nothing), so this one-shot
+     * pass — invoked from the user's "Compact Notebooks" sweep — reclaims the backlog (~29MB → ~6MB
+     * measured). Batched in one transaction; self-limiting via the blob-null filter; VACUUMs once.
+     * Returns the number of strokes converted.
+     */
+    suspend fun compactCalendarScratchpadStrokes(): Int {
+        val db = NotesproutIndex.db()
+        val calDao = NotesproutIndex.calendarDao()
+        val scratchDao = NotesproutIndex.scratchpadDao()
+        var converted = 0
+        db.withTransaction {
+            for (r in calDao.legacyStrokeRowsToConvert()) {
+                val sd = try { StrokeData.fromJson(r.data) } catch (e: Exception) { continue }
+                if (sd.points.isEmpty()) continue
+                calDao.convertStrokeToBlobKeepingTimestamp(r.id, LiveStroke.packPoints(sd.toPointFs()), sd.color, sd.strokeWidth)
+                converted++
+            }
+            for (r in scratchDao.legacyStrokeRowsToConvert()) {
+                val sd = try { StrokeData.fromJson(r.data) } catch (e: Exception) { continue }
+                if (sd.points.isEmpty()) continue
+                scratchDao.convertStrokeToBlobKeepingTimestamp(r.id, LiveStroke.packPoints(sd.toPointFs()), sd.color, sd.strokeWidth)
+                converted++
+            }
+        }
+        if (converted > 0) db.openHelper.writableDatabase.execSQL("VACUUM")
+        return converted
+    }
+
     private fun transcodeIndexRow(type: String, data: String): String? = when (type) {
         ObjectType.TEMPLATE -> {
             val t = TemplateObject.fromJson(data) ?: return null

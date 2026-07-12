@@ -2302,6 +2302,7 @@ class MainActivity : AppCompatActivity() {
         var skippedEncrypted = 0
         var errors = 0
         var indexRows = 0
+        var calScratchStrokes = 0
 
         withContext(Dispatchers.IO) {
             val notebooks = repository.getAllNotebooks()
@@ -2336,6 +2337,10 @@ class MainActivity : AppCompatActivity() {
             withContext(Dispatchers.Main) { tvMessage.text = "Compacting index…" }
             runCatching { indexRows = NotebookCompactor.compactIndex() }
                 .onFailure { errors++; Slog.d("MainActivity") { "index compaction failed: ${it.message}" } }
+            // …and bulk-convert the calendar + scratchpad legacy strokes to binary (Phase 3 backlog).
+            withContext(Dispatchers.Main) { tvMessage.text = "Compacting calendar & scratch pad…" }
+            runCatching { calScratchStrokes = NotebookCompactor.compactCalendarScratchpadStrokes() }
+                .onFailure { errors++; Slog.d("MainActivity") { "calendar/scratchpad compaction failed: ${it.message}" } }
         }
 
         dialog.dismiss()
@@ -2343,6 +2348,8 @@ class MainActivity : AppCompatActivity() {
         val summary = StringBuilder("Compacted $compacted notebook${if (compacted == 1) "" else "s"} — freed $freedMb MB.")
         if (indexRows > 0)
             summary.append("\n\nConverted $indexRows index image${if (indexRows == 1) "" else "s"} to WEBP.")
+        if (calScratchStrokes > 0)
+            summary.append("\n\nConverted $calScratchStrokes calendar/scratch-pad stroke${if (calScratchStrokes == 1) "" else "s"} to binary.")
         if (skippedEncrypted > 0)
             summary.append("\n\n$skippedEncrypted encrypted notebook${if (skippedEncrypted == 1) "" else "s"} skipped — they compact when you open them.")
         if (errors > 0)

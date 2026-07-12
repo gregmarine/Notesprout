@@ -4,6 +4,7 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import com.notesprout.android.data.StrokeRowData
 
 /** CRUD for the `calendar` table — mirrors [ScratchpadDao] against the calendar table. */
 @Dao
@@ -27,6 +28,17 @@ interface CalendarDao {
 
     @Query("SELECT * FROM calendar WHERE type = 'stroke' AND parentId = :layerId AND deletedAt IS NULL ORDER BY `order` ASC")
     suspend fun getStrokesForLayer(layerId: String): List<CalendarEntity>
+
+    // ── Lazy stroke-format conversion (data-model-optimization Phase 3) ─────────
+    // Existing calendar strokes stay legacy JSON (saveStrokes uses INSERT-OR-IGNORE, so they never
+    // rewrite on edit). NotebookCompactor.compactCalendarScratchpadStrokes converts them in bulk when
+    // the user runs "Compact Notebooks". Self-limiting via the blob-null filter.
+
+    @Query("SELECT id, data FROM calendar WHERE type = 'stroke' AND blob IS NULL AND data LIKE '%\"points\":%'")
+    suspend fun legacyStrokeRowsToConvert(): List<StrokeRowData>
+
+    @Query("UPDATE calendar SET blob = :blob, color = :color, strokeWidth = :strokeWidth, data = '', boundingBox = '' WHERE id = :id")
+    suspend fun convertStrokeToBlobKeepingTimestamp(id: String, blob: ByteArray, color: String, strokeWidth: Float)
 
     @Query("SELECT * FROM calendar WHERE type = 'heading' AND parentId = :layerId AND deletedAt IS NULL ORDER BY `order` ASC")
     suspend fun getHeadingsForLayer(layerId: String): List<CalendarEntity>

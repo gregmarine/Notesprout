@@ -4,6 +4,7 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import com.notesprout.android.data.StrokeRowData
 
 @Dao
 interface ScratchpadDao {
@@ -32,6 +33,14 @@ interface ScratchpadDao {
 
     @Query("SELECT * FROM scratchpad WHERE type = 'stroke' AND parentId = :layerId AND deletedAt IS NULL ORDER BY `order` ASC")
     suspend fun getStrokesForLayer(layerId: String): List<ScratchpadEntity>
+
+    // ── Lazy stroke-format conversion (data-model-optimization Phase 3) ─────────
+
+    @Query("SELECT id, data FROM scratchpad WHERE type = 'stroke' AND blob IS NULL AND data LIKE '%\"points\":%'")
+    suspend fun legacyStrokeRowsToConvert(): List<StrokeRowData>
+
+    @Query("UPDATE scratchpad SET blob = :blob, color = :color, strokeWidth = :strokeWidth, data = '', boundingBox = '' WHERE id = :id")
+    suspend fun convertStrokeToBlobKeepingTimestamp(id: String, blob: ByteArray, color: String, strokeWidth: Float)
 
     @Query("SELECT * FROM scratchpad WHERE type = 'heading' AND parentId = :layerId AND deletedAt IS NULL ORDER BY `order` ASC")
     suspend fun getHeadingsForLayer(layerId: String): List<ScratchpadEntity>
