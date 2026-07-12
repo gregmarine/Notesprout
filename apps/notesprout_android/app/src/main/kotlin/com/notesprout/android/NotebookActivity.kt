@@ -60,6 +60,7 @@ import com.notesprout.android.data.TextRender
 import com.notesprout.android.data.LineObject
 import com.notesprout.android.data.LineOrientation
 import com.notesprout.android.data.LineRender
+import com.notesprout.android.data.toLineRender
 import com.notesprout.android.data.LineStyle
 import com.notesprout.android.data.LinkChrome
 import com.notesprout.android.data.LinkObject
@@ -4224,22 +4225,8 @@ class NotebookActivity : AppCompatActivity() {
 
     private suspend fun loadLineObjectsFromDb(db: SoilDatabase, layerId: String): List<LineRender> {
         if (layerId.isEmpty()) return emptyList()
-        val rows = db.notebookDao().getLineObjectsForLayer(layerId)
-        return rows.mapNotNull { row ->
-            val box = row.parseBoundingBox() ?: return@mapNotNull null
-            val lineObj = runCatching { LineObject.fromJson(row.data) }.getOrNull()
-                ?: return@mapNotNull null
-            val startX: Float; val startY: Float; val endX: Float; val endY: Float
-            when (lineObj.orientation) {
-                LineOrientation.HORIZONTAL -> {
-                    startX = box.left; endX = box.right; startY = box.centerY(); endY = box.centerY()
-                }
-                LineOrientation.VERTICAL -> {
-                    startX = box.centerX(); endX = box.centerX(); startY = box.top; endY = box.bottom
-                }
-            }
-            LineRender(row.id, box, startX, startY, endX, endY, lineObj.style, lineObj.orientation, lineObj.strokeWidthDp, lineObj.dotSpacingDp * resources.displayMetrics.density)
-        }
+        val density = resources.displayMetrics.density
+        return db.notebookDao().getLineObjectsForLayer(layerId).mapNotNull { it.toLineRender(density) }
     }
 
     /**
