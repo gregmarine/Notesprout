@@ -228,3 +228,40 @@ fun NotebookObject.toLinkRender(density: Float): LinkRender? {
         lines = lo.lines.map { it.toLineRender(density) },
     )
 }
+
+// ── Sticky note ──────────────────────────────────────────────────────────────
+// The icon rectangle goes to x/y/width/height; the content-window pixel size goes to
+// contentW/contentH; the embedded content (own coordinate space) stays atomic in `blob` as
+// zlib(JSON(StickyNoteObject)). A columnar row has data == "".
+
+fun StickyNoteRender.toRow(
+    parentId: String, order: Int, createdAt: Long, updatedAt: Long, density: Float, deletedAt: Long? = null,
+): NotebookObject {
+    val b = boundingBox
+    return NotebookObject(
+        id = id, parentId = parentId, boundingBox = "", sortOrder = order,
+        createdAt = createdAt, updatedAt = updatedAt, deletedAt = deletedAt, type = TYPE_STICKY_NOTE, data = "",
+        x = b.left, y = b.top, width = b.width(), height = b.height(),
+        contentW = contentWidth, contentH = contentHeight,
+        blob = deflateString(toStickyNoteObject(density).toJson()),
+    )
+}
+
+/**
+ * Decode a `sticky_note` row to a render-time [StickyNoteRender] (columns+blob when present, else
+ * legacy JSON). Embedded shapes ARE surfaced (matches the exporter's lossless read).
+ */
+fun NotebookObject.toStickyNoteRender(density: Float): StickyNoteRender? {
+    val box = boxOrLegacy() ?: return null
+    val obj = if (data.isEmpty()) {
+        blob?.let { runCatching { StickyNoteObject.fromJson(inflateString(it)) }.getOrNull() } ?: return null
+    } else {
+        runCatching { StickyNoteObject.fromJson(data) }.getOrNull() ?: return null
+    }
+    return StickyNoteRender(
+        id = id, boundingBox = box,
+        strokes = obj.strokes, headings = obj.headings, textObjects = obj.textObjects,
+        lines = obj.lines.map { it.toLineRender(density) }, shapes = obj.shapes,
+        contentWidth = obj.contentWidth, contentHeight = obj.contentHeight,
+    )
+}

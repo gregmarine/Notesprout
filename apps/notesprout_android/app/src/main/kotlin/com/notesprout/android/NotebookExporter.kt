@@ -35,8 +35,8 @@ import com.notesprout.android.data.LiveStroke
 import com.notesprout.android.notebook.ShapeGeometry
 import com.notesprout.android.data.NotebookDao
 import com.notesprout.android.data.NotebookObject
-import com.notesprout.android.data.StickyNoteObject
 import com.notesprout.android.data.StickyNoteRender
+import com.notesprout.android.data.toStickyNoteRender
 import com.notesprout.android.data.TextObject
 import com.notesprout.android.data.TextRender
 import com.notesprout.android.data.NotebookMetadata
@@ -530,22 +530,7 @@ object NotebookExporter {
         } else emptyList()
 
         val stickyNotes: List<StickyNoteRender> = if (layer != null) {
-            dao.getStickyNotesForLayer(layer.id).mapNotNull { row ->
-                val box = parseBoundingBox(row.boundingBox) ?: return@mapNotNull null
-                val obj = runCatching { StickyNoteObject.fromJson(row.data) }.getOrNull()
-                    ?: return@mapNotNull null
-                StickyNoteRender(
-                    id = row.id,
-                    boundingBox = box,
-                    strokes = obj.strokes,
-                    headings = obj.headings,
-                    textObjects = obj.textObjects,
-                    lines = obj.lines.map { it.toLineRender(density) },
-                    shapes = obj.shapes,
-                    contentWidth = obj.contentWidth,
-                    contentHeight = obj.contentHeight,
-                )
-            }
+            dao.getStickyNotesForLayer(layer.id).mapNotNull { it.toStickyNoteRender(density) }
         } else emptyList()
 
         val strokes: List<LiveStroke> = if (layer != null) {

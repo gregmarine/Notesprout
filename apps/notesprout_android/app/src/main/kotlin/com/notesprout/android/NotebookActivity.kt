@@ -81,9 +81,9 @@ import com.notesprout.android.data.TYPE_LINK
 import com.notesprout.android.data.TYPE_SHAPE
 import com.notesprout.android.data.TYPE_STICKY_NOTE
 import com.notesprout.android.data.TYPE_TEXT
-import com.notesprout.android.data.StickyNoteObject
 import com.notesprout.android.data.StickyNoteRender
 import com.notesprout.android.data.toStickyNoteObject
+import com.notesprout.android.data.toStickyNoteRender
 import com.notesprout.android.core.markdown.TextObjectRenderer
 import android.text.TextPaint
 import com.notesprout.android.data.NotebookDao
@@ -851,12 +851,12 @@ class NotebookActivity : AppCompatActivity() {
         val density = resources.displayMetrics.density
 
         if (out != null && db != null && pageId != null) {
-            val afterData  = afterRender.toStickyNoteObject(density).toJson()
-            val beforeData = pending.toStickyNoteObject(density).toJson()
-            if (afterData != beforeData) {
+            val afterObj  = afterRender.toStickyNoteObject(density)
+            val beforeObj = pending.toStickyNoteObject(density)
+            if (afterObj != beforeObj) {
                 lifecycleScope.launch {
                     withContext(Dispatchers.IO) {
-                        db.notebookDao().updateData(pending.id, afterData, System.currentTimeMillis())
+                        db.notebookDao().updateColumns(afterRender.toRow("", 0, 0L, System.currentTimeMillis(), density))
                         noteContentEdit(db, pageId)
                     }
                     val updatedNotes = drawingView.getStickyNotes().map {
@@ -1936,10 +1936,7 @@ class NotebookActivity : AppCompatActivity() {
                                 db.notebookDao().updateColumns(link.toRow("", 0, now, now, density))
                             }
                             for (note in movedStickyNotes) {
-                                val bboxJson = note.boundingBox.toBoundingBoxJson()
-                                db.notebookDao().updateHeadingData(
-                                    note.id, bboxJson, note.toStickyNoteObject(density).toJson(), now
-                                )
+                                db.notebookDao().updateColumns(note.toRow("", 0, now, now, density))
                             }
                             for (shape in movedShapes) {
                                 db.notebookDao().updateColumns(shape.toRow("", 0, now, now, density))
@@ -4226,20 +4223,7 @@ class NotebookActivity : AppCompatActivity() {
         if (layerId.isEmpty()) return emptyList()
         val density = resources.displayMetrics.density
         val rows = db.notebookDao().getStickyNotesForLayer(layerId)
-        return rows.mapNotNull { row ->
-            val box = row.parseBoundingBox() ?: return@mapNotNull null
-            val noteObj = runCatching { StickyNoteObject.fromJson(row.data) }.getOrNull() ?: return@mapNotNull null
-            StickyNoteRender(
-                id           = row.id,
-                boundingBox  = box,
-                strokes      = noteObj.strokes,
-                headings     = noteObj.headings,
-                textObjects  = noteObj.textObjects,
-                lines        = noteObj.lines.map { it.toLineRender(density) },
-                contentWidth = noteObj.contentWidth,
-                contentHeight = noteObj.contentHeight,
-            )
-        }
+        return rows.mapNotNull { row -> row.toStickyNoteRender(density) }
     }
 
     private suspend fun loadShapeObjectsFromDb(db: SoilDatabase, layerId: String): List<com.notesprout.android.data.ShapeRender> {
@@ -5409,19 +5393,7 @@ class NotebookActivity : AppCompatActivity() {
                         dao.insertOrIgnore(link.toRow(layerId, 0, now, now, density))
                     }
                     newStickyNotes.forEach { note ->
-                        dao.insertOrIgnore(
-                            NotebookObject(
-                                id          = note.id,
-                                type        = TYPE_STICKY_NOTE,
-                                parentId    = layerId,
-                                boundingBox = note.boundingBox.toBoundingBoxJson(),
-                                sortOrder   = 0,
-                                createdAt   = now,
-                                updatedAt   = now,
-                                deletedAt   = null,
-                                data        = note.toStickyNoteObject(density).toJson(),
-                            )
-                        )
+                        dao.insertOrIgnore(note.toRow(layerId, 0, now, now, density))
                     }
                     newShapes.forEach { shape ->
                         dao.insertOrIgnore(shape.toRow(layerId, 0, now, now, density))
@@ -5595,19 +5567,7 @@ class NotebookActivity : AppCompatActivity() {
                         dao.insertOrIgnore(link.toRow(layerId, 0, now, now, density))
                     }
                     newStickyNotes.forEach { note ->
-                        dao.insertOrIgnore(
-                            NotebookObject(
-                                id          = note.id,
-                                type        = TYPE_STICKY_NOTE,
-                                parentId    = layerId,
-                                boundingBox = note.boundingBox.toBoundingBoxJson(),
-                                sortOrder   = 0,
-                                createdAt   = now,
-                                updatedAt   = now,
-                                deletedAt   = null,
-                                data        = note.toStickyNoteObject(density).toJson(),
-                            )
-                        )
+                        dao.insertOrIgnore(note.toRow(layerId, 0, now, now, density))
                     }
                     newShapes.forEach { shape ->
                         dao.insertOrIgnore(shape.toRow(layerId, 0, now, now, density))
@@ -7906,26 +7866,13 @@ class NotebookActivity : AppCompatActivity() {
 
             val noteId   = java.util.UUID.randomUUID().toString()
             val now      = System.currentTimeMillis()
-            val bboxJson = bbox.toBoundingBoxJson()
+            val noteRender = StickyNoteRender(id = noteId, boundingBox = bbox)
 
             withContext(Dispatchers.IO) {
-                db.notebookDao().insertObject(
-                    NotebookObject(
-                        id          = noteId,
-                        parentId    = layerId,
-                        type        = TYPE_STICKY_NOTE,
-                        boundingBox = bboxJson,
-                        sortOrder   = 0,
-                        createdAt   = now,
-                        updatedAt   = now,
-                        deletedAt   = null,
-                        data        = StickyNoteObject().toJson(),
-                    )
-                )
+                db.notebookDao().insertObject(noteRender.toRow(layerId, 0, now, now, density))
                 noteContentEdit(db, pageId)
             }
 
-            val noteRender     = StickyNoteRender(id = noteId, boundingBox = bbox)
             val updatedNotes   = drawingView.getStickyNotes() + noteRender
             drawingView.loadStickyNotes(updatedNotes)
 
@@ -9930,7 +9877,7 @@ class NotebookActivity : AppCompatActivity() {
                         dao.updateColumns(link.toRow("", 0, now, now, density))
                     }
                     for (note in targetStickyNotes) {
-                        dao.updateHeadingData(note.id, note.boundingBox.toBoundingBoxJson(), note.toStickyNoteObject(density).toJson(), now)
+                        dao.updateColumns(note.toRow("", 0, now, now, density))
                     }
                     val targetShapes = if (isUndo) action.originalShapes else action.movedShapes
                     for (shape in targetShapes) {
@@ -10116,7 +10063,7 @@ class NotebookActivity : AppCompatActivity() {
             is UndoRedoAction.StickyNoteContentEdited -> withContext(Dispatchers.IO) {
                 val density = resources.displayMetrics.density
                 val target  = if (isUndo) action.before else action.after
-                dao.updateData(action.noteId, target.toStickyNoteObject(density).toJson(), now)
+                dao.updateColumns(target.toRow("", 0, 0L, now, density))
                 noteContentEdit(db, action.pageId)
             }
 
