@@ -61,6 +61,8 @@ import com.notesprout.android.data.LineObject
 import com.notesprout.android.data.LineOrientation
 import com.notesprout.android.data.LineRender
 import com.notesprout.android.data.toLineRender
+import com.notesprout.android.data.toRow
+import com.notesprout.android.data.updateColumns
 import com.notesprout.android.data.LineStyle
 import com.notesprout.android.data.LinkChrome
 import com.notesprout.android.data.LinkObject
@@ -1932,10 +1934,7 @@ class NotebookActivity : AppCompatActivity() {
                                 )
                             }
                             for (lineObj in movedLineObjects) {
-                                val bboxJson = lineObj.boundingBox.toBoundingBoxJson()
-                                db.notebookDao().updateHeadingData(
-                                    lineObj.id, bboxJson, LineObject(lineObj.style, lineObj.orientation, lineObj.strokeWidthDp, lineObj.dotSpacingPx / density).toJson(), now
-                                )
+                                db.notebookDao().updateColumns(lineObj.toRow("", 0, now, now, density))
                             }
                             for (link in movedLinks) {
                                 val bboxJson = link.boundingBox.toBoundingBoxJson()
@@ -5470,21 +5469,7 @@ class NotebookActivity : AppCompatActivity() {
                         )
                     }
                     newLineObjects.forEach { lineObj ->
-                        val bb = lineObj.boundingBox
-                        val bboxJson = bb.toBoundingBoxJson()
-                        dao.insertOrIgnore(
-                            NotebookObject(
-                                id          = lineObj.id,
-                                type        = TYPE_LINE,
-                                parentId    = layerId,
-                                boundingBox = bboxJson,
-                                sortOrder   = 0,
-                                createdAt   = now,
-                                updatedAt   = now,
-                                deletedAt   = null,
-                                data        = LineObject(lineObj.style, lineObj.orientation, lineObj.strokeWidthDp, lineObj.dotSpacingPx / density).toJson(),
-                            )
-                        )
+                        dao.insertOrIgnore(lineObj.toRow(layerId, 0, now, now, density))
                     }
                     newLinks.forEach { link ->
                         dao.insertOrIgnore(
@@ -5718,19 +5703,7 @@ class NotebookActivity : AppCompatActivity() {
                         )
                     }
                     newLineObjects.forEach { lineObj ->
-                        dao.insertOrIgnore(
-                            NotebookObject(
-                                id          = lineObj.id,
-                                type        = TYPE_LINE,
-                                parentId    = layerId,
-                                boundingBox = lineObj.boundingBox.toBoundingBoxJson(),
-                                sortOrder   = 0,
-                                createdAt   = now,
-                                updatedAt   = now,
-                                deletedAt   = null,
-                                data        = LineObject(lineObj.style, lineObj.orientation, lineObj.strokeWidthDp, lineObj.dotSpacingPx / density).toJson(),
-                            )
-                        )
+                        dao.insertOrIgnore(lineObj.toRow(layerId, 0, now, now, density))
                     }
                     newLinks.forEach { link ->
                         dao.insertOrIgnore(
@@ -7089,8 +7062,7 @@ class NotebookActivity : AppCompatActivity() {
                 dao.insertObject(NotebookObject(t.id, layerId, t.boundingBox.toBoundingBoxJson(), 0, now, now, null, TYPE_TEXT, data))
             }
             restoredLines.forEach { l ->
-                val data = LineObject(l.style, l.orientation, l.strokeWidthDp, l.dotSpacingPx / density).toJson()
-                dao.insertObject(NotebookObject(l.id, layerId, l.boundingBox.toBoundingBoxJson(), 0, now, now, null, TYPE_LINE, data))
+                dao.insertObject(l.toRow(layerId, 0, now, now, density))
             }
         }
         noteContentEdit(db, pageId)
@@ -7652,11 +7624,7 @@ class NotebookActivity : AppCompatActivity() {
                     )
                 }
                 for (lineObj in movedLines) {
-                    val bb = lineObj.boundingBox
-                    val bboxJson = bb.toBoundingBoxJson()
-                    db.notebookDao().updateHeadingData(
-                        lineObj.id, bboxJson, LineObject(lineObj.style, lineObj.orientation, lineObj.strokeWidthDp, lineObj.dotSpacingPx / resources.displayMetrics.density).toJson(), now
-                    )
+                    db.notebookDao().updateColumns(lineObj.toRow("", 0, now, now, resources.displayMetrics.density))
                 }
             }
             noteContentEdit(db, pageId)
@@ -8280,23 +8248,7 @@ class NotebookActivity : AppCompatActivity() {
                 db.withTransaction {
                     val dao = db.notebookDao()
                     lines.forEach { line ->
-                        val bb = line.boundingBox
-                        val bboxJson = bb.toBoundingBoxJson()
-                        val dotSpacingDp = line.dotSpacingPx / resources.displayMetrics.density
-                        val dataJson = LineObject(line.style, line.orientation, line.strokeWidthDp, dotSpacingDp).toJson()
-                        dao.insertObject(
-                            NotebookObject(
-                                id          = line.id,
-                                parentId    = layerId,
-                                type        = TYPE_LINE,
-                                boundingBox = bboxJson,
-                                sortOrder   = 0,
-                                createdAt   = now,
-                                updatedAt   = now,
-                                deletedAt   = null,
-                                data        = dataJson,
-                            )
-                        )
+                        dao.insertObject(line.toRow(layerId, 0, now, now, resources.displayMetrics.density))
                     }
                     noteContentEdit(db, pageId)
                 }
@@ -9642,9 +9594,7 @@ class NotebookActivity : AppCompatActivity() {
                         dao.updateHeadingData(textObj.id, bboxJson, TextObject(text = textObj.text, strokes = textObj.strokes).toJson(), ts)
                     }
                     for (lineObj in targetLines) {
-                        val bb = lineObj.boundingBox
-                        val bboxJson = bb.toBoundingBoxJson()
-                        dao.updateHeadingData(lineObj.id, bboxJson, LineObject(lineObj.style, lineObj.orientation, lineObj.strokeWidthDp, lineObj.dotSpacingPx / density).toJson(), ts)
+                        dao.updateColumns(lineObj.toRow("", 0, ts, ts, density))
                     }
                     for (link in targetLinks) {
                         dao.updateHeadingData(link.id, link.boundingBox.toBoundingBoxJson(), link.toLinkObject(density).toJson(), ts)
@@ -10255,9 +10205,7 @@ class NotebookActivity : AppCompatActivity() {
                         dao.updateHeadingData(textObj.id, bbJson, TextObject(text = textObj.text, strokes = textObj.strokes).toJson(), now)
                     }
                     for (lineObj in targetLines) {
-                        val bb = lineObj.boundingBox
-                        val bbJson = bb.toBoundingBoxJson()
-                        dao.updateHeadingData(lineObj.id, bbJson, LineObject(lineObj.style, lineObj.orientation, lineObj.strokeWidthDp, lineObj.dotSpacingPx / density).toJson(), now)
+                        dao.updateColumns(lineObj.toRow("", 0, now, now, density))
                     }
                     for (link in targetLinks) {
                         dao.updateHeadingData(link.id, link.boundingBox.toBoundingBoxJson(), link.toLinkObject(density).toJson(), now)

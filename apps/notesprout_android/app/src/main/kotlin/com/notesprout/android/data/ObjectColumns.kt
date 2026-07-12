@@ -16,6 +16,18 @@ import android.graphics.RectF
  * index tables ([com.notesprout.android.data.index.ObjectEntity]) stay JSON (that is Phase 2).
  */
 
+/**
+ * In-place columnar update from a `toRow()`-built [row]: writes its payload columns + `updatedAt`
+ * (structural fields — parentId/order/createdAt — are ignored, so `toRow`'s placeholders for them are
+ * irrelevant). The one primitive behind every non-stroke lasso-move / edit re-persist.
+ */
+suspend fun NotebookDao.updateColumns(row: NotebookObject) = updateObjectColumns(
+    row.id, row.x, row.y, row.width, row.height, row.text, row.color, row.strokeWidth, row.refId,
+    row.level, row.lineStyle, row.orientation, row.dotSpacing, row.shapeType, row.centerX, row.centerY,
+    row.rotationDeg, row.pointCount, row.contentW, row.contentH, row.linkTarget, row.chrome, row.flags,
+    row.blob, row.updatedAt,
+)
+
 /** Geometry from the typed x/y/width/height columns, or the legacy `boundingBox` JSON. */
 fun NotebookObject.boxOrLegacy(): RectF? {
     val lx = x; val ly = y; val lw = width; val lh = height

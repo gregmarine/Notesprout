@@ -382,6 +382,29 @@ interface NotebookDao {
     @Query("UPDATE notebook SET data = :data WHERE id = :id")
     suspend fun rewriteObjectDataKeepingTimestamp(id: String, data: String)
 
+    /**
+     * Generic columnar update (data-model-optimization Phase 1, step 4): overwrite every payload
+     * column + `updatedAt` for the row [id], clearing the legacy `data`/`boundingBox`. Does NOT touch
+     * `createdAt`/`parentId`/`order` (structural), so it is the in-place counterpart to the per-type
+     * `toRow()` builders — used by every non-stroke lasso-move / edit re-persist path. Prefer the
+     * [com.notesprout.android.data.updateColumns] extension, which feeds this from a `toRow()` row.
+     */
+    @Query(
+        "UPDATE notebook SET boundingBox = '', data = '', x = :x, y = :y, width = :width, " +
+        "height = :height, text = :text, color = :color, strokeWidth = :strokeWidth, refId = :refId, " +
+        "level = :level, lineStyle = :lineStyle, orientation = :orientation, dotSpacing = :dotSpacing, " +
+        "shapeType = :shapeType, centerX = :centerX, centerY = :centerY, rotationDeg = :rotationDeg, " +
+        "pointCount = :pointCount, contentW = :contentW, contentH = :contentH, linkTarget = :linkTarget, " +
+        "chrome = :chrome, flags = :flags, blob = :blob, updatedAt = :updatedAt WHERE id = :id"
+    )
+    suspend fun updateObjectColumns(
+        id: String, x: Float?, y: Float?, width: Float?, height: Float?, text: String?, color: String?,
+        strokeWidth: Float?, refId: String?, level: Int?, lineStyle: String?, orientation: String?,
+        dotSpacing: Float?, shapeType: String?, centerX: Float?, centerY: Float?, rotationDeg: Float?,
+        pointCount: Int?, contentW: Float?, contentH: Float?, linkTarget: String?, chrome: String?,
+        flags: Int?, blob: ByteArray?, updatedAt: Long,
+    )
+
     // ── Lazy stroke-format conversion (data-model-optimization Phase 1) ─────────
 
     /**
