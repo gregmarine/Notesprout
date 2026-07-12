@@ -691,6 +691,7 @@ sealed class UndoRedoAction {
         val restoredHeadingIds: List<String> = emptyList(),
         val restoredTextIds: List<String> = emptyList(),
         val restoredLineIds: List<String> = emptyList(),
+        val restoredShapeIds: List<String> = emptyList(),
     ) : UndoRedoAction()
 
     /**

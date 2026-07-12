@@ -6819,6 +6819,7 @@ class NotebookActivity : AppCompatActivity() {
         val restoredHeadings = link.headings.map { it.copy(id = UUID.randomUUID().toString(), boundingBox = RectF(it.boundingBox)) }
         val restoredTexts    = link.textObjects.map { it.copy(id = UUID.randomUUID().toString(), boundingBox = RectF(it.boundingBox)) }
         val restoredLines    = link.lines.map { it.copy(id = UUID.randomUUID().toString(), boundingBox = RectF(it.boundingBox)) }
+        val restoredShapes   = link.shapes.map { it.copy(id = UUID.randomUUID().toString(), boundingBox = RectF(it.boundingBox)) }
 
         db.withTransaction {
             val dao = db.notebookDao()
@@ -6835,6 +6836,9 @@ class NotebookActivity : AppCompatActivity() {
             restoredLines.forEach { l ->
                 dao.insertObject(l.toRow(layerId, 0, now, now, density))
             }
+            restoredShapes.forEach { s ->
+                dao.insertObject(s.toRow(layerId, 0, now, now, density))
+            }
         }
         noteContentEdit(db, pageId)
 
@@ -6846,6 +6850,7 @@ class NotebookActivity : AppCompatActivity() {
                 restoredHeadingIds = restoredHeadings.map { it.id },
                 restoredTextIds    = restoredTexts.map { it.id },
                 restoredLineIds    = restoredLines.map { it.id },
+                restoredShapeIds   = restoredShapes.map { it.id },
             ))
             updateUndoRedoButtons()
 
@@ -6854,17 +6859,19 @@ class NotebookActivity : AppCompatActivity() {
             val updatedHeadings = drawingView.getHeadings() + restoredHeadings
             val updatedTexts    = drawingView.getTextObjects() + restoredTexts
             val updatedLines    = drawingView.getLineObjects() + restoredLines
+            val updatedShapes   = drawingView.getShapeObjects() + restoredShapes
             restoredStrokes.forEach { persistedStrokeIds.add(it.id) }
 
             drawingView.loadLinks(updatedLinks)
             drawingView.loadHeadings(updatedHeadings)
             drawingView.loadTextObjects(updatedTexts)
             drawingView.loadLineObjects(updatedLines)
+            drawingView.loadShapeObjects(updatedShapes)
             drawingView.setStrokeListSilently(updatedStrokes)
 
             val templateBmp = currentTemplateBitmap
             val bitmap = withContext(Dispatchers.IO) {
-                drawingView.buildRenderBitmap(updatedStrokes, templateBmp, updatedHeadings, updatedTexts, updatedLines, updatedLinks)
+                drawingView.buildRenderBitmap(updatedStrokes, templateBmp, updatedHeadings, updatedTexts, updatedLines, updatedLinks, shapeObjects = updatedShapes)
             }
             if (bitmap != null) {
                 drawingView.loadStrokesWithBitmap(updatedStrokes, bitmap, templateBmp)
@@ -6876,7 +6883,7 @@ class NotebookActivity : AppCompatActivity() {
             val selBox = RectF(link.boundingBox)
             val pad = 8f * density
             selBox.inset(-pad, -pad)
-            val restoredIds = (restoredStrokes.map { it.id } + restoredHeadings.map { it.id } + restoredTexts.map { it.id } + restoredLines.map { it.id }).toSet()
+            val restoredIds = (restoredStrokes.map { it.id } + restoredHeadings.map { it.id } + restoredTexts.map { it.id } + restoredLines.map { it.id } + restoredShapes.map { it.id }).toSet()
             selectedObjectIds.clear()
             selectedObjectIds.addAll(restoredIds)
             drawingView.setLassoSelectedIds(restoredIds, selBox)
@@ -10058,7 +10065,7 @@ class NotebookActivity : AppCompatActivity() {
             }
 
             is UndoRedoAction.LinkRemoved -> withContext(Dispatchers.IO) {
-                val restoredIds = action.restoredStrokeIds + action.restoredHeadingIds + action.restoredTextIds + action.restoredLineIds
+                val restoredIds = action.restoredStrokeIds + action.restoredHeadingIds + action.restoredTextIds + action.restoredLineIds + action.restoredShapeIds
                 if (isUndo) {
                     restoredIds.forEach { dao.softDeleteById(it, now) }
                     dao.restoreById(action.linkId, now)
