@@ -64,9 +64,56 @@ data class NotebookObject(
     @ColumnInfo(name = "type")
     val type: String,
 
-    /** Type-owned JSON blob — stroke arrays, image base64, text content, etc. */
+    /**
+     * Legacy type-owned JSON payload. Kept for **lazy coexistence** while the columnar migration
+     * (data-model-optimization Phase 1) rolls out: old rows still carry their JSON here; new columnar
+     * rows write `""` and put their data in the typed columns + [blob] below. Format-agnostic readers
+     * prefer the columns/[blob] and fall back to this when they are empty. A later phase drops it.
+     */
     @ColumnInfo(name = "data")
     val data: String,
+
+    // ── Columnar payload (v4, all nullable — wide sparse table) ────────────────
+    // Geometry (was the boundingBox JSON). NULL for strokes (derived from points on load),
+    // layers, and the notebook-meta row.
+    @ColumnInfo(name = "x") val x: Float? = null,
+    @ColumnInfo(name = "y") val y: Float? = null,
+    @ColumnInfo(name = "width") val width: Float? = null,
+    @ColumnInfo(name = "height") val height: Float? = null,
+
+    // Shared content columns.
+    /** heading.recognizedText · text.text · page_text · template.name · layer.label · notebook.title */
+    @ColumnInfo(name = "text") val text: String? = null,
+    /** stroke colour (`#RRGGBB`/`#AARRGGBB`). */
+    @ColumnInfo(name = "color") val color: String? = null,
+    /** stroke / line / shape width. */
+    @ColumnInfo(name = "strokeWidth") val strokeWidth: Float? = null,
+    /** page→template id · notebook→lastOpenedPage · link→target page/notebook id. */
+    @ColumnInfo(name = "refId") val refId: String? = null,
+
+    // Small type-specific fields.
+    @ColumnInfo(name = "level") val level: Int? = null,                 // heading
+    @ColumnInfo(name = "lineStyle") val lineStyle: String? = null,      // line
+    @ColumnInfo(name = "orientation") val orientation: String? = null,  // line
+    @ColumnInfo(name = "dotSpacing") val dotSpacing: Float? = null,     // line
+    @ColumnInfo(name = "shapeType") val shapeType: String? = null,      // shape
+    @ColumnInfo(name = "centerX") val centerX: Float? = null,           // shape
+    @ColumnInfo(name = "centerY") val centerY: Float? = null,           // shape
+    @ColumnInfo(name = "rotationDeg") val rotationDeg: Float? = null,   // shape
+    @ColumnInfo(name = "pointCount") val pointCount: Int? = null,       // shape (STAR)
+    @ColumnInfo(name = "contentW") val contentW: Float? = null,         // sticky content space
+    @ColumnInfo(name = "contentH") val contentH: Float? = null,         // sticky content space
+    @ColumnInfo(name = "linkTarget") val linkTarget: String? = null,    // link target (JSON discriminator)
+    @ColumnInfo(name = "chrome") val chrome: String? = null,            // link chrome
+    /** bitfield: layer isLocked (bit0) / isVisible (bit1); shape aspectLocked (bit0). */
+    @ColumnInfo(name = "flags") val flags: Int? = null,
+
+    /**
+     * Binary payload. Stroke geometry (packed points via [com.notesprout.android.core.StrokeCodec]),
+     * decoded template image bytes, or the atomic nested content of a composite (link / sticky note /
+     * ML-fail heading·text fallback) held as zlib(JSON) until it is normalized in a later phase.
+     */
+    @ColumnInfo(name = "blob", typeAffinity = ColumnInfo.BLOB) val blob: ByteArray? = null,
 )
 
 const val TYPE_STROKE       = "stroke"

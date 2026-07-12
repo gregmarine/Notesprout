@@ -38,27 +38,8 @@ suspend fun createBlankNotebook(
         pragma("PRAGMA wal_autocheckpoint = 100")
         pragma("PRAGMA auto_vacuum = INCREMENTAL")
 
-        exec(
-            """
-            CREATE TABLE IF NOT EXISTS notebook (
-                id          TEXT    NOT NULL PRIMARY KEY,
-                parentId    TEXT    NOT NULL,
-                boundingBox TEXT    NOT NULL,
-                "order"     INTEGER NOT NULL DEFAULT 0,
-                createdAt   INTEGER NOT NULL,
-                updatedAt   INTEGER NOT NULL,
-                deletedAt   INTEGER,
-                type        TEXT    NOT NULL,
-                data        TEXT    NOT NULL
-            )
-            """.trimIndent()
-        )
-        exec(
-            """
-            CREATE INDEX IF NOT EXISTS idx_notebook_parent_order
-                ON notebook(parentId, "order", deletedAt)
-            """.trimIndent()
-        )
+        exec(SoilSchema.CREATE_NOTEBOOK_TABLE)
+        exec(SoilSchema.CREATE_NOTEBOOK_INDEX)
         exec("CREATE TABLE IF NOT EXISTS undo_redo_state (id INTEGER PRIMARY KEY CHECK (id = 0), json TEXT NOT NULL)")
         exec("CREATE TABLE IF NOT EXISTS notebook_meta (id INTEGER PRIMARY KEY CHECK (id = 0), json TEXT NOT NULL)")
 

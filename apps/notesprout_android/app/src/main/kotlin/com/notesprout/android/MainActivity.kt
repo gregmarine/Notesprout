@@ -51,6 +51,7 @@ import com.notesprout.android.data.NotebookMetadata
 import com.notesprout.android.data.NotebookMetaStore
 import com.notesprout.android.data.PageData
 import com.notesprout.android.data.SoilDatabase
+import com.notesprout.android.data.SoilSchema
 import com.notesprout.android.data.index.IndexRepository
 import com.notesprout.android.data.index.PINNED_LIST_ID
 import com.notesprout.android.data.index.NotebookObject
@@ -1597,29 +1598,8 @@ class MainActivity : AppCompatActivity() {
                     pragma("PRAGMA wal_autocheckpoint = 100")
                     pragma("PRAGMA auto_vacuum = INCREMENTAL")
 
-                    exec(
-                        """
-                        CREATE TABLE IF NOT EXISTS notebook (
-                            id          TEXT    NOT NULL PRIMARY KEY,
-                            parentId    TEXT    NOT NULL,
-                            boundingBox TEXT    NOT NULL,
-                            "order"     INTEGER NOT NULL DEFAULT 0,
-                            createdAt   INTEGER NOT NULL,
-                            updatedAt   INTEGER NOT NULL,
-                            deletedAt   INTEGER,
-                            type        TEXT    NOT NULL,
-                            data        TEXT    NOT NULL
-                        )
-                        """.trimIndent(),
-                        null
-                    )
-                    exec(
-                        """
-                        CREATE INDEX IF NOT EXISTS idx_notebook_parent_order
-                            ON notebook(parentId, "order", deletedAt)
-                        """.trimIndent(),
-                        null
-                    )
+                    exec(SoilSchema.CREATE_NOTEBOOK_TABLE, null)
+                    exec(SoilSchema.CREATE_NOTEBOOK_INDEX, null)
                     // Meta table for undo/redo persistence inside encrypted .soil files (P2.S3).
                     // Plaintext notebooks never write to this table; Room migration 1→2 adds it
                     // to existing notebooks. id = 0 is the only row.
