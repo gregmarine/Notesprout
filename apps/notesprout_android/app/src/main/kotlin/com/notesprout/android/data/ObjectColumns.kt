@@ -267,6 +267,150 @@ fun NotebookObject.toStickyNoteRender(density: Float): StickyNoteRender? {
     )
 }
 
+// ── Phase 2c: composites as child-row subtrees ───────────────────────────────
+// The relational model: a composite (heading/text fallback, link, sticky) is a PARENT row (no
+// blob) plus CHILD rows of its nested objects, each `child.parentId = composite.id`. Nested
+// headings/text may in turn own stroke children (2 levels deep). Coordinate space: sticky children
+// are LOCAL (content window); link + heading/text children are page-absolute — the render models
+// already store them that way, so `toRows` needs no transform.
+//
+// Reading stays format-agnostic via [isLegacyComposite]: a pre-2c row (JSON in `data`, or the
+// Phase-1/2b `zlib(JSON)` blob) still decodes through the old single-row readers; only rows with
+// data=="" AND blob==null use the child rows. Writers always emit child rows; the compactor
+// converts legacy composites lazily.
+
+/** True when this row still carries its nested content inline (legacy JSON `data` or `blob`). */
+private fun NotebookObject.isLegacyComposite(): Boolean = data.isNotEmpty() || blob != null
+
+private fun NotebookObject.linkTargetFromColumn(): LinkTarget? =
+    linkTarget?.let { runCatching { compositeJson.decodeFromString(LinkTarget.serializer(), it) }.getOrNull() }
+private fun NotebookObject.linkChromeFromColumn(): LinkChrome =
+    chrome?.let { runCatching { LinkChrome.valueOf(it) }.getOrNull() } ?: LinkChrome.NONE
+
+/** Heading → parent row (no blob) + fallback stroke children (recognized headings have none). */
+fun HeadingStroke.toRows(parentId: String, order: Int, createdAt: Long, updatedAt: Long): List<NotebookObject> {
+    val b = boundingBox
+    val head = NotebookObject(
+        id = id, parentId = parentId, boundingBox = "", sortOrder = order,
+        createdAt = createdAt, updatedAt = updatedAt, deletedAt = null, type = TYPE_HEADING, data = "",
+        x = b.left, y = b.top, width = b.width(), height = b.height(),
+        text = recognizedText, level = level,
+    )
+    val kids = if (recognizedText == null)
+        strokes.mapIndexed { i, s -> s.toStrokeRow(id, i, createdAt, updatedAt) } else emptyList()
+    return listOf(head) + kids
+}
+
+/** Text → parent row (no blob) + fallback stroke children (recognized text has none). */
+fun TextRender.toRows(parentId: String, order: Int, createdAt: Long, updatedAt: Long): List<NotebookObject> {
+    val b = boundingBox
+    val head = NotebookObject(
+        id = id, parentId = parentId, boundingBox = "", sortOrder = order,
+        createdAt = createdAt, updatedAt = updatedAt, deletedAt = null, type = TYPE_TEXT, data = "",
+        x = b.left, y = b.top, width = b.width(), height = b.height(), text = text,
+    )
+    val kids = strokes?.mapIndexed { i, s -> s.toStrokeRow(id, i, createdAt, updatedAt) } ?: emptyList()
+    return listOf(head) + kids
+}
+
+/** Link → parent row (target/chrome columns, no blob) + child rows (page-absolute coords). */
+fun LinkRender.toRows(
+    parentId: String, order: Int, createdAt: Long, updatedAt: Long, density: Float,
+): List<NotebookObject> {
+    val b = boundingBox
+    val head = NotebookObject(
+        id = id, parentId = parentId, boundingBox = "", sortOrder = order,
+        createdAt = createdAt, updatedAt = updatedAt, deletedAt = null, type = TYPE_LINK, data = "",
+        x = b.left, y = b.top, width = b.width(), height = b.height(),
+        linkTarget = compositeJson.encodeToString(LinkTarget.serializer(), target), chrome = chrome.name,
+    )
+    return listOf(head) + compositeChildRows(id, createdAt, updatedAt, density,
+        strokes, headings, textObjects, lines, shapes)
+}
+
+/** Sticky → parent row (icon box + contentW/H, no blob) + child rows (LOCAL coords). */
+fun StickyNoteRender.toRows(
+    parentId: String, order: Int, createdAt: Long, updatedAt: Long, density: Float,
+): List<NotebookObject> {
+    val b = boundingBox
+    val head = NotebookObject(
+        id = id, parentId = parentId, boundingBox = "", sortOrder = order,
+        createdAt = createdAt, updatedAt = updatedAt, deletedAt = null, type = TYPE_STICKY_NOTE, data = "",
+        x = b.left, y = b.top, width = b.width(), height = b.height(),
+        contentW = contentWidth, contentH = contentHeight,
+    )
+    return listOf(head) + compositeChildRows(id, createdAt, updatedAt, density,
+        strokes, headings, textObjects, lines, shapes)
+}
+
+/** Shared child-row flattening for link/sticky: strokes → headings → text → lines → shapes. */
+private fun compositeChildRows(
+    parentId: String, createdAt: Long, updatedAt: Long, density: Float,
+    strokes: List<LiveStroke>, headings: List<HeadingStroke>, textObjects: List<TextRender>,
+    lines: List<LineRender>, shapes: List<ShapeRender>,
+): List<NotebookObject> {
+    val out = ArrayList<NotebookObject>()
+    var o = 0
+    strokes.forEach { out += it.toStrokeRow(parentId, o++, createdAt, updatedAt) }
+    headings.forEach { out += it.toRows(parentId, o++, createdAt, updatedAt) }
+    textObjects.forEach { out += it.toRows(parentId, o++, createdAt, updatedAt) }
+    lines.forEach { out += it.toRow(parentId, o++, createdAt, updatedAt, density) }
+    shapes.forEach { out += it.toRow(parentId, o++, createdAt, updatedAt, density) }
+    return out
+}
+
+/** Assemble a heading from its parent row + (pre-fetched) children; legacy rows use the old reader. */
+fun assembleHeadingStroke(parent: NotebookObject, children: List<NotebookObject>): HeadingStroke? {
+    if (parent.isLegacyComposite()) return parent.toHeadingStroke()
+    val box = parent.boxOrLegacy() ?: return null
+    val strokes = children.filter { it.type == TYPE_STROKE }.mapNotNull { LiveStroke.fromRow(it) }
+    return HeadingStroke(parent.id, box, strokes, parent.text, parent.level ?: 1)
+}
+
+/** Assemble a text object from its parent row + children; legacy rows use the old reader. */
+fun assembleTextRender(parent: NotebookObject, children: List<NotebookObject>): TextRender? {
+    if (parent.isLegacyComposite()) return parent.toTextRender()
+    val box = parent.boxOrLegacy() ?: return null
+    val strokes = children.filter { it.type == TYPE_STROKE }.mapNotNull { LiveStroke.fromRow(it) }
+    return TextRender(parent.id, box, parent.text ?: "", strokes.ifEmpty { null })
+}
+
+/** Assemble a link from its parent row, recursing into [childrenOf]; legacy rows use the old reader. */
+fun assembleLinkRender(
+    parent: NotebookObject, density: Float, childrenOf: (String) -> List<NotebookObject>,
+): LinkRender? {
+    if (parent.isLegacyComposite()) return parent.toLinkRender(density)
+    val box = parent.boxOrLegacy() ?: return null
+    val target = parent.linkTargetFromColumn() ?: return null
+    val kids = childrenOf(parent.id)
+    return LinkRender(
+        id = parent.id, boundingBox = box, target = target, chrome = parent.linkChromeFromColumn(),
+        strokes = kids.filter { it.type == TYPE_STROKE }.mapNotNull { LiveStroke.fromRow(it) },
+        headings = kids.filter { it.type == TYPE_HEADING }.mapNotNull { assembleHeadingStroke(it, childrenOf(it.id)) },
+        textObjects = kids.filter { it.type == TYPE_TEXT }.mapNotNull { assembleTextRender(it, childrenOf(it.id)) },
+        lines = kids.filter { it.type == TYPE_LINE }.mapNotNull { it.toLineRender(density) },
+        shapes = kids.filter { it.type == TYPE_SHAPE }.mapNotNull { it.toShapeRender(density) },
+    )
+}
+
+/** Assemble a sticky from its parent row, recursing into [childrenOf]; legacy rows use the old reader. */
+fun assembleStickyNoteRender(
+    parent: NotebookObject, density: Float, childrenOf: (String) -> List<NotebookObject>,
+): StickyNoteRender? {
+    if (parent.isLegacyComposite()) return parent.toStickyNoteRender(density)
+    val box = parent.boxOrLegacy() ?: return null
+    val kids = childrenOf(parent.id)
+    return StickyNoteRender(
+        id = parent.id, boundingBox = box,
+        strokes = kids.filter { it.type == TYPE_STROKE }.mapNotNull { LiveStroke.fromRow(it) },
+        headings = kids.filter { it.type == TYPE_HEADING }.mapNotNull { assembleHeadingStroke(it, childrenOf(it.id)) },
+        textObjects = kids.filter { it.type == TYPE_TEXT }.mapNotNull { assembleTextRender(it, childrenOf(it.id)) },
+        lines = kids.filter { it.type == TYPE_LINE }.mapNotNull { it.toLineRender(density) },
+        shapes = kids.filter { it.type == TYPE_SHAPE }.mapNotNull { it.toShapeRender(density) },
+        contentWidth = parent.contentW ?: 0f, contentHeight = parent.contentH ?: 0f,
+    )
+}
+
 // ── Structural rows: page / layer / notebook-meta / template (Phase 2b) ───────
 // Same lazy-coexistence contract as the content types: a columnar row has data == "" and reads from
 // typed columns; legacy rows keep their JSON in `data` and read via the fallback. The `boundingBox`

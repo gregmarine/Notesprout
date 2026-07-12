@@ -20,6 +20,10 @@ interface NotebookDao {
     @Insert
     suspend fun insertObject(obj: NotebookObject)
 
+    /** Insert many objects at once (e.g. a composite parent + its child-row subtree). */
+    @Insert
+    suspend fun insertObjects(objs: List<NotebookObject>)
+
     /**
      * Insert a single object, silently ignoring it if the same [NotebookObject.id]
      * already exists.  Used for incremental stroke saves — already-persisted strokes
@@ -44,6 +48,14 @@ interface NotebookDao {
      */
     @Query("SELECT * FROM notebook WHERE parentId = :parentId AND deletedAt IS NULL ORDER BY `order` ASC")
     suspend fun getObjectsByParent(parentId: String): List<NotebookObject>
+
+    /**
+     * All non-deleted children of any parent in [parentIds], sorted by `order` ascending. Used to
+     * batch-load composite subtrees (Phase 2c) in one query instead of N `getObjectsByParent` calls.
+     * Callers group by [NotebookObject.parentId] to reconstruct each subtree.
+     */
+    @Query("SELECT * FROM notebook WHERE parentId IN (:parentIds) AND deletedAt IS NULL ORDER BY `order` ASC")
+    suspend fun getObjectsByParents(parentIds: List<String>): List<NotebookObject>
 
     /**
      * All non-deleted pages, sorted by `order` ascending.
