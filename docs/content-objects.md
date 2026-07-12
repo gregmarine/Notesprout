@@ -5,6 +5,15 @@
 
 ## Heading Objects
 
+> **Storage (schema v4 / Phase 2c).** Heading and text are columnar rows: `recognizedText`→`text`,
+> heading level→`level`, geometry→`x/y/width/height`. A **recognized** heading/text is a single bare
+> row (no strokes, no blob). Only the rare **unrecognized fallback** (`recognizedText == null`) keeps
+> ink, and it does so as `stroke` **child rows** (`parentId = heading.id`), not JSON. `HeadingObject`
+> is the legacy on-disk form only (format-agnostic read; converted by `NotebookCompactor`).
+> Persistence goes through the `*HeadingSubtree`/`*TextSubtree` helpers in `ObjectColumns.kt`; the
+> readers short-circuit for recognized rows, so this is behaviour- and perf-neutral on the happy path.
+> See [`data-architecture.md`](data-architecture.md) "Schema Version 4".
+
 - `type = "heading"` rows in `.soil`; `HeadingObject` serialized to `data`; `HeadingStroke` is the in-memory representation
 - Headings render **without a background fill** — strokes draw directly on the white page, or 20sp inkBlack canvas text when `recognizedText` is non-null. No grey rect is drawn at any render site.
 - `recognizedText: String?` — null = render strokes; non-null = canvas text (populated by ML Kit at creation)

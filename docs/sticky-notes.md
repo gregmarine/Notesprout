@@ -7,12 +7,21 @@ lasso, and paste. The note's drawn content does **not** render on the page; only
 
 ---
 
-## Data model — embedded content in `data` (the link precedent)
+## Data model — embedded content as child rows (schema v4 / Phase 2c)
 
 A sticky note is a `type = "sticky_note"` row in the `.soil` `notebook` table (notebook pages) or
-the `scratchpad` table (scratch pad pages). It follows the `LinkObject` pattern: the object's
-**embedded content travels inside its `data` JSON** (`StickyNoteObject`), so copy/cut/paste, page
-copy, full-notebook export, and clipboard persistence all carry it automatically.
+the `scratchpad` table (scratch pad pages).
+
+> **In the `.soil` path a sticky is a columnar parent row + child rows.** Its icon box is in the
+> `x/y/width/height` columns and its content-window pixel size in `contentW/contentH`; its embedded
+> content (strokes/headings/text/lines/shapes) are child rows with `parentId = sticky.id`, in the
+> content window's LOCAL coordinate space — so moving the sticky touches only the parent row.
+> Persistence goes through the `*StickyNoteSubtree` helpers in `ObjectColumns.kt`. `StickyNoteObject`
+> remains as the legacy on-disk form (format-agnostic read; converted by `NotebookCompactor`) and as
+> the clipboard/undo carrier, so copy/cut/paste, page copy, export, and clipboard persistence still
+> carry the content. The **calendar/scratchpad** tables keep the sticky as a `StickyNoteObject` blob
+> (their own DBs); cross-DB transfer bridges via the render model through the clipboard. See
+> [`data-architecture.md`](data-architecture.md) "Schema Version 4".
 
 ### Two independent coordinate spaces
 

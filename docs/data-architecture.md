@@ -149,13 +149,18 @@ The reusable **template library** lives in the global index — not the filesyst
 - **One file per notebook.** Each `.soil` file is a self-contained SQLite database.
 - **Single table.** Everything — pages, layers, strokes, images, text, metadata — is a row in one `notebook` table.
 - **Everything is an object.** No type special-casing at the schema level — type behavior lives in Kotlin.
-- **Assets are base64 strings.** No external files. Images stored inline in the `data` TEXT column as
-  **WEBP q100** (templates, and the library-grid cover snapshot in the global index) — encoded via `core/ImageCodec`. q100 lossy is
-  used deliberately: on transparent-alpha ink content it measured ~47% smaller than PNG and visually
-  lossless, whereas Android's `WEBP_LOSSLESS` bloats to 2–6× PNG. Legacy blobs are PNG (or the earlier
-  mistaken lossless-WEBP); decode is format-agnostic (`BitmapFactory` reads the header), so all coexist
-  with no format flag. A transitional sweep re-encodes old PNG/lossless-WEBP in place (see
-  `NotebookCompactor`, BACKLOG "TEMP").
+- **Payload is columnar, not JSON.** As of schema **v4** (the data-model-optimization work) every
+  object's payload lives in typed columns + a binary `blob`, not the opaque `data` TEXT column. Stroke
+  geometry is a binary blob (float32 + zlib, ~5× smaller than the old JSON); template images are a
+  binary WEBP blob (not base64). See **Schema Version 4** below. The legacy `data` column is retained
+  (readers are format-agnostic) but new writes leave it `""`; the `NotebookCompactor` converts legacy
+  rows lazily on seal, so a fully-swept notebook has **zero JSON** on the object path.
+- **Images are WEBP q100.** Template images (and the library-grid cover snapshot in the global index)
+  are **WEBP q100** via `core/ImageCodec` — a binary `blob` on a columnar `template` row, or base64 in
+  the index. q100 lossy is deliberate: on transparent-alpha ink it measured ~47% smaller than PNG and
+  visually lossless, whereas Android's `WEBP_LOSSLESS` bloats to 2–6× PNG. Decode is format-agnostic
+  (`BitmapFactory` reads the header) so legacy PNG/lossless-WEBP coexist; `NotebookCompactor` re-encodes
+  old ones in place.
 - **Decode embedded images bounded.** Route all embedded-asset decodes through `core/BitmapDecode.decodeSampled(bytes, reqW, reqH)` — never `BitmapFactory.decodeByteArray` directly on `.soil`-sourced bytes (OOM risk on e-ink). `MAX_DIMENSION=4096` fallback when there's no natural target.
 - **SQLite must stay clean.** A file browser should show only `.soil` files — no WAL/SHM/journal sidecars.
   - `PRAGMA journal_mode = WAL`; `PRAGMA wal_autocheckpoint = 100`; `PRAGMA auto_vacuum = INCREMENTAL`
@@ -163,22 +168,65 @@ The reusable **template library** lives in the global index — not the filesyst
 
 ### Object Schema
 
+The v1 shape below is the stable core; **v4** adds the columnar payload columns (see next section).
+
 ```sql
 CREATE TABLE IF NOT EXISTS notebook (
     id          TEXT    PRIMARY KEY NOT NULL,
     parentId    TEXT    NOT NULL,
     type        TEXT    NOT NULL,
-    boundingBox TEXT    NOT NULL,
+    boundingBox TEXT    NOT NULL,   -- v4: "" for content rows (geometry moved to x/y/width/height)
     "order"     INTEGER NOT NULL DEFAULT 0,
     createdAt   INTEGER NOT NULL,
     updatedAt   INTEGER NOT NULL,
     deletedAt   INTEGER,
-    data        TEXT    NOT NULL
+    data        TEXT    NOT NULL    -- v4: "" on columnar rows; legacy JSON only on un-swept rows
 );
 
 CREATE INDEX IF NOT EXISTS idx_notebook_parent_order
     ON notebook(parentId, "order", deletedAt);
 ```
+
+### `.soil` Schema Version 4 — columnar payload, binary strokes, relational composites
+
+`SoilDatabase.MIGRATION_3_4` adds 23 nullable typed columns + a `blob BLOB`
+(`SoilSchema.ADDED_COLUMNS_V4`) so an object's payload no longer lives in the opaque `data` JSON:
+
+- **Typed columns** — `x/y/width/height`, `text`, `color`, `strokeWidth`, `refId`, `level`,
+  `lineStyle`, `orientation`, `dotSpacing`, `shapeType`, `centerX/centerY`, `rotationDeg`,
+  `pointCount`, `contentW/contentH`, `linkTarget`, `chrome`, `flags`. Each type uses the subset it
+  needs (e.g. a `page` puts its template in `refId` and keeps size in `boundingBox`; a `layer` puts
+  its label in `text` and lock/visible bits in `flags`).
+- **`blob`** — binary stroke geometry (float32 x,y + zlib via `core/StrokeCodec`, ~5× smaller than
+  JSON), and the binary WEBP image on a `template` row.
+- **`ObjectColumns.kt`** is the single boundary between the render/domain models and the columnar row:
+  per-type `to<Type>()` readers, `<Render>.toRow()` builders, and the generic `updateColumns`.
+
+**Format-agnostic reading (lazy coexistence).** A columnar row has `data == ""`; readers use the
+typed columns/blob when present and fall back to the legacy `data` JSON otherwise, so pre-v4 rows keep
+working and convert on their next write. `NotebookCompactor` (run on every seal) sweeps the rest:
+legacy JSON strokes → binary blob, then **composites → child rows**, then legacy **structural rows →
+columnar**, then a VACUUM. A fully-swept notebook is 100% JSON-free on the object path.
+
+**Composites are relational child rows (Phase 2c).** A composite — a **sticky note**, a **link**, or a
+fallback (unrecognized) **heading**/**text** — no longer holds its nested content as `zlib(JSON)` in
+the blob. Instead it is a **parent row plus child rows**, each `child.parentId = composite.id`, and
+each child a normal columnar row of its own type (strokes, headings, text, lines, shapes; nested
+heading/text own their own stroke children). This is the pure "everything is an object — relational,
+compositional" model. Coordinate space: **sticky** children are LOCAL (the sticky's content window),
+so moving a sticky touches only the parent; **link** and fallback heading/text children are
+PAGE-ABSOLUTE, so a move rewrites them. The parentId hierarchy self-isolates composite content from
+the page — every page-level reader queries `parentId = layerId`, and a composite's children are
+parented to the composite, so they never leak into page rendering, lasso, or export. Recognized
+heading/text carry no strokes, so they remain a single bare parent row (behaviour- and perf-neutral).
+`ObjectColumns.kt` provides the subtree boundary (`loadXSubtree` / `insertXSubtree` /
+`replaceXSubtree` / `assembleX`); `PageCopier` deep-copies whole subtrees (`collectDescendants` /
+`deepCopyChildren`); deleting a composite soft-deletes only its parent, and a compactor orphan-sweep
+reclaims the child subtree once the parent is purged.
+
+**Calendar/scratchpad** index tables mirror the same columnar+binary model (`CalendarEntity` /
+`ScratchpadEntity`, `NotesproutDatabase` v6 / `MIGRATION_5_6`), but keep composites as blob (their
+own DBs; cross-DB transfer bridges via render models through the clipboard).
 
 ### `.soil` Schema Version 2 — `undo_redo_state`
 
