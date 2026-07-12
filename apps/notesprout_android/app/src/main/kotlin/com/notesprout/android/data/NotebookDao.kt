@@ -66,6 +66,17 @@ interface NotebookDao {
     suspend fun hardDeleteByIds(ids: List<String>)
 
     /**
+     * Hard-delete CONTENT rows orphaned by a purged parent — the child subtree of a deleted composite
+     * (sticky/link/heading/text) whose parent was removed by [hardDeleteOldSoftDeleted]. Restricted to
+     * content types so structural rows (page/layer) and the refId-referenced `template` library are
+     * never touched (templates are linked via page.refId, not the parentId hierarchy). A row whose
+     * parent is only *soft*-deleted still has its parent row present, so it is NOT swept (current-session
+     * composite deletes stay restorable). Removes one level; the caller loops to cascade through nesting.
+     */
+    @Query("DELETE FROM notebook WHERE type IN ('stroke','heading','text','line','shape','link','sticky_note') AND parentId NOT IN (SELECT id FROM notebook)")
+    suspend fun hardDeleteOrphansOnce(): Int
+
+    /**
      * All non-deleted pages, sorted by `order` ascending.
      * Use this for multi-page navigation — it reflects the canonical page order.
      */

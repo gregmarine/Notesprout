@@ -3982,7 +3982,7 @@ class NotebookActivity : AppCompatActivity() {
                 "compaction sealed: ${r.tsRows} ts + ${r.imageRows} images→WEBP + ${r.deadStrokeRows} dead-stroke + " +
                     "${r.snapshotRows} snapshots stripped + ${r.coverRows} cover rows deleted + " +
                     "${r.compositeRows} composites→child-rows + ${r.orphanRows} orphan sweeps + " +
-                    "${r.structuralRows} structural→columnar + VACUUM"
+                    "${r.structuralRows} structural→columnar + ${r.orphanSubtreeRows} orphan subtrees + VACUUM"
             }
         }.onFailure { Slog.d(TAG) { "compaction failed: ${it.message}" } }
         db.openHelper.writableDatabase.apply {

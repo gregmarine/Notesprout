@@ -66,10 +66,12 @@ object NotebookCompactor {
         val compositeRows: Int = 0,
         val orphanRows: Int = 0,
         val structuralRows: Int = 0,
+        val orphanSubtreeRows: Int = 0,
     ) {
         val changed: Boolean
             get() = tsRows > 0 || imageRows > 0 || deadStrokeRows > 0 || snapshotRows > 0 ||
-                coverRows > 0 || strokeBlobRows > 0 || compositeRows > 0 || orphanRows > 0 || structuralRows > 0
+                coverRows > 0 || strokeBlobRows > 0 || compositeRows > 0 || orphanRows > 0 ||
+                structuralRows > 0 || orphanSubtreeRows > 0
     }
 
     /**
@@ -200,12 +202,24 @@ object NotebookCompactor {
             }
         }
 
+        // Pass 10 — sweep content rows orphaned by a purged composite parent (a deleted sticky/link/
+        // heading/text whose parent row was hard-deleted, leaving its live child subtree dangling).
+        // Loop to cascade through nesting (composite → heading → stroke). A soft-deleted parent still
+        // exists, so its children are left intact — only truly parentless rows are removed.
+        var orphanSubtreeRows = 0
+        while (true) {
+            val n = dao.hardDeleteOrphansOnce()
+            if (n == 0) break
+            orphanSubtreeRows += n
+        }
+
         if (tsRows.isNotEmpty() || imageRows > 0 || deadStrokeRows > 0 || snapshotRows > 0 ||
-            coverRows > 0 || strokeBlobRows > 0 || compositeRows > 0 || orphanRows > 0 || structuralRows > 0) {
+            coverRows > 0 || strokeBlobRows > 0 || compositeRows > 0 || orphanRows > 0 ||
+            structuralRows > 0 || orphanSubtreeRows > 0) {
             val raw: SupportSQLiteDatabase = db.openHelper.writableDatabase
             raw.execSQL("VACUUM")
         }
-        return Result(tsRows.size, imageRows, deadStrokeRows, snapshotRows, coverRows, strokeBlobRows, compositeRows, orphanRows, structuralRows)
+        return Result(tsRows.size, imageRows, deadStrokeRows, snapshotRows, coverRows, strokeBlobRows, compositeRows, orphanRows, structuralRows, orphanSubtreeRows)
     }
 
     /**
