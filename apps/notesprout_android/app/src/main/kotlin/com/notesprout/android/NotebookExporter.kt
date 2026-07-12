@@ -24,6 +24,7 @@ import com.notesprout.android.data.LineObject
 import com.notesprout.android.data.LineOrientation
 import com.notesprout.android.data.LineRender
 import com.notesprout.android.data.toLineRender
+import com.notesprout.android.data.toShapeRender
 import com.notesprout.android.data.LineStyle
 import com.notesprout.android.data.LinkObject
 import com.notesprout.android.data.LinkRender
@@ -549,12 +550,7 @@ object NotebookExporter {
         } else emptyList()
 
         val shapeObjects: List<ShapeRender> = if (layer != null) {
-            dao.getShapeObjectsForLayer(layer.id).mapNotNull { row ->
-                val box = parseBoundingBox(row.boundingBox) ?: return@mapNotNull null
-                val so = runCatching { ShapeObject.fromJson(row.data) }.getOrNull()
-                    ?: return@mapNotNull null
-                ShapeRender.from(row.id, so, density)
-            }
+            dao.getShapeObjectsForLayer(layer.id).mapNotNull { it.toShapeRender(density) }
         } else emptyList()
 
         val links: List<LinkRender> = if (layer != null) {

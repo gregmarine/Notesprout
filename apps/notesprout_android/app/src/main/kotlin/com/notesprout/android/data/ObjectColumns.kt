@@ -73,3 +73,33 @@ fun NotebookObject.toLineRender(density: Float): LineRender? {
     }
     return LineRender(id, box, startX, startY, endX, endY, style, orient, swDp, dotDp * density)
 }
+
+// ── Shape ──────────────────────────────────────────────────────────────────
+// The stored bounding box is redundant (ShapeRender.from recomputes the AABB from the oriented box +
+// rotation), so shapes persist only their params; x/y stay null and width/height are the ORIENTED box.
+
+/** Build a columnar `shape` row from a render-time [ShapeRender]. */
+fun ShapeRender.toRow(
+    parentId: String, order: Int, createdAt: Long, updatedAt: Long, density: Float, deletedAt: Long? = null,
+): NotebookObject = NotebookObject(
+    id = id, parentId = parentId, boundingBox = "", sortOrder = order,
+    createdAt = createdAt, updatedAt = updatedAt, deletedAt = deletedAt,
+    type = TYPE_SHAPE, data = "",
+    width = width, height = height, strokeWidth = strokeWidthPx / density,
+    shapeType = type.name, centerX = centerX, centerY = centerY, rotationDeg = rotationDeg,
+    pointCount = pointCount, flags = if (aspectLocked) 1 else 0,
+)
+
+/** Decode a `shape` row to a render-time [ShapeRender] (columns when present, else legacy JSON). */
+fun NotebookObject.toShapeRender(density: Float): ShapeRender? {
+    val st = shapeType
+    val obj = if (st != null) {
+        ShapeObject(
+            type = runCatching { ShapeType.valueOf(st) }.getOrNull() ?: return null,
+            centerX = centerX ?: 0f, centerY = centerY ?: 0f, width = width ?: 0f, height = height ?: 0f,
+            rotationDeg = rotationDeg ?: 0f, strokeWidthDp = strokeWidth ?: 1f,
+            aspectLocked = ((flags ?: 0) and 1) != 0, pointCount = pointCount ?: 5,
+        )
+    } else runCatching { ShapeObject.fromJson(data) }.getOrNull() ?: return null
+    return ShapeRender.from(id, obj, density)
+}

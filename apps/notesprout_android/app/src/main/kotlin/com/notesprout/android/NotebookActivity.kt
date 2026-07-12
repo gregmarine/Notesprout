@@ -62,6 +62,7 @@ import com.notesprout.android.data.LineOrientation
 import com.notesprout.android.data.LineRender
 import com.notesprout.android.data.toLineRender
 import com.notesprout.android.data.toRow
+import com.notesprout.android.data.toShapeRender
 import com.notesprout.android.data.updateColumns
 import com.notesprout.android.data.LineStyle
 import com.notesprout.android.data.LinkChrome
@@ -1949,9 +1950,7 @@ class NotebookActivity : AppCompatActivity() {
                                 )
                             }
                             for (shape in movedShapes) {
-                                db.notebookDao().updateHeadingData(
-                                    shape.id, shape.boundingBox.toBoundingBoxJson(), shape.toShapeObject(density).toJson(), now
-                                )
+                                db.notebookDao().updateColumns(shape.toRow("", 0, now, now, density))
                             }
                         }
                         if (movedLinks.isNotEmpty() || movedStickyNotes.isNotEmpty() || movedShapes.isNotEmpty()) noteContentEdit(db, pageId)
@@ -4278,13 +4277,7 @@ class NotebookActivity : AppCompatActivity() {
     private suspend fun loadShapeObjectsFromDb(db: SoilDatabase, layerId: String): List<com.notesprout.android.data.ShapeRender> {
         if (layerId.isEmpty()) return emptyList()
         val density = resources.displayMetrics.density
-        val rows = db.notebookDao().getShapeObjectsForLayer(layerId)
-        return rows.mapNotNull { row ->
-            val box = row.parseBoundingBox() ?: return@mapNotNull null
-            val shapeObj = runCatching { com.notesprout.android.data.ShapeObject.fromJson(row.data) }.getOrNull()
-                ?: return@mapNotNull null
-            com.notesprout.android.data.ShapeRender.from(row.id, shapeObj, density)
-        }
+        return db.notebookDao().getShapeObjectsForLayer(layerId).mapNotNull { it.toShapeRender(density) }
     }
 
     private fun NotebookObject.parseBoundingBox(): android.graphics.RectF? =
@@ -5502,19 +5495,7 @@ class NotebookActivity : AppCompatActivity() {
                         )
                     }
                     newShapes.forEach { shape ->
-                        dao.insertOrIgnore(
-                            NotebookObject(
-                                id          = shape.id,
-                                type        = TYPE_SHAPE,
-                                parentId    = layerId,
-                                boundingBox = shape.boundingBox.toBoundingBoxJson(),
-                                sortOrder   = 0,
-                                createdAt   = now,
-                                updatedAt   = now,
-                                deletedAt   = null,
-                                data        = shape.toShapeObject(density).toJson(),
-                            )
-                        )
+                        dao.insertOrIgnore(shape.toRow(layerId, 0, now, now, density))
                     }
                 }
                 if (newLinks.isNotEmpty() || newStickyNotes.isNotEmpty() || newShapes.isNotEmpty()) noteContentEdit(db, pageId)
@@ -5736,19 +5717,7 @@ class NotebookActivity : AppCompatActivity() {
                         )
                     }
                     newShapes.forEach { shape ->
-                        dao.insertOrIgnore(
-                            NotebookObject(
-                                id          = shape.id,
-                                type        = TYPE_SHAPE,
-                                parentId    = layerId,
-                                boundingBox = shape.boundingBox.toBoundingBoxJson(),
-                                sortOrder   = 0,
-                                createdAt   = now,
-                                updatedAt   = now,
-                                deletedAt   = null,
-                                data        = shape.toShapeObject(density).toJson(),
-                            )
-                        )
+                        dao.insertOrIgnore(shape.toRow(layerId, 0, now, now, density))
                     }
                 }
                 if (newLinks.isNotEmpty() || newStickyNotes.isNotEmpty() || newShapes.isNotEmpty()) noteContentEdit(db, pageId)
@@ -6569,19 +6538,7 @@ class NotebookActivity : AppCompatActivity() {
         db.withTransaction {
             val dao = db.notebookDao()
             if (wasInDb) dao.softDeleteById(stroke.id, now)
-            dao.insertObject(
-                com.notesprout.android.data.NotebookObject(
-                    id          = shapeId,
-                    parentId    = layerId,
-                    type        = com.notesprout.android.data.TYPE_SHAPE,
-                    boundingBox = shapeRender.boundingBox.toBoundingBoxJson(),
-                    sortOrder   = 0,
-                    createdAt   = now,
-                    updatedAt   = now,
-                    deletedAt   = null,
-                    data        = shapeObj.toJson(),
-                )
-            )
+            dao.insertObject(shapeRender.toRow(layerId, 0, now, now, density))
         }
         noteContentEdit(db, pageId)
 
@@ -6648,10 +6605,8 @@ class NotebookActivity : AppCompatActivity() {
             before.rotationDeg == after.rotationDeg && before.aspectLocked == after.aspectLocked
         ) return  // No change — nothing to persist.
 
-        val bboxJson = after.boundingBox.toBoundingBoxJson()
-        val dataJson = after.toShapeObject(density).toJson()
         db.withTransaction {
-            db.notebookDao().updateHeadingData(after.id, bboxJson, dataJson, now)
+            db.notebookDao().updateColumns(after.toRow("", 0, now, now, density))
         }
         noteContentEdit(db, pageId)
 
@@ -7819,19 +7774,7 @@ class NotebookActivity : AppCompatActivity() {
             val shapeRender = com.notesprout.android.data.ShapeRender.from(shapeId, shapeObj, density)
 
             withContext(Dispatchers.IO) {
-                db.notebookDao().insertObject(
-                    com.notesprout.android.data.NotebookObject(
-                        id          = shapeId,
-                        parentId    = layerId,
-                        type        = com.notesprout.android.data.TYPE_SHAPE,
-                        boundingBox = shapeRender.boundingBox.toBoundingBoxJson(),
-                        sortOrder   = 0,
-                        createdAt   = now,
-                        updatedAt   = now,
-                        deletedAt   = null,
-                        data        = shapeObj.toJson(),
-                    )
-                )
+                db.notebookDao().insertObject(shapeRender.toRow(layerId, 0, now, now, density))
                 noteContentEdit(db, pageId)
             }
 
@@ -9845,9 +9788,7 @@ class NotebookActivity : AppCompatActivity() {
             val density = resources.displayMetrics.density
             val target = if (isUndo) action.before else action.after
             withContext(Dispatchers.IO) {
-                db.notebookDao().updateHeadingData(
-                    target.id, target.boundingBox.toBoundingBoxJson(), target.toShapeObject(density).toJson(), now,
-                )
+                db.notebookDao().updateColumns(target.toRow("", 0, now, now, density))
                 noteContentEdit(db, action.pageId)
             }
 
@@ -10215,7 +10156,7 @@ class NotebookActivity : AppCompatActivity() {
                     }
                     val targetShapes = if (isUndo) action.originalShapes else action.movedShapes
                     for (shape in targetShapes) {
-                        dao.updateHeadingData(shape.id, shape.boundingBox.toBoundingBoxJson(), shape.toShapeObject(density).toJson(), now)
+                        dao.updateColumns(shape.toRow("", 0, now, now, density))
                     }
                 }
                 if (action.movedLinks.isNotEmpty() || action.movedStickyNotes.isNotEmpty() || action.movedShapes.isNotEmpty()) noteContentEdit(db, action.pageId)
@@ -10324,9 +10265,7 @@ class NotebookActivity : AppCompatActivity() {
             is UndoRedoAction.ShapeTransformed -> withContext(Dispatchers.IO) {
                 val target  = if (isUndo) action.before else action.after
                 val density = resources.displayMetrics.density
-                dao.updateHeadingData(
-                    target.id, target.boundingBox.toBoundingBoxJson(), target.toShapeObject(density).toJson(), now,
-                )
+                dao.updateColumns(target.toRow("", 0, now, now, density))
                 noteContentEdit(db, action.pageId)
             }
 
