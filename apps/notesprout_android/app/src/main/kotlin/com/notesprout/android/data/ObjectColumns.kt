@@ -1,6 +1,11 @@
 package com.notesprout.android.data
 
 import android.graphics.RectF
+import java.io.ByteArrayOutputStream
+import java.util.zip.Deflater
+import java.util.zip.Inflater
+import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.json.Json
 
 /**
  * Object ⇄ columnar-row mapping (data-model-optimization Phase 1, step 4).
@@ -27,6 +32,32 @@ suspend fun NotebookDao.updateColumns(row: NotebookObject) = updateObjectColumns
     row.rotationDeg, row.pointCount, row.contentW, row.contentH, row.linkTarget, row.chrome, row.flags,
     row.blob, row.updatedAt,
 )
+
+// ── Composite nested content (zlib(JSON) in the binary blob) ─────────────────
+// Composites (heading/text fallback strokes, link/sticky sub-collections) keep their nested content
+// atomic in `blob` as zlib(JSON) — a format change off the TEXT `data` column, not normalization.
+
+private val compositeJson = Json { encodeDefaults = false; ignoreUnknownKeys = true }
+private val strokeListSerializer = ListSerializer(LiveStroke.serializer())
+
+internal fun deflateString(s: String): ByteArray {
+    val d = Deflater(Deflater.BEST_COMPRESSION); d.setInput(s.toByteArray()); d.finish()
+    val out = ByteArrayOutputStream(maxOf(16, s.length / 2)); val buf = ByteArray(4096)
+    while (!d.finished()) out.write(buf, 0, d.deflate(buf)); d.end()
+    return out.toByteArray()
+}
+
+internal fun inflateString(b: ByteArray): String {
+    val inf = Inflater(); inf.setInput(b)
+    val out = ByteArrayOutputStream(maxOf(16, b.size * 3)); val buf = ByteArray(4096)
+    while (!inf.finished()) { val n = inf.inflate(buf); if (n == 0 && inf.needsInput()) break; out.write(buf, 0, n) }
+    inf.end(); return out.toByteArray().toString(Charsets.UTF_8)
+}
+
+private fun packStrokes(list: List<LiveStroke>): ByteArray =
+    deflateString(compositeJson.encodeToString(strokeListSerializer, list))
+private fun unpackStrokes(b: ByteArray): List<LiveStroke> =
+    compositeJson.decodeFromString(strokeListSerializer, inflateString(b))
 
 /** Geometry from the typed x/y/width/height columns, or the legacy `boundingBox` JSON. */
 fun NotebookObject.boxOrLegacy(): RectF? {
@@ -102,4 +133,59 @@ fun NotebookObject.toShapeRender(density: Float): ShapeRender? {
         )
     } else runCatching { ShapeObject.fromJson(data) }.getOrNull() ?: return null
     return ShapeRender.from(id, obj, density)
+}
+
+// ── Text ───────────────────────────────────────────────────────────────────
+// Recognized text → `text` column. The rare unrecognized fallback (blank text + embedded strokes)
+// keeps its strokes in `blob`. A columnar row has data == "".
+
+fun TextRender.toRow(parentId: String, order: Int, createdAt: Long, updatedAt: Long, deletedAt: Long? = null): NotebookObject {
+    val b = boundingBox
+    val fallback = strokes
+    return NotebookObject(
+        id = id, parentId = parentId, boundingBox = "", sortOrder = order,
+        createdAt = createdAt, updatedAt = updatedAt, deletedAt = deletedAt, type = TYPE_TEXT, data = "",
+        x = b.left, y = b.top, width = b.width(), height = b.height(),
+        text = text,
+        blob = if (!fallback.isNullOrEmpty()) packStrokes(fallback) else null,
+    )
+}
+
+fun NotebookObject.toTextRender(): TextRender? {
+    val box = boxOrLegacy() ?: return null
+    return if (data.isEmpty()) {
+        TextRender(id = id, boundingBox = box, text = text ?: "", strokes = blob?.let { unpackStrokes(it) })
+    } else {
+        val t = runCatching { TextObject.fromJson(data) }.getOrNull() ?: return null
+        TextRender(id = id, boundingBox = box, text = t.text, strokes = t.strokes)
+    }
+}
+
+// ── Heading ────────────────────────────────────────────────────────────────
+// Recognized heading → `text` (recognizedText) + `level`. The ML-fail stroke-only fallback
+// (recognizedText == null) keeps its strokes in `blob`. A columnar row has data == "".
+
+fun HeadingStroke.toRow(parentId: String, order: Int, createdAt: Long, updatedAt: Long, deletedAt: Long? = null): NotebookObject {
+    val b = boundingBox
+    return NotebookObject(
+        id = id, parentId = parentId, boundingBox = "", sortOrder = order,
+        createdAt = createdAt, updatedAt = updatedAt, deletedAt = deletedAt, type = TYPE_HEADING, data = "",
+        x = b.left, y = b.top, width = b.width(), height = b.height(),
+        text = recognizedText, level = level,
+        blob = if (recognizedText == null && strokes.isNotEmpty()) packStrokes(strokes) else null,
+    )
+}
+
+fun NotebookObject.toHeadingStroke(): HeadingStroke? {
+    val box = boxOrLegacy() ?: return null
+    return if (data.isEmpty()) {
+        HeadingStroke(
+            id = id, boundingBox = box,
+            strokes = blob?.let { unpackStrokes(it) } ?: emptyList(),
+            recognizedText = text, level = level ?: 1,
+        )
+    } else {
+        val h = runCatching { HeadingObject.fromJson(data) }.getOrNull() ?: return null
+        HeadingStroke(id, box, h.strokes, h.recognizedText, h.level)
+    }
 }

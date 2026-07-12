@@ -61,8 +61,10 @@ import com.notesprout.android.data.LineObject
 import com.notesprout.android.data.LineOrientation
 import com.notesprout.android.data.LineRender
 import com.notesprout.android.data.toLineRender
+import com.notesprout.android.data.toHeadingStroke
 import com.notesprout.android.data.toRow
 import com.notesprout.android.data.toShapeRender
+import com.notesprout.android.data.toTextRender
 import com.notesprout.android.data.updateColumns
 import com.notesprout.android.data.LineStyle
 import com.notesprout.android.data.LinkChrome
@@ -1929,10 +1931,7 @@ class NotebookActivity : AppCompatActivity() {
                                 )
                             }
                             for (textObj in movedTextObjects) {
-                                val bboxJson = textObj.boundingBox.toBoundingBoxJson()
-                                db.notebookDao().updateHeadingData(
-                                    textObj.id, bboxJson, TextObject(text = textObj.text, strokes = textObj.strokes).toJson(), now
-                                )
+                                db.notebookDao().updateColumns(textObj.toRow("", 0, now, now))
                             }
                             for (lineObj in movedLineObjects) {
                                 db.notebookDao().updateColumns(lineObj.toRow("", 0, now, now, density))
@@ -4212,13 +4211,7 @@ class NotebookActivity : AppCompatActivity() {
 
     private suspend fun loadTextObjectsFromDb(db: SoilDatabase, layerId: String): List<TextRender> {
         if (layerId.isEmpty()) return emptyList()
-        val rows = db.notebookDao().getTextObjectsForLayer(layerId)
-        return rows.mapNotNull { row ->
-            val box = row.parseBoundingBox() ?: return@mapNotNull null
-            val textObj = runCatching { TextObject.fromJson(row.data) }.getOrNull()
-                ?: return@mapNotNull null
-            TextRender(id = row.id, boundingBox = box, text = textObj.text, strokes = textObj.strokes)
-        }
+        return db.notebookDao().getTextObjectsForLayer(layerId).mapNotNull { it.toTextRender() }
     }
 
     private suspend fun loadLineObjectsFromDb(db: SoilDatabase, layerId: String): List<LineRender> {
@@ -5445,21 +5438,7 @@ class NotebookActivity : AppCompatActivity() {
                         )
                     }
                     newTextObjects.forEach { textObj ->
-                        val bb = textObj.boundingBox
-                        val bboxJson = bb.toBoundingBoxJson()
-                        dao.insertOrIgnore(
-                            NotebookObject(
-                                id          = textObj.id,
-                                type        = TYPE_TEXT,
-                                parentId    = layerId,
-                                boundingBox = bboxJson,
-                                sortOrder   = 0,
-                                createdAt   = now,
-                                updatedAt   = now,
-                                deletedAt   = null,
-                                data        = TextObject(text = textObj.text, strokes = textObj.strokes).toJson(),
-                            )
-                        )
+                        dao.insertOrIgnore(textObj.toRow(layerId, 0, now, now))
                     }
                     newLineObjects.forEach { lineObj ->
                         dao.insertOrIgnore(lineObj.toRow(layerId, 0, now, now, density))
@@ -5669,19 +5648,7 @@ class NotebookActivity : AppCompatActivity() {
                         )
                     }
                     newTextObjects.forEach { textObj ->
-                        dao.insertOrIgnore(
-                            NotebookObject(
-                                id          = textObj.id,
-                                type        = TYPE_TEXT,
-                                parentId    = layerId,
-                                boundingBox = textObj.boundingBox.toBoundingBoxJson(),
-                                sortOrder   = 0,
-                                createdAt   = now,
-                                updatedAt   = now,
-                                deletedAt   = null,
-                                data        = TextObject(text = textObj.text, strokes = textObj.strokes).toJson(),
-                            )
-                        )
+                        dao.insertOrIgnore(textObj.toRow(layerId, 0, now, now))
                     }
                     newLineObjects.forEach { lineObj ->
                         dao.insertOrIgnore(lineObj.toRow(layerId, 0, now, now, density))
@@ -6435,25 +6402,12 @@ class NotebookActivity : AppCompatActivity() {
         }
 
         val now      = System.currentTimeMillis()
-        val bboxJson = boundsToConvert.toBoundingBoxJson()
-        val textObj  = TextObject(text = textForObject, strokes = embeddedStrokes)
+        val textRow  = TextRender(id = textId, boundingBox = boundsToConvert, text = textForObject, strokes = embeddedStrokes)
 
         db.withTransaction {
             val dao = db.notebookDao()
             originalStrokeIds.forEach { dao.softDeleteById(it, deletedAt) }
-            dao.insertObject(
-                NotebookObject(
-                    id          = textId,
-                    parentId    = layerId,
-                    type        = TYPE_TEXT,
-                    boundingBox = bboxJson,
-                    sortOrder   = 0,
-                    createdAt   = now,
-                    updatedAt   = now,
-                    deletedAt   = null,
-                    data        = textObj.toJson(),
-                )
-            )
+            dao.insertObject(textRow.toRow(layerId, 0, now, now))
         }
 
         noteContentEdit(db, pageId)
@@ -7013,8 +6967,7 @@ class NotebookActivity : AppCompatActivity() {
                 dao.insertObject(NotebookObject(h.id, layerId, h.boundingBox.toBoundingBoxJson(), 0, now, now, null, TYPE_HEADING, data))
             }
             restoredTexts.forEach { t ->
-                val data = TextObject(text = t.text, strokes = t.strokes).toJson()
-                dao.insertObject(NotebookObject(t.id, layerId, t.boundingBox.toBoundingBoxJson(), 0, now, now, null, TYPE_TEXT, data))
+                dao.insertObject(t.toRow(layerId, 0, now, now))
             }
             restoredLines.forEach { l ->
                 dao.insertObject(l.toRow(layerId, 0, now, now, density))
@@ -7572,11 +7525,7 @@ class NotebookActivity : AppCompatActivity() {
                     )
                 }
                 for (textObj in movedTextObjects) {
-                    val bb = textObj.boundingBox
-                    val bboxJson = bb.toBoundingBoxJson()
-                    db.notebookDao().updateHeadingData(
-                        textObj.id, bboxJson, TextObject(text = textObj.text, strokes = textObj.strokes).toJson(), now
-                    )
+                    db.notebookDao().updateColumns(textObj.toRow("", 0, now, now))
                 }
                 for (lineObj in movedLines) {
                     db.notebookDao().updateColumns(lineObj.toRow("", 0, now, now, resources.displayMetrics.density))
@@ -8015,26 +7964,13 @@ class NotebookActivity : AppCompatActivity() {
 
             val textId  = UUID.randomUUID().toString()
             val now     = System.currentTimeMillis()
-            val bboxJson = bbox.toBoundingBoxJson()
+            val textRender = TextRender(id = textId, boundingBox = bbox, text = markdown)
 
             withContext(Dispatchers.IO) {
-                db.notebookDao().insertObject(
-                    NotebookObject(
-                        id          = textId,
-                        parentId    = layerId,
-                        type        = TYPE_TEXT,
-                        boundingBox = bboxJson,
-                        sortOrder   = 0,
-                        createdAt   = now,
-                        updatedAt   = now,
-                        deletedAt   = null,
-                        data        = TextObject(text = markdown).toJson(),
-                    )
-                )
+                db.notebookDao().insertObject(textRender.toRow(layerId, 0, now, now))
                 noteContentEdit(db, pageId)
             }
 
-            val textRender     = TextRender(id = textId, boundingBox = bbox, text = markdown)
             val updatedTexts   = drawingView.getTextObjects() + textRender
             drawingView.loadTextObjects(updatedTexts)
 
@@ -8263,16 +8199,13 @@ class NotebookActivity : AppCompatActivity() {
             val newBbox = RectF(newLeft, newTop, newLeft + objW, newTop + objH)
 
             val now      = System.currentTimeMillis()
-            val bboxJson = newBbox.toBoundingBoxJson()
+            val newTextRender = TextRender(id = textRender.id, boundingBox = newBbox, text = newMarkdown, strokes = textRender.strokes)
 
             withContext(Dispatchers.IO) {
-                db.notebookDao().updateHeadingData(
-                    textRender.id, bboxJson, TextObject(text = newMarkdown, strokes = textRender.strokes).toJson(), now
-                )
+                db.notebookDao().updateColumns(newTextRender.toRow("", 0, now, now))
                 noteContentEdit(db, pageId)
             }
 
-            val newTextRender = TextRender(id = textRender.id, boundingBox = newBbox, text = newMarkdown, strokes = textRender.strokes)
             val updatedTexts  = drawingView.getTextObjects().map { t ->
                 if (t.id == textRender.id) newTextRender else t
             }
@@ -9534,7 +9467,7 @@ class NotebookActivity : AppCompatActivity() {
                     for (textObj in targetTexts) {
                         val bb = textObj.boundingBox
                         val bboxJson = bb.toBoundingBoxJson()
-                        dao.updateHeadingData(textObj.id, bboxJson, TextObject(text = textObj.text, strokes = textObj.strokes).toJson(), ts)
+                        dao.updateColumns(textObj.toRow("", 0, ts, ts))
                     }
                     for (lineObj in targetLines) {
                         dao.updateColumns(lineObj.toRow("", 0, ts, ts, density))
@@ -10141,9 +10074,7 @@ class NotebookActivity : AppCompatActivity() {
                         dao.updateHeadingData(heading.id, bbJson, dataJson, now)
                     }
                     for (textObj in targetTexts) {
-                        val bb = textObj.boundingBox
-                        val bbJson = bb.toBoundingBoxJson()
-                        dao.updateHeadingData(textObj.id, bbJson, TextObject(text = textObj.text, strokes = textObj.strokes).toJson(), now)
+                        dao.updateColumns(textObj.toRow("", 0, now, now))
                     }
                     for (lineObj in targetLines) {
                         dao.updateColumns(lineObj.toRow("", 0, now, now, density))
@@ -10218,9 +10149,7 @@ class NotebookActivity : AppCompatActivity() {
 
             is UndoRedoAction.TextEdited -> withContext(Dispatchers.IO) {
                 val target = if (isUndo) action.oldTextRender else action.newTextRender
-                val bb = target.boundingBox
-                val bboxJson = bb.toBoundingBoxJson()
-                dao.updateHeadingData(action.textId, bboxJson, TextObject(text = target.text, strokes = target.strokes).toJson(), now)
+                dao.updateColumns(target.toRow("", 0, now, now))
                 noteContentEdit(db, action.pageId)
             }
 
