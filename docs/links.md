@@ -7,10 +7,20 @@
 
 ## Overview
 
-A **link** wraps a lasso selection of any mix of strokes, headings, text objects, and lines into a
-single `type = "link"` row. The original objects are soft-deleted; fresh-UUID embedded copies live
-inside the link's `data` column. The link draws its content through the existing per-type helpers
-and overlays a visual chrome indicator — making the whole group tappable (finger only) to navigate.
+A **link** wraps a lasso selection of any mix of strokes, headings, text objects, lines, **and
+shapes** into a single `type = "link"` row. The original objects are soft-deleted; fresh-UUID
+embedded copies are stored as the link's content. The link draws its content through the existing
+per-type helpers and overlays a visual chrome indicator — making the whole group tappable (finger
+only) to navigate.
+
+> **Storage (schema v4 / Phase 2c).** A link is a **columnar parent row + child rows** — its
+> `target`/`chrome` live in the `linkTarget`/`chrome` columns, and its embedded content
+> (strokes/headings/text/lines/shapes) are child rows with `parentId = link.id`, in page-absolute
+> coordinates. It is no longer a `zlib(JSON(LinkObject))` blob. `LinkObject` remains only as the
+> legacy on-disk form (read via the format-agnostic path; converted by `NotebookCompactor`) and as
+> the clipboard/undo serialization carrier. Persistence goes through the `*LinkSubtree` helpers in
+> `ObjectColumns.kt`; see [`data-architecture.md`](data-architecture.md) "Schema Version 4". Shapes
+> are full linkables end-to-end (capture, render on both engines, PDF export, unlink-restore, undo).
 
 ---
 

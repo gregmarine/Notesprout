@@ -2,6 +2,7 @@ package com.notesprout.android.data
 
 import android.graphics.PointF
 import android.graphics.RectF
+import com.notesprout.android.core.StrokeCodec
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.Transient
@@ -131,8 +132,87 @@ data class LiveStroke(
                 srcPoints = null,
             )
         }
+
+        // ── Binary format (data-model-optimization Phase 1) ────────────────────
+
+        /**
+         * Pack points to the binary stroke blob ([StrokeCodec] format B — float32 + zlib, lossless).
+         * Colour and width live in the row's own columns, so the blob is geometry only.
+         */
+        fun packPoints(points: List<PointF>): ByteArray {
+            val xy = FloatArray(points.size * 2)
+            for (i in points.indices) { xy[i * 2] = points[i].x; xy[i * 2 + 1] = points[i].y }
+            return StrokeCodec.encode(xy)
+        }
+
+        /** Inverse of [packPoints]. */
+        fun unpackPoints(blob: ByteArray): List<PointF> {
+            val xy = StrokeCodec.decode(blob)
+            val out = ArrayList<PointF>(xy.size / 2)
+            var i = 0
+            while (i < xy.size) { out.add(PointF(xy[i], xy[i + 1])); i += 2 }
+            return out
+        }
+
+        /**
+         * Format-agnostic decode of a stroke row: prefer the binary [NotebookObject.blob] (with colour
+         * and width from the row columns); otherwise fall back to the legacy JSON in
+         * [NotebookObject.data] — lean, points-only path when there is no per-point pressure/tilt (all
+         * current data), full [StrokeData] otherwise. [lean] forces the points-only path (thumbnails).
+         * Returns null on malformed data.
+         */
+        fun fromRow(obj: NotebookObject, lean: Boolean = false): LiveStroke? = try {
+            val blob = obj.blob
+            if (blob != null && blob.isNotEmpty()) {
+                LiveStroke(
+                    id = obj.id,
+                    points = unpackPoints(blob),
+                    color = obj.color ?: DEFAULT_COLOR,
+                    strokeWidth = obj.strokeWidth ?: DEFAULT_STROKE_WIDTH,
+                    srcPoints = null,
+                )
+            } else {
+                val data = obj.data
+                if (lean || (data.indexOf("pressure") < 0 && data.indexOf("tilt") < 0)) {
+                    fromPointsJson(obj.id, data)
+                } else {
+                    fromStrokeData(obj.id, StrokeData.fromJson(data))
+                }
+            }
+        } catch (e: Exception) {
+            null
+        }
     }
 }
+
+/**
+ * Build a columnar stroke row (data-model-optimization Phase 1): points → binary [NotebookObject.blob],
+ * colour/width → columns. The bounding box is derived from points on load, so `boundingBox`/`data`
+ * stay empty (the legacy columns are NOT NULL, hence `""`).
+ */
+fun LiveStroke.toStrokeRow(
+    parentId: String,
+    order: Int,
+    createdAt: Long,
+    updatedAt: Long,
+    deletedAt: Long? = null,
+): NotebookObject = NotebookObject(
+    id = id,
+    parentId = parentId,
+    boundingBox = "",
+    sortOrder = order,
+    createdAt = createdAt,
+    updatedAt = updatedAt,
+    deletedAt = deletedAt,
+    type = TYPE_STROKE,
+    data = "",
+    color = color,
+    strokeWidth = strokeWidth,
+    blob = LiveStroke.packPoints(points),
+)
+
+/** The binary blob for this stroke's current points — used to persist translated coordinates. */
+fun LiveStroke.strokeBlob(): ByteArray = LiveStroke.packPoints(points)
 
 /** Minimal stroke surrogate whose `points` decode directly to [PointF] (see [LiveStroke.fromPointsJson]). */
 @Serializable

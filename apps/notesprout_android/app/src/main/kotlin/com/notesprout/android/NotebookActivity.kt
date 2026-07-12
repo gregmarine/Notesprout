@@ -60,11 +60,30 @@ import com.notesprout.android.data.TextRender
 import com.notesprout.android.data.LineObject
 import com.notesprout.android.data.LineOrientation
 import com.notesprout.android.data.LineRender
+import com.notesprout.android.data.toLineRender
+import com.notesprout.android.data.assembleHeadingResolved
+import com.notesprout.android.data.insertHeadingSubtree
+import com.notesprout.android.data.insertTextSubtree
+import com.notesprout.android.data.loadHeadingsSubtree
+import com.notesprout.android.data.loadTextsSubtree
+import com.notesprout.android.data.replaceHeadingSubtree
+import com.notesprout.android.data.replaceTextSubtree
+import com.notesprout.android.data.toRow
+import com.notesprout.android.data.pageData
+import com.notesprout.android.data.notebookMetadata
+import com.notesprout.android.data.templateDataOrNull
+import com.notesprout.android.data.writeOnto
+import com.notesprout.android.data.LAYER_FLAGS_DEFAULT
+import com.notesprout.android.data.index.toNotebookObject
+import com.notesprout.android.data.toShapeRender
+import com.notesprout.android.data.updateColumns
 import com.notesprout.android.data.LineStyle
 import com.notesprout.android.data.LinkChrome
-import com.notesprout.android.data.LinkObject
 import com.notesprout.android.data.LinkRender
-import com.notesprout.android.data.toLinkObject
+import com.notesprout.android.data.insertLinkSubtree
+import com.notesprout.android.data.loadLinkSubtree
+import com.notesprout.android.data.loadLinksSubtree
+import com.notesprout.android.data.replaceLinkSubtree
 import com.notesprout.android.data.translate
 import com.notesprout.android.data.LinkTarget
 import com.notesprout.android.data.toEmbeddedLine
@@ -76,8 +95,11 @@ import com.notesprout.android.data.TYPE_LINK
 import com.notesprout.android.data.TYPE_SHAPE
 import com.notesprout.android.data.TYPE_STICKY_NOTE
 import com.notesprout.android.data.TYPE_TEXT
-import com.notesprout.android.data.StickyNoteObject
+import com.notesprout.android.data.ShapeRender
 import com.notesprout.android.data.StickyNoteRender
+import com.notesprout.android.data.insertStickyNoteSubtree
+import com.notesprout.android.data.loadStickyNotesSubtree
+import com.notesprout.android.data.replaceStickyNoteSubtree
 import com.notesprout.android.data.toStickyNoteObject
 import com.notesprout.android.core.markdown.TextObjectRenderer
 import android.text.TextPaint
@@ -87,8 +109,9 @@ import com.notesprout.android.data.NotebookObject
 import com.notesprout.android.data.PageData
 import com.notesprout.android.data.SoilDatabase
 import com.notesprout.android.data.StrokeData
-import com.notesprout.android.data.TemplateData
+import com.notesprout.android.data.strokeBlob
 import com.notesprout.android.data.toBoundingBoxJson
+import com.notesprout.android.data.toStrokeRow
 import com.notesprout.android.data.index.IndexRepository
 import com.notesprout.android.data.index.NotesproutIndex
 import com.notesprout.android.data.ScratchpadRepository
@@ -235,6 +258,7 @@ class NotebookActivity : AppCompatActivity() {
     private var pendingLinkHeadings:    List<HeadingStroke> = emptyList()
     private var pendingLinkTexts:       List<TextRender>    = emptyList()
     private var pendingLinkLines:       List<LineRender>    = emptyList()
+    private var pendingLinkShapes:      List<ShapeRender>   = emptyList()
     private var pendingLinkEditId:      String?             = null
     private var pendingLinkStrokesOnly: Boolean             = false
 
@@ -484,14 +508,12 @@ class NotebookActivity : AppCompatActivity() {
         val imageBytes = Base64.decode(tObj.image, Base64.DEFAULT)
         val bitmap = BitmapDecode.decodeSampled(imageBytes, BitmapDecode.MAX_DIMENSION, BitmapDecode.MAX_DIMENSION)
 
-        // Build the .soil TemplateData (name comes from entity.name, not from the JSON payload).
-        val dataJson = TemplateData(tObj.width, tObj.height, entity.name, tObj.image).toJson()
-
         val newId = UUID.randomUUID().toString()
         val now   = System.currentTimeMillis()
         val fullScreenBounds = BoundingBox(0f, 0f, tObj.width.toFloat(), tObj.height.toFloat()).toJson()
         val notebookParentId = notebookMetadata?.id ?: MainActivity.NIL_UUID
 
+        // Columnar (Phase 2b) template row: name→text, decoded image bytes→blob, size→boundingBox.
         db.notebookDao().insertObject(
             NotebookObject(
                 id          = newId,
@@ -502,7 +524,9 @@ class NotebookActivity : AppCompatActivity() {
                 createdAt   = now,
                 updatedAt   = now,
                 deletedAt   = null,
-                data        = dataJson,
+                data        = "",
+                text        = entity.name,
+                blob        = imageBytes,
             ),
         )
         Slog.d(TAG) { "insertLibraryTemplateIntoSoil: inserted soil row $newId for library template '$libraryTemplateId'" }
@@ -670,11 +694,13 @@ class NotebookActivity : AppCompatActivity() {
         val headings    = pendingLinkHeadings
         val texts       = pendingLinkTexts
         val lines       = pendingLinkLines
+        val shapes      = pendingLinkShapes
         val strokesOnly = pendingLinkStrokesOnly
         pendingLinkEditId      = null
         pendingLinkStrokesOnly = false
         pendingLinkStrokes = emptyList(); pendingLinkHeadings = emptyList()
         pendingLinkTexts = emptyList();   pendingLinkLines = emptyList()
+        pendingLinkShapes = emptyList()
 
         if (result.resultCode != RESULT_OK) return@registerForActivityResult
         val data = result.data ?: return@registerForActivityResult
@@ -705,8 +731,8 @@ class NotebookActivity : AppCompatActivity() {
                 updateLink(editId, chrome, target, newText = resultText)
             } else if (strokesOnly && convertToText && strokes.isNotEmpty()) {
                 createLinkFromStrokesConvertingToText(strokes, chrome, target)
-            } else if (strokes.isNotEmpty() || headings.isNotEmpty() || texts.isNotEmpty() || lines.isNotEmpty()) {
-                createLinkFromSelection(strokes, headings, texts, lines, chrome, target)
+            } else if (strokes.isNotEmpty() || headings.isNotEmpty() || texts.isNotEmpty() || lines.isNotEmpty() || shapes.isNotEmpty()) {
+                createLinkFromSelection(strokes, headings, texts, lines, shapes, chrome, target)
             }
         }
     }
@@ -844,12 +870,14 @@ class NotebookActivity : AppCompatActivity() {
         val density = resources.displayMetrics.density
 
         if (out != null && db != null && pageId != null) {
-            val afterData  = afterRender.toStickyNoteObject(density).toJson()
-            val beforeData = pending.toStickyNoteObject(density).toJson()
-            if (afterData != beforeData) {
+            val afterObj  = afterRender.toStickyNoteObject(density)
+            val beforeObj = pending.toStickyNoteObject(density)
+            if (afterObj != beforeObj) {
                 lifecycleScope.launch {
                     withContext(Dispatchers.IO) {
-                        db.notebookDao().updateData(pending.id, afterData, System.currentTimeMillis())
+                        db.withTransaction {
+                            db.notebookDao().replaceStickyNoteSubtree(afterRender, System.currentTimeMillis(), density)
+                        }
                         noteContentEdit(db, pageId)
                     }
                     val updatedNotes = drawingView.getStickyNotes().map {
@@ -1914,42 +1942,25 @@ class NotebookActivity : AppCompatActivity() {
                     withContext(Dispatchers.IO) {
                         db.withTransaction {
                             for (moved in movedStrokes) {
-                                db.notebookDao().updateStrokeData(moved.id, moved.toStrokeData().toJson(), now)
+                                db.notebookDao().updateStrokeBlob(moved.id, moved.strokeBlob(), moved.color, moved.strokeWidth, now)
                             }
                             for (heading in movedHeadings) {
-                                val bboxJson = heading.boundingBox.toBoundingBoxJson()
-                                db.notebookDao().updateHeadingData(
-                                    heading.id, bboxJson, HeadingObject(heading.strokes, heading.recognizedText, heading.level).toJson(), now
-                                )
+                                db.notebookDao().replaceHeadingSubtree(heading, now)
                             }
                             for (textObj in movedTextObjects) {
-                                val bboxJson = textObj.boundingBox.toBoundingBoxJson()
-                                db.notebookDao().updateHeadingData(
-                                    textObj.id, bboxJson, TextObject(text = textObj.text, strokes = textObj.strokes).toJson(), now
-                                )
+                                db.notebookDao().replaceTextSubtree(textObj, now)
                             }
                             for (lineObj in movedLineObjects) {
-                                val bboxJson = lineObj.boundingBox.toBoundingBoxJson()
-                                db.notebookDao().updateHeadingData(
-                                    lineObj.id, bboxJson, LineObject(lineObj.style, lineObj.orientation, lineObj.strokeWidthDp, lineObj.dotSpacingPx / density).toJson(), now
-                                )
+                                db.notebookDao().updateColumns(lineObj.toRow("", 0, now, now, density))
                             }
                             for (link in movedLinks) {
-                                val bboxJson = link.boundingBox.toBoundingBoxJson()
-                                db.notebookDao().updateHeadingData(
-                                    link.id, bboxJson, link.toLinkObject(density).toJson(), now
-                                )
+                                db.notebookDao().replaceLinkSubtree(link, now, density)
                             }
                             for (note in movedStickyNotes) {
-                                val bboxJson = note.boundingBox.toBoundingBoxJson()
-                                db.notebookDao().updateHeadingData(
-                                    note.id, bboxJson, note.toStickyNoteObject(density).toJson(), now
-                                )
+                                db.notebookDao().replaceStickyNoteSubtree(note, now, density)
                             }
                             for (shape in movedShapes) {
-                                db.notebookDao().updateHeadingData(
-                                    shape.id, shape.boundingBox.toBoundingBoxJson(), shape.toShapeObject(density).toJson(), now
-                                )
+                                db.notebookDao().updateColumns(shape.toRow("", 0, now, now, density))
                             }
                         }
                         if (movedLinks.isNotEmpty() || movedStickyNotes.isNotEmpty() || movedShapes.isNotEmpty()) noteContentEdit(db, pageId)
@@ -2111,12 +2122,14 @@ class NotebookActivity : AppCompatActivity() {
             val headings = drawingView.getHeadings().filter { it.id in ids }
             val texts    = drawingView.getTextObjects().filter { it.id in ids }
             val lines    = drawingView.getLineObjects().filter { it.id in ids }
-            if (strokes.isEmpty() && headings.isEmpty() && texts.isEmpty() && lines.isEmpty()) return@setOnClickListener
+            val shapes   = drawingView.getShapeObjects().filter { it.id in ids }
+            if (strokes.isEmpty() && headings.isEmpty() && texts.isEmpty() && lines.isEmpty() && shapes.isEmpty()) return@setOnClickListener
             // Stash the selection and open the target picker; the result handler creates the link.
             pendingLinkEditId = null
             pendingLinkStrokes = strokes; pendingLinkHeadings = headings
             pendingLinkTexts = texts;     pendingLinkLines = lines
-            pendingLinkStrokesOnly = strokes.isNotEmpty() && headings.isEmpty() && texts.isEmpty() && lines.isEmpty()
+            pendingLinkShapes = shapes
+            pendingLinkStrokesOnly = strokes.isNotEmpty() && headings.isEmpty() && texts.isEmpty() && lines.isEmpty() && shapes.isEmpty()
             launchLinkPicker(initialChrome = null, initialTarget = null, strokesOnly = pendingLinkStrokesOnly)
         }
 
@@ -2125,6 +2138,7 @@ class NotebookActivity : AppCompatActivity() {
             pendingLinkEditId = link.id
             pendingLinkStrokes = emptyList(); pendingLinkHeadings = emptyList()
             pendingLinkTexts = emptyList();   pendingLinkLines = emptyList()
+            pendingLinkShapes = emptyList()
             val singleText = link.textObjects.singleOrNull()?.text?.takeIf {
                 link.strokes.isEmpty() && link.headings.isEmpty() && link.lines.isEmpty()
             }
@@ -3963,10 +3977,12 @@ class NotebookActivity : AppCompatActivity() {
         // notebook is converted the scans find nothing. touchNotebook() below flags the shrunk file
         // for backup.
         runCatching {
-            val r = NotebookCompactor.compact(db)
+            val r = NotebookCompactor.compact(db, resources.displayMetrics.density)
             if (r.changed) Slog.d(TAG) {
                 "compaction sealed: ${r.tsRows} ts + ${r.imageRows} images→WEBP + ${r.deadStrokeRows} dead-stroke + " +
-                    "${r.snapshotRows} snapshots stripped + ${r.coverRows} cover rows deleted + VACUUM"
+                    "${r.snapshotRows} snapshots stripped + ${r.coverRows} cover rows deleted + " +
+                    "${r.compositeRows} composites→child-rows + ${r.orphanRows} orphan sweeps + " +
+                    "${r.structuralRows} structural→columnar + ${r.orphanSubtreeRows} orphan subtrees + VACUUM"
             }
         }.onFailure { Slog.d(TAG) { "compaction failed: ${it.message}" } }
         db.openHelper.writableDatabase.apply {
@@ -4094,18 +4110,11 @@ class NotebookActivity : AppCompatActivity() {
      * Also repopulates [persistedStrokeIds].
      * Must be called on [Dispatchers.IO] AFTER [setupPageIds] has set [currentLayerId].
      */
-    private fun parseStrokeRow(id: String, data: String): LiveStroke? = try {
-        // Fast path: rows with no per-point pressure/tilt (all current data) parse straight into PointF,
-        // skipping the StrokePoint allocation. Fall back to the full model when those samples exist.
-        if (data.indexOf("pressure") < 0 && data.indexOf("tilt") < 0) {
-            LiveStroke.fromPointsJson(id, data)
-        } else {
-            LiveStroke.fromStrokeData(id, StrokeData.fromJson(data))
+    private fun parseStrokeRow(obj: NotebookObject): LiveStroke? =
+        LiveStroke.fromRow(obj) ?: run {
+            Log.e(TAG, "deserializeStrokesFromDb: failed to parse stroke ${obj.id}")
+            null
         }
-    } catch (e: Exception) {
-        Log.e(TAG, "deserializeStrokesFromDb: failed to parse stroke $id", e)
-        null
-    }
 
     /**
      * Parse every stroke row for [layerId] into [LiveStroke]s. Pure — no view/[persistedStrokeIds]
@@ -4117,12 +4126,12 @@ class NotebookActivity : AppCompatActivity() {
     private suspend fun parseStrokesForLayer(db: SoilDatabase, layerId: String): List<LiveStroke> = coroutineScope {
         val strokeObjects = db.notebookDao().getStrokesForLayer(layerId)
         if (strokeObjects.size < PARALLEL_PARSE_THRESHOLD) {
-            strokeObjects.mapNotNull { parseStrokeRow(it.id, it.data) }
+            strokeObjects.mapNotNull { parseStrokeRow(it) }
         } else {
             val cores = Runtime.getRuntime().availableProcessors().coerceIn(2, 8)
             val chunkSize = (strokeObjects.size + cores - 1) / cores
             strokeObjects.chunked(chunkSize)
-                .map { chunk -> async(Dispatchers.Default) { chunk.mapNotNull { parseStrokeRow(it.id, it.data) } } }
+                .map { chunk -> async(Dispatchers.Default) { chunk.mapNotNull { parseStrokeRow(it) } } }
                 .awaitAll()
                 .flatten()
         }
@@ -4207,44 +4216,18 @@ class NotebookActivity : AppCompatActivity() {
      */
     private suspend fun loadHeadingsFromDb(db: SoilDatabase, layerId: String): List<HeadingStroke> {
         if (layerId.isEmpty()) return emptyList()
-        val rows = db.notebookDao().getHeadingsForLayer(layerId)
-        return rows.mapNotNull { row ->
-            val box = row.parseBoundingBox() ?: return@mapNotNull null
-            val headingObj = runCatching { HeadingObject.fromJson(row.data) }.getOrNull()
-                ?: return@mapNotNull null
-            HeadingStroke(id = row.id, boundingBox = box, strokes = headingObj.strokes, recognizedText = headingObj.recognizedText, level = headingObj.level)
-        }
+        return db.notebookDao().loadHeadingsSubtree(layerId)
     }
 
     private suspend fun loadTextObjectsFromDb(db: SoilDatabase, layerId: String): List<TextRender> {
         if (layerId.isEmpty()) return emptyList()
-        val rows = db.notebookDao().getTextObjectsForLayer(layerId)
-        return rows.mapNotNull { row ->
-            val box = row.parseBoundingBox() ?: return@mapNotNull null
-            val textObj = runCatching { TextObject.fromJson(row.data) }.getOrNull()
-                ?: return@mapNotNull null
-            TextRender(id = row.id, boundingBox = box, text = textObj.text, strokes = textObj.strokes)
-        }
+        return db.notebookDao().loadTextsSubtree(layerId)
     }
 
     private suspend fun loadLineObjectsFromDb(db: SoilDatabase, layerId: String): List<LineRender> {
         if (layerId.isEmpty()) return emptyList()
-        val rows = db.notebookDao().getLineObjectsForLayer(layerId)
-        return rows.mapNotNull { row ->
-            val box = row.parseBoundingBox() ?: return@mapNotNull null
-            val lineObj = runCatching { LineObject.fromJson(row.data) }.getOrNull()
-                ?: return@mapNotNull null
-            val startX: Float; val startY: Float; val endX: Float; val endY: Float
-            when (lineObj.orientation) {
-                LineOrientation.HORIZONTAL -> {
-                    startX = box.left; endX = box.right; startY = box.centerY(); endY = box.centerY()
-                }
-                LineOrientation.VERTICAL -> {
-                    startX = box.centerX(); endX = box.centerX(); startY = box.top; endY = box.bottom
-                }
-            }
-            LineRender(row.id, box, startX, startY, endX, endY, lineObj.style, lineObj.orientation, lineObj.strokeWidthDp, lineObj.dotSpacingDp * resources.displayMetrics.density)
-        }
+        val density = resources.displayMetrics.density
+        return db.notebookDao().getLineObjectsForLayer(layerId).mapNotNull { it.toLineRender(density) }
     }
 
     /**
@@ -4257,53 +4240,19 @@ class NotebookActivity : AppCompatActivity() {
     private suspend fun loadLinksFromDb(db: SoilDatabase, layerId: String): List<LinkRender> {
         if (layerId.isEmpty()) return emptyList()
         val density = resources.displayMetrics.density
-        val rows = db.notebookDao().getLinkObjectsForLayer(layerId)
-        return rows.mapNotNull { row ->
-            val box = row.parseBoundingBox() ?: return@mapNotNull null
-            val linkObj = runCatching { LinkObject.fromJson(row.data) }.getOrNull() ?: return@mapNotNull null
-            LinkRender(
-                id          = row.id,
-                boundingBox = box,
-                target      = linkObj.target,
-                chrome      = linkObj.chrome,
-                strokes     = linkObj.strokes,
-                headings    = linkObj.headings,
-                textObjects = linkObj.textObjects,
-                lines       = linkObj.lines.map { it.toLineRender(density) },
-            )
-        }
+        return db.notebookDao().loadLinksSubtree(layerId, density)
     }
 
     private suspend fun loadStickyNotesFromDb(db: SoilDatabase, layerId: String): List<StickyNoteRender> {
         if (layerId.isEmpty()) return emptyList()
         val density = resources.displayMetrics.density
-        val rows = db.notebookDao().getStickyNotesForLayer(layerId)
-        return rows.mapNotNull { row ->
-            val box = row.parseBoundingBox() ?: return@mapNotNull null
-            val noteObj = runCatching { StickyNoteObject.fromJson(row.data) }.getOrNull() ?: return@mapNotNull null
-            StickyNoteRender(
-                id           = row.id,
-                boundingBox  = box,
-                strokes      = noteObj.strokes,
-                headings     = noteObj.headings,
-                textObjects  = noteObj.textObjects,
-                lines        = noteObj.lines.map { it.toLineRender(density) },
-                contentWidth = noteObj.contentWidth,
-                contentHeight = noteObj.contentHeight,
-            )
-        }
+        return db.notebookDao().loadStickyNotesSubtree(layerId, density)
     }
 
     private suspend fun loadShapeObjectsFromDb(db: SoilDatabase, layerId: String): List<com.notesprout.android.data.ShapeRender> {
         if (layerId.isEmpty()) return emptyList()
         val density = resources.displayMetrics.density
-        val rows = db.notebookDao().getShapeObjectsForLayer(layerId)
-        return rows.mapNotNull { row ->
-            val box = row.parseBoundingBox() ?: return@mapNotNull null
-            val shapeObj = runCatching { com.notesprout.android.data.ShapeObject.fromJson(row.data) }.getOrNull()
-                ?: return@mapNotNull null
-            com.notesprout.android.data.ShapeRender.from(row.id, shapeObj, density)
-        }
+        return db.notebookDao().getShapeObjectsForLayer(layerId).mapNotNull { it.toShapeRender(density) }
     }
 
     private fun NotebookObject.parseBoundingBox(): android.graphics.RectF? =
@@ -4359,12 +4308,12 @@ class NotebookActivity : AppCompatActivity() {
 
         val page = db.notebookDao().getObjectById(pageId) ?: return null
 
-        val templateId = TemplateDialog.parseTemplateId(page.data).takeIf { it.isNotEmpty() } ?: return null
+        val templateId = page.pageData().template.takeIf { it.isNotEmpty() } ?: return null
 
         val templateObj = db.notebookDao().getTemplateById(templateId) ?: return null
 
         return try {
-            val b64 = TemplateData.fromJson(templateObj.data)?.image?.takeIf { it.isNotEmpty() } ?: return null
+            val b64 = templateObj.templateDataOrNull()?.image?.takeIf { it.isNotEmpty() } ?: return null
             val bytes = Base64.decode(b64, android.util.Base64.DEFAULT)
             // Bounded decode (M-1): cap to the view size (fall back to MAX_DIMENSION before layout).
             val view = drawingView.asView()
@@ -4441,28 +4390,13 @@ class NotebookActivity : AppCompatActivity() {
         // Single transaction — all new inserts share one BEGIN/COMMIT.
         db.withTransaction {
             for (liveStroke in newStrokes) {
-                val points = liveStroke.points
-                if (points.size < 2) continue   // degenerate stroke — skip
-
-                val minX = points.minOf { it.x }
-                val minY = points.minOf { it.y }
-                val maxX = points.maxOf { it.x }
-                val maxY = points.maxOf { it.y }
-                val bboxJson = BoundingBox(minX, minY, maxX - minX, maxY - minY).toJson()
-
-                val strokeData = liveStroke.toStrokeData()
-
+                if (liveStroke.points.size < 2) continue   // degenerate stroke — skip
                 dao.insertOrIgnore(
-                    NotebookObject(
-                        id          = liveStroke.id,
-                        type        = "stroke",
-                        parentId    = layerId,
-                        boundingBox = bboxJson,
-                        sortOrder   = strokeIndexMap[liveStroke.id] ?: 0,
-                        createdAt   = now,
-                        updatedAt   = now,
-                        deletedAt   = null,
-                        data        = strokeData.toJson(),
+                    liveStroke.toStrokeRow(
+                        parentId  = layerId,
+                        order     = strokeIndexMap[liveStroke.id] ?: 0,
+                        createdAt = now,
+                        updatedAt = now,
                     )
                 )
             }
@@ -4719,7 +4653,7 @@ class NotebookActivity : AppCompatActivity() {
         lifecycleScope.launch {
             withContext(Dispatchers.IO) {
                 val row = db.notebookDao().getNotebookObject() ?: return@withContext
-                db.notebookDao().upsertNotebookObject(row.copy(data = updated.toJson(), updatedAt = System.currentTimeMillis()))
+                db.notebookDao().upsertNotebookObject(updated.writeOnto(row, System.currentTimeMillis()))
             }
             syncRtrScheduler()   // creates the scheduler + kicks a backfill of missing/stale pages
             toast(if (enabling) "Real-time text on — recognizing existing pages…" else "Real-time text off.")
@@ -4935,7 +4869,7 @@ class NotebookActivity : AppCompatActivity() {
                 // Read current (previous) template ID before overwriting — needed for undo.
                 val page = db.notebookDao().getObjectById(pageId)
                 val previousTemplateId = page
-                    ?.let { TemplateDialog.parseTemplateId(it.data) }
+                    ?.let { it.pageData().template }
                     ?.takeIf { it.isNotEmpty() }
 
                 persistPageTemplate(db.notebookDao(), pageId, templateId)
@@ -4961,9 +4895,8 @@ class NotebookActivity : AppCompatActivity() {
      * Must be called on [Dispatchers.IO].
      */
     private suspend fun persistPageTemplate(dao: NotebookDao, pageId: String, templateId: String) {
-        val page = dao.getObjectById(pageId) ?: return
-        val updated = PageData.fromJson(page.data).copy(template = templateId)
-        dao.updateData(pageId, updated.toJson(), System.currentTimeMillis())
+        // Columnar page: template lives in refId, size stays in boundingBox. Clears legacy data JSON.
+        dao.updatePageTemplate(pageId, templateId, System.currentTimeMillis())
     }
 
     // ── Notebook metadata operations ──────────────────────────────────────────
@@ -4976,7 +4909,7 @@ class NotebookActivity : AppCompatActivity() {
     private suspend fun loadNotebookMetadataFromDb(db: SoilDatabase): NotebookMetadata? {
         val obj = db.notebookDao().getNotebookObject() ?: return null
         return try {
-            NotebookMetadata.fromJson(obj.id, obj.data)
+            obj.notebookMetadata()
         } catch (e: Exception) {
             Log.e(TAG, "loadNotebookMetadataFromDb: failed to parse metadata row", e)
             null
@@ -4997,9 +4930,7 @@ class NotebookActivity : AppCompatActivity() {
                 notebookMetadata = updatedMeta
                 val obj = db.notebookDao().getNotebookObject() ?: return@withContext
                 val now = System.currentTimeMillis()
-                db.notebookDao().upsertNotebookObject(
-                    obj.copy(data = updatedMeta.toJson(), updatedAt = now)
-                )
+                db.notebookDao().upsertNotebookObject(updatedMeta.writeOnto(obj, now))
             }
         }
     }
@@ -5032,7 +4963,7 @@ class NotebookActivity : AppCompatActivity() {
         // template id even if the in-memory `pages` list is stale (e.g. after applyTemplateToCurrentPage
         // updated the DB without refreshing the list).
         val freshCurrentPage = dao.getObjectById(currentPageId)
-        val inheritedTemplate = freshCurrentPage?.let { TemplateDialog.parseTemplateId(it.data) } ?: ""
+        val inheritedTemplate = freshCurrentPage?.pageData()?.template ?: ""
 
         // Shift the order of every page that comes after the insertion point.
         for (i in insertionIndex until pages.size) {
@@ -5052,7 +4983,8 @@ class NotebookActivity : AppCompatActivity() {
                 createdAt   = now,
                 updatedAt   = now,
                 deletedAt   = null,
-                data        = PageData(width = screenW, height = screenH, template = inheritedTemplate).toJson(),
+                data        = "",
+                refId       = inheritedTemplate,
             )
         )
 
@@ -5068,7 +5000,9 @@ class NotebookActivity : AppCompatActivity() {
                 createdAt   = now,
                 updatedAt   = now,
                 deletedAt   = null,
-                data        = """{"label":"Content","isLocked":false,"isVisible":true}""",
+                data        = "",
+                text        = "Content",
+                flags       = LAYER_FLAGS_DEFAULT,
             )
         )
 
@@ -5099,7 +5033,7 @@ class NotebookActivity : AppCompatActivity() {
         val insertionIndex = currentPageIndex
 
         val freshCurrentPage = dao.getObjectById(currentPageId)
-        val inheritedTemplate = freshCurrentPage?.let { TemplateDialog.parseTemplateId(it.data) } ?: ""
+        val inheritedTemplate = freshCurrentPage?.pageData()?.template ?: ""
 
         for (i in insertionIndex until pages.size) {
             dao.updateOrder(pages[i].id, i + 1)
@@ -5116,7 +5050,8 @@ class NotebookActivity : AppCompatActivity() {
                 createdAt   = now,
                 updatedAt   = now,
                 deletedAt   = null,
-                data        = PageData(width = screenW, height = screenH, template = inheritedTemplate).toJson(),
+                data        = "",
+                refId       = inheritedTemplate,
             )
         )
 
@@ -5131,7 +5066,9 @@ class NotebookActivity : AppCompatActivity() {
                 createdAt   = now,
                 updatedAt   = now,
                 deletedAt   = null,
-                data        = """{"label":"Content","isLocked":false,"isVisible":true}""",
+                data        = "",
+                text        = "Content",
+                flags       = LAYER_FLAGS_DEFAULT,
             )
         )
 
@@ -5187,7 +5124,8 @@ class NotebookActivity : AppCompatActivity() {
                     createdAt   = newNow,
                     updatedAt   = newNow,
                     deletedAt   = null,
-                    data        = PageData(width = screenW, height = screenH, template = "").toJson(),
+                    data        = "",
+                    refId       = "",
                 )
             )
             val newLayerId = UUID.randomUUID().toString()
@@ -5201,7 +5139,9 @@ class NotebookActivity : AppCompatActivity() {
                     createdAt   = newNow,
                     updatedAt   = newNow,
                     deletedAt   = null,
-                    data        = """{"label":"Content","isLocked":false,"isVisible":true}""",
+                    data        = "",
+                text        = "Content",
+                flags       = LAYER_FLAGS_DEFAULT,
                 )
             )
             pages = dao.getPagesSorted().toMutableList()
@@ -5459,122 +5399,33 @@ class NotebookActivity : AppCompatActivity() {
                 val dao = db.notebookDao()
                 db.withTransaction {
                     newStrokes.forEachIndexed { i, stroke ->
-                        val points = stroke.points
-                        if (points.size < 2) return@forEachIndexed
-                        val minX = points.minOf { it.x }
-                        val minY = points.minOf { it.y }
-                        val maxX = points.maxOf { it.x }
-                        val maxY = points.maxOf { it.y }
-                        val bboxJson = BoundingBox(minX, minY, maxX - minX, maxY - minY).toJson()
-                        val strokeData = stroke.toStrokeData()
+                        if (stroke.points.size < 2) return@forEachIndexed
                         dao.insertOrIgnore(
-                            NotebookObject(
-                                id          = stroke.id,
-                                type        = "stroke",
-                                parentId    = layerId,
-                                boundingBox = bboxJson,
-                                sortOrder   = baseOrder + i,
-                                createdAt   = now,
-                                updatedAt   = now,
-                                deletedAt   = null,
-                                data        = strokeData.toJson(),
+                            stroke.toStrokeRow(
+                                parentId  = layerId,
+                                order     = baseOrder + i,
+                                createdAt = now,
+                                updatedAt = now,
                             )
                         )
                     }
                     newHeadings.forEach { heading ->
-                        val bboxJson = heading.boundingBox.toBoundingBoxJson()
-                        dao.insertOrIgnore(
-                            NotebookObject(
-                                id          = heading.id,
-                                type        = TYPE_HEADING,
-                                parentId    = layerId,
-                                boundingBox = bboxJson,
-                                sortOrder   = 0,
-                                createdAt   = now,
-                                updatedAt   = now,
-                                deletedAt   = null,
-                                data        = HeadingObject(heading.strokes, heading.recognizedText, heading.level).toJson(),
-                            )
-                        )
+                        dao.insertHeadingSubtree(heading, layerId, 0, now, now)
                     }
                     newTextObjects.forEach { textObj ->
-                        val bb = textObj.boundingBox
-                        val bboxJson = bb.toBoundingBoxJson()
-                        dao.insertOrIgnore(
-                            NotebookObject(
-                                id          = textObj.id,
-                                type        = TYPE_TEXT,
-                                parentId    = layerId,
-                                boundingBox = bboxJson,
-                                sortOrder   = 0,
-                                createdAt   = now,
-                                updatedAt   = now,
-                                deletedAt   = null,
-                                data        = TextObject(text = textObj.text, strokes = textObj.strokes).toJson(),
-                            )
-                        )
+                        dao.insertTextSubtree(textObj, layerId, 0, now, now)
                     }
                     newLineObjects.forEach { lineObj ->
-                        val bb = lineObj.boundingBox
-                        val bboxJson = bb.toBoundingBoxJson()
-                        dao.insertOrIgnore(
-                            NotebookObject(
-                                id          = lineObj.id,
-                                type        = TYPE_LINE,
-                                parentId    = layerId,
-                                boundingBox = bboxJson,
-                                sortOrder   = 0,
-                                createdAt   = now,
-                                updatedAt   = now,
-                                deletedAt   = null,
-                                data        = LineObject(lineObj.style, lineObj.orientation, lineObj.strokeWidthDp, lineObj.dotSpacingPx / density).toJson(),
-                            )
-                        )
+                        dao.insertOrIgnore(lineObj.toRow(layerId, 0, now, now, density))
                     }
                     newLinks.forEach { link ->
-                        dao.insertOrIgnore(
-                            NotebookObject(
-                                id          = link.id,
-                                type        = TYPE_LINK,
-                                parentId    = layerId,
-                                boundingBox = link.boundingBox.toBoundingBoxJson(),
-                                sortOrder   = 0,
-                                createdAt   = now,
-                                updatedAt   = now,
-                                deletedAt   = null,
-                                data        = link.toLinkObject(density).toJson(),
-                            )
-                        )
+                        dao.insertLinkSubtree(link, layerId, 0, now, now, density)
                     }
                     newStickyNotes.forEach { note ->
-                        dao.insertOrIgnore(
-                            NotebookObject(
-                                id          = note.id,
-                                type        = TYPE_STICKY_NOTE,
-                                parentId    = layerId,
-                                boundingBox = note.boundingBox.toBoundingBoxJson(),
-                                sortOrder   = 0,
-                                createdAt   = now,
-                                updatedAt   = now,
-                                deletedAt   = null,
-                                data        = note.toStickyNoteObject(density).toJson(),
-                            )
-                        )
+                        dao.insertStickyNoteSubtree(note, layerId, 0, now, now, density)
                     }
                     newShapes.forEach { shape ->
-                        dao.insertOrIgnore(
-                            NotebookObject(
-                                id          = shape.id,
-                                type        = TYPE_SHAPE,
-                                parentId    = layerId,
-                                boundingBox = shape.boundingBox.toBoundingBoxJson(),
-                                sortOrder   = 0,
-                                createdAt   = now,
-                                updatedAt   = now,
-                                deletedAt   = null,
-                                data        = shape.toShapeObject(density).toJson(),
-                            )
-                        )
+                        dao.insertOrIgnore(shape.toRow(layerId, 0, now, now, density))
                     }
                 }
                 if (newLinks.isNotEmpty() || newStickyNotes.isNotEmpty() || newShapes.isNotEmpty()) noteContentEdit(db, pageId)
@@ -5722,117 +5573,33 @@ class NotebookActivity : AppCompatActivity() {
                 val dao = db.notebookDao()
                 db.withTransaction {
                     newStrokes.forEachIndexed { i, stroke ->
-                        val points = stroke.points
-                        if (points.size < 2) return@forEachIndexed
-                        val minX = points.minOf { it.x }
-                        val minY = points.minOf { it.y }
-                        val maxX = points.maxOf { it.x }
-                        val maxY = points.maxOf { it.y }
-                        val bboxJson = BoundingBox(minX, minY, maxX - minX, maxY - minY).toJson()
-                        val strokeData = stroke.toStrokeData()
+                        if (stroke.points.size < 2) return@forEachIndexed
                         dao.insertOrIgnore(
-                            NotebookObject(
-                                id          = stroke.id,
-                                type        = "stroke",
-                                parentId    = layerId,
-                                boundingBox = bboxJson,
-                                sortOrder   = baseOrder + i,
-                                createdAt   = now,
-                                updatedAt   = now,
-                                deletedAt   = null,
-                                data        = strokeData.toJson(),
+                            stroke.toStrokeRow(
+                                parentId  = layerId,
+                                order     = baseOrder + i,
+                                createdAt = now,
+                                updatedAt = now,
                             )
                         )
                     }
                     newHeadings.forEach { heading ->
-                        dao.insertOrIgnore(
-                            NotebookObject(
-                                id          = heading.id,
-                                type        = TYPE_HEADING,
-                                parentId    = layerId,
-                                boundingBox = heading.boundingBox.toBoundingBoxJson(),
-                                sortOrder   = 0,
-                                createdAt   = now,
-                                updatedAt   = now,
-                                deletedAt   = null,
-                                data        = HeadingObject(heading.strokes, heading.recognizedText, heading.level).toJson(),
-                            )
-                        )
+                        dao.insertHeadingSubtree(heading, layerId, 0, now, now)
                     }
                     newTextObjects.forEach { textObj ->
-                        dao.insertOrIgnore(
-                            NotebookObject(
-                                id          = textObj.id,
-                                type        = TYPE_TEXT,
-                                parentId    = layerId,
-                                boundingBox = textObj.boundingBox.toBoundingBoxJson(),
-                                sortOrder   = 0,
-                                createdAt   = now,
-                                updatedAt   = now,
-                                deletedAt   = null,
-                                data        = TextObject(text = textObj.text, strokes = textObj.strokes).toJson(),
-                            )
-                        )
+                        dao.insertTextSubtree(textObj, layerId, 0, now, now)
                     }
                     newLineObjects.forEach { lineObj ->
-                        dao.insertOrIgnore(
-                            NotebookObject(
-                                id          = lineObj.id,
-                                type        = TYPE_LINE,
-                                parentId    = layerId,
-                                boundingBox = lineObj.boundingBox.toBoundingBoxJson(),
-                                sortOrder   = 0,
-                                createdAt   = now,
-                                updatedAt   = now,
-                                deletedAt   = null,
-                                data        = LineObject(lineObj.style, lineObj.orientation, lineObj.strokeWidthDp, lineObj.dotSpacingPx / density).toJson(),
-                            )
-                        )
+                        dao.insertOrIgnore(lineObj.toRow(layerId, 0, now, now, density))
                     }
                     newLinks.forEach { link ->
-                        dao.insertOrIgnore(
-                            NotebookObject(
-                                id          = link.id,
-                                type        = TYPE_LINK,
-                                parentId    = layerId,
-                                boundingBox = link.boundingBox.toBoundingBoxJson(),
-                                sortOrder   = 0,
-                                createdAt   = now,
-                                updatedAt   = now,
-                                deletedAt   = null,
-                                data        = link.toLinkObject(density).toJson(),
-                            )
-                        )
+                        dao.insertLinkSubtree(link, layerId, 0, now, now, density)
                     }
                     newStickyNotes.forEach { note ->
-                        dao.insertOrIgnore(
-                            NotebookObject(
-                                id          = note.id,
-                                type        = TYPE_STICKY_NOTE,
-                                parentId    = layerId,
-                                boundingBox = note.boundingBox.toBoundingBoxJson(),
-                                sortOrder   = 0,
-                                createdAt   = now,
-                                updatedAt   = now,
-                                deletedAt   = null,
-                                data        = note.toStickyNoteObject(density).toJson(),
-                            )
-                        )
+                        dao.insertStickyNoteSubtree(note, layerId, 0, now, now, density)
                     }
                     newShapes.forEach { shape ->
-                        dao.insertOrIgnore(
-                            NotebookObject(
-                                id          = shape.id,
-                                type        = TYPE_SHAPE,
-                                parentId    = layerId,
-                                boundingBox = shape.boundingBox.toBoundingBoxJson(),
-                                sortOrder   = 0,
-                                createdAt   = now,
-                                updatedAt   = now,
-                                deletedAt   = null,
-                                data        = shape.toShapeObject(density).toJson(),
-                            )
-                        )
+                        dao.insertOrIgnore(shape.toRow(layerId, 0, now, now, density))
                     }
                 }
                 if (newLinks.isNotEmpty() || newStickyNotes.isNotEmpty() || newShapes.isNotEmpty()) noteContentEdit(db, pageId)
@@ -6093,9 +5860,7 @@ class NotebookActivity : AppCompatActivity() {
         val savedIndex = ScratchpadPreferences.loadCurrentPageIndex(this)
         val pageIndex = savedIndex.coerceIn(0, (pages.size - 1).coerceAtLeast(0))
         val currentPage = pages.getOrNull(pageIndex)
-        val pageData = currentPage?.let {
-            runCatching { PageData.fromJson(it.data) }.getOrNull()
-        }
+        val pageData = currentPage?.toNotebookObject()?.pageData()
         val pageW = pageData?.width ?: 0f
         val pageH = pageData?.height ?: 0f
 
@@ -6418,25 +6183,12 @@ class NotebookActivity : AppCompatActivity() {
             stroke.copy(id = UUID.randomUUID().toString(), points = stroke.points.map { PointF(it.x, it.y) })
         }
 
+        val newHeading = HeadingStroke(id = headingId, boundingBox = boundsToConvert, strokes = storedStrokes, recognizedText = storedText, level = level)
         db.withTransaction {
             val dao = db.notebookDao()
             originalStrokeIds.forEach { dao.softDeleteById(it, deletedAt) }
-            val now        = System.currentTimeMillis()
-            val bboxJson   = boundsToConvert.toBoundingBoxJson()
-            val headingObj = HeadingObject(strokes = storedStrokes, recognizedText = storedText, level = level)
-            dao.insertObject(
-                NotebookObject(
-                    id          = headingId,
-                    parentId    = layerId,
-                    type        = TYPE_HEADING,
-                    boundingBox = bboxJson,
-                    sortOrder   = 0,
-                    createdAt   = now,
-                    updatedAt   = now,
-                    deletedAt   = null,
-                    data        = headingObj.toJson(),
-                )
-            )
+            val now = System.currentTimeMillis()
+            dao.insertHeadingSubtree(newHeading, layerId, 0, now, now)
         }
 
         // Invalidate any existing page snapshot — it predates the heading.
@@ -6448,7 +6200,6 @@ class NotebookActivity : AppCompatActivity() {
             val updatedStrokes = drawingView.getStrokes().filter { it.id !in erasedSet }
             persistedStrokeIds.removeAll(erasedSet)
 
-            val newHeading    = HeadingStroke(id = headingId, boundingBox = boundsToConvert, strokes = storedStrokes, recognizedText = storedText, level = level)
             val updatedHeadings = drawingView.getHeadings() + newHeading
             drawingView.loadHeadings(updatedHeadings)
 
@@ -6550,25 +6301,12 @@ class NotebookActivity : AppCompatActivity() {
         }
 
         val now      = System.currentTimeMillis()
-        val bboxJson = boundsToConvert.toBoundingBoxJson()
-        val textObj  = TextObject(text = textForObject, strokes = embeddedStrokes)
+        val textRow  = TextRender(id = textId, boundingBox = boundsToConvert, text = textForObject, strokes = embeddedStrokes)
 
         db.withTransaction {
             val dao = db.notebookDao()
             originalStrokeIds.forEach { dao.softDeleteById(it, deletedAt) }
-            dao.insertObject(
-                NotebookObject(
-                    id          = textId,
-                    parentId    = layerId,
-                    type        = TYPE_TEXT,
-                    boundingBox = bboxJson,
-                    sortOrder   = 0,
-                    createdAt   = now,
-                    updatedAt   = now,
-                    deletedAt   = null,
-                    data        = textObj.toJson(),
-                )
-            )
+            dao.insertTextSubtree(textRow, layerId, 0, now, now)
         }
 
         noteContentEdit(db, pageId)
@@ -6653,19 +6391,7 @@ class NotebookActivity : AppCompatActivity() {
         db.withTransaction {
             val dao = db.notebookDao()
             if (wasInDb) dao.softDeleteById(stroke.id, now)
-            dao.insertObject(
-                com.notesprout.android.data.NotebookObject(
-                    id          = shapeId,
-                    parentId    = layerId,
-                    type        = com.notesprout.android.data.TYPE_SHAPE,
-                    boundingBox = shapeRender.boundingBox.toBoundingBoxJson(),
-                    sortOrder   = 0,
-                    createdAt   = now,
-                    updatedAt   = now,
-                    deletedAt   = null,
-                    data        = shapeObj.toJson(),
-                )
-            )
+            dao.insertObject(shapeRender.toRow(layerId, 0, now, now, density))
         }
         noteContentEdit(db, pageId)
 
@@ -6732,10 +6458,8 @@ class NotebookActivity : AppCompatActivity() {
             before.rotationDeg == after.rotationDeg && before.aspectLocked == after.aspectLocked
         ) return  // No change — nothing to persist.
 
-        val bboxJson = after.boundingBox.toBoundingBoxJson()
-        val dataJson = after.toShapeObject(density).toJson()
         db.withTransaction {
-            db.notebookDao().updateHeadingData(after.id, bboxJson, dataJson, now)
+            db.notebookDao().updateColumns(after.toRow("", 0, now, now, density))
         }
         noteContentEdit(db, pageId)
 
@@ -6910,36 +6634,17 @@ class NotebookActivity : AppCompatActivity() {
         val deletedAt = System.currentTimeMillis()
         val linkId    = UUID.randomUUID().toString()
 
-        val linkObj = LinkObject(
-            target      = target,
-            chrome      = chrome,
-            strokes     = emptyList(),
-            headings    = emptyList(),
-            textObjects = listOf(embeddedText),
-            lines       = emptyList(),
-        )
+        val newLink = LinkRender(linkId, RectF(unionBox), target, chrome,
+            strokes = emptyList(), headings = emptyList(),
+            textObjects = listOf(embeddedText), lines = emptyList())
 
         db.withTransaction {
             val dao = db.notebookDao()
             originalStrokeIds.forEach { dao.softDeleteById(it, deletedAt) }
             val now = System.currentTimeMillis()
-            dao.insertObject(NotebookObject(
-                id          = linkId,
-                parentId    = layerId,
-                type        = TYPE_LINK,
-                boundingBox = unionBox.toBoundingBoxJson(),
-                sortOrder   = 0,
-                createdAt   = now,
-                updatedAt   = now,
-                deletedAt   = null,
-                data        = linkObj.toJson(),
-            ))
+            dao.insertLinkSubtree(newLink, layerId, 0, now, now, density)
         }
         noteContentEdit(db, pageId)
-
-        val newLink = LinkRender(linkId, RectF(unionBox), target, chrome,
-            strokes = emptyList(), headings = emptyList(),
-            textObjects = listOf(embeddedText), lines = emptyList())
 
         withContext(Dispatchers.Main) {
             val strokeSet      = originalStrokeIds.toSet()
@@ -6998,13 +6703,15 @@ class NotebookActivity : AppCompatActivity() {
         selectedHeadings: List<HeadingStroke>,
         selectedTexts: List<TextRender>,
         selectedLines: List<LineRender>,
+        selectedShapes: List<ShapeRender>,
         chrome: LinkChrome,
         target: LinkTarget,
     ) {
         val db      = soilDatabase ?: return
         val layerId = currentLayerId.takeIf { it.isNotEmpty() } ?: return
         val pageId  = currentPageId.takeIf  { it.isNotEmpty() } ?: return
-        if (selectedStrokes.isEmpty() && selectedHeadings.isEmpty() && selectedTexts.isEmpty() && selectedLines.isEmpty()) return
+        if (selectedStrokes.isEmpty() && selectedHeadings.isEmpty() && selectedTexts.isEmpty() &&
+            selectedLines.isEmpty() && selectedShapes.isEmpty()) return
 
         val density = resources.displayMetrics.density
 
@@ -7015,6 +6722,7 @@ class NotebookActivity : AppCompatActivity() {
         selectedHeadings.forEach { unionBox.union(it.boundingBox) }
         selectedTexts.forEach { unionBox.union(it.boundingBox) }
         selectedLines.forEach { unionBox.union(it.boundingBox) }
+        selectedShapes.forEach { unionBox.union(it.boundingBox) }
         val linkContentPadPx = 6f * density
         unionBox.inset(-linkContentPadPx, -linkContentPadPx)
         // Extra right-side room for the link icon (14dp icon + 3dp inner margin).
@@ -7026,60 +6734,46 @@ class NotebookActivity : AppCompatActivity() {
         val embeddedHeadings = selectedHeadings.map { it.copy(id = UUID.randomUUID().toString(), boundingBox = RectF(it.boundingBox)) }
         val embeddedTexts = selectedTexts.map { it.copy(id = UUID.randomUUID().toString(), boundingBox = RectF(it.boundingBox)) }
         val embeddedLineRenders = selectedLines.map { it.copy(id = UUID.randomUUID().toString(), boundingBox = RectF(it.boundingBox)) }
+        val embeddedShapes = selectedShapes.map { it.copy(id = UUID.randomUUID().toString(), boundingBox = RectF(it.boundingBox)) }
 
         val originalStrokeIds  = selectedStrokes.map { it.id }
         val originalHeadingIds = selectedHeadings.map { it.id }
         val originalTextIds    = selectedTexts.map { it.id }
         val originalLineIds    = selectedLines.map { it.id }
+        val originalShapeIds   = selectedShapes.map { it.id }
 
         val deletedAt = System.currentTimeMillis()
         val linkId    = UUID.randomUUID().toString()
 
-        val linkObj = LinkObject(
-            target      = target,
-            chrome      = chrome,
-            strokes     = embeddedStrokes,
-            headings    = embeddedHeadings,
-            textObjects = embeddedTexts,
-            lines       = embeddedLineRenders.map { it.toEmbeddedLine(density) },
-        )
+        val newLink = LinkRender(linkId, RectF(unionBox), target, chrome, embeddedStrokes, embeddedHeadings, embeddedTexts, embeddedLineRenders, embeddedShapes)
 
         db.withTransaction {
             val dao = db.notebookDao()
-            (originalStrokeIds + originalHeadingIds + originalTextIds + originalLineIds).forEach { dao.softDeleteById(it, deletedAt) }
+            (originalStrokeIds + originalHeadingIds + originalTextIds + originalLineIds + originalShapeIds).forEach { dao.softDeleteById(it, deletedAt) }
             val now = System.currentTimeMillis()
-            dao.insertObject(NotebookObject(
-                id          = linkId,
-                parentId    = layerId,
-                type        = TYPE_LINK,
-                boundingBox = unionBox.toBoundingBoxJson(),
-                sortOrder   = 0,
-                createdAt   = now,
-                updatedAt   = now,
-                deletedAt   = null,
-                data        = linkObj.toJson(),
-            ))
+            dao.insertLinkSubtree(newLink, layerId, 0, now, now, density)
         }
         noteContentEdit(db, pageId)
-
-        val newLink = LinkRender(linkId, RectF(unionBox), target, chrome, embeddedStrokes, embeddedHeadings, embeddedTexts, embeddedLineRenders)
 
         withContext(Dispatchers.Main) {
             val strokeSet  = originalStrokeIds.toSet()
             val headingSet = originalHeadingIds.toSet()
             val textSet    = originalTextIds.toSet()
             val lineSet    = originalLineIds.toSet()
+            val shapeSet   = originalShapeIds.toSet()
 
             val updatedStrokes  = drawingView.getStrokes().filter { it.id !in strokeSet }
             val updatedHeadings = drawingView.getHeadings().filter { it.id !in headingSet }
             val updatedTexts    = drawingView.getTextObjects().filter { it.id !in textSet }
             val updatedLines    = drawingView.getLineObjects().filter { it.id !in lineSet }
+            val updatedShapes   = drawingView.getShapeObjects().filter { it.id !in shapeSet }
             val updatedLinks    = drawingView.getLinks() + newLink
             persistedStrokeIds.removeAll(strokeSet)
 
             drawingView.loadHeadings(updatedHeadings)
             drawingView.loadTextObjects(updatedTexts)
             drawingView.loadLineObjects(updatedLines)
+            drawingView.loadShapeObjects(updatedShapes)
             drawingView.loadLinks(updatedLinks)
 
             undoRedoManager.push(UndoRedoAction.LinkCreated(
@@ -7091,6 +6785,7 @@ class NotebookActivity : AppCompatActivity() {
                 originalHeadingIds = originalHeadingIds,
                 originalTextIds   = originalTextIds,
                 originalLineIds   = originalLineIds,
+                originalShapeIds  = originalShapeIds,
                 link              = newLink,
             ))
             updateUndoRedoButtons()
@@ -7130,6 +6825,7 @@ class NotebookActivity : AppCompatActivity() {
         val restoredHeadings = link.headings.map { it.copy(id = UUID.randomUUID().toString(), boundingBox = RectF(it.boundingBox)) }
         val restoredTexts    = link.textObjects.map { it.copy(id = UUID.randomUUID().toString(), boundingBox = RectF(it.boundingBox)) }
         val restoredLines    = link.lines.map { it.copy(id = UUID.randomUUID().toString(), boundingBox = RectF(it.boundingBox)) }
+        val restoredShapes   = link.shapes.map { it.copy(id = UUID.randomUUID().toString(), boundingBox = RectF(it.boundingBox)) }
 
         db.withTransaction {
             val dao = db.notebookDao()
@@ -7138,16 +6834,16 @@ class NotebookActivity : AppCompatActivity() {
                 dao.insertObject(NotebookObject(s.id, layerId, s.boundingBox.toBoundingBoxJson(), 0, now, now, null, "stroke", s.toStrokeData().toJson()))
             }
             restoredHeadings.forEach { h ->
-                val data = HeadingObject(strokes = h.strokes, recognizedText = h.recognizedText, level = h.level).toJson()
-                dao.insertObject(NotebookObject(h.id, layerId, h.boundingBox.toBoundingBoxJson(), 0, now, now, null, TYPE_HEADING, data))
+                dao.insertHeadingSubtree(h, layerId, 0, now, now)
             }
             restoredTexts.forEach { t ->
-                val data = TextObject(text = t.text, strokes = t.strokes).toJson()
-                dao.insertObject(NotebookObject(t.id, layerId, t.boundingBox.toBoundingBoxJson(), 0, now, now, null, TYPE_TEXT, data))
+                dao.insertTextSubtree(t, layerId, 0, now, now)
             }
             restoredLines.forEach { l ->
-                val data = LineObject(l.style, l.orientation, l.strokeWidthDp, l.dotSpacingPx / density).toJson()
-                dao.insertObject(NotebookObject(l.id, layerId, l.boundingBox.toBoundingBoxJson(), 0, now, now, null, TYPE_LINE, data))
+                dao.insertObject(l.toRow(layerId, 0, now, now, density))
+            }
+            restoredShapes.forEach { s ->
+                dao.insertObject(s.toRow(layerId, 0, now, now, density))
             }
         }
         noteContentEdit(db, pageId)
@@ -7160,6 +6856,7 @@ class NotebookActivity : AppCompatActivity() {
                 restoredHeadingIds = restoredHeadings.map { it.id },
                 restoredTextIds    = restoredTexts.map { it.id },
                 restoredLineIds    = restoredLines.map { it.id },
+                restoredShapeIds   = restoredShapes.map { it.id },
             ))
             updateUndoRedoButtons()
 
@@ -7168,17 +6865,19 @@ class NotebookActivity : AppCompatActivity() {
             val updatedHeadings = drawingView.getHeadings() + restoredHeadings
             val updatedTexts    = drawingView.getTextObjects() + restoredTexts
             val updatedLines    = drawingView.getLineObjects() + restoredLines
+            val updatedShapes   = drawingView.getShapeObjects() + restoredShapes
             restoredStrokes.forEach { persistedStrokeIds.add(it.id) }
 
             drawingView.loadLinks(updatedLinks)
             drawingView.loadHeadings(updatedHeadings)
             drawingView.loadTextObjects(updatedTexts)
             drawingView.loadLineObjects(updatedLines)
+            drawingView.loadShapeObjects(updatedShapes)
             drawingView.setStrokeListSilently(updatedStrokes)
 
             val templateBmp = currentTemplateBitmap
             val bitmap = withContext(Dispatchers.IO) {
-                drawingView.buildRenderBitmap(updatedStrokes, templateBmp, updatedHeadings, updatedTexts, updatedLines, updatedLinks)
+                drawingView.buildRenderBitmap(updatedStrokes, templateBmp, updatedHeadings, updatedTexts, updatedLines, updatedLinks, shapeObjects = updatedShapes)
             }
             if (bitmap != null) {
                 drawingView.loadStrokesWithBitmap(updatedStrokes, bitmap, templateBmp)
@@ -7190,7 +6889,7 @@ class NotebookActivity : AppCompatActivity() {
             val selBox = RectF(link.boundingBox)
             val pad = 8f * density
             selBox.inset(-pad, -pad)
-            val restoredIds = (restoredStrokes.map { it.id } + restoredHeadings.map { it.id } + restoredTexts.map { it.id } + restoredLines.map { it.id }).toSet()
+            val restoredIds = (restoredStrokes.map { it.id } + restoredHeadings.map { it.id } + restoredTexts.map { it.id } + restoredLines.map { it.id } + restoredShapes.map { it.id }).toSet()
             selectedObjectIds.clear()
             selectedObjectIds.addAll(restoredIds)
             drawingView.setLassoSelectedIds(restoredIds, selBox)
@@ -7213,23 +6912,23 @@ class NotebookActivity : AppCompatActivity() {
         val db     = soilDatabase ?: return
         val pageId = currentPageId.takeIf { it.isNotEmpty() } ?: return
         val dao    = db.notebookDao()
-        val row    = dao.getObjectById(linkId) ?: return
-        val obj    = try { LinkObject.fromJson(row.data) } catch (_: Exception) { return }
-        val oldChrome = obj.chrome
-        val oldTarget = obj.target
+        val density = resources.displayMetrics.density
+        val link   = dao.loadLinkSubtree(linkId, density) ?: return
+        val oldChrome = link.chrome
+        val oldTarget = link.target
 
         // Apply text update only when the link embeds exactly one text object and no other content.
-        val updatedTextObjects = if (newText != null && obj.textObjects.size == 1
-                && obj.strokes.isEmpty() && obj.headings.isEmpty() && obj.lines.isEmpty()) {
-            listOf(obj.textObjects[0].copy(text = newText))
-        } else obj.textObjects
+        val updatedTextObjects = if (newText != null && link.textObjects.size == 1
+                && link.strokes.isEmpty() && link.headings.isEmpty() && link.lines.isEmpty()) {
+            listOf(link.textObjects[0].copy(text = newText))
+        } else link.textObjects
 
-        val textChanged = updatedTextObjects !== obj.textObjects
+        val textChanged = updatedTextObjects !== link.textObjects
         if (oldChrome == newChrome && oldTarget == newTarget && !textChanged) return
 
-        val updatedObj = obj.copy(chrome = newChrome, target = newTarget, textObjects = updatedTextObjects)
+        val updatedLink = link.copy(chrome = newChrome, target = newTarget, textObjects = updatedTextObjects)
         val now = System.currentTimeMillis()
-        dao.updateData(linkId, updatedObj.toJson(), now)
+        db.withTransaction { dao.replaceLinkSubtree(updatedLink, now, density) }
         noteContentEdit(db, pageId)
 
         withContext(Dispatchers.Main) {
@@ -7330,11 +7029,10 @@ class NotebookActivity : AppCompatActivity() {
         lifecycleScope.launch {
             withContext(Dispatchers.IO) {
                 val row = db.notebookDao().getObjectById(heading.id) ?: return@withContext
-                val headingObj = HeadingObject.fromJson(row.data)
                 // Persist prefixed text and preserve level so the two always agree.
-                val updated = headingObj.copy(recognizedText = prefixedText, level = level)
-                val bboxJson = newBox.toBoundingBoxJson()
-                db.notebookDao().updateHeadingData(heading.id, bboxJson, updated.toJson(), System.currentTimeMillis())
+                val updated = (db.notebookDao().assembleHeadingResolved(row) ?: return@withContext)
+                    .copy(recognizedText = prefixedText, level = level, boundingBox = newBox)
+                db.notebookDao().replaceHeadingSubtree(updated, System.currentTimeMillis())
             }
             val updatedHeadings = drawingView.getHeadings().map { h ->
                 if (h.id == heading.id) h.copy(recognizedText = prefixedText, boundingBox = newBox, level = level) else h
@@ -7405,11 +7103,10 @@ class NotebookActivity : AppCompatActivity() {
 
         lifecycleScope.launch {
             withContext(Dispatchers.IO) {
-                val row        = db.notebookDao().getObjectById(heading.id) ?: return@withContext
-                val headingObj = HeadingObject.fromJson(row.data)
-                val updated    = headingObj.copy(recognizedText = newText, level = newLevel)
-                val bboxJson   = newBox.toBoundingBoxJson()
-                db.notebookDao().updateHeadingData(heading.id, bboxJson, updated.toJson(), System.currentTimeMillis())
+                val row     = db.notebookDao().getObjectById(heading.id) ?: return@withContext
+                val updated = (db.notebookDao().assembleHeadingResolved(row) ?: return@withContext)
+                    .copy(recognizedText = newText, level = newLevel, boundingBox = newBox)
+                db.notebookDao().replaceHeadingSubtree(updated, System.currentTimeMillis())
             }
             val updatedHeadings = drawingView.getHeadings().map { h ->
                 if (h.id == heading.id) h.copy(recognizedText = newText, boundingBox = newBox, level = newLevel) else h
@@ -7695,25 +7392,13 @@ class NotebookActivity : AppCompatActivity() {
         withContext(Dispatchers.IO) {
             db.withTransaction {
                 for (heading in movedHeadings) {
-                    val bb = heading.boundingBox
-                    val bboxJson = bb.toBoundingBoxJson()
-                    db.notebookDao().updateHeadingData(
-                        heading.id, bboxJson, HeadingObject(heading.strokes, heading.recognizedText, heading.level).toJson(), now
-                    )
+                    db.notebookDao().replaceHeadingSubtree(heading, now)
                 }
                 for (textObj in movedTextObjects) {
-                    val bb = textObj.boundingBox
-                    val bboxJson = bb.toBoundingBoxJson()
-                    db.notebookDao().updateHeadingData(
-                        textObj.id, bboxJson, TextObject(text = textObj.text, strokes = textObj.strokes).toJson(), now
-                    )
+                    db.notebookDao().replaceTextSubtree(textObj, now)
                 }
                 for (lineObj in movedLines) {
-                    val bb = lineObj.boundingBox
-                    val bboxJson = bb.toBoundingBoxJson()
-                    db.notebookDao().updateHeadingData(
-                        lineObj.id, bboxJson, LineObject(lineObj.style, lineObj.orientation, lineObj.strokeWidthDp, lineObj.dotSpacingPx / resources.displayMetrics.density).toJson(), now
-                    )
+                    db.notebookDao().updateColumns(lineObj.toRow("", 0, now, now, resources.displayMetrics.density))
                 }
             }
             noteContentEdit(db, pageId)
@@ -7908,19 +7593,7 @@ class NotebookActivity : AppCompatActivity() {
             val shapeRender = com.notesprout.android.data.ShapeRender.from(shapeId, shapeObj, density)
 
             withContext(Dispatchers.IO) {
-                db.notebookDao().insertObject(
-                    com.notesprout.android.data.NotebookObject(
-                        id          = shapeId,
-                        parentId    = layerId,
-                        type        = com.notesprout.android.data.TYPE_SHAPE,
-                        boundingBox = shapeRender.boundingBox.toBoundingBoxJson(),
-                        sortOrder   = 0,
-                        createdAt   = now,
-                        updatedAt   = now,
-                        deletedAt   = null,
-                        data        = shapeObj.toJson(),
-                    )
-                )
+                db.notebookDao().insertObject(shapeRender.toRow(layerId, 0, now, now, density))
                 noteContentEdit(db, pageId)
             }
 
@@ -8161,26 +7834,13 @@ class NotebookActivity : AppCompatActivity() {
 
             val textId  = UUID.randomUUID().toString()
             val now     = System.currentTimeMillis()
-            val bboxJson = bbox.toBoundingBoxJson()
+            val textRender = TextRender(id = textId, boundingBox = bbox, text = markdown)
 
             withContext(Dispatchers.IO) {
-                db.notebookDao().insertObject(
-                    NotebookObject(
-                        id          = textId,
-                        parentId    = layerId,
-                        type        = TYPE_TEXT,
-                        boundingBox = bboxJson,
-                        sortOrder   = 0,
-                        createdAt   = now,
-                        updatedAt   = now,
-                        deletedAt   = null,
-                        data        = TextObject(text = markdown).toJson(),
-                    )
-                )
+                db.notebookDao().insertTextSubtree(textRender, layerId, 0, now, now)
                 noteContentEdit(db, pageId)
             }
 
-            val textRender     = TextRender(id = textId, boundingBox = bbox, text = markdown)
             val updatedTexts   = drawingView.getTextObjects() + textRender
             drawingView.loadTextObjects(updatedTexts)
 
@@ -8248,26 +7908,13 @@ class NotebookActivity : AppCompatActivity() {
 
             val noteId   = java.util.UUID.randomUUID().toString()
             val now      = System.currentTimeMillis()
-            val bboxJson = bbox.toBoundingBoxJson()
+            val noteRender = StickyNoteRender(id = noteId, boundingBox = bbox)
 
             withContext(Dispatchers.IO) {
-                db.notebookDao().insertObject(
-                    NotebookObject(
-                        id          = noteId,
-                        parentId    = layerId,
-                        type        = TYPE_STICKY_NOTE,
-                        boundingBox = bboxJson,
-                        sortOrder   = 0,
-                        createdAt   = now,
-                        updatedAt   = now,
-                        deletedAt   = null,
-                        data        = StickyNoteObject().toJson(),
-                    )
-                )
+                db.notebookDao().insertStickyNoteSubtree(noteRender, layerId, 0, now, now, density)
                 noteContentEdit(db, pageId)
             }
 
-            val noteRender     = StickyNoteRender(id = noteId, boundingBox = bbox)
             val updatedNotes   = drawingView.getStickyNotes() + noteRender
             drawingView.loadStickyNotes(updatedNotes)
 
@@ -8337,23 +7984,7 @@ class NotebookActivity : AppCompatActivity() {
                 db.withTransaction {
                     val dao = db.notebookDao()
                     lines.forEach { line ->
-                        val bb = line.boundingBox
-                        val bboxJson = bb.toBoundingBoxJson()
-                        val dotSpacingDp = line.dotSpacingPx / resources.displayMetrics.density
-                        val dataJson = LineObject(line.style, line.orientation, line.strokeWidthDp, dotSpacingDp).toJson()
-                        dao.insertObject(
-                            NotebookObject(
-                                id          = line.id,
-                                parentId    = layerId,
-                                type        = TYPE_LINE,
-                                boundingBox = bboxJson,
-                                sortOrder   = 0,
-                                createdAt   = now,
-                                updatedAt   = now,
-                                deletedAt   = null,
-                                data        = dataJson,
-                            )
-                        )
+                        dao.insertObject(line.toRow(layerId, 0, now, now, resources.displayMetrics.density))
                     }
                     noteContentEdit(db, pageId)
                 }
@@ -8425,16 +8056,13 @@ class NotebookActivity : AppCompatActivity() {
             val newBbox = RectF(newLeft, newTop, newLeft + objW, newTop + objH)
 
             val now      = System.currentTimeMillis()
-            val bboxJson = newBbox.toBoundingBoxJson()
+            val newTextRender = TextRender(id = textRender.id, boundingBox = newBbox, text = newMarkdown, strokes = textRender.strokes)
 
             withContext(Dispatchers.IO) {
-                db.notebookDao().updateHeadingData(
-                    textRender.id, bboxJson, TextObject(text = newMarkdown, strokes = textRender.strokes).toJson(), now
-                )
+                db.notebookDao().replaceTextSubtree(newTextRender, now)
                 noteContentEdit(db, pageId)
             }
 
-            val newTextRender = TextRender(id = textRender.id, boundingBox = newBbox, text = newMarkdown, strokes = textRender.strokes)
             val updatedTexts  = drawingView.getTextObjects().map { t ->
                 if (t.id == textRender.id) newTextRender else t
             }
@@ -8756,18 +8384,14 @@ class NotebookActivity : AppCompatActivity() {
                 val restoredStrokes = restoredRows
                     .filter { it.type != TYPE_HEADING && it.type != TYPE_TEXT && it.type != TYPE_LINE }
                     .mapNotNull { obj ->
-                        try { LiveStroke.fromStrokeData(obj.id, StrokeData.fromJson(obj.data)) }
+                        try { LiveStroke.fromRow(obj) }
                         catch (e: Exception) {
                             Log.e(TAG, "executeAction LassoErased: failed to deserialize ${obj.id}", e); null
                         }
                     }
                 val restoredHeadings = restoredRows
                     .filter { it.type == TYPE_HEADING }
-                    .mapNotNull { obj ->
-                        val box = obj.parseBoundingBox() ?: return@mapNotNull null
-                        val headingObj = runCatching { HeadingObject.fromJson(obj.data) }.getOrNull() ?: return@mapNotNull null
-                        HeadingStroke(id = obj.id, boundingBox = box, strokes = headingObj.strokes, recognizedText = headingObj.recognizedText, level = headingObj.level)
-                    }
+                    .mapNotNull { obj -> db.notebookDao().assembleHeadingResolved(obj) }
                 updatedStrokes  = buildList { addAll(preUndoStrokes); addAll(restoredStrokes) }
                 updatedHeadings = preUndoHeadings + restoredHeadings
                 updatedTexts    = preUndoTexts + action.textObjects
@@ -8871,7 +8495,7 @@ class NotebookActivity : AppCompatActivity() {
                     pureStrokeIdsSet.mapNotNull { id -> dao.getObjectById(id) }
                 }
                 val restoredStrokes = restoredStrokeRows.mapNotNull { obj ->
-                    try { LiveStroke.fromStrokeData(obj.id, StrokeData.fromJson(obj.data)) }
+                    try { LiveStroke.fromRow(obj) }
                     catch (e: Exception) {
                         Log.e(TAG, "executeAction ScribbleErased: failed to deserialize ${obj.id}", e); null
                     }
@@ -9011,7 +8635,7 @@ class NotebookActivity : AppCompatActivity() {
                 val restoredStrokes = withContext(Dispatchers.IO) {
                     action.strokeIds.mapNotNull { id ->
                         dao.getObjectById(id)?.let { obj ->
-                            try { LiveStroke.fromStrokeData(obj.id, StrokeData.fromJson(obj.data)) }
+                            try { LiveStroke.fromRow(obj) }
                             catch (e: Exception) {
                                 Log.e(TAG, "executeAction LassoCut: failed to deserialize $id", e); null
                             }
@@ -9127,7 +8751,7 @@ class NotebookActivity : AppCompatActivity() {
                 val restoredStrokes = withContext(Dispatchers.IO) {
                     action.strokeIds.mapNotNull { id ->
                         dao.getObjectById(id)?.let { obj ->
-                            try { LiveStroke.fromStrokeData(obj.id, StrokeData.fromJson(obj.data)) }
+                            try { LiveStroke.fromRow(obj) }
                             catch (e: Exception) {
                                 Log.e(TAG, "executeAction LassoDeleted: failed to deserialize $id", e); null
                             }
@@ -9251,7 +8875,7 @@ class NotebookActivity : AppCompatActivity() {
                 val restoredStrokes = withContext(Dispatchers.IO) {
                     action.strokeIds.mapNotNull { id ->
                         dao.getObjectById(id)?.let { obj ->
-                            try { LiveStroke.fromStrokeData(obj.id, StrokeData.fromJson(obj.data)) }
+                            try { LiveStroke.fromRow(obj) }
                             catch (e: Exception) {
                                 Log.e(TAG, "executeAction LassoPasted: failed to deserialize $id", e); null
                             }
@@ -9260,15 +8884,7 @@ class NotebookActivity : AppCompatActivity() {
                 }
                 val restoredHeadings = withContext(Dispatchers.IO) {
                     action.headingIds.mapNotNull { id ->
-                        dao.getObjectById(id)?.let { obj ->
-                            try {
-                                val ho = HeadingObject.fromJson(obj.data)
-                                val box = obj.parseBoundingBox() ?: return@mapNotNull null
-                                HeadingStroke(id = obj.id, boundingBox = box, strokes = ho.strokes, recognizedText = ho.recognizedText, level = ho.level)
-                            } catch (e: Exception) {
-                                Log.e(TAG, "executeAction LassoPasted redo: failed to deserialize heading $id", e); null
-                            }
-                        }
+                        dao.getObjectById(id)?.let { dao.assembleHeadingResolved(it) }
                     }
                 }
                 updatedStrokes      = buildList { addAll(preUndoStrokes); addAll(restoredStrokes) }
@@ -9348,7 +8964,7 @@ class NotebookActivity : AppCompatActivity() {
                 val restoredStrokes = withContext(Dispatchers.IO) {
                     action.originalStrokeIds.mapNotNull { id ->
                         dao.getObjectById(id)?.let { obj ->
-                            try { LiveStroke.fromStrokeData(obj.id, StrokeData.fromJson(obj.data)) }
+                            try { LiveStroke.fromRow(obj) }
                             catch (e: Exception) {
                                 Log.e(TAG, "executeAction HeadingCreated: failed to deserialize $id", e); null
                             }
@@ -9415,20 +9031,18 @@ class NotebookActivity : AppCompatActivity() {
             val pageWidthForHeading = resources.displayMetrics.widthPixels
             withContext(Dispatchers.IO) {
                 val row = dao.getObjectById(action.headingId) ?: return@withContext
-                val headingObj = HeadingObject.fromJson(row.data)
-                val updated = headingObj.copy(recognizedText = targetText)
+                val base = db.notebookDao().assembleHeadingResolved(row) ?: return@withContext
                 if (targetText != null) {
                     val textPaint = TextPaint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
                         textSize = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 24f, resources.displayMetrics)
                     }
                     val paddingPx = 8f * resources.displayMetrics.density
-                    val box = row.parseBoundingBox() ?: return@withContext
+                    val box = base.boundingBox
                     val (measuredW, measuredH) = TextObjectRenderer.measure(targetText, pageWidthForHeading, textPaint, resources.displayMetrics.density, singleLine = true)
                     val newBox = RectF(box.left, box.top, box.left + measuredW + 2f * paddingPx, box.top + measuredH + 2f * paddingPx)
-                    val bboxJson = newBox.toBoundingBoxJson()
-                    dao.updateHeadingData(action.headingId, bboxJson, updated.toJson(), now)
+                    dao.replaceHeadingSubtree(base.copy(recognizedText = targetText, boundingBox = newBox), now)
                 } else {
-                    dao.updateHeadingData(action.headingId, row.boundingBox, updated.toJson(), now)
+                    dao.replaceHeadingSubtree(base.copy(recognizedText = targetText), now)
                 }
             }
 
@@ -9485,11 +9099,10 @@ class NotebookActivity : AppCompatActivity() {
 
             // Write target level/text/box directly — no re-measure needed (boxes are pre-computed).
             withContext(Dispatchers.IO) {
-                val row        = dao.getObjectById(action.headingId) ?: return@withContext
-                val headingObj = HeadingObject.fromJson(row.data)
-                val updated    = headingObj.copy(recognizedText = targetText, level = targetLevel)
-                val bboxJson   = targetBox.toBoundingBoxJson()
-                dao.updateHeadingData(action.headingId, bboxJson, updated.toJson(), now)
+                val row     = dao.getObjectById(action.headingId) ?: return@withContext
+                val updated = (db.notebookDao().assembleHeadingResolved(row) ?: return@withContext)
+                    .copy(recognizedText = targetText, level = targetLevel, boundingBox = targetBox)
+                dao.replaceHeadingSubtree(updated, now)
             }
 
             val updatedHeadings = withContext(Dispatchers.IO) {
@@ -9561,7 +9174,7 @@ class NotebookActivity : AppCompatActivity() {
                 val restoredStrokes = withContext(Dispatchers.IO) {
                     action.originalStrokeIds.mapNotNull { id ->
                         dao.getObjectById(id)?.let { obj ->
-                            try { LiveStroke.fromStrokeData(obj.id, StrokeData.fromJson(obj.data)) }
+                            try { LiveStroke.fromRow(obj) }
                             catch (e: Exception) {
                                 Log.e(TAG, "executeAction TextConverted: failed to deserialize $id", e); null
                             }
@@ -9687,24 +9300,19 @@ class NotebookActivity : AppCompatActivity() {
                 val density = resources.displayMetrics.density
                 db.withTransaction {
                     for (stroke in targetStrokes) {
-                        dao.updateStrokeData(stroke.id, stroke.toStrokeData().toJson(), ts)
+                        dao.updateStrokeBlob(stroke.id, stroke.strokeBlob(), stroke.color, stroke.strokeWidth, ts)
                     }
                     for (heading in targetHeadings) {
-                        val bboxJson = heading.boundingBox.toBoundingBoxJson()
-                        dao.updateHeadingData(heading.id, bboxJson, HeadingObject(heading.strokes, heading.recognizedText, heading.level).toJson(), ts)
+                        dao.replaceHeadingSubtree(heading, ts)
                     }
                     for (textObj in targetTexts) {
-                        val bb = textObj.boundingBox
-                        val bboxJson = bb.toBoundingBoxJson()
-                        dao.updateHeadingData(textObj.id, bboxJson, TextObject(text = textObj.text, strokes = textObj.strokes).toJson(), ts)
+                        dao.replaceTextSubtree(textObj, ts)
                     }
                     for (lineObj in targetLines) {
-                        val bb = lineObj.boundingBox
-                        val bboxJson = bb.toBoundingBoxJson()
-                        dao.updateHeadingData(lineObj.id, bboxJson, LineObject(lineObj.style, lineObj.orientation, lineObj.strokeWidthDp, lineObj.dotSpacingPx / density).toJson(), ts)
+                        dao.updateColumns(lineObj.toRow("", 0, ts, ts, density))
                     }
                     for (link in targetLinks) {
-                        dao.updateHeadingData(link.id, link.boundingBox.toBoundingBoxJson(), link.toLinkObject(density).toJson(), ts)
+                        dao.replaceLinkSubtree(link, ts, density)
                     }
                 }
                 if (targetLinks.isNotEmpty()) noteContentEdit(db, action.pageId)
@@ -9812,7 +9420,7 @@ class NotebookActivity : AppCompatActivity() {
             } else {
                 val strokeObj = withContext(Dispatchers.IO) { dao.getObjectById(strokeId) }
                 val restored = strokeObj?.let {
-                    try { LiveStroke.fromStrokeData(it.id, StrokeData.fromJson(it.data)) }
+                    try { LiveStroke.fromRow(it) }
                     catch (e: Exception) {
                         Log.e(TAG, "executeAction: failed to deserialize stroke $strokeId", e); null
                     }
@@ -9874,19 +9482,8 @@ class NotebookActivity : AppCompatActivity() {
                     if (action.deletedAt == 0L) {
                         // Stroke was never persisted — re-insert it
                         val stroke = action.originalStroke
-                        val sd = stroke.toStrokeData()
                         dao.insertObject(
-                            com.notesprout.android.data.NotebookObject(
-                                id          = stroke.id,
-                                parentId    = action.layerId,
-                                type        = com.notesprout.android.data.TYPE_STROKE,
-                                boundingBox = stroke.boundingBox.toBoundingBoxJson(),
-                                sortOrder   = 0,
-                                createdAt   = now,
-                                updatedAt   = now,
-                                deletedAt   = null,
-                                data        = sd.toJson(),
-                            )
+                            stroke.toStrokeRow(parentId = action.layerId, order = 0, createdAt = now, updatedAt = now)
                         )
                     } else {
                         dao.restoreById(action.originalStroke.id, now)
@@ -9963,9 +9560,7 @@ class NotebookActivity : AppCompatActivity() {
             val density = resources.displayMetrics.density
             val target = if (isUndo) action.before else action.after
             withContext(Dispatchers.IO) {
-                db.notebookDao().updateHeadingData(
-                    target.id, target.boundingBox.toBoundingBoxJson(), target.toShapeObject(density).toJson(), now,
-                )
+                db.notebookDao().updateColumns(target.toRow("", 0, now, now, density))
                 noteContentEdit(db, action.pageId)
             }
 
@@ -10309,33 +9904,26 @@ class NotebookActivity : AppCompatActivity() {
                 val density            = resources.displayMetrics.density
                 db.withTransaction {
                     for (stroke in targetStrokes) {
-                        dao.updateStrokeData(stroke.id, stroke.toStrokeData().toJson(), now)
+                        dao.updateStrokeBlob(stroke.id, stroke.strokeBlob(), stroke.color, stroke.strokeWidth, now)
                     }
                     for (heading in targetHeadings) {
-                        val bb = heading.boundingBox
-                        val bbJson = bb.toBoundingBoxJson()
-                        val dataJson = HeadingObject(strokes = heading.strokes, recognizedText = heading.recognizedText, level = heading.level).toJson()
-                        dao.updateHeadingData(heading.id, bbJson, dataJson, now)
+                        dao.replaceHeadingSubtree(heading, now)
                     }
                     for (textObj in targetTexts) {
-                        val bb = textObj.boundingBox
-                        val bbJson = bb.toBoundingBoxJson()
-                        dao.updateHeadingData(textObj.id, bbJson, TextObject(text = textObj.text, strokes = textObj.strokes).toJson(), now)
+                        dao.replaceTextSubtree(textObj, now)
                     }
                     for (lineObj in targetLines) {
-                        val bb = lineObj.boundingBox
-                        val bbJson = bb.toBoundingBoxJson()
-                        dao.updateHeadingData(lineObj.id, bbJson, LineObject(lineObj.style, lineObj.orientation, lineObj.strokeWidthDp, lineObj.dotSpacingPx / density).toJson(), now)
+                        dao.updateColumns(lineObj.toRow("", 0, now, now, density))
                     }
                     for (link in targetLinks) {
-                        dao.updateHeadingData(link.id, link.boundingBox.toBoundingBoxJson(), link.toLinkObject(density).toJson(), now)
+                        dao.replaceLinkSubtree(link, now, density)
                     }
                     for (note in targetStickyNotes) {
-                        dao.updateHeadingData(note.id, note.boundingBox.toBoundingBoxJson(), note.toStickyNoteObject(density).toJson(), now)
+                        dao.replaceStickyNoteSubtree(note, now, density)
                     }
                     val targetShapes = if (isUndo) action.originalShapes else action.movedShapes
                     for (shape in targetShapes) {
-                        dao.updateHeadingData(shape.id, shape.boundingBox.toBoundingBoxJson(), shape.toShapeObject(density).toJson(), now)
+                        dao.updateColumns(shape.toRow("", 0, now, now, density))
                     }
                 }
                 if (action.movedLinks.isNotEmpty() || action.movedStickyNotes.isNotEmpty() || action.movedShapes.isNotEmpty()) noteContentEdit(db, action.pageId)
@@ -10356,21 +9944,19 @@ class NotebookActivity : AppCompatActivity() {
                 withContext(Dispatchers.IO) {
                 val targetText = if (isUndo) action.previousText else action.newText
                 val row = dao.getObjectById(action.headingId) ?: return@withContext
-                val headingObj = HeadingObject.fromJson(row.data)
-                val updated = headingObj.copy(recognizedText = targetText)
+                val base = db.notebookDao().assembleHeadingResolved(row) ?: return@withContext
                 if (targetText != null) {
                     val textPaint = TextPaint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
                         textSize = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 24f, resources.displayMetrics)
                     }
                     val paddingPx = 8f * resources.displayMetrics.density
-                    val box = row.parseBoundingBox() ?: return@withContext
+                    val box = base.boundingBox
                     val (measuredW, measuredH) = TextObjectRenderer.measure(targetText, pageWidthForEdit, textPaint, resources.displayMetrics.density, singleLine = true)
                     val newBox = RectF(box.left, box.top, box.left + measuredW + 2f * paddingPx, box.top + measuredH + 2f * paddingPx)
-                    val bboxJson = newBox.toBoundingBoxJson()
-                    dao.updateHeadingData(action.headingId, bboxJson, updated.toJson(), now)
+                    dao.replaceHeadingSubtree(base.copy(recognizedText = targetText, boundingBox = newBox), now)
                 } else {
                     // Restoring null: keep existing bounding box, just clear the text field.
-                    dao.updateHeadingData(action.headingId, row.boundingBox, updated.toJson(), now)
+                    dao.replaceHeadingSubtree(base.copy(recognizedText = targetText), now)
                 }
             }}
 
@@ -10379,11 +9965,10 @@ class NotebookActivity : AppCompatActivity() {
                 val targetLevel = if (isUndo) action.previousLevel else action.newLevel
                 val targetText  = if (isUndo) action.previousText  else action.newText
                 val targetBox   = if (isUndo) action.previousBox   else action.newBox
-                val row        = dao.getObjectById(action.headingId) ?: return@withContext
-                val headingObj = HeadingObject.fromJson(row.data)
-                val updated    = headingObj.copy(recognizedText = targetText, level = targetLevel)
-                val bboxJson   = targetBox.toBoundingBoxJson()
-                dao.updateHeadingData(action.headingId, bboxJson, updated.toJson(), now)
+                val row     = dao.getObjectById(action.headingId) ?: return@withContext
+                val updated = (db.notebookDao().assembleHeadingResolved(row) ?: return@withContext)
+                    .copy(recognizedText = targetText, level = targetLevel, boundingBox = targetBox)
+                dao.replaceHeadingSubtree(updated, now)
             }
 
             is UndoRedoAction.TextInserted -> withContext(Dispatchers.IO) {
@@ -10397,9 +9982,7 @@ class NotebookActivity : AppCompatActivity() {
 
             is UndoRedoAction.TextEdited -> withContext(Dispatchers.IO) {
                 val target = if (isUndo) action.oldTextRender else action.newTextRender
-                val bb = target.boundingBox
-                val bboxJson = bb.toBoundingBoxJson()
-                dao.updateHeadingData(action.textId, bboxJson, TextObject(text = target.text, strokes = target.strokes).toJson(), now)
+                dao.replaceTextSubtree(target, now)
                 noteContentEdit(db, action.pageId)
             }
 
@@ -10429,17 +10012,7 @@ class NotebookActivity : AppCompatActivity() {
                     if (action.deletedAt == 0L) {
                         val stroke = action.originalStroke
                         dao.insertObject(
-                            com.notesprout.android.data.NotebookObject(
-                                id          = stroke.id,
-                                parentId    = action.layerId,
-                                type        = com.notesprout.android.data.TYPE_STROKE,
-                                boundingBox = stroke.boundingBox.toBoundingBoxJson(),
-                                sortOrder   = 0,
-                                createdAt   = now,
-                                updatedAt   = now,
-                                deletedAt   = null,
-                                data        = stroke.toStrokeData().toJson(),
-                            )
+                            stroke.toStrokeRow(parentId = action.layerId, order = 0, createdAt = now, updatedAt = now)
                         )
                     } else {
                         dao.restoreById(action.originalStroke.id, now)
@@ -10454,9 +10027,7 @@ class NotebookActivity : AppCompatActivity() {
             is UndoRedoAction.ShapeTransformed -> withContext(Dispatchers.IO) {
                 val target  = if (isUndo) action.before else action.after
                 val density = resources.displayMetrics.density
-                dao.updateHeadingData(
-                    target.id, target.boundingBox.toBoundingBoxJson(), target.toShapeObject(density).toJson(), now,
-                )
+                dao.updateColumns(target.toRow("", 0, now, now, density))
                 noteContentEdit(db, action.pageId)
             }
 
@@ -10488,7 +10059,7 @@ class NotebookActivity : AppCompatActivity() {
             }
 
             is UndoRedoAction.LinkCreated -> withContext(Dispatchers.IO) {
-                val originalIds = action.originalStrokeIds + action.originalHeadingIds + action.originalTextIds + action.originalLineIds
+                val originalIds = action.originalStrokeIds + action.originalHeadingIds + action.originalTextIds + action.originalLineIds + action.originalShapeIds
                 if (isUndo) {
                     dao.softDeleteById(action.linkId, now)
                     originalIds.forEach { dao.restoreById(it, now) }
@@ -10500,7 +10071,7 @@ class NotebookActivity : AppCompatActivity() {
             }
 
             is UndoRedoAction.LinkRemoved -> withContext(Dispatchers.IO) {
-                val restoredIds = action.restoredStrokeIds + action.restoredHeadingIds + action.restoredTextIds + action.restoredLineIds
+                val restoredIds = action.restoredStrokeIds + action.restoredHeadingIds + action.restoredTextIds + action.restoredLineIds + action.restoredShapeIds
                 if (isUndo) {
                     restoredIds.forEach { dao.softDeleteById(it, now) }
                     dao.restoreById(action.linkId, now)
@@ -10512,14 +10083,12 @@ class NotebookActivity : AppCompatActivity() {
             }
 
             is UndoRedoAction.LinkEdited -> withContext(Dispatchers.IO) {
-                val row = dao.getObjectById(action.linkId)
-                if (row != null) {
-                    val obj = try { LinkObject.fromJson(row.data) } catch (_: Exception) { null }
-                    if (obj != null) {
-                        val chrome = if (isUndo) action.oldChrome else action.newChrome
-                        val target = if (isUndo) action.oldTarget else action.newTarget
-                        dao.updateData(action.linkId, obj.copy(chrome = chrome, target = target).toJson(), now)
-                    }
+                val density = resources.displayMetrics.density
+                val link = dao.loadLinkSubtree(action.linkId, density)
+                if (link != null) {
+                    val chrome = if (isUndo) action.oldChrome else action.newChrome
+                    val target = if (isUndo) action.oldTarget else action.newTarget
+                    db.withTransaction { dao.replaceLinkSubtree(link.copy(chrome = chrome, target = target), now, density) }
                 }
                 noteContentEdit(db, action.pageId)
             }
@@ -10536,7 +10105,7 @@ class NotebookActivity : AppCompatActivity() {
             is UndoRedoAction.StickyNoteContentEdited -> withContext(Dispatchers.IO) {
                 val density = resources.displayMetrics.density
                 val target  = if (isUndo) action.before else action.after
-                dao.updateData(action.noteId, target.toStickyNoteObject(density).toJson(), now)
+                db.withTransaction { dao.replaceStickyNoteSubtree(target, now, density) }
                 noteContentEdit(db, action.pageId)
             }
 
@@ -10681,7 +10250,7 @@ class NotebookActivity : AppCompatActivity() {
                 val restoredStrokes = withContext(Dispatchers.IO) {
                     pureStrokeIdsSet.mapNotNull { id ->
                         dao.getObjectById(id)?.let { obj ->
-                            try { LiveStroke.fromStrokeData(obj.id, StrokeData.fromJson(obj.data)) }
+                            try { LiveStroke.fromRow(obj) }
                             catch (e: Exception) {
                                 Log.e(TAG, "executeAction LassoErased: failed to deserialize ${obj.id}", e); null
                             }
@@ -10695,11 +10264,7 @@ class NotebookActivity : AppCompatActivity() {
                 } else if (headingIdsSet.isNotEmpty()) {
                     withContext(Dispatchers.IO) {
                         headingIdsSet.mapNotNull { id ->
-                            dao.getObjectById(id)?.let { obj ->
-                                val box = obj.parseBoundingBox() ?: return@mapNotNull null
-                                val headingObj = runCatching { HeadingObject.fromJson(obj.data) }.getOrNull() ?: return@mapNotNull null
-                                HeadingStroke(id = obj.id, boundingBox = box, strokes = headingObj.strokes, recognizedText = headingObj.recognizedText, level = headingObj.level)
-                            }
+                            dao.getObjectById(id)?.let { dao.assembleHeadingResolved(it) }
                         }
                     }
                 } else emptyList()
@@ -10765,7 +10330,7 @@ class NotebookActivity : AppCompatActivity() {
                     pureStrokeIdsSet.mapNotNull { id -> dao.getObjectById(id) }
                 }
                 val restoredErasedStrokes = erasedStrokeRows.mapNotNull { obj ->
-                    try { LiveStroke.fromStrokeData(obj.id, StrokeData.fromJson(obj.data)) }
+                    try { LiveStroke.fromRow(obj) }
                     catch (e: Exception) {
                         Log.e(TAG, "executeAction ScribbleErased undo: failed to deserialize ${obj.id}", e); null
                     }
@@ -10775,11 +10340,7 @@ class NotebookActivity : AppCompatActivity() {
                 } else if (headingIdsSet.isNotEmpty()) {
                     withContext(Dispatchers.IO) {
                         headingIdsSet.mapNotNull { id ->
-                            dao.getObjectById(id)?.let { obj ->
-                                val box = obj.parseBoundingBox() ?: return@mapNotNull null
-                                val ho = runCatching { HeadingObject.fromJson(obj.data) }.getOrNull() ?: return@mapNotNull null
-                                HeadingStroke(id = obj.id, boundingBox = box, strokes = ho.strokes, recognizedText = ho.recognizedText, level = ho.level)
-                            }
+                            dao.getObjectById(id)?.let { dao.assembleHeadingResolved(it) }
                         }
                     }
                 } else emptyList()
@@ -10866,7 +10427,7 @@ class NotebookActivity : AppCompatActivity() {
                 val restoredStrokes = withContext(Dispatchers.IO) {
                     action.strokeIds.mapNotNull { id ->
                         dao.getObjectById(id)?.let { obj ->
-                            try { LiveStroke.fromStrokeData(obj.id, StrokeData.fromJson(obj.data)) }
+                            try { LiveStroke.fromRow(obj) }
                             catch (e: Exception) {
                                 Log.e(TAG, "executeAction LassoCut: failed to deserialize $id", e); null
                             }
@@ -10933,7 +10494,7 @@ class NotebookActivity : AppCompatActivity() {
                 val restoredStrokes = withContext(Dispatchers.IO) {
                     action.strokeIds.mapNotNull { id ->
                         dao.getObjectById(id)?.let { obj ->
-                            try { LiveStroke.fromStrokeData(obj.id, StrokeData.fromJson(obj.data)) }
+                            try { LiveStroke.fromRow(obj) }
                             catch (e: Exception) {
                                 Log.e(TAG, "executeAction LassoDeleted: failed to deserialize $id", e); null
                             }
@@ -10979,7 +10540,7 @@ class NotebookActivity : AppCompatActivity() {
                 val restoredStrokes = withContext(Dispatchers.IO) {
                     action.originalStrokeIds.mapNotNull { id ->
                         dao.getObjectById(id)?.let { obj ->
-                            try { LiveStroke.fromStrokeData(obj.id, StrokeData.fromJson(obj.data)) }
+                            try { LiveStroke.fromRow(obj) }
                             catch (e: Exception) {
                                 Log.e(TAG, "executeAction HeadingCreated: failed to deserialize $id", e); null
                             }
@@ -11047,7 +10608,7 @@ class NotebookActivity : AppCompatActivity() {
                 val restoredStrokes = withContext(Dispatchers.IO) {
                     action.strokeIds.mapNotNull { id ->
                         dao.getObjectById(id)?.let { obj ->
-                            try { LiveStroke.fromStrokeData(obj.id, StrokeData.fromJson(obj.data)) }
+                            try { LiveStroke.fromRow(obj) }
                             catch (e: Exception) {
                                 Log.e(TAG, "executeAction LassoPasted: failed to deserialize $id", e); null
                             }
@@ -11056,11 +10617,7 @@ class NotebookActivity : AppCompatActivity() {
                 }
                 val restoredHeadings = withContext(Dispatchers.IO) {
                     action.headingIds.mapNotNull { id ->
-                        dao.getObjectById(id)?.let { obj ->
-                            val box = obj.parseBoundingBox() ?: return@mapNotNull null
-                            val hObj = runCatching { HeadingObject.fromJson(obj.data) }.getOrNull() ?: return@mapNotNull null
-                            HeadingStroke(id = obj.id, boundingBox = box, strokes = hObj.strokes, recognizedText = hObj.recognizedText, level = hObj.level)
-                        }
+                        dao.getObjectById(id)?.let { dao.assembleHeadingResolved(it) }
                     }
                 }
                 updatedStrokes      = buildList { addAll(drawingView.getStrokes()); addAll(restoredStrokes) }
@@ -11287,7 +10844,7 @@ class NotebookActivity : AppCompatActivity() {
                 val restoredStrokes = withContext(Dispatchers.IO) {
                     action.originalStrokeIds.mapNotNull { id ->
                         dao.getObjectById(id)?.let { obj ->
-                            try { LiveStroke.fromStrokeData(obj.id, StrokeData.fromJson(obj.data)) }
+                            try { LiveStroke.fromRow(obj) }
                             catch (e: Exception) {
                                 Log.e(TAG, "executeAction TextConverted: failed to deserialize $id", e); null
                             }
@@ -11606,7 +11163,7 @@ class NotebookActivity : AppCompatActivity() {
             } else {
                 val strokeObj = withContext(Dispatchers.IO) { dao.getObjectById(strokeId) }
                 val restored = strokeObj?.let {
-                    try { LiveStroke.fromStrokeData(it.id, StrokeData.fromJson(it.data)) }
+                    try { LiveStroke.fromRow(it) }
                     catch (e: Exception) {
                         Log.e(TAG, "executeAction: failed to deserialize stroke $strokeId", e); null
                     }
@@ -11655,7 +11212,7 @@ class NotebookActivity : AppCompatActivity() {
     private suspend fun loadTemplateBitmapById(db: SoilDatabase, templateId: String): Bitmap? {
         val templateObj = db.notebookDao().getTemplateById(templateId) ?: return null
         return try {
-            val b64 = TemplateData.fromJson(templateObj.data)?.image?.takeIf { it.isNotEmpty() } ?: return null
+            val b64 = templateObj.templateDataOrNull()?.image?.takeIf { it.isNotEmpty() } ?: return null
             val bytes = Base64.decode(b64, Base64.DEFAULT)
             // Bounded decode (M-1): cap to the view size (fall back to MAX_DIMENSION before layout).
             val view = drawingView.asView()

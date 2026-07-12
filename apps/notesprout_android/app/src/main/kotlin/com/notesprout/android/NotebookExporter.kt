@@ -18,23 +18,28 @@ import com.notesprout.android.core.BitmapDecode
 import com.notesprout.android.crypto.SoilCrypto
 import com.notesprout.android.core.markdown.TextObjectRenderer
 import com.notesprout.android.data.BoundingBox
-import com.notesprout.android.data.HeadingObject
 import com.notesprout.android.data.HeadingStroke
+import com.notesprout.android.data.loadHeadingsSubtree
+import com.notesprout.android.data.loadTextsSubtree
 import com.notesprout.android.data.LineObject
 import com.notesprout.android.data.LineOrientation
 import com.notesprout.android.data.LineRender
+import com.notesprout.android.data.toLineRender
+import com.notesprout.android.data.toShapeRender
 import com.notesprout.android.data.LineStyle
-import com.notesprout.android.data.LinkObject
 import com.notesprout.android.data.LinkRender
+import com.notesprout.android.data.loadLinksSubtree
+import com.notesprout.android.data.pageData
+import com.notesprout.android.data.templateDataOrNull
+import com.notesprout.android.data.notebookMetadata
 import com.notesprout.android.data.ShapeObject
 import com.notesprout.android.data.ShapeRender
-import com.notesprout.android.data.toLineRender
 import com.notesprout.android.data.LiveStroke
 import com.notesprout.android.notebook.ShapeGeometry
 import com.notesprout.android.data.NotebookDao
 import com.notesprout.android.data.NotebookObject
-import com.notesprout.android.data.StickyNoteObject
 import com.notesprout.android.data.StickyNoteRender
+import com.notesprout.android.data.loadStickyNotesSubtree
 import com.notesprout.android.data.TextObject
 import com.notesprout.android.data.TextRender
 import com.notesprout.android.data.NotebookMetadata
@@ -79,7 +84,7 @@ object NotebookExporter {
         // Notebook metadata → title for filename
         val notebookObj = dao.getNotebookObject()
         val title = notebookObj?.let {
-            runCatching { NotebookMetadata.fromJson(it.id, it.data).title }.getOrNull()
+            runCatching { it.notebookMetadata().title }.getOrNull()
         }?.takeIf { it.isNotBlank() } ?: "notebook"
         val safeTitle = title.replace(Regex("[^a-zA-Z0-9_\\-. ]"), "_").trim('_', ' ')
             .ifBlank { "notebook" }
@@ -451,18 +456,6 @@ object NotebookExporter {
         return LineRender(id, box, startX, startY, endX, endY, lo.style, lo.orientation, lo.strokeWidthDp, lo.dotSpacingDp * densityDp)
     }
 
-    private fun parseLinkRender(id: String, box: RectF, lo: LinkObject, densityDp: Float): LinkRender =
-        LinkRender(
-            id = id,
-            boundingBox = box,
-            target = lo.target,
-            chrome = lo.chrome,
-            strokes = lo.strokes,
-            headings = lo.headings,
-            textObjects = lo.textObjects,
-            lines = lo.lines.map { it.toLineRender(densityDp) },
-        )
-
     private fun parseDimensions(boundingBoxJson: String): Pair<Int, Int> {
         val box = BoundingBox.fromJson(boundingBoxJson)
             ?: return Pair(1404, 1872) // safe fallback
@@ -471,15 +464,15 @@ object NotebookExporter {
 
     private suspend fun loadTemplate(
         dao: NotebookDao,
-        pageData: String,
+        page: NotebookObject,
         pageWidth: Int,
         pageHeight: Int,
     ): Bitmap? {
-        val templateId = TemplateDialog.parseTemplateId(pageData).takeIf { it.isNotEmpty() }
+        val templateId = page.pageData().template.takeIf { it.isNotEmpty() }
             ?: return null
         val templateRow = dao.getTemplateById(templateId) ?: return null
         return runCatching {
-            val b64 = com.notesprout.android.data.TemplateData.fromJson(templateRow.data)?.image
+            val b64 = templateRow.templateDataOrNull()?.image
                 ?.takeIf { it.isNotEmpty() } ?: return@runCatching null
             val bytes = Base64.decode(b64, Base64.DEFAULT)
             // Bounded decode (M-1): cap to the page size this template renders into.
@@ -514,93 +507,40 @@ object NotebookExporter {
         // pure win (less decode time + memory).
         val tW = if (renderScale < 1f) (pw * renderScale).roundToInt().coerceAtLeast(1) else pw
         val tH = if (renderScale < 1f) (ph * renderScale).roundToInt().coerceAtLeast(1) else ph
-        val templateBitmap = if (includeTemplate) loadTemplate(dao, pageRow.data, tW, tH) else null
+        val templateBitmap = if (includeTemplate) loadTemplate(dao, pageRow, tW, tH) else null
         val density = context.resources.displayMetrics.density
 
         val layer = dao.getLayerForPage(pageRow.id)
 
         val headings: List<HeadingStroke> = if (layer != null) {
-            dao.getHeadingsForLayer(layer.id).mapNotNull { row ->
-                val box = parseBoundingBox(row.boundingBox) ?: return@mapNotNull null
-                val ho = runCatching { HeadingObject.fromJson(row.data) }.getOrNull()
-                    ?: return@mapNotNull null
-                HeadingStroke(
-                    id = row.id,
-                    boundingBox = box,
-                    strokes = ho.strokes,
-                    recognizedText = ho.recognizedText,
-                    level = ho.level,
-                )
-            }
+            dao.loadHeadingsSubtree(layer.id)
         } else emptyList()
 
         val textObjects: List<TextRender> = if (layer != null) {
-            dao.getTextObjectsForLayer(layer.id).mapNotNull { row ->
-                val box = parseBoundingBox(row.boundingBox) ?: return@mapNotNull null
-                val to = runCatching { TextObject.fromJson(row.data) }.getOrNull()
-                    ?: return@mapNotNull null
-                TextRender(id = row.id, boundingBox = box, text = to.text)
-            }
+            dao.loadTextsSubtree(layer.id)
         } else emptyList()
 
         val lineObjects: List<LineRender> = if (layer != null) {
-            dao.getLineObjectsForLayer(layer.id).mapNotNull { row ->
-                val box = parseBoundingBox(row.boundingBox) ?: return@mapNotNull null
-                val lo = runCatching { LineObject.fromJson(row.data) }.getOrNull()
-                    ?: return@mapNotNull null
-                parseLineRender(row.id, box, lo, density)
-            }
+            dao.getLineObjectsForLayer(layer.id).mapNotNull { it.toLineRender(density) }
         } else emptyList()
 
         val shapeObjects: List<ShapeRender> = if (layer != null) {
-            dao.getShapeObjectsForLayer(layer.id).mapNotNull { row ->
-                val box = parseBoundingBox(row.boundingBox) ?: return@mapNotNull null
-                val so = runCatching { ShapeObject.fromJson(row.data) }.getOrNull()
-                    ?: return@mapNotNull null
-                ShapeRender.from(row.id, so, density)
-            }
+            dao.getShapeObjectsForLayer(layer.id).mapNotNull { it.toShapeRender(density) }
         } else emptyList()
 
         val links: List<LinkRender> = if (layer != null) {
-            dao.getLinkObjectsForLayer(layer.id).mapNotNull { row ->
-                val box = parseBoundingBox(row.boundingBox) ?: return@mapNotNull null
-                val lo = runCatching { LinkObject.fromJson(row.data) }.getOrNull()
-                    ?: return@mapNotNull null
-                parseLinkRender(row.id, box, lo, density)
-            }
+            dao.loadLinksSubtree(layer.id, density)
         } else emptyList()
 
         val stickyNotes: List<StickyNoteRender> = if (layer != null) {
-            dao.getStickyNotesForLayer(layer.id).mapNotNull { row ->
-                val box = parseBoundingBox(row.boundingBox) ?: return@mapNotNull null
-                val obj = runCatching { StickyNoteObject.fromJson(row.data) }.getOrNull()
-                    ?: return@mapNotNull null
-                StickyNoteRender(
-                    id = row.id,
-                    boundingBox = box,
-                    strokes = obj.strokes,
-                    headings = obj.headings,
-                    textObjects = obj.textObjects,
-                    lines = obj.lines.map { it.toLineRender(density) },
-                    shapes = obj.shapes,
-                    contentWidth = obj.contentWidth,
-                    contentHeight = obj.contentHeight,
-                )
-            }
+            dao.loadStickyNotesSubtree(layer.id, density)
         } else emptyList()
 
         val strokes: List<LiveStroke> = if (layer != null) {
             dao.getStrokesForLayer(layer.id).mapNotNull { row ->
-                if (leanStrokes) {
-                    // Thumbnails draw plain fixed-width black paths (see renderPage → drawStrokeList),
-                    // so parse points only — skips the per-point StrokePoint allocation and the
-                    // pressure/tilt fields the thumbnail renderer never reads.
-                    runCatching { LiveStroke.fromPointsJson(row.id, row.data) }.getOrNull()
-                } else {
-                    val sd = runCatching { StrokeData.fromJson(row.data) }.getOrNull()
-                        ?: return@mapNotNull null
-                    LiveStroke.fromStrokeData(row.id, sd)
-                }
+                // Format-agnostic: binary blob when present, else legacy JSON. Thumbnails draw plain
+                // fixed-width black paths, so the lean (points-only) path is fine there.
+                LiveStroke.fromRow(row, lean = leanStrokes)
             }
         } else emptyList()
 
@@ -798,12 +738,13 @@ object NotebookExporter {
         drawShapeList(shapeObjects)
 
         // Links render their embedded content only — NO chrome (per Session 5 / export rule).
-        // Mirrors the view's drawLinkObject order (headings → text → lines → strokes), after the
-        // page's own lines and before its top-level strokes.
+        // Mirrors the view's drawLinkObject order (headings → text → lines → shapes → strokes), after
+        // the page's own lines and before its top-level strokes.
         for (link in links) {
             drawHeadingList(link.headings)
             drawTextList(link.textObjects)
             drawLineList(link.lines)
+            drawShapeList(link.shapes)
             drawStrokeList(link.strokes)
         }
 

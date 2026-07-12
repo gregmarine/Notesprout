@@ -18,6 +18,101 @@ private fun cleanStrayJournal(notebookPath: String) {
 }
 
 /**
+ * Copy every column of the current cursor row into a [ContentValues] with correct per-type handling —
+ * crucially BLOB (the binary stroke column, data-model-optimization Phase 1), which a string-based
+ * copy would corrupt. The reserved word `order` is emitted back-tick quoted so the result inserts
+ * cleanly. Used by the raw-SQL deep-copy paths so they carry the full columnar payload for free
+ * (all current + future columns) instead of hand-listing the legacy text columns.
+ */
+private fun cursorRowToCv(c: android.database.Cursor): ContentValues {
+    val cv = ContentValues()
+    for (i in 0 until c.columnCount) {
+        val name = c.getColumnName(i)
+        val key = if (name == "order") "`order`" else name
+        when (c.getType(i)) {
+            android.database.Cursor.FIELD_TYPE_NULL    -> cv.putNull(key)
+            android.database.Cursor.FIELD_TYPE_INTEGER -> cv.put(key, c.getLong(i))
+            android.database.Cursor.FIELD_TYPE_FLOAT   -> cv.put(key, c.getDouble(i))
+            android.database.Cursor.FIELD_TYPE_BLOB    -> cv.put(key, c.getBlob(i))
+            else                                       -> cv.put(key, c.getString(i))
+        }
+    }
+    return cv
+}
+
+/** A captured subtree row: its full columns plus its original id + parentId (for id remapping). */
+private class SubtreeNode(val cv: ContentValues, val id: String, val parentId: String)
+
+/**
+ * BFS-collect every non-deleted descendant of [rootParentId] from [db] (Phase 2c: composite content
+ * lives in child rows, so a page copy must recurse past the layer's direct children). Parents come
+ * before their children, so [writeDescendants] can remap ids in a single forward pass.
+ */
+private fun collectDescendants(db: SoilRawDb, rootParentId: String): List<SubtreeNode> {
+    val out = ArrayList<SubtreeNode>()
+    val queue = ArrayDeque<String>().apply { add(rootParentId) }
+    while (queue.isNotEmpty()) {
+        val pid = queue.removeFirst()
+        db.rawQuery(
+            "SELECT * FROM notebook WHERE parentId = ? AND deletedAt IS NULL ORDER BY `order` ASC",
+            arrayOf(pid),
+        ).use { c ->
+            while (c.moveToNext()) {
+                val id = c.getString(c.getColumnIndexOrThrow("id"))
+                out.add(SubtreeNode(cursorRowToCv(c), id, pid))
+                queue.add(id)
+            }
+        }
+    }
+    return out
+}
+
+/**
+ * Write a captured subtree into [db] under a fresh id tree: every node gets a new UUID, and its
+ * parentId is remapped through [idMap] (seeded with [rootOldId] → [rootNewId], e.g. the layer).
+ * BFS order guarantees a node's parent is already in the map.
+ */
+private fun writeDescendants(
+    db: SoilRawDb, descendants: List<SubtreeNode>, rootOldId: String, rootNewId: String, now: Long,
+) {
+    val idMap = HashMap<String, String>().apply { put(rootOldId, rootNewId) }
+    for (node in descendants) {
+        val newId = UUID.randomUUID().toString()
+        idMap[node.id] = newId
+        db.insert("notebook", null, ContentValues(node.cv).apply {
+            put("id", newId)
+            put("parentId", idMap[node.parentId] ?: rootNewId)
+            put("createdAt", now)
+            put("updatedAt", now)
+            putNull("deletedAt")
+        })
+    }
+}
+
+/**
+ * Template id of a page-row [ContentValues] regardless of storage format:
+ * columnar (Phase 2b) keeps it in `refId` with `data = ""`; legacy keeps it in the `data` JSON.
+ */
+private fun cvPageTemplate(cv: ContentValues): String {
+    val data = cv.getAsString("data")
+    return if (data.isNullOrEmpty()) (cv.getAsString("refId") ?: "") else PageData.fromJson(data).template
+}
+
+/**
+ * Rewrite a page-row [ContentValues]' template, preserving its storage format (columnar vs legacy)
+ * so a copied page stays consistent with how its source stored the reference.
+ */
+private fun cvSetPageTemplate(cv: ContentValues, templateId: String) {
+    val data = cv.getAsString("data")
+    if (data.isNullOrEmpty()) {
+        cv.put("data", "")
+        cv.put("refId", templateId)
+    } else {
+        cv.put("data", PageData.fromJson(data).copy(template = templateId).toJson())
+    }
+}
+
+/**
  * Result of [movePagesAcrossNotebooks]: the destination insertions (same shape as
  * [copyPagesAcrossNotebooks]) plus the data needed to build a source-side restore undo action.
  */
@@ -50,7 +145,6 @@ suspend fun copyPageAfter(
 
     val sourcePage    = dao.getObjectById(sourcePageId) ?: return null
     val sourceLayer   = dao.getLayerForPage(sourcePageId) ?: return null
-    val sourceObjects = dao.getObjectsByParent(sourceLayer.id)
 
     val allPages       = dao.getPagesSorted()
     val targetIdx      = allPages.indexOfFirst { it.id == targetPageId }
@@ -79,15 +173,8 @@ suspend fun copyPageAfter(
             updatedAt = now,
             deletedAt = null,
         ))
-        for (obj in sourceObjects) {
-            dao.insertObject(obj.copy(
-                id        = UUID.randomUUID().toString(),
-                parentId  = newLayerId,
-                createdAt = now,
-                updatedAt = now,
-                deletedAt = null,
-            ))
-        }
+        // Deep-copy the whole layer subtree (direct children + composite content grandchildren).
+        dao.deepCopyChildren(sourceLayer.id, newLayerId, now)
     }
 
     return newPageId
@@ -230,44 +317,28 @@ suspend fun copyPagesRelativeRaw(
     try {
         db = SoilCrypto.openRaw(File(notebookPath), passphrase)
 
-        // ── Shared row types ─────────────────────────────────────────────────
-        data class Row(val id: String, val parentId: String, val bbox: String,
-                       val order: Int, val data: String, val type: String)
-        data class ChildRow(val type: String, val bbox: String, val order: Int, val data: String)
-
-        fun readRow(c: android.database.Cursor): Row? {
-            if (!c.moveToFirst()) return null
-            return Row(
-                id       = c.getString(c.getColumnIndexOrThrow("id")),
-                parentId = c.getString(c.getColumnIndexOrThrow("parentId")),
-                bbox     = c.getString(c.getColumnIndexOrThrow("boundingBox")),
-                order    = c.getInt(c.getColumnIndexOrThrow("order")),
-                data     = c.getString(c.getColumnIndexOrThrow("data")),
-                type     = c.getString(c.getColumnIndexOrThrow("type")),
-            )
-        }
-
         // ── Read source pages ────────────────────────────────────────────────
-        data class SourcePage(val page: Row, val layer: Row, val children: List<ChildRow>)
+        // Full-column capture (via cursorRowToCv) for page + layer, and the whole layer subtree
+        // (collectDescendants) so ALL columnar payload — page.refId, layer.text/flags, strokes'
+        // binary blob, AND composite content child rows (Phase 2c stickies) — copies verbatim.
+        data class SourcePage(
+            val page: ContentValues, val layer: ContentValues,
+            val layerId: String, val descendants: List<SubtreeNode>,
+        )
         val sources = sourcePageIds.mapNotNull { srcId ->
             val page = db.rawQuery(
                 "SELECT * FROM notebook WHERE id = ? LIMIT 1", arrayOf(srcId)
-            ).use { readRow(it) } ?: return@mapNotNull null
+            ).use { c -> if (c.moveToFirst()) cursorRowToCv(c) else null } ?: return@mapNotNull null
 
-            val layer = db.rawQuery(
-                "SELECT * FROM notebook WHERE type = 'layer' AND parentId = ? AND deletedAt IS NULL LIMIT 1",
+            val layerId = db.rawQuery(
+                "SELECT id FROM notebook WHERE type = 'layer' AND parentId = ? AND deletedAt IS NULL LIMIT 1",
                 arrayOf(srcId)
-            ).use { readRow(it) } ?: return@mapNotNull null
+            ).use { c -> if (c.moveToFirst()) c.getString(0) else null } ?: return@mapNotNull null
+            val layer = db.rawQuery(
+                "SELECT * FROM notebook WHERE id = ? LIMIT 1", arrayOf(layerId)
+            ).use { c -> if (c.moveToFirst()) cursorRowToCv(c) else null } ?: return@mapNotNull null
 
-            val children: List<ChildRow> = db.rawQuery(
-                "SELECT type, boundingBox, `order`, data FROM notebook WHERE parentId = ? AND deletedAt IS NULL ORDER BY `order` ASC",
-                arrayOf(layer.id)
-            ).use { c ->
-                val list = mutableListOf<ChildRow>()
-                while (c.moveToNext()) list.add(ChildRow(c.getString(0), c.getString(1), c.getInt(2), c.getString(3)))
-                list
-            }
-            SourcePage(page, layer, children)
+            SourcePage(page, layer, layerId, collectDescendants(db, layerId))
         }
         if (sources.isEmpty()) return@withContext null
 
@@ -307,43 +378,27 @@ suspend fun copyPagesRelativeRaw(
                 val newLayerId = UUID.randomUUID().toString()
                 newPageIds.add(newPageId)
 
-                db.insert("notebook", null, ContentValues().apply {
-                    put("id",          newPageId)
-                    put("parentId",    src.page.parentId)
-                    put("type",        "page")
-                    put("boundingBox", src.page.bbox)
-                    put("`order`",     insertionIndex + offset)
-                    put("createdAt",   now)
-                    put("updatedAt",   now)
+                // Same-file copy: template ids stay valid, so carry every column verbatim.
+                db.insert("notebook", null, ContentValues(src.page).apply {
+                    put("id",        newPageId)
+                    put("`order`",   insertionIndex + offset)
+                    put("createdAt", now)
+                    put("updatedAt", now)
                     putNull("deletedAt")
-                    put("data",        src.page.data)
                 })
 
-                db.insert("notebook", null, ContentValues().apply {
-                    put("id",          newLayerId)
-                    put("parentId",    newPageId)
-                    put("type",        "layer")
-                    put("boundingBox", src.layer.bbox)
-                    put("`order`",     0)
-                    put("createdAt",   now)
-                    put("updatedAt",   now)
+                db.insert("notebook", null, ContentValues(src.layer).apply {
+                    put("id",        newLayerId)
+                    put("parentId",  newPageId)
+                    put("`order`",   0)
+                    put("createdAt", now)
+                    put("updatedAt", now)
                     putNull("deletedAt")
-                    put("data",        src.layer.data)
                 })
 
-                for (obj in src.children) {
-                    db.insert("notebook", null, ContentValues().apply {
-                        put("id",          UUID.randomUUID().toString())
-                        put("parentId",    newLayerId)
-                        put("type",        obj.type)
-                        put("boundingBox", obj.bbox)
-                        put("`order`",     obj.order)
-                        put("createdAt",   now)
-                        put("updatedAt",   now)
-                        putNull("deletedAt")
-                        put("data",        obj.data)
-                    })
-                }
+                // Copy the entire layer subtree (direct children + composite grandchildren), remapping
+                // every parentId through fresh ids.
+                writeDescendants(db, src.descendants, src.layerId, newLayerId, now)
             }
 
             db.setTransactionSuccessful()
@@ -398,10 +453,11 @@ suspend fun insertSoilTemplateRaw(
         val now = System.currentTimeMillis()
         val newId = UUID.randomUUID().toString()
         val bbox = BoundingBox(0f, 0f, width.toFloat(), height.toFloat()).toJson()
-        val data = TemplateData(width, height, name, imageBase64).toJson()
+        val imageBytes = templateImageBlob(imageBase64)
 
         db.beginTransaction()
         try {
+            // Columnar (Phase 2b) template row: name→text, decoded image bytes→blob, size→boundingBox.
             db.insert("notebook", null, ContentValues().apply {
                 put("id",          newId)
                 put("parentId",    parentId)
@@ -411,7 +467,9 @@ suspend fun insertSoilTemplateRaw(
                 put("createdAt",   now)
                 put("updatedAt",   now)
                 putNull("deletedAt")
-                put("data",        data)
+                put("data",        "")
+                put("text",        name)
+                if (imageBytes != null) put("blob", imageBytes) else putNull("blob")
             })
             db.setTransactionSuccessful()
         } finally {
@@ -455,14 +513,14 @@ suspend fun insertBlankPageRaw(
     try {
         db = SoilCrypto.openRaw(File(notebookPath), passphrase)
 
-        data class PageRow(val id: String, val parentId: String, val order: Int, val data: String)
+        data class PageRow(val id: String, val parentId: String, val order: Int, val data: String, val refId: String?)
         val allPages: List<PageRow> = db.rawQuery(
-            "SELECT id, parentId, `order`, data FROM notebook WHERE type = 'page' AND deletedAt IS NULL ORDER BY `order` ASC",
+            "SELECT id, parentId, `order`, data, refId FROM notebook WHERE type = 'page' AND deletedAt IS NULL ORDER BY `order` ASC",
             null
         ).use { c ->
             val list = mutableListOf<PageRow>()
             while (c.moveToNext()) {
-                list.add(PageRow(c.getString(0), c.getString(1), c.getInt(2), c.getString(3)))
+                list.add(PageRow(c.getString(0), c.getString(1), c.getInt(2), c.getString(3), c.getString(4)))
             }
             list
         }
@@ -473,9 +531,11 @@ suspend fun insertBlankPageRaw(
             else -> allPages.size
         }
 
+        // Template inheritance is format-agnostic: columnar keeps it in refId, legacy in the data JSON.
+        fun PageRow.template(): String = if (data.isEmpty()) (refId ?: "") else PageData.fromJson(data).template
         val inheritedTemplate: String = when {
-            anchorIdx >= 0 -> PageData.fromJson(allPages[anchorIdx].data).template
-            allPages.isNotEmpty() -> PageData.fromJson(allPages.last().data).template
+            anchorIdx >= 0 -> allPages[anchorIdx].template()
+            allPages.isNotEmpty() -> allPages.last().template()
             else -> ""
         }
 
@@ -486,7 +546,6 @@ suspend fun insertBlankPageRaw(
             ?: UUID.randomUUID().toString()
 
         val bbox = BoundingBox(0f, 0f, pageWidth, pageHeight).toJson()
-        val pageData = PageData(width = pageWidth, height = pageHeight, template = inheritedTemplate).toJson()
         val now = System.currentTimeMillis()
         val newPageId  = UUID.randomUUID().toString()
         val newLayerId = UUID.randomUUID().toString()
@@ -497,6 +556,7 @@ suspend fun insertBlankPageRaw(
                 val cv = ContentValues().apply { put("`order`", i + 1) }
                 db.update("notebook", cv, "id = ?", arrayOf(allPages[i].id))
             }
+            // Columnar (Phase 2b): page template→refId; layer label→text, visible+unlocked→flags.
             db.insert("notebook", null, ContentValues().apply {
                 put("id",          newPageId)
                 put("parentId",    notebookParentId)
@@ -506,7 +566,8 @@ suspend fun insertBlankPageRaw(
                 put("createdAt",   now)
                 put("updatedAt",   now)
                 putNull("deletedAt")
-                put("data",        pageData)
+                put("data",        "")
+                put("refId",       inheritedTemplate)
             })
             db.insert("notebook", null, ContentValues().apply {
                 put("id",          newLayerId)
@@ -517,7 +578,9 @@ suspend fun insertBlankPageRaw(
                 put("createdAt",   now)
                 put("updatedAt",   now)
                 putNull("deletedAt")
-                put("data",        """{"label":"Content","isLocked":false,"isVisible":true}""")
+                put("data",        "")
+                put("text",        "Content")
+                put("flags",       LAYER_FLAGS_DEFAULT)
             })
             db.setTransactionSuccessful()
         } finally {
@@ -582,17 +645,21 @@ suspend fun setPagesTemplateRaw(
         db.beginTransaction()
         try {
             for (pageId in pageIds) {
-                val oldData = db.rawQuery(
-                    "SELECT data FROM notebook WHERE id = ? AND type = 'page' LIMIT 1",
+                val row = db.rawQuery(
+                    "SELECT data, refId FROM notebook WHERE id = ? AND type = 'page' LIMIT 1",
                     arrayOf(pageId)
-                ).use { c -> if (c.moveToFirst()) c.getString(0) else null } ?: continue
+                ).use { c -> if (c.moveToFirst()) Pair(c.getString(0), c.getString(1)) else null } ?: continue
+                val (oldData, oldRefId) = row
 
-                val parsed = PageData.fromJson(oldData)
-                val previousTemplateId = parsed.template.takeIf { it.isNotEmpty() }
-                val newData = parsed.copy(template = newTemplateId).toJson()
+                // Prior template is format-agnostic: columnar keeps it in refId, legacy in data JSON.
+                val previousTemplateId =
+                    (if (oldData.isNullOrEmpty()) oldRefId else PageData.fromJson(oldData).template)
+                        ?.takeIf { it.isNotEmpty() }
 
+                // Write columnar: template→refId, data cleared.
                 db.update("notebook", ContentValues().apply {
-                    put("data",      newData)
+                    put("data",      "")
+                    put("refId",     newTemplateId)
                     put("updatedAt", now)
                 }, "id = ?", arrayOf(pageId))
 
@@ -745,25 +812,12 @@ suspend fun copyPagesAcrossNotebooks(
         return@withContext null
     }
 
-    // ── Shared local types ────────────────────────────────────────────────
-    data class Row(val id: String, val parentId: String, val bbox: String,
-                   val order: Int, val data: String, val type: String)
-    data class ChildRow(val type: String, val bbox: String, val order: Int, val data: String)
-
-    fun readRow(c: android.database.Cursor): Row? {
-        if (!c.moveToFirst()) return null
-        return Row(
-            id       = c.getString(c.getColumnIndexOrThrow("id")),
-            parentId = c.getString(c.getColumnIndexOrThrow("parentId")),
-            bbox     = c.getString(c.getColumnIndexOrThrow("boundingBox")),
-            order    = c.getInt(c.getColumnIndexOrThrow("order")),
-            data     = c.getString(c.getColumnIndexOrThrow("data")),
-            type     = c.getString(c.getColumnIndexOrThrow("type")),
-        )
-    }
-
-    data class SourcePage(val page: Row, val layer: Row, val children: List<ChildRow>)
-    data class TemplateRow(val bbox: String, val data: String)
+    // Full-column capture (via cursorRowToCv) so ALL columnar payload — page.refId (template),
+    // layer.text/flags, template.text/blob, strokes' binary blob — copies verbatim across notebooks.
+    data class SourcePage(
+        val page: ContentValues, val layer: ContentValues,
+        val layerId: String, val descendants: List<SubtreeNode>,
+    )
 
     var sourceDb: SoilRawDb? = null
     var destDb: SoilRawDb? = null
@@ -774,37 +828,33 @@ suspend fun copyPagesAcrossNotebooks(
         val sources = sourcePageIds.mapNotNull { srcId ->
             val page = sourceDb.rawQuery(
                 "SELECT * FROM notebook WHERE id = ? LIMIT 1", arrayOf(srcId)
-            ).use { readRow(it) } ?: return@mapNotNull null
+            ).use { c -> if (c.moveToFirst()) cursorRowToCv(c) else null } ?: return@mapNotNull null
 
-            val layer = sourceDb.rawQuery(
-                "SELECT * FROM notebook WHERE type = 'layer' AND parentId = ? AND deletedAt IS NULL LIMIT 1",
+            val layerId = sourceDb.rawQuery(
+                "SELECT id FROM notebook WHERE type = 'layer' AND parentId = ? AND deletedAt IS NULL LIMIT 1",
                 arrayOf(srcId)
-            ).use { readRow(it) } ?: return@mapNotNull null
+            ).use { c -> if (c.moveToFirst()) c.getString(0) else null } ?: return@mapNotNull null
+            val layer = sourceDb.rawQuery(
+                "SELECT * FROM notebook WHERE id = ? LIMIT 1", arrayOf(layerId)
+            ).use { c -> if (c.moveToFirst()) cursorRowToCv(c) else null } ?: return@mapNotNull null
 
-            val children: List<ChildRow> = sourceDb.rawQuery(
-                "SELECT type, boundingBox, `order`, data FROM notebook WHERE parentId = ? AND deletedAt IS NULL ORDER BY `order` ASC",
-                arrayOf(layer.id)
-            ).use { c ->
-                val list = mutableListOf<ChildRow>()
-                while (c.moveToNext()) list.add(ChildRow(c.getString(0), c.getString(1), c.getInt(2), c.getString(3)))
-                list
-            }
-            SourcePage(page, layer, children)
+            SourcePage(page, layer, layerId, collectDescendants(sourceDb, layerId))
         }
         if (sources.isEmpty()) return@withContext null
 
-        // Collect distinct template ids referenced by the pages being copied.
+        // Collect distinct template ids referenced by the pages being copied (format-agnostic).
         val referencedTemplateIds = sources.mapNotNull { src ->
-            PageData.fromJson(src.page.data).template.takeIf { it.isNotEmpty() }
+            cvPageTemplate(src.page).takeIf { it.isNotEmpty() }
         }.toSet()
 
-        val sourceTemplates = mutableMapOf<String, TemplateRow>()
+        // Full-column capture of each referenced template row (carries columnar text/blob or legacy data).
+        val sourceTemplates = mutableMapOf<String, ContentValues>()
         for (templateId in referencedTemplateIds) {
             sourceDb.rawQuery(
-                "SELECT boundingBox, data FROM notebook WHERE id = ? AND type = 'template' LIMIT 1",
+                "SELECT * FROM notebook WHERE id = ? AND type = 'template' LIMIT 1",
                 arrayOf(templateId)
             ).use { c ->
-                if (c.moveToFirst()) sourceTemplates[templateId] = TemplateRow(c.getString(0), c.getString(1))
+                if (c.moveToFirst()) sourceTemplates[templateId] = cursorRowToCv(c)
             }
         }
 
@@ -818,7 +868,7 @@ suspend fun copyPagesAcrossNotebooks(
         // Use dest notebook metadata row as parentId for pages and templates.
         val destParentId = destDb.rawQuery(
             "SELECT id FROM notebook WHERE type = 'notebook' LIMIT 1", null
-        ).use { c -> if (c.moveToFirst()) c.getString(0) else sources.first().page.parentId }
+        ).use { c -> if (c.moveToFirst()) c.getString(0) else sources.first().page.getAsString("parentId") }
 
         data class PageOrder(val id: String, val order: Int)
         val allDestPages: MutableList<PageOrder> = destDb.rawQuery(
@@ -841,19 +891,16 @@ suspend fun copyPagesAcrossNotebooks(
 
         destDb.beginTransaction()
         try {
-            // Copy template rows into dest and build the remap.
-            for ((srcTemplateId, templateRow) in sourceTemplates) {
+            // Copy template rows into dest and build the remap (full-column: carries text/blob or data).
+            for ((srcTemplateId, templateCv) in sourceTemplates) {
                 val newTemplateId = UUID.randomUUID().toString()
-                destDb.insert("notebook", null, ContentValues().apply {
-                    put("id",          newTemplateId)
-                    put("parentId",    destParentId)
-                    put("type",        "template")
-                    put("boundingBox", templateRow.bbox)
-                    put("`order`",     0)
-                    put("createdAt",   now)
-                    put("updatedAt",   now)
+                destDb.insert("notebook", null, ContentValues(templateCv).apply {
+                    put("id",        newTemplateId)
+                    put("parentId",  destParentId)
+                    put("`order`",   0)
+                    put("createdAt", now)
+                    put("updatedAt", now)
                     putNull("deletedAt")
-                    put("data",        templateRow.data)
                 })
                 templateRemap[srcTemplateId] = newTemplateId
             }
@@ -871,49 +918,31 @@ suspend fun copyPagesAcrossNotebooks(
                 val newLayerId = UUID.randomUUID().toString()
                 newPageIds.add(newPageId)
 
-                // Rewrite template id if this page referenced a template.
-                val pageData = PageData.fromJson(src.page.data)
-                val remappedData = templateRemap[pageData.template]?.let { newTplId ->
-                    pageData.copy(template = newTplId).toJson()
-                } ?: src.page.data
-
-                destDb.insert("notebook", null, ContentValues().apply {
-                    put("id",          newPageId)
-                    put("parentId",    destParentId)
-                    put("type",        "page")
-                    put("boundingBox", src.page.bbox)
-                    put("`order`",     insertionIndex + offset)
-                    put("createdAt",   now)
-                    put("updatedAt",   now)
+                // Carry every page column verbatim, then re-parent and remap its template id
+                // (preserving the source's storage format via cvSetPageTemplate).
+                val pageCv = ContentValues(src.page).apply {
+                    put("id",        newPageId)
+                    put("parentId",  destParentId)
+                    put("`order`",   insertionIndex + offset)
+                    put("createdAt", now)
+                    put("updatedAt", now)
                     putNull("deletedAt")
-                    put("data",        remappedData)
-                })
-
-                destDb.insert("notebook", null, ContentValues().apply {
-                    put("id",          newLayerId)
-                    put("parentId",    newPageId)
-                    put("type",        "layer")
-                    put("boundingBox", src.layer.bbox)
-                    put("`order`",     0)
-                    put("createdAt",   now)
-                    put("updatedAt",   now)
-                    putNull("deletedAt")
-                    put("data",        src.layer.data)
-                })
-
-                for (obj in src.children) {
-                    destDb.insert("notebook", null, ContentValues().apply {
-                        put("id",          UUID.randomUUID().toString())
-                        put("parentId",    newLayerId)
-                        put("type",        obj.type)
-                        put("boundingBox", obj.bbox)
-                        put("`order`",     obj.order)
-                        put("createdAt",   now)
-                        put("updatedAt",   now)
-                        putNull("deletedAt")
-                        put("data",        obj.data)
-                    })
                 }
+                templateRemap[cvPageTemplate(src.page)]?.let { cvSetPageTemplate(pageCv, it) }
+                destDb.insert("notebook", null, pageCv)
+
+                destDb.insert("notebook", null, ContentValues(src.layer).apply {
+                    put("id",        newLayerId)
+                    put("parentId",  newPageId)
+                    put("`order`",   0)
+                    put("createdAt", now)
+                    put("updatedAt", now)
+                    putNull("deletedAt")
+                })
+
+                // Copy the entire layer subtree (direct children + composite grandchildren) into the
+                // destination, remapping every parentId through fresh ids.
+                writeDescendants(destDb, src.descendants, src.layerId, newLayerId, now)
             }
 
             destDb.setTransactionSuccessful()

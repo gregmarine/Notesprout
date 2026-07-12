@@ -20,6 +20,10 @@ interface NotebookDao {
     @Insert
     suspend fun insertObject(obj: NotebookObject)
 
+    /** Insert many objects at once (e.g. a composite parent + its child-row subtree). */
+    @Insert
+    suspend fun insertObjects(objs: List<NotebookObject>)
+
     /**
      * Insert a single object, silently ignoring it if the same [NotebookObject.id]
      * already exists.  Used for incremental stroke saves — already-persisted strokes
@@ -44,6 +48,33 @@ interface NotebookDao {
      */
     @Query("SELECT * FROM notebook WHERE parentId = :parentId AND deletedAt IS NULL ORDER BY `order` ASC")
     suspend fun getObjectsByParent(parentId: String): List<NotebookObject>
+
+    /**
+     * All non-deleted children of any parent in [parentIds], sorted by `order` ascending. Used to
+     * batch-load composite subtrees (Phase 2c) in one query instead of N `getObjectsByParent` calls.
+     * Callers group by [NotebookObject.parentId] to reconstruct each subtree.
+     */
+    @Query("SELECT * FROM notebook WHERE parentId IN (:parentIds) AND deletedAt IS NULL ORDER BY `order` ASC")
+    suspend fun getObjectsByParents(parentIds: List<String>): List<NotebookObject>
+
+    /** Every direct child id of [parentId], INCLUDING soft-deleted rows (for a hard-delete cascade). */
+    @Query("SELECT id FROM notebook WHERE parentId = :parentId")
+    suspend fun childIdsIncludingDeleted(parentId: String): List<String>
+
+    /** Hard-delete the given rows by id (used to replace a composite's child subtree in place). */
+    @Query("DELETE FROM notebook WHERE id IN (:ids)")
+    suspend fun hardDeleteByIds(ids: List<String>)
+
+    /**
+     * Hard-delete CONTENT rows orphaned by a purged parent — the child subtree of a deleted composite
+     * (sticky/link/heading/text) whose parent was removed by [hardDeleteOldSoftDeleted]. Restricted to
+     * content types so structural rows (page/layer) and the refId-referenced `template` library are
+     * never touched (templates are linked via page.refId, not the parentId hierarchy). A row whose
+     * parent is only *soft*-deleted still has its parent row present, so it is NOT swept (current-session
+     * composite deletes stay restorable). Removes one level; the caller loops to cascade through nesting.
+     */
+    @Query("DELETE FROM notebook WHERE type IN ('stroke','heading','text','line','shape','link','sticky_note') AND parentId NOT IN (SELECT id FROM notebook)")
+    suspend fun hardDeleteOrphansOnce(): Int
 
     /**
      * All non-deleted pages, sorted by `order` ascending.
@@ -204,12 +235,28 @@ interface NotebookDao {
     suspend fun updateData(id: String, data: String, updatedAt: Long)
 
     /**
+     * Set a columnar page row's template (refId), clearing the legacy `data` JSON. The page's size
+     * stays in its `boundingBox` column (untouched). Phase 2b — see [pageData].
+     */
+    @Query("UPDATE notebook SET refId = :templateId, data = '', updatedAt = :updatedAt WHERE id = :id")
+    suspend fun updatePageTemplate(id: String, templateId: String, updatedAt: Long)
+
+    /**
      * Overwrite the serialized point array for a single stroke row.
      * Used by the lasso-move commit path to persist translated stroke coordinates
      * without re-inserting the row or changing any other columns.
      */
     @Query("UPDATE notebook SET data = :data, updatedAt = :updatedAt WHERE id = :id")
     suspend fun updateStrokeData(id: String, data: String, updatedAt: Long)
+
+    /**
+     * Overwrite a stroke row's binary [NotebookObject.blob] plus its colour/width columns, clearing
+     * the legacy `data`/`boundingBox` (data-model-optimization Phase 1). Colour/width are written too
+     * so a lasso-move that lands on a still-legacy row converts it fully to columnar form without
+     * losing a non-default colour. Used by the lasso-move commit and undo/redo re-persist paths.
+     */
+    @Query("UPDATE notebook SET blob = :blob, color = :color, strokeWidth = :strokeWidth, data = '', boundingBox = '', updatedAt = :updatedAt WHERE id = :id")
+    suspend fun updateStrokeBlob(id: String, blob: ByteArray, color: String, strokeWidth: Float, updatedAt: Long)
 
     /**
      * Overwrite both [boundingBox] and [data] for a heading row.
@@ -372,6 +419,82 @@ interface NotebookDao {
      */
     @Query("UPDATE notebook SET data = :data WHERE id = :id")
     suspend fun rewriteObjectDataKeepingTimestamp(id: String, data: String)
+
+    /**
+     * Generic columnar update (data-model-optimization Phase 1, step 4): overwrite every payload
+     * column + `updatedAt` for the row [id], clearing the legacy `data`/`boundingBox`. Does NOT touch
+     * `createdAt`/`parentId`/`order` (structural), so it is the in-place counterpart to the per-type
+     * `toRow()` builders — used by every non-stroke lasso-move / edit re-persist path. Prefer the
+     * [com.notesprout.android.data.updateColumns] extension, which feeds this from a `toRow()` row.
+     */
+    @Query(
+        "UPDATE notebook SET boundingBox = '', data = '', x = :x, y = :y, width = :width, " +
+        "height = :height, text = :text, color = :color, strokeWidth = :strokeWidth, refId = :refId, " +
+        "level = :level, lineStyle = :lineStyle, orientation = :orientation, dotSpacing = :dotSpacing, " +
+        "shapeType = :shapeType, centerX = :centerX, centerY = :centerY, rotationDeg = :rotationDeg, " +
+        "pointCount = :pointCount, contentW = :contentW, contentH = :contentH, linkTarget = :linkTarget, " +
+        "chrome = :chrome, flags = :flags, blob = :blob, updatedAt = :updatedAt WHERE id = :id"
+    )
+    suspend fun updateObjectColumns(
+        id: String, x: Float?, y: Float?, width: Float?, height: Float?, text: String?, color: String?,
+        strokeWidth: Float?, refId: String?, level: Int?, lineStyle: String?, orientation: String?,
+        dotSpacing: Float?, shapeType: String?, centerX: Float?, centerY: Float?, rotationDeg: Float?,
+        pointCount: Int?, contentW: Float?, contentH: Float?, linkTarget: String?, chrome: String?,
+        flags: Int?, blob: ByteArray?, updatedAt: Long,
+    )
+
+    // ── Lazy stroke-format conversion (data-model-optimization Phase 1) ─────────
+
+    /**
+     * Legacy stroke rows still stored as JSON (no binary [NotebookObject.blob] yet). Self-limiting:
+     * once converted, `blob` is non-null and the row drops out of the scan, so [NotebookCompactor]
+     * can run this on every seal. The `LIKE` keeps an already-converted notebook's scan cheap.
+     */
+    @Query("SELECT id, data FROM notebook WHERE type = 'stroke' AND blob IS NULL AND data LIKE '%\"points\":%'")
+    suspend fun legacyStrokeRowsToConvert(): List<StrokeRowData>
+
+    /**
+     * Convert a stroke row to the binary format — write [blob] + colour/width columns, clear the
+     * legacy `data`/`boundingBox` — WITHOUT touching [NotebookObject.updatedAt]. A format change, not a
+     * content edit, so (like the other compactor passes) the file is not re-flagged for backup.
+     */
+    @Query("UPDATE notebook SET blob = :blob, color = :color, strokeWidth = :strokeWidth, data = '', boundingBox = '' WHERE id = :id")
+    suspend fun convertStrokeToBlobKeepingTimestamp(id: String, blob: ByteArray, color: String, strokeWidth: Float)
+
+    // ── Lazy composite→child-row conversion (data-model-optimization Phase 2c) ──
+
+    /**
+     * Legacy composite rows (heading/text/link/sticky) that still carry their nested content inline —
+     * either a pre-columnar `data` JSON or the Phase-1/2b `zlib(JSON)` blob. [NotebookCompactor]
+     * converts these to child-row subtrees on seal. Self-limiting: once converted a composite has
+     * data = '' AND blob = NULL, so it drops out of this scan.
+     */
+    @Query("SELECT * FROM notebook WHERE type IN ('heading','text','link','sticky_note') AND (data <> '' OR blob IS NOT NULL) AND deletedAt IS NULL")
+    suspend fun legacyBlobCompositeRows(): List<NotebookObject>
+
+    /**
+     * Recognized heading/text parents (text != null) that still have child rows — the orphan strokes
+     * a fallback→recognized transition leaves behind (see [com.notesprout.android.data.replaceHeadingSubtree]).
+     * [NotebookCompactor] hard-deletes their descendants. Returns empty for a clean notebook.
+     */
+    @Query("SELECT DISTINCT p.id FROM notebook p JOIN notebook c ON c.parentId = p.id WHERE p.type IN ('heading','text') AND p.text IS NOT NULL AND p.deletedAt IS NULL")
+    suspend fun recognizedCompositeParentIdsWithChildren(): List<String>
+
+    /**
+     * Legacy structural/leaf rows (page/layer/notebook/template/shape/line) still storing their
+     * payload as `data` JSON. [NotebookCompactor] converts these to the Phase 2b/1 columnar form on
+     * seal. Self-limiting: once converted a row has data = '' and drops out of the scan.
+     */
+    @Query("SELECT * FROM notebook WHERE type IN ('page','layer','notebook','template','shape','line') AND data <> '' AND deletedAt IS NULL")
+    suspend fun legacyStructuralRows(): List<NotebookObject>
+
+    /** Columnar layer write keeping [NotebookObject.updatedAt] + boundingBox: label→text, flags. */
+    @Query("UPDATE notebook SET data = '', text = :text, flags = :flags, updatedAt = :updatedAt WHERE id = :id")
+    suspend fun updateLayerColumnarKeepingTimestamp(id: String, text: String, flags: Int, updatedAt: Long)
+
+    /** Columnar template write keeping [NotebookObject.updatedAt] + boundingBox: name→text, image→blob. */
+    @Query("UPDATE notebook SET data = '', text = :text, blob = :blob, updatedAt = :updatedAt WHERE id = :id")
+    suspend fun updateTemplateColumnarKeepingTimestamp(id: String, text: String, blob: ByteArray?, updatedAt: Long)
 }
 
 /** Minimal id/data projection for [NotebookDao.strokeRowsWithLegacyTimestamp]. */

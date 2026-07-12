@@ -30,7 +30,7 @@ import com.notesprout.android.data.LineRender
 import com.notesprout.android.data.LinkObject
 import com.notesprout.android.data.LinkRender
 import com.notesprout.android.data.LiveStroke
-import com.notesprout.android.data.PageData
+import com.notesprout.android.data.pageData
 import com.notesprout.android.data.ScratchpadRepository
 import com.notesprout.android.data.ShapeObject
 import com.notesprout.android.data.ShapeRender
@@ -46,6 +46,7 @@ import com.notesprout.android.data.toStickyNoteObject
 import com.notesprout.android.data.translate
 import com.notesprout.android.data.index.NotesproutIndex
 import com.notesprout.android.data.index.ScratchpadEntity
+import com.notesprout.android.data.index.toNotebookObject
 import com.notesprout.android.notebook.ShapeRecognizer
 import com.notesprout.android.notebook.STICKY_NOTE_ICON_SIZE_DP
 import com.notesprout.android.databinding.ActivityScratchpadBinding
@@ -1262,7 +1263,7 @@ class ScratchpadActivity : AppCompatActivity() {
             // Record real page size on first layout if still at 0×0.
             if (containerW > 0 && containerH > 0) {
                 val row = NotesproutIndex.scratchpadDao().getObjectById(pageId)
-                val pd  = row?.let { PageData.fromJson(it.data) }
+                val pd  = row?.toNotebookObject()?.pageData()
                 if (pd != null && (pd.width == 0f || pd.height == 0f)) {
                     repository.setPageSize(pageId, containerW, containerH)
                 }

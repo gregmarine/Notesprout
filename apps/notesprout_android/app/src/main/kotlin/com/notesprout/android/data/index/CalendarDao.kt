@@ -96,6 +96,14 @@ interface CalendarDao {
     @Query("UPDATE calendar SET boundingBox = :boundingBox, data = :data, updatedAt = :updatedAt WHERE id = :id")
     suspend fun updatePageSize(id: String, boundingBox: String, data: String, updatedAt: Long)
 
+    /** Columnar page template (refId), clearing legacy data JSON — Phase 2b. */
+    @Query("UPDATE calendar SET refId = :templateId, data = '', updatedAt = :updatedAt WHERE id = :id")
+    suspend fun updatePageTemplate(id: String, templateId: String, updatedAt: Long)
+
+    /** Columnar page size (boundingBox) preserving template (refId), clearing legacy data — Phase 2b. */
+    @Query("UPDATE calendar SET boundingBox = :boundingBox, refId = :templateId, data = '', updatedAt = :updatedAt WHERE id = :id")
+    suspend fun updatePageSizeColumnar(id: String, boundingBox: String, templateId: String, updatedAt: Long)
+
     @Query("UPDATE calendar SET boundingBox = :boundingBox, data = :data, updatedAt = :updatedAt WHERE id = :id")
     suspend fun updateObjectData(id: String, boundingBox: String, data: String, updatedAt: Long)
 }

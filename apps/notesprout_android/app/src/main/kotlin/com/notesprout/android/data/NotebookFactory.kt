@@ -38,27 +38,8 @@ suspend fun createBlankNotebook(
         pragma("PRAGMA wal_autocheckpoint = 100")
         pragma("PRAGMA auto_vacuum = INCREMENTAL")
 
-        exec(
-            """
-            CREATE TABLE IF NOT EXISTS notebook (
-                id          TEXT    NOT NULL PRIMARY KEY,
-                parentId    TEXT    NOT NULL,
-                boundingBox TEXT    NOT NULL,
-                "order"     INTEGER NOT NULL DEFAULT 0,
-                createdAt   INTEGER NOT NULL,
-                updatedAt   INTEGER NOT NULL,
-                deletedAt   INTEGER,
-                type        TEXT    NOT NULL,
-                data        TEXT    NOT NULL
-            )
-            """.trimIndent()
-        )
-        exec(
-            """
-            CREATE INDEX IF NOT EXISTS idx_notebook_parent_order
-                ON notebook(parentId, "order", deletedAt)
-            """.trimIndent()
-        )
+        exec(SoilSchema.CREATE_NOTEBOOK_TABLE)
+        exec(SoilSchema.CREATE_NOTEBOOK_INDEX)
         exec("CREATE TABLE IF NOT EXISTS undo_redo_state (id INTEGER PRIMARY KEY CHECK (id = 0), json TEXT NOT NULL)")
         exec("CREATE TABLE IF NOT EXISTS notebook_meta (id INTEGER PRIMARY KEY CHECK (id = 0), json TEXT NOT NULL)")
 
@@ -67,29 +48,22 @@ suspend fun createBlankNotebook(
         val bboxJson = BoundingBox(0f, 0f, screenW, screenH).toJson()
         val now = System.currentTimeMillis()
 
-        val insertSql = """INSERT INTO notebook (id, parentId, boundingBox, "order", createdAt, updatedAt, deletedAt, type, data)
-                           VALUES (?, ?, ?, 0, ?, ?, NULL, ?, ?)"""
+        // Columnar (Phase 2b): notebook meta, page, and layer all write typed columns, data = "".
+        // Columns beyond `data`: text (notebook.title / layer.label), refId (notebook.lastOpenedPage /
+        // page.template), flags (layer isLocked/isVisible bits).
+        val insertSql = """INSERT INTO notebook (id, parentId, boundingBox, "order", createdAt, updatedAt, deletedAt, type, data, text, refId, flags)
+                           VALUES (?, ?, ?, 0, ?, ?, NULL, ?, '', ?, ?, ?)"""
 
         val notebookRowId = UUID.randomUUID().toString()
         val pageId        = UUID.randomUUID().toString()
 
-        val notebookDataJson = NotebookMetadata(
-            id             = notebookRowId,
-            title          = name,
-            lastOpenedPage = pageId,
-        ).toJson()
-        exec(insertSql, arrayOf(notebookRowId, "", "{}", now, now, "notebook", notebookDataJson))
-
-        exec(insertSql, arrayOf(
-            pageId, notebookRowId, bboxJson, now, now, "page",
-            PageData(width = screenW, height = screenH, template = "").toJson()
-        ))
-
+        // notebook meta: title→text, lastOpenedPage→refId.
+        exec(insertSql, arrayOf(notebookRowId, "", "{}", now, now, "notebook", name, pageId, null))
+        // page: template→refId (none); size stays in boundingBox.
+        exec(insertSql, arrayOf(pageId, notebookRowId, bboxJson, now, now, "page", null, "", null))
+        // layer: label→text, visible+unlocked → flags.
         val layerId = UUID.randomUUID().toString()
-        exec(insertSql, arrayOf(
-            layerId, pageId, bboxJson, now, now, "layer",
-            """{"label":"Content","isLocked":false,"isVisible":true}"""
-        ))
+        exec(insertSql, arrayOf(layerId, pageId, bboxJson, now, now, "layer", "Content", null, LAYER_FLAGS_DEFAULT))
 
         val folderPath = repository.getFolderAncestry(parentId)
         val initialMeta = NotebookMeta(
