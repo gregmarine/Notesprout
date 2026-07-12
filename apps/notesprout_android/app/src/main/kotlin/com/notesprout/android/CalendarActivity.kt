@@ -48,7 +48,7 @@ import com.notesprout.android.data.HeadingStroke
 import com.notesprout.android.data.LineObject
 import com.notesprout.android.data.LineRender
 import com.notesprout.android.data.LiveStroke
-import com.notesprout.android.data.PageData
+import com.notesprout.android.data.pageData
 import com.notesprout.android.data.ShapeObject
 import com.notesprout.android.data.ShapeRender
 import com.notesprout.android.data.ShapeType
@@ -59,6 +59,7 @@ import com.notesprout.android.data.TYPE_STICKY_NOTE
 import com.notesprout.android.data.TextObject
 import com.notesprout.android.data.TextRender
 import com.notesprout.android.data.index.CalendarEntity
+import com.notesprout.android.data.index.toNotebookObject
 import com.notesprout.android.data.index.IndexRepository
 import com.notesprout.android.data.index.NotesproutIndex
 import com.notesprout.android.data.insertCalendarPagesIntoNotebook
@@ -602,7 +603,7 @@ class CalendarActivity : AppCompatActivity() {
         val content = withContext(Dispatchers.IO) {
             if (containerW > 0 && containerH > 0) {
                 val row = NotesproutIndex.calendarDao().getObjectById(pageId)
-                val pd = row?.let { PageData.fromJson(it.data) }
+                val pd = row?.toNotebookObject()?.pageData()
                 if (pd != null && (pd.width == 0f || pd.height == 0f)) {
                     repository.setPageSize(pageId, containerW, containerH)
                 }

@@ -70,7 +70,8 @@ class CalendarRepository(
                         createdAt   = now,
                         updatedAt   = now,
                         type        = "page",
-                        data        = PageData(width = 0f, height = 0f, template = "").toJson(),
+                        data        = "",
+                        refId       = "",
                     )
                 )
             }
@@ -84,7 +85,9 @@ class CalendarRepository(
                         createdAt   = now,
                         updatedAt   = now,
                         type        = "layer",
-                        data        = """{"label":"Content","isLocked":false,"isVisible":true}""",
+                        data        = "",
+                        text        = "Content",
+                        flags       = LAYER_FLAGS_DEFAULT,
                     )
                 )
             } else {
@@ -114,7 +117,9 @@ class CalendarRepository(
                     createdAt   = now,
                     updatedAt   = now,
                     type        = "template",
-                    data        = TemplateData(width, height, name, imageBase64).toJson(),
+                    data        = "",
+                    text        = name,
+                    blob        = templateImageBlob(imageBase64),
                 )
             )
             id
@@ -127,10 +132,8 @@ class CalendarRepository(
 
     /** Set (or clear, with "") the [templateId] on a page row, preserving its size + snapshot. */
     suspend fun setPageTemplate(pageId: String, templateId: String) = withContext(Dispatchers.IO) {
-        val now = System.currentTimeMillis()
-        val pageRow = dao.getObjectById(pageId) ?: return@withContext
-        val updatedData = PageData.fromJson(pageRow.data).copy(template = templateId).toJson()
-        dao.updateData(pageId, updatedData, now)
+        // Columnar: template → refId, data cleared. Size stays in boundingBox.
+        dao.updatePageTemplate(pageId, templateId, System.currentTimeMillis())
     }
 
     // ── Page size ─────────────────────────────────────────────────────────────
@@ -138,9 +141,10 @@ class CalendarRepository(
     suspend fun setPageSize(pageId: String, w: Float, h: Float) = withContext(Dispatchers.IO) {
         val now = System.currentTimeMillis()
         val pageRow = dao.getObjectById(pageId) ?: return@withContext
-        val updatedData = PageData.fromJson(pageRow.data).copy(width = w, height = h).toJson()
+        // Preserve any template (refId) while updating the size (boundingBox) columnar.
+        val template = pageRow.toNotebookObject().pageData().template
         val bboxJson = BoundingBox(0f, 0f, w, h).toJson()
-        dao.updatePageSize(pageId, bboxJson, updatedData, now)
+        dao.updatePageSizeColumnar(pageId, bboxJson, template, now)
     }
 
     // ── Load page ─────────────────────────────────────────────────────────────

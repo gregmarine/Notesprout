@@ -63,6 +63,12 @@ import com.notesprout.android.data.LineRender
 import com.notesprout.android.data.toLineRender
 import com.notesprout.android.data.toHeadingStroke
 import com.notesprout.android.data.toRow
+import com.notesprout.android.data.pageData
+import com.notesprout.android.data.notebookMetadata
+import com.notesprout.android.data.templateDataOrNull
+import com.notesprout.android.data.writeOnto
+import com.notesprout.android.data.LAYER_FLAGS_DEFAULT
+import com.notesprout.android.data.index.toNotebookObject
 import com.notesprout.android.data.toShapeRender
 import com.notesprout.android.data.toTextRender
 import com.notesprout.android.data.updateColumns
@@ -92,7 +98,6 @@ import com.notesprout.android.data.NotebookObject
 import com.notesprout.android.data.PageData
 import com.notesprout.android.data.SoilDatabase
 import com.notesprout.android.data.StrokeData
-import com.notesprout.android.data.TemplateData
 import com.notesprout.android.data.strokeBlob
 import com.notesprout.android.data.toBoundingBoxJson
 import com.notesprout.android.data.toStrokeRow
@@ -491,14 +496,12 @@ class NotebookActivity : AppCompatActivity() {
         val imageBytes = Base64.decode(tObj.image, Base64.DEFAULT)
         val bitmap = BitmapDecode.decodeSampled(imageBytes, BitmapDecode.MAX_DIMENSION, BitmapDecode.MAX_DIMENSION)
 
-        // Build the .soil TemplateData (name comes from entity.name, not from the JSON payload).
-        val dataJson = TemplateData(tObj.width, tObj.height, entity.name, tObj.image).toJson()
-
         val newId = UUID.randomUUID().toString()
         val now   = System.currentTimeMillis()
         val fullScreenBounds = BoundingBox(0f, 0f, tObj.width.toFloat(), tObj.height.toFloat()).toJson()
         val notebookParentId = notebookMetadata?.id ?: MainActivity.NIL_UUID
 
+        // Columnar (Phase 2b) template row: name→text, decoded image bytes→blob, size→boundingBox.
         db.notebookDao().insertObject(
             NotebookObject(
                 id          = newId,
@@ -509,7 +512,9 @@ class NotebookActivity : AppCompatActivity() {
                 createdAt   = now,
                 updatedAt   = now,
                 deletedAt   = null,
-                data        = dataJson,
+                data        = "",
+                text        = entity.name,
+                blob        = imageBytes,
             ),
         )
         Slog.d(TAG) { "insertLibraryTemplateIntoSoil: inserted soil row $newId for library template '$libraryTemplateId'" }
@@ -4285,12 +4290,12 @@ class NotebookActivity : AppCompatActivity() {
 
         val page = db.notebookDao().getObjectById(pageId) ?: return null
 
-        val templateId = TemplateDialog.parseTemplateId(page.data).takeIf { it.isNotEmpty() } ?: return null
+        val templateId = page.pageData().template.takeIf { it.isNotEmpty() } ?: return null
 
         val templateObj = db.notebookDao().getTemplateById(templateId) ?: return null
 
         return try {
-            val b64 = TemplateData.fromJson(templateObj.data)?.image?.takeIf { it.isNotEmpty() } ?: return null
+            val b64 = templateObj.templateDataOrNull()?.image?.takeIf { it.isNotEmpty() } ?: return null
             val bytes = Base64.decode(b64, android.util.Base64.DEFAULT)
             // Bounded decode (M-1): cap to the view size (fall back to MAX_DIMENSION before layout).
             val view = drawingView.asView()
@@ -4630,7 +4635,7 @@ class NotebookActivity : AppCompatActivity() {
         lifecycleScope.launch {
             withContext(Dispatchers.IO) {
                 val row = db.notebookDao().getNotebookObject() ?: return@withContext
-                db.notebookDao().upsertNotebookObject(row.copy(data = updated.toJson(), updatedAt = System.currentTimeMillis()))
+                db.notebookDao().upsertNotebookObject(updated.writeOnto(row, System.currentTimeMillis()))
             }
             syncRtrScheduler()   // creates the scheduler + kicks a backfill of missing/stale pages
             toast(if (enabling) "Real-time text on — recognizing existing pages…" else "Real-time text off.")
@@ -4846,7 +4851,7 @@ class NotebookActivity : AppCompatActivity() {
                 // Read current (previous) template ID before overwriting — needed for undo.
                 val page = db.notebookDao().getObjectById(pageId)
                 val previousTemplateId = page
-                    ?.let { TemplateDialog.parseTemplateId(it.data) }
+                    ?.let { it.pageData().template }
                     ?.takeIf { it.isNotEmpty() }
 
                 persistPageTemplate(db.notebookDao(), pageId, templateId)
@@ -4872,9 +4877,8 @@ class NotebookActivity : AppCompatActivity() {
      * Must be called on [Dispatchers.IO].
      */
     private suspend fun persistPageTemplate(dao: NotebookDao, pageId: String, templateId: String) {
-        val page = dao.getObjectById(pageId) ?: return
-        val updated = PageData.fromJson(page.data).copy(template = templateId)
-        dao.updateData(pageId, updated.toJson(), System.currentTimeMillis())
+        // Columnar page: template lives in refId, size stays in boundingBox. Clears legacy data JSON.
+        dao.updatePageTemplate(pageId, templateId, System.currentTimeMillis())
     }
 
     // ── Notebook metadata operations ──────────────────────────────────────────
@@ -4887,7 +4891,7 @@ class NotebookActivity : AppCompatActivity() {
     private suspend fun loadNotebookMetadataFromDb(db: SoilDatabase): NotebookMetadata? {
         val obj = db.notebookDao().getNotebookObject() ?: return null
         return try {
-            NotebookMetadata.fromJson(obj.id, obj.data)
+            obj.notebookMetadata()
         } catch (e: Exception) {
             Log.e(TAG, "loadNotebookMetadataFromDb: failed to parse metadata row", e)
             null
@@ -4908,9 +4912,7 @@ class NotebookActivity : AppCompatActivity() {
                 notebookMetadata = updatedMeta
                 val obj = db.notebookDao().getNotebookObject() ?: return@withContext
                 val now = System.currentTimeMillis()
-                db.notebookDao().upsertNotebookObject(
-                    obj.copy(data = updatedMeta.toJson(), updatedAt = now)
-                )
+                db.notebookDao().upsertNotebookObject(updatedMeta.writeOnto(obj, now))
             }
         }
     }
@@ -4943,7 +4945,7 @@ class NotebookActivity : AppCompatActivity() {
         // template id even if the in-memory `pages` list is stale (e.g. after applyTemplateToCurrentPage
         // updated the DB without refreshing the list).
         val freshCurrentPage = dao.getObjectById(currentPageId)
-        val inheritedTemplate = freshCurrentPage?.let { TemplateDialog.parseTemplateId(it.data) } ?: ""
+        val inheritedTemplate = freshCurrentPage?.pageData()?.template ?: ""
 
         // Shift the order of every page that comes after the insertion point.
         for (i in insertionIndex until pages.size) {
@@ -4963,7 +4965,8 @@ class NotebookActivity : AppCompatActivity() {
                 createdAt   = now,
                 updatedAt   = now,
                 deletedAt   = null,
-                data        = PageData(width = screenW, height = screenH, template = inheritedTemplate).toJson(),
+                data        = "",
+                refId       = inheritedTemplate,
             )
         )
 
@@ -4979,7 +4982,9 @@ class NotebookActivity : AppCompatActivity() {
                 createdAt   = now,
                 updatedAt   = now,
                 deletedAt   = null,
-                data        = """{"label":"Content","isLocked":false,"isVisible":true}""",
+                data        = "",
+                text        = "Content",
+                flags       = LAYER_FLAGS_DEFAULT,
             )
         )
 
@@ -5010,7 +5015,7 @@ class NotebookActivity : AppCompatActivity() {
         val insertionIndex = currentPageIndex
 
         val freshCurrentPage = dao.getObjectById(currentPageId)
-        val inheritedTemplate = freshCurrentPage?.let { TemplateDialog.parseTemplateId(it.data) } ?: ""
+        val inheritedTemplate = freshCurrentPage?.pageData()?.template ?: ""
 
         for (i in insertionIndex until pages.size) {
             dao.updateOrder(pages[i].id, i + 1)
@@ -5027,7 +5032,8 @@ class NotebookActivity : AppCompatActivity() {
                 createdAt   = now,
                 updatedAt   = now,
                 deletedAt   = null,
-                data        = PageData(width = screenW, height = screenH, template = inheritedTemplate).toJson(),
+                data        = "",
+                refId       = inheritedTemplate,
             )
         )
 
@@ -5042,7 +5048,9 @@ class NotebookActivity : AppCompatActivity() {
                 createdAt   = now,
                 updatedAt   = now,
                 deletedAt   = null,
-                data        = """{"label":"Content","isLocked":false,"isVisible":true}""",
+                data        = "",
+                text        = "Content",
+                flags       = LAYER_FLAGS_DEFAULT,
             )
         )
 
@@ -5098,7 +5106,8 @@ class NotebookActivity : AppCompatActivity() {
                     createdAt   = newNow,
                     updatedAt   = newNow,
                     deletedAt   = null,
-                    data        = PageData(width = screenW, height = screenH, template = "").toJson(),
+                    data        = "",
+                    refId       = "",
                 )
             )
             val newLayerId = UUID.randomUUID().toString()
@@ -5112,7 +5121,9 @@ class NotebookActivity : AppCompatActivity() {
                     createdAt   = newNow,
                     updatedAt   = newNow,
                     deletedAt   = null,
-                    data        = """{"label":"Content","isLocked":false,"isVisible":true}""",
+                    data        = "",
+                text        = "Content",
+                flags       = LAYER_FLAGS_DEFAULT,
                 )
             )
             pages = dao.getPagesSorted().toMutableList()
@@ -5831,9 +5842,7 @@ class NotebookActivity : AppCompatActivity() {
         val savedIndex = ScratchpadPreferences.loadCurrentPageIndex(this)
         val pageIndex = savedIndex.coerceIn(0, (pages.size - 1).coerceAtLeast(0))
         val currentPage = pages.getOrNull(pageIndex)
-        val pageData = currentPage?.let {
-            runCatching { PageData.fromJson(it.data) }.getOrNull()
-        }
+        val pageData = currentPage?.toNotebookObject()?.pageData()
         val pageW = pageData?.width ?: 0f
         val pageH = pageData?.height ?: 0f
 
@@ -11170,7 +11179,7 @@ class NotebookActivity : AppCompatActivity() {
     private suspend fun loadTemplateBitmapById(db: SoilDatabase, templateId: String): Bitmap? {
         val templateObj = db.notebookDao().getTemplateById(templateId) ?: return null
         return try {
-            val b64 = TemplateData.fromJson(templateObj.data)?.image?.takeIf { it.isNotEmpty() } ?: return null
+            val b64 = templateObj.templateDataOrNull()?.image?.takeIf { it.isNotEmpty() } ?: return null
             val bytes = Base64.decode(b64, Base64.DEFAULT)
             // Bounded decode (M-1): cap to the view size (fall back to MAX_DIMENSION before layout).
             val view = drawingView.asView()

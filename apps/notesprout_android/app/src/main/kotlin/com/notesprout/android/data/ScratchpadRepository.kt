@@ -63,7 +63,8 @@ class ScratchpadRepository(
                     createdAt   = now,
                     updatedAt   = now,
                     type        = "page",
-                    data        = PageData(width = 0f, height = 0f, template = "").toJson(),
+                    data        = "",
+                    refId       = "",
                 )
             )
 
@@ -76,7 +77,9 @@ class ScratchpadRepository(
                     createdAt   = now,
                     updatedAt   = now,
                     type        = "layer",
-                    data        = """{"label":"Content","isLocked":false,"isVisible":true}""",
+                    data        = "",
+                    text        = "Content",
+                    flags       = LAYER_FLAGS_DEFAULT,
                 )
             )
         }
@@ -96,10 +99,10 @@ class ScratchpadRepository(
 
     suspend fun setPageSize(pageId: String, w: Float, h: Float) = withContext(Dispatchers.IO) {
         val now = System.currentTimeMillis()
-        val pageRow = dao.getObjectById(pageId) ?: return@withContext
-        val updatedData = PageData.fromJson(pageRow.data).copy(width = w, height = h).toJson()
+        dao.getObjectById(pageId) ?: return@withContext
+        // Columnar: size → boundingBox, data cleared (scratchpad pages have no template).
         val bboxJson = BoundingBox(0f, 0f, w, h).toJson()
-        dao.updatePageSize(pageId, bboxJson, updatedData, now)
+        dao.updatePageSizeColumnar(pageId, bboxJson, now)
     }
 
     // ── Load page ─────────────────────────────────────────────────────────────
@@ -201,7 +204,8 @@ class ScratchpadRepository(
                     createdAt   = now,
                     updatedAt   = now,
                     type        = "page",
-                    data        = PageData(width = 0f, height = 0f, template = "").toJson(),
+                    data        = "",
+                    refId       = "",
                 )
             )
             dao.insertObject(
@@ -213,7 +217,9 @@ class ScratchpadRepository(
                     createdAt   = now,
                     updatedAt   = now,
                     type        = "layer",
-                    data        = """{"label":"Content","isLocked":false,"isVisible":true}""",
+                    data        = "",
+                    text        = "Content",
+                    flags       = LAYER_FLAGS_DEFAULT,
                 )
             )
         }

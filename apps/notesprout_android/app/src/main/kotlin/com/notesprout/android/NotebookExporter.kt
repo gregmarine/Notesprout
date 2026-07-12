@@ -29,6 +29,9 @@ import com.notesprout.android.data.toTextRender
 import com.notesprout.android.data.LineStyle
 import com.notesprout.android.data.LinkRender
 import com.notesprout.android.data.toLinkRender
+import com.notesprout.android.data.pageData
+import com.notesprout.android.data.templateDataOrNull
+import com.notesprout.android.data.notebookMetadata
 import com.notesprout.android.data.ShapeObject
 import com.notesprout.android.data.ShapeRender
 import com.notesprout.android.data.LiveStroke
@@ -81,7 +84,7 @@ object NotebookExporter {
         // Notebook metadata → title for filename
         val notebookObj = dao.getNotebookObject()
         val title = notebookObj?.let {
-            runCatching { NotebookMetadata.fromJson(it.id, it.data).title }.getOrNull()
+            runCatching { it.notebookMetadata().title }.getOrNull()
         }?.takeIf { it.isNotBlank() } ?: "notebook"
         val safeTitle = title.replace(Regex("[^a-zA-Z0-9_\\-. ]"), "_").trim('_', ' ')
             .ifBlank { "notebook" }
@@ -461,15 +464,15 @@ object NotebookExporter {
 
     private suspend fun loadTemplate(
         dao: NotebookDao,
-        pageData: String,
+        page: NotebookObject,
         pageWidth: Int,
         pageHeight: Int,
     ): Bitmap? {
-        val templateId = TemplateDialog.parseTemplateId(pageData).takeIf { it.isNotEmpty() }
+        val templateId = page.pageData().template.takeIf { it.isNotEmpty() }
             ?: return null
         val templateRow = dao.getTemplateById(templateId) ?: return null
         return runCatching {
-            val b64 = com.notesprout.android.data.TemplateData.fromJson(templateRow.data)?.image
+            val b64 = templateRow.templateDataOrNull()?.image
                 ?.takeIf { it.isNotEmpty() } ?: return@runCatching null
             val bytes = Base64.decode(b64, Base64.DEFAULT)
             // Bounded decode (M-1): cap to the page size this template renders into.
@@ -504,7 +507,7 @@ object NotebookExporter {
         // pure win (less decode time + memory).
         val tW = if (renderScale < 1f) (pw * renderScale).roundToInt().coerceAtLeast(1) else pw
         val tH = if (renderScale < 1f) (ph * renderScale).roundToInt().coerceAtLeast(1) else ph
-        val templateBitmap = if (includeTemplate) loadTemplate(dao, pageRow.data, tW, tH) else null
+        val templateBitmap = if (includeTemplate) loadTemplate(dao, pageRow, tW, tH) else null
         val density = context.resources.displayMetrics.density
 
         val layer = dao.getLayerForPage(pageRow.id)

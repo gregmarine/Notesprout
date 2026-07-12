@@ -85,6 +85,10 @@ interface ScratchpadDao {
     @Query("UPDATE scratchpad SET boundingBox = :boundingBox, data = :data, updatedAt = :updatedAt WHERE id = :id")
     suspend fun updatePageSize(id: String, boundingBox: String, data: String, updatedAt: Long)
 
+    /** Columnar page size (boundingBox), clearing legacy data JSON — Phase 2b (scratchpad has no template). */
+    @Query("UPDATE scratchpad SET boundingBox = :boundingBox, data = '', updatedAt = :updatedAt WHERE id = :id")
+    suspend fun updatePageSizeColumnar(id: String, boundingBox: String, updatedAt: Long)
+
     @Query("UPDATE scratchpad SET boundingBox = :boundingBox, data = :data, updatedAt = :updatedAt WHERE id = :id")
     suspend fun updateObjectData(id: String, boundingBox: String, data: String, updatedAt: Long)
 }

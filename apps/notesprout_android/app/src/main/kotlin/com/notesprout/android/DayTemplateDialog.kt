@@ -15,8 +15,9 @@ import androidx.appcompat.widget.AppCompatImageView
 import androidx.appcompat.widget.AppCompatTextView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.LifecycleCoroutineScope
-import com.notesprout.android.data.TemplateData
 import com.notesprout.android.data.index.CalendarDao
+import com.notesprout.android.data.index.toNotebookObject
+import com.notesprout.android.data.templateDataOrNull
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -42,16 +43,18 @@ class DayTemplateDialog(
     private val onBrowseLibrary: () -> Unit,
 ) {
 
-    private data class Item(val id: String, val data: String, val thumbnail: Bitmap?, val label: String)
+    private data class Item(val id: String, val imageB64: String, val thumbnail: Bitmap?, val label: String)
 
     fun show() {
         lifecycleScope.launch {
             val items = withContext(Dispatchers.IO) {
                 dao.getTemplatesSorted().mapIndexed { index, row ->
-                    val thumb = decodeBase64Thumb(row.data, THUMB_PX)
-                    val name = TemplateData.fromJson(row.data)?.name?.takeIf { it.isNotEmpty() }
+                    val td = row.toNotebookObject().templateDataOrNull()
+                    val b64 = td?.image ?: ""
+                    val thumb = decodeBase64Thumb(b64, THUMB_PX)
+                    val name = td?.name?.takeIf { it.isNotEmpty() }
                         ?: "Template ${index + 1}"
-                    Item(row.id, row.data, thumb, name)
+                    Item(row.id, b64, thumb, name)
                 }
             }
             buildAndShow(items)
@@ -120,7 +123,7 @@ class DayTemplateDialog(
             for (item in items) {
                 add(Cell(item.label, item.thumbnail, item.id == currentTemplateId) {
                     lifecycleScope.launch {
-                        val full = withContext(Dispatchers.IO) { decodeFullBitmap(item.data) }
+                        val full = withContext(Dispatchers.IO) { decodeFullBitmap(item.imageB64) }
                         onItemClicked(item.id, full)
                     }
                 })
@@ -159,8 +162,8 @@ class DayTemplateDialog(
         dialog.window?.setLayout((dm.widthPixels * 0.9f).toInt(), (dm.heightPixels * 0.7f).toInt())
     }
 
-    private fun decodeFullBitmap(data: String): Bitmap? = try {
-        val b64 = TemplateData.fromJson(data)?.image?.takeIf { it.isNotEmpty() } ?: return null
+    private fun decodeFullBitmap(imageB64: String): Bitmap? = try {
+        val b64 = imageB64.takeIf { it.isNotEmpty() } ?: return null
         val bytes = Base64.decode(b64, Base64.DEFAULT)
         BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
     } catch (e: Exception) { null }
@@ -204,8 +207,8 @@ class DayTemplateDialog(
         return cell
     }
 
-    private fun decodeBase64Thumb(data: String, maxSize: Int): Bitmap? = try {
-        val b64 = TemplateData.fromJson(data)?.image?.takeIf { it.isNotEmpty() } ?: return null
+    private fun decodeBase64Thumb(imageB64: String, maxSize: Int): Bitmap? = try {
+        val b64 = imageB64.takeIf { it.isNotEmpty() } ?: return null
         val bytes = Base64.decode(b64, Base64.DEFAULT)
         val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)

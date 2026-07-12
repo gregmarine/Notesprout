@@ -1620,37 +1620,32 @@ class MainActivity : AppCompatActivity() {
                     val bboxJson = BoundingBox(0f, 0f, screenW, screenH).toJson()
                     val now = System.currentTimeMillis()
 
+                    // Columnar (Phase 2b): notebook/page/template/layer write typed columns, data = "".
+                    // text = notebook.title / template.name / layer.label; refId = notebook.lastOpenedPage
+                    // / page.template; flags = layer bits; blob = template image bytes.
                     val insertSql =
-                        """INSERT INTO notebook (id, parentId, boundingBox, "order", createdAt, updatedAt, deletedAt, type, data)
-                           VALUES (?, ?, ?, 0, ?, ?, NULL, ?, ?)"""
+                        """INSERT INTO notebook (id, parentId, boundingBox, "order", createdAt, updatedAt, deletedAt, type, data, text, refId, flags, blob)
+                           VALUES (?, ?, ?, 0, ?, ?, NULL, ?, '', ?, ?, ?, ?)"""
 
                     val notebookId = UUID.randomUUID().toString()
                     val pageId     = UUID.randomUUID().toString()
 
-                    val notebookDataJson = NotebookMetadata(
-                        id             = notebookId,
-                        title          = name,
-                        lastOpenedPage = pageId,
-                    ).toJson()
-                    exec(insertSql, arrayOf(notebookId, "", "{}", now, now, "notebook", notebookDataJson))
+                    exec(insertSql, arrayOf(notebookId, "", "{}", now, now, "notebook", name, pageId, null, null))
 
                     val firstPageTemplate = if (seed != null) UUID.randomUUID().toString() else ""
-                    exec(insertSql, arrayOf(
-                        pageId, notebookId, bboxJson, now, now, "page",
-                        PageData(width = screenW, height = screenH, template = firstPageTemplate).toJson()
-                    ))
+                    exec(insertSql, arrayOf(pageId, notebookId, bboxJson, now, now, "page", null, firstPageTemplate, null, null))
                     if (seed != null) {
                         val tmplBbox = BoundingBox(0f, 0f, seed.width.toFloat(), seed.height.toFloat()).toJson()
                         exec(insertSql, arrayOf(
                             firstPageTemplate, notebookId, tmplBbox, now, now, "template",
-                            com.notesprout.android.data.TemplateData(seed.width, seed.height, seed.name, seed.image).toJson()
+                            seed.name, null, null, com.notesprout.android.data.templateImageBlob(seed.image),
                         ))
                     }
 
                     val layerId = UUID.randomUUID().toString()
                     exec(insertSql, arrayOf(
                         layerId, pageId, bboxJson, now, now, "layer",
-                        """{"label":"Content","isLocked":false,"isVisible":true}"""
+                        "Content", null, com.notesprout.android.data.LAYER_FLAGS_DEFAULT, null,
                     ))
 
                     val folderPath = repository.getFolderAncestry(currentParentId)

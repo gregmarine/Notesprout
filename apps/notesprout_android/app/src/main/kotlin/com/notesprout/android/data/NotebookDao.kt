@@ -204,6 +204,13 @@ interface NotebookDao {
     suspend fun updateData(id: String, data: String, updatedAt: Long)
 
     /**
+     * Set a columnar page row's template (refId), clearing the legacy `data` JSON. The page's size
+     * stays in its `boundingBox` column (untouched). Phase 2b — see [pageData].
+     */
+    @Query("UPDATE notebook SET refId = :templateId, data = '', updatedAt = :updatedAt WHERE id = :id")
+    suspend fun updatePageTemplate(id: String, templateId: String, updatedAt: Long)
+
+    /**
      * Overwrite the serialized point array for a single stroke row.
      * Used by the lasso-move commit path to persist translated stroke coordinates
      * without re-inserting the row or changing any other columns.

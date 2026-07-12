@@ -1,6 +1,7 @@
 package com.notesprout.android.data
 
 import android.graphics.RectF
+import android.util.Base64
 import java.io.ByteArrayOutputStream
 import java.util.zip.Deflater
 import java.util.zip.Inflater
@@ -265,3 +266,55 @@ fun NotebookObject.toStickyNoteRender(density: Float): StickyNoteRender? {
         contentWidth = obj.contentWidth, contentHeight = obj.contentHeight,
     )
 }
+
+// ── Structural rows: page / layer / notebook-meta / template (Phase 2b) ───────
+// Same lazy-coexistence contract as the content types: a columnar row has data == "" and reads from
+// typed columns; legacy rows keep their JSON in `data` and read via the fallback. The `boundingBox`
+// column is left untouched for pages/templates so raw-SQL dimension readers keep working.
+
+/** Layer flag bits: isLocked = bit0, isVisible = bit1. A default content layer is VISIBLE, unlocked. */
+const val LAYER_FLAG_LOCKED = 1
+const val LAYER_FLAG_VISIBLE = 2
+const val LAYER_FLAGS_DEFAULT = LAYER_FLAG_VISIBLE
+
+/**
+ * Page config. A columnar page keeps its size in the `boundingBox` column (`{0,0,w,h}`, untouched so
+ * raw-SQL dimension readers still work) and moves only the template id into `refId`; falls back to the
+ * legacy PageData JSON.
+ */
+fun NotebookObject.pageData(): PageData {
+    if (data.isNotEmpty()) return PageData.fromJson(data)
+    val bb = BoundingBox.fromJson(boundingBox)
+    return PageData(width = bb?.width ?: 0f, height = bb?.height ?: 0f, template = refId ?: "")
+}
+
+/** Notebook-meta row: title→text, lastOpenedPage→refId, rtrEnabled→flags bit0; legacy JSON fallback. */
+fun NotebookObject.notebookMetadata(): NotebookMetadata =
+    if (data.isEmpty()) NotebookMetadata(
+        id = id, title = text ?: "", lastOpenedPage = refId, rtrEnabled = ((flags ?: 0) and 1) != 0,
+    )
+    else NotebookMetadata.fromJson(id, data)
+
+/**
+ * Template row: name→text, size→width/height, decoded image bytes→[NotebookObject.blob]. The base64
+ * image is re-encoded on read so every caller keeps receiving [TemplateData.image] as base64. Legacy
+ * JSON fallback; null only when a legacy row's JSON is malformed.
+ */
+fun NotebookObject.templateDataOrNull(): TemplateData? {
+    if (data.isNotEmpty()) return TemplateData.fromJson(data)
+    val bb = BoundingBox.fromJson(boundingBox)
+    return TemplateData(
+        width = (bb?.width ?: 0f).toInt(), height = (bb?.height ?: 0f).toInt(), name = text ?: "",
+        image = blob?.let { Base64.encodeToString(it, Base64.NO_WRAP) } ?: "",
+    )
+}
+
+/** Encode a base64 template image to the binary blob (inverse of the [templateDataOrNull] read). "" → null. */
+fun templateImageBlob(imageBase64: String): ByteArray? =
+    if (imageBase64.isEmpty()) null
+    else runCatching { Base64.decode(imageBase64, Base64.DEFAULT) }.getOrNull()
+
+/** Write this metadata onto its existing notebook row [obj] as columnar fields (clears legacy data). */
+fun NotebookMetadata.writeOnto(obj: NotebookObject, updatedAt: Long): NotebookObject = obj.copy(
+    data = "", text = title, refId = lastOpenedPage, flags = if (rtrEnabled) 1 else 0, updatedAt = updatedAt,
+)

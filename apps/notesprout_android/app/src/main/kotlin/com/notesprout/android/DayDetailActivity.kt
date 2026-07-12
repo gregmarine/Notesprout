@@ -46,7 +46,8 @@ import com.notesprout.android.data.HeadingStroke
 import com.notesprout.android.data.LineObject
 import com.notesprout.android.data.LineRender
 import com.notesprout.android.data.LiveStroke
-import com.notesprout.android.data.PageData
+import com.notesprout.android.data.pageData
+import com.notesprout.android.data.index.toNotebookObject
 import com.notesprout.android.data.ScratchpadPageContent
 import com.notesprout.android.data.ShapeObject
 import com.notesprout.android.data.ShapeRender
@@ -57,7 +58,7 @@ import com.notesprout.android.data.TYPE_SHAPE
 import com.notesprout.android.data.TYPE_STICKY_NOTE
 import com.notesprout.android.data.TextObject
 import com.notesprout.android.data.TextRender
-import com.notesprout.android.data.TemplateData
+import com.notesprout.android.data.templateDataOrNull
 import com.notesprout.android.data.index.CalendarEntity
 import com.notesprout.android.data.index.IndexRepository
 import com.notesprout.android.data.index.NotesproutIndex
@@ -658,7 +659,7 @@ class DayDetailActivity : AppCompatActivity() {
         val pageId = dayHistoryRepo.dayNotePageId(date) ?: return null
         val dao = NotesproutIndex.calendarDao()
         val pageRow = dao.getObjectById(pageId) ?: return null
-        val pd = PageData.fromJson(pageRow.data)
+        val pd = pageRow.toNotebookObject().pageData()
         // Prefer the page's authored size; fall back to the current container.
         val w = pd.width.toInt().takeIf { it > 0 } ?: containerW.takeIf { it > 0 } ?: return null
         val h = pd.height.toInt().takeIf { it > 0 } ?: containerH.takeIf { it > 0 } ?: return null
@@ -674,9 +675,9 @@ class DayDetailActivity : AppCompatActivity() {
     /** Decode a page row's template image to a bitmap sized to [reqW]×[reqH]; null if none. */
     private suspend fun loadTemplateBitmapFor(pageRow: CalendarEntity, reqW: Int, reqH: Int): Bitmap? =
         withContext(Dispatchers.IO) {
-            val tid = PageData.fromJson(pageRow.data).template.takeIf { it.isNotEmpty() } ?: return@withContext null
+            val tid = pageRow.toNotebookObject().pageData().template.takeIf { it.isNotEmpty() } ?: return@withContext null
             val tRow = repository.getTemplateById(tid) ?: return@withContext null
-            val b64 = TemplateData.fromJson(tRow.data)?.image?.takeIf { it.isNotEmpty() } ?: return@withContext null
+            val b64 = tRow.toNotebookObject().templateDataOrNull()?.image?.takeIf { it.isNotEmpty() } ?: return@withContext null
             val bytes = Base64.decode(b64, Base64.DEFAULT)
             BitmapDecode.decodeSampled(bytes, reqW, reqH)
         }
@@ -988,10 +989,10 @@ class DayDetailActivity : AppCompatActivity() {
         val reqH = view.height.takeIf { it > 0 } ?: BitmapDecode.MAX_DIMENSION
         val (templateId, bitmap) = withContext(Dispatchers.IO) {
             val pageRow = NotesproutIndex.calendarDao().getObjectById(pageId)
-            val tid = pageRow?.let { PageData.fromJson(it.data).template } ?: ""
+            val tid = pageRow?.toNotebookObject()?.pageData()?.template ?: ""
             if (tid.isEmpty()) return@withContext "" to null
             val tRow = repository.getTemplateById(tid) ?: return@withContext "" to null
-            val b64 = TemplateData.fromJson(tRow.data)?.image?.takeIf { it.isNotEmpty() }
+            val b64 = tRow.toNotebookObject().templateDataOrNull()?.image?.takeIf { it.isNotEmpty() }
                 ?: return@withContext "" to null
             val bytes = Base64.decode(b64, Base64.DEFAULT)
             tid to BitmapDecode.decodeSampled(bytes, reqW, reqH)
@@ -1008,7 +1009,7 @@ class DayDetailActivity : AppCompatActivity() {
         val content = withContext(Dispatchers.IO) {
             if (containerW > 0 && containerH > 0) {
                 val row = NotesproutIndex.calendarDao().getObjectById(pageId)
-                val pd = row?.let { PageData.fromJson(it.data) }
+                val pd = row?.toNotebookObject()?.pageData()
                 if (pd != null && (pd.width == 0f || pd.height == 0f)) {
                     repository.setPageSize(pageId, containerW, containerH)
                 }
