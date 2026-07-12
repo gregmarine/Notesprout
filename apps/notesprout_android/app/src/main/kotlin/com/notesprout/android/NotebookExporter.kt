@@ -19,13 +19,13 @@ import com.notesprout.android.crypto.SoilCrypto
 import com.notesprout.android.core.markdown.TextObjectRenderer
 import com.notesprout.android.data.BoundingBox
 import com.notesprout.android.data.HeadingStroke
-import com.notesprout.android.data.toHeadingStroke
+import com.notesprout.android.data.loadHeadingsSubtree
+import com.notesprout.android.data.loadTextsSubtree
 import com.notesprout.android.data.LineObject
 import com.notesprout.android.data.LineOrientation
 import com.notesprout.android.data.LineRender
 import com.notesprout.android.data.toLineRender
 import com.notesprout.android.data.toShapeRender
-import com.notesprout.android.data.toTextRender
 import com.notesprout.android.data.LineStyle
 import com.notesprout.android.data.LinkRender
 import com.notesprout.android.data.loadLinksSubtree
@@ -513,11 +513,11 @@ object NotebookExporter {
         val layer = dao.getLayerForPage(pageRow.id)
 
         val headings: List<HeadingStroke> = if (layer != null) {
-            dao.getHeadingsForLayer(layer.id).mapNotNull { it.toHeadingStroke() }
+            dao.loadHeadingsSubtree(layer.id)
         } else emptyList()
 
         val textObjects: List<TextRender> = if (layer != null) {
-            dao.getTextObjectsForLayer(layer.id).mapNotNull { it.toTextRender() }
+            dao.loadTextsSubtree(layer.id)
         } else emptyList()
 
         val lineObjects: List<LineRender> = if (layer != null) {

@@ -449,6 +449,63 @@ suspend fun NotebookDao.replaceStickyNoteSubtree(note: StickyNoteRender, now: Lo
     if (rows.size > 1) insertObjects(rows.drop(1))
 }
 
+// ── Phase 2c: heading / text subtree persistence (DAO helpers) ───────────────
+// Recognized heading/text (the ML-Kit happy path) carry no strokes: toRows yields a single parent
+// row (no blob) and the reader short-circuits — behaviour- and perf-neutral vs the old toRow path.
+// Only the rare unrecognized *fallback* (text == null, strokes present) gains stroke child rows.
+
+/** True when [row] is a columnar fallback heading/text (unrecognized) that may own stroke children. */
+private fun NotebookObject.isColumnarFallback(): Boolean =
+    text == null && data.isEmpty() && blob == null
+
+/** Assemble one heading from a row, fetching stroke children only for a columnar fallback. */
+suspend fun NotebookDao.assembleHeadingResolved(row: NotebookObject): HeadingStroke? =
+    assembleHeadingStroke(row, if (row.isColumnarFallback()) getObjectsByParent(row.id) else emptyList())
+
+/** Assemble one text object from a row, fetching stroke children only for a columnar fallback. */
+suspend fun NotebookDao.assembleTextResolved(row: NotebookObject): TextRender? =
+    assembleTextRender(row, if (row.isColumnarFallback()) getObjectsByParent(row.id) else emptyList())
+
+/** Load every heading on [layerId] as a render model (one batch children query covers fallbacks). */
+suspend fun NotebookDao.loadHeadingsSubtree(layerId: String): List<HeadingStroke> {
+    val parents = getHeadingsForLayer(layerId)
+    if (parents.isEmpty()) return emptyList()
+    val map = loadSubtreeMap(parents.filter { it.isColumnarFallback() }.map { it.id })
+    return parents.mapNotNull { assembleHeadingStroke(it, map[it.id].orEmpty()) }
+}
+
+/** Load every text object on [layerId] as a render model (one batch children query covers fallbacks). */
+suspend fun NotebookDao.loadTextsSubtree(layerId: String): List<TextRender> {
+    val parents = getTextObjectsForLayer(layerId)
+    if (parents.isEmpty()) return emptyList()
+    val map = loadSubtreeMap(parents.filter { it.isColumnarFallback() }.map { it.id })
+    return parents.mapNotNull { assembleTextRender(it, map[it.id].orEmpty()) }
+}
+
+suspend fun NotebookDao.insertHeadingSubtree(h: HeadingStroke, layerId: String, order: Int, createdAt: Long, updatedAt: Long) =
+    insertObjects(h.toRows(layerId, order, createdAt, updatedAt))
+
+suspend fun NotebookDao.insertTextSubtree(t: TextRender, layerId: String, order: Int, createdAt: Long, updatedAt: Long) =
+    insertObjects(t.toRows(layerId, order, createdAt, updatedAt))
+
+/**
+ * Re-persist an existing heading. Recognized headings write only the parent column update (same cost
+ * as before); a fallback heading rebuilds its stroke children. Note: a fallback→recognized transition
+ * leaves the old stroke children as harmless orphans (excluded from reads; swept by the compactor).
+ */
+suspend fun NotebookDao.replaceHeadingSubtree(h: HeadingStroke, now: Long) {
+    val rows = h.toRows("", 0, now, now)
+    updateColumns(rows[0])
+    if (rows.size > 1) { hardDeleteDescendants(h.id); insertObjects(rows.drop(1)) }
+}
+
+/** Re-persist an existing text object; see [replaceHeadingSubtree] for the recognized/fallback split. */
+suspend fun NotebookDao.replaceTextSubtree(t: TextRender, now: Long) {
+    val rows = t.toRows("", 0, now, now)
+    updateColumns(rows[0])
+    if (rows.size > 1) { hardDeleteDescendants(t.id); insertObjects(rows.drop(1)) }
+}
+
 // ── Phase 2c: link subtree persistence (DAO helpers) ─────────────────────────
 // Same shape as the sticky helpers, but link content is PAGE-ABSOLUTE: LinkRender.translate already
 // offsets every child's coords, so a moved link's render model carries the new coordinates and

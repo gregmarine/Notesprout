@@ -61,7 +61,13 @@ import com.notesprout.android.data.LineObject
 import com.notesprout.android.data.LineOrientation
 import com.notesprout.android.data.LineRender
 import com.notesprout.android.data.toLineRender
-import com.notesprout.android.data.toHeadingStroke
+import com.notesprout.android.data.assembleHeadingResolved
+import com.notesprout.android.data.insertHeadingSubtree
+import com.notesprout.android.data.insertTextSubtree
+import com.notesprout.android.data.loadHeadingsSubtree
+import com.notesprout.android.data.loadTextsSubtree
+import com.notesprout.android.data.replaceHeadingSubtree
+import com.notesprout.android.data.replaceTextSubtree
 import com.notesprout.android.data.toRow
 import com.notesprout.android.data.pageData
 import com.notesprout.android.data.notebookMetadata
@@ -70,7 +76,6 @@ import com.notesprout.android.data.writeOnto
 import com.notesprout.android.data.LAYER_FLAGS_DEFAULT
 import com.notesprout.android.data.index.toNotebookObject
 import com.notesprout.android.data.toShapeRender
-import com.notesprout.android.data.toTextRender
 import com.notesprout.android.data.updateColumns
 import com.notesprout.android.data.LineStyle
 import com.notesprout.android.data.LinkChrome
@@ -1940,10 +1945,10 @@ class NotebookActivity : AppCompatActivity() {
                                 db.notebookDao().updateStrokeBlob(moved.id, moved.strokeBlob(), moved.color, moved.strokeWidth, now)
                             }
                             for (heading in movedHeadings) {
-                                db.notebookDao().updateColumns(heading.toRow("", 0, now, now))
+                                db.notebookDao().replaceHeadingSubtree(heading, now)
                             }
                             for (textObj in movedTextObjects) {
-                                db.notebookDao().updateColumns(textObj.toRow("", 0, now, now))
+                                db.notebookDao().replaceTextSubtree(textObj, now)
                             }
                             for (lineObj in movedLineObjects) {
                                 db.notebookDao().updateColumns(lineObj.toRow("", 0, now, now, density))
@@ -4209,13 +4214,12 @@ class NotebookActivity : AppCompatActivity() {
      */
     private suspend fun loadHeadingsFromDb(db: SoilDatabase, layerId: String): List<HeadingStroke> {
         if (layerId.isEmpty()) return emptyList()
-        val rows = db.notebookDao().getHeadingsForLayer(layerId)
-        return rows.mapNotNull { row -> row.toHeadingStroke() }
+        return db.notebookDao().loadHeadingsSubtree(layerId)
     }
 
     private suspend fun loadTextObjectsFromDb(db: SoilDatabase, layerId: String): List<TextRender> {
         if (layerId.isEmpty()) return emptyList()
-        return db.notebookDao().getTextObjectsForLayer(layerId).mapNotNull { it.toTextRender() }
+        return db.notebookDao().loadTextsSubtree(layerId)
     }
 
     private suspend fun loadLineObjectsFromDb(db: SoilDatabase, layerId: String): List<LineRender> {
@@ -5404,10 +5408,10 @@ class NotebookActivity : AppCompatActivity() {
                         )
                     }
                     newHeadings.forEach { heading ->
-                        dao.insertOrIgnore(heading.toRow(layerId, 0, now, now))
+                        dao.insertHeadingSubtree(heading, layerId, 0, now, now)
                     }
                     newTextObjects.forEach { textObj ->
-                        dao.insertOrIgnore(textObj.toRow(layerId, 0, now, now))
+                        dao.insertTextSubtree(textObj, layerId, 0, now, now)
                     }
                     newLineObjects.forEach { lineObj ->
                         dao.insertOrIgnore(lineObj.toRow(layerId, 0, now, now, density))
@@ -5578,10 +5582,10 @@ class NotebookActivity : AppCompatActivity() {
                         )
                     }
                     newHeadings.forEach { heading ->
-                        dao.insertOrIgnore(heading.toRow(layerId, 0, now, now))
+                        dao.insertHeadingSubtree(heading, layerId, 0, now, now)
                     }
                     newTextObjects.forEach { textObj ->
-                        dao.insertOrIgnore(textObj.toRow(layerId, 0, now, now))
+                        dao.insertTextSubtree(textObj, layerId, 0, now, now)
                     }
                     newLineObjects.forEach { lineObj ->
                         dao.insertOrIgnore(lineObj.toRow(layerId, 0, now, now, density))
@@ -6182,7 +6186,7 @@ class NotebookActivity : AppCompatActivity() {
             val dao = db.notebookDao()
             originalStrokeIds.forEach { dao.softDeleteById(it, deletedAt) }
             val now = System.currentTimeMillis()
-            dao.insertObject(newHeading.toRow(layerId, 0, now, now))
+            dao.insertHeadingSubtree(newHeading, layerId, 0, now, now)
         }
 
         // Invalidate any existing page snapshot — it predates the heading.
@@ -6300,7 +6304,7 @@ class NotebookActivity : AppCompatActivity() {
         db.withTransaction {
             val dao = db.notebookDao()
             originalStrokeIds.forEach { dao.softDeleteById(it, deletedAt) }
-            dao.insertObject(textRow.toRow(layerId, 0, now, now))
+            dao.insertTextSubtree(textRow, layerId, 0, now, now)
         }
 
         noteContentEdit(db, pageId)
@@ -6828,10 +6832,10 @@ class NotebookActivity : AppCompatActivity() {
                 dao.insertObject(NotebookObject(s.id, layerId, s.boundingBox.toBoundingBoxJson(), 0, now, now, null, "stroke", s.toStrokeData().toJson()))
             }
             restoredHeadings.forEach { h ->
-                dao.insertObject(h.toRow(layerId, 0, now, now))
+                dao.insertHeadingSubtree(h, layerId, 0, now, now)
             }
             restoredTexts.forEach { t ->
-                dao.insertObject(t.toRow(layerId, 0, now, now))
+                dao.insertTextSubtree(t, layerId, 0, now, now)
             }
             restoredLines.forEach { l ->
                 dao.insertObject(l.toRow(layerId, 0, now, now, density))
@@ -7024,9 +7028,9 @@ class NotebookActivity : AppCompatActivity() {
             withContext(Dispatchers.IO) {
                 val row = db.notebookDao().getObjectById(heading.id) ?: return@withContext
                 // Persist prefixed text and preserve level so the two always agree.
-                val updated = (row.toHeadingStroke() ?: return@withContext)
+                val updated = (db.notebookDao().assembleHeadingResolved(row) ?: return@withContext)
                     .copy(recognizedText = prefixedText, level = level, boundingBox = newBox)
-                db.notebookDao().updateColumns(updated.toRow("", 0, 0L, System.currentTimeMillis()))
+                db.notebookDao().replaceHeadingSubtree(updated, System.currentTimeMillis())
             }
             val updatedHeadings = drawingView.getHeadings().map { h ->
                 if (h.id == heading.id) h.copy(recognizedText = prefixedText, boundingBox = newBox, level = level) else h
@@ -7098,9 +7102,9 @@ class NotebookActivity : AppCompatActivity() {
         lifecycleScope.launch {
             withContext(Dispatchers.IO) {
                 val row     = db.notebookDao().getObjectById(heading.id) ?: return@withContext
-                val updated = (row.toHeadingStroke() ?: return@withContext)
+                val updated = (db.notebookDao().assembleHeadingResolved(row) ?: return@withContext)
                     .copy(recognizedText = newText, level = newLevel, boundingBox = newBox)
-                db.notebookDao().updateColumns(updated.toRow("", 0, 0L, System.currentTimeMillis()))
+                db.notebookDao().replaceHeadingSubtree(updated, System.currentTimeMillis())
             }
             val updatedHeadings = drawingView.getHeadings().map { h ->
                 if (h.id == heading.id) h.copy(recognizedText = newText, boundingBox = newBox, level = newLevel) else h
@@ -7386,10 +7390,10 @@ class NotebookActivity : AppCompatActivity() {
         withContext(Dispatchers.IO) {
             db.withTransaction {
                 for (heading in movedHeadings) {
-                    db.notebookDao().updateColumns(heading.toRow("", 0, now, now))
+                    db.notebookDao().replaceHeadingSubtree(heading, now)
                 }
                 for (textObj in movedTextObjects) {
-                    db.notebookDao().updateColumns(textObj.toRow("", 0, now, now))
+                    db.notebookDao().replaceTextSubtree(textObj, now)
                 }
                 for (lineObj in movedLines) {
                     db.notebookDao().updateColumns(lineObj.toRow("", 0, now, now, resources.displayMetrics.density))
@@ -7831,7 +7835,7 @@ class NotebookActivity : AppCompatActivity() {
             val textRender = TextRender(id = textId, boundingBox = bbox, text = markdown)
 
             withContext(Dispatchers.IO) {
-                db.notebookDao().insertObject(textRender.toRow(layerId, 0, now, now))
+                db.notebookDao().insertTextSubtree(textRender, layerId, 0, now, now)
                 noteContentEdit(db, pageId)
             }
 
@@ -8053,7 +8057,7 @@ class NotebookActivity : AppCompatActivity() {
             val newTextRender = TextRender(id = textRender.id, boundingBox = newBbox, text = newMarkdown, strokes = textRender.strokes)
 
             withContext(Dispatchers.IO) {
-                db.notebookDao().updateColumns(newTextRender.toRow("", 0, now, now))
+                db.notebookDao().replaceTextSubtree(newTextRender, now)
                 noteContentEdit(db, pageId)
             }
 
@@ -8385,7 +8389,7 @@ class NotebookActivity : AppCompatActivity() {
                     }
                 val restoredHeadings = restoredRows
                     .filter { it.type == TYPE_HEADING }
-                    .mapNotNull { obj -> obj.toHeadingStroke() }
+                    .mapNotNull { obj -> db.notebookDao().assembleHeadingResolved(obj) }
                 updatedStrokes  = buildList { addAll(preUndoStrokes); addAll(restoredStrokes) }
                 updatedHeadings = preUndoHeadings + restoredHeadings
                 updatedTexts    = preUndoTexts + action.textObjects
@@ -8878,7 +8882,7 @@ class NotebookActivity : AppCompatActivity() {
                 }
                 val restoredHeadings = withContext(Dispatchers.IO) {
                     action.headingIds.mapNotNull { id ->
-                        dao.getObjectById(id)?.toHeadingStroke()
+                        dao.getObjectById(id)?.let { dao.assembleHeadingResolved(it) }
                     }
                 }
                 updatedStrokes      = buildList { addAll(preUndoStrokes); addAll(restoredStrokes) }
@@ -9025,7 +9029,7 @@ class NotebookActivity : AppCompatActivity() {
             val pageWidthForHeading = resources.displayMetrics.widthPixels
             withContext(Dispatchers.IO) {
                 val row = dao.getObjectById(action.headingId) ?: return@withContext
-                val base = row.toHeadingStroke() ?: return@withContext
+                val base = db.notebookDao().assembleHeadingResolved(row) ?: return@withContext
                 if (targetText != null) {
                     val textPaint = TextPaint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
                         textSize = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 24f, resources.displayMetrics)
@@ -9034,9 +9038,9 @@ class NotebookActivity : AppCompatActivity() {
                     val box = base.boundingBox
                     val (measuredW, measuredH) = TextObjectRenderer.measure(targetText, pageWidthForHeading, textPaint, resources.displayMetrics.density, singleLine = true)
                     val newBox = RectF(box.left, box.top, box.left + measuredW + 2f * paddingPx, box.top + measuredH + 2f * paddingPx)
-                    dao.updateColumns(base.copy(recognizedText = targetText, boundingBox = newBox).toRow("", 0, 0L, now))
+                    dao.replaceHeadingSubtree(base.copy(recognizedText = targetText, boundingBox = newBox), now)
                 } else {
-                    dao.updateColumns(base.copy(recognizedText = targetText).toRow("", 0, 0L, now))
+                    dao.replaceHeadingSubtree(base.copy(recognizedText = targetText), now)
                 }
             }
 
@@ -9094,9 +9098,9 @@ class NotebookActivity : AppCompatActivity() {
             // Write target level/text/box directly — no re-measure needed (boxes are pre-computed).
             withContext(Dispatchers.IO) {
                 val row     = dao.getObjectById(action.headingId) ?: return@withContext
-                val updated = (row.toHeadingStroke() ?: return@withContext)
+                val updated = (db.notebookDao().assembleHeadingResolved(row) ?: return@withContext)
                     .copy(recognizedText = targetText, level = targetLevel, boundingBox = targetBox)
-                dao.updateColumns(updated.toRow("", 0, 0L, now))
+                dao.replaceHeadingSubtree(updated, now)
             }
 
             val updatedHeadings = withContext(Dispatchers.IO) {
@@ -9297,10 +9301,10 @@ class NotebookActivity : AppCompatActivity() {
                         dao.updateStrokeBlob(stroke.id, stroke.strokeBlob(), stroke.color, stroke.strokeWidth, ts)
                     }
                     for (heading in targetHeadings) {
-                        dao.updateColumns(heading.toRow("", 0, ts, ts))
+                        dao.replaceHeadingSubtree(heading, ts)
                     }
                     for (textObj in targetTexts) {
-                        dao.updateColumns(textObj.toRow("", 0, ts, ts))
+                        dao.replaceTextSubtree(textObj, ts)
                     }
                     for (lineObj in targetLines) {
                         dao.updateColumns(lineObj.toRow("", 0, ts, ts, density))
@@ -9901,10 +9905,10 @@ class NotebookActivity : AppCompatActivity() {
                         dao.updateStrokeBlob(stroke.id, stroke.strokeBlob(), stroke.color, stroke.strokeWidth, now)
                     }
                     for (heading in targetHeadings) {
-                        dao.updateColumns(heading.toRow("", 0, now, now))
+                        dao.replaceHeadingSubtree(heading, now)
                     }
                     for (textObj in targetTexts) {
-                        dao.updateColumns(textObj.toRow("", 0, now, now))
+                        dao.replaceTextSubtree(textObj, now)
                     }
                     for (lineObj in targetLines) {
                         dao.updateColumns(lineObj.toRow("", 0, now, now, density))
@@ -9938,7 +9942,7 @@ class NotebookActivity : AppCompatActivity() {
                 withContext(Dispatchers.IO) {
                 val targetText = if (isUndo) action.previousText else action.newText
                 val row = dao.getObjectById(action.headingId) ?: return@withContext
-                val base = row.toHeadingStroke() ?: return@withContext
+                val base = db.notebookDao().assembleHeadingResolved(row) ?: return@withContext
                 if (targetText != null) {
                     val textPaint = TextPaint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
                         textSize = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 24f, resources.displayMetrics)
@@ -9947,10 +9951,10 @@ class NotebookActivity : AppCompatActivity() {
                     val box = base.boundingBox
                     val (measuredW, measuredH) = TextObjectRenderer.measure(targetText, pageWidthForEdit, textPaint, resources.displayMetrics.density, singleLine = true)
                     val newBox = RectF(box.left, box.top, box.left + measuredW + 2f * paddingPx, box.top + measuredH + 2f * paddingPx)
-                    dao.updateColumns(base.copy(recognizedText = targetText, boundingBox = newBox).toRow("", 0, 0L, now))
+                    dao.replaceHeadingSubtree(base.copy(recognizedText = targetText, boundingBox = newBox), now)
                 } else {
                     // Restoring null: keep existing bounding box, just clear the text field.
-                    dao.updateColumns(base.copy(recognizedText = targetText).toRow("", 0, 0L, now))
+                    dao.replaceHeadingSubtree(base.copy(recognizedText = targetText), now)
                 }
             }}
 
@@ -9960,9 +9964,9 @@ class NotebookActivity : AppCompatActivity() {
                 val targetText  = if (isUndo) action.previousText  else action.newText
                 val targetBox   = if (isUndo) action.previousBox   else action.newBox
                 val row     = dao.getObjectById(action.headingId) ?: return@withContext
-                val updated = (row.toHeadingStroke() ?: return@withContext)
+                val updated = (db.notebookDao().assembleHeadingResolved(row) ?: return@withContext)
                     .copy(recognizedText = targetText, level = targetLevel, boundingBox = targetBox)
-                dao.updateColumns(updated.toRow("", 0, 0L, now))
+                dao.replaceHeadingSubtree(updated, now)
             }
 
             is UndoRedoAction.TextInserted -> withContext(Dispatchers.IO) {
@@ -9976,7 +9980,7 @@ class NotebookActivity : AppCompatActivity() {
 
             is UndoRedoAction.TextEdited -> withContext(Dispatchers.IO) {
                 val target = if (isUndo) action.oldTextRender else action.newTextRender
-                dao.updateColumns(target.toRow("", 0, now, now))
+                dao.replaceTextSubtree(target, now)
                 noteContentEdit(db, action.pageId)
             }
 
@@ -10258,7 +10262,7 @@ class NotebookActivity : AppCompatActivity() {
                 } else if (headingIdsSet.isNotEmpty()) {
                     withContext(Dispatchers.IO) {
                         headingIdsSet.mapNotNull { id ->
-                            dao.getObjectById(id)?.toHeadingStroke()
+                            dao.getObjectById(id)?.let { dao.assembleHeadingResolved(it) }
                         }
                     }
                 } else emptyList()
@@ -10334,7 +10338,7 @@ class NotebookActivity : AppCompatActivity() {
                 } else if (headingIdsSet.isNotEmpty()) {
                     withContext(Dispatchers.IO) {
                         headingIdsSet.mapNotNull { id ->
-                            dao.getObjectById(id)?.toHeadingStroke()
+                            dao.getObjectById(id)?.let { dao.assembleHeadingResolved(it) }
                         }
                     }
                 } else emptyList()
@@ -10611,7 +10615,7 @@ class NotebookActivity : AppCompatActivity() {
                 }
                 val restoredHeadings = withContext(Dispatchers.IO) {
                     action.headingIds.mapNotNull { id ->
-                        dao.getObjectById(id)?.toHeadingStroke()
+                        dao.getObjectById(id)?.let { dao.assembleHeadingResolved(it) }
                     }
                 }
                 updatedStrokes      = buildList { addAll(drawingView.getStrokes()); addAll(restoredStrokes) }
