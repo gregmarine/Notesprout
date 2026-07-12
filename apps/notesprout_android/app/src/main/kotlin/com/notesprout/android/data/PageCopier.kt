@@ -18,6 +18,29 @@ private fun cleanStrayJournal(notebookPath: String) {
 }
 
 /**
+ * Copy every column of the current cursor row into a [ContentValues] with correct per-type handling —
+ * crucially BLOB (the binary stroke column, data-model-optimization Phase 1), which a string-based
+ * copy would corrupt. The reserved word `order` is emitted back-tick quoted so the result inserts
+ * cleanly. Used by the raw-SQL deep-copy paths so they carry the full columnar payload for free
+ * (all current + future columns) instead of hand-listing the legacy text columns.
+ */
+private fun cursorRowToCv(c: android.database.Cursor): ContentValues {
+    val cv = ContentValues()
+    for (i in 0 until c.columnCount) {
+        val name = c.getColumnName(i)
+        val key = if (name == "order") "`order`" else name
+        when (c.getType(i)) {
+            android.database.Cursor.FIELD_TYPE_NULL    -> cv.putNull(key)
+            android.database.Cursor.FIELD_TYPE_INTEGER -> cv.put(key, c.getLong(i))
+            android.database.Cursor.FIELD_TYPE_FLOAT   -> cv.put(key, c.getDouble(i))
+            android.database.Cursor.FIELD_TYPE_BLOB    -> cv.put(key, c.getBlob(i))
+            else                                       -> cv.put(key, c.getString(i))
+        }
+    }
+    return cv
+}
+
+/**
  * Result of [movePagesAcrossNotebooks]: the destination insertions (same shape as
  * [copyPagesAcrossNotebooks]) plus the data needed to build a source-side restore undo action.
  */
@@ -233,7 +256,6 @@ suspend fun copyPagesRelativeRaw(
         // ── Shared row types ─────────────────────────────────────────────────
         data class Row(val id: String, val parentId: String, val bbox: String,
                        val order: Int, val data: String, val type: String)
-        data class ChildRow(val type: String, val bbox: String, val order: Int, val data: String)
 
         fun readRow(c: android.database.Cursor): Row? {
             if (!c.moveToFirst()) return null
@@ -248,7 +270,7 @@ suspend fun copyPagesRelativeRaw(
         }
 
         // ── Read source pages ────────────────────────────────────────────────
-        data class SourcePage(val page: Row, val layer: Row, val children: List<ChildRow>)
+        data class SourcePage(val page: Row, val layer: Row, val children: List<ContentValues>)
         val sources = sourcePageIds.mapNotNull { srcId ->
             val page = db.rawQuery(
                 "SELECT * FROM notebook WHERE id = ? LIMIT 1", arrayOf(srcId)
@@ -259,12 +281,13 @@ suspend fun copyPagesRelativeRaw(
                 arrayOf(srcId)
             ).use { readRow(it) } ?: return@mapNotNull null
 
-            val children: List<ChildRow> = db.rawQuery(
-                "SELECT type, boundingBox, `order`, data FROM notebook WHERE parentId = ? AND deletedAt IS NULL ORDER BY `order` ASC",
+            // Full-column capture so strokes' binary blob + all columnar payload copy with the row.
+            val children: List<ContentValues> = db.rawQuery(
+                "SELECT * FROM notebook WHERE parentId = ? AND deletedAt IS NULL ORDER BY `order` ASC",
                 arrayOf(layer.id)
             ).use { c ->
-                val list = mutableListOf<ChildRow>()
-                while (c.moveToNext()) list.add(ChildRow(c.getString(0), c.getString(1), c.getInt(2), c.getString(3)))
+                val list = mutableListOf<ContentValues>()
+                while (c.moveToNext()) list.add(cursorRowToCv(c))
                 list
             }
             SourcePage(page, layer, children)
@@ -332,17 +355,13 @@ suspend fun copyPagesRelativeRaw(
                 })
 
                 for (obj in src.children) {
-                    db.insert("notebook", null, ContentValues().apply {
-                        put("id",          UUID.randomUUID().toString())
-                        put("parentId",    newLayerId)
-                        put("type",        obj.type)
-                        put("boundingBox", obj.bbox)
-                        put("`order`",     obj.order)
-                        put("createdAt",   now)
-                        put("updatedAt",   now)
-                        putNull("deletedAt")
-                        put("data",        obj.data)
-                    })
+                    val cv = ContentValues(obj)   // full columnar copy (incl. binary blob), order preserved
+                    cv.put("id",        UUID.randomUUID().toString())
+                    cv.put("parentId",  newLayerId)
+                    cv.put("createdAt", now)
+                    cv.put("updatedAt", now)
+                    cv.putNull("deletedAt")
+                    db.insert("notebook", null, cv)
                 }
             }
 
@@ -748,7 +767,6 @@ suspend fun copyPagesAcrossNotebooks(
     // ── Shared local types ────────────────────────────────────────────────
     data class Row(val id: String, val parentId: String, val bbox: String,
                    val order: Int, val data: String, val type: String)
-    data class ChildRow(val type: String, val bbox: String, val order: Int, val data: String)
 
     fun readRow(c: android.database.Cursor): Row? {
         if (!c.moveToFirst()) return null
@@ -762,7 +780,7 @@ suspend fun copyPagesAcrossNotebooks(
         )
     }
 
-    data class SourcePage(val page: Row, val layer: Row, val children: List<ChildRow>)
+    data class SourcePage(val page: Row, val layer: Row, val children: List<ContentValues>)
     data class TemplateRow(val bbox: String, val data: String)
 
     var sourceDb: SoilRawDb? = null
@@ -781,12 +799,13 @@ suspend fun copyPagesAcrossNotebooks(
                 arrayOf(srcId)
             ).use { readRow(it) } ?: return@mapNotNull null
 
-            val children: List<ChildRow> = sourceDb.rawQuery(
-                "SELECT type, boundingBox, `order`, data FROM notebook WHERE parentId = ? AND deletedAt IS NULL ORDER BY `order` ASC",
+            // Full-column capture so strokes' binary blob + all columnar payload copy with the row.
+            val children: List<ContentValues> = sourceDb.rawQuery(
+                "SELECT * FROM notebook WHERE parentId = ? AND deletedAt IS NULL ORDER BY `order` ASC",
                 arrayOf(layer.id)
             ).use { c ->
-                val list = mutableListOf<ChildRow>()
-                while (c.moveToNext()) list.add(ChildRow(c.getString(0), c.getString(1), c.getInt(2), c.getString(3)))
+                val list = mutableListOf<ContentValues>()
+                while (c.moveToNext()) list.add(cursorRowToCv(c))
                 list
             }
             SourcePage(page, layer, children)
@@ -902,17 +921,13 @@ suspend fun copyPagesAcrossNotebooks(
                 })
 
                 for (obj in src.children) {
-                    destDb.insert("notebook", null, ContentValues().apply {
-                        put("id",          UUID.randomUUID().toString())
-                        put("parentId",    newLayerId)
-                        put("type",        obj.type)
-                        put("boundingBox", obj.bbox)
-                        put("`order`",     obj.order)
-                        put("createdAt",   now)
-                        put("updatedAt",   now)
-                        putNull("deletedAt")
-                        put("data",        obj.data)
-                    })
+                    val cv = ContentValues(obj)   // full columnar copy (incl. binary blob), order preserved
+                    cv.put("id",        UUID.randomUUID().toString())
+                    cv.put("parentId",  newLayerId)
+                    cv.put("createdAt", now)
+                    cv.put("updatedAt", now)
+                    cv.putNull("deletedAt")
+                    destDb.insert("notebook", null, cv)
                 }
             }
 

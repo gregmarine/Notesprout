@@ -88,7 +88,9 @@ import com.notesprout.android.data.PageData
 import com.notesprout.android.data.SoilDatabase
 import com.notesprout.android.data.StrokeData
 import com.notesprout.android.data.TemplateData
+import com.notesprout.android.data.strokeBlob
 import com.notesprout.android.data.toBoundingBoxJson
+import com.notesprout.android.data.toStrokeRow
 import com.notesprout.android.data.index.IndexRepository
 import com.notesprout.android.data.index.NotesproutIndex
 import com.notesprout.android.data.ScratchpadRepository
@@ -1914,7 +1916,7 @@ class NotebookActivity : AppCompatActivity() {
                     withContext(Dispatchers.IO) {
                         db.withTransaction {
                             for (moved in movedStrokes) {
-                                db.notebookDao().updateStrokeData(moved.id, moved.toStrokeData().toJson(), now)
+                                db.notebookDao().updateStrokeBlob(moved.id, moved.strokeBlob(), moved.color, moved.strokeWidth, now)
                             }
                             for (heading in movedHeadings) {
                                 val bboxJson = heading.boundingBox.toBoundingBoxJson()
@@ -4094,18 +4096,11 @@ class NotebookActivity : AppCompatActivity() {
      * Also repopulates [persistedStrokeIds].
      * Must be called on [Dispatchers.IO] AFTER [setupPageIds] has set [currentLayerId].
      */
-    private fun parseStrokeRow(id: String, data: String): LiveStroke? = try {
-        // Fast path: rows with no per-point pressure/tilt (all current data) parse straight into PointF,
-        // skipping the StrokePoint allocation. Fall back to the full model when those samples exist.
-        if (data.indexOf("pressure") < 0 && data.indexOf("tilt") < 0) {
-            LiveStroke.fromPointsJson(id, data)
-        } else {
-            LiveStroke.fromStrokeData(id, StrokeData.fromJson(data))
+    private fun parseStrokeRow(obj: NotebookObject): LiveStroke? =
+        LiveStroke.fromRow(obj) ?: run {
+            Log.e(TAG, "deserializeStrokesFromDb: failed to parse stroke ${obj.id}")
+            null
         }
-    } catch (e: Exception) {
-        Log.e(TAG, "deserializeStrokesFromDb: failed to parse stroke $id", e)
-        null
-    }
 
     /**
      * Parse every stroke row for [layerId] into [LiveStroke]s. Pure — no view/[persistedStrokeIds]
@@ -4117,12 +4112,12 @@ class NotebookActivity : AppCompatActivity() {
     private suspend fun parseStrokesForLayer(db: SoilDatabase, layerId: String): List<LiveStroke> = coroutineScope {
         val strokeObjects = db.notebookDao().getStrokesForLayer(layerId)
         if (strokeObjects.size < PARALLEL_PARSE_THRESHOLD) {
-            strokeObjects.mapNotNull { parseStrokeRow(it.id, it.data) }
+            strokeObjects.mapNotNull { parseStrokeRow(it) }
         } else {
             val cores = Runtime.getRuntime().availableProcessors().coerceIn(2, 8)
             val chunkSize = (strokeObjects.size + cores - 1) / cores
             strokeObjects.chunked(chunkSize)
-                .map { chunk -> async(Dispatchers.Default) { chunk.mapNotNull { parseStrokeRow(it.id, it.data) } } }
+                .map { chunk -> async(Dispatchers.Default) { chunk.mapNotNull { parseStrokeRow(it) } } }
                 .awaitAll()
                 .flatten()
         }
@@ -4441,28 +4436,13 @@ class NotebookActivity : AppCompatActivity() {
         // Single transaction — all new inserts share one BEGIN/COMMIT.
         db.withTransaction {
             for (liveStroke in newStrokes) {
-                val points = liveStroke.points
-                if (points.size < 2) continue   // degenerate stroke — skip
-
-                val minX = points.minOf { it.x }
-                val minY = points.minOf { it.y }
-                val maxX = points.maxOf { it.x }
-                val maxY = points.maxOf { it.y }
-                val bboxJson = BoundingBox(minX, minY, maxX - minX, maxY - minY).toJson()
-
-                val strokeData = liveStroke.toStrokeData()
-
+                if (liveStroke.points.size < 2) continue   // degenerate stroke — skip
                 dao.insertOrIgnore(
-                    NotebookObject(
-                        id          = liveStroke.id,
-                        type        = "stroke",
-                        parentId    = layerId,
-                        boundingBox = bboxJson,
-                        sortOrder   = strokeIndexMap[liveStroke.id] ?: 0,
-                        createdAt   = now,
-                        updatedAt   = now,
-                        deletedAt   = null,
-                        data        = strokeData.toJson(),
+                    liveStroke.toStrokeRow(
+                        parentId  = layerId,
+                        order     = strokeIndexMap[liveStroke.id] ?: 0,
+                        createdAt = now,
+                        updatedAt = now,
                     )
                 )
             }
@@ -5459,25 +5439,13 @@ class NotebookActivity : AppCompatActivity() {
                 val dao = db.notebookDao()
                 db.withTransaction {
                     newStrokes.forEachIndexed { i, stroke ->
-                        val points = stroke.points
-                        if (points.size < 2) return@forEachIndexed
-                        val minX = points.minOf { it.x }
-                        val minY = points.minOf { it.y }
-                        val maxX = points.maxOf { it.x }
-                        val maxY = points.maxOf { it.y }
-                        val bboxJson = BoundingBox(minX, minY, maxX - minX, maxY - minY).toJson()
-                        val strokeData = stroke.toStrokeData()
+                        if (stroke.points.size < 2) return@forEachIndexed
                         dao.insertOrIgnore(
-                            NotebookObject(
-                                id          = stroke.id,
-                                type        = "stroke",
-                                parentId    = layerId,
-                                boundingBox = bboxJson,
-                                sortOrder   = baseOrder + i,
-                                createdAt   = now,
-                                updatedAt   = now,
-                                deletedAt   = null,
-                                data        = strokeData.toJson(),
+                            stroke.toStrokeRow(
+                                parentId  = layerId,
+                                order     = baseOrder + i,
+                                createdAt = now,
+                                updatedAt = now,
                             )
                         )
                     }
@@ -5722,25 +5690,13 @@ class NotebookActivity : AppCompatActivity() {
                 val dao = db.notebookDao()
                 db.withTransaction {
                     newStrokes.forEachIndexed { i, stroke ->
-                        val points = stroke.points
-                        if (points.size < 2) return@forEachIndexed
-                        val minX = points.minOf { it.x }
-                        val minY = points.minOf { it.y }
-                        val maxX = points.maxOf { it.x }
-                        val maxY = points.maxOf { it.y }
-                        val bboxJson = BoundingBox(minX, minY, maxX - minX, maxY - minY).toJson()
-                        val strokeData = stroke.toStrokeData()
+                        if (stroke.points.size < 2) return@forEachIndexed
                         dao.insertOrIgnore(
-                            NotebookObject(
-                                id          = stroke.id,
-                                type        = "stroke",
-                                parentId    = layerId,
-                                boundingBox = bboxJson,
-                                sortOrder   = baseOrder + i,
-                                createdAt   = now,
-                                updatedAt   = now,
-                                deletedAt   = null,
-                                data        = strokeData.toJson(),
+                            stroke.toStrokeRow(
+                                parentId  = layerId,
+                                order     = baseOrder + i,
+                                createdAt = now,
+                                updatedAt = now,
                             )
                         )
                     }
@@ -8756,7 +8712,7 @@ class NotebookActivity : AppCompatActivity() {
                 val restoredStrokes = restoredRows
                     .filter { it.type != TYPE_HEADING && it.type != TYPE_TEXT && it.type != TYPE_LINE }
                     .mapNotNull { obj ->
-                        try { LiveStroke.fromStrokeData(obj.id, StrokeData.fromJson(obj.data)) }
+                        try { LiveStroke.fromRow(obj) }
                         catch (e: Exception) {
                             Log.e(TAG, "executeAction LassoErased: failed to deserialize ${obj.id}", e); null
                         }
@@ -8871,7 +8827,7 @@ class NotebookActivity : AppCompatActivity() {
                     pureStrokeIdsSet.mapNotNull { id -> dao.getObjectById(id) }
                 }
                 val restoredStrokes = restoredStrokeRows.mapNotNull { obj ->
-                    try { LiveStroke.fromStrokeData(obj.id, StrokeData.fromJson(obj.data)) }
+                    try { LiveStroke.fromRow(obj) }
                     catch (e: Exception) {
                         Log.e(TAG, "executeAction ScribbleErased: failed to deserialize ${obj.id}", e); null
                     }
@@ -9011,7 +8967,7 @@ class NotebookActivity : AppCompatActivity() {
                 val restoredStrokes = withContext(Dispatchers.IO) {
                     action.strokeIds.mapNotNull { id ->
                         dao.getObjectById(id)?.let { obj ->
-                            try { LiveStroke.fromStrokeData(obj.id, StrokeData.fromJson(obj.data)) }
+                            try { LiveStroke.fromRow(obj) }
                             catch (e: Exception) {
                                 Log.e(TAG, "executeAction LassoCut: failed to deserialize $id", e); null
                             }
@@ -9127,7 +9083,7 @@ class NotebookActivity : AppCompatActivity() {
                 val restoredStrokes = withContext(Dispatchers.IO) {
                     action.strokeIds.mapNotNull { id ->
                         dao.getObjectById(id)?.let { obj ->
-                            try { LiveStroke.fromStrokeData(obj.id, StrokeData.fromJson(obj.data)) }
+                            try { LiveStroke.fromRow(obj) }
                             catch (e: Exception) {
                                 Log.e(TAG, "executeAction LassoDeleted: failed to deserialize $id", e); null
                             }
@@ -9251,7 +9207,7 @@ class NotebookActivity : AppCompatActivity() {
                 val restoredStrokes = withContext(Dispatchers.IO) {
                     action.strokeIds.mapNotNull { id ->
                         dao.getObjectById(id)?.let { obj ->
-                            try { LiveStroke.fromStrokeData(obj.id, StrokeData.fromJson(obj.data)) }
+                            try { LiveStroke.fromRow(obj) }
                             catch (e: Exception) {
                                 Log.e(TAG, "executeAction LassoPasted: failed to deserialize $id", e); null
                             }
@@ -9348,7 +9304,7 @@ class NotebookActivity : AppCompatActivity() {
                 val restoredStrokes = withContext(Dispatchers.IO) {
                     action.originalStrokeIds.mapNotNull { id ->
                         dao.getObjectById(id)?.let { obj ->
-                            try { LiveStroke.fromStrokeData(obj.id, StrokeData.fromJson(obj.data)) }
+                            try { LiveStroke.fromRow(obj) }
                             catch (e: Exception) {
                                 Log.e(TAG, "executeAction HeadingCreated: failed to deserialize $id", e); null
                             }
@@ -9561,7 +9517,7 @@ class NotebookActivity : AppCompatActivity() {
                 val restoredStrokes = withContext(Dispatchers.IO) {
                     action.originalStrokeIds.mapNotNull { id ->
                         dao.getObjectById(id)?.let { obj ->
-                            try { LiveStroke.fromStrokeData(obj.id, StrokeData.fromJson(obj.data)) }
+                            try { LiveStroke.fromRow(obj) }
                             catch (e: Exception) {
                                 Log.e(TAG, "executeAction TextConverted: failed to deserialize $id", e); null
                             }
@@ -9687,7 +9643,7 @@ class NotebookActivity : AppCompatActivity() {
                 val density = resources.displayMetrics.density
                 db.withTransaction {
                     for (stroke in targetStrokes) {
-                        dao.updateStrokeData(stroke.id, stroke.toStrokeData().toJson(), ts)
+                        dao.updateStrokeBlob(stroke.id, stroke.strokeBlob(), stroke.color, stroke.strokeWidth, ts)
                     }
                     for (heading in targetHeadings) {
                         val bboxJson = heading.boundingBox.toBoundingBoxJson()
@@ -9874,19 +9830,8 @@ class NotebookActivity : AppCompatActivity() {
                     if (action.deletedAt == 0L) {
                         // Stroke was never persisted — re-insert it
                         val stroke = action.originalStroke
-                        val sd = stroke.toStrokeData()
                         dao.insertObject(
-                            com.notesprout.android.data.NotebookObject(
-                                id          = stroke.id,
-                                parentId    = action.layerId,
-                                type        = com.notesprout.android.data.TYPE_STROKE,
-                                boundingBox = stroke.boundingBox.toBoundingBoxJson(),
-                                sortOrder   = 0,
-                                createdAt   = now,
-                                updatedAt   = now,
-                                deletedAt   = null,
-                                data        = sd.toJson(),
-                            )
+                            stroke.toStrokeRow(parentId = action.layerId, order = 0, createdAt = now, updatedAt = now)
                         )
                     } else {
                         dao.restoreById(action.originalStroke.id, now)
@@ -10309,7 +10254,7 @@ class NotebookActivity : AppCompatActivity() {
                 val density            = resources.displayMetrics.density
                 db.withTransaction {
                     for (stroke in targetStrokes) {
-                        dao.updateStrokeData(stroke.id, stroke.toStrokeData().toJson(), now)
+                        dao.updateStrokeBlob(stroke.id, stroke.strokeBlob(), stroke.color, stroke.strokeWidth, now)
                     }
                     for (heading in targetHeadings) {
                         val bb = heading.boundingBox
@@ -10429,17 +10374,7 @@ class NotebookActivity : AppCompatActivity() {
                     if (action.deletedAt == 0L) {
                         val stroke = action.originalStroke
                         dao.insertObject(
-                            com.notesprout.android.data.NotebookObject(
-                                id          = stroke.id,
-                                parentId    = action.layerId,
-                                type        = com.notesprout.android.data.TYPE_STROKE,
-                                boundingBox = stroke.boundingBox.toBoundingBoxJson(),
-                                sortOrder   = 0,
-                                createdAt   = now,
-                                updatedAt   = now,
-                                deletedAt   = null,
-                                data        = stroke.toStrokeData().toJson(),
-                            )
+                            stroke.toStrokeRow(parentId = action.layerId, order = 0, createdAt = now, updatedAt = now)
                         )
                     } else {
                         dao.restoreById(action.originalStroke.id, now)
@@ -10681,7 +10616,7 @@ class NotebookActivity : AppCompatActivity() {
                 val restoredStrokes = withContext(Dispatchers.IO) {
                     pureStrokeIdsSet.mapNotNull { id ->
                         dao.getObjectById(id)?.let { obj ->
-                            try { LiveStroke.fromStrokeData(obj.id, StrokeData.fromJson(obj.data)) }
+                            try { LiveStroke.fromRow(obj) }
                             catch (e: Exception) {
                                 Log.e(TAG, "executeAction LassoErased: failed to deserialize ${obj.id}", e); null
                             }
@@ -10765,7 +10700,7 @@ class NotebookActivity : AppCompatActivity() {
                     pureStrokeIdsSet.mapNotNull { id -> dao.getObjectById(id) }
                 }
                 val restoredErasedStrokes = erasedStrokeRows.mapNotNull { obj ->
-                    try { LiveStroke.fromStrokeData(obj.id, StrokeData.fromJson(obj.data)) }
+                    try { LiveStroke.fromRow(obj) }
                     catch (e: Exception) {
                         Log.e(TAG, "executeAction ScribbleErased undo: failed to deserialize ${obj.id}", e); null
                     }
@@ -10866,7 +10801,7 @@ class NotebookActivity : AppCompatActivity() {
                 val restoredStrokes = withContext(Dispatchers.IO) {
                     action.strokeIds.mapNotNull { id ->
                         dao.getObjectById(id)?.let { obj ->
-                            try { LiveStroke.fromStrokeData(obj.id, StrokeData.fromJson(obj.data)) }
+                            try { LiveStroke.fromRow(obj) }
                             catch (e: Exception) {
                                 Log.e(TAG, "executeAction LassoCut: failed to deserialize $id", e); null
                             }
@@ -10933,7 +10868,7 @@ class NotebookActivity : AppCompatActivity() {
                 val restoredStrokes = withContext(Dispatchers.IO) {
                     action.strokeIds.mapNotNull { id ->
                         dao.getObjectById(id)?.let { obj ->
-                            try { LiveStroke.fromStrokeData(obj.id, StrokeData.fromJson(obj.data)) }
+                            try { LiveStroke.fromRow(obj) }
                             catch (e: Exception) {
                                 Log.e(TAG, "executeAction LassoDeleted: failed to deserialize $id", e); null
                             }
@@ -10979,7 +10914,7 @@ class NotebookActivity : AppCompatActivity() {
                 val restoredStrokes = withContext(Dispatchers.IO) {
                     action.originalStrokeIds.mapNotNull { id ->
                         dao.getObjectById(id)?.let { obj ->
-                            try { LiveStroke.fromStrokeData(obj.id, StrokeData.fromJson(obj.data)) }
+                            try { LiveStroke.fromRow(obj) }
                             catch (e: Exception) {
                                 Log.e(TAG, "executeAction HeadingCreated: failed to deserialize $id", e); null
                             }
@@ -11047,7 +10982,7 @@ class NotebookActivity : AppCompatActivity() {
                 val restoredStrokes = withContext(Dispatchers.IO) {
                     action.strokeIds.mapNotNull { id ->
                         dao.getObjectById(id)?.let { obj ->
-                            try { LiveStroke.fromStrokeData(obj.id, StrokeData.fromJson(obj.data)) }
+                            try { LiveStroke.fromRow(obj) }
                             catch (e: Exception) {
                                 Log.e(TAG, "executeAction LassoPasted: failed to deserialize $id", e); null
                             }
@@ -11287,7 +11222,7 @@ class NotebookActivity : AppCompatActivity() {
                 val restoredStrokes = withContext(Dispatchers.IO) {
                     action.originalStrokeIds.mapNotNull { id ->
                         dao.getObjectById(id)?.let { obj ->
-                            try { LiveStroke.fromStrokeData(obj.id, StrokeData.fromJson(obj.data)) }
+                            try { LiveStroke.fromRow(obj) }
                             catch (e: Exception) {
                                 Log.e(TAG, "executeAction TextConverted: failed to deserialize $id", e); null
                             }

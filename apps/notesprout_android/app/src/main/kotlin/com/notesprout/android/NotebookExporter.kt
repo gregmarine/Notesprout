@@ -591,16 +591,9 @@ object NotebookExporter {
 
         val strokes: List<LiveStroke> = if (layer != null) {
             dao.getStrokesForLayer(layer.id).mapNotNull { row ->
-                if (leanStrokes) {
-                    // Thumbnails draw plain fixed-width black paths (see renderPage → drawStrokeList),
-                    // so parse points only — skips the per-point StrokePoint allocation and the
-                    // pressure/tilt fields the thumbnail renderer never reads.
-                    runCatching { LiveStroke.fromPointsJson(row.id, row.data) }.getOrNull()
-                } else {
-                    val sd = runCatching { StrokeData.fromJson(row.data) }.getOrNull()
-                        ?: return@mapNotNull null
-                    LiveStroke.fromStrokeData(row.id, sd)
-                }
+                // Format-agnostic: binary blob when present, else legacy JSON. Thumbnails draw plain
+                // fixed-width black paths, so the lean (points-only) path is fine there.
+                LiveStroke.fromRow(row, lean = leanStrokes)
             }
         } else emptyList()
 

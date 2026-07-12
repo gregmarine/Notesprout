@@ -212,6 +212,15 @@ interface NotebookDao {
     suspend fun updateStrokeData(id: String, data: String, updatedAt: Long)
 
     /**
+     * Overwrite a stroke row's binary [NotebookObject.blob] plus its colour/width columns, clearing
+     * the legacy `data`/`boundingBox` (data-model-optimization Phase 1). Colour/width are written too
+     * so a lasso-move that lands on a still-legacy row converts it fully to columnar form without
+     * losing a non-default colour. Used by the lasso-move commit and undo/redo re-persist paths.
+     */
+    @Query("UPDATE notebook SET blob = :blob, color = :color, strokeWidth = :strokeWidth, data = '', boundingBox = '', updatedAt = :updatedAt WHERE id = :id")
+    suspend fun updateStrokeBlob(id: String, blob: ByteArray, color: String, strokeWidth: Float, updatedAt: Long)
+
+    /**
      * Overwrite both [boundingBox] and [data] for a heading row.
      * Used by the lasso-move commit path to persist translated heading position
      * and embedded stroke coordinates together in one SQL statement.
