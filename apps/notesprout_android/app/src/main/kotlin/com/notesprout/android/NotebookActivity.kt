@@ -89,8 +89,10 @@ import com.notesprout.android.data.TYPE_STICKY_NOTE
 import com.notesprout.android.data.TYPE_TEXT
 import com.notesprout.android.data.ShapeRender
 import com.notesprout.android.data.StickyNoteRender
+import com.notesprout.android.data.insertStickyNoteSubtree
+import com.notesprout.android.data.loadStickyNotesSubtree
+import com.notesprout.android.data.replaceStickyNoteSubtree
 import com.notesprout.android.data.toStickyNoteObject
-import com.notesprout.android.data.toStickyNoteRender
 import com.notesprout.android.core.markdown.TextObjectRenderer
 import android.text.TextPaint
 import com.notesprout.android.data.NotebookDao
@@ -865,7 +867,9 @@ class NotebookActivity : AppCompatActivity() {
             if (afterObj != beforeObj) {
                 lifecycleScope.launch {
                     withContext(Dispatchers.IO) {
-                        db.notebookDao().updateColumns(afterRender.toRow("", 0, 0L, System.currentTimeMillis(), density))
+                        db.withTransaction {
+                            db.notebookDao().replaceStickyNoteSubtree(afterRender, System.currentTimeMillis(), density)
+                        }
                         noteContentEdit(db, pageId)
                     }
                     val updatedNotes = drawingView.getStickyNotes().map {
@@ -1945,7 +1949,7 @@ class NotebookActivity : AppCompatActivity() {
                                 db.notebookDao().updateColumns(link.toRow("", 0, now, now, density))
                             }
                             for (note in movedStickyNotes) {
-                                db.notebookDao().updateColumns(note.toRow("", 0, now, now, density))
+                                db.notebookDao().replaceStickyNoteSubtree(note, now, density)
                             }
                             for (shape in movedShapes) {
                                 db.notebookDao().updateColumns(shape.toRow("", 0, now, now, density))
@@ -4234,8 +4238,7 @@ class NotebookActivity : AppCompatActivity() {
     private suspend fun loadStickyNotesFromDb(db: SoilDatabase, layerId: String): List<StickyNoteRender> {
         if (layerId.isEmpty()) return emptyList()
         val density = resources.displayMetrics.density
-        val rows = db.notebookDao().getStickyNotesForLayer(layerId)
-        return rows.mapNotNull { row -> row.toStickyNoteRender(density) }
+        return db.notebookDao().loadStickyNotesSubtree(layerId, density)
     }
 
     private suspend fun loadShapeObjectsFromDb(db: SoilDatabase, layerId: String): List<com.notesprout.android.data.ShapeRender> {
@@ -5411,7 +5414,7 @@ class NotebookActivity : AppCompatActivity() {
                         dao.insertOrIgnore(link.toRow(layerId, 0, now, now, density))
                     }
                     newStickyNotes.forEach { note ->
-                        dao.insertOrIgnore(note.toRow(layerId, 0, now, now, density))
+                        dao.insertStickyNoteSubtree(note, layerId, 0, now, now, density)
                     }
                     newShapes.forEach { shape ->
                         dao.insertOrIgnore(shape.toRow(layerId, 0, now, now, density))
@@ -5585,7 +5588,7 @@ class NotebookActivity : AppCompatActivity() {
                         dao.insertOrIgnore(link.toRow(layerId, 0, now, now, density))
                     }
                     newStickyNotes.forEach { note ->
-                        dao.insertOrIgnore(note.toRow(layerId, 0, now, now, density))
+                        dao.insertStickyNoteSubtree(note, layerId, 0, now, now, density)
                     }
                     newShapes.forEach { shape ->
                         dao.insertOrIgnore(shape.toRow(layerId, 0, now, now, density))
@@ -7894,7 +7897,7 @@ class NotebookActivity : AppCompatActivity() {
             val noteRender = StickyNoteRender(id = noteId, boundingBox = bbox)
 
             withContext(Dispatchers.IO) {
-                db.notebookDao().insertObject(noteRender.toRow(layerId, 0, now, now, density))
+                db.notebookDao().insertStickyNoteSubtree(noteRender, layerId, 0, now, now, density)
                 noteContentEdit(db, pageId)
             }
 
@@ -9902,7 +9905,7 @@ class NotebookActivity : AppCompatActivity() {
                         dao.updateColumns(link.toRow("", 0, now, now, density))
                     }
                     for (note in targetStickyNotes) {
-                        dao.updateColumns(note.toRow("", 0, now, now, density))
+                        dao.replaceStickyNoteSubtree(note, now, density)
                     }
                     val targetShapes = if (isUndo) action.originalShapes else action.movedShapes
                     for (shape in targetShapes) {
@@ -10088,7 +10091,7 @@ class NotebookActivity : AppCompatActivity() {
             is UndoRedoAction.StickyNoteContentEdited -> withContext(Dispatchers.IO) {
                 val density = resources.displayMetrics.density
                 val target  = if (isUndo) action.before else action.after
-                dao.updateColumns(target.toRow("", 0, 0L, now, density))
+                db.withTransaction { dao.replaceStickyNoteSubtree(target, now, density) }
                 noteContentEdit(db, action.pageId)
             }
 

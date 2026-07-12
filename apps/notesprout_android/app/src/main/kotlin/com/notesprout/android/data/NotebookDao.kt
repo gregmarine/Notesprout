@@ -57,6 +57,14 @@ interface NotebookDao {
     @Query("SELECT * FROM notebook WHERE parentId IN (:parentIds) AND deletedAt IS NULL ORDER BY `order` ASC")
     suspend fun getObjectsByParents(parentIds: List<String>): List<NotebookObject>
 
+    /** Every direct child id of [parentId], INCLUDING soft-deleted rows (for a hard-delete cascade). */
+    @Query("SELECT id FROM notebook WHERE parentId = :parentId")
+    suspend fun childIdsIncludingDeleted(parentId: String): List<String>
+
+    /** Hard-delete the given rows by id (used to replace a composite's child subtree in place). */
+    @Query("DELETE FROM notebook WHERE id IN (:ids)")
+    suspend fun hardDeleteByIds(ids: List<String>)
+
     /**
      * All non-deleted pages, sorted by `order` ascending.
      * Use this for multi-page navigation — it reflects the canonical page order.

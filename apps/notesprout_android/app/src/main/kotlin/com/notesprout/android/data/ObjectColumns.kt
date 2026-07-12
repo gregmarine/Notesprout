@@ -3,6 +3,7 @@ package com.notesprout.android.data
 import android.graphics.RectF
 import android.util.Base64
 import java.io.ByteArrayOutputStream
+import java.util.UUID
 import java.util.zip.Deflater
 import java.util.zip.Inflater
 import kotlinx.serialization.builtins.ListSerializer
@@ -409,6 +410,63 @@ fun assembleStickyNoteRender(
         shapes = kids.filter { it.type == TYPE_SHAPE }.mapNotNull { it.toShapeRender(density) },
         contentWidth = parent.contentW ?: 0f, contentHeight = parent.contentH ?: 0f,
     )
+}
+
+// ── Phase 2c: sticky-note subtree persistence (DAO helpers) ──────────────────
+// The single boundary NotebookActivity/exporter use for stickies, so no call site hand-builds a
+// subtree. Reading is format-agnostic (legacy blob stickies fall through assembleStickyNoteRender);
+// writing always emits child rows and clears any legacy blob.
+
+/** Load every sticky on [layerId] as a full render model, batching the child subtree in ≤2 queries. */
+suspend fun NotebookDao.loadStickyNotesSubtree(layerId: String, density: Float): List<StickyNoteRender> {
+    val parents = getStickyNotesForLayer(layerId)
+    if (parents.isEmpty()) return emptyList()
+    val childrenByParent = loadSubtreeMap(parents.map { it.id })
+    return parents.mapNotNull { p -> assembleStickyNoteRender(p, density) { childrenByParent[it].orEmpty() } }
+}
+
+/** Children (+ grandchildren, for nested heading/text) of [rootIds], grouped by parentId. */
+private suspend fun NotebookDao.loadSubtreeMap(rootIds: List<String>): Map<String, List<NotebookObject>> {
+    val level1 = getObjectsByParents(rootIds)
+    val nested = level1.filter { it.type == TYPE_HEADING || it.type == TYPE_TEXT }.map { it.id }
+    val level2 = if (nested.isNotEmpty()) getObjectsByParents(nested) else emptyList()
+    return (level1 + level2).groupBy { it.parentId }
+}
+
+/** Insert a new sticky (parent + child subtree). Caller supplies a fresh id on the render model. */
+suspend fun NotebookDao.insertStickyNoteSubtree(
+    note: StickyNoteRender, layerId: String, order: Int, createdAt: Long, updatedAt: Long, density: Float,
+) = insertObjects(note.toRows(layerId, order, createdAt, updatedAt, density))
+
+/**
+ * Re-persist an existing sticky (content edit or move): update the parent columns (clearing any
+ * legacy blob) and rebuild the child subtree. Cheap for a move too — sticky content is small.
+ */
+suspend fun NotebookDao.replaceStickyNoteSubtree(note: StickyNoteRender, now: Long, density: Float) {
+    val rows = note.toRows("", 0, now, now, density)  // parentId/order placeholders (updateColumns ignores them)
+    updateColumns(rows[0])                             // parent payload columns + clears blob
+    hardDeleteDescendants(note.id)                     // drop any prior children (legacy blob rows had none)
+    if (rows.size > 1) insertObjects(rows.drop(1))
+}
+
+/** Hard-delete every descendant (children, grandchildren, …) of [rootId]. Depth-bounded in practice. */
+suspend fun NotebookDao.hardDeleteDescendants(rootId: String) {
+    val kids = childIdsIncludingDeleted(rootId)
+    if (kids.isEmpty()) return
+    kids.forEach { hardDeleteDescendants(it) }
+    hardDeleteByIds(kids)
+}
+
+/**
+ * Deep-copy every non-deleted descendant of [oldParentId] under [newParentId], assigning fresh ids
+ * and timestamps (Room path). Recurses so composite content child rows (Phase 2c) copy with the row.
+ */
+suspend fun NotebookDao.deepCopyChildren(oldParentId: String, newParentId: String, now: Long) {
+    for (child in getObjectsByParent(oldParentId)) {
+        val newId = UUID.randomUUID().toString()
+        insertObject(child.copy(id = newId, parentId = newParentId, createdAt = now, updatedAt = now, deletedAt = null))
+        deepCopyChildren(child.id, newId, now)
+    }
 }
 
 // ── Structural rows: page / layer / notebook-meta / template (Phase 2b) ───────

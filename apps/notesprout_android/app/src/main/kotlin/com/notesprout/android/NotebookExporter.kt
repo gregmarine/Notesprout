@@ -39,7 +39,7 @@ import com.notesprout.android.notebook.ShapeGeometry
 import com.notesprout.android.data.NotebookDao
 import com.notesprout.android.data.NotebookObject
 import com.notesprout.android.data.StickyNoteRender
-import com.notesprout.android.data.toStickyNoteRender
+import com.notesprout.android.data.loadStickyNotesSubtree
 import com.notesprout.android.data.TextObject
 import com.notesprout.android.data.TextRender
 import com.notesprout.android.data.NotebookMetadata
@@ -533,7 +533,7 @@ object NotebookExporter {
         } else emptyList()
 
         val stickyNotes: List<StickyNoteRender> = if (layer != null) {
-            dao.getStickyNotesForLayer(layer.id).mapNotNull { it.toStickyNoteRender(density) }
+            dao.loadStickyNotesSubtree(layer.id, density)
         } else emptyList()
 
         val strokes: List<LiveStroke> = if (layer != null) {

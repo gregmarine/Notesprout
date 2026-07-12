@@ -40,6 +40,55 @@ private fun cursorRowToCv(c: android.database.Cursor): ContentValues {
     return cv
 }
 
+/** A captured subtree row: its full columns plus its original id + parentId (for id remapping). */
+private class SubtreeNode(val cv: ContentValues, val id: String, val parentId: String)
+
+/**
+ * BFS-collect every non-deleted descendant of [rootParentId] from [db] (Phase 2c: composite content
+ * lives in child rows, so a page copy must recurse past the layer's direct children). Parents come
+ * before their children, so [writeDescendants] can remap ids in a single forward pass.
+ */
+private fun collectDescendants(db: SoilRawDb, rootParentId: String): List<SubtreeNode> {
+    val out = ArrayList<SubtreeNode>()
+    val queue = ArrayDeque<String>().apply { add(rootParentId) }
+    while (queue.isNotEmpty()) {
+        val pid = queue.removeFirst()
+        db.rawQuery(
+            "SELECT * FROM notebook WHERE parentId = ? AND deletedAt IS NULL ORDER BY `order` ASC",
+            arrayOf(pid),
+        ).use { c ->
+            while (c.moveToNext()) {
+                val id = c.getString(c.getColumnIndexOrThrow("id"))
+                out.add(SubtreeNode(cursorRowToCv(c), id, pid))
+                queue.add(id)
+            }
+        }
+    }
+    return out
+}
+
+/**
+ * Write a captured subtree into [db] under a fresh id tree: every node gets a new UUID, and its
+ * parentId is remapped through [idMap] (seeded with [rootOldId] → [rootNewId], e.g. the layer).
+ * BFS order guarantees a node's parent is already in the map.
+ */
+private fun writeDescendants(
+    db: SoilRawDb, descendants: List<SubtreeNode>, rootOldId: String, rootNewId: String, now: Long,
+) {
+    val idMap = HashMap<String, String>().apply { put(rootOldId, rootNewId) }
+    for (node in descendants) {
+        val newId = UUID.randomUUID().toString()
+        idMap[node.id] = newId
+        db.insert("notebook", null, ContentValues(node.cv).apply {
+            put("id", newId)
+            put("parentId", idMap[node.parentId] ?: rootNewId)
+            put("createdAt", now)
+            put("updatedAt", now)
+            putNull("deletedAt")
+        })
+    }
+}
+
 /**
  * Template id of a page-row [ContentValues] regardless of storage format:
  * columnar (Phase 2b) keeps it in `refId` with `data = ""`; legacy keeps it in the `data` JSON.
@@ -96,7 +145,6 @@ suspend fun copyPageAfter(
 
     val sourcePage    = dao.getObjectById(sourcePageId) ?: return null
     val sourceLayer   = dao.getLayerForPage(sourcePageId) ?: return null
-    val sourceObjects = dao.getObjectsByParent(sourceLayer.id)
 
     val allPages       = dao.getPagesSorted()
     val targetIdx      = allPages.indexOfFirst { it.id == targetPageId }
@@ -125,15 +173,8 @@ suspend fun copyPageAfter(
             updatedAt = now,
             deletedAt = null,
         ))
-        for (obj in sourceObjects) {
-            dao.insertObject(obj.copy(
-                id        = UUID.randomUUID().toString(),
-                parentId  = newLayerId,
-                createdAt = now,
-                updatedAt = now,
-                deletedAt = null,
-            ))
-        }
+        // Deep-copy the whole layer subtree (direct children + composite content grandchildren).
+        dao.deepCopyChildren(sourceLayer.id, newLayerId, now)
     }
 
     return newPageId
@@ -277,9 +318,13 @@ suspend fun copyPagesRelativeRaw(
         db = SoilCrypto.openRaw(File(notebookPath), passphrase)
 
         // ── Read source pages ────────────────────────────────────────────────
-        // Full-column capture (via cursorRowToCv) for page, layer, and children so ALL columnar
-        // payload — page.refId (template), layer.text/flags, strokes' binary blob — copies verbatim.
-        data class SourcePage(val page: ContentValues, val layer: ContentValues, val children: List<ContentValues>)
+        // Full-column capture (via cursorRowToCv) for page + layer, and the whole layer subtree
+        // (collectDescendants) so ALL columnar payload — page.refId, layer.text/flags, strokes'
+        // binary blob, AND composite content child rows (Phase 2c stickies) — copies verbatim.
+        data class SourcePage(
+            val page: ContentValues, val layer: ContentValues,
+            val layerId: String, val descendants: List<SubtreeNode>,
+        )
         val sources = sourcePageIds.mapNotNull { srcId ->
             val page = db.rawQuery(
                 "SELECT * FROM notebook WHERE id = ? LIMIT 1", arrayOf(srcId)
@@ -293,15 +338,7 @@ suspend fun copyPagesRelativeRaw(
                 "SELECT * FROM notebook WHERE id = ? LIMIT 1", arrayOf(layerId)
             ).use { c -> if (c.moveToFirst()) cursorRowToCv(c) else null } ?: return@mapNotNull null
 
-            val children: List<ContentValues> = db.rawQuery(
-                "SELECT * FROM notebook WHERE parentId = ? AND deletedAt IS NULL ORDER BY `order` ASC",
-                arrayOf(layerId)
-            ).use { c ->
-                val list = mutableListOf<ContentValues>()
-                while (c.moveToNext()) list.add(cursorRowToCv(c))
-                list
-            }
-            SourcePage(page, layer, children)
+            SourcePage(page, layer, layerId, collectDescendants(db, layerId))
         }
         if (sources.isEmpty()) return@withContext null
 
@@ -359,15 +396,9 @@ suspend fun copyPagesRelativeRaw(
                     putNull("deletedAt")
                 })
 
-                for (obj in src.children) {
-                    val cv = ContentValues(obj)   // full columnar copy (incl. binary blob), order preserved
-                    cv.put("id",        UUID.randomUUID().toString())
-                    cv.put("parentId",  newLayerId)
-                    cv.put("createdAt", now)
-                    cv.put("updatedAt", now)
-                    cv.putNull("deletedAt")
-                    db.insert("notebook", null, cv)
-                }
+                // Copy the entire layer subtree (direct children + composite grandchildren), remapping
+                // every parentId through fresh ids.
+                writeDescendants(db, src.descendants, src.layerId, newLayerId, now)
             }
 
             db.setTransactionSuccessful()
@@ -783,7 +814,10 @@ suspend fun copyPagesAcrossNotebooks(
 
     // Full-column capture (via cursorRowToCv) so ALL columnar payload — page.refId (template),
     // layer.text/flags, template.text/blob, strokes' binary blob — copies verbatim across notebooks.
-    data class SourcePage(val page: ContentValues, val layer: ContentValues, val children: List<ContentValues>)
+    data class SourcePage(
+        val page: ContentValues, val layer: ContentValues,
+        val layerId: String, val descendants: List<SubtreeNode>,
+    )
 
     var sourceDb: SoilRawDb? = null
     var destDb: SoilRawDb? = null
@@ -804,15 +838,7 @@ suspend fun copyPagesAcrossNotebooks(
                 "SELECT * FROM notebook WHERE id = ? LIMIT 1", arrayOf(layerId)
             ).use { c -> if (c.moveToFirst()) cursorRowToCv(c) else null } ?: return@mapNotNull null
 
-            val children: List<ContentValues> = sourceDb.rawQuery(
-                "SELECT * FROM notebook WHERE parentId = ? AND deletedAt IS NULL ORDER BY `order` ASC",
-                arrayOf(layerId)
-            ).use { c ->
-                val list = mutableListOf<ContentValues>()
-                while (c.moveToNext()) list.add(cursorRowToCv(c))
-                list
-            }
-            SourcePage(page, layer, children)
+            SourcePage(page, layer, layerId, collectDescendants(sourceDb, layerId))
         }
         if (sources.isEmpty()) return@withContext null
 
@@ -914,15 +940,9 @@ suspend fun copyPagesAcrossNotebooks(
                     putNull("deletedAt")
                 })
 
-                for (obj in src.children) {
-                    val cv = ContentValues(obj)   // full columnar copy (incl. binary blob), order preserved
-                    cv.put("id",        UUID.randomUUID().toString())
-                    cv.put("parentId",  newLayerId)
-                    cv.put("createdAt", now)
-                    cv.put("updatedAt", now)
-                    cv.putNull("deletedAt")
-                    destDb.insert("notebook", null, cv)
-                }
+                // Copy the entire layer subtree (direct children + composite grandchildren) into the
+                // destination, remapping every parentId through fresh ids.
+                writeDescendants(destDb, src.descendants, src.layerId, newLayerId, now)
             }
 
             destDb.setTransactionSuccessful()
