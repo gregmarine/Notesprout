@@ -28,7 +28,7 @@ import com.notesprout.android.data.toShapeRender
 import com.notesprout.android.data.toTextRender
 import com.notesprout.android.data.LineStyle
 import com.notesprout.android.data.LinkRender
-import com.notesprout.android.data.toLinkRender
+import com.notesprout.android.data.loadLinksSubtree
 import com.notesprout.android.data.pageData
 import com.notesprout.android.data.templateDataOrNull
 import com.notesprout.android.data.notebookMetadata
@@ -529,7 +529,7 @@ object NotebookExporter {
         } else emptyList()
 
         val links: List<LinkRender> = if (layer != null) {
-            dao.getLinkObjectsForLayer(layer.id).mapNotNull { it.toLinkRender(density) }
+            dao.loadLinksSubtree(layer.id, density)
         } else emptyList()
 
         val stickyNotes: List<StickyNoteRender> = if (layer != null) {

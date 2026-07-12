@@ -75,7 +75,10 @@ import com.notesprout.android.data.updateColumns
 import com.notesprout.android.data.LineStyle
 import com.notesprout.android.data.LinkChrome
 import com.notesprout.android.data.LinkRender
-import com.notesprout.android.data.toLinkRender
+import com.notesprout.android.data.insertLinkSubtree
+import com.notesprout.android.data.loadLinkSubtree
+import com.notesprout.android.data.loadLinksSubtree
+import com.notesprout.android.data.replaceLinkSubtree
 import com.notesprout.android.data.translate
 import com.notesprout.android.data.LinkTarget
 import com.notesprout.android.data.toEmbeddedLine
@@ -1946,7 +1949,7 @@ class NotebookActivity : AppCompatActivity() {
                                 db.notebookDao().updateColumns(lineObj.toRow("", 0, now, now, density))
                             }
                             for (link in movedLinks) {
-                                db.notebookDao().updateColumns(link.toRow("", 0, now, now, density))
+                                db.notebookDao().replaceLinkSubtree(link, now, density)
                             }
                             for (note in movedStickyNotes) {
                                 db.notebookDao().replaceStickyNoteSubtree(note, now, density)
@@ -4231,8 +4234,7 @@ class NotebookActivity : AppCompatActivity() {
     private suspend fun loadLinksFromDb(db: SoilDatabase, layerId: String): List<LinkRender> {
         if (layerId.isEmpty()) return emptyList()
         val density = resources.displayMetrics.density
-        val rows = db.notebookDao().getLinkObjectsForLayer(layerId)
-        return rows.mapNotNull { row -> row.toLinkRender(density) }
+        return db.notebookDao().loadLinksSubtree(layerId, density)
     }
 
     private suspend fun loadStickyNotesFromDb(db: SoilDatabase, layerId: String): List<StickyNoteRender> {
@@ -5411,7 +5413,7 @@ class NotebookActivity : AppCompatActivity() {
                         dao.insertOrIgnore(lineObj.toRow(layerId, 0, now, now, density))
                     }
                     newLinks.forEach { link ->
-                        dao.insertOrIgnore(link.toRow(layerId, 0, now, now, density))
+                        dao.insertLinkSubtree(link, layerId, 0, now, now, density)
                     }
                     newStickyNotes.forEach { note ->
                         dao.insertStickyNoteSubtree(note, layerId, 0, now, now, density)
@@ -5585,7 +5587,7 @@ class NotebookActivity : AppCompatActivity() {
                         dao.insertOrIgnore(lineObj.toRow(layerId, 0, now, now, density))
                     }
                     newLinks.forEach { link ->
-                        dao.insertOrIgnore(link.toRow(layerId, 0, now, now, density))
+                        dao.insertLinkSubtree(link, layerId, 0, now, now, density)
                     }
                     newStickyNotes.forEach { note ->
                         dao.insertStickyNoteSubtree(note, layerId, 0, now, now, density)
@@ -6634,7 +6636,7 @@ class NotebookActivity : AppCompatActivity() {
             val dao = db.notebookDao()
             originalStrokeIds.forEach { dao.softDeleteById(it, deletedAt) }
             val now = System.currentTimeMillis()
-            dao.insertObject(newLink.toRow(layerId, 0, now, now, density))
+            dao.insertLinkSubtree(newLink, layerId, 0, now, now, density)
         }
         noteContentEdit(db, pageId)
 
@@ -6743,7 +6745,7 @@ class NotebookActivity : AppCompatActivity() {
             val dao = db.notebookDao()
             (originalStrokeIds + originalHeadingIds + originalTextIds + originalLineIds + originalShapeIds).forEach { dao.softDeleteById(it, deletedAt) }
             val now = System.currentTimeMillis()
-            dao.insertObject(newLink.toRow(layerId, 0, now, now, density))
+            dao.insertLinkSubtree(newLink, layerId, 0, now, now, density)
         }
         noteContentEdit(db, pageId)
 
@@ -6897,9 +6899,8 @@ class NotebookActivity : AppCompatActivity() {
         val db     = soilDatabase ?: return
         val pageId = currentPageId.takeIf { it.isNotEmpty() } ?: return
         val dao    = db.notebookDao()
-        val row    = dao.getObjectById(linkId) ?: return
         val density = resources.displayMetrics.density
-        val link   = row.toLinkRender(density) ?: return
+        val link   = dao.loadLinkSubtree(linkId, density) ?: return
         val oldChrome = link.chrome
         val oldTarget = link.target
 
@@ -6914,7 +6915,7 @@ class NotebookActivity : AppCompatActivity() {
 
         val updatedLink = link.copy(chrome = newChrome, target = newTarget, textObjects = updatedTextObjects)
         val now = System.currentTimeMillis()
-        dao.updateColumns(updatedLink.toRow("", 0, 0L, now, density))
+        db.withTransaction { dao.replaceLinkSubtree(updatedLink, now, density) }
         noteContentEdit(db, pageId)
 
         withContext(Dispatchers.Main) {
@@ -9298,7 +9299,7 @@ class NotebookActivity : AppCompatActivity() {
                         dao.updateColumns(lineObj.toRow("", 0, ts, ts, density))
                     }
                     for (link in targetLinks) {
-                        dao.updateColumns(link.toRow("", 0, ts, ts, density))
+                        dao.replaceLinkSubtree(link, ts, density)
                     }
                 }
                 if (targetLinks.isNotEmpty()) noteContentEdit(db, action.pageId)
@@ -9902,7 +9903,7 @@ class NotebookActivity : AppCompatActivity() {
                         dao.updateColumns(lineObj.toRow("", 0, now, now, density))
                     }
                     for (link in targetLinks) {
-                        dao.updateColumns(link.toRow("", 0, now, now, density))
+                        dao.replaceLinkSubtree(link, now, density)
                     }
                     for (note in targetStickyNotes) {
                         dao.replaceStickyNoteSubtree(note, now, density)
@@ -10070,11 +10071,11 @@ class NotebookActivity : AppCompatActivity() {
 
             is UndoRedoAction.LinkEdited -> withContext(Dispatchers.IO) {
                 val density = resources.displayMetrics.density
-                val link = dao.getObjectById(action.linkId)?.toLinkRender(density)
+                val link = dao.loadLinkSubtree(action.linkId, density)
                 if (link != null) {
                     val chrome = if (isUndo) action.oldChrome else action.newChrome
                     val target = if (isUndo) action.oldTarget else action.newTarget
-                    dao.updateColumns(link.copy(chrome = chrome, target = target).toRow("", 0, 0L, now, density))
+                    db.withTransaction { dao.replaceLinkSubtree(link.copy(chrome = chrome, target = target), now, density) }
                 }
                 noteContentEdit(db, action.pageId)
             }

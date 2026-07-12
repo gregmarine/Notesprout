@@ -449,6 +449,43 @@ suspend fun NotebookDao.replaceStickyNoteSubtree(note: StickyNoteRender, now: Lo
     if (rows.size > 1) insertObjects(rows.drop(1))
 }
 
+// ── Phase 2c: link subtree persistence (DAO helpers) ─────────────────────────
+// Same shape as the sticky helpers, but link content is PAGE-ABSOLUTE: LinkRender.translate already
+// offsets every child's coords, so a moved link's render model carries the new coordinates and
+// replaceLinkSubtree just rewrites the children. Reading stays format-agnostic (legacy blob links
+// fall through assembleLinkRender).
+
+/** Load every link on [layerId] as a full render model, batching the child subtree in ≤2 queries. */
+suspend fun NotebookDao.loadLinksSubtree(layerId: String, density: Float): List<LinkRender> {
+    val parents = getLinkObjectsForLayer(layerId)
+    if (parents.isEmpty()) return emptyList()
+    val childrenByParent = loadSubtreeMap(parents.map { it.id })
+    return parents.mapNotNull { p -> assembleLinkRender(p, density) { childrenByParent[it].orEmpty() } }
+}
+
+/** Load a single link (by id) as a full render model — for tap-to-follow and undo/redo. */
+suspend fun NotebookDao.loadLinkSubtree(linkId: String, density: Float): LinkRender? {
+    val parent = getObjectById(linkId) ?: return null
+    val childrenByParent = loadSubtreeMap(listOf(linkId))
+    return assembleLinkRender(parent, density) { childrenByParent[it].orEmpty() }
+}
+
+/** Insert a new link (parent + child subtree). Caller supplies a fresh id on the render model. */
+suspend fun NotebookDao.insertLinkSubtree(
+    link: LinkRender, layerId: String, order: Int, createdAt: Long, updatedAt: Long, density: Float,
+) = insertObjects(link.toRows(layerId, order, createdAt, updatedAt, density))
+
+/**
+ * Re-persist an existing link (chrome/target edit, or a move that translated its page-absolute
+ * children): update the parent columns (clearing any legacy blob) and rebuild the child subtree.
+ */
+suspend fun NotebookDao.replaceLinkSubtree(link: LinkRender, now: Long, density: Float) {
+    val rows = link.toRows("", 0, now, now, density)  // parentId/order placeholders (updateColumns ignores them)
+    updateColumns(rows[0])
+    hardDeleteDescendants(link.id)
+    if (rows.size > 1) insertObjects(rows.drop(1))
+}
+
 /** Hard-delete every descendant (children, grandchildren, …) of [rootId]. Depth-bounded in practice. */
 suspend fun NotebookDao.hardDeleteDescendants(rootId: String) {
     val kids = childIdsIncludingDeleted(rootId)
