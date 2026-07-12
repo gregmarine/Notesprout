@@ -738,12 +738,13 @@ object NotebookExporter {
         drawShapeList(shapeObjects)
 
         // Links render their embedded content only — NO chrome (per Session 5 / export rule).
-        // Mirrors the view's drawLinkObject order (headings → text → lines → strokes), after the
-        // page's own lines and before its top-level strokes.
+        // Mirrors the view's drawLinkObject order (headings → text → lines → shapes → strokes), after
+        // the page's own lines and before its top-level strokes.
         for (link in links) {
             drawHeadingList(link.headings)
             drawTextList(link.textObjects)
             drawLineList(link.lines)
+            drawShapeList(link.shapes)
             drawStrokeList(link.strokes)
         }
 

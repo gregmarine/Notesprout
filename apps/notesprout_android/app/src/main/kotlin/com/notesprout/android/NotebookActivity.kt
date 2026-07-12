@@ -87,6 +87,7 @@ import com.notesprout.android.data.TYPE_LINK
 import com.notesprout.android.data.TYPE_SHAPE
 import com.notesprout.android.data.TYPE_STICKY_NOTE
 import com.notesprout.android.data.TYPE_TEXT
+import com.notesprout.android.data.ShapeRender
 import com.notesprout.android.data.StickyNoteRender
 import com.notesprout.android.data.toStickyNoteObject
 import com.notesprout.android.data.toStickyNoteRender
@@ -247,6 +248,7 @@ class NotebookActivity : AppCompatActivity() {
     private var pendingLinkHeadings:    List<HeadingStroke> = emptyList()
     private var pendingLinkTexts:       List<TextRender>    = emptyList()
     private var pendingLinkLines:       List<LineRender>    = emptyList()
+    private var pendingLinkShapes:      List<ShapeRender>   = emptyList()
     private var pendingLinkEditId:      String?             = null
     private var pendingLinkStrokesOnly: Boolean             = false
 
@@ -682,11 +684,13 @@ class NotebookActivity : AppCompatActivity() {
         val headings    = pendingLinkHeadings
         val texts       = pendingLinkTexts
         val lines       = pendingLinkLines
+        val shapes      = pendingLinkShapes
         val strokesOnly = pendingLinkStrokesOnly
         pendingLinkEditId      = null
         pendingLinkStrokesOnly = false
         pendingLinkStrokes = emptyList(); pendingLinkHeadings = emptyList()
         pendingLinkTexts = emptyList();   pendingLinkLines = emptyList()
+        pendingLinkShapes = emptyList()
 
         if (result.resultCode != RESULT_OK) return@registerForActivityResult
         val data = result.data ?: return@registerForActivityResult
@@ -717,8 +721,8 @@ class NotebookActivity : AppCompatActivity() {
                 updateLink(editId, chrome, target, newText = resultText)
             } else if (strokesOnly && convertToText && strokes.isNotEmpty()) {
                 createLinkFromStrokesConvertingToText(strokes, chrome, target)
-            } else if (strokes.isNotEmpty() || headings.isNotEmpty() || texts.isNotEmpty() || lines.isNotEmpty()) {
-                createLinkFromSelection(strokes, headings, texts, lines, chrome, target)
+            } else if (strokes.isNotEmpty() || headings.isNotEmpty() || texts.isNotEmpty() || lines.isNotEmpty() || shapes.isNotEmpty()) {
+                createLinkFromSelection(strokes, headings, texts, lines, shapes, chrome, target)
             }
         }
     }
@@ -2106,12 +2110,14 @@ class NotebookActivity : AppCompatActivity() {
             val headings = drawingView.getHeadings().filter { it.id in ids }
             val texts    = drawingView.getTextObjects().filter { it.id in ids }
             val lines    = drawingView.getLineObjects().filter { it.id in ids }
-            if (strokes.isEmpty() && headings.isEmpty() && texts.isEmpty() && lines.isEmpty()) return@setOnClickListener
+            val shapes   = drawingView.getShapeObjects().filter { it.id in ids }
+            if (strokes.isEmpty() && headings.isEmpty() && texts.isEmpty() && lines.isEmpty() && shapes.isEmpty()) return@setOnClickListener
             // Stash the selection and open the target picker; the result handler creates the link.
             pendingLinkEditId = null
             pendingLinkStrokes = strokes; pendingLinkHeadings = headings
             pendingLinkTexts = texts;     pendingLinkLines = lines
-            pendingLinkStrokesOnly = strokes.isNotEmpty() && headings.isEmpty() && texts.isEmpty() && lines.isEmpty()
+            pendingLinkShapes = shapes
+            pendingLinkStrokesOnly = strokes.isNotEmpty() && headings.isEmpty() && texts.isEmpty() && lines.isEmpty() && shapes.isEmpty()
             launchLinkPicker(initialChrome = null, initialTarget = null, strokesOnly = pendingLinkStrokesOnly)
         }
 
@@ -2120,6 +2126,7 @@ class NotebookActivity : AppCompatActivity() {
             pendingLinkEditId = link.id
             pendingLinkStrokes = emptyList(); pendingLinkHeadings = emptyList()
             pendingLinkTexts = emptyList();   pendingLinkLines = emptyList()
+            pendingLinkShapes = emptyList()
             val singleText = link.textObjects.singleOrNull()?.text?.takeIf {
                 link.strokes.isEmpty() && link.headings.isEmpty() && link.lines.isEmpty()
             }
@@ -6685,13 +6692,15 @@ class NotebookActivity : AppCompatActivity() {
         selectedHeadings: List<HeadingStroke>,
         selectedTexts: List<TextRender>,
         selectedLines: List<LineRender>,
+        selectedShapes: List<ShapeRender>,
         chrome: LinkChrome,
         target: LinkTarget,
     ) {
         val db      = soilDatabase ?: return
         val layerId = currentLayerId.takeIf { it.isNotEmpty() } ?: return
         val pageId  = currentPageId.takeIf  { it.isNotEmpty() } ?: return
-        if (selectedStrokes.isEmpty() && selectedHeadings.isEmpty() && selectedTexts.isEmpty() && selectedLines.isEmpty()) return
+        if (selectedStrokes.isEmpty() && selectedHeadings.isEmpty() && selectedTexts.isEmpty() &&
+            selectedLines.isEmpty() && selectedShapes.isEmpty()) return
 
         val density = resources.displayMetrics.density
 
@@ -6702,6 +6711,7 @@ class NotebookActivity : AppCompatActivity() {
         selectedHeadings.forEach { unionBox.union(it.boundingBox) }
         selectedTexts.forEach { unionBox.union(it.boundingBox) }
         selectedLines.forEach { unionBox.union(it.boundingBox) }
+        selectedShapes.forEach { unionBox.union(it.boundingBox) }
         val linkContentPadPx = 6f * density
         unionBox.inset(-linkContentPadPx, -linkContentPadPx)
         // Extra right-side room for the link icon (14dp icon + 3dp inner margin).
@@ -6713,20 +6723,22 @@ class NotebookActivity : AppCompatActivity() {
         val embeddedHeadings = selectedHeadings.map { it.copy(id = UUID.randomUUID().toString(), boundingBox = RectF(it.boundingBox)) }
         val embeddedTexts = selectedTexts.map { it.copy(id = UUID.randomUUID().toString(), boundingBox = RectF(it.boundingBox)) }
         val embeddedLineRenders = selectedLines.map { it.copy(id = UUID.randomUUID().toString(), boundingBox = RectF(it.boundingBox)) }
+        val embeddedShapes = selectedShapes.map { it.copy(id = UUID.randomUUID().toString(), boundingBox = RectF(it.boundingBox)) }
 
         val originalStrokeIds  = selectedStrokes.map { it.id }
         val originalHeadingIds = selectedHeadings.map { it.id }
         val originalTextIds    = selectedTexts.map { it.id }
         val originalLineIds    = selectedLines.map { it.id }
+        val originalShapeIds   = selectedShapes.map { it.id }
 
         val deletedAt = System.currentTimeMillis()
         val linkId    = UUID.randomUUID().toString()
 
-        val newLink = LinkRender(linkId, RectF(unionBox), target, chrome, embeddedStrokes, embeddedHeadings, embeddedTexts, embeddedLineRenders)
+        val newLink = LinkRender(linkId, RectF(unionBox), target, chrome, embeddedStrokes, embeddedHeadings, embeddedTexts, embeddedLineRenders, embeddedShapes)
 
         db.withTransaction {
             val dao = db.notebookDao()
-            (originalStrokeIds + originalHeadingIds + originalTextIds + originalLineIds).forEach { dao.softDeleteById(it, deletedAt) }
+            (originalStrokeIds + originalHeadingIds + originalTextIds + originalLineIds + originalShapeIds).forEach { dao.softDeleteById(it, deletedAt) }
             val now = System.currentTimeMillis()
             dao.insertObject(newLink.toRow(layerId, 0, now, now, density))
         }
@@ -6737,17 +6749,20 @@ class NotebookActivity : AppCompatActivity() {
             val headingSet = originalHeadingIds.toSet()
             val textSet    = originalTextIds.toSet()
             val lineSet    = originalLineIds.toSet()
+            val shapeSet   = originalShapeIds.toSet()
 
             val updatedStrokes  = drawingView.getStrokes().filter { it.id !in strokeSet }
             val updatedHeadings = drawingView.getHeadings().filter { it.id !in headingSet }
             val updatedTexts    = drawingView.getTextObjects().filter { it.id !in textSet }
             val updatedLines    = drawingView.getLineObjects().filter { it.id !in lineSet }
+            val updatedShapes   = drawingView.getShapeObjects().filter { it.id !in shapeSet }
             val updatedLinks    = drawingView.getLinks() + newLink
             persistedStrokeIds.removeAll(strokeSet)
 
             drawingView.loadHeadings(updatedHeadings)
             drawingView.loadTextObjects(updatedTexts)
             drawingView.loadLineObjects(updatedLines)
+            drawingView.loadShapeObjects(updatedShapes)
             drawingView.loadLinks(updatedLinks)
 
             undoRedoManager.push(UndoRedoAction.LinkCreated(
@@ -6759,6 +6774,7 @@ class NotebookActivity : AppCompatActivity() {
                 originalHeadingIds = originalHeadingIds,
                 originalTextIds   = originalTextIds,
                 originalLineIds   = originalLineIds,
+                originalShapeIds  = originalShapeIds,
                 link              = newLink,
             ))
             updateUndoRedoButtons()
@@ -10026,7 +10042,7 @@ class NotebookActivity : AppCompatActivity() {
             }
 
             is UndoRedoAction.LinkCreated -> withContext(Dispatchers.IO) {
-                val originalIds = action.originalStrokeIds + action.originalHeadingIds + action.originalTextIds + action.originalLineIds
+                val originalIds = action.originalStrokeIds + action.originalHeadingIds + action.originalTextIds + action.originalLineIds + action.originalShapeIds
                 if (isUndo) {
                     dao.softDeleteById(action.linkId, now)
                     originalIds.forEach { dao.restoreById(it, now) }

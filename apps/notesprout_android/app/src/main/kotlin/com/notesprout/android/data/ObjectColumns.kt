@@ -213,8 +213,7 @@ fun LinkRender.toRow(
 
 /**
  * Decode a `link` row to a render-time [LinkRender] (columns+blob when present, else legacy JSON).
- * Mirrors the historical readers: embedded strokes/headings/text/lines are inflated; embedded
- * shapes are intentionally NOT surfaced (unchanged from the prior load path).
+ * Embedded strokes/headings/text/lines/shapes are all inflated (shapes are valid linkables).
  */
 fun NotebookObject.toLinkRender(density: Float): LinkRender? {
     val box = boxOrLegacy() ?: return null
@@ -227,6 +226,7 @@ fun NotebookObject.toLinkRender(density: Float): LinkRender? {
         id = id, boundingBox = box, target = lo.target, chrome = lo.chrome,
         strokes = lo.strokes, headings = lo.headings, textObjects = lo.textObjects,
         lines = lo.lines.map { it.toLineRender(density) },
+        shapes = lo.shapes.map { it.toShapeRender(density) },
     )
 }
 

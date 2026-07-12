@@ -669,6 +669,7 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
         }
         for (textObj in link.textObjects) drawTextObject(canvas, textObj, widthPx)
         for (lineObj in link.lines) drawLineObject(canvas, lineObj)
+        for (shape in link.shapes) drawShapeObject(canvas, shape)
         for (liveStroke in link.strokes) {
             val pts = liveStroke.points; if (pts.size < 2) continue
             val path = Path()
