@@ -65,10 +65,11 @@ object NotebookCompactor {
         val strokeBlobRows: Int = 0,
         val compositeRows: Int = 0,
         val orphanRows: Int = 0,
+        val structuralRows: Int = 0,
     ) {
         val changed: Boolean
             get() = tsRows > 0 || imageRows > 0 || deadStrokeRows > 0 || snapshotRows > 0 ||
-                coverRows > 0 || strokeBlobRows > 0 || compositeRows > 0 || orphanRows > 0
+                coverRows > 0 || strokeBlobRows > 0 || compositeRows > 0 || orphanRows > 0 || structuralRows > 0
     }
 
     /**
@@ -177,12 +178,34 @@ object NotebookCompactor {
             }
         }
 
+        // Pass 9 — convert legacy structural + leaf rows (page/layer/notebook/template/shape/line) to
+        // the Phase 2b/1 columnar form, so an imported-from-stable notebook becomes fully JSON-free.
+        // Each write keeps the row's own `updatedAt`; page/template keep their size in boundingBox.
+        var structuralRows = 0
+        val legacyStructural = dao.legacyStructuralRows()
+        if (legacyStructural.isNotEmpty()) {
+            db.withTransaction {
+                for (row in legacyStructural) {
+                    when (row.type) {
+                        "page"     -> dao.updatePageTemplate(row.id, row.pageData().template, row.updatedAt)
+                        "layer"    -> { val (t, f) = layerColumnsFromLegacy(row.data); dao.updateLayerColumnarKeepingTimestamp(row.id, t, f, row.updatedAt) }
+                        "notebook" -> dao.upsertNotebookObject(row.notebookMetadata().writeOnto(row, row.updatedAt))
+                        "template" -> { val td = row.templateDataOrNull() ?: continue; dao.updateTemplateColumnarKeepingTimestamp(row.id, td.name, templateImageBlob(td.image), row.updatedAt) }
+                        "shape"    -> dao.updateColumns((row.toShapeRender(density) ?: continue).toRow("", 0, 0L, row.updatedAt, density))
+                        "line"     -> dao.updateColumns((row.toLineRender(density) ?: continue).toRow("", 0, 0L, row.updatedAt, density))
+                        else       -> continue
+                    }
+                    structuralRows++
+                }
+            }
+        }
+
         if (tsRows.isNotEmpty() || imageRows > 0 || deadStrokeRows > 0 || snapshotRows > 0 ||
-            coverRows > 0 || strokeBlobRows > 0 || compositeRows > 0 || orphanRows > 0) {
+            coverRows > 0 || strokeBlobRows > 0 || compositeRows > 0 || orphanRows > 0 || structuralRows > 0) {
             val raw: SupportSQLiteDatabase = db.openHelper.writableDatabase
             raw.execSQL("VACUUM")
         }
-        return Result(tsRows.size, imageRows, deadStrokeRows, snapshotRows, coverRows, strokeBlobRows, compositeRows, orphanRows)
+        return Result(tsRows.size, imageRows, deadStrokeRows, snapshotRows, coverRows, strokeBlobRows, compositeRows, orphanRows, structuralRows)
     }
 
     /**

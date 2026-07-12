@@ -468,6 +468,22 @@ interface NotebookDao {
      */
     @Query("SELECT DISTINCT p.id FROM notebook p JOIN notebook c ON c.parentId = p.id WHERE p.type IN ('heading','text') AND p.text IS NOT NULL AND p.deletedAt IS NULL")
     suspend fun recognizedCompositeParentIdsWithChildren(): List<String>
+
+    /**
+     * Legacy structural/leaf rows (page/layer/notebook/template/shape/line) still storing their
+     * payload as `data` JSON. [NotebookCompactor] converts these to the Phase 2b/1 columnar form on
+     * seal. Self-limiting: once converted a row has data = '' and drops out of the scan.
+     */
+    @Query("SELECT * FROM notebook WHERE type IN ('page','layer','notebook','template','shape','line') AND data <> '' AND deletedAt IS NULL")
+    suspend fun legacyStructuralRows(): List<NotebookObject>
+
+    /** Columnar layer write keeping [NotebookObject.updatedAt] + boundingBox: label→text, flags. */
+    @Query("UPDATE notebook SET data = '', text = :text, flags = :flags, updatedAt = :updatedAt WHERE id = :id")
+    suspend fun updateLayerColumnarKeepingTimestamp(id: String, text: String, flags: Int, updatedAt: Long)
+
+    /** Columnar template write keeping [NotebookObject.updatedAt] + boundingBox: name→text, image→blob. */
+    @Query("UPDATE notebook SET data = '', text = :text, blob = :blob, updatedAt = :updatedAt WHERE id = :id")
+    suspend fun updateTemplateColumnarKeepingTimestamp(id: String, text: String, blob: ByteArray?, updatedAt: Long)
 }
 
 /** Minimal id/data projection for [NotebookDao.strokeRowsWithLegacyTimestamp]. */

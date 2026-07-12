@@ -573,6 +573,18 @@ const val LAYER_FLAG_LOCKED = 1
 const val LAYER_FLAG_VISIBLE = 2
 const val LAYER_FLAGS_DEFAULT = LAYER_FLAG_VISIBLE
 
+@kotlinx.serialization.Serializable
+private data class LayerData(val label: String = "Content", val isLocked: Boolean = false, val isVisible: Boolean = true)
+
+/** Decode a legacy layer `data` JSON into columnar form: (label→text, isLocked/isVisible→flags). */
+fun layerColumnsFromLegacy(dataJson: String): Pair<String, Int> {
+    val ld = runCatching { compositeJson.decodeFromString(LayerData.serializer(), dataJson) }.getOrDefault(LayerData())
+    var flags = 0
+    if (ld.isLocked) flags = flags or LAYER_FLAG_LOCKED
+    if (ld.isVisible) flags = flags or LAYER_FLAG_VISIBLE
+    return ld.label to flags
+}
+
 /**
  * Page config. A columnar page keeps its size in the `boundingBox` column (`{0,0,w,h}`, untouched so
  * raw-SQL dimension readers still work) and moves only the template id into `refId`; falls back to the
