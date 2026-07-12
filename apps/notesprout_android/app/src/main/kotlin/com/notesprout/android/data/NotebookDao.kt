@@ -381,6 +381,24 @@ interface NotebookDao {
      */
     @Query("UPDATE notebook SET data = :data WHERE id = :id")
     suspend fun rewriteObjectDataKeepingTimestamp(id: String, data: String)
+
+    // ── Lazy stroke-format conversion (data-model-optimization Phase 1) ─────────
+
+    /**
+     * Legacy stroke rows still stored as JSON (no binary [NotebookObject.blob] yet). Self-limiting:
+     * once converted, `blob` is non-null and the row drops out of the scan, so [NotebookCompactor]
+     * can run this on every seal. The `LIKE` keeps an already-converted notebook's scan cheap.
+     */
+    @Query("SELECT id, data FROM notebook WHERE type = 'stroke' AND blob IS NULL AND data LIKE '%\"points\":%'")
+    suspend fun legacyStrokeRowsToConvert(): List<StrokeRowData>
+
+    /**
+     * Convert a stroke row to the binary format — write [blob] + colour/width columns, clear the
+     * legacy `data`/`boundingBox` — WITHOUT touching [NotebookObject.updatedAt]. A format change, not a
+     * content edit, so (like the other compactor passes) the file is not re-flagged for backup.
+     */
+    @Query("UPDATE notebook SET blob = :blob, color = :color, strokeWidth = :strokeWidth, data = '', boundingBox = '' WHERE id = :id")
+    suspend fun convertStrokeToBlobKeepingTimestamp(id: String, blob: ByteArray, color: String, strokeWidth: Float)
 }
 
 /** Minimal id/data projection for [NotebookDao.strokeRowsWithLegacyTimestamp]. */

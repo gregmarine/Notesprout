@@ -1,6 +1,7 @@
 package com.notesprout.android.data
 
 import android.util.Base64
+import androidx.room.withTransaction
 import androidx.sqlite.db.SupportSQLiteDatabase
 import com.notesprout.android.core.ImageCodec
 import com.notesprout.android.data.index.NotebookObject
@@ -61,9 +62,11 @@ object NotebookCompactor {
         val deadStrokeRows: Int = 0,
         val snapshotRows: Int = 0,
         val coverRows: Int = 0,
+        val strokeBlobRows: Int = 0,
     ) {
         val changed: Boolean
-            get() = tsRows > 0 || imageRows > 0 || deadStrokeRows > 0 || snapshotRows > 0 || coverRows > 0
+            get() = tsRows > 0 || imageRows > 0 || deadStrokeRows > 0 || snapshotRows > 0 ||
+                coverRows > 0 || strokeBlobRows > 0
     }
 
     /**
@@ -120,11 +123,31 @@ object NotebookCompactor {
             dao.rewriteObjectDataKeepingTimestamp(nbRow.id, NotebookMetadata.fromJson(nbRow.id, nbRow.data).toJson())
         }
 
-        if (tsRows.isNotEmpty() || imageRows > 0 || deadStrokeRows > 0 || snapshotRows > 0 || coverRows > 0) {
+        // Pass 6 — convert legacy JSON stroke rows to the binary blob format (data-model-optimization
+        // Phase 1). This is the lazy migration: a legacy notebook shrinks (~5×) on its next close.
+        // Self-limiting (blob IS NULL filter) and not a content edit, so `updatedAt` is preserved.
+        // Batched in one transaction — the first close of a big legacy notebook can convert ~10k rows.
+        var strokeBlobRows = 0
+        val legacyStrokes = dao.legacyStrokeRowsToConvert()
+        if (legacyStrokes.isNotEmpty()) {
+            db.withTransaction {
+                for (r in legacyStrokes) {
+                    val sd = try { StrokeData.fromJson(r.data) } catch (e: Exception) { continue }
+                    if (sd.points.isEmpty()) continue
+                    dao.convertStrokeToBlobKeepingTimestamp(
+                        r.id, LiveStroke.packPoints(sd.toPointFs()), sd.color, sd.strokeWidth,
+                    )
+                    strokeBlobRows++
+                }
+            }
+        }
+
+        if (tsRows.isNotEmpty() || imageRows > 0 || deadStrokeRows > 0 || snapshotRows > 0 ||
+            coverRows > 0 || strokeBlobRows > 0) {
             val raw: SupportSQLiteDatabase = db.openHelper.writableDatabase
             raw.execSQL("VACUUM")
         }
-        return Result(tsRows.size, imageRows, deadStrokeRows, snapshotRows, coverRows)
+        return Result(tsRows.size, imageRows, deadStrokeRows, snapshotRows, coverRows, strokeBlobRows)
     }
 
     /**
