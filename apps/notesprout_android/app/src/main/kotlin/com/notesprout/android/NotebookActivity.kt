@@ -3977,10 +3977,11 @@ class NotebookActivity : AppCompatActivity() {
         // notebook is converted the scans find nothing. touchNotebook() below flags the shrunk file
         // for backup.
         runCatching {
-            val r = NotebookCompactor.compact(db)
+            val r = NotebookCompactor.compact(db, resources.displayMetrics.density)
             if (r.changed) Slog.d(TAG) {
                 "compaction sealed: ${r.tsRows} ts + ${r.imageRows} images→WEBP + ${r.deadStrokeRows} dead-stroke + " +
-                    "${r.snapshotRows} snapshots stripped + ${r.coverRows} cover rows deleted + VACUUM"
+                    "${r.snapshotRows} snapshots stripped + ${r.coverRows} cover rows deleted + " +
+                    "${r.compositeRows} composites→child-rows + ${r.orphanRows} orphan sweeps + VACUUM"
             }
         }.onFailure { Slog.d(TAG) { "compaction failed: ${it.message}" } }
         db.openHelper.writableDatabase.apply {

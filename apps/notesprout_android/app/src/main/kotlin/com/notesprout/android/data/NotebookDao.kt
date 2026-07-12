@@ -449,6 +449,25 @@ interface NotebookDao {
      */
     @Query("UPDATE notebook SET blob = :blob, color = :color, strokeWidth = :strokeWidth, data = '', boundingBox = '' WHERE id = :id")
     suspend fun convertStrokeToBlobKeepingTimestamp(id: String, blob: ByteArray, color: String, strokeWidth: Float)
+
+    // ── Lazy composite→child-row conversion (data-model-optimization Phase 2c) ──
+
+    /**
+     * Legacy composite rows (heading/text/link/sticky) that still carry their nested content inline —
+     * either a pre-columnar `data` JSON or the Phase-1/2b `zlib(JSON)` blob. [NotebookCompactor]
+     * converts these to child-row subtrees on seal. Self-limiting: once converted a composite has
+     * data = '' AND blob = NULL, so it drops out of this scan.
+     */
+    @Query("SELECT * FROM notebook WHERE type IN ('heading','text','link','sticky_note') AND (data <> '' OR blob IS NOT NULL) AND deletedAt IS NULL")
+    suspend fun legacyBlobCompositeRows(): List<NotebookObject>
+
+    /**
+     * Recognized heading/text parents (text != null) that still have child rows — the orphan strokes
+     * a fallback→recognized transition leaves behind (see [com.notesprout.android.data.replaceHeadingSubtree]).
+     * [NotebookCompactor] hard-deletes their descendants. Returns empty for a clean notebook.
+     */
+    @Query("SELECT DISTINCT p.id FROM notebook p JOIN notebook c ON c.parentId = p.id WHERE p.type IN ('heading','text') AND p.text IS NOT NULL AND p.deletedAt IS NULL")
+    suspend fun recognizedCompositeParentIdsWithChildren(): List<String>
 }
 
 /** Minimal id/data projection for [NotebookDao.strokeRowsWithLegacyTimestamp]. */

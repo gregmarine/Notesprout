@@ -63,17 +63,21 @@ object NotebookCompactor {
         val snapshotRows: Int = 0,
         val coverRows: Int = 0,
         val strokeBlobRows: Int = 0,
+        val compositeRows: Int = 0,
+        val orphanRows: Int = 0,
     ) {
         val changed: Boolean
             get() = tsRows > 0 || imageRows > 0 || deadStrokeRows > 0 || snapshotRows > 0 ||
-                coverRows > 0 || strokeBlobRows > 0
+                coverRows > 0 || strokeBlobRows > 0 || compositeRows > 0 || orphanRows > 0
     }
 
     /**
      * Strip legacy `ts` and re-encode PNG/lossless-WEBP images in a single `.soil`, then VACUUM once
-     * if anything changed. Runs its own DB work — call from `Dispatchers.IO`.
+     * if anything changed. Runs its own DB work — call from `Dispatchers.IO`. [density] is used only
+     * by the composite→child-row pass, and only to round-trip embedded line/shape dp values (the
+     * conversion is density-neutral, so any consistent value works).
      */
-    suspend fun compact(db: SoilDatabase): Result {
+    suspend fun compact(db: SoilDatabase, density: Float): Result {
         val dao = db.notebookDao()
 
         // Pass 1 — drop dead per-point ts from stroke rows.
@@ -142,12 +146,43 @@ object NotebookCompactor {
             }
         }
 
+        // Pass 7 — convert legacy composites (heading/text/link/sticky) that still hold their nested
+        // content inline (data JSON or zlib(JSON) blob) into child-row subtrees (Phase 2c). Reads via
+        // the format-agnostic renderers, re-persists via the subtree writers (which clear data + blob).
+        // `updatedAt` is preserved by passing the row's own timestamp — a format change, not an edit.
+        var compositeRows = 0
+        val legacyComposites = dao.legacyBlobCompositeRows()
+        if (legacyComposites.isNotEmpty()) {
+            db.withTransaction {
+                for (row in legacyComposites) {
+                    when (row.type) {
+                        TYPE_STICKY_NOTE -> dao.replaceStickyNoteSubtree(row.toStickyNoteRender(density) ?: continue, row.updatedAt, density)
+                        TYPE_LINK        -> dao.replaceLinkSubtree(row.toLinkRender(density) ?: continue, row.updatedAt, density)
+                        TYPE_HEADING     -> dao.replaceHeadingSubtree(row.toHeadingStroke() ?: continue, row.updatedAt)
+                        TYPE_TEXT        -> dao.replaceTextSubtree(row.toTextRender() ?: continue, row.updatedAt)
+                        else             -> continue
+                    }
+                    compositeRows++
+                }
+            }
+        }
+
+        // Pass 8 — sweep orphan stroke children left under a recognized heading/text by a
+        // fallback→recognized transition (the parent now reads from its text column and ignores them).
+        var orphanRows = 0
+        val orphanParents = dao.recognizedCompositeParentIdsWithChildren()
+        if (orphanParents.isNotEmpty()) {
+            db.withTransaction {
+                for (pid in orphanParents) { dao.hardDeleteDescendants(pid); orphanRows++ }
+            }
+        }
+
         if (tsRows.isNotEmpty() || imageRows > 0 || deadStrokeRows > 0 || snapshotRows > 0 ||
-            coverRows > 0 || strokeBlobRows > 0) {
+            coverRows > 0 || strokeBlobRows > 0 || compositeRows > 0 || orphanRows > 0) {
             val raw: SupportSQLiteDatabase = db.openHelper.writableDatabase
             raw.execSQL("VACUUM")
         }
-        return Result(tsRows.size, imageRows, deadStrokeRows, snapshotRows, coverRows, strokeBlobRows)
+        return Result(tsRows.size, imageRows, deadStrokeRows, snapshotRows, coverRows, strokeBlobRows, compositeRows, orphanRows)
     }
 
     /**

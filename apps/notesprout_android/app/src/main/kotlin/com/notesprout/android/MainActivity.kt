@@ -2322,7 +2322,7 @@ class MainActivity : AppCompatActivity() {
                     if (key != null) builder.openHelperFactory(com.notesprout.android.crypto.SoilCrypto.roomFactory(key))
                     val db = builder.build()
                     val result = try {
-                        NotebookCompactor.compact(db)
+                        NotebookCompactor.compact(db, resources.displayMetrics.density)
                     } finally { db.close() }
                     if (result.changed) {
                         compacted++
