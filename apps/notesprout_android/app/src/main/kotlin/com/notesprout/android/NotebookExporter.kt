@@ -18,8 +18,8 @@ import com.notesprout.android.core.BitmapDecode
 import com.notesprout.android.crypto.SoilCrypto
 import com.notesprout.android.core.markdown.TextObjectRenderer
 import com.notesprout.android.data.BoundingBox
-import com.notesprout.android.data.HeadingObject
 import com.notesprout.android.data.HeadingStroke
+import com.notesprout.android.data.toHeadingStroke
 import com.notesprout.android.data.LineObject
 import com.notesprout.android.data.LineOrientation
 import com.notesprout.android.data.LineRender
@@ -31,7 +31,6 @@ import com.notesprout.android.data.LinkObject
 import com.notesprout.android.data.LinkRender
 import com.notesprout.android.data.ShapeObject
 import com.notesprout.android.data.ShapeRender
-import com.notesprout.android.data.toLineRender
 import com.notesprout.android.data.LiveStroke
 import com.notesprout.android.notebook.ShapeGeometry
 import com.notesprout.android.data.NotebookDao
@@ -523,18 +522,7 @@ object NotebookExporter {
         val layer = dao.getLayerForPage(pageRow.id)
 
         val headings: List<HeadingStroke> = if (layer != null) {
-            dao.getHeadingsForLayer(layer.id).mapNotNull { row ->
-                val box = parseBoundingBox(row.boundingBox) ?: return@mapNotNull null
-                val ho = runCatching { HeadingObject.fromJson(row.data) }.getOrNull()
-                    ?: return@mapNotNull null
-                HeadingStroke(
-                    id = row.id,
-                    boundingBox = box,
-                    strokes = ho.strokes,
-                    recognizedText = ho.recognizedText,
-                    level = ho.level,
-                )
-            }
+            dao.getHeadingsForLayer(layer.id).mapNotNull { it.toHeadingStroke() }
         } else emptyList()
 
         val textObjects: List<TextRender> = if (layer != null) {
