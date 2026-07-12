@@ -4,6 +4,7 @@ import androidx.room.Database
 import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
+import com.notesprout.android.data.SoilSchema
 
 @Database(
     entities = [
@@ -13,7 +14,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         NotebookActivityEntity::class,
         EventEntity::class,
     ],
-    version = 5,
+    version = 6,
     exportSchema = false,
 )
 abstract class NotesproutDatabase : RoomDatabase() {
@@ -131,6 +132,22 @@ abstract class NotesproutDatabase : RoomDatabase() {
                 )
                 db.execSQL("CREATE INDEX IF NOT EXISTS index_events_recurring ON events(recurring)")
                 db.execSQL("CREATE INDEX IF NOT EXISTS index_events_deletedAt ON events(deletedAt)")
+            }
+        }
+
+        /**
+         * data-model-optimization Phase 2: widen the `scratchpad` + `calendar` tables with the same
+         * columnar columns + binary `blob` as the `.soil` `notebook` table (see [SoilSchema]).
+         * Additive nullable ALTERs — legacy rows keep their JSON in `data` and read via the
+         * format-agnostic mappings; new rows are columnar.
+         */
+        val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                for (table in listOf("scratchpad", "calendar")) {
+                    for ((name, sqlType) in SoilSchema.ADDED_COLUMNS_V4) {
+                        db.execSQL("ALTER TABLE $table ADD COLUMN \"$name\" $sqlType")
+                    }
+                }
             }
         }
 
