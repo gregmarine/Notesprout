@@ -68,9 +68,8 @@ import com.notesprout.android.data.toTextRender
 import com.notesprout.android.data.updateColumns
 import com.notesprout.android.data.LineStyle
 import com.notesprout.android.data.LinkChrome
-import com.notesprout.android.data.LinkObject
 import com.notesprout.android.data.LinkRender
-import com.notesprout.android.data.toLinkObject
+import com.notesprout.android.data.toLinkRender
 import com.notesprout.android.data.translate
 import com.notesprout.android.data.LinkTarget
 import com.notesprout.android.data.toEmbeddedLine
@@ -1934,10 +1933,7 @@ class NotebookActivity : AppCompatActivity() {
                                 db.notebookDao().updateColumns(lineObj.toRow("", 0, now, now, density))
                             }
                             for (link in movedLinks) {
-                                val bboxJson = link.boundingBox.toBoundingBoxJson()
-                                db.notebookDao().updateHeadingData(
-                                    link.id, bboxJson, link.toLinkObject(density).toJson(), now
-                                )
+                                db.notebookDao().updateColumns(link.toRow("", 0, now, now, density))
                             }
                             for (note in movedStickyNotes) {
                                 val bboxJson = note.boundingBox.toBoundingBoxJson()
@@ -4223,20 +4219,7 @@ class NotebookActivity : AppCompatActivity() {
         if (layerId.isEmpty()) return emptyList()
         val density = resources.displayMetrics.density
         val rows = db.notebookDao().getLinkObjectsForLayer(layerId)
-        return rows.mapNotNull { row ->
-            val box = row.parseBoundingBox() ?: return@mapNotNull null
-            val linkObj = runCatching { LinkObject.fromJson(row.data) }.getOrNull() ?: return@mapNotNull null
-            LinkRender(
-                id          = row.id,
-                boundingBox = box,
-                target      = linkObj.target,
-                chrome      = linkObj.chrome,
-                strokes     = linkObj.strokes,
-                headings    = linkObj.headings,
-                textObjects = linkObj.textObjects,
-                lines       = linkObj.lines.map { it.toLineRender(density) },
-            )
-        }
+        return rows.mapNotNull { row -> row.toLinkRender(density) }
     }
 
     private suspend fun loadStickyNotesFromDb(db: SoilDatabase, layerId: String): List<StickyNoteRender> {
@@ -5423,19 +5406,7 @@ class NotebookActivity : AppCompatActivity() {
                         dao.insertOrIgnore(lineObj.toRow(layerId, 0, now, now, density))
                     }
                     newLinks.forEach { link ->
-                        dao.insertOrIgnore(
-                            NotebookObject(
-                                id          = link.id,
-                                type        = TYPE_LINK,
-                                parentId    = layerId,
-                                boundingBox = link.boundingBox.toBoundingBoxJson(),
-                                sortOrder   = 0,
-                                createdAt   = now,
-                                updatedAt   = now,
-                                deletedAt   = null,
-                                data        = link.toLinkObject(density).toJson(),
-                            )
-                        )
+                        dao.insertOrIgnore(link.toRow(layerId, 0, now, now, density))
                     }
                     newStickyNotes.forEach { note ->
                         dao.insertOrIgnore(
@@ -5621,19 +5592,7 @@ class NotebookActivity : AppCompatActivity() {
                         dao.insertOrIgnore(lineObj.toRow(layerId, 0, now, now, density))
                     }
                     newLinks.forEach { link ->
-                        dao.insertOrIgnore(
-                            NotebookObject(
-                                id          = link.id,
-                                type        = TYPE_LINK,
-                                parentId    = layerId,
-                                boundingBox = link.boundingBox.toBoundingBoxJson(),
-                                sortOrder   = 0,
-                                createdAt   = now,
-                                updatedAt   = now,
-                                deletedAt   = null,
-                                data        = link.toLinkObject(density).toJson(),
-                            )
-                        )
+                        dao.insertOrIgnore(link.toRow(layerId, 0, now, now, density))
                     }
                     newStickyNotes.forEach { note ->
                         dao.insertOrIgnore(
@@ -6688,36 +6647,17 @@ class NotebookActivity : AppCompatActivity() {
         val deletedAt = System.currentTimeMillis()
         val linkId    = UUID.randomUUID().toString()
 
-        val linkObj = LinkObject(
-            target      = target,
-            chrome      = chrome,
-            strokes     = emptyList(),
-            headings    = emptyList(),
-            textObjects = listOf(embeddedText),
-            lines       = emptyList(),
-        )
+        val newLink = LinkRender(linkId, RectF(unionBox), target, chrome,
+            strokes = emptyList(), headings = emptyList(),
+            textObjects = listOf(embeddedText), lines = emptyList())
 
         db.withTransaction {
             val dao = db.notebookDao()
             originalStrokeIds.forEach { dao.softDeleteById(it, deletedAt) }
             val now = System.currentTimeMillis()
-            dao.insertObject(NotebookObject(
-                id          = linkId,
-                parentId    = layerId,
-                type        = TYPE_LINK,
-                boundingBox = unionBox.toBoundingBoxJson(),
-                sortOrder   = 0,
-                createdAt   = now,
-                updatedAt   = now,
-                deletedAt   = null,
-                data        = linkObj.toJson(),
-            ))
+            dao.insertObject(newLink.toRow(layerId, 0, now, now, density))
         }
         noteContentEdit(db, pageId)
-
-        val newLink = LinkRender(linkId, RectF(unionBox), target, chrome,
-            strokes = emptyList(), headings = emptyList(),
-            textObjects = listOf(embeddedText), lines = emptyList())
 
         withContext(Dispatchers.Main) {
             val strokeSet      = originalStrokeIds.toSet()
@@ -6813,34 +6753,15 @@ class NotebookActivity : AppCompatActivity() {
         val deletedAt = System.currentTimeMillis()
         val linkId    = UUID.randomUUID().toString()
 
-        val linkObj = LinkObject(
-            target      = target,
-            chrome      = chrome,
-            strokes     = embeddedStrokes,
-            headings    = embeddedHeadings,
-            textObjects = embeddedTexts,
-            lines       = embeddedLineRenders.map { it.toEmbeddedLine(density) },
-        )
+        val newLink = LinkRender(linkId, RectF(unionBox), target, chrome, embeddedStrokes, embeddedHeadings, embeddedTexts, embeddedLineRenders)
 
         db.withTransaction {
             val dao = db.notebookDao()
             (originalStrokeIds + originalHeadingIds + originalTextIds + originalLineIds).forEach { dao.softDeleteById(it, deletedAt) }
             val now = System.currentTimeMillis()
-            dao.insertObject(NotebookObject(
-                id          = linkId,
-                parentId    = layerId,
-                type        = TYPE_LINK,
-                boundingBox = unionBox.toBoundingBoxJson(),
-                sortOrder   = 0,
-                createdAt   = now,
-                updatedAt   = now,
-                deletedAt   = null,
-                data        = linkObj.toJson(),
-            ))
+            dao.insertObject(newLink.toRow(layerId, 0, now, now, density))
         }
         noteContentEdit(db, pageId)
-
-        val newLink = LinkRender(linkId, RectF(unionBox), target, chrome, embeddedStrokes, embeddedHeadings, embeddedTexts, embeddedLineRenders)
 
         withContext(Dispatchers.Main) {
             val strokeSet  = originalStrokeIds.toSet()
@@ -6989,22 +6910,23 @@ class NotebookActivity : AppCompatActivity() {
         val pageId = currentPageId.takeIf { it.isNotEmpty() } ?: return
         val dao    = db.notebookDao()
         val row    = dao.getObjectById(linkId) ?: return
-        val obj    = try { LinkObject.fromJson(row.data) } catch (_: Exception) { return }
-        val oldChrome = obj.chrome
-        val oldTarget = obj.target
+        val density = resources.displayMetrics.density
+        val link   = row.toLinkRender(density) ?: return
+        val oldChrome = link.chrome
+        val oldTarget = link.target
 
         // Apply text update only when the link embeds exactly one text object and no other content.
-        val updatedTextObjects = if (newText != null && obj.textObjects.size == 1
-                && obj.strokes.isEmpty() && obj.headings.isEmpty() && obj.lines.isEmpty()) {
-            listOf(obj.textObjects[0].copy(text = newText))
-        } else obj.textObjects
+        val updatedTextObjects = if (newText != null && link.textObjects.size == 1
+                && link.strokes.isEmpty() && link.headings.isEmpty() && link.lines.isEmpty()) {
+            listOf(link.textObjects[0].copy(text = newText))
+        } else link.textObjects
 
-        val textChanged = updatedTextObjects !== obj.textObjects
+        val textChanged = updatedTextObjects !== link.textObjects
         if (oldChrome == newChrome && oldTarget == newTarget && !textChanged) return
 
-        val updatedObj = obj.copy(chrome = newChrome, target = newTarget, textObjects = updatedTextObjects)
+        val updatedLink = link.copy(chrome = newChrome, target = newTarget, textObjects = updatedTextObjects)
         val now = System.currentTimeMillis()
-        dao.updateData(linkId, updatedObj.toJson(), now)
+        dao.updateColumns(updatedLink.toRow("", 0, 0L, now, density))
         noteContentEdit(db, pageId)
 
         withContext(Dispatchers.Main) {
@@ -9401,7 +9323,7 @@ class NotebookActivity : AppCompatActivity() {
                         dao.updateColumns(lineObj.toRow("", 0, ts, ts, density))
                     }
                     for (link in targetLinks) {
-                        dao.updateHeadingData(link.id, link.boundingBox.toBoundingBoxJson(), link.toLinkObject(density).toJson(), ts)
+                        dao.updateColumns(link.toRow("", 0, ts, ts, density))
                     }
                 }
                 if (targetLinks.isNotEmpty()) noteContentEdit(db, action.pageId)
@@ -10005,7 +9927,7 @@ class NotebookActivity : AppCompatActivity() {
                         dao.updateColumns(lineObj.toRow("", 0, now, now, density))
                     }
                     for (link in targetLinks) {
-                        dao.updateHeadingData(link.id, link.boundingBox.toBoundingBoxJson(), link.toLinkObject(density).toJson(), now)
+                        dao.updateColumns(link.toRow("", 0, now, now, density))
                     }
                     for (note in targetStickyNotes) {
                         dao.updateHeadingData(note.id, note.boundingBox.toBoundingBoxJson(), note.toStickyNoteObject(density).toJson(), now)
@@ -10172,14 +10094,12 @@ class NotebookActivity : AppCompatActivity() {
             }
 
             is UndoRedoAction.LinkEdited -> withContext(Dispatchers.IO) {
-                val row = dao.getObjectById(action.linkId)
-                if (row != null) {
-                    val obj = try { LinkObject.fromJson(row.data) } catch (_: Exception) { null }
-                    if (obj != null) {
-                        val chrome = if (isUndo) action.oldChrome else action.newChrome
-                        val target = if (isUndo) action.oldTarget else action.newTarget
-                        dao.updateData(action.linkId, obj.copy(chrome = chrome, target = target).toJson(), now)
-                    }
+                val density = resources.displayMetrics.density
+                val link = dao.getObjectById(action.linkId)?.toLinkRender(density)
+                if (link != null) {
+                    val chrome = if (isUndo) action.oldChrome else action.newChrome
+                    val target = if (isUndo) action.oldTarget else action.newTarget
+                    dao.updateColumns(link.copy(chrome = chrome, target = target).toRow("", 0, 0L, now, density))
                 }
                 noteContentEdit(db, action.pageId)
             }

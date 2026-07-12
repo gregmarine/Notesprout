@@ -189,3 +189,42 @@ fun NotebookObject.toHeadingStroke(): HeadingStroke? {
         HeadingStroke(id, box, h.strokes, h.recognizedText, h.level)
     }
 }
+
+// ── Link ─────────────────────────────────────────────────────────────────────
+// A link's scalar target/chrome go to the linkTarget/chrome columns; its heterogeneous nested
+// content (strokes/headings/text/lines/shapes) stays atomic in `blob` as zlib(JSON(LinkObject)) —
+// the nested payload is exactly what the legacy `data` column held, just compressed. A columnar
+// row has data == "". Density-independent embedded lines/shapes round-trip via LinkObject.
+
+fun LinkRender.toRow(
+    parentId: String, order: Int, createdAt: Long, updatedAt: Long, density: Float, deletedAt: Long? = null,
+): NotebookObject {
+    val b = boundingBox
+    return NotebookObject(
+        id = id, parentId = parentId, boundingBox = "", sortOrder = order,
+        createdAt = createdAt, updatedAt = updatedAt, deletedAt = deletedAt, type = TYPE_LINK, data = "",
+        x = b.left, y = b.top, width = b.width(), height = b.height(),
+        linkTarget = compositeJson.encodeToString(LinkTarget.serializer(), target),
+        chrome = chrome.name,
+        blob = deflateString(toLinkObject(density).toJson()),
+    )
+}
+
+/**
+ * Decode a `link` row to a render-time [LinkRender] (columns+blob when present, else legacy JSON).
+ * Mirrors the historical readers: embedded strokes/headings/text/lines are inflated; embedded
+ * shapes are intentionally NOT surfaced (unchanged from the prior load path).
+ */
+fun NotebookObject.toLinkRender(density: Float): LinkRender? {
+    val box = boxOrLegacy() ?: return null
+    val lo = if (data.isEmpty()) {
+        blob?.let { runCatching { LinkObject.fromJson(inflateString(it)) }.getOrNull() } ?: return null
+    } else {
+        runCatching { LinkObject.fromJson(data) }.getOrNull() ?: return null
+    }
+    return LinkRender(
+        id = id, boundingBox = box, target = lo.target, chrome = lo.chrome,
+        strokes = lo.strokes, headings = lo.headings, textObjects = lo.textObjects,
+        lines = lo.lines.map { it.toLineRender(density) },
+    )
+}

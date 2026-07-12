@@ -27,8 +27,8 @@ import com.notesprout.android.data.toLineRender
 import com.notesprout.android.data.toShapeRender
 import com.notesprout.android.data.toTextRender
 import com.notesprout.android.data.LineStyle
-import com.notesprout.android.data.LinkObject
 import com.notesprout.android.data.LinkRender
+import com.notesprout.android.data.toLinkRender
 import com.notesprout.android.data.ShapeObject
 import com.notesprout.android.data.ShapeRender
 import com.notesprout.android.data.LiveStroke
@@ -453,18 +453,6 @@ object NotebookExporter {
         return LineRender(id, box, startX, startY, endX, endY, lo.style, lo.orientation, lo.strokeWidthDp, lo.dotSpacingDp * densityDp)
     }
 
-    private fun parseLinkRender(id: String, box: RectF, lo: LinkObject, densityDp: Float): LinkRender =
-        LinkRender(
-            id = id,
-            boundingBox = box,
-            target = lo.target,
-            chrome = lo.chrome,
-            strokes = lo.strokes,
-            headings = lo.headings,
-            textObjects = lo.textObjects,
-            lines = lo.lines.map { it.toLineRender(densityDp) },
-        )
-
     private fun parseDimensions(boundingBoxJson: String): Pair<Int, Int> {
         val box = BoundingBox.fromJson(boundingBoxJson)
             ?: return Pair(1404, 1872) // safe fallback
@@ -538,12 +526,7 @@ object NotebookExporter {
         } else emptyList()
 
         val links: List<LinkRender> = if (layer != null) {
-            dao.getLinkObjectsForLayer(layer.id).mapNotNull { row ->
-                val box = parseBoundingBox(row.boundingBox) ?: return@mapNotNull null
-                val lo = runCatching { LinkObject.fromJson(row.data) }.getOrNull()
-                    ?: return@mapNotNull null
-                parseLinkRender(row.id, box, lo, density)
-            }
+            dao.getLinkObjectsForLayer(layer.id).mapNotNull { it.toLinkRender(density) }
         } else emptyList()
 
         val stickyNotes: List<StickyNoteRender> = if (layer != null) {
