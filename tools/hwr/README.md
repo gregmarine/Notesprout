@@ -41,9 +41,15 @@ pip install -r requirements.txt
    python eval_local.py --export build/base [--images lines/ --labels lines/labels.jsonl]
    ```
 
-4. **`finetune.py`** *(Phase 3, not yet written)* — LoRA fine-tune on a device training
-   bundle (PyTorch MPS), merge, then re-run `export_model.py --model <merged>` +
-   `make_bundle.py --personalized`.
+4. **`finetune.py`** — LoRA fine-tune on a device training bundle (Settings → Handwriting
+   Recognition → Export training data…). Runs on MPS; re-rasterizes from raw strokes with
+   augmentation; prints before/after held-out CER; saves a merged HF model. Then:
+
+   ```sh
+   python finetune.py --bundle ~/Downloads/notesprout-hwr-train-*.zip --out build/personal-merged
+   python export_model.py --model build/personal-merged --out build/personal
+   python make_bundle.py --export build/personal --name "Personal v1" --personalized --out build/
+   ```
 
 ## Getting the bundle onto a device
 

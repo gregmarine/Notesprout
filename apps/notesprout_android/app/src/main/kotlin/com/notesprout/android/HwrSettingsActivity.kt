@@ -34,6 +34,21 @@ class HwrSettingsActivity : AppCompatActivity() {
 
     private val store get() = HandwritingRecognizerProvider.trOcrEngine?.modelStore
 
+    private val exportTraining =
+        registerForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { uri ->
+            uri ?: return@registerForActivityResult
+            lifecycleScope.launch {
+                val result = com.notesprout.android.recognition.personal.TrainingBundleExporter
+                    .export(applicationContext, uri)
+                result.fold(
+                    onSuccess = { n ->
+                        Toast.makeText(this@HwrSettingsActivity, "Exported $n training samples.", Toast.LENGTH_SHORT).show()
+                    },
+                    onFailure = { showError("Export failed", it.message ?: "Unknown error") },
+                )
+            }
+        }
+
     private val importModel =
         registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
             uri ?: return@registerForActivityResult
@@ -80,6 +95,11 @@ class HwrSettingsActivity : AppCompatActivity() {
             startActivity(Intent(this, HwrEnrollmentActivity::class.java))
         }
         binding.btnClearTraining.setOnClickListener { confirmClearTraining() }
+        binding.btnExportTraining.setOnClickListener {
+            exportTraining.launch(
+                com.notesprout.android.recognition.personal.TrainingBundleExporter.suggestedName()
+            )
+        }
 
         if (BuildConfig.DEBUG) {
             binding.btnOpenLab.isVisible = true
@@ -138,6 +158,7 @@ class HwrSettingsActivity : AppCompatActivity() {
             binding.checkPersonalization.isChecked = HwrSettings.personalizationEnabled(this@HwrSettingsActivity)
             val samples = TrainingPairRepository.confirmedCount(this@HwrSettingsActivity)
             binding.samplesStatus.text = "$samples handwriting samples collected"
+            binding.btnExportTraining.isVisible = samples > 0
         }
     }
 

@@ -457,9 +457,21 @@ applies to this engine identically).
   ≥2 identical confirmations) post-passes the decoded text. Master toggle: settings →
   "Learn from my corrections" (`HwrSettings.personalizationEnabled`); "Clear my data" wipes the store.
 
-### Phase 3 — Mac fine-tune loop (next)
+### Phase 3 — Mac fine-tune loop (BUILT; awaiting a real training run)
 
-Training-bundle export (SAF zip: per-pair PNGs rendered by the same `LineRasterizer` + raw strokes +
-labels.jsonl) → LoRA fine-tune on the user's Mac (`tools/hwr/finetune.py`, PyTorch MPS) → re-import
-as a `personalized: true` bundle via the existing model store. Payoff gate: personalized CER <
-ML Kit CER on the user's held-out lines.
+- **Export** (settings → "Export training data…", visible when samples > 0):
+  `TrainingBundleExporter` writes a SAF zip — `pairs/<id>.png` rendered by the **same
+  `LineRasterizer`** used at inference (train/infer match), `strokes/<id>.json` (raw ink for
+  augmentation), `labels.jsonl` (label + source + the engine's `originalText`), `meta.json`
+  (bundle schema + `RASTERIZER_VERSION`, which `finetune.py` validates before training).
+- **`tools/hwr/finetune.py`** — peft LoRA (r=8 on decoder q/v projections), MPS/CPU; training
+  images re-rasterized from strokes each epoch by a Python mirror of `LineRasterGeometry`
+  (thickness ±30 %, slant ±4°, sub-px jitter); the app-rendered PNGs serve as the held-out eval
+  split so before/after CER matches on-device rendering. Refuses to run on < 8 pairs.
+  `merge_and_unload()` → merged HF model → `export_model.py` + `make_bundle.py --personalized` →
+  import in settings (SHA-256 + smoke decode; versions listed side-by-side, ML Kit fallback if
+  anything fails).
+- **Payoff gate** (open until Greg completes enrollment + a training run): personalized CER <
+  ML Kit CER on held-out lines of the user's handwriting.
+- Round trip verified structurally on G102: enroll → export → bundle parses in `finetune.py`'s
+  loader → augmentation raster mirrors the app's geometry.

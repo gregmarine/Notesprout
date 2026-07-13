@@ -296,6 +296,15 @@
                         android:layout_marginStart="8dp"
                         android:text="Clear my data" />
                 </LinearLayout>
+
+                <androidx.appcompat.widget.AppCompatButton
+                    android:id="@+id/btnExportTraining"
+                    style="@style/Widget.Notesprout.OutlinedButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:text="Export training data…"
+                    android:visibility="gone" />
             </LinearLayout>
 
             <!-- Debug-only lab entry -->

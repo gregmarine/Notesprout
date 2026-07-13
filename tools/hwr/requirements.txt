@@ -9,5 +9,4 @@ pillow>=10.0
 sentencepiece>=0.2
 protobuf>=4.0
 jiwer>=3.0
-# Phase 3 (fine-tuning) additions:
-# peft>=0.11
+peft>=0.11
