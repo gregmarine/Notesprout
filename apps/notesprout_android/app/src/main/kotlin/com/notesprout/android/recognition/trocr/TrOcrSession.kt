@@ -57,10 +57,13 @@ class TrOcrSession(
     /**
      * Full pipeline for one line image: encoder pass + greedy decode.
      * [pixels] is the CHW tensor from [LineRasterizer]. Returns generated token ids.
+     * [maxNewTokens] caps the decode (≤ 0 → the manifest's maxLength); the smoke test
+     * on bundle import passes 1 to prove the whole graph runs without paying a full decode.
      */
     suspend fun generate(
         pixels: FloatBuffer,
         processors: List<TrOcrDecoder.LogitProcessor> = emptyList(),
+        maxNewTokens: Int = -1,
     ): IntArray {
         ensureLoaded()
         val enc = encoder!!; val dInit = decoderInit!!; val dPast = decoderPast!!
@@ -89,7 +92,7 @@ class TrOcrSession(
                     },
                     startId = manifest.decoderStartTokenId,
                     eosId = manifest.eosTokenId,
-                    maxNewTokens = manifest.maxLength,
+                    maxNewTokens = if (maxNewTokens > 0) maxNewTokens else manifest.maxLength,
                 )
             } finally {
                 past.values.forEach { it.close() }

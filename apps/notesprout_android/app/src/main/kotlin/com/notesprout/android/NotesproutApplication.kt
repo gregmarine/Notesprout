@@ -25,6 +25,15 @@ class NotesproutApplication : Application() {
         com.notesprout.android.recognition.HandwritingRecognizerProvider.shutdown()
     }
 
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        // TrOCR's ORT sessions hold ~model-size native heap; drop them when the app goes
+        // to the background (they reload lazily on the next recognition).
+        if (level >= TRIM_MEMORY_UI_HIDDEN) {
+            com.notesprout.android.recognition.HandwritingRecognizerProvider.onTrimMemory()
+        }
+    }
+
     override fun onCreate() {
         super.onCreate()
         try {
@@ -53,8 +62,11 @@ class NotesproutApplication : Application() {
             }
         }
 
+        // Both engines register with the Provider; the settings toggle decides routing.
+        // TrOCR does zero work here — its ORT sessions load lazily on first recognition.
         val mlKitRecognizer = com.notesprout.android.recognition.MlKitHandwritingRecognizer()
-        com.notesprout.android.recognition.HandwritingRecognizerProvider.init(mlKitRecognizer)
+        val trOcrRecognizer = com.notesprout.android.recognition.trocr.TrOcrHandwritingRecognizer(this, appScope)
+        com.notesprout.android.recognition.HandwritingRecognizerProvider.init(this, mlKitRecognizer, trOcrRecognizer)
         mlKitRecognizer.initModel { success ->
             if (!success) {
                 android.os.Handler(android.os.Looper.getMainLooper()).post {

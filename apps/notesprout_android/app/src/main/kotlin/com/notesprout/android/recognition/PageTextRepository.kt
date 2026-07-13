@@ -76,9 +76,15 @@ object PageTextRepository {
         return runCatching { PageText.fromJson(row.data) }.getOrNull()
     }
 
-    /** A cache entry is fresh when its watermark is at least the layer's current max. */
-    fun isFresh(cached: PageText?, currentMax: Long): Boolean =
-        cached != null && cached.sourceMaxUpdatedAt >= currentMax
+    /**
+     * A cache entry is fresh when its watermark is at least the layer's current max AND
+     * (when [expectedEngine] is given) it was produced by that engine — switching the
+     * Handwriting Engine toggle must invalidate the other engine's cached text, or the
+     * viewer/export would keep serving stale results forever after a switch.
+     */
+    fun isFresh(cached: PageText?, currentMax: Long, expectedEngine: String? = null): Boolean =
+        cached != null && cached.sourceMaxUpdatedAt >= currentMax &&
+            (expectedEngine == null || cached.engine == expectedEngine)
 
     /** Insert-or-replace the single page_text row for [pageId]. */
     suspend fun upsert(dao: NotebookDao, pageId: String, pageText: PageText) {
@@ -132,7 +138,7 @@ object PageTextRepository {
     ): PageText {
         val max = layerMaxUpdatedAt(dao, pageId)
         val cached = getCached(dao, pageId)
-        if (isFresh(cached, max)) return cached!!
+        if (isFresh(cached, max, recognizer.engineName)) return cached!!
         return recognizeAndCache(dao, pageId, recognizer)
     }
 
@@ -148,7 +154,7 @@ object PageTextRepository {
     ): PageText {
         val max = layerMaxUpdatedAt(dao, pageId)
         val cached = getCached(dao, pageId)
-        if (isFresh(cached, max)) return cached!!
+        if (isFresh(cached, max, recognizer.engineName)) return cached!!
         val content = loadPageContent(dao, pageId)
         return recognizer.recognizePage(content, sourceMaxUpdatedAt = max)
     }

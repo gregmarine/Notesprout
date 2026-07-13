@@ -15,6 +15,12 @@ import com.notesprout.android.data.LiveStroke
 interface HandwritingRecognizer : AutoCloseable {
 
     /**
+     * Stable engine identifier stamped into recognition results (e.g. `PageText.engine`)
+     * so cached text can be re-generated per-engine later: "mlkit" | "trocr" | "onyx".
+     */
+    val engineName: String
+
+    /**
      * Returns true if this recognizer is ready to process strokes.
      * May return false if the ML model has not been downloaded yet.
      */

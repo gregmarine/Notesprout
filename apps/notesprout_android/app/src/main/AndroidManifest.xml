@@ -130,6 +130,12 @@
             android:exported="false"
             android:windowSoftInputMode="stateHidden" />
 
+        <!-- Handwriting Recognition settings — engine toggle (ML Kit / TrOCR) + model bundles -->
+        <activity
+            android:name=".HwrSettingsActivity"
+            android:exported="false"
+            android:windowSoftInputMode="stateHidden" />
+
         <!-- Backup settings — local + Google Drive destination configuration -->
         <activity
             android:name=".BackupSettingsActivity"

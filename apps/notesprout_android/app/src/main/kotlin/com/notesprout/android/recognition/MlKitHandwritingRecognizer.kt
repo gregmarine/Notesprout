@@ -18,6 +18,8 @@ import kotlin.coroutines.resume
 
 class MlKitHandwritingRecognizer : HandwritingRecognizer {
 
+    override val engineName: String = "mlkit"
+
     private var recognizer: com.google.mlkit.vision.digitalink.recognition.DigitalInkRecognizer? = null
     private var modelReady = false
 

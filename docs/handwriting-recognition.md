@@ -5,6 +5,9 @@ ML Kit recognizer used for heading / text-box conversion) and the **proposed des
 it to whole-page and whole-notebook text: a segmentation layer, a persisted per-page text cache, a
 real-time background recognition (RTR) mode, and an export-time recognition path.
 
+> **Second engine (branch `hwr-trocr`, 2026-07-13):** a personalizable TrOCR-based engine now sits
+> behind the same `HandwritingRecognizer` interface — see § "TrOCR engine" at the end of this doc.
+
 > **Status.** The single-shot recognizer (§ Current State) is **shipped**. The shared core
 > (`StrokeSegmenter`, context-aware `recognizeSegment`, `PageTextRecognizer`, the `page_text`
 > object), **Path 2 export** (Markdown default + text-only via `MarkdownText`; whole-notebook from
@@ -361,3 +364,76 @@ Behavior:
 - **Language** — only `en-US` today; multi-language notebooks need model selection + download UX.
 - **Onyx HWR engine** — the `engine` field and interface leave the door open; the AIDL bridge itself
   is a separate effort (see `SUPERNOTE_SUPPORT_PLAN.md` for the analogous vendor-ink pattern).
+
+---
+
+## TrOCR engine — the personalizable second engine (`hwr-trocr`)
+
+A second `HandwritingRecognizer` implementation that Notesprout fully controls and that will
+**learn the user's handwriting** over time, fully offline. Base model:
+`microsoft/trocr-small-handwritten` (MIT) — an **image** (line-crop) recognizer, chosen because no
+production-quality open-source *stroke*-based pretrained model exists. Runtime: **ONNX Runtime
+Mobile** (`com.microsoft.onnxruntime:onnxruntime-android`, MIT) — a deliberate, discussed
+dependency addition.
+
+### Routing & rollout
+
+- **Settings toggle** (MainActivity overflow → Handwriting Recognition, `HwrSettingsActivity`):
+  Standard (ML Kit, default) vs Personal (TrOCR, experimental). Stored in `HwrSettings`
+  (`hwr_settings` prefs).
+- **`HandwritingRecognizerProvider` is the only router**: `instance` returns TrOCR when the toggle
+  says so AND a model bundle is installed; ML Kit otherwise. Deleting the model can never strand
+  the app without recognition. No call-site changes anywhere.
+- **Per-line fallback:** `PageTextRecognizer(hwr, fallback = Provider.mlKitFallback)` retries a
+  line through ML Kit when the active engine returns `FALLBACK_TEXT`.
+- **Engine-aware cache freshness:** `PageTextRepository.isFresh(cached, max, expectedEngine)` —
+  flipping the toggle invalidates the other engine's cached `page_text`, so viewer/export
+  re-recognize with the newly-selected engine (RTR stays watermark-only on purpose: no
+  whole-notebook churn on toggle; it picks the new engine up on next notebook open).
+  `HandwritingRecognizer.engineName` ("mlkit"/"trocr") is stamped into `PageText.engine`.
+
+### Pipeline (`recognition/trocr/`)
+
+`StrokeSegmenter.Segment` → `LineRasterizer` (strokes only, always black, no template; uniform
+stage-1 render at 128 px height then **non-aspect-preserving** 384×384 stretch — deliberately
+matching TrOCR's training distribution, do not "fix") → `TrOcrSession` (3 ORT sessions: encoder +
+unmerged decoder pair; step 1 = `decoder_model.onnx` computing cross-attention KV, steps 2+ =
+`decoder_with_past_model.onnx`) → `TrOcrDecoder` (pure-JVM greedy loop, 4-gram repetition ban,
+`LogitProcessor` hook for future lexicon biasing, cooperative cancellation) →
+`SentencePieceTokenizer.decode` (unigram `tokenizer.json`; vocab index == token id; must tolerate
+out-of-range ids — 64044 logits vs 64002 pieces). Sessions load lazily (~1 s), never at startup,
+and are dropped on `onTrimMemory(UI_HIDDEN)` when idle (`releaseIfIdle`).
+
+### Model bundles
+
+Produced by **`tools/hwr/`** on a Mac (`export_model.py` → ONNX + int8 dynamic quant incl. Gather
+so the 65 MB embedding shrinks — the *merged* decoder is rejected because its `If` subgraph defeats
+`quantize_dynamic`; `make_bundle.py` → zip with manifest). Imported via SAF in `HwrSettingsActivity`
+into `filesDir/hwr/models/<versionId>/` (internal storage deliberately — personalized weights are
+biometric-adjacent). Install verifies manifest schema, per-file SHA-256, **and a smoke decode**
+before atomically activating; all runtime config (token ids, image normalization, decode cap)
+travels in the manifest — nothing hardcoded on either side. `TrOcrModelStore` keeps versions
+side-by-side (activate/switch/delete in settings).
+
+### Measured on G102 (Phase 0, int8, greedy, real handwriting)
+
+median **509 ms/line** (p95 510), session load 976 ms, ~291 MB native heap while loaded, base CER
+10.9 % vs ML Kit 5.5 % on the same 6 lines — TrOCR's misses were uppercase tech terms (`JSON`,
+`SQLite`), the exact target of personalization. Whole-notebook cold recognition (357 lines) ≈ 3 min
+— acceptable for the experimental toggle; a progress indicator in the viewer is future polish.
+
+### Debug lab
+
+`HwrLabActivity` (debug source set only, `adb shell am start -n
+com.notesprout.android.dev/com.notesprout.android.HwrLabActivity`, or the settings screen's
+debug-only button): per-line ink image + both engines' transcription + latency, tap-a-line to set
+its true text, corpus CER. Recognized text is shown on screen only — **never logged** (privacy rule
+applies to this engine identically).
+
+### Next phases (planned)
+
+Phase 2: personalization at the decoder (user lexicon from corrections + enrollment → logit
+biasing; correction memory post-pass) + training-pair capture (plain Room DB `filesDir/hwr/
+training.db`; **capture skipped for encrypted notebooks** — leak hygiene). Phase 3: training-bundle
+export → LoRA fine-tune on the user's Mac (`tools/hwr/finetune.py`, PyTorch MPS) → re-import as a
+`personalized: true` bundle. Payoff gate: personalized CER < ML Kit CER on the user's held-out lines.

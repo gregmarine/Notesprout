@@ -36,6 +36,7 @@ data class PageText(
 
     companion object {
         const val ENGINE_MLKIT = "mlkit"
+        const val ENGINE_TROCR = "trocr"
 
         private val codec = Json { ignoreUnknownKeys = true }
 

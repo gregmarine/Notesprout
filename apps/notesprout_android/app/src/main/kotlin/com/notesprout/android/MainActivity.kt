@@ -831,6 +831,10 @@ class MainActivity : AppCompatActivity() {
             closeOverflowToolbar()
             startActivity(Intent(this, EncryptionSettingsActivity::class.java))
         }
+        binding.btnHwr.setOnClickListener {
+            closeOverflowToolbar()
+            startActivity(Intent(this, HwrSettingsActivity::class.java))
+        }
         binding.btnBackup.setOnClickListener {
             closeOverflowToolbar()
             startActivity(Intent(this, BackupSettingsActivity::class.java))

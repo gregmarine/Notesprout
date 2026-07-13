@@ -32,6 +32,8 @@ class TrOcrHandwritingRecognizer(
     private val ioScope: CoroutineScope,
 ) : HandwritingRecognizer {
 
+    override val engineName: String = "trocr"
+
     val modelStore = TrOcrModelStore(context)
 
     private val mutex = Mutex()
@@ -110,6 +112,22 @@ class TrOcrHandwritingRecognizer(
 
     /** Session load time of the last cold load, for HwrLab reporting. */
     fun lastLoadMillis(): Long = session?.lastLoadMillis ?: -1
+
+    /**
+     * Release the ORT sessions (~model-size native heap) if no recognition is in flight —
+     * wired to Application.onTrimMemory. They reload lazily on the next recognition.
+     */
+    fun releaseIfIdle() {
+        if (mutex.tryLock()) {
+            try {
+                session?.close()
+                session = null
+                loadedVersionId = null
+            } finally {
+                mutex.unlock()
+            }
+        }
+    }
 
     override fun close() {
         session?.close()

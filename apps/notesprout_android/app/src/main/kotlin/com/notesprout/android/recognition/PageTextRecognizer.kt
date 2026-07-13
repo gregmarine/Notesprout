@@ -32,9 +32,20 @@ data class PageContent(
  *
  * Engine-agnostic — it only depends on [HandwritingRecognizer]. See docs/handwriting-recognition.md.
  */
-class PageTextRecognizer(private val hwr: HandwritingRecognizer) {
+class PageTextRecognizer(
+    private val hwr: HandwritingRecognizer,
+    /**
+     * Per-line retry engine when [hwr] fails a line (FALLBACK_TEXT). Defaults to ML Kit
+     * via the Provider so existing call sites get the safety net for free; identical to
+     * [hwr] (or null) means no retry.
+     */
+    private val fallback: HandwritingRecognizer? = HandwritingRecognizerProvider.mlKitFallback,
+) {
 
     private companion object { const val TAG = "PageTextRecognizer" }
+
+    /** Engine stamped on produced [PageText]s — used by cache-freshness checks. */
+    val engineName: String get() = hwr.engineName
 
     /** One positioned Markdown block; blocks are sorted by [top] then joined with a blank line. */
     private data class Block(val top: Float, val left: Float, val markdown: String)
@@ -54,7 +65,12 @@ class PageTextRecognizer(private val hwr: HandwritingRecognizer) {
         for (para in layout.paragraphs) {
             val lines = mutableListOf<String>()
             for (line in para.lines) {
-                val t = hwr.recognizeSegment(line.strokes, line.bounds, pre, lineHeight)
+                var t = hwr.recognizeSegment(line.strokes, line.bounds, pre, lineHeight)
+                if (t == HandwritingRecognizer.FALLBACK_TEXT &&
+                    fallback != null && fallback !== hwr && fallback.isReady()
+                ) {
+                    t = fallback.recognizeSegment(line.strokes, line.bounds, pre, lineHeight)
+                }
                 // Never log the recognized text itself (privacy rule) — only structure/length.
                 Slog.d(TAG) { "line ${line.strokes.size} strokes @${line.bounds.top.toInt()} → ${t.length} chars" }
                 if (t.isNotBlank() && t != HandwritingRecognizer.FALLBACK_TEXT) {
@@ -86,7 +102,7 @@ class PageTextRecognizer(private val hwr: HandwritingRecognizer) {
         if (blocks.isEmpty()) {
             return PageText(
                 text = "",
-                engine = PageText.ENGINE_MLKIT,
+                engine = hwr.engineName,
                 recognizedAt = System.currentTimeMillis(),
                 sourceMaxUpdatedAt = sourceMaxUpdatedAt,
             )
@@ -98,7 +114,7 @@ class PageTextRecognizer(private val hwr: HandwritingRecognizer) {
 
         return PageText(
             text = markdown,
-            engine = PageText.ENGINE_MLKIT,
+            engine = hwr.engineName,
             recognizedAt = System.currentTimeMillis(),
             sourceMaxUpdatedAt = sourceMaxUpdatedAt,
         )

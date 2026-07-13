@@ -116,6 +116,23 @@ class TrOcrModelStore(private val context: Context) {
                 }
             }
 
+            // Smoke decode: load the sessions from the temp dir and run one decode step on a
+            // blank page. An incompatible or subtly corrupt model must fail HERE — after
+            // activation it would take recognition down instead.
+            try {
+                TrOcrSession(tempDir, manifest).use { s ->
+                    val n = manifest.imageSize * manifest.imageSize
+                    val blank = java.nio.FloatBuffer.allocate(3 * n)
+                    for (c in 0 until 3) {
+                        val white = (1f - manifest.imageMean[c]) / manifest.imageStd[c]
+                        for (i in 0 until n) blank.put(c * n + i, white)
+                    }
+                    s.generate(blank, maxNewTokens = 1)
+                }
+            } catch (e: Exception) {
+                return@withContext Result.failure(IllegalStateException("Bundle failed smoke inference: ${e.message}", e))
+            }
+
             modelsDir.mkdirs()
             val target = File(modelsDir, manifest.versionId)
             if (target.exists()) target.deleteRecursively() // reimport of same version replaces it
