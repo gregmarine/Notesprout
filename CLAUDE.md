@@ -130,7 +130,7 @@ Install all requested devices in a single shell block. If the user says devices 
 | BOOX Go 6 Gen II (G6) | `DAF86F61` | | BOOX Go 7 (G7) | `17845014` |
 | BOOX Palma2 Pro (P2P) | `287d2364` | | Wacom Movink Pad 11 (MIP11) | `5HL21V5007384` |
 | BOOX Go 10.3 Gen 2 (G102) | `b7a46e13` | | Supernote Nomad (SNN) | `SN078D10012852` |
-| Paper 7 (P7) | `T1737BBR0327` | | |
+| Paper 7 (P7) | `T1737BBR0327` | | Samsung Galaxy S26 Ultra (S26U) | `R3GL307HGDH` |
 
 - **Tier 1 (primary, always-tested):** BOOX Go 10.3 (**flagship**), Go 10.3 Gen 2, Note Max, Go 6 Gen II, Go 7, Palma2 Pro
 - **Tier 2 (QA):** NoteAir5C/4C, Tab XC, Go Color 7 Gen II, Wacom Movink Pad 11 & 14 + Paper 7 (GenericDrawingEngine)
