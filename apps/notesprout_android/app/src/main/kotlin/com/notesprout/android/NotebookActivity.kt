@@ -117,7 +117,7 @@ import com.notesprout.android.data.index.NotesproutIndex
 import com.notesprout.android.data.ScratchpadRepository
 import com.notesprout.android.notebook.ScratchpadPreferences
 import com.notesprout.android.data.index.ObjectType
-import com.notesprout.android.data.index.TemplateObject as IndexTemplateObject
+import com.notesprout.android.data.index.templateObject
 import com.notesprout.android.data.links.BackEntry
 import com.notesprout.android.data.links.LinkBackStack
 import com.notesprout.android.data.recents.RecentsManager
@@ -495,7 +495,7 @@ class NotebookActivity : AppCompatActivity() {
             Slog.d(TAG) { "insertLibraryTemplateIntoSoil: entity not found for $libraryTemplateId" }
             return Pair("", null)
         }
-        val tObj = IndexTemplateObject.fromJson(entity.data) ?: run {
+        val tObj = entity.templateObject() ?: run {
             Slog.d(TAG) { "insertLibraryTemplateIntoSoil: failed to parse TemplateObject for $libraryTemplateId" }
             return Pair("", null)
         }

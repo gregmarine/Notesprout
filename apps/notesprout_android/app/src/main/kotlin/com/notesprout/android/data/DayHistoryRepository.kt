@@ -9,6 +9,7 @@ import com.notesprout.android.data.index.NotebookObject
 import com.notesprout.android.data.index.NotesproutIndex
 import com.notesprout.android.data.index.ObjectEntity
 import com.notesprout.android.data.index.ObjectType
+import com.notesprout.android.data.index.notebookMeta
 import com.notesprout.android.data.recents.ResolvedRecent
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -105,7 +106,7 @@ class DayHistoryRepository(
      */
     suspend fun coverFor(notebookId: String): NotebookCover = withContext(Dispatchers.IO) {
         val entity = indexRepo.getNotebook(notebookId) ?: return@withContext NotebookCover(false, null)
-        val obj = runCatching { Json.decodeFromString<NotebookObject>(entity.data) }.getOrNull()
+        val obj = runCatching { entity.notebookMeta() }.getOrNull()
             ?: return@withContext NotebookCover(false, null)
         NotebookCover(obj.encrypted, if (obj.encrypted) null else obj.snapshot)
     }

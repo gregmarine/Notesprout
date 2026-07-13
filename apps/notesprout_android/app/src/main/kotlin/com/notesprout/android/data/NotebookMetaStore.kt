@@ -4,6 +4,7 @@ import com.notesprout.android.BuildConfig
 import com.notesprout.android.crypto.SoilRawDb
 import com.notesprout.android.data.index.IndexRepository
 import com.notesprout.android.data.index.NotebookObject
+import com.notesprout.android.data.index.notebookMeta
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
@@ -34,7 +35,7 @@ object NotebookMetaStore {
         withContext(Dispatchers.IO) {
             val entity = repo.getNotebook(notebookId) ?: return@withContext null
             val notebookObj = try {
-                Json.decodeFromString<NotebookObject>(entity.data)
+                entity.notebookMeta()
             } catch (_: Exception) {
                 return@withContext null
             }

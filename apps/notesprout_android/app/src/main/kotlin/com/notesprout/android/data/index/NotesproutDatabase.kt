@@ -14,7 +14,7 @@ import com.notesprout.android.data.SoilSchema
         NotebookActivityEntity::class,
         EventEntity::class,
     ],
-    version = 6,
+    version = 7,
     exportSchema = false,
 )
 abstract class NotesproutDatabase : RoomDatabase() {
@@ -147,6 +147,26 @@ abstract class NotesproutDatabase : RoomDatabase() {
                     for ((name, sqlType) in SoilSchema.ADDED_COLUMNS_V4) {
                         db.execSQL("ALTER TABLE $table ADD COLUMN \"$name\" $sqlType")
                     }
+                }
+            }
+        }
+
+        /**
+         * data-model-optimization Phase A (index columnar): widen the global-index `objects` table
+         * with typed payload columns + a binary `blob`, so notebook/template/folder rows can move off
+         * the opaque `data` JSON (see [ObjectEntity]). Additive nullable ALTERs — legacy rows keep
+         * their JSON in `data` and read via the format-agnostic [IndexObjectColumns] mappings; new
+         * rows are columnar.
+         */
+        val MIGRATION_6_7 = object : Migration(6, 7) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                val columns = listOf(
+                    "pageCount" to "INTEGER", "flags" to "INTEGER", "keyScope" to "TEXT",
+                    "lastBackedUpLocal" to "INTEGER", "lastBackedUpDrive" to "INTEGER",
+                    "width" to "INTEGER", "height" to "INTEGER", "blob" to "BLOB",
+                )
+                for ((name, sqlType) in columns) {
+                    db.execSQL("ALTER TABLE objects ADD COLUMN \"$name\" $sqlType")
                 }
             }
         }

@@ -62,7 +62,7 @@ import com.notesprout.android.data.templateDataOrNull
 import com.notesprout.android.data.index.CalendarEntity
 import com.notesprout.android.data.index.IndexRepository
 import com.notesprout.android.data.index.NotesproutIndex
-import com.notesprout.android.data.index.TemplateObject as IndexTemplateObject
+import com.notesprout.android.data.index.templateObject
 import com.notesprout.android.data.recents.ResolvedRecent
 import com.notesprout.android.data.toBoundingBoxJson
 import com.notesprout.android.data.toLinkObject
@@ -1072,7 +1072,7 @@ class DayDetailActivity : AppCompatActivity() {
         lifecycleScope.launch {
             val newId = withContext(Dispatchers.IO) {
                 val entity = indexRepo.getTemplate(libraryTemplateId) ?: return@withContext null
-                val tObj = IndexTemplateObject.fromJson(entity.data) ?: return@withContext null
+                val tObj = entity.templateObject() ?: return@withContext null
                 if (tObj.image.isEmpty()) return@withContext null
                 repository.insertTemplateRow(entity.name, tObj.width, tObj.height, tObj.image)
             } ?: run { toast("Couldn't load template"); return@launch }

@@ -40,6 +40,7 @@ import com.notesprout.android.data.index.NotebookObject
 import com.notesprout.android.data.index.NotesproutIndex
 import com.notesprout.android.data.index.ObjectEntity
 import com.notesprout.android.data.index.ObjectType
+import com.notesprout.android.data.index.notebookMeta
 import com.notesprout.android.data.soilFile
 import com.notesprout.android.data.topHeadingNamesByPageId
 import com.notesprout.android.databinding.ActivityLinkTargetPickerBinding
@@ -1063,7 +1064,7 @@ class LinkTargetPickerActivity : AppCompatActivity() {
                 card.addView(icon, FrameLayout.LayoutParams(iconSize, iconSize, Gravity.CENTER))
 
                 val notebookObj = try {
-                    Json.decodeFromString<NotebookObject>(item.entity.data)
+                    item.entity.notebookMeta()
                 } catch (_: Exception) { null }
 
                 if (notebookObj?.encrypted == true) {

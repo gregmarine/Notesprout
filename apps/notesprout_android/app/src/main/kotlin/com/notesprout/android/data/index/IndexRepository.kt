@@ -29,7 +29,7 @@ class IndexRepository(private val dao: ObjectDao) {
             createdAt = now,
             updatedAt = now,
             deletedAt = null,
-            data = Json.encodeToString(FolderObject())
+            data = "",
         )
         dao.insert(entity)
         return entity
@@ -58,7 +58,7 @@ class IndexRepository(private val dao: ObjectDao) {
             createdAt = now,
             updatedAt = now,
             deletedAt = null,
-            data = Json.encodeToString(FolderObject()),
+            data = "",
         )
         dao.insert(entity)
         return entity
@@ -81,8 +81,7 @@ class IndexRepository(private val dao: ObjectDao) {
             createdAt = createdAt,
             updatedAt = updatedAt,
             deletedAt = null,
-            data = Json.encodeToString(obj),
-        )
+        ).withNotebookMeta(obj)
         val existing = dao.getById(id)
         if (existing != null) dao.update(entity) else dao.insert(entity)
         return entity
@@ -113,7 +112,7 @@ class IndexRepository(private val dao: ObjectDao) {
             createdAt = now,
             updatedAt = now,
             deletedAt = null,
-            data = Json.encodeToString(NotebookObject())
+            data = "",
         )
         dao.insert(entity)
         return entity
@@ -130,25 +129,21 @@ class IndexRepository(private val dao: ObjectDao) {
 
     suspend fun updateNotebookSnapshot(id: String, snapshot: String?) {
         val entity = dao.getById(id) ?: return
-        val obj = Json.decodeFromString<NotebookObject>(entity.data)
+        val obj = entity.notebookMeta()
         // Never cache plaintext page content for encrypted notebooks (leak hygiene).
         if (obj.encrypted) return
         dao.update(
-            entity.copy(
-                data = Json.encodeToString(obj.copy(snapshot = snapshot)),
-                updatedAt = System.currentTimeMillis()
-            )
+            entity.withNotebookMeta(obj.copy(snapshot = snapshot))
+                .copy(updatedAt = System.currentTimeMillis())
         )
     }
 
     suspend fun updateNotebookPageCount(id: String, pageCount: Int) {
         val entity = dao.getById(id) ?: return
-        val obj = Json.decodeFromString<NotebookObject>(entity.data)
+        val obj = entity.notebookMeta()
         dao.update(
-            entity.copy(
-                data = Json.encodeToString(obj.copy(pageCount = pageCount)),
-                updatedAt = System.currentTimeMillis()
-            )
+            entity.withNotebookMeta(obj.copy(pageCount = pageCount))
+                .copy(updatedAt = System.currentTimeMillis())
         )
     }
 
@@ -168,7 +163,7 @@ class IndexRepository(private val dao: ObjectDao) {
             createdAt = now,
             updatedAt = now,
             deletedAt = null,
-            data = Json.encodeToString(FolderObject())
+            data = "",
         )
         dao.insert(entity)
         return entity
@@ -184,8 +179,7 @@ class IndexRepository(private val dao: ObjectDao) {
             createdAt = now,
             updatedAt = now,
             deletedAt = null,
-            data = TemplateObject(width, height, imageBase64).toJson()
-        )
+        ).withTemplate(TemplateObject(width, height, imageBase64))
         dao.insert(entity)
         return entity
     }
@@ -226,15 +220,15 @@ class IndexRepository(private val dao: ObjectDao) {
     suspend fun copyTemplate(sourceId: String, destParentId: String?, newName: String? = null): ObjectEntity? {
         val source = dao.getById(sourceId) ?: return null
         val now = System.currentTimeMillis()
-        val entity = ObjectEntity(
+        // Carry every payload column (data / width / height / blob …) so the copy preserves the
+        // source's storage format — columnar rows stay columnar, legacy JSON stays JSON.
+        val entity = source.copy(
             id = UUID.randomUUID().toString(),
-            type = source.type,
             name = newName ?: source.name,
             parentId = destParentId,
             createdAt = now,
             updatedAt = now,
             deletedAt = null,
-            data = source.data
         )
         dao.insert(entity)
         return entity
@@ -525,20 +519,20 @@ class IndexRepository(private val dao: ObjectDao) {
 
     suspend fun setNotebookExcludedFromBackup(notebookId: String, excluded: Boolean) {
         val entity = dao.getById(notebookId) ?: return
-        val obj = Json.decodeFromString<NotebookObject>(entity.data)
+        val obj = entity.notebookMeta()
         // Do NOT bump updatedAt — exclusion flag is not a content modification.
-        dao.update(entity.copy(data = Json.encodeToString(obj.copy(excludeFromBackup = excluded))))
+        dao.update(entity.withNotebookMeta(obj.copy(excludeFromBackup = excluded)))
     }
 
     suspend fun markNotebookBackedUp(notebookId: String, kind: BackupKind, timestamp: Long) {
         val entity = dao.getById(notebookId) ?: return
-        val obj = Json.decodeFromString<NotebookObject>(entity.data)
+        val obj = entity.notebookMeta()
         val updated = when (kind) {
             BackupKind.LOCAL -> obj.copy(lastBackedUpLocal = timestamp)
             BackupKind.DRIVE -> obj.copy(lastBackedUpDrive = timestamp)
         }
         // Do NOT bump updatedAt — stamping backup time is not a content modification.
-        dao.update(entity.copy(data = Json.encodeToString(updated)))
+        dao.update(entity.withNotebookMeta(updated))
     }
 
     suspend fun notebooksNeedingBackup(kind: BackupKind): List<ObjectEntity> {
@@ -546,7 +540,7 @@ class IndexRepository(private val dao: ObjectDao) {
             .filter { it.type == ObjectType.NOTEBOOK }
             .filter { entity ->
                 val obj = try {
-                    Json.decodeFromString<NotebookObject>(entity.data)
+                    entity.notebookMeta()
                 } catch (_: Exception) { return@filter false }
                 val lastBackedUp = when (kind) {
                     BackupKind.LOCAL -> obj.lastBackedUpLocal
@@ -564,7 +558,7 @@ class IndexRepository(private val dao: ObjectDao) {
         dao.getAllNotDeleted()
             .count { entity ->
                 if (entity.type != ObjectType.NOTEBOOK) return@count false
-                val obj = try { Json.decodeFromString<NotebookObject>(entity.data) } catch (_: Exception) { return@count false }
+                val obj = try { entity.notebookMeta() } catch (_: Exception) { return@count false }
                 obj.encrypted && obj.keyScope == KeyScope.GLOBAL
             }
 
@@ -572,14 +566,14 @@ class IndexRepository(private val dao: ObjectDao) {
         dao.getAllNotDeleted()
             .filter { entity ->
                 if (entity.type != ObjectType.NOTEBOOK) return@filter false
-                val obj = try { Json.decodeFromString<NotebookObject>(entity.data) } catch (_: Exception) { return@filter false }
+                val obj = try { entity.notebookMeta() } catch (_: Exception) { return@filter false }
                 obj.encrypted && obj.keyScope == KeyScope.GLOBAL
             }
             .map { it.id }
 
     suspend fun getEncryptionInfo(notebookId: String): EncryptionInfo {
         val entity = dao.getById(notebookId) ?: return EncryptionInfo.NONE
-        val obj = Json.decodeFromString<NotebookObject>(entity.data)
+        val obj = entity.notebookMeta()
         return EncryptionInfo(obj.encrypted, obj.keyScope)
     }
 
@@ -589,13 +583,13 @@ class IndexRepository(private val dao: ObjectDao) {
      */
     suspend fun setEncryptionState(notebookId: String, encrypted: Boolean, keyScope: KeyScope?) {
         val entity = dao.getById(notebookId) ?: return
-        val obj = Json.decodeFromString<NotebookObject>(entity.data)
+        val obj = entity.notebookMeta()
         val updated = obj.copy(
             encrypted = encrypted,
             keyScope = keyScope,
             snapshot = if (encrypted) null else obj.snapshot,
         )
-        dao.update(entity.copy(data = Json.encodeToString(updated), updatedAt = System.currentTimeMillis()))
+        dao.update(entity.withNotebookMeta(updated).copy(updatedAt = System.currentTimeMillis()))
     }
 
     // endregion

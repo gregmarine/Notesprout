@@ -33,7 +33,7 @@ import com.notesprout.android.crypto.SoilCrypto
 import com.notesprout.android.data.SoilDatabase
 import com.notesprout.android.data.index.IndexRepository
 import com.notesprout.android.data.index.NotesproutIndex
-import com.notesprout.android.data.index.TemplateObject
+import com.notesprout.android.data.index.templateObject
 import com.notesprout.android.data.recents.TemplateRecentsManager
 import com.notesprout.android.data.soilFile
 import com.notesprout.android.data.topHeadingNamesByPageId
@@ -1424,7 +1424,7 @@ class PageIndexActivity : AppCompatActivity() {
                     ""  // Blank — clear template.
                 } else {
                     val entity = indexRepo.getTemplate(libraryTemplateId) ?: return@withContext null
-                    val tObj = TemplateObject.fromJson(entity.data) ?: return@withContext null
+                    val tObj = entity.templateObject() ?: return@withContext null
                     if (tObj.image.isEmpty()) return@withContext null
                     val key = KeySession.getFor(notebookId)
                     val parentId = com.notesprout.android.data.readNotebookRowId(path, key)

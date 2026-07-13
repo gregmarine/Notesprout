@@ -38,7 +38,7 @@ import com.notesprout.android.core.Slog
 import com.notesprout.android.data.index.IndexRepository
 import com.notesprout.android.data.index.NotesproutIndex
 import com.notesprout.android.data.index.ObjectEntity
-import com.notesprout.android.data.index.TemplateObject
+import com.notesprout.android.data.index.templateObject
 import com.notesprout.android.databinding.ActivityTemplateBrowserBinding
 import com.notesprout.android.databinding.DialogNewNotebookBinding
 import com.notesprout.android.data.recents.TemplateRecentsManager
@@ -1282,7 +1282,7 @@ class TemplateBrowserActivity : AppCompatActivity() {
         val job = lifecycleScope.launch {
             val bitmap: Bitmap? = withContext(Dispatchers.IO) {
                 try {
-                    val tObj = TemplateObject.fromJson(entity.data) ?: return@withContext null
+                    val tObj = entity.templateObject() ?: return@withContext null
                     if (tObj.image.isEmpty()) return@withContext null
                     val bytes = Base64.decode(tObj.image, Base64.DEFAULT)
                     // Decode bounds first, then sample.
@@ -1420,7 +1420,7 @@ class TemplateBrowserActivity : AppCompatActivity() {
         lifecycleScope.launch {
             val bitmap: Bitmap? = withContext(Dispatchers.IO) {
                 try {
-                    val tObj = TemplateObject.fromJson(entity.data) ?: return@withContext null
+                    val tObj = entity.templateObject() ?: return@withContext null
                     if (tObj.image.isEmpty()) return@withContext null
                     val bytes = Base64.decode(tObj.image, Base64.DEFAULT)
                     BitmapDecode.decodeSampled(bytes, BitmapDecode.MAX_DIMENSION, BitmapDecode.MAX_DIMENSION)
@@ -1480,7 +1480,7 @@ class TemplateBrowserActivity : AppCompatActivity() {
     private suspend fun writeTemplatePng(entity: ObjectEntity): java.io.File? {
         return withContext(Dispatchers.IO) {
             try {
-                val tObj = TemplateObject.fromJson(entity.data)
+                val tObj = entity.templateObject()
                 if (tObj == null || tObj.image.isEmpty()) return@withContext null
                 val bytes = android.util.Base64.decode(tObj.image, android.util.Base64.DEFAULT)
                 val outDir = java.io.File(cacheDir, "exported_pngs").apply { mkdirs() }

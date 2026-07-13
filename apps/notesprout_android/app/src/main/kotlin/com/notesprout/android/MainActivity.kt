@@ -58,6 +58,8 @@ import com.notesprout.android.data.index.NotebookObject
 import com.notesprout.android.data.index.NotesproutIndex
 import com.notesprout.android.data.index.ObjectEntity
 import com.notesprout.android.data.index.ObjectType
+import com.notesprout.android.data.index.notebookMeta
+import com.notesprout.android.data.index.templateObject
 import com.notesprout.android.data.recents.RecentsManager
 import com.notesprout.android.data.recents.ResolvedRecent
 import com.notesprout.android.data.recents.TemplateRecentsManager
@@ -1165,7 +1167,7 @@ class MainActivity : AppCompatActivity() {
 
                 // Read snapshot from the index — no .soil file access during list rendering.
                 val notebookObj = try {
-                    Json.decodeFromString<NotebookObject>(item.entity.data)
+                    item.entity.notebookMeta()
                 } catch (_: Exception) { null }
 
                 if (notebookObj?.encrypted == true) {
@@ -1558,7 +1560,7 @@ class MainActivity : AppCompatActivity() {
             val seed: SeedTemplate? = if (libraryTemplateId.isNotEmpty()) {
                 withContext(Dispatchers.IO) {
                     val e = repository.getTemplate(libraryTemplateId)
-                    val t = e?.let { com.notesprout.android.data.index.TemplateObject.fromJson(it.data) }
+                    val t = e?.templateObject()
                     if (e != null && t != null && t.image.isNotEmpty())
                         SeedTemplate(t.width, t.height, e.name, t.image) else null
                 }
@@ -1718,7 +1720,7 @@ class MainActivity : AppCompatActivity() {
         lifecycleScope.launch {
             val pinned = withContext(Dispatchers.IO) { repository.isNotebookPinned(entity.id) }
             val encInfo = withContext(Dispatchers.IO) { repository.getEncryptionInfo(entity.id) }
-            val excluded = try { Json.decodeFromString<NotebookObject>(entity.data).excludeFromBackup } catch (_: Exception) { false }
+            val excluded = try { entity.notebookMeta().excludeFromBackup } catch (_: Exception) { false }
             val pinIcon  = if (pinned) R.drawable.ic_pinned_off else R.drawable.ic_pinned
             val pinLabel = if (pinned) "Unpin Notebook" else "Pin Notebook"
             val menu = ActionSheetDialog(this@MainActivity)
@@ -2178,7 +2180,7 @@ class MainActivity : AppCompatActivity() {
                         }
                         is DestinationPickerState.CopyNotebook -> {
                             val sourceObj = try {
-                                Json.decodeFromString<NotebookObject>(source.data)
+                                source.notebookMeta()
                             } catch (_: Exception) { NotebookObject() }
                             val newEntity = repository.createNotebook(source.name, currentParentId)
                             // Encrypted notebooks never expose a plaintext snapshot.
@@ -2385,7 +2387,7 @@ class MainActivity : AppCompatActivity() {
             when (child.type) {
                 ObjectType.NOTEBOOK -> {
                     val sourceObj = try {
-                        Json.decodeFromString<NotebookObject>(child.data)
+                        child.notebookMeta()
                     } catch (_: Exception) { NotebookObject() }
                     val newNotebook = repository.createNotebook(child.name, newFolder.id)
                     if (sourceObj.snapshot != null && !sourceObj.encrypted) {
