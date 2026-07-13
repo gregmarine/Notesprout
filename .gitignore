@@ -52,3 +52,7 @@ key.properties
 
 # Logs
 *.log
+
+# HWR tooling — venv and model build artifacts (models are large, rebuilt from scripts)
+tools/hwr/.venv/
+tools/hwr/build/

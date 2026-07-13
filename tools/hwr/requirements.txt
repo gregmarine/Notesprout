@@ -1,0 +1,13 @@
+# Notesprout HWR tooling — Python 3.11 venv
+# python3.11 -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt
+torch>=2.3
+transformers>=4.44
+optimum[onnxruntime]>=1.21
+onnx>=1.16
+onnxruntime>=1.18
+pillow>=10.0
+sentencepiece>=0.2
+protobuf>=4.0
+jiwer>=3.0
+# Phase 3 (fine-tuning) additions:
+# peft>=0.11

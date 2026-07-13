@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <!-- HWR Lab: debug-only eval harness for the TrOCR engine (Phase 0 go/no-go).
+             exported=true so it can be launched without touching production UI:
+             adb shell am start -n com.notesprout.android.dev/com.notesprout.android.HwrLabActivity -->
+        <activity
+            android:name="com.notesprout.android.HwrLabActivity"
+            android:exported="true"
+            android:label="HWR Lab" />
+    </application>
+</manifest>

@@ -108,6 +108,11 @@ dependencies {
     // ML Kit Digital Ink Recognition — general-purpose handwriting-to-text layer.
     implementation("com.google.mlkit:digital-ink-recognition:19.0.0")
 
+    // ONNX Runtime Mobile — runs the TrOCR handwriting engine (recognition/trocr/), the
+    // personalizable second engine behind the Handwriting Engine toggle (ML Kit stays the
+    // default + fallback). MIT license. Deliberate, discussed dependency addition (hwr-trocr).
+    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.22.0")
+
     // SQLCipher — full-file encryption for .soil notebooks. Key = user passphrase (portable).
     implementation("net.zetetic:sqlcipher-android:4.6.1")
     implementation("androidx.sqlite:sqlite:2.4.0")
