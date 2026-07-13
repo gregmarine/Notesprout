@@ -5,6 +5,11 @@ import android.net.Uri
 import android.util.Log
 import androidx.documentfile.provider.DocumentFile
 import com.notesprout.android.BuildConfig
+import com.notesprout.android.crypto.KeyScope
+import com.notesprout.android.crypto.PassphraseStore
+import com.notesprout.android.crypto.SoilCrypto
+import com.notesprout.android.data.NotebookCompactor
+import com.notesprout.android.data.SoilDatabase
 import com.notesprout.android.data.index.IndexRepository
 import com.notesprout.android.data.index.NotesproutIndex
 import com.notesprout.android.data.soilFile
@@ -92,6 +97,20 @@ object BackupEngine {
             repo.notebooksNeedingBackup(BackupKind.DRIVE).forEach { work.add(Work(it.id, it.name, BackupKind.DRIVE)) }
         }
 
+        // ── Compact the leanest form of each backed-up notebook, in place ─────
+        // Only the notebooks moving in this run (unique across destinations) are compacted, right
+        // before their bytes are copied. Compaction preserves `updatedAt`, so a notebook already in
+        // the work list stays flagged and is copied in its now-smaller form below. Encrypted
+        // notebooks we cannot open unattended (NOTEBOOK-scope, or GLOBAL without a cached passphrase)
+        // are silently left as-is — still valid, just not extra-compacted; they self-compact on their
+        // next open. VACUUM inside compact() only fires when a pass actually changed something, so an
+        // already-lean notebook costs only cheap scans here.
+        val toCompact = work.map { it.id to it.name }.distinctBy { it.first }
+        toCompact.forEachIndexed { i, (id, name) ->
+            onProgress(i + 1, toCompact.size, "Compacting $name")
+            compactInPlace(context, repo, id)
+        }
+
         // ── Per-notebook copies ───────────────────────────────────────────────
         var localAttempted = 0; var localSucceeded = 0; var localFailed = 0; var localSkipped = 0
         val localErrors = mutableListOf<String>()
@@ -157,5 +176,37 @@ object BackupEngine {
         repo.saveBackupConfig(config.copy(lastRunAt = runStart))
 
         BackupResult(results)
+    }
+
+    /**
+     * Open one `.soil` and run the same seal-time [NotebookCompactor.compact] pass used on close, so
+     * the file about to be backed up is in its leanest form. Mirrors the key resolution of the manual
+     * "Compact Notebooks" sweep: plaintext opens with no key; a GLOBAL-scope notebook opens only if
+     * its passphrase is cached; a NOTEBOOK-scope notebook (no unattended key) is skipped. Any failure
+     * is swallowed — this is best-effort optimisation, never a reason to fail the backup copy that
+     * follows. Caller must be on [Dispatchers.IO].
+     */
+    private suspend fun compactInPlace(context: Context, repo: IndexRepository, notebookId: String) {
+        try {
+            val info = repo.getEncryptionInfo(notebookId)
+            val key: String? = when {
+                !info.encrypted -> null
+                info.keyScope == KeyScope.GLOBAL ->
+                    PassphraseStore.getGlobalPassphrase(context) ?: return
+                else -> return
+            }
+            val file = soilFile(context, notebookId)
+            if (!file.exists()) return
+            val builder = SoilDatabase.builder(context, file.absolutePath)
+            if (key != null) builder.openHelperFactory(SoilCrypto.roomFactory(key))
+            val db = builder.build()
+            try {
+                NotebookCompactor.compact(db, context.resources.displayMetrics.density)
+            } finally {
+                db.close()
+            }
+        } catch (e: Exception) {
+            Log.w("BackupEngine", "Pre-backup compaction failed for $notebookId — backing up as-is: ${e.message}")
+        }
     }
 }
