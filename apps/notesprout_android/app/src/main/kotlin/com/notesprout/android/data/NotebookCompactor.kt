@@ -4,13 +4,12 @@ import android.util.Base64
 import androidx.room.withTransaction
 import androidx.sqlite.db.SupportSQLiteDatabase
 import com.notesprout.android.core.ImageCodec
-import com.notesprout.android.data.index.NotebookObject
 import com.notesprout.android.data.index.NotesproutIndex
 import com.notesprout.android.data.index.ObjectType
-import com.notesprout.android.data.index.TemplateObject
-import kotlinx.serialization.decodeFromString
-import kotlinx.serialization.encodeToString
-import kotlinx.serialization.json.Json
+import com.notesprout.android.data.index.notebookMeta
+import com.notesprout.android.data.index.templateObject
+import com.notesprout.android.data.index.withNotebookMeta
+import com.notesprout.android.data.index.withTemplate
 
 /**
  * One-time, idempotent **transitional** compaction of stored notebooks and the global index.
@@ -40,10 +39,9 @@ import kotlinx.serialization.json.Json
  * - **Self-limiting.** ts / snapshot / cover rows are found by `LIKE` scans; template image rows are
  *   decided from a cheap header ([needsWebpReencode]). Once converted a notebook does no heavy work
  *   beyond those scans, so this can run on every seal.
- * - **`updatedAt` preserved.** Rewrites go through [NotebookDao.rewriteObjectDataKeepingTimestamp]
- *   (and [com.notesprout.android.data.index.ObjectDao.rewriteObjectData] for the index) so no row's
- *   `updatedAt` moves. None of these are content edits; bumping it would needlessly re-flag the file
- *   for backup.
+ * - **`updatedAt` preserved.** `.soil` rewrites go through [NotebookDao.rewriteObjectDataKeepingTimestamp];
+ *   the index backfill ([compactIndex]) re-persists whole rows whose `updatedAt` is copied through
+ *   unchanged. None of these are content edits; bumping it would needlessly re-flag the file for backup.
  *
  * Reclamation requires a full `VACUUM`: shrinking a TEXT value in place leaves the freed bytes as
  * internal page fragmentation, which `incremental_vacuum` does not return to the OS. VACUUM
@@ -256,26 +254,54 @@ object NotebookCompactor {
         else -> null
     }
 
+    /** Outcome of [compactIndex]: legacy rows moved to columnar, and image blobs re-encoded to WEBP. */
+    data class IndexCompaction(val columnarRows: Int, val webpImages: Int) {
+        val changed: Boolean get() = columnarRows > 0 || webpImages > 0
+    }
+
     /**
-     * Re-encode the PNG/lossless-WEBP images in the global index (`notesprout.db`) — template-library
-     * images and notebook cover snapshots — then VACUUM once if anything changed. The index is a
-     * long-lived Room singleton, so this is invoked from the manual sweep rather than a per-notebook
-     * seal. Returns the number of rows rewritten.
+     * Bulk-convert the global index (`notesprout.db`) `objects` table to its leanest columnar form
+     * (data-model-optimization Phase C). Two passes, then VACUUM once if anything changed:
+     *
+     *  - **A** — every structural row still holding legacy JSON in `data` (notebook / template /
+     *    folder) moves to typed columns + binary `blob` via the [IndexObjectColumns] mappings. Rows
+     *    convert lazily on their own writes (open+close, pin, create), so this reclaims the backlog of
+     *    rows never touched since Phase A. `updatedAt` is preserved — a format change, not an edit.
+     *  - **B** — every columnar image `blob` (template image / notebook cover) still stored as PNG or
+     *    lossless WEBP is re-encoded to WEBP q100 (the ~47% win the old JSON path did in place).
+     *
+     * List membership is already migrated to child rows by the ensure*ListExists bootstrap on launch,
+     * so it needs no sweep here. The index is a long-lived Room singleton, so this runs from the manual
+     * "Compact Notebooks" sweep rather than a per-notebook seal.
      */
-    suspend fun compactIndex(): Int {
-        val dao = NotesproutIndex.dao()
-        var changed = 0
-        for (h in dao.imageRowHeads()) {
-            if (!needsWebpReencode(h.head)) continue
-            val data = dao.imageDataForId(h.id) ?: continue
-            val newData = transcodeIndexRow(h.type, data) ?: continue
-            dao.rewriteObjectData(h.id, newData)
-            changed++
+    suspend fun compactIndex(): IndexCompaction {
+        val db = NotesproutIndex.db()
+        val dao = db.objectDao()
+        var columnarRows = 0
+        var webpImages = 0
+        db.withTransaction {
+            // Pass A — legacy JSON structural rows → columnar (image bytes carried as-is; WEBP is Pass B).
+            for (row in dao.legacyStructuralIndexRows()) {
+                val columnar = when (row.type) {
+                    ObjectType.NOTEBOOK -> row.withNotebookMeta(row.notebookMeta())
+                    ObjectType.TEMPLATE -> row.templateObject()?.let { row.withTemplate(it) }
+                    ObjectType.FOLDER, ObjectType.TEMPLATE_FOLDER -> row.copy(data = "")
+                    else -> null
+                } ?: continue
+                dao.update(columnar)
+                columnarRows++
+            }
+            // Pass B — re-encode columnar image blobs that are still PNG / lossless WEBP.
+            for (row in dao.columnarImageIndexRows()) {
+                val b = row.blob ?: continue
+                if (!needsWebpReencodeBytes(b)) continue
+                val webp = ImageCodec.transcodeBytesToWebp(b) ?: continue
+                dao.update(row.copy(blob = webp))   // copy() preserves updatedAt — a format change
+                webpImages++
+            }
         }
-        if (changed > 0) {
-            NotesproutIndex.db().openHelper.writableDatabase.execSQL("VACUUM")
-        }
-        return changed
+        if (columnarRows > 0 || webpImages > 0) db.openHelper.writableDatabase.execSQL("VACUUM")
+        return IndexCompaction(columnarRows, webpImages)
     }
 
     /**
@@ -309,21 +335,6 @@ object NotebookCompactor {
         return converted
     }
 
-    private fun transcodeIndexRow(type: String, data: String): String? = when (type) {
-        ObjectType.TEMPLATE -> {
-            val t = TemplateObject.fromJson(data) ?: return null
-            val webp = ImageCodec.transcodeToWebpBase64(t.image) ?: return null
-            t.copy(image = webp).toJson()
-        }
-        ObjectType.NOTEBOOK -> {
-            val n = try { Json.decodeFromString<NotebookObject>(data) } catch (e: Exception) { return null }
-            val snap = n.snapshot ?: return null
-            val webp = ImageCodec.transcodeToWebpBase64(snap) ?: return null
-            Json.encodeToString(n.copy(snapshot = webp))
-        }
-        else -> null
-    }
-
     /**
      * Decide from a row's JSON [head] (first ~4000 chars of `data`) whether its embedded image should
      * be re-encoded to WEBP q100: true for **PNG** and for **lossless WEBP** (a `VP8L` codec chunk),
@@ -345,6 +356,25 @@ object NotebookCompactor {
         var b64 = head.substring(webpStart, if (quote < 0) head.length else quote)
         b64 = b64.substring(0, b64.length - b64.length % 4)     // trim to a whole base64 quantum
         val b = try { Base64.decode(b64, Base64.DEFAULT) } catch (e: Exception) { return false }
+        return webpChunkNeedsReencode(b)
+    }
+
+    /**
+     * Raw-bytes variant of [needsWebpReencode] for the columnar `blob` images (Phase C): a PNG
+     * (magic `89 50 4E 47`) always re-encodes; a WEBP is classified by its codec chunk.
+     */
+    private fun needsWebpReencodeBytes(b: ByteArray): Boolean {
+        if (b.size >= 4 && (b[0].toInt() and 0xFF) == 0x89 && b[1].toInt() == 0x50 &&
+            b[2].toInt() == 0x4E && b[3].toInt() == 0x47) return true   // PNG
+        return webpChunkNeedsReencode(b)
+    }
+
+    /**
+     * Walk a decoded WEBP's RIFF chunk list: a `VP8L` (lossless) codec chunk → re-encode, `VP8 `
+     * (lossy) → already compact, skip. Degradation-safe — only a positively-identified `VP8L`
+     * returns true, so a lossy image is never re-encoded lossy→lossy. Non-WEBP input → false.
+     */
+    private fun webpChunkNeedsReencode(b: ByteArray): Boolean {
         if (b.size < 16 || fourccAt(b, 0) != "RIFF" || fourccAt(b, 8) != "WEBP") return false
         var off = 12
         while (off + 8 <= b.size) {

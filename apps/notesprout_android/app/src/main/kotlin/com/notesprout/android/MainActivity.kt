@@ -2303,7 +2303,8 @@ class MainActivity : AppCompatActivity() {
         var bytesFreed = 0L
         var skippedEncrypted = 0
         var errors = 0
-        var indexRows = 0
+        var indexColumnarRows = 0
+        var indexWebpImages = 0
         var calScratchStrokes = 0
 
         withContext(Dispatchers.IO) {
@@ -2335,10 +2336,12 @@ class MainActivity : AppCompatActivity() {
                 }.onFailure { errors++; Slog.d("MainActivity") { "compact sweep failed for ${nb.id}: ${it.message}" } }
                 withContext(Dispatchers.Main) { tvMessage.text = "Compacting notebooks…\n${i + 1} / ${notebooks.size}" }
             }
-            // Finally, transcode the global index's own PNG images (template library + cover snapshots).
+            // Finally, backfill the global index to columnar + transcode its images to WEBP.
             withContext(Dispatchers.Main) { tvMessage.text = "Compacting index…" }
-            runCatching { indexRows = NotebookCompactor.compactIndex() }
-                .onFailure { errors++; Slog.d("MainActivity") { "index compaction failed: ${it.message}" } }
+            runCatching {
+                val r = NotebookCompactor.compactIndex()
+                indexColumnarRows = r.columnarRows; indexWebpImages = r.webpImages
+            }.onFailure { errors++; Slog.d("MainActivity") { "index compaction failed: ${it.message}" } }
             // …and bulk-convert the calendar + scratchpad legacy strokes to binary (Phase 3 backlog).
             withContext(Dispatchers.Main) { tvMessage.text = "Compacting calendar & scratch pad…" }
             runCatching { calScratchStrokes = NotebookCompactor.compactCalendarScratchpadStrokes() }
@@ -2348,8 +2351,10 @@ class MainActivity : AppCompatActivity() {
         dialog.dismiss()
         val freedMb = "%.1f".format(bytesFreed / (1024.0 * 1024.0))
         val summary = StringBuilder("Compacted $compacted notebook${if (compacted == 1) "" else "s"} — freed $freedMb MB.")
-        if (indexRows > 0)
-            summary.append("\n\nConverted $indexRows index image${if (indexRows == 1) "" else "s"} to WEBP.")
+        if (indexColumnarRows > 0)
+            summary.append("\n\nConverted $indexColumnarRows index row${if (indexColumnarRows == 1) "" else "s"} to columnar.")
+        if (indexWebpImages > 0)
+            summary.append("\n\nConverted $indexWebpImages index image${if (indexWebpImages == 1) "" else "s"} to WEBP.")
         if (calScratchStrokes > 0)
             summary.append("\n\nConverted $calScratchStrokes calendar/scratch-pad stroke${if (calScratchStrokes == 1) "" else "s"} to binary.")
         if (skippedEncrypted > 0)

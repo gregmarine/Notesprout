@@ -37,24 +37,15 @@ interface ObjectDao {
     @Query("SELECT * FROM objects WHERE deletedAt IS NULL")
     suspend fun getAllNotDeleted(): List<ObjectEntity>
 
-    // ── Transitional PNG→WEBP compaction (see NotebookCompactor.compactIndex) ──
+    // ── Phase C: bulk columnar backfill of the index `objects` table ─────────
 
-    /**
-     * Cheap header projection for image-bearing index rows (template image / notebook cover
-     * snapshot): id, type, and the first 80 base64 chars of `data`. [NotebookCompactor.compactIndex]
-     * reads the head to decide whether a WEBP re-encode is needed, pulling [imageDataForId] only for
-     * those. Self-limiting, like the `.soil` scan.
-     */
-    @Query("SELECT id, type, substr(data, 1, 4000) AS head FROM objects WHERE type IN ('template', 'notebook')")
-    suspend fun imageRowHeads(): List<IndexImageHead>
+    /** Structural rows still carrying legacy JSON in `data` (convert to columnar on the manual sweep). */
+    @Query("SELECT * FROM objects WHERE data <> '' AND type IN ('notebook', 'template', 'folder', 'template_folder')")
+    suspend fun legacyStructuralIndexRows(): List<ObjectEntity>
 
-    /** Full `data` for a single index row — pulled only for rows chosen for re-encode. */
-    @Query("SELECT data FROM objects WHERE id = :id")
-    suspend fun imageDataForId(id: String): String?
-
-    /** Overwrite a row's [data] WITHOUT touching `updatedAt` (avoids needlessly re-flagging for backup). */
-    @Query("UPDATE objects SET data = :data WHERE id = :id")
-    suspend fun rewriteObjectData(id: String, data: String)
+    /** Columnar image rows (notebook cover / template image in `blob`) — candidates for WEBP re-encode. */
+    @Query("SELECT * FROM objects WHERE data = '' AND blob IS NOT NULL AND type IN ('notebook', 'template')")
+    suspend fun columnarImageIndexRows(): List<ObjectEntity>
 
     // ── List membership as child rows (Phase B) ──────────────────────────────
     // A `list_item` row is one membership edge: parentId = list id, refId = member id,
@@ -83,6 +74,3 @@ interface ObjectDao {
     @Query("UPDATE objects SET sortOrder = :sortOrder WHERE parentId = :listId AND refId = :memberId AND type = 'list_item'")
     suspend fun updateListItemOrder(listId: String, memberId: String, sortOrder: Int)
 }
-
-/** id/type/base64-head projection for [ObjectDao.imageRowHeads] (type selects the image field). */
-data class IndexImageHead(val id: String, val type: String, val head: String)

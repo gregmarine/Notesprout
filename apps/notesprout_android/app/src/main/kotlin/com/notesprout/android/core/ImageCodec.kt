@@ -48,10 +48,22 @@ object ImageCodec {
      * q100 base64. Returns null on empty/undecodable input; callers that must not lose the import
      * should fall back to storing the original bytes.
      */
-    fun transcodeBytesToWebpBase64(bytes: ByteArray): String? {
+    fun transcodeBytesToWebpBase64(bytes: ByteArray): String? =
+        transcodeBytesToWebp(bytes)?.let { Base64.encodeToString(it, Base64.NO_WRAP) }
+
+    /**
+     * Decode raw image [bytes] at full resolution and re-encode as raw WEBP q100 bytes (no base64).
+     * For the binary `blob` columns (index cover snapshots / template images). Returns null on
+     * empty/undecodable input so callers can leave the original bytes in place.
+     */
+    fun transcodeBytesToWebp(bytes: ByteArray): ByteArray? {
         if (bytes.isEmpty()) return null
         val bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: return null
-        return try { encodeBase64(bmp) } finally { bmp.recycle() }
+        return try {
+            val out = ByteArrayOutputStream()
+            compress(bmp, out)
+            out.toByteArray()
+        } finally { bmp.recycle() }
     }
 
     /**
