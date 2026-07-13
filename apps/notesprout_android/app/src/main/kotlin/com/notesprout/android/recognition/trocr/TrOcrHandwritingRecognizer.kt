@@ -5,8 +5,13 @@ import android.graphics.RectF
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import com.notesprout.android.core.Slog
 import com.notesprout.android.data.LiveStroke
 import com.notesprout.android.recognition.HandwritingRecognizer
+import com.notesprout.android.recognition.HwrSettings
+import com.notesprout.android.recognition.personal.CorrectionMemory
+import com.notesprout.android.recognition.personal.TrainingPairRepository
+import com.notesprout.android.recognition.personal.UserLexicon
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -67,15 +72,51 @@ class TrOcrHandwritingRecognizer(
             try {
                 val (sess, tok, raster) = ensurePipeline()
                     ?: return@withLock HandwritingRecognizer.FALLBACK_TEXT
+                val personalization = ensurePersonalization(tok)
                 val pixels = raster.rasterize(strokes)
-                val ids = sess.generate(pixels)
-                val text = tok.decode(ids)
+                val processors = personalization?.lexicon
+                    ?.takeIf { !it.isEmpty }
+                    ?.let { listOf(it.processor()) }
+                    ?: emptyList()
+                val ids = sess.generate(pixels, processors)
+                var text = tok.decode(ids)
+                personalization?.memory?.takeIf { !it.isEmpty }?.let { text = it.apply(text) }
                 text.ifBlank { HandwritingRecognizer.FALLBACK_TEXT }
             } catch (e: Exception) {
                 Log.e(TAG, "TrOCR recognition failed", e)
                 HandwritingRecognizer.FALLBACK_TEXT
             }
         }
+    }
+
+    private class Personalization(
+        val lexicon: UserLexicon,
+        val memory: CorrectionMemory,
+        val builtAtCount: Int,
+    )
+
+    private var personalization: Personalization? = null
+
+    /**
+     * Lexicon + correction memory built from confirmed training pairs; rebuilt when the
+     * confirmed count changes (one COUNT query per line — cheap). Null when the
+     * personalization toggle is off. Called under [mutex] on Dispatchers.IO.
+     */
+    private suspend fun ensurePersonalization(tokenizer: SentencePieceTokenizer): Personalization? {
+        if (!HwrSettings.personalizationEnabled(context)) return null
+        val count = TrainingPairRepository.confirmedCount(context)
+        val cached = personalization
+        if (cached != null && cached.builtAtCount == count) return cached
+        val labels = TrainingPairRepository.confirmedLabels(context)
+        val corrections = TrainingPairRepository.correctionPairs(context)
+        val built = Personalization(
+            lexicon = UserLexicon.build(labels, tokenizer),
+            memory = CorrectionMemory.build(corrections),
+            builtAtCount = count,
+        )
+        personalization = built
+        Slog.d(TAG) { "personalization rebuilt: $count confirmed pairs" }
+        return built
     }
 
     /** Load (or reload after a model switch) the session + tokenizer + rasterizer triple. */

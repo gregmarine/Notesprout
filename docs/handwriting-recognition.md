@@ -430,10 +430,36 @@ debug-only button): per-line ink image + both engines' transcription + latency, 
 its true text, corpus CER. Recognized text is shown on screen only — **never logged** (privacy rule
 applies to this engine identically).
 
-### Next phases (planned)
+### Phase 2 — personalization (BUILT)
 
-Phase 2: personalization at the decoder (user lexicon from corrections + enrollment → logit
-biasing; correction memory post-pass) + training-pair capture (plain Room DB `filesDir/hwr/
-training.db`; **capture skipped for encrypted notebooks** — leak hygiene). Phase 3: training-bundle
-export → LoRA fine-tune on the user's Mac (`tools/hwr/finetune.py`, PyTorch MPS) → re-import as a
-`personalized: true` bundle. Payoff gate: personalized CER < ML Kit CER on the user's held-out lines.
+- **Training-pair store**: plain Room DB `filesDir/hwr/training.db`
+  (`data/hwr/TrainingPairEntity|Dao|HwrTrainingDatabase`, cap 2000, unconfirmed evicted first) —
+  a pair = strokes JSON + human label + the engine's `originalText`. Every capture is gated by
+  `TrainingPairRepository.captureAllowed` (personalization toggle AND plaintext notebook — leak
+  hygiene; encrypting the store itself is BACKLOG). Deliberately NOT in `notesprout.db`.
+- **Capture sources**: heading conversion (unconfirmed, keyed by heading id) + heading edit
+  (upgrades to confirmed) in `NotebookActivity`; viewer line correction; HwrLab references;
+  enrollment. Other heading hosts (Scratchpad/DayDetail/StickyNote) are BACKLOG.
+- **Viewer Correct mode** (`PageTextViewerActivity`): `PageText` **schema 2** adds
+  `lines: List<RecognizedLine>(text, strokeIds, top, height)` provenance for handwriting-derived
+  lines (populated by `PageTextRecognizer`; schema-1 rows decode with `lines = null` and offer no
+  correction until re-recognized). Correct button (This-Page, plaintext, personalization on) →
+  tappable line list → edit dialog → confirmed pair + in-memory patch. The `page_text` row is NOT
+  written (viewer stays read-only); the fix becomes durable via correction memory on the next pass.
+- **Enrollment** (`HwrEnrollmentActivity`, settings → "Teach it your handwriting…"): 16 prescribed
+  sentences (`EnrollmentScript` — letter/digit/punctuation coverage), in-memory ink capture
+  (`EnrollmentInkView`, plain View), single-band enforcement via `StrokeSegmenter`, each save = a
+  confirmed pair.
+- **Decoder-level personalization**, applied inside `TrOcrHandwritingRecognizer` and rebuilt
+  automatically when the confirmed-pair count changes: `UserLexicon` (confirmed labels → word →
+  token-id prefix trie; ≥3 chars, non-numeric) drives a bounded `LogitProcessor` bias (+2.0) toward
+  lexicon-word continuations; `CorrectionMemory` (exact normalized-line map + word substitutions at
+  ≥2 identical confirmations) post-passes the decoded text. Master toggle: settings →
+  "Learn from my corrections" (`HwrSettings.personalizationEnabled`); "Clear my data" wipes the store.
+
+### Phase 3 — Mac fine-tune loop (next)
+
+Training-bundle export (SAF zip: per-pair PNGs rendered by the same `LineRasterizer` + raw strokes +
+labels.jsonl) → LoRA fine-tune on the user's Mac (`tools/hwr/finetune.py`, PyTorch MPS) → re-import
+as a `personalized: true` bundle via the existing model store. Payoff gate: personalized CER <
+ML Kit CER on the user's held-out lines.

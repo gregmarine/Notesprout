@@ -43,6 +43,25 @@
 
 ---
 
+## TrOCR personal engine — deferred items (branch `hwr-trocr`)
+
+Phases 0–2 built (see `docs/handwriting-recognition.md` § "TrOCR engine"). Deferred:
+
+- **Viewer progress indicator** — a cold whole-notebook recognition pass with TrOCR (~0.5 s/line)
+  can take minutes with only a static "Recognizing…" label; show per-page progress + cancel.
+- **Capture hooks in other heading hosts** — heading-conversion/correction capture currently lives
+  in `NotebookActivity` only; Scratchpad / DayDetail / StickyNoteEditor heading edits could mirror
+  the same ~8-line hook (their conversions would need capture first for corrections to matter).
+- **SQLCipher the training store** — `filesDir/hwr/training.db` is plaintext (capture already
+  excludes encrypted notebooks); encrypting it keyed by the global passphrase would drag
+  KeyResolver/rotation into scope — deliberately deferred.
+- **Beam search + KV-state cloning** — decoder is greedy; beam-3 needs per-beam ORT tensor state
+  cloning in `TrOcrSession`. Revisit if lexicon biasing under greedy proves too weak.
+- **RTR debounce bump when TrOCR active** — consider raising `RtrScheduler.DEBOUNCE_MS` 2 s → 4 s
+  while the Personal engine is selected (a 19-line page ≈ 10 s per RTR job).
+- **Enrollment ink view EPD acceleration** — `EnrollmentInkView` is a plain View (laggy-but-usable
+  ink on e-ink); could route through the raw-drawing fast path like real pages.
+
 ## Handwriting → Text: page-text, RTR & export recognition
 
 > **Phases 1 & 2 SHIPPED on `sprout` (2026-07-03), device-verified.** Full detail + as-built notes in

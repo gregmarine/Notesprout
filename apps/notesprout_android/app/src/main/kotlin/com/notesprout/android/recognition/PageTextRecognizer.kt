@@ -57,6 +57,7 @@ class PageTextRecognizer(
      */
     suspend fun recognizePage(content: PageContent, sourceMaxUpdatedAt: Long): PageText {
         val blocks = mutableListOf<Block>()
+        val recognizedLines = mutableListOf<PageText.RecognizedLine>()
 
         // 1. Handwriting strokes → segmented, per-line-recognized paragraphs (context-chained).
         val layout = StrokeSegmenter.segment(content.strokes)
@@ -76,6 +77,14 @@ class PageTextRecognizer(
                 if (t.isNotBlank() && t != HandwritingRecognizer.FALLBACK_TEXT) {
                     lines += t
                     pre = t   // feed line N into line N+1
+                    // Schema-2 provenance: this text came from exactly these strokes —
+                    // the viewer's tap-to-correct flow needs the mapping.
+                    recognizedLines += PageText.RecognizedLine(
+                        text = t,
+                        strokeIds = line.strokes.map { it.id },
+                        top = line.bounds.top,
+                        height = line.bounds.height(),
+                    )
                 }
             }
             if (lines.isNotEmpty()) {
@@ -105,6 +114,7 @@ class PageTextRecognizer(
                 engine = hwr.engineName,
                 recognizedAt = System.currentTimeMillis(),
                 sourceMaxUpdatedAt = sourceMaxUpdatedAt,
+                lines = emptyList(),
             )
         }
 
@@ -117,6 +127,7 @@ class PageTextRecognizer(
             engine = hwr.engineName,
             recognizedAt = System.currentTimeMillis(),
             sourceMaxUpdatedAt = sourceMaxUpdatedAt,
+            lines = recognizedLines,
         )
     }
 }

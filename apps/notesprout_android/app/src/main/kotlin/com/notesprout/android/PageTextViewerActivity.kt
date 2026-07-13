@@ -69,6 +69,18 @@ class PageTextViewerActivity : AppCompatActivity() {
     private var notebookName: String = "Notebook"
     private var encrypted = false
 
+    // ── Correct mode (This Page only) ──────────────────────────────────────────
+    // Tap a recognized handwriting line to fix its text; each fix is stored as a
+    // confirmed training pair. The page_text row is NOT rewritten (viewer stays
+    // read-only) — the fix becomes durable through correction memory on the next
+    // recognition pass.
+    private lateinit var btnCorrect: AppCompatButton
+    private lateinit var correctionsList: LinearLayout
+    private var correctMode = false
+    private var notebookId: String = ""
+    private var currentPageId: String = ""
+    private var thisPageLines: MutableList<com.notesprout.android.data.PageText.RecognizedLine> = mutableListOf()
+
     // File staged for a SAF save; the mime launcher matches the extension so the picker
     // doesn't append a second one (see PageIndexActivity).
     private var pendingExportFile: File? = null
@@ -82,9 +94,9 @@ class PageTextViewerActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        val notebookId = intent.getStringExtra(EXTRA_NOTEBOOK_ID).orEmpty()
+        notebookId = intent.getStringExtra(EXTRA_NOTEBOOK_ID).orEmpty()
         notebookName = intent.getStringExtra(EXTRA_NOTEBOOK_NAME).orEmpty().ifBlank { "Notebook" }
-        val currentPageId = intent.getStringExtra(EXTRA_CURRENT_PAGE_ID).orEmpty()
+        currentPageId = intent.getStringExtra(EXTRA_CURRENT_PAGE_ID).orEmpty()
 
         setContentView(buildUi(notebookName))
         updateToggleState()
@@ -125,6 +137,16 @@ class PageTextViewerActivity : AppCompatActivity() {
             textSize = 18f
             layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
         }
+        btnCorrect = AppCompatButton(this).apply {
+            text = "Correct"
+            setTextColor(ink)
+            setBackgroundResource(R.drawable.shape_bordered)
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply { marginEnd = dp(8) }
+            visibility = View.GONE // shown after load when correction is possible
+            setOnClickListener { toggleCorrectMode() }
+        }
         val export = AppCompatButton(this).apply {
             text = "Export"
             setTextColor(ink)
@@ -141,6 +163,7 @@ class PageTextViewerActivity : AppCompatActivity() {
             setOnClickListener { finish() }
         }
         header.addView(title)
+        header.addView(btnCorrect)
         header.addView(export)
         header.addView(done)
         root.addView(header)
@@ -190,15 +213,141 @@ class PageTextViewerActivity : AppCompatActivity() {
             setTextIsSelectable(true)
             setPadding(dp(20), dp(12), dp(20), dp(32))
         }
+        correctionsList = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), dp(8), dp(16), dp(32))
+            visibility = View.GONE
+        }
+        val body = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(contentText)
+            addView(correctionsList)
+        }
         val scroll = ScrollView(this).apply {
             isFillViewport = true
             layoutParams = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f
             )
-            addView(contentText)
+            addView(body)
         }
         root.addView(scroll)
         return root
+    }
+
+    // ── Correct mode ─────────────────────────────────────────────────────────────
+
+    private fun toggleCorrectMode() {
+        correctMode = !correctMode
+        if (correctMode && showingWhole) { showingWhole = false }
+        render()
+    }
+
+    private fun renderCorrections() {
+        val ink = ContextCompat.getColor(this, R.color.inkBlack)
+        correctionsList.removeAllViews()
+        correctionsList.addView(AppCompatTextView(this).apply {
+            text = "Tap a line to fix its text. Fixes teach the Personal engine your handwriting."
+            setTextColor(ink)
+            textSize = 13f
+            setPadding(0, 0, 0, dp(8))
+        })
+        for ((index, line) in thisPageLines.withIndex()) {
+            correctionsList.addView(AppCompatTextView(this).apply {
+                text = line.text
+                setTextColor(ink)
+                textSize = 16f
+                setBackgroundResource(R.drawable.shape_bordered)
+                setPadding(dp(12), dp(10), dp(12), dp(10))
+                layoutParams = LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+                ).apply { topMargin = dp(6) }
+                setOnClickListener { showLineCorrectionDialog(index) }
+            })
+        }
+    }
+
+    private fun showLineCorrectionDialog(index: Int) {
+        val line = thisPageLines.getOrNull(index) ?: return
+        val input = androidx.appcompat.widget.AppCompatEditText(this).apply {
+            setText(line.text)
+            setSelection(text?.length ?: 0)
+            setTextColor(ContextCompat.getColor(this@PageTextViewerActivity, R.color.inkBlack))
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or
+                android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+            setBackgroundResource(R.drawable.shape_bordered)
+            val p = dp(8)
+            setPadding(p, p, p, p)
+        }
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            val p = dp(12)
+            setPadding(p, p, p, p)
+            addView(input)
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Correct line")
+            .setView(container)
+            .setPositiveButton("Save") { _, _ ->
+                val corrected = input.text?.toString()?.trim().orEmpty()
+                if (corrected.isNotEmpty() && corrected != line.text) {
+                    applyLineCorrection(index, line, corrected)
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .create()
+            .also { d ->
+                d.show()
+                d.window?.setElevation(0f)
+                d.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+            }
+    }
+
+    private fun applyLineCorrection(
+        index: Int,
+        line: com.notesprout.android.data.PageText.RecognizedLine,
+        corrected: String,
+    ) {
+        lifecycleScope.launch {
+            // Load the line's source strokes from a short-lived read-only connection
+            // (plaintext only — Correct is hidden on encrypted notebooks).
+            val strokes = withContext(Dispatchers.IO) {
+                val db = SoilDatabase.builder(
+                    this@PageTextViewerActivity,
+                    soilFile(this@PageTextViewerActivity, notebookId).absolutePath,
+                ).build()
+                try {
+                    val dao = db.notebookDao()
+                    val layer = dao.getLayerForPage(currentPageId) ?: return@withContext emptyList()
+                    val wanted = line.strokeIds.toSet()
+                    dao.getStrokesForLayer(layer.id)
+                        .filter { it.id in wanted }
+                        .mapNotNull { row -> runCatching { com.notesprout.android.data.LiveStroke.fromRow(row) }.getOrNull() }
+                } finally {
+                    db.close()
+                }
+            }
+            if (strokes.isEmpty()) {
+                Toast.makeText(this@PageTextViewerActivity, "That ink is no longer on the page.", Toast.LENGTH_SHORT).show()
+                return@launch
+            }
+            com.notesprout.android.recognition.personal.TrainingPairRepository.addPair(
+                context = applicationContext,
+                source = com.notesprout.android.recognition.personal.TrainingPairRepository.SOURCE_LINE_CORRECTION,
+                strokes = strokes,
+                label = corrected,
+                confirmed = true,
+                originalText = line.text,
+                notebookId = notebookId,
+                pageId = currentPageId,
+            )
+            // Patch the in-memory views so the fix shows immediately; the page_text row is
+            // untouched (read-only viewer) — correction memory re-applies it on the next pass.
+            thisPageLines[index] = line.copy(text = corrected)
+            thisPageMarkdown = thisPageMarkdown.replaceFirst(line.text, corrected)
+            wholeNotebookMarkdown = wholeNotebookMarkdown.replaceFirst(line.text, corrected)
+            render()
+            Toast.makeText(this@PageTextViewerActivity, "Saved — the Personal engine will learn from this.", Toast.LENGTH_SHORT).show()
+        }
     }
 
     private fun updateToggleState() {
@@ -210,6 +359,20 @@ class PageTextViewerActivity : AppCompatActivity() {
     private fun render() {
         updateToggleState()
         if (!loaded) return
+        if (showingWhole) correctMode = false
+        btnCorrect.visibility =
+            if (!encrypted && thisPageLines.isNotEmpty() &&
+                com.notesprout.android.recognition.HwrSettings.personalizationEnabled(this)
+            ) View.VISIBLE else View.GONE
+        btnCorrect.isSelected = correctMode
+        if (correctMode) {
+            contentText.visibility = View.GONE
+            correctionsList.visibility = View.VISIBLE
+            renderCorrections()
+            return
+        }
+        contentText.visibility = View.VISIBLE
+        correctionsList.visibility = View.GONE
         val md = if (showingWhole) wholeNotebookMarkdown else thisPageMarkdown
         if (md.isBlank()) {
             contentText.text = if (showingWhole) "No recognized text yet." else "No recognized text on this page yet."
@@ -249,6 +412,7 @@ class PageTextViewerActivity : AppCompatActivity() {
                     val recognizer = hwr?.let { PageTextRecognizer(it) }
                     val pages = dao.getPagesSorted()
                     val perPage = LinkedHashMap<String, String>()
+                    var pageLines: List<com.notesprout.android.data.PageText.RecognizedLine>? = null
                     for (page in pages) {
                         val pt = if (recognizer != null) {
                             PageTextRepository.freshOrRecognizeReadOnly(dao, page.id, recognizer)
@@ -256,10 +420,11 @@ class PageTextViewerActivity : AppCompatActivity() {
                             PageTextRepository.getCached(dao, page.id)
                         }
                         perPage[page.id] = pt?.text?.trim().orEmpty()
+                        if (page.id == currentPageId) pageLines = pt?.lines
                     }
                     val whole = perPage.values.filter { it.isNotBlank() }.joinToString("\n\n")
                     val thisPage = perPage[currentPageId].orEmpty()
-                    Triple(thisPage, whole, pages.size)
+                    Triple(thisPage, whole, pageLines)
                 } finally {
                     db.close()
                 }
@@ -267,6 +432,7 @@ class PageTextViewerActivity : AppCompatActivity() {
 
             thisPageMarkdown = result.first
             wholeNotebookMarkdown = result.second
+            thisPageLines = result.third.orEmpty().toMutableList()
             loaded = true
             statusText.text = when {
                 hwr == null -> "Handwriting model not ready — showing cached text only."

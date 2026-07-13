@@ -28,6 +28,7 @@ import com.notesprout.android.recognition.HandwritingRecognizer
 import com.notesprout.android.recognition.HandwritingRecognizerProvider
 import com.notesprout.android.recognition.PageTextRepository
 import com.notesprout.android.recognition.StrokeSegmenter
+import com.notesprout.android.recognition.personal.TrainingPairRepository
 import com.notesprout.android.recognition.trocr.CerMetric
 import com.notesprout.android.recognition.trocr.LineRasterizer
 import com.notesprout.android.recognition.trocr.TrOcrHandwritingRecognizer
@@ -68,6 +69,7 @@ class HwrLabActivity : AppCompatActivity() {
 
     private class LineResult(
         val image: Bitmap,
+        val strokes: List<com.notesprout.android.data.LiveStroke>,
         val mlText: String,
         val mlMs: Long,
         val trText: String,
@@ -210,7 +212,7 @@ class HwrLabActivity : AppCompatActivity() {
                     val trMs = System.currentTimeMillis() - t1
                     trTimes.add(trMs)
 
-                    val result = LineResult(image, mlText, mlMs, trText, trMs)
+                    val result = LineResult(image, line.strokes, mlText, mlMs, trText, trMs)
                     withContext(Dispatchers.Main) {
                         lineResults.add(result)
                         addRow(i, result)
@@ -269,6 +271,23 @@ class HwrLabActivity : AppCompatActivity() {
             .setPositiveButton("Save") { _, _ ->
                 result.reference = input.text.toString().trim().ifEmpty { null }
                 result.label?.let { bindRowText(it, index, result) }
+                // Every lab reference is a perfect confirmed training pair (plaintext
+                // notebooks only by construction — see pickNotebook).
+                val ref = result.reference
+                if (ref != null && TrainingPairRepository.captureAllowed(this, encryptedSource = false)) {
+                    lifecycleScope.launch {
+                        TrainingPairRepository.addPair(
+                            context = applicationContext,
+                            source = TrainingPairRepository.SOURCE_LAB,
+                            strokes = result.strokes,
+                            label = ref,
+                            confirmed = true,
+                            originalText = result.trText.takeIf { it != HandwritingRecognizer.FALLBACK_TEXT },
+                            notebookId = notebookId,
+                            pageId = pageId,
+                        )
+                    }
+                }
             }
             .setNegativeButton("Cancel", null)
             .show()

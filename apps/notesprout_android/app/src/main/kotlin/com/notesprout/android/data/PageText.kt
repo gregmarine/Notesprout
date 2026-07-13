@@ -24,14 +24,32 @@ import kotlinx.serialization.json.Json
 data class PageText(
     /** Assembled, reading-order Markdown. */
     val text: String,
-    /** Recognizer that produced [text] — "mlkit" today, "onyx" later. Lets us upgrade per-engine. */
+    /** Recognizer that produced [text] — "mlkit" / "trocr" ("onyx" later). Lets us upgrade per-engine. */
     val engine: String,
     /** When [text] was produced (Unix epoch ms). */
     val recognizedAt: Long,
     /** `getMaxContentUpdatedAt(layerId)` at recognition time — the freshness watermark. */
     val sourceMaxUpdatedAt: Long,
-    val schema: Int = 1,
+    val schema: Int = 2,
+    /**
+     * Schema 2: per-line provenance for **handwriting-derived** lines only (headings /
+     * text objects / rules excluded) in reading order — powers the viewer's tap-to-correct
+     * flow, which needs each line's source strokes to store a training pair. Old schema-1
+     * rows decode with `lines = null` (ignoreUnknownKeys) and simply offer no correction
+     * until re-recognized.
+     */
+    val lines: List<RecognizedLine>? = null,
 ) {
+    @Serializable
+    data class RecognizedLine(
+        val text: String,
+        /** Ids of the strokes this line was recognized from. */
+        val strokeIds: List<String>,
+        /** Line bounds (page px) — vertical position for display ordering. */
+        val top: Float,
+        val height: Float,
+    )
+
     fun toJson(): String = codec.encodeToString(serializer(), this)
 
     companion object {

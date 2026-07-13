@@ -15,6 +15,7 @@ object HwrSettings {
     private const val PREFS = "hwr_settings"
     private const val KEY_ENGINE = "engine"
     private const val KEY_ACTIVE_MODEL_VERSION = "active_model_version"
+    private const val KEY_PERSONALIZATION = "personalization_enabled"
 
     private fun prefs(context: Context) =
         context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -24,6 +25,18 @@ object HwrSettings {
 
     fun setEngine(context: Context, engine: String) {
         prefs(context).edit().putString(KEY_ENGINE, engine).apply()
+    }
+
+    /**
+     * Master switch for handwriting personalization: training-pair capture from
+     * corrections/conversions AND applying the personal lexicon/correction memory.
+     * Default on — capture is already hard-gated to plaintext notebooks.
+     */
+    fun personalizationEnabled(context: Context): Boolean =
+        prefs(context).getBoolean(KEY_PERSONALIZATION, true)
+
+    fun setPersonalizationEnabled(context: Context, enabled: Boolean) {
+        prefs(context).edit().putBoolean(KEY_PERSONALIZATION, enabled).apply()
     }
 
     /** versionId of the active TrOCR model bundle, or null when none installed. */

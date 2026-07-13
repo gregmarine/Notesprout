@@ -136,6 +136,12 @@
             android:exported="false"
             android:windowSoftInputMode="stateHidden" />
 
+        <!-- Handwriting enrollment — copy prescribed sentences to seed the personal model -->
+        <activity
+            android:name=".HwrEnrollmentActivity"
+            android:exported="false"
+            android:windowSoftInputMode="stateHidden" />
+
         <!-- Backup settings — local + Google Drive destination configuration -->
         <activity
             android:name=".BackupSettingsActivity"

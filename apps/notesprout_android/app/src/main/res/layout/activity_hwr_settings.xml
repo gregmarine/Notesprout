@@ -217,6 +217,87 @@
                 android:textColor="@color/inkBlack"
                 android:layout_marginTop="12dp" />
 
+            <!-- Personalization -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Personalization"
+                android:textSize="16sp"
+                android:textStyle="bold"
+                android:textColor="@color/inkBlack"
+                android:layout_marginTop="20dp"
+                android:layout_marginBottom="8dp" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:background="@drawable/shape_bordered"
+                android:padding="12dp">
+
+                <LinearLayout
+                    android:id="@+id/rowPersonalization"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical">
+
+                    <androidx.appcompat.widget.AppCompatCheckBox
+                        android:id="@+id/checkPersonalization"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:clickable="false"
+                        android:focusable="false" />
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:paddingStart="8dp"
+                        android:text="Learn from my corrections"
+                        android:textSize="15sp"
+                        android:textColor="@color/inkBlack" />
+                </LinearLayout>
+
+                <TextView
+                    android:id="@+id/samplesStatus"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:textSize="13sp"
+                    android:textColor="@color/inkBlack"
+                    android:layout_marginTop="6dp" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Samples come from your fixes to recognized text and the teaching flow below. Nothing is collected from encrypted notebooks, and nothing ever leaves this device."
+                    android:textSize="13sp"
+                    android:textColor="@color/inkBlack"
+                    android:layout_marginTop="6dp" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:layout_marginTop="8dp">
+
+                    <androidx.appcompat.widget.AppCompatButton
+                        android:id="@+id/btnEnroll"
+                        style="@style/Widget.Notesprout.OutlinedButton"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Teach it your handwriting…" />
+
+                    <androidx.appcompat.widget.AppCompatButton
+                        android:id="@+id/btnClearTraining"
+                        style="@style/Widget.Notesprout.OutlinedButton"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="8dp"
+                        android:text="Clear my data" />
+                </LinearLayout>
+            </LinearLayout>
+
             <!-- Debug-only lab entry -->
             <androidx.appcompat.widget.AppCompatButton
                 android:id="@+id/btnOpenLab"

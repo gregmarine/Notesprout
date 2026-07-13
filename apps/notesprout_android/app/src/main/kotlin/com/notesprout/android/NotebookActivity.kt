@@ -6183,6 +6183,28 @@ class NotebookActivity : AppCompatActivity() {
             stroke.copy(id = UUID.randomUUID().toString(), points = stroke.points.map { PointF(it.x, it.y) })
         }
 
+        // Personalization capture: the only moment a heading's ink and its recognized text
+        // coexist (recognized headings drop their strokes below). Fire-and-forget; gated to
+        // plaintext notebooks. A later edit of this heading confirms/corrects the pair.
+        if (isRecognized &&
+            com.notesprout.android.recognition.personal.TrainingPairRepository.captureAllowed(
+                this, encryptionInfo.encrypted)
+        ) {
+            NotesproutApplication.appScope.launch {
+                com.notesprout.android.recognition.personal.TrainingPairRepository.addPair(
+                    context = this@NotebookActivity.applicationContext,
+                    source = com.notesprout.android.recognition.personal.TrainingPairRepository.SOURCE_HEADING_CONVERSION,
+                    strokes = strokesToConvert,
+                    label = recognizedText,
+                    confirmed = false,
+                    originalText = recognizedText,
+                    objectId = headingId,
+                    notebookId = notebookId,
+                    pageId = pageId,
+                )
+            }
+        }
+
         val newHeading = HeadingStroke(id = headingId, boundingBox = boundsToConvert, strokes = storedStrokes, recognizedText = storedText, level = level)
         db.withTransaction {
             val dao = db.notebookDao()
@@ -7033,6 +7055,20 @@ class NotebookActivity : AppCompatActivity() {
                 val updated = (db.notebookDao().assembleHeadingResolved(row) ?: return@withContext)
                     .copy(recognizedText = prefixedText, level = level, boundingBox = newBox)
                 db.notebookDao().replaceHeadingSubtree(updated, System.currentTimeMillis())
+            }
+            // Personalization: a human just corrected this heading's text — upgrade the pair
+            // captured at conversion time (no-ops when none exists). Unprefixed text.
+            if (com.notesprout.android.recognition.personal.TrainingPairRepository.captureAllowed(
+                    this@NotebookActivity, encryptionInfo.encrypted)
+            ) {
+                NotesproutApplication.appScope.launch {
+                    com.notesprout.android.recognition.personal.TrainingPairRepository.confirmByObjectId(
+                        context = applicationContext,
+                        objectId = heading.id,
+                        newLabel = newText,
+                        source = com.notesprout.android.recognition.personal.TrainingPairRepository.SOURCE_HEADING_CORRECTION,
+                    )
+                }
             }
             val updatedHeadings = drawingView.getHeadings().map { h ->
                 if (h.id == heading.id) h.copy(recognizedText = prefixedText, boundingBox = newBox, level = level) else h

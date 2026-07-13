@@ -12,6 +12,7 @@ import androidx.lifecycle.lifecycleScope
 import com.notesprout.android.databinding.ActivityHwrSettingsBinding
 import com.notesprout.android.recognition.HwrSettings
 import com.notesprout.android.recognition.HandwritingRecognizerProvider
+import com.notesprout.android.recognition.personal.TrainingPairRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -71,6 +72,14 @@ class HwrSettingsActivity : AppCompatActivity() {
         binding.btnImportModel.setOnClickListener { importModel.launch(arrayOf("application/zip")) }
         binding.btnDeleteModel.setOnClickListener { confirmDelete() }
         binding.btnSwitchModel.setOnClickListener { showSwitchDialog() }
+        binding.rowPersonalization.setOnClickListener {
+            HwrSettings.setPersonalizationEnabled(this, !HwrSettings.personalizationEnabled(this))
+            refresh()
+        }
+        binding.btnEnroll.setOnClickListener {
+            startActivity(Intent(this, HwrEnrollmentActivity::class.java))
+        }
+        binding.btnClearTraining.setOnClickListener { confirmClearTraining() }
 
         if (BuildConfig.DEBUG) {
             binding.btnOpenLab.isVisible = true
@@ -80,6 +89,12 @@ class HwrSettingsActivity : AppCompatActivity() {
             }
         }
 
+        refresh()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // Coming back from enrollment (or any child flow) must show fresh sample counts.
         refresh()
     }
 
@@ -119,7 +134,30 @@ class HwrSettingsActivity : AppCompatActivity() {
             }
             binding.btnDeleteModel.isVisible = active != null
             binding.btnSwitchModel.isVisible = versions.size > 1
+
+            binding.checkPersonalization.isChecked = HwrSettings.personalizationEnabled(this@HwrSettingsActivity)
+            val samples = TrainingPairRepository.confirmedCount(this@HwrSettingsActivity)
+            binding.samplesStatus.text = "$samples handwriting samples collected"
         }
+    }
+
+    private fun confirmClearTraining() {
+        AlertDialog.Builder(this)
+            .setTitle("Clear handwriting data?")
+            .setMessage("Deletes all collected handwriting samples (corrections and teaching sentences). The Personal engine forgets what it learned; a personalized model already built from them is unaffected.")
+            .setPositiveButton("Clear") { _, _ ->
+                lifecycleScope.launch {
+                    TrainingPairRepository.clearAll(this@HwrSettingsActivity)
+                    refresh()
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .create()
+            .also { d ->
+                d.show()
+                d.window?.setElevation(0f)
+                d.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+            }
     }
 
     private fun confirmDelete() {
