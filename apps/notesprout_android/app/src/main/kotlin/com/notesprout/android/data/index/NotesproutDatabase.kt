@@ -14,7 +14,7 @@ import com.notesprout.android.data.SoilSchema
         NotebookActivityEntity::class,
         EventEntity::class,
     ],
-    version = 7,
+    version = 8,
     exportSchema = false,
 )
 abstract class NotesproutDatabase : RoomDatabase() {
@@ -168,6 +168,19 @@ abstract class NotesproutDatabase : RoomDatabase() {
                 for ((name, sqlType) in columns) {
                     db.execSQL("ALTER TABLE objects ADD COLUMN \"$name\" $sqlType")
                 }
+            }
+        }
+
+        /**
+         * data-model-optimization Phase B (index list membership → child rows): add the relational
+         * `refId` + `sortOrder` columns so a `list_item` row can point at its member with a position.
+         * Additive nullable ALTERs; the legacy inline `ListObject`/`TemplateListObject` JSON on the list
+         * row is converted to child rows lazily (see IndexRepository.ensure*ListExists / mutators).
+         */
+        val MIGRATION_7_8 = object : Migration(7, 8) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE objects ADD COLUMN \"refId\" TEXT")
+                db.execSQL("ALTER TABLE objects ADD COLUMN \"sortOrder\" INTEGER")
             }
         }
 

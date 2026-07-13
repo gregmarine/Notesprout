@@ -30,6 +30,7 @@ object NotesproutIndex {
                     NotesproutDatabase.MIGRATION_4_5,
                     NotesproutDatabase.MIGRATION_5_6,
                     NotesproutDatabase.MIGRATION_6_7,
+                    NotesproutDatabase.MIGRATION_7_8,
                 )
                 .build()
         }

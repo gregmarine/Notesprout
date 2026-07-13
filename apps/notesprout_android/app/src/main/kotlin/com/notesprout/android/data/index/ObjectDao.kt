@@ -55,6 +55,33 @@ interface ObjectDao {
     /** Overwrite a row's [data] WITHOUT touching `updatedAt` (avoids needlessly re-flagging for backup). */
     @Query("UPDATE objects SET data = :data WHERE id = :id")
     suspend fun rewriteObjectData(id: String, data: String)
+
+    // ── List membership as child rows (Phase B) ──────────────────────────────
+    // A `list_item` row is one membership edge: parentId = list id, refId = member id,
+    // sortOrder = position. Membership churn hard-deletes (no tombstones — not precious history).
+
+    @Query("SELECT * FROM objects WHERE parentId = :listId AND type = 'list_item' AND deletedAt IS NULL ORDER BY sortOrder")
+    suspend fun getListItems(listId: String): List<ObjectEntity>
+
+    @Query("SELECT EXISTS(SELECT 1 FROM objects WHERE parentId = :listId AND refId = :memberId AND type = 'list_item' AND deletedAt IS NULL)")
+    suspend fun listContains(listId: String, memberId: String): Boolean
+
+    @Query("SELECT COALESCE(MAX(sortOrder), -1) FROM objects WHERE parentId = :listId AND type = 'list_item' AND deletedAt IS NULL")
+    suspend fun maxListSortOrder(listId: String): Int
+
+    @Query("DELETE FROM objects WHERE parentId = :listId AND refId = :memberId AND type = 'list_item'")
+    suspend fun deleteListItem(listId: String, memberId: String)
+
+    /** Scrub a member from every list (e.g. a deleted notebook). */
+    @Query("DELETE FROM objects WHERE refId = :memberId AND type = 'list_item'")
+    suspend fun deleteListItemsForMember(memberId: String)
+
+    /** Clear a list's child rows (used when re-migrating a legacy inline list). */
+    @Query("DELETE FROM objects WHERE parentId = :listId AND type = 'list_item'")
+    suspend fun deleteAllListItems(listId: String)
+
+    @Query("UPDATE objects SET sortOrder = :sortOrder WHERE parentId = :listId AND refId = :memberId AND type = 'list_item'")
+    suspend fun updateListItemOrder(listId: String, memberId: String, sortOrder: Int)
 }
 
 /** id/type/base64-head projection for [ObjectDao.imageRowHeads] (type selects the image field). */

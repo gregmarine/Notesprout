@@ -40,4 +40,9 @@ data class ObjectEntity(
     val height: Int? = null,
     /** Notebook cover snapshot / template image bytes (was base64-in-JSON). */
     @ColumnInfo(typeAffinity = ColumnInfo.BLOB) val blob: ByteArray? = null,
+    // ── v8 relational membership (list_item rows: Phase B) ───────────────────
+    /** The referenced member id (a `list_item` points at its notebook/template via this). */
+    val refId: String? = null,
+    /** Position within the parent list (a `list_item`'s ordinal). */
+    val sortOrder: Int? = null,
 )
