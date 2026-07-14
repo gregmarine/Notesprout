@@ -471,7 +471,15 @@ applies to this engine identically).
   `merge_and_unload()` → merged HF model → `export_model.py` + `make_bundle.py --personalized` →
   import in settings (SHA-256 + smoke decode; versions listed side-by-side, ML Kit fallback if
   anything fails).
-- **Payoff gate** (open until Greg completes enrollment + a training run): personalized CER <
-  ML Kit CER on held-out lines of the user's handwriting.
+- **Payoff gate** (still open): personalized CER < ML Kit CER on held-out lines of the user's
+  handwriting. **First real attempt (2026-07-13, 39 pairs): not enough data.** Three configs
+  (decoder LoRA, both-sides, encoder-only) all degraded held-out CER vs the base model
+  (0.03–0.06 base → 0.10–0.20 tuned; failure mode = memorization + repetition artifacts).
+  As-built learnings baked into `finetune.py`: train on the app-rendered PNGs (the Python stroke
+  re-rasterizer's PIL rendering differs enough to hurt — kept only for experiments), `--target
+  encoder|decoder|both` (default encoder), early stopping on held-out CER every 2 epochs with
+  best-checkpoint restore, and **refuse to save any model when nothing beats base**. Revisit at
+  roughly 150+ pairs (mostly real-page corrections); meanwhile the on-device lexicon/correction
+  memory is the personalization that works at this data scale — by design.
 - Round trip verified structurally on G102: enroll → export → bundle parses in `finetune.py`'s
   loader → augmentation raster mirrors the app's geometry.

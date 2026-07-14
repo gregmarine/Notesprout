@@ -5,11 +5,12 @@ Input: the zip exported from the app (Settings → Handwriting Recognition →
 Export training data…). Runs on Apple Silicon (MPS) or CPU. Nothing uploads
 anywhere — the bundle and the model stay on this machine.
 
-Augmentation re-rasterizes each pair from its RAW STROKES (mirroring the app's
-LineRasterizer: uniform scale into a 128-px-high band, 8% padding, stroke width
-clamped to [1.5, 4.5]px, then a non-aspect resize to 384x384 at model input),
-jittering thickness/slant/position per epoch. The shipped PNGs are used for the
-held-out evaluation split so eval matches on-device rendering exactly.
+Training images are the APP-RENDERED PNGs (the exact rendering the device uses at
+inference) with light per-epoch geometric jitter (small rotation/scale/translate via
+PIL affine). The stroke re-rasterizer below is retained for experiments but is NOT
+the default training source: PIL's line rendering (chunky joints, no anti-aliasing)
+differs enough from the app's to hurt — training on it made held-out CER worse.
+The held-out split also uses the app PNGs, so eval matches on-device rendering.
 
 Output: a merged Hugging Face model directory. Then produce the app bundle:
 
@@ -100,15 +101,36 @@ def rasterize(strokes, thickness_scale=1.0, slant_deg=0.0, jitter_px=0.0):
     return img
 
 
+def augment_png(img: Image.Image) -> Image.Image:
+    """Light geometric jitter on the app-rendered PNG — rendering style untouched."""
+    angle = random.uniform(-1.5, 1.5)
+    scale = random.uniform(0.94, 1.06)
+    tx = random.uniform(-0.01, 0.01) * img.width
+    ty = random.uniform(-0.03, 0.03) * img.height
+    a = math.cos(math.radians(angle)) / scale
+    b = math.sin(math.radians(angle)) / scale
+    return img.transform(
+        img.size,
+        Image.Transform.AFFINE,
+        (a, b, -tx, -b, a, -ty),
+        resample=Image.Resampling.BILINEAR,
+        fillcolor="white",
+    )
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--bundle", required=True)
     ap.add_argument("--out", required=True, help="merged model output dir")
-    ap.add_argument("--epochs", type=int, default=12)
+    ap.add_argument("--epochs", type=int, default=30)
     ap.add_argument("--rank", type=int, default=8)
     ap.add_argument("--lr", type=float, default=1e-4)
     ap.add_argument("--batch", type=int, default=4)
-    ap.add_argument("--holdout", type=float, default=0.15)
+    ap.add_argument("--holdout", type=float, default=0.2)
+    ap.add_argument("--target", choices=["encoder", "decoder", "both"], default="encoder",
+                    help="which attention projections get LoRA; encoder-only is safest on small "
+                         "data (adapts letterform perception without disturbing the decoder's "
+                         "language behavior — decoder tuning caused repetition artifacts)")
     ap.add_argument("--seed", type=int, default=7)
     args = ap.parse_args()
 
@@ -151,12 +173,32 @@ def main() -> None:
         print(f"CER {tag}: {score:.4f}")
         return score
 
+    def report_lines(tag):
+        model.eval()
+        print(f"-- held-out detail ({tag}):")
+        with torch.no_grad():
+            for p in holdout:
+                pv = pixel_values(p["png"]).unsqueeze(0).to(device)
+                ids = model.generate(pv, max_length=96)
+                hyp = tokenizer.decode(ids[0], skip_special_tokens=True).strip()
+                mark = "OK " if hyp == p["label"] else "DIFF"
+                print(f"  [{mark}] ref: {p['label']}")
+                if hyp != p["label"]:
+                    print(f"         hyp: {hyp}")
+
     before = evaluate("before (base model, held-out)")
 
+    # DeiT encoder names its attention projections query/value; the TrOCR decoder
+    # uses q_proj/v_proj.
+    targets = {
+        "encoder": ["query", "value"],
+        "decoder": ["q_proj", "v_proj"],
+        "both": ["query", "value", "q_proj", "v_proj"],
+    }[args.target]
     lora = LoraConfig(
         r=args.rank,
         lora_alpha=args.rank * 2,
-        target_modules=["q_proj", "v_proj"],  # decoder self- and cross-attention
+        target_modules=targets,
         lora_dropout=0.05,
         bias="none",
     )
@@ -165,21 +207,22 @@ def main() -> None:
 
     optim = torch.optim.AdamW([p for p in model.parameters() if p.requires_grad], lr=args.lr)
 
+    # Early stopping: keep the adapter weights from the best held-out CER — the floor
+    # is the base model itself (if nothing beats "before", we report that honestly).
+    best_cer = before
+    best_state = None
+    trainable_names = [n for n, p in model.named_parameters() if p.requires_grad]
+
+    def snapshot():
+        return {n: model.get_parameter(n).detach().clone() for n in trainable_names}
+
     for epoch in range(args.epochs):
         model.train()
         random.shuffle(train)
         total = 0.0
         for i in range(0, len(train), args.batch):
             batch = train[i : i + args.batch]
-            imgs = [
-                rasterize(
-                    p["strokes"],
-                    thickness_scale=random.uniform(0.7, 1.3),
-                    slant_deg=random.uniform(-4, 4),
-                    jitter_px=0.4,
-                )
-                for p in batch
-            ]
+            imgs = [augment_png(p["png"]) for p in batch]
             pv = torch.stack([pixel_values(img) for img in imgs]).to(device)
             labels = tokenizer(
                 [p["label"] for p in batch], return_tensors="pt", padding=True, truncation=True, max_length=96
@@ -190,9 +233,31 @@ def main() -> None:
             optim.step()
             optim.zero_grad()
             total += loss.item() * len(batch)
-        print(f"epoch {epoch + 1}/{args.epochs}  loss {total / len(train):.4f}")
+        msg = f"epoch {epoch + 1}/{args.epochs}  loss {total / len(train):.4f}"
+        if (epoch + 1) % 2 == 0 or epoch + 1 == args.epochs:
+            score = evaluate(f"epoch {epoch + 1}")
+            if score < best_cer:
+                best_cer = score
+                best_state = snapshot()
+            msg += f"  (best {best_cer:.4f})"
+        print(msg)
 
-    after = evaluate("after (LoRA, held-out)")
+    if best_state is None:
+        # Nothing beat the plain base model — refuse to produce an artifact rather
+        # than merge degraded weights. More data (especially corrections from real
+        # pages) is the fix; gradient fine-tuning needs a few hundred lines.
+        print("NO epoch beat the base model — no model saved. Keep collecting "
+              "corrections and retrain later; the on-device lexicon/correction-memory "
+              "personalization keeps working from these same samples in the meantime.")
+        sys.exit(1)
+
+    with torch.no_grad():
+        for n in trainable_names:
+            model.get_parameter(n).copy_(best_state[n])
+    print(f"restored best checkpoint (held-out CER {best_cer:.4f})")
+
+    after = evaluate("after (best checkpoint, held-out)")
+    report_lines("after")
 
     print("merging LoRA into the base weights…")
     merged = model.merge_and_unload()
