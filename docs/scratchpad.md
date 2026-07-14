@@ -248,14 +248,21 @@ transfer.
 
 ## Launch surfaces
 
-The scratch pad launches from **two** places only:
-
 | Surface | Intent extras |
 |---|---|
 | `MainActivity` (toolbar `btnScratchpad`) | None — `fromNotebookId` is null, Send-to-Notebook hidden |
 | `NotebookActivity` (toolbar button, via `scratchpadLauncher`) | `EXTRA_FROM_NOTEBOOK_ID`, `EXTRA_FROM_NOTEBOOK_NAME`, `EXTRA_FROM_NOTEBOOK_ENCRYPTED` |
+| `CalendarActivity` / `DayDetailActivity` (toolbar button) | None — same as the library |
+| `MainActivity` launch-restore (see below) | The extras of whatever it was opened from, replayed |
 
 `NotebookActivity` may also re-launch the scratch pad with `EXTRA_JUMP_TO_PAGE_ID` and
 `EXTRA_SELECT_OBJECT_IDS` after inserting content via "Send to Scratch Pad".
 
 Never launched from: PageIndex, Link picker, Template browser, settings, or any other surface.
+
+**Launch restore:** the scratch pad is one of the surfaces on the
+[surface stack](mainactivity-and-recents.md#surface-stack--launch-restore) — if the app is killed with
+it open, a cold launch reopens it **over whatever it was opened from** (the notebook, the calendar, the
+day window), with the source notebook's `EXTRA_FROM_NOTEBOOK_*` replayed so Send-to-Notebook still
+targets what it did. It records itself via `SurfaceStack.attach` / `markTop` in `onCreate` / `onResume`;
+the page it comes back on is `ScratchpadPreferences`' job, as on any other open.

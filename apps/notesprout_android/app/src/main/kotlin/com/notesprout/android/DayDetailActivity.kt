@@ -78,6 +78,9 @@ import com.notesprout.android.notebook.STICKY_NOTE_ICON_SIZE_DP
 import com.notesprout.android.notebook.ShapeRecognizer
 import com.notesprout.android.notebook.ToolPreferencesManager
 import com.notesprout.android.notebook.ToolbarOverflowManager
+import com.notesprout.android.state.AppSurface
+import com.notesprout.android.state.SurfaceEntry
+import com.notesprout.android.state.SurfaceStack
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
@@ -112,15 +115,19 @@ class DayDetailActivity : AppCompatActivity() {
         const val EXTRA_FROM_NOTEBOOK_ID        = "from_notebook_id"
         const val EXTRA_FROM_NOTEBOOK_NAME      = "from_notebook_name"
         const val EXTRA_FROM_NOTEBOOK_ENCRYPTED = "from_notebook_encrypted"
+        /** A [ViewMode] name. Only the launch-restore path passes it — a normal open lands on Events. */
+        const val EXTRA_VIEW                    = "day_detail_view"
 
         fun intent(
             context: Context, date: LocalDate,
             fromNotebookId: String?, fromNotebookName: String?, fromNotebookEncrypted: Boolean,
+            view: String? = null,
         ): Intent = Intent(context, DayDetailActivity::class.java)
             .putExtra(EXTRA_DATE, date.toString())
             .putExtra(EXTRA_FROM_NOTEBOOK_ID, fromNotebookId)
             .putExtra(EXTRA_FROM_NOTEBOOK_NAME, fromNotebookName)
             .putExtra(EXTRA_FROM_NOTEBOOK_ENCRYPTED, fromNotebookEncrypted)
+            .putExtra(EXTRA_VIEW, view)
     }
 
     private lateinit var binding: ActivityDayDetailBinding
@@ -135,6 +142,9 @@ class DayDetailActivity : AppCompatActivity() {
     private lateinit var eventsController: EventsController
 
     private var selectedDate: LocalDate = LocalDate.now()
+
+    /** This Activity instance's identity on the [SurfaceStack]. */
+    private var surfaceToken: String = ""
 
     // View mode — Note (editable canvas) / Notebooks (activity lists) / History (past years) /
     // Events (birthdays, anniversaries, appointments… attached to this day).
@@ -317,6 +327,16 @@ class DayDetailActivity : AppCompatActivity() {
         fromNotebookEncrypted = intent.getBooleanExtra(EXTRA_FROM_NOTEBOOK_ENCRYPTED, false)
         selectedDate = runCatching { LocalDate.parse(intent.getStringExtra(EXTRA_DATE) ?: "") }
             .getOrDefault(LocalDate.now())
+        // Absent on a normal open, so the day window still lands on Events; set only when a cold
+        // launch is restoring the view the user actually left it on.
+        viewMode = runCatching { ViewMode.valueOf(intent.getStringExtra(EXTRA_VIEW) ?: "") }
+            .getOrDefault(ViewMode.EVENTS)
+
+        // Record the day window on the surface stack, so a cold launch reopens it (see SurfaceStack).
+        // Unlike the other surfaces it has no position store of its own, so its date + view ride in
+        // the entry and come back through EXTRA_VIEW above.
+        surfaceToken = savedInstanceState?.getString(SurfaceStack.KEY_TOKEN) ?: UUID.randomUUID().toString()
+        SurfaceStack.attach(this, surfaceEntry())
 
         drawingView = if (isBooxDevice()) OnyxNotebookView(this) else GenericNotebookView(this)
         binding.dayContent.addView(
@@ -344,7 +364,8 @@ class DayDetailActivity : AppCompatActivity() {
         wireDrawingCallbacks()
         wireToolButtons()
         updateLassoButtonIcon()
-        applyViewMode()
+        // History needs its year data before it can paint (see switchViewMode).
+        if (viewMode == ViewMode.HISTORY) loadHistoryYearsThenApply() else applyViewMode()
 
         // Route system / predictive Back through the same step-out logic as the toolbar arrow.
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
@@ -2191,8 +2212,21 @@ class DayDetailActivity : AppCompatActivity() {
 
     // ── Lifecycle ────────────────────────────────────────────────────────────────
 
+    private fun surfaceEntry() = SurfaceEntry(
+        surfaceToken,
+        AppSurface.DAY_WINDOW,
+        dayDate = selectedDate.toString(),
+        dayView = viewMode.name,
+    )
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        outState.putString(SurfaceStack.KEY_TOKEN, surfaceToken)
+    }
+
     override fun onResume() {
         super.onResume()
+        SurfaceStack.markTop(this, surfaceEntry())
         if (viewMode == ViewMode.NOTE) drawingView.resumeDrawing()
         else if (viewMode == ViewMode.EVENTS) eventsController.refresh()
         // Returning from an opened notebook: refresh the card grid (it may have new activity) but
@@ -2203,6 +2237,9 @@ class DayDetailActivity : AppCompatActivity() {
 
     override fun onPause() {
         super.onPause()
+        // Refresh the entry, not just on resume: the date and view can both change without the user
+        // ever leaving this Activity (switchToDate / switchViewMode).
+        SurfaceStack.attach(this, surfaceEntry())
         if (::overflowManager.isInitialized && overflowManager.isOverflowMenuOpen()) closeDayOverflowMenu()
         // appScope (not lifecycleScope): the save must complete even as the Activity is paused
         // and torn down. lifecycleScope would be cancelled at onDestroy, dropping the write.

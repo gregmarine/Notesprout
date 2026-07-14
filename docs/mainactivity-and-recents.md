@@ -49,18 +49,45 @@ data class AppViewState(
     val recentsMode: Boolean = false,
     val searchMode: Boolean = false,
     val searchQuery: String = "",
-    val lastOpenedNotebookId: String? = null,
 )
 ```
 
 Persisted in `SharedPreferences("notesprout_view_state")`. Saved at every browse-context change — including entering/exiting search and recents modes.
 
-**Restore on launch:** `onCreate` loads state synchronously. Non-default state (any non-root folder, pinned/recents/search mode active, or a last-opened notebook ID on cold launch): set `isStateRestored = false`, launch coroutine `restoreSavedBrowseState(state, coldLaunch)`, set `isStateRestored = true`, trigger first render. Layout listener and `onResume` check `isStateRestored` — if false, defer scan to the restore coroutine.
+**Restore on launch:** `onCreate` loads state synchronously. Non-default state (any non-root folder, pinned/recents/search mode active, or a non-LIBRARY surface on cold launch): set `isStateRestored = false`, launch coroutine `restoreSavedBrowseState(state, surface, coldLaunch)`, set `isStateRestored = true`, trigger first render. Layout listener and `onResume` check `isStateRestored` — if false, defer scan to the restore coroutine.
 
-- **Last opened notebook (`lastOpenedNotebookId`):** on a **cold launch** (`savedInstanceState == null` — app was killed or crashed), if a notebook ID is persisted, the restore coroutine immediately relaunches it via `launchNotebookActivity`. On a **warm restart** (MainActivity killed by OS while notebook was open, then user closes notebook), `coldLaunch` is false and only the browse state is restored. The notebook ID is cleared from prefs in `onResume` when `notebookOpenedThisSession` is true (set by `launchNotebookActivity`, checked once on return).
 - **Mode restore:** after navigating to the saved folder, `restoreSavedBrowseState` applies the active mode: pinned → `applyPinnedModeUI()`; recents → `applyRecentsModeUI()`; search (query non-empty) → `applySearchModeUI()` + restores `currentSearchQuery`.
 - **Stale folder:** if `navigateStackToFolder` resolves to root (folder deleted), clear via `AppStateManager.save(context, AppViewState(null, false))`.
-- **Stale notebook:** if `getNotebook(id)` returns null or `deletedAt != null`, clear `lastOpenedNotebookId` from prefs and proceed to browse state restore only.
+
+## Surface Stack — Launch Restore (`state/SurfaceStack.kt`)
+
+A cold launch reopens **what the user was doing**, not just the library: the whole chain of open screens, so a scratch pad opened from a notebook comes back over *that notebook*, and stepping out of it lands where it did before the app died.
+
+```kotlin
+enum class AppSurface { NOTEBOOK, CALENDAR, DAY_WINDOW, SCRATCHPAD }  // library = implicit bottom
+
+data class SurfaceEntry(
+    val token: String,               // the Activity *instance* — survives onSaveInstanceState
+    val surface: AppSurface,
+    val notebookId: String? = null,  // NOTEBOOK
+    val dayDate: String? = null,     // DAY_WINDOW (ISO-8601)
+    val dayView: String? = null,     // DAY_WINDOW (DayDetailActivity.ViewMode name)
+)
+```
+
+Bottom-first list, kotlinx JSON under one key (`surface_stack`) in the same prefs file as the browse state — separate key + separate accessors, so the many `AppStateManager.save(AppViewState(...))` browse writes can't clobber it. Exact in memory for the process's life, mirrored to prefs on every mutation; the mirror is what survives the kill. Main thread only.
+
+- **The Activities maintain it themselves**, from two hooks: `onCreate` → `attach` (append, or refresh in place if this instance is a recreation), `onResume` → `markTop` (I'm on screen — drop anything still recorded above me). `markTop` is what pops a surface the user backed out of, so there's **no `onDestroy` bookkeeping** — which would be unreliable exactly when it matters, since a killed process gets no `onDestroy`. `attach` is needed as well because a restored stack is launched with `startActivities`, and everything below the top is created without ever being resumed.
+- **`MainActivity.onResume` calls `reset`** — the library is on screen, so nothing is stacked on it. Every path home therefore heals the stack; a stale entry can't outlive a visit to the library. Guarded by `isStateRestored`, since an in-flight restore is about to stack surfaces on top.
+- **Ordering holds** because the leaving Activity's `onPause` always precedes the revealed Activity's `onResume`.
+- **`token` identifies the instance, not the surface type** — the same notebook can legitimately appear twice in one stack (notebook → calendar → day window → same notebook again), so identity can't be surface + payload. It's stored in `onSaveInstanceState`, so an Activity Android rebuilds (config change, or a task the OS restores itself) re-attaches to its existing entry instead of duplicating it.
+- **DayDetail also `attach`es in `onPause`:** it's the one surface whose payload changes without the user leaving the Activity (`switchToDate`, `switchViewMode`).
+- **Restore (`MainActivity.restoreSurfaces`), cold launch only** (`savedInstanceState == null`; on a warm restart the surfaces are already on the back stack or were just closed): map the entries to intents and `startActivities` them bottom-first, then `reset` (the relaunched Activities re-record themselves).
+- **Only the notebook and day window need identity passed in.** The calendar (`calendar_state` prefs) and the scratch pad (`ScratchpadPreferences`) already persist their own position and restore it on open. The day window has no such store, so its date + view ride in the entry and reach it via `DayDetailActivity.EXTRA_VIEW` — absent on a normal open, which still lands on **Events**.
+- **The source notebook is passed back down:** a restored calendar / day window / scratch pad gets the `EXTRA_FROM_NOTEBOOK_*` of the notebook directly beneath it (for a day window, the one beneath its calendar), so Send-to-Notebook still targets what it did.
+- **This can put an encrypted notebook back underneath.** It only unlocks when the user steps down to it, but its `.soil` is opened for a screen they aren't looking at yet — accepted, so they land where they actually were.
+- **Anything unresolvable is dropped, the rest still comes back:** a deleted notebook (`getNotebook` null / `deletedAt != null`) or an unparseable date drops that one entry.
+- **Migration:** installs predating the stack only stored `last_notebook_id`. Read once, as a one-entry NOTEBOOK stack, then removed on the next write.
 
 ## Pinned Browse View
 

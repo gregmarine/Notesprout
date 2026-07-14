@@ -57,6 +57,9 @@ import com.notesprout.android.notebook.NotebookView
 import com.notesprout.android.notebook.OnyxNotebookView
 import com.notesprout.android.notebook.ScratchpadPreferences
 import com.notesprout.android.notebook.ToolPreferencesManager
+import com.notesprout.android.state.AppSurface
+import com.notesprout.android.state.SurfaceEntry
+import com.notesprout.android.state.SurfaceStack
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
@@ -64,6 +67,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.abs
 
@@ -124,6 +128,9 @@ class ScratchpadActivity : AppCompatActivity() {
     private var threeFingerTapFirstY = 0f
 
     private lateinit var binding: ActivityScratchpadBinding
+
+    /** This Activity instance's identity on the [SurfaceStack]. */
+    private var surfaceToken: String = ""
     private lateinit var drawingView: NotebookView
     private lateinit var repository: ScratchpadRepository
 
@@ -224,6 +231,11 @@ class ScratchpadActivity : AppCompatActivity() {
         fromNotebookId = intent.getStringExtra(EXTRA_FROM_NOTEBOOK_ID)
         binding.btnSendToNotebook.visibility =
             if (fromNotebookId != null) View.VISIBLE else View.GONE
+
+        // Record the scratch pad on the surface stack, so a cold launch reopens it (see SurfaceStack).
+        // No payload: the page comes back from ScratchpadPreferences.
+        surfaceToken = savedInstanceState?.getString(SurfaceStack.KEY_TOKEN) ?: UUID.randomUUID().toString()
+        SurfaceStack.attach(this, surfaceEntry())
 
         // On large screens constrain to 75% × 75%, centered.
         if (resources.getBoolean(R.bool.is_large_screen)) {
@@ -1983,9 +1995,17 @@ class ScratchpadActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        SurfaceStack.markTop(this, surfaceEntry())
         drawingView.resumeDrawing()
         updateLassoButtonIcon()
     }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        outState.putString(SurfaceStack.KEY_TOKEN, surfaceToken)
+    }
+
+    private fun surfaceEntry() = SurfaceEntry(surfaceToken, AppSurface.SCRATCHPAD)
 
     override fun onPause() {
         super.onPause()

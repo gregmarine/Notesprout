@@ -69,7 +69,10 @@ import com.notesprout.android.search.SearchEngine
 import com.notesprout.android.search.SearchResult
 import com.notesprout.android.sort.FolderSort
 import com.notesprout.android.state.AppStateManager
+import com.notesprout.android.state.AppSurface
 import com.notesprout.android.state.AppViewState
+import com.notesprout.android.state.SurfaceEntry
+import com.notesprout.android.state.SurfaceStack
 import com.notesprout.android.sort.SortDialog
 import com.notesprout.android.sort.SortField
 import com.notesprout.android.sort.SortOrder
@@ -86,6 +89,7 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import java.io.ByteArrayOutputStream
+import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 import java.util.Date
@@ -172,11 +176,6 @@ class MainActivity : AppCompatActivity() {
     // false while the async state-restore coroutine is running on first launch; guards the layout
     // listener and onResume from triggering a premature scan before the stack is rebuilt.
     private var isStateRestored = true
-
-    // Set to true whenever a NotebookActivity is launched; cleared in onResume when we return,
-    // which also clears the persisted lastOpenedNotebookId so the notebook is not re-launched
-    // on the next cold start (only a crash leaves it set for restore).
-    private var notebookOpenedThisSession = false
 
     // ── Color cache ───────────────────────────────────────────────────────────
 
@@ -337,15 +336,16 @@ class MainActivity : AppCompatActivity() {
         sortPrefs = SortPreferencesManager.load(this)
 
         val savedViewState = AppStateManager.load(this)
+        val savedSurfaces  = SurfaceStack.load(this)
         val coldLaunch = savedInstanceState == null
         val hasNonDefaultState = savedViewState.folderId != null ||
                 savedViewState.pinnedMode ||
                 savedViewState.recentsMode ||
                 (savedViewState.searchMode && savedViewState.searchQuery.isNotEmpty()) ||
-                (coldLaunch && savedViewState.lastOpenedNotebookId != null)
+                (coldLaunch && savedSurfaces.isNotEmpty())
         if (hasNonDefaultState) {
             isStateRestored = false
-            lifecycleScope.launch { restoreSavedBrowseState(savedViewState, coldLaunch) }
+            lifecycleScope.launch { restoreSavedBrowseState(savedViewState, savedSurfaces, coldLaunch) }
         }
 
         setupBottomBar()
@@ -433,13 +433,9 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
-        if (notebookOpenedThisSession) {
-            notebookOpenedThisSession = false
-            val st = AppStateManager.load(this)
-            if (st.lastOpenedNotebookId != null) {
-                AppStateManager.save(this, st.copy(lastOpenedNotebookId = null))
-            }
-        }
+        // The library is on screen, so nothing is stacked on it. Skipped while a restore is still in
+        // flight — that coroutine is about to stack surfaces on top of us, and they record themselves.
+        if (isStateRestored) SurfaceStack.reset(this)
         if (!isStateRestored) {
             pendingScan = true
             return
@@ -726,21 +722,15 @@ class MainActivity : AppCompatActivity() {
         directoryStack.addAll(path)
     }
 
-    private suspend fun restoreSavedBrowseState(state: AppViewState, coldLaunch: Boolean = false) {
-        // Reopen the last notebook only on cold launch (crash/process-kill recovery).
-        // On a warm restart (MainActivity killed while notebook was open, user then closes notebook),
-        // coldLaunch is false and we just restore the browse state behind it instead.
-        if (coldLaunch && state.lastOpenedNotebookId != null) {
-            val notebook = withContext(Dispatchers.IO) {
-                repository.getNotebook(state.lastOpenedNotebookId)
-            }
-            if (notebook != null && notebook.deletedAt == null) {
-                launchNotebookActivity(notebook)
-            } else {
-                // Notebook gone — clear the stale entry.
-                AppStateManager.save(this@MainActivity, state.copy(lastOpenedNotebookId = null))
-            }
-        }
+    private suspend fun restoreSavedBrowseState(
+        state: AppViewState,
+        surfaces: List<SurfaceEntry>,
+        coldLaunch: Boolean = false,
+    ) {
+        // Reopen the surfaces only on cold launch (process start). On a warm restart — MainActivity
+        // recreated while a notebook sat on top, user then closes it — coldLaunch is false and we just
+        // restore the browse state behind it instead.
+        if (coldLaunch) restoreSurfaces(surfaces)
 
         navigateStackToFolder(state.folderId)
         if (state.folderId != null && currentParentId != state.folderId) {
@@ -773,6 +763,83 @@ class MainActivity : AppCompatActivity() {
         }
         // If gridSpec is still null, the layout listener will handle the render now that
         // isStateRestored is true.
+    }
+
+    /**
+     * Rebuild the surfaces the user had open, over the library we're already building — the whole
+     * chain, not just the top one, so a scratch pad opened from a notebook (or from the calendar)
+     * comes back *over that screen*, and stepping out of it lands where it did before the app died.
+     *
+     * The calendar and the scratch pad restore their own position (view/date, page) when they open,
+     * so only the notebook and the day window need identity passed in. The **source notebook** is
+     * passed back down too, so a restored calendar / day window / scratch pad still has the
+     * Send-to-Notebook target it was opened with — the notebook directly beneath it, or for a day
+     * window, the one beneath its calendar.
+     *
+     * Anything unresolvable (deleted notebook, unparseable date) is dropped; the rest of the chain
+     * still comes back.
+     *
+     * Note this can put an **encrypted** notebook back underneath: it unlocks when the user steps
+     * down to it, not at launch, but its `.soil` does get opened for a screen they aren't looking at
+     * yet. That's the price of landing them where they actually were.
+     */
+    private suspend fun restoreSurfaces(surfaces: List<SurfaceEntry>) {
+        val intents = mutableListOf<Intent>()
+        // The notebook directly beneath the entry being rebuilt, and the one beneath the calendar
+        // (which is what a day window above it was opened from) — see CalendarActivity.openDayDetail.
+        var below: ObjectEntity? = null
+        var calendarBelow: ObjectEntity? = null
+
+        for (entry in surfaces) {
+            val notebook = if (entry.surface == AppSurface.NOTEBOOK) {
+                entry.notebookId
+                    ?.let { id -> withContext(Dispatchers.IO) { repository.getNotebook(id) } }
+                    ?.takeIf { it.deletedAt == null }
+            } else null
+            val from = below
+
+            val intent: Intent? = when (entry.surface) {
+                AppSurface.NOTEBOOK -> notebook?.let {
+                    Intent(this, NotebookActivity::class.java).apply {
+                        putExtra(NotebookActivity.EXTRA_NOTEBOOK_ID,   it.id)
+                        putExtra(NotebookActivity.EXTRA_NOTEBOOK_NAME, it.name)
+                    }
+                }
+                AppSurface.CALENDAR -> {
+                    calendarBelow = from
+                    if (from == null) Intent(this, CalendarActivity::class.java)
+                    else CalendarActivity.intentFromNotebook(
+                        this, from.id, from.name, from.notebookMeta().encrypted,
+                    )
+                }
+                AppSurface.DAY_WINDOW -> entry.dayDate
+                    ?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
+                    ?.let { date ->
+                        val source = calendarBelow
+                        DayDetailActivity.intent(
+                            this, date,
+                            fromNotebookId        = source?.id,
+                            fromNotebookName      = source?.name,
+                            fromNotebookEncrypted = source?.notebookMeta()?.encrypted ?: false,
+                            view = entry.dayView,
+                        )
+                    }
+                AppSurface.SCRATCHPAD -> Intent(this, ScratchpadActivity::class.java).apply {
+                    if (from != null) {
+                        putExtra(ScratchpadActivity.EXTRA_FROM_NOTEBOOK_ID,        from.id)
+                        putExtra(ScratchpadActivity.EXTRA_FROM_NOTEBOOK_NAME,      from.name)
+                        putExtra(ScratchpadActivity.EXTRA_FROM_NOTEBOOK_ENCRYPTED, from.notebookMeta().encrypted)
+                    }
+                }
+            }
+            if (intent != null) intents += intent
+            below = notebook
+        }
+
+        // Drop the dead process's entries — the Activities we're about to launch record themselves,
+        // and anything we couldn't resolve should not be retried on the next launch.
+        SurfaceStack.reset(this)
+        if (intents.isNotEmpty()) startActivities(intents.toTypedArray())
     }
 
     private fun setupBackNavigation() {
@@ -1297,9 +1364,6 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun launchNotebookActivity(entity: ObjectEntity) {
-        val st = AppStateManager.load(this)
-        AppStateManager.save(this, st.copy(lastOpenedNotebookId = entity.id))
-        notebookOpenedThisSession = true
         val intent = Intent(this, NotebookActivity::class.java).apply {
             putExtra(NotebookActivity.EXTRA_NOTEBOOK_ID,   entity.id)
             putExtra(NotebookActivity.EXTRA_NOTEBOOK_NAME, entity.name)

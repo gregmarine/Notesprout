@@ -124,7 +124,10 @@ import com.notesprout.android.data.recents.RecentsManager
 import com.notesprout.android.data.recents.TemplateRecentsManager
 import com.notesprout.android.notebook.RecentsDialog
 import com.notesprout.android.state.AppStateManager
+import com.notesprout.android.state.AppSurface
 import com.notesprout.android.state.AppViewState
+import com.notesprout.android.state.SurfaceEntry
+import com.notesprout.android.state.SurfaceStack
 import com.notesprout.android.data.soilFile
 import com.notesprout.android.databinding.ActivityNotebookBinding
 import com.notesprout.android.databinding.DialogEditHeadingTextBinding
@@ -330,6 +333,9 @@ class NotebookActivity : AppCompatActivity() {
 
     /** Index UUID of the open notebook — set once in onCreate from EXTRA_NOTEBOOK_ID. */
     private var notebookId: String = ""
+
+    /** This Activity instance's identity on the [SurfaceStack]. */
+    private var surfaceToken: String = ""
 
     /** Derived absolute path to the .soil file — set once in onCreate. */
     private var notebookSoilPath: String? = null
@@ -2309,6 +2315,10 @@ class NotebookActivity : AppCompatActivity() {
         // ── Resolve notebook identity ─────────────────────────────────────────
         notebookId          = intent.getStringExtra(EXTRA_NOTEBOOK_ID) ?: ""
         notebookDisplayName = intent.getStringExtra(EXTRA_NOTEBOOK_NAME) ?: ""
+
+        // Record this notebook on the surface stack, so a cold launch reopens it (see SurfaceStack).
+        surfaceToken = savedInstanceState?.getString(SurfaceStack.KEY_TOKEN) ?: UUID.randomUUID().toString()
+        SurfaceStack.attach(this, surfaceEntry())
         // A "fresh" open (from MainActivity/Recents) resets the link back-stack; a via-link open
         // (following a link or a back-swipe) preserves the trail. See [LinkBackStack].
         if (!intent.getBooleanExtra(EXTRA_VIA_LINK, false)) LinkBackStack.clear(this)
@@ -2417,9 +2427,17 @@ class NotebookActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        SurfaceStack.markTop(this, surfaceEntry())
         drawingView.resumeDrawing()
         updateLassoButtonIcon()
     }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        outState.putString(SurfaceStack.KEY_TOKEN, surfaceToken)
+    }
+
+    private fun surfaceEntry() = SurfaceEntry(surfaceToken, AppSurface.NOTEBOOK, notebookId = notebookId)
 
     override fun onPause() {
         super.onPause()
@@ -3813,8 +3831,7 @@ class NotebookActivity : AppCompatActivity() {
             val entity = withContext(Dispatchers.IO) { indexRepo.getNotebook(selectedId) } ?: return@launch
 
             // Return-to-folder: closing the switched notebook should land in *its* folder.
-            // Also record lastOpenedNotebookId so a cold relaunch reopens this notebook.
-            AppStateManager.save(this@NotebookActivity, AppViewState(entity.parentId, false, lastOpenedNotebookId = entity.id))
+            AppStateManager.save(this@NotebookActivity, AppViewState(entity.parentId, false))
 
             // Seal the current notebook (records close), then open the selected one directly.
             closeNotebook()
@@ -3899,8 +3916,7 @@ class NotebookActivity : AppCompatActivity() {
             if (origin != null) LinkBackStack.push(this@NotebookActivity, origin)
 
             // Return-to-folder: closing the opened notebook should land in *its* folder.
-            // Also record lastOpenedNotebookId so a cold relaunch reopens this notebook.
-            AppStateManager.save(this@NotebookActivity, AppViewState(entity.parentId, false, lastOpenedNotebookId = entity.id))
+            AppStateManager.save(this@NotebookActivity, AppViewState(entity.parentId, false))
 
             closeNotebook()
             // Clean pen-pipeline handoff before the linked notebook opens (the ownership guard still

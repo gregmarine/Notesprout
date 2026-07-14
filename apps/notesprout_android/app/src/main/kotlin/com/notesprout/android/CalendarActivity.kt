@@ -81,6 +81,9 @@ import com.notesprout.android.notebook.STICKY_NOTE_ICON_SIZE_DP
 import com.notesprout.android.notebook.ShapeRecognizer
 import com.notesprout.android.notebook.ToolPreferencesManager
 import com.notesprout.android.notebook.ToolbarOverflowManager
+import com.notesprout.android.state.AppSurface
+import com.notesprout.android.state.SurfaceEntry
+import com.notesprout.android.state.SurfaceStack
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
@@ -88,6 +91,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.ByteArrayOutputStream
+import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.time.LocalDate
 import java.time.LocalTime
@@ -142,6 +146,9 @@ class CalendarActivity : AppCompatActivity() {
     }
 
     private lateinit var binding: ActivityCalendarBinding
+
+    /** This Activity instance's identity on the [SurfaceStack]. */
+    private var surfaceToken: String = ""
     private lateinit var overflowManager: ToolbarOverflowManager
     // True between a press inside the open overflow menu and its release, so the menu closes only
     // after the tapped item's click has been dispatched.
@@ -319,6 +326,11 @@ class CalendarActivity : AppCompatActivity() {
         fromNotebookId        = intent.getStringExtra(EXTRA_FROM_NOTEBOOK_ID)
         fromNotebookName      = intent.getStringExtra(EXTRA_FROM_NOTEBOOK_NAME)
         fromNotebookEncrypted = intent.getBooleanExtra(EXTRA_FROM_NOTEBOOK_ENCRYPTED, false)
+
+        // Record the calendar on the surface stack, so a cold launch reopens it (see SurfaceStack).
+        // No payload: the view + date come back from PREFS_CALENDAR below.
+        surfaceToken = savedInstanceState?.getString(SurfaceStack.KEY_TOKEN) ?: UUID.randomUUID().toString()
+        SurfaceStack.attach(this, surfaceEntry())
 
         // Restore the last-used view + date so the calendar reopens where the user left off.
         // Falls back to today's month view (AM/PM by clock) on a fresh install.
@@ -2075,6 +2087,7 @@ class CalendarActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        SurfaceStack.markTop(this, surfaceEntry())
         drawingView.resumeDrawing()
         updateLassoButtonIcon()
         // Returning from the day window (or an event edit): events may have changed — reload and
@@ -2092,6 +2105,13 @@ class CalendarActivity : AppCompatActivity() {
         // and torn down. lifecycleScope would be cancelled at onDestroy, dropping the write.
         NotesproutApplication.appScope.launch { saveStrokes() }
     }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        outState.putString(SurfaceStack.KEY_TOKEN, surfaceToken)
+    }
+
+    private fun surfaceEntry() = SurfaceEntry(surfaceToken, AppSurface.CALENDAR)
 
     /** Persist the current view + date so the next open restores this exact position. */
     private fun saveCalendarPosition() {

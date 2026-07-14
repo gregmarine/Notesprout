@@ -321,7 +321,12 @@ toolbar order is **Events · Note · Notebooks · History**:
 
 State: `ViewMode {NOTE, NOTEBOOKS, HISTORY, EVENTS}` (initial value `EVENTS`) + sub-toggles
 `NbSub {OPENED, EDITED, CREATED}` / `HistSub {NOTES, OPENED, EDITED, CREATED}`. **Reopening a day
-always lands on Events** — the active view is not persisted. `daySubNotebooks` / `daySubHistory`
+always lands on Events** — the active view is not persisted. The one exception is **launch restore**:
+if the app was killed with the day window open, MainActivity reopens it on the date + view the user
+left it on, passed through the optional `EXTRA_VIEW` intent extra, with the calendar (and the notebook
+it was opened from, if any) stacked underneath so Back still steps out where it did (see
+[`docs/mainactivity-and-recents.md`](mainactivity-and-recents.md) → Surface Stack).
+`daySubNotebooks` / `daySubHistory`
 sub-bars are visible only in their mode; `dayToolsGroup` is visible only in Note mode (`applyViewMode`
 drives all show/hide + `isSelected`).
 
