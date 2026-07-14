@@ -266,70 +266,97 @@ class PageTextViewerActivity : AppCompatActivity() {
         }
     }
 
+    /** Preview-only rasterizer for the correction dialog (mean/std unused by renderLineBitmap). */
+    private val linePreview by lazy {
+        com.notesprout.android.recognition.trocr.LineRasterizer(
+            384, floatArrayOf(0.5f, 0.5f, 0.5f), floatArrayOf(0.5f, 0.5f, 0.5f),
+        )
+    }
+
+    /** Load the line's source strokes from a short-lived read-only connection
+     *  (plaintext only — Correct is hidden on encrypted notebooks). */
+    private suspend fun loadLineStrokes(
+        line: com.notesprout.android.data.PageText.RecognizedLine,
+    ): List<com.notesprout.android.data.LiveStroke> = withContext(Dispatchers.IO) {
+        val db = SoilDatabase.builder(
+            this@PageTextViewerActivity,
+            soilFile(this@PageTextViewerActivity, notebookId).absolutePath,
+        ).build()
+        try {
+            val dao = db.notebookDao()
+            val layer = dao.getLayerForPage(currentPageId) ?: return@withContext emptyList()
+            val wanted = line.strokeIds.toSet()
+            dao.getStrokesForLayer(layer.id)
+                .filter { it.id in wanted }
+                .mapNotNull { row -> runCatching { com.notesprout.android.data.LiveStroke.fromRow(row) }.getOrNull() }
+        } finally {
+            db.close()
+        }
+    }
+
     private fun showLineCorrectionDialog(index: Int) {
         val line = thisPageLines.getOrNull(index) ?: return
-        val input = androidx.appcompat.widget.AppCompatEditText(this).apply {
-            setText(line.text)
-            setSelection(text?.length ?: 0)
-            setTextColor(ContextCompat.getColor(this@PageTextViewerActivity, R.color.inkBlack))
-            inputType = android.text.InputType.TYPE_CLASS_TEXT or
-                android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
-            setBackgroundResource(R.drawable.shape_bordered)
-            val p = dp(8)
-            setPadding(p, p, p, p)
-        }
-        val container = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            val p = dp(12)
-            setPadding(p, p, p, p)
-            addView(input)
-        }
-        AlertDialog.Builder(this)
-            .setTitle("Correct line")
-            .setView(container)
-            .setPositiveButton("Save") { _, _ ->
-                val corrected = input.text?.toString()?.trim().orEmpty()
-                if (corrected.isNotEmpty() && corrected != line.text) {
-                    applyLineCorrection(index, line, corrected)
+        lifecycleScope.launch {
+            val strokes = loadLineStrokes(line)
+            if (strokes.isEmpty()) {
+                Toast.makeText(this@PageTextViewerActivity, "That ink is no longer on the page.", Toast.LENGTH_SHORT).show()
+                return@launch
+            }
+            // The user corrects against their actual ink — render it above the input.
+            val inkImage = withContext(Dispatchers.IO) { linePreview.renderLineBitmap(strokes) }
+
+            val input = androidx.appcompat.widget.AppCompatEditText(this@PageTextViewerActivity).apply {
+                setText(line.text)
+                setSelection(text?.length ?: 0)
+                setTextColor(ContextCompat.getColor(this@PageTextViewerActivity, R.color.inkBlack))
+                inputType = android.text.InputType.TYPE_CLASS_TEXT or
+                    android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+                setBackgroundResource(R.drawable.shape_bordered)
+                val p = dp(8)
+                setPadding(p, p, p, p)
+            }
+            val container = LinearLayout(this@PageTextViewerActivity).apply {
+                orientation = LinearLayout.VERTICAL
+                val p = dp(12)
+                setPadding(p, p, p, p)
+                addView(android.widget.ImageView(this@PageTextViewerActivity).apply {
+                    setImageBitmap(inkImage)
+                    adjustViewBounds = true
+                    scaleType = android.widget.ImageView.ScaleType.FIT_START
+                    setBackgroundResource(R.drawable.shape_bordered)
+                })
+                addView(input, LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+                ).apply { topMargin = dp(8) })
+            }
+            AlertDialog.Builder(this@PageTextViewerActivity)
+                .setTitle("Correct line")
+                .setView(container)
+                .setPositiveButton("Save") { _, _ ->
+                    val corrected = input.text?.toString()?.trim().orEmpty()
+                    if (corrected.isNotEmpty() && corrected != line.text) {
+                        applyLineCorrection(index, line, corrected, strokes)
+                    } else {
+                        inkImage.recycle()
+                    }
                 }
-            }
-            .setNegativeButton("Cancel", null)
-            .create()
-            .also { d ->
-                d.show()
-                d.window?.setElevation(0f)
-                d.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
-            }
+                .setNegativeButton("Cancel") { _, _ -> inkImage.recycle() }
+                .create()
+                .also { d ->
+                    d.show()
+                    d.window?.setElevation(0f)
+                    d.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+                }
+        }
     }
 
     private fun applyLineCorrection(
         index: Int,
         line: com.notesprout.android.data.PageText.RecognizedLine,
         corrected: String,
+        strokes: List<com.notesprout.android.data.LiveStroke>,
     ) {
         lifecycleScope.launch {
-            // Load the line's source strokes from a short-lived read-only connection
-            // (plaintext only — Correct is hidden on encrypted notebooks).
-            val strokes = withContext(Dispatchers.IO) {
-                val db = SoilDatabase.builder(
-                    this@PageTextViewerActivity,
-                    soilFile(this@PageTextViewerActivity, notebookId).absolutePath,
-                ).build()
-                try {
-                    val dao = db.notebookDao()
-                    val layer = dao.getLayerForPage(currentPageId) ?: return@withContext emptyList()
-                    val wanted = line.strokeIds.toSet()
-                    dao.getStrokesForLayer(layer.id)
-                        .filter { it.id in wanted }
-                        .mapNotNull { row -> runCatching { com.notesprout.android.data.LiveStroke.fromRow(row) }.getOrNull() }
-                } finally {
-                    db.close()
-                }
-            }
-            if (strokes.isEmpty()) {
-                Toast.makeText(this@PageTextViewerActivity, "That ink is no longer on the page.", Toast.LENGTH_SHORT).show()
-                return@launch
-            }
             com.notesprout.android.recognition.personal.TrainingPairRepository.addPair(
                 context = applicationContext,
                 source = com.notesprout.android.recognition.personal.TrainingPairRepository.SOURCE_LINE_CORRECTION,

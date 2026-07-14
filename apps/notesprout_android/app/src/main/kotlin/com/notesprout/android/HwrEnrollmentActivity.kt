@@ -17,7 +17,9 @@ import com.notesprout.android.core.isBooxDevice
 import com.notesprout.android.notebook.GenericNotebookView
 import com.notesprout.android.notebook.NotebookView
 import com.notesprout.android.notebook.OnyxNotebookView
+import com.notesprout.android.recognition.HandwritingRecognizerProvider
 import com.notesprout.android.recognition.StrokeSegmenter
+import com.notesprout.android.recognition.personal.EnrollmentAligner
 import com.notesprout.android.recognition.personal.EnrollmentScript
 import com.notesprout.android.recognition.personal.TrainingPairRepository
 import kotlinx.coroutines.launch
@@ -104,7 +106,7 @@ class HwrEnrollmentActivity : AppCompatActivity() {
         })
 
         root.addView(AppCompatTextView(this).apply {
-            text = "Copy the sentence below in your normal handwriting, on one line."
+            text = "Copy the sentence below in your normal handwriting. Use more lines if you need the space."
             setTextColor(inkColor)
             textSize = 14f
             setPadding(dp(16), dp(12), dp(16), 0)
@@ -204,21 +206,60 @@ class HwrEnrollmentActivity : AppCompatActivity() {
             Toast.makeText(this, "Write the sentence first (or Skip).", Toast.LENGTH_SHORT).show()
             return
         }
-        // Labels can't be split across lines — require a single writing band.
-        val bands = StrokeSegmenter.segment(strokes).paragraphs.sumOf { it.lines.size }
-        if (bands > 1) {
-            Toast.makeText(this, "Please write it on a single line — Clear and try again.", Toast.LENGTH_LONG).show()
+        val sentence = EnrollmentScript.SENTENCES[index]
+        val layout = StrokeSegmenter.segment(strokes)
+        val lines = layout.paragraphs.flatMap { it.lines }
+        if (lines.isEmpty()) {
+            Toast.makeText(this, "Write the sentence first (or Skip).", Toast.LENGTH_SHORT).show()
             return
         }
-        val sentence = EnrollmentScript.SENTENCES[index]
+
+        // Single line: the label is simply the whole sentence. Multiple lines: each line is
+        // its own training pair, so the sentence's words must be split correctly across them —
+        // ML Kit roughly transcribes each line and EnrollmentAligner finds the word boundaries
+        // (a misread doesn't matter, only the split points do).
+        if (lines.size == 1) {
+            storePairs(listOf(lines.single().strokes to sentence))
+            return
+        }
+        val mlKit = HandwritingRecognizerProvider.mlKitFallback?.takeIf { it.isReady() }
+        if (mlKit == null) {
+            Toast.makeText(
+                this,
+                "Multi-line needs the Standard model (still downloading?) — write it on one line for now.",
+                Toast.LENGTH_LONG,
+            ).show()
+            return
+        }
         lifecycleScope.launch {
-            TrainingPairRepository.addPair(
-                context = applicationContext,
-                source = TrainingPairRepository.SOURCE_ENROLLMENT,
-                strokes = strokes,
-                label = sentence,
-                confirmed = true,
-            )
+            val roughTexts = lines.map { line ->
+                mlKit.recognizeSegment(line.strokes, line.bounds, "", layout.medianLineHeight)
+            }
+            val labels = EnrollmentAligner.align(sentence, roughTexts)
+            if (labels == null) {
+                Toast.makeText(
+                    this@HwrEnrollmentActivity,
+                    "Couldn't match your lines to the sentence — Clear and try again.",
+                    Toast.LENGTH_LONG,
+                ).show()
+                return@launch
+            }
+            storePairs(lines.map { it.strokes }.zip(labels))
+        }
+    }
+
+    /** Persist one pair per written line and advance. */
+    private fun storePairs(pairs: List<Pair<List<com.notesprout.android.data.LiveStroke>, String>>) {
+        lifecycleScope.launch {
+            for ((strokes, label) in pairs) {
+                TrainingPairRepository.addPair(
+                    context = applicationContext,
+                    source = TrainingPairRepository.SOURCE_ENROLLMENT,
+                    strokes = strokes,
+                    label = label,
+                    confirmed = true,
+                )
+            }
         }
         saved++
         advance()
