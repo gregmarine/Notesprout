@@ -246,6 +246,39 @@ Phases 0–2 built (see `docs/handwriting-recognition.md` § "TrOCR engine"). De
 
 ---
 
+## Serialization hardening — pin `@SerialName` on `LinkTarget` (latent, not urgent)
+
+> Found 2026-07-14 while evaluating (and rejecting) an app package rename. Nothing is broken today —
+> this is a tripwire that only fires if `LinkTarget` ever changes package or class name.
+
+`data/LinkTarget.kt` is a `@Serializable sealed class` whose three subclasses carry **no
+`@SerialName`**. kotlinx.serialization therefore falls back to the fully-qualified class name as the
+polymorphic discriminator, and that FQCN string is **persisted on disk** — it's written into the
+`linkTarget TEXT` column of every link row in every `.soil` (`ObjectColumns.kt:209`, `:326`):
+
+```json
+{"type":"com.notesprout.android.data.LinkTarget.OtherNotebookPage","notebookId":"…","pageId":"…"}
+```
+
+So the Kotlin package path is, accidentally, part of the on-disk file format. Move or rename the
+class and old rows no longer decode. The read path (`ObjectColumns.kt:287`) is
+`runCatching { … }.getOrNull()`, so it **fails silently to `null`** rather than throwing: every
+existing link would quietly lose its target, and a re-save would persist the `null`. Silent data
+loss, discovered late.
+
+**Fix (cheap, do before any refactor that touches this class):**
+1. Add stable `@SerialName("current_page" / "other_notebook" / "other_notebook_page")` to the three
+   subclasses — decouples the wire format from the class path permanently.
+2. Ship a read-side migration (or a `NotebookCompactor` pass) that rewrites existing rows whose
+   discriminator is the old FQCN, since step 1 alone would orphan them the same way.
+3. While in there: consider making the decode failure loud (or at least `Slog`-warned) instead of a
+   silent `getOrNull()`.
+
+Audit note: `LinkTarget` is the only *persisted* sealed hierarchy. `DriveAuth.TokenResult` and
+`history/UndoRedoAction` are sealed too but are in-memory only — no on-disk exposure.
+
+---
+
 ## Full Notebook Import — out of scope / future
 
 > From the retired `FULL_NOTEBOOK_IMPORT_PLAN.md` (single-file import shipped in full).
