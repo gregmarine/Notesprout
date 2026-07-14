@@ -5,6 +5,7 @@ import android.os.Bundle
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
+import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
@@ -12,8 +13,11 @@ import androidx.appcompat.widget.AppCompatButton
 import androidx.appcompat.widget.AppCompatTextView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
+import com.notesprout.android.core.isBooxDevice
+import com.notesprout.android.notebook.GenericNotebookView
+import com.notesprout.android.notebook.NotebookView
+import com.notesprout.android.notebook.OnyxNotebookView
 import com.notesprout.android.recognition.StrokeSegmenter
-import com.notesprout.android.recognition.personal.EnrollmentInkView
 import com.notesprout.android.recognition.personal.EnrollmentScript
 import com.notesprout.android.recognition.personal.TrainingPairRepository
 import kotlinx.coroutines.launch
@@ -23,15 +27,20 @@ import kotlinx.coroutines.launch
  * their normal hand; each becomes a confirmed training pair (full letter/digit/
  * punctuation coverage on day one, before any organic corrections exist).
  *
- * Ink is captured in memory only (no `.soil`, nothing rendered to disk); the strokes go
- * straight into the training-pair store. Explicitly opt-in by nature, so capture is
- * allowed regardless of notebook encryption state (there is no notebook here).
+ * The writing surface is the app's real drawing engine — [OnyxNotebookView] on BOOX
+ * (EPD raw-drawing acceleration, so it writes exactly like a page) with the standard
+ * [GenericNotebookView] fallback elsewhere — with pen + eraser, same as every other
+ * host. Ink is captured in memory only (no `.soil`, nothing rendered to disk); the
+ * strokes go straight into the training-pair store. Explicitly opt-in by nature, so
+ * capture is allowed regardless of notebook encryption state (there is no notebook here).
  */
 class HwrEnrollmentActivity : AppCompatActivity() {
 
     private lateinit var progress: AppCompatTextView
     private lateinit var prompt: AppCompatTextView
-    private lateinit var ink: EnrollmentInkView
+    private lateinit var drawingView: NotebookView
+    private lateinit var btnPen: AppCompatButton
+    private lateinit var btnEraser: AppCompatButton
 
     private var index = 0
     private var saved = 0
@@ -40,6 +49,16 @@ class HwrEnrollmentActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(buildUi())
         showSentence()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        drawingView.resumeDrawing()
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        drawingView.releaseResources()
     }
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
@@ -93,20 +112,53 @@ class HwrEnrollmentActivity : AppCompatActivity() {
         prompt = AppCompatTextView(this).apply {
             setTextColor(inkColor)
             textSize = 20f
-            setPadding(dp(16), dp(10), dp(16), dp(10))
+            setPadding(dp(16), dp(10), dp(16), dp(6))
         }
         root.addView(prompt)
 
-        ink = EnrollmentInkView(this)
-        root.addView(LinearLayout(this).apply {
+        // Tool row: pen / eraser — same two-state pattern as the sticky-note editor.
+        val tools = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(dp(16), 0, dp(16), dp(8))
+        }
+        btnPen = AppCompatButton(this).apply {
+            text = "Pen"
+            setTextColor(inkColor)
             setBackgroundResource(R.drawable.shape_bordered)
+            isSelected = true
+            setOnClickListener { setEraser(false) }
+        }
+        btnEraser = AppCompatButton(this).apply {
+            text = "Eraser"
+            setTextColor(inkColor)
+            setBackgroundResource(R.drawable.shape_bordered)
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply { marginStart = dp(8) }
+            setOnClickListener { setEraser(true) }
+        }
+        tools.addView(btnPen)
+        tools.addView(btnEraser)
+        root.addView(tools)
+
+        // The real drawing engine: EPD raw drawing on BOOX, generic canvas elsewhere.
+        drawingView = if (isBooxDevice()) OnyxNotebookView(this) else GenericNotebookView(this)
+        val canvasFrame = FrameLayout(this).apply {
+            setBackgroundResource(R.drawable.shape_bordered)
+            val pad = dp(2)
+            setPadding(pad, pad, pad, pad)
             layoutParams = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f
             ).apply { leftMargin = dp(16); rightMargin = dp(16) }
-            addView(ink, LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT
-            ))
-        })
+            addView(
+                drawingView.asView(),
+                FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                ),
+            )
+        }
+        root.addView(canvasFrame)
 
         val buttons = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -120,12 +172,18 @@ class HwrEnrollmentActivity : AppCompatActivity() {
                 .apply { marginEnd = dp(8) }
             setOnClickListener { onClick() }
         }
-        buttons.addView(button("Clear") { ink.clear() })
+        buttons.addView(button("Clear") { drawingView.eraseAll() })
         buttons.addView(button("Skip") { advance() })
         buttons.addView(button("Save & Next") { saveAndAdvance() })
         root.addView(buttons)
 
         return root
+    }
+
+    private fun setEraser(active: Boolean) {
+        drawingView.setEraserMode(active)
+        btnPen.isSelected = !active
+        btnEraser.isSelected = active
     }
 
     private fun showSentence() {
@@ -136,11 +194,12 @@ class HwrEnrollmentActivity : AppCompatActivity() {
         }
         progress.text = "${index + 1} / ${sentences.size}"
         prompt.text = sentences[index]
-        ink.clear()
+        drawingView.eraseAll()
+        setEraser(false) // each sentence starts with the pen
     }
 
     private fun saveAndAdvance() {
-        val strokes = ink.getStrokes()
+        val strokes = drawingView.getStrokes()
         if (strokes.isEmpty()) {
             Toast.makeText(this, "Write the sentence first (or Skip).", Toast.LENGTH_SHORT).show()
             return
