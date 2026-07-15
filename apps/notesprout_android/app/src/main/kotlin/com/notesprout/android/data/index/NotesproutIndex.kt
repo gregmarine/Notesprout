@@ -174,6 +174,59 @@ object NotesproutIndex {
         }
     }
 
+    /**
+     * Re-key the encrypted index from [oldPassphrase] to [newPassphrase] as part of a global
+     * rotation. Closes the live connection (required — the codebase re-keys via file round-trip,
+     * not the on-device-unreliable `PRAGMA rekey`), re-keys the file, refreshes the cached raw key
+     * to the new salt, and reopens. Idempotent: a file already readable with [newPassphrase] (from a
+     * crash-interrupted prior run) skips the round-trip.
+     *
+     * Holds [prepareMutex] so it can't race the open paths. There is a brief window where the index
+     * is closed — callers run this only from the modal, quiesced rotation flow. Does NOT touch the
+     * cached global passphrase (the rotation orchestrator updates that last, after every target).
+     */
+    suspend fun rekey(context: Context, oldPassphrase: String, newPassphrase: String) = withContext(Dispatchers.IO) {
+        prepareMutex.withLock {
+            val app = context.applicationContext
+            val dbFile = File(app.getExternalFilesDir(null), "notesprout.db")
+            val alreadyNew = SoilCrypto.verifyPassphrase(dbFile, newPassphrase)
+
+            // Close the live connection so the file can be replaced (or reopened cleanly under the new key).
+            instance?.let { db ->
+                runCatching {
+                    db.openHelper.writableDatabase.query("PRAGMA wal_checkpoint(TRUNCATE)").use { it.moveToFirst() }
+                }
+                db.close()
+                instance = null
+                readyLatch = CompletableDeferred()
+            }
+
+            if (!alreadyNew) {
+                try {
+                    SoilMigrator.rekeyInPlace(dbFile, oldPassphrase, newPassphrase)
+                } catch (e: Throwable) {
+                    // rekeyInPlace is atomic — on failure the file is still under the OLD key. Reopen
+                    // with it so the index is never left closed, then surface the failure.
+                    KeyMaterial.invalidate(app, KeyMaterial.INDEX_FILE_ID)
+                    val oldKey = KeyMaterial.rawKeyGlobal(app, KeyMaterial.INDEX_FILE_ID, dbFile, oldPassphrase)
+                    val restored = buildRoom(app, dbFile, SoilCrypto.roomFactoryRawKey(oldKey))
+                    forceOpen(restored)
+                    instance = restored
+                    if (!readyLatch.isCompleted) readyLatch.complete(Unit)
+                    throw e
+                }
+            }
+
+            // Point the raw-key cache at the new salt, then reopen.
+            KeyMaterial.invalidate(app, KeyMaterial.INDEX_FILE_ID)
+            val key = KeyMaterial.rawKeyGlobal(app, KeyMaterial.INDEX_FILE_ID, dbFile, newPassphrase)
+            val reopened = buildRoom(app, dbFile, SoilCrypto.roomFactoryRawKey(key))
+            forceOpen(reopened)
+            instance = reopened
+            if (!readyLatch.isCompleted) readyLatch.complete(Unit)
+        }
+    }
+
     suspend fun seal() = withContext(Dispatchers.IO) {
         val db = db()
         db.openHelper.writableDatabase.let { raw ->

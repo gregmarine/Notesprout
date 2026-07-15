@@ -150,12 +150,27 @@
                 android:layout_height="1dp"
                 android:background="@color/inkBlack" />
 
+            <!-- Reveal Recovery Key button -->
+            <androidx.appcompat.widget.AppCompatButton
+                android:id="@+id/btnRevealRecoveryKey"
+                android:layout_width="match_parent"
+                android:layout_height="56dp"
+                android:layout_marginTop="24dp"
+                android:text="Reveal Recovery Key…"
+                android:textSize="16sp"
+                android:textColor="@color/inkBlack"
+                android:textAllCaps="false"
+                android:background="@drawable/shape_bordered"
+                android:stateListAnimator="@null"
+                android:minWidth="0dp"
+                android:minHeight="0dp" />
+
             <!-- Change Global Passphrase button -->
             <androidx.appcompat.widget.AppCompatButton
                 android:id="@+id/btnChangeGlobalPassphrase"
                 android:layout_width="match_parent"
                 android:layout_height="56dp"
-                android:layout_marginTop="24dp"
+                android:layout_marginTop="12dp"
                 android:text="Change Global Passphrase…"
                 android:textSize="16sp"
                 android:textColor="@color/inkBlack"

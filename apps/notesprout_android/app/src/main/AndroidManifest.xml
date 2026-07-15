@@ -132,6 +132,13 @@
             android:theme="@style/Theme.Notesprout"
             android:windowSoftInputMode="stateHidden" />
 
+        <!-- First-launch onboarding — reveals the recovery key before the library opens -->
+        <activity
+            android:name=".OnboardingActivity"
+            android:exported="false"
+            android:launchMode="singleTop"
+            android:windowSoftInputMode="stateHidden" />
+
         <!-- Encryption settings — global passphrase management (status, forget, change) -->
         <activity
             android:name=".EncryptionSettingsActivity"

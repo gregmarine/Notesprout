@@ -41,13 +41,16 @@ class BootstrapActivity : AppCompatActivity() {
                 message = "That passphrase didn't open your library. Try again."
             }
         }
-        forwardToMain()
+        forwardNext()
     }
 
-    /** Reuse the received intent (launcher MAIN, or a forwarded .soil VIEW/SEND) so MainActivity sees
-     *  a normal cold launch — its restore/import logic is untouched. */
-    private fun forwardToMain() {
-        startActivity(Intent(intent).setClass(this, MainActivity::class.java))
+    /** Reuse the received intent (launcher MAIN, or a forwarded .soil VIEW/SEND) so the next screen
+     *  sees a normal cold launch. First launch routes through onboarding (recovery-key reveal);
+     *  otherwise straight to MainActivity, whose restore/import logic is untouched. */
+    private fun forwardNext() {
+        val next = if (OnboardingActivity.shouldShow(this)) OnboardingActivity::class.java
+                   else MainActivity::class.java
+        startActivity(Intent(intent).setClass(this, next))
         finish()
     }
 

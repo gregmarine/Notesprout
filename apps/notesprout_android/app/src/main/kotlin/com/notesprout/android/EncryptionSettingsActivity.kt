@@ -31,6 +31,7 @@ class EncryptionSettingsActivity : AppCompatActivity() {
         setContentView(binding.root)
 
         binding.btnBack.setOnClickListener { finish() }
+        binding.btnRevealRecoveryKey.setOnClickListener { showRecoveryKey() }
         binding.btnChangeGlobalPassphrase.setOnClickListener { startChangeGlobalPassphrase() }
         binding.btnForgetPassphrase.setOnClickListener { showForgetConfirm() }
         binding.btnResumeRotation.setOnClickListener { resumeRotation() }
@@ -61,6 +62,45 @@ class EncryptionSettingsActivity : AppCompatActivity() {
             } else {
                 binding.resumeRotationBanner.visibility = View.GONE
             }
+        }
+    }
+
+    // ── Reveal recovery key ───────────────────────────────────────────────────
+
+    /** Show the current global passphrase (a.k.a. recovery key) so the user can re-save it. */
+    private fun showRecoveryKey() {
+        lifecycleScope.launch {
+            val key = withContext(Dispatchers.IO) {
+                PassphraseStore.getGlobalPassphrase(this@EncryptionSettingsActivity)
+            }
+            if (key == null) {
+                Toast.makeText(this@EncryptionSettingsActivity, "No recovery key on this device.", Toast.LENGTH_SHORT).show()
+                return@launch
+            }
+            val keyView = android.widget.TextView(this@EncryptionSettingsActivity).apply {
+                text = key
+                setTextIsSelectable(true)
+                typeface = android.graphics.Typeface.MONOSPACE
+                textSize = 16f
+                setTextColor(androidx.core.content.ContextCompat.getColor(context, R.color.inkBlack))
+                setPadding(48, 40, 48, 8)
+            }
+            AlertDialog.Builder(this@EncryptionSettingsActivity)
+                .setTitle("Recovery key")
+                .setMessage("The one secret that unlocks your library on another device or after a reinstall. Keep it safe.")
+                .setView(keyView)
+                .setPositiveButton("Copy") { _, _ ->
+                    val cm = getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                    cm.setPrimaryClip(android.content.ClipData.newPlainText("Notesprout recovery key", key))
+                    Toast.makeText(this@EncryptionSettingsActivity, "Recovery key copied", Toast.LENGTH_SHORT).show()
+                }
+                .setNegativeButton("Close", null)
+                .create()
+                .also { d ->
+                    d.show()
+                    d.window?.setElevation(0f)
+                    d.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+                }
         }
     }
 

@@ -2,7 +2,9 @@ package com.notesprout.android.crypto
 
 import android.content.Context
 import com.notesprout.android.core.Slog
+import com.notesprout.android.data.hwr.HwrTrainingDatabase
 import com.notesprout.android.data.index.IndexRepository
+import com.notesprout.android.data.index.NotesproutIndex
 import com.notesprout.android.data.soilFile
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -54,9 +56,12 @@ object GlobalRotation {
         PassphraseStore.setRotationMarker(context, RotationMarker(ids, newPassphrase))
 
         if (ids.isEmpty()) {
-            PassphraseStore.setGlobalPassphrase(context, newPassphrase)
-            PassphraseStore.clearRotationMarker(context)
-            return@withContext Result.Complete(0)
+            return@withContext try {
+                finishRotation(context, oldPassphrase, newPassphrase)
+                Result.Complete(0)
+            } catch (e: Exception) {
+                Result.Failed(e.message ?: "Failed to finalize rotation.")
+            }
         }
 
         rotate(context, ids.toMutableList(), oldPassphrase, newPassphrase, onProgress, cancelSignal, ids.size)
@@ -161,9 +166,29 @@ object GlobalRotation {
             onProgress(rotated, total)
         }
 
-        // All notebooks done — update the cached global and clear the marker.
+        // All notebooks done — re-key the index + training store, commit the new global, clear marker.
+        return try {
+            finishRotation(context, oldPassphrase, newPassphrase)
+            Result.Complete(rotated)
+        } catch (e: Exception) {
+            // Notebooks are re-keyed; the marker stays so the index/training step can be resumed.
+            Result.Failed(e.message ?: "Failed to finalize rotation.")
+        }
+    }
+
+    /**
+     * Final, resumable step of every rotation: re-key the two non-notebook global files (the
+     * encrypted index and the HWR training store) so the new passphrase is the single secret that
+     * unlocks everything, then commit it as the cached global and clear the marker.
+     *
+     * Both re-keys are idempotent, so a crash that re-enters here (marker still present) is safe.
+     * Ordered so the passphrase commit is last: if we crash after re-keying the index but before the
+     * commit, the index still opens via its refreshed raw-key cache, and a resume finishes cleanly.
+     */
+    private suspend fun finishRotation(context: Context, oldPassphrase: String, newPassphrase: String) {
+        NotesproutIndex.rekey(context, oldPassphrase, newPassphrase)
+        HwrTrainingDatabase.rekey(context, oldPassphrase, newPassphrase)
         PassphraseStore.setGlobalPassphrase(context, newPassphrase)
         PassphraseStore.clearRotationMarker(context)
-        return Result.Complete(rotated)
     }
 }

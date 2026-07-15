@@ -64,5 +64,34 @@ abstract class HwrTrainingDatabase : RoomDatabase() {
                 return db.trainingPairDao()
             }
         }
+
+        /**
+         * Re-key the training store from [oldPassphrase] to [newPassphrase] during a global rotation.
+         * Closes the singleton (lazy reopen on the next [dao] under the new global key), re-keys the
+         * file if it exists and isn't already on the new key, and refreshes the cached raw key.
+         * Idempotent and safe to call when the store was never materialized. Call from Dispatchers.IO.
+         */
+        fun rekey(context: Context, oldPassphrase: String, newPassphrase: String) {
+            val app = context.applicationContext
+            val dbFile = File(app.filesDir, "hwr/training.db")
+            synchronized(this) {
+                instance?.close()
+                instance = null
+            }
+            if (dbFile.exists() && dbFile.length() > 0) {
+                when (SoilCrypto.probe(dbFile)) {
+                    SoilFileKind.Encrypted ->
+                        if (!SoilCrypto.verifyPassphrase(dbFile, newPassphrase)) {
+                            runBlocking { SoilMigrator.rekeyInPlace(dbFile, oldPassphrase, newPassphrase) }
+                        }
+                    // Pre-encryption leftover — bring it under the new global key directly.
+                    SoilFileKind.Plaintext ->
+                        runBlocking { SoilMigrator.encryptInPlace(dbFile, newPassphrase) }
+                    SoilFileKind.Invalid -> { /* not a usable DB — treat as not materialized */ }
+                }
+            }
+            // Drop the stale key; the next dao() re-derives under the (by-then updated) global passphrase.
+            KeyMaterial.invalidate(app, KeyMaterial.TRAINING_FILE_ID)
+        }
     }
 }
