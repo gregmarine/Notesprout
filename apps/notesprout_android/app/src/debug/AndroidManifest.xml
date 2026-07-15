@@ -15,5 +15,11 @@
             android:name="com.notesprout.android.debug.CryptoSpikeActivity"
             android:exported="true"
             android:label="Crypto Spike" />
+        <!-- Reveals the global passphrase so the encrypted index stays sqlcipher-inspectable. Debug only.
+             adb shell am start -n com.notesprout.android.dev/com.notesprout.android.debug.DebugKeyActivity -->
+        <activity
+            android:name="com.notesprout.android.debug.DebugKeyActivity"
+            android:exported="true"
+            android:label="Debug Key" />
     </application>
 </manifest>
