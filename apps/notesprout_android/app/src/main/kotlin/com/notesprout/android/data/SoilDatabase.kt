@@ -6,6 +6,7 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
+import androidx.sqlite.db.framework.FrameworkSQLiteOpenHelperFactory
 
 /**
  * Room database for a single `.soil` notebook file.
@@ -74,6 +75,10 @@ abstract class SoilDatabase : RoomDatabase() {
             Room.databaseBuilder(context.applicationContext, SoilDatabase::class.java, absolutePath)
                 .addCallback(openCallback())
                 .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+                // Default (plaintext) open path: never let a corrupt/mis-read file be deleted. An
+                // encrypted .soil opened without a key looks corrupt here; the default handler would
+                // wipe it. Keyed callers override this with the SQLCipher factory (also wrapped).
+                .openHelperFactory(NonDestructiveOpenHelperFactory(FrameworkSQLiteOpenHelperFactory()))
 
         /**
          * Room callback that (re-)applies connection-level PRAGMAs every time the

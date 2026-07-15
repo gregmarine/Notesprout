@@ -185,6 +185,11 @@ class LinkTargetPickerActivity : AppCompatActivity() {
     private var otherNotebookId: String? = null
     private var otherNotebookName: String = ""
     private var otherPages: List<PageEntry> = emptyList()
+    // Resolved key for the notebook whose pages are showing (OtherView.PAGES). Set by
+    // loadOtherPagesAsync so thumbnail rendering opens the target with the SAME key it was unlocked
+    // with — never plaintext. Opening an encrypted .soil without its key trips Room's corruption
+    // handler, which deletes and recreates the file empty (data loss). null = plaintext target.
+    private var otherKey: String? = null
 
     // The currently visible grid page index (shared across all grids).
     private var currentGridPage: Int = 0
@@ -411,6 +416,7 @@ class LinkTargetPickerActivity : AppCompatActivity() {
         if (targetTab == TargetTab.OTHER && otherView == OtherView.PAGES) {
             otherView = OtherView.BROWSE
             otherNotebookId = null
+            otherKey = null
             currentGridPage = 0
             render()
             return true
@@ -440,6 +446,7 @@ class LinkTargetPickerActivity : AppCompatActivity() {
 
     private fun openOtherNotebookPages(notebookId: String, name: String) {
         otherNotebookId = notebookId
+        otherKey = null            // cleared until loadOtherPagesAsync resolves this notebook's key
         otherNotebookName = name
         otherView = OtherView.PAGES
         currentGridPage = 0
@@ -529,6 +536,7 @@ class LinkTargetPickerActivity : AppCompatActivity() {
             val loaded = withContext(Dispatchers.IO) { loadPagesFromSoil(path, key) }
             if (otherNotebookId != forNotebookId) return@launch
             otherPages = loaded
+            otherKey = key             // thumbnails must reuse this key, not KeySession (null for non-foreground)
             val spec = gridSpec
             if (spec != null && spec.itemsPerPage > 0 && initialNotebookId == forNotebookId) {
                 val anchorIdx = initialNotebookPageId?.let { id -> otherPages.indexOfFirst { it.id == id } }
@@ -634,7 +642,7 @@ class LinkTargetPickerActivity : AppCompatActivity() {
                     otherPages,
                     highlightId = otherPageHighlightId(),
                     sourcePath = otherId?.let { soilFile(this, it).absolutePath },
-                    sourceKey = otherId?.let { KeySession.getFor(it) },
+                    sourceKey = otherKey,
                 ) { selectOtherNotebookPage(otherNotebookId ?: return@renderPageGrid, it.id) }
             }
             else -> renderBrowseGrid()
@@ -729,6 +737,7 @@ class LinkTargetPickerActivity : AppCompatActivity() {
                     if (otherView == OtherView.PAGES) {
                         otherView = OtherView.BROWSE
                         otherNotebookId = null
+                        otherKey = null
                         currentGridPage = 0
                     }
                     while (directoryStack.size > index + 1) directoryStack.removeLast()
