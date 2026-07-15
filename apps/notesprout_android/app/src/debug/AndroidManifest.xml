@@ -8,5 +8,12 @@
             android:name="com.notesprout.android.HwrLabActivity"
             android:exported="true"
             android:label="HWR Lab" />
+        <!-- Crypto Spike: debug-only Phase-0 harness measuring SQLCipher open latency on
+             real notebooks (global-encryption go/no-go). Scratch for the spike; reverted after.
+             adb shell am start -n com.notesprout.android.dev/com.notesprout.android.debug.CryptoSpikeActivity -->
+        <activity
+            android:name="com.notesprout.android.debug.CryptoSpikeActivity"
+            android:exported="true"
+            android:label="Crypto Spike" />
     </application>
 </manifest>
