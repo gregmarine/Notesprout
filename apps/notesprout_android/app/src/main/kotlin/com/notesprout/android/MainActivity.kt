@@ -1251,8 +1251,9 @@ class MainActivity : AppCompatActivity() {
                     item.entity.notebookMeta()
                 } catch (_: Exception) { null }
 
-                if (notebookObj?.encrypted == true) {
-                    // Encrypted: show lock icon; never decode a snapshot (plaintext-leak guard).
+                if (notebookObj?.encrypted == true && notebookObj.keyScope != KeyScope.GLOBAL) {
+                    // Private (NOTEBOOK-scope) encryption: show lock icon; never decode a snapshot.
+                    // GLOBAL-scope covers fall through and render — the index is encrypted at rest.
                     icon.setImageResource(R.drawable.ic_lock_cover)
                 } else {
                     val snapshotB64 = notebookObj?.snapshot

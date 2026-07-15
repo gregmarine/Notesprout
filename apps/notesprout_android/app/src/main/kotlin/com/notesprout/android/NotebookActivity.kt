@@ -3954,7 +3954,7 @@ class NotebookActivity : AppCompatActivity() {
     ) = withContext(Dispatchers.IO) {
         // Keep the index cover current so the MainActivity grid doesn't need to open the .soil: push
         // the current page's snapshot (captured on the main thread in closeNotebook) as the cover.
-        // Unencrypted only — cacheSnapshotIfAllowed guards the plaintext-leak case.
+        // cacheSnapshotIfAllowed suppresses only private (NOTEBOOK-scope) notebooks.
         if (nbId.isNotEmpty() && snapshot != null) {
             cacheSnapshotIfAllowed(nbId, snapshot)
         }
@@ -4540,11 +4540,11 @@ class NotebookActivity : AppCompatActivity() {
 
     /**
      * Write [snapshot] (the current page image, captured at close) to the global index as this
-     * notebook's library-grid cover — but only when the notebook is unencrypted. Encrypted
-     * notebooks must never cache page content in the plaintext global index.
+     * notebook's library-grid cover. Suppressed only for private (NOTEBOOK-scope) notebooks;
+     * GLOBAL-scope covers are safe because the index is itself encrypted under the global key.
      */
     private suspend fun cacheSnapshotIfAllowed(nbId: String, snapshot: String) {
-        if (encryptionInfo.encrypted) return
+        if (encryptionInfo.encrypted && encryptionInfo.keyScope != KeyScope.GLOBAL) return
         runCatching { indexRepo.updateNotebookSnapshot(nbId, snapshot) }
     }
 
