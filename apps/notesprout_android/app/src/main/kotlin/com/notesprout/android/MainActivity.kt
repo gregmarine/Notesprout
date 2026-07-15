@@ -319,6 +319,16 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        // The encrypted index must be prepared before any index access. Normally BootstrapActivity
+        // (the launcher) has already done this and forwarded here; but a .soil deep-link or a
+        // task-root recreation can reach MainActivity cold with the index not yet ready — bounce back
+        // through the gate (preserving the intent) so preparation/unlock happens exactly once.
+        if (!com.notesprout.android.data.index.NotesproutIndex.isReady()) {
+            startActivity(Intent(intent).setClass(this, BootstrapActivity::class.java))
+            finish()
+            return
+        }
+
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 

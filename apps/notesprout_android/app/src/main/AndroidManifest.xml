@@ -14,16 +14,24 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.Notesprout">
 
-        <!-- Theme QA — launcher entry point -->
+        <!-- Launcher entry point: prepares (and, first launch, encrypts) the index before any UI,
+             then forwards to MainActivity so its cold-launch surface restore runs unchanged. -->
+        <activity
+            android:name=".BootstrapActivity"
+            android:exported="true"
+            android:launchMode="singleTop"
+            android:theme="@style/Theme.Notesprout">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
         <activity
             android:name=".MainActivity"
             android:exported="true"
             android:launchMode="singleTop"
             android:windowSoftInputMode="stateHidden">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
             <!-- Tap a .soil file — path-pattern match covers any MIME type the file manager sends -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />

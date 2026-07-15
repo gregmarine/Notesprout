@@ -48,14 +48,17 @@ class NotesproutApplication : Application() {
         // before any SDK code runs.
         HiddenApiBypass.addHiddenApiExemptions("")
 
-        com.notesprout.android.data.index.NotesproutIndex.open(this)
-
-        val repository = com.notesprout.android.data.index.IndexRepository(
-            com.notesprout.android.data.index.NotesproutIndex.dao()
-        )
-        appScope.launch { repository.ensurePinnedListExists() }
-        appScope.launch { repository.ensurePinnedTemplatesListExists() }
+        // The index is encrypted (Phase 1b) and may need an async plaintext→encrypted migration or an
+        // unlock prompt, so it can no longer open synchronously here. BootstrapActivity (launcher) and
+        // MainActivity (deep-link entry) drive NotesproutIndex.ensureReady(); these index-dependent
+        // startup tasks just wait until it's open.
         appScope.launch {
+            com.notesprout.android.data.index.NotesproutIndex.awaitReady()
+            val repository = com.notesprout.android.data.index.IndexRepository(
+                com.notesprout.android.data.index.NotesproutIndex.dao()
+            )
+            repository.ensurePinnedListExists()
+            repository.ensurePinnedTemplatesListExists()
             val payload = repository.loadClipboard()
             if (payload != null && NotesproutClipboard.content == null) {
                 NotesproutClipboard.content = payload.toClipboardContent()
