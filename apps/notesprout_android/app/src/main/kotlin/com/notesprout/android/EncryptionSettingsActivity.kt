@@ -6,6 +6,7 @@ import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
+import com.notesprout.android.crypto.GlobalConversion
 import com.notesprout.android.crypto.GlobalRotation
 import com.notesprout.android.crypto.KeySession
 import com.notesprout.android.crypto.PassphrasePrompt
@@ -35,6 +36,8 @@ class EncryptionSettingsActivity : AppCompatActivity() {
         binding.btnChangeGlobalPassphrase.setOnClickListener { startChangeGlobalPassphrase() }
         binding.btnForgetPassphrase.setOnClickListener { showForgetConfirm() }
         binding.btnResumeRotation.setOnClickListener { resumeRotation() }
+        binding.btnEncryptAll.setOnClickListener { startBulkConversion() }
+        binding.btnResumeConversion.setOnClickListener { resumeBulkConversion() }
     }
 
     override fun onResume() {
@@ -47,6 +50,8 @@ class EncryptionSettingsActivity : AppCompatActivity() {
             val isSet = withContext(Dispatchers.IO) { PassphraseStore.hasGlobalPassphrase(this@EncryptionSettingsActivity) }
             val count = withContext(Dispatchers.IO) { repository.countGlobalNotebooks() }
             val hasMarker = withContext(Dispatchers.IO) { GlobalRotation.hasMarker(this@EncryptionSettingsActivity) }
+            val hasConversionMarker = withContext(Dispatchers.IO) { GlobalConversion.hasMarker(this@EncryptionSettingsActivity) }
+            val plaintextCount = withContext(Dispatchers.IO) { repository.getPlaintextNotebookIds().size }
 
             binding.tvGlobalStatus.text = if (isSet) "Set" else "Not set"
             binding.tvGlobalCount.text = when (count) {
@@ -54,13 +59,20 @@ class EncryptionSettingsActivity : AppCompatActivity() {
                 1 -> "1 notebook uses the global passphrase"
                 else -> "$count notebooks use the global passphrase"
             }
-            binding.btnChangeGlobalPassphrase.isEnabled = isSet && !hasMarker
-            binding.btnForgetPassphrase.isEnabled = isSet && !hasMarker
+            // Rotation and conversion are mutually exclusive with a marker of the other kind in flight.
+            val busy = hasMarker || hasConversionMarker
+            binding.btnChangeGlobalPassphrase.isEnabled = isSet && !busy
+            binding.btnForgetPassphrase.isEnabled = isSet && !busy
 
-            if (hasMarker) {
-                binding.resumeRotationBanner.visibility = View.VISIBLE
-            } else {
-                binding.resumeRotationBanner.visibility = View.GONE
+            binding.resumeRotationBanner.visibility = if (hasMarker) View.VISIBLE else View.GONE
+            binding.resumeConversionBanner.visibility = if (hasConversionMarker) View.VISIBLE else View.GONE
+
+            // Offer bulk-encrypt only when a global key exists, plaintext notebooks remain, and no
+            // sweep is already pending (the resume banner owns that case).
+            binding.btnEncryptAll.apply {
+                visibility = if (isSet && plaintextCount > 0 && !hasConversionMarker) View.VISIBLE else View.GONE
+                text = "Encrypt All Notebooks ($plaintextCount)…"
+                isEnabled = !hasMarker
             }
         }
     }
@@ -279,6 +291,71 @@ class EncryptionSettingsActivity : AppCompatActivity() {
                 d.window?.setElevation(0f)
                 d.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
             }
+    }
+
+    // ── Bulk-convert plaintext notebooks → GLOBAL ─────────────────────────────
+
+    private fun startBulkConversion() {
+        lifecycleScope.launch { runConversion(resume = false) }
+    }
+
+    private fun resumeBulkConversion() {
+        lifecycleScope.launch { runConversion(resume = true) }
+    }
+
+    private suspend fun runConversion(resume: Boolean) {
+        val globalPass = withContext(Dispatchers.IO) {
+            PassphraseStore.getGlobalPassphrase(this@EncryptionSettingsActivity)
+        }
+        if (globalPass == null) {
+            Toast.makeText(this, "No global passphrase on this device.", Toast.LENGTH_LONG).show()
+            return
+        }
+
+        val cancelSignal = AtomicBoolean(false)
+        val progress = AlertDialog.Builder(this)
+            .setTitle("Encrypting Notebooks")
+            .setMessage("Encrypting 0 / ……")
+            .setNegativeButton("Cancel") { _, _ -> cancelSignal.set(true) }
+            .setCancelable(false)
+            .create()
+            .also { d ->
+                d.window?.setElevation(0f)
+                d.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+            }
+        progress.show()
+
+        val onProgress: suspend (Int, Int) -> Unit = { done, total ->
+            withContext(Dispatchers.Main) { progress.setMessage("Encrypting $done / $total…") }
+        }
+        val result = try {
+            if (resume) {
+                GlobalConversion.resume(this, repository, onProgress, cancelSignal)
+            } else {
+                GlobalConversion.start(this, repository, globalPass, onProgress, cancelSignal)
+            }
+        } finally {
+            progress.dismiss()
+        }
+        handleConversionResult(result)
+    }
+
+    private fun handleConversionResult(result: GlobalConversion.Result) {
+        val msg = when (result) {
+            is GlobalConversion.Result.Complete -> buildString {
+                append("Encrypted ${result.converted} notebook${if (result.converted == 1) "" else "s"}.")
+                if (result.skipped > 0) append(" ${result.skipped} couldn't be encrypted and were left as-is.")
+            }
+            is GlobalConversion.Result.Cancelled ->
+                "Paused. ${result.converted} encrypted, ${result.remaining} remaining. Tap Resume to continue."
+            is GlobalConversion.Result.Failed -> {
+                if (result.message == "no_cached_global")
+                    "The global passphrase is no longer cached. Set it again to continue."
+                else "Encryption failed: ${result.message}"
+            }
+        }
+        Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
+        refreshStatus()
     }
 
     // ── Forget passphrase ─────────────────────────────────────────────────────

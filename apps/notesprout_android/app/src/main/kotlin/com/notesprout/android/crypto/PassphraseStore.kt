@@ -21,6 +21,7 @@ object PassphraseStore {
     private const val KEY_GLOBAL = "global_passphrase"
     private const val KEY_ROTATION_PENDING = "rotation_pending_ids"
     private const val KEY_ROTATION_NEW = "rotation_new_passphrase"
+    private const val KEY_CONVERSION_PENDING = "conversion_pending_ids"
 
     private fun prefs(context: Context) = EncryptedSharedPreferences.create(
         context,
@@ -75,5 +76,24 @@ object PassphraseStore {
             .remove(KEY_ROTATION_PENDING)
             .remove(KEY_ROTATION_NEW)
             .apply()
+    }
+
+    // ── Bulk-conversion marker ─────────────────────────────────────────────────
+    // Tracks the in-progress plaintext→GLOBAL sweep so a crash or cancel can be resumed.
+    // No passphrase is stored — the sweep always uses the cached global passphrase.
+
+    fun getConversionPending(context: Context): List<String>? {
+        val pending = prefs(context).getString(KEY_CONVERSION_PENDING, null) ?: return null
+        return pending.split(",").filter { it.isNotEmpty() }
+    }
+
+    fun setConversionPending(context: Context, pending: List<String>) {
+        prefs(context).edit()
+            .putString(KEY_CONVERSION_PENDING, pending.joinToString(","))
+            .apply()
+    }
+
+    fun clearConversionMarker(context: Context) {
+        prefs(context).edit().remove(KEY_CONVERSION_PENDING).apply()
     }
 }

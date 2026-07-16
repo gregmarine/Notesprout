@@ -563,6 +563,16 @@ class IndexRepository(private val dao: ObjectDao) {
             }
             .map { it.id }
 
+    /** Ids of every non-deleted notebook still stored in plaintext — the Phase-4 bulk-convert set. */
+    suspend fun getPlaintextNotebookIds(): List<String> =
+        dao.getAllNotDeleted()
+            .filter { entity ->
+                if (entity.type != ObjectType.NOTEBOOK) return@filter false
+                val obj = try { entity.notebookMeta() } catch (_: Exception) { return@filter false }
+                !obj.encrypted
+            }
+            .map { it.id }
+
     suspend fun getEncryptionInfo(notebookId: String): EncryptionInfo {
         val entity = dao.getById(notebookId) ?: return EncryptionInfo.NONE
         val obj = entity.notebookMeta()

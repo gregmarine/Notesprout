@@ -110,6 +110,9 @@ class MainActivity : AppCompatActivity() {
          */
         const val EXTRA_START_NEW_NOTEBOOK = "start_new_notebook"
 
+        /** One-time flag (in the notesprout_onboarding prefs) that the Phase-4 bulk-encrypt offer was shown. */
+        private const val KEY_CONVERSION_OFFERED = "conversion_offered"
+
         private val lenientJson = Json { ignoreUnknownKeys = true }
     }
 
@@ -431,6 +434,7 @@ class MainActivity : AppCompatActivity() {
         if (savedInstanceState == null) {
             handleIncomingIntent(intent)
             handleNewNotebookIntent(intent)
+            maybeOfferBulkEncryption()
         }
     }
 
@@ -1834,6 +1838,101 @@ class MainActivity : AppCompatActivity() {
             }
             menu.addAction(R.drawable.ic_delete_notebook, "Delete Notebook") { showDeleteNotebookConfirmation(entity) }
             menu.show()
+        }
+    }
+
+    // ── Phase 4: one-time bulk-convert offer ──────────────────────────────────
+
+    /**
+     * On a normal cold launch (after onboarding), if any plaintext notebooks remain, offer once to
+     * bulk-encrypt them under the global passphrase. Guarded by a one-time flag so it never nags; if
+     * the user declines they can still run it from Encryption settings. Skipped for .soil deep-links
+     * so the offer never collides with an import flow.
+     */
+    private fun maybeOfferBulkEncryption() {
+        if (intent?.action == Intent.ACTION_VIEW || intent?.action == Intent.ACTION_SEND) return
+        val prefs = getSharedPreferences("notesprout_onboarding", MODE_PRIVATE)
+        if (prefs.getBoolean(KEY_CONVERSION_OFFERED, false)) return
+        lifecycleScope.launch {
+            val hasGlobal = withContext(Dispatchers.IO) {
+                com.notesprout.android.crypto.PassphraseStore.getGlobalPassphrase(this@MainActivity) != null
+            }
+            if (!hasGlobal) return@launch
+            // If a sweep is already mid-flight, the Encryption-settings Resume banner owns it.
+            if (com.notesprout.android.crypto.GlobalConversion.hasMarker(this@MainActivity)) return@launch
+            val plaintextIds = withContext(Dispatchers.IO) { repository.getPlaintextNotebookIds() }
+            prefs.edit().putBoolean(KEY_CONVERSION_OFFERED, true).apply()
+            if (plaintextIds.isEmpty()) return@launch
+
+            val count = plaintextIds.size
+            val dialog = AlertDialog.Builder(this@MainActivity)
+                .setTitle("Encrypt your notebooks?")
+                .setMessage(
+                    "You have $count unencrypted notebook${if (count == 1) "" else "s"}. " +
+                    "Encrypt ${if (count == 1) "it" else "them"} now with your global passphrase? " +
+                    "You can also do this later from Encryption settings."
+                )
+                .setPositiveButton("Encrypt Now") { _, _ -> runBulkConversion() }
+                .setNegativeButton("Later", null)
+                .create()
+            dialog.setOnShowListener {
+                dialog.window?.setElevation(0f)
+                dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+            }
+            dialog.show()
+        }
+    }
+
+    private fun runBulkConversion() {
+        lifecycleScope.launch {
+            val globalPass = withContext(Dispatchers.IO) {
+                com.notesprout.android.crypto.PassphraseStore.getGlobalPassphrase(this@MainActivity)
+            } ?: return@launch
+            val cancelSignal = java.util.concurrent.atomic.AtomicBoolean(false)
+
+            val tvMessage = android.widget.TextView(this@MainActivity).apply {
+                text = "Encrypting…"
+                setPadding(64, 48, 64, 48)
+                setTextColor(android.graphics.Color.BLACK)
+                textSize = 16f
+            }
+            val progress = AlertDialog.Builder(this@MainActivity)
+                .setView(tvMessage)
+                .setNegativeButton("Cancel") { _, _ -> cancelSignal.set(true) }
+                .setCancelable(false)
+                .create()
+            progress.show()
+            progress.window?.setElevation(0f)
+            progress.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+
+            val result = try {
+                com.notesprout.android.crypto.GlobalConversion.start(
+                    context = this@MainActivity,
+                    repository = repository,
+                    globalPassphrase = globalPass,
+                    onProgress = { done, total ->
+                        withContext(Dispatchers.Main) { tvMessage.text = "Encrypting $done / $total…" }
+                    },
+                    cancelSignal = cancelSignal,
+                )
+            } catch (e: Exception) {
+                com.notesprout.android.crypto.GlobalConversion.Result.Failed(e.message ?: "unknown error")
+            } finally {
+                progress.dismiss()
+            }
+
+            val msg = when (result) {
+                is com.notesprout.android.crypto.GlobalConversion.Result.Complete -> buildString {
+                    append("Encrypted ${result.converted} notebook${if (result.converted == 1) "" else "s"}.")
+                    if (result.skipped > 0) append(" ${result.skipped} couldn't be encrypted and were left as-is.")
+                }
+                is com.notesprout.android.crypto.GlobalConversion.Result.Cancelled ->
+                    "Paused. ${result.converted} encrypted, ${result.remaining} remaining. Resume from Encryption settings."
+                is com.notesprout.android.crypto.GlobalConversion.Result.Failed ->
+                    "Encryption failed: ${result.message}"
+            }
+            Toast.makeText(this@MainActivity, msg, Toast.LENGTH_LONG).show()
+            scanAndRender()
         }
     }
 
