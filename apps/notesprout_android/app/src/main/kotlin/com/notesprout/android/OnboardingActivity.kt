@@ -110,7 +110,10 @@ class OnboardingActivity : AppCompatActivity() {
 
             when (result) {
                 is GlobalRotation.Result.Complete -> {
-                    Toast.makeText(this@OnboardingActivity, "Passphrase set.", Toast.LENGTH_SHORT).show()
+                    val msg = if (result.quarantined > 0)
+                        "Passphrase set. ${result.quarantined} notebook${if (result.quarantined == 1) "" else "s"} kept their own passphrase."
+                    else "Passphrase set."
+                    Toast.makeText(this@OnboardingActivity, msg, Toast.LENGTH_LONG).show()
                     acknowledgeAndContinue()
                 }
                 is GlobalRotation.Result.Failed -> {

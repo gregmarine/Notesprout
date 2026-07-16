@@ -28,8 +28,8 @@ object GlobalRotation {
     private const val TAG = "GlobalRotation"
 
     sealed class Result {
-        data class Complete(val count: Int) : Result()
-        data class Cancelled(val rotated: Int, val remaining: Int) : Result()
+        data class Complete(val count: Int, val quarantined: Int = 0) : Result()
+        data class Cancelled(val rotated: Int, val remaining: Int, val quarantined: Int = 0) : Result()
         data class Failed(val message: String) : Result()
     }
 
@@ -64,7 +64,7 @@ object GlobalRotation {
             }
         }
 
-        rotate(context, ids.toMutableList(), oldPassphrase, newPassphrase, onProgress, cancelSignal, ids.size)
+        rotate(context, repository, ids.toMutableList(), oldPassphrase, newPassphrase, onProgress, cancelSignal, ids.size)
     }
 
     /**
@@ -79,6 +79,7 @@ object GlobalRotation {
      */
     suspend fun resume(
         context: Context,
+        repository: IndexRepository,
         onProgress: suspend (completed: Int, total: Int) -> Unit = { _, _ -> },
         cancelSignal: AtomicBoolean = AtomicBoolean(false),
     ): Result = withContext(Dispatchers.IO) {
@@ -87,7 +88,7 @@ object GlobalRotation {
         val oldPassphrase = PassphraseStore.getGlobalPassphrase(context)
             ?: return@withContext Result.Failed("no_cached_global")
         val pending = marker.pendingIds.toMutableList()
-        rotate(context, pending, oldPassphrase, marker.newPassphrase, onProgress, cancelSignal, pending.size)
+        rotate(context, repository, pending, oldPassphrase, marker.newPassphrase, onProgress, cancelSignal, pending.size)
     }
 
     /**
@@ -103,6 +104,7 @@ object GlobalRotation {
 
     private suspend fun rotate(
         context: Context,
+        repository: IndexRepository,
         pending: MutableList<String>,
         oldPassphrase: String,
         newPassphrase: String,
@@ -111,12 +113,13 @@ object GlobalRotation {
         total: Int,
     ): Result {
         var rotated = 0
+        var quarantined = 0
         val snapshot = pending.toList()
 
         for (id in snapshot) {
             if (cancelSignal.get()) {
                 PassphraseStore.updateRotationPending(context, pending)
-                return Result.Cancelled(rotated, pending.size)
+                return Result.Cancelled(rotated, pending.size, quarantined)
             }
 
             val file = soilFile(context, id)
@@ -154,6 +157,27 @@ object GlobalRotation {
             try {
                 SoilMigrator.rekeyInPlace(file, oldPassphrase, newPassphrase)
             } catch (e: Exception) {
+                // A rekey failure has two very different causes:
+                //  1. The file opens with the old key but the export/rename failed (IO, disk, mid-run
+                //     corruption). That's a genuine, retryable error — leave it pending and abort so
+                //     the user can resume.
+                //  2. The file opens with NEITHER the old nor the new global key. Its scope says GLOBAL
+                //     but it is actually keyed to some other secret (a foreign import copied in raw, a
+                //     half-finished earlier rotation, a restore from a device with a different global).
+                //     Such a notebook can never be part of the global set, and aborting here would stall
+                //     every future rotation on it forever. Quarantine it: downgrade its index scope to
+                //     NOTEBOOK (truthful — it has its own key, and it will prompt on open), drop it from
+                //     the pending set, and continue. rekeyInPlace leaves the original file untouched on
+                //     this failure, so nothing is lost.
+                if (!SoilCrypto.verifyPassphrase(file, oldPassphrase)) {
+                    repository.setEncryptionState(id, true, KeyScope.NOTEBOOK)
+                    File("${file.absolutePath}.rekey.tmp").delete()
+                    pending.remove(id)
+                    PassphraseStore.updateRotationPending(context, pending)
+                    quarantined++
+                    Slog.d(TAG) { "Notebook $id opens with neither global key — quarantined to NOTEBOOK scope." }
+                    continue
+                }
                 // Leave remaining pending so the user can resume.
                 PassphraseStore.updateRotationPending(context, pending)
                 Slog.d(TAG) { "rekeyInPlace failed for $id: ${e.message}" }
@@ -169,7 +193,7 @@ object GlobalRotation {
         // All notebooks done — re-key the index + training store, commit the new global, clear marker.
         return try {
             finishRotation(context, oldPassphrase, newPassphrase)
-            Result.Complete(rotated)
+            Result.Complete(rotated, quarantined)
         } catch (e: Exception) {
             // Notebooks are re-keyed; the marker stays so the index/training step can be resumed.
             Result.Failed(e.message ?: "Failed to finalize rotation.")

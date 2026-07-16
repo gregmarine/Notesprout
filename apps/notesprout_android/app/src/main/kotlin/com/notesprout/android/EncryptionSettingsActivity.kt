@@ -222,6 +222,7 @@ class EncryptionSettingsActivity : AppCompatActivity() {
         val result = try {
             val r = GlobalRotation.resume(
                 context = this@EncryptionSettingsActivity,
+                repository = repository,
                 onProgress = { done, total ->
                     withContext(Dispatchers.Main) {
                         progressDialog.setMessage("Re-keying $done / $total…")
@@ -243,14 +244,20 @@ class EncryptionSettingsActivity : AppCompatActivity() {
     private fun handleRotationResult(result: GlobalRotation.Result) {
         when (result) {
             is GlobalRotation.Result.Complete -> {
-                val msg = if (result.count == 0) "Global passphrase changed."
-                else "Global passphrase changed (${result.count} notebook${if (result.count == 1) "" else "s"} re-keyed)."
+                val msg = buildString {
+                    if (result.count == 0) append("Global passphrase changed.")
+                    else append("Global passphrase changed (${result.count} notebook${if (result.count == 1) "" else "s"} re-keyed).")
+                    if (result.quarantined > 0) {
+                        append(" ${result.quarantined} notebook${if (result.quarantined == 1) "" else "s"} couldn't be re-keyed and now need their own passphrase.")
+                    }
+                }
                 Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
             }
             is GlobalRotation.Result.Cancelled -> {
+                val extra = if (result.quarantined > 0) " ${result.quarantined} needed their own passphrase." else ""
                 Toast.makeText(
                     this,
-                    "Rotation paused. ${result.rotated} re-keyed, ${result.remaining} remaining. Tap Resume to continue.",
+                    "Rotation paused. ${result.rotated} re-keyed, ${result.remaining} remaining.$extra Tap Resume to continue.",
                     Toast.LENGTH_LONG
                 ).show()
             }
