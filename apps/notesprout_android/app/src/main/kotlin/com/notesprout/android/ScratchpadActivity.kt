@@ -641,6 +641,31 @@ class ScratchpadActivity : AppCompatActivity() {
             hideFloatingSelectionToolbar()
         }
 
+        drawingView.onStrokesMoved = { _, movedStrokes, _, movedHeadings, _, movedTextObjects, _, movedLineObjects, _, movedLinks, _, movedStickyNotes, _, movedShapes ->
+            val layerId = currentLayerId.takeIf { it.isNotEmpty() }
+            if (layerId != null) {
+                lifecycleScope.launch {
+                    val density = resources.displayMetrics.density
+                    repository.persistMovedObjects(
+                        layerId, movedStrokes, movedHeadings, movedTextObjects,
+                        movedLineObjects, movedLinks, movedStickyNotes, movedShapes, density,
+                    )
+                    val newBox = RectF()
+                    movedStrokes.forEach { newBox.union(it.boundingBox) }
+                    movedHeadings.forEach { newBox.union(it.boundingBox) }
+                    movedTextObjects.forEach { newBox.union(it.boundingBox) }
+                    movedLineObjects.forEach { newBox.union(it.boundingBox) }
+                    movedLinks.forEach { newBox.union(it.boundingBox) }
+                    movedStickyNotes.forEach { newBox.union(it.boundingBox) }
+                    movedShapes.forEach { newBox.union(it.boundingBox) }
+                    val pad = 8f * density
+                    newBox.inset(-pad, -pad)
+                    updateFloatingSelectionToolbar(newBox)
+                    pushHistory()
+                }
+            }
+        }
+
         drawingView.onSmartLassoComplete = { hitIds, unionBounds ->
             if (!isLassoMode) {
                 enterLassoMode()
