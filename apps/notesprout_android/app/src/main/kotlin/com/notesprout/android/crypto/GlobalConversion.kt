@@ -112,6 +112,7 @@ object GlobalConversion {
                         SoilFileKind.Plaintext -> {
                             SoilMigrator.encryptInPlace(file, globalPassphrase)
                             repository.setEncryptionState(id, encrypted = true, keyScope = KeyScope.GLOBAL)
+                            KeyOpener.warm(context, id, file, KeyScope.GLOBAL, globalPassphrase)
                             converted++
                         }
                         SoilFileKind.Encrypted -> {
@@ -120,6 +121,7 @@ object GlobalConversion {
                             // opens with the global passphrase; otherwise leave it and skip.
                             if (SoilCrypto.verifyPassphrase(file, globalPassphrase)) {
                                 repository.setEncryptionState(id, encrypted = true, keyScope = KeyScope.GLOBAL)
+                                KeyOpener.warm(context, id, file, KeyScope.GLOBAL, globalPassphrase)
                                 converted++
                                 Slog.d(TAG) { "Notebook $id already global-encrypted — index reconciled." }
                             } else {

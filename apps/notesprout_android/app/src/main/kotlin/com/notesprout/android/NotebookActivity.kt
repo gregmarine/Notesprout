@@ -2366,7 +2366,11 @@ class NotebookActivity : AppCompatActivity() {
                 }
                 sessionStartTime = System.currentTimeMillis()
                 val builder = SoilDatabase.builder(this@NotebookActivity, notebookPath)
-                if (key != null) builder.openHelperFactory(SoilCrypto.roomFactory(key))
+                if (key != null) builder.openHelperFactory(
+                    com.notesprout.android.crypto.KeyOpener.roomFactoryFor(
+                        this@NotebookActivity, nbId, java.io.File(notebookPath), info.keyScope, key
+                    )
+                )
                 soilDatabase = builder.build()
                 val db = soilDatabase!!
                 lifecycleScope.launch(Dispatchers.IO) {

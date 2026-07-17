@@ -383,6 +383,8 @@ class EncryptionSettingsActivity : AppCompatActivity() {
             withContext(Dispatchers.IO) {
                 PassphraseStore.clearGlobalPassphrase(this@EncryptionSettingsActivity)
                 KeySession.clear()
+                // Drop cached raw keys too, so re-opening prompts and re-derives from scratch.
+                com.notesprout.android.crypto.KeyMaterial.clearAll(this@EncryptionSettingsActivity)
             }
             refreshStatus()
             Toast.makeText(this@EncryptionSettingsActivity, "Global passphrase forgotten on this device.", Toast.LENGTH_SHORT).show()

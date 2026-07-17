@@ -1765,6 +1765,8 @@ class MainActivity : AppCompatActivity() {
                 withContext(Dispatchers.IO) {
                     repository.setEncryptionState(entity.id, encrypted = true, keyScope = scope)
                 }
+                // Derive + cache the raw key now so the notebook's first open is a fast raw-key open.
+                if (key != null) com.notesprout.android.crypto.KeyOpener.warm(this, entity.id, soilPath, scope, key)
             }
 
             Toast.makeText(this@MainActivity, "Notebook '$name' created", Toast.LENGTH_SHORT).show()
@@ -1971,6 +1973,7 @@ class MainActivity : AppCompatActivity() {
             val file = soilFile(this, entity.id)
             withContext(Dispatchers.IO) { SoilMigrator.encryptInPlace(file, key) }
             withContext(Dispatchers.IO) { repository.setEncryptionState(entity.id, encrypted = true, keyScope = scope) }
+            com.notesprout.android.crypto.KeyOpener.warm(this, entity.id, file, scope, key)
             dialog.dismiss()
             scanAndRender()
         } catch (e: Exception) {
@@ -2019,6 +2022,8 @@ class MainActivity : AppCompatActivity() {
             val file = soilFile(this, entity.id)
             withContext(Dispatchers.IO) { SoilMigrator.decryptInPlace(file, key) }
             withContext(Dispatchers.IO) { repository.setEncryptionState(entity.id, encrypted = false, keyScope = null) }
+            // Now plaintext — no raw key applies anymore.
+            com.notesprout.android.crypto.KeyMaterial.invalidate(this, entity.id)
             dialog.dismiss()
             scanAndRender()
         } catch (e: Exception) {
@@ -2070,6 +2075,8 @@ class MainActivity : AppCompatActivity() {
         try {
             val file = soilFile(this, entity.id)
             withContext(Dispatchers.IO) { SoilMigrator.rekeyInPlace(file, oldKey, newKey) }
+            // Salt changed on re-key — the old cached raw key is stale.
+            com.notesprout.android.crypto.KeyMaterial.invalidate(this, entity.id)
             // Invalidate any in-process session so the old key isn't reused.
             if (KeySession.entry?.notebookId == entity.id) KeySession.clear()
             dialog.dismiss()
@@ -2130,6 +2137,9 @@ class MainActivity : AppCompatActivity() {
             val file = soilFile(this, entity.id)
             withContext(Dispatchers.IO) { SoilMigrator.rekeyInPlace(file, oldKey, newKey) }
             withContext(Dispatchers.IO) { repository.setEncryptionState(entity.id, encrypted = true, keyScope = newScope) }
+            // Salt changed on re-key — drop the stale cached key, then warm the new one for GLOBAL.
+            com.notesprout.android.crypto.KeyMaterial.invalidate(this, entity.id)
+            com.notesprout.android.crypto.KeyOpener.warm(this, entity.id, file, newScope, newKey)
             if (KeySession.entry?.notebookId == entity.id) KeySession.clear()
             dialog.dismiss()
             scanAndRender()
@@ -2630,6 +2640,8 @@ class MainActivity : AppCompatActivity() {
             withContext(Dispatchers.IO) {
                 repository.scrubNotebookFromAllLists(entity.id)
                 repository.softDeleteNotebook(entity.id)
+                // Drop any cached raw key for this notebook (RAM + Keystore).
+                com.notesprout.android.crypto.KeyMaterial.invalidate(this@MainActivity, entity.id)
                 val file = soilFile(this@MainActivity, entity.id)
                 // Delete .soil and any sibling artefacts (-wal, -shm, -journal).
                 file.parentFile?.listFiles { f -> f.name.startsWith(file.name) }

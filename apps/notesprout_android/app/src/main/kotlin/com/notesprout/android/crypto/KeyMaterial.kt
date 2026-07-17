@@ -47,6 +47,16 @@ object KeyMaterial {
     /** Cached raw key for [fileId] if already resolved this session (RAM), else null — no derivation. */
     fun peek(fileId: String): ByteArray? = ram[fileId]
 
+    /**
+     * Raw key for a GLOBAL-scope [fileId] from RAM or the Keystore — **never derives**. Null when the
+     * key has not been derived yet on this device. Populates RAM on a Keystore hit so later lookups are
+     * free. Use on the open path to decide raw-key-vs-passphrase without paying the KDF.
+     */
+    fun peekOrLoad(context: Context, fileId: String): ByteArray? {
+        ram[fileId]?.let { return it }
+        return DerivedKeyStore.get(context, fileId)?.also { ram[fileId] = it }
+    }
+
     /** Drop a single file's key from RAM and (if present) the Keystore — on delete or before re-key. */
     fun invalidate(context: Context, fileId: String) {
         ram.remove(fileId)

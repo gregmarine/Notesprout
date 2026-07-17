@@ -210,6 +210,9 @@ object GlobalRotation {
      * commit, the index still opens via its refreshed raw-key cache, and a resume finishes cleanly.
      */
     private suspend fun finishRotation(context: Context, oldPassphrase: String, newPassphrase: String) {
+        // Every GLOBAL notebook (and the index + training) was just re-keyed, so all salts — and thus
+        // every cached raw key — are stale. Drop them all; they re-derive lazily on next open.
+        KeyMaterial.clearAll(context)
         NotesproutIndex.rekey(context, oldPassphrase, newPassphrase)
         HwrTrainingDatabase.rekey(context, oldPassphrase, newPassphrase)
         PassphraseStore.setGlobalPassphrase(context, newPassphrase)

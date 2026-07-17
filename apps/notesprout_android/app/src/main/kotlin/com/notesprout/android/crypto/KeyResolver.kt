@@ -126,6 +126,10 @@ object KeyResolver {
     private suspend fun resolveGlobalForOpen(activity: Activity, notebookId: String): String? {
         val cached = withContext(Dispatchers.IO) { PassphraseStore.getGlobalPassphrase(activity) }
         if (cached != null) {
+            // Fast path: if this notebook's raw key is already cached (RAM/Keystore), the cached global
+            // is known-good for it — skip the ~300 ms KDF verify. The cache is invalidated on
+            // rotation/delete/forget, so a present key always matches the current file.
+            if (withContext(Dispatchers.IO) { KeyMaterial.peekOrLoad(activity, notebookId) } != null) return cached
             val file = soilFile(activity, notebookId)
             val valid = withContext(Dispatchers.IO) { SoilCrypto.verifyPassphrase(file, cached) }
             if (valid) return cached
