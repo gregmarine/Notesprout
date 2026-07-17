@@ -285,6 +285,44 @@
                 android:textColor="@color/inkLight"
                 android:gravity="center" />
 
+            <!-- Divider -->
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:layout_marginTop="24dp"
+                android:background="@color/inkBlack" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="24dp"
+                android:text="Restore"
+                android:textSize="18sp"
+                android:textStyle="bold"
+                android:textColor="@color/inkBlack" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:text="Replace this device's library with a backup. You'll need that backup's recovery key to unlock it."
+                android:textSize="14sp"
+                android:textColor="@color/inkLight" />
+
+            <androidx.appcompat.widget.AppCompatButton
+                android:id="@+id/btnRestore"
+                android:layout_width="match_parent"
+                android:layout_height="56dp"
+                android:layout_marginTop="16dp"
+                android:text="Restore from Backup…"
+                android:textSize="16sp"
+                android:textColor="@color/inkBlack"
+                android:textAllCaps="false"
+                android:background="@drawable/shape_bordered"
+                android:stateListAnimator="@null"
+                android:minWidth="0dp"
+                android:minHeight="0dp" />
+
         </LinearLayout>
 
     </ScrollView>

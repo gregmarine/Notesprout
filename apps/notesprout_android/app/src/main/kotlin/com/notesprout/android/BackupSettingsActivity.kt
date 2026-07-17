@@ -15,7 +15,14 @@ import com.notesprout.android.data.backup.BackupConfig
 import com.notesprout.android.data.backup.BackupEngine
 import com.notesprout.android.data.backup.BackupKind
 import com.notesprout.android.data.backup.DeviceIdentity
+import com.notesprout.android.data.backup.DriveApiClient
+import com.notesprout.android.data.backup.DriveAuth
+import com.notesprout.android.data.backup.DriveRestoreSource
 import com.notesprout.android.data.backup.DriveTokenStore
+import com.notesprout.android.data.backup.RestoreDevice
+import com.notesprout.android.data.backup.RestoreEngine
+import com.notesprout.android.data.backup.RestoreSource
+import com.notesprout.android.data.backup.SafRestoreSource
 import com.notesprout.android.data.index.IndexRepository
 import com.notesprout.android.data.index.NotesproutIndex
 import com.notesprout.android.databinding.ActivityBackupSettingsBinding
@@ -47,6 +54,12 @@ class BackupSettingsActivity : AppCompatActivity() {
         }
     }
 
+    private val pickRestoreTreeLauncher = registerForActivityResult(
+        ActivityResultContracts.OpenDocumentTree()
+    ) { uri ->
+        if (uri != null) restoreFromSaf(uri)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityBackupSettingsBinding.inflate(layoutInflater)
@@ -67,6 +80,7 @@ class BackupSettingsActivity : AppCompatActivity() {
         }
 
         binding.btnBackUpNow.setOnClickListener { startBackup() }
+        binding.btnRestore.setOnClickListener { startRestore() }
     }
 
     override fun onResume() {
@@ -259,6 +273,132 @@ class BackupSettingsActivity : AppCompatActivity() {
 
             refreshUi()
         }
+    }
+
+    // ── Restore ────────────────────────────────────────────────────────────────
+
+    private fun startRestore() {
+        AlertDialog.Builder(this)
+            .setTitle("Restore from Backup")
+            .setItems(arrayOf("Local folder", "Google Drive")) { _, which ->
+                when (which) {
+                    0 -> pickRestoreTreeLauncher.launch(null)
+                    1 -> restoreFromDrive()
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .create().also { styleAndShow(it) }
+    }
+
+    private fun restoreFromSaf(uri: Uri) {
+        runCatching {
+            contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        continueRestore(SafRestoreSource(this, uri), "local folder")
+    }
+
+    private fun restoreFromDrive() {
+        lifecycleScope.launch {
+            val tr = withContext(Dispatchers.IO) { DriveAuth.getAccessTokenSilent(this@BackupSettingsActivity) }
+            when (tr) {
+                is DriveAuth.TokenResult.Token ->
+                    continueRestore(DriveRestoreSource(DriveApiClient(tr.accessToken)), "Google Drive")
+                is DriveAuth.TokenResult.Error ->
+                    Toast.makeText(this@BackupSettingsActivity, "Drive not connected: ${tr.message}", Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
+    private fun continueRestore(source: RestoreSource, label: String) {
+        lifecycleScope.launch {
+            val progress = simpleProgress("Scanning $label…")
+            val devices = try {
+                withContext(Dispatchers.IO) { source.listDevices() }
+            } catch (e: Exception) {
+                emptyList()
+            } finally {
+                progress.dismiss()
+            }
+            if (devices.isEmpty()) {
+                Toast.makeText(this@BackupSettingsActivity, "No backups found in $label.", Toast.LENGTH_LONG).show()
+                return@launch
+            }
+            val names = devices.map {
+                "${it.name} (${it.notebookCount} notebook${if (it.notebookCount == 1) "" else "s"})"
+            }.toTypedArray()
+            AlertDialog.Builder(this@BackupSettingsActivity)
+                .setTitle("Choose a Backup")
+                .setItems(names) { _, which -> confirmRestore(source, which, devices[which]) }
+                .setNegativeButton("Cancel", null)
+                .create().also { styleAndShow(it) }
+        }
+    }
+
+    private fun confirmRestore(source: RestoreSource, index: Int, device: RestoreDevice) {
+        AlertDialog.Builder(this)
+            .setTitle("Replace your library?")
+            .setMessage(
+                "Restore \"${device.name}\" (${device.notebookCount} notebook" +
+                "${if (device.notebookCount == 1) "" else "s"})?\n\n" +
+                "This REPLACES the entire library on this device — everything currently here is removed. " +
+                "You'll need that backup's recovery key to unlock it. This can't be undone."
+            )
+            .setPositiveButton("Restore") { _, _ -> runRestore(source, index) }
+            .setNegativeButton("Cancel", null)
+            .create().also { styleAndShow(it) }
+    }
+
+    private fun runRestore(source: RestoreSource, index: Int) {
+        val tv = android.widget.TextView(this).apply {
+            text = "Preparing…"; setPadding(64, 48, 64, 48)
+            setTextColor(android.graphics.Color.BLACK); textSize = 16f
+        }
+        val progress = AlertDialog.Builder(this)
+            .setTitle("Restoring").setView(tv).setCancelable(false)
+            .create().also { styleAndShow(it) }
+        lifecycleScope.launch {
+            val result = try {
+                RestoreEngine.restore(this@BackupSettingsActivity, source, index) { done, total ->
+                    withContext(Dispatchers.Main) { tv.text = "Restoring $done / $total…" }
+                }
+            } finally {
+                progress.dismiss()
+            }
+            when (result) {
+                is RestoreEngine.Result.Success -> {
+                    AlertDialog.Builder(this@BackupSettingsActivity)
+                        .setTitle("Restore Complete")
+                        .setMessage("Restored ${result.notebookCount} notebook${if (result.notebookCount == 1) "" else "s"}. The app will restart so you can unlock your library.")
+                        .setCancelable(false)
+                        .setPositiveButton("Restart") { _, _ -> restartApp() }
+                        .create().also { styleAndShow(it) }
+                }
+                is RestoreEngine.Result.Failed ->
+                    Toast.makeText(this@BackupSettingsActivity, "Restore failed: ${result.message}", Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
+    private fun restartApp() {
+        val i = packageManager.getLaunchIntentForPackage(packageName)
+            ?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+        if (i != null) startActivity(i)
+        Runtime.getRuntime().exit(0)
+    }
+
+    private fun simpleProgress(msg: String): AlertDialog {
+        val tv = android.widget.TextView(this).apply {
+            text = msg; setPadding(64, 48, 64, 48)
+            setTextColor(android.graphics.Color.BLACK); textSize = 16f
+        }
+        return AlertDialog.Builder(this).setView(tv).setCancelable(false)
+            .create().also { styleAndShow(it) }
+    }
+
+    private fun styleAndShow(d: AlertDialog) {
+        d.show()
+        d.window?.setElevation(0f)
+        d.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
     }
 
     private fun saveDeviceName() {

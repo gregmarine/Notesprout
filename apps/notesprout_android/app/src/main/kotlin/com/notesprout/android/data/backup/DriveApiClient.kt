@@ -11,7 +11,13 @@ import java.net.URLEncoder
 private const val TAG = "DriveApiClient"
 
 @Serializable private data class DriveFile(val id: String, val name: String? = null)
-@Serializable private data class DriveFileList(val files: List<DriveFile> = emptyList())
+@Serializable private data class DriveFileList(
+    val files: List<DriveFile> = emptyList(),
+    val nextPageToken: String? = null,
+)
+
+/** A Drive folder/file child: stable id + display name. */
+data class DriveEntry(val id: String, val name: String)
 @Serializable private data class CreateFolderBody(
     val name: String, val mimeType: String, val parents: List<String>,
 )
@@ -66,6 +72,48 @@ class DriveApiClient(private val accessToken: String) {
     /** Finds or creates a folder named [name] inside [parentId]. Returns the folder ID or null. */
     fun ensureFolder(name: String, parentId: String): String? =
         findChild(name, parentId, foldersOnly = true) ?: createFolder(name, parentId)
+
+    /**
+     * Lists every non-trashed child of [parentId] (folders only when [foldersOnly]). Pages through
+     * the full result set. Returns an empty list on any failure — callers treat that as "nothing to
+     * restore" rather than an error.
+     */
+    fun listChildren(parentId: String, foldersOnly: Boolean): List<DriveEntry> = try {
+        val out = mutableListOf<DriveEntry>()
+        var pageToken: String? = null
+        var q = "'$parentId' in parents and trashed = false"
+        if (foldersOnly) q += " and mimeType = '$FOLDER_MIME'"
+        do {
+            var url = "$FILES?q=${URLEncoder.encode(q, "UTF-8")}&spaces=drive" +
+                "&fields=nextPageToken,files(id,name)&pageSize=1000"
+            if (pageToken != null) url += "&pageToken=${URLEncoder.encode(pageToken, "UTF-8")}"
+            val conn = open("GET", url)
+            val body = readBody(conn)
+            if (conn.responseCode != 200) { Log.e(TAG, "listChildren HTTP ${conn.responseCode}"); break }
+            val page = codec.decodeFromString(DriveFileList.serializer(), body)
+            page.files.forEach { f -> f.name?.let { out.add(DriveEntry(f.id, it)) } }
+            pageToken = page.nextPageToken
+        } while (pageToken != null)
+        out
+    } catch (e: Exception) {
+        Log.e(TAG, "listChildren failed: ${e.message}")
+        emptyList()
+    }
+
+    /** Downloads the content of [fileId] to [dest]. Returns true on success. */
+    fun downloadTo(fileId: String, dest: File): Boolean = try {
+        val conn = open("GET", "$FILES/$fileId?alt=media")
+        if (conn.responseCode == 200) {
+            conn.inputStream.use { inp -> dest.outputStream().use { out -> inp.copyTo(out) } }
+            true
+        } else {
+            Log.e(TAG, "downloadTo HTTP ${conn.responseCode}")
+            false
+        }
+    } catch (e: Exception) {
+        Log.e(TAG, "downloadTo failed: ${e.message}")
+        false
+    }
 
     private fun createFolder(name: String, parentId: String): String? = try {
         val body = codec.encodeToString(CreateFolderBody.serializer(),
