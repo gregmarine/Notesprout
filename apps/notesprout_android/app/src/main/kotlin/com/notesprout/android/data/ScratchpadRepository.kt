@@ -8,6 +8,7 @@ import com.notesprout.android.data.index.ScratchpadDao
 import com.notesprout.android.data.index.ScratchpadEntity
 import com.notesprout.android.data.index.toNotebookObject
 import com.notesprout.android.data.index.toScratchpadEntity
+import com.notesprout.android.data.index.updateColumns
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.util.UUID
@@ -155,6 +156,36 @@ class ScratchpadRepository(
             content.links.forEach { dao.insertOrIgnore(it.toRow(layerId, 0, now, now, density).toScratchpadEntity()) }
             content.stickyNotes.forEach { dao.insertOrIgnore(it.toRow(layerId, 0, now, now, density).toScratchpadEntity()) }
             content.shapeObjects.forEach { dao.insertOrIgnore(it.toRow(layerId, 0, now, now, density).toScratchpadEntity()) }
+        }
+    }
+
+    // ── Persist a lasso move (columnar in-place update) ─────────────────────────
+
+    /**
+     * Persist the new positions of objects moved by a lasso drag. Uses the columnar in-place update
+     * (strokes via their blob, everything else via [updateColumns]) so the move survives a page flip
+     * or reopen — the JSON-only `updateObjectData` path silently no-ops for columnar rows.
+     */
+    suspend fun persistMovedObjects(
+        layerId: String,
+        strokes: List<LiveStroke>,
+        headings: List<HeadingStroke>,
+        textObjects: List<TextRender>,
+        lineObjects: List<LineRender>,
+        links: List<LinkRender>,
+        stickyNotes: List<StickyNoteRender>,
+        shapeObjects: List<ShapeRender>,
+        density: Float,
+    ) = withContext(Dispatchers.IO) {
+        val now = System.currentTimeMillis()
+        db.withTransaction {
+            strokes.forEach { dao.convertStrokeToBlobKeepingTimestamp(it.id, it.strokeBlob(), it.color, it.strokeWidth) }
+            headings.forEach { dao.updateColumns(it.toRow(layerId, 0, now, now)) }
+            textObjects.forEach { dao.updateColumns(it.toRow(layerId, 0, now, now)) }
+            lineObjects.forEach { dao.updateColumns(it.toRow(layerId, 0, now, now, density)) }
+            links.forEach { dao.updateColumns(it.toRow(layerId, 0, now, now, density)) }
+            stickyNotes.forEach { dao.updateColumns(it.toRow(layerId, 0, now, now, density)) }
+            shapeObjects.forEach { dao.updateColumns(it.toRow(layerId, 0, now, now, density)) }
         }
     }
 

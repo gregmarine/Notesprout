@@ -841,20 +841,10 @@ class CalendarActivity : AppCompatActivity() {
 
         drawingView.onStrokesMoved = { _, movedStrokes, _, movedHeadings, _, movedTextObjects, _, movedLineObjects, _, movedLinks, _, movedStickyNotes, _, movedShapes ->
             lifecycleScope.launch {
-                val now = System.currentTimeMillis()
-                val dao = NotesproutIndex.calendarDao()
-                withContext(Dispatchers.IO) {
-                    for (s in movedStrokes) {
-                        val bbox = s.boundingBox
-                        dao.updateObjectData(s.id, BoundingBox(bbox.left, bbox.top, bbox.width(), bbox.height()).toJson(), s.toStrokeData().toJson(), now)
-                    }
-                    for (h in movedHeadings) dao.updateObjectData(h.id, h.boundingBox.toBoundingBoxJson(), HeadingObject(h.strokes, h.recognizedText, h.level).toJson(), now)
-                    for (t in movedTextObjects) dao.updateObjectData(t.id, t.boundingBox.toBoundingBoxJson(), TextObject(text = t.text, strokes = t.strokes).toJson(), now)
-                    for (l in movedLineObjects) dao.updateObjectData(l.id, l.boundingBox.toBoundingBoxJson(), LineObject(l.style, l.orientation, l.strokeWidthDp, l.dotSpacingPx / density).toJson(), now)
-                    for (lk in movedLinks) dao.updateObjectData(lk.id, lk.boundingBox.toBoundingBoxJson(), lk.toLinkObject(density).toJson(), now)
-                    for (n in movedStickyNotes) dao.updateObjectData(n.id, n.boundingBox.toBoundingBoxJson(), n.toStickyNoteObject(density).toJson(), now)
-                    for (sh in movedShapes) dao.updateObjectData(sh.id, sh.boundingBox.toBoundingBoxJson(), sh.toShapeObject(density).toJson(), now)
-                }
+                repository.persistMovedObjects(
+                    currentLayerId, movedStrokes, movedHeadings, movedTextObjects,
+                    movedLineObjects, movedLinks, movedStickyNotes, movedShapes, density,
+                )
                 val newBox = RectF()
                 movedStrokes.forEach { newBox.union(it.boundingBox) }
                 movedHeadings.forEach { newBox.union(it.boundingBox) }

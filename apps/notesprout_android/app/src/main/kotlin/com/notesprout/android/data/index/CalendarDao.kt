@@ -118,4 +118,26 @@ interface CalendarDao {
 
     @Query("UPDATE calendar SET boundingBox = :boundingBox, data = :data, updatedAt = :updatedAt WHERE id = :id")
     suspend fun updateObjectData(id: String, boundingBox: String, data: String, updatedAt: Long)
+
+    /**
+     * In-place columnar update for a moved/edited object (mirrors the notebook's updateObjectColumns).
+     * Writes the payload columns + clears the legacy boundingBox/data JSON, so the columnar loader —
+     * which reads typed columns first — sees the new position. Structural columns (parentId/order/
+     * createdAt) are left untouched.
+     */
+    @Query(
+        "UPDATE calendar SET boundingBox = '', data = '', x = :x, y = :y, width = :width, " +
+        "height = :height, text = :text, color = :color, strokeWidth = :strokeWidth, refId = :refId, " +
+        "level = :level, lineStyle = :lineStyle, orientation = :orientation, dotSpacing = :dotSpacing, " +
+        "shapeType = :shapeType, centerX = :centerX, centerY = :centerY, rotationDeg = :rotationDeg, " +
+        "pointCount = :pointCount, contentW = :contentW, contentH = :contentH, linkTarget = :linkTarget, " +
+        "chrome = :chrome, flags = :flags, blob = :blob, updatedAt = :updatedAt WHERE id = :id"
+    )
+    suspend fun updateObjectColumns(
+        id: String, x: Float?, y: Float?, width: Float?, height: Float?, text: String?, color: String?,
+        strokeWidth: Float?, refId: String?, level: Int?, lineStyle: String?, orientation: String?,
+        dotSpacing: Float?, shapeType: String?, centerX: Float?, centerY: Float?, rotationDeg: Float?,
+        pointCount: Int?, contentW: Float?, contentH: Float?, linkTarget: String?, chrome: String?,
+        flags: Int?, blob: ByteArray?, updatedAt: Long,
+    )
 }

@@ -54,3 +54,22 @@ fun NotebookObject.toScratchpadEntity(): ScratchpadEntity = ScratchpadEntity(
     centerY = centerY, rotationDeg = rotationDeg, pointCount = pointCount, contentW = contentW,
     contentH = contentH, linkTarget = linkTarget, chrome = chrome, flags = flags, blob = blob,
 )
+
+/**
+ * In-place columnar update from a `toRow()`-built [row] — the calendar/scratchpad analogue of
+ * [com.notesprout.android.data.updateColumns] for the notebook. Persists a moved/edited object's
+ * payload columns by id; structural columns (parentId/order/createdAt) are left untouched.
+ */
+suspend fun CalendarDao.updateColumns(row: NotebookObject) = updateObjectColumns(
+    row.id, row.x, row.y, row.width, row.height, row.text, row.color, row.strokeWidth, row.refId,
+    row.level, row.lineStyle, row.orientation, row.dotSpacing, row.shapeType, row.centerX, row.centerY,
+    row.rotationDeg, row.pointCount, row.contentW, row.contentH, row.linkTarget, row.chrome, row.flags,
+    row.blob, row.updatedAt,
+)
+
+suspend fun ScratchpadDao.updateColumns(row: NotebookObject) = updateObjectColumns(
+    row.id, row.x, row.y, row.width, row.height, row.text, row.color, row.strokeWidth, row.refId,
+    row.level, row.lineStyle, row.orientation, row.dotSpacing, row.shapeType, row.centerX, row.centerY,
+    row.rotationDeg, row.pointCount, row.contentW, row.contentH, row.linkTarget, row.chrome, row.flags,
+    row.blob, row.updatedAt,
+)
