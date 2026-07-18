@@ -4706,7 +4706,16 @@ class NotebookActivity : AppCompatActivity() {
                 return@launch
             }
             dialog.dismiss()
-            showSoilExportChoice(soilFile)
+            SoilExportKeying.chooseAndApply(
+                activity     = this@NotebookActivity,
+                scope        = lifecycleScope,
+                packaged     = soilFile,
+                info         = encryptionInfo,
+                notebookName = notebookDisplayName,
+                // The notebook is open and unlocked — its current key is already in hand.
+                resolveCurrentKey = { soilKey },
+                onReady = { showSoilExportChoice(it) },
+            )
         }
     }
 

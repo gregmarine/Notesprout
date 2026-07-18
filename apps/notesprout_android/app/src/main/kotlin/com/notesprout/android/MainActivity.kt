@@ -2063,7 +2063,14 @@ class MainActivity : AppCompatActivity() {
 
     private suspend fun changeScope(entity: ObjectEntity, encInfo: EncryptionInfo) {
         val currentScope = encInfo.keyScope ?: return
-        val oldKey = KeyResolver.resolveCurrentKeyForRekey(this, entity.id, encInfo) ?: return
+        // GLOBAL is already cached in memory, so switching a global notebook to a private passphrase
+        // doesn't need the global re-entered — mirrors the export flow. Only a NOTEBOOK-scope source
+        // has an uncached passphrase worth prompting for.
+        val oldKey = if (currentScope == KeyScope.GLOBAL)
+            PassphraseStore.getGlobalPassphrase(this)
+        else
+            KeyResolver.resolveCurrentKeyForRekey(this, entity.id, encInfo)
+        if (oldKey == null) return
         val newScope = when (currentScope) {
             KeyScope.NOTEBOOK -> KeyScope.GLOBAL
             KeyScope.GLOBAL   -> KeyScope.NOTEBOOK
@@ -2833,7 +2840,20 @@ class MainActivity : AppCompatActivity() {
                 return@launch
             }
             dialog.dismiss()
-            showSoilExportChoice(soilFile)
+            SoilExportKeying.chooseAndApply(
+                activity     = this@MainActivity,
+                scope        = lifecycleScope,
+                packaged     = soilFile,
+                info         = info,
+                notebookName = entity.name,
+                resolveCurrentKey = {
+                    if (info.keyScope == KeyScope.GLOBAL)
+                        PassphraseStore.getGlobalPassphrase(this@MainActivity)
+                    else
+                        KeyResolver.resolveForDecrypt(this@MainActivity, entity.id, info)
+                },
+                onReady = { showSoilExportChoice(it) },
+            )
         }
     }
 
