@@ -822,9 +822,7 @@ class MainActivity : AppCompatActivity() {
                 AppSurface.CALENDAR -> {
                     calendarBelow = from
                     if (from == null) Intent(this, CalendarActivity::class.java)
-                    else CalendarActivity.intentFromNotebook(
-                        this, from.id, from.name, from.notebookMeta().encrypted,
-                    )
+                    else CalendarActivity.intentFromNotebook(this, from.id, from.name)
                 }
                 AppSurface.DAY_WINDOW -> entry.dayDate
                     ?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
@@ -834,7 +832,6 @@ class MainActivity : AppCompatActivity() {
                             this, date,
                             fromNotebookId        = source?.id,
                             fromNotebookName      = source?.name,
-                            fromNotebookEncrypted = source?.notebookMeta()?.encrypted ?: false,
                             view = entry.dayView,
                         )
                     }
@@ -842,7 +839,6 @@ class MainActivity : AppCompatActivity() {
                     if (from != null) {
                         putExtra(ScratchpadActivity.EXTRA_FROM_NOTEBOOK_ID,        from.id)
                         putExtra(ScratchpadActivity.EXTRA_FROM_NOTEBOOK_NAME,      from.name)
-                        putExtra(ScratchpadActivity.EXTRA_FROM_NOTEBOOK_ENCRYPTED, from.notebookMeta().encrypted)
                     }
                 }
             }

@@ -114,19 +114,17 @@ class DayDetailActivity : AppCompatActivity() {
         const val EXTRA_DATE                    = "day_detail_date"
         const val EXTRA_FROM_NOTEBOOK_ID        = "from_notebook_id"
         const val EXTRA_FROM_NOTEBOOK_NAME      = "from_notebook_name"
-        const val EXTRA_FROM_NOTEBOOK_ENCRYPTED = "from_notebook_encrypted"
         /** A [ViewMode] name. Only the launch-restore path passes it — a normal open lands on Events. */
         const val EXTRA_VIEW                    = "day_detail_view"
 
         fun intent(
             context: Context, date: LocalDate,
-            fromNotebookId: String?, fromNotebookName: String?, fromNotebookEncrypted: Boolean,
+            fromNotebookId: String?, fromNotebookName: String?,
             view: String? = null,
         ): Intent = Intent(context, DayDetailActivity::class.java)
             .putExtra(EXTRA_DATE, date.toString())
             .putExtra(EXTRA_FROM_NOTEBOOK_ID, fromNotebookId)
             .putExtra(EXTRA_FROM_NOTEBOOK_NAME, fromNotebookName)
-            .putExtra(EXTRA_FROM_NOTEBOOK_ENCRYPTED, fromNotebookEncrypted)
             .putExtra(EXTRA_VIEW, view)
     }
 
@@ -208,7 +206,6 @@ class DayDetailActivity : AppCompatActivity() {
     // Source notebook (non-null only when the calendar was launched from a notebook)
     private var fromNotebookId: String? = null
     private var fromNotebookName: String? = null
-    private var fromNotebookEncrypted = false
 
     // Undo/redo — full-layer snapshot history (single page)
     private var currentSnapshot: List<CalendarEntity> = emptyList()
@@ -324,7 +321,6 @@ class DayDetailActivity : AppCompatActivity() {
 
         fromNotebookId        = intent.getStringExtra(EXTRA_FROM_NOTEBOOK_ID)
         fromNotebookName      = intent.getStringExtra(EXTRA_FROM_NOTEBOOK_NAME)
-        fromNotebookEncrypted = intent.getBooleanExtra(EXTRA_FROM_NOTEBOOK_ENCRYPTED, false)
         selectedDate = runCatching { LocalDate.parse(intent.getStringExtra(EXTRA_DATE) ?: "") }
             .getOrDefault(LocalDate.now())
         // Absent on a normal open, so the day window still lands on Events; set only when a cold

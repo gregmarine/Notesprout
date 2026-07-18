@@ -1290,7 +1290,7 @@ class NotebookActivity : AppCompatActivity() {
 
         binding.btnCalendar.setOnClickListener {
             calendarLauncher.launch(
-                CalendarActivity.intentFromNotebook(this, notebookId, notebookDisplayName, encryptionInfo.encrypted)
+                CalendarActivity.intentFromNotebook(this, notebookId, notebookDisplayName)
             )
         }
 
@@ -1298,7 +1298,6 @@ class NotebookActivity : AppCompatActivity() {
             val intent = Intent(this, ScratchpadActivity::class.java).apply {
                 putExtra(ScratchpadActivity.EXTRA_FROM_NOTEBOOK_ID,        notebookId)
                 putExtra(ScratchpadActivity.EXTRA_FROM_NOTEBOOK_NAME,      notebookDisplayName)
-                putExtra(ScratchpadActivity.EXTRA_FROM_NOTEBOOK_ENCRYPTED, encryptionInfo.encrypted)
             }
             scratchpadLauncher.launch(intent)
         }
@@ -5278,11 +5277,9 @@ class NotebookActivity : AppCompatActivity() {
             shapeObjects = shapeObjects.map { it.copy(boundingBox = RectF(it.boundingBox)) },
         )
         lifecycleScope.launch {
-            val encInfo = withContext(Dispatchers.IO) { indexRepo.getEncryptionInfo(notebookId) }
-            if (encInfo.encrypted && !awaitEncryptionClipboardConfirm()) return@launch
             NotesproutClipboard.content = clip
             updateLassoButtonIcon()
-            withContext(Dispatchers.IO) { indexRepo.saveClipboard(clip.toPayload(notebookId, encInfo.encrypted)) }
+            withContext(Dispatchers.IO) { indexRepo.saveClipboard(clip.toPayload(notebookId)) }
             // Deselect immediately so the user can paste without tapping off first.
             // Lasso mode stays active (isSmartLassoSession is preserved) so they can paste
             // on this page or navigate to another page and paste there.
@@ -5703,11 +5700,9 @@ class NotebookActivity : AppCompatActivity() {
         val shapeIds       = selectedShapes.map { it.id }
 
         lifecycleScope.launch {
-            val encInfo = withContext(Dispatchers.IO) { indexRepo.getEncryptionInfo(notebookId) }
-            if (encInfo.encrypted && !awaitEncryptionClipboardConfirm()) return@launch
             NotesproutClipboard.content = clip
             withContext(Dispatchers.IO) {
-            indexRepo.saveClipboard(clip.toPayload(notebookId, encInfo.encrypted))
+            indexRepo.saveClipboard(clip.toPayload(notebookId))
             val deletedAt = System.currentTimeMillis()
             (strokeIds + headingIds + textIds + lineIds + linkIds + stickyNoteIds + shapeIds).forEach { id ->
                 soilDatabase?.notebookDao()?.softDeleteById(id, deletedAt)
@@ -5774,25 +5769,6 @@ class NotebookActivity : AppCompatActivity() {
         }
     }
 
-    /** Shows the "encrypted source → unencrypted clipboard" warning. Returns true to proceed, false to cancel. */
-    private suspend fun awaitEncryptionClipboardConfirm(): Boolean =
-        suspendCancellableCoroutine { cont ->
-            AlertDialog.Builder(this)
-                .setMessage(
-                    "This notebook is encrypted. Copying these objects places their contents " +
-                    "in the app clipboard, which is stored unencrypted on this device. Continue?"
-                )
-                .setPositiveButton("Continue") { _, _ -> if (cont.isActive) cont.resume(true) }
-                .setNegativeButton("Cancel") { _, _ -> if (cont.isActive) cont.resume(false) }
-                .setOnCancelListener { if (cont.isActive) cont.resume(false) }
-                .create()
-                .also { d ->
-                    d.show()
-                    d.window?.setElevation(0f)
-                    d.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
-                }
-        }
-
     /** Clears both the in-memory clipboard and the persisted row in notesprout.db. */
     private fun clearClipboard() {
         NotesproutClipboard.clear()
@@ -5822,10 +5798,7 @@ class NotebookActivity : AppCompatActivity() {
         stickyNotes.forEach { box.union(it.boundingBox) }
         shapeObjects.forEach { box.union(it.boundingBox) }
 
-        // Encryption guard: scratch pad is plaintext, same warning as clipboard copy.
-        val encInfo = withContext(Dispatchers.IO) { indexRepo.getEncryptionInfo(notebookId) }
-        if (encInfo.encrypted && !awaitEncryptionClipboardConfirm()) return
-
+        // No encryption gate: the scratch pad lives in notesprout.db, which is encrypted at rest.
         // Ensure the scratch pad is initialised so we can read page dimensions.
         withContext(Dispatchers.IO) { scratchpadRepo.ensureBootstrap() }
 
@@ -5985,7 +5958,6 @@ class NotebookActivity : AppCompatActivity() {
             android.content.Intent(this, ScratchpadActivity::class.java).apply {
                 putExtra(ScratchpadActivity.EXTRA_FROM_NOTEBOOK_ID,        notebookId)
                 putExtra(ScratchpadActivity.EXTRA_FROM_NOTEBOOK_NAME,      notebookDisplayName)
-                putExtra(ScratchpadActivity.EXTRA_FROM_NOTEBOOK_ENCRYPTED, encInfo.encrypted)
                 putExtra(ScratchpadActivity.EXTRA_JUMP_TO_PAGE_ID,         target.pageId)
                 putExtra(ScratchpadActivity.EXTRA_SELECT_OBJECT_IDS,       insertedIds.joinToString(","))
             }

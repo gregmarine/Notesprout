@@ -116,7 +116,6 @@ class CalendarActivity : AppCompatActivity() {
     companion object {
         const val EXTRA_FROM_NOTEBOOK_ID        = "from_notebook_id"
         const val EXTRA_FROM_NOTEBOOK_NAME      = "from_notebook_name"
-        const val EXTRA_FROM_NOTEBOOK_ENCRYPTED = "from_notebook_encrypted"
 
         /**
          * Result extra (String, page UUID): set when the user exports calendar page(s) into the
@@ -138,11 +137,10 @@ class CalendarActivity : AppCompatActivity() {
         }
 
         /** Intent for launching from a notebook (used with NotebookActivity's for-result launcher). */
-        fun intentFromNotebook(context: Context, id: String, name: String, encrypted: Boolean): Intent =
+        fun intentFromNotebook(context: Context, id: String, name: String): Intent =
             Intent(context, CalendarActivity::class.java)
                 .putExtra(EXTRA_FROM_NOTEBOOK_ID, id)
                 .putExtra(EXTRA_FROM_NOTEBOOK_NAME, name)
-                .putExtra(EXTRA_FROM_NOTEBOOK_ENCRYPTED, encrypted)
     }
 
     private lateinit var binding: ActivityCalendarBinding
@@ -196,7 +194,6 @@ class CalendarActivity : AppCompatActivity() {
     // Source notebook (non-null only when launched from a notebook)
     private var fromNotebookId: String? = null
     private var fromNotebookName: String? = null
-    private var fromNotebookEncrypted = false
 
     // Undo/redo — full-layer snapshot history (per page; reset on navigation)
     private var currentSnapshot: List<CalendarEntity> = emptyList()
@@ -325,7 +322,6 @@ class CalendarActivity : AppCompatActivity() {
 
         fromNotebookId        = intent.getStringExtra(EXTRA_FROM_NOTEBOOK_ID)
         fromNotebookName      = intent.getStringExtra(EXTRA_FROM_NOTEBOOK_NAME)
-        fromNotebookEncrypted = intent.getBooleanExtra(EXTRA_FROM_NOTEBOOK_ENCRYPTED, false)
 
         // Record the calendar on the surface stack, so a cold launch reopens it (see SurfaceStack).
         // No payload: the view + date come back from PREFS_CALENDAR below.
@@ -2031,7 +2027,6 @@ class CalendarActivity : AppCompatActivity() {
                 this, date,
                 fromNotebookId = fromNotebookId,
                 fromNotebookName = fromNotebookName,
-                fromNotebookEncrypted = fromNotebookEncrypted,
             )
         )
     }

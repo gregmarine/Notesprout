@@ -77,7 +77,6 @@ class ScratchpadActivity : AppCompatActivity() {
         /** Nullable — set when launched from a notebook; null when launched from MainActivity. */
         const val EXTRA_FROM_NOTEBOOK_ID        = "from_notebook_id"
         const val EXTRA_FROM_NOTEBOOK_NAME      = "from_notebook_name"
-        const val EXTRA_FROM_NOTEBOOK_ENCRYPTED = "from_notebook_encrypted"
 
         /** If set, navigate to this page ID on open (used by "Send to Scratch Pad"). */
         const val EXTRA_JUMP_TO_PAGE_ID   = "jump_to_page_id"

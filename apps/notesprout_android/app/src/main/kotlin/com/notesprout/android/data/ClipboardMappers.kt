@@ -8,7 +8,6 @@ private val clipCodec = Json { ignoreUnknownKeys = true; explicitNulls = false }
 
 fun NotesproutClipboard.ClipboardContent.toPayload(
     sourceNotebookId: String,
-    sourceEncrypted: Boolean,
 ): ClipboardPayload {
     val items = mutableListOf<ClipItem>()
     strokes.forEach { s ->
@@ -57,7 +56,6 @@ fun NotesproutClipboard.ClipboardContent.toPayload(
         items = items,
         boundingBox = BoundingBoxData.from(boundingBox),
         sourceNotebookId = sourceNotebookId,
-        sourceEncrypted = sourceEncrypted,
         copiedAt = System.currentTimeMillis(),
     )
 }
