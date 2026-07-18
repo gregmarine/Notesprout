@@ -1,8 +1,8 @@
 # Full Notebook Export
 
 > Referenced from `CLAUDE.md`. Covers the export format, `notebook_meta` schema, continuous
-> upkeep, the copy engine, and the encrypted trade-off. Import is **out of scope** for the current
-> implementation (see stub below).
+> upkeep, the copy engine, and the encrypted trade-off — plus the **full import pipeline**
+> (probe → unlock → placement → collision → keying), which is implemented; see [Import](#import).
 
 ---
 

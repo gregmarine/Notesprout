@@ -4,7 +4,7 @@
 > rule, run ordering, encrypted behavior, state storage, the Google Drive REST/OAuth path, key
 > classes, the Backup Settings screen, and known limitations.
 >
-> **Restore — out of scope for Phase 1.** See the "Restore" stub at the end.
+> **Restore is implemented** (staging-first, replace-all) — see [Restore](#restore).
 
 ---
 
@@ -274,9 +274,30 @@ to the destination root.
 
 ---
 
-## Restore (Future)
+## Restore
 
-Restore is out of scope for Phase 1. The backed-up files are standard `.soil` and `notesprout.db`
-files. A future restore flow would download/copy them to the device and run them through the
-existing full-notebook import pipeline for `.soil` files, and a separate migration path for the
-global index.
+In-app restore is implemented. It **replaces the entire current library** — it is not a merge and not
+a per-notebook import (that is what full-notebook import is for).
+
+**Key classes:** `RestoreSource` (LOCAL/SAF or DRIVE, with device-folder selection) and
+`RestoreEngine` (`data/backup/RestoreEngine.kt`).
+
+**Staging-first ordering** — the live library is not touched until the fetch has fully succeeded:
+
+1. Wipe + recreate `cacheDir/restore_staging`.
+2. Fetch the backup's `notesprout.db` and every `.soil` into staging. **Any network/IO failure here
+   leaves the live library completely untouched.**
+3. Only then: seal the index, clear the cached global passphrase **and all cached raw keys**
+   (`KeyMaterial` / `KeySession` / `PassphraseStore`).
+4. Wipe the live `Garden/` + index; move the staged files into place.
+
+**Restart into unlock.** The restored index is encrypted under the **backup device's** global
+passphrase, which is not this device's. So the next launch necessarily lands in
+`NotesproutIndex.PrepareOutcome.NEEDS_UNLOCK`, and the caller restarts into the bootstrap gate to
+prompt for that library's recovery key. Clearing the cached keys in step 3 is what makes this
+deterministic — a stale cached key would otherwise fail verification and look like corruption.
+
+**Entry point:** the Restore section of Backup Settings.
+
+**Status:** the LOCAL/SAF path is validated end-to-end on G102. The DRIVE path is built but had not
+been exercised on-device at the time of writing.

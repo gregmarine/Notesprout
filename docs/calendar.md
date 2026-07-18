@@ -43,8 +43,9 @@ calendar_root  (type="calendar_root", parentId="", fixed id CALENDAR_ROOT_ID)
 - **Pages are keyed, not indexed.** The page row's `id` *is* the deterministic page key (below). Pages
   + layers are created lazily on first open of any month/week/day-half (`getOrCreatePageLayer`).
 - `PageData.template` is always `""` — the grid/timeline is rendered live, not stored (see below).
-- Soft deletes for content (`deletedAt`); stable UUIDs throughout. **Content is always plaintext** —
-  `notesprout.db` is never encrypted.
+- Soft deletes for content (`deletedAt`); stable UUIDs throughout. Content lives in `notesprout.db`,
+  which is [encrypted at rest](encryption.md#the-global-index-is-encrypted) under the **global**
+  passphrase (never a per-notebook one).
 
 ### Page keys (`CalendarActivity.pageKey()`)
 
@@ -670,6 +671,11 @@ pasting via `performScratchpadTransfer`.
 
 ## Encryption note
 
-The calendar stores all content in `notesprout.db`, which is **never encrypted**. There is no
-encryption gate on calendar copy/paste or "Send to Notebook" — calendar content is inherently
-plaintext-on-device, the same as the scratch pad.
+The calendar stores all content in `notesprout.db`, which is
+[SQLCipher-encrypted at rest](encryption.md#the-global-index-is-encrypted) under the **global**
+passphrase. There is no encryption gate on calendar copy/paste or "Send to Notebook".
+
+That remains correct, but for a sharper reason than "it's all plaintext anyway": calendar content is
+always global-scoped, so moving content *into* the calendar never downgrades it — except from a
+NOTEBOOK-scoped notebook, where it widens the secret from a per-notebook passphrase to the
+device-global one. Same residual consideration as the scratch pad.

@@ -12,7 +12,7 @@
 - Hierarchy: Notebook → Pages → Layers → Content Objects
 - Layers: base layer (template, locked) and content layers
 - Every object carries: id, parentId, boundingBox, order, createdAt, updatedAt, deletedAt, data
-- Stroke data: proprietary point arrays (x, y; optional pressure/tilt), stored as JSON in the `data` TEXT column
+- Stroke data: point arrays (x, y; optional pressure/tilt) stored as a **binary blob** — float32 + zlib via `core/StrokeCodec`, ~5× smaller than the legacy JSON. Colour/width live in row columns. (Pre-v4 rows may still carry JSON in `data`; readers are format-agnostic. See **Schema Version 4** below.)
 - Soft deletes with cleanup process; stable UUIDs everywhere
 - Activities receive notebook identity as `EXTRA_NOTEBOOK_ID` (entity UUID) + `EXTRA_NOTEBOOK_NAME` — never a `File` object
 
@@ -42,8 +42,10 @@ CREATE INDEX idx_objects_parent_type_deleted
 
 ### Auxiliary tables (same `notesprout.db`, Room `version = 5`)
 
-Beyond `objects`, the global index DB holds several plaintext tables (the global index is never
-encrypted). The two object-canvas tables share the universal row schema
+Beyond `objects`, the global index DB holds several auxiliary tables. **The index itself is
+SQLCipher-encrypted at rest** under the global passphrase (encrypt-everything-by-default) — see
+[`docs/encryption.md`](encryption.md#the-global-index-is-encrypted). The two object-canvas tables
+share the universal row schema
 (`id/parentId/type/boundingBox/order/createdAt/updatedAt/deletedAt/data`) so every `.soil` object
 serializer works unchanged.
 

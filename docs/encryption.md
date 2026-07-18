@@ -24,6 +24,36 @@ portability.
 
 ---
 
+## The Global Index Is Encrypted
+
+**`notesprout.db` is SQLCipher-encrypted at rest**, under the global passphrase, from first launch
+(encrypt-everything-by-default). Earlier phases of this doc described the index as plaintext; that is
+no longer true.
+
+`NotesproutIndex.ensureReady(context)` owns the open and branches on `SoilCrypto.probe`:
+
+| Probe result | Action |
+|---|---|
+| `Invalid` (fresh install / empty file) | Mint the global key (`GlobalKey.ensure`) and create the index **encrypted from the start** |
+| `Plaintext` (existing user upgrading) | Bring the schema current **while still plaintext**, close, `SoilMigrator.encryptInPlace`, reopen keyed |
+| `Encrypted` + resolvable key | Open via the raw-key cache (`KeyMaterial.rawKeyGlobal`, `INDEX_FILE_ID`) |
+| `Encrypted` + no usable key | `PrepareOutcome.NEEDS_UNLOCK` — caller prompts, then `unlockAndOpen` |
+
+Consequences:
+
+- **Opening the index is potentially async** (a one-time migration, or an unlock prompt), so it can
+  no longer complete synchronously in `Application.onCreate`. `BootstrapActivity` gates on it and
+  index consumers suspend via `awaitReady`; `MainActivity` self-guards for deep-link entries.
+- The index's raw key is cached under `KeyMaterial.INDEX_FILE_ID` and **invalidated on rotation** —
+  a rotated index re-derives on next launch.
+- Everything stored in the index — including the `scratchpad`, `calendar`, `events`,
+  `notebook_activity`, and clipboard tables — is therefore **encrypted at rest**.
+
+The [search-leak invariant](#search-leak-invariant) still holds and is still enforced: index
+encryption is defence in depth, not a licence to start writing page content there.
+
+---
+
 ## Passphrase Scopes
 
 | Scope | `KeyScope` value | Prompt behaviour | Cached? |
@@ -363,8 +393,11 @@ Stroke data, images, text objects, and all other page content live exclusively i
 This invariant ensures that adding search over decrypted content in a future phase requires an
 explicit, opt-in design decision — no page content can leak into search results by accident.
 
-If any future feature proposes writing page content to the global index, it must go through Phase 3
-design with an encrypted-at-rest index.
+The index is now [encrypted at rest](#the-global-index-is-encrypted), but the invariant is
+**unchanged**: index encryption is under the *global* key, so writing a NOTEBOOK-scoped notebook's
+content there would still widen its blast radius from one passphrase to the device-global one. Any
+future feature that proposes writing page content to the index must still go through an explicit
+design decision.
 
 ---
 

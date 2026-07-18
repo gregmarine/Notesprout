@@ -39,7 +39,9 @@ scratchpad_root  (type="scratchpad_root", parentId="", fixed id SCRATCHPAD_ROOT_
   defined in `data/index/ListIds.kt`. Created once by `ScratchpadRepository.ensureBootstrap()`.
 - `PageData.template` is always `""` (no template on the scratch pad).
 - Soft deletes only — `deletedAt` set, rows never physically removed. Stable UUIDs throughout.
-- Content is **always plaintext** — `notesprout.db` is never encrypted.
+- Content lives in `notesprout.db`, which is
+  [encrypted at rest](encryption.md#the-global-index-is-encrypted) under the **global** passphrase
+  (never a per-notebook one).
 
 ### Key files
 
@@ -231,10 +233,14 @@ The notebook's `.soil` connection stays open since the activity is only paused, 
 
 ## Encryption note
 
-The scratch pad stores content in `notesprout.db`, which is **never encrypted**. Any content sent
-to the scratch pad from an encrypted notebook uses the same `awaitEncryptionClipboardConfirm()`
-warning shown for clipboard operations ("stored unencrypted on this device"). Cancel aborts the
-transfer.
+The scratch pad stores content in `notesprout.db`, which is
+[SQLCipher-encrypted at rest](encryption.md#the-global-index-is-encrypted) under the **global**
+passphrase.
+
+**There is no encryption gate on "Send to Scratch Pad".** Content moves from one encrypted store to
+another; encrypted is encrypted. The old warning dialog (shared with clipboard copy) was removed
+2026-07-18 — it existed to flag a move into *plaintext*, which no longer happens. See
+[`clipboard-and-page-transfer.md`](clipboard-and-page-transfer.md#encryption-guard-objects--removed).
 
 ---
 
