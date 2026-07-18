@@ -44,13 +44,29 @@ class BootstrapActivity : AppCompatActivity() {
         forwardNext()
     }
 
-    /** Reuse the received intent (launcher MAIN, or a forwarded .soil VIEW/SEND) so the next screen
-     *  sees a normal cold launch. First launch routes through onboarding (recovery-key reveal);
-     *  otherwise straight to MainActivity, whose restore/import logic is untouched. */
+    /** Forward to the next screen so it sees a normal cold launch. First launch routes through
+     *  onboarding (recovery-key reveal); otherwise straight to MainActivity, whose restore/import
+     *  logic is untouched.
+     *
+     *  We build a *clean* in-app intent rather than reusing the received one. Reusing it drags the
+     *  launcher's `CATEGORY_LAUNCHER` + `NEW_TASK|RESET_TASK_IF_NEEDED` flags onto this internal
+     *  start, which re-triggers launcher task routing — and once the encrypted-index open delays
+     *  this hand-off by a beat, the window lands back on the home screen instead of the app (a
+     *  hard-to-see "opens then closes" on BOOX). Only a genuine `.soil` deep-link (VIEW/SEND)
+     *  payload is carried through, so import still works. */
     private fun forwardNext() {
         val next = if (OnboardingActivity.shouldShow(this)) OnboardingActivity::class.java
                    else MainActivity::class.java
-        startActivity(Intent(intent).setClass(this, next))
+        val forward = Intent(this, next)
+        val src = intent
+        if (src.action == Intent.ACTION_VIEW || src.action == Intent.ACTION_SEND) {
+            forward.action = src.action
+            forward.setDataAndType(src.data, src.type)
+            src.extras?.let { forward.putExtras(it) }
+            forward.addFlags(src.flags and
+                (Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION))
+        }
+        startActivity(forward)
         finish()
     }
 
