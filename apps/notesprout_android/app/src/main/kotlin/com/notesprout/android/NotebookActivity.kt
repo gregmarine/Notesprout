@@ -1286,11 +1286,6 @@ class NotebookActivity : AppCompatActivity() {
             showEncryptFromToolbarDialog(nbId)
         }
 
-        binding.btnLockOff.setOnClickListener {
-            val nbId = notebookId.takeIf { it.isNotEmpty() } ?: return@setOnClickListener
-            showDecryptFromToolbarDialog(nbId)
-        }
-
         binding.btnPageIndex.setOnClickListener { openPageIndex() }
 
         binding.btnCalendar.setOnClickListener {
@@ -2362,7 +2357,12 @@ class NotebookActivity : AppCompatActivity() {
                     undoRedoPersistenceFile(notebookPath).takeIf { it.exists() }?.delete()
                     undoRedoManager = UndoRedoManager()
                     updateUndoRedoButtons()
-                    binding.openingOverlay.visibility = View.VISIBLE
+                    // Only NOTEBOOK-scope runs the passphrase KDF on open (a real wait worth an
+                    // overlay). GLOBAL-scope opens from a cached raw key almost instantly, so the
+                    // "Opening…" overlay would just flash — skip it (matches plaintext behaviour).
+                    if (info.keyScope == KeyScope.NOTEBOOK) {
+                        binding.openingOverlay.visibility = View.VISIBLE
+                    }
                 }
                 sessionStartTime = System.currentTimeMillis()
                 val builder = SoilDatabase.builder(this@NotebookActivity, notebookPath)
@@ -3684,8 +3684,10 @@ class NotebookActivity : AppCompatActivity() {
     // ── Toolbar lock / lock-off ───────────────────────────────────────────────
 
     private fun updateLockButtonVisibility(info: EncryptionInfo) {
-        binding.btnLock.visibility    = if (info.encrypted) View.GONE else View.VISIBLE
-        binding.btnLockOff.visibility = if (info.encrypted) View.VISIBLE else View.GONE
+        // Encrypt is offered only for a (rare) plaintext notebook, e.g. a freshly-imported .soil.
+        // Encrypted notebooks are managed from MainActivity (scope toggle / passphrase); there is no
+        // decrypt-to-plaintext path under encrypt-everything.
+        binding.btnLock.visibility = if (info.encrypted) View.GONE else View.VISIBLE
     }
 
     private fun showEncryptFromToolbarDialog(nbId: String) {
@@ -3698,25 +3700,6 @@ class NotebookActivity : AppCompatActivity() {
                 lifecycleScope.launch { encryptFromToolbar(nbId, KeyScope.NOTEBOOK) }
             }
             .show()
-    }
-
-    private fun showDecryptFromToolbarDialog(nbId: String) {
-        AlertDialog.Builder(this)
-            .setTitle("Decrypt Notebook")
-            .setMessage(
-                "\"$notebookDisplayName\" will be stored unencrypted. Anyone with access to " +
-                "the file can read its contents. This cannot be undone."
-            )
-            .setPositiveButton("Continue") { _, _ ->
-                lifecycleScope.launch { decryptFromToolbar(nbId) }
-            }
-            .setNegativeButton("Cancel", null)
-            .create()
-            .also { d ->
-                d.show()
-                d.window?.setElevation(0f)
-                d.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
-            }
     }
 
     /**
@@ -3775,44 +3758,6 @@ class NotebookActivity : AppCompatActivity() {
         } catch (e: Exception) {
             dialog.dismiss()
             android.widget.Toast.makeText(this, "Encryption failed: ${e.message}", android.widget.Toast.LENGTH_LONG).show()
-        }
-    }
-
-    private suspend fun decryptFromToolbar(nbId: String) {
-        val key = KeyResolver.resolveForDecrypt(this, nbId, encryptionInfo) ?: return
-
-        val tvMessage = android.widget.TextView(this).apply {
-            text = "Decrypting…"
-            setPadding(64, 48, 64, 48)
-            setTextColor(android.graphics.Color.BLACK)
-            textSize = 16f
-        }
-        val dialog = AlertDialog.Builder(this)
-            .setView(tvMessage)
-            .setCancelable(false)
-            .create()
-        dialog.show()
-        dialog.window?.setElevation(0f)
-        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
-
-        try {
-            sealForConversion()
-            val file = soilFile(this, nbId)
-            withContext(Dispatchers.IO) { SoilMigrator.decryptInPlace(file, key) }
-            withContext(Dispatchers.IO) { indexRepo.setEncryptionState(nbId, encrypted = false, keyScope = null) }
-            dialog.dismiss()
-            // Clean pen-pipeline handoff before reopening this notebook under its new encryption state.
-            drawingView.releaseForHandoff()
-            startActivity(
-                Intent(this, NotebookActivity::class.java).apply {
-                    putExtra(EXTRA_NOTEBOOK_ID,   nbId)
-                    putExtra(EXTRA_NOTEBOOK_NAME, notebookDisplayName)
-                }
-            )
-            finish()
-        } catch (e: Exception) {
-            dialog.dismiss()
-            android.widget.Toast.makeText(this, "Decryption failed: ${e.message}", android.widget.Toast.LENGTH_LONG).show()
         }
     }
 

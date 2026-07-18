@@ -1826,7 +1826,8 @@ class MainActivity : AppCompatActivity() {
             if (!encInfo.encrypted) {
                 menu.addAction(R.drawable.ic_lock,     "Encrypt Notebook") { showEncryptNotebookDialog(entity) }
             } else {
-                menu.addAction(R.drawable.ic_lock_off, "Decrypt Notebook") { showDecryptNotebookDialog(entity, encInfo) }
+                // No decrypt-to-plaintext under encrypt-everything — scope is toggled between the
+                // device-global and a private notebook passphrase, both still encrypted.
                 menu.addAction(R.drawable.ic_edit,     "Change Passphrase") { showChangePassphraseDialog(entity, encInfo) }
                 menu.addAction(R.drawable.ic_lock,     "Change Encryption Scope") { showChangeScopeDialog(entity, encInfo) }
             }
@@ -1979,56 +1980,6 @@ class MainActivity : AppCompatActivity() {
         } catch (e: Exception) {
             dialog.dismiss()
             Toast.makeText(this, "Encryption failed: ${e.message}", Toast.LENGTH_LONG).show()
-        }
-    }
-
-    private fun showDecryptNotebookDialog(entity: ObjectEntity, encInfo: EncryptionInfo) {
-        AlertDialog.Builder(this)
-            .setTitle("Decrypt Notebook")
-            .setMessage(
-                "\"${entity.name}\" will be stored unencrypted. Anyone with access to the file " +
-                "can read its contents. This cannot be undone."
-            )
-            .setPositiveButton("Continue") { _, _ ->
-                lifecycleScope.launch { decryptNotebook(entity, encInfo) }
-            }
-            .setNegativeButton("Cancel", null)
-            .create()
-            .also { d ->
-                d.show()
-                d.window?.setElevation(0f)
-                d.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
-            }
-    }
-
-    private suspend fun decryptNotebook(entity: ObjectEntity, encInfo: EncryptionInfo) {
-        val key = KeyResolver.resolveForDecrypt(this, entity.id, encInfo) ?: return
-
-        val tvMessage = android.widget.TextView(this).apply {
-            text = "Decrypting…"
-            setPadding(64, 48, 64, 48)
-            setTextColor(android.graphics.Color.BLACK)
-            textSize = 16f
-        }
-        val dialog = AlertDialog.Builder(this)
-            .setView(tvMessage)
-            .setCancelable(false)
-            .create()
-        dialog.show()
-        dialog.window?.setElevation(0f)
-        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
-
-        try {
-            val file = soilFile(this, entity.id)
-            withContext(Dispatchers.IO) { SoilMigrator.decryptInPlace(file, key) }
-            withContext(Dispatchers.IO) { repository.setEncryptionState(entity.id, encrypted = false, keyScope = null) }
-            // Now plaintext — no raw key applies anymore.
-            com.notesprout.android.crypto.KeyMaterial.invalidate(this, entity.id)
-            dialog.dismiss()
-            scanAndRender()
-        } catch (e: Exception) {
-            dialog.dismiss()
-            Toast.makeText(this, "Decryption failed: ${e.message}", Toast.LENGTH_LONG).show()
         }
     }
 
@@ -3162,22 +3113,8 @@ class MainActivity : AppCompatActivity() {
             showKeyingChooserForImport(manifest, tempFile, displayName, parentId, resolvedId, enteredPass)
             return
         }
-        val modal = showImportingModal()
-        val name = try {
-            withContext(Dispatchers.IO) {
-                NotebookImporter.importPlaintext(
-                    this@MainActivity, repository, tempFile, manifest, displayName, parentId, resolvedId
-                )
-                displayName
-            }
-        } catch (e: Exception) {
-            modal.dismiss()
-            Toast.makeText(this@MainActivity, "Import failed: ${e.message}", Toast.LENGTH_LONG).show()
-            return
-        }
-        modal.dismiss()
-        Toast.makeText(this@MainActivity, "Imported “$name”", Toast.LENGTH_SHORT).show()
-        scanAndRender()
+        // Plaintext source: encrypt-on-import — never land as plaintext. Prompt for the scope.
+        showKeyingChooserForPlaintextImport(manifest, tempFile, displayName, parentId, resolvedId)
     }
 
     private suspend fun executeReplace(
@@ -3191,22 +3128,8 @@ class MainActivity : AppCompatActivity() {
             showKeyingChooserForReplace(manifest, tempFile, displayName, existingId, enteredPass)
             return
         }
-        val modal = showImportingModal()
-        val name = try {
-            withContext(Dispatchers.IO) {
-                NotebookImporter.replacePlaintext(
-                    this@MainActivity, repository, tempFile, manifest, displayName, existingId
-                )
-                displayName
-            }
-        } catch (e: Exception) {
-            modal.dismiss()
-            Toast.makeText(this@MainActivity, "Import failed: ${e.message}", Toast.LENGTH_LONG).show()
-            return
-        }
-        modal.dismiss()
-        Toast.makeText(this@MainActivity, "Replaced “$name”", Toast.LENGTH_SHORT).show()
-        scanAndRender()
+        // Plaintext source: encrypt-on-import — never land as plaintext. Prompt for the scope.
+        showKeyingChooserForPlaintextReplace(manifest, tempFile, displayName, existingId)
     }
 
     private fun showKeyingChooserForImport(
@@ -3284,6 +3207,118 @@ class MainActivity : AppCompatActivity() {
                 runCatching { tempFile.delete() }
             }
             .show()
+    }
+
+    /** A plaintext `.soil` is never imported as-is under encrypt-everything: choose whether to key it
+     *  to the device global passphrase or a private notebook passphrase, then encrypt it on the way in. */
+    private fun showKeyingChooserForPlaintextImport(
+        manifest: ImportManifest,
+        tempFile: java.io.File,
+        displayName: String,
+        parentId: String?,
+        resolvedId: String,
+    ) {
+        ActionSheetDialog(this)
+            .title("Encrypt imported notebook")
+            .addAction(null, "Use this device's global") {
+                lifecycleScope.launch {
+                    val pass = KeyResolver.resolveForConvertToEncrypted(this@MainActivity, KeyScope.GLOBAL) ?: return@launch
+                    doImportPlaintextEncrypting(manifest, tempFile, displayName, parentId, resolvedId, pass, KeyScope.GLOBAL)
+                }
+            }
+            .addAction(null, "New notebook passphrase") {
+                lifecycleScope.launch {
+                    val pass = KeyResolver.resolveForConvertToEncrypted(this@MainActivity, KeyScope.NOTEBOOK) ?: return@launch
+                    doImportPlaintextEncrypting(manifest, tempFile, displayName, parentId, resolvedId, pass, KeyScope.NOTEBOOK)
+                }
+            }
+            .addAction(null, "Cancel") {
+                runCatching { tempFile.delete() }
+            }
+            .show()
+    }
+
+    private fun showKeyingChooserForPlaintextReplace(
+        manifest: ImportManifest,
+        tempFile: java.io.File,
+        displayName: String,
+        existingId: String,
+    ) {
+        ActionSheetDialog(this)
+            .title("Encrypt imported notebook")
+            .addAction(null, "Use this device's global") {
+                lifecycleScope.launch {
+                    val pass = KeyResolver.resolveForConvertToEncrypted(this@MainActivity, KeyScope.GLOBAL) ?: return@launch
+                    doReplacePlaintextEncrypting(manifest, tempFile, displayName, existingId, pass, KeyScope.GLOBAL)
+                }
+            }
+            .addAction(null, "New notebook passphrase") {
+                lifecycleScope.launch {
+                    val pass = KeyResolver.resolveForConvertToEncrypted(this@MainActivity, KeyScope.NOTEBOOK) ?: return@launch
+                    doReplacePlaintextEncrypting(manifest, tempFile, displayName, existingId, pass, KeyScope.NOTEBOOK)
+                }
+            }
+            .addAction(null, "Cancel") {
+                runCatching { tempFile.delete() }
+            }
+            .show()
+    }
+
+    /** Encrypt the plaintext temp in place with the chosen key, then hand off to the (encrypted)
+     *  import path — so the notebook lands in Garden already encrypted at the requested scope. */
+    private suspend fun doImportPlaintextEncrypting(
+        manifest: ImportManifest,
+        tempFile: java.io.File,
+        displayName: String,
+        parentId: String?,
+        resolvedId: String,
+        passphrase: String,
+        scope: KeyScope,
+    ) {
+        val modal = showImportingModal()
+        try {
+            withContext(Dispatchers.IO) {
+                SoilMigrator.encryptInPlace(tempFile, passphrase)
+                NotebookImporter.importEncrypted(
+                    this@MainActivity, repository, tempFile, manifest, displayName, parentId, resolvedId,
+                    enteredPass = passphrase, finalPass = passphrase, scope = scope,
+                )
+            }
+        } catch (e: Exception) {
+            modal.dismiss()
+            Toast.makeText(this@MainActivity, "Import failed: ${e.message}", Toast.LENGTH_LONG).show()
+            return
+        }
+        modal.dismiss()
+        Toast.makeText(this@MainActivity, "Imported “$displayName”", Toast.LENGTH_SHORT).show()
+        scanAndRender()
+    }
+
+    private suspend fun doReplacePlaintextEncrypting(
+        manifest: ImportManifest,
+        tempFile: java.io.File,
+        displayName: String,
+        existingId: String,
+        passphrase: String,
+        scope: KeyScope,
+    ) {
+        val modal = showImportingModal()
+        try {
+            withContext(Dispatchers.IO) {
+                SoilMigrator.encryptInPlace(tempFile, passphrase)
+                NotebookImporter.replaceEncrypted(
+                    this@MainActivity, repository, tempFile, manifest, displayName, existingId,
+                    enteredPass = passphrase, finalPass = passphrase, scope = scope,
+                )
+            }
+        } catch (e: Exception) {
+            modal.dismiss()
+            Toast.makeText(this@MainActivity, "Import failed: ${e.message}", Toast.LENGTH_LONG).show()
+            return
+        }
+        modal.dismiss()
+        Toast.makeText(this@MainActivity, "Replaced “$displayName”", Toast.LENGTH_SHORT).show()
+        scanAndRender()
     }
 
     private suspend fun doImportEncrypted(

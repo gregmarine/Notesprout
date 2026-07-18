@@ -163,7 +163,10 @@ object NotebookImporter {
      * copying into Garden. Re-keying on the temp keeps Garden clean on any failure.
      * [file] is deleted after a successful import.
      *
-     * NEVER pass a cover snapshot for encrypted notebooks — leak hygiene.
+     * The **index** snapshot is kept only for GLOBAL scope (the index is encrypted at rest and the
+     * key is available, so its card renders a cover like any other global notebook); NOTEBOOK scope
+     * stays cover-less. The **portable** in-`.soil` meta always stays cover-less (see
+     * [refreshEncryptedMeta]) so a keyless import on another device can't leak a preview.
      */
     suspend fun importEncrypted(
         context: Context,
@@ -193,7 +196,7 @@ object NotebookImporter {
             name = displayName,
             parentId = parentId,
             obj = NotebookObject(
-                snapshot = null,
+                snapshot = if (scope == KeyScope.GLOBAL) manifest.meta?.cover else null,
                 pageCount = manifest.pageCount,
                 encrypted = true,
                 keyScope = scope,
@@ -239,7 +242,7 @@ object NotebookImporter {
 
         repo.renameNotebook(existingId, displayName)
         repo.updateNotebookPageCount(existingId, manifest.pageCount)
-        repo.updateNotebookSnapshot(existingId, null)
+        repo.updateNotebookSnapshot(existingId, if (scope == KeyScope.GLOBAL) manifest.meta?.cover else null)
         repo.setEncryptionState(existingId, true, scope)
         // The file (and its salt) was just replaced — any cached raw key for this id is stale.
         com.notesprout.android.crypto.KeyMaterial.invalidate(context, existingId)

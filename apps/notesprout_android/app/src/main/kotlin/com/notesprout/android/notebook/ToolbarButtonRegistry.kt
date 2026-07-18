@@ -62,7 +62,9 @@ object ToolbarButtonRegistry {
         ButtonSpec("export", R.id.btnExport, R.drawable.ic_export, "Export", GROUP_NOTEBOOK),
         ButtonSpec("pin", R.id.btnPin, R.drawable.ic_pinned, "Pin", GROUP_NOTEBOOK),
         ButtonSpec("lock", R.id.btnLock, R.drawable.ic_lock, "Encrypt", GROUP_NOTEBOOK),
-        ButtonSpec("lockOff", R.id.btnLockOff, R.drawable.ic_lock_off, "Decrypt", GROUP_NOTEBOOK),
+        // "lockOff" (Decrypt) retired under encrypt-everything — a notebook is never downgraded to
+        // plaintext; scope is changed via the long-press "Change Encryption Scope" toggle instead.
+        // Persisted configs that still list "lockOff" resolve to null and are skipped harmlessly.
         ButtonSpec("pen", R.id.btnPen, R.drawable.ic_pen, "Pen", GROUP_TOOLS),
         ButtonSpec("eraser", R.id.btnEraser, R.drawable.ic_eraser, "Eraser", GROUP_TOOLS),
         ButtonSpec("lassoEraser", R.id.btnLassoEraser, R.drawable.ic_lasso_eraser, "Lasso Eraser", GROUP_TOOLS),
