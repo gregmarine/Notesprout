@@ -943,12 +943,13 @@ class DayDetailActivity : AppCompatActivity() {
         }
     }
 
-    /** Populate a card cover: snapshot bitmap when present, lock icon when encrypted, else the
-     *  default notebook icon. Job tracked so it's cancelled on the next grid re-render. */
+    /** Populate a card cover: snapshot bitmap when present, lock icon for NOTEBOOK-scope (private)
+     *  encryption, else the default notebook icon. GLOBAL-scope covers render normally. Job tracked
+     *  so it's cancelled on the next grid re-render. */
     private fun loadCoverInto(notebookId: String, cover: AppCompatImageView, icon: AppCompatImageView) {
         val job = lifecycleScope.launch {
             val info = dayHistoryRepo.coverFor(notebookId)
-            if (info.encrypted) { icon.setImageResource(R.drawable.ic_lock_cover); return@launch }
+            if (info.locked) { icon.setImageResource(R.drawable.ic_lock_cover); return@launch }
             val b64 = info.snapshotB64 ?: return@launch
             val bitmap = withContext(Dispatchers.IO) {
                 runCatching {

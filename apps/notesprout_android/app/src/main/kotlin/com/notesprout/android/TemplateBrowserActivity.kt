@@ -1745,10 +1745,11 @@ class TemplateBrowserActivity : AppCompatActivity() {
                 binding.btnCreate.isEnabled = true
                 return@launch
             }
+            // Encryption-by-default: GLOBAL unless the user explicitly picks a private passphrase.
+            // Plaintext notebooks are no longer creatable (they only ever arrive via import).
             val scopeString = when (binding.scopeRadioGroup.checkedRadioButtonId) {
-                R.id.radioScopeGlobal    -> "GLOBAL"
                 R.id.radioScopeNotebook  -> "NOTEBOOK"
-                else                     -> ""
+                else                     -> "GLOBAL"
             }
             val resultIntent = Intent()
                 .putExtra(RESULT_NOTEBOOK_NAME, name)

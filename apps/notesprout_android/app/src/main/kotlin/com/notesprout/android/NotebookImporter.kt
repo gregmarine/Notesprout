@@ -241,6 +241,8 @@ object NotebookImporter {
         repo.updateNotebookPageCount(existingId, manifest.pageCount)
         repo.updateNotebookSnapshot(existingId, null)
         repo.setEncryptionState(existingId, true, scope)
+        // The file (and its salt) was just replaced — any cached raw key for this id is stale.
+        com.notesprout.android.crypto.KeyMaterial.invalidate(context, existingId)
 
         val now = System.currentTimeMillis()
         refreshEncryptedMeta(context, repo, gardenFile, existingId, displayName, parentId, manifest, scope, finalPass, now)

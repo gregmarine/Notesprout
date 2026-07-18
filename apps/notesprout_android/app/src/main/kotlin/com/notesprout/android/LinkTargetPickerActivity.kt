@@ -29,6 +29,7 @@ import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.lifecycleScope
 import com.notesprout.android.core.Slog
 import com.notesprout.android.crypto.KeyResolver
+import com.notesprout.android.crypto.KeyScope
 import com.notesprout.android.crypto.KeySession
 import com.notesprout.android.crypto.SoilCrypto
 import com.notesprout.android.data.LinkChrome
@@ -1076,7 +1077,9 @@ class LinkTargetPickerActivity : AppCompatActivity() {
                     item.entity.notebookMeta()
                 } catch (_: Exception) { null }
 
-                if (notebookObj?.encrypted == true) {
+                if (notebookObj?.encrypted == true && notebookObj.keyScope != KeyScope.GLOBAL) {
+                    // Private (NOTEBOOK-scope) encryption: show lock icon; never decode a snapshot.
+                    // GLOBAL-scope covers render — the index is encrypted at rest, key available.
                     icon.setImageResource(R.drawable.ic_lock_cover)
                 } else {
                     decodeSnapshotInto(notebookObj?.snapshot, cover, icon)

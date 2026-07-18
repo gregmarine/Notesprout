@@ -130,8 +130,9 @@ class IndexRepository(private val dao: ObjectDao) {
     suspend fun updateNotebookSnapshot(id: String, snapshot: String?) {
         val entity = dao.getById(id) ?: return
         val obj = entity.notebookMeta()
-        // Never cache plaintext page content for encrypted notebooks (leak hygiene).
-        if (obj.encrypted) return
+        // Private (NOTEBOOK-scope) notebooks never cache page content into the index. GLOBAL-scope
+        // covers are fine now that the index itself is encrypted at rest under the global key.
+        if (obj.encrypted && obj.keyScope != KeyScope.GLOBAL) return
         dao.update(
             entity.withNotebookMeta(obj.copy(snapshot = snapshot))
                 .copy(updatedAt = System.currentTimeMillis())
@@ -562,6 +563,16 @@ class IndexRepository(private val dao: ObjectDao) {
             }
             .map { it.id }
 
+    /** Ids of every non-deleted notebook still stored in plaintext — the Phase-4 bulk-convert set. */
+    suspend fun getPlaintextNotebookIds(): List<String> =
+        dao.getAllNotDeleted()
+            .filter { entity ->
+                if (entity.type != ObjectType.NOTEBOOK) return@filter false
+                val obj = try { entity.notebookMeta() } catch (_: Exception) { return@filter false }
+                !obj.encrypted
+            }
+            .map { it.id }
+
     suspend fun getEncryptionInfo(notebookId: String): EncryptionInfo {
         val entity = dao.getById(notebookId) ?: return EncryptionInfo.NONE
         val obj = entity.notebookMeta()
@@ -569,8 +580,9 @@ class IndexRepository(private val dao: ObjectDao) {
     }
 
     /**
-     * Write encryption state to the index row. When [encrypted] is true, also clears the snapshot
-     * to prevent plaintext page content from leaking into the global (unencrypted) index.
+     * Write encryption state to the index row. Clears the snapshot only when converting to
+     * private (NOTEBOOK) scope — a GLOBAL-scope cover stays valid because the index is itself
+     * encrypted under the global key.
      */
     suspend fun setEncryptionState(notebookId: String, encrypted: Boolean, keyScope: KeyScope?) {
         val entity = dao.getById(notebookId) ?: return
@@ -578,7 +590,7 @@ class IndexRepository(private val dao: ObjectDao) {
         val updated = obj.copy(
             encrypted = encrypted,
             keyScope = keyScope,
-            snapshot = if (encrypted) null else obj.snapshot,
+            snapshot = if (encrypted && keyScope != KeyScope.GLOBAL) null else obj.snapshot,
         )
         dao.update(entity.withNotebookMeta(updated).copy(updatedAt = System.currentTimeMillis()))
     }
