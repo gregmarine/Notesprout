@@ -1,5 +1,6 @@
 package com.notesprout.android.data
 
+import com.notesprout.android.crypto.KeyScope
 import com.notesprout.android.data.index.ActivityType
 import com.notesprout.android.data.index.CalendarDao
 import com.notesprout.android.data.index.IndexRepository
@@ -39,10 +40,11 @@ class DayHistoryRepository(
     enum class Kind { OPENED, EDITED, CREATED }
 
     /**
-     * Card cover info for a notebook: [encrypted] notebooks show a lock icon and expose no
-     * [snapshotB64] (plaintext-leak guard, matching MainActivity's list rendering).
+     * Card cover info for a notebook: [locked] notebooks show a lock icon and expose no
+     * [snapshotB64] (plaintext-leak guard, matching MainActivity's list rendering). Only
+     * NOTEBOOK-scope (private) encryption locks — GLOBAL-scope covers render normally.
      */
-    data class NotebookCover(val encrypted: Boolean, val snapshotB64: String?)
+    data class NotebookCover(val locked: Boolean, val snapshotB64: String?)
 
     // region Logging
 
@@ -102,13 +104,15 @@ class DayHistoryRepository(
 
     /**
      * Cover for a notebook card. Missing / undecodable rows resolve to a plain notebook icon
-     * (no cover, not encrypted). Encrypted notebooks never expose a snapshot.
+     * (no cover, not locked). Only NOTEBOOK-scope (private) encryption locks the cover behind an
+     * icon; GLOBAL-scope covers render (the index is encrypted at rest and the key is available).
      */
     suspend fun coverFor(notebookId: String): NotebookCover = withContext(Dispatchers.IO) {
         val entity = indexRepo.getNotebook(notebookId) ?: return@withContext NotebookCover(false, null)
         val obj = runCatching { entity.notebookMeta() }.getOrNull()
             ?: return@withContext NotebookCover(false, null)
-        NotebookCover(obj.encrypted, if (obj.encrypted) null else obj.snapshot)
+        val locked = obj.encrypted && obj.keyScope != KeyScope.GLOBAL
+        NotebookCover(locked, if (locked) null else obj.snapshot)
     }
 
     /**
