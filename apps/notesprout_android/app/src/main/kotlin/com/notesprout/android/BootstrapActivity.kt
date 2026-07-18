@@ -2,8 +2,12 @@ package com.notesprout.android
 
 import android.content.Intent
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.view.Gravity
+import android.view.View
 import android.view.ViewGroup.LayoutParams.WRAP_CONTENT
+import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
@@ -24,10 +28,23 @@ import kotlinx.coroutines.launch
  */
 class BootstrapActivity : AppCompatActivity() {
 
+    private val handler = Handler(Looper.getMainLooper())
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContentView(preparingView())
-        lifecycleScope.launch { boot() }
+        // Just a paper-white screen up front — the warm-cache index open is instant, so a normal
+        // launch should show no text (the old "Preparing your library…" flashed as an awkward blip).
+        val root = FrameLayout(this).apply {
+            setBackgroundColor(ContextCompat.getColor(this@BootstrapActivity, R.color.paperWhite))
+        }
+        setContentView(root)
+        // Reveal the message only if prep is actually slow: a first-run migration, a cold
+        // key-derivation, or while an unlock prompt is up. Cancelled the moment boot() finishes.
+        val reveal = Runnable { root.addView(preparingView()) }
+        handler.postDelayed(reveal, REVEAL_DELAY_MS)
+        lifecycleScope.launch {
+            try { boot() } finally { handler.removeCallbacks(reveal) }
+        }
     }
 
     private suspend fun boot() {
@@ -74,6 +91,8 @@ class BootstrapActivity : AppCompatActivity() {
         val ink = ContextCompat.getColor(this, R.color.inkBlack)
         val light = ContextCompat.getColor(this, R.color.inkLight)
         return LinearLayout(this).apply {
+            layoutParams = FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT)
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
             setBackgroundColor(ContextCompat.getColor(this@BootstrapActivity, R.color.paperWhite))
@@ -91,5 +110,11 @@ class BootstrapActivity : AppCompatActivity() {
                 setPadding(0, 24, 0, 0)
             }, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT))
         }
+    }
+
+    companion object {
+        /** Grace period before showing "Preparing your library…" — long enough that a warm-cache
+         *  (instant) open never flashes text, short enough to reassure on a genuinely slow prep. */
+        private const val REVEAL_DELAY_MS = 450L
     }
 }
