@@ -68,6 +68,14 @@ All three checks run in the same background thread, in priority order:
 2. **Scribble-to-erase** — dense + zigzag + crosses ≥1 object → erases hit objects.
 3. **Normal stroke** — fire `onPenLifted`; activity saves to DB.
 
+A **Gate 0 shape-dwell** check precedes these in the code, but is disabled
+(`SHAPE_DWELL_ENABLED = false`) — see [`shape-objects.md`](shape-objects.md). Smart lasso and
+scribble-erase are unaffected by that flag and are evaluated on the direct path.
+
+Note that any gate which matches **consumes the stroke**: it is discarded rather than persisted, and
+`onPenLifted` never fires for it. That is correct for a deliberate gesture, but it means loose
+thresholds here show up to the user as handwriting that silently fails to register. Tune with care.
+
 ### Detection heuristics (both drawing engines)
 
 A completed stroke is a **smart-lasso candidate** when ALL THREE hold:

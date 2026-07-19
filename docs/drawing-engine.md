@@ -8,7 +8,7 @@
 - `notebook/NotebookView.kt` — interface for both engines; all drawing, lasso, heading, render ops
 - `notebook/OnyxNotebookView.kt` — BOOX: TouchHelper, RawInputCallback. `onPenLifted` fires on `onEndRawDrawing`. `onBeginRawDrawing` re-enables render guarded by `!isEraserMode`.
 - `notebook/GenericNotebookView.kt` — standard Canvas: two-layer Bitmap, stylus-only (`TOOL_TYPE_STYLUS` + `TOOL_TYPE_ERASER`), historical point capture. `onPenLifted` fires on `ACTION_UP`.
-- `NotebookActivity.kt` — fullscreen immersive, multi-page state, incremental save via `insertOrIgnore`. One-finger deliberate swipe for page navigation (three guards: distance ≥50% screen width, velocity ≥1.5× fling threshold, horizontal dominance). Two-finger swipe left/right inserts a page after/before current and navigates to it (same guards). Two-finger stationary double-tap = undo; three-finger stationary double-tap = redo. On BOOX the Onyx SDK intercepts 3-finger touches and sends `ACTION_CANCEL` before `ACTION_UP` — the 3-finger detector treats a cancel on an armed, stationary 3-finger gesture as tap completion.
+- `NotebookActivity.kt` — fullscreen immersive, multi-page state, incremental save via `insertOrIgnore`. One-finger deliberate swipe for page navigation (three guards: distance ≥50% screen width, velocity ≥1.5× fling threshold, horizontal dominance). Two-finger swipe left/right inserts a page after/before current and navigates to it (same guards). Two-finger stationary double-tap = undo; three-finger stationary double-tap = redo. On BOOX the Onyx SDK intercepts 3-finger touches and sends `ACTION_CANCEL` before `ACTION_UP` — the 3-finger detector treats a cancel on an armed, stationary 3-finger gesture as tap completion. All of these detectors sit behind the pen-activity gate (see below) so a resting palm can't drive them.
 - `MainActivity.kt` — notebook list, adaptive grid (3/2 cols at 480dp), pagination, empty state, bottom bar.
 
 ## Key Build Facts
@@ -33,7 +33,7 @@
 - `onPenLifted` is a DB-save trigger only — does NOT touch the overlay.
 
 **Toolbar touch → overlay release:**
-- Any finger `ACTION_DOWN` within `drawingToolbar.bottom` (intercepted in `NotebookActivity.dispatchTouchEvent`) calls `drawingView.releaseRender()` before the child button handles the event.
+- Any finger `ACTION_DOWN` within `drawingToolbar.bottom` (intercepted in `NotebookActivity.dispatchTouchEvent`) calls `drawingView.releaseRender()` before the child button handles the event — **unless the pen-activity gate is closed** (see below); a palm landing over the bar mid-word is not a button press.
 - `releaseRender()`: `setRawDrawingRenderEnabled(false)` → `invalidate()`. No `handwritingRepaint` needed.
 - Overlay re-enables automatically via `onBeginRawDrawing` on the next pen stroke.
 - Must use `dispatchTouchEvent` (not `setOnTouchListener`) — button children always consume touches, so `setOnTouchListener` on the ViewGroup never fires.
@@ -59,6 +59,56 @@
 - **Focus-independent reclaim (`resumeDrawing()`):** hosts call this from `onResume` (**not** `enableDrawing()`) so the surviving screen reclaims the pipeline without depending on the BOOX-flaky `onWindowFocusChanged(true)` event — reopen if released, restart if superseded (an overlay took it), else just re-enable. DayDetail also calls it when entering **Note** mode (`setViewMode`).
 - **Clean handoff (`releaseForHandoff()`):** the opaque "open another drawing screen and finish" paths — calendar/day-detail → notebook (paste/send), notebook → notebook (recents-switch / link-follow), encrypt/decrypt reopen — call this immediately before `startActivity` so the outgoing view closes its session *while still the owner*, leaving no dangling raw-input session. The ownership guard remains the safety net for paths that don't (translucent overlays, backgrounding).
 - **Diagnostics (`EPD_TIMING`):** `PEN_OWNER_CLAIMED`, `CLOSE_RAW_DRAWING_SKIPPED reason=notOwner` (guard catching a would-be clobber), `RESUME_DRAWING`, `RELEASE_FOR_HANDOFF`.
+
+## Pen-Activity Gate — Palm vs. Finger Gestures
+
+**The problem.** On Onyx, stylus ink runs through the SDK raw-drawing pipeline and never produces
+Android `MotionEvent`s — but a palm resting on the glass still does. Every drawing host fed finger
+events unconditionally to its gesture detectors, so a palm roll mid-word registered as a
+tap / swipe / double-tap. The handlers that fired then reached into the **live pen session**
+(`releaseRender()`, or `setLimitRect()` via the toolbar toggle), dropping the stroke being written.
+One cause, two symptoms: strokes intermittently not registering, and false-positive double-taps.
+
+**The gate.** `NotebookView.isPenActive` — true while the stylus is down, plus a tail of
+`PEN_ACTIVE_TAIL_MS` (350 ms) after it lifts. The tail is deliberately longer than the platform
+double-tap window (~300 ms) so the second half of a palm-induced "double tap" can't land just after
+the pen leaves the glass and be treated as a clean gesture. Short enough that a deliberate finger tap
+right after writing still registers — **this constant is the tuning dial** if taps ever feel
+swallowed.
+
+Tracked in both engines, from both directions:
+
+| Engine | Source of truth |
+|---|---|
+| `OnyxNotebookView` | `onBeginRawDrawing` / `onEndRawDrawing` **and** `onBeginRawErasing` / `onEndRawErasing` (marked *before* the mode guards), **plus** stylus `MotionEvent`s in `onTouchEvent` — lasso / lasso-eraser / text-placement / shape-transform disable raw drawing, so the SDK callbacks never fire in those modes and the stylus arrives as an ordinary event |
+| `GenericNotebookView` | stylus `MotionEvent`s in `onTouchEvent` — all ink arrives this way, so one hook covers every mode |
+
+**Applied on all five drawing screens.** Each checks `drawingView.isPenActive` at the top of its
+finger branch in `dispatchTouchEvent` and, on the first suppressed event, latches
+`fingerGesturesSuppressed` and calls its own `cancelFingerGestures()`.
+
+| Screen | Gated detectors |
+|---|---|
+| `NotebookActivity` | page swipe, link/sticky follow, toolbar toggle, multi-finger undo/redo |
+| `ScratchpadActivity` | page swipe, sticky tap, multi-finger undo/redo |
+| `CalendarActivity` | nav swipe + day tap, sticky tap, multi-finger undo/redo |
+| `DayDetailActivity` | sticky tap, multi-finger undo/redo (NOTE view only) |
+| `StickyNoteEditorActivity` | multi-finger undo/redo |
+
+**Two rules when touching this code:**
+
+- **`cancelFingerGestures()` must reset state fields directly — never route a synthetic
+  `ACTION_CANCEL` through the detectors.** Every screen carries the Onyx 3-finger workaround, where a
+  cancel on an armed, stationary 3-finger gesture counts as a *completed* tap. Routing through it
+  would fire the exact false positive the gate exists to prevent.
+- **Clear the first-tap timestamps** (`twoFingerTapFirstTime`, `threeFingerTapFirstTime`,
+  `toggleFirstTapTime`), not just the in-flight flags. A stale armed first tap otherwise pairs with a
+  real tap after the pen lifts and fires a phantom undo / redo / toolbar toggle.
+
+On the four secondary screens the gate returns early out of the whole finger branch, so the
+chrome/toolbar `releaseRender()` is skipped too. In `NotebookActivity` that release is entangled with
+overflow-menu dismissal logic that must keep running, so there only the release call itself is
+guarded. Same effect, different shape.
 
 ## Tool-State Invariants (OnyxNotebookView)
 

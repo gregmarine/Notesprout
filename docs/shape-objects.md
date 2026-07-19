@@ -96,11 +96,22 @@ After construction a rotation matrix is applied around `(cx, cy)` if `rotationDe
 
 ## Dwell Trigger and Gate Order
 
+> **Gate 0 is currently DISABLED** — `SHAPE_DWELL_ENABLED = false` in `NotebookConstants.kt`.
+> The trigger never fired reliably in practice, and every stroke it evaluated was a stroke that
+> could be silently swallowed instead of persisted (a contributor to the "strokes not registering"
+> reports). The recognizer, the dwell tracking, `onShapeRecognized`, and the whole downstream
+> pipeline are **intentionally left in place** — flip the flag to `true` to reinstate the trigger
+> with no other change. Gates 1 and 2 are unaffected and remain active. Shapes created via the
+> insert-shape toolbar and the lasso "Convert to Shape" path are unaffected either way.
+>
+> The rest of this section describes the trigger as built, for when it is re-enabled.
+
 Shape recognition fires at **pen lift** via the gesture-detection pipeline in
 `OnyxNotebookView` and `GenericNotebookView`. Gate order (first match wins):
 
 ```
-Gate 0 — Shape dwell:    single stroke held still ≥ SHAPE_DWELL_MS (700 ms)
+Gate 0 — Shape dwell:    [DISABLED via SHAPE_DWELL_ENABLED]
+                         single stroke held still ≥ SHAPE_DWELL_MS (700 ms)
                          within SHAPE_DWELL_RADIUS_DP (6 dp) of the lift point
                          → feed stroke points to ShapeRecognizer on a background thread
                          → on success: emit onShapeRecognized, erase stroke, insert ShapeRender
@@ -112,6 +123,15 @@ Gate 3 — Normal stroke:  committed to the EPD layer as a drawn stroke
 The dwell window is tracked per-point using raw stylus timestamps so that the batch-delivery
 pattern on BOOX (all points arrive at once at pen-lift) doesn't collapse the dwell window to ~0 ms.
 The stillness radius uses squared-distance comparison to avoid a `sqrt()` per point.
+
+**Unverified before re-enabling — possible mixed clock.** `OnyxNotebookView.renderStroke` sets
+`lastMoveTimeMs = raw.timestamp` (the Onyx SDK's `TouchPoint` clock), but `onEndRawDrawing` computes
+`dwellMs = System.currentTimeMillis() - lastMoveTimeMs` (epoch clock). If `TouchPoint.timestamp` is
+uptime-based rather than epoch-based, `dwellMs` is astronomically large and **every** stroke becomes
+a dwell candidate — routing all handwriting through `ShapeRecognizer`, where an unlucky letter can be
+converted to a shape. This was noticed during the 2026-07-19 dropped-stroke investigation but not
+confirmed on-device (disabling the gate made it moot). Check the SDK's clock base before flipping
+`SHAPE_DWELL_ENABLED` back on.
 
 Only a **single-stroke** selection is fed to the recognizer. Multi-stroke shape assembly is a
 deferred backlog item.
@@ -235,9 +255,12 @@ Shape objects are fully supported in all three drawing hosts:
 
 | Host | Dwell trigger | Insert toolbar | Lasso/erase | Lasso convert | Transform | Clipboard | Export |
 |---|---|---|---|---|---|---|---|
-| `NotebookActivity` (Onyx + Generic) | Yes | Yes | Yes | Yes | Yes | Yes | PDF |
-| `ScratchpadActivity` | Yes | No | Yes | Yes | Yes | Yes | PNG/PDF |
-| `StickyNoteEditorActivity` | Yes | No | Yes | Yes | Yes | Yes | (in sticky note) |
+| `NotebookActivity` (Onyx + Generic) | Wired (off) | Yes | Yes | Yes | Yes | Yes | PDF |
+| `ScratchpadActivity` | Wired (off) | No | Yes | Yes | Yes | Yes | PNG/PDF |
+| `StickyNoteEditorActivity` | Wired (off) | No | Yes | Yes | Yes | Yes | (in sticky note) |
+
+"Wired (off)" — the dwell path exists in every host but is gated off globally by
+`SHAPE_DWELL_ENABLED`; re-enabling restores it on all three at once. Every other column is live.
 
 Cross-host clipboard (notebook ↔ scratch pad ↔ sticky) carries `ShapeRender` objects; the
 receiving host reconstructs them via `ShapeRender.from()`.
