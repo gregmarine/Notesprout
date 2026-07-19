@@ -639,7 +639,7 @@ class TemplateBrowserActivity : AppCompatActivity() {
         dialog.window?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE)
         dialog.show()
         dialog.window?.setElevation(0f)
-        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
 
         dialogBinding.editNotebookName.requestFocus()
         dialogBinding.editNotebookName.postDelayed({
@@ -788,7 +788,7 @@ class TemplateBrowserActivity : AppCompatActivity() {
                     .create()
                 dialog.show()
                 dialog.window?.setElevation(0f)
-                dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+                dialog.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
             } else {
                 executePickerOperation(state, source, null)
             }
@@ -1521,7 +1521,7 @@ class TemplateBrowserActivity : AppCompatActivity() {
                 .create()
             dialog.show()
             dialog.window?.setElevation(0f)
-            dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+            dialog.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
         }
     }
 
@@ -1570,7 +1570,7 @@ class TemplateBrowserActivity : AppCompatActivity() {
         dialog.window?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE)
         dialog.show()
         dialog.window?.setElevation(0f)
-        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
 
         dialogBinding.editNotebookName.requestFocus()
         dialogBinding.editNotebookName.postDelayed({
@@ -1618,7 +1618,7 @@ class TemplateBrowserActivity : AppCompatActivity() {
         dialog.window?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE)
         dialog.show()
         dialog.window?.setElevation(0f)
-        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
 
         dialogBinding.editNotebookName.requestFocus()
         dialogBinding.editNotebookName.postDelayed({
@@ -1647,7 +1647,7 @@ class TemplateBrowserActivity : AppCompatActivity() {
             .create()
         dialog.show()
         dialog.window?.setElevation(0f)
-        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
     }
 
     // ── Delete template folder confirmation ───────────────────────────────────
@@ -1665,7 +1665,7 @@ class TemplateBrowserActivity : AppCompatActivity() {
             .create()
         dialog.show()
         dialog.window?.setElevation(0f)
-        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
     }
 
     // ── New template folder dialog ────────────────────────────────────────────
@@ -1703,7 +1703,7 @@ class TemplateBrowserActivity : AppCompatActivity() {
         dialog.window?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE)
         dialog.show()
         dialog.window?.setElevation(0f)
-        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
 
         dialogBinding.editNotebookName.requestFocus()
         dialogBinding.editNotebookName.postDelayed({

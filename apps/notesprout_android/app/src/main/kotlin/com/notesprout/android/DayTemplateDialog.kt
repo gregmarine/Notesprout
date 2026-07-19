@@ -157,7 +157,7 @@ class DayTemplateDialog(
 
         dialog.show()
         dialog.window?.setElevation(0f)
-        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
         val dm = ctx.resources.displayMetrics
         dialog.window?.setLayout((dm.widthPixels * 0.9f).toInt(), (dm.heightPixels * 0.7f).toInt())
     }

@@ -1051,7 +1051,7 @@ class NotebookActivity : AppCompatActivity() {
             dialog.show()
             // Style after show() — window only exists once the dialog is displayed.
             dialog.window?.setElevation(0f)
-            dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+            dialog.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
         }
 
         binding.btnEraseAll.setOnClickListener {
@@ -1100,7 +1100,7 @@ class NotebookActivity : AppCompatActivity() {
             dialog.show()
             // Style after show() — window only exists once the dialog is displayed.
             dialog.window?.setElevation(0f)
-            dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+            dialog.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
         }
 
         // Pen tool button — activates pen mode (default)
@@ -3747,7 +3747,7 @@ class NotebookActivity : AppCompatActivity() {
             .create()
         dialog.show()
         dialog.window?.setElevation(0f)
-        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
 
         try {
             sealForConversion()
@@ -4544,7 +4544,7 @@ class NotebookActivity : AppCompatActivity() {
             .create()
         dialog.show()
         dialog.window?.setElevation(0f)
-        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
 
         val handler = android.os.Handler(android.os.Looper.getMainLooper())
         lifecycleScope.launch {
@@ -4584,7 +4584,7 @@ class NotebookActivity : AppCompatActivity() {
             .create()
         d.show()
         d.window?.setElevation(0f)
-        d.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+        d.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
     }
 
     private fun shareText(file: java.io.File) {
@@ -4662,7 +4662,7 @@ class NotebookActivity : AppCompatActivity() {
                             .create()
                         d.show()
                         d.window?.setElevation(0f)
-                        d.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+                        d.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
                         cont.invokeOnCancellation { d.dismiss() }
                     }
                     if (!confirmed) return@launch
@@ -4695,7 +4695,7 @@ class NotebookActivity : AppCompatActivity() {
                 .create()
             dialog.show()
             dialog.window?.setElevation(0f)
-            dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+            dialog.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
 
             val soilFile = try {
                 withContext(Dispatchers.IO) {
@@ -4741,7 +4741,7 @@ class NotebookActivity : AppCompatActivity() {
             .create()
         dialog.show()
         dialog.window?.setElevation(0f)
-        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
 
         val handler = android.os.Handler(android.os.Looper.getMainLooper())
 
@@ -4781,7 +4781,7 @@ class NotebookActivity : AppCompatActivity() {
             .create()
         d.show()
         d.window?.setElevation(0f)
-        d.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+        d.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
     }
 
     private fun sharePdf(file: java.io.File) {
@@ -4812,7 +4812,7 @@ class NotebookActivity : AppCompatActivity() {
             .create()
         d.show()
         d.window?.setElevation(0f)
-        d.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+        d.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
     }
 
     private fun shareSoil(file: java.io.File) {
@@ -5840,7 +5840,7 @@ class NotebookActivity : AppCompatActivity() {
                     .also { d ->
                         d.show()
                         d.window?.setElevation(0f)
-                        d.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+                        d.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
                     }
             }
             if (!proceed) return
@@ -5858,7 +5858,7 @@ class NotebookActivity : AppCompatActivity() {
                 .also { d ->
                     d.show()
                     d.window?.setElevation(0f)
-                    d.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+                    d.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
                 }
         } ?: return
 
@@ -6562,7 +6562,7 @@ class NotebookActivity : AppCompatActivity() {
                     dialog.window?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE)
                     dialog.show()
                     dialog.window?.setElevation(0f)
-                    dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+                    dialog.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
                     editView.requestFocus()
                     editView.postDelayed({
                         ViewCompat.getWindowInsetsController(editView)
@@ -6970,7 +6970,7 @@ class NotebookActivity : AppCompatActivity() {
         dialog.window?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE)
         dialog.show()
         dialog.window?.setElevation(0f)
-        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
 
         dialogBinding.editHeadingText.requestFocus()
         dialogBinding.editHeadingText.selectAll()

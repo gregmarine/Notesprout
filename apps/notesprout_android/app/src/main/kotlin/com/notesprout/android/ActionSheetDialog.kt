@@ -131,7 +131,7 @@ class ActionSheetDialog(private val context: Context) {
         dialog.show()
 
         dialog.window?.setElevation(0f)
-        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
     }
 
     private fun makeDivider(context: Context, color: Int, heightPx: Int): View =

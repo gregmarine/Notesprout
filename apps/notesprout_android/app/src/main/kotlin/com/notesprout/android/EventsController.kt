@@ -221,7 +221,7 @@ class EventsController(
     private fun styleAndShow(dialog: AlertDialog) {
         dialog.show()
         dialog.window?.setElevation(0f)
-        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
     }
 
     private fun fmtMin(m: Int): String {

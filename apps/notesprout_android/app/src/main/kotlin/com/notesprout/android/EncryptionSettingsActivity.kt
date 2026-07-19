@@ -113,7 +113,7 @@ class EncryptionSettingsActivity : AppCompatActivity() {
                 .also { d ->
                     d.show()
                     d.window?.setElevation(0f)
-                    d.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+                    d.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
                 }
         }
     }
@@ -291,7 +291,7 @@ class EncryptionSettingsActivity : AppCompatActivity() {
             .create()
             .also { d ->
                 d.window?.setElevation(0f)
-                d.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+                d.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
             }
     }
 
@@ -323,7 +323,7 @@ class EncryptionSettingsActivity : AppCompatActivity() {
             .create()
             .also { d ->
                 d.window?.setElevation(0f)
-                d.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+                d.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
             }
         progress.show()
 
@@ -376,7 +376,7 @@ class EncryptionSettingsActivity : AppCompatActivity() {
             .also { d ->
                 d.show()
                 d.window?.setElevation(0f)
-                d.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+                d.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
             }
     }
 

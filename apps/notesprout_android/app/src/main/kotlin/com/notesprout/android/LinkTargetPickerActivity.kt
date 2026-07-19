@@ -1296,7 +1296,7 @@ class LinkTargetPickerActivity : AppCompatActivity() {
         dialog.window?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE)
         dialog.show()
         dialog.window?.setElevation(0f)
-        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
 
         dialogBinding.editNotebookName.requestFocus()
         dialogBinding.editNotebookName.postDelayed({

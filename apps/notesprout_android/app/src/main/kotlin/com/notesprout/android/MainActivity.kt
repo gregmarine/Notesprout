@@ -1452,7 +1452,7 @@ class MainActivity : AppCompatActivity() {
         dialog.window?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE)
         dialog.show()
         dialog.window?.setElevation(0f)
-        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
 
         dialogBinding.editNotebookName.requestFocus()
         dialogBinding.editNotebookName.postDelayed({
@@ -1499,7 +1499,7 @@ class MainActivity : AppCompatActivity() {
         dialog.window?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE)
         dialog.show()
         dialog.window?.setElevation(0f)
-        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
 
         dialogBinding.editNotebookName.requestFocus()
         dialogBinding.editNotebookName.postDelayed({
@@ -1547,7 +1547,7 @@ class MainActivity : AppCompatActivity() {
         dialog.window?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE)
         dialog.show()
         dialog.window?.setElevation(0f)
-        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
 
         dialogBinding.editNotebookName.requestFocus()
         dialogBinding.editNotebookName.postDelayed({
@@ -1876,7 +1876,7 @@ class MainActivity : AppCompatActivity() {
                 .create()
             dialog.setOnShowListener {
                 dialog.window?.setElevation(0f)
-                dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+                dialog.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
             }
             dialog.show()
         }
@@ -1902,7 +1902,7 @@ class MainActivity : AppCompatActivity() {
                 .create()
             progress.show()
             progress.window?.setElevation(0f)
-            progress.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+            progress.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
 
             val result = try {
                 com.notesprout.android.crypto.GlobalConversion.start(
@@ -1964,7 +1964,7 @@ class MainActivity : AppCompatActivity() {
             .create()
         dialog.show()
         dialog.window?.setElevation(0f)
-        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
 
         try {
             val file = soilFile(this, entity.id)
@@ -1994,7 +1994,7 @@ class MainActivity : AppCompatActivity() {
                 .also { d ->
                     d.show()
                     d.window?.setElevation(0f)
-                    d.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+                    d.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
                 }
             return
         }
@@ -2017,7 +2017,7 @@ class MainActivity : AppCompatActivity() {
             .create()
         dialog.show()
         dialog.window?.setElevation(0f)
-        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
 
         try {
             val file = soilFile(this, entity.id)
@@ -2053,7 +2053,7 @@ class MainActivity : AppCompatActivity() {
             .also { d ->
                 d.show()
                 d.window?.setElevation(0f)
-                d.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+                d.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
             }
     }
 
@@ -2085,7 +2085,7 @@ class MainActivity : AppCompatActivity() {
             .create()
         dialog.show()
         dialog.window?.setElevation(0f)
-        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
 
         try {
             val file = soilFile(this, entity.id)
@@ -2248,7 +2248,7 @@ class MainActivity : AppCompatActivity() {
                     .create()
                 dialog.show()
                 dialog.window?.setElevation(0f)
-                dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+                dialog.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
             } else {
                 executePickerOperation(state, source, null)
             }
@@ -2439,7 +2439,7 @@ class MainActivity : AppCompatActivity() {
             .create()
         dialog.show()
         dialog.window?.setElevation(0f)
-        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
 
         var compacted = 0
         var bytesFreed = 0L
@@ -2566,7 +2566,7 @@ class MainActivity : AppCompatActivity() {
             .create()
         dialog.show()
         dialog.window?.setElevation(0f)
-        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
     }
 
     private fun deleteFolder(entity: ObjectEntity) {
@@ -2586,7 +2586,7 @@ class MainActivity : AppCompatActivity() {
             .create()
         dialog.show()
         dialog.window?.setElevation(0f)
-        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
     }
 
     private fun deleteNotebook(entity: ObjectEntity) {
@@ -2646,7 +2646,7 @@ class MainActivity : AppCompatActivity() {
                 .setView(tvMessage).setCancelable(false).create()
             dialog.show()
             dialog.window?.setElevation(0f)
-            dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+            dialog.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
             val handler = android.os.Handler(android.os.Looper.getMainLooper())
 
             val outFile = try {
@@ -2693,7 +2693,7 @@ class MainActivity : AppCompatActivity() {
             .create()
         d.show()
         d.window?.setElevation(0f)
-        d.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+        d.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
     }
 
     /** PDF sub-choice: render with the page template or just the handwriting (strokes only). */
@@ -2737,7 +2737,7 @@ class MainActivity : AppCompatActivity() {
                             .create()
                         d.show()
                         d.window?.setElevation(0f)
-                        d.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+                        d.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
                         cont.invokeOnCancellation { d.dismiss() }
                     }
                     if (!confirmed) return@launch
@@ -2761,7 +2761,7 @@ class MainActivity : AppCompatActivity() {
                 .create()
             dialog.show()
             dialog.window?.setElevation(0f)
-            dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+            dialog.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
 
             val handler = android.os.Handler(android.os.Looper.getMainLooper())
 
@@ -2819,7 +2819,7 @@ class MainActivity : AppCompatActivity() {
                 .create()
             dialog.show()
             dialog.window?.setElevation(0f)
-            dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+            dialog.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
 
             val soilFile = try {
                 withContext(Dispatchers.IO) {
@@ -2875,7 +2875,7 @@ class MainActivity : AppCompatActivity() {
             .create()
         d.show()
         d.window?.setElevation(0f)
-        d.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+        d.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
     }
 
     private fun showExportChoice(file: java.io.File) {
@@ -2900,7 +2900,7 @@ class MainActivity : AppCompatActivity() {
             .create()
         d.show()
         d.window?.setElevation(0f)
-        d.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+        d.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
     }
 
     /**
@@ -3078,7 +3078,7 @@ class MainActivity : AppCompatActivity() {
             .also { d ->
                 d.show()
                 d.window?.setElevation(0f)
-                d.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+                d.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
             }
     }
 
@@ -3113,7 +3113,7 @@ class MainActivity : AppCompatActivity() {
             .also { d ->
                 d.show()
                 d.window?.setElevation(0f)
-                d.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+                d.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
             }
     }
 
@@ -3407,7 +3407,7 @@ class MainActivity : AppCompatActivity() {
             .create()
         dialog.show()
         dialog.window?.setElevation(0f)
-        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
         return dialog
     }
 

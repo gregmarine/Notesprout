@@ -66,7 +66,14 @@ its row pitch from canvas height and misaligns when shortened.)
 
 **AlertDialog styling pattern:**
 - `dialog.window?.setSoftInputMode(...)` before `show()`
-- `dialog.window?.setElevation(0f)` and `setBackgroundDrawableResource(R.drawable.shape_bordered)` after `show()` — window only exists once shown
+- `dialog.window?.setElevation(0f)` and `setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)` after `show()` — window only exists once shown
+
+**Floating-window border weight:** anything that floats over a screen — dialogs, prompts, messages,
+the scratch pad and sticky note editor windows — uses `shape_dialog_bordered` (**2dp** inkBlack,
+4dp radius). With no shadows or elevation on e-ink, the heavier stroke is what lifts a window off
+the page. Inner chrome *inside* those windows (buttons, cards, inputs, swatches) stays on
+`shape_bordered` at 1dp. A panel that paints its own background behind the stroke needs padding
+equal to the stroke width (2dp) so the border isn't covered.
 
 **Keyboard (IME) dismissal in dialogs:**
 - On some BOOX devices the IME does not auto-dismiss on dialog close. Always explicitly hide in button click handlers — **not** `setOnDismissListener`.

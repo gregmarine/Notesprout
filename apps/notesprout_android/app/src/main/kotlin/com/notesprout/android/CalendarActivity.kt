@@ -1252,7 +1252,7 @@ class CalendarActivity : AppCompatActivity() {
             .setNegativeButton("Cancel", null)
             .show()
         dialog.window?.setElevation(0f)
-        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
     }
 
     private fun erasePage() {
@@ -1290,7 +1290,7 @@ class CalendarActivity : AppCompatActivity() {
                 .setNegativeButton("Cancel", null)
                 .show()
             dialog.window?.setElevation(0f)
-            dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+            dialog.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
         } else {
             launchNotebookPicker(content, excludeId = null)
         }
@@ -1333,7 +1333,7 @@ class CalendarActivity : AppCompatActivity() {
             .setNegativeButton("Cancel", null)
             .show()
         dialog.window?.setElevation(0f)
-        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
     }
 
     /** Pick the destination notebook (this-notebook prompt when launched from one; else the picker). */
@@ -1349,7 +1349,7 @@ class CalendarActivity : AppCompatActivity() {
                 .setNegativeButton("Cancel", null)
                 .show()
             dialog.window?.setElevation(0f)
-            dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+            dialog.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
         } else {
             launchExportPicker(includeContent, excludeId = null)
         }
@@ -1435,7 +1435,7 @@ class CalendarActivity : AppCompatActivity() {
             .create()
         dlg.show()
         dlg.window?.setElevation(0f)
-        dlg.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+        dlg.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
     }
 
     private fun showBeforeAfterPicker(pageNumber: Int, onChosen: (before: Boolean) -> Unit) {
@@ -1446,7 +1446,7 @@ class CalendarActivity : AppCompatActivity() {
             .setNegativeButton("Cancel", null)
             .show()
         dialog.window?.setElevation(0f)
-        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
     }
 
     /** The page key(s) + render spec(s) the current view exports (Day = AM + PM). */
@@ -1540,7 +1540,7 @@ class CalendarActivity : AppCompatActivity() {
             .setNegativeButton("Stay", null)
             .show()
         dialog.window?.setElevation(0f)
-        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
     }
 
     private fun openExportedNotebook(destId: String, destName: String, firstPageId: String) {

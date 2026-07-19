@@ -221,7 +221,7 @@ class BackupSettingsActivity : AppCompatActivity() {
             .also { d ->
                 d.show()
                 d.window?.setElevation(0f)
-                d.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+                d.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
             }
 
         lifecycleScope.launch {
@@ -270,7 +270,7 @@ class BackupSettingsActivity : AppCompatActivity() {
                 .also { d ->
                     d.show()
                     d.window?.setElevation(0f)
-                    d.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+                    d.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
                 }
 
             refreshUi()
@@ -400,7 +400,7 @@ class BackupSettingsActivity : AppCompatActivity() {
     private fun styleAndShow(d: AlertDialog) {
         d.show()
         d.window?.setElevation(0f)
-        d.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+        d.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
     }
 
     private fun saveDeviceName() {

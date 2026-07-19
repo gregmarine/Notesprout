@@ -16,8 +16,8 @@
         android:layout_height="match_parent"
         android:layout_gravity="center"
         android:orientation="vertical"
-        android:background="@drawable/shape_bordered"
-        android:padding="1dp"
+        android:background="@drawable/shape_dialog_bordered"
+        android:padding="2dp"
         android:clipToOutline="true">
 
         <!-- Chrome bar: title only (single page — no page nav) -->

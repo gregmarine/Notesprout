@@ -239,7 +239,7 @@ class TemplateDialog(
         dialog.show()
         // Flat Notesprout styling — applied after show() because window only exists then.
         dialog.window?.setElevation(0f)
-        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
         // Constrain width to 90% of screen and height to 70% so the list is scrollable.
         val dm = ctx.resources.displayMetrics
         dialog.window?.setLayout(

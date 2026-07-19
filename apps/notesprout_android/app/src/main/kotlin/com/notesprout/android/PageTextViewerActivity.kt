@@ -354,7 +354,7 @@ class PageTextViewerActivity : AppCompatActivity() {
                 .also { d ->
                     d.show()
                     d.window?.setElevation(0f)
-                    d.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+                    d.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
                 }
         }
     }
@@ -504,7 +504,7 @@ class PageTextViewerActivity : AppCompatActivity() {
             .create()
         dlg.show()
         dlg.window?.setElevation(0f)
-        dlg.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+        dlg.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
     }
 
     private fun chooseFormatThen(md: String) {
@@ -518,7 +518,7 @@ class PageTextViewerActivity : AppCompatActivity() {
             .create()
         dlg.show()
         dlg.window?.setElevation(0f)
-        dlg.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+        dlg.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
     }
 
     /** Write [body] to a cache file named after the notebook, then offer Save/Share. */
@@ -559,7 +559,7 @@ class PageTextViewerActivity : AppCompatActivity() {
             .create()
         dlg.show()
         dlg.window?.setElevation(0f)
-        dlg.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+        dlg.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
     }
 
     private fun writePendingExportTo(uri: Uri?) {

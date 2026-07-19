@@ -90,7 +90,7 @@ object PassphrasePrompt {
         dialog.window?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE)
         dialog.show()
         dialog.window?.setElevation(0f)
-        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
 
         val okButton = dialog.getButton(AlertDialog.BUTTON_POSITIVE)
         okButton?.setOnClickListener {
@@ -187,7 +187,7 @@ object PassphrasePrompt {
                 .create()
             d.show()
             d.window?.setElevation(0f)
-            d.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+            d.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
             cont.invokeOnCancellation { d.dismiss() }
         }
         return when (wantsPassword) {

@@ -93,7 +93,7 @@ object SoilExportKeying {
                 .create()
             d.show()
             d.window?.setElevation(0f)
-            d.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+            d.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
             cont.invokeOnCancellation { d.dismiss() }
         }
 
@@ -108,7 +108,7 @@ object SoilExportKeying {
         val dialog = AlertDialog.Builder(activity).setView(tv).setCancelable(false).create()
         dialog.show()
         dialog.window?.setElevation(0f)
-        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
         return try {
             withContext(Dispatchers.IO) { block() }
             dialog.dismiss()

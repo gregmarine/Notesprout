@@ -60,7 +60,7 @@ class HwrSettingsActivity : AppCompatActivity() {
                 setCancelable(false)
                 show()
                 window?.setElevation(0f)
-                window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+                window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
             }
             lifecycleScope.launch {
                 val result = s.installFromUri(uri)
@@ -179,7 +179,7 @@ class HwrSettingsActivity : AppCompatActivity() {
             .also { d ->
                 d.show()
                 d.window?.setElevation(0f)
-                d.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+                d.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
             }
     }
 
@@ -203,7 +203,7 @@ class HwrSettingsActivity : AppCompatActivity() {
             .also { d ->
                 d.show()
                 d.window?.setElevation(0f)
-                d.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+                d.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
             }
     }
 
@@ -226,7 +226,7 @@ class HwrSettingsActivity : AppCompatActivity() {
                 .also { d ->
                     d.show()
                     d.window?.setElevation(0f)
-                    d.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+                    d.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
                 }
         }
     }
@@ -240,7 +240,7 @@ class HwrSettingsActivity : AppCompatActivity() {
             .also { d ->
                 d.show()
                 d.window?.setElevation(0f)
-                d.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+                d.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
             }
     }
 

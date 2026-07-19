@@ -101,7 +101,7 @@ object DayPickerDialog {
             .create()
         dlg.show()
         dlg.window?.setElevation(0f)
-        dlg.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+        dlg.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
     }
 
     // ── Cell builders ────────────────────────────────────────────────────────────

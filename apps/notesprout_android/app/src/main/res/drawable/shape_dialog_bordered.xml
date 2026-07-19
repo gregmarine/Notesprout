@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Floating-window border — dialogs, prompts, messages, and the scratch pad / sticky note
+     editor windows. 2dp stroke so a window reads as lifted off the page on e-ink (no shadows).
+     Inner chrome (buttons, cards, inputs) stays on shape_bordered at 1dp. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android">
+    <solid android:color="@color/paperWhite" />
+    <stroke android:width="2dp" android:color="@color/inkBlack" />
+    <corners android:radius="4dp" />
+</shape>

@@ -296,7 +296,7 @@ class ScratchpadActivity : AppCompatActivity() {
                 .setNegativeButton("Cancel", null)
                 .show()
             dialog.window?.setElevation(0f)
-            dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+            dialog.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
         }
         binding.btnScratchUndo.setOnClickListener { undo() }
         binding.btnScratchRedo.setOnClickListener { redo() }

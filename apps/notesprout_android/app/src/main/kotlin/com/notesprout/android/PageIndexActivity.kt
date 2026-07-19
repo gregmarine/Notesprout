@@ -1319,7 +1319,7 @@ class PageIndexActivity : AppCompatActivity() {
                         .create()
                     d.show()
                     d.window?.setElevation(0f)
-                    d.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+                    d.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
                     cont.invokeOnCancellation { d.dismiss() }
                 }
                 if (!confirmed) return@launch
@@ -1381,7 +1381,7 @@ class PageIndexActivity : AppCompatActivity() {
                     .create()
                 d.show()
                 d.window?.setElevation(0f)
-                d.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+                d.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
                 cont.invokeOnCancellation { d.dismiss() }
             }
             if (openChosen) {
@@ -1527,7 +1527,7 @@ class PageIndexActivity : AppCompatActivity() {
             .create()
         dialog.show()
         dialog.window?.setElevation(0f)
-        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
     }
 
     /**
@@ -1564,7 +1564,7 @@ class PageIndexActivity : AppCompatActivity() {
                         .create()
                     d.show()
                     d.window?.setElevation(0f)
-                    d.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+                    d.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
                     cont.invokeOnCancellation { d.dismiss() }
                 }
                 if (!confirmed) return@launch
@@ -1606,7 +1606,7 @@ class PageIndexActivity : AppCompatActivity() {
             .create()
         dialog.show()
         dialog.window?.setElevation(0f)
-        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
 
         lifecycleScope.launch {
             val pngFile = try {
@@ -1662,7 +1662,7 @@ class PageIndexActivity : AppCompatActivity() {
                                 .create()
                             dlg.show()
                             dlg.window?.setElevation(0f)
-                            dlg.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+                            dlg.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
                             cont.invokeOnCancellation { dlg.dismiss() }
                         }
                         if (!confirmed) return@launch
@@ -1706,7 +1706,7 @@ class PageIndexActivity : AppCompatActivity() {
                         .create()
                     dlg.show()
                     dlg.window?.setElevation(0f)
-                    dlg.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+                    dlg.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
                     cont.invokeOnCancellation { dlg.dismiss() }
                 }
                 if (!confirmed) return@launch
@@ -1723,7 +1723,7 @@ class PageIndexActivity : AppCompatActivity() {
                 .setView(tvMessage).setCancelable(false).create()
             progressDialog.show()
             progressDialog.window?.setElevation(0f)
-            progressDialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+            progressDialog.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
             val handler = android.os.Handler(android.os.Looper.getMainLooper())
 
             val file = try {
@@ -1772,7 +1772,7 @@ class PageIndexActivity : AppCompatActivity() {
             .create()
         d.show()
         d.window?.setElevation(0f)
-        d.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+        d.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
     }
 
     /**
@@ -1789,7 +1789,7 @@ class PageIndexActivity : AppCompatActivity() {
             .create()
         d.show()
         d.window?.setElevation(0f)
-        d.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+        d.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
     }
 
     /**
@@ -1832,7 +1832,7 @@ class PageIndexActivity : AppCompatActivity() {
                             .create()
                         d.show()
                         d.window?.setElevation(0f)
-                        d.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+                        d.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
                         cont.invokeOnCancellation { d.dismiss() }
                     }
                     if (!confirmed) return@launch
@@ -1856,7 +1856,7 @@ class PageIndexActivity : AppCompatActivity() {
                 .create()
             progressDialog.show()
             progressDialog.window?.setElevation(0f)
-            progressDialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+            progressDialog.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
 
             val handler = android.os.Handler(android.os.Looper.getMainLooper())
 
@@ -1911,7 +1911,7 @@ class PageIndexActivity : AppCompatActivity() {
             .create()
         d.show()
         d.window?.setElevation(0f)
-        d.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+        d.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
     }
 
     /**
@@ -1950,7 +1950,7 @@ class PageIndexActivity : AppCompatActivity() {
             .create()
         progressDialog.show()
         progressDialog.window?.setElevation(0f)
-        progressDialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+        progressDialog.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
 
         val handler = android.os.Handler(android.os.Looper.getMainLooper())
 
@@ -2072,7 +2072,7 @@ class PageIndexActivity : AppCompatActivity() {
             .create()
         progressDialog.show()
         progressDialog.window?.setElevation(0f)
-        progressDialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+        progressDialog.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
 
         val handler = android.os.Handler(android.os.Looper.getMainLooper())
 
@@ -2203,7 +2203,7 @@ class PageIndexActivity : AppCompatActivity() {
             .create()
         d.show()
         d.window?.setElevation(0f)
-        d.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+        d.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
     }
 
     /** Encode all session paste/delete/move actions into the result and finish. */
