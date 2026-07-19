@@ -1,7 +1,54 @@
 # MainActivity Feature Systems & Recents
 
-> Referenced from `CLAUDE.md`. Covers notebook/folder management, browse state, search/sort, exports,
-> ML Kit, and the recents system.
+> Referenced from `CLAUDE.md`. Covers the library chrome, notebook/folder management, browse state,
+> search/sort, exports, ML Kit, and the recents system.
+
+## Library Chrome — Zones & Width Buckets (`activity_main.xml`)
+
+The library screen has a **top bar** that is swapped out per browse mode and a **bottom bar** that
+never is. Which bar a control lives in follows from that:
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│ breadcrumb / search / pinned / recents / picker  (swapped)   │  ← mode-specific top bar
+├──────────────────────────────────────────────────────────────┤
+│                        gridContainer                          │
+├──────────────────────────────────────────────────────────────┤
+│  📅 ✏️        |< < n/n > >|            📓+ 📁+ ⋯             │  ← bottom bar (always present)
+│  surface       pagination               actions               │
+└──────────────────────────────────────────────────────────────┘
+```
+
+- **`surfaceButtonsGroup` (start)** — `btnCalendar` + `btnScratchpad`. These are *sibling surfaces*
+  (places to go), not library actions, so they get their own zone opposite the create/overflow
+  group. Because the bottom bar is never replaced by search / pinned / recents mode, one button
+  each is reachable everywhere and needs **no per-mode duplicate** — the group is hidden only in
+  destination-picker mode (`applyPickerModeUI`), where launching another surface mid-flow would be
+  disruptive. Prior to this, `btnScratchpad` was mirrored four times (breadcrumb + pinned + recents
+  + search toolbars) and `btnCalendar` was buried in the overflow row; both are now single buttons.
+- **`paginationGroup` (centre)** — driven only by `isEnabled`, never `visibility`, from
+  `updatePaginationControls`. That matters: layout variants can `gone` individual page buttons without
+  any Kotlin change and without making the view-binding fields nullable.
+- **`actionButtonsGroup` (end)** — `btnNewNotebook` · `btnNewFolder` · `btnMore` (overflow row:
+  Import · Templates · Encryption · HWR · Backup · Compact).
+
+**Width buckets.** The full bar needs **520dp**. Three variants of `activity_main.xml` exist, and a
+device picks the highest matching qualifier:
+
+| Bucket | Range | Devices | Bottom bar |
+|---|---|---|---|
+| `layout/` | < 360dp | — | full bar, pagination centred |
+| `layout-sw360dp/` | 360–479dp | Palma2 Pro (439dp) | first/last-page `gone`, pagination anchored `toEndOf` the surface group — 428dp of 439dp |
+| `layout-sw480dp/` | ≥ 480dp | Go 6 Gen II (571dp), Go 10.3 Gen 2 (992dp), all larger tablets | full bar, pagination centred |
+
+Palma2 Pro is the only device genuinely too narrow for the full bar. The `sw480dp` bucket exists so
+the Go 6 Gen II does **not** fall back to the narrow variant and lose its first/last-page buttons
+despite having ~140dp spare. There is deliberately **no** `layout-sw600dp/activity_main.xml` — it
+would be a byte-identical fourth copy of a ~500-line file, and `sw480dp` already covers everything
+above 600dp. (`layout-sw600dp/` still holds `activity_template_browser.xml`.)
+
+Device dp = `px × 160 ÷ density`; all current BOOX devices report density 300, so
+`dp = px × 0.533`. Verify a bar change against the *narrowest* bucket member, not the flagship.
 
 ## Notebook & Folder Management
 

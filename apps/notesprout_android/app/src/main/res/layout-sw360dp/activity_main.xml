@@ -95,12 +95,6 @@
             android:paddingEnd="16dp" />
 
         <androidx.appcompat.widget.AppCompatImageButton
-            android:id="@+id/btnScratchpadPinned"
-            style="@style/Widget.Notesprout.ToolbarButton"
-            android:src="@drawable/ic_sketching"
-            android:contentDescription="Scratch Pad" />
-
-        <androidx.appcompat.widget.AppCompatImageButton
             android:id="@+id/btnPinnedCancel"
             style="@style/Widget.Notesprout.ToolbarButton"
             android:src="@drawable/ic_x"
@@ -139,12 +133,6 @@
             android:textColor="@color/inkBlack"
             android:paddingStart="16dp"
             android:paddingEnd="16dp" />
-
-        <androidx.appcompat.widget.AppCompatImageButton
-            android:id="@+id/btnScratchpadRecents"
-            style="@style/Widget.Notesprout.ToolbarButton"
-            android:src="@drawable/ic_sketching"
-            android:contentDescription="Scratch Pad" />
 
         <androidx.appcompat.widget.AppCompatImageButton
             android:id="@+id/btnRecentsCancel"
@@ -192,12 +180,6 @@
             style="@style/Widget.Notesprout.ToolbarButton"
             android:src="@drawable/ic_search"
             android:contentDescription="Search notebooks" />
-
-        <androidx.appcompat.widget.AppCompatImageButton
-            android:id="@+id/btnScratchpadSearch"
-            style="@style/Widget.Notesprout.ToolbarButton"
-            android:src="@drawable/ic_sketching"
-            android:contentDescription="Scratch Pad" />
 
         <androidx.appcompat.widget.AppCompatImageButton
             android:id="@+id/btnClearSearch"
@@ -273,7 +255,6 @@
             android:src="@drawable/ic_search"
             android:contentDescription="Search notebooks" />
 
-
         <androidx.appcompat.widget.AppCompatImageButton
             android:id="@+id/btnRecents"
             style="@style/Widget.Notesprout.ToolbarButton"
@@ -285,13 +266,6 @@
             style="@style/Widget.Notesprout.ToolbarButton"
             android:src="@drawable/ic_filter"
             android:contentDescription="Sort" />
-
-        <androidx.appcompat.widget.AppCompatImageButton
-            android:id="@+id/btnScratchpad"
-            style="@style/Widget.Notesprout.ToolbarButton"
-            android:layout_marginStart="4dp"
-            android:src="@drawable/ic_sketching"
-            android:contentDescription="Scratch Pad" />
 
     </LinearLayout>
 
@@ -335,15 +309,8 @@
         android:visibility="gone">
 
         <androidx.appcompat.widget.AppCompatImageButton
-            android:id="@+id/btnCalendar"
-            style="@style/Widget.Notesprout.ToolbarButton"
-            android:src="@drawable/ic_calendar"
-            android:contentDescription="Calendar" />
-
-        <androidx.appcompat.widget.AppCompatImageButton
             android:id="@+id/btnImport"
             style="@style/Widget.Notesprout.ToolbarButton"
-            android:layout_marginStart="4dp"
             android:src="@drawable/ic_import"
             android:contentDescription="Import Notebook" />
 
@@ -386,9 +353,19 @@
     </LinearLayout>
 
     <!--
-        Bottom bar (sw360dp variant): pagination anchored to start, action buttons right-aligned.
-        On narrow screens (e.g. Palma2 Pro) there is not enough room to centre the pagination
-        group when the action buttons are also present, so we left-anchor it instead.
+        Bottom bar (sw360dp variant): sibling-surface buttons at the start, pagination anchored
+        directly after them, action buttons right-aligned.
+
+        Width budget — the tightest device in this bucket is the Palma2 Pro at 439dp
+        (824px @ density 300); the Go 6 Gen II is 571dp and has room to spare:
+            surface     16 + 44 + 4 + 44            = 108dp
+            pagination  44 + 4 + 72 (n/n) + 44      = 164dp   (first/last dropped, see below)
+            actions     44 + 4 + 44 + 4 + 44 + 16   = 156dp
+                                                    = 428dp of 439dp
+        With first/last-page shown this comes to 520dp and overflows, so those two are gone here.
+        There is likewise no room to centre the pagination group once the action buttons are
+        present, so it is anchored to the end of the surface group instead.
+        Height 56dp — matches the notebook activity toolbar for uniformity.
     -->
     <RelativeLayout
         android:id="@+id/bottomBar"
@@ -404,22 +381,62 @@
             android:layout_alignParentTop="true" />
 
         <!--
+            Sibling-surface buttons: Calendar + Scratch Pad, left-aligned.
+            These are places to go, not library actions — hence their own zone, opposite the
+            create/overflow group. The bottom bar is the only chrome that is never swapped out by
+            search / pinned / recents mode, so one button each here is always reachable and needs
+            no per-mode duplicate. Hidden only in destination-picker mode.
+        -->
+        <LinearLayout
+            android:id="@+id/surfaceButtonsGroup"
+            android:layout_width="wrap_content"
+            android:layout_height="match_parent"
+            android:orientation="horizontal"
+            android:layout_alignParentStart="true"
+            android:layout_centerVertical="true"
+            android:layout_marginStart="16dp"
+            android:gravity="center_vertical">
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnCalendar"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:src="@drawable/ic_calendar"
+                android:contentDescription="Calendar" />
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnScratchpad"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:layout_marginStart="4dp"
+                android:src="@drawable/ic_sketching"
+                android:contentDescription="Scratch Pad" />
+
+        </LinearLayout>
+
+        <!--
             Pagination group: |<  <  n/n  >  >|
-            Left-anchored on narrow screens so it does not overlap the action buttons.
+            Anchored after the surface group on narrow screens so the two do not overlap.
         -->
         <LinearLayout
             android:id="@+id/paginationGroup"
             android:layout_width="wrap_content"
             android:layout_height="match_parent"
             android:orientation="horizontal"
-            android:layout_alignParentStart="true"
+            android:layout_toEndOf="@id/surfaceButtonsGroup"
+            android:layout_centerVertical="true"
             android:gravity="center_vertical">
 
+            <!--
+                First/last-page jumps are dropped on narrow screens to make room for the surface
+                buttons — prev/next plus the n/n readout still cover paging. Kept in the tree (not
+                deleted) so the view-binding fields stay non-null across all layout variants;
+                MainActivity only ever sets isEnabled on these, never visibility.
+            -->
             <androidx.appcompat.widget.AppCompatImageButton
                 android:id="@+id/btnFirstPage"
                 style="@style/Widget.Notesprout.ToolbarButton"
                 android:src="@drawable/ic_page_first"
-                android:contentDescription="First page" />
+                android:contentDescription="First page"
+                android:visibility="gone" />
 
             <androidx.appcompat.widget.AppCompatImageButton
                 android:id="@+id/btnPrevPage"
@@ -452,7 +469,8 @@
                 style="@style/Widget.Notesprout.ToolbarButton"
                 android:layout_marginStart="4dp"
                 android:src="@drawable/ic_page_last"
-                android:contentDescription="Last page" />
+                android:contentDescription="Last page"
+                android:visibility="gone" />
 
         </LinearLayout>
 

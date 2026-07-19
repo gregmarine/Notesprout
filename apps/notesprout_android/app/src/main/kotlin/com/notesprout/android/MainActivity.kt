@@ -374,11 +374,9 @@ class MainActivity : AppCompatActivity() {
         binding.btnRecents.setOnClickListener { enterRecentsMode() }
         binding.btnRecentsCancel.setOnClickListener { exitRecentsMode() }
 
-        val openScratchpad = View.OnClickListener { launchScratchpad() }
-        binding.btnScratchpad.setOnClickListener(openScratchpad)
-        binding.btnScratchpadPinned.setOnClickListener(openScratchpad)
-        binding.btnScratchpadRecents.setOnClickListener(openScratchpad)
-        binding.btnScratchpadSearch.setOnClickListener(openScratchpad)
+        // Lives in the bottom bar, which is never swapped out by search / pinned / recents mode,
+        // so a single button covers every browse mode.
+        binding.btnScratchpad.setOnClickListener { launchScratchpad() }
 
         binding.btnSort.setOnClickListener {
             SortDialog(this, sortPrefs) { newPrefs ->
@@ -582,7 +580,6 @@ class MainActivity : AppCompatActivity() {
             binding.btnSort.visibility          = View.GONE
             binding.btnPinned.visibility        = View.GONE
             binding.btnRecents.visibility       = View.GONE
-            binding.btnScratchpad.visibility    = View.GONE
             closeOverflowToolbar()
         } else {
             binding.btnNewNotebook.visibility   = View.VISIBLE
@@ -593,7 +590,6 @@ class MainActivity : AppCompatActivity() {
             binding.btnSort.visibility          = View.VISIBLE
             binding.btnPinned.visibility        = View.VISIBLE
             binding.btnRecents.visibility       = View.VISIBLE
-            binding.btnScratchpad.visibility    = View.VISIBLE
         }
     }
 
@@ -678,7 +674,6 @@ class MainActivity : AppCompatActivity() {
             binding.btnSort.visibility        = View.GONE
             binding.btnPinned.visibility      = View.GONE
             binding.btnRecents.visibility     = View.GONE
-            binding.btnScratchpad.visibility  = View.GONE
             closeOverflowToolbar()
         } else {
             binding.btnNewNotebook.visibility = View.VISIBLE
@@ -689,7 +684,6 @@ class MainActivity : AppCompatActivity() {
             binding.btnSort.visibility        = View.VISIBLE
             binding.btnPinned.visibility      = View.VISIBLE
             binding.btnRecents.visibility     = View.VISIBLE
-            binding.btnScratchpad.visibility  = View.VISIBLE
         }
     }
 
@@ -889,7 +883,7 @@ class MainActivity : AppCompatActivity() {
         binding.btnNewNotebook.setOnClickListener    { showNewNotebookDialog() }
         binding.btnNewFolder.setOnClickListener      { showNewFolderDialog() }
         binding.btnMore.setOnClickListener           { toggleOverflowToolbar() }
-        binding.btnCalendar?.setOnClickListener      {
+        binding.btnCalendar.setOnClickListener       {
             closeOverflowToolbar()
             CalendarActivity.launch(this)
         }
@@ -2152,7 +2146,7 @@ class MainActivity : AppCompatActivity() {
             binding.btnSort.visibility          = View.GONE
             binding.btnPinned.visibility        = View.GONE
             binding.btnRecents.visibility       = View.GONE
-            binding.btnScratchpad.visibility    = View.GONE
+            binding.surfaceButtonsGroup.visibility = View.GONE
             closeOverflowToolbar()
         } else {
             binding.btnNewNotebook.visibility   = View.VISIBLE
@@ -2163,7 +2157,7 @@ class MainActivity : AppCompatActivity() {
             binding.btnSort.visibility          = View.VISIBLE
             binding.btnPinned.visibility        = View.VISIBLE
             binding.btnRecents.visibility       = View.VISIBLE
-            binding.btnScratchpad.visibility    = View.VISIBLE
+            binding.surfaceButtonsGroup.visibility = View.VISIBLE
         }
     }
 

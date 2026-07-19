@@ -657,9 +657,14 @@ orders, and writes template + page + layer + children in one transaction, then c
 
 ### Launch surfaces
 
+The library entry point is a **first-class bottom-bar button**, not an overflow item: `btnCalendar`
+sits at the start of `surfaceButtonsGroup` beside the scratch pad, in the one bar that search /
+pinned / recents mode never swap out. See
+[mainactivity-and-recents.md](mainactivity-and-recents.md) for the zone split and width buckets.
+
 | Surface | How | Extras |
 |---|---|---|
-| `MainActivity` | `CalendarActivity.launch(this)` | none — Send-to-Notebook uses the picker |
+| `MainActivity` | `CalendarActivity.launch(this)` from bottom-bar `btnCalendar` | none — Send-to-Notebook uses the picker |
 | `NotebookActivity` | `calendarLauncher.launch(CalendarActivity.intentFromNotebook(...))` | `EXTRA_FROM_NOTEBOOK_ID/NAME/ENCRYPTED` |
 
 `NotebookActivity` consumes `CalendarTransfer.pending` in two places: the `calendarLauncher` result

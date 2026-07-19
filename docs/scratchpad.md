@@ -256,7 +256,7 @@ another; encrypted is encrypted. The old warning dialog (shared with clipboard c
 
 | Surface | Intent extras |
 |---|---|
-| `MainActivity` (toolbar `btnScratchpad`) | None — `fromNotebookId` is null, Send-to-Notebook hidden |
+| `MainActivity` (bottom-bar `btnScratchpad`, paired with `btnCalendar` in `surfaceButtonsGroup` — see [mainactivity-and-recents.md](mainactivity-and-recents.md)) | None — `fromNotebookId` is null, Send-to-Notebook hidden |
 | `NotebookActivity` (toolbar button, via `scratchpadLauncher`) | `EXTRA_FROM_NOTEBOOK_ID`, `EXTRA_FROM_NOTEBOOK_NAME`, `EXTRA_FROM_NOTEBOOK_ENCRYPTED` |
 | `CalendarActivity` / `DayDetailActivity` (toolbar button) | None — same as the library |
 | `MainActivity` launch-restore (see below) | The extras of whatever it was opened from, replayed |

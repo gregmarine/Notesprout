@@ -24,7 +24,7 @@ matching doc before working in that area:**
 | Heading / Text (+ markdown) / Line objects | [`docs/content-objects.md`](docs/content-objects.md) |
 | Link objects: data model, chrome, follow, back-stack, lasso/undo | [`docs/links.md`](docs/links.md) |
 | Scribble-erase, smart lasso, snap-to-guide, align & distribute | [`docs/lasso-and-gestures.md`](docs/lasso-and-gestures.md) |
-| MainActivity features (browse/search/sort/export/ML Kit) + recents + launch restore (surface stack: a cold launch reopens the whole chain of screens the user had open) | [`docs/mainactivity-and-recents.md`](docs/mainactivity-and-recents.md) |
+| MainActivity features (browse/search/sort/export/ML Kit) + recents + launch restore (surface stack: a cold launch reopens the whole chain of screens the user had open) + **library chrome zones & bottom-bar width buckets** (`layout/`, `-sw360dp`, `-sw480dp`) | [`docs/mainactivity-and-recents.md`](docs/mainactivity-and-recents.md) |
 | Encryption: SQLCipher model, scopes, key lifecycle, leak hygiene, migration | [`docs/encryption.md`](docs/encryption.md) |
 | Full-notebook export + import: `.soil` format, `notebook_meta`, copy engine, import pipeline (probe/unlock/placement/keying) | [`docs/full-notebook-export.md`](docs/full-notebook-export.md) |
 | Global clipboard (persist across restart, encrypted-source warning) + cross-notebook page copy/move (template remap, smart encryption gate, source-side undo, nav prompt) | [`docs/clipboard-and-page-transfer.md`](docs/clipboard-and-page-transfer.md) |
