@@ -95,7 +95,13 @@ inkBlack for any visible border/divider).
 - Theme is `Theme.AppCompat.Light.NoActionBar`; buttons are `AppCompatButton` with explicit drawable backgrounds.
 - **Source of truth — never hardcode:** colors `res/values/colors.xml`, styles `styles.xml`, theme `themes.xml`.
 
-AlertDialog styling + BOOX IME-dismissal patterns: [`docs/design-system.md`](docs/design-system.md).
+- **Top guard band:** no tappable chrome may sit against the top screen edge (on BOOX it pulls the
+  status bar down instead of tapping). Always via `core/TopGuard.kt` — `applyInsetPadding()` where the
+  system bars are visible, `applyRootPadding()` on immersive screens (their inset is 0, so the inset
+  listener alone does nothing). Applies to tap targets only — canvases stay full-bleed, and chrome
+  pushed off the edge needs its own 1dp inkBlack top border.
+
+Top guard details, AlertDialog styling + BOOX IME-dismissal patterns: [`docs/design-system.md`](docs/design-system.md).
 
 ---
 
