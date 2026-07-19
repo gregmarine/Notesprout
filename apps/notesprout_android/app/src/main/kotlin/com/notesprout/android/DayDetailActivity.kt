@@ -37,6 +37,7 @@ import androidx.core.view.doOnLayout
 import androidx.core.view.isVisible
 import androidx.lifecycle.lifecycleScope
 import com.notesprout.android.core.BitmapDecode
+import com.notesprout.android.core.TopGuard
 import com.notesprout.android.core.isBooxDevice
 import com.notesprout.android.data.BoundingBox
 import com.notesprout.android.data.CalendarRepository
@@ -316,6 +317,9 @@ class DayDetailActivity : AppCompatActivity() {
 
         binding = ActivityDayDetailBinding.inflate(layoutInflater)
         setContentView(binding.root)
+        // Immersive: system bars are hidden, so their inset is 0. Reserve the guard
+        // explicitly so the top bar isn't parked in the status bar's reveal zone.
+        TopGuard.applyRootPadding(binding.root)
 
         repository = CalendarRepository(NotesproutIndex.db(), NotesproutIndex.calendarDao())
 

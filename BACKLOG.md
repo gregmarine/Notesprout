@@ -343,6 +343,46 @@ Audit note: `LinkTarget` is the only *persisted* sealed hierarchy. `DriveAuth.To
 
 ---
 
+## Calendar Day view — height-dependent geometry (misaligns on any canvas resize)
+
+> Surfaced 2026-07-18 by the top-guard work (toolbar pushed below the status bar reveal zone, which
+> shortened the calendar canvas by the guard height). **Not caused by it — exposed by it.**
+
+`CalendarTemplateRenderer.drawDay()` derives its geometry purely from the canvas height:
+
+```kotlin
+val rowH = h / 24f
+val top  = rowH * slot
+```
+
+Every row is a proportional slice of `h`, so *any* change in canvas height re-spaces the whole grid
+and existing day-view handwriting drifts against it — a drift that grows toward the bottom of the
+page (~1px at row 1, ~29px at row 23 for a ~30px height loss).
+
+Month and Week are structurally immune: `monthGeometry()` builds **square, width-derived** cells
+(`cellW = (w - 6) / 7f; cellH = cellW`) and lets the bottom Notes band absorb all height slack
+(`notesH = (h - notesTop)`). Week borrows month's `notesH`, so its cell area reduces to the same
+width-derived constant. Day has no such slack band.
+
+This bites on any canvas-height change: a different device, a backup restored onto different
+hardware, or a future toolbar-height tweak.
+
+**Options considered** (Day view left misaligned for now, by decision):
+
+- **A — full-bleed canvas.** Restructure `activity_calendar.xml` into a FrameLayout with the toolbar
+  overlaying a full-height `calendarContent`, mirroring `NotebookActivity`. Restores the canvas to
+  its exact prior height so existing ink realigns; touches no stored data. `CalendarActivity` already
+  has `setToolbarExclusion` plumbing. Fixes today's symptom, not the underlying fragility.
+- **B — give Day a slack band.** Derive `rowH` from a fixed (dp- or width-based) reference and let a
+  bottom band absorb the remainder, exactly as Month/Week do. Makes Day permanently
+  height-independent. Costs a one-time reflow of existing day-view ink.
+- **C — rescale stored day strokes** by `newH/oldH`. Rejected: needs the old height recorded and only
+  patches a single instance.
+
+Recommended path if picked up: **A**, then **B** as a deliberate hardening pass.
+
+---
+
 ## Operational task — migrate legacy on-device PNG templates into the index
 
 > From the retired `TEMPLATE_MIGRATION_RUNBOOK.md`. The template system moved from flat PNG files

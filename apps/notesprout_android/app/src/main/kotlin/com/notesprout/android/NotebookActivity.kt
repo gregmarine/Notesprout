@@ -2720,6 +2720,9 @@ class NotebookActivity : AppCompatActivity() {
         val menu = binding.overflowMenu
         val lp = menu.layoutParams as FrameLayout.LayoutParams
         val thick = toolbarLayoutManager.barThickness()
+        // The bar itself starts below the guard on every top-touching placement, so the menu that
+        // hangs off it has to clear the guard as well.
+        val guard = toolbarLayoutManager.topGuard()
         val match = FrameLayout.LayoutParams.MATCH_PARENT
         val wrap = FrameLayout.LayoutParams.WRAP_CONTENT
         lp.topMargin = 0; lp.bottomMargin = 0; lp.leftMargin = 0; lp.rightMargin = 0
@@ -2729,12 +2732,14 @@ class NotebookActivity : AppCompatActivity() {
                 lp.gravity = Gravity.START
                 lp.width = wrap; lp.height = match
                 lp.leftMargin = thick
+                lp.topMargin = guard
             }
             ToolbarPlacement.RIGHT -> {
                 menu.orientation = LinearLayout.HORIZONTAL
                 lp.gravity = Gravity.END
                 lp.width = wrap; lp.height = match
                 lp.rightMargin = thick
+                lp.topMargin = guard
             }
             ToolbarPlacement.BOTTOM -> {
                 menu.orientation = LinearLayout.VERTICAL
@@ -2766,7 +2771,7 @@ class NotebookActivity : AppCompatActivity() {
                 menu.orientation = LinearLayout.VERTICAL
                 lp.gravity = Gravity.TOP
                 lp.width = match; lp.height = wrap
-                lp.topMargin = thick
+                lp.topMargin = guard + thick
             }
         }
         menu.layoutParams = lp
@@ -2790,9 +2795,10 @@ class NotebookActivity : AppCompatActivity() {
         }
         when (toolbarConfig.placement) {
             ToolbarPlacement.BOTTOM -> {
-                // Bar sits at the bottom; the top edge is free, so pin flush to the top-right.
+                // Bar sits at the bottom; the top edge is free, so pin flush to the top-right —
+                // below the guard, so it lines up with where a top bar would start.
                 lp.gravity = Gravity.TOP or Gravity.END
-                lp.topMargin = gap
+                lp.topMargin = toolbarLayoutManager.topGuard() + gap
                 lp.marginEnd = gap
             }
             ToolbarPlacement.RIGHT -> {
@@ -3222,8 +3228,12 @@ class NotebookActivity : AppCompatActivity() {
                 MotionEvent.ACTION_MOVE -> {
                     val maxX = (binding.root.width - binding.drawingToolbar.width).coerceAtLeast(0)
                     val maxY = (binding.root.height - binding.drawingToolbar.height).coerceAtLeast(0)
+                    // Floor the drag at the top guard so the bar can't be parked in the status bar's
+                    // reveal zone (see ToolbarLayoutManager.topGuard).
+                    val minY = toolbarLayoutManager.topGuard()
                     lp.leftMargin = (startMarginL + (event.rawX - startRawX).toInt()).coerceIn(0, maxX)
-                    lp.topMargin  = (startMarginT + (event.rawY - startRawY).toInt()).coerceIn(0, maxY)
+                    lp.topMargin  = (startMarginT + (event.rawY - startRawY).toInt())
+                        .coerceIn(minY, maxY.coerceAtLeast(minY))
                     binding.drawingToolbar.layoutParams = lp
                     true
                 }
@@ -7252,7 +7262,10 @@ class NotebookActivity : AppCompatActivity() {
         // the safe area off-screen.
         val barThick = toolbarLayoutManager.barThickness().toFloat()
         val place    = toolbarConfig.placement
-        val minY     = if (place == ToolbarPlacement.TOP)    barThick + dpGap else dpGap
+        // Popovers are tappable, so they never enter the top guard band either. A top bar sits below
+        // the guard, so clearing it means clearing guard + thickness.
+        val guard    = toolbarLayoutManager.topGuard().toFloat()
+        val minY     = if (place == ToolbarPlacement.TOP) guard + barThick + dpGap else guard + dpGap
         val maxY     = if (place == ToolbarPlacement.BOTTOM) screenH - barThick - viewH - dpGap
                        else screenH - viewH
         val minX     = if (place == ToolbarPlacement.LEFT)   barThick + dpGap else 0f
@@ -7473,8 +7486,9 @@ class NotebookActivity : AppCompatActivity() {
                 else ->
                     (btn.centerX() - w / 2f) to (btn.bottom + dpGap)
             }
+            val guard = toolbarLayoutManager.topGuard().toFloat()
             binding.lassoPopupToolbar.x = px.coerceIn(0f, (screenW - w).coerceAtLeast(0f))
-            binding.lassoPopupToolbar.y = py.coerceIn(0f, (screenH - h).coerceAtLeast(0f))
+            binding.lassoPopupToolbar.y = py.coerceIn(guard, (screenH - h).coerceAtLeast(guard))
         }
     }
 
@@ -7506,8 +7520,9 @@ class NotebookActivity : AppCompatActivity() {
                 else ->
                     (btn.centerX() - w / 2f) to (btn.bottom + dpGap)
             }
+            val guard = toolbarLayoutManager.topGuard().toFloat()
             binding.shapeInsertToolbar.x = px.coerceIn(0f, (screenW - w).coerceAtLeast(0f))
-            binding.shapeInsertToolbar.y = py.coerceIn(0f, (screenH - h).coerceAtLeast(0f))
+            binding.shapeInsertToolbar.y = py.coerceIn(guard, (screenH - h).coerceAtLeast(guard))
             // Update the BOOX pen exclusion zone now that the toolbar is positioned and measured.
             pushToolbarExclusion()
         }

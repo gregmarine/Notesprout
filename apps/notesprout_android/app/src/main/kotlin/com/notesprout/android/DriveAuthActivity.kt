@@ -9,6 +9,7 @@ import android.webkit.WebViewClient
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
+import com.notesprout.android.core.TopGuard
 import com.notesprout.android.data.backup.DriveApiClient
 import com.notesprout.android.data.backup.DriveAuth
 import com.notesprout.android.data.backup.DriveTokenStore
@@ -51,6 +52,7 @@ class DriveAuthActivity : AppCompatActivity() {
 
         binding = ActivityDriveAuthBinding.inflate(layoutInflater)
         setContentView(binding.root)
+        TopGuard.applyInsetPadding(binding.root)
 
         binding.btnCancel.setOnClickListener {
             setResult(RESULT_CANCELED)

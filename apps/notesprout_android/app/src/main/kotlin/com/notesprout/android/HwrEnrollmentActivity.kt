@@ -13,6 +13,7 @@ import androidx.appcompat.widget.AppCompatButton
 import androidx.appcompat.widget.AppCompatTextView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
+import com.notesprout.android.core.TopGuard
 import com.notesprout.android.core.isBooxDevice
 import com.notesprout.android.notebook.GenericNotebookView
 import com.notesprout.android.notebook.NotebookView
@@ -49,7 +50,9 @@ class HwrEnrollmentActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContentView(buildUi())
+        val root = buildUi()
+        setContentView(root)
+        TopGuard.applyInsetPadding(root)
         showSentence()
     }
 
@@ -73,6 +76,12 @@ class HwrEnrollmentActivity : AppCompatActivity() {
             setBackgroundColor(Color.WHITE)
             fitsSystemWindows = true
         }
+
+        // Top border — content starts below the system bar inset, so it needs its own 1dp rule.
+        root.addView(View(this).apply {
+            setBackgroundColor(inkColor)
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(1))
+        })
 
         val header = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL

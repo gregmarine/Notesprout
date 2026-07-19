@@ -21,6 +21,7 @@ import androidx.appcompat.widget.AppCompatTextView
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import androidx.lifecycle.lifecycleScope
+import com.notesprout.android.core.TopGuard
 import com.notesprout.android.crypto.KeyResolver
 import com.notesprout.android.crypto.KeySession
 import com.notesprout.android.crypto.SoilCrypto
@@ -98,7 +99,9 @@ class PageTextViewerActivity : AppCompatActivity() {
         notebookName = intent.getStringExtra(EXTRA_NOTEBOOK_NAME).orEmpty().ifBlank { "Notebook" }
         currentPageId = intent.getStringExtra(EXTRA_CURRENT_PAGE_ID).orEmpty()
 
-        setContentView(buildUi(notebookName))
+        val root = buildUi(notebookName)
+        setContentView(root)
+        TopGuard.applyInsetPadding(root)
         updateToggleState()
 
         if (notebookId.isEmpty()) {
@@ -124,6 +127,12 @@ class PageTextViewerActivity : AppCompatActivity() {
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT
             )
         }
+
+        // Top border — content starts below the system bar inset, so it needs its own 1dp rule.
+        root.addView(View(this).apply {
+            setBackgroundColor(ink)
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(1))
+        })
 
         // Header: title + Done
         val header = LinearLayout(this).apply {

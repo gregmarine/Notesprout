@@ -9,6 +9,7 @@ import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.isVisible
 import androidx.lifecycle.lifecycleScope
+import com.notesprout.android.core.TopGuard
 import com.notesprout.android.databinding.ActivityHwrSettingsBinding
 import com.notesprout.android.recognition.HwrSettings
 import com.notesprout.android.recognition.HandwritingRecognizerProvider
@@ -80,6 +81,7 @@ class HwrSettingsActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         binding = ActivityHwrSettingsBinding.inflate(layoutInflater)
         setContentView(binding.root)
+        TopGuard.applyInsetPadding(binding.root)
 
         binding.btnBack.setOnClickListener { finish() }
         binding.rowMlKit.setOnClickListener { selectEngine(HwrSettings.ENGINE_MLKIT) }

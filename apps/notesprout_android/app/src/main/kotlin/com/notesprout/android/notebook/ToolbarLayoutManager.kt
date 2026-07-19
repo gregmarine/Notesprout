@@ -9,6 +9,7 @@ import android.widget.Space
 import androidx.appcompat.widget.AppCompatImageView
 import androidx.core.content.ContextCompat
 import com.notesprout.android.R
+import com.notesprout.android.core.TopGuard
 import com.notesprout.android.data.toolbar.ToolbarAxis
 import com.notesprout.android.data.toolbar.ToolbarConfig
 import com.notesprout.android.data.toolbar.ToolbarPlacement
@@ -51,6 +52,18 @@ class ToolbarLayoutManager(
 
     /** Fixed cross-axis thickness of the bar in px — see [barThicknessPx]. */
     fun barThickness(): Int = barThicknessPx
+
+    /**
+     * Height of the reserved strip along the top edge that the bar must not occupy — see [TopGuard].
+     * The notebook runs immersive, so the status bar is hidden and its inset is 0; without this the
+     * bar would sit hard against the top edge, where a reach for a button pulls the status bar down
+     * instead. Every placement that touches the top edge (TOP, LEFT, RIGHT, and a dragged FLOAT)
+     * starts below it. The canvas is unaffected — it stays full-bleed under the guard.
+     */
+    private val topGuardPx: Int = TopGuard.heightPx(context)
+
+    /** Height of the top guard band in px — see [topGuardPx]. */
+    fun topGuard(): Int = topGuardPx
 
     /**
      * Cached references to every button view, captured once from the inflated hierarchy. Views are
@@ -134,6 +147,8 @@ class ToolbarLayoutManager(
                 lp.gravity = Gravity.START
                 lp.width = barThicknessPx
                 lp.height = match
+                // A vertical bar reaches the top edge too — start it below the guard.
+                lp.topMargin = topGuardPx
                 toolbar.setBackgroundResource(R.drawable.toolbar_background_left)
             }
             ToolbarPlacement.RIGHT -> {
@@ -142,6 +157,8 @@ class ToolbarLayoutManager(
                 lp.gravity = Gravity.END
                 lp.width = barThicknessPx
                 lp.height = match
+                // A vertical bar reaches the top edge too — start it below the guard.
+                lp.topMargin = topGuardPx
                 toolbar.setBackgroundResource(R.drawable.toolbar_background_right)
             }
             ToolbarPlacement.BOTTOM -> {
@@ -181,7 +198,10 @@ class ToolbarLayoutManager(
                 val x = if (config.floatX < 0f) maxX / 2 else config.floatX.toInt()
                 val y = if (config.floatY < 0f) maxY / 2 else config.floatY.toInt()
                 lp.leftMargin = x.coerceIn(0, maxX)
-                lp.topMargin = y.coerceIn(0, maxY)
+                // The float bar is draggable, so the guard becomes its minimum Y — it can be parked
+                // anywhere except inside the status bar's reveal zone. A previously-saved floatY from
+                // before the guard existed is pulled down into range here.
+                lp.topMargin = y.coerceIn(topGuardPx, maxY.coerceAtLeast(topGuardPx))
                 toolbar.setBackgroundResource(R.drawable.shape_bordered)
             }
             else -> {
@@ -190,6 +210,9 @@ class ToolbarLayoutManager(
                 lp.gravity = Gravity.TOP
                 lp.width = match
                 lp.height = barThicknessPx
+                // Push the bar clear of the status bar's reveal zone. The canvas keeps its full
+                // height and simply shows through the guard band above the bar.
+                lp.topMargin = topGuardPx
                 toolbar.setBackgroundResource(R.drawable.toolbar_background_top)
             }
         }

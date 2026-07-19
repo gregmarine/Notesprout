@@ -6,6 +6,7 @@ import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
+import com.notesprout.android.core.TopGuard
 import com.notesprout.android.crypto.GlobalConversion
 import com.notesprout.android.crypto.GlobalRotation
 import com.notesprout.android.crypto.KeySession
@@ -30,6 +31,7 @@ class EncryptionSettingsActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         binding = ActivityEncryptionSettingsBinding.inflate(layoutInflater)
         setContentView(binding.root)
+        TopGuard.applyInsetPadding(binding.root)
 
         binding.btnBack.setOnClickListener { finish() }
         binding.btnRevealRecoveryKey.setOnClickListener { showRecoveryKey() }

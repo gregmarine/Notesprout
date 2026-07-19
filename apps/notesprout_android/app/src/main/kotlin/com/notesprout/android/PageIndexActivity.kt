@@ -27,6 +27,7 @@ import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.lifecycleScope
 import com.notesprout.android.core.ImageCodec
 import com.notesprout.android.core.Slog
+import com.notesprout.android.core.TopGuard
 import com.notesprout.android.crypto.KeyResolver
 import com.notesprout.android.crypto.KeySession
 import com.notesprout.android.crypto.SoilCrypto
@@ -424,6 +425,9 @@ class PageIndexActivity : AppCompatActivity() {
 
         binding = ActivityPageIndexBinding.inflate(layoutInflater)
         setContentView(binding.root)
+        // Immersive: system bars are hidden, so their inset is 0. Reserve the guard
+        // explicitly so the top bar isn't parked in the status bar's reveal zone.
+        TopGuard.applyRootPadding(binding.root)
 
         notebookId       = intent.getStringExtra(EXTRA_NOTEBOOK_ID) ?: ""
         notebookSoilPath = if (notebookId.isNotEmpty()) soilFile(this, notebookId).absolutePath else null

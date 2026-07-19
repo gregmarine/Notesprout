@@ -11,6 +11,7 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.isVisible
 import androidx.lifecycle.lifecycleScope
 import com.notesprout.android.R
+import com.notesprout.android.core.TopGuard
 import com.notesprout.android.data.backup.BackupConfig
 import com.notesprout.android.data.backup.BackupEngine
 import com.notesprout.android.data.backup.BackupKind
@@ -64,6 +65,7 @@ class BackupSettingsActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         binding = ActivityBackupSettingsBinding.inflate(layoutInflater)
         setContentView(binding.root)
+        TopGuard.applyInsetPadding(binding.root)
 
         binding.btnBack.setOnClickListener { finish() }
         binding.btnChooseLocal.setOnClickListener { pickLocalTreeLauncher.launch(null) }
