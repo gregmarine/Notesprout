@@ -2152,6 +2152,7 @@ class MainActivity : AppCompatActivity() {
             binding.btnSort.visibility          = View.GONE
             binding.btnPinned.visibility        = View.GONE
             binding.btnRecents.visibility       = View.GONE
+            binding.btnScratchpad.visibility    = View.GONE
             closeOverflowToolbar()
         } else {
             binding.btnNewNotebook.visibility   = View.VISIBLE
@@ -2162,6 +2163,7 @@ class MainActivity : AppCompatActivity() {
             binding.btnSort.visibility          = View.VISIBLE
             binding.btnPinned.visibility        = View.VISIBLE
             binding.btnRecents.visibility       = View.VISIBLE
+            binding.btnScratchpad.visibility    = View.VISIBLE
         }
     }
 
