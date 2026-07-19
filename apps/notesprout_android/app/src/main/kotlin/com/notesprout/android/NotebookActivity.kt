@@ -6140,11 +6140,10 @@ class NotebookActivity : AppCompatActivity() {
         }
 
         // Personalization capture: the only moment a heading's ink and its recognized text
-        // coexist (recognized headings drop their strokes below). Fire-and-forget; gated to
-        // plaintext notebooks. A later edit of this heading confirms/corrects the pair.
+        // coexist (recognized headings drop their strokes below). Fire-and-forget; gated on
+        // the personalization toggle alone. An edit within the correction window confirms it.
         if (isRecognized &&
-            com.notesprout.android.recognition.personal.TrainingPairRepository.captureAllowed(
-                this, encryptionInfo.encrypted)
+            com.notesprout.android.recognition.personal.TrainingPairRepository.captureAllowed(this)
         ) {
             NotesproutApplication.appScope.launch {
                 com.notesprout.android.recognition.personal.TrainingPairRepository.addPair(
@@ -7015,7 +7014,7 @@ class NotebookActivity : AppCompatActivity() {
             // Personalization: a human just corrected this heading's text — upgrade the pair
             // captured at conversion time (no-ops when none exists). Unprefixed text.
             if (com.notesprout.android.recognition.personal.TrainingPairRepository.captureAllowed(
-                    this@NotebookActivity, encryptionInfo.encrypted)
+                    this@NotebookActivity)
             ) {
                 NotesproutApplication.appScope.launch {
                     com.notesprout.android.recognition.personal.TrainingPairRepository.confirmByObjectId(
@@ -7185,6 +7184,11 @@ class NotebookActivity : AppCompatActivity() {
         val selectionIsSingleHeading = selHeadings.size == 1 && selStrokes.isEmpty()
         val selectionIsPureStrokes   = selStrokes.isNotEmpty() && selHeadings.isEmpty()
         val selectionIsNonStrokeGroup = selStrokes.isEmpty() && (selHeadings.size + selTextObjects.size + selLines.size) >= 2
+        // A pure-stroke selection is the only one that can be converted to a heading / text
+        // object. Warm the recognizer now so its cold load overlaps the user's next taps.
+        if (selectionIsPureStrokes) {
+            com.notesprout.android.recognition.HandwritingRecognizerProvider.warmUpActive()
+        }
         binding.btnMakeHeading.visibility  = if (selectionIsPureStrokes)   View.VISIBLE else View.GONE
         // S4: btnHeadingMenu opens the submenu in CHANGE mode for a single heading (change level).
         binding.btnHeadingMenu.visibility  = if (selectionIsSingleHeading) View.VISIBLE else View.GONE

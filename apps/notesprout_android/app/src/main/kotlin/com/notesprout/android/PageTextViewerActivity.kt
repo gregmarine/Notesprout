@@ -282,15 +282,27 @@ class PageTextViewerActivity : AppCompatActivity() {
         )
     }
 
-    /** Load the line's source strokes from a short-lived read-only connection
-     *  (plaintext only — Correct is hidden on encrypted notebooks). */
+    /**
+     * Load the line's source strokes from a short-lived read-only connection.
+     *
+     * MUST apply the SQLCipher factory when the notebook is encrypted — opening an encrypted
+     * `.soil` as plaintext Room is the link-picker data-loss class of bug. The key comes from
+     * [KeyResolver] (cached in [KeySession] by [loadText]); it is never held in a field.
+     */
     private suspend fun loadLineStrokes(
         line: com.notesprout.android.data.PageText.RecognizedLine,
     ): List<com.notesprout.android.data.LiveStroke> = withContext(Dispatchers.IO) {
-        val db = SoilDatabase.builder(
+        val builder = SoilDatabase.builder(
             this@PageTextViewerActivity,
             soilFile(this@PageTextViewerActivity, notebookId).absolutePath,
-        ).build()
+        )
+        if (encrypted) {
+            val info = indexRepo.getEncryptionInfo(notebookId)
+            val key = KeyResolver.resolveForOpen(this@PageTextViewerActivity, notebookId, info)
+                ?: return@withContext emptyList()
+            builder.openHelperFactory(SoilCrypto.roomFactory(key))
+        }
+        val db = builder.build()
         try {
             val dao = db.notebookDao()
             val layer = dao.getLayerForPage(currentPageId) ?: return@withContext emptyList()
@@ -397,7 +409,7 @@ class PageTextViewerActivity : AppCompatActivity() {
         if (!loaded) return
         if (showingWhole) correctMode = false
         btnCorrect.visibility =
-            if (!encrypted && thisPageLines.isNotEmpty() &&
+            if (thisPageLines.isNotEmpty() &&
                 com.notesprout.android.recognition.HwrSettings.personalizationEnabled(this)
             ) View.VISIBLE else View.GONE
         btnCorrect.isSelected = correctMode

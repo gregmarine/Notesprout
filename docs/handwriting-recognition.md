@@ -422,6 +422,26 @@ median **509 ms/line** (p95 510), session load 976 ms, ~291 MB native heap while
 `SQLite`), the exact target of personalization. Whole-notebook cold recognition (357 lines) ≈ 3 min
 — acceptable for the experimental toggle; a progress indicator in the viewer is future polish.
 
+### Interactive latency (heading / text conversion)
+
+A single-shot conversion pays the encoder+greedy-decode cost (~500 ms warm) **plus** a ~1 s cold
+ORT session load on the first recognition of a session and after every `onTrimMemory(UI_HIDDEN)`
+release. Fixes applied 2026-07-18:
+
+- **Warm-up on selection.** `HandwritingRecognizerProvider.warmUpActive()` →
+  `TrOcrHandwritingRecognizer.warmUp()` loads the sessions + personalization off the interactive
+  path, fired from `updateFloatingSelectionToolbar` when the selection is **pure strokes** (the
+  only selection convertible to a heading / text object). The cold load then overlaps the user's
+  "Heading → H1" taps instead of landing after them. Idempotent, `tryLock`-guarded (a recognition
+  in flight is already loading), and a no-op when ML Kit is the active engine.
+- **Lexicon bias was silently dead.** `TrOcrSession.generate` accepted `processors` and never
+  passed them to `TrOcrDecoder.greedy` — the `UserLexicon` bias built per recognition was computed
+  and discarded. Now forwarded.
+- **Correction-memory rebuild no longer loads the whole store.** `correctionPairs` went through
+  `confirmedPairs()`, deserializing every row's `strokesJson` (up to 2000 rows) just to read two
+  text columns. Replaced with a `confirmedCorrections()` projection (`CorrectionRow`) that filters
+  in SQL.
+
 ### Debug lab
 
 `HwrLabActivity` (debug source set only, `adb shell am start -n
@@ -432,14 +452,33 @@ applies to this engine identically).
 
 ### Phase 2 — personalization (BUILT)
 
-- **Training-pair store**: plain Room DB `filesDir/hwr/training.db`
+- **Training-pair store**: Room DB `filesDir/hwr/training.db`, SQLCipher-encrypted under the
+  global key (see the encryption bullet below)
   (`data/hwr/TrainingPairEntity|Dao|HwrTrainingDatabase`, cap 2000, unconfirmed evicted first) —
   a pair = strokes JSON + human label + the engine's `originalText`. Every capture is gated by
-  `TrainingPairRepository.captureAllowed` (personalization toggle AND plaintext notebook — leak
-  hygiene; encrypting the store itself is BACKLOG). Deliberately NOT in `notesprout.db`.
+  `TrainingPairRepository.captureAllowed` — **the personalization toggle alone**. Deliberately
+  NOT in `notesprout.db`.
+- **Encrypted notebooks contribute (changed 2026-07-18).** The original rule was "plaintext
+  notebooks only", written when the store itself was plaintext. **Phase 1b-ii (`3d52e5b`) made
+  `filesDir/hwr/training.db` SQLCipher-encrypted under the global key** — with migration-in-place
+  and rotation `rekey()` — which removed the reason for the rule; under encrypt-by-default it
+  then disabled the feature outright, so it is gone. Pairs are protected at rest at the same
+  level as the `.soil` they came from, and nothing leaves the device unless the user explicitly
+  exports a training bundle (that bundle is plaintext, by necessity — it feeds `finetune.py`).
+  Viewer **Correct** mode is likewise no longer hidden on encrypted notebooks — `loadLineStrokes`
+  now applies `SoilCrypto.roomFactory` when `encrypted` (opening an encrypted `.soil` as
+  plaintext Room is the link-picker data-loss class of bug; the key is re-resolved via
+  `KeyResolver`, never held in a field).
 - **Capture sources**: heading conversion (unconfirmed, keyed by heading id) + heading edit
   (upgrades to confirmed) in `NotebookActivity`; viewer line correction; HwrLab references;
   enrollment. Other heading hosts (Scratchpad/DayDetail/StickyNote) are BACKLOG.
+- **Only the initial edit teaches** (2026-07-18). `confirmByObjectId` ignores an edit when the
+  pair is **already confirmed** (corrected once) or when it lands **more than 5 minutes**
+  (`CORRECTION_WINDOW_MS`) after capture. Rationale: editing a heading days later means the user
+  changed what it should *say*, not that the engine misread the ink — confirming it would store a
+  label that no longer describes the stored strokes and teach `CorrectionMemory` a bogus
+  "wrong → right" substitution. Viewer line correction is unaffected (it is explicitly a
+  fix-the-recognition mode and writes a confirmed pair directly via `addPair`).
 - **Viewer Correct mode** (`PageTextViewerActivity`): `PageText` **schema 2** adds
   `lines: List<RecognizedLine>(text, strokeIds, top, height)` provenance for handwriting-derived
   lines (populated by `PageTextRecognizer`; schema-1 rows decode with `lines = null` and offer no

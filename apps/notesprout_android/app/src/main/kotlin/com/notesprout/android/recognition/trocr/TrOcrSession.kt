@@ -93,6 +93,7 @@ class TrOcrSession(
                     startId = manifest.decoderStartTokenId,
                     eosId = manifest.eosTokenId,
                     maxNewTokens = if (maxNewTokens > 0) maxNewTokens else manifest.maxLength,
+                    processors = processors,
                 )
             } finally {
                 past.values.forEach { it.close() }

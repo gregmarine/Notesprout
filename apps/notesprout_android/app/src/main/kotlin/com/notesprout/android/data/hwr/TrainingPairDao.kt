@@ -5,6 +5,9 @@ import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
 
+/** Projection row for [TrainingPairDao.confirmedCorrections]. */
+data class CorrectionRow(val originalText: String, val label: String)
+
 @Dao
 interface TrainingPairDao {
 
@@ -25,6 +28,17 @@ interface TrainingPairDao {
 
     @Query("SELECT label FROM training_pairs WHERE confirmed = 1")
     suspend fun confirmedLabels(): List<String>
+
+    /**
+     * (originalText, label) of confirmed corrections — a projection, deliberately NOT
+     * [confirmedPairs], so rebuilding correction memory never loads every row's strokesJson.
+     */
+    @Query(
+        """SELECT originalText AS originalText, label AS label FROM training_pairs
+           WHERE confirmed = 1 AND originalText IS NOT NULL
+             AND originalText <> '' AND originalText <> label"""
+    )
+    suspend fun confirmedCorrections(): List<CorrectionRow>
 
     @Query("DELETE FROM training_pairs")
     suspend fun deleteAll()

@@ -89,6 +89,32 @@ class TrOcrHandwritingRecognizer(
         }
     }
 
+    /**
+     * Load the ORT sessions + personalization ahead of an anticipated recognition, off the
+     * interactive path. Called when the user makes a stroke selection (a heading / text
+     * conversion may follow) — the ~1 s cold session load then overlaps their next taps
+     * instead of landing after them.
+     *
+     * Fire-and-forget and idempotent: no-ops when already warm, and skipped entirely if a
+     * recognition is in flight (that call is already doing the loading).
+     */
+    fun warmUp() {
+        if (!isReady()) return
+        if (session?.isLoaded == true && loadedVersionId != null) return
+        ioScope.launch(Dispatchers.IO) {
+            if (!mutex.tryLock()) return@launch
+            try {
+                val (sess, tok, _) = ensurePipeline() ?: return@launch
+                sess.ensureLoaded()
+                ensurePersonalization(tok)
+            } catch (e: Exception) {
+                Log.e(TAG, "TrOCR warm-up failed", e)
+            } finally {
+                mutex.unlock()
+            }
+        }
+    }
+
     private class Personalization(
         val lexicon: UserLexicon,
         val memory: CorrectionMemory,

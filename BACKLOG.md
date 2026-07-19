@@ -52,9 +52,6 @@ Phases 0–2 built (see `docs/handwriting-recognition.md` § "TrOCR engine"). De
 - **Capture hooks in other heading hosts** — heading-conversion/correction capture currently lives
   in `NotebookActivity` only; Scratchpad / DayDetail / StickyNoteEditor heading edits could mirror
   the same ~8-line hook (their conversions would need capture first for corrections to matter).
-- **SQLCipher the training store** — `filesDir/hwr/training.db` is plaintext (capture already
-  excludes encrypted notebooks); encrypting it keyed by the global passphrase would drag
-  KeyResolver/rotation into scope — deliberately deferred.
 - **Beam search + KV-state cloning** — decoder is greedy; beam-3 needs per-beam ORT tensor state
   cloning in `TrOcrSession`. Revisit if lexicon biasing under greedy proves too weak.
 - **RTR debounce bump when TrOCR active** — consider raising `RtrScheduler.DEBOUNCE_MS` 2 s → 4 s

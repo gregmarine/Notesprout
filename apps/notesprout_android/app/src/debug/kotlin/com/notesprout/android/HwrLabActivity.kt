@@ -274,7 +274,7 @@ class HwrLabActivity : AppCompatActivity() {
                 // Every lab reference is a perfect confirmed training pair (plaintext
                 // notebooks only by construction — see pickNotebook).
                 val ref = result.reference
-                if (ref != null && TrainingPairRepository.captureAllowed(this, encryptedSource = false)) {
+                if (ref != null && TrainingPairRepository.captureAllowed(this)) {
                     lifecycleScope.launch {
                         TrainingPairRepository.addPair(
                             context = applicationContext,

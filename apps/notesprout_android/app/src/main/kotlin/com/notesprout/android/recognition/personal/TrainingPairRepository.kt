@@ -15,10 +15,12 @@ import java.util.UUID
 /**
  * CRUD over the handwriting training-pair store (`filesDir/hwr/training.db`).
  *
- * Every capture goes through [captureAllowed]: personalization must be enabled AND the
- * source notebook must be plaintext (leak hygiene — encrypted-notebook ink/text never
- * lands in this unencrypted store). Enrollment passes `encryptedSource = false` by
- * definition (its prescribed sentences are the user's explicit opt-in).
+ * Every capture goes through [captureAllowed]: the personalization toggle is the single
+ * gate. Encrypted notebooks are NOT excluded — with encrypt-by-default, excluding them
+ * would disable the feature entirely. Nothing captured here leaves the device unless the
+ * user explicitly exports a training bundle (settings → "Export training data…").
+ *
+ * The store is SQLCipher-encrypted under the global key (see `HwrTrainingDatabase`).
  *
  * All methods suspend and run on Dispatchers.IO. Captures are fire-and-forget from the
  * UI's perspective — a failed capture must never break the calling flow.
@@ -38,8 +40,8 @@ object TrainingPairRepository {
 
     private val json = Json { ignoreUnknownKeys = true }
 
-    fun captureAllowed(context: Context, encryptedSource: Boolean): Boolean =
-        HwrSettings.personalizationEnabled(context) && !encryptedSource
+    fun captureAllowed(context: Context): Boolean =
+        HwrSettings.personalizationEnabled(context)
 
     /**
      * Store a new pair. [confirmed] is false for engine output (e.g. a fresh heading
@@ -86,9 +88,20 @@ object TrainingPairRepository {
     }
 
     /**
+     * How long after an object's ink was captured an edit still counts as "fixing the
+     * recognition". Past this, editing a heading means the user changed their mind about
+     * what it should say — that is a rewrite, not evidence the engine misread the ink.
+     */
+    private const val CORRECTION_WINDOW_MS = 5 * 60 * 1000L
+
+    /**
      * A human corrected/confirmed the text of an object whose ink was captured earlier
      * (e.g. heading edit). Upgrades the stored pair; silently no-ops when no pair exists
      * (pre-feature object, encrypted notebook, capture disabled at conversion time).
+     *
+     * Only the FIRST edit, within [CORRECTION_WINDOW_MS] of capture, is treated as a
+     * correction. Later edits are rewordings whose text no longer describes the stored ink;
+     * learning from them would teach the engine a bogus "wrong → right" substitution.
      */
     suspend fun confirmByObjectId(
         context: Context,
@@ -100,6 +113,14 @@ object TrainingPairRepository {
         try {
             val dao = HwrTrainingDatabase.dao(context)
             val existing = dao.getByObjectId(objectId) ?: return@withContext
+            if (existing.confirmed) {
+                Slog.d(TAG) { "edit ignored for training — pair already corrected once" }
+                return@withContext
+            }
+            if (System.currentTimeMillis() - existing.createdAt > CORRECTION_WINDOW_MS) {
+                Slog.d(TAG) { "edit ignored for training — outside the correction window" }
+                return@withContext
+            }
             dao.insert(
                 existing.copy(
                     source = source,
@@ -145,11 +166,8 @@ object TrainingPairRepository {
     suspend fun correctionPairs(context: Context): List<Pair<String, String>> =
         withContext(Dispatchers.IO) {
             try {
-                HwrTrainingDatabase.dao(context).confirmedPairs()
-                    .mapNotNull { p ->
-                        val orig = p.originalText?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
-                        if (orig == p.label) null else orig to p.label
-                    }
+                HwrTrainingDatabase.dao(context).confirmedCorrections()
+                    .map { it.originalText to it.label }
             } catch (e: Exception) {
                 android.util.Log.e(TAG, "read failed", e); emptyList()
             }

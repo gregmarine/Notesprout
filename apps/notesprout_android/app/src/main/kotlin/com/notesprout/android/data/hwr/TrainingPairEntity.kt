@@ -10,10 +10,13 @@ import androidx.room.PrimaryKey
  * augmentation and any future rasterizer version — see docs/handwriting-recognition.md
  * § "TrOCR engine".
  *
- * INVARIANT (leak hygiene): rows only ever originate from PLAINTEXT notebooks or from the
- * explicitly opt-in enrollment flow — `TrainingPairRepository.captureAllowed` gates every
- * capture. This DB lives unencrypted at `filesDir/hwr/training.db`; encrypting it with
- * SQLCipher is documented future work (BACKLOG), deliberately out of scope for Phase 2.
+ * PRIVACY: capture is gated only by the personalization toggle
+ * (`TrainingPairRepository.captureAllowed`). Encrypted notebooks DO contribute — under
+ * encrypt-by-default the old "plaintext notebooks only" rule disabled the feature outright,
+ * and the reason for that rule is gone: the store itself is SQLCipher-encrypted under the
+ * global key (see [HwrTrainingDatabase], Phase 1b-ii), so pairs are protected at rest at the
+ * same level as the `.soil` they came from. Nothing here leaves the device unless the user
+ * explicitly exports a training bundle — that export IS plaintext, by necessity.
  */
 @Entity(
     tableName = "training_pairs",

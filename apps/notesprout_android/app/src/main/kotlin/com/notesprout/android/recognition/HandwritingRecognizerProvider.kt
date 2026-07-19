@@ -58,6 +58,16 @@ object HandwritingRecognizerProvider {
         trOcr = trOcrRecognizer
     }
 
+    /**
+     * Preload the active engine ahead of a likely recognition (e.g. the user just selected
+     * strokes). Only TrOCR has a meaningful cold-start cost; ML Kit no-ops.
+     */
+    fun warmUpActive() {
+        val ctx = appContext ?: return
+        val t = trOcr ?: return
+        if (HwrSettings.engine(ctx) == HwrSettings.ENGINE_TROCR) t.warmUp()
+    }
+
     /** Called from NotesproutApplication.onTrimMemory — drop TrOCR sessions if idle. */
     fun onTrimMemory() {
         trOcr?.releaseIfIdle()
