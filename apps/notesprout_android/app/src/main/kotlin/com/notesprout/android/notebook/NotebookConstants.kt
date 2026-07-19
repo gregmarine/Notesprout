@@ -113,7 +113,33 @@ const val SHAPE_ROTATE_SNAP_DEG = 5f
 /** Minimum width or height (dp) a shape can be resized to. */
 const val SHAPE_MIN_SIZE_DP = 24f
 
+// ── Pen-activity gate ────────────────────────────────────────────────────────
+
+/**
+ * How long after a pen lift the surface still counts as pen-active (see
+ * [NotebookView.isPenActive]).
+ *
+ * Sized to outlast the platform double-tap window (~300 ms) so the second half of a palm-induced
+ * "double tap" can't land just after the pen leaves the glass and be treated as a clean gesture.
+ * Short enough that a deliberate finger tap right after writing still registers.
+ */
+const val PEN_ACTIVE_TAIL_MS = 350L
+
 // ── Shape dwell-trigger constants ────────────────────────────────────────────
+
+/**
+ * Master switch for the Gate 0 shape dwell trigger (hold the pen still at the end of a
+ * stroke → run [ShapeRecognizer] and convert the stroke to a shape object).
+ *
+ * Disabled: the trigger never fired reliably in practice, and every stroke it evaluates is
+ * a stroke that can be silently swallowed instead of persisted. Gate 1 (smart lasso) and
+ * Gate 2 (scribble-erase) are unaffected and remain active.
+ *
+ * The recognizer and the whole dwell pipeline are intentionally left in place — flip this
+ * to `true` to reinstate the trigger without any other change. Shape objects created by
+ * other means (the insert-shape toolbar) are unaffected either way.
+ */
+const val SHAPE_DWELL_ENABLED = false
 
 /** Minimum dwell time (ms) at pen lift to trigger shape recognition. */
 const val SHAPE_DWELL_MS = 700L

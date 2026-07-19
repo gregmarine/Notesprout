@@ -243,6 +243,9 @@ class DayDetailActivity : AppCompatActivity() {
     private var stickyNoteTapDownTime = 0L
     private var stickyNoteTapMoved = false
 
+    /** True while finger gestures are suppressed because the pen owns the surface. */
+    private var fingerGesturesSuppressed = false
+
     private val touchSlopPx by lazy { ViewConfiguration.get(this).scaledTouchSlop }
     private val doubleTapSlopPx by lazy { ViewConfiguration.get(this).scaledDoubleTapSlop }
     private val density get() = resources.displayMetrics.density
@@ -2117,6 +2120,18 @@ class DayDetailActivity : AppCompatActivity() {
         // Canvas gestures (sticky-tap, multi-finger undo/redo, EPD release) apply only to the
         // editable Note canvas; in Notebooks/History the list handles its own touches.
         if (viewMode == ViewMode.NOTE && event.getToolType(0) == MotionEvent.TOOL_TYPE_FINGER) {
+            // Pen-activity gate: while the stylus owns the surface (and briefly after it lifts) a
+            // finger contact is a palm, not a gesture — see [NotebookView.isPenActive]. Drop it
+            // before any detector or EPD release can act on it and disturb the stroke in flight.
+            if (drawingView.isPenActive) {
+                if (!fingerGesturesSuppressed) {
+                    fingerGesturesSuppressed = true
+                    cancelFingerGestures()
+                }
+                return super.dispatchTouchEvent(event)
+            }
+            fingerGesturesSuppressed = false
+
             val inToolbar = isTouchInView(event, binding.dayToolbar)
             val inMenu = binding.dayOverflowMenu.visibility == View.VISIBLE &&
                     isTouchInView(event, binding.dayOverflowMenu)
@@ -2138,6 +2153,24 @@ class DayDetailActivity : AppCompatActivity() {
             }
         }
         return super.dispatchTouchEvent(event)
+    }
+
+    /**
+     * Abandon all in-flight finger-gesture state when the pen-activity gate closes. Resets fields
+     * directly rather than routing a cancel through [handleMultiFingerDoubleTap], whose CANCEL
+     * branch treats a cancel on an armed 3-finger gesture as a *completed* tap (the Onyx 3-finger
+     * interception workaround) — exactly the false positive the gate exists to prevent.
+     * Mirrors `NotebookActivity.cancelFingerGestures`.
+     */
+    private fun cancelFingerGestures() {
+        stickyNoteTapCandidate = null
+        stickyNoteTapMoved = true
+
+        mfTapArmed = false
+        mfTapMoved = true
+        mfTapPeakCount = 0
+        twoFingerTapFirstTime = 0L
+        threeFingerTapFirstTime = 0L
     }
 
     private fun handleMultiFingerDoubleTap(event: MotionEvent) {

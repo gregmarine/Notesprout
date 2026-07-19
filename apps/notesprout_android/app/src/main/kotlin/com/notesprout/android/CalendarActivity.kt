@@ -243,6 +243,9 @@ class CalendarActivity : AppCompatActivity() {
     private var stickyNoteTapDownTime = 0L
     private var stickyNoteTapMoved = false
 
+    /** True while finger gestures are suppressed because the pen owns the surface. */
+    private var fingerGesturesSuppressed = false
+
     private val density get() = resources.displayMetrics.density
 
     private val editorLauncher = registerForActivityResult(
@@ -1850,6 +1853,18 @@ class CalendarActivity : AppCompatActivity() {
             }
         }
         if (event.getToolType(0) == MotionEvent.TOOL_TYPE_FINGER) {
+            // Pen-activity gate: while the stylus owns the surface (and briefly after it lifts) a
+            // finger contact is a palm, not a gesture — see [NotebookView.isPenActive]. Drop it
+            // before any detector or EPD release can act on it and disturb the stroke in flight.
+            if (drawingView.isPenActive) {
+                if (!fingerGesturesSuppressed) {
+                    fingerGesturesSuppressed = true
+                    cancelFingerGestures()
+                }
+                return super.dispatchTouchEvent(event)
+            }
+            fingerGesturesSuppressed = false
+
             val inToolbar = isTouchInView(event, binding.calendarToolbar)
             val inMenu = binding.calOverflowMenu.visibility == View.VISIBLE &&
                     isTouchInView(event, binding.calOverflowMenu)
@@ -1977,6 +1992,28 @@ class CalendarActivity : AppCompatActivity() {
     }
 
     /** Finger gestures over the canvas: horizontal swipe steps the period; a double-tap opens a day. */
+    /**
+     * Abandon all in-flight finger-gesture state when the pen-activity gate closes. Resets fields
+     * directly rather than routing a cancel through [handleMultiFingerDoubleTap], whose CANCEL
+     * branch treats a cancel on an armed 3-finger gesture as a *completed* tap (the Onyx 3-finger
+     * interception workaround) — exactly the false positive the gate exists to prevent.
+     * Mirrors `NotebookActivity.cancelFingerGestures`.
+     */
+    private fun cancelFingerGestures() {
+        // Single-finger nav swipe / day tap.
+        calMoved = true
+        calMultiTouch = true
+
+        stickyNoteTapCandidate = null
+        stickyNoteTapMoved = true
+
+        mfTapArmed = false
+        mfTapMoved = true
+        mfTapPeakCount = 0
+        twoFingerTapFirstTime = 0L
+        threeFingerTapFirstTime = 0L
+    }
+
     private fun handleCalendarFingerGesture(event: MotionEvent): Boolean {
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> { calDownX = event.x; calDownY = event.y; calDownTime = event.eventTime; calMoved = false; calMultiTouch = false }

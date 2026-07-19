@@ -104,6 +104,21 @@ interface NotebookView {
      */
     var onPenLifted: (() -> Unit)?
 
+    /**
+     * True while the stylus is writing, and for [PEN_ACTIVE_TAIL_MS] after it lifts.
+     *
+     * Exists so the host activity can suppress its finger-gesture detectors while the pen
+     * owns the surface. On Onyx the ink path runs through the SDK's raw-drawing pipeline and
+     * never produces Android `MotionEvent`s — but a palm resting on the glass still does. Without
+     * this gate a palm roll mid-word is evaluated as a tap/swipe/double-tap, and the handlers
+     * that fire reach into the live pen session (`releaseRender`, `setLimitRect`), dropping the
+     * stroke being written.
+     *
+     * The tail covers the window just after a lift, where a palm that was riding along with the
+     * hand settles or breaks contact and would otherwise register as a fresh gesture.
+     */
+    val isPenActive: Boolean get() = false
+
     // ── Lasso selection ───────────────────────────────────────────────────────
 
     /**

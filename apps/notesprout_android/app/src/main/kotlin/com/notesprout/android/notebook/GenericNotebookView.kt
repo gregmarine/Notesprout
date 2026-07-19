@@ -3,6 +3,7 @@ package com.notesprout.android.notebook
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
+import android.os.SystemClock
 import androidx.appcompat.content.res.AppCompatResources
 import com.notesprout.android.R
 import android.graphics.Color
@@ -216,6 +217,13 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
     // Wall-clock time of the last ACTION_DOWN, used to compute gesture duration for smart-lasso velocity.
     private var strokeStartTimeMs = 0L
 
+    // ── Pen-activity gate (see [NotebookView.isPenActive]) ───────────────────
+    private var penDown       = false
+    private var penLastLiftMs = 0L
+
+    override val isPenActive: Boolean
+        get() = penDown || (SystemClock.uptimeMillis() - penLastLiftMs) < PEN_ACTIVE_TAIL_MS
+
     // Dwell tracking: how long the stylus was still at the end of the stroke.
     private var dwellAnchorX   = 0f
     private var dwellAnchorY   = 0f
@@ -242,6 +250,19 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
+        // Pen-activity gate: all ink on this engine arrives as MotionEvents, so tracking the
+        // stylus here covers every mode. Runs before any per-mode dispatch/early return.
+        val gateToolType = event.getToolType(0)
+        if (gateToolType == MotionEvent.TOOL_TYPE_STYLUS || gateToolType == MotionEvent.TOOL_TYPE_ERASER) {
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> penDown = true
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    penDown = false
+                    penLastLiftMs = SystemClock.uptimeMillis()
+                }
+            }
+        }
+
         if (isTextPlacementMode) return handleTextPlacementTouch(event)
         // In any mode that bypasses the SDK raw-drawing path, intercept stylus button/eraser-end
         // events before the per-mode handler drops them. Check both TOOL_TYPE_ERASER and
@@ -1070,6 +1091,7 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
      * Called after [commitActiveStroke] on every non-eraser pen lift. Runs the detection
      * gate chain in priority order on a single background thread:
      *   Gate 0 — Shape dwell: single stroke held still ≥ [SHAPE_DWELL_MS] → shape object.
+     *            Currently off via [SHAPE_DWELL_ENABLED]; the gate is skipped entirely.
      *   Gate 1 — Smart lasso: fast closed circle enclosing ≥1 object → enter lasso selection.
      *   Gate 2 — Scribble-to-erase: dense back-and-forth crossing ≥1 object → erase.
      *   Default — Normal stroke: fire [onPenLifted] so the activity saves the stroke to DB.
@@ -1083,7 +1105,7 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
         val strokeId  = lastStroke.id
 
         // ── Gate 0 pre-check: single-stroke dwell candidate → always spawn a thread ──
-        val dwellCandidate = dwellMs >= SHAPE_DWELL_MS
+        val dwellCandidate = SHAPE_DWELL_ENABLED && dwellMs >= SHAPE_DWELL_MS
 
         val isSmartLasso = !dwellCandidate && isSmartLassoCandidate(points, durationMs, density)
         val isScribble   = !dwellCandidate && !isSmartLasso && isScribbleCandidate(points)

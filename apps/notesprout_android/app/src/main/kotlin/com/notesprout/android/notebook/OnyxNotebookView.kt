@@ -3,6 +3,7 @@ package com.notesprout.android.notebook
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
+import android.os.SystemClock
 import androidx.appcompat.content.res.AppCompatResources
 import com.notesprout.android.R
 import android.graphics.Color
@@ -302,6 +303,26 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
     private val currentGesturePoints    = mutableListOf<PointF>()
     private val currentGestureStrokeIds = mutableListOf<String>()
 
+    // ── Pen-activity gate (see [NotebookView.isPenActive]) ───────────────────
+    // Driven by the raw-drawing / raw-erasing callbacks, which are the only place this view
+    // learns the stylus is on the glass — SDK ink never reaches onTouchEvent.
+    private var penDown          = false
+    private var penLastLiftMs    = 0L
+
+    override val isPenActive: Boolean
+        get() = penDown || (SystemClock.uptimeMillis() - penLastLiftMs) < PEN_ACTIVE_TAIL_MS
+
+    /** Mark the stylus as on the glass. Called from every raw begin callback. */
+    private fun markPenDown() {
+        penDown = true
+    }
+
+    /** Mark the stylus as lifted and start the tail window. Called from every raw end callback. */
+    private fun markPenUp() {
+        penDown = false
+        penLastLiftMs = SystemClock.uptimeMillis()
+    }
+
     // Dwell tracking: how long the stylus was still at the end of the stroke.
     private var dwellAnchorX    = 0f
     private var dwellAnchorY    = 0f
@@ -327,6 +348,9 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
     private val rawInputCallback = object : RawInputCallback() {
         override fun onBeginRawDrawing(shortcutDrawing: Boolean, touchPoint: TouchPoint) {
             epd { "ON_BEGIN_RAW_DRAWING isEraserMode=$isEraserMode isLassoMode=$isLassoMode isLassoEraserMode=$isLassoEraserMode isTextPlacementMode=$isTextPlacementMode isSetup=$isSetup" }
+            // Before the mode guard: the pen is on the glass in every mode, and the gate must
+            // hold off finger gestures regardless of what this contact will end up doing.
+            markPenDown()
             if (isLassoMode || isLassoEraserMode || isTextPlacementMode || isShapeTransformMode) return
             if (isSetup && !isEraserMode) {
                 touchHelper.setRawDrawingRenderEnabled(true)
@@ -345,6 +369,7 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
 
         override fun onEndRawDrawing(shortcutDrawing: Boolean, touchPoint: TouchPoint) {
             epd { "ON_END_RAW_DRAWING isEraserMode=$isEraserMode isLassoMode=$isLassoMode isLassoEraserMode=$isLassoEraserMode isTextPlacementMode=$isTextPlacementMode" }
+            markPenUp()
             if (isLassoMode || isLassoEraserMode || isTextPlacementMode || isShapeTransformMode) return
             if (isEraserMode) {
                 // Flush any throttled-but-not-yet-drawn erase removals before the EPD repaint.
@@ -385,6 +410,7 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
 
         override fun onBeginRawErasing(shortcutErasing: Boolean, touchPoint: TouchPoint) {
             epd { "ON_BEGIN_RAW_ERASING isSetup=$isSetup" }
+            markPenDown()
             // Release the overlay render immediately so bitmap updates (erased strokes
             // disappearing) are visible right away — same issue as toolbar eraser toggle.
             // Without this the overlay obscures the updated bitmap.
@@ -399,6 +425,7 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
 
         override fun onEndRawErasing(shortcutErasing: Boolean, touchPoint: TouchPoint) {
             epd { "ON_END_RAW_ERASING" }
+            markPenUp()
             // Flush any throttled-but-not-yet-drawn erase removals before the EPD repaint.
             finalizeEraseRedraw()
             post {
@@ -842,6 +869,7 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
      * Called at the end of every non-eraser pen gesture.  Runs the detection gate chain
      * in priority order on a single background thread:
      *   Gate 0 — Shape dwell: single stroke held still ≥ [SHAPE_DWELL_MS] → shape object.
+     *            Currently off via [SHAPE_DWELL_ENABLED]; the gate is skipped entirely.
      *   Gate 1 — Smart lasso: fast closed circle enclosing ≥1 object → enter lasso selection.
      *   Gate 2 — Scribble-to-erase: dense back-and-forth crossing ≥1 object → erase.
      *   Default — Normal stroke: fire [onPenLifted] so the activity saves the stroke to DB.
@@ -864,7 +892,7 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
         // On Onyx, a single pen contact produces multiple renderStroke batches
         // (multiple IDs in gestureStrokeIds). All batches belong to the same gesture,
         // so no stroke-count check — just the dwell time.
-        val dwellCandidate = dwellMs >= SHAPE_DWELL_MS
+        val dwellCandidate = SHAPE_DWELL_ENABLED && dwellMs >= SHAPE_DWELL_MS
         // Merge all gesture points into one synthetic stroke for undo restoration.
         // None of the gesture strokes are persisted (onPenLifted never fires for them).
         val mergedStroke: com.notesprout.android.data.LiveStroke? = if (dwellCandidate) {
@@ -1270,6 +1298,17 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
+        // Pen-activity gate, Android-event half. In the modes below the SDK raw-drawing path is
+        // off, so the raw begin/end callbacks never fire and the stylus arrives here instead —
+        // track it from MotionEvents so [isPenActive] stays correct in every mode.
+        val gateToolType = event.getToolType(0)
+        if (gateToolType == MotionEvent.TOOL_TYPE_STYLUS || gateToolType == MotionEvent.TOOL_TYPE_ERASER) {
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> markPenDown()
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> markPenUp()
+            }
+        }
+
         // In any mode that disables the SDK raw-drawing path (setRawDrawingEnabled=false),
         // the SDK never fires onBeginRawErasing for the stylus button/eraser-end. Intercept
         // via Android events before the per-mode handler gets a chance to drop the event.

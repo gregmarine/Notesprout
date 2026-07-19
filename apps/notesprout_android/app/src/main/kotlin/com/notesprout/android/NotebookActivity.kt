@@ -331,6 +331,13 @@ class NotebookActivity : AppCompatActivity() {
     /** The sticky note the current finger gesture started on (pen mode only), or null. */
     private var stickyNoteTapCandidate: StickyNoteRender? = null
 
+    /**
+     * True while finger gestures are being ignored because the pen owns the surface
+     * ([NotebookView.isPenActive]). Latched so [cancelFingerGestures] runs once per suppression
+     * window rather than on every palm MOVE event.
+     */
+    private var fingerGesturesSuppressed = false
+
     /** Index UUID of the open notebook — set once in onCreate from EXTRA_NOTEBOOK_ID. */
     private var notebookId: String = ""
 
@@ -2470,11 +2477,24 @@ class NotebookActivity : AppCompatActivity() {
      * drawing engine exclusively.  A pen swipe must never turn the page.
      */
     override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+        // Pen-activity gate: while the stylus owns the surface (and briefly after it lifts), a
+        // finger contact is a palm, not a gesture. Feeding it to the detectors produces false
+        // double-taps/swipes whose handlers reconfigure the live pen session (releaseRender,
+        // setLimitRect) and drop the stroke being written. Cancel any in-flight gesture state
+        // once, then stay out of the way until the pen is gone.
         if (event.getToolType(0) == MotionEvent.TOOL_TYPE_FINGER) {
-            handlePageSwipe(event)
-            handleLinkFollowGesture(event)
-            handleToolbarToggleGesture(event)
-            handleMultiFingerDoubleTap(event)
+            if (drawingView.isPenActive) {
+                if (!fingerGesturesSuppressed) {
+                    fingerGesturesSuppressed = true
+                    cancelFingerGestures()
+                }
+            } else {
+                fingerGesturesSuppressed = false
+                handlePageSwipe(event)
+                handleLinkFollowGesture(event)
+                handleToolbarToggleGesture(event)
+                handleMultiFingerDoubleTap(event)
+            }
         }
 
         // ── Overflow: deferred close after button UP (fixes finger click + stylus click) ──
@@ -2511,7 +2531,11 @@ class NotebookActivity : AppCompatActivity() {
             // or shape insert toolbar so button state changes are visible immediately on e-ink.
             // Shape insert toolbar releases for both finger and stylus — it's a UI surface, not
             // a drawing surface, so we always want to flush the current EPD frame on entry.
-            if ((isFinger && (inToolbar || inOverflowMenu)) || inShapeInsertToolbar) {
+            // Pen-active guard on the finger path: a palm landing over the bar mid-word is not a
+            // button press, and releasing the render here would kill the stroke in flight. The
+            // stylus path is unguarded — a pen touch on chrome is always deliberate.
+            if ((isFinger && (inToolbar || inOverflowMenu) && !drawingView.isPenActive)
+                || inShapeInsertToolbar) {
                 drawingView.releaseRender()
             }
 
@@ -3088,6 +3112,45 @@ class NotebookActivity : AppCompatActivity() {
                 mfTapMoved = false
             }
         }
+    }
+
+    /**
+     * Abandon all in-flight finger-gesture state, silently.
+     *
+     * Called once when the pen-activity gate closes ([fingerGesturesSuppressed]). This resets the
+     * same fields the detectors' own `ACTION_CANCEL` branches do, but deliberately does **not**
+     * route through them: [handleMultiFingerDoubleTap]'s cancel branch treats a cancel on an armed
+     * 3-finger gesture as a *completed* tap (the Onyx 3-finger interception workaround), which is
+     * exactly the false positive this gate exists to prevent.
+     *
+     * Clearing the first-tap timestamps matters as much as the in-flight flags — a stale armed
+     * first tap would otherwise pair with a real tap after the pen lifts and fire a phantom
+     * undo / redo / toolbar toggle.
+     */
+    private fun cancelFingerGestures() {
+        // One-finger + two-finger page swipe.
+        pageSwipeActive = false
+        pageSwipeVelocityTracker?.recycle()
+        pageSwipeVelocityTracker = null
+        twoFingerSwipeActive = false
+        twoFingerSwipeVelocityTracker?.recycle()
+        twoFingerSwipeVelocityTracker = null
+
+        // Link / sticky-note tap-to-follow.
+        linkTapMoved = true
+        linkTapCandidate = null
+        stickyNoteTapCandidate = null
+
+        // One-finger double-tap toolbar toggle.
+        toggleTapMoved = true
+        toggleFirstTapTime = 0L
+
+        // Multi-finger double-tap undo / redo.
+        mfTapArmed = false
+        mfTapMoved = true
+        mfTapPeakCount = 0
+        twoFingerTapFirstTime = 0L
+        threeFingerTapFirstTime = 0L
     }
 
     /**
