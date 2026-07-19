@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <!--
+        720dp+ (G102 ~992dp, Note Max, Tab XC …): one row again. The fixed chrome costs ~650dp, so
+        the tools group still gets real width to lay out in and overflows the tail as designed —
+        stacked rows would just waste writing area on a 10" page.
+    -->
+    <bool name="day_toolbar_single_row">true</bool>
+
+</resources>

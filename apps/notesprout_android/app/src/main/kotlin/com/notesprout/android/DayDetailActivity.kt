@@ -17,6 +17,7 @@ import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewConfiguration
+import android.view.ViewGroup
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
@@ -357,6 +358,9 @@ class DayDetailActivity : AppCompatActivity() {
         )
 
         updateDateLabel()
+        // Before setupOverflow: the manager captures dayToolsGroup's children on first layout, and
+        // on a wide screen that group has to be sitting in the toolbar by then.
+        if (singleRowToolbar) collapseToolbarToSingleRow()
         setupToolbar()
         setupOverflow()
         setupViewToggles()
@@ -410,6 +414,77 @@ class DayDetailActivity : AppCompatActivity() {
         binding.btnDayUndo.setOnClickListener { undo() }
         binding.btnDayRedo.setOnClickListener { redo() }
         binding.btnDayTemplate.setOnClickListener { showTemplatePicker() }
+    }
+
+    /**
+     * True on 720dp+ screens (G102, Note Max, Tab XC …), where the whole day toolbar fits on one
+     * row and stacking it would just cost writing area. See `values/bools.xml`.
+     */
+    private val singleRowToolbar by lazy { resources.getBoolean(R.bool.day_toolbar_single_row) }
+
+    /**
+     * Folds the stacked view-toggle and tools rows back onto the nav row. The layout ships stacked
+     * because that's what phone-width e-ink needs; a wide screen has room for the original one-line
+     * bar, so the two extra rows are merged in rather than maintained as a duplicate layout file.
+     */
+    private fun collapseToolbarToSingleRow() {
+        val bar = binding.dayToolbar
+        val toggles = listOf(
+            binding.btnDayViewEvents, binding.btnDayViewNote,
+            binding.btnDayViewNotebooks, binding.btnDayViewHistory,
+        )
+        // Equal-weight segments make sense across a full-width row; inline they take natural width.
+        for (btn in toggles) {
+            val lp = btn.layoutParams as LinearLayout.LayoutParams
+            lp.width = LinearLayout.LayoutParams.WRAP_CONTENT
+            lp.weight = 0f
+            btn.layoutParams = lp
+        }
+        binding.dayViewBar.setPadding(0, 0, 0, 0)
+        binding.dayViewBarDivider.isVisible = false
+
+        (binding.dayViewBar.parent as ViewGroup).removeView(binding.dayViewBar)
+        (binding.dayToolsGroup.parent as ViewGroup).removeView(binding.dayToolsGroup)
+
+        // Insert ahead of the divider that precedes the date, so the date + scratch pad stay trailing.
+        val at = bar.indexOfChild(binding.dayToolsInlineDivider)
+        bar.addView(
+            binding.dayViewBar, at,
+            LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.MATCH_PARENT,
+            ),
+        )
+        // The tools group takes the weight the date label holds while stacked, so it has room to lay
+        // out and overflow its tail — the date falls back to its natural width.
+        bar.addView(
+            binding.dayToolsGroup, at + 1,
+            LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f),
+        )
+        binding.dayToolsInlineDivider.isVisible = true
+
+        val dateLp = binding.tvDayDate.layoutParams as LinearLayout.LayoutParams
+        dateLp.width = LinearLayout.LayoutParams.WRAP_CONTENT
+        dateLp.weight = 0f
+        binding.tvDayDate.layoutParams = dateLp
+        binding.tvDayDate.minWidth = (148 * resources.displayMetrics.density).toInt()
+
+        // The History sub-toggles are weighted for the same reason as the view toggles — and would
+        // likewise stretch across a 10" bar. Natural width + the style's normal padding here.
+        val pad = (12 * resources.displayMetrics.density).toInt()
+        for (btn in listOf(
+            binding.btnDayHistNotes, binding.btnDayHistOpened,
+            binding.btnDayHistEdited, binding.btnDayHistCreated,
+        )) {
+            val lp = btn.layoutParams as LinearLayout.LayoutParams
+            lp.width = LinearLayout.LayoutParams.WRAP_CONTENT
+            lp.weight = 0f
+            btn.layoutParams = lp
+            btn.setPadding(pad, btn.paddingTop, pad, btn.paddingBottom)
+        }
+        val histLp = binding.daySubHistory.layoutParams as LinearLayout.LayoutParams
+        histLp.width = LinearLayout.LayoutParams.WRAP_CONTENT
+        histLp.weight = 0f
+        binding.daySubHistory.layoutParams = histLp
     }
 
     // ── Tools overflow (reuses ToolbarOverflowManager over the Note-mode dayToolsGroup) ──────────
@@ -576,11 +651,11 @@ class DayDetailActivity : AppCompatActivity() {
         val isNote = viewMode == ViewMode.NOTE
         val isHistoryNotes = viewMode == ViewMode.HISTORY && historySub == HistSub.NOTES
 
-        // Drawing tools live only in Note mode; the fallback spacer keeps the date label right-aligned
-        // when they're hidden. The tools group is weighted, so hiding it hands its space to the spacer.
+        // Drawing tools live only in Note mode. They own a full-width row of their own, so hiding
+        // the group (and its border) reclaims the whole row for the canvas in the other three views.
         binding.dayToolsGroup.isVisible = isNote
-        binding.dayToolsDivider.isVisible = isNote
-        binding.daySpacerB.isVisible = !isNote
+        // Stacked only: the tools row's own border. Inline, the toolbar's border already covers it.
+        binding.dayToolsDivider.isVisible = isNote && !singleRowToolbar
         if (!isNote && ::overflowManager.isInitialized && overflowManager.isOverflowMenuOpen()) {
             closeDayOverflowMenu()
         }
