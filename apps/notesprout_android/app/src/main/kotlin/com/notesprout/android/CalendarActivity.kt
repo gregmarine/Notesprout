@@ -433,13 +433,24 @@ class CalendarActivity : AppCompatActivity() {
         }
     }
 
+    /**
+     * Freezes the text toggles' natural widths into their LayoutParams, since the overflow manager
+     * sizes by LayoutParams px and wrap_content reads as 0 there.
+     *
+     * Measured UNSPECIFIED rather than read from [View.getWidth]: a horizontal LinearLayout measures
+     * each child against the space its siblings left over, so on a bar too narrow to fit everything
+     * the toggle straddling the cut lands truncated (it's clipped at the edge anyway). Pinning that
+     * width froze it permanently, and the button carried the stub into the overflow menu with no room
+     * left to draw its label — "Week" showed as an empty pill on G6, where the cut fell on that button.
+     */
     private fun pinToggleWidths() {
+        val unspecified = View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
         for (btn in listOf(binding.btnToday, binding.btnMonthView, binding.btnWeekView, binding.btnDayView)) {
-            val w = btn.width
-            if (w > 0) {
-                val lp = btn.layoutParams as LinearLayout.LayoutParams
-                if (lp.width != w) { lp.width = w; btn.layoutParams = lp }
-            }
+            val lp = btn.layoutParams as LinearLayout.LayoutParams
+            if (lp.width >= 0) continue // already pinned — natural width doesn't change
+            btn.measure(unspecified, unspecified)
+            val w = btn.measuredWidth
+            if (w > 0) { lp.width = w; btn.layoutParams = lp }
         }
     }
 
