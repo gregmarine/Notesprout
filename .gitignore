@@ -48,7 +48,9 @@ key.properties
 .vscode/
 
 # Claude Code local tooling
-.claude/
+.claude/*
+!.claude/skills/
+!.claude/skills/**
 
 # Logs
 *.log
