@@ -243,6 +243,36 @@ Phases 0–2 built (see `docs/handwriting-recognition.md` § "TrOCR engine"). De
 
 ---
 
+## Columnar schema drift — crash-on-launch with no user-facing recovery
+
+> Hit again on G6 (dev) 2026-07-20 while testing an unrelated UI change; first recorded during the
+> global-encryption work, on G6 and MAX but never G102. Not urgent for *my* devices (dev data is
+> disposable) — it matters only if drifted notebooks exist on a real install.
+
+Old notebooks written before the columnar migration carry a `notebook` column set that no longer
+matches `NotebookObject`. Room finds no `room_master_table`, takes the **`onCreate`** path, then fails
+strict schema validation on the open:
+
+```
+java.lang.IllegalStateException: Pre-packaged database has an invalid schema:
+notebook(com.notesprout.android.data.NotebookObject)
+  Expected: blob, x, y, width, height, level, shapeType, linkTarget, …   (columnar)
+  Found:    id, parentId, type, updatedAt                                (legacy)
+```
+
+("Pre-packaged" is a red herring — there is no asset DB. That's just Room's message for a failed
+`onCreate` validation.)
+
+`NonDestructiveOpenHelperFactory` behaves **correctly** here: it converts what the default corruption
+handler would have made a silent delete-and-recreate into a loud crash, and the `.soil` files and index
+are left byte-intact. That is the right trade — but the consequence is a **hard crash on launch with no
+in-app way out**. The only recovery today is `pm clear` (destroys the library) or manual surgery.
+
+Options, none decided: a real migration for drifted column sets; a pre-open schema probe that quarantines
+the offending notebook and lets the library still load; or at minimum catching the validation failure so
+the app surfaces "this notebook can't be opened by this build" instead of dying at startup. A reinstall
+or clean build does **not** help — the fault is entirely in the on-device data.
+
 ## Serialization hardening — pin `@SerialName` on `LinkTarget` (latent, not urgent)
 
 > Found 2026-07-14 while evaluating (and rejecting) an app package rename. Nothing is broken today —

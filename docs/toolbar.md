@@ -140,3 +140,21 @@ the gear button `btnToolbarSettings`.
 - `applyCollapsedState()` hides/shows `drawingToolbar` (closing any open overflow first) + releases
   the EPD overlay; `collapsed` persists and is restored on open via `root.doOnLayout` (after the
   overflow-init `doOnLayout`, so fit is computed while the bar is still visible).
+- **The page indicator hides with the bar.** `applyCollapsedState()` also drives
+  `tvPageIndicator.visibility`, so one double-tap clears *all* chrome off the page. Because that single
+  site serves both the gesture and the restore path, a notebook opened with a persisted `collapsed`
+  state starts with the indicator already hidden — no flash.
+
+### Page indicator overlay
+
+`tvPageIndicator` (`activity_notebook.xml`) is a bare `TextView` layered above the toolbar in the root
+`FrameLayout` — it is *not* part of the bar. It reads `<notebook name> · <n> / <total>` (falling back to
+the bare `n / total` when the name is blank), at 18sp `inkBlack`.
+
+- `updatePageIndicator()` (`NotebookActivity`) sets the text and syncs the page count to the global
+  index when it changes.
+- `positionPageIndicator()` re-anchors it so it never collides with the bar: collapsed → `bottom|end`;
+  toolbar BOTTOM → `top|end`; RIGHT → `bottom|start`; TOP/LEFT → `bottom|end`.
+- The name makes this view far wider than the old `n / total`, so it is capped at `maxWidth=320dp` with
+  `maxLines=1` + `ellipsize=end`. On narrow devices a long name truncates rather than running across the
+  page — worth re-checking in every toolbar placement if that cap is ever changed.
