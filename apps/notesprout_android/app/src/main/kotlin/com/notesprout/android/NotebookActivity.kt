@@ -11,7 +11,6 @@ import android.graphics.PointF
 import android.graphics.Rect
 import android.graphics.RectF
 import android.graphics.Region
-import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.SystemClock
@@ -810,10 +809,6 @@ class NotebookActivity : AppCompatActivity() {
         }
     }
 
-    // ── Export save-to-device launchers ──────────────────────────────────────
-
-    private var pendingExportFile: java.io.File? = null
-
     /** The sticky note being edited in [StickyNoteEditorActivity] — stashed before launch,
      *  read in [editorLauncher] to know which note to persist content to. */
     private var pendingStickyNote: StickyNoteRender? = null
@@ -919,82 +914,6 @@ class NotebookActivity : AppCompatActivity() {
             }
         }
         if (wasInitialCreate) selectStickyNoteIcon(afterRender)
-    }
-
-    private val savePdfLauncher = registerForActivityResult(
-        ActivityResultContracts.CreateDocument("application/pdf")
-    ) { uri ->
-        val file = pendingExportFile ?: return@registerForActivityResult
-        if (uri == null) return@registerForActivityResult
-        lifecycleScope.launch(Dispatchers.IO) {
-            try {
-                contentResolver.openOutputStream(uri)?.use { out ->
-                    file.inputStream().use { it.copyTo(out) }
-                }
-            } catch (e: Exception) {
-                android.os.Handler(android.os.Looper.getMainLooper()).post {
-                    android.widget.Toast.makeText(
-                        this@NotebookActivity, "Save failed: ${e.message}", android.widget.Toast.LENGTH_LONG
-                    ).show()
-                }
-            }
-        }
-    }
-
-    private val saveSoilLauncher = registerForActivityResult(
-        ActivityResultContracts.CreateDocument("application/x-notesprout-soil")
-    ) { uri ->
-        val file = pendingExportFile ?: return@registerForActivityResult
-        if (uri == null) return@registerForActivityResult
-        lifecycleScope.launch(Dispatchers.IO) {
-            try {
-                contentResolver.openOutputStream(uri)?.use { out ->
-                    file.inputStream().use { it.copyTo(out) }
-                }
-            } catch (e: Exception) {
-                android.os.Handler(android.os.Looper.getMainLooper()).post {
-                    android.widget.Toast.makeText(
-                        this@NotebookActivity, "Save failed: ${e.message}", android.widget.Toast.LENGTH_LONG
-                    ).show()
-                }
-            }
-        }
-    }
-
-    // Two launchers so the SAF mime matches the extension — a text/plain launcher on a ".md" name
-    // makes the picker append ".txt" (→ "notebook.md.txt"). Route .md through text/markdown.
-    private val saveTextLauncher = registerForActivityResult(
-        ActivityResultContracts.CreateDocument("text/plain")
-    ) { uri -> writePendingExportTo(uri) }
-
-    private val saveMarkdownLauncher = registerForActivityResult(
-        ActivityResultContracts.CreateDocument("text/markdown")
-    ) { uri -> writePendingExportTo(uri) }
-
-    /** Copy [pendingExportFile] into the SAF-picked [uri]. Shared by the text/markdown launchers. */
-    private fun writePendingExportTo(uri: android.net.Uri?) {
-        val file = pendingExportFile ?: return
-        if (uri == null) return
-        lifecycleScope.launch(Dispatchers.IO) {
-            try {
-                contentResolver.openOutputStream(uri)?.use { out ->
-                    file.inputStream().use { it.copyTo(out) }
-                }
-            } catch (e: Exception) {
-                android.os.Handler(android.os.Looper.getMainLooper()).post {
-                    android.widget.Toast.makeText(
-                        this@NotebookActivity, "Save failed: ${e.message}", android.widget.Toast.LENGTH_LONG
-                    ).show()
-                }
-            }
-        }
-    }
-
-    /** Launch the SAF create-document flow with the mime matching [file]'s extension. */
-    private fun launchTextSave(file: java.io.File) {
-        pendingExportFile = file
-        if (file.extension.equals("md", ignoreCase = true)) saveMarkdownLauncher.launch(file.name)
-        else saveTextLauncher.launch(file.name)
     }
 
     // ── Activity lifecycle ────────────────────────────────────────────────────
@@ -1275,7 +1194,12 @@ class NotebookActivity : AppCompatActivity() {
 
         binding.btnExport.setOnClickListener {
             val db = soilDatabase ?: return@setOnClickListener
-            startExport(db)
+            openExportScreen(db)
+        }
+
+        binding.btnTextRecognition.setOnClickListener {
+            val db = soilDatabase ?: return@setOnClickListener
+            showTextRecognitionMenu(db)
         }
 
         binding.btnPin.setOnClickListener {
@@ -4569,14 +4493,15 @@ class NotebookActivity : AppCompatActivity() {
         runCatching { indexRepo.updateNotebookSnapshot(nbId, snapshot) }
     }
 
-    private fun startExport(db: SoilDatabase) {
+    /**
+     * The "Text" toolbar button: the two recognition actions that used to hang off the Export
+     * sheet. Export itself now opens [ExportActivity] directly.
+     */
+    private fun showTextRecognitionMenu(db: SoilDatabase) {
         val rtrOn = notebookMetadata?.rtrEnabled == true
         ActionSheetDialog(this)
-            .title("Export")
-            .addAction(R.drawable.ic_export,             "Export as PDF")          { choosePdfTemplate(db) }
-            .addAction(R.drawable.ic_text_recognition,   "Export as Text")         { chooseTextFormat(db) }
-            .addAction(R.drawable.ic_notebook,           "Export Notebook (.soil)") { startSoilExport(db) }
-            .addAction(R.drawable.ic_text_recognition,   "View recognized text")   { openTextViewer(db) }
+            .title("Text recognition")
+            .addAction(R.drawable.ic_text_recognition, "View recognized text") { openTextViewer(db) }
             .addAction(
                 R.drawable.ic_text_recognition,
                 if (rtrOn) "Real-time text: On" else "Real-time text: Off",
@@ -4584,81 +4509,22 @@ class NotebookActivity : AppCompatActivity() {
             .show()
     }
 
-    /** Text-export sub-choice: Markdown (default, keeps `#`/`---`/lists) or plain text (stripped). */
-    private fun chooseTextFormat(db: SoilDatabase) {
-        ActionSheetDialog(this)
-            .title("Export as Text")
-            .addAction(null, "Markdown (.md)") { startTextExport(db, NotebookTextExporter.Format.MARKDOWN) }
-            .addAction(null, "Text only (.txt)") { startTextExport(db, NotebookTextExporter.Format.PLAIN) }
-            .show()
-    }
-
-    private fun startTextExport(db: SoilDatabase, format: NotebookTextExporter.Format) {
-        val hwrReady = com.notesprout.android.recognition.HandwritingRecognizerProvider.instance?.isReady() == true
-        val tvMessage = android.widget.TextView(this).apply {
-            text = "Recognizing…"
-            setPadding(64, 48, 64, 48)
-            setTextColor(android.graphics.Color.BLACK)
-            textSize = 16f
-        }
-        val dialog = AlertDialog.Builder(this)
-            .setView(tvMessage)
-            .setCancelable(false)
-            .create()
-        dialog.show()
-        dialog.window?.setElevation(0f)
-        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
-
-        val handler = android.os.Handler(android.os.Looper.getMainLooper())
+    /**
+     * Open the export screen. Strokes are flushed first: [ExportActivity] renders from the `.soil`
+     * on disk, so unsaved ink in the live view would silently be missing from the output.
+     */
+    private fun openExportScreen(db: SoilDatabase) {
         lifecycleScope.launch {
-            val file = try {
-                withContext(Dispatchers.IO) {
-                    saveStrokes(db)   // flush current-page ink so it is recognized
-                    val pageIds = db.notebookDao().getPagesSorted().map { it.id }
-                    NotebookTextExporter.export(
-                        context = this@NotebookActivity,
-                        db = db,
-                        pageIds = pageIds,
-                        notebookTitle = notebookDisplayName,
-                        format = format,
-                        onProgress = { current, total ->
-                            handler.post { tvMessage.text = "Recognizing page $current of $total…" }
-                        },
-                    )
-                }
-            } catch (e: Exception) {
-                dialog.dismiss()
-                toast("Export failed: ${e.message}")
-                return@launch
-            }
-            dialog.dismiss()
-            if (!hwrReady) {
-                toast("Handwriting model not ready — exported cached text only.")
-            }
-            showTextExportChoice(file)
+            withContext(Dispatchers.IO) { saveStrokes(db) }
+            startActivity(
+                ExportActivity.intentFor(
+                    context = this@NotebookActivity,
+                    notebookId = notebookId,
+                    notebookName = notebookDisplayName,
+                    currentPageId = currentPageId.takeIf { it.isNotEmpty() },
+                )
+            )
         }
-    }
-
-    private fun showTextExportChoice(file: java.io.File) {
-        val d = AlertDialog.Builder(this)
-            .setTitle("Export Text")
-            .setPositiveButton("Save to device") { _, _ -> launchTextSave(file) }
-            .setNegativeButton("Share") { _, _ -> shareText(file) }
-            .create()
-        d.show()
-        d.window?.setElevation(0f)
-        d.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
-    }
-
-    private fun shareText(file: java.io.File) {
-        val uri = androidx.core.content.FileProvider.getUriForFile(this, "$packageName.fileprovider", file)
-        val intent = Intent(Intent.ACTION_SEND).apply {
-            type = if (file.extension == "md") "text/markdown" else "text/plain"
-            putExtra(Intent.EXTRA_STREAM, uri)
-            clipData = android.content.ClipData.newRawUri("", uri)
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        }
-        startActivity(Intent.createChooser(intent, "Share Text"))
     }
 
     /** Open the read-only recognized-text viewer for this notebook (flush current ink first). */
@@ -4695,202 +4561,6 @@ class NotebookActivity : AppCompatActivity() {
             syncRtrScheduler()   // creates the scheduler + kicks a backfill of missing/stale pages
             toast(if (enabling) "Real-time text on — recognizing existing pages…" else "Real-time text off.")
         }
-    }
-
-    /** PDF sub-choice: render with the page template or just the handwriting (strokes only). */
-    private fun choosePdfTemplate(db: SoilDatabase) {
-        ActionSheetDialog(this)
-            .title("Export as PDF")
-            .addAction(null, "With template")              { startPdfExport(db, includeTemplate = true) }
-            .addAction(null, "Strokes only (no template)") { startPdfExport(db, includeTemplate = false) }
-            .show()
-    }
-
-    private fun startPdfExport(db: SoilDatabase, includeTemplate: Boolean) {
-        lifecycleScope.launch {
-            // 1. For encrypted notebooks only: offer PDF password protection first.
-            //    If the user declines a password, warn that the export will be unencrypted.
-            val exportPassword: String?
-            if (encryptionInfo.encrypted) {
-                val exportPwdChoice = com.notesprout.android.crypto.PassphrasePrompt.promptForPdfExportPassword(this@NotebookActivity)
-                    ?: return@launch  // user cancelled
-                if (exportPwdChoice.isEmpty()) {
-                    val confirmed = suspendCancellableCoroutine<Boolean> { cont ->
-                        val d = AlertDialog.Builder(this@NotebookActivity)
-                            .setTitle("Export encrypted notebook")
-                            .setMessage("This notebook is encrypted. The exported file will be unencrypted — anyone with access to the exported file will be able to read its contents.")
-                            .setPositiveButton("Export anyway") { _, _ -> if (cont.isActive) cont.resume(true) }
-                            .setNegativeButton("Cancel") { _, _ -> if (cont.isActive) cont.resume(false) }
-                            .setOnCancelListener { if (cont.isActive) cont.resume(false) }
-                            .create()
-                        d.show()
-                        d.window?.setElevation(0f)
-                        d.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
-                        cont.invokeOnCancellation { d.dismiss() }
-                    }
-                    if (!confirmed) return@launch
-                    exportPassword = null
-                } else {
-                    exportPassword = exportPwdChoice
-                }
-            } else {
-                exportPassword = null
-            }
-
-            // 3. Flush current page strokes so the export reflects the latest content.
-            withContext(Dispatchers.IO) { saveStrokes(db) }
-            runExport(db, exportPassword, includeTemplate)
-        }
-    }
-
-    private fun startSoilExport(db: SoilDatabase) {
-        val nbId = notebookId.takeIf { it.isNotEmpty() } ?: return
-        lifecycleScope.launch {
-            val tvMessage = android.widget.TextView(this@NotebookActivity).apply {
-                text = "Exporting…"
-                setPadding(64, 48, 64, 48)
-                setTextColor(android.graphics.Color.BLACK)
-                textSize = 16f
-            }
-            val dialog = AlertDialog.Builder(this@NotebookActivity)
-                .setView(tvMessage)
-                .setCancelable(false)
-                .create()
-            dialog.show()
-            dialog.window?.setElevation(0f)
-            dialog.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
-
-            val soilFile = try {
-                withContext(Dispatchers.IO) {
-                    saveStrokes(db)
-                    NotebookPackager.packageOpenForExport(
-                        context    = this@NotebookActivity,
-                        db         = db,
-                        repo       = indexRepo,
-                        notebookId = nbId,
-                    )
-                }
-            } catch (e: Exception) {
-                dialog.dismiss()
-                android.widget.Toast.makeText(
-                    this@NotebookActivity, "Export failed: ${e.message}", android.widget.Toast.LENGTH_LONG
-                ).show()
-                return@launch
-            }
-            dialog.dismiss()
-            SoilExportKeying.chooseAndApply(
-                activity     = this@NotebookActivity,
-                scope        = lifecycleScope,
-                packaged     = soilFile,
-                info         = encryptionInfo,
-                notebookName = notebookDisplayName,
-                // The notebook is open and unlocked — its current key is already in hand.
-                resolveCurrentKey = { soilKey },
-                onReady = { showSoilExportChoice(it) },
-            )
-        }
-    }
-
-    private fun runExport(db: SoilDatabase, exportPassword: String? = null, includeTemplate: Boolean = true) {
-        val tvMessage = android.widget.TextView(this).apply {
-            text = "Exporting…"
-            setPadding(64, 48, 64, 48)
-            setTextColor(android.graphics.Color.BLACK)
-            textSize = 16f
-        }
-        val dialog = androidx.appcompat.app.AlertDialog.Builder(this)
-            .setView(tvMessage)
-            .setCancelable(false)
-            .create()
-        dialog.show()
-        dialog.window?.setElevation(0f)
-        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
-
-        val handler = android.os.Handler(android.os.Looper.getMainLooper())
-
-        lifecycleScope.launch {
-            val pdfFile = try {
-                withContext(Dispatchers.IO) {
-                    NotebookExporter.export(
-                        context = this@NotebookActivity,
-                        db = db,
-                        onProgress = { current, total ->
-                            handler.post { tvMessage.text = "Exporting page $current of $total…" }
-                        },
-                        exportPassword = exportPassword,
-                        includeTemplate = includeTemplate,
-                    )
-                }
-            } catch (e: Exception) {
-                dialog.dismiss()
-                android.widget.Toast.makeText(this@NotebookActivity, "Export failed: ${e.message}", android.widget.Toast.LENGTH_LONG).show()
-                return@launch
-            }
-            dialog.dismiss()
-            showExportChoice(pdfFile)
-        }
-    }
-
-    private fun showExportChoice(file: java.io.File) {
-        val d = AlertDialog.Builder(this)
-            .setTitle("Export PDF")
-            .setPositiveButton("Save to device") { _, _ ->
-                pendingExportFile = file
-                savePdfLauncher.launch(file.name)
-            }
-            .setNegativeButton("Share") { _, _ ->
-                sharePdf(file)
-            }
-            .create()
-        d.show()
-        d.window?.setElevation(0f)
-        d.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
-    }
-
-    private fun sharePdf(file: java.io.File) {
-        val uri = androidx.core.content.FileProvider.getUriForFile(
-            this,
-            "$packageName.fileprovider",
-            file,
-        )
-        val intent = Intent(Intent.ACTION_SEND).apply {
-            type = "application/pdf"
-            putExtra(Intent.EXTRA_STREAM, uri)
-            clipData = android.content.ClipData.newRawUri("", uri)
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        }
-        startActivity(Intent.createChooser(intent, "Share PDF"))
-    }
-
-    private fun showSoilExportChoice(file: java.io.File) {
-        val d = AlertDialog.Builder(this)
-            .setTitle("Export Notebook")
-            .setPositiveButton("Save to device") { _, _ ->
-                pendingExportFile = file
-                saveSoilLauncher.launch(file.name)
-            }
-            .setNegativeButton("Share") { _, _ ->
-                shareSoil(file)
-            }
-            .create()
-        d.show()
-        d.window?.setElevation(0f)
-        d.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
-    }
-
-    private fun shareSoil(file: java.io.File) {
-        val uri = androidx.core.content.FileProvider.getUriForFile(
-            this,
-            "$packageName.fileprovider",
-            file,
-        )
-        val intent = Intent(Intent.ACTION_SEND).apply {
-            type = "application/x-notesprout-soil"
-            putExtra(Intent.EXTRA_STREAM, uri)
-            clipData = android.content.ClipData.newRawUri("", uri)
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        }
-        startActivity(Intent.createChooser(intent, "Share Notebook"))
     }
 
     /**

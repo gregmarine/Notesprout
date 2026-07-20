@@ -1,0 +1,302 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Export screen. Replaces the format → sub-choice → encryption → progress → save/share dialog
+  chains that used to live separately in NotebookActivity, MainActivity and PageIndexActivity.
+
+  Every section is populated and shown/hidden by ExportActivity.refreshOptions(). Unavailable
+  options are GONE, never disabled — a disabled control is visually silent on e-ink.
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@color/paperWhite"
+    android:fitsSystemWindows="true">
+
+    <!-- Top border -->
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="@color/inkBlack" />
+
+    <!-- Title bar -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="56dp"
+        android:orientation="horizontal"
+        android:background="@color/paperWhite"
+        android:gravity="center_vertical">
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnBack"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:src="@drawable/ic_arrow_left"
+            android:contentDescription="Back"
+            android:layout_marginStart="4dp" />
+
+        <TextView
+            android:id="@+id/tvTitle"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="Export"
+            android:textSize="18sp"
+            android:textColor="@color/inkBlack"
+            android:textStyle="bold"
+            android:paddingStart="8dp"
+            android:paddingEnd="8dp" />
+
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/btnRunExport"
+            style="@style/Widget.Notesprout.OutlinedButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Export"
+            android:layout_marginEnd="12dp" />
+
+    </LinearLayout>
+
+    <!-- Divider -->
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="@color/inkBlack" />
+
+    <!-- Inline progress — replaces the options body while a job runs (no modal dialog). -->
+    <TextView
+        android:id="@+id/tvProgress"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:gravity="center"
+        android:textSize="16sp"
+        android:textColor="@color/inkBlack"
+        android:padding="24dp"
+        android:visibility="gone" />
+
+    <ScrollView
+        android:id="@+id/scrollOptions"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:scrollbars="none">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:paddingStart="24dp"
+            android:paddingEnd="24dp"
+            android:paddingTop="20dp"
+            android:paddingBottom="20dp">
+
+            <!-- ── Locked notice (encrypted notebook whose key could not be resolved) ── -->
+            <TextView
+                android:id="@+id/tvLocked"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="This notebook is locked. Open it once to unlock, then export."
+                android:textSize="15sp"
+                android:textColor="@color/inkBlack"
+                android:background="@drawable/shape_bordered"
+                android:padding="12dp"
+                android:visibility="gone" />
+
+            <!-- ── Pages ──────────────────────────────────────────────────── -->
+            <LinearLayout
+                android:id="@+id/sectionPages"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical">
+
+                <TextView
+                    style="@style/Widget.Notesprout.SectionHeading"
+                    android:text="Pages" />
+
+                <TextView
+                    android:id="@+id/rowScopeAll"
+                    style="@style/Widget.Notesprout.OptionRow"
+                    android:text="All pages" />
+
+                <TextView
+                    android:id="@+id/rowScopeCurrent"
+                    style="@style/Widget.Notesprout.OptionRow"
+                    android:text="Current page" />
+
+                <TextView
+                    android:id="@+id/rowScopeSelected"
+                    style="@style/Widget.Notesprout.OptionRow"
+                    android:text="Selected pages" />
+
+                <View
+                    android:layout_width="match_parent"
+                    android:layout_height="1dp"
+                    android:background="@color/inkBlack"
+                    android:layout_marginTop="20dp"
+                    android:layout_marginBottom="20dp" />
+            </LinearLayout>
+
+            <!-- ── Format ─────────────────────────────────────────────────── -->
+            <TextView
+                style="@style/Widget.Notesprout.SectionHeading"
+                android:text="Format" />
+
+            <TextView
+                android:id="@+id/rowFormatPdf"
+                style="@style/Widget.Notesprout.OptionRow"
+                android:text="PDF" />
+
+            <TextView
+                android:id="@+id/rowFormatPng"
+                style="@style/Widget.Notesprout.OptionRow"
+                android:text="PNG image" />
+
+            <TextView
+                android:id="@+id/rowFormatMarkdown"
+                style="@style/Widget.Notesprout.OptionRow"
+                android:text="Markdown (.md)" />
+
+            <TextView
+                android:id="@+id/rowFormatText"
+                style="@style/Widget.Notesprout.OptionRow"
+                android:text="Plain text (.txt)" />
+
+            <TextView
+                android:id="@+id/rowFormatSoil"
+                style="@style/Widget.Notesprout.OptionRow"
+                android:text="Notebook (.soil)" />
+
+            <!-- ── Options ────────────────────────────────────────────────── -->
+            <LinearLayout
+                android:id="@+id/sectionOptions"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical">
+
+                <View
+                    android:layout_width="match_parent"
+                    android:layout_height="1dp"
+                    android:background="@color/inkBlack"
+                    android:layout_marginTop="20dp"
+                    android:layout_marginBottom="20dp" />
+
+                <TextView
+                    style="@style/Widget.Notesprout.SectionHeading"
+                    android:text="Options" />
+
+                <androidx.appcompat.widget.AppCompatCheckBox
+                    android:id="@+id/checkTemplate"
+                    style="@style/Widget.Notesprout.OptionCheck"
+                    android:text="Include page template"
+                    android:checked="true" />
+
+                <androidx.appcompat.widget.AppCompatCheckBox
+                    android:id="@+id/checkStickyEndnotes"
+                    style="@style/Widget.Notesprout.OptionCheck"
+                    android:text="Sticky notes as endnote pages"
+                    android:checked="true" />
+            </LinearLayout>
+
+            <!-- ── Encryption ─────────────────────────────────────────────── -->
+            <LinearLayout
+                android:id="@+id/sectionEncryption"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:visibility="gone">
+
+                <View
+                    android:layout_width="match_parent"
+                    android:layout_height="1dp"
+                    android:background="@color/inkBlack"
+                    android:layout_marginTop="20dp"
+                    android:layout_marginBottom="20dp" />
+
+                <TextView
+                    style="@style/Widget.Notesprout.SectionHeading"
+                    android:text="Encryption" />
+
+                <!-- PDF: optional AES-128 password on the output file. -->
+                <androidx.appcompat.widget.AppCompatCheckBox
+                    android:id="@+id/checkPdfPassword"
+                    style="@style/Widget.Notesprout.OptionCheck"
+                    android:text="Protect PDF with a password"
+                    android:visibility="gone" />
+
+                <!-- .soil: how the exported copy is keyed. -->
+                <LinearLayout
+                    android:id="@+id/groupKeying"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:visibility="gone">
+
+                    <TextView
+                        android:id="@+id/rowKeyKeep"
+                        style="@style/Widget.Notesprout.OptionRow"
+                        android:text="Keep current encryption" />
+
+                    <TextView
+                        android:id="@+id/rowKeyRemove"
+                        style="@style/Widget.Notesprout.OptionRow"
+                        android:text="Remove encryption (plaintext)" />
+
+                    <TextView
+                        android:id="@+id/rowKeyNew"
+                        style="@style/Widget.Notesprout.OptionRow"
+                        android:text="Set a new passphrase…" />
+                </LinearLayout>
+
+                <TextView
+                    android:id="@+id/tvEncryptionWarning"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:textSize="14sp"
+                    android:textColor="@color/inkBlack"
+                    android:background="@drawable/shape_bordered"
+                    android:padding="12dp"
+                    android:layout_marginTop="8dp"
+                    android:visibility="gone" />
+            </LinearLayout>
+
+            <!-- ── Destination ────────────────────────────────────────────── -->
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:background="@color/inkBlack"
+                android:layout_marginTop="20dp"
+                android:layout_marginBottom="20dp" />
+
+            <TextView
+                style="@style/Widget.Notesprout.SectionHeading"
+                android:text="Destination" />
+
+            <TextView
+                android:id="@+id/rowDestSave"
+                style="@style/Widget.Notesprout.OptionRow"
+                android:text="Save to device" />
+
+            <TextView
+                android:id="@+id/rowDestShare"
+                style="@style/Widget.Notesprout.OptionRow"
+                android:text="Share" />
+
+            <TextView
+                android:id="@+id/rowDestTemplate"
+                style="@style/Widget.Notesprout.OptionRow"
+                android:text="Save as template" />
+
+            <!-- Resulting filename (read-only — the SAF picker is where it can be edited). -->
+            <TextView
+                android:id="@+id/tvFilename"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textSize="14sp"
+                android:textColor="@color/inkLight"
+                android:layout_marginTop="20dp" />
+
+        </LinearLayout>
+    </ScrollView>
+
+</LinearLayout>

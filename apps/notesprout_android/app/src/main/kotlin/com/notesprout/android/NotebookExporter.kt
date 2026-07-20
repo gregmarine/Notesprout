@@ -65,94 +65,13 @@ object NotebookExporter {
     )
 
     /**
-     * Renders every page of [db] to a PDF and writes it to [context.cacheDir].
-     * [onProgress] is called on the calling thread (IO) with (currentPage, totalPages)
-     * before each notebook page is rendered — callers must post to main thread for UI updates.
-     * When [exportPassword] is non-null, post-processes the PDF with AES-128 password protection
-     * using PdfBox-Android; the intermediate plaintext PDF is deleted before returning.
-     * Returns the written PDF [File].
-     */
-    suspend fun export(
-        context: Context,
-        db: SoilDatabase,
-        onProgress: (current: Int, total: Int) -> Unit,
-        exportPassword: String? = null,
-        includeTemplate: Boolean = true,
-    ): File {
-        val dao = db.notebookDao()
-
-        // Notebook metadata → title for filename
-        val notebookObj = dao.getNotebookObject()
-        val title = notebookObj?.let {
-            runCatching { it.notebookMetadata().title }.getOrNull()
-        }?.takeIf { it.isNotBlank() } ?: "notebook"
-        val safeTitle = title.replace(Regex("[^a-zA-Z0-9_\\-. ]"), "_").trim('_', ' ')
-            .ifBlank { "notebook" }
-
-        val pages = dao.getPagesSorted()
-        val totalPages = pages.size
-
-        val pdf = PdfDocument()
-        var pdfPageNumber = 1
-        var pdfPageIndex = 0  // 0-based, tracks current page for annotation wiring
-        val stickyExports = mutableListOf<StickyExport>()
-
-        // Notebook pages
-        for ((i, pageRow) in pages.withIndex()) {
-            onProgress(i + 1, totalPages)
-
-            val (bitmap, templateBitmap, stickyNotes) = renderPageBitmap(dao, pageRow, context, includeTemplate)
-
-            for (note in stickyNotes) {
-                stickyExports += StickyExport(pdfPageIndex, RectF(note.boundingBox), note, bitmap.width, bitmap.height)
-            }
-
-            val pageInfo = PdfDocument.PageInfo.Builder(bitmap.width, bitmap.height, pdfPageNumber++).create()
-            val pdfPage = pdf.startPage(pageInfo)
-            pdfPage.canvas.drawBitmap(bitmap, 0f, 0f, null)
-            pdf.finishPage(pdfPage)
-
-            bitmap.recycle()
-            templateBitmap?.recycle()
-            pdfPageIndex++
-        }
-
-        val outDir = File(context.cacheDir, "exported_pdfs").also { it.deleteRecursively(); it.mkdirs() }
-        val outFile = File(outDir, "$safeTitle.pdf")
-
-        if (exportPassword != null) {
-            // Order: annotate → encrypt
-            val tmpA = File(outDir, "${safeTitle}_tmp.pdf")
-            FileOutputStream(tmpA).use { pdf.writeTo(it) }
-            pdf.close()
-            if (stickyExports.isNotEmpty()) {
-                val tmpB = File(outDir, "${safeTitle}_noted.pdf")
-                addStickyEndnotes(tmpA, tmpB, stickyExports, context)
-                encryptPdfFile(tmpB, outFile, exportPassword)
-            } else {
-                encryptPdfFile(tmpA, outFile, exportPassword)
-            }
-        } else {
-            if (stickyExports.isNotEmpty()) {
-                val tmpA = File(outDir, "${safeTitle}_tmp.pdf")
-                FileOutputStream(tmpA).use { pdf.writeTo(it) }
-                pdf.close()
-                addStickyEndnotes(tmpA, outFile, stickyExports, context)
-            } else {
-                FileOutputStream(outFile).use { pdf.writeTo(it) }
-                pdf.close()
-            }
-        }
-
-        return outFile
-    }
-
-    /**
      * Renders selected pages to a single PDF using a transient Room connection for [soilPath].
      * [pageIds] is the ordered list of page UUIDs to include (in display order, caller's
      * responsibility to sort by page index). [notebookTitle] names the output file.
      * [onProgress] is called on the IO thread with (currentPage, totalInSelection) before each
      * page render — callers must post to main thread for UI updates.
+     * When [stickyEndnotes] is false, sticky notes render as on-page icons only — no endnote pages
+     * and no GoTo link annotations are appended.
      * Does NOT checkpoint on close since NotebookActivity may hold the canonical connection.
      * Returns the written PDF [File].
      */
@@ -165,6 +84,7 @@ object NotebookExporter {
         passphrase: String? = null,
         exportPassword: String? = null,
         includeTemplate: Boolean = true,
+        stickyEndnotes: Boolean = true,
     ): File {
         val safeTitle = notebookTitle.replace(Regex("[^a-zA-Z0-9_\\-. ]"), "_").trim('_', ' ')
             .ifBlank { "notebook" }
@@ -186,8 +106,10 @@ object NotebookExporter {
                 val pageRow = dao.getObjectById(pageId) ?: continue
                 val (bitmap, templateBitmap, stickyNotes) = renderPageBitmap(dao, pageRow, context, includeTemplate)
 
-                for (note in stickyNotes) {
-                    stickyExports += StickyExport(pdfPageIndex, RectF(note.boundingBox), note, bitmap.width, bitmap.height)
+                if (stickyEndnotes) {
+                    for (note in stickyNotes) {
+                        stickyExports += StickyExport(pdfPageIndex, RectF(note.boundingBox), note, bitmap.width, bitmap.height)
+                    }
                 }
 
                 val pageInfo = PdfDocument.PageInfo.Builder(bitmap.width, bitmap.height, pdfPageNumber++).create()
@@ -761,47 +683,5 @@ object NotebookExporter {
         drawStrokeList(strokes)
 
         return bmp
-    }
-
-    /**
-     * Renders a single page to a PNG and writes it to [context.cacheDir/exported_pngs/].
-     * Opens a transient Room instance for [soilPath]; does not checkpoint on close since
-     * NotebookActivity's canonical connection is still live.
-     * [pageNumber] is the 1-based display index used in the filename.
-     * Returns the written PNG [File].
-     */
-    suspend fun exportPage(
-        context: Context,
-        soilPath: String,
-        pageId: String,
-        pageNumber: Int,
-        notebookTitle: String,
-        passphrase: String? = null,
-        includeTemplate: Boolean = true,
-    ): File {
-        val safeTitle = notebookTitle.replace(Regex("[^a-zA-Z0-9_\\-. ]"), "_").trim('_', ' ')
-            .ifBlank { "notebook" }
-
-        val builder = SoilDatabase.builder(context, soilPath)
-        if (passphrase != null) builder.openHelperFactory(SoilCrypto.roomFactory(passphrase))
-        val db = builder.build()
-
-        try {
-            val dao = db.notebookDao()
-            val pageRow = dao.getObjectById(pageId)
-                ?: throw IllegalStateException("Page not found: $pageId")
-
-            val (bitmap, templateBitmap, _) = renderPageBitmap(dao, pageRow, context, includeTemplate)
-            templateBitmap?.recycle()
-
-            val outDir = File(context.cacheDir, "exported_pngs").also { it.deleteRecursively(); it.mkdirs() }
-            val outFile = File(outDir, "${safeTitle}_page${pageNumber}.png")
-            FileOutputStream(outFile).use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
-            bitmap.recycle()
-
-            return outFile
-        } finally {
-            db.close()
-        }
     }
 }

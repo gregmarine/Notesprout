@@ -164,6 +164,13 @@
             android:theme="@style/Theme.Notesprout"
             android:windowSoftInputMode="stateHidden" />
 
+        <!-- Export screen — format, options, and destination for every export entry point -->
+        <activity
+            android:name=".ExportActivity"
+            android:exported="false"
+            android:theme="@style/Theme.Notesprout"
+            android:windowSoftInputMode="stateHidden" />
+
         <!-- Drive OAuth WebView — opens Google consent page, intercepts localhost redirect -->
         <activity
             android:name=".DriveAuthActivity"

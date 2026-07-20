@@ -76,6 +76,12 @@ so `isSelected` state, icon state, and listeners always survive.
   encrypted. Existing users' persisted `order` configs that pre-date S6 may not include these keys;
   a one-time migration in `ToolbarPreferencesManager` appends any registry keys missing from the
   persisted list (new keys appear at the end rather than being hidden until a manual reset).
+  **Text-recognition button:** `"textRecognition"` (`btnTextRecognition`, `ic_text_recognition`,
+  group `GROUP_NOTEBOOK`) was appended when export moved to its own screen. It opens a two-item
+  action sheet — "View recognized text" and the per-notebook "Real-time text: On/Off" toggle — both
+  of which previously hung off the Export action sheet. `btnExport` now opens `ExportActivity`
+  directly with no intermediate sheet. Existing users pick the new key up via the same append
+  migration described above.
 - **`ToolbarLayoutManager`** — arranges the existing button views into `drawingToolbar` per
   `ToolbarConfig`: resolves the visible key list (`order − hidden`, Close always kept; or the mini
   set when `miniEnabled && FLOAT`), sets orientation + size + edge-aware background, inserts

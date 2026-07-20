@@ -13,11 +13,17 @@ user-chosen destination via **Save to device** (`CreateDocument`) or **Share** (
 sheet via FileProvider). The file is **self-describing**: an embedded `notebook_meta` table inside
 the `.soil` carries the import metadata, so no external manifest or wrapper is needed.
 
+Every export in the app — `.soil` included — runs through the single **`ExportActivity`** screen.
 Entry points:
-- **MainActivity** — long-press context menu → Export → "Export Notebook (.soil)" (format chooser)
-- **NotebookActivity** — toolbar Export button → "Export Notebook (.soil)" (format chooser)
 
-Both flow through the same Save/Share AlertDialog after packaging.
+- **MainActivity** — long-press context menu → Export
+- **NotebookActivity** — toolbar Export button (flushes ink first)
+- **PageIndexActivity** — select pages → Export (seeds the "Selected (n)" scope)
+
+The screen presents Pages / Format / Options / Encryption / Destination at once; the top-right
+Export button runs the job and hands the result straight to the chosen destination. `.soil` is
+offered only when the scope is **All pages** — it is inherently whole-notebook. See
+[The Export Screen](#the-export-screen).
 
 ---
 
@@ -97,13 +103,45 @@ Key classes:
 
 ---
 
+## The Export Screen
+
+`ExportActivity` (`ExportActivity.kt`, `res/layout/activity_export.xml`) is the only export UI.
+Supporting types live in `export/`:
+
+| File | Role |
+|---|---|
+| `export/ExportSpec.kt` | `ExportFormat` (PDF/PNG/MARKDOWN/TEXT/SOIL), `PageScope`, `ExportDestination`, `SoilKeying`, and the immutable `ExportSpec` describing one job |
+| `export/ExportEngine.kt` | Runs a spec — dispatches to `NotebookExporter` / `NotebookTextExporter` / `NotebookPackager`, and applies the `.soil` keying transform |
+| `export/ExportDelivery.kt` | SAF `CreateDocument` launchers (one per mime), the `OpenDocumentTree` folder write for multi-file PNG, share intents, and the PNG→template import |
+| `export/ExportNaming.kt` | Filename/template-name whitelisting and de-duplication |
+
+Contract notes:
+
+- The screen receives **notebook identity only** (`EXTRA_NOTEBOOK_ID` / `_NAME`, optional
+  `EXTRA_CURRENT_PAGE_ID`, optional `EXTRA_SELECTED_PAGE_IDS`) — never a `File` or a live DB handle.
+  It reads the page list itself via `data/PageList.kt`'s `loadPageRefs(path, passphrase)`.
+- **Callers must flush unsaved ink before launching.** The screen renders from the `.soil` on disk;
+  `NotebookActivity.openExportScreen` calls `saveStrokes(db)` first for exactly this reason.
+- The key is resolved **once** in `onCreate`: `KeySession` → `PassphraseStore.getGlobalPassphrase`
+  (GLOBAL) → `KeyResolver.resolveForOpen` (NOTEBOOK). An unresolvable key shows a "locked" notice
+  and hides the Export button.
+- Encryption choices are **inline, not prompts**: the unencrypted-export warning is visible text,
+  and the `.soil` keying picker (Keep / Remove / New passphrase) replaces the old
+  `SoilExportKeying` action sheet. Only the two options that need typed input — the PDF password
+  and a new `.soil` passphrase — still open a `PassphrasePrompt`, and they fire from their row
+  rather than after Export.
+- Unavailable options are `GONE`, never disabled — a disabled control is visually silent on e-ink.
+- Progress is inline (`Exporting page 7 of 24…`); Back cancels the running job.
+
+---
+
 ## Export Copy Engine (`NotebookPackager`)
 
-`object NotebookPackager` (`NotebookPackager.kt`) provides two variants:
+### `packageForExport(context, repo, notebookId, openableKey)`
 
-### Cold-file variant — `packageForExport(context, repo, notebookId, openableKey)`
-
-Used from **MainActivity** (notebook is not currently open):
+The single packaging path. Because `ExportActivity` always works from the cold file, the former
+open-DB variant (`packageOpenForExport`) is gone — callers flush and let this open its own
+transient connection:
 
 - `openableKey`: `""` = plaintext; non-empty String = GLOBAL passphrase (open via SoilCrypto);
   `null` = encrypted-NOTEBOOK or key not cached — skip meta refresh, copy as-is.
@@ -115,28 +153,12 @@ Used from **MainActivity** (notebook is not currently open):
   sidecars — after TRUNCATE checkpoint, the WAL is empty and the main file is self-contained).
 - Returns the `File` in the export cache dir.
 
-### Open-DB variant — `packageOpenForExport(context, db, repo, notebookId)`
-
-Used from **NotebookActivity** (notebook is currently open, `db` is the live keyed connection):
-
-- Caller must flush strokes to `db` before invoking (NotebookActivity calls `saveStrokes(db)` first).
-- Refreshes `notebook_meta` with `exportedAt = now` **through the live keyed connection** — no
-  passphrase prompt; the key is already held by `db`. Works identically for plaintext and encrypted.
-- Checkpoints the live connection (`PRAGMA wal_checkpoint(TRUNCATE)`) so the main `.soil` holds all
-  committed content.
-- **Copies the main file only.** The live Room connection stays open; its `-wal`/`-shm` are NOT
-  deleted (SQLite manages them; same rule as `data/PageCopier.kt`). Because the TRUNCATE checkpoint
-  ran and the user isn't drawing during the "Exporting…" modal, the copied main file is complete.
-- Returns the `File` in the export cache dir.
-
 ### Sidecar / cache hygiene
 
 - `exported_notebooks/` is **wiped and recreated** at the start of every export (
   `deleteRecursively()` + `mkdirs()`). No stale `.soil` files accumulate.
 - The copy touches only the main `.soil` file — never `-wal`, `-shm`, or `-journal`.
-- The cold-file path closes the transient DB after checkpoint; Room removes the (empty) WAL and SHM
-  on close.
-- The open-DB path leaves Garden sidecars intact (the live connection owns them).
+- The transient DB is closed after checkpoint; Room removes the (empty) WAL and SHM on close.
 
 ---
 

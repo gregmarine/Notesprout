@@ -56,13 +56,21 @@
             android:src="@drawable/ic_toc"
             android:contentDescription="Table of Contents" />
 
-        <!-- Export button: export notebook to PDF -->
+        <!-- Export button: opens the export screen (format, options, destination) -->
         <androidx.appcompat.widget.AppCompatImageButton
             android:id="@+id/btnExport"
             style="@style/Widget.Notesprout.ToolbarButton"
             android:layout_marginStart="4dp"
             android:src="@drawable/ic_export"
             android:contentDescription="Export notebook" />
+
+        <!-- Text button: view recognized text + real-time text toggle -->
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnTextRecognition"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:layout_marginStart="4dp"
+            android:src="@drawable/ic_text_recognition"
+            android:contentDescription="Text recognition" />
 
         <!-- Pin button: pin/unpin this notebook -->
         <androidx.appcompat.widget.AppCompatImageButton

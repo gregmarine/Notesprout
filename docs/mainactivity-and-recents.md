@@ -186,22 +186,23 @@ template but exporting just the handwriting (blog posts, letters). No data-model
 - `NotebookExporter` renders all pages off-screen on `Dispatchers.IO` using white→template→headings→text→strokes pipeline (template skipped for strokes-only)
 - Output to `context.cacheDir/<title>.pdf`; FileProvider (`${applicationId}.fileprovider`) used for both save and share paths
 - Share intent **must** include `clipData = ClipData.newRawUri("", uri)` alongside `FLAG_GRANT_READ_URI_PERMISSION` — on Android 12+, the chooser intermediary does not forward URI permissions without `ClipData` (causes silent Google Drive upload failure on NA5C)
-- Progress dialog: "Exporting page X of N…" via `Handler(Looper.getMainLooper())`
-- After export: `showExportChoice(file)` presents an `AlertDialog` with "Save to device" (`ACTION_CREATE_DOCUMENT` via `savePdfLauncher`) or "Share" (existing `ACTION_SEND` flow).
-- **Encrypted-notebook warning:** the rendered PDF is plaintext — a warning dialog is shown before the export proceeds.
+- Progress is shown **inline on the export screen** ("Rendering page X of N…"), not in a modal dialog.
+- **Encrypted-notebook warning:** the rendered PDF is plaintext, so the export screen shows a
+  standing inline warning whenever the output would leave the app readable. Ticking "Protect PDF
+  with a password" clears it.
 
-### Full-Notebook Export (.soil)
+### The export screen
 
-- `NotebookPackager.packageForExport(context, repo, notebookId, openableKey)` (cold-file / MainActivity path)
-  or `NotebookPackager.packageOpenForExport(context, db, repo, notebookId)` (open-DB / NotebookActivity path).
-- No passphrase prompt; no "unencrypted" warning. Encrypted notebooks stay encrypted in the copy.
-- Export cache: `cacheDir/exported_notebooks/<safeName>.soil`. Directory is wiped+recreated each export.
+`startExportFromMain(entity)` opens `ExportActivity` — that is the whole implementation. Format,
+page scope, render options, encryption and destination are all chosen there, and the same screen
+serves NotebookActivity and PageIndexActivity. See
+[`docs/full-notebook-export.md` § The Export Screen](full-notebook-export.md#the-export-screen).
+
+- Export cache dirs: `cacheDir/exported_pdfs|exported_pngs|exported_text|exported_notebooks/`, each
+  wiped+recreated per export.
 - FileProvider entry: `<cache-path name="exported_notebooks" path="exported_notebooks/" />` in `file_paths.xml`.
-- After packaging: `showSoilExportChoice(file)` — `AlertDialog` with "Save to device"
-  (`saveSoilLauncher`, `CreateDocument("application/octet-stream")`) or "Share"
-  (`ACTION_SEND`, same `ClipData` + `FLAG_GRANT_READ_URI_PERMISSION` pattern as PDF share).
-- **openableKey semantics (cold path):** `""` = plaintext; non-empty = GLOBAL passphrase (cached,
-  no prompt); `null` = NOTEBOOK-scoped or key not cached → copy cold without meta refresh.
+- **openableKey semantics:** `""` = plaintext; non-empty = passphrase to open with; `null` = copy
+  cold without a meta refresh.
 
 See [`docs/full-notebook-export.md`](full-notebook-export.md) for the full format, `notebook_meta`
 schema, continuous upkeep, and encrypted trade-off.
