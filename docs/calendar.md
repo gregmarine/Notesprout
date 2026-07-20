@@ -72,7 +72,8 @@ all independent, all keyed.
 | `data/index/NotesproutDatabase.kt` | `version=4`; `CalendarEntity` + `NotebookActivityEntity` in `@Database entities`; `MIGRATION_2_3`, `MIGRATION_3_4` |
 | `data/index/NotesproutIndex.kt` | registers `MIGRATION_2_3` + `MIGRATION_3_4`; `calendarDao()` / `notebookActivityDao()` accessors |
 | `data/index/NotebookActivityEntity.kt` / `NotebookActivityDao.kt` | `notebook_activity` log (OPENED/EDITED) — see [Day window](#day-detail--the-day-window) |
-| `data/DayHistoryRepository.kt` | query + logging layer for the Notebooks / History views |
+| `data/DayHistoryRepository.kt` | query + logging layer for the Notebooks / History views + the long-press day list (`notebooksForDay`) |
+| `DayNotebooksDialog.kt` | long-press popup: merged list of notebooks created/opened/edited on a day |
 | `notebook/CalendarTemplateRenderer.kt` | bakes the grid/timeline bitmap + finger hit-test geometry |
 | `CalendarActivity.kt` | the host screen (canvas, tools, navigation, gestures, undo/redo, transfer); launches `DayDetailActivity` on double-tap |
 | `DayDetailActivity.kt` | full-screen **three-view day window** (Note / Notebooks / History — see [Day window](#day-detail--the-day-window)) |
@@ -207,6 +208,9 @@ real canvas pixel size via `setPageSize`.
 - **Single-finger double-tap** → opens the day's full-page canvas ([`DayDetailActivity`](#day-detail--cal-daynote-)).
   Month/Week: double-tap a day **cell** (`hitTest` resolves the date). Day: double-tap **anywhere** opens
   `selectedDate` (no cell hit-test). Second tap within `getDoubleTapTimeout()` on the same day opens.
+- **Single-finger long-press** → that day's [notebook list](#long-press--the-day-notebook-list)
+  (`DayNotebooksDialog`). Same date resolution as the double-tap: Month/Week hit-test the cell, Day
+  uses `selectedDate` from anywhere on either half.
 
 ### Last-position persistence
 
@@ -232,6 +236,32 @@ dialog.
 - Bordered dialog (`shape_bordered`) + `setElevation(0f)`, the standard e-ink dialog treatment.
   Drawables: `bg_day_selected` (oval) / `bg_day_today` (ring) / `bg_month_selected` (filled chip).
 
+### Long-press — the day notebook list
+
+A **finger** long-press on any of the three views opens `DayNotebooksDialog` — a plain list of every
+notebook created / opened / edited on that day. The day window's Notebooks view is the full browser
+(paginated card grid, three separate sub-lists); this is the shortcut, reachable without leaving the
+calendar.
+
+- **Merged, one row per notebook.** `DayHistoryRepository.notebooksForDay(date)` folds all three
+  `Kind`s into `DayNotebook` rows carrying `created` / `opened` / `edited` flags, so a notebook
+  created *and* edited that day is one row tagged `created · edited` (`activityLabel`). Newest-first.
+- **Simple rows, not cards** — notebook name over `folder breadcrumb · what happened`. No covers, no
+  paging (the list scrolls), so nothing has to resolve a snapshot or an encryption state.
+- **Tapping a row** dismisses and opens the notebook via the normal `NotebookActivity` intent —
+  encrypted notebooks route through their own unlock path.
+- **A day with no activity still opens the dialog**, showing "No notebooks on this day". The gesture
+  always does the same thing, so a quiet day never reads as a missed press.
+- **Finger only.** Stylus events never reach `dispatchTouchEvent`'s gesture branch, and a stylus
+  long-press would deposit an ink dwell — the same reason the [shape dwell trigger](shape-objects.md)
+  is disabled.
+- **Fires while the finger is down** (`armDayNotebooksLongPress` posts to `binding.calendarContent` at
+  `getLongPressTimeout()`), not on release. Cancelled by movement past `scaledTouchSlop`, a second
+  pointer, UP/CANCEL, or `cancelFingerGestures` (the pen-activity gate). Once fired, `calLongPressFired`
+  swallows the following ACTION_UP so the release can't also register as a swipe or day tap.
+- **Month/Week presses off the grid never arm** — `hitTest` returns null in the notes band, so writing
+  there is undisturbed.
+
 ---
 
 ## Touch routing (`dispatchTouchEvent`)
@@ -241,7 +271,8 @@ the drawing view untouched. Order for a finger touch outside the toolbar/floatin
 
 1. `handleStickyNoteTapGesture` — tap an on-canvas sticky-note icon → open its editor.
 2. `handleMultiFingerDoubleTap` — **2-finger** stationary double-tap = undo, **3-finger** = redo.
-3. `handleCalendarFingerGesture` — single-finger horizontal swipe = step period; quick tap = select day.
+3. `handleCalendarFingerGesture` — single-finger horizontal swipe = step period; quick tap = select day;
+   long-press = day notebook list.
 
 A `releaseRender()` is issued when a finger ACTION_DOWN lands on the toolbar/floating toolbar (EPD).
 

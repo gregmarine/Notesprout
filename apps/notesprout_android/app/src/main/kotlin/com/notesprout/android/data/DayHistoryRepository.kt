@@ -103,6 +103,52 @@ class DayHistoryRepository(
         }
 
     /**
+     * One notebook's activity on a day, merged across all three [Kind]s — the row model behind the
+     * calendar's long-press list. [timestamp] is the newest time across whichever flags are set.
+     */
+    data class DayNotebook(
+        val notebookId: String,
+        val notebookName: String,
+        val folderPath: String,
+        val timestamp: Long,
+        val created: Boolean,
+        val opened: Boolean,
+        val edited: Boolean,
+    ) {
+        /** Human label for the flags, in the order things happen to a notebook. */
+        val activityLabel: String
+            get() = buildList {
+                if (created) add("created")
+                if (opened) add("opened")
+                if (edited) add("edited")
+            }.joinToString(" · ")
+    }
+
+    /**
+     * Every notebook touched on [date], **one row per notebook** carrying all of that day's activity
+     * flags. Newest-first. Unlike the day window's three separate lists, this is the merged view the
+     * calendar long-press popup shows.
+     */
+    suspend fun notebooksForDay(date: LocalDate): List<DayNotebook> = withContext(Dispatchers.IO) {
+        val merged = LinkedHashMap<String, DayNotebook>()
+        for (kind in listOf(Kind.CREATED, Kind.OPENED, Kind.EDITED)) {
+            for (r in notebooksFor(date, kind)) {
+                val prev = merged[r.notebookId]
+                merged[r.notebookId] = DayNotebook(
+                    notebookId = r.notebookId,
+                    notebookName = r.notebookName,
+                    folderPath = r.folderPath,
+                    timestamp = maxOf(prev?.timestamp ?: 0L, r.timestamp),
+                    created = prev?.created == true || kind == Kind.CREATED,
+                    opened = prev?.opened == true || kind == Kind.OPENED,
+                    edited = prev?.edited == true || kind == Kind.EDITED,
+                )
+            }
+        }
+        merged.values.sortedByDescending { it.timestamp }
+    }
+
+    /**
      * Cover for a notebook card. Missing / undecodable rows resolve to a plain notebook icon
      * (no cover, not locked). Only NOTEBOOK-scope (private) encryption locks the cover behind an
      * icon; GLOBAL-scope covers render (the index is encrypted at rest and the key is available).

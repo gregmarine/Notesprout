@@ -219,6 +219,10 @@ class CalendarActivity : AppCompatActivity() {
     // Single-finger double-tap on a day cell (Month/Week) → open that day's full-page canvas.
     private var lastDayTapDate: LocalDate? = null
     private var lastDayTapTime = 0L
+
+    // Single-finger long-press → that day's notebook list (see showDayNotebooks).
+    private var calLongPressRunnable: Runnable? = null
+    private var calLongPressFired = false
     private val touchSlopPx by lazy { ViewConfiguration.get(this).scaledTouchSlop }
     private val doubleTapSlopPx by lazy { ViewConfiguration.get(this).scaledDoubleTapSlop }
 
@@ -2000,9 +2004,11 @@ class CalendarActivity : AppCompatActivity() {
      * Mirrors `NotebookActivity.cancelFingerGestures`.
      */
     private fun cancelFingerGestures() {
-        // Single-finger nav swipe / day tap.
+        // Single-finger nav swipe / day tap / long-press.
         calMoved = true
         calMultiTouch = true
+        cancelDayNotebooksLongPress()
+        calLongPressFired = false
 
         stickyNoteTapCandidate = null
         stickyNoteTapMoved = true
@@ -2016,12 +2022,20 @@ class CalendarActivity : AppCompatActivity() {
 
     private fun handleCalendarFingerGesture(event: MotionEvent): Boolean {
         when (event.actionMasked) {
-            MotionEvent.ACTION_DOWN -> { calDownX = event.x; calDownY = event.y; calDownTime = event.eventTime; calMoved = false; calMultiTouch = false }
-            MotionEvent.ACTION_POINTER_DOWN -> { calMoved = true; calMultiTouch = true }
+            MotionEvent.ACTION_DOWN -> {
+                calDownX = event.x; calDownY = event.y; calDownTime = event.eventTime; calMoved = false; calMultiTouch = false
+                armDayNotebooksLongPress(event)
+            }
+            MotionEvent.ACTION_POINTER_DOWN -> { calMoved = true; calMultiTouch = true; cancelDayNotebooksLongPress() }
             MotionEvent.ACTION_MOVE -> {
                 if (!calMoved && hypot((event.x - calDownX).toDouble(), (event.y - calDownY).toDouble()) > touchSlopPx) calMoved = true
+                if (calMoved) cancelDayNotebooksLongPress()
             }
             MotionEvent.ACTION_UP -> {
+                cancelDayNotebooksLongPress()
+                // The long-press already acted while the finger was down; swallow its UP so the
+                // release doesn't also read as a swipe or a day tap.
+                if (calLongPressFired) { calLongPressFired = false; return true }
                 val dx = event.x - calDownX
                 val dy = event.y - calDownY
                 // !calMultiTouch guard: a 2-/3-finger gesture (undo/redo double-tap) sets the flag
@@ -2038,9 +2052,46 @@ class CalendarActivity : AppCompatActivity() {
                     return true
                 }
             }
-            MotionEvent.ACTION_CANCEL -> calMoved = true
+            MotionEvent.ACTION_CANCEL -> { calMoved = true; cancelDayNotebooksLongPress(); calLongPressFired = false }
         }
         return false
+    }
+
+    // ── Long-press → that day's notebook list ────────────────────────────────────
+
+    /**
+     * Arm the long-press that opens [DayNotebooksDialog]. Fires while the finger is still down (the
+     * standard feel) rather than on release, and is cancelled by movement past slop, a second
+     * pointer, release, or the pen-activity gate.
+     *
+     * The date is resolved at DOWN: Month/Week hit-test the pressed **cell** (a press off the grid —
+     * the notes band, say — resolves to nothing and never arms); Day view has no cell hit-test, so a
+     * press anywhere on either half opens [selectedDate].
+     */
+    private fun armDayNotebooksLongPress(event: MotionEvent) {
+        cancelDayNotebooksLongPress()
+        calLongPressFired = false
+        val date = if (currentView == CalView.DAY) selectedDate else {
+            val loc = IntArray(2)
+            binding.calendarContent.getLocationInWindow(loc)
+            CalendarTemplateRenderer.hitTest(
+                currentSpec(), event.x - loc[0], event.y - loc[1],
+                binding.calendarContent.width, binding.calendarContent.height, density,
+            ) ?: return
+        }
+        val runnable = Runnable {
+            calLongPressRunnable = null
+            calLongPressFired = true
+            if (isLassoMode) exitLassoMode()
+            DayNotebooksDialog.show(this, date)
+        }
+        calLongPressRunnable = runnable
+        binding.calendarContent.postDelayed(runnable, ViewConfiguration.getLongPressTimeout().toLong())
+    }
+
+    private fun cancelDayNotebooksLongPress() {
+        calLongPressRunnable?.let { binding.calendarContent.removeCallbacks(it) }
+        calLongPressRunnable = null
     }
 
     private fun handleDayTap(localX: Float, localY: Float) {
