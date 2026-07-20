@@ -3110,7 +3110,10 @@ class NotebookActivity : AppCompatActivity() {
      */
     private fun applyCollapsedState() {
         // Reposition the page indicator: hidden bar → lower-right, visible bar → placement corner.
+        // It hides with the bar, so a one-finger double-tap clears all chrome off the page.
         positionPageIndicator()
+        binding.tvPageIndicator.visibility =
+            if (toolbarConfig.collapsed) View.GONE else View.VISIBLE
         if (toolbarConfig.collapsed) {
             if (overflowManager.isOverflowMenuOpen()) overflowManager.closeOverflowMenu()
             binding.drawingToolbar.visibility = View.GONE
@@ -4931,7 +4934,9 @@ class NotebookActivity : AppCompatActivity() {
 
     /** Refresh the page indicator overlay text. Call on the main thread. */
     private fun updatePageIndicator() {
-        binding.tvPageIndicator.text = "${currentPageIndex + 1} / ${pages.size.coerceAtLeast(1)}"
+        val pageText = "${currentPageIndex + 1} / ${pages.size.coerceAtLeast(1)}"
+        binding.tvPageIndicator.text =
+            if (notebookDisplayName.isNotBlank()) "$notebookDisplayName · $pageText" else pageText
         val count = pages.size
         if (notebookId.isNotEmpty() && count != lastSyncedPageCount) {
             lastSyncedPageCount = count

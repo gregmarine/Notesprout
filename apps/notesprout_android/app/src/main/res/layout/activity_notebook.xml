@@ -297,9 +297,12 @@
         android:layout_gravity="bottom|end"
         android:layout_marginBottom="8dp"
         android:layout_marginEnd="8dp"
+        android:ellipsize="end"
+        android:maxLines="1"
+        android:maxWidth="320dp"
         android:text="1 / 1"
         android:textColor="@color/inkBlack"
-        android:textSize="16sp" />
+        android:textSize="18sp" />
 
     <!-- Floating selection context toolbar — appears below (or above) the lasso selection box.
          Positioned programmatically in NotebookActivity.updateFloatingSelectionToolbar().
