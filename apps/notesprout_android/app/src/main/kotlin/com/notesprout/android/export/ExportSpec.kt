@@ -2,6 +2,7 @@ package com.notesprout.android.export
 
 import com.notesprout.android.NotebookTextExporter
 import com.notesprout.android.data.PageRef
+import kotlinx.serialization.Serializable
 
 /**
  * The value types describing one export, assembled by [ExportActivity] and executed by
@@ -13,6 +14,7 @@ import com.notesprout.android.data.PageRef
  */
 
 /** Output file format. One per export — the screen offers a single choice. */
+@Serializable
 enum class ExportFormat(val extension: String, val mimeType: String, val label: String) {
     PDF("pdf", "application/pdf", "PDF"),
     PNG("png", "image/png", "PNG image"),
@@ -36,12 +38,14 @@ enum class ExportFormat(val extension: String, val mimeType: String, val label: 
 enum class PageScope { ALL, CURRENT, SELECTED }
 
 /** Where the finished file(s) go. */
+@Serializable
 enum class ExportDestination { SAVE, SHARE, TEMPLATE }
 
 /**
  * What to do with an encrypted notebook's key when exporting a portable `.soil`.
  * Mirrors the three options the old `SoilExportKeying` action sheet offered.
  */
+@Serializable
 enum class SoilKeying { KEEP, REMOVE, NEW }
 
 /**

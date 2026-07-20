@@ -114,6 +114,29 @@ Supporting types live in `export/`:
 | `export/ExportEngine.kt` | Runs a spec — dispatches to `NotebookExporter` / `NotebookTextExporter` / `NotebookPackager`, and applies the `.soil` keying transform |
 | `export/ExportDelivery.kt` | SAF `CreateDocument` launchers (one per mime), the `OpenDocumentTree` folder write for multi-file PNG, share intents, and the PNG→template import |
 | `export/ExportNaming.kt` | Filename/template-name whitelisting and de-duplication |
+| `data/export/ExportPreset.kt` | One saved set of export choices |
+| `data/export/ExportPresetsManager.kt` | SharedPreferences + kotlinx JSON store for the preset list |
+
+### Presets
+
+The Presets section at the top of the screen saves the current choices for reuse. Rows apply a
+preset on tap and delete it on long-press (with confirmation); `+ Save current settings…` prompts
+for a name (empty field — the user names every preset).
+
+- **A preset never holds a secret.** `usePdfPassword` and `soilKeying` record what was *chosen*;
+  the PDF password and any new `.soil` passphrase are not stored. Applying a preset that needs one
+  re-opens its prompt immediately, so the secret is typed fresh each time. This is the same rule as
+  everywhere else in the app — see [`encryption.md`](encryption.md).
+- **Page scope is not captured.** It belongs to how the screen was opened (a Page Index selection,
+  the current page), not to a reusable preference. Changing scope therefore does *not* clear the
+  active preset, while changing anything a preset does capture does.
+- Applying a `.soil` preset widens the scope to All pages rather than falling back to another
+  format — `.soil` is inherently whole-notebook.
+- `ExportActivity.applyingPreset` guards the widget writes in `applyPreset`: setting a checkbox in
+  code fires its listener, and those listeners clear the active preset, so without the guard a
+  preset would instantly deselect itself.
+- Storage mirrors `ToolbarPreferencesManager` — device-local SharedPreferences, tolerant load, not
+  in `notesprout.db` and not in any `.soil`.
 
 Contract notes:
 

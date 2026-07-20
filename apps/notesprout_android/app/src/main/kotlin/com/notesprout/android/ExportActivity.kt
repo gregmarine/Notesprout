@@ -3,9 +3,11 @@ package com.notesprout.android
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
+import android.view.WindowManager
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.addCallback
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.isVisible
 import androidx.lifecycle.lifecycleScope
@@ -17,11 +19,14 @@ import com.notesprout.android.crypto.KeySession
 import com.notesprout.android.crypto.PassphrasePrompt
 import com.notesprout.android.crypto.PassphraseStore
 import com.notesprout.android.data.PageRef
+import com.notesprout.android.data.export.ExportPreset
+import com.notesprout.android.data.export.ExportPresetsManager
 import com.notesprout.android.data.index.IndexRepository
 import com.notesprout.android.data.index.NotesproutIndex
 import com.notesprout.android.data.loadPageRefs
 import com.notesprout.android.data.soilFile
 import com.notesprout.android.databinding.ActivityExportBinding
+import com.notesprout.android.databinding.DialogExportPresetNameBinding
 import com.notesprout.android.export.ExportDelivery
 import com.notesprout.android.export.ExportDestination
 import com.notesprout.android.export.ExportEngine
@@ -106,6 +111,12 @@ class ExportActivity : AppCompatActivity() {
     /** Set when "Set a new passphrase…" is chosen and a passphrase has been entered. */
     private var newSoilPassphrase: String? = null
 
+    private var presets: List<ExportPreset> = emptyList()
+    /** The applied preset, cleared as soon as the user changes anything by hand. */
+    private var activePresetId: String? = null
+    /** True while [applyPreset] is writing widgets, so their listeners don't clear the selection. */
+    private var applyingPreset = false
+
     private var runningJob: Job? = null
 
     // Eagerly constructed on purpose: ExportDelivery registers activity-result launchers in its
@@ -156,9 +167,12 @@ class ExportActivity : AppCompatActivity() {
         }
 
         wireRows()
-        binding.checkTemplate.setOnCheckedChangeListener { _, _ -> refreshOptions() }
-        binding.checkStickyEndnotes.setOnCheckedChangeListener { _, _ -> refreshOptions() }
+        binding.checkTemplate.setOnCheckedChangeListener { _, _ -> clearActivePreset(); refreshOptions() }
+        binding.checkStickyEndnotes.setOnCheckedChangeListener { _, _ -> clearActivePreset(); refreshOptions() }
         binding.checkPdfPassword.setOnCheckedChangeListener { _, checked -> onPdfPasswordToggled(checked) }
+        binding.rowSavePreset.setOnClickListener { promptSavePreset() }
+
+        presets = ExportPresetsManager.load(this)
 
         // Resolve the key and load the page list before the options can mean anything.
         lifecycleScope.launch {
@@ -168,6 +182,7 @@ class ExportActivity : AppCompatActivity() {
             locked = encryptionInfo.encrypted && passphrase == null
             allPages = withContext(Dispatchers.IO) { loadPageRefs(soilPath, passphrase) }
             binding.btnRunExport.isVisible = !locked
+            renderPresets()
             refreshOptions()
         }
     }
@@ -190,6 +205,7 @@ class ExportActivity : AppCompatActivity() {
     // ── Option rows ──────────────────────────────────────────────────────────
 
     private fun wireRows() = with(binding) {
+        // Page scope isn't part of a preset, so changing it leaves the active preset intact.
         rowScopeAll.setOnClickListener { scope = PageScope.ALL; refreshOptions() }
         rowScopeCurrent.setOnClickListener { scope = PageScope.CURRENT; refreshOptions() }
         rowScopeSelected.setOnClickListener { scope = PageScope.SELECTED; refreshOptions() }
@@ -200,22 +216,141 @@ class ExportActivity : AppCompatActivity() {
         rowFormatText.setOnClickListener { selectFormat(ExportFormat.TEXT) }
         rowFormatSoil.setOnClickListener { selectFormat(ExportFormat.SOIL) }
 
-        rowKeyKeep.setOnClickListener { keying = SoilKeying.KEEP; refreshOptions() }
-        rowKeyRemove.setOnClickListener { confirmRemoveEncryption() }
-        rowKeyNew.setOnClickListener { promptNewSoilPassphrase() }
+        rowKeyKeep.setOnClickListener { clearActivePreset(); keying = SoilKeying.KEEP; refreshOptions() }
+        rowKeyRemove.setOnClickListener { clearActivePreset(); confirmRemoveEncryption() }
+        rowKeyNew.setOnClickListener { clearActivePreset(); promptNewSoilPassphrase() }
 
-        rowDestSave.setOnClickListener { destination = ExportDestination.SAVE; refreshOptions() }
-        rowDestShare.setOnClickListener { destination = ExportDestination.SHARE; refreshOptions() }
-        rowDestTemplate.setOnClickListener { destination = ExportDestination.TEMPLATE; refreshOptions() }
+        rowDestSave.setOnClickListener { selectDestination(ExportDestination.SAVE) }
+        rowDestShare.setOnClickListener { selectDestination(ExportDestination.SHARE) }
+        rowDestTemplate.setOnClickListener { selectDestination(ExportDestination.TEMPLATE) }
+    }
+
+    private fun selectDestination(next: ExportDestination) {
+        clearActivePreset()
+        destination = next
+        refreshOptions()
     }
 
     private fun selectFormat(next: ExportFormat) {
+        clearActivePreset()
         format = next
         // "Save as template" only exists for PNG — fall back rather than leave an impossible pair.
         if (destination == ExportDestination.TEMPLATE && next != ExportFormat.PNG) {
             destination = ExportDestination.SAVE
         }
         refreshOptions()
+    }
+
+    // ── Presets ──────────────────────────────────────────────────────────────
+
+    /**
+     * Rebuild the preset rows. Called on load and after any save/delete — the list is short enough
+     * that recreating the views is simpler than diffing them.
+     */
+    private fun renderPresets() {
+        val container = binding.presetRows
+        container.removeAllViews()
+        for (preset in presets) {
+            val row = layoutInflater.inflate(R.layout.item_export_preset, container, false) as TextView
+            row.text = preset.name
+            row.isSelected = preset.id == activePresetId
+            row.setOnClickListener { applyPreset(preset) }
+            row.setOnLongClickListener { confirmDeletePreset(preset); true }
+            container.addView(row)
+        }
+        // With nothing saved yet the heading and the empty list would just be noise — but the save
+        // row still has to be reachable, so the section stays and only the rows are absent.
+        container.isVisible = presets.isNotEmpty()
+    }
+
+    /**
+     * Apply [preset]'s choices. A preset carries no secret, so one that needs a PDF password or a
+     * new `.soil` passphrase opens its prompt right here rather than at export time.
+     */
+    private fun applyPreset(preset: ExportPreset) {
+        // Ticking a checkbox in code fires its listener, and those listeners clear the active
+        // preset — without this guard applying a preset would instantly deselect itself.
+        applyingPreset = true
+        activePresetId = preset.id
+        format = preset.format
+        destination = preset.destination
+        binding.checkTemplate.isChecked = preset.includeTemplate
+        binding.checkStickyEndnotes.isChecked = preset.stickyEndnotes
+        binding.checkPdfPassword.isChecked = preset.usePdfPassword
+        keying = preset.soilKeying
+        newSoilPassphrase = null
+        pdfPassword = null
+
+        // A .soil preset only makes sense over the whole notebook — widen the scope rather than
+        // silently falling back to another format.
+        if (preset.format == ExportFormat.SOIL) scope = PageScope.ALL
+        applyingPreset = false
+
+        refreshOptions()
+        renderPresets()
+
+        when {
+            preset.format == ExportFormat.PDF && preset.usePdfPassword -> promptPdfPassword()
+            preset.format == ExportFormat.SOIL && preset.soilKeying == SoilKeying.NEW ->
+                promptNewSoilPassphrase()
+        }
+    }
+
+    /** Any hand-made change means the settings no longer are the preset — drop the highlight. */
+    private fun clearActivePreset() {
+        if (applyingPreset || activePresetId == null) return
+        activePresetId = null
+        renderPresets()
+    }
+
+    private fun promptSavePreset() {
+        val dialogBinding = DialogExportPresetNameBinding.inflate(layoutInflater)
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("Save preset")
+            .setView(dialogBinding.root)
+            .setPositiveButton("Save") { _, _ ->
+                hideIme(dialogBinding.editPresetName)
+                val name = dialogBinding.editPresetName.text?.toString()?.trim().orEmpty()
+                if (name.isEmpty()) {
+                    Toast.makeText(this, "Preset needs a name", Toast.LENGTH_SHORT).show()
+                    return@setPositiveButton
+                }
+                val preset = ExportPreset.from(name, buildSpec(scopedPages()))
+                presets = ExportPresetsManager.add(this, preset)
+                activePresetId = preset.id
+                renderPresets()
+                Toast.makeText(this, "Saved “$name”", Toast.LENGTH_SHORT).show()
+            }
+            .setNegativeButton("Cancel") { _, _ -> hideIme(dialogBinding.editPresetName) }
+            .create()
+
+        dialog.window?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE)
+        dialog.show()
+        dialog.window?.setElevation(0f)
+        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
+        dialogBinding.editPresetName.requestFocus()
+    }
+
+    private fun confirmDeletePreset(preset: ExportPreset) {
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("Delete preset")
+            .setMessage("Delete “${preset.name}”? This doesn't affect any exported files.")
+            .setPositiveButton("Delete") { _, _ ->
+                presets = ExportPresetsManager.delete(this, preset.id)
+                if (activePresetId == preset.id) activePresetId = null
+                renderPresets()
+            }
+            .setNegativeButton("Cancel", null)
+            .create()
+        dialog.show()
+        dialog.window?.setElevation(0f)
+        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
+    }
+
+    /** BOOX keeps the IME up unless it is dismissed explicitly — see docs/design-system.md. */
+    private fun hideIme(view: android.view.View) {
+        getSystemService(android.view.inputmethod.InputMethodManager::class.java)
+            ?.hideSoftInputFromWindow(view.windowToken, 0)
     }
 
     /** The pages the current scope covers, in display order. */
@@ -232,6 +367,7 @@ class ExportActivity : AppCompatActivity() {
     private fun refreshOptions() = with(binding) {
         if (locked) {
             tvLocked.isVisible = true
+            sectionPresets.isVisible = false
             sectionPages.isVisible = false
             sectionOptions.isVisible = false
             sectionEncryption.isVisible = false
@@ -336,7 +472,12 @@ class ExportActivity : AppCompatActivity() {
     // not after Export, so pressing Export never opens a dialog.
 
     private fun onPdfPasswordToggled(checked: Boolean) {
+        clearActivePreset()
         if (!checked) { pdfPassword = null; refreshOptions(); return }
+        promptPdfPassword()
+    }
+
+    private fun promptPdfPassword() {
         lifecycleScope.launch {
             val pass = PassphrasePrompt.promptForPassphrase(
                 this@ExportActivity,

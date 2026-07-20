@@ -103,6 +103,38 @@
                 android:padding="12dp"
                 android:visibility="gone" />
 
+            <!-- ── Presets ────────────────────────────────────────────────── -->
+            <!-- Rows are added to presetRows at runtime (item_export_preset.xml), so the section
+                 grows with the user's saved presets. Long-press a row to delete it. -->
+            <LinearLayout
+                android:id="@+id/sectionPresets"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical">
+
+                <TextView
+                    style="@style/Widget.Notesprout.SectionHeading"
+                    android:text="Presets" />
+
+                <LinearLayout
+                    android:id="@+id/presetRows"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical" />
+
+                <TextView
+                    android:id="@+id/rowSavePreset"
+                    style="@style/Widget.Notesprout.OptionRow"
+                    android:text="+ Save current settings…" />
+
+                <View
+                    android:layout_width="match_parent"
+                    android:layout_height="1dp"
+                    android:background="@color/inkBlack"
+                    android:layout_marginTop="20dp"
+                    android:layout_marginBottom="20dp" />
+            </LinearLayout>
+
             <!-- ── Pages ──────────────────────────────────────────────────── -->
             <LinearLayout
                 android:id="@+id/sectionPages"
