@@ -1,11 +1,19 @@
 package com.notesprout.android.export
 
+import android.content.ContentValues
 import android.content.Context
 import com.notesprout.android.NotebookExporter
 import com.notesprout.android.NotebookPackager
 import com.notesprout.android.NotebookTextExporter
+import com.notesprout.android.core.Slog
+import com.notesprout.android.crypto.KeyScope
+import com.notesprout.android.crypto.SoilCrypto
 import com.notesprout.android.crypto.SoilMigrator
+import com.notesprout.android.crypto.SoilRawDb
+import com.notesprout.android.data.NotebookMetaStore
 import com.notesprout.android.data.index.IndexRepository
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.io.File
 
 /**
@@ -100,15 +108,23 @@ object ExportEngine {
         val key = spec.passphrase
         try {
             when (spec.soilKeying) {
-                // Plaintext stays plaintext; an encrypted copy keeps whatever key it already has.
+                // Plaintext stays plaintext; an encrypted copy keeps whatever key it already has,
+                // so the metadata written by packageForExport already describes it correctly.
                 SoilKeying.KEEP -> Unit
-                SoilKeying.REMOVE -> if (key != null) SoilMigrator.decryptInPlace(packaged, key)
+
+                SoilKeying.REMOVE -> if (key != null) {
+                    SoilMigrator.decryptInPlace(packaged, key)
+                    restampMeta(packaged, openWith = null, encrypted = false, keyScope = null)
+                }
+
                 SoilKeying.NEW -> {
                     val newPass = requireNotNull(spec.newSoilPassphrase) {
                         "SoilKeying.NEW requires newSoilPassphrase"
                     }
                     if (key != null) SoilMigrator.rekeyInPlace(packaged, key, newPass)
                     else SoilMigrator.encryptInPlace(packaged, newPass)
+                    // The copy now carries its own passphrase rather than this device's global one.
+                    restampMeta(packaged, openWith = newPass, encrypted = true, keyScope = KeyScope.NOTEBOOK)
                 }
             }
         } catch (e: Exception) {
@@ -119,5 +135,41 @@ object ExportEngine {
 
         onProgress(Phase.PACKAGING, 1, 1)
         return packaged
+    }
+
+    /**
+     * Rewrite `notebook_meta`'s encryption fields on [file] so the embedded metadata describes the
+     * file as it now stands, not as it stood in the library.
+     *
+     * `packageForExport` stamps the metadata *before* the keying transform runs, so without this a
+     * decrypted export still claimed `encrypted: true` (and a re-keyed one still claimed the source
+     * notebook's scope). Nothing in this app's import path is affected — it reads the real state
+     * from `SoilCrypto.probe` — but a `.soil` is meant to be self-describing for any reader, so the
+     * flag has to tell the truth. See docs/soil-file-format.md.
+     *
+     * [openWith] is the passphrase the file now uses, or null once it is plaintext. Best-effort:
+     * the export still succeeds if this fails, since the payload itself is already correct.
+     */
+    private suspend fun restampMeta(
+        file: File,
+        openWith: String?,
+        encrypted: Boolean,
+        keyScope: KeyScope?,
+    ) = withContext(Dispatchers.IO) {
+        var db: SoilRawDb? = null
+        try {
+            db = SoilCrypto.openRaw(file, openWith)
+            val meta = NotebookMetaStore.readRaw(db) ?: return@withContext
+            val values = ContentValues().apply {
+                put("json", meta.copy(encrypted = encrypted, keyScope = keyScope).toJson())
+            }
+            db.update("notebook_meta", values, "id = 0", null)
+            // Fold the WAL back in — only the main file is handed to the destination.
+            db.checkpointAndVacuum()
+        } catch (e: Exception) {
+            Slog.d("ExportEngine") { "notebook_meta restamp failed: ${e.message}" }
+        } finally {
+            runCatching { db?.close() }
+        }
     }
 }
