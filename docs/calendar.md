@@ -201,7 +201,13 @@ real canvas pixel size via `setPageSize`.
 - **Day picker** (`showMonthYearPicker` → the shared [`DayPickerDialog`](#date-picker), tap `tvMonthYear`) —
   picks a specific day: sets `selectedDate` + `calYear/calMonth` and navigates. This is the **only** way
   to change the selected day by pointing (see the tap note below).
-- **Finger swipe** (canvas) — horizontal swipe ≥ 60dp (and dx > 1.5·dy) steps the period.
+- **Finger swipe** (canvas) — a deliberate horizontal swipe steps the period. Uses the *same three
+  guards as `NotebookActivity`'s page turn* (`pageSwipeQualifies`, constants copied verbatim):
+  horizontal dominance (|dx| > |dy|), distance ≥ 30% of screen width, and either velocity ≥
+  `scaledMinimumFlingVelocity` or distance ≥ 50% of screen width. Direction comes from `dx`, never
+  from velocity. A `VelocityTracker` is armed on ACTION_DOWN and recycled on UP/CANCEL/pen-gate close.
+  (Before 2026-07-20 this was a bare `|dx| ≥ 60dp && |dx| > 1.5·|dy|` with no velocity term, which
+  made the calendar far twitchier than the notebook.)
 - **Single-finger tap does *not* select a day** (`handleDayTap`). It once selected/navigated on a single
   tap, but that caused accidental day switches while writing — day selection is the picker's job now. The
   tap still records `lastDayTapDate`/`lastDayTapTime` purely to detect a double-tap.

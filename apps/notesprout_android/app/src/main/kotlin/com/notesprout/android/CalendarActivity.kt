@@ -15,6 +15,7 @@ import android.util.Base64
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
+import android.view.VelocityTracker
 import android.view.ViewConfiguration
 import android.widget.FrameLayout
 import android.widget.LinearLayout
@@ -125,6 +126,12 @@ class CalendarActivity : AppCompatActivity() {
          */
         const val EXTRA_RESULT_GOTO_PAGE_ID = "cal_result_goto_page_id"
 
+        // One-finger period-step gesture thresholds. Kept identical to NotebookActivity's
+        // page-turn gate so navigating the calendar feels the same as turning a page.
+        private const val PAGE_SWIPE_MIN_DISTANCE_FRAC  = 0.30f  // min |dx| to qualify at all
+        private const val PAGE_SWIPE_LONG_DISTANCE_FRAC = 0.50f  // |dx| that qualifies regardless of velocity
+        private const val PAGE_SWIPE_MIN_VELOCITY_MULT  = 1.0f   // x scaledMinimumFlingVelocity
+
         // Last-position persistence (view + date restored on next open).
         private const val PREFS_CALENDAR = "calendar_state"
         private const val KEY_VIEW       = "last_view"
@@ -215,6 +222,7 @@ class CalendarActivity : AppCompatActivity() {
     private var calDownTime = 0L
     private var calMoved = false
     private var calMultiTouch = false
+    private var calVelocityTracker: VelocityTracker? = null
 
     // Single-finger double-tap on a day cell (Month/Week) → open that day's full-page canvas.
     private var lastDayTapDate: LocalDate? = null
@@ -2009,6 +2017,8 @@ class CalendarActivity : AppCompatActivity() {
         calMultiTouch = true
         cancelDayNotebooksLongPress()
         calLongPressFired = false
+        calVelocityTracker?.recycle()
+        calVelocityTracker = null
 
         stickyNoteTapCandidate = null
         stickyNoteTapMoved = true
@@ -2020,19 +2030,48 @@ class CalendarActivity : AppCompatActivity() {
         threeFingerTapFirstTime = 0L
     }
 
+    /**
+     * True when a one-finger displacement is a deliberate period-step swipe. Mirrors
+     * [NotebookActivity.evaluatePageFling]'s three guards so the calendar feels like the
+     * notebook: horizontal dominance, ≥30% of screen width, and either fling velocity or
+     * ≥50% of screen width. Direction is taken from `dx`, never from velocity, so a finger
+     * decelerating at lift-off can't flip the sign.
+     */
+    private fun pageSwipeQualifies(dx: Float, dy: Float, velocityX: Float): Boolean {
+        val absDx = abs(dx)
+        val absDy = abs(dy)
+        if (absDx <= absDy) return false
+        val width = resources.displayMetrics.widthPixels.toFloat()
+        if (absDx < PAGE_SWIPE_MIN_DISTANCE_FRAC * width) return false
+        val minVel = ViewConfiguration.get(this).scaledMinimumFlingVelocity * PAGE_SWIPE_MIN_VELOCITY_MULT
+        val fastEnough = abs(velocityX) >= minVel
+        val longEnough = absDx >= PAGE_SWIPE_LONG_DISTANCE_FRAC * width
+        return fastEnough || longEnough
+    }
+
     private fun handleCalendarFingerGesture(event: MotionEvent): Boolean {
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 calDownX = event.x; calDownY = event.y; calDownTime = event.eventTime; calMoved = false; calMultiTouch = false
+                calVelocityTracker?.recycle()
+                calVelocityTracker = VelocityTracker.obtain().apply { addMovement(event) }
                 armDayNotebooksLongPress(event)
             }
             MotionEvent.ACTION_POINTER_DOWN -> { calMoved = true; calMultiTouch = true; cancelDayNotebooksLongPress() }
             MotionEvent.ACTION_MOVE -> {
+                calVelocityTracker?.addMovement(event)
                 if (!calMoved && hypot((event.x - calDownX).toDouble(), (event.y - calDownY).toDouble()) > touchSlopPx) calMoved = true
                 if (calMoved) cancelDayNotebooksLongPress()
             }
             MotionEvent.ACTION_UP -> {
                 cancelDayNotebooksLongPress()
+                val velocityX = calVelocityTracker?.let {
+                    it.addMovement(event)
+                    it.computeCurrentVelocity(1000)
+                    it.xVelocity
+                } ?: 0f
+                calVelocityTracker?.recycle()
+                calVelocityTracker = null
                 // The long-press already acted while the finger was down; swallow its UP so the
                 // release doesn't also read as a swipe or a day tap.
                 if (calLongPressFired) { calLongPressFired = false; return true }
@@ -2040,7 +2079,7 @@ class CalendarActivity : AppCompatActivity() {
                 val dy = event.y - calDownY
                 // !calMultiTouch guard: a 2-/3-finger gesture (undo/redo double-tap) sets the flag
                 // on POINTER_DOWN, so it never registers as a single-finger navigation swipe.
-                if (!calMultiTouch && abs(dx) >= dp(60) && abs(dx) > abs(dy) * 1.5f) {
+                if (!calMultiTouch && pageSwipeQualifies(dx, dy, velocityX)) {
                     if (dx < 0) stepForward() else stepBack()
                     return true
                 }
@@ -2052,7 +2091,11 @@ class CalendarActivity : AppCompatActivity() {
                     return true
                 }
             }
-            MotionEvent.ACTION_CANCEL -> { calMoved = true; cancelDayNotebooksLongPress(); calLongPressFired = false }
+            MotionEvent.ACTION_CANCEL -> {
+                calMoved = true; cancelDayNotebooksLongPress(); calLongPressFired = false
+                calVelocityTracker?.recycle()
+                calVelocityTracker = null
+            }
         }
         return false
     }
