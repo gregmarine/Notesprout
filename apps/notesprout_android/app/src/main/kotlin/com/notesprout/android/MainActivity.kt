@@ -68,6 +68,7 @@ import com.notesprout.android.search.SearchEngine
 import com.notesprout.android.search.SearchResult
 import com.notesprout.android.sort.FolderSort
 import com.notesprout.android.state.AppStateManager
+import com.notesprout.android.state.NotebookOpenFailure
 import com.notesprout.android.state.AppSurface
 import com.notesprout.android.state.AppViewState
 import com.notesprout.android.state.SurfaceEntry
@@ -373,6 +374,7 @@ class MainActivity : AppCompatActivity() {
         // The library is on screen, so nothing is stacked on it. Skipped while a restore is still in
         // flight — that coroutine is about to stack surfaces on top of us, and they record themselves.
         if (isStateRestored) SurfaceStack.reset(this)
+        showNotebookOpenFailureIfAny()
         if (!isStateRestored) {
             pendingScan = true
             return
@@ -1337,6 +1339,44 @@ class MainActivity : AppCompatActivity() {
     }
 
     // ── New folder dialog ─────────────────────────────────────────────────────
+
+    /**
+     * A notebook stepped back here because its `.soil` would not open ([NotebookOpenFailure]).
+     * Explain it rather than leaving the user with a screen that just bounced them home.
+     *
+     * The copy is **deliberately verbose while dogfooding** — it names the likely cause, states
+     * plainly that the file was left intact (the important reassurance, since the last time this
+     * class of failure went unhandled it destroyed a notebook), and offers the raw exception chain
+     * behind a second tap for reporting. Trim this to a one-liner before a public release.
+     */
+    private fun showNotebookOpenFailureIfAny() {
+        val report = NotebookOpenFailure.take() ?: return
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("Couldn't open “${report.notebookName}”")
+            .setMessage(
+                report.diagnosis +
+                    "\n\nYour notebook file has not been changed, deleted, or rewritten — it is " +
+                    "still on disk exactly as it was. Everything else in your library is unaffected."
+            )
+            .setPositiveButton("OK", null)
+            .setNeutralButton("Details") { _, _ -> showOpenFailureDetail(report) }
+            .create()
+        dialog.show()
+        dialog.window?.setElevation(0f)
+        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
+    }
+
+    /** The raw exception chain behind the failure, for copying into a bug report while dogfooding. */
+    private fun showOpenFailureDetail(report: NotebookOpenFailure.Report) {
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("Technical detail")
+            .setMessage(report.technical)
+            .setPositiveButton("OK", null)
+            .create()
+        dialog.show()
+        dialog.window?.setElevation(0f)
+        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
+    }
 
     private fun showNewFolderDialog() {
         val dialogBinding = DialogNewNotebookBinding.inflate(layoutInflater)

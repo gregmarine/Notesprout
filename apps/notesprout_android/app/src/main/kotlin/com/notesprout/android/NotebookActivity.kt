@@ -122,7 +122,9 @@ import com.notesprout.android.data.links.LinkBackStack
 import com.notesprout.android.data.recents.RecentsManager
 import com.notesprout.android.data.recents.TemplateRecentsManager
 import com.notesprout.android.notebook.RecentsDialog
+import kotlinx.coroutines.CancellationException
 import com.notesprout.android.state.AppStateManager
+import com.notesprout.android.state.NotebookOpenFailure
 import com.notesprout.android.state.AppSurface
 import com.notesprout.android.state.AppViewState
 import com.notesprout.android.state.SurfaceEntry
@@ -2295,20 +2297,31 @@ class NotebookActivity : AppCompatActivity() {
                     }
                 }
                 sessionStartTime = System.currentTimeMillis()
-                val builder = SoilDatabase.builder(this@NotebookActivity, notebookPath)
-                if (key != null) builder.openHelperFactory(
-                    com.notesprout.android.crypto.KeyOpener.roomFactoryFor(
-                        this@NotebookActivity, nbId, java.io.File(notebookPath), info.keyScope, key
+                // Broad on purpose. A .soil that this build cannot open (schema drift from before the
+                // columnar migration, an unreadable/mis-keyed file) used to throw straight out of this
+                // coroutine and kill the process — and since cold launch rebuilds the surface stack,
+                // the next launch reopened the same notebook and died again. Fail back to the library
+                // with an explanation instead; the file itself is never touched by this path.
+                try {
+                    val builder = SoilDatabase.builder(this@NotebookActivity, notebookPath)
+                    if (key != null) builder.openHelperFactory(
+                        com.notesprout.android.crypto.KeyOpener.roomFactoryFor(
+                            this@NotebookActivity, nbId, java.io.File(notebookPath), info.keyScope, key
+                        )
                     )
-                )
-                soilDatabase = builder.build()
-                val db = soilDatabase!!
-                lifecycleScope.launch(Dispatchers.IO) {
-                    runCatching {
-                        NotebookMetaStore.refresh(db, indexRepo, notebookId)
-                    }.onFailure { Slog.d(TAG) { "meta refresh on open failed: ${it.message}" } }
+                    soilDatabase = builder.build()
+                    val db = soilDatabase!!
+                    lifecycleScope.launch(Dispatchers.IO) {
+                        runCatching {
+                            NotebookMetaStore.refresh(db, indexRepo, notebookId)
+                        }.onFailure { Slog.d(TAG) { "meta refresh on open failed: ${it.message}" } }
+                    }
+                    loadStrokes()
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Throwable) {
+                    failOpen(e)
                 }
-                loadStrokes()
             }
         }
     }
@@ -3977,6 +3990,29 @@ class NotebookActivity : AppCompatActivity() {
      * displayed.  A snapshot is captured and persisted after display so the NEXT load
      * can use the fast path.
      */
+    /**
+     * A `.soil` this build cannot open: report it to the library and step out, rather than letting the
+     * exception kill the process. See [NotebookOpenFailure] for why this is caught broadly and why
+     * returning to the library is what breaks the relaunch loop. Main thread.
+     */
+    private fun failOpen(e: Throwable) {
+        Log.e(TAG, "notebook open failed for $notebookId — returning to library", e)
+        runCatching { soilDatabase?.close() }
+        soilDatabase = null
+        binding.openingOverlay.visibility = View.GONE
+        NotebookOpenFailure.set(
+            NotebookOpenFailure.from(
+                notebookName = notebookDisplayName,
+                notebookId   = notebookId,
+                soilPath     = notebookSoilPath,
+                encrypted    = encryptionInfo.encrypted,
+                keyScope     = encryptionInfo.keyScope?.name ?: "unknown",
+                error        = e,
+            )
+        )
+        finish()
+    }
+
     private fun loadStrokes() {
         val db = soilDatabase ?: return
         // A followed other-notebook *page* link requests a specific opening page. Consume it so an
@@ -3986,7 +4022,10 @@ class NotebookActivity : AppCompatActivity() {
         var linkedPageMissing = false
         var savedUndoJson: String? = null
         lifecycleScope.launch {
-            val result = withContext(Dispatchers.IO) {
+            // Room opens the file lazily, so an unopenable .soil surfaces on the *first query* below —
+            // not at build(). This is the catch that actually fires for schema drift; the one around
+            // the builder covers failures that land earlier. See [failOpen].
+            val result = try { withContext(Dispatchers.IO) {
                 notebookMetadata = loadNotebookMetadataFromDb(db)
                 val allPages = db.notebookDao().getPagesSorted()
                 // Open to the linked page when requested; if it's gone, fall back to last-opened
@@ -4017,6 +4056,11 @@ class NotebookActivity : AppCompatActivity() {
                     }
                 }
                 loadCurrentPage(db)
+            } } catch (e: CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                failOpen(e)
+                return@launch
             }
             displayPage(result)
             binding.openingOverlay.visibility = View.GONE

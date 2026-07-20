@@ -265,13 +265,22 @@ notebook(com.notesprout.android.data.NotebookObject)
 
 `NonDestructiveOpenHelperFactory` behaves **correctly** here: it converts what the default corruption
 handler would have made a silent delete-and-recreate into a loud crash, and the `.soil` files and index
-are left byte-intact. That is the right trade — but the consequence is a **hard crash on launch with no
-in-app way out**. The only recovery today is `pm clear` (destroys the library) or manual surgery.
+are left byte-intact. A reinstall or clean build does **not** help — the fault is entirely in the
+on-device data.
 
-Options, none decided: a real migration for drifted column sets; a pre-open schema probe that quarantines
-the offending notebook and lets the library still load; or at minimum catching the validation failure so
-the app surfaces "this notebook can't be opened by this build" instead of dying at startup. A reinstall
-or clean build does **not** help — the fault is entirely in the on-device data.
+**The crash-loop half is FIXED (2026-07-20).** The open is now caught broadly in `NotebookActivity` and
+reported via `state/NotebookOpenFailure`: the notebook steps back to the library, which explains what
+happened and offers the raw exception chain behind a "Details" button. Returning to the library is also
+what breaks the loop — `MainActivity.onResume` calls `SurfaceStack.reset`, so the bad notebook is no
+longer in the stack the next cold launch rebuilds. Note the catch has to sit in **two** places: `build()`
+is lazy, so schema validation actually fires on the first query inside `loadStrokes()`'s own coroutine.
+Verified on G6 against a deliberately corrupted `.soil`, via both the surface-restore path and a direct
+tap. The dialog copy is **intentionally verbose for dogfooding** — trim before a public release.
+
+**Still open: the underlying migration gap.** A drifted notebook is still unopenable — it now fails
+gracefully instead of fatally. Options, none decided: a real migration for drifted column sets; a
+pre-open schema probe that flags the notebook in the library so its card shows it can't be opened; or
+accepting graceful failure as the permanent answer if drift can only originate from test devices.
 
 ## Serialization hardening — pin `@SerialName` on `LinkTarget` (latent, not urgent)
 

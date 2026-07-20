@@ -164,6 +164,20 @@ The reusable **template library** lives in the global index — not the filesyst
   (`BitmapFactory` reads the header) so legacy PNG/lossless-WEBP coexist; `NotebookCompactor` re-encodes
   old ones in place.
 - **Decode embedded images bounded.** Route all embedded-asset decodes through `core/BitmapDecode.decodeSampled(bytes, reqW, reqH)` — never `BitmapFactory.decodeByteArray` directly on `.soil`-sourced bytes (OOM risk on e-ink). `MAX_DIMENSION=4096` fallback when there's no natural target.
+- **A `.soil` that won't open must never take the app down.** Two layers cooperate here, and both are
+  load-bearing:
+  - `NonDestructiveOpenHelperFactory` (installed by `SoilDatabase.builder`) refuses to delete on a
+    reported corruption. The framework default is delete-and-recreate — that is precisely how a notebook
+    was destroyed in the link-picker incident, and a mis-keyed open of an encrypted `.soil` looks exactly
+    like corruption. It throws instead, leaving the file byte-intact.
+  - `NotebookActivity` then **catches that throw broadly** and reports it via `state/NotebookOpenFailure`,
+    so the notebook steps back to the library with an explanation instead of killing the process. This
+    matters beyond tidiness: cold launch rebuilds the previous surface stack, so an uncaught open failure
+    reopened the same notebook on the next launch and crashed again — an unrecoverable loop whose only
+    exit was clearing app data. Failing back to the library is the fix, because `MainActivity.onResume`
+    resets the surface stack.
+  - Room opens the file **lazily**, so the failure usually surfaces on the *first query*, not at
+    `build()`. Any new `.soil` open path needs its guard where the first DAO call happens.
 - **SQLite must stay clean.** A file browser should show only `.soil` files — no WAL/SHM/journal sidecars.
   - `PRAGMA journal_mode = WAL`; `PRAGMA wal_autocheckpoint = 100`; `PRAGMA auto_vacuum = INCREMENTAL`
   - Run `PRAGMA incremental_vacuum` + `PRAGMA wal_checkpoint(TRUNCATE)` on clean close
