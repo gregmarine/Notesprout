@@ -500,6 +500,14 @@ and makes the union region tappable.
 Because link children are **page-absolute**, moving a link must rewrite every child's coordinates.
 Compare sticky notes below.
 
+> ⚠️ **Materializing a legacy composite must re-id its children.** A legacy composite stored its
+> content as one opaque `zlib(JSON)` blob, and duplicated composites were saved **keeping identical
+> embedded child ids**. When you promote such a blob into real child rows (`id` is the PK), reusing
+> those ids collides with the other copy's already-materialized rows — a hard `UNIQUE` failure. Assign
+> **fresh ids to all descendants on materialization** (rewiring intra-subtree `parentId`); a
+> composite's child ids are private and never referenced from outside the subtree. Notesprout learned
+> this from a crash moving a legacy-blob link (`remapDescendantIds`).
+
 ---
 
 ## `sticky_note` — a collapsed content window

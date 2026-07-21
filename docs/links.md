@@ -21,6 +21,12 @@ only) to navigate.
 > the clipboard/undo serialization carrier. Persistence goes through the `*LinkSubtree` helpers in
 > `ObjectColumns.kt`; see [`data-architecture.md`](data-architecture.md) "Schema Version 4". Shapes
 > are full linkables end-to-end (capture, render on both engines, PDF export, unlink-restore, undo).
+>
+> **`replaceLinkSubtree` re-ids the children on every write** (`remapDescendantIds`). A legacy blob
+> link that shared its embedded child ids with another (already-migrated) link would otherwise hit
+> `UNIQUE constraint failed: notebook.id` the first time a move materializes its children as rows —
+> the child ids are the link's private content, so fresh UUIDs are correct and collision-proof. See
+> [`data-architecture.md`](data-architecture.md) "Composites are relational child rows".
 
 ---
 

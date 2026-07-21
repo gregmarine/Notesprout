@@ -240,6 +240,19 @@ heading/text carry no strokes, so they remain a single bare parent row (behaviou
 `deepCopyChildren`); deleting a composite soft-deletes only its parent, and a compactor orphan-sweep
 reclaims the child subtree once the parent is purged.
 
+**Materialized child rows always get fresh ids (`replaceXSubtree` → `remapDescendantIds`).** A
+composite's children are private content whose ids are never referenced from outside the subtree, so
+`replaceXSubtree` (delete-descendants-then-insert) reassigns every descendant a fresh UUID before
+insert, rewiring intra-subtree `parentId` through the map (top-level children keep `parentId =
+composite.id`). This is not optional: legacy `zlib(JSON)` composites were duplicated **keeping
+identical embedded child ids**, so two composites can carry the same child ids. A blob tolerates that
+(it is opaque); real child rows cannot (`id` is the PK). Once one side is compacted to child rows,
+materializing the other with its original ids hits `UNIQUE constraint failed: notebook.id` — the
+crash seen moving a selection containing a legacy-blob link whose children already lived under another
+link. Fresh ids make the insert collision-proof and never touch the other composite's rows.
+`hardDeleteDescendants` deletes by `parentId` (not child id) and readers reassemble from rows, so
+child-id stability is never required.
+
 **Calendar/scratchpad** index tables mirror the same columnar+binary model (`CalendarEntity` /
 `ScratchpadEntity`, `NotesproutDatabase` v6 / `MIGRATION_5_6`), but keep composites as blob (their
 own DBs; cross-DB transfer bridges via render models through the clipboard).
