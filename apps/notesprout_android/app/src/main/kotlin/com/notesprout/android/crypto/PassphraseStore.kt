@@ -1,8 +1,6 @@
 package com.notesprout.android.crypto
 
 import android.content.Context
-import androidx.security.crypto.EncryptedSharedPreferences
-import androidx.security.crypto.MasterKey
 
 /**
  * Keystore-backed cache for the GLOBAL passphrase only.
@@ -23,13 +21,7 @@ object PassphraseStore {
     private const val KEY_ROTATION_NEW = "rotation_new_passphrase"
     private const val KEY_CONVERSION_PENDING = "conversion_pending_ids"
 
-    private fun prefs(context: Context) = EncryptedSharedPreferences.create(
-        context,
-        PREFS_FILE,
-        MasterKey.Builder(context).setKeyScheme(MasterKey.KeyScheme.AES256_GCM).build(),
-        EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-        EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
-    )
+    private fun prefs(context: Context) = SecurePrefs.get(context, PREFS_FILE)
 
     fun hasGlobalPassphrase(context: Context): Boolean =
         prefs(context).contains(KEY_GLOBAL)

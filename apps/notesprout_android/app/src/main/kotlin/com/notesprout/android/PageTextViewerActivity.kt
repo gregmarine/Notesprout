@@ -318,7 +318,15 @@ class PageTextViewerActivity : AppCompatActivity() {
     private fun showLineCorrectionDialog(index: Int) {
         val line = thisPageLines.getOrNull(index) ?: return
         lifecycleScope.launch {
-            val strokes = loadLineStrokes(line)
+            // Same guard rationale as loadText: an open/DAO throw (e.g. key rotated in another
+            // screen since the viewer loaded) must degrade, not crash.
+            val strokes = try {
+                loadLineStrokes(line)
+            } catch (e: Exception) {
+                android.util.Log.e("PageTextViewer", "loadLineStrokes failed", e)
+                Toast.makeText(this@PageTextViewerActivity, "Couldn't open that line's ink.", Toast.LENGTH_SHORT).show()
+                return@launch
+            }
             if (strokes.isEmpty()) {
                 Toast.makeText(this@PageTextViewerActivity, "That ink is no longer on the page.", Toast.LENGTH_SHORT).show()
                 return@launch
@@ -447,35 +455,44 @@ class PageTextViewerActivity : AppCompatActivity() {
                 return@launch
             }
 
-            val result = withContext(Dispatchers.IO) {
-                val path = soilFile(this@PageTextViewerActivity, notebookId).absolutePath
-                val builder = SoilDatabase.builder(this@PageTextViewerActivity, path)
-                if (key != null) {
-                    builder.openHelperFactory(SoilCrypto.roomFactory(key))
-                    KeySession.set(notebookId, key)
-                }
-                val db = builder.build()
-                try {
-                    val dao = db.notebookDao()
-                    val recognizer = hwr?.let { PageTextRecognizer(it) }
-                    val pages = dao.getPagesSorted()
-                    val perPage = LinkedHashMap<String, String>()
-                    var pageLines: List<com.notesprout.android.data.PageText.RecognizedLine>? = null
-                    for (page in pages) {
-                        val pt = if (recognizer != null) {
-                            PageTextRepository.freshOrRecognizeReadOnly(dao, page.id, recognizer)
-                        } else {
-                            PageTextRepository.getCached(dao, page.id)
-                        }
-                        perPage[page.id] = pt?.text?.trim().orEmpty()
-                        if (page.id == currentPageId) pageLines = pt?.lines
+            // Guarded end-to-end: a stale/rotated key, corrupt file, or schema drift throws out
+            // of the open/DAO calls — that must land as "couldn't open", not a process crash
+            // (the file itself is protected by the non-destructive factories either way).
+            val result = try {
+                withContext(Dispatchers.IO) {
+                    val path = soilFile(this@PageTextViewerActivity, notebookId).absolutePath
+                    val builder = SoilDatabase.builder(this@PageTextViewerActivity, path)
+                    if (key != null) {
+                        builder.openHelperFactory(SoilCrypto.roomFactory(key))
+                        KeySession.set(notebookId, key)
                     }
-                    val whole = perPage.values.filter { it.isNotBlank() }.joinToString("\n\n")
-                    val thisPage = perPage[currentPageId].orEmpty()
-                    Triple(thisPage, whole, pageLines)
-                } finally {
-                    db.close()
+                    val db = builder.build()
+                    try {
+                        val dao = db.notebookDao()
+                        val recognizer = hwr?.let { PageTextRecognizer(it) }
+                        val pages = dao.getPagesSorted()
+                        val perPage = LinkedHashMap<String, String>()
+                        var pageLines: List<com.notesprout.android.data.PageText.RecognizedLine>? = null
+                        for (page in pages) {
+                            val pt = if (recognizer != null) {
+                                PageTextRepository.freshOrRecognizeReadOnly(dao, page.id, recognizer)
+                            } else {
+                                PageTextRepository.getCached(dao, page.id)
+                            }
+                            perPage[page.id] = pt?.text?.trim().orEmpty()
+                            if (page.id == currentPageId) pageLines = pt?.lines
+                        }
+                        val whole = perPage.values.filter { it.isNotBlank() }.joinToString("\n\n")
+                        val thisPage = perPage[currentPageId].orEmpty()
+                        Triple(thisPage, whole, pageLines)
+                    } finally {
+                        db.close()
+                    }
                 }
+            } catch (e: Exception) {
+                android.util.Log.e("PageTextViewer", "loadText failed", e)
+                statusText.text = "Couldn't open this notebook's text: ${e.message}"
+                return@launch
             }
 
             thisPageMarkdown = result.first

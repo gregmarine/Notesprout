@@ -189,6 +189,20 @@ object KeyResolver {
         limiterKey: String = notebookId,
         onSuccess: suspend (String) -> Unit = {},
     ): String? {
+        // A missing/empty file can never verify (and used to silently mint an empty DB that
+        // "verified" the first passphrase typed). Say what's wrong instead of looping the prompt
+        // and feeding the attempt limiter.
+        val target = soilFile(activity, notebookId)
+        if (withContext(Dispatchers.IO) { !target.exists() || target.length() == 0L }) {
+            withContext(Dispatchers.Main) {
+                android.widget.Toast.makeText(
+                    activity,
+                    "This notebook's file is missing on this device — restore it from a backup.",
+                    android.widget.Toast.LENGTH_LONG,
+                ).show()
+            }
+            return null
+        }
         var promptMessage = message
         while (true) {
             val lockedUntilMs = withContext(Dispatchers.IO) { AttemptLimiter.check(activity, limiterKey) }

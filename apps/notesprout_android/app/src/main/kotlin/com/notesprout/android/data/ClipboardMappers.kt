@@ -70,14 +70,23 @@ fun ClipboardPayload.toClipboardContent(): NotesproutClipboard.ClipboardContent?
     val stickyNotes  = mutableListOf<StickyNoteRender>()
     val shapes       = mutableListOf<ShapeRender>()
     for (item in items) {
-        when (item.type) {
-            TYPE_STROKE       -> strokes.add(clipCodec.decodeFromString(LiveStroke.serializer(), item.data))
-            TYPE_HEADING      -> headings.add(clipCodec.decodeFromString(HeadingStroke.serializer(), item.data))
-            TYPE_TEXT         -> textObjects.add(clipCodec.decodeFromString(TextRender.serializer(), item.data))
-            TYPE_LINE         -> lineObjects.add(clipCodec.decodeFromString(LineRender.serializer(), item.data))
-            TYPE_LINK         -> links.add(clipCodec.decodeFromString(LinkRender.serializer(), item.data))
-            TYPE_STICKY_NOTE  -> stickyNotes.add(clipCodec.decodeFromString(StickyNoteRender.serializer(), item.data))
-            TYPE_SHAPE        -> shapes.add(clipCodec.decodeFromString(ShapeRender.serializer(), item.data))
+        // Per-item guard: this decode runs unconditionally at app launch on a row persisted by a
+        // possibly different build (version-skewed schema, the LinkTarget FQCN discriminator, or
+        // plain corruption). One bad item must degrade to "that item is gone", never to an
+        // exception — an uncaught throw here crashes EVERY launch until the row is cleared, and
+        // the user has no way to reach the UI to clear it.
+        runCatching {
+            when (item.type) {
+                TYPE_STROKE       -> strokes.add(clipCodec.decodeFromString(LiveStroke.serializer(), item.data))
+                TYPE_HEADING      -> headings.add(clipCodec.decodeFromString(HeadingStroke.serializer(), item.data))
+                TYPE_TEXT         -> textObjects.add(clipCodec.decodeFromString(TextRender.serializer(), item.data))
+                TYPE_LINE         -> lineObjects.add(clipCodec.decodeFromString(LineRender.serializer(), item.data))
+                TYPE_LINK         -> links.add(clipCodec.decodeFromString(LinkRender.serializer(), item.data))
+                TYPE_STICKY_NOTE  -> stickyNotes.add(clipCodec.decodeFromString(StickyNoteRender.serializer(), item.data))
+                TYPE_SHAPE        -> shapes.add(clipCodec.decodeFromString(ShapeRender.serializer(), item.data))
+            }
+        }.onFailure {
+            android.util.Log.e("ClipboardMappers", "Skipping undecodable clipboard item (${item.type}): ${it.message}")
         }
     }
     if (strokes.isEmpty() && headings.isEmpty() && textObjects.isEmpty() && lineObjects.isEmpty() && links.isEmpty() && stickyNotes.isEmpty() && shapes.isEmpty()) return null

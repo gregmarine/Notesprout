@@ -47,8 +47,41 @@ class BootstrapActivity : AppCompatActivity() {
         // key-derivation, or while an unlock prompt is up. Cancelled the moment boot() finishes.
         val reveal = Runnable { root.addView(preparingView()) }
         handler.postDelayed(reveal, REVEAL_DELAY_MS)
+        launchBoot(root, reveal)
+    }
+
+    /**
+     * Run [boot] with a real failure path. This is the app's front door: an exception escaping
+     * here (index migration failure, Keystore hiccup right after device boot, corrupted
+     * EncryptedSharedPreferences keyset) would crash — and because this activity is the launcher,
+     * crash again on every relaunch. Data is intact in those states; show the error and offer
+     * Retry instead of looping.
+     */
+    private fun launchBoot(root: FrameLayout, reveal: Runnable) {
         lifecycleScope.launch {
-            try { boot() } finally { handler.removeCallbacks(reveal) }
+            try {
+                boot()
+            } catch (e: Exception) {
+                android.util.Log.e("BootstrapActivity", "boot failed", e)
+                root.removeAllViews()
+                androidx.appcompat.app.AlertDialog.Builder(this@BootstrapActivity)
+                    .setTitle("Couldn't open your library")
+                    .setMessage(
+                        "Something went wrong while preparing Notesprout:\n\n${e.message}\n\n" +
+                        "Your notebooks are untouched. Retry usually resolves a temporary problem " +
+                        "(e.g. right after a device restart)."
+                    )
+                    .setCancelable(false)
+                    .setPositiveButton("Retry") { _, _ -> launchBoot(root, reveal) }
+                    .setNegativeButton("Close app") { _, _ -> finishAffinity() }
+                    .create()
+                    .also { d ->
+                        d.show()
+                        d.window?.setElevation(0f)
+                    }
+            } finally {
+                handler.removeCallbacks(reveal)
+            }
         }
     }
 

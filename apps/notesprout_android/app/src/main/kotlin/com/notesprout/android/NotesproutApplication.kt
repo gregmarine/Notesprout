@@ -2,6 +2,7 @@ package com.notesprout.android
 
 import android.app.Application
 import com.notesprout.android.data.toClipboardContent
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -16,8 +17,18 @@ class NotesproutApplication : Application() {
          * the activity immediately and lets the heavy save/checkpoint complete here instead
          * of blocking the UI thread. SupervisorJob so one failed seal can't cancel others;
          * never cancelled (lives as long as the process).
+         *
+         * The exception handler is the last line of defense: work here is fire-and-forget with
+         * no UI to surface into, so an escaped exception (disk full during a seal, a repo call on
+         * a just-sealed index) would otherwise crash the whole app seconds after the user moved
+         * on. Log it and keep the process alive — the data-side effects are the individual jobs'
+         * responsibility to contain.
          */
-        val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        val appScope = CoroutineScope(
+            SupervisorJob() + Dispatchers.IO + CoroutineExceptionHandler { _, e ->
+                android.util.Log.e("NotesproutApplication", "Uncaught exception in appScope job", e)
+            }
+        )
     }
 
     override fun onTerminate() {

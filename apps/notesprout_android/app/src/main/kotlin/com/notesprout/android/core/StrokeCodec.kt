@@ -92,9 +92,11 @@ object StrokeCodec {
         inf.setInput(data, offset, data.size - offset)
         val out = ByteArrayOutputStream(maxOf(16, (data.size - offset) * 3))
         val buf = ByteArray(4096)
+        // Bail on ANY zero-progress round — a corrupt header (e.g. FDICT set) makes inflate()
+        // return 0 forever with needsInput() false, spinning this loop into an ANR.
         while (!inf.finished()) {
             val n = inf.inflate(buf)
-            if (n == 0 && (inf.finished() || inf.needsInput())) break
+            if (n == 0) break
             out.write(buf, 0, n)
         }
         inf.end()

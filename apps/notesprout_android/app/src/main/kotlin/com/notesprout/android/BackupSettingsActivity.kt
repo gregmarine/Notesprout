@@ -225,10 +225,10 @@ class BackupSettingsActivity : AppCompatActivity() {
             }
 
         lifecycleScope.launch {
-            val config = withContext(Dispatchers.IO) {
-                repository.ensureBackupConfig(DeviceIdentity.defaultDeviceFolderName())
-            }
             val result = try {
+                val config = withContext(Dispatchers.IO) {
+                    repository.ensureBackupConfig(DeviceIdentity.defaultDeviceFolderName())
+                }
                 BackupEngine.run(
                     context = this@BackupSettingsActivity,
                     repo = repository,
@@ -239,6 +239,13 @@ class BackupSettingsActivity : AppCompatActivity() {
                         }
                     }
                 )
+            } catch (e: Exception) {
+                // The engine guards per-file copies but its own repo/index calls can still throw
+                // (index sealed underneath, SQLite error) — that must end as a failed backup
+                // message, not an app crash mid-backup.
+                android.util.Log.e("BackupSettings", "backup run failed", e)
+                Toast.makeText(this@BackupSettingsActivity, "Backup failed: ${e.message}", Toast.LENGTH_LONG).show()
+                return@launch
             } finally {
                 isBackupRunning.set(false)
                 progressDialog.dismiss()

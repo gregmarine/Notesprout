@@ -3922,10 +3922,15 @@ class NotebookActivity : AppCompatActivity() {
         // Keep the index cover current so the MainActivity grid doesn't need to open the .soil: push
         // the current page's snapshot (captured on the main thread in closeNotebook) as the cover.
         // cacheSnapshotIfAllowed suppresses only private (NOTEBOOK-scope) notebooks.
+        // Every step below is individually guarded: this runs fire-and-forget on appScope after
+        // the activity is gone, so a throw (disk full, index sealed underneath) has no UI to land
+        // in and would take down the whole process — and skip the checkpoint/close that follow.
         if (nbId.isNotEmpty() && snapshot != null) {
-            cacheSnapshotIfAllowed(nbId, snapshot)
+            runCatching { cacheSnapshotIfAllowed(nbId, snapshot) }
+                .onFailure { android.util.Log.e(TAG, "seal: cover cache failed", it) }
         }
-        saveStrokes(db)
+        runCatching { saveStrokes(db) }
+            .onFailure { android.util.Log.e(TAG, "seal: stroke flush failed — unsaved ink lost", it) }
         // RTR: stop pending debounce jobs and flush the sealed page's text synchronously, on this
         // IO context, so it completes before the DB is closed below (the "run once at page-seal" hook).
         rtrScheduler?.let { scheduler ->
@@ -3952,7 +3957,8 @@ class NotebookActivity : AppCompatActivity() {
         // Hard-delete rows soft-deleted before this session — they predate the undo stack
         // and can never be restored, so they are dead weight. Current-session soft-deletes
         // (deletedAt >= sessionStart) are kept for undo/redo safety on abnormal teardown.
-        db.notebookDao().hardDeleteOldSoftDeleted(before = sessionStart)
+        runCatching { db.notebookDao().hardDeleteOldSoftDeleted(before = sessionStart) }
+            .onFailure { android.util.Log.e(TAG, "seal: soft-delete sweep failed", it) }
         // One-time transitional compaction: strip dead per-point ts, re-encode template images to
         // WEBP q100, strip dead heading/text strokes, strip legacy per-page snapshots, and delete
         // legacy custom-cover rows — then VACUUM to reclaim the space. Runs on every seal (including
@@ -3968,18 +3974,21 @@ class NotebookActivity : AppCompatActivity() {
                     "${r.structuralRows} structural→columnar + ${r.orphanSubtreeRows} orphan subtrees + VACUUM"
             }
         }.onFailure { Slog.d(TAG) { "compaction failed: ${it.message}" } }
-        db.openHelper.writableDatabase.apply {
-            query("PRAGMA incremental_vacuum").use { it.moveToFirst() }
-            query("PRAGMA wal_checkpoint(TRUNCATE)").use { it.moveToFirst() }
-        }
+        runCatching {
+            db.openHelper.writableDatabase.apply {
+                query("PRAGMA incremental_vacuum").use { it.moveToFirst() }
+                query("PRAGMA wal_checkpoint(TRUNCATE)").use { it.moveToFirst() }
+            }
+        }.onFailure { android.util.Log.e(TAG, "seal: checkpoint failed", it) }
         KeySession.clear()
-        db.close()
-        if (nbPath != null) File("$nbPath-journal").takeIf { it.exists() }?.delete()
+        runCatching { db.close() }
+            .onFailure { android.util.Log.e(TAG, "seal: close failed", it) }
+        if (nbPath != null) runCatching { File("$nbPath-journal").takeIf { it.exists() }?.delete() }
         // Update the index updatedAt so sort-by-date stays correct in MainActivity.
         if (nbId.isNotEmpty()) runCatching { indexRepo.touchNotebook(nbId) }
         // Bump this notebook's recents timestamp to close-time (newest-first ordering).
         // applicationContext — the Activity may be finishing while this seal runs on appScope.
-        if (nbId.isNotEmpty()) RecentsManager.recordClose(applicationContext, nbId)
+        if (nbId.isNotEmpty()) runCatching { RecentsManager.recordClose(applicationContext, nbId) }
     }
 
     // ── Persistence ───────────────────────────────────────────────────────────

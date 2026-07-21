@@ -2,8 +2,6 @@ package com.notesprout.android.crypto
 
 import android.content.Context
 import android.util.Base64
-import androidx.security.crypto.EncryptedSharedPreferences
-import androidx.security.crypto.MasterKey
 
 /**
  * Device-local, Keystore-encrypted cache of per-file SQLCipher raw keys.
@@ -21,13 +19,7 @@ import androidx.security.crypto.MasterKey
 object DerivedKeyStore {
     private const val PREFS_FILE = "notesprout_dkeys"
 
-    private fun prefs(context: Context) = EncryptedSharedPreferences.create(
-        context,
-        PREFS_FILE,
-        MasterKey.Builder(context).setKeyScheme(MasterKey.KeyScheme.AES256_GCM).build(),
-        EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-        EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
-    )
+    private fun prefs(context: Context) = SecurePrefs.get(context, PREFS_FILE)
 
     fun get(context: Context, fileId: String): ByteArray? =
         prefs(context).getString(fileId, null)?.let { Base64.decode(it, Base64.NO_WRAP) }

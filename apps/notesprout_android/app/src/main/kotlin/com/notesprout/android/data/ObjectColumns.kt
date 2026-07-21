@@ -52,7 +52,9 @@ internal fun deflateString(s: String): ByteArray {
 internal fun inflateString(b: ByteArray): String {
     val inf = Inflater(); inf.setInput(b)
     val out = ByteArrayOutputStream(maxOf(16, b.size * 3)); val buf = ByteArray(4096)
-    while (!inf.finished()) { val n = inf.inflate(buf); if (n == 0 && inf.needsInput()) break; out.write(buf, 0, n) }
+    // Bail on ANY zero-progress round, not just needsInput() — a corrupt header (e.g. FDICT set)
+    // makes inflate() return 0 forever with needsInput() false, spinning this loop into an ANR.
+    while (!inf.finished()) { val n = inf.inflate(buf); if (n == 0) break; out.write(buf, 0, n) }
     inf.end(); return out.toByteArray().toString(Charsets.UTF_8)
 }
 
@@ -156,7 +158,11 @@ fun TextRender.toRow(parentId: String, order: Int, createdAt: Long, updatedAt: L
 fun NotebookObject.toTextRender(): TextRender? {
     val box = boxOrLegacy() ?: return null
     return if (data.isEmpty()) {
-        TextRender(id = id, boundingBox = box, text = text ?: "", strokes = blob?.let { unpackStrokes(it) })
+        // Blob decode guarded like every sibling reader: one corrupt/truncated blob must degrade
+        // to a stroke-less render, not crash every load of the page (launch-restore would then
+        // reopen the crashing page on each start — the notebook becomes unopenable).
+        TextRender(id = id, boundingBox = box, text = text ?: "",
+            strokes = blob?.let { runCatching { unpackStrokes(it) }.getOrNull() })
     } else {
         val t = runCatching { TextObject.fromJson(data) }.getOrNull() ?: return null
         TextRender(id = id, boundingBox = box, text = t.text, strokes = t.strokes)
@@ -183,7 +189,8 @@ fun NotebookObject.toHeadingStroke(): HeadingStroke? {
     return if (data.isEmpty()) {
         HeadingStroke(
             id = id, boundingBox = box,
-            strokes = blob?.let { unpackStrokes(it) } ?: emptyList(),
+            // Guarded like toTextRender — a corrupt blob must not make the page unloadable.
+            strokes = blob?.let { runCatching { unpackStrokes(it) }.getOrNull() } ?: emptyList(),
             recognizedText = text, level = level ?: 1,
         )
     } else {
@@ -436,7 +443,7 @@ private suspend fun NotebookDao.loadSubtreeMap(rootIds: List<String>): Map<Strin
 /** Insert a new sticky (parent + child subtree). Caller supplies a fresh id on the render model. */
 suspend fun NotebookDao.insertStickyNoteSubtree(
     note: StickyNoteRender, layerId: String, order: Int, createdAt: Long, updatedAt: Long, density: Float,
-) = insertObjects(note.toRows(layerId, order, createdAt, updatedAt, density))
+) = insertObjects(remapSubtreeRows(note.toRows(layerId, order, createdAt, updatedAt, density)))
 
 /**
  * Re-persist an existing sticky (content edit or move): update the parent columns (clearing any
@@ -483,10 +490,10 @@ suspend fun NotebookDao.loadTextsSubtree(layerId: String): List<TextRender> {
 }
 
 suspend fun NotebookDao.insertHeadingSubtree(h: HeadingStroke, layerId: String, order: Int, createdAt: Long, updatedAt: Long) =
-    insertObjects(h.toRows(layerId, order, createdAt, updatedAt))
+    insertObjects(remapSubtreeRows(h.toRows(layerId, order, createdAt, updatedAt)))
 
 suspend fun NotebookDao.insertTextSubtree(t: TextRender, layerId: String, order: Int, createdAt: Long, updatedAt: Long) =
-    insertObjects(t.toRows(layerId, order, createdAt, updatedAt))
+    insertObjects(remapSubtreeRows(t.toRows(layerId, order, createdAt, updatedAt)))
 
 /**
  * Re-persist an existing heading. Recognized headings write only the parent column update (same cost
@@ -530,7 +537,7 @@ suspend fun NotebookDao.loadLinkSubtree(linkId: String, density: Float): LinkRen
 /** Insert a new link (parent + child subtree). Caller supplies a fresh id on the render model. */
 suspend fun NotebookDao.insertLinkSubtree(
     link: LinkRender, layerId: String, order: Int, createdAt: Long, updatedAt: Long, density: Float,
-) = insertObjects(link.toRows(layerId, order, createdAt, updatedAt, density))
+) = insertObjects(remapSubtreeRows(link.toRows(layerId, order, createdAt, updatedAt, density)))
 
 /**
  * Re-persist an existing link (chrome/target edit, or a move that translated its page-absolute
@@ -557,6 +564,19 @@ suspend fun NotebookDao.replaceLinkSubtree(link: LinkRender, now: Long, density:
  * other object's rows. The top-level children keep their `parentId` (it points at the composite's own
  * id, which is not in the map and stays stable); nested links are rewired through the map.
  */
+/**
+ * Remap a full subtree's descendant rows (parent row untouched) for the insert helpers.
+ *
+ * The insert paths receive render models whose child ids are frequently the LIVE child-row ids of
+ * another object: lasso copy snapshots the source's rows verbatim, `translate()` re-ids only the
+ * parent, and cut soft-deletes only the parent (its child rows stay physical). Inserting those
+ * rows as-is collides — copy a link/sticky and paste it on the same page, or paste the same
+ * clipboard twice, and the plain `@Insert` aborts with `UNIQUE constraint failed: notebook.id`,
+ * crashing the paste. Descendant ids are private to the composite, so remapping is always safe.
+ */
+private fun remapSubtreeRows(rows: List<NotebookObject>): List<NotebookObject> =
+    if (rows.size <= 1) rows else listOf(rows[0]) + remapDescendantIds(rows.drop(1))
+
 private fun remapDescendantIds(rows: List<NotebookObject>): List<NotebookObject> {
     val idMap = rows.associate { it.id to UUID.randomUUID().toString() }
     return rows.map { row ->

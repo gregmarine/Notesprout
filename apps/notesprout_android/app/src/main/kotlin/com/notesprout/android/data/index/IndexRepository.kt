@@ -129,7 +129,9 @@ class IndexRepository(private val dao: ObjectDao) {
 
     suspend fun updateNotebookSnapshot(id: String, snapshot: String?) {
         val entity = dao.getById(id) ?: return
-        val obj = entity.notebookMeta()
+        // Malformed legacy meta: skip the write (never crash, and never overwrite the stored
+        // data with defaults — that would destroy whatever the legacy JSON still holds).
+        val obj = runCatching { entity.notebookMeta() }.getOrNull() ?: return
         // Private (NOTEBOOK-scope) notebooks never cache page content into the index. GLOBAL-scope
         // covers are fine now that the index itself is encrypted at rest under the global key.
         if (obj.encrypted && obj.keyScope != KeyScope.GLOBAL) return
@@ -141,7 +143,7 @@ class IndexRepository(private val dao: ObjectDao) {
 
     suspend fun updateNotebookPageCount(id: String, pageCount: Int) {
         val entity = dao.getById(id) ?: return
-        val obj = entity.notebookMeta()
+        val obj = runCatching { entity.notebookMeta() }.getOrNull() ?: return // see updateNotebookSnapshot
         dao.update(
             entity.withNotebookMeta(obj.copy(pageCount = pageCount))
                 .copy(updatedAt = System.currentTimeMillis())
@@ -511,14 +513,14 @@ class IndexRepository(private val dao: ObjectDao) {
 
     suspend fun setNotebookExcludedFromBackup(notebookId: String, excluded: Boolean) {
         val entity = dao.getById(notebookId) ?: return
-        val obj = entity.notebookMeta()
+        val obj = runCatching { entity.notebookMeta() }.getOrNull() ?: return // see updateNotebookSnapshot
         // Do NOT bump updatedAt — exclusion flag is not a content modification.
         dao.update(entity.withNotebookMeta(obj.copy(excludeFromBackup = excluded)))
     }
 
     suspend fun markNotebookBackedUp(notebookId: String, kind: BackupKind, timestamp: Long) {
         val entity = dao.getById(notebookId) ?: return
-        val obj = entity.notebookMeta()
+        val obj = runCatching { entity.notebookMeta() }.getOrNull() ?: return // see updateNotebookSnapshot
         val updated = when (kind) {
             BackupKind.LOCAL -> obj.copy(lastBackedUpLocal = timestamp)
             BackupKind.DRIVE -> obj.copy(lastBackedUpDrive = timestamp)
@@ -575,7 +577,10 @@ class IndexRepository(private val dao: ObjectDao) {
 
     suspend fun getEncryptionInfo(notebookId: String): EncryptionInfo {
         val entity = dao.getById(notebookId) ?: return EncryptionInfo.NONE
-        val obj = entity.notebookMeta()
+        // This sits on the notebook-open path — a corrupt legacy row must not make the notebook
+        // unopenable via crash. NONE is safe post-hardening: opening an actually-encrypted file
+        // keyless now throws SoilLockedException / reports corruption without deleting anything.
+        val obj = runCatching { entity.notebookMeta() }.getOrNull() ?: return EncryptionInfo.NONE
         return EncryptionInfo(obj.encrypted, obj.keyScope)
     }
 
@@ -586,7 +591,7 @@ class IndexRepository(private val dao: ObjectDao) {
      */
     suspend fun setEncryptionState(notebookId: String, encrypted: Boolean, keyScope: KeyScope?) {
         val entity = dao.getById(notebookId) ?: return
-        val obj = entity.notebookMeta()
+        val obj = runCatching { entity.notebookMeta() }.getOrNull() ?: return // see updateNotebookSnapshot
         val updated = obj.copy(
             encrypted = encrypted,
             keyScope = keyScope,
