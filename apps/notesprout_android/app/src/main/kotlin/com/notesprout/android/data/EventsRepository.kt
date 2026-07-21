@@ -177,12 +177,14 @@ class EventsRepository(
             // 1) exception the parent at the original occurrence start
             val parentRule = rule.copy(exceptionDates = (rule.exceptionDates + occStart).distinct())
             dao.upsert(original.copy(data = payload.copy(recurrence = parentRule).toJson(), updatedAt = now))
-            // 2) one-off override on the edited dates (may differ from occStart = a moved occurrence)
+            // 2) one-off override on the edited dates (may differ from occStart = a moved occurrence).
+            // copy() from the edited payload so reminders carry over — building a fresh EventPayload
+            // here silently dropped them and the override vanished from the Upcoming look-ahead.
             dao.upsert(
                 edited.copy(
                     id = UUID.randomUUID().toString(),
                     recurring = false,
-                    data = EventPayload(recurrence = null, notes = EventPayload.fromJson(edited.data).notes).toJson(),
+                    data = EventPayload.fromJson(edited.data).copy(recurrence = null).toJson(),
                     createdAt = now,
                     updatedAt = now,
                     deletedAt = null,
@@ -207,21 +209,21 @@ class EventsRepository(
             ) ?: return@withContext
             val now = System.currentTimeMillis()
             if (occStart <= original.startEpochDay) {
-                return@withContext editSeries(edited, original)
+                return@withContext editSeries(edited, original, viewedDay)
             }
             val editedPayload = EventPayload.fromJson(edited.data)
             val editedRule = editedPayload.recurrence
             // 1) truncate the original series to end before the original occurrence start
             val truncated = rule.copy(endMode = EndMode.UNTIL, endEpochDay = occStart - 1, endCount = null)
             dao.upsert(original.copy(data = payload.copy(recurrence = truncated).toJson(), updatedAt = now))
-            // 2) new series on the edited dates (may differ from occStart = a moved this-and-following)
+            // 2) new series on the edited dates (may differ from occStart = a moved this-and-following).
+            // copy() so reminders carry into the new series (see editOccurrence).
             dao.upsert(
                 edited.copy(
                     id = UUID.randomUUID().toString(),
                     recurring = editedRule != null,
-                    data = EventPayload(
+                    data = editedPayload.copy(
                         recurrence = editedRule?.copy(exceptionDates = emptyList()),
-                        notes = editedPayload.notes,
                     ).toJson(),
                     createdAt = now,
                     updatedAt = now,
@@ -230,16 +232,31 @@ class EventsRepository(
             )
         }
 
-    /** "Edit all events": save the whole series (anchor preserved), carrying forward [original]'s
-     *  exception dates so previously-removed occurrences stay removed. */
-    suspend fun editSeries(edited: EventEntity, original: EventEntity) = withContext(Dispatchers.IO) {
-        val editedPayload = EventPayload.fromJson(edited.data)
-        val originalRule = EventPayload.fromJson(original.data).recurrence
-        val mergedRule = editedPayload.recurrence?.copy(
-            exceptionDates = originalRule?.exceptionDates ?: emptyList(),
-        )
-        dao.upsert(edited.copy(data = editedPayload.copy(recurrence = mergedRule).toJson()))
-    }
+    /** "Edit all events": save the whole series, carrying forward [original]'s exception dates so
+     *  previously-removed occurrences stay removed. The editor pre-fills its dates from the TAPPED
+     *  occurrence, so when those dates come back untouched the series keeps its original anchor
+     *  (e.g. a birthday's birth year) — upserting the prefill verbatim silently re-anchored the
+     *  series and erased every past occurrence. A deliberately changed date still re-anchors. */
+    suspend fun editSeries(edited: EventEntity, original: EventEntity, viewedDay: Long? = null) =
+        withContext(Dispatchers.IO) {
+            val editedPayload = EventPayload.fromJson(edited.data)
+            val originalRule = EventPayload.fromJson(original.data).recurrence
+            val mergedRule = editedPayload.recurrence?.copy(
+                exceptionDates = originalRule?.exceptionDates ?: emptyList(),
+            )
+            val span = original.endEpochDay - original.startEpochDay
+            val prefillStart = if (viewedDay != null && originalRule != null) {
+                EventRecurrence.occurrenceStartCovering(
+                    originalRule, original.startEpochDay, original.endEpochDay, viewedDay,
+                )
+            } else null
+            val datesUntouched = prefillStart != null &&
+                edited.startEpochDay == prefillStart && edited.endEpochDay == prefillStart + span
+            val anchored = if (datesUntouched) {
+                edited.copy(startEpochDay = original.startEpochDay, endEpochDay = original.endEpochDay)
+            } else edited
+            dao.upsert(anchored.copy(data = editedPayload.copy(recurrence = mergedRule).toJson()))
+        }
 
     private companion object {
         /** How far ahead the *Upcoming* look-ahead ever probes; a reminder lead beyond a year is

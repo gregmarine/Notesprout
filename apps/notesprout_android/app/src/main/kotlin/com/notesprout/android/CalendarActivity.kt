@@ -566,7 +566,10 @@ class CalendarActivity : AppCompatActivity() {
     )
 
     private fun pageKey(): String = when (currentView) {
-        CalView.MONTH -> "cal-month-%04d-%02d".format(calYear, calMonth)
+        // Locale.ROOT: default-locale format() writes Eastern-Arabic digits on ar/fa/bn locales,
+        // orphaning every month page written before a device-language switch (week/day keys use
+        // ISO LocalDate.toString() and were never affected).
+        CalView.MONTH -> "cal-month-%04d-%02d".format(java.util.Locale.ROOT, calYear, calMonth)
         CalView.WEEK -> "cal-week-${sundayOf(selectedDate)}"
         CalView.DAY -> "cal-day-$selectedDate-${if (dayHalf == 0) "AM" else "PM"}"
     }
@@ -1487,7 +1490,7 @@ class CalendarActivity : AppCompatActivity() {
         val today = LocalDate.now()
         return when (currentView) {
             CalView.MONTH -> listOf(
-                "cal-month-%04d-%02d".format(calYear, calMonth) to
+                "cal-month-%04d-%02d".format(java.util.Locale.ROOT, calYear, calMonth) to
                     CalendarTemplateRenderer.Spec(CalView.MONTH, calYear, calMonth, selectedDate, 0, today)
             )
             CalView.WEEK -> listOf(

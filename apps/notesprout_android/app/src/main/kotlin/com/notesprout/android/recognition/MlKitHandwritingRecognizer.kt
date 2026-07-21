@@ -100,7 +100,8 @@ class MlKitHandwritingRecognizer : HandwritingRecognizer {
             inkBuilder.addStroke(strokeBuilder.build())
         }
 
-        val writingArea = WritingArea(bounds.width(), bounds.height())
+        // Floor the area like recognizeSegment — a dot-only selection has a 0×0 bbox.
+        val writingArea = WritingArea(bounds.width().coerceAtLeast(1f), bounds.height().coerceAtLeast(1f))
         val recognitionContext = RecognitionContext.builder()
             .setPreContext("")
             .setWritingArea(writingArea)
@@ -110,7 +111,8 @@ class MlKitHandwritingRecognizer : HandwritingRecognizer {
             .addOnSuccessListener { result ->
                 val text = result.candidates.firstOrNull()?.text
                 val recognized = if (!text.isNullOrBlank()) text else HandwritingRecognizer.FALLBACK_TEXT
-                Slog.d(TAG) { "Recognition result: \"$recognized\"" }
+                // Log counts only — recognized text is user content and must never be logged.
+                Slog.d(TAG) { "Recognition result: ${recognized.length} chars" }
                 onResult(recognized)
             }
             .addOnFailureListener { e ->

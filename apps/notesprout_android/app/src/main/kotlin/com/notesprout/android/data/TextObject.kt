@@ -12,6 +12,10 @@ data class TextObject(
     fun toJson(): String = Json.encodeToString(serializer(), this)
 
     companion object {
-        fun fromJson(json: String): TextObject = Json.decodeFromString(serializer(), json)
+        // Lenient decode (codebase convention): a future added field must degrade gracefully
+        // on older builds, not make the object undecodable.
+        fun fromJson(json: String): TextObject = lenientJson.decodeFromString(serializer(), json)
+
+        private val lenientJson = Json { ignoreUnknownKeys = true }
     }
 }

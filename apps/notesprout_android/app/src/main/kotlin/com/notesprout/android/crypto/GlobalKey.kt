@@ -22,7 +22,11 @@ object GlobalKey {
     private const val ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
     private const val ENTROPY_BYTES = 20 // 160 bits
 
-    /** Global passphrase for this device, generating+caching one if absent. Never returns null. */
+    /** Global passphrase for this device, generating+caching one if absent. Never returns null.
+     *  Synchronized: concurrent first calls (index open vs. training-db open use different locks)
+     *  could otherwise mint two different globals, and the loser's write would strand whatever the
+     *  winner already encrypted behind a passphrase the user was never shown. */
+    @Synchronized
     fun ensure(context: Context): String {
         PassphraseStore.getGlobalPassphrase(context)?.let { return it }
         val generated = generate()

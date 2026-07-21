@@ -118,8 +118,12 @@ object PageTextRepository {
         pageId: String,
         recognizer: PageTextRecognizer,
     ): PageText {
-        val content = loadPageContent(dao, pageId)
+        // Watermark BEFORE content (matching freshOrRecognizeReadOnly): read the other way round,
+        // an edit committed between the two queries is covered by the stored watermark but absent
+        // from the recognized text — isFresh then reports stale text as current, and the export
+        // path (no RTR re-trigger) serves it until the next edit.
         val max = layerMaxUpdatedAt(dao, pageId)
+        val content = loadPageContent(dao, pageId)
         val result = recognizer.recognizePage(content, sourceMaxUpdatedAt = max)
         upsert(dao, pageId, result)
         Slog.d(TAG) { "Recognized page $pageId (${result.text.length} chars, max=$max)" }

@@ -134,6 +134,10 @@ object GlobalConversion {
                             Slog.d(TAG) { "Notebook $id is not a valid database — skipped." }
                         }
                     }
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    // A cancelled sweep must abort, not mark the in-flight notebook "skipped"
+                    // and drop it from pending (it was never converted).
+                    throw e
                 } catch (e: Exception) {
                     // One notebook failing must never stall the sweep.
                     skipped++

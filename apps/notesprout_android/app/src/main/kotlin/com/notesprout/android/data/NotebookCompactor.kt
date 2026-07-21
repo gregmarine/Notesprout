@@ -81,10 +81,11 @@ object NotebookCompactor {
     suspend fun compact(db: SoilDatabase, density: Float): Result {
         val dao = db.notebookDao()
 
-        // Pass 1 — drop dead per-point ts from stroke rows.
+        // Pass 1 — drop dead per-point ts from stroke rows. Per-row guard (like pass 6): one
+        // malformed legacy row must skip, not abort every remaining pass for this notebook forever.
         val tsRows = dao.strokeRowsWithLegacyTimestamp()
         for (r in tsRows) {
-            val sd = StrokeData.fromJson(r.data)
+            val sd = try { StrokeData.fromJson(r.data) } catch (e: Exception) { continue }
             val stripped = sd.copy(
                 points = sd.points.map { if (it.timestamp == null) it else it.copy(timestamp = null) },
             )
@@ -104,7 +105,7 @@ object NotebookCompactor {
         // Pass 3 — drop dead embedded strokes from recognized headings / converted text objects.
         var deadStrokeRows = 0
         for (r in dao.headingTextRowsWithStrokes()) {
-            val newData = stripDeadStrokes(r.type, r.data) ?: continue
+            val newData = runCatching { stripDeadStrokes(r.type, r.data) }.getOrNull() ?: continue
             dao.rewriteObjectDataKeepingTimestamp(r.id, newData)
             deadStrokeRows++
         }
@@ -114,7 +115,8 @@ object NotebookCompactor {
         // serializing through PageData drops the now-unknown key. `updatedAt` is preserved.
         var snapshotRows = 0
         for (r in dao.pageRowsWithSnapshot()) {
-            dao.rewriteObjectDataKeepingTimestamp(r.id, PageData.fromJson(r.data).toJson())
+            val pageJson = runCatching { PageData.fromJson(r.data).toJson() }.getOrNull() ?: continue
+            dao.rewriteObjectDataKeepingTimestamp(r.id, pageJson)
             snapshotRows++
         }
 
@@ -125,7 +127,8 @@ object NotebookCompactor {
         // through NotebookMetadata (which no longer has a `cover` field) drops the stale key; the key
         // is gone afterwards, so later seals skip this — no per-seal rewrite loop.
         if (nbRow != null && nbRow.data.contains("\"cover\":")) {
-            dao.rewriteObjectDataKeepingTimestamp(nbRow.id, NotebookMetadata.fromJson(nbRow.id, nbRow.data).toJson())
+            runCatching { NotebookMetadata.fromJson(nbRow.id, nbRow.data).toJson() }
+                .getOrNull()?.let { dao.rewriteObjectDataKeepingTimestamp(nbRow.id, it) }
         }
 
         // Pass 6 — convert legacy JSON stroke rows to the binary blob format (data-model-optimization

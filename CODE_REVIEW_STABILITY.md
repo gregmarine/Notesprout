@@ -3,6 +3,15 @@
 **Date:** 2026-07-20 · **Branch:** `sprout` (clean, HEAD `fe8fb6e`) · **Scope:** entire
 `apps/notesprout_android` main source (287 Kotlin files)
 
+> **STATUS (2026-07-21): all four fix phases implemented on `pruning-stability`.**
+> Phase 1 `6e2b675` (P0 destruction paths) · Phase 2 `8f592b4` (P1 crashes/crash-loops) ·
+> Phase 3 `78b48fd` (P2 silent data loss) · Phase 4 (events/locale/compactor/hardening) — see
+> `git log` for the per-phase breakdown. Debug + release build; unit tests pass.
+> **Remaining:** the on-device validation sweep on G102 (end of Fix plan below), and two
+> deliberately-skipped LOWs: explicit non-deleting handlers on zetetic opens (delete behavior
+> bytecode-verified impossible while the codec is present) and cover snapshots omitting shapes
+> (visual only). Stroke-attribute fidelity is backlogged per decision 4.
+
 **Method:** ten parallel deep-read reviews (crypto, data layer + index, backup/restore,
 export/import, drawing engine, activities/lifecycle, clipboard/links/transfer,
 calendar/scratchpad/sticky, recognition, plus an exhaustive cross-cutting sweep that cataloged

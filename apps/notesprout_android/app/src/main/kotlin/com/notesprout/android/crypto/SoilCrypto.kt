@@ -120,6 +120,19 @@ object SoilCrypto {
         }
     }
 
+    // ── Creation-only opens (new-notebook bootstrap) ─────────────────────────
+    // The ONLY paths allowed to create a .soil. Everything else goes through the exists-guarded
+    // opens above — a create-capable open pointed at a missing notebook fabricates an empty stub.
+
+    /** Create (or reopen) a brand-new encrypted .soil at [file] — new-notebook bootstrap only. */
+    fun createRawEncrypted(file: File, passphrase: String): ZeticDB =
+        ZeticDB.openOrCreateDatabase(file, passphrase, null, null)
+
+    /** Create (or reopen) a brand-new plaintext .soil at [file] — new-notebook bootstrap only.
+     *  Non-deleting handler: even a creation open must never let a corruption report delete. */
+    fun createRawPlaintext(file: File): android.database.sqlite.SQLiteDatabase =
+        android.database.sqlite.SQLiteDatabase.openOrCreateDatabase(file.path, null, NonDeletingErrorHandler)
+
     /**
      * Open a .soil for raw (non-Room) access, dispatching to the plaintext or encrypted path.
      * Returns a [SoilRawDb] that wraps whichever underlying type is needed.

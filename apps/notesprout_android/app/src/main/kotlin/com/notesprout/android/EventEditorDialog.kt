@@ -282,7 +282,7 @@ object EventEditorDialog {
         val builder = AlertDialog.Builder(activity)
             .setTitle(if (isNew) "New event" else "Edit event")
             .setView(b.root)
-            .setPositiveButton("Save") { _, _ -> onSaved(build()) }
+            .setPositiveButton("Save", null) // validated click handler installed after show()
             .setNegativeButton("Cancel", null)
         if (!isNew && onDeleted != null) {
             builder.setNeutralButton("Delete") { _, _ -> onDeleted(existing!!) }
@@ -292,6 +292,23 @@ object EventEditorDialog {
         dialog.show()
         dialog.window?.setElevation(0f)
         dialog.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
+        // Manual Save handler so validation can keep the dialog open. An "ends on" date before
+        // the event's start would save a row that occurs on no day, is excluded from every query,
+        // and can never be edited or deleted again from the UI — block it here.
+        dialog.getButton(AlertDialog.BUTTON_POSITIVE)?.setOnClickListener {
+            val untilInvalid = repeatFreq() != null &&
+                b.spEnd.selectedItemPosition == 1 && untilDate.isBefore(startDate)
+            if (untilInvalid) {
+                android.widget.Toast.makeText(
+                    activity,
+                    "The \"ends on\" date is before the event starts — pick a later end date.",
+                    android.widget.Toast.LENGTH_LONG,
+                ).show()
+            } else {
+                onSaved(build())
+                dialog.dismiss()
+            }
+        }
     }
 
     // ── Helpers ────────────────────────────────────────────────────────────────

@@ -136,4 +136,14 @@ class DriveAuthActivity : AppCompatActivity() {
             finish()
         }
     }
+
+    override fun onDestroy() {
+        // Stop and release the WebView explicitly — it otherwise keeps loading/leaks after the
+        // OAuth flow finishes.
+        if (::binding.isInitialized) {
+            binding.webView.stopLoading()
+            binding.webView.destroy()
+        }
+        super.onDestroy()
+    }
 }

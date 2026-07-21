@@ -187,7 +187,7 @@ class DayHistoryRepository(
         activityDao.allTimestamps(ActivityType.EDITED).forEach(::addMatching)
         indexRepo.getAllNotebooks().forEach { addMatching(it.createdAt) }
 
-        val pattern = "cal-daynote-____-%02d-%02d".format(month, dayOfMonth)
+        val pattern = "cal-daynote-____-%02d-%02d".format(java.util.Locale.ROOT, month, dayOfMonth)
         for (pageId in calendarDao.dayNotePagesWithContent(pattern)) {
             // cal-daynote-YYYY-MM-DD → parse the YYYY segment.
             pageId.removePrefix("cal-daynote-").take(4).toIntOrNull()?.let { years.add(it) }
@@ -211,8 +211,9 @@ class DayHistoryRepository(
     /** Full breadcrumb for [parentId] (root → `"Notebooks"`) — mirrors RecentsManager. */
     private fun buildFolderPath(parentId: String?, allFolders: List<ObjectEntity>): String {
         val segments = mutableListOf<String>()
+        val visited = mutableSetOf<String>() // corrupt parentId cycle must not spin the IO thread
         var currentId: String? = parentId
-        while (currentId != null) {
+        while (currentId != null && visited.add(currentId)) {
             val folder = allFolders.find { it.id == currentId } ?: break
             segments.add(0, folder.name)
             currentId = folder.parentId

@@ -176,7 +176,7 @@ class EventsController(
                         when (which) {
                             0 -> repo.editOccurrence(original, edited, viewedDay)
                             1 -> repo.editThisAndFollowing(original, edited, viewedDay)
-                            else -> repo.editSeries(edited, original)
+                            else -> repo.editSeries(edited, original, viewedDay)
                         }
                         refresh()
                     }

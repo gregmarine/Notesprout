@@ -21,7 +21,11 @@ data class HeadingObject(
     fun toJson(): String = Json.encodeToString(serializer(), this)
 
     companion object {
-        fun fromJson(json: String): HeadingObject = Json.decodeFromString(serializer(), json)
+        // Lenient decode (codebase convention): a future added field must degrade gracefully
+        // on older builds, not make the object undecodable.
+        fun fromJson(json: String): HeadingObject = lenientJson.decodeFromString(serializer(), json)
+
+        private val lenientJson = Json { ignoreUnknownKeys = true }
 
         /** Returns the markdown prefix for [level] (clamped 1–3), e.g. `"## "` for level 2. */
         fun headingPrefix(level: Int): String = "#".repeat(level.coerceIn(1, 3)) + " "

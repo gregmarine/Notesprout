@@ -2282,6 +2282,20 @@ class NotebookActivity : AppCompatActivity() {
         if (notebookPath != null) {
             lifecycleScope.launch {
                 val nbId = notebookId
+                // Existence gate: a stale recents/history tap or replayed intent can carry an id
+                // whose index row (or .soil) is gone. Without this, getEncryptionInfo defaults to
+                // NONE and Room CREATES a ghost empty .soil at the path — an orphan file shown to
+                // the user as their notebook, mysteriously blank.
+                val exists = withContext(Dispatchers.IO) {
+                    indexRepo.getNotebook(nbId)?.deletedAt == null && soilFile(this@NotebookActivity, nbId).exists()
+                }
+                if (!exists) {
+                    android.widget.Toast.makeText(
+                        this@NotebookActivity, "This notebook no longer exists.", android.widget.Toast.LENGTH_LONG
+                    ).show()
+                    finish()
+                    return@launch
+                }
                 val info = withContext(Dispatchers.IO) { indexRepo.getEncryptionInfo(nbId) }
                 encryptionInfo = info
                 updateLockButtonVisibility(info)
@@ -4518,7 +4532,11 @@ class NotebookActivity : AppCompatActivity() {
         // position even though we iterate only the subset.
         val strokeIndexMap = currentStrokes.withIndex().associate { (i, s) -> s.id to i }
 
-        // Single transaction — all new inserts share one BEGIN/COMMIT.
+        // Single transaction — all new inserts share one BEGIN/COMMIT. Track what was actually
+        // written: degenerate (<2-point) strokes are skipped, and reporting their ids as saved
+        // used to create StrokeAdded undo entries for rows that don't exist and permanently
+        // block those in-memory strokes from ever saving.
+        val savedIds = ArrayList<String>(newStrokes.size)
         db.withTransaction {
             for (liveStroke in newStrokes) {
                 if (liveStroke.points.size < 2) continue   // degenerate stroke — skip
@@ -4530,11 +4548,12 @@ class NotebookActivity : AppCompatActivity() {
                         updatedAt = now,
                     )
                 )
+                savedIds.add(liveStroke.id)
             }
         }
 
         // Extend the registry so subsequent saves skip these IDs immediately.
-        val newIds = newStrokes.map { it.id }
+        val newIds: List<String> = savedIds
         persistedStrokeIds.addAll(newIds)
 
         // RTR: new ink landed — schedule a debounced re-recognition of this page.
@@ -9934,9 +9953,13 @@ class NotebookActivity : AppCompatActivity() {
                     dao.softDeleteById(action.shapeId, now)
                     if (action.deletedAt == 0L) {
                         val stroke = action.originalStroke
-                        dao.insertObject(
+                        // insertOrIgnore: undo→redo→undo repeats this branch; the row from the
+                        // first undo still exists (redo only soft-deleted it), and a plain insert
+                        // would abort with a UNIQUE crash. Restore covers the soft-deleted case.
+                        dao.insertOrIgnore(
                             stroke.toStrokeRow(parentId = action.layerId, order = 0, createdAt = now, updatedAt = now)
                         )
+                        dao.restoreById(stroke.id, now)
                     } else {
                         dao.restoreById(action.originalStroke.id, now)
                     }

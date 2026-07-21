@@ -240,13 +240,17 @@ object NotesproutIndex {
     }
 
     suspend fun seal() = withContext(Dispatchers.IO) {
-        val db = db()
-        db.openHelper.writableDatabase.let { raw ->
-            raw.query("PRAGMA incremental_vacuum").use { it.moveToFirst() }
-            raw.query("PRAGMA wal_checkpoint(TRUNCATE)").use { it.moveToFirst() }
+        // prepareMutex like every other open/close path — sealing mid-ensureReady (or vice versa)
+        // could interleave a close with a fresh open and throw on the closed instance.
+        prepareMutex.withLock {
+            val db = instance ?: return@withLock
+            db.openHelper.writableDatabase.let { raw ->
+                raw.query("PRAGMA incremental_vacuum").use { it.moveToFirst() }
+                raw.query("PRAGMA wal_checkpoint(TRUNCATE)").use { it.moveToFirst() }
+            }
+            db.close()
+            instance = null
+            readyLatch = CompletableDeferred()
         }
-        db.close()
-        instance = null
-        readyLatch = CompletableDeferred()
     }
 }

@@ -1,7 +1,6 @@
 package com.notesprout.android.data
 
 import android.content.Context
-import android.database.sqlite.SQLiteDatabase
 import com.notesprout.android.BuildConfig
 import com.notesprout.android.data.index.IndexRepository
 import com.notesprout.android.data.index.ObjectEntity
@@ -28,7 +27,14 @@ suspend fun createBlankNotebook(
     val entity = repository.createNotebook(name, parentId)
     val soilPath = soilFile(context, entity.id)
 
-    val db = SQLiteDatabase.openOrCreateDatabase(soilPath, null)
+    val db = try {
+        com.notesprout.android.crypto.SoilCrypto.createRawPlaintext(soilPath)
+    } catch (e: Exception) {
+        // The index row went in first — take it back out rather than stranding a phantom card
+        // that points at a file that never got built (disk full, IO error).
+        runCatching { repository.softDeleteNotebook(entity.id) }
+        throw e
+    }
     try {
         fun pragma(sql: String) = db.rawQuery(sql, null).use { it.moveToFirst() }
         fun exec(sql: String, args: Array<Any?>? = null) =
@@ -81,8 +87,14 @@ suspend fun createBlankNotebook(
 
         pragma("PRAGMA incremental_vacuum")
         pragma("PRAGMA wal_checkpoint(TRUNCATE)")
+    } catch (e: Exception) {
+        // Mid-bootstrap failure: retract the index row and the partial file together.
+        runCatching { repository.softDeleteNotebook(entity.id) }
+        runCatching { db.close() }
+        runCatching { soilPath.delete() }
+        throw e
     } finally {
-        db.close()
+        runCatching { db.close() }
     }
 
     java.io.File("${soilPath.absolutePath}-journal").takeIf { it.exists() }?.delete()

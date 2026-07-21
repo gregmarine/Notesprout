@@ -1296,7 +1296,15 @@ class MainActivity : AppCompatActivity() {
         startActivity(Intent(this, ScratchpadActivity::class.java))
     }
 
+    /** Debounce for notebook-card taps — see [launchNotebookActivity]. */
+    private var lastNotebookLaunchAt = 0L
+
     private fun launchNotebookActivity(entity: ObjectEntity) {
+        // E-ink refresh lag invites double-taps; two rapid taps used to stack two activities on
+        // the same .soil (benign for data — insert-only ink — but thoroughly confusing on screen).
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (now - lastNotebookLaunchAt < 800) return
+        lastNotebookLaunchAt = now
         val intent = Intent(this, NotebookActivity::class.java).apply {
             putExtra(NotebookActivity.EXTRA_NOTEBOOK_ID,   entity.id)
             putExtra(NotebookActivity.EXTRA_NOTEBOOK_NAME, entity.name)
@@ -1674,12 +1682,12 @@ class MainActivity : AppCompatActivity() {
                 val pragma: (String) -> Unit
                 val closeDb: () -> Unit
                 if (key != null) {
-                    val db = SoilCrypto.openRawEncrypted(soilPath, key)
+                    val db = SoilCrypto.createRawEncrypted(soilPath, key)
                     exec = { sql, args -> if (args != null) db.execSQL(sql, args) else db.execSQL(sql) }
                     pragma = { sql -> db.rawQuery(sql, null).use { it.moveToFirst() } }
                     closeDb = { db.close() }
                 } else {
-                    val db = SQLiteDatabase.openOrCreateDatabase(soilPath, null)
+                    val db = SoilCrypto.createRawPlaintext(soilPath)
                     exec = { sql, args -> if (args != null) db.execSQL(sql, args) else db.execSQL(sql) }
                     pragma = { sql -> db.rawQuery(sql, null).use { it.moveToFirst() } }
                     closeDb = { db.close() }
@@ -2669,12 +2677,17 @@ class MainActivity : AppCompatActivity() {
 
     private fun startImportFromUri(uri: android.net.Uri) {
         lifecycleScope.launch {
-            val uriDisplayName = contentResolver.query(
-                uri,
-                arrayOf(android.provider.OpenableColumns.DISPLAY_NAME),
-                null, null, null
-            )?.use { cursor ->
-                if (cursor.moveToFirst()) cursor.getString(0) else null
+            // IO: a slow document provider must not jank/ANR the main thread for a name lookup.
+            val uriDisplayName = withContext(Dispatchers.IO) {
+                runCatching {
+                    contentResolver.query(
+                        uri,
+                        arrayOf(android.provider.OpenableColumns.DISPLAY_NAME),
+                        null, null, null
+                    )?.use { cursor ->
+                        if (cursor.moveToFirst()) cursor.getString(0) else null
+                    }
+                }.getOrNull()
             }
             val fallbackName = uriDisplayName
                 ?.removeSuffix(".soil")
@@ -2947,14 +2960,14 @@ class MainActivity : AppCompatActivity() {
             .addAction(null, "Use this device's global") {
                 lifecycleScope.launch {
                     val globalPass = KeyResolver.resolveForConvertToEncrypted(this@MainActivity, KeyScope.GLOBAL)
-                        ?: return@launch
+                        ?: run { runCatching { tempFile.delete() }; return@launch } // prompt cancelled — drop the cached import copy
                     doImportEncrypted(manifest, tempFile, displayName, parentId, resolvedId, enteredPass, globalPass, KeyScope.GLOBAL, replaceVictimId)
                 }
             }
             .addAction(null, "New notebook passphrase") {
                 lifecycleScope.launch {
                     val newPass = KeyResolver.resolveForConvertToEncrypted(this@MainActivity, KeyScope.NOTEBOOK)
-                        ?: return@launch
+                        ?: run { runCatching { tempFile.delete() }; return@launch } // prompt cancelled — drop the cached import copy
                     doImportEncrypted(manifest, tempFile, displayName, parentId, resolvedId, enteredPass, newPass, KeyScope.NOTEBOOK, replaceVictimId)
                 }
             }
@@ -2985,14 +2998,14 @@ class MainActivity : AppCompatActivity() {
             .addAction(null, "Use this device's global") {
                 lifecycleScope.launch {
                     val globalPass = KeyResolver.resolveForConvertToEncrypted(this@MainActivity, KeyScope.GLOBAL)
-                        ?: return@launch
+                        ?: run { runCatching { tempFile.delete() }; return@launch } // prompt cancelled — drop the cached import copy
                     doReplaceEncrypted(manifest, tempFile, displayName, existingId, enteredPass, globalPass, KeyScope.GLOBAL)
                 }
             }
             .addAction(null, "New notebook passphrase") {
                 lifecycleScope.launch {
                     val newPass = KeyResolver.resolveForConvertToEncrypted(this@MainActivity, KeyScope.NOTEBOOK)
-                        ?: return@launch
+                        ?: run { runCatching { tempFile.delete() }; return@launch } // prompt cancelled — drop the cached import copy
                     doReplaceEncrypted(manifest, tempFile, displayName, existingId, enteredPass, newPass, KeyScope.NOTEBOOK)
                 }
             }
@@ -3016,13 +3029,15 @@ class MainActivity : AppCompatActivity() {
             .title("Encrypt imported notebook")
             .addAction(null, "Use this device's global") {
                 lifecycleScope.launch {
-                    val pass = KeyResolver.resolveForConvertToEncrypted(this@MainActivity, KeyScope.GLOBAL) ?: return@launch
+                    val pass = KeyResolver.resolveForConvertToEncrypted(this@MainActivity, KeyScope.GLOBAL)
+                        ?: run { runCatching { tempFile.delete() }; return@launch } // prompt cancelled — drop the cached import copy
                     doImportPlaintextEncrypting(manifest, tempFile, displayName, parentId, resolvedId, pass, KeyScope.GLOBAL, replaceVictimId)
                 }
             }
             .addAction(null, "New notebook passphrase") {
                 lifecycleScope.launch {
-                    val pass = KeyResolver.resolveForConvertToEncrypted(this@MainActivity, KeyScope.NOTEBOOK) ?: return@launch
+                    val pass = KeyResolver.resolveForConvertToEncrypted(this@MainActivity, KeyScope.NOTEBOOK)
+                        ?: run { runCatching { tempFile.delete() }; return@launch } // prompt cancelled — drop the cached import copy
                     doImportPlaintextEncrypting(manifest, tempFile, displayName, parentId, resolvedId, pass, KeyScope.NOTEBOOK, replaceVictimId)
                 }
             }
@@ -3042,13 +3057,15 @@ class MainActivity : AppCompatActivity() {
             .title("Encrypt imported notebook")
             .addAction(null, "Use this device's global") {
                 lifecycleScope.launch {
-                    val pass = KeyResolver.resolveForConvertToEncrypted(this@MainActivity, KeyScope.GLOBAL) ?: return@launch
+                    val pass = KeyResolver.resolveForConvertToEncrypted(this@MainActivity, KeyScope.GLOBAL)
+                        ?: run { runCatching { tempFile.delete() }; return@launch } // prompt cancelled — drop the cached import copy
                     doReplacePlaintextEncrypting(manifest, tempFile, displayName, existingId, pass, KeyScope.GLOBAL)
                 }
             }
             .addAction(null, "New notebook passphrase") {
                 lifecycleScope.launch {
-                    val pass = KeyResolver.resolveForConvertToEncrypted(this@MainActivity, KeyScope.NOTEBOOK) ?: return@launch
+                    val pass = KeyResolver.resolveForConvertToEncrypted(this@MainActivity, KeyScope.NOTEBOOK)
+                        ?: run { runCatching { tempFile.delete() }; return@launch } // prompt cancelled — drop the cached import copy
                     doReplacePlaintextEncrypting(manifest, tempFile, displayName, existingId, pass, KeyScope.NOTEBOOK)
                 }
             }

@@ -36,11 +36,16 @@ class RtrScheduler(
     fun noteEdit(pageId: String) {
         if (pageId.isEmpty()) return
         pending.remove(pageId)?.cancel()
-        pending[pageId] = scope.launch {
+        val job = scope.launch {
             delay(DEBOUNCE_MS)
             runPage(pageId)
-            pending.remove(pageId)
+            // Remove only OUR OWN entry: a job cancelled after its delay completed still runs to
+            // this line (runPage's runCatching absorbs the cancellation) — a plain remove(pageId)
+            // would evict the NEWER job noteEdit just installed, leaving it untracked and
+            // uncancellable by cancelAll().
+            pending.remove(pageId, coroutineContext[kotlinx.coroutines.Job]!!)
         }
+        pending[pageId] = job
     }
 
     /** Recognize [pageId] immediately (page-seal boundary) — bypasses the debounce. */

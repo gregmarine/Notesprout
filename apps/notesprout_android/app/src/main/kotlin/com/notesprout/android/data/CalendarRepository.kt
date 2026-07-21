@@ -92,7 +92,24 @@ class CalendarRepository(
                     )
                 )
             } else {
-                layerId = dao.getLayerForPage(pageKey)!!.id
+                // Layer existed at the check above; re-read defensively (no `!!` — a vanished or
+                // corrupt row must heal by re-creating the layer, not NPE every open of this page).
+                layerId = dao.getLayerForPage(pageKey)?.id ?: layerId.also {
+                    dao.insertOrIgnore(
+                        CalendarEntity(
+                            id          = it,
+                            parentId    = pageKey,
+                            boundingBox = emptyBbox,
+                            sortOrder   = 0,
+                            createdAt   = now,
+                            updatedAt   = now,
+                            type        = "layer",
+                            data        = "",
+                            text        = "Content",
+                            flags       = LAYER_FLAGS_DEFAULT,
+                        )
+                    )
+                }
             }
         }
         pageKey to layerId
