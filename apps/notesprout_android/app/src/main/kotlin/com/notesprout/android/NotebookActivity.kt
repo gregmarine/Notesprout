@@ -3999,42 +3999,92 @@ class NotebookActivity : AppCompatActivity() {
      * exception kill the process. See [NotebookOpenFailure] for why this is caught broadly and why
      * returning to the library is what breaks the relaunch loop. Main thread.
      */
-    /** Survives [recreate] via the Intent — one recovery offer per notebook launch, never a loop. */
-    private var recoveryAttempted: Boolean
+    /** Survives [recreate] via the Intent — one fix attempt per notebook launch, never a loop. */
+    private var openFixAttempted: Boolean
         get() = intent.getBooleanExtra(EXTRA_RECOVERY_ATTEMPTED, false)
         set(value) { intent.putExtra(EXTRA_RECOVERY_ATTEMPTED, value) }
 
     /**
-     * An encrypted notebook that won't open is not necessarily lost — the user may hold a valid
-     * passphrase the app doesn't know (file restored from an older backup, re-keyed elsewhere).
-     * Offer the recovery path before falling back to the library; only a decline bails out.
+     * A notebook that won't open is not necessarily lost. Two very different failures land here and
+     * must be handled differently:
+     *
+     *  - **Schema drift** — the file decrypts fine but Room rejects its schema. The common cause is a
+     *    `.soil` bricked by the old `sqlcipher_export` user-version loss (version 0 + old schema →
+     *    "Pre-packaged database has an invalid schema"). [SoilMigrator.repairMissingUserVersion] fixes
+     *    that silently with the key we already have, and we retry. Recovery must NOT fire here — the
+     *    key is fine; prompting for a passphrase would be wrong and futile.
+     *  - **Key / decryption failure** — the passphrase the app knows is wrong for the file (restored
+     *    from an older backup, re-keyed elsewhere). Only then do we offer [NotebookRecovery].
+     *
+     * Anything else, or a fix that doesn't apply, falls back to the library.
      */
     private fun failOpen(e: Throwable) {
-        Log.e(TAG, "notebook open failed for $notebookId — offering recovery", e)
+        Log.e(TAG, "notebook open failed for $notebookId", e)
         runCatching { soilDatabase?.close() }
         soilDatabase = null
         binding.openingOverlay.visibility = View.GONE
 
-        if (encryptionInfo.encrypted && !recoveryAttempted) {
-            recoveryAttempted = true
-            lifecycleScope.launch {
+        if (!encryptionInfo.encrypted || openFixAttempted) {
+            bailToLibrary(e)
+            return
+        }
+        openFixAttempted = true
+        lifecycleScope.launch {
+            val key = soilKey ?: KeySession.getFor(notebookId)
+
+            // 1. Silent version-stamp repair for the sqlcipher_export brick — uses the key we have.
+            if (key != null) {
+                val repaired = runCatching {
+                    withContext(Dispatchers.IO) {
+                        com.notesprout.android.crypto.SoilMigrator.repairMissingUserVersion(
+                            java.io.File(notebookSoilPath ?: return@withContext null), key
+                        )
+                    }
+                }.getOrNull()
+                if (repaired != null) {
+                    Log.e(TAG, "notebook $notebookId repaired (stamped user_version=$repaired) — retrying")
+                    recreate()
+                    return@launch
+                }
+            }
+
+            // 2. Genuine key/decryption failure → offer passphrase recovery. Schema errors are NOT
+            //    key failures and must not reach here.
+            if (isKeyFailure(e)) {
                 val outcome = runCatching {
                     com.notesprout.android.crypto.NotebookRecovery.offer(
                         this@NotebookActivity, notebookId, notebookDisplayName, encryptionInfo
                     )
                 }.getOrDefault(com.notesprout.android.crypto.NotebookRecovery.Outcome.DECLINED)
-
                 if (outcome == com.notesprout.android.crypto.NotebookRecovery.Outcome.RETRY) {
-                    // Key material is fixed (stale key dropped, file repaired, or passphrase handed
-                    // to the one-shot cache) — run the whole open again from a clean activity.
                     recreate()
-                } else {
-                    bailToLibrary(e)
+                    return@launch
                 }
             }
-            return
+
+            // 3. Unrepairable (schema drift we can't fix, or some other error) → library.
+            bailToLibrary(e)
         }
-        bailToLibrary(e)
+    }
+
+    /**
+     * True when [e] indicates the file couldn't be decrypted/read (wrong key, corruption), as opposed
+     * to a schema/migration mismatch. Only the former warrants a passphrase-recovery prompt.
+     */
+    private fun isKeyFailure(e: Throwable): Boolean {
+        var t: Throwable? = e
+        while (t != null) {
+            if (t is android.database.sqlite.SQLiteDatabaseCorruptException) return true
+            if (t is com.notesprout.android.crypto.SoilLockedException) return true
+            val m = t.message?.lowercase().orEmpty()
+            if ("file is not a database" in m || "not a database" in m ||
+                "file is encrypted" in m || "corrupt" in m) return true
+            // Schema/migration problems are explicitly NOT key failures.
+            if (t is IllegalStateException &&
+                ("invalid schema" in m || "migration" in m || "identity" in m)) return false
+            t = t.cause
+        }
+        return false
     }
 
     /** Original fail-back: hand the reason to the library and finish. See [failOpen]. */

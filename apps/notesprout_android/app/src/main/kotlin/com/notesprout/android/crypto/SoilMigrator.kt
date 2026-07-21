@@ -2,6 +2,7 @@ package com.notesprout.android.crypto
 
 import android.util.Log
 import com.notesprout.android.core.Slog
+import com.notesprout.android.data.SoilSchema
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import net.zetetic.database.sqlcipher.SQLiteDatabase as ZeticDB
@@ -57,6 +58,11 @@ object SoilMigrator {
             try {
                 // Two-argument export: copies FROM 'plain' attachment TO 'main' (encrypted dest).
                 dest.rawQuery("SELECT sqlcipher_export('main', 'plain')", null).use { it.moveToFirst() }
+                // sqlcipher_export does NOT copy PRAGMA user_version — carry it over by hand. Without
+                // this the encrypted output is version 0, and if the source was below the current Room
+                // schema, Room treats it as a new/prepackaged DB and rejects the old-schema tables
+                // instead of migrating them. That bricked G6's v3 notebooks. See docs/encryption.md.
+                copyUserVersion(dest, from = "plain", to = "main")
             } finally {
                 dest.execSQL("DETACH DATABASE plain")
             }
@@ -101,6 +107,8 @@ object SoilMigrator {
             src.execSQL("ATTACH DATABASE '${tmp.absolutePath}' AS plaintext KEY ''")
             try {
                 src.rawQuery("SELECT sqlcipher_export('plaintext')", null).use { it.moveToFirst() }
+                // Preserve the Room schema version — sqlcipher_export drops it (see encryptInPlace).
+                copyUserVersion(src, from = "main", to = "plaintext")
             } finally {
                 src.execSQL("DETACH DATABASE plaintext")
             }
@@ -156,6 +164,8 @@ object SoilMigrator {
             try {
                 // Two-argument export: copies FROM 'old_src' attachment TO 'main' (new-encrypted dest).
                 dest.rawQuery("SELECT sqlcipher_export('main', 'old_src')", null).use { it.moveToFirst() }
+                // Preserve the Room schema version — sqlcipher_export drops it (see encryptInPlace).
+                copyUserVersion(dest, from = "old_src", to = "main")
             } finally {
                 dest.execSQL("DETACH DATABASE old_src")
             }
@@ -176,6 +186,88 @@ object SoilMigrator {
         }
 
         Slog.d(TAG) { "rekeyInPlace complete: ${file.name}" }
+    }
+
+    /**
+     * Repair a `.soil` bricked by the historical `sqlcipher_export` user-version loss.
+     *
+     * Signature of the brick: the file **decrypts fine** (so this is not a key problem) but Room
+     * refuses it with "Pre-packaged database has an invalid schema" because its `PRAGMA user_version`
+     * is 0 while it still holds an older `notebook` schema. Room reads version 0 as "brand-new DB",
+     * runs `onCreate`, and validates the pre-existing old-schema tables against the current entity —
+     * which fails, instead of running the additive migration that would upgrade them.
+     *
+     * The fix is to restore the version Room needs to see so it migrates normally. We derive it from
+     * which schema-version tables are already present (every historical migration only *adds* tables/
+     * columns, so table presence is a reliable version floor): `notebook_meta` ⇒ v3, else
+     * `undo_redo_state` ⇒ v2, else v1. Room then runs the remaining migrations (all idempotent for a
+     * pre-v4 file — the v3→v4 `ADD COLUMN`s target columns this file is missing).
+     *
+     * No-ops (returns null, file untouched) unless the exact brick signature holds: opens with the
+     * key, `user_version == 0`, `room_master_table` present (it *was* a versioned Room DB), a
+     * `notebook` table exists, and it lacks the v4 columnar columns. [passphrase] null ⇒ plaintext.
+     *
+     * Returns the version stamped, or null if nothing was done. Must run on Dispatchers.IO.
+     */
+    suspend fun repairMissingUserVersion(file: File, passphrase: String?): Int? = withContext(Dispatchers.IO) {
+        if (!file.exists() || file.length() == 0L) return@withContext null
+        val db = try {
+            SoilCrypto.openRaw(file, passphrase)
+        } catch (e: Exception) {
+            // Won't even open with the key → not this bug (a real key/corruption problem).
+            Slog.d(TAG) { "repair: open failed for ${file.name}: ${e.message}" }
+            return@withContext null
+        }
+        try {
+            fun queryLong(sql: String): Long? =
+                db.rawQuery(sql, null).use { c -> if (c.moveToFirst()) c.getLong(0) else null }
+            fun tableExists(name: String): Boolean = (queryLong(
+                "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='$name'"
+            ) ?: 0L) > 0L
+
+            val version = queryLong("PRAGMA user_version") ?: return@withContext null
+            if (version != 0L) return@withContext null   // already versioned → not the brick
+
+            // A Room DB (has room_master_table) whose version was zeroed. No room_master_table, or no
+            // notebook table, means this is some other file we must not touch.
+            if (!tableExists("room_master_table") || !tableExists("notebook")) return@withContext null
+
+            // If the notebook table already has the v4 columns, the schema matches and this isn't the
+            // brick (a v4 file with version 0 opens fine) — leave it alone.
+            val v4Marker = SoilSchema.ADDED_COLUMNS_V4.firstOrNull()?.first
+            if (v4Marker != null) {
+                val hasV4 = runCatching {
+                    var found = false
+                    db.rawQuery("PRAGMA table_info(notebook)", null).use { c ->
+                        val nameIdx = c.getColumnIndex("name")
+                        while (c.moveToNext()) if (c.getString(nameIdx) == v4Marker) { found = true; break }
+                    }
+                    found
+                }.getOrDefault(false)
+                if (hasV4) return@withContext null
+            }
+
+            // Derive the version floor from present tables (every historical migration only *adds*).
+            val target = when {
+                tableExists("notebook_meta")    -> 3
+                tableExists("undo_redo_state")  -> 2
+                else                            -> 1
+            }
+            db.rawQuery("PRAGMA user_version = $target", null).use { it.moveToFirst() }
+            // Flush the header write out of the WAL into the main file before Room reopens it.
+            db.rawQuery("PRAGMA wal_checkpoint(TRUNCATE)", null).use { it.moveToFirst() }
+            Slog.d(TAG) { "repair: stamped user_version=$target on ${file.name}" }
+            target
+        } finally {
+            runCatching { db.close() }
+        }
+    }
+
+    /** Copy `PRAGMA user_version` from one attached schema to another (sqlcipher_export omits it). */
+    private fun copyUserVersion(db: ZeticDB, from: String, to: String) {
+        val version = db.rawQuery("PRAGMA $from.user_version", null)
+            .use { c -> if (c.moveToFirst()) c.getLong(0) else 0L }
+        db.execSQL("PRAGMA $to.user_version = $version")
     }
 
     // ── Private helpers ───────────────────────────────────────────────────────
