@@ -1,6 +1,7 @@
 package com.notesprout.android
 
 import android.content.Context
+import androidx.room.withTransaction
 import com.notesprout.android.core.Slog
 import com.notesprout.android.crypto.KeyScope
 import com.notesprout.android.crypto.SoilCrypto
@@ -11,6 +12,7 @@ import com.notesprout.android.data.NotebookMetaStore
 import com.notesprout.android.data.SoilDatabase
 import com.notesprout.android.data.index.IndexRepository
 import com.notesprout.android.data.index.NotebookObject
+import com.notesprout.android.data.index.NotesproutIndex
 import com.notesprout.android.data.soilFile
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -156,12 +158,18 @@ object NotebookImporter {
         val gardenFile = soilFile(context, existingId)
         installIntoGarden(file, gardenFile)
 
-        repo.renameNotebook(existingId, displayName)
-        repo.updateNotebookPageCount(existingId, manifest.pageCount)
-        repo.updateNotebookSnapshot(existingId, if (scope == KeyScope.GLOBAL) manifest.meta?.cover else null)
-        repo.setEncryptionState(existingId, true, scope)
-        // The file (and its salt) was just replaced — any cached raw key for this id is stale.
+        // The file (and its salt) was just replaced — drop the stale cached raw key immediately,
+        // before anything can try to open the new file with it.
         com.notesprout.android.crypto.KeyMaterial.invalidate(context, existingId)
+        // One transaction: a partial set of these writes (e.g. state written without the rename)
+        // leaves the index describing the new file with the old keying — stranding the notebook
+        // in a needless unlock loop until something repairs it.
+        NotesproutIndex.db().withTransaction {
+            repo.renameNotebook(existingId, displayName)
+            repo.updateNotebookPageCount(existingId, manifest.pageCount)
+            repo.updateNotebookSnapshot(existingId, if (scope == KeyScope.GLOBAL) manifest.meta?.cover else null)
+            repo.setEncryptionState(existingId, true, scope)
+        }
 
         val now = System.currentTimeMillis()
         refreshEncryptedMeta(context, repo, gardenFile, existingId, displayName, parentId, manifest, scope, finalPass, now)

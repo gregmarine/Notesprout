@@ -162,6 +162,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
@@ -2250,6 +2251,11 @@ class NotebookActivity : AppCompatActivity() {
 
         // Record this notebook on the surface stack, so a cold launch reopens it (see SurfaceStack).
         surfaceToken = savedInstanceState?.getString(SurfaceStack.KEY_TOKEN) ?: UUID.randomUUID().toString()
+        // Restore an in-flight sticky-editor session (see onSaveInstanceState).
+        savedInstanceState?.getString(StickyNoteEditorTransfer.STATE_PENDING_NOTE)?.let {
+            pendingStickyNote = StickyNoteEditorTransfer.decodeNote(it)
+            pendingStickyInitialCreate = savedInstanceState.getBoolean(StickyNoteEditorTransfer.STATE_PENDING_CREATE, false)
+        }
         SurfaceStack.attach(this, surfaceEntry())
         // A "fresh" open (from MainActivity/Recents) resets the link back-stack; a via-link open
         // (following a link or a back-swipe) preserves the trail. See [LinkBackStack].
@@ -2387,6 +2393,13 @@ class NotebookActivity : AppCompatActivity() {
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
         outState.putString(SurfaceStack.KEY_TOKEN, surfaceToken)
+        // Sticky-editor session marker: the transfer singleton dies with the process, so the
+        // pending note must survive here or a low-memory kill behind the open editor makes the
+        // launcher callback drop the whole editing session on return.
+        pendingStickyNote?.let {
+            outState.putString(StickyNoteEditorTransfer.STATE_PENDING_NOTE, StickyNoteEditorTransfer.encodeNote(it))
+            outState.putBoolean(StickyNoteEditorTransfer.STATE_PENDING_CREATE, pendingStickyInitialCreate)
+        }
     }
 
     private fun surfaceEntry() = SurfaceEntry(surfaceToken, AppSurface.NOTEBOOK, notebookId = notebookId)
@@ -3683,19 +3696,18 @@ class NotebookActivity : AppCompatActivity() {
         val nbPath = notebookSoilPath
         if (nbPath != null) undoRedoPersistenceFile(nbPath).takeIf { it.exists() }?.delete()
 
-        // Capture snapshot on the main thread — View operations must run here.
-        // Reading the strokes for the seal is thread-safe: getStrokes() returns a copy and
-        // releaseResources() never mutates the stroke list, so the async seal can read it
-        // even after onDestroy has run.
+        // Capture snapshot AND the stroke-list copy on the main thread — View operations must run
+        // here, and copying the stroke list from the seal's IO context would race UI mutations.
         val snapshot = drawingView.captureSnapshot()
+        val strokesAtClose = drawingView.getStrokes()
         val pageId   = currentPageId
 
         val nbId         = notebookId
         val sessionStart = sessionStartTime
         if (blocking) {
-            runBlocking { sealNotebook(db, snapshot, pageId, nbPath, nbId, sessionStart) }
+            runBlocking { sealNotebook(db, snapshot, strokesAtClose, pageId, nbPath, nbId, sessionStart) }
         } else {
-            NotesproutApplication.appScope.launch { sealNotebook(db, snapshot, pageId, nbPath, nbId, sessionStart) }
+            NotesproutApplication.appScope.launch { sealNotebook(db, snapshot, strokesAtClose, pageId, nbPath, nbId, sessionStart) }
         }
     }
 
@@ -3731,11 +3743,12 @@ class NotebookActivity : AppCompatActivity() {
         undoRedoManager.clear()
         val nbPath = notebookSoilPath
         if (nbPath != null) undoRedoPersistenceFile(nbPath).takeIf { it.exists() }?.delete()
+        val strokesAtClose = drawingView.getStrokes() // main thread — see closeNotebook
         val pageId       = currentPageId
         val nbId         = notebookId
         val sessionStart = sessionStartTime
         withContext(Dispatchers.IO) {
-            sealNotebook(db, snapshot = null, pageId, nbPath, nbId, sessionStart)
+            sealNotebook(db, snapshot = null, strokesAtClose, pageId, nbPath, nbId, sessionStart)
         }
     }
 
@@ -3914,6 +3927,7 @@ class NotebookActivity : AppCompatActivity() {
     private suspend fun sealNotebook(
         db: SoilDatabase,
         snapshot: String?,
+        strokesAtClose: List<LiveStroke>,
         pageId: String,
         nbPath: String?,
         nbId: String,
@@ -3929,7 +3943,7 @@ class NotebookActivity : AppCompatActivity() {
             runCatching { cacheSnapshotIfAllowed(nbId, snapshot) }
                 .onFailure { android.util.Log.e(TAG, "seal: cover cache failed", it) }
         }
-        runCatching { saveStrokes(db) }
+        runCatching { saveStrokes(db, strokesAtClose) }
             .onFailure { android.util.Log.e(TAG, "seal: stroke flush failed — unsaved ink lost", it) }
         // RTR: stop pending debounce jobs and flush the sealed page's text synchronously, on this
         // IO context, so it completes before the DB is closed below (the "run once at page-seal" hook).
@@ -3980,7 +3994,11 @@ class NotebookActivity : AppCompatActivity() {
                 query("PRAGMA wal_checkpoint(TRUNCATE)").use { it.moveToFirst() }
             }
         }.onFailure { android.util.Log.e(TAG, "seal: checkpoint failed", it) }
-        KeySession.clear()
+        // Guarded clear: this seal runs async on appScope and can finish AFTER the user has
+        // already opened another encrypted notebook (compaction + VACUUM take seconds on big
+        // files). KeySession is a single process-global slot — an unconditional clear here wipes
+        // the NEW notebook's cached key. Same idiom as MainActivity's delete path.
+        if (KeySession.entry?.notebookId == nbId) KeySession.clear()
         runCatching { db.close() }
             .onFailure { android.util.Log.e(TAG, "seal: close failed", it) }
         if (nbPath != null) runCatching { File("$nbPath-journal").takeIf { it.exists() }?.delete() }
@@ -4468,7 +4486,7 @@ class NotebookActivity : AppCompatActivity() {
         }
     }
 
-    private suspend fun saveStrokes(db: SoilDatabase): List<String> {
+    private suspend fun saveStrokes(db: SoilDatabase, strokesSnapshot: List<LiveStroke>? = null): List<String> {
         val layerId = currentLayerId
         if (layerId.isEmpty()) {
             Log.w(TAG, "saveStrokes: currentLayerId is empty — skipping")
@@ -4476,7 +4494,12 @@ class NotebookActivity : AppCompatActivity() {
         }
         val dao = db.notebookDao()
         val now = System.currentTimeMillis()
-        val currentStrokes = drawingView.getStrokes()
+        // Snapshot on the main thread: the view's stroke list is a plain ArrayList mutated by the
+        // UI thread (renderStroke / erase / drag-commit), and this function runs on IO — copying
+        // it from here races those mutations (CME / torn copy on the core ink-save path).
+        // [strokesSnapshot] bypasses the hop for the seal path, whose blocking onDestroy variant
+        // runs under runBlocking on the main thread (a Main hop there would deadlock).
+        val currentStrokes = strokesSnapshot ?: withContext(Dispatchers.Main) { drawingView.getStrokes() }
 
         // Fix #2a — skip serialization for strokes already committed to the DB.
         // Take a snapshot of persistedStrokeIds before the transaction so the filter
@@ -8034,18 +8057,35 @@ class NotebookActivity : AppCompatActivity() {
         }
     }
 
+    /**
+     * Serializes [executeAction] runs. Each execution suspends at several IO points while
+     * same-page handlers snapshot the live stroke list and write back FULL lists — two
+     * interleaved executions (rapid multi-finger double-taps, button mashing) each write a list
+     * missing only their own change, resurrecting a just-undone stroke on screen while its row is
+     * soft-deleted. Cross-page pairs additionally race the page switch.
+     */
+    private val undoRedoExecutionMutex = kotlinx.coroutines.sync.Mutex()
+
     private fun performUndo() {
         val db = soilDatabase ?: return
-        val action = undoRedoManager.undo() ?: return
-        updateUndoRedoButtons()
-        lifecycleScope.launch { executeAction(db, action, isUndo = true) }
+        lifecycleScope.launch {
+            undoRedoExecutionMutex.withLock {
+                val action = undoRedoManager.undo() ?: return@withLock
+                updateUndoRedoButtons()
+                executeAction(db, action, isUndo = true)
+            }
+        }
     }
 
     private fun performRedo() {
         val db = soilDatabase ?: return
-        val action = undoRedoManager.redo() ?: return
-        updateUndoRedoButtons()
-        lifecycleScope.launch { executeAction(db, action, isUndo = false) }
+        lifecycleScope.launch {
+            undoRedoExecutionMutex.withLock {
+                val action = undoRedoManager.redo() ?: return@withLock
+                updateUndoRedoButtons()
+                executeAction(db, action, isUndo = false)
+            }
+        }
     }
 
     /**

@@ -53,7 +53,11 @@ class SafRestoreSource(private val context: Context, private val treeUri: Uri) :
     ): Int = withContext(Dispatchers.IO) {
         val dir = devices.getOrNull(deviceIndex) ?: error("Invalid backup selection.")
         val index = dir.findFile(SafBackupReader.INDEX_NAME) ?: error("Backup is missing its index.")
-        val soils = SafBackupReader.soilFiles(dir)
+        val all = dir.listFiles().filter { it.isFile }
+        val soils = all.filter { it.name?.endsWith(".soil") == true }
+        // Sidecars exist only for notebooks whose WAL couldn't be absorbed at backup time; they
+        // must travel with their .soil or the restored notebook silently loses those writes.
+        val walsByName = all.filter { it.name?.endsWith(".soil-wal") == true }.associateBy { it.name }
         val total = soils.size + 1
         var done = 0
         if (!SafBackupReader.copyTo(context, index, indexDest)) error("Failed to read the backup index.")
@@ -64,6 +68,11 @@ class SafRestoreSource(private val context: Context, private val treeUri: Uri) :
             // otherwise be committed as the entire library.
             if (!SafBackupReader.copyTo(context, s, File(gardenDir, name))) {
                 error("Failed to read \"$name\" from the backup — your current library is untouched.")
+            }
+            walsByName["$name-wal"]?.let { wal ->
+                if (!SafBackupReader.copyTo(context, wal, File(gardenDir, "$name-wal"))) {
+                    error("Failed to read \"$name-wal\" from the backup — your current library is untouched.")
+                }
             }
             onProgress(++done, total)
         }
@@ -98,6 +107,8 @@ class DriveRestoreSource(private val client: DriveApiClient) : RestoreSource {
         val index = children.firstOrNull { it.name == SafBackupReader.INDEX_NAME }
             ?: error("Backup is missing its index.")
         val soils = children.filter { it.name.endsWith(".soil") }
+        // See SafRestoreSource: sidecars travel with their .soil or those writes are lost.
+        val walsByName = children.filter { it.name.endsWith(".soil-wal") }.associateBy { it.name }
         val total = soils.size + 1
         var done = 0
         if (!client.downloadTo(index.id, indexDest)) error("Failed to download the backup index.")
@@ -107,6 +118,11 @@ class DriveRestoreSource(private val client: DriveApiClient) : RestoreSource {
             // otherwise be committed as the entire library.
             if (!client.downloadTo(s.id, File(gardenDir, s.name))) {
                 error("Failed to download \"${s.name}\" — your current library is untouched.")
+            }
+            walsByName["${s.name}-wal"]?.let { wal ->
+                if (!client.downloadTo(wal.id, File(gardenDir, wal.name))) {
+                    error("Failed to download \"${wal.name}\" — your current library is untouched.")
+                }
             }
             onProgress(++done, total)
         }

@@ -127,7 +127,11 @@ class DriveAuthActivity : AppCompatActivity() {
                 ).show()
             }
 
+            // The email is display/marker only — a transient failure here must not null it out:
+            // a null driveAccountEmail reads as "not connected" and silently disables Drive backup
+            // despite the valid refresh token just stored.
             val email = withContext(Dispatchers.IO) { DriveApiClient(accessToken).accountEmail() }
+                ?: "Google Drive (connected)"
             setResult(RESULT_OK, Intent().putExtra(EXTRA_EMAIL, email))
             finish()
         }

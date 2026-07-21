@@ -34,6 +34,8 @@ import com.notesprout.android.data.pageData
 import com.notesprout.android.data.ScratchpadRepository
 import com.notesprout.android.data.ShapeObject
 import com.notesprout.android.data.ShapeRender
+import com.notesprout.android.data.index.updateColumns
+import com.notesprout.android.data.toRow
 import com.notesprout.android.data.StickyNoteObject
 import com.notesprout.android.data.StickyNoteRender
 import com.notesprout.android.data.TYPE_SHAPE
@@ -237,6 +239,11 @@ class ScratchpadActivity : AppCompatActivity() {
         // Record the scratch pad on the surface stack, so a cold launch reopens it (see SurfaceStack).
         // No payload: the page comes back from ScratchpadPreferences.
         surfaceToken = savedInstanceState?.getString(SurfaceStack.KEY_TOKEN) ?: UUID.randomUUID().toString()
+        // Restore an in-flight sticky-editor session (see onSaveInstanceState).
+        savedInstanceState?.getString(StickyNoteEditorTransfer.STATE_PENDING_NOTE)?.let {
+            pendingStickyNote = StickyNoteEditorTransfer.decodeNote(it)
+            pendingStickyInitialCreate = savedInstanceState.getBoolean(StickyNoteEditorTransfer.STATE_PENDING_CREATE, false)
+        }
         SurfaceStack.attach(this, surfaceEntry())
 
         // On large screens constrain to 75% × 75%, centered.
@@ -595,54 +602,13 @@ class ScratchpadActivity : AppCompatActivity() {
             hideFloatingSelectionToolbar()
         }
 
-        drawingView.onStrokesMoved = { _, movedStrokes, _, movedHeadings, _, movedTextObjects, _, movedLineObjects, _, movedLinks, _, movedStickyNotes, _, movedShapes ->
-            lifecycleScope.launch {
-                val now     = System.currentTimeMillis()
-                val density = resources.displayMetrics.density
-                val dao     = NotesproutIndex.scratchpadDao()
-                withContext(Dispatchers.IO) {
-                    for (s in movedStrokes) {
-                        val bbox = s.boundingBox
-                        dao.updateObjectData(s.id, BoundingBox(bbox.left, bbox.top, bbox.width(), bbox.height()).toJson(), s.toStrokeData().toJson(), now)
-                    }
-                    for (h in movedHeadings) {
-                        dao.updateObjectData(h.id, h.boundingBox.toBoundingBoxJson(), HeadingObject(h.strokes, h.recognizedText, h.level).toJson(), now)
-                    }
-                    for (t in movedTextObjects) {
-                        dao.updateObjectData(t.id, t.boundingBox.toBoundingBoxJson(), TextObject(text = t.text, strokes = t.strokes).toJson(), now)
-                    }
-                    for (l in movedLineObjects) {
-                        dao.updateObjectData(l.id, l.boundingBox.toBoundingBoxJson(), LineObject(l.style, l.orientation, l.strokeWidthDp, l.dotSpacingPx / density).toJson(), now)
-                    }
-                    for (lk in movedLinks) {
-                        dao.updateObjectData(lk.id, lk.boundingBox.toBoundingBoxJson(), lk.toLinkObject(density).toJson(), now)
-                    }
-                    for (note in movedStickyNotes) {
-                        dao.updateObjectData(note.id, note.boundingBox.toBoundingBoxJson(), note.toStickyNoteObject(density).toJson(), now)
-                    }
-                    for (shape in movedShapes) {
-                        dao.updateObjectData(shape.id, shape.boundingBox.toBoundingBoxJson(), shape.toShapeObject(density).toJson(), now)
-                    }
-                }
-                val newBox = RectF()
-                movedStrokes.forEach { newBox.union(it.boundingBox) }
-                movedHeadings.forEach { newBox.union(it.boundingBox) }
-                movedTextObjects.forEach { newBox.union(it.boundingBox) }
-                movedLineObjects.forEach { newBox.union(it.boundingBox) }
-                movedLinks.forEach { newBox.union(it.boundingBox) }
-                movedStickyNotes.forEach { newBox.union(it.boundingBox) }
-                movedShapes.forEach { newBox.union(it.boundingBox) }
-                val pad = 8f * resources.displayMetrics.density
-                newBox.inset(-pad, -pad)
-                updateFloatingSelectionToolbar(newBox)
-                pushHistory()
-            }
-        }
-
         drawingView.onLassoSelectionCleared = {
             hideFloatingSelectionToolbar()
         }
 
+        // Single assignment on purpose. A dead duplicate of this handler using the legacy
+        // updateObjectData JSON path (a silent no-op for columnar rows — the "moved objects snap
+        // back" bug) used to sit above and was only harmless because this assignment overwrote it.
         drawingView.onStrokesMoved = { _, movedStrokes, _, movedHeadings, _, movedTextObjects, _, movedLineObjects, _, movedLinks, _, movedStickyNotes, _, movedShapes ->
             val layerId = currentLayerId.takeIf { it.isNotEmpty() }
             if (layerId != null) {
@@ -1919,7 +1885,11 @@ class ScratchpadActivity : AppCompatActivity() {
         val now     = System.currentTimeMillis()
         val density = resources.displayMetrics.density
         val dao     = NotesproutIndex.scratchpadDao()
-        dao.updateObjectData(after.id, after.boundingBox.toBoundingBoxJson(), after.toShapeObject(density).toJson(), now)
+        // Columnar in-place update, NOT updateObjectData: the shape reader prefers the typed
+        // columns whenever shapeType is set, so for any columnar row (pasted, or ever
+        // lasso-moved) the JSON write is dead and the transform silently snaps back on reload.
+        // Same tripwire as the c98af2e move fix; mirrors NotebookActivity.persistShapeTransform.
+        dao.updateColumns(after.toRow("", 0, now, now, density))
         withContext(Dispatchers.Main) {
             val updatedShapes      = drawingView.getShapeObjects().map { if (it.id == after.id) after else it }
             drawingView.loadShapeObjects(updatedShapes)
@@ -2064,6 +2034,13 @@ class ScratchpadActivity : AppCompatActivity() {
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
         outState.putString(SurfaceStack.KEY_TOKEN, surfaceToken)
+        // Sticky-editor session marker: the transfer singleton dies with the process, so the
+        // pending note must survive here or a low-memory kill behind the open editor makes the
+        // launcher callback drop the whole editing session on return.
+        pendingStickyNote?.let {
+            outState.putString(StickyNoteEditorTransfer.STATE_PENDING_NOTE, StickyNoteEditorTransfer.encodeNote(it))
+            outState.putBoolean(StickyNoteEditorTransfer.STATE_PENDING_CREATE, pendingStickyInitialCreate)
+        }
     }
 
     private fun surfaceEntry() = SurfaceEntry(surfaceToken, AppSurface.SCRATCHPAD)

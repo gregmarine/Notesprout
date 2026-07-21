@@ -75,6 +75,10 @@ object SafBackupWriter {
         }
     }
 
+    /** Delete [fileName] from [dir] if present. True when absent afterwards. */
+    fun deleteFile(dir: DocumentFile, fileName: String): Boolean =
+        dir.findFile(fileName)?.delete() ?: true
+
     private fun stream(context: Context, source: File, target: DocumentFile): Boolean = try {
         context.contentResolver.openOutputStream(target.uri)?.use { out ->
             source.inputStream().use { input ->

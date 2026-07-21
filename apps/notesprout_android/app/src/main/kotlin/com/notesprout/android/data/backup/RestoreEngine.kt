@@ -72,6 +72,7 @@ object RestoreEngine {
                 return@withContext Result.Failed("The backup index could not be read.")
             }
             val badSoil = stagedGarden.listFiles()
+                ?.filter { it.name.endsWith(".soil") } // -wal sidecars aren't databases; skip them
                 ?.firstOrNull { SoilCrypto.probe(it) == SoilFileKind.Invalid }
             if (badSoil != null) {
                 return@withContext Result.Failed("\"${badSoil.name}\" in the backup is not a readable notebook.")

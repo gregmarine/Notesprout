@@ -106,9 +106,14 @@ object BackupEngine {
         // next open. VACUUM inside compact() only fires when a pass actually changed something, so an
         // already-lean notebook costs only cheap scans here.
         val toCompact = work.map { it.id to it.name }.distinctBy { it.first }
+        // Ids whose compaction actually opened the file — the open/close replays + truncates any
+        // WAL, so the main file alone is a complete copy. Notebooks we can't open unattended keep
+        // whatever -wal an abnormal exit left; their sidecar is copied alongside below so the
+        // backup never silently misses committed writes.
+        val walAbsorbed = mutableSetOf<String>()
         toCompact.forEachIndexed { i, (id, name) ->
             onProgress(i + 1, toCompact.size, "Compacting $name")
-            compactInPlace(context, repo, id)
+            if (compactInPlace(context, repo, id)) walAbsorbed.add(id)
         }
 
         // ── Per-notebook copies ───────────────────────────────────────────────
@@ -125,10 +130,20 @@ object BackupEngine {
                 if (item.kind == BackupKind.LOCAL) localSkipped++ else driveSkipped++
                 return@forEachIndexed
             }
+            // A notebook that couldn't be checkpointed (keyless encrypted) may carry committed
+            // writes in its -wal: copy the sidecar with the main file, and require BOTH to land
+            // before stamping the notebook backed-up. When the WAL was absorbed (or none exists),
+            // delete any stale sidecar at the destination — pairing a fresh .soil with an old
+            // -wal on restore would corrupt the notebook.
+            val walFile = File("${soil.absolutePath}-wal")
+            val needsWal = item.id !in walAbsorbed && walFile.exists() && walFile.length() > 0L
             when (item.kind) {
                 BackupKind.LOCAL -> {
                     localAttempted++
-                    if (SafBackupWriter.replaceFile(context, localDir!!, "${item.id}.soil", soil)) {
+                    val ok = SafBackupWriter.replaceFile(context, localDir!!, "${item.id}.soil", soil) &&
+                        if (needsWal) SafBackupWriter.replaceFile(context, localDir, "${item.id}.soil-wal", walFile)
+                        else SafBackupWriter.deleteFile(localDir, "${item.id}.soil-wal")
+                    if (ok) {
                         localSucceeded++
                         repo.markNotebookBackedUp(item.id, BackupKind.LOCAL, runStart)
                     } else {
@@ -138,7 +153,10 @@ object BackupEngine {
                 }
                 BackupKind.DRIVE -> {
                     driveAttempted++
-                    if (DriveBackupWriter.replaceFile(driveClient!!, driveFolderId!!, "${item.id}.soil", soil)) {
+                    val ok = DriveBackupWriter.replaceFile(driveClient!!, driveFolderId!!, "${item.id}.soil", soil) &&
+                        if (needsWal) DriveBackupWriter.replaceFile(driveClient, driveFolderId, "${item.id}.soil-wal", walFile)
+                        else DriveBackupWriter.deleteFile(driveClient, driveFolderId, "${item.id}.soil-wal")
+                    if (ok) {
                         driveSucceeded++
                         repo.markNotebookBackedUp(item.id, BackupKind.DRIVE, runStart)
                     } else {
@@ -153,17 +171,32 @@ object BackupEngine {
         NotesproutIndex.checkpointAndVacuum()
         val indexFile = File(context.getExternalFilesDir(null), "notesprout.db")
 
+        // Snapshot the live index locally first: the DB stays open during the (slow, especially
+        // Drive) destination writes, and a concurrent write + auto-checkpoint could tear a copy
+        // streamed straight from the live file. The local copy's window is milliseconds, and the
+        // probe rejects a torn snapshot before it can replace a good backup.
+        val indexSnapshot = File(context.cacheDir, "backup_index_snapshot.db")
+        val indexSource = runCatching {
+            indexFile.copyTo(indexSnapshot, overwrite = true)
+            check(SoilCrypto.probe(indexSnapshot) != com.notesprout.android.crypto.SoilFileKind.Invalid)
+            indexSnapshot
+        }.getOrElse {
+            Log.w("BackupEngine", "index snapshot failed — streaming live file: ${it.message}")
+            indexFile
+        }
+
         var localIndexCopied = false
         if (localDir != null) {
-            localIndexCopied = SafBackupWriter.replaceFile(context, localDir, "notesprout.db", indexFile)
+            localIndexCopied = SafBackupWriter.replaceFile(context, localDir, "notesprout.db", indexSource)
             if (!localIndexCopied) localErrors.add("Failed to copy notesprout.db to local storage.")
         }
 
         var driveIndexCopied = false
         if (driveClient != null && driveFolderId != null) {
-            driveIndexCopied = DriveBackupWriter.replaceFile(driveClient, driveFolderId, "notesprout.db", indexFile)
+            driveIndexCopied = DriveBackupWriter.replaceFile(driveClient, driveFolderId, "notesprout.db", indexSource)
             if (!driveIndexCopied) driveErrors.add("Failed to copy notesprout.db to Google Drive.")
         }
+        indexSnapshot.delete()
 
         // ── Finalise ──────────────────────────────────────────────────────────
         if (localDir != null) {
@@ -173,7 +206,10 @@ object BackupEngine {
             results[BackupKind.DRIVE] = DestResult(driveAttempted, driveSucceeded, driveFailed, driveSkipped, driveIndexCopied, driveErrors)
         }
 
-        repo.saveBackupConfig(config.copy(lastRunAt = runStart))
+        // Stamp "last backup" only when something actually landed — a run where every destination
+        // failed used to show "backed up just now" and lull the user into a false sense of safety.
+        val anySuccess = results.values.any { it.indexCopied || it.succeeded > 0 }
+        if (anySuccess) repo.saveBackupConfig(config.copy(lastRunAt = runStart))
 
         BackupResult(results)
     }
@@ -185,18 +221,21 @@ object BackupEngine {
      * its passphrase is cached; a NOTEBOOK-scope notebook (no unattended key) is skipped. Any failure
      * is swallowed — this is best-effort optimisation, never a reason to fail the backup copy that
      * follows. Caller must be on [Dispatchers.IO].
+     *
+     * Returns true when the notebook was actually opened (the open/close also absorbs its WAL, so
+     * the main file alone is a complete backup copy); false when it was skipped or failed.
      */
-    private suspend fun compactInPlace(context: Context, repo: IndexRepository, notebookId: String) {
+    private suspend fun compactInPlace(context: Context, repo: IndexRepository, notebookId: String): Boolean {
         try {
             val info = repo.getEncryptionInfo(notebookId)
             val key: String? = when {
                 !info.encrypted -> null
                 info.keyScope == KeyScope.GLOBAL ->
-                    PassphraseStore.getGlobalPassphrase(context) ?: return
-                else -> return
+                    PassphraseStore.getGlobalPassphrase(context) ?: return false
+                else -> return false
             }
             val file = soilFile(context, notebookId)
-            if (!file.exists()) return
+            if (!file.exists()) return false
             val builder = SoilDatabase.builder(context, file.absolutePath)
             if (key != null) builder.openHelperFactory(SoilCrypto.roomFactory(key))
             val db = builder.build()
@@ -205,8 +244,10 @@ object BackupEngine {
             } finally {
                 db.close()
             }
+            return true
         } catch (e: Exception) {
             Log.w("BackupEngine", "Pre-backup compaction failed for $notebookId — backing up as-is: ${e.message}")
+            return false
         }
     }
 }

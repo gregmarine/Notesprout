@@ -165,7 +165,12 @@ class StickyNoteEditorActivity : AppCompatActivity() {
             exitShapeTransformMode(clearSelection = false)
         }
 
+        // The transfer singleton dies with the process; on a post-kill recreate, fall back to the
+        // canvas content this activity saved in its own instance state so the editing session
+        // (including unsaved ink) survives instead of restoring blank.
         val input = StickyNoteEditorTransfer.input
+            ?: savedInstanceState?.getString(STATE_CONTENT)?.let { StickyNoteEditorTransfer.decodeContent(it) }
+        initialInput = input
         if (binding.drawingContainer.width > 0) {
             if (input != null) loadContent(input) else recordCanvasSize()
         } else {
@@ -173,6 +178,19 @@ class StickyNoteEditorActivity : AppCompatActivity() {
                 if (input != null) loadContent(input) else recordCanvasSize()
             }
         }
+    }
+
+    /** The content this session started from — what onSaveInstanceState falls back to while the
+     *  async initial load hasn't populated the canvas yet. */
+    private var initialInput: StickyNoteEditorTransfer.Content? = null
+
+    /** True once the canvas holds the session's content (initial load done or blank-note sizing). */
+    private var contentLoaded = false
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        val content = if (contentLoaded) currentContent() else initialInput
+        content?.let { outState.putString(STATE_CONTENT, StickyNoteEditorTransfer.encodeContent(it)) }
     }
 
     // ── Content load ──────────────────────────────────────────────────────────
@@ -223,6 +241,7 @@ class StickyNoteEditorActivity : AppCompatActivity() {
         currentSnapshot = captureState()
         undoStack.clear()
         redoStack.clear()
+        contentLoaded = true
     }
 
     /** Capture post-change state, pushing the prior state onto the undo stack. */
@@ -258,10 +277,10 @@ class StickyNoteEditorActivity : AppCompatActivity() {
         applySnapshot(redoStack.removeLast())
     }
 
-    private fun writeTransferOutput() {
+    private fun currentContent(): StickyNoteEditorTransfer.Content {
         val w = if (contentWidth  > 0f) contentWidth  else binding.drawingContainer.width.toFloat()
         val h = if (contentHeight > 0f) contentHeight else binding.drawingContainer.height.toFloat()
-        StickyNoteEditorTransfer.output = StickyNoteEditorTransfer.Content(
+        return StickyNoteEditorTransfer.Content(
             strokes       = drawingView.getStrokes(),
             headings      = drawingView.getHeadings(),
             textObjects   = drawingView.getTextObjects(),
@@ -270,6 +289,10 @@ class StickyNoteEditorActivity : AppCompatActivity() {
             contentWidth  = w,
             contentHeight = h,
         )
+    }
+
+    private fun writeTransferOutput() {
+        StickyNoteEditorTransfer.output = currentContent()
     }
 
     // ── Drawing callbacks ─────────────────────────────────────────────────────
@@ -1198,5 +1221,10 @@ class StickyNoteEditorActivity : AppCompatActivity() {
     override fun onDestroy() {
         super.onDestroy()
         drawingView.releaseResources()
+    }
+
+    companion object {
+        /** Instance-state key: the session's canvas content (see onSaveInstanceState). */
+        private const val STATE_CONTENT = "sticky_editor_content"
     }
 }

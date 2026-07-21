@@ -53,6 +53,8 @@ import com.notesprout.android.data.index.toNotebookObject
 import com.notesprout.android.data.ScratchpadPageContent
 import com.notesprout.android.data.ShapeObject
 import com.notesprout.android.data.ShapeRender
+import com.notesprout.android.data.index.updateColumns
+import com.notesprout.android.data.toRow
 import com.notesprout.android.data.ShapeType
 import com.notesprout.android.data.StickyNoteObject
 import com.notesprout.android.data.StickyNoteRender
@@ -340,6 +342,11 @@ class DayDetailActivity : AppCompatActivity() {
         // Unlike the other surfaces it has no position store of its own, so its date + view ride in
         // the entry and come back through EXTRA_VIEW above.
         surfaceToken = savedInstanceState?.getString(SurfaceStack.KEY_TOKEN) ?: UUID.randomUUID().toString()
+        // Restore an in-flight sticky-editor session (see onSaveInstanceState).
+        savedInstanceState?.getString(StickyNoteEditorTransfer.STATE_PENDING_NOTE)?.let {
+            pendingStickyNote = StickyNoteEditorTransfer.decodeNote(it)
+            pendingStickyInitialCreate = savedInstanceState.getBoolean(StickyNoteEditorTransfer.STATE_PENDING_CREATE, false)
+        }
         SurfaceStack.attach(this, surfaceEntry())
 
         drawingView = if (isBooxDevice()) OnyxNotebookView(this) else GenericNotebookView(this)
@@ -1933,7 +1940,9 @@ class DayDetailActivity : AppCompatActivity() {
             before.width == after.width && before.height == after.height &&
             before.rotationDeg == after.rotationDeg && before.aspectLocked == after.aspectLocked) return
         val now = System.currentTimeMillis()
-        NotesproutIndex.calendarDao().updateObjectData(after.id, after.boundingBox.toBoundingBoxJson(), after.toShapeObject(density).toJson(), now)
+        // Columnar in-place update, NOT updateObjectData — dead write for columnar shape rows
+        // (reader prefers typed columns); see ScratchpadActivity.persistShapeTransform.
+        NotesproutIndex.calendarDao().updateColumns(after.toRow("", 0, now, now, density))
         withContext(Dispatchers.Main) {
             drawingView.loadShapeObjects(drawingView.getShapeObjects().map { if (it.id == after.id) after else it })
             rebuildCanvas()
@@ -2321,6 +2330,13 @@ class DayDetailActivity : AppCompatActivity() {
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
         outState.putString(SurfaceStack.KEY_TOKEN, surfaceToken)
+        // Sticky-editor session marker: the transfer singleton dies with the process, so the
+        // pending note must survive here or a low-memory kill behind the open editor makes the
+        // launcher callback drop the whole editing session on return.
+        pendingStickyNote?.let {
+            outState.putString(StickyNoteEditorTransfer.STATE_PENDING_NOTE, StickyNoteEditorTransfer.encodeNote(it))
+            outState.putBoolean(StickyNoteEditorTransfer.STATE_PENDING_CREATE, pendingStickyInitialCreate)
+        }
     }
 
     override fun onResume() {

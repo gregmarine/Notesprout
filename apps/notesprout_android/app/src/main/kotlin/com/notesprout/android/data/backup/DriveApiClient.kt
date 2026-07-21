@@ -75,29 +75,48 @@ class DriveApiClient(private val accessToken: String) {
 
     /**
      * Lists every non-trashed child of [parentId] (folders only when [foldersOnly]). Pages through
-     * the full result set. Returns an empty list on any failure — callers treat that as "nothing to
-     * restore" rather than an error.
+     * the full result set. A failure before anything was read returns an empty list ("nothing to
+     * restore"); a failure MID-pagination throws — returning the partial list would silently
+     * truncate the set, and a restore committed from it would drop notebooks.
      */
-    fun listChildren(parentId: String, foldersOnly: Boolean): List<DriveEntry> = try {
+    fun listChildren(parentId: String, foldersOnly: Boolean): List<DriveEntry> {
         val out = mutableListOf<DriveEntry>()
-        var pageToken: String? = null
-        var q = "'$parentId' in parents and trashed = false"
-        if (foldersOnly) q += " and mimeType = '$FOLDER_MIME'"
-        do {
-            var url = "$FILES?q=${URLEncoder.encode(q, "UTF-8")}&spaces=drive" +
-                "&fields=nextPageToken,files(id,name)&pageSize=1000"
-            if (pageToken != null) url += "&pageToken=${URLEncoder.encode(pageToken, "UTF-8")}"
-            val conn = open("GET", url)
-            val body = readBody(conn)
-            if (conn.responseCode != 200) { Log.e(TAG, "listChildren HTTP ${conn.responseCode}"); break }
-            val page = codec.decodeFromString(DriveFileList.serializer(), body)
-            page.files.forEach { f -> f.name?.let { out.add(DriveEntry(f.id, it)) } }
-            pageToken = page.nextPageToken
-        } while (pageToken != null)
-        out
+        try {
+            var pageToken: String? = null
+            var q = "'$parentId' in parents and trashed = false"
+            if (foldersOnly) q += " and mimeType = '$FOLDER_MIME'"
+            do {
+                var url = "$FILES?q=${URLEncoder.encode(q, "UTF-8")}&spaces=drive" +
+                    "&fields=nextPageToken,files(id,name)&pageSize=1000"
+                if (pageToken != null) url += "&pageToken=${URLEncoder.encode(pageToken, "UTF-8")}"
+                val conn = open("GET", url)
+                val body = readBody(conn)
+                if (conn.responseCode != 200) {
+                    Log.e(TAG, "listChildren HTTP ${conn.responseCode}")
+                    if (out.isEmpty()) return emptyList()
+                    throw java.io.IOException("Google Drive listing failed partway (HTTP ${conn.responseCode}).")
+                }
+                val page = codec.decodeFromString(DriveFileList.serializer(), body)
+                page.files.forEach { f -> f.name?.let { out.add(DriveEntry(f.id, it)) } }
+                pageToken = page.nextPageToken
+            } while (pageToken != null)
+            return out
+        } catch (e: java.io.IOException) {
+            throw e
+        } catch (e: Exception) {
+            Log.e(TAG, "listChildren failed: ${e.message}")
+            if (out.isEmpty()) return emptyList()
+            throw java.io.IOException("Google Drive listing failed partway: ${e.message}")
+        }
+    }
+
+    /** Permanently delete a file by id. True on success (or already gone). */
+    fun delete(fileId: String): Boolean = try {
+        val conn = open("DELETE", "$FILES/$fileId")
+        conn.responseCode == 204 || conn.responseCode == 404
     } catch (e: Exception) {
-        Log.e(TAG, "listChildren failed: ${e.message}")
-        emptyList()
+        Log.e(TAG, "delete failed: ${e.message}")
+        false
     }
 
     /** Downloads the content of [fileId] to [dest]. Returns true on success. */

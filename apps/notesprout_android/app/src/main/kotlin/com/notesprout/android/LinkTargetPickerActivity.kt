@@ -482,10 +482,39 @@ class LinkTargetPickerActivity : AppCompatActivity() {
 
     // ── Data loading ──────────────────────────────────────────────────────────
 
+    /** Key resolved for the current notebook when [KeySession] was cold (process-death restore,
+     *  or the outgoing seal of a previous notebook cleared the session). See [resolveCurrentNotebookKey]. */
+    private var resolvedCurrentKey: String? = null
+
+    /**
+     * Resolve the current notebook's SQLCipher key, preferring the foreground session.
+     *
+     * A bare `KeySession.getFor()` is null after process death or when a slow async seal cleared
+     * the session — that means "not resolved yet", not "plaintext". The probe guard makes the
+     * null-key open throw instead of destroying anything, but this screen would then render an
+     * empty page grid and fail page creation. Mirrors PageIndexActivity.resolveNotebookKey().
+     */
+    private suspend fun resolveCurrentNotebookKey(): String? {
+        KeySession.getFor(notebookId)?.let { return it }
+        resolvedCurrentKey?.let { return it }
+        val info = withContext(Dispatchers.IO) { indexRepo.getEncryptionInfo(notebookId) }
+        if (!info.encrypted) return null
+        val key = if (info.keyScope == com.notesprout.android.crypto.KeyScope.GLOBAL) {
+            withContext(Dispatchers.IO) {
+                com.notesprout.android.crypto.PassphraseStore.getGlobalPassphrase(this@LinkTargetPickerActivity)
+            }
+        } else {
+            KeyResolver.resolveForOpen(this, notebookId, info)
+        }
+        resolvedCurrentKey = key
+        return key
+    }
+
     private fun loadCurrentPagesAsync() {
         val path = notebookSoilPath ?: return
         lifecycleScope.launch {
-            pages = withContext(Dispatchers.IO) { loadPagesFromSoil(path, KeySession.getFor(notebookId)) }
+            val key = resolveCurrentNotebookKey()
+            pages = withContext(Dispatchers.IO) { loadPagesFromSoil(path, key) }
             if (targetTab == TargetTab.CURRENT) {
                 val spec = gridSpec
                 if (spec != null && spec.itemsPerPage > 0) {
@@ -1226,8 +1255,9 @@ class LinkTargetPickerActivity : AppCompatActivity() {
         val w = resources.displayMetrics.widthPixels.toFloat()
         val h = resources.displayMetrics.heightPixels.toFloat()
         lifecycleScope.launch {
+            val key = resolveCurrentNotebookKey()
             val result = withContext(Dispatchers.IO) {
-                insertBlankPageRaw(path, anchorPageId, before, w, h, KeySession.getFor(notebookId))
+                insertBlankPageRaw(path, anchorPageId, before, w, h, key)
             } ?: run {
                 android.widget.Toast.makeText(
                     this@LinkTargetPickerActivity, "Could not create page", android.widget.Toast.LENGTH_SHORT
@@ -1236,7 +1266,7 @@ class LinkTargetPickerActivity : AppCompatActivity() {
             }
             currentNotebookPagesChanged = true
             pages = withContext(Dispatchers.IO) {
-                loadPagesFromSoil(path, KeySession.getFor(notebookId))
+                loadPagesFromSoil(path, key)
             }
             selectCurrentPage(result.first)
             val spec = gridSpec
