@@ -204,6 +204,10 @@ class NotebookActivity : AppCompatActivity() {
          */
         const val EXTRA_PASTE_PENDING = "paste_pending"
 
+        /** Set once recovery has been offered, so a still-failing open can't loop the prompt.
+         *  Lives on the Intent because [recreate] is how a recovered notebook is reopened. */
+        const val EXTRA_RECOVERY_ATTEMPTED = "recovery_attempted"
+
         // One-finger page-turn gesture thresholds.
         private const val PAGE_SWIPE_MIN_DISTANCE_FRAC  = 0.30f  // min |dx| to qualify at all
         private const val PAGE_SWIPE_LONG_DISTANCE_FRAC = 0.50f  // |dx| that qualifies regardless of velocity
@@ -3995,11 +3999,46 @@ class NotebookActivity : AppCompatActivity() {
      * exception kill the process. See [NotebookOpenFailure] for why this is caught broadly and why
      * returning to the library is what breaks the relaunch loop. Main thread.
      */
+    /** Survives [recreate] via the Intent — one recovery offer per notebook launch, never a loop. */
+    private var recoveryAttempted: Boolean
+        get() = intent.getBooleanExtra(EXTRA_RECOVERY_ATTEMPTED, false)
+        set(value) { intent.putExtra(EXTRA_RECOVERY_ATTEMPTED, value) }
+
+    /**
+     * An encrypted notebook that won't open is not necessarily lost — the user may hold a valid
+     * passphrase the app doesn't know (file restored from an older backup, re-keyed elsewhere).
+     * Offer the recovery path before falling back to the library; only a decline bails out.
+     */
     private fun failOpen(e: Throwable) {
-        Log.e(TAG, "notebook open failed for $notebookId — returning to library", e)
+        Log.e(TAG, "notebook open failed for $notebookId — offering recovery", e)
         runCatching { soilDatabase?.close() }
         soilDatabase = null
         binding.openingOverlay.visibility = View.GONE
+
+        if (encryptionInfo.encrypted && !recoveryAttempted) {
+            recoveryAttempted = true
+            lifecycleScope.launch {
+                val outcome = runCatching {
+                    com.notesprout.android.crypto.NotebookRecovery.offer(
+                        this@NotebookActivity, notebookId, notebookDisplayName, encryptionInfo
+                    )
+                }.getOrDefault(com.notesprout.android.crypto.NotebookRecovery.Outcome.DECLINED)
+
+                if (outcome == com.notesprout.android.crypto.NotebookRecovery.Outcome.RETRY) {
+                    // Key material is fixed (stale key dropped, file repaired, or passphrase handed
+                    // to the one-shot cache) — run the whole open again from a clean activity.
+                    recreate()
+                } else {
+                    bailToLibrary(e)
+                }
+            }
+            return
+        }
+        bailToLibrary(e)
+    }
+
+    /** Original fail-back: hand the reason to the library and finish. See [failOpen]. */
+    private fun bailToLibrary(e: Throwable) {
         NotebookOpenFailure.set(
             NotebookOpenFailure.from(
                 notebookName = notebookDisplayName,

@@ -43,7 +43,17 @@ object KeyOpener {
         }
         if (cached != null) {
             Slog.d(TAG) { "raw-key open: $fileId" }
-            return SoilCrypto.roomFactoryRawKey(cached)
+            // The cached key is derived against a specific file salt. If the file behind this id was
+            // swapped (restore from backup, re-encrypted elsewhere, re-imported), the key is stale and
+            // cannot open it — but the passphrase still can. Never let a stale cache lock the user out.
+            return SelfHealingKeyFactory(
+                context = context.applicationContext,
+                fileId = fileId,
+                rawKeyFactory = SoilCrypto.roomFactoryRawKey(cached),
+                passphraseFactory = { SoilCrypto.roomFactory(passphrase) },
+                // Re-derive against the file's real salt so the next open is a fast raw-key open again.
+                onHealed = { warm(context, fileId, file, scope, passphrase) },
+            )
         }
 
         // Cache miss: open with the passphrase now (native KDF, this one connection), and derive the

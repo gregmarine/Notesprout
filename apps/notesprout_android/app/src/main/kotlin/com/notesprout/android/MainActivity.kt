@@ -35,6 +35,7 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.lifecycleScope
 import com.notesprout.android.crypto.EncryptionInfo
 import com.notesprout.android.crypto.KeyResolver
+import com.notesprout.android.crypto.PassphrasePrompt
 import com.notesprout.android.data.NotebookCompactor
 import com.notesprout.android.crypto.KeyScope
 import com.notesprout.android.crypto.KeySession
@@ -1425,6 +1426,57 @@ class MainActivity : AppCompatActivity() {
         }, 100)
     }
 
+    /**
+     * DEBUG ONLY — re-key a notebook to a throwaway passphrase to exercise [NotebookRecovery].
+     *
+     * Reproduces the real failure exactly: the file is re-encrypted (new salt, new passphrase) while
+     * the index still says GLOBAL **and the cached raw key is deliberately left in place**. That is
+     * what makes the next open take KeyResolver's skip-verify shortcut, hand KeyOpener a stale key,
+     * fail past [SelfHealingKeyFactory]'s passphrase retry, and land in the recovery dialog — the
+     * same chain that stranded notebook 0e5161f1. Enter the throwaway passphrase there to recover.
+     *
+     * Never ship an entry point to this: it makes a notebook unopenable by ordinary means.
+     */
+    private fun showBreakKeyingDialog(entity: ObjectEntity, encInfo: EncryptionInfo) {
+        AlertDialog.Builder(this)
+            .setTitle("Break Keying (debug)")
+            .setMessage(
+                "Re-encrypts \"${entity.name}\" with a throwaway passphrase, leaving the index and the " +
+                "cached key untouched — so the next open fails the way a restored-from-backup notebook does.\n\n" +
+                "You'll need the passphrase you set here to recover it. Debug builds only."
+            )
+            .setPositiveButton("Break It") { _, _ ->
+                lifecycleScope.launch {
+                    val rogue = PassphrasePrompt.promptForPassphrase(
+                        this@MainActivity,
+                        title = "Throwaway Passphrase",
+                        message = "Set the passphrase the notebook will be re-encrypted with. Remember it — " +
+                            "it's what you'll type into the recovery dialog.",
+                        confirm = true,
+                    ) ?: return@launch
+                    val current = KeyResolver.resolveCurrentKeyForRekey(this@MainActivity, entity.id, encInfo)
+                        ?: return@launch
+                    val ok = withContext(Dispatchers.IO) {
+                        runCatching { SoilMigrator.rekeyInPlace(soilFile(this@MainActivity, entity.id), current, rogue) }
+                    }.isSuccess
+                    // NOTE: deliberately NOT calling KeyMaterial.invalidate — the stale cached key is
+                    // the whole point of the repro.
+                    Toast.makeText(
+                        this@MainActivity,
+                        if (ok) "Keying broken. Open it to test recovery." else "Break failed — notebook unchanged.",
+                        Toast.LENGTH_LONG,
+                    ).show()
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .create()
+            .also { d ->
+                d.show()
+                d.window?.setElevation(0f)
+                d.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
+            }
+    }
+
     // ── Rename notebook dialog ────────────────────────────────────────────────
 
     private fun showRenameNotebookDialog(entity: ObjectEntity) {
@@ -1795,6 +1847,9 @@ class MainActivity : AppCompatActivity() {
                 }
             }
             menu.addAction(R.drawable.ic_delete_notebook, "Delete Notebook") { showDeleteNotebookConfirmation(entity) }
+            if (BuildConfig.DEBUG && encInfo.encrypted) {
+                menu.addAction(R.drawable.ic_lock, "Break Keying (debug)") { showBreakKeyingDialog(entity, encInfo) }
+            }
             menu.show()
         }
     }
