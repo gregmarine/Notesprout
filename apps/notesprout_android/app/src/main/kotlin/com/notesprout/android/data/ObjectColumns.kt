@@ -446,7 +446,7 @@ suspend fun NotebookDao.replaceStickyNoteSubtree(note: StickyNoteRender, now: Lo
     val rows = note.toRows("", 0, now, now, density)  // parentId/order placeholders (updateColumns ignores them)
     updateColumns(rows[0])                             // parent payload columns + clears blob
     hardDeleteDescendants(note.id)                     // drop any prior children (legacy blob rows had none)
-    if (rows.size > 1) insertObjects(rows.drop(1))
+    if (rows.size > 1) insertObjects(remapDescendantIds(rows.drop(1)))
 }
 
 // ── Phase 2c: heading / text subtree persistence (DAO helpers) ───────────────
@@ -496,14 +496,14 @@ suspend fun NotebookDao.insertTextSubtree(t: TextRender, layerId: String, order:
 suspend fun NotebookDao.replaceHeadingSubtree(h: HeadingStroke, now: Long) {
     val rows = h.toRows("", 0, now, now)
     updateColumns(rows[0])
-    if (rows.size > 1) { hardDeleteDescendants(h.id); insertObjects(rows.drop(1)) }
+    if (rows.size > 1) { hardDeleteDescendants(h.id); insertObjects(remapDescendantIds(rows.drop(1))) }
 }
 
 /** Re-persist an existing text object; see [replaceHeadingSubtree] for the recognized/fallback split. */
 suspend fun NotebookDao.replaceTextSubtree(t: TextRender, now: Long) {
     val rows = t.toRows("", 0, now, now)
     updateColumns(rows[0])
-    if (rows.size > 1) { hardDeleteDescendants(t.id); insertObjects(rows.drop(1)) }
+    if (rows.size > 1) { hardDeleteDescendants(t.id); insertObjects(remapDescendantIds(rows.drop(1))) }
 }
 
 // ── Phase 2c: link subtree persistence (DAO helpers) ─────────────────────────
@@ -540,7 +540,31 @@ suspend fun NotebookDao.replaceLinkSubtree(link: LinkRender, now: Long, density:
     val rows = link.toRows("", 0, now, now, density)  // parentId/order placeholders (updateColumns ignores them)
     updateColumns(rows[0])
     hardDeleteDescendants(link.id)
-    if (rows.size > 1) insertObjects(rows.drop(1))
+    if (rows.size > 1) insertObjects(remapDescendantIds(rows.drop(1)))
+}
+
+/**
+ * Give a subtree's descendant rows fresh ids before insertion, preserving parent→child linkage.
+ *
+ * Child rows of a composite (link / sticky / fallback heading·text) are that object's **private**
+ * content; their ids are never referenced from outside the subtree. Reusing the ids carried by the
+ * render model is unsafe: legacy composites were duplicated keeping identical embedded child ids, so
+ * two objects can claim the same child ids. Once one side is materialized into real rows, inserting
+ * the other collides (`UNIQUE constraint failed: notebook.id`) — the crash seen moving a selection
+ * that contains a legacy-blob link whose children were already promoted under another link.
+ *
+ * Remapping every descendant to a fresh UUID makes the insert collision-proof and never touches the
+ * other object's rows. The top-level children keep their `parentId` (it points at the composite's own
+ * id, which is not in the map and stays stable); nested links are rewired through the map.
+ */
+private fun remapDescendantIds(rows: List<NotebookObject>): List<NotebookObject> {
+    val idMap = rows.associate { it.id to UUID.randomUUID().toString() }
+    return rows.map { row ->
+        row.copy(
+            id = idMap.getValue(row.id),
+            parentId = idMap[row.parentId] ?: row.parentId,
+        )
+    }
 }
 
 /** Hard-delete every descendant (children, grandchildren, …) of [rootId]. Depth-bounded in practice. */
