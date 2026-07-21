@@ -228,6 +228,9 @@ class PageIndexActivity : AppCompatActivity() {
     /** Global-index repository (templates live in `notesprout.db`, not the `.soil`). */
     private val indexRepo: IndexRepository by lazy { IndexRepository(NotesproutIndex.dao()) }
 
+    /** Key resolved for this notebook when [KeySession] was cold. See [resolveNotebookKey]. */
+    private var resolvedKey: String? = null
+
     /** Pages whose template will be set once the picker returns (snapshot of the selection). */
     private var pendingTemplateTargets: List<String> = emptyList()
 
@@ -353,9 +356,32 @@ class PageIndexActivity : AppCompatActivity() {
 
     // ── Data loading ──────────────────────────────────────────────────────────
 
+    /**
+     * Resolve this notebook's SQLCipher key, preferring the foreground session.
+     *
+     * [KeySession] is process-scoped and in-memory: after process death (or when this screen is
+     * reached by launch restore rather than from NotebookActivity) it is empty, and a bare
+     * `KeySession.getFor()` would hand a null key to the raw open path. That is not "plaintext" —
+     * it is "not resolved yet", and treating the two as the same is what destroyed a notebook.
+     * Mirrors ExportActivity.resolveKey().
+     */
+    private suspend fun resolveNotebookKey(): String? {
+        KeySession.getFor(notebookId)?.let { return it }
+        val info = withContext(Dispatchers.IO) { indexRepo.getEncryptionInfo(notebookId) } ?: return null
+        if (!info.encrypted) return null
+        val key = if (info.keyScope == com.notesprout.android.crypto.KeyScope.GLOBAL) {
+            com.notesprout.android.crypto.PassphraseStore.getGlobalPassphrase(this)
+        } else {
+            KeyResolver.resolveForOpen(this, notebookId, info)
+        }
+        resolvedKey = key
+        return key
+    }
+
     private fun loadPagesAsync() {
         val path = notebookSoilPath ?: return
         lifecycleScope.launch {
+            resolveNotebookKey()
             pages = withContext(Dispatchers.IO) { loadPagesFromSoil(path) }
             currentPageId = pages.getOrNull(currentPageIndex)?.id
             // Jump to the grid page that contains the currently-open page.
@@ -368,7 +394,10 @@ class PageIndexActivity : AppCompatActivity() {
         }
     }
 
-    private fun loadPagesFromSoil(path: String, passphrase: String? = KeySession.getFor(notebookId)): List<PageEntry> {
+    /** Key for THIS notebook: live session first, then the key resolved by [resolveNotebookKey]. */
+    private fun notebookKey(): String? = KeySession.getFor(notebookId) ?: resolvedKey
+
+    private fun loadPagesFromSoil(path: String, passphrase: String? = notebookKey()): List<PageEntry> {
         // Any reload means page content/order may have changed → invalidate cached thumbnails.
         thumbEpoch++
         return loadPageRefs(path, passphrase).map { PageEntry(it.id, it.number, it.headingName) }
@@ -528,7 +557,7 @@ class PageIndexActivity : AppCompatActivity() {
         }
         if (misses.isEmpty()) return
 
-        val key = KeySession.getFor(notebookId)
+        val key = notebookKey()
         val job = lifecycleScope.launch {
             withContext(Dispatchers.IO) {
                 var db: SoilDatabase? = null
@@ -983,7 +1012,7 @@ class PageIndexActivity : AppCompatActivity() {
 
         lifecycleScope.launch {
             val results = withContext(Dispatchers.IO) {
-                com.notesprout.android.data.movePagesRelativeRaw(sources, targetPageId, insertBefore, path, KeySession.getFor(notebookId))
+                com.notesprout.android.data.movePagesRelativeRaw(sources, targetPageId, insertBefore, path, notebookKey())
             }
             if (results == null) {
                 android.widget.Toast.makeText(this@PageIndexActivity, "Couldn't move pages", android.widget.Toast.LENGTH_SHORT).show()
@@ -1014,7 +1043,7 @@ class PageIndexActivity : AppCompatActivity() {
 
         lifecycleScope.launch {
             val results = withContext(Dispatchers.IO) {
-                com.notesprout.android.data.copyPagesRelativeRaw(sources, targetPageId, insertBefore, path, KeySession.getFor(notebookId))
+                com.notesprout.android.data.copyPagesRelativeRaw(sources, targetPageId, insertBefore, path, notebookKey())
             }
             if (results == null) {
                 android.widget.Toast.makeText(this@PageIndexActivity, "Couldn't paste pages", android.widget.Toast.LENGTH_SHORT).show()
@@ -1079,7 +1108,7 @@ class PageIndexActivity : AppCompatActivity() {
         val sourceIds = crossPendingSourceIds
         if (sourceIds.isEmpty()) { refreshActionMode(); renderGridPage(); return }
         val sourcePath = notebookSoilPath ?: return
-        val sourcePass = KeySession.getFor(notebookId)
+        val sourcePass = notebookKey()
         val destPath   = soilFile(this, destId).absolutePath
 
         lifecycleScope.launch {
@@ -1272,7 +1301,7 @@ class PageIndexActivity : AppCompatActivity() {
                     val entity = indexRepo.getTemplate(libraryTemplateId) ?: return@withContext null
                     val tObj = entity.templateObject() ?: return@withContext null
                     if (tObj.image.isEmpty()) return@withContext null
-                    val key = KeySession.getFor(notebookId)
+                    val key = notebookKey()
                     val parentId = com.notesprout.android.data.readNotebookRowId(path, key)
                         ?: MainActivity.NIL_UUID
                     com.notesprout.android.data.insertSoilTemplateRaw(
@@ -1292,7 +1321,7 @@ class PageIndexActivity : AppCompatActivity() {
             }
 
             val pairs = withContext(Dispatchers.IO) {
-                com.notesprout.android.data.setPagesTemplateRaw(targets, soilTemplateId, path, KeySession.getFor(notebookId))
+                com.notesprout.android.data.setPagesTemplateRaw(targets, soilTemplateId, path, notebookKey())
             }
             if (pairs == null) {
                 android.widget.Toast.makeText(this@PageIndexActivity, "Couldn't set template", android.widget.Toast.LENGTH_SHORT).show()
@@ -1340,7 +1369,7 @@ class PageIndexActivity : AppCompatActivity() {
                 lifecycleScope.launch {
                     val deleted = withContext(kotlinx.coroutines.Dispatchers.IO) {
                         targetIds.mapNotNull { id ->
-                            val deletedAt = com.notesprout.android.data.deletePageRaw(id, path, KeySession.getFor(notebookId))
+                            val deletedAt = com.notesprout.android.data.deletePageRaw(id, path, notebookKey())
                             val originalIndex = indexById[id]
                             if (deletedAt != null && originalIndex != null) {
                                 Triple(id, originalIndex, deletedAt)
