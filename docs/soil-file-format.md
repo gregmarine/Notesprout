@@ -807,6 +807,7 @@ there by accident.
 1. Open source with the zetetic driver  (plaintext = empty key "")
 2. ATTACH DATABASE '<tmp>' AS target KEY '<dest-passphrase>'
 3. SELECT sqlcipher_export('target')
+3a. PRAGMA target.user_version = <source user_version>   ← REQUIRED, see below
 4. DETACH DATABASE 'target'
 5. verifyPassphrase(<tmp>, dest-passphrase)          ← gate
 6. Delete original + WAL/SHM/journal, then tmp.renameTo(original)
@@ -815,7 +816,18 @@ there by accident.
 
 On any failure before step 6 the temp is deleted and the original is untouched.
 
-**Re-key** — `PRAGMA rekey = '<new>'`, in place, no temp file, then verify.
+> ⚠️ **`sqlcipher_export` does not copy `PRAGMA user_version` — you must copy it yourself** (step 3a).
+> It copies every table and row, but the target keeps its default `user_version` of 0. For a container
+> whose reader keys off the schema version (this app uses Room, which does), a version-0 output whose
+> schema is *below* the reader's current version is treated as a brand-new/prepackaged database and
+> **rejected** rather than migrated — silently bricking an otherwise-intact notebook. A compatible
+> implementation must carry `user_version` across every `sqlcipher_export` round-trip (encrypt,
+> decrypt, and re-key). Omitting this was a real data-integrity bug; existing bricked files are
+> recoverable only by restamping the correct `user_version` in place.
+
+**Re-key** — copies via `sqlcipher_export` FROM the old-keyed source TO a new-keyed temp (the same
+round-trip, so the `user_version` copy in step 3a applies here too). `PRAGMA rekey` was found
+unreliable on-device and is not used.
 
 Encrypting an already-open document **requires a close → migrate → reopen cycle**: the live
 connection holds an open handle and in-memory WAL, and `sqlcipher_export` must run against a sealed,

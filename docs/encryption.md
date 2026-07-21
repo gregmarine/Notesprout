@@ -172,10 +172,21 @@ persisted.
 
 ### `SoilMigrator` (`crypto/SoilMigrator.kt`)
 
-`encryptInPlace` and `decryptInPlace` — both `suspend` on `Dispatchers.IO`, using a temp file then
-atomic rename, with full sidecar cleanup. Uses `sqlcipher_export()` via an ATTACH/export/DETACH
-sequence on a zetetic connection. Exception-safe: on any failure before the rename, the temp is
-deleted and the original is intact.
+`encryptInPlace`, `decryptInPlace`, and `rekeyInPlace` — all `suspend` on `Dispatchers.IO`, using a
+temp file then atomic rename, with full sidecar cleanup. Uses `sqlcipher_export()` via an
+ATTACH/export/DETACH sequence on a zetetic connection. Exception-safe: on any failure before the
+rename, the temp is deleted and the original is intact.
+
+**`sqlcipher_export` does not copy `PRAGMA user_version`** — every round-trip must restore it by hand
+(`copyUserVersion`), or the output is version 0. This is not cosmetic: a version-0 file whose schema
+is *below* the current Room version makes Room treat it as a brand-new/prepackaged database and
+reject the old-schema tables instead of migrating them — see [version-loss repair](#version-loss-repair).
+
+`repairMissingUserVersion(file, passphrase)` fixes a file already bricked that way: it opens with the
+key, and **only** if the exact brick signature holds (`user_version == 0`, `room_master_table`
+present, a `notebook` table present, and the v4 columnar columns absent) it restamps the version
+derived from which schema-version tables exist (`notebook_meta` ⇒ 3, `undo_redo_state` ⇒ 2, else 1),
+then checkpoints. Room then runs the remaining migrations normally. No-op on anything else.
 
 ---
 
@@ -235,6 +246,25 @@ which `SoilMigrator.rekeyInPlace`-es the file onto the global passphrase so futu
 A one-shot flag on the Intent (`EXTRA_RECOVERY_ATTEMPTED`) ensures the offer is made once per launch,
 never in a loop.
 
+**`failOpen` routes by failure kind, not blanket.** It first tries the silent version-loss repair
+(below) with the key it already has. Only if the failure is a genuine *key/decryption* problem
+(`isKeyFailure` — `SQLiteDatabaseCorruptException`, `SoilLockedException`, "file is not a database")
+does it invoke `NotebookRecovery`. A **schema/migration** failure (`IllegalStateException` with
+"invalid schema"/"migration") is explicitly *not* a key failure and never triggers a passphrase
+prompt — recovery can't fix schema drift and the prompt would mislead.
+
+### Version-loss repair
+
+A `.soil` encrypted (or rekeyed) by an older build carries `user_version = 0` because
+`sqlcipher_export` dropped it. If that notebook was also below the current Room schema at the time,
+the current build rejects it at Room `onCreate` with "Pre-packaged database has an invalid schema".
+`failOpen` calls `SoilMigrator.repairMissingUserVersion` with the resolved key: it restamps the
+correct version in place (no re-encryption, no backup restore) and retries via `recreate()`, after
+which the normal additive migration runs. The fix-forward `copyUserVersion` in the migrator prevents
+new occurrences; this repairs ones already on disk. Real incident: G6's v3 notebooks, encrypted while
+still v3, bricked exactly this way. (G102 survived because its notebooks were already v4 when
+encrypted, so their schema still matched.)
+
 > **Debug harness.** In debug builds a notebook's context menu has **"Break Keying (debug)"**
 > (`MainActivity.showBreakKeyingDialog`): it `rekeyInPlace`-es the file to a throwaway passphrase but
 > deliberately leaves the index scope and the cached raw key untouched — reproducing the
@@ -285,11 +315,12 @@ No snapshot is ever written during an encrypted notebook's open session (guards 
 
 ### Re-Keying a Single Notebook (`SoilMigrator.rekeyInPlace`)
 
-`SoilMigrator.rekeyInPlace(file, oldPassphrase, newPassphrase)` re-encrypts a `.soil` in place
-using SQLCipher's `PRAGMA rekey`. It opens the file with the old passphrase, runs
-`PRAGMA rekey = '<newPassphrase>'`, checkpoints, closes, then calls
-`SoilCrypto.verifyPassphrase(file, newPassphrase)` to confirm success. No temp file is needed —
-`PRAGMA rekey` modifies the file in place. WAL/SHM sidecars are cleaned up afterward.
+`SoilMigrator.rekeyInPlace(file, oldPassphrase, newPassphrase)` re-encrypts a `.soil` via the same
+`sqlcipher_export` round-trip as `encryptInPlace` — **not** `PRAGMA rekey`, which was found unreliable
+on-device. It opens a new-passphrase-keyed temp as the primary connection, ATTACHes the old-keyed
+source, exports source → main, **copies `PRAGMA user_version`** (sqlcipher_export drops it — see
+[SoilMigrator](#soilmigrator-cryptosoilmigratorkt)), verifies the temp with the new passphrase, then
+deletes the original + sidecars and renames the temp into place.
 
 On any failure the file remains intact and openable with the original passphrase; the caller
 receives an exception.
