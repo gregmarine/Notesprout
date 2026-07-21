@@ -112,9 +112,9 @@ or open a zetetic `SQLiteDatabase` outside this object.
 |---|---|
 | `keyBytes(passphrase)` | `passphrase.toByteArray(Charsets.UTF_8)` — canonical encoding |
 | `roomFactory(passphrase)` | Returns `SupportOpenHelperFactory(keyBytes(passphrase))` for Room builder |
-| `openRawPlaintext(file)` | `android.database.sqlite.SQLiteDatabase` open — no zetetic involvement |
+| `openRawPlaintext(file)` | `android.database.sqlite.SQLiteDatabase` open — no zetetic involvement. Opened with `NonDeletingErrorHandler` so a corruption report never deletes the file (see [Never delete on corruption](#never-delete-on-corruption)) |
 | `openRawEncrypted(file, passphrase)` | `net.zetetic.database.sqlcipher.SQLiteDatabase` open |
-| `openRaw(file, passphrase?)` | Dispatches to `SoilRawDb.Plaintext` or `SoilRawDb.Encrypted` |
+| `openRaw(file, passphrase?)` | Dispatches to `SoilRawDb.Plaintext` or `SoilRawDb.Encrypted`. A `null` key against a file that probes as `Encrypted` throws `SoilLockedException` instead of opening it as plaintext — a null key means "not resolved yet", never "plaintext" |
 | `verifyPassphrase(file, passphrase)` | Opens, runs `SELECT count(*) FROM sqlite_master`, always closes; returns `false` on any error |
 
 `SoilRawDb` is a thin sealed wrapper providing a common `rawQuery/beginTransaction/…/close` API over
@@ -133,6 +133,23 @@ prompt, or verify.
 | `resolveForDecrypt(activity, notebookId, info)` | **Always** prompts (even if global is cached — the "extra are you sure"). Verify, return on success. |
 
 `null` return always means "couldn't get a usable key" — the caller must abort and not open anything.
+
+**Global-passphrase overwrite guard.** `resolveGlobalForOpen` adopts an entered passphrase as the
+device global (`PassphraseStore.setGlobalPassphrase`) **only when no global was cached** — i.e. the
+user is establishing it on a fresh device or after "Forget on this device". If a global is already
+cached but this notebook *diverged* from it (its file uses a different passphrase — restored from an
+older backup, keyed on another device), the entered passphrase unlocks **that file for this session
+only** and the stored global is left untouched. Overwriting it would silently re-point every other
+global notebook's key resolution and could strand the whole library from one outlier notebook. The
+prompt says so ("This notebook's passphrase differs from your global passphrase"). Re-keying a
+divergent notebook back onto the global is `NotebookRecovery`'s explicit repair, never a side effect.
+
+**Fast-path assumption.** When a notebook's raw key is already cached, `resolveGlobalForOpen` returns
+the cached global **without** re-verifying (skips the ~300 ms KDF). This is optimistic, not
+guaranteed: in-app flows invalidate the cache on rotation/delete/forget, but a file swapped
+out-of-band (restore from backup, re-key on another device) can leave a stale key that no longer
+fits. That mismatch is caught downstream by [self-heal](#never-delete-on-corruption) — a wrong
+assumption costs one self-heal, never a failed open.
 
 ### `PassphraseStore` (`crypto/PassphraseStore.kt`)
 
@@ -159,6 +176,70 @@ persisted.
 atomic rename, with full sidecar cleanup. Uses `sqlcipher_export()` via an ATTACH/export/DETACH
 sequence on a zetetic connection. Exception-safe: on any failure before the rename, the temp is
 deleted and the original is intact.
+
+---
+
+## Data-Loss Defense (never violate)
+
+A `.soil` opened with the wrong key — or with **no** key, i.e. as plaintext — makes SQLite read
+ciphertext as a *corrupt database*. Two real incidents came out of that, and this section is the
+standing defense against a third. **The invariant: a notebook the user holds a valid passphrase for
+must never become permanently unopenable, and no open path may ever delete a `.soil` it failed to
+read.** Four independent layers enforce it.
+
+### Never delete on corruption
+
+Android's default SQLite corruption handler (`DefaultDatabaseErrorHandler`) and Room's default both
+**delete and recreate** a database reported corrupt. For a `.soil` opened with the wrong key that
+destroys the notebook and leaves an empty stub — exactly how a notebook was lost twice (link-picker
+thumbnail open; page-index raw open). Every open path must therefore use a non-deleting handler:
+
+- **Room path** — `NonDestructiveOpenHelperFactory` (`data/`) wraps the Room open factory; its
+  `onCorruption` logs and throws instead of deleting. Wired into `SoilDatabase.builder`,
+  `SoilCrypto.roomFactory`, and `roomFactoryRawKey`.
+- **Raw (non-Room) path** — `NonDeletingErrorHandler` (`crypto/SoilCrypto.kt`) is the framework-SQLite
+  analogue, passed to every `openRawPlaintext` (and `probe`). The ~18 raw open sites (`PageCopier`,
+  `ExportEngine`, `LinkTargetPickerActivity`, `PageList`, `NotebookImporter`) all inherit it.
+
+### Never open an encrypted file as plaintext
+
+`SoilCrypto.openRaw(file, passphrase=null)` probes the file first: if it is actually encrypted it
+throws `SoilLockedException` rather than opening it as plaintext. A `null` key means "the key was not
+resolved yet" (e.g. a `KeySession` miss on a non-foreground notebook after process death), **not**
+"this notebook is plaintext" — conflating the two is what wiped a notebook via `PageIndexActivity`.
+Callers already treat "can't read" as an empty/locked state, so this degrades safely. Screens that
+open a notebook they didn't launch from (e.g. `PageIndexActivity` reached by launch restore) resolve
+the key through the full `KeySession → KeyResolver/PassphraseStore` fallback, not a bare
+`KeySession.getFor`.
+
+### Self-heal a stale raw key
+
+The raw key is a cache — PBKDF2 over the passphrase **and the file's salt**. Anything that swaps the
+file behind a notebook id (restore from backup, re-key elsewhere, re-import) changes the salt, making
+the cached key wrong even though the passphrase is correct. `SelfHealingKeyFactory`
+(`crypto/SelfHealingKeyFactory.kt`) wraps the raw-key Room open: on the first failure it drops the
+cached key (`KeyMaterial.invalidate`), reopens with the **passphrase** (re-running the KDF against the
+file's real salt), and re-warms so the next open is fast again. Wired in `KeyOpener.roomFactoryFor`.
+This makes the common "same passphrase, stale key" case — including a notebook restored from a
+pre-conversion backup — heal automatically with no UI. Only if the passphrase open *also* fails does
+the failure propagate.
+
+### Recover with a user-supplied passphrase
+
+When an encrypted notebook still won't open (the passphrase the app knows is genuinely wrong for the
+file), `NotebookActivity.failOpen` calls `NotebookRecovery.offer` **before** falling back to the
+library. It tries the cached global first, then prompts (verifying each attempt against the file,
+rate-limited via `AttemptLimiter`). On success it drops the stale key and reopens via `recreate()`;
+for a GLOBAL-scope notebook whose file uses a *different* passphrase it offers **"Repair and Open"**,
+which `SoilMigrator.rekeyInPlace`-es the file onto the global passphrase so future opens are ordinary.
+A one-shot flag on the Intent (`EXTRA_RECOVERY_ATTEMPTED`) ensures the offer is made once per launch,
+never in a loop.
+
+> **Debug harness.** In debug builds a notebook's context menu has **"Break Keying (debug)"**
+> (`MainActivity.showBreakKeyingDialog`): it `rekeyInPlace`-es the file to a throwaway passphrase but
+> deliberately leaves the index scope and the cached raw key untouched — reproducing the
+> stale-key-plus-divergent-passphrase failure on demand to exercise self-heal and recovery. Never
+> ship an entry point to this.
 
 ---
 
