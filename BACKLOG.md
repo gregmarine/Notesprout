@@ -16,6 +16,20 @@
 
 ---
 
+## Stroke-attribute fidelity through lasso move/copy (Paintsprout interop)
+
+Deferred from the 2026-07 stability review (`CODE_REVIEW_STABILITY.md` P2-2) — revisit when
+Paintsprout `.soil` interop approaches. The lasso drag deep-copy rebuilds strokes as
+`LiveStroke(id, points)` (`OnyxNotebookView.kt` ~1394, `GenericNotebookView.kt` ~401), dropping
+`color`/`strokeWidth`/`srcPoints`; the persist (`NotebookActivity` ~1882 and undo path) then writes
+defaults (`#000000`/3.0f) and replaces legacy JSON (per-point pressure/tilt) with a points-only
+blob — permanent, and `performLassoCopy` (~5148) strips the same into the clipboard. Invisible
+today because all in-app ink uses default attributes, but the first lasso-move of imported
+attributed ink silently and irreversibly flattens it. Fix shape: carry the attribute fields through
+the drag copy and the clipboard snapshot so the persisted row round-trips them.
+
+---
+
 ## TEMP — legacy-`ts` + PNG→WEBP compaction (remove after all my devices are compacted)
 
 > Transitional single-user migration, **not** a permanent feature. New writes already omit the dead

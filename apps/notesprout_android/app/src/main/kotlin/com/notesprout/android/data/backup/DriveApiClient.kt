@@ -101,18 +101,24 @@ class DriveApiClient(private val accessToken: String) {
     }
 
     /** Downloads the content of [fileId] to [dest]. Returns true on success. */
-    fun downloadTo(fileId: String, dest: File): Boolean = try {
-        val conn = open("GET", "$FILES/$fileId?alt=media")
-        if (conn.responseCode == 200) {
-            conn.inputStream.use { inp -> dest.outputStream().use { out -> inp.copyTo(out) } }
-            true
-        } else {
-            Log.e(TAG, "downloadTo HTTP ${conn.responseCode}")
+    /** Streams into a `.part` sibling and renames on completion — a connection that drops mid-body
+     *  never leaves a truncated file under the final name (restore would install it as a notebook). */
+    fun downloadTo(fileId: String, dest: File): Boolean {
+        val part = File("${dest.absolutePath}.part")
+        return try {
+            val conn = open("GET", "$FILES/$fileId?alt=media")
+            if (conn.responseCode == 200) {
+                conn.inputStream.use { inp -> part.outputStream().use { out -> inp.copyTo(out) } }
+                if (part.renameTo(dest)) true else { part.delete(); false }
+            } else {
+                Log.e(TAG, "downloadTo HTTP ${conn.responseCode}")
+                false
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "downloadTo failed: ${e.message}")
+            part.delete()
             false
         }
-    } catch (e: Exception) {
-        Log.e(TAG, "downloadTo failed: ${e.message}")
-        false
     }
 
     private fun createFolder(name: String, parentId: String): String? = try {

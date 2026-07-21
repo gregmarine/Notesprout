@@ -2314,22 +2314,9 @@ class MainActivity : AppCompatActivity() {
         lifecycleScope.launch {
             val success = withContext(Dispatchers.IO) {
                 try {
-                    // Delete conflicting entry first.
-                    if (conflictId != null) {
-                        when (state) {
-                            is DestinationPickerState.CopyNotebook,
-                            is DestinationPickerState.MoveNotebook -> {
-                                repository.softDeleteNotebook(conflictId)
-                                soilFile(this@MainActivity, conflictId).delete()
-                            }
-                            is DestinationPickerState.CopyFolder,
-                            is DestinationPickerState.MoveFolder -> {
-                                deleteFolderRecursively(conflictId)
-                            }
-                            else -> {}
-                        }
-                    }
-
+                    // The conflicting entry is only deleted AFTER the operation succeeds (below).
+                    // Deleting it up front destroyed the user's notebook even when the copy/move
+                    // then failed or was interrupted.
                     when (state) {
                         is DestinationPickerState.MoveNotebook -> {
                             repository.moveObject(source.id, currentParentId)
@@ -2368,6 +2355,23 @@ class MainActivity : AppCompatActivity() {
                             true
                         }
                         else -> false
+                    }.also { ok ->
+                        // Operation committed — now retire the replaced entry (same semantics as a
+                        // user-confirmed delete).
+                        if (ok && conflictId != null) {
+                            when (state) {
+                                is DestinationPickerState.CopyNotebook,
+                                is DestinationPickerState.MoveNotebook -> {
+                                    repository.softDeleteNotebook(conflictId)
+                                    soilFile(this@MainActivity, conflictId).delete()
+                                }
+                                is DestinationPickerState.CopyFolder,
+                                is DestinationPickerState.MoveFolder -> {
+                                    deleteFolderRecursively(conflictId)
+                                }
+                                else -> {}
+                            }
+                        }
                     }
                 } catch (e: Exception) {
                     Log.e("MainActivity", "Picker operation failed", e)
@@ -2726,7 +2730,12 @@ class MainActivity : AppCompatActivity() {
 
             val displayName = manifest.meta?.name?.trim()?.takeIf { it.isNotEmpty() } ?: fallbackName
 
-            val collision = manifest.meta?.notebookId?.let { id ->
+            // The manifest is untrusted input and its notebookId becomes a Garden filename via
+            // soilFile(). An id that isn't a plain UUID-shaped token (e.g. "../…") could escape
+            // the Garden directory — such files import under a fresh id instead.
+            val manifestId = manifest.meta?.notebookId?.takeIf(::isSafeImportId)
+
+            val collision = manifestId?.let { id ->
                 withContext(Dispatchers.IO) {
                     repository.getNotebook(id)?.takeIf { it.deletedAt == null }
                 }
@@ -2735,11 +2744,16 @@ class MainActivity : AppCompatActivity() {
             if (collision != null) {
                 showImportCollisionDialog(manifest, tempFile, displayName, collision.id, enteredPass)
             } else {
-                val resolvedId = manifest.meta?.notebookId ?: UUID.randomUUID().toString()
+                val resolvedId = manifestId ?: UUID.randomUUID().toString()
                 showImportPlacementDialog(manifest, tempFile, displayName, resolvedId, enteredPass)
             }
         }
     }
+
+    /** True when an id read from an imported file's manifest is safe to use as a Garden filename
+     *  and an index primary key: UUID-alphabet only — no path separators, dots, or quotes. */
+    private fun isSafeImportId(id: String): Boolean =
+        id.length in 1..64 && id.all { it in '0'..'9' || it in 'a'..'z' || it in 'A'..'Z' || it == '-' }
 
     private fun showImportCollisionDialog(
         manifest: ImportManifest,
@@ -2751,7 +2765,15 @@ class MainActivity : AppCompatActivity() {
         ActionSheetDialog(this)
             .title("\"$displayName\" already exists")
             .addAction(null, "Replace existing notebook") {
-                lifecycleScope.launch { executeReplace(manifest, tempFile, displayName, existingId, enteredPass) }
+                // Replacing swaps the .soil under the same id — refuse while a NotebookActivity
+                // holds it open (its live connection would keep writing to the unlinked file and
+                // silently lose every edit made after the swap).
+                if (com.notesprout.android.core.OpenNotebooks.isOpen(existingId)) {
+                    runCatching { tempFile.delete() }
+                    Toast.makeText(this, "That notebook is currently open — close it and import again.", Toast.LENGTH_LONG).show()
+                } else {
+                    lifecycleScope.launch { executeReplace(manifest, tempFile, displayName, existingId, enteredPass) }
+                }
             }
             .addAction(null, "Keep both") {
                 val freshId = UUID.randomUUID().toString()
@@ -2780,11 +2802,18 @@ class MainActivity : AppCompatActivity() {
             .setPositiveButton("Notebook's folders") { _, _ ->
                 lifecycleScope.launch {
                     // Walk folderPath to resolve parentId, then check for name conflict.
+                    // Strictly create-only: an unsafe id, or any collision with an existing row
+                    // (soft-deleted folder, non-folder id), stops the descent and the notebook
+                    // lands one level up — imported ancestry never mutates the user's own rows.
                     val (parentId, conflict) = withContext(Dispatchers.IO) {
                         var pid: String? = null
-                        manifest.meta?.folderPath?.forEach { ref ->
-                            val entity = repository.ensureFolderWithId(ref.id, ref.name, pid)
-                            pid = entity.id
+                        run {
+                            manifest.meta?.folderPath?.forEach { ref ->
+                                if (!isSafeImportId(ref.id)) return@run
+                                val entity = repository.importFolderCreateOnly(ref.id, ref.name, pid)
+                                    ?: return@run
+                                pid = entity.id
+                            }
                         }
                         val conflict = repository.getNotebooks(pid).find { it.name == displayName }
                         pid to conflict
@@ -2822,12 +2851,16 @@ class MainActivity : AppCompatActivity() {
         AlertDialog.Builder(this)
             .setMessage("A notebook named \"$displayName\" already exists here. Replace it or keep both?")
             .setPositiveButton("Replace") { _, _ ->
+                // The existing notebook is retired only AFTER the import commits (see
+                // retireReplacedNotebook) — cancelling any later step must leave it untouched.
+                if (com.notesprout.android.core.OpenNotebooks.isOpen(conflictId)) {
+                    runCatching { tempFile.delete() }
+                    Toast.makeText(this, "That notebook is currently open — close it and import again.", Toast.LENGTH_LONG).show()
+                    return@setPositiveButton
+                }
                 lifecycleScope.launch {
-                    withContext(Dispatchers.IO) {
-                        repository.softDeleteNotebook(conflictId)
-                        soilFile(this@MainActivity, conflictId).delete()
-                    }
-                    executeImport(manifest, tempFile, displayName, parentId, resolvedId, enteredPass)
+                    executeImport(manifest, tempFile, displayName, parentId, resolvedId, enteredPass,
+                        replaceVictimId = conflictId)
                 }
             }
             .setNeutralButton("Keep both") { _, _ ->
@@ -2852,13 +2885,28 @@ class MainActivity : AppCompatActivity() {
         parentId: String?,
         resolvedId: String,
         enteredPass: String? = null,
+        replaceVictimId: String? = null,
     ) {
         if (enteredPass != null) {
-            showKeyingChooserForImport(manifest, tempFile, displayName, parentId, resolvedId, enteredPass)
+            showKeyingChooserForImport(manifest, tempFile, displayName, parentId, resolvedId, enteredPass, replaceVictimId)
             return
         }
         // Plaintext source: encrypt-on-import — never land as plaintext. Prompt for the scope.
-        showKeyingChooserForPlaintextImport(manifest, tempFile, displayName, parentId, resolvedId)
+        showKeyingChooserForPlaintextImport(manifest, tempFile, displayName, parentId, resolvedId, replaceVictimId)
+    }
+
+    /**
+     * Retire the notebook a committed import replaced — same semantics as a user-confirmed
+     * delete. Runs only after the import fully succeeded, never before.
+     */
+    private suspend fun retireReplacedNotebook(id: String) = withContext(Dispatchers.IO) {
+        runCatching {
+            repository.scrubNotebookFromAllLists(id)
+            repository.softDeleteNotebook(id)
+            com.notesprout.android.crypto.KeyMaterial.invalidate(this@MainActivity, id)
+            val file = soilFile(this@MainActivity, id)
+            file.parentFile?.listFiles { f -> f.name.startsWith(file.name) }?.forEach { it.delete() }
+        }
     }
 
     private suspend fun executeReplace(
@@ -2883,6 +2931,7 @@ class MainActivity : AppCompatActivity() {
         parentId: String?,
         resolvedId: String,
         enteredPass: String,
+        replaceVictimId: String? = null,
     ) {
         ActionSheetDialog(this)
             .title("Import encrypted notebook")
@@ -2892,21 +2941,21 @@ class MainActivity : AppCompatActivity() {
                         PassphraseStore.getGlobalPassphrase(this@MainActivity)
                     }
                     val scope = if (enteredPass == globalPass) KeyScope.GLOBAL else KeyScope.NOTEBOOK
-                    doImportEncrypted(manifest, tempFile, displayName, parentId, resolvedId, enteredPass, enteredPass, scope)
+                    doImportEncrypted(manifest, tempFile, displayName, parentId, resolvedId, enteredPass, enteredPass, scope, replaceVictimId)
                 }
             }
             .addAction(null, "Use this device's global") {
                 lifecycleScope.launch {
                     val globalPass = KeyResolver.resolveForConvertToEncrypted(this@MainActivity, KeyScope.GLOBAL)
                         ?: return@launch
-                    doImportEncrypted(manifest, tempFile, displayName, parentId, resolvedId, enteredPass, globalPass, KeyScope.GLOBAL)
+                    doImportEncrypted(manifest, tempFile, displayName, parentId, resolvedId, enteredPass, globalPass, KeyScope.GLOBAL, replaceVictimId)
                 }
             }
             .addAction(null, "New notebook passphrase") {
                 lifecycleScope.launch {
                     val newPass = KeyResolver.resolveForConvertToEncrypted(this@MainActivity, KeyScope.NOTEBOOK)
                         ?: return@launch
-                    doImportEncrypted(manifest, tempFile, displayName, parentId, resolvedId, enteredPass, newPass, KeyScope.NOTEBOOK)
+                    doImportEncrypted(manifest, tempFile, displayName, parentId, resolvedId, enteredPass, newPass, KeyScope.NOTEBOOK, replaceVictimId)
                 }
             }
             .addAction(null, "Cancel") {
@@ -2961,19 +3010,20 @@ class MainActivity : AppCompatActivity() {
         displayName: String,
         parentId: String?,
         resolvedId: String,
+        replaceVictimId: String? = null,
     ) {
         ActionSheetDialog(this)
             .title("Encrypt imported notebook")
             .addAction(null, "Use this device's global") {
                 lifecycleScope.launch {
                     val pass = KeyResolver.resolveForConvertToEncrypted(this@MainActivity, KeyScope.GLOBAL) ?: return@launch
-                    doImportPlaintextEncrypting(manifest, tempFile, displayName, parentId, resolvedId, pass, KeyScope.GLOBAL)
+                    doImportPlaintextEncrypting(manifest, tempFile, displayName, parentId, resolvedId, pass, KeyScope.GLOBAL, replaceVictimId)
                 }
             }
             .addAction(null, "New notebook passphrase") {
                 lifecycleScope.launch {
                     val pass = KeyResolver.resolveForConvertToEncrypted(this@MainActivity, KeyScope.NOTEBOOK) ?: return@launch
-                    doImportPlaintextEncrypting(manifest, tempFile, displayName, parentId, resolvedId, pass, KeyScope.NOTEBOOK)
+                    doImportPlaintextEncrypting(manifest, tempFile, displayName, parentId, resolvedId, pass, KeyScope.NOTEBOOK, replaceVictimId)
                 }
             }
             .addAction(null, "Cancel") {
@@ -3018,6 +3068,7 @@ class MainActivity : AppCompatActivity() {
         resolvedId: String,
         passphrase: String,
         scope: KeyScope,
+        replaceVictimId: String? = null,
     ) {
         val modal = showImportingModal()
         try {
@@ -3033,6 +3084,7 @@ class MainActivity : AppCompatActivity() {
             Toast.makeText(this@MainActivity, "Import failed: ${e.message}", Toast.LENGTH_LONG).show()
             return
         }
+        replaceVictimId?.let { retireReplacedNotebook(it) }
         modal.dismiss()
         Toast.makeText(this@MainActivity, "Imported “$displayName”", Toast.LENGTH_SHORT).show()
         scanAndRender()
@@ -3074,6 +3126,7 @@ class MainActivity : AppCompatActivity() {
         enteredPass: String,
         finalPass: String,
         scope: KeyScope,
+        replaceVictimId: String? = null,
     ) {
         val modal = showImportingModal()
         val name = try {
@@ -3089,6 +3142,7 @@ class MainActivity : AppCompatActivity() {
             Toast.makeText(this@MainActivity, "Import failed: ${e.message}", Toast.LENGTH_LONG).show()
             return
         }
+        replaceVictimId?.let { retireReplacedNotebook(it) }
         modal.dismiss()
         Toast.makeText(this@MainActivity, "Imported “$name”", Toast.LENGTH_SHORT).show()
         scanAndRender()

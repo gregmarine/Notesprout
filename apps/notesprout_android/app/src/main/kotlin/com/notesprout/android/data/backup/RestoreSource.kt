@@ -60,7 +60,11 @@ class SafRestoreSource(private val context: Context, private val treeUri: Uri) :
         onProgress(++done, total)
         for (s in soils) {
             val name = s.name ?: continue
-            SafBackupReader.copyTo(context, s, File(gardenDir, name))
+            // Any single failure aborts the whole fetch — a silently incomplete staging set would
+            // otherwise be committed as the entire library.
+            if (!SafBackupReader.copyTo(context, s, File(gardenDir, name))) {
+                error("Failed to read \"$name\" from the backup — your current library is untouched.")
+            }
             onProgress(++done, total)
         }
         soils.size
@@ -99,7 +103,11 @@ class DriveRestoreSource(private val client: DriveApiClient) : RestoreSource {
         if (!client.downloadTo(index.id, indexDest)) error("Failed to download the backup index.")
         onProgress(++done, total)
         for (s in soils) {
-            client.downloadTo(s.id, File(gardenDir, s.name))
+            // Any single failure aborts the whole fetch — a silently incomplete staging set would
+            // otherwise be committed as the entire library.
+            if (!client.downloadTo(s.id, File(gardenDir, s.name))) {
+                error("Failed to download \"${s.name}\" — your current library is untouched.")
+            }
             onProgress(++done, total)
         }
         soils.size

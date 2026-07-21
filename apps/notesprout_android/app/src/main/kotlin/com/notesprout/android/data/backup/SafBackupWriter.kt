@@ -17,9 +17,14 @@ object SafBackupWriter {
         parent.findFile(name)?.takeIf { it.isDirectory } ?: parent.createDirectory(name)
 
     /**
-     * Replace-in-place: delete existing file with the same name, then create and stream source.
-     * SAF delete+create is the standard approach (no atomic replace in SAF).
-     * Logs a warning if SAF renames the file (de-dupe / extension append).
+     * Replace a backup file without a window where the destination holds only a truncated copy.
+     *
+     * SAF has no atomic replace, so: stream into a `.part` sibling first (the existing good backup
+     * is untouched if the stream dies — USB unplug, destination full), then swap `.part` into the
+     * final name. On providers without rename support, falls back to delete-then-rewrite — the
+     * bytes have already streamed once successfully at that point, so the risk window is minimal.
+     * Restore ignores `.part`/`.old` names, so a leftover from a killed run is never mistaken for
+     * a backup file.
      */
     fun replaceFile(
         context: Context,
@@ -29,28 +34,61 @@ object SafBackupWriter {
         mime: String = "application/octet-stream",
     ): Boolean {
         return try {
-            dir.findFile(fileName)?.delete()
-            val target = dir.createFile(mime, fileName) ?: run {
-                Log.e("SafBackupWriter", "createFile returned null for $fileName")
+            // 1. Stream into the temp sibling.
+            dir.findFile("$fileName.part")?.delete()
+            val part = dir.createFile(mime, "$fileName.part") ?: run {
+                Log.e("SafBackupWriter", "createFile returned null for $fileName.part")
                 return false
             }
-            if (target.name != fileName) {
-                Log.w("SafBackupWriter", "SAF renamed $fileName → ${target.name}")
+            if (!stream(context, source, part)) {
+                part.delete()
+                return false
             }
-            context.contentResolver.openOutputStream(target.uri)?.use { out ->
-                source.inputStream().use { input ->
-                    val buf = ByteArray(8192)
-                    var n: Int
-                    while (input.read(buf).also { n = it } != -1) out.write(buf, 0, n)
+
+            // 2. Swap: move the old file out of the way, then rename the temp in.
+            dir.findFile("$fileName.old")?.delete()
+            val old = dir.findFile(fileName)
+            if (old != null && !old.renameTo("$fileName.old")) old.delete()
+            if (part.renameTo(fileName)) {
+                if (part.name != fileName) {
+                    Log.w("SafBackupWriter", "SAF renamed $fileName → ${part.name}")
                 }
-            } ?: run {
-                Log.e("SafBackupWriter", "openOutputStream null for $fileName")
-                return false
+            } else {
+                // Provider without rename support: rewrite the final name directly.
+                part.delete()
+                val target = dir.createFile(mime, fileName) ?: run {
+                    Log.e("SafBackupWriter", "createFile returned null for $fileName")
+                    dir.findFile("$fileName.old")?.renameTo(fileName)
+                    return false
+                }
+                if (!stream(context, source, target)) {
+                    target.delete()
+                    dir.findFile("$fileName.old")?.renameTo(fileName)
+                    return false
+                }
             }
+            dir.findFile("$fileName.old")?.delete()
             true
         } catch (e: Exception) {
             Log.e("SafBackupWriter", "replaceFile failed: $fileName", e)
             false
         }
+    }
+
+    private fun stream(context: Context, source: File, target: DocumentFile): Boolean = try {
+        context.contentResolver.openOutputStream(target.uri)?.use { out ->
+            source.inputStream().use { input ->
+                val buf = ByteArray(8192)
+                var n: Int
+                while (input.read(buf).also { n = it } != -1) out.write(buf, 0, n)
+            }
+            true
+        } ?: run {
+            Log.e("SafBackupWriter", "openOutputStream null for ${target.name}")
+            false
+        }
+    } catch (e: Exception) {
+        Log.e("SafBackupWriter", "stream failed: ${target.name}", e)
+        false
     }
 }

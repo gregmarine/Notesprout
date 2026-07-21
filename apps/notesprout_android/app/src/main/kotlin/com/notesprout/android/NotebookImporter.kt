@@ -107,10 +107,7 @@ object NotebookImporter {
         }
 
         val gardenFile = soilFile(context, resolvedId)
-        File(gardenFile.parent!!, "$resolvedId.soil-wal").delete()
-        File(gardenFile.parent!!, "$resolvedId.soil-shm").delete()
-        File(gardenFile.parent!!, "$resolvedId.soil-journal").delete()
-        file.copyTo(gardenFile, overwrite = true)
+        installIntoGarden(file, gardenFile)
 
         val now = System.currentTimeMillis()
         repo.importNotebookRow(
@@ -157,10 +154,7 @@ object NotebookImporter {
 
         val parentId = repo.getNotebook(existingId)?.parentId
         val gardenFile = soilFile(context, existingId)
-        File(gardenFile.parent!!, "$existingId.soil-wal").delete()
-        File(gardenFile.parent!!, "$existingId.soil-shm").delete()
-        File(gardenFile.parent!!, "$existingId.soil-journal").delete()
-        file.copyTo(gardenFile, overwrite = true)
+        installIntoGarden(file, gardenFile)
 
         repo.renameNotebook(existingId, displayName)
         repo.updateNotebookPageCount(existingId, manifest.pageCount)
@@ -174,6 +168,24 @@ object NotebookImporter {
 
         runCatching { file.delete() }
         existingId
+    }
+
+    /**
+     * Install the verified temp [file] at [gardenFile] atomically: copy to a `.new` sibling first,
+     * then rename into place. A plain `copyTo(overwrite = true)` truncates the destination up
+     * front, so a mid-copy process death would leave a torn `.soil` where a notebook (on the
+     * replace path, the user's existing notebook) used to be. Stale sidecars of the destination
+     * are dropped so the fresh file isn't paired with another database's WAL.
+     */
+    private fun installIntoGarden(file: File, gardenFile: File) {
+        val incoming = File("${gardenFile.absolutePath}.new")
+        incoming.delete()
+        file.copyTo(incoming, overwrite = true)
+        listOf("-wal", "-shm", "-journal").forEach { File("${gardenFile.absolutePath}$it").delete() }
+        if (!incoming.renameTo(gardenFile)) {
+            incoming.delete()
+            throw ImportException("Could not install the imported notebook file.")
+        }
     }
 
     private suspend fun refreshEncryptedMeta(

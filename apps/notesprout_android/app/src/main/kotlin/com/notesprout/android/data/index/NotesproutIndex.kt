@@ -52,6 +52,11 @@ object NotesproutIndex {
             val app = context.applicationContext
             val dbFile = File(app.getExternalFilesDir(null), "notesprout.db")
 
+            // A killed in-place migration (upgrade encrypt / rotation rekey) can leave the index
+            // mid-swap. Repair before probing — a missing dbFile would otherwise read as Invalid
+            // and a fresh empty index would silently replace the whole library structure.
+            runCatching { SoilMigrator.recoverInterruptedMigration(dbFile) }
+
             when (SoilCrypto.probe(dbFile)) {
                 SoilFileKind.Invalid -> {
                     // Fresh install (or empty file): create the index encrypted from the start.
@@ -142,7 +147,14 @@ object NotesproutIndex {
                 NotesproutDatabase.MIGRATION_6_7,
                 NotesproutDatabase.MIGRATION_7_8,
             )
-        if (factory != null) builder.openHelperFactory(factory)
+        // Plaintext opens (factory == null — the one-time upgrade path) must be wrapped too:
+        // Room's default framework helper DELETES the database on a corruption report, and this
+        // file is the entire library structure. Mirrors SoilDatabase.builder's default.
+        builder.openHelperFactory(
+            factory ?: com.notesprout.android.data.NonDestructiveOpenHelperFactory(
+                androidx.sqlite.db.framework.FrameworkSQLiteOpenHelperFactory()
+            )
+        )
         return builder.build()
     }
 

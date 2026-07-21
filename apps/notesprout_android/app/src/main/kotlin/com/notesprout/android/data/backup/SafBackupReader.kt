@@ -27,13 +27,22 @@ object SafBackupReader {
     fun soilFiles(dir: DocumentFile): List<DocumentFile> =
         dir.listFiles().filter { it.isFile && it.name?.endsWith(".soil") == true }
 
-    /** Copy a DocumentFile's content to [dest]. Returns true on success. */
-    fun copyTo(context: Context, doc: DocumentFile, dest: File): Boolean = try {
-        context.contentResolver.openInputStream(doc.uri)?.use { inp ->
-            dest.outputStream().use { out -> inp.copyTo(out) }
-        } != null
-    } catch (e: Exception) {
-        Log.e("SafBackupReader", "copyTo failed for ${doc.name}: ${e.message}")
-        false
+    /**
+     * Copy a DocumentFile's content to [dest]. Returns true on success.
+     * Streams into a `.part` sibling and renames on completion, so a stream that dies mid-copy
+     * never leaves a truncated file under the final name (restore would install it as a notebook).
+     */
+    fun copyTo(context: Context, doc: DocumentFile, dest: File): Boolean {
+        val part = File("${dest.absolutePath}.part")
+        return try {
+            val opened = context.contentResolver.openInputStream(doc.uri)?.use { inp ->
+                part.outputStream().use { out -> inp.copyTo(out) }
+            } != null
+            if (opened && part.renameTo(dest)) true else { part.delete(); false }
+        } catch (e: Exception) {
+            Log.e("SafBackupReader", "copyTo failed for ${doc.name}: ${e.message}")
+            part.delete()
+            false
+        }
     }
 }

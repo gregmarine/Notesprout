@@ -2246,6 +2246,7 @@ class NotebookActivity : AppCompatActivity() {
         // ── Resolve notebook identity ─────────────────────────────────────────
         notebookId          = intent.getStringExtra(EXTRA_NOTEBOOK_ID) ?: ""
         notebookDisplayName = intent.getStringExtra(EXTRA_NOTEBOOK_NAME) ?: ""
+        com.notesprout.android.core.OpenNotebooks.opened(notebookId)
 
         // Record this notebook on the surface stack, so a cold launch reopens it (see SurfaceStack).
         surfaceToken = savedInstanceState?.getString(SurfaceStack.KEY_TOKEN) ?: UUID.randomUUID().toString()
@@ -2396,6 +2397,7 @@ class NotebookActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
+        com.notesprout.android.core.OpenNotebooks.closed(notebookId)
         drawingView.releaseResources()
         // Safety net: if the activity is destroyed without the user tapping Close
         // (e.g. system kill), ensure the DB is still closed cleanly. Seal synchronously

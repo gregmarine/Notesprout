@@ -14,8 +14,13 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.notesprout.android.crypto.PassphrasePrompt
+import com.notesprout.android.crypto.SoilMigrator
+import com.notesprout.android.data.backup.RestoreEngine
 import com.notesprout.android.data.index.NotesproutIndex
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.File
 
 /**
  * Launcher gate. Prepares the encrypted index — a one-time plaintext→encrypted migration on the
@@ -48,6 +53,15 @@ class BootstrapActivity : AppCompatActivity() {
     }
 
     private suspend fun boot() {
+        // On-disk repairs before anything opens: roll back a restore that was killed mid-commit
+        // (puts the old library back), then finish any notebook migration killed mid-swap. Both
+        // are no-ops on a clean launch. The index's own mid-swap repair runs inside ensureReady.
+        withContext(Dispatchers.IO) {
+            runCatching { RestoreEngine.recoverInterrupted(this@BootstrapActivity) }
+            runCatching {
+                getExternalFilesDir(null)?.let { SoilMigrator.recoverGardenOrphans(File(it, "Garden")) }
+            }
+        }
         val outcome = NotesproutIndex.ensureReady(this)
         if (outcome == NotesproutIndex.PrepareOutcome.NEEDS_UNLOCK) {
             var message = "Enter your global passphrase (or recovery key) to open your library on this device."

@@ -36,13 +36,26 @@ object SoilMigrator {
      * Throws on failure — caller is responsible for surfacing the error.
      */
     suspend fun encryptInPlace(file: File, passphrase: String) = withContext(Dispatchers.IO) {
+        // If the file on disk is not actually plaintext, encrypting it would read ciphertext as an
+        // empty/corrupt source and could replace real data with an empty output. The classic way in
+        // is index drift: a prior run encrypted the file but died before the index row was updated,
+        // and the user retries "Encrypt".
+        val kind = SoilCrypto.probe(file)
+        check(kind == SoilFileKind.Plaintext) {
+            "Refusing to encrypt ${file.name}: the file is not a plaintext database (found: $kind). " +
+            "It may already be encrypted by an interrupted earlier attempt."
+        }
+
         val tmp = File("${file.absolutePath}.enc.tmp")
-        tmp.delete()
+        file.parentFile?.listFiles { f -> f.name.startsWith(tmp.name) }?.forEach { it.delete() }
 
         // Checkpoint any pending WAL data into the main file using the standard driver first.
+        // NonDeletingErrorHandler is mandatory: the framework default DELETES the database on a
+        // corruption report, and this open targets the live original.
         try {
             val stdDb = android.database.sqlite.SQLiteDatabase.openDatabase(
-                file.absolutePath, null, android.database.sqlite.SQLiteDatabase.OPEN_READWRITE
+                file.absolutePath, null,
+                android.database.sqlite.SQLiteDatabase.OPEN_READWRITE, NonDeletingErrorHandler,
             )
             stdDb.rawQuery("PRAGMA wal_checkpoint(TRUNCATE)", null).use { it.moveToFirst() }
             stdDb.close()
@@ -54,7 +67,7 @@ object SoilMigrator {
         val dest = ZeticDB.openOrCreateDatabase(tmp, passphrase, null, null)
         try {
             // Attach the plaintext source. KEY '' = SQLCipher plaintext mode for ATTACH.
-            dest.execSQL("ATTACH DATABASE '${file.absolutePath}' AS plain KEY ''")
+            dest.execSQL("ATTACH DATABASE '${sqlPath(file)}' AS plain KEY ''")
             try {
                 // Two-argument export: copies FROM 'plain' attachment TO 'main' (encrypted dest).
                 dest.rawQuery("SELECT sqlcipher_export('main', 'plain')", null).use { it.moveToFirst() }
@@ -76,13 +89,7 @@ object SoilMigrator {
             error("Encrypted output failed verification — original notebook is unchanged.")
         }
 
-        // Atomic-ish replace: delete original + sidecars, then rename tmp.
-        deleteSoilAndSidecars(file)
-        if (!tmp.renameTo(file)) {
-            tmp.delete()
-            error("Failed to rename encrypted temp file to ${file.name}.")
-        }
-
+        commitReplace(file, tmp)
         Slog.d(TAG) { "encryptInPlace complete: ${file.name}" }
     }
 
@@ -97,14 +104,14 @@ object SoilMigrator {
      */
     suspend fun decryptInPlace(file: File, passphrase: String) = withContext(Dispatchers.IO) {
         val tmp = File("${file.absolutePath}.dec.tmp")
-        tmp.delete()
+        file.parentFile?.listFiles { f -> f.name.startsWith(tmp.name) }?.forEach { it.delete() }
 
         val src = ZeticDB.openOrCreateDatabase(file, passphrase, null, null)
         try {
             src.rawQuery("PRAGMA wal_checkpoint(TRUNCATE)", null).use { it.moveToFirst() }
 
             // Attach a plaintext destination (empty key = no encryption).
-            src.execSQL("ATTACH DATABASE '${tmp.absolutePath}' AS plaintext KEY ''")
+            src.execSQL("ATTACH DATABASE '${sqlPath(tmp)}' AS plaintext KEY ''")
             try {
                 src.rawQuery("SELECT sqlcipher_export('plaintext')", null).use { it.moveToFirst() }
                 // Preserve the Room schema version — sqlcipher_export drops it (see encryptInPlace).
@@ -122,12 +129,7 @@ object SoilMigrator {
             error("Decrypted output is not a valid SQLite database — original notebook is unchanged.")
         }
 
-        deleteSoilAndSidecars(file)
-        if (!tmp.renameTo(file)) {
-            tmp.delete()
-            error("Failed to rename decrypted temp file to ${file.name}.")
-        }
-
+        commitReplace(file, tmp)
         Slog.d(TAG) { "decryptInPlace complete: ${file.name}" }
     }
 
@@ -160,7 +162,7 @@ object SoilMigrator {
         val dest = ZeticDB.openOrCreateDatabase(tmp, newPassphrase, null, null)
         try {
             // Attach the old-encrypted source with the old key.
-            dest.execSQL("ATTACH DATABASE '${file.absolutePath}' AS old_src KEY '${oldPassphrase.replace("'", "''")}'")
+            dest.execSQL("ATTACH DATABASE '${sqlPath(file)}' AS old_src KEY '${oldPassphrase.replace("'", "''")}'")
             try {
                 // Two-argument export: copies FROM 'old_src' attachment TO 'main' (new-encrypted dest).
                 dest.rawQuery("SELECT sqlcipher_export('main', 'old_src')", null).use { it.moveToFirst() }
@@ -178,13 +180,7 @@ object SoilMigrator {
             error("Re-key verification failed — original notebook is unchanged.")
         }
 
-        // Delete original + sidecars but NOT the rekey temp (it hasn't been renamed yet).
-        deleteSoilAndSidecars(file)
-        if (!tmp.renameTo(file)) {
-            tmp.delete()
-            error("Failed to rename re-keyed temp file to ${file.name}.")
-        }
-
+        commitReplace(file, tmp)
         Slog.d(TAG) { "rekeyInPlace complete: ${file.name}" }
     }
 
@@ -270,15 +266,105 @@ object SoilMigrator {
         db.execSQL("PRAGMA $to.user_version = $version")
     }
 
+    // ── Replace / recovery machinery ─────────────────────────────────────────
+
+    private const val ASIDE_SUFFIX = ".old.bak"
+    private val TMP_SUFFIXES = listOf(".enc.tmp", ".dec.tmp", ".rekey.tmp")
+
+    /**
+     * Swap a verified converted [tmp] into [file]'s place without ever holding zero copies.
+     *
+     * Ordering: original → `.old.bak` (rename), tmp → original name (rename), delete `.old.bak`.
+     * At every instant at least one intact copy of the data exists under a known name, so any
+     * failure (or a process kill — see [recoverInterruptedMigration]) is recoverable. On a rename
+     * failure the original is rolled back and the converted tmp is left on disk for the retry.
+     */
+    private fun commitReplace(file: File, tmp: File) {
+        fsyncFile(tmp)
+        val aside = File("${file.absolutePath}$ASIDE_SUFFIX")
+        aside.delete() // stale aside from a completed prior swap ([file] exists, so it's disposable)
+        deleteSidecars(file)
+        if (!file.renameTo(aside)) {
+            error("Could not move ${file.name} aside for replacement — the original is unchanged.")
+        }
+        if (!tmp.renameTo(file)) {
+            if (!aside.renameTo(file)) {
+                // Both renames failed; delete nothing — both copies stay on disk for recovery.
+                error(
+                    "Rename failed and rollback failed — data preserved as ${aside.name} and ${tmp.name}. " +
+                    "Restart the app to recover."
+                )
+            }
+            error("Failed to rename ${tmp.name} into place — the original was restored unchanged.")
+        }
+        fsyncDir(file.parentFile)
+        aside.delete()
+    }
+
+    /**
+     * Repair the on-disk state of [file] after an in-place migration was killed mid-swap.
+     * Call sites: index open ([NotesproutIndex.ensureReady]) and the bootstrap Garden sweep.
+     *
+     *  - [file] present: the swap completed (or never started) — drop a stale `.old.bak` if any.
+     *  - [file] missing + `.old.bak` present: killed between the two renames — restore the original.
+     *  - [file] missing + only a `*.tmp` present (a pre-`.old.bak` build's delete-then-rename window):
+     *    the tmp was verified before the swap began — rename it in. The index may still describe the
+     *    pre-migration keying; the self-healing open paths reconcile that on next open.
+     *
+     * Returns true if anything was renamed back into place.
+     */
+    fun recoverInterruptedMigration(file: File): Boolean {
+        val aside = File("${file.absolutePath}$ASIDE_SUFFIX")
+        if (file.exists()) {
+            if (aside.exists()) aside.delete()
+            return false
+        }
+        if (aside.exists()) {
+            val ok = aside.renameTo(file)
+            if (ok) Log.w(TAG, "Recovered ${file.name} from interrupted migration (restored original)")
+            return ok
+        }
+        for (suffix in TMP_SUFFIXES) {
+            val tmp = File("${file.absolutePath}$suffix")
+            if (tmp.exists() && tmp.length() > 0L && tmp.renameTo(file)) {
+                Log.w(TAG, "Recovered ${file.name} from orphaned $suffix (converted copy)")
+                return true
+            }
+        }
+        return false
+    }
+
+    /** Bootstrap sweep: recover every Garden notebook left mid-swap by a killed migration. */
+    fun recoverGardenOrphans(garden: File) {
+        val markers = TMP_SUFFIXES + ASIDE_SUFFIX
+        garden.listFiles()
+            ?.mapNotNull { f ->
+                markers.firstOrNull { f.name.endsWith(it) }
+                    ?.let { suffix -> File(garden, f.name.removeSuffix(suffix)) }
+            }
+            ?.distinct()
+            ?.forEach { runCatching { recoverInterruptedMigration(it) } }
+    }
+
     // ── Private helpers ───────────────────────────────────────────────────────
 
-    private fun deleteSoilAndSidecars(file: File) {
-        file.parentFile?.listFiles { f ->
-            f.name.startsWith(file.name) &&
-            !f.name.endsWith(".enc.tmp") &&
-            !f.name.endsWith(".dec.tmp") &&
-            !f.name.endsWith(".rekey.tmp")
-        }?.forEach { it.delete() }
+    /** Single-quote-escape a filesystem path for embedding in an ATTACH statement. */
+    private fun sqlPath(file: File): String = file.absolutePath.replace("'", "''")
+
+    private fun deleteSidecars(file: File) {
+        listOf("-wal", "-shm", "-journal").forEach { File("${file.absolutePath}$it").delete() }
+    }
+
+    private fun fsyncFile(file: File) {
+        runCatching { java.io.FileInputStream(file).use { it.fd.sync() } }
+    }
+
+    private fun fsyncDir(dir: File?) {
+        dir ?: return
+        runCatching {
+            val fd = android.system.Os.open(dir.absolutePath, android.system.OsConstants.O_RDONLY, 0)
+            try { android.system.Os.fsync(fd) } finally { android.system.Os.close(fd) }
+        }
     }
 
     private fun verifyPlaintext(file: File): Boolean {

@@ -36,20 +36,20 @@ class IndexRepository(private val dao: ObjectDao) {
     }
 
     /**
-     * Import helper: ensure a FOLDER with an exact [id] exists (for recreating the source
-     * notebook's folder hierarchy with the same UUIDs). If the folder is present and live,
-     * it is returned as-is. If soft-deleted, it is un-deleted and its name/parent updated.
-     * If absent, a new row is inserted with the given [id].
+     * Import placement helper, strictly create-only: recreate the source notebook's folder
+     * hierarchy with the same UUIDs, but never mutate rows the user already owns. The ids come
+     * from an untrusted imported file's manifest, so:
+     *  - absent id → insert a new FOLDER row with it;
+     *  - id exists as a live folder → returned as-is (never renamed, moved, or touched);
+     *  - anything else (soft-deleted row, or an id that belongs to a non-folder) → null; the
+     *    caller stops descending and places the import one level up.
      */
-    suspend fun ensureFolderWithId(id: String, name: String, parentId: String?): ObjectEntity {
+    suspend fun importFolderCreateOnly(id: String, name: String, parentId: String?): ObjectEntity? {
         val existing = dao.getById(id)
-        val now = System.currentTimeMillis()
         if (existing != null) {
-            if (existing.deletedAt == null) return existing
-            val restored = existing.copy(name = name, parentId = parentId, deletedAt = null, updatedAt = now)
-            dao.update(restored)
-            return restored
+            return existing.takeIf { it.type == ObjectType.FOLDER && it.deletedAt == null }
         }
+        val now = System.currentTimeMillis()
         val entity = ObjectEntity(
             id = id,
             type = ObjectType.FOLDER,
