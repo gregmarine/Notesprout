@@ -27,8 +27,6 @@ object ToolbarButtonRegistry {
     private const val GROUP_NOTEBOOK = "notebook" // toc, cover, export, pin
     private const val GROUP_TOOLS = "tools"       // pen, eraser, lasso eraser, erase all, text, lines, lasso
     private const val GROUP_HISTORY = "history"   // undo, redo
-    private const val GROUP_PAGE_VIEW = "pageView" // template, page index
-    private const val GROUP_PAGE_EDIT = "pageEdit" // insert before/after, delete, copy, paste
     private const val GROUP_SETTINGS = "settings"  // customize toolbar (gear)
 
     /** The stable key of the pinned Close button — always present, never hideable. */
@@ -69,19 +67,16 @@ object ToolbarButtonRegistry {
         ButtonSpec("pen", R.id.btnPen, R.drawable.ic_pen, "Pen", GROUP_TOOLS),
         ButtonSpec("eraser", R.id.btnEraser, R.drawable.ic_eraser, "Eraser", GROUP_TOOLS),
         ButtonSpec("lassoEraser", R.id.btnLassoEraser, R.drawable.ic_lasso_eraser, "Lasso Eraser", GROUP_TOOLS),
-        ButtonSpec("eraseAll", R.id.btnEraseAll, R.drawable.ic_erase_all, "Erase All", GROUP_TOOLS),
+        // "eraseAll" (Erase Page) moved to the canvas long-press "Page" menu; spec removed. A
+        // persisted config that still lists it resolves to null and is skipped harmlessly.
         ButtonSpec("insertText", R.id.btnInsertText, R.drawable.ic_text_recognition, "Insert Text", GROUP_TOOLS),
         ButtonSpec("insertLines", R.id.btnInsertLines, R.drawable.ic_density_small, "Insert Lines", GROUP_TOOLS),
         ButtonSpec("lasso", R.id.btnLasso, R.drawable.ic_lasso, "Lasso", GROUP_TOOLS),
         ButtonSpec("undo", R.id.btnUndo, R.drawable.ic_undo, "Undo", GROUP_HISTORY),
         ButtonSpec("redo", R.id.btnRedo, R.drawable.ic_redo, "Redo", GROUP_HISTORY),
-        ButtonSpec("template", R.id.btnTemplate, R.drawable.ic_template, "Template", GROUP_PAGE_VIEW),
-        ButtonSpec("pageIndex", R.id.btnPageIndex, R.drawable.ic_files, "Page Index", GROUP_PAGE_VIEW),
-        ButtonSpec("insertPageBefore", R.id.btnInsertPageBefore, R.drawable.ic_insert_page_before, "Insert Page Before", GROUP_PAGE_EDIT),
-        ButtonSpec("insertPageAfter", R.id.btnInsertPageAfter, R.drawable.ic_insert_page_after, "Insert Page After", GROUP_PAGE_EDIT),
-        ButtonSpec("deletePage", R.id.btnDeletePage, R.drawable.ic_page_delete, "Delete Page", GROUP_PAGE_EDIT),
-        ButtonSpec("copyPage", R.id.btnCopyPage, R.drawable.ic_copy_page, "Copy Page", GROUP_PAGE_EDIT),
-        ButtonSpec("pastePage", R.id.btnPastePage, R.drawable.ic_paste_page, "Paste Page", GROUP_PAGE_EDIT),
+        // The page-view / page-edit buttons (template, pageIndex, insertPageBefore, insertPageAfter,
+        // deletePage, copyPage, pastePage) moved to the canvas long-press "Page" menu; their specs are
+        // removed. Persisted configs that still list these keys resolve to null and are skipped.
         ButtonSpec("toolbarSettings", R.id.btnToolbarSettings, R.drawable.ic_adjustments, "Customize Toolbar", GROUP_SETTINGS, pinned = true),
         ButtonSpec("scratchpad", R.id.btnScratchpad, R.drawable.ic_sketching, "Scratch Pad", GROUP_NOTEBOOK),
         ButtonSpec("stickyNote", R.id.btnInsertStickyNote, R.drawable.ic_sticker_2, "Insert Sticky Note", GROUP_TOOLS),
@@ -97,5 +92,5 @@ object ToolbarButtonRegistry {
     val DEFAULT_ORDER: List<String> = SPECS.map { it.key }
 
     /** Default mini set — a compact everyday subset. */
-    val DEFAULT_MINI: List<String> = listOf("pen", "eraser", "undo", "lasso", "pageIndex")
+    val DEFAULT_MINI: List<String> = listOf("pen", "eraser", "undo", "lasso", "toc")
 }

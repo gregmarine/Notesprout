@@ -111,14 +111,6 @@
             android:src="@drawable/ic_lasso_eraser"
             android:contentDescription="Lasso eraser" />
 
-        <!-- Erase all -->
-        <androidx.appcompat.widget.AppCompatImageButton
-            android:id="@+id/btnEraseAll"
-            style="@style/Widget.Notesprout.ToolbarButton"
-            android:layout_marginStart="4dp"
-            android:src="@drawable/ic_erase_all"
-            android:contentDescription="Erase all" />
-
         <!-- Insert text object -->
         <androidx.appcompat.widget.AppCompatImageButton
             android:id="@+id/btnInsertText"
@@ -174,59 +166,9 @@
             android:src="@drawable/ic_redo"
             android:contentDescription="Redo" />
 
-        <!-- Template picker -->
-        <androidx.appcompat.widget.AppCompatImageButton
-            android:id="@+id/btnTemplate"
-            style="@style/Widget.Notesprout.ToolbarButton"
-            android:src="@drawable/ic_template"
-            android:contentDescription="Template" />
-
-        <!-- Page index — same group as template, no separator -->
-        <androidx.appcompat.widget.AppCompatImageButton
-            android:id="@+id/btnPageIndex"
-            style="@style/Widget.Notesprout.ToolbarButton"
-            android:layout_marginStart="4dp"
-            android:src="@drawable/ic_files"
-            android:contentDescription="Page index" />
-
-        <!-- Insert page before current -->
-        <androidx.appcompat.widget.AppCompatImageButton
-            android:id="@+id/btnInsertPageBefore"
-            style="@style/Widget.Notesprout.ToolbarButton"
-            android:src="@drawable/ic_insert_page_before"
-            android:contentDescription="Insert page before" />
-
-        <!-- Insert page after current -->
-        <androidx.appcompat.widget.AppCompatImageButton
-            android:id="@+id/btnInsertPageAfter"
-            style="@style/Widget.Notesprout.ToolbarButton"
-            android:layout_marginStart="4dp"
-            android:src="@drawable/ic_insert_page_after"
-            android:contentDescription="Insert page after" />
-
-        <!-- Delete page -->
-        <androidx.appcompat.widget.AppCompatImageButton
-            android:id="@+id/btnDeletePage"
-            style="@style/Widget.Notesprout.ToolbarButton"
-            android:layout_marginStart="4dp"
-            android:src="@drawable/ic_page_delete"
-            android:contentDescription="Delete page" />
-
-        <!-- Copy page — same group as page management controls -->
-        <androidx.appcompat.widget.AppCompatImageButton
-            android:id="@+id/btnCopyPage"
-            style="@style/Widget.Notesprout.ToolbarButton"
-            android:layout_marginStart="4dp"
-            android:src="@drawable/ic_copy_page"
-            android:contentDescription="Copy page" />
-
-        <!-- Paste page — same group -->
-        <androidx.appcompat.widget.AppCompatImageButton
-            android:id="@+id/btnPastePage"
-            style="@style/Widget.Notesprout.ToolbarButton"
-            android:layout_marginStart="4dp"
-            android:src="@drawable/ic_paste_page"
-            android:contentDescription="Paste page" />
+        <!-- Page-related actions (Template, Page Index, Insert/Delete/Copy/Paste page,
+             Erase page) now live in the canvas long-press "Page" menu, not the toolbar —
+             see NotebookActivity.showPageMenu(). -->
 
         <!-- Customize toolbar (gear) — opens the reorder / show-hide dialog.
              Customizable + overflow-eligible like any other button. -->

@@ -13,6 +13,8 @@ import android.graphics.RectF
 import android.graphics.Region
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.os.SystemClock
 import android.util.Base64
 import android.util.Log
@@ -319,6 +321,20 @@ class NotebookActivity : AppCompatActivity() {
     private var toggleFirstTapY = 0f
     private val toggleTouchSlopPx by lazy { ViewConfiguration.get(this).scaledTouchSlop }
     private val toggleDoubleTapSlopPx by lazy { ViewConfiguration.get(this).scaledDoubleTapSlop }
+
+    // ── Page long-press menu gesture ──────────────────────────────────────────
+    // A one-finger stationary long-press on the canvas opens the "Page" action menu (template,
+    // page index, insert/delete/copy/paste, erase) — the actions that used to be toolbar buttons.
+    // Armed on ACTION_DOWN (single finger, on the canvas, not over chrome or a followable
+    // link/sticky, and not in a selection/placement mode); a posted runnable fires at the
+    // long-press timeout while the finger is still held. Any movement past touch slop, a second
+    // finger, an UP/CANCEL, or the pen-activity gate cancels it. Finger-only: the stylus never
+    // reaches this, so writing is untouched. A long-press is longer than the toolbar-toggle tap
+    // window, so the two gestures never collide.
+    private val pageMenuLongPressHandler = Handler(Looper.getMainLooper())
+    private var pageMenuLongPressRunnable: Runnable? = null
+    private var pageMenuDownX = 0f
+    private var pageMenuDownY = 0f
     /** True when the toggle gesture's DOWN landed inside a followable link bbox — suppresses the
      *  double-tap-hide so a link follow isn't also a toolbar toggle (Session 4, plan step 4). */
     private var toggleDownOnLink = false
@@ -944,97 +960,8 @@ class NotebookActivity : AppCompatActivity() {
             finish()
         }
 
-        binding.btnInsertPageBefore.setOnClickListener {
-            insertPageBeforeCurrentAndNavigate()
-        }
-
-        binding.btnInsertPageAfter.setOnClickListener {
-            insertPageAfterCurrentAndNavigate()
-        }
-
-        binding.btnDeletePage.setOnClickListener {
-            val db = soilDatabase ?: return@setOnClickListener
-            // Confirmation dialog — flat Notesprout style (elevation=0, shape_bordered).
-            val dialog = AlertDialog.Builder(this)
-                .setMessage("Delete this page?")
-                .setNegativeButton("Cancel", null)
-                .setPositiveButton("Delete") { _, _ ->
-                    // Capture pageId, pageIndex, and deletedAt timestamp BEFORE the delete runs.
-                    // All three soft-delete calls (page, layer, strokes) use the same timestamp
-                    // so PageDeleted.undo can restore exactly those rows via restoreChildrenDeletedSince.
-                    val deletedPageId    = currentPageId
-                    val deletedPageIndex = currentPageIndex
-                    val deletedAt        = System.currentTimeMillis()
-                    lifecycleScope.launch {
-                        // No snapshot needed — the page being deleted is discarded.
-                        withContext(Dispatchers.IO) { deletePage(db, deletedAt) }
-                        undoRedoManager.push(
-                            UndoRedoAction.PageDeleted(deletedPageId, deletedPageIndex, deletedAt)
-                        )
-                        updateUndoRedoButtons()
-                        drawingView.clearForPageLoad()
-                        val result = withContext(Dispatchers.IO) { loadCurrentPage(db) }
-                        displayPage(result)
-                        updatePageIndicator()
-                        saveLastOpenedPage(currentPageId)
-                        postDisplayWork(db, result)
-                    }
-                }
-                .create()
-            dialog.show()
-            // Style after show() — window only exists once the dialog is displayed.
-            dialog.window?.setElevation(0f)
-            dialog.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
-        }
-
-        binding.btnEraseAll.setOnClickListener {
-            val db = soilDatabase
-            val dialog = AlertDialog.Builder(this)
-                .setMessage("Erase this page?")
-                .setNegativeButton("Cancel", null)
-                .setPositiveButton("Erase") { _, _ ->
-                    // Snapshot the page/layer IDs now — they may change before the coroutine runs.
-                    val eraseAllPageId      = currentPageId
-                    val eraseAllLayerId     = currentLayerId
-                    val eraseAllHeadingIds  = drawingView.getHeadings().map { it.id }
-                    val eraseAllStickyIds   = drawingView.getStickyNotes().map { it.id }
-                    val hasContent = drawingView.getStrokes().isNotEmpty() ||
-                                     eraseAllHeadingIds.isNotEmpty() ||
-                                     drawingView.getTextObjects().isNotEmpty() ||
-                                     drawingView.getLineObjects().isNotEmpty() ||
-                                     eraseAllStickyIds.isNotEmpty() ||
-                                     drawingView.getShapeObjects().isNotEmpty()
-                    drawingView.eraseAll()
-                    drawingView.loadHeadings(emptyList())
-                    // All content removed from memory and will be soft-deleted from DB.
-                    // Clear the persisted-ID registry; no snapshot needed for a user-initiated erase.
-                    persistedStrokeIds.clear()
-                    if (db != null && hasContent) {
-                        lifecycleScope.launch {
-                            val deletedAt = System.currentTimeMillis()
-                            withContext(Dispatchers.IO) {
-                                // Soft-delete all layer children (strokes, headings, any future types)
-                                // with a shared timestamp so restoreChildrenDeletedSince recovers everything atomically.
-                                db.notebookDao().softDeleteByParentId(eraseAllLayerId, deletedAt)
-                                // Schedule RTR so the recognized-text cache tracks this erase.
-                                noteContentEdit(db, eraseAllPageId)
-                            }
-                            // Record the erase as a single undoable action after the DB writes succeed.
-                            // headingIds stored so undo can restore them explicitly by ID (belt-and-suspenders
-                            // alongside restoreChildrenDeletedSince which uses a timestamp filter).
-                            undoRedoManager.push(
-                                UndoRedoAction.PageEraseAll(eraseAllPageId, eraseAllLayerId, deletedAt, eraseAllHeadingIds, eraseAllStickyIds)
-                            )
-                            updateUndoRedoButtons()
-                        }
-                    }
-                }
-                .create()
-            dialog.show()
-            // Style after show() — window only exists once the dialog is displayed.
-            dialog.window?.setElevation(0f)
-            dialog.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
-        }
+        // Page actions (insert before/after, delete, erase, template, page index, copy, paste)
+        // now live in the canvas long-press "Page" menu — see showPageMenu(). No toolbar buttons.
 
         // Pen tool button — activates pen mode (default)
         binding.btnPen.setOnClickListener {
@@ -1164,26 +1091,6 @@ class NotebookActivity : AppCompatActivity() {
             }
         }
 
-        // TODO: implement toolbar show/hide UX
-        binding.btnTemplate.setOnClickListener {
-            val db = soilDatabase ?: return@setOnClickListener
-            val pageId = currentPageId.takeIf { it.isNotEmpty() } ?: return@setOnClickListener
-            TemplateDialog(
-                activity       = this,
-                lifecycleScope = lifecycleScope,
-                db             = db,
-                pageId         = pageId,
-                onConfirm      = { templateId, bitmap ->
-                    applyTemplateToCurrentPage(templateId, bitmap)
-                },
-                onBrowseLibrary = {
-                    val intent = Intent(this, TemplateBrowserActivity::class.java)
-                        .putExtra(TemplateBrowserActivity.EXTRA_MODE, TemplateBrowserActivity.MODE_PICK)
-                    templatePickLauncher.launch(intent)
-                },
-            ).show()
-        }
-
         binding.btnToc.setOnClickListener { openToc() }
 
         binding.btnRecents.setOnClickListener {
@@ -1224,8 +1131,6 @@ class NotebookActivity : AppCompatActivity() {
             showEncryptFromToolbarDialog(nbId)
         }
 
-        binding.btnPageIndex.setOnClickListener { openPageIndex() }
-
         binding.btnCalendar.setOnClickListener {
             calendarLauncher.launch(
                 CalendarActivity.intentFromNotebook(this, notebookId, notebookDisplayName)
@@ -1239,10 +1144,6 @@ class NotebookActivity : AppCompatActivity() {
             }
             scratchpadLauncher.launch(intent)
         }
-
-        binding.btnCopyPage.setOnClickListener { copyCurrentPage() }
-        binding.btnPastePage.setOnClickListener { pasteCopiedPage() }
-        updateCopyPasteButtons()
 
         binding.btnUndo.setOnClickListener { performUndo() }
         binding.btnRedo.setOnClickListener { performRedo() }
@@ -2464,6 +2365,7 @@ class NotebookActivity : AppCompatActivity() {
                 handleLinkFollowGesture(event)
                 handleToolbarToggleGesture(event)
                 handleMultiFingerDoubleTap(event)
+                handlePageMenuLongPress(event)
             }
         }
 
@@ -3085,6 +2987,65 @@ class NotebookActivity : AppCompatActivity() {
     }
 
     /**
+     * One-finger stationary long-press on the canvas → open the page [showPageMenu]. Arms a posted
+     * runnable on ACTION_DOWN and lets it fire while the finger is still held (standard long-press
+     * feel), cancelling on movement, a second finger, UP/CANCEL, or the pen-activity gate.
+     *
+     * Guarded against every context where a long-press would be ambiguous: over toolbar chrome or
+     * the shape-insert picker, over a followable link / sticky note (which own the finger tap), and
+     * while a lasso / lasso-eraser / text-placement / shape-transform mode is active. The runnable
+     * re-checks pen-active + finishing state at fire time, since ~500ms elapse before it runs.
+     */
+    private fun handlePageMenuLongPress(event: MotionEvent) {
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                // Finger-only gesture — orthogonal to the active *stylus* tool. Deliberately NOT
+                // guarded on lasso / text-placement / shape-transform modes: those are stylus
+                // interactions, and the other finger gestures (swipe, double-tap toggle) run in
+                // them freely. Only genuine finger-tap conflicts are excluded: toolbar chrome, the
+                // shape-insert picker, an open overflow, and a followable link / sticky note.
+                val eligible = event.pointerCount == 1
+                    && !drawingView.isPenActive
+                    && !isPointInToolbarChrome(event)
+                    && binding.shapeInsertToolbar.visibility != View.VISIBLE
+                    && !overflowManager.isOverflowMenuOpen()
+                    && !(isLinkFollowEnabled()
+                        && (linkAt(event.x, event.y) != null || stickyNoteAt(event.x, event.y) != null))
+                if (!eligible) {
+                    cancelPageMenuLongPress()
+                    return
+                }
+                pageMenuDownX = event.rawX
+                pageMenuDownY = event.rawY
+                cancelPageMenuLongPress()
+                val r = Runnable {
+                    pageMenuLongPressRunnable = null
+                    if (isFinishing || isDestroyed) return@Runnable
+                    if (drawingView.isPenActive) return@Runnable
+                    showPageMenu()
+                }
+                pageMenuLongPressRunnable = r
+                pageMenuLongPressHandler.postDelayed(r, ViewConfiguration.getLongPressTimeout().toLong())
+            }
+            MotionEvent.ACTION_POINTER_DOWN -> cancelPageMenuLongPress()
+            MotionEvent.ACTION_MOVE -> {
+                if (pageMenuLongPressRunnable != null) {
+                    val dx = event.rawX - pageMenuDownX
+                    val dy = event.rawY - pageMenuDownY
+                    if (Math.hypot(dx.toDouble(), dy.toDouble()) > toggleTouchSlopPx) cancelPageMenuLongPress()
+                }
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> cancelPageMenuLongPress()
+        }
+    }
+
+    /** Cancel any pending page-menu long-press. Safe to call when nothing is armed. */
+    private fun cancelPageMenuLongPress() {
+        pageMenuLongPressRunnable?.let { pageMenuLongPressHandler.removeCallbacks(it) }
+        pageMenuLongPressRunnable = null
+    }
+
+    /**
      * Abandon all in-flight finger-gesture state, silently.
      *
      * Called once when the pen-activity gate closes ([fingerGesturesSuppressed]). This resets the
@@ -3121,6 +3082,9 @@ class NotebookActivity : AppCompatActivity() {
         mfTapPeakCount = 0
         twoFingerTapFirstTime = 0L
         threeFingerTapFirstTime = 0L
+
+        // Page long-press menu.
+        cancelPageMenuLongPress()
     }
 
     /**
@@ -4631,7 +4595,6 @@ class NotebookActivity : AppCompatActivity() {
     private fun copyCurrentPage() {
         val pageId = currentPageId.takeIf { it.isNotEmpty() } ?: return
         pendingCopyPageId = if (pendingCopyPageId == pageId) null else pageId
-        updateCopyPasteButtons()
     }
 
     /** Pastes the clipboard page immediately after the current page, then navigates to it. */
@@ -4655,7 +4618,6 @@ class NotebookActivity : AppCompatActivity() {
             }
             if (newPageId == null) return@launch
             pendingCopyPageId = null
-            updateCopyPasteButtons()
             undoRedoManager.push(UndoRedoAction.PagePasted(currentPageId, currentPageIndex))
             updateUndoRedoButtons()
             drawingView.clearForPageLoad()
@@ -4667,9 +4629,141 @@ class NotebookActivity : AppCompatActivity() {
         }
     }
 
-    private fun updateCopyPasteButtons() {
-        binding.btnCopyPage.isSelected  = pendingCopyPageId != null
-        binding.btnPastePage.isEnabled  = pendingCopyPageId != null
+    // ── Page long-press menu ────────────────────────────────────────────────────
+    //
+    // The page-related actions that used to be toolbar buttons (template, page index, insert
+    // before/after, copy, paste, erase, delete) live here, opened by a finger long-press on the
+    // canvas via [handlePageMenuLongPress]. Paste is offered only when a page has been copied
+    // (mirrors the old disabled-button state — an unavailable action is simply absent on e-ink,
+    // never a silently-inert row). Actions call the same underlying methods the buttons did.
+
+    private fun showPageMenu() {
+        // A page must be open for these actions to make sense.
+        if (currentPageId.isEmpty()) return
+        drawingView.releaseRender()
+        val copied = pendingCopyPageId != null
+        ActionSheetDialog(this)
+            .title("Page")
+            .addAction(R.drawable.ic_template, "Template") { showTemplateDialog() }
+            .addAction(R.drawable.ic_files, "Page Index") { openPageIndex() }
+            .addAction(R.drawable.ic_insert_page_before, "Insert Page Before") { insertPageBeforeCurrentAndNavigate() }
+            .addAction(R.drawable.ic_insert_page_after, "Insert Page After") { insertPageAfterCurrentAndNavigate() }
+            .addAction(
+                R.drawable.ic_copy_page,
+                if (pendingCopyPageId == currentPageId) "Copy Page (copied — tap to clear)" else "Copy Page",
+            ) { copyCurrentPage() }
+            .apply {
+                if (copied) addAction(R.drawable.ic_paste_page, "Paste Page") { pasteCopiedPage() }
+            }
+            .addAction(R.drawable.ic_erase_all, "Erase Page") { eraseCurrentPage() }
+            .addAction(R.drawable.ic_page_delete, "Delete Page") { confirmDeleteCurrentPage() }
+            .show()
+    }
+
+    /** Template picker for the current page (was the `btnTemplate` toolbar button). */
+    private fun showTemplateDialog() {
+        val db = soilDatabase ?: return
+        val pageId = currentPageId.takeIf { it.isNotEmpty() } ?: return
+        TemplateDialog(
+            activity       = this,
+            lifecycleScope = lifecycleScope,
+            db             = db,
+            pageId         = pageId,
+            onConfirm      = { templateId, bitmap ->
+                applyTemplateToCurrentPage(templateId, bitmap)
+            },
+            onBrowseLibrary = {
+                val intent = Intent(this, TemplateBrowserActivity::class.java)
+                    .putExtra(TemplateBrowserActivity.EXTRA_MODE, TemplateBrowserActivity.MODE_PICK)
+                templatePickLauncher.launch(intent)
+            },
+        ).show()
+    }
+
+    /** Erase all content on the current page, with confirmation (was the `btnEraseAll` button). */
+    private fun eraseCurrentPage() {
+        val db = soilDatabase
+        val dialog = AlertDialog.Builder(this)
+            .setMessage("Erase this page?")
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Erase") { _, _ ->
+                // Snapshot the page/layer IDs now — they may change before the coroutine runs.
+                val eraseAllPageId      = currentPageId
+                val eraseAllLayerId     = currentLayerId
+                val eraseAllHeadingIds  = drawingView.getHeadings().map { it.id }
+                val eraseAllStickyIds   = drawingView.getStickyNotes().map { it.id }
+                val hasContent = drawingView.getStrokes().isNotEmpty() ||
+                                 eraseAllHeadingIds.isNotEmpty() ||
+                                 drawingView.getTextObjects().isNotEmpty() ||
+                                 drawingView.getLineObjects().isNotEmpty() ||
+                                 eraseAllStickyIds.isNotEmpty() ||
+                                 drawingView.getShapeObjects().isNotEmpty()
+                drawingView.eraseAll()
+                drawingView.loadHeadings(emptyList())
+                // All content removed from memory and will be soft-deleted from DB.
+                // Clear the persisted-ID registry; no snapshot needed for a user-initiated erase.
+                persistedStrokeIds.clear()
+                if (db != null && hasContent) {
+                    lifecycleScope.launch {
+                        val deletedAt = System.currentTimeMillis()
+                        withContext(Dispatchers.IO) {
+                            // Soft-delete all layer children (strokes, headings, any future types)
+                            // with a shared timestamp so restoreChildrenDeletedSince recovers everything atomically.
+                            db.notebookDao().softDeleteByParentId(eraseAllLayerId, deletedAt)
+                            // Schedule RTR so the recognized-text cache tracks this erase.
+                            noteContentEdit(db, eraseAllPageId)
+                        }
+                        // Record the erase as a single undoable action after the DB writes succeed.
+                        // headingIds stored so undo can restore them explicitly by ID (belt-and-suspenders
+                        // alongside restoreChildrenDeletedSince which uses a timestamp filter).
+                        undoRedoManager.push(
+                            UndoRedoAction.PageEraseAll(eraseAllPageId, eraseAllLayerId, deletedAt, eraseAllHeadingIds, eraseAllStickyIds)
+                        )
+                        updateUndoRedoButtons()
+                    }
+                }
+            }
+            .create()
+        dialog.show()
+        // Style after show() — window only exists once the dialog is displayed.
+        dialog.window?.setElevation(0f)
+        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
+    }
+
+    /** Delete the current page, with confirmation (was the `btnDeletePage` toolbar button). */
+    private fun confirmDeleteCurrentPage() {
+        val db = soilDatabase ?: return
+        // Confirmation dialog — flat Notesprout style (elevation=0, shape_bordered).
+        val dialog = AlertDialog.Builder(this)
+            .setMessage("Delete this page?")
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Delete") { _, _ ->
+                // Capture pageId, pageIndex, and deletedAt timestamp BEFORE the delete runs.
+                // All three soft-delete calls (page, layer, strokes) use the same timestamp
+                // so PageDeleted.undo can restore exactly those rows via restoreChildrenDeletedSince.
+                val deletedPageId    = currentPageId
+                val deletedPageIndex = currentPageIndex
+                val deletedAt        = System.currentTimeMillis()
+                lifecycleScope.launch {
+                    // No snapshot needed — the page being deleted is discarded.
+                    withContext(Dispatchers.IO) { deletePage(db, deletedAt) }
+                    undoRedoManager.push(
+                        UndoRedoAction.PageDeleted(deletedPageId, deletedPageIndex, deletedAt)
+                    )
+                    updateUndoRedoButtons()
+                    drawingView.clearForPageLoad()
+                    val result = withContext(Dispatchers.IO) { loadCurrentPage(db) }
+                    displayPage(result)
+                    updatePageIndicator()
+                    saveLastOpenedPage(currentPageId)
+                    postDisplayWork(db, result)
+                }
+            }
+            .create()
+        dialog.show()
+        // Style after show() — window only exists once the dialog is displayed.
+        dialog.window?.setElevation(0f)
+        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
     }
 
     // ── Library-grid cover ──────────────────────────────────────────────────

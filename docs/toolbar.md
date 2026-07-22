@@ -158,3 +158,34 @@ the bare `n / total` when the name is blank), at 18sp `inkBlack`.
 - The name makes this view far wider than the old `n / total`, so it is capped at `maxWidth=320dp` with
   `maxLines=1` + `ellipsize=end`. On narrow devices a long name truncates rather than running across the
   page — worth re-checking in every toolbar placement if that cap is ever changed.
+
+---
+
+## Page Long-Press Menu
+
+The **page-scoped** actions are **not** toolbar buttons — they live in a canvas long-press menu, so the
+bar stays focused on drawing tools. A one-finger stationary long-press anywhere on the canvas opens an
+`ActionSheetDialog` titled **"Page"** with: **Template · Page Index · Insert Page Before · Insert Page
+After · Copy Page · (Paste Page) · Erase Page · Delete Page**. Paste appears only when a page has been
+copied (`pendingCopyPageId != null`) — an unavailable action is simply absent, never a silently-inert
+row (disabled buttons are invisible on e-ink). Each row calls the same method its old button did.
+
+- **Gesture:** `handlePageMenuLongPress()` in `NotebookActivity.dispatchTouchEvent`'s finger fan-out,
+  alongside the swipe / toggle / multi-finger detectors. **Finger-only** (the stylus never reaches the
+  fan-out, so writing is untouched). Arms a posted runnable on `ACTION_DOWN` and lets it fire at
+  `getLongPressTimeout()` while the finger is still held; cancels on movement past `scaledTouchSlop`, a
+  second finger, `ACTION_UP`/`CANCEL`, or the pen-activity gate (`cancelFingerGestures`). The runnable
+  re-checks `isFinishing`/`isDestroyed`/`isPenActive` at fire time. A long-press is longer than the
+  toolbar-toggle tap window, so the two never collide.
+- **Suppressed** only for genuine *finger*-tap conflicts: over toolbar chrome, the shape-insert picker,
+  an open overflow menu, or a followable link / sticky note. It is deliberately **not** gated on the
+  active drawing tool — lasso / lasso-eraser / text-placement / shape-transform are *stylus*
+  interactions, orthogonal to a finger gesture, and the other finger gestures (swipe, double-tap
+  toggle) run in them freely. (An early build guarded on those modes and the menu silently did nothing
+  whenever the restored tool was Lasso — a finger long-press must work regardless of the stylus tool.)
+  `showPageMenu()` calls `releaseRender()` before showing so the sheet is visible on EPD.
+- **Registry impact:** the `template`, `pageIndex`, `insertPageBefore`, `insertPageAfter`, `deletePage`,
+  `copyPage`, `pastePage`, and `eraseAll` specs were **removed** from `ToolbarButtonRegistry` (and their
+  `activity_notebook.xml` views deleted). Per the append-only key rule these keys are simply retired —
+  a persisted config still listing them resolves to `null` and is skipped harmlessly, exactly like the
+  retired `lockOff`. `DEFAULT_MINI` swapped its `pageIndex` entry for `toc`.
