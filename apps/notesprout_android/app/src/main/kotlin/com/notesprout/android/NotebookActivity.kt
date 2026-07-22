@@ -247,10 +247,6 @@ class NotebookActivity : AppCompatActivity() {
     // ── Snap-to-guide mode ────────────────────────────────────────────────────
     private var isSnapEnabled = false
 
-    // ── Text placement mode ───────────────────────────────────────────────────
-    /** True while placement mode is active (waiting for next canvas stylus tap). */
-    private var isTextPlacementMode = false
-
     // ── Lasso selection state ─────────────────────────────────────────────────
     private var isLassoMode = false
     private var isLassoEraserMode = false
@@ -401,6 +397,9 @@ class NotebookActivity : AppCompatActivity() {
      * Null for notebooks that pre-date the metadata row (falls back gracefully).
      */
     private var notebookMetadata: NotebookMetadata? = null
+
+    /** In-memory pin state, read synchronously by the Page menu; loaded on open, updated on toggle. */
+    private var notebookPinned = false
 
     // ── Real-time recognition (RTR) ─────────────────────────────────────────────
 
@@ -1006,13 +1005,7 @@ class NotebookActivity : AppCompatActivity() {
             // Tapping the active lasso eraser button is a no-op.
         }
 
-        binding.btnInsertText.setOnClickListener {
-            if (!isTextPlacementMode) {
-                enterTextPlacementMode()
-            } else {
-                exitTextPlacementMode()
-            }
-        }
+        // Insert Text button retired — strokes are converted to text instead.
 
         binding.btnInsertLines.setOnClickListener {
             val db = soilDatabase ?: return@setOnClickListener
@@ -1091,7 +1084,7 @@ class NotebookActivity : AppCompatActivity() {
             }
         }
 
-        binding.btnToc.setOnClickListener { openToc() }
+        // Table of Contents button retired — reachable via the canvas gesture only.
 
         binding.btnRecents.setOnClickListener {
             lifecycleScope.launch {
@@ -1106,25 +1099,11 @@ class NotebookActivity : AppCompatActivity() {
             }
         }
 
-        binding.btnExport.setOnClickListener {
-            val db = soilDatabase ?: return@setOnClickListener
-            openExportScreen(db)
-        }
+        // Export button moved to the canvas long-press "Page" menu — see showPageMenu().
 
-        binding.btnTextRecognition.setOnClickListener {
-            val db = soilDatabase ?: return@setOnClickListener
-            showTextRecognitionMenu(db)
-        }
+        // Text-recognition button moved to the canvas long-press "Page" menu — see showPageMenu().
 
-        binding.btnPin.setOnClickListener {
-            val nbId = notebookId.takeIf { it.isNotEmpty() } ?: return@setOnClickListener
-            lifecycleScope.launch {
-                val nowPinned = withContext(Dispatchers.IO) { indexRepo.togglePin(nbId) }
-                binding.btnPin.setImageResource(
-                    if (nowPinned) R.drawable.ic_pinned_off else R.drawable.ic_pinned
-                )
-            }
-        }
+        // Pin button moved to the top of the canvas long-press "Page" menu — see showPageMenu().
 
         binding.btnLock.setOnClickListener {
             val nbId = notebookId.takeIf { it.isNotEmpty() } ?: return@setOnClickListener
@@ -1838,26 +1817,6 @@ class NotebookActivity : AppCompatActivity() {
             }
         }
 
-        // Canvas tap in text placement mode — open editor dialog and insert on confirm.
-        drawingView.onTextPlacementTap = { tapX, tapY ->
-            // Placement mode already exited inside the view's handleTextPlacementTouch
-            // (fires on ACTION_UP, after the stylus has left the screen).
-            // Do NOT call enableDrawing() here: the dialog's focus cycle does it safely —
-            // onWindowFocusChanged(true) → openRawDrawing() — after the stylus is gone.
-            isTextPlacementMode = false
-            binding.btnInsertText.isSelected = false
-            val tap = PointF(tapX, tapY)
-            TextEditDialog(
-                context = this,
-                initialMarkdown = "",
-                onConfirm = { markdown ->
-                    if (markdown.isNotBlank()) {
-                        insertTextObject(markdown, tap.x, tap.y)
-                    }
-                },
-            ).show()
-        }
-
         binding.drawingContainer.addView(
             drawingView.asView(),
             FrameLayout.LayoutParams(
@@ -2170,10 +2129,7 @@ class NotebookActivity : AppCompatActivity() {
             NotesproutApplication.appScope.launch { dayHistoryRepo.logOpened(notebookId) }
             val nbId = notebookId
             lifecycleScope.launch {
-                val pinned = withContext(Dispatchers.IO) { indexRepo.isNotebookPinned(nbId) }
-                binding.btnPin.setImageResource(
-                    if (pinned) R.drawable.ic_pinned_off else R.drawable.ic_pinned
-                )
+                notebookPinned = withContext(Dispatchers.IO) { indexRepo.isNotebookPinned(nbId) }
             }
         }
 
@@ -2446,15 +2402,6 @@ class NotebookActivity : AppCompatActivity() {
                         if (isFinger) return true
                     }
                 }
-            }
-        }
-
-        // Cancel text placement mode on any toolbar touch (except btnInsertText, which toggles
-        // placement mode via its own click listener and would re-enter if cancelled here).
-        if (event.actionMasked == MotionEvent.ACTION_DOWN && isTextPlacementMode) {
-            val inToolbar = isTouchInToolbar(event)
-            if (inToolbar && !isTouchInView(event, binding.btnInsertText)) {
-                exitTextPlacementMode()
             }
         }
 
@@ -2780,13 +2727,13 @@ class NotebookActivity : AppCompatActivity() {
     }
 
     /**
-     * Tap-to-follow ([handleLinkFollowGesture]) runs for a clean one-finger tap in every mode except
-     * text-placement (where a tap places text). [handleLinkFollowGesture] is finger-only
-     * (see [dispatchTouchEvent]), so this never conflicts with the stylus-driven lasso selection,
-     * lasso erase, or stylus tap-to-paste — those are separate input and keep their behavior.
+     * Tap-to-follow ([handleLinkFollowGesture]) runs for a clean one-finger tap in every mode.
+     * [handleLinkFollowGesture] is finger-only (see [dispatchTouchEvent]), so this never conflicts
+     * with the stylus-driven lasso selection, lasso erase, or stylus tap-to-paste — those are
+     * separate input and keep their behavior. (Kept as a named predicate so the tap-follow guards
+     * stay readable and re-gating link-follow later is a one-line change.)
      */
-    private fun isLinkFollowEnabled(): Boolean =
-        !isTextPlacementMode
+    private fun isLinkFollowEnabled(): Boolean = true
 
     /** Topmost link whose bounding box contains the view-space point ([x],[y]), or null. */
     private fun linkAt(x: Float, y: Float): LinkRender? =
@@ -4644,6 +4591,11 @@ class NotebookActivity : AppCompatActivity() {
         val copied = pendingCopyPageId != null
         ActionSheetDialog(this)
             .title("Page")
+            // Pin/unpin the notebook (was the btnPin toolbar button) — top of the menu.
+            .addAction(
+                if (notebookPinned) R.drawable.ic_pinned_off else R.drawable.ic_pinned,
+                if (notebookPinned) "Unpin Notebook" else "Pin Notebook",
+            ) { toggleNotebookPin() }
             .addAction(R.drawable.ic_template, "Template") { showTemplateDialog() }
             .addAction(R.drawable.ic_files, "Page Index") { openPageIndex() }
             .addAction(R.drawable.ic_insert_page_before, "Insert Page Before") { insertPageBeforeCurrentAndNavigate() }
@@ -4657,7 +4609,25 @@ class NotebookActivity : AppCompatActivity() {
             }
             .addAction(R.drawable.ic_erase_all, "Erase Page") { eraseCurrentPage() }
             .addAction(R.drawable.ic_page_delete, "Delete Page") { confirmDeleteCurrentPage() }
+            // Text-recognition actions (were the btnTextRecognition popup) sit just above Export.
+            .addAction(R.drawable.ic_text_recognition, "View recognized text") {
+                openTextViewer(soilDatabase ?: return@addAction)
+            }
+            .addAction(
+                R.drawable.ic_text_recognition,
+                if (notebookMetadata?.rtrEnabled == true) "Real-time text: On" else "Real-time text: Off",
+            ) { toggleRtr(soilDatabase ?: return@addAction) }
+            // Export (was a toolbar button) lives at the bottom of the Page menu now.
+            .addAction(R.drawable.ic_export, "Export") { openExportScreen(soilDatabase ?: return@addAction) }
             .show()
+    }
+
+    /** Toggle the notebook's pinned state in the global index and update the in-memory flag. */
+    private fun toggleNotebookPin() {
+        val nbId = notebookId.takeIf { it.isNotEmpty() } ?: return
+        lifecycleScope.launch {
+            notebookPinned = withContext(Dispatchers.IO) { indexRepo.togglePin(nbId) }
+        }
     }
 
     /** Template picker for the current page (was the `btnTemplate` toolbar button). */
@@ -4782,18 +4752,6 @@ class NotebookActivity : AppCompatActivity() {
      * The "Text" toolbar button: the two recognition actions that used to hang off the Export
      * sheet. Export itself now opens [ExportActivity] directly.
      */
-    private fun showTextRecognitionMenu(db: SoilDatabase) {
-        val rtrOn = notebookMetadata?.rtrEnabled == true
-        ActionSheetDialog(this)
-            .title("Text recognition")
-            .addAction(R.drawable.ic_text_recognition, "View recognized text") { openTextViewer(db) }
-            .addAction(
-                R.drawable.ic_text_recognition,
-                if (rtrOn) "Real-time text: On" else "Real-time text: Off",
-            ) { toggleRtr(db) }
-            .show()
-    }
-
     /**
      * Open the export screen. Strokes are flushed first: [ExportActivity] renders from the `.soil`
      * on disk, so unsaved ink in the live view would silently be missing from the output.
@@ -7801,99 +7759,9 @@ class NotebookActivity : AppCompatActivity() {
         binding.btnShapeAspectLock.isSelected = isLocked
     }
 
-    // ── Text placement mode helpers ───────────────────────────────────────────
-
-    private fun enterTextPlacementMode() {
-        if (isLassoMode) exitLassoMode()
-        if (isLassoEraserMode) exitLassoEraserMode()
-        isTextPlacementMode = true
-        drawingView.setTextPlacementMode(true)
-        drawingView.releaseRender()
-        binding.btnInsertText.isSelected = true
-        binding.btnPen.isSelected    = false
-        binding.btnEraser.isSelected = false
-        binding.btnLasso.isSelected  = false
-        binding.btnLassoEraser.isSelected = false
-    }
-
-    private fun exitTextPlacementMode() {
-        isTextPlacementMode = false
-        drawingView.setTextPlacementMode(false)
-        drawingView.enableDrawing()
-        binding.btnInsertText.isSelected = false
-        binding.btnPen.isSelected    = !isEraserActive
-        binding.btnEraser.isSelected = isEraserActive
-    }
-
-    /**
-     * Measure [markdown], compute a bounding box centered on ([tapX], [tapY]) clamped
-     * to the page, insert a new type="text" row, update the canvas, select the new
-     * object, and push a [UndoRedoAction.TextInserted] undo entry.
-     * Switches the activity into lasso mode so drag-move and Delete are immediately available.
-     */
-    private fun insertTextObject(markdown: String, tapX: Float, tapY: Float) {
-        val db      = soilDatabase ?: return
-        val layerId = currentLayerId.takeIf { it.isNotEmpty() } ?: return
-        val pageId  = currentPageId.takeIf { it.isNotEmpty() } ?: return
-        val pageW   = drawingView.asView().width
-        val pageH   = drawingView.asView().height
-
-        lifecycleScope.launch {
-            val paint = TextPaint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
-                color    = android.graphics.Color.BLACK
-                textSize = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 24f, resources.displayMetrics)
-            }
-            val (measuredW, measuredH) = withContext(Dispatchers.Default) {
-                TextObjectRenderer.measure(markdown, pageW, paint, resources.displayMetrics.density)
-            }
-
-            val objW  = measuredW.toFloat().coerceAtMost(pageW.toFloat())
-            val objH  = measuredH.toFloat()
-            val left  = (tapX - objW / 2f).coerceIn(0f, (pageW - objW).coerceAtLeast(0f))
-            val top   = (tapY - objH / 2f).coerceIn(0f, (pageH - objH).coerceAtLeast(0f))
-            val bbox  = RectF(left, top, left + objW, top + objH)
-
-            val textId  = UUID.randomUUID().toString()
-            val now     = System.currentTimeMillis()
-            val textRender = TextRender(id = textId, boundingBox = bbox, text = markdown)
-
-            withContext(Dispatchers.IO) {
-                db.notebookDao().insertTextSubtree(textRender, layerId, 0, now, now)
-                noteContentEdit(db, pageId)
-            }
-
-            val updatedTexts   = drawingView.getTextObjects() + textRender
-            drawingView.loadTextObjects(updatedTexts)
-
-            val templateBmp    = currentTemplateBitmap
-            val currentStrokes = drawingView.getStrokes()
-            val currentHeadings = drawingView.getHeadings()
-            val bitmap = withContext(Dispatchers.IO) {
-                drawingView.buildRenderBitmap(currentStrokes, templateBmp, currentHeadings, updatedTexts)
-            }
-            if (bitmap != null) {
-                drawingView.loadStrokesWithBitmap(currentStrokes, bitmap, templateBmp)
-            }
-
-            // Select the new text object and show the floating toolbar.
-            if (!isLassoMode) enterLassoMode()
-            selectedObjectIds.clear()
-            selectedObjectIds.add(textId)
-            drawingView.lassoSelectedIds = selectedObjectIds.toSet()
-            val pad = 8f * resources.displayMetrics.density
-            val selBox = RectF(bbox).apply { inset(-pad, -pad) }
-            drawingView.setLassoOverlay(null, selBox)
-            updateFloatingSelectionToolbar(selBox)
-
-            undoRedoManager.push(UndoRedoAction.TextInserted(
-                textId     = textId,
-                pageId     = pageId,
-                layerId    = layerId,
-                textRender = textRender,
-            ))
-            updateUndoRedoButtons()
-        }
-    }
+    // Text placement mode (the Insert Text button + tap-to-place-text flow) was retired —
+    // strokes are converted to text instead. Existing type="text" objects remain fully
+    // editable via [showTextEditDialogForTextObject] and the TextInserted undo/redo path.
 
     /**
      * Opens [TextEditDialog] pre-filled with [textRender]'s current markdown.

@@ -68,8 +68,13 @@ so `isSelected` state, icon state, and listeners always survive.
   → `R.id`, icon, label, **group** (consecutive buttons whose group differs get an auto-divider), and
   a `pinned` flag. `PINNED_KEY = "close"` (always present, never hideable); `SETTINGS_KEY =
   "toolbarSettings"` (the gear; force-included in mini so the dialog is always reachable).
-  **KEY STABILITY RULE:** keys are persisted → append-only, never rename/reorder. `DEFAULT_ORDER` =
-  XML order (no spacer); `DEFAULT_MINI` = compact everyday subset.
+  **KEY STABILITY RULE:** keys are persisted → append-only, never rename/reorder `SPECS`. `DEFAULT_ORDER`
+  is an **explicit key list** (decoupled from `SPECS` declaration order) defining the *display* default —
+  a **bracketed layout**: Close/Recents then Undo/Redo on the left (history parked in a fixed spot right
+  after navigation), content tools centered (ink & select → insert-objects), Scratchpad/Calendar on the
+  right, with the latent Encrypt button + pinned gear at the far right. It must list every live `SPECS` key or `load()` appends the missing ones. `DEFAULT_MINI` =
+  compact everyday subset. **Changing `DEFAULT_ORDER` only affects fresh installs / a toolbar reset** — an
+  existing persisted `order` wins and is never reordered by `load()` (it only appends new keys).
   **Encryption buttons:** `"lock"` (`btnLock`, `ic_lock`, group `GROUP_NOTEBOOK`) and `"lockOff"`
   (`btnLockOff`, `ic_lock_off`, group `GROUP_NOTEBOOK`) were appended in S6. They are runtime-hidden
   based on encryption state — `btnLock` visible only on unencrypted notebooks, `btnLockOff` only on
@@ -77,11 +82,12 @@ so `isSelected` state, icon state, and listeners always survive.
   a one-time migration in `ToolbarPreferencesManager` appends any registry keys missing from the
   persisted list (new keys appear at the end rather than being hidden until a manual reset).
   **Text-recognition button:** `"textRecognition"` (`btnTextRecognition`, `ic_text_recognition`,
-  group `GROUP_NOTEBOOK`) was appended when export moved to its own screen. It opens a two-item
-  action sheet — "View recognized text" and the per-notebook "Real-time text: On/Off" toggle — both
-  of which previously hung off the Export action sheet. `btnExport` now opens `ExportActivity`
-  directly with no intermediate sheet. Existing users pick the new key up via the same append
-  migration described above.
+  group `GROUP_NOTEBOOK`) was appended when export moved to its own screen. It opened a two-item
+  action sheet — "View recognized text" and the per-notebook "Real-time text: On/Off" toggle. Both
+  actions were **later moved into the canvas long-press "Page" menu** (just above Export — see
+  `showPageMenu()`), and the toolbar button (spec + view + `showTextRecognitionMenu`) was removed;
+  `openTextViewer()`/`toggleRtr()` are called directly from the Page menu now. The key retires
+  harmlessly under the append-only rule.
 - **`ToolbarLayoutManager`** — arranges the existing button views into `drawingToolbar` per
   `ToolbarConfig`: resolves the visible key list (`order − hidden`, Close always kept; or the mini
   set when `miniEnabled && FLOAT`), sets orientation + size + edge-aware background, inserts
@@ -188,4 +194,22 @@ row (disabled buttons are invisible on e-ink). Each row calls the same method it
   `copyPage`, `pastePage`, and `eraseAll` specs were **removed** from `ToolbarButtonRegistry` (and their
   `activity_notebook.xml` views deleted). Per the append-only key rule these keys are simply retired —
   a persisted config still listing them resolves to `null` and is skipped harmlessly, exactly like the
-  retired `lockOff`. `DEFAULT_MINI` swapped its `pageIndex` entry for `toc`.
+  retired `lockOff`.
+- **Later retirements (`toc`, `export`, `insertText`, `textRecognition`, `pin`):** the `toc` spec/view
+  were removed — the table of contents is reachable via the swipe-down-on-canvas gesture only
+  (`evaluateSwipeDownToc` → `openToc()`, still live). `export` moved to the **bottom of the canvas
+  long-press "Page" menu** (`showPageMenu()` → `openExportScreen()`); its spec/view were removed from the
+  toolbar. `textRecognition` moved to the **Page menu just above Export** — its two actions ("View
+  recognized text" → `openTextViewer()`, and the "Real-time text: On/Off" toggle → `toggleRtr()`) are
+  added inline in `showPageMenu()`, and the button (spec + view + `showTextRecognitionMenu`) was removed.
+  `pin` moved to the **top of the Page menu** — its spec/view were removed; a synchronous in-memory
+  `notebookPinned` flag (loaded on open, updated by `toggleNotebookPin()`) drives the menu item's
+  label/icon ("Pin Notebook"/"Unpin Notebook"), replacing the old button's live icon swap.
+  `insertText` (the tap-to-place-text flow) was retired outright — strokes are converted to text instead —
+  so its spec/view **and** the Activity-side placement machinery
+  (`enterTextPlacementMode`/`exitTextPlacementMode`/`insertTextObject`, the `onTextPlacementTap` wiring,
+  and the toolbar-touch cancel guard) were deleted; existing `type="text"` objects stay editable via
+  `showTextEditDialogForTextObject` and the `TextInserted` undo path. The dormant `DrawingView` placement
+  hooks (`setTextPlacementMode`/`onTextPlacementTap`) are left in place, unused. All five keys retire
+  harmlessly under the append-only rule. `DEFAULT_MINI` is now `pen, eraser, undo, lasso` (its former
+  `toc` entry dropped).

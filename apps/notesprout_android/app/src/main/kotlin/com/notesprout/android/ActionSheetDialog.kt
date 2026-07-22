@@ -27,6 +27,8 @@ import androidx.core.content.ContextCompat
  *   - Tapping outside dismisses (AlertDialog default)
  *   - When a title is provided, an X close button appears in the upper-right of the title row
  *   - 1dp inkBlack dividers between items
+ *   - Title row is a pinned header; the action list scrolls (height-capped) when it would otherwise
+ *     run off a short screen — so no item is ever clipped unreachable (e.g. BOOX Go 6)
  */
 class ActionSheetDialog(private val context: Context) {
 
@@ -66,6 +68,14 @@ class ActionSheetDialog(private val context: Context) {
         val iconGap = (12 * density).toInt()
         val dividerH = (1 * density).toInt()
 
+        // Root holds a fixed title header (if any) + a scrollable action list, so a tall menu on a
+        // short screen scrolls instead of clipping items off the bottom (e.g. Export on the BOOX Go 6).
+        val root = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+        }
+
+        // Action rows live inside a height-capped ScrollView. A short menu wraps to its content
+        // (compact); a tall one caps at [maxScrollH] and scrolls internally.
         val container = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
         }
@@ -99,12 +109,13 @@ class ActionSheetDialog(private val context: Context) {
             }
             titleRow.addView(closeBtn, LinearLayout.LayoutParams(iconSize, iconSize))
 
-            container.addView(titleRow, LinearLayout.LayoutParams(
+            // Title stays pinned above the scroll area.
+            root.addView(titleRow, LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT,
             ))
 
-            container.addView(makeDivider(context, inkBlack, dividerH))
+            root.addView(makeDivider(context, inkBlack, dividerH))
         }
 
         // ── Action rows ────────────────────────────────────────────────────────
@@ -123,8 +134,29 @@ class ActionSheetDialog(private val context: Context) {
             ))
         }
 
+        // Cap the scrollable list so title + list always fit the screen (leaves room for the pinned
+        // header + AlertDialog margins). Only bites when the content is genuinely taller than this.
+        val maxScrollH = (context.resources.displayMetrics.heightPixels * 0.72f).toInt()
+        val scroll = object : android.widget.ScrollView(context) {
+            override fun onMeasure(widthSpec: Int, heightSpec: Int) {
+                val capped = MeasureSpec.makeMeasureSpec(maxScrollH, MeasureSpec.AT_MOST)
+                super.onMeasure(widthSpec, capped)
+            }
+        }.apply {
+            isFillViewport = false
+            overScrollMode = View.OVER_SCROLL_NEVER   // no e-ink overscroll glow/animation
+            addView(container, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+            ))
+        }
+        root.addView(scroll, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT,
+        ))
+
         dialog = AlertDialog.Builder(context)
-            .setView(container)
+            .setView(root)
             .create()
 
         dialog.setCanceledOnTouchOutside(touchOutsideDismisses)

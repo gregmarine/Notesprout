@@ -158,7 +158,7 @@ Fuzzy match against all notebooks: substring (3) > all words present (2) > prefi
 
 ## Notebook-Level Export
 
-Both `MainActivity` (long-press → Export) and `NotebookActivity` (toolbar Export button) first
+Both `MainActivity` (long-press → Export) and `NotebookActivity` (canvas "Page" menu → Export) first
 present a **format chooser** `ActionSheetDialog` with two rows before starting any export:
 
 - **Export as PDF** → **template sub-choice** (see below) → existing PDF path (encrypted-unencrypted warning + optional PDF password)
@@ -369,8 +369,10 @@ in every extras list.
 
 ## Table of Contents (TOC)
 
-The notebook TOC (`btnToc` → `toc/TocDialog`) is a **hierarchical** H1→H2→H3 outline of the notebook's
-headings, built by `toc/TocRepository.buildTocTree(): List<TocNode>`.
+The notebook TOC (`toc/TocDialog`) is a **hierarchical** H1→H2→H3 outline of the notebook's
+headings, built by `toc/TocRepository.buildTocTree(): List<TocNode>`. It is opened **only** by the
+swipe-down-on-canvas gesture (`NotebookActivity.evaluateSwipeDownToc` → `openToc()`) — the former
+`btnToc` toolbar button was retired.
 
 - **`TocNode`** (`toc/TocNode.kt`) — `pageNumber`, `pageIndex`, `pageId`, `level` (1–3), `title`
   (prefix-stripped; `""` for unrecognized stroke headings), `heading: HeadingStroke`, and a mutable
@@ -459,7 +461,8 @@ a **MainActivity recents browse mode** (notebook cards) and a **NotebookActivity
 
 ### NotebookActivity recents dialog (`notebook/RecentsDialog.kt`)
 
-- `btnRecents` (`ic_clock`) after `btnClose`, before the divider preceding `btnToc`. Modeled on
+- `btnRecents` (`ic_clock`) sits second in the default order, right after `btnClose` (see
+  `ToolbarButtonRegistry.DEFAULT_ORDER`). Modeled on
   `TocDialog`: paginated (measure row height → `itemsPerPage`; first/prev/next/last + indicator).
   Each row: notebook name (TOC heading style) / date-time (smaller) / folder path (smaller).
   Layouts: `dialog_recents.xml`, `item_recent_entry.xml`. Empty state "No recent notebooks".

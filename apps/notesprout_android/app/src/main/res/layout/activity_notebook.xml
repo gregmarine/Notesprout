@@ -49,36 +49,14 @@
             android:src="@drawable/ic_clock"
             android:contentDescription="Recent notebooks" />
 
-        <!-- Table of Contents button -->
-        <androidx.appcompat.widget.AppCompatImageButton
-            android:id="@+id/btnToc"
-            style="@style/Widget.Notesprout.ToolbarButton"
-            android:src="@drawable/ic_toc"
-            android:contentDescription="Table of Contents" />
+        <!-- Table of Contents (toc) reachable via the canvas gesture only; button removed.
+             Export moved to the canvas long-press "Page" menu — see NotebookActivity.showPageMenu(). -->
 
-        <!-- Export button: opens the export screen (format, options, destination) -->
-        <androidx.appcompat.widget.AppCompatImageButton
-            android:id="@+id/btnExport"
-            style="@style/Widget.Notesprout.ToolbarButton"
-            android:layout_marginStart="4dp"
-            android:src="@drawable/ic_export"
-            android:contentDescription="Export notebook" />
+        <!-- Text recognition (View recognized text + real-time text toggle) moved to the canvas
+             long-press "Page" menu — see NotebookActivity.showPageMenu(). Button removed. -->
 
-        <!-- Text button: view recognized text + real-time text toggle -->
-        <androidx.appcompat.widget.AppCompatImageButton
-            android:id="@+id/btnTextRecognition"
-            style="@style/Widget.Notesprout.ToolbarButton"
-            android:layout_marginStart="4dp"
-            android:src="@drawable/ic_text_recognition"
-            android:contentDescription="Text recognition" />
-
-        <!-- Pin button: pin/unpin this notebook -->
-        <androidx.appcompat.widget.AppCompatImageButton
-            android:id="@+id/btnPin"
-            style="@style/Widget.Notesprout.ToolbarButton"
-            android:layout_marginStart="4dp"
-            android:src="@drawable/ic_pinned"
-            android:contentDescription="Pin notebook" />
+        <!-- Pin/unpin moved to the top of the canvas long-press "Page" menu — see
+             NotebookActivity.showPageMenu(). Button removed. -->
 
         <!-- Lock button: encrypt this notebook (visible only when unencrypted) -->
         <androidx.appcompat.widget.AppCompatImageButton
@@ -111,13 +89,7 @@
             android:src="@drawable/ic_lasso_eraser"
             android:contentDescription="Lasso eraser" />
 
-        <!-- Insert text object -->
-        <androidx.appcompat.widget.AppCompatImageButton
-            android:id="@+id/btnInsertText"
-            style="@style/Widget.Notesprout.ToolbarButton"
-            android:layout_marginStart="4dp"
-            android:src="@drawable/ic_text_recognition"
-            android:contentDescription="Insert text" />
+        <!-- Insert text (insertText) retired — strokes are converted to text instead; button removed. -->
 
         <!-- Insert line objects -->
         <androidx.appcompat.widget.AppCompatImageButton

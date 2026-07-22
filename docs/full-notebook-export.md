@@ -17,7 +17,7 @@ Every export in the app — `.soil` included — runs through the single **`Expo
 Entry points:
 
 - **MainActivity** — long-press context menu → Export
-- **NotebookActivity** — toolbar Export button (flushes ink first)
+- **NotebookActivity** — canvas long-press "Page" menu → Export (bottom item; flushes ink first)
 - **PageIndexActivity** — select pages → Export (seeds the "Selected (n)" scope)
 
 The screen presents Pages / Format / Options / Encryption / Destination at once; the top-right
