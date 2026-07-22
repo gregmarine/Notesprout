@@ -210,6 +210,13 @@ The aspect-lock toggle (`btnShapeAspectLock`) cycles through shape-specific labe
 On transform end, `getBeforeRender()` + `getWorkingRender()` carry the before/after snapshots into
 a `ShapeTransformed` undo action.
 
+> **Persistence:** `persistShapeTransform` writes via the **columnar `updateColumns`** path in every
+> host (notebook `NotebookDao`, and the index-table hosts `ScratchpadActivity` / `CalendarActivity` /
+> `DayDetailActivity`). The shape reader (`toShapeRender`) prefers the typed `shapeType/centerX/…`
+> columns, so a columnar shape row (any pasted shape, or one ever lasso-moved) ignores the legacy
+> `data` JSON — persisting a transform through `updateObjectData` was a silent no-op and the shape
+> snapped back on reload. Device-verified on Scratch Pad + Calendar (2026-07-21).
+
 ---
 
 ## Insert Shape Toolbar

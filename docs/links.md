@@ -22,10 +22,14 @@ only) to navigate.
 > `ObjectColumns.kt`; see [`data-architecture.md`](data-architecture.md) "Schema Version 4". Shapes
 > are full linkables end-to-end (capture, render on both engines, PDF export, unlink-restore, undo).
 >
-> **`replaceLinkSubtree` re-ids the children on every write** (`remapDescendantIds`). A legacy blob
-> link that shared its embedded child ids with another (already-migrated) link would otherwise hit
-> `UNIQUE constraint failed: notebook.id` the first time a move materializes its children as rows —
-> the child ids are the link's private content, so fresh UUIDs are correct and collision-proof. See
+> **Every composite subtree helper re-ids the children on write** (`remapSubtreeRows` /
+> `remapDescendantIds`) — the four `insert*Subtree` **and** the four `replace*Subtree` helpers
+> (link / sticky / heading / text). The child ids are the composite's private content; copy/cut/
+> `translate` all preserve them, so **pasting** a copied link or sticky (or pasting the same clipboard
+> twice, or a repeated "Send to Notebook") would insert rows whose ids collide with the source's live
+> children → `UNIQUE constraint failed: notebook.id`. Fresh UUIDs on every materialization are correct
+> and collision-proof. (The original fix covered only the `replace*` helpers; the `insert*` half was
+> found via the paste crash and closed 2026-07 — device-verified on G102.) See
 > [`data-architecture.md`](data-architecture.md) "Composites are relational child rows".
 
 ---

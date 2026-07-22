@@ -253,12 +253,29 @@ any other object type).
 
 ---
 
+## Real-time persistence (process-death durability)
+
+The editor persists its canvas **straight to the sticky's own encrypted database in real-time** —
+the same model as writing on a notebook page. It is launched with routing extras (see
+`StickyNoteEditorActivity.intent(...)`: host kind, notebook id, encrypted flag, bbox) and, on each
+content change (`pushHistory` / undo / redo), schedules a debounced (~0.6 s) write plus a flush on
+`onStop`:
+
+- **Notebook stickies** → the notebook's `.soil`, opened with the key resolved from the in-memory
+  `KeySession` (the key is **never** passed in an Intent), via `replaceStickyNoteSubtree`. The
+  connection is cached for the editor's lifetime and closed in `onDestroy`.
+- **Scratch Pad / Calendar / Day-note stickies** → the already-open, already-encrypted global index
+  (`scratchpadDao`/`calendarDao` `updateData`).
+
+No plaintext copy of the content is ever written to disk, and an OS kill mid-edit loses nothing that
+landed before the last debounce. The host's return-to-editor callback still persists on a normal
+close (idempotent with the real-time write) and drives the undo/render update. Device-verified on
+G102 across the notebook `.soil` and index paths (2026-07-21).
+
 ## Deferred items
 
 - **Cross-size content scaling:** when the editor window differs from `contentWidth/Height` (rotation,
   cross-device paste), proportionally rescale embedded content instead of rendering as-authored + clipping.
-- **In-editor autosave / process-death durability:** the editor holds content in memory until close;
-  persist incrementally (or on `onPause`) so an OS kill mid-edit doesn't lose strokes.
 - **Multi-page sticky notes** (D1 chose single page).
 - **Native text/line insertion inside the editor** (D2 chose pen/eraser/lasso + paste only).
 - **Content affordance on the icon** (e.g. "has content" mark or mini-preview — currently one static icon).

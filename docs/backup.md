@@ -90,9 +90,18 @@ sequence:
 1. Resolve destination directories (fail-fast per destination, not global abort).
 2. Pre-flight DRIVE token fetch (`DriveAuth.getAccessTokenSilent`).
 3. For each (notebook, destination) pair needing backup: copy `.soil`, stamp timestamp on success.
-4. `NotesproutIndex.checkpointAndVacuum()` — flushes WAL, makes `notesprout.db` self-contained.
-5. Copy `notesprout.db` to each enabled destination.
-6. Persist `config.lastRunAt`.
+   Pre-backup compaction opens+closes each notebook, which absorbs its WAL — so the main file is a
+   complete copy. A notebook that **couldn't** be checkpointed unattended (NOTEBOOK-scope encrypted,
+   or GLOBAL without a cached passphrase) has its non-empty `-wal` **sidecar copied alongside** the
+   `.soil`, and both must land before the notebook is stamped backed-up; when the WAL *was* absorbed,
+   any stale destination sidecar is deleted (a fresh `.soil` paired with an old `-wal` would corrupt
+   on restore).
+4. `NotesproutIndex.checkpointAndVacuum()`, then snapshot the index to a local temp and **probe it**
+   before streaming to destinations (guards against a torn copy of the live, still-open index).
+5. Copy `notesprout.db` to each enabled destination (writes stream to `.part` then rename — a torn
+   write never replaces a good backup).
+6. Persist `config.lastRunAt` **only if at least one destination succeeded** (a fully-failed run no
+   longer reports "backed up just now").
 
 ---
 
@@ -282,14 +291,24 @@ a per-notebook import (that is what full-notebook import is for).
 **Key classes:** `RestoreSource` (LOCAL/SAF or DRIVE, with device-folder selection) and
 `RestoreEngine` (`data/backup/RestoreEngine.kt`).
 
-**Staging-first ordering** — the live library is not touched until the fetch has fully succeeded:
+**Staging-first, aside-swap commit** — the live library is never in a state with no intact copy:
 
 1. Wipe + recreate `cacheDir/restore_staging`.
-2. Fetch the backup's `notesprout.db` and every `.soil` into staging. **Any network/IO failure here
-   leaves the live library completely untouched.**
-3. Only then: seal the index, clear the cached global passphrase **and all cached raw keys**
-   (`KeyMaterial` / `KeySession` / `PassphraseStore`).
-4. Wipe the live `Garden/` + index; move the staged files into place.
+2. Fetch the backup's `notesprout.db` and every `.soil` (plus any `-wal` sidecar) into staging.
+   **Every per-file result is checked — a single failure aborts the whole restore**, and each file
+   streams to a `.part` name then renames, so a dropped connection never stages a truncated file.
+   The live library is untouched if this fails.
+3. **Validate + free-space gate:** probe the staged index and every staged `.soil` (reject a
+   non-database); require ~2× the staged size free, else hard-fail with a clear message.
+4. Seal the index, then **move (rename) the live index + `Garden/` aside** into `restore_replaced/`,
+   copy the staged Garden in, and install the staged index **last** as the commit marker.
+5. Only after the index is in place: clear the cached global passphrase **and all cached raw keys**
+   (`KeyMaterial` / `KeySession` / `PassphraseStore`), then delete the aside copy.
+
+**Crash recovery.** A kill mid-commit is repaired at launch by `RestoreEngine.recoverInterrupted`
+(called from `BootstrapActivity`): aside present + no live index ⇒ roll the old library back; aside
+present + live index present ⇒ the commit finished, discard the aside. WAL sidecars staged in step 2
+travel with their `.soil` (see the backup side's un-checkpointable-notebook handling).
 
 **Restart into unlock.** The restored index is encrypted under the **backup device's** global
 passphrase, which is not this device's. So the next launch necessarily lands in
@@ -299,5 +318,6 @@ deterministic — a stale cached key would otherwise fail verification and look 
 
 **Entry point:** the Restore section of Backup Settings.
 
-**Status:** the LOCAL/SAF path is validated end-to-end on G102. The DRIVE path is built but had not
-been exercised on-device at the time of writing.
+**Status:** the LOCAL/SAF backup **and** restore round-trip are validated end-to-end on G102
+(2026-07-21), including the WAL-sidecar copy/delete branches and the mid-commit recovery. The DRIVE
+path is built and shares the same engine/writer logic but has not been exercised on-device.

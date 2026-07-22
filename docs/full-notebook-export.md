@@ -249,15 +249,22 @@ Both paths call `startImportFromUri(uri)`.
 4. **Read manifest.** `NotebookImporter.readManifest(file, fallbackName, passphrase?)` opens the file via
    `SoilCrypto.openRaw`, reads `notebook_meta` + page count. Missing `notebook_meta` → `meta = null`,
    fallback name = file's display name minus `.soil`, empty `folderPath` (lands at root or chosen folder).
-   No `notebook` table → `ImportException` → rejected.
-5. **ID collision.** If `meta.notebookId` already exists in the index (live row): **Replace existing** /
-   **Keep both** (fresh UUID) / **Cancel**. Replace keeps the existing row's placement and skips the
-   placement dialog. Keep both proceeds to placement.
-6. **Placement dialog.** "Notebook's folders" (default — recreates missing folders with same UUIDs/names
-   via `ensureFolderWithId`, walking `folderPath` root→parent) or "Choose folder…" (enters
-   `DestinationPickerState.ImportNotebook` — existing picker, no folders created).
+   No `notebook` table → `ImportException` → rejected. **The manifest is untrusted input:** every
+   `notebookId` / folder id read from it is validated (`isSafeImportId` — UUID alphabet only) before it
+   is used as a `soilFile()` path or index key, closing path-traversal; a non-UUID id falls back to a
+   fresh UUID. `SoilMigrator`'s ATTACH statements single-quote-escape the file path.
+5. **ID collision.** If a (validated) `meta.notebookId` already exists in the index (live row):
+   **Replace existing** / **Keep both** (fresh UUID) / **Cancel**. Replace keeps the existing row's
+   placement and skips the placement dialog. Keep both proceeds to placement.
+6. **Placement dialog.** "Notebook's folders" (default) or "Choose folder…". Ancestry recreation is
+   **strictly create-only** (`importFolderCreateOnly`): a folder path segment whose id is missing is
+   created with that UUID/name; an id that already exists — as a live folder, a soft-deleted folder,
+   or a non-folder — is **never mutated**, and the descent stops there (the notebook lands one level
+   up). Imported ancestry can't resurrect, rename, or move the user's own folders.
 7. **Name conflict.** If a notebook of the same name already exists in the target folder: **Replace**
-   (soft-deletes the conflict, imports with same name) or **Keep both** (appends " Copy").
+   or **Keep both** (appends " Copy"). **Replace retires the existing notebook only *after* the import
+   fully commits** (soft-delete → normal trash), so cancelling at a later step leaves it intact; it is
+   refused outright if that notebook is currently open in a `NotebookActivity` (`OpenNotebooks`).
 8. **Keying chooser (encrypted only).** `ActionSheetDialog` after placement is resolved, before writing
    to Garden — "Keep existing passphrase" / "Use this device's global" / "New notebook passphrase".
    See [`docs/encryption.md`](encryption.md) for the scope rule (including GLOBAL→NOTEBOOK downgrade).

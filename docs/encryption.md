@@ -173,9 +173,11 @@ persisted.
 ### `SoilMigrator` (`crypto/SoilMigrator.kt`)
 
 `encryptInPlace`, `decryptInPlace`, and `rekeyInPlace` — all `suspend` on `Dispatchers.IO`, using a
-temp file then atomic rename, with full sidecar cleanup. Uses `sqlcipher_export()` via an
-ATTACH/export/DETACH sequence on a zetetic connection. Exception-safe: on any failure before the
-rename, the temp is deleted and the original is intact.
+temp file then a **rename-first `commitReplace`** (`original → .old.bak → tmp into place → drop
+.old.bak`) so there is never an instant with zero intact copies, plus fsync and launch-time
+`recoverInterruptedMigration`. Uses `sqlcipher_export()` via an ATTACH/export/DETACH sequence on a
+zetetic connection. Exception-safe: a rename failure rolls the original back and **keeps** the
+verified temp. See [Migration Mechanics](#migration-mechanics-sqlcipher_export) for the full flow.
 
 **`sqlcipher_export` does not copy `PRAGMA user_version`** — every round-trip must restore it by hand
 (`copyUserVersion`), or the output is version 0. This is not cosmetic: a version-0 file whose schema
@@ -277,15 +279,29 @@ encrypted, so their schema still matched.)
 
 Converting a `.soil` in place:
 
-1. Open the **source** file using the zetetic driver (plaintext = empty key `""`, encrypted = its passphrase).
-2. `ATTACH DATABASE '<tmp>' AS target KEY '<dest-passphrase>'` (empty key for decrypt).
-3. `SELECT sqlcipher_export('target')` — copies all pages into `<tmp>`.
-4. `DETACH DATABASE 'target'`.
-5. `SoilCrypto.verifyPassphrase(<tmp>, dest-passphrase)`.
-6. Delete the original + WAL/SHM/journal siblings, then `tmp.renameTo(original)`.
-7. Delete any `*.undoredo` sidecar.
+0. **Probe-before-encrypt.** `encryptInPlace` refuses input that isn't actually plaintext
+   (`SoilCrypto.probe(...) == Plaintext`). This stops the index-drift retry that could otherwise
+   read an already-encrypted file as an empty source and replace real data with an empty output.
+1. Checkpoint the source WAL with a **non-deleting** framework open (`NonDeletingErrorHandler`) — a
+   corruption report during this open must never delete the live file.
+2. Open the encrypted-destination temp via the zetetic driver; `ATTACH DATABASE '<src>'` (paths
+   single-quote-escaped), `SELECT sqlcipher_export(...)`, then `copyUserVersion` (see below), DETACH.
+3. `SoilCrypto.verifyPassphrase(<tmp>, dest-passphrase)` (or `verifyPlaintext` for decrypt).
+4. **Commit via `commitReplace` — never a state with zero intact copies:**
+   `original → <original>.old.bak` (rename), then `<tmp> → original` (rename), then delete
+   `.old.bak`. On a rename failure the original is rolled back and the verified `tmp` is **kept**,
+   never deleted. `fsync` of the file + parent dir brackets the swap.
 
-On any failure before step 6, `tmp` is deleted and the original is never touched.
+**Crash recovery.** A kill in the swap window (or an orphan `*.enc/.dec/.rekey.tmp` from an older
+build) is repaired at launch by `SoilMigrator.recoverInterruptedMigration` — called from
+`BootstrapActivity.recoverGardenOrphans` (Garden sweep) and `NotesproutIndex.ensureReady` (the index
+itself). If `original` is missing and a `.old.bak` (or verified `.tmp`) exists, it is renamed back;
+a stale `.old.bak` next to a present `original` is dropped. This is why the historical
+"delete-original-before-rename destroys both copies" hole is closed.
+
+**Creation is a separate path.** Only `SoilCrypto.createRawEncrypted`/`createRawPlaintext` may create
+a `.soil`; every other open is exists-guarded (`verifyPassphrase`/`openRaw` return/throw on a missing
+file) so a create-capable open can never fabricate an empty stub at a vanished notebook's path.
 
 ---
 

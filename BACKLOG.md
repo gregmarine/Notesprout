@@ -138,9 +138,9 @@ Phases 0–2 built (see `docs/handwriting-recognition.md` § "TrOCR engine"). De
 - **Cross-size content scaling.** When the editor window size differs from the authored
   `contentWidth/Height` (rotation, cross-device paste), proportionally rescale embedded content
   instead of rendering as-authored + clipping.
-- **In-editor autosave / process-death durability.** The editor holds content in memory until close;
-  an OS kill mid-edit loses unsaved strokes. Persist incrementally (or on `onPause`) so a kill is
-  recoverable. (Short sessions, same process as the paused host — acceptable for v1.)
+- ~~In-editor autosave / process-death durability.~~ **DONE (2026-07-21).** The editor now persists
+  its canvas to the sticky's own encrypted DB in real-time (debounced pen-lift + `onStop` flush) —
+  see `docs/sticky-notes.md` → "Real-time persistence". An OS kill mid-edit no longer loses ink.
 - **Multi-page sticky notes.** D1 chose single page; multi-page would need in-window page nav/add/delete.
 - **Native text/line insertion inside the editor.** D2 chose pen / eraser / lasso + paste only.
   Adding the text and line insertion buttons inside the window is a follow-on decision.

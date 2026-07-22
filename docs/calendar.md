@@ -60,6 +60,11 @@ Pages are shared across the `calendar` table/root regardless of view, so a singl
 month-cell writing, week-cell writing, both AM/PM timeline halves, **and** its day-detail page —
 all independent, all keyed.
 
+> The numeric month key is formatted with **`Locale.ROOT`** (`"cal-month-%04d-%02d".format(Locale.ROOT, …)`),
+> and the History day-note `LIKE` pattern likewise. On non-Western-digit locales (ar/fa/bn…) the
+> default locale would render Eastern-Arabic digits, orphaning every previously-written month page
+> after a device-language switch (week/day keys use ISO `LocalDate.toString()` and were never affected).
+
 ### Key files
 
 | File | Role |
@@ -582,11 +587,20 @@ Editing or deleting a **recurring** event prompts a scope (`EventsController.pro
 - **This occurrence** — the occurrence's start epoch-day is added to `RecurrenceRule.exceptionDates`
   (a new field with an empty default → **no DB migration**; rides in the existing `data` JSON). The
   engine skips excluded starts. An *edit* additionally drops a standalone one-off override on that
-  occurrence's dates carrying the edited fields.
+  occurrence's dates carrying the edited fields — **including its reminders** (the override is built
+  from the edited payload, not a fresh one, so reminders are never dropped).
 - **This and following** — the series is truncated (`endMode = UNTIL`, `endEpochDay = occStart − 1`);
-  an *edit* also starts a fresh series at the occurrence (re-anchored, no inherited exceptions).
-  Splitting at the first occurrence collapses to a whole-series op.
-- **All events** — whole-series update / soft-delete; edits carry forward existing `exceptionDates`.
+  an *edit* also starts a fresh series at the occurrence (re-anchored, no inherited exceptions) that
+  **carries the reminders**. Splitting at the first occurrence collapses to a whole-series op.
+- **All events** — whole-series update / soft-delete; edits carry forward existing `exceptionDates`
+  and **preserve the original series anchor** when the editor's dates come back unchanged from the
+  tapped-occurrence prefill (`editSeries` compares against `occurrenceStartCovering` for the viewed
+  day). A deliberately changed date still re-anchors; upserting the prefill verbatim used to silently
+  erase the original anchor (e.g. a birthday's birth year) and all past occurrences.
+
+**Editor validation:** an "Ends on a date" before the event's start is **rejected at Save** (it would
+otherwise store a `recurring=1` row that occurs on no day — invisible to every query and impossible to
+edit or delete from the UI).
 
 **Moving an occurrence's day:** all edit scopes honour a date change. The editor pre-fills a recurring
 event's dates from the **tapped occurrence** (not the series' parent anchor — `EventsController.openEditor`
