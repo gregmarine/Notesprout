@@ -1,5 +1,7 @@
 package com.notesprout.android
 
+import android.content.Context
+import android.content.Intent
 import android.graphics.PointF
 import android.graphics.Rect
 import android.graphics.RectF
@@ -16,14 +18,24 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.doOnLayout
 import androidx.lifecycle.lifecycleScope
+import androidx.room.withTransaction
+import com.notesprout.android.core.Slog
 import com.notesprout.android.core.isBooxDevice
+import com.notesprout.android.crypto.KeySession
+import com.notesprout.android.crypto.SoilCrypto
 import com.notesprout.android.data.HeadingStroke
 import com.notesprout.android.data.LineRender
 import com.notesprout.android.data.LiveStroke
 import com.notesprout.android.data.ShapeObject
 import com.notesprout.android.data.ShapeRender
 import com.notesprout.android.data.ShapeType
+import com.notesprout.android.data.SoilDatabase
+import com.notesprout.android.data.StickyNoteRender
 import com.notesprout.android.data.TextRender
+import com.notesprout.android.data.index.NotesproutIndex
+import com.notesprout.android.data.replaceStickyNoteSubtree
+import com.notesprout.android.data.soilFile
+import com.notesprout.android.data.toStickyNoteObject
 import com.notesprout.android.databinding.ActivityStickyNoteEditorBinding
 import com.notesprout.android.notebook.ActiveTool
 import com.notesprout.android.notebook.GenericNotebookView
@@ -34,6 +46,7 @@ import com.notesprout.android.notebook.ShapeRecognizer
 import com.notesprout.android.notebook.ToolPreferencesManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -165,12 +178,16 @@ class StickyNoteEditorActivity : AppCompatActivity() {
             exitShapeTransformMode(clearSelection = false)
         }
 
-        // The transfer singleton dies with the process; on a post-kill recreate, fall back to the
-        // canvas content this activity saved in its own instance state so the editing session
-        // (including unsaved ink) survives instead of restoring blank.
+        stickyId       = intent.getStringExtra(EXTRA_STICKY_ID).orEmpty()
+        hostKind       = intent.getStringExtra(EXTRA_HOST).orEmpty()
+        hostNotebookId = intent.getStringExtra(EXTRA_NOTEBOOK_ID).orEmpty()
+        hostEncrypted  = intent.getBooleanExtra(EXTRA_ENCRYPTED, false)
+        stickyBbox.set(
+            intent.getFloatExtra(EXTRA_BBOX_L, 0f), intent.getFloatExtra(EXTRA_BBOX_T, 0f),
+            intent.getFloatExtra(EXTRA_BBOX_R, 0f), intent.getFloatExtra(EXTRA_BBOX_B, 0f),
+        )
+
         val input = StickyNoteEditorTransfer.input
-            ?: savedInstanceState?.getString(STATE_CONTENT)?.let { StickyNoteEditorTransfer.decodeContent(it) }
-        initialInput = input
         if (binding.drawingContainer.width > 0) {
             if (input != null) loadContent(input) else recordCanvasSize()
         } else {
@@ -180,17 +197,82 @@ class StickyNoteEditorActivity : AppCompatActivity() {
         }
     }
 
-    /** The content this session started from — what onSaveInstanceState falls back to while the
-     *  async initial load hasn't populated the canvas yet. */
-    private var initialInput: StickyNoteEditorTransfer.Content? = null
+    // ── Real-time persistence to the sticky's own (encrypted) database ───────────
+    // The editor is launched DB-agnostic, but a durable, encrypted-at-rest save can't wait for the
+    // return-to-host callback (which never runs on process death). So it writes straight to the
+    // sticky's real DB — the notebook's `.soil` (keyed from the in-memory [KeySession], never an
+    // Intent) or the already-open, already-encrypted global index — debounced on each content
+    // change plus a flush on onStop. No plaintext file is ever written.
+
+    /** DB id of the sticky being edited (from the launching host). */
+    private var stickyId: String = ""
+    private var hostKind: String = ""          // "notebook" | "scratchpad" | "calendar"
+    private var hostNotebookId: String = ""    // notebook host only
+    private var hostEncrypted: Boolean = false // notebook host only
+    private val stickyBbox = RectF()
+    private var notebookDbCache: SoilDatabase? = null
+    private var persistJob: Job? = null
 
     /** True once the canvas holds the session's content (initial load done or blank-note sizing). */
     private var contentLoaded = false
 
-    override fun onSaveInstanceState(outState: Bundle) {
-        super.onSaveInstanceState(outState)
-        val content = if (contentLoaded) currentContent() else initialInput
-        content?.let { outState.putString(STATE_CONTENT, StickyNoteEditorTransfer.encodeContent(it)) }
+    /** Debounced persist — coalesces a flurry of strokes into one write ~0.6 s after the last one. */
+    private fun schedulePersist() {
+        if (!contentLoaded || stickyId.isEmpty()) return
+        persistJob?.cancel()
+        persistJob = lifecycleScope.launch {
+            delay(PERSIST_DEBOUNCE_MS)
+            persistNow()
+        }
+    }
+
+    private suspend fun persistNow() {
+        if (!contentLoaded || stickyId.isEmpty()) return
+        val density = resources.displayMetrics.density
+        val render = StickyNoteRender(
+            id = stickyId,
+            boundingBox = RectF(stickyBbox),
+            strokes = drawingView.getStrokes(),
+            headings = drawingView.getHeadings(),
+            textObjects = drawingView.getTextObjects(),
+            lines = drawingView.getLineObjects(),
+            shapes = drawingView.getShapeObjects(),
+            contentWidth = if (contentWidth > 0f) contentWidth else binding.drawingContainer.width.toFloat(),
+            contentHeight = if (contentHeight > 0f) contentHeight else binding.drawingContainer.height.toFloat(),
+        )
+        withContext(Dispatchers.IO) {
+            try {
+                when (hostKind) {
+                    HOST_NOTEBOOK -> notebookDb()?.let { db ->
+                        db.withTransaction {
+                            db.notebookDao().replaceStickyNoteSubtree(render, System.currentTimeMillis(), density)
+                        }
+                    }
+                    HOST_SCRATCHPAD -> NotesproutIndex.scratchpadDao()
+                        .updateData(stickyId, render.toStickyNoteObject(density).toJson(), System.currentTimeMillis())
+                    HOST_CALENDAR -> NotesproutIndex.calendarDao()
+                        .updateData(stickyId, render.toStickyNoteObject(density).toJson(), System.currentTimeMillis())
+                }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e   // a superseding stroke cancelled this debounced write — honor cancellation
+            } catch (e: Exception) {
+                Slog.d("StickyEditor") { "real-time persist failed: ${e.message}" }
+            }
+        }
+    }
+
+    /** Lazily-opened connection to the notebook's `.soil`, keyed from [KeySession] (in-memory).
+     *  Null when this isn't a notebook sticky, or the notebook is encrypted and no key is resolved
+     *  (then the host's normal-close callback remains the fallback). Closed in onDestroy. */
+    private fun notebookDb(): SoilDatabase? {
+        notebookDbCache?.let { return it }
+        if (hostKind != HOST_NOTEBOOK || hostNotebookId.isEmpty()) return null
+        val key = KeySession.getFor(hostNotebookId)
+        if (hostEncrypted && key == null) return null
+        val path = soilFile(this, hostNotebookId).absolutePath
+        val builder = SoilDatabase.builder(this, path)
+        if (key != null) builder.openHelperFactory(SoilCrypto.roomFactory(key))
+        return builder.build().also { notebookDbCache = it }
     }
 
     // ── Content load ──────────────────────────────────────────────────────────
@@ -250,6 +332,7 @@ class StickyNoteEditorActivity : AppCompatActivity() {
         while (undoStack.size > historyCap) undoStack.removeFirst()
         currentSnapshot = captureState()
         redoStack.clear()
+        schedulePersist()   // real-time durability: flush this change to the sticky's DB shortly
     }
 
     private fun applySnapshot(snap: EditorSnapshot) {
@@ -263,6 +346,7 @@ class StickyNoteEditorActivity : AppCompatActivity() {
         // later in-place move/resize can't corrupt the history entry.
         currentSnapshot = captureState()
         lifecycleScope.launch { rebuildBitmap() }
+        schedulePersist()   // undo/redo changed the content — persist the new state too
     }
 
     private fun undo() {
@@ -1218,13 +1302,56 @@ class StickyNoteEditorActivity : AppCompatActivity() {
         writeTransferOutput()
     }
 
+    override fun onStop() {
+        super.onStop()
+        // Final flush before a possible background kill. The debounced pen-lift persist has usually
+        // already written the latest content; this catches anything from the last <0.6 s. Best-effort
+        // (may not complete if killed immediately) — the debounced writes are the durability guarantee.
+        if (contentLoaded && stickyId.isNotEmpty()) {
+            persistJob?.cancel()
+            lifecycleScope.launch { persistNow() }
+        }
+    }
+
     override fun onDestroy() {
         super.onDestroy()
         drawingView.releaseResources()
+        runCatching { notebookDbCache?.close() }
     }
 
     companion object {
-        /** Instance-state key: the session's canvas content (see onSaveInstanceState). */
-        private const val STATE_CONTENT = "sticky_editor_content"
+        /** Intent extra: the DB id of the sticky being edited (targets the real-time persist). */
+        const val EXTRA_STICKY_ID = "sticky_id"
+        const val EXTRA_HOST = "sticky_host"
+        const val EXTRA_NOTEBOOK_ID = "sticky_notebook_id"
+        const val EXTRA_ENCRYPTED = "sticky_encrypted"
+        const val EXTRA_BBOX_L = "sticky_bbox_l"
+        const val EXTRA_BBOX_T = "sticky_bbox_t"
+        const val EXTRA_BBOX_R = "sticky_bbox_r"
+        const val EXTRA_BBOX_B = "sticky_bbox_b"
+
+        const val HOST_NOTEBOOK = "notebook"
+        const val HOST_SCRATCHPAD = "scratchpad"
+        const val HOST_CALENDAR = "calendar"
+
+        private const val PERSIST_DEBOUNCE_MS = 600L
+
+        /** Build the launch intent, carrying everything the editor needs to persist the sticky in
+         *  real-time to its own DB. [notebookId]/[encrypted] apply only to [HOST_NOTEBOOK]. */
+        fun intent(
+            ctx: Context,
+            sticky: StickyNoteRender,
+            host: String,
+            notebookId: String = "",
+            encrypted: Boolean = false,
+        ): Intent = Intent(ctx, StickyNoteEditorActivity::class.java)
+            .putExtra(EXTRA_STICKY_ID, sticky.id)
+            .putExtra(EXTRA_HOST, host)
+            .putExtra(EXTRA_NOTEBOOK_ID, notebookId)
+            .putExtra(EXTRA_ENCRYPTED, encrypted)
+            .putExtra(EXTRA_BBOX_L, sticky.boundingBox.left)
+            .putExtra(EXTRA_BBOX_T, sticky.boundingBox.top)
+            .putExtra(EXTRA_BBOX_R, sticky.boundingBox.right)
+            .putExtra(EXTRA_BBOX_B, sticky.boundingBox.bottom)
     }
 }

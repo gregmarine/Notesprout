@@ -1633,7 +1633,7 @@ class CalendarActivity : AppCompatActivity() {
         StickyNoteEditorTransfer.output = null
         pendingStickyNote = note
         pendingStickyInitialCreate = initialCreate
-        editorLauncher.launch(Intent(this, StickyNoteEditorActivity::class.java))
+        editorLauncher.launch(StickyNoteEditorActivity.intent(this, note, StickyNoteEditorActivity.HOST_CALENDAR))
     }
 
     private fun stickyNoteAt(x: Float, y: Float): StickyNoteRender? =

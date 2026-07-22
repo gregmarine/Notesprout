@@ -4386,6 +4386,8 @@ class NotebookActivity : AppCompatActivity() {
     private suspend fun loadStickyNotesFromDb(db: SoilDatabase, layerId: String): List<StickyNoteRender> {
         if (layerId.isEmpty()) return emptyList()
         val density = resources.displayMetrics.density
+        // The sticky editor now persists its content directly to this .soil in real-time (P2-12),
+        // so a page load simply reflects whatever the editor already wrote — even after a kill.
         return db.notebookDao().loadStickyNotesSubtree(layerId, density)
     }
 
@@ -7880,7 +7882,7 @@ class NotebookActivity : AppCompatActivity() {
         StickyNoteEditorTransfer.output = null
         pendingStickyNote          = note
         pendingStickyInitialCreate = initialCreate
-        editorLauncher.launch(Intent(this, StickyNoteEditorActivity::class.java))
+        editorLauncher.launch(StickyNoteEditorActivity.intent(this, note, StickyNoteEditorActivity.HOST_NOTEBOOK, notebookId, encryptionInfo.encrypted))
     }
 
     /** Topmost sticky note icon whose bbox contains the view-space point ([x],[y]), or null. */

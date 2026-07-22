@@ -37,10 +37,6 @@ object StickyNoteEditorTransfer {
 
     private val codec = Json { ignoreUnknownKeys = true; explicitNulls = false }
 
-    fun encodeContent(c: Content): String = codec.encodeToString(Content.serializer(), c)
-    fun decodeContent(json: String): Content? =
-        runCatching { codec.decodeFromString(Content.serializer(), json) }.getOrNull()
-
     fun encodeNote(n: StickyNoteRender): String = codec.encodeToString(StickyNoteRender.serializer(), n)
     fun decodeNote(json: String): StickyNoteRender? =
         runCatching { codec.decodeFromString(StickyNoteRender.serializer(), json) }.getOrNull()
