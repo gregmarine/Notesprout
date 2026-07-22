@@ -82,7 +82,7 @@ dependencies {
     implementation("androidx.appcompat:appcompat:1.7.0")
     // SAF tree navigation for LOCAL backup destination (DocumentFile.fromTreeUri).
     implementation("androidx.documentfile:documentfile:1.0.1")
-    // Onyx BOOX SDK — same versions as proven in notesprout_flutter
+    // Onyx BOOX SDK
     implementation("com.onyx.android.sdk:onyxsdk-device:1.3.3")
     implementation("com.onyx.android.sdk:onyxsdk-pen:1.5.4")
 
