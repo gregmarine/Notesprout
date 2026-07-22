@@ -131,9 +131,11 @@ class ToolbarLayoutManager(
      * Anchor the bar to an edge (or float it), set its orientation + size, and select the matching
      * background. TOP/BOTTOM are horizontal (match_parent × thickness); LEFT/RIGHT are vertical
      * (thickness × match_parent) — both with an edge-aware border on the inner edge. FLOAT is a
-     * detached bar: a fixed length of [FLOAT_LENGTH_FRACTION] × the matching screen dimension on its
-     * main axis, [barThicknessPx] on the cross axis, positioned via margins from `floatX`/`floatY`
-     * (centered on -1), with a full `shape_bordered` border all around.
+     * detached bar: its main-axis length is the smaller of the buttons' natural extent
+     * ([floatContentMainSize]) and [FLOAT_LENGTH_FRACTION] × the matching screen dimension, so it hugs
+     * a short toolbar yet caps a long one at 75% (overflowing the rest); [barThicknessPx] on the cross
+     * axis, positioned via margins from `floatX`/`floatY` (centered on -1), with a full `shape_bordered`
+     * border all around.
      */
     private fun applyPlacement(config: ToolbarConfig) {
         val lp = toolbar.layoutParams as FrameLayout.LayoutParams
@@ -175,14 +177,16 @@ class ToolbarLayoutManager(
                 toolbar.orientation = if (horizontal) LinearLayout.HORIZONTAL else LinearLayout.VERTICAL
                 toolbar.gravity = if (horizontal) Gravity.CENTER_VERTICAL else Gravity.CENTER_HORIZONTAL
                 lp.gravity = Gravity.TOP or Gravity.START
-                // Mini floats hug their content (only as long as the buttons need); full floats span a
-                // fixed FLOAT_LENGTH_FRACTION of the matching screen dimension on their main axis.
+                // Mini floats hug their content. Full floats span FLOAT_LENGTH_FRACTION of the matching
+                // screen dimension — but only as an upper bound: when the buttons' natural extent is
+                // shorter (a thinned toolbar), the bar hugs them so 75% never leaves a trailing gap.
+                // When they exceed that fraction the bar stays capped there and the overflow menu kicks in.
                 val mainSize = if (config.miniEnabled) {
                     FrameLayout.LayoutParams.WRAP_CONTENT
-                } else if (horizontal) {
-                    (dm.widthPixels * FLOAT_LENGTH_FRACTION).toInt()
                 } else {
-                    (dm.heightPixels * FLOAT_LENGTH_FRACTION).toInt()
+                    val screen = if (horizontal) dm.widthPixels else dm.heightPixels
+                    val cap = (screen * FLOAT_LENGTH_FRACTION).toInt()
+                    floatContentMainSize(config, horizontal).coerceAtMost(cap)
                 }
                 if (horizontal) {
                     lp.width = mainSize
@@ -226,6 +230,43 @@ class ToolbarLayoutManager(
             toolbar.setPadding(pad, 0, pad, 0)
         }
         toolbar.layoutParams = lp
+    }
+
+    /**
+     * The main-axis extent a *full* (non-mini) FLOAT bar needs to show all of its content with no gap:
+     * the leading drag handle, every visible button, the auto-dividers inserted between group
+     * boundaries, and the bar's own start/end padding. Computed from the same fixed layout-param sizes
+     * [ToolbarOverflowManager] sums (no measure pass required), so the two agree: when this comes in at
+     * or under the 75% cap the bar hugs its buttons and nothing overflows; when it exceeds the cap the
+     * bar is pinned at 75% and the surplus buttons spill into the overflow menu.
+     */
+    private fun floatContentMainSize(config: ToolbarConfig, horizontal: Boolean): Int {
+        val views = captureButtonViews()
+        var total = dp(4) + dp(4) // bar start/end padding on the main axis
+        total += dp(28)           // leading drag handle (28dp on either axis, no margins)
+        var prevGroup: String? = null
+        var first = true
+        for (key in resolveVisibleKeys(config)) {
+            val spec = ToolbarButtonRegistry.spec(key) ?: continue
+            val view = views[key] ?: continue
+            // A group divider is 1dp on its main axis with a 4dp margin on each side (see makeDivider).
+            if (!first && spec.group != prevGroup) total += dp(1) + dp(4) + dp(4)
+            total += buttonMainSize(view, horizontal)
+            prevGroup = spec.group
+            first = false
+        }
+        return total
+    }
+
+    /** Main-axis span a button view occupies: its fixed layout-param dimension plus that axis's margins
+     *  — mirrors [ToolbarOverflowManager]'s natural-size measure so sizing and overflow stay in sync. */
+    private fun buttonMainSize(view: View, horizontal: Boolean): Int {
+        val lp = view.layoutParams as? ViewGroup.MarginLayoutParams ?: return 0
+        return if (horizontal) {
+            (if (lp.width >= 0) lp.width else 0) + lp.leftMargin + lp.rightMargin
+        } else {
+            (if (lp.height >= 0) lp.height else 0) + lp.topMargin + lp.bottomMargin
+        }
     }
 
     /**
@@ -339,7 +380,9 @@ class ToolbarLayoutManager(
     private fun dp(value: Int): Int = (value * density).toInt()
 
     companion object {
-        /** A floating bar spans this fraction of the matching screen dimension on its main axis. */
+        /** Upper bound on a floating bar's main-axis length as a fraction of the matching screen
+         *  dimension. A short toolbar hugs its buttons ([floatContentMainSize]); a long one is capped
+         *  here and overflows the rest. */
         const val FLOAT_LENGTH_FRACTION = 0.75f
     }
 }

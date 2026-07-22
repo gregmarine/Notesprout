@@ -105,8 +105,12 @@ so `isSelected` state, icon state, and listeners always survive.
   (`toolbar_background_{top,bottom,left,right}`). `barThickness()` (56dp, captured from the inflated
   layout before any flip) drives overflow-menu / page-indicator / floating-selection positioning so
   none assume a placement.
-- **Float:** a detached bar at `shape_bordered`, length = `FLOAT_LENGTH_FRACTION` (0.75) × the
-  matching screen dimension (or `WRAP_CONTENT` in mini), positioned by `floatX/floatY` margins. A
+- **Float:** a detached bar at `shape_bordered`, main-axis length = `min(natural content extent,
+  FLOAT_LENGTH_FRACTION (0.75) × matching screen dimension)` — so a thinned toolbar hugs its buttons
+  and 0.75 never leaves a trailing gap, while a longer one is capped at 0.75 and overflows the rest
+  (mini stays `WRAP_CONTENT`). The natural extent is summed deterministically by `floatContentMainSize()`
+  from the same fixed layout-param sizes `ToolbarOverflowManager` measures (drag handle + buttons +
+  group dividers + padding), so sizing and overflow agree. Positioned by `floatX/floatY` margins. A
   manager-owned **grip drag handle** (`ic_grip_vertical`) leads the bar; `wireFloatDragHandle()` does
   the long-drag (clamped to screen, persists `{floatX, floatY}` on release, re-pushes exclusion +
   overflow anchor). Overflow can flip to the bar's leading side near a far screen edge
