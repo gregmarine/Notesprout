@@ -8,7 +8,7 @@ import androidx.room.PrimaryKey
  * One row per logged notebook activity event — powers the Day Detail "Notebooks" and "History"
  * views (notebooks Opened / Edited on a given calendar day).
  *
- * Lives in the plaintext global index (`notesprout.db`), never in a `.soil` file. Distinct from the
+ * Lives in the global index (`notesprout.db`, encrypted at rest), never in a `.soil` file. Distinct from the
  * future *calendar events* system (birthdays/anniversaries/appointments) — this is app-activity
  * telemetry, hence `notebook_activity`, not `events`.
  *

@@ -12,7 +12,7 @@ import java.time.LocalDate
 import java.util.UUID
 
 /**
- * CRUD + day-scoped query layer for calendar [EventEntity] rows (plaintext global index).
+ * CRUD + day-scoped query layer for calendar [EventEntity] rows (global index, encrypted at rest).
  *
  * [eventsForDay] is the workhorse: non-recurring events whose span covers the day (SQL) unioned with
  * recurring events the engine says land on the day, sorted **all-day first, then timed by start

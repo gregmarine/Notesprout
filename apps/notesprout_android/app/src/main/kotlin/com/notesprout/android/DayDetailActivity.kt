@@ -105,7 +105,7 @@ import kotlin.math.hypot
  * A full-screen, single-page handwriting canvas "into" one calendar day, opened by single-finger
  * double-tap on a day in [CalendarActivity]'s Month / Week view. Behaves like the scratch pad: one
  * page, freely writable, with an optional ruling template. Content is stored in the `calendar`
- * table (plaintext) under the key `cal-daynote-YYYY-MM-DD`, sharing the universal object model +
+ * table (encrypted at rest with the index) under the key `cal-daynote-YYYY-MM-DD`, sharing the universal object model +
  * clipboard with notebooks, the scratch pad, sticky notes & shapes.
  *
  * Canvas machinery (drawing callbacks, save, per-page undo/redo, lasso, sticky notes, shape

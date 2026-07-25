@@ -6,7 +6,7 @@ import kotlinx.serialization.json.Json
 
 /**
  * Calendar **Events** — birthdays, anniversaries, vacations, meetings, appointments, and one-off
- * entries — stored in the plaintext global index (`notesprout.db`, table `events`), never in a
+ * entries — stored in the global index (`notesprout.db`, table `events`, encrypted at rest), never in a
  * `.soil` file. Distinct from the `notebook_activity` telemetry log (which the calendar docs
  * deliberately did *not* name "events" so this word stayed free).
  *

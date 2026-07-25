@@ -22,7 +22,12 @@
 
 Room/SQLite at `getExternalFilesDir(null)/notesprout.db`. Owns the entire folder/notebook tree — the `Garden/` directory is flat blob storage, not a source of structure.
 
-### Schema (`objects` table)
+> **Full specification:** [`global-index-format.md`](global-index-format.md) — every table, every
+> payload, the v1→v8 migration history, the encryption/key lifecycle, and the portable-contract view
+> written for other Sprout apps. This section is the Notesprout-internal quick reference; when the two
+> disagree, that document is authoritative.
+
+### Schema (`objects` table, v8)
 
 ```sql
 CREATE TABLE objects (
@@ -33,14 +38,24 @@ CREATE TABLE objects (
     createdAt  INTEGER NOT NULL,
     updatedAt  INTEGER NOT NULL,
     deletedAt  INTEGER,
-    data       TEXT    NOT NULL DEFAULT '{}'
+    data       TEXT    NOT NULL DEFAULT '{}',
+    -- v7 columnar payload (present when data == "")
+    pageCount  INTEGER, flags INTEGER, keyScope TEXT,
+    lastBackedUpLocal INTEGER, lastBackedUpDrive INTEGER,
+    width      INTEGER, height INTEGER, blob BLOB,
+    -- v8 relational list membership
+    refId      TEXT, sortOrder INTEGER
 );
 
-CREATE INDEX idx_objects_parent_type_deleted
+CREATE INDEX index_objects_parentId_type_deletedAt
     ON objects(parentId, type, deletedAt);
 ```
 
-### Auxiliary tables (same `notesprout.db`, Room `version = 5`)
+`ObjectType` also covers `LIST_ITEM` (a membership edge: `parentId` = list, `refId` = member,
+`sortOrder` = position), plus the `CLIPBOARD` and `BACKUP_CONFIG` singleton rows (payload stays JSON
+in `data`, by design). Sentinel ids live in `ListIds.kt`.
+
+### Auxiliary tables (same `notesprout.db`, Room `version = 8`)
 
 Beyond `objects`, the global index DB holds several auxiliary tables. **The index itself is
 SQLCipher-encrypted at rest** under the global passphrase (encrypt-everything-by-default) — see
@@ -58,16 +73,21 @@ serializer works unchanged.
   RRULE-like recurrence. Own column schema (not the universal row shape). See
   [`docs/calendar.md`](calendar.md#events--the-events-table).
 
+Later migrations widen existing tables rather than adding new ones: `MIGRATION_5_6` gives
+`scratchpad` + `calendar` the same columnar columns + `blob` as the `.soil` table; `MIGRATION_6_7`
+widens `objects` with the typed payload columns + `blob`; `MIGRATION_7_8` adds `refId`/`sortOrder`
+for `list_item` child rows. All additive, all rewrite zero rows.
+
 `NotesproutDatabase` (`@Database entities = [ObjectEntity, ScratchpadEntity, CalendarEntity,
-NotebookActivityEntity, EventEntity]`, `version = 5`) registers all migrations in `NotesproutIndex`.
+NotebookActivityEntity, EventEntity]`, `version = 8`) registers all migrations in `NotesproutIndex`.
 
 ### Key Classes
 
 - `ObjectEntity` (`data/index/ObjectEntity.kt`) — Room entity; universal index row
-- `ObjectType` (`data/index/ObjectType.kt`) — `FOLDER`, `NOTEBOOK`, `LIST`, `TEMPLATE`, `TEMPLATE_FOLDER`
+- `ObjectType` (`data/index/ObjectType.kt`) — `FOLDER`, `NOTEBOOK`, `LIST`, `TEMPLATE`, `TEMPLATE_FOLDER`, `LIST_ITEM`, `CLIPBOARD`, `BACKUP_CONFIG`
 - `FolderObject`, `NotebookObject`, `ListObject` — `@Serializable` data classes in `data` column. `NotebookObject` carries `snapshot: String?`, `pageCount: Int`, `encrypted: Boolean` (default `false`), and `keyScope: KeyScope?` (non-null only when `encrypted == true`). `ListObject` carries `notebookIds: List<String>` (array order = display order).
-  - **Snapshot suppression:** `snapshot` is **always `null`** for encrypted notebooks. `IndexRepository.updateNotebookSnapshot` is a no-op when the row has `encrypted = true`; `setEncryptionState(..., encrypted = true)` atomically clears `snapshot` in the same write. Lists and card renders show the lock icon instead. See [`docs/encryption.md`](docs/encryption.md).
-- `ListIds` (`data/index/ListIds.kt`) — `PINNED_LIST_ID = "00000000-0000-0000-0000-70696e6e6564"`, `PINNED_TEMPLATES_LIST_ID = "00000000-0000-0000-0000-746d706c7069"`
+  - **Snapshot suppression is keyed on *scope*, not on `encrypted`.** A GLOBAL-scope notebook keeps its cover — the index is itself encrypted under that same global key, so the cover is protected by exactly the key that protects the notebook. A **NOTEBOOK-scope** (own-passphrase) notebook never gets one: `IndexRepository.updateNotebookSnapshot` returns early when `encrypted && keyScope != GLOBAL`, and `setEncryptionState` clears `snapshot` in the same write when converting to that scope. Only those cards render the lock icon. See [`docs/encryption.md`](encryption.md) and [`global-index-format.md`](global-index-format.md#what-may-be-cached-in-the-index).
+- `ListIds` (`data/index/ListIds.kt`) — six sentinel ids, each the all-zero UUID with an ASCII string in hex as the last group: `PINNED_LIST_ID` (`pinned`), `PINNED_TEMPLATES_LIST_ID` (`tmplpi`), `CLIPBOARD_ID` (`clipbd`), `BACKUP_CONFIG_ID` (`backup`), `SCRATCHPAD_ROOT_ID` (`scrtch`), `CALENDAR_ROOT_ID` (`calndr`)
 - `TemplateListObject` (`data/index/TemplateListObject.kt`) — `@Serializable data class TemplateListObject(templateIds: List<String>)`; the `data` payload of the pinned-templates `LIST` object. A parallel to `ListObject` so notebook list code is untouched.
 - `ObjectDao` (`data/index/ObjectDao.kt`) — Room DAO for all index queries and mutations
 - `IndexRepository` (`data/index/IndexRepository.kt`) — higher-level API: create/rename/softDelete/move for folders and notebooks; list ops: `ensurePinnedListExists`, `getPinnedList`, `addNotebookToList`, `removeNotebookFromList`, `reorderList`, `getNotebooksInList`, `scrubNotebookFromAllLists`; pin helpers: `isNotebookPinned(notebookId)`, `togglePin(notebookId)`

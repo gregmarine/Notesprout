@@ -23,7 +23,7 @@ import java.util.UUID
 /**
  * Query + logging layer for the Day-Detail "Notebooks" and "History" views.
  *
- * Backed by the plaintext global index ([NotesproutIndex]):
+ * Backed by the global index ([NotesproutIndex], SQLCipher-encrypted under the global key):
  * - **Opened / Edited** come from the `notebook_activity` table (forward-only log; see
  *   [NotebookActivityEntity]).
  * - **Created** is derived retroactively from [ObjectEntity.createdAt] — no rows are logged.

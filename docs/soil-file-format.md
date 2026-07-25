@@ -10,9 +10,15 @@
 > the sidecar/portability discipline. Part XI tells you exactly which parts are invariant and which
 > you are expected to replace.
 >
+> **Companion document:** [`global-index-format.md`](global-index-format.md) specifies the *other*
+> half of the storage model — the single per-install global index that holds folder structure,
+> document metadata, the template library, and app-level content. A document container is only half a
+> working app; read both.
+>
 > Everything below describes Notesprout as built on the `sprout` branch (schema `.soil` v4, global
-> index v8, global encryption phases 0–5). Where the format has legacy shapes still readable in the
-> wild, that is called out explicitly — a greenfield app should implement only the current shape.
+> index v8, global encryption phases 0–5, plus the stability-hardening pass of July 2026). Where the
+> format has legacy shapes still readable in the wild, that is called out explicitly — a greenfield
+> app should implement only the current shape.
 
 ---
 
@@ -25,7 +31,7 @@
 - [Part V — Binary Encodings](#part-v--binary-encodings)
 - [Part VI — Schema Versions & Migration](#part-vi--schema-versions--migration)
 - [Part VII — Encryption](#part-vii--encryption)
-- [Part VIII — The Global Index](#part-viii--the-global-index)
+- [Part VIII — The Global Index (summary)](#part-viii--the-global-index-summary)
 - [Part IX — Portability: Export & Import](#part-ix--portability-export--import)
 - [Part X — Durability: WAL, Sidecars, Backup](#part-x--durability-wal-sidecars-backup)
 - [Part XI — Adapting This Format for Paintsprout](#part-xi--adapting-this-format-for-paintsprout)
@@ -81,8 +87,9 @@ Sprout container model even if it stores entirely different content.
 11. **No stray files.** A file browser shows only document files. WAL/SHM/journal sidecars are
     checkpointed and removed on clean close.
 
-12. **No content leaks outside the encrypted file.** Nothing derived from document content —
-    thumbnails, recognized text, caches — may be written to any unencrypted store.
+12. **No content leaks across a key boundary.** Nothing derived from document content — thumbnails,
+    recognized text, caches — may be written to any unencrypted store, or to any store encrypted
+    under a *different* key than the document itself. See [Leak hygiene](#leak-hygiene).
 
 ---
 
@@ -117,6 +124,10 @@ required, visible to the user in a file manager, and removed on uninstall.
 **The critical rule:** the `Garden/` directory is *blob storage*. It has no structure. Folder
 ancestry, display names, ordering, and pinning are index concerns. This is what makes a document file
 portable — it carries no assumptions about where it lives.
+
+The index half of this split is specified in full in
+[`global-index-format.md`](global-index-format.md); [Part VIII](#part-viii--the-global-index-summary)
+below carries only what a *document* implementer has to know.
 
 ## Path derivation
 
@@ -554,6 +565,11 @@ the two patterns worth stealing:
 Note `engine` and `schema` inside the payload — the cache knows what produced it, so a better engine
 can invalidate only its predecessor's output.
 
+**Read the watermark before you read the content it describes.** Reading content first and the
+watermark second lets a write that lands between the two reads make a stale cache look fresh — the
+freshness test compares the new content's timestamps against a watermark written after them. This is
+a one-line ordering fix and an invisible bug: the export just quietly contains yesterday's text.
+
 ---
 
 ## Composites: the relational rule
@@ -579,6 +595,16 @@ Consequences that fall out for free:
   orphan sweep once the parent is purged.
 - **Reads batch.** Children fetch in ≤2 queries: `WHERE parentId IN (…)` for level 1, then again for
   nested heading/text. Not N+1.
+
+> ⚠️ **Every path that writes a composite subtree must mint fresh ids for its descendants.** Child
+> row ids are the primary key, and a copied/cut subtree carries its *source's live child ids*. Paste
+> it onto the same page, paste the same clipboard twice, or send the same selection across surfaces
+> twice, and the second insert is a hard `UNIQUE` failure — a crash, in the middle of the user's
+> work. The fix is one shared "remap this subtree" helper (fresh ids for every descendant, intra-
+> subtree `parentId` references rewired) applied by **all** insert *and* replace helpers. A
+> composite's child ids are private to its subtree and never referenced from outside, so remapping is
+> always safe. Notesprout shipped this bug twice — once on the replace side, once on the insert side —
+> which is the real lesson: fix it in one place both sides call.
 
 **Legacy shape:** composites once stored nested content as `zlib(JSON)` in `blob`. Readers detect
 this — a row with `data != "" OR blob != NULL` is a legacy composite and decodes through the old
@@ -634,6 +660,21 @@ fun encode(xy: FloatArray): ByteArray {          // xy = x0,y0,x1,y1,…
 An empty stroke encodes to a valid tiny blob that decodes back to an empty array — don't special-case
 it.
 
+### Decoding is an attack surface on your own data
+
+Every blob in the file is bytes that may have been damaged by a bad sector, a torn write, or a
+version skew. Three rules, each of which was a crash-loop first:
+
+- **Bail the inflate loop on any zero-progress round.** A corrupt zlib header (an FDICT bit set, for
+  instance) makes `inflate()` return 0 bytes forever without ever reporting "finished" — a hang, not
+  an error, and on a page-load path that is an ANR the user cannot escape.
+- **Guard every blob decode, per row.** One corrupt stroke blob should degrade to a stroke-less
+  render, not make the page — and, via launch-restore of the last-open surface, the entire app —
+  permanently unopenable.
+- **Decode payload JSON leniently.** Ignore unknown keys everywhere. A field added by a newer build
+  must not make an object undecodable by an older one, and a field removed by a newer build must not
+  make old rows undecodable by it.
+
 ## Images — WEBP q100
 
 Covered under `template` in Part IV. Summary: WEBP quality-100 lossy, raw bytes in `blob` (base64
@@ -679,6 +720,10 @@ it **only** when at least one row actually changed, or you pay a full rewrite on
 
 Another subtlety: format conversions must **preserve `updatedAt`**. A format change is not a content
 edit; bumping the timestamp would needlessly re-flag every file for backup.
+
+A third, learned the hard way: **guard the sweep per row, not per pass.** A compactor that aborts its
+whole pass on one malformed legacy row does not merely skip that row — it means that document's
+backlog is never converted again, on any launch, forever. Skip the row, count it, continue.
 
 ## Schema as a single source of truth
 
@@ -789,7 +834,43 @@ picker opened it as plaintext, the default handler fired, and the notebook was *
 
 **Every open helper factory — plaintext, passphrase, and raw-key — must be wrapped in a
 non-destructive factory that reports corruption without deleting.** No exceptions, no "this path
-can't hit an encrypted file." Build the wrapper before you build the encryption.
+can't hit an encrypted file." Build the wrapper before you build the encryption. That includes the
+raw, non-ORM opens (they take their own error handler) and the transient opens inside migration and
+probe helpers — a probe that deletes what it was probing is the worst possible bug.
+
+The paired rule: **a keyless open of a file that is actually encrypted must fail loudly, not proceed.**
+Before opening anything as plaintext, probe it; if it is encrypted, throw a distinct "locked"
+exception. Callers that already treat "cannot read" as "nothing to show" — page lists, thumbnails,
+pickers — catch it and degrade to a locked state. The important part is what it replaces: opening
+ciphertext with a plaintext driver, which reads it as a corrupt database and hands it to the deleting
+handler.
+
+## The second data-loss guard: create-capable opens
+
+Nearly every SQLite open API is **create-if-missing**. Point one at a path where the document *should*
+be but isn't, and instead of failing it fabricates an empty database there. Three consequences, all
+of which shipped:
+
+- The empty stub **masquerades as the real document** — it opens fine, it's just blank.
+- It **blocks recovery**: a manual restore of the real file now has to contend with a file already
+  sitting at that path.
+- Worst, an empty encrypted database **"verifies" any passphrase you type**, because it was created
+  keyed to whatever was passed. A verification helper built on a create-capable open reports success
+  against a notebook that is not there.
+
+Rules:
+
+- Every open helper and every verification helper **requires the file to exist and be non-empty**, and
+  fails loudly otherwise.
+- **Creation gets its own explicitly named entry points** — used only by the new-document bootstrap.
+  Everything else uses the exists-guarded opens.
+- A verification helper returns `false` (never `true`) for a missing or empty file.
+- A "the file is missing" outcome must be reported as such, not looped back into the passphrase prompt
+  — otherwise the user retries a nonexistent file until the rate limiter locks them out.
+
+Related, at the app layer: **verify that the index row and the file both exist before opening a
+document.** A stale entry in a recents list or a history view otherwise mints an empty ghost document
+through exactly this path.
 
 ## Leak hygiene
 
@@ -797,34 +878,59 @@ Encrypting the document is not sufficient. Every derived artifact is a plaintext
 
 | Channel | Rule |
 |---|---|
-| Index cover/thumbnail | **Never** written for an encrypted document. Cleared atomically in the same write that sets the encrypted flag. The setter refuses a non-null value on an encrypted row. |
+| Index cover/thumbnail | Governed by **key scope**, not by the encrypted flag — see below. |
 | Undo/redo sidecar | Not written when encrypted — persisted to the in-file `undo_redo_state` table instead (encrypted at rest for free). Stale sidecars deleted on open. |
+| Editor drafts / in-progress work | **Never a plaintext temp file.** An editor that must survive process death persists straight into the encrypted store it came from (the document's own file, or the encrypted index for index-hosted canvases), debounced on change and flushed on stop. |
 | WAL / SHM | SQLCipher encrypts these too. Safe. |
-| Original plaintext file | After in-place encryption, the original and all siblings are deleted atomically — the temp is renamed over the original **only after** verification passes. |
+| Original plaintext file | After in-place encryption, the original and all siblings are removed via the never-zero-copies swap in [Conversion mechanics](#conversion-mechanics) — the temp is renamed over the original **only after** verification passes. |
 | Search index | **No document content is ever written to the global index.** Search queries only `name`. |
+| Plaintext preference files | Ids and settings only — never display names, never content. Names resolve against the encrypted index at read time. |
 
-That last one is a **structural invariant, not a policy**: because no content can reach the index, a
-future "search inside documents" feature *must* be an explicit design decision. Nothing can leak
-there by accident.
+**The cover rule, precisely.** The obvious rule — "never cache a cover for an encrypted document" —
+was correct only while the index was plaintext. Once the index is itself encrypted under the global
+key, the right question is not *"does this leave the encrypted zone?"* (nothing does) but *"does this
+cross a **key boundary**?"*:
+
+| Document | Cover in the index? |
+|---|---|
+| Unencrypted | Yes |
+| Encrypted, `GLOBAL` scope | **Yes** — the index is encrypted under that same key, so the cover is protected by exactly the key that protects the document |
+| Encrypted, `NOTEBOOK` scope (own passphrase) | **Never** — the user chose a separate passphrase precisely so this content is not readable with the global key. Converting a document to private scope clears any existing cover in the same write; cards render a lock |
+
+Generalize this after any encrypt-everything migration: **audit for per-operation "this leaves the
+encrypted zone" warnings and suppression rules written under the old model.** They have stopped being
+warnings and started being noise, and the suppression rules are now costing features (every library
+card its thumbnail) for no security.
+
+The search-index row is a **structural invariant, not a policy**: because no content can reach the
+index, a future "search inside documents" feature *must* be an explicit design decision. Nothing can
+leak there by accident.
 
 ## Conversion mechanics
 
 **Encrypt / decrypt in place** — via `sqlcipher_export`:
 
 ```
-1. Open source with the zetetic driver  (plaintext = empty key "")
-2. ATTACH DATABASE '<tmp>' AS target KEY '<dest-passphrase>'
-3. SELECT sqlcipher_export('target')
-3a. PRAGMA target.user_version = <source user_version>   ← REQUIRED, see below
-4. DETACH DATABASE 'target'
-5. verifyPassphrase(<tmp>, dest-passphrase)          ← gate
-6. Delete original + WAL/SHM/journal, then tmp.renameTo(original)
-7. Delete any sidecars
+0. PROBE the input first — refuse to encrypt anything that is not actually plaintext
+1. Checkpoint the source WAL (non-deleting error handler — mandatory, see below)
+2. Open source with the zetetic driver  (plaintext = empty key "")
+3. ATTACH DATABASE '<tmp>' AS target KEY '<dest-passphrase>'    ← single-quote-escape both the
+                                                                  path and the passphrase
+4. SELECT sqlcipher_export('target')
+4a. PRAGMA target.user_version = <source user_version>   ← REQUIRED, see below
+5. DETACH DATABASE 'target'
+6. verifyPassphrase(<tmp>, dest-passphrase)          ← gate
+7. Commit the swap (below)
 ```
 
-On any failure before step 6 the temp is deleted and the original is untouched.
+On any failure before step 7 the temp is deleted and the original is untouched.
 
-> ⚠️ **`sqlcipher_export` does not copy `PRAGMA user_version` — you must copy it yourself** (step 3a).
+> ⚠️ **Step 0 is not paranoia.** The way in is index drift: a prior run encrypted the file but died
+> before the index row was updated, so the app still believes the file is plaintext and the user
+> retries "Encrypt". Without the probe, the export reads ciphertext as an empty/corrupt source and
+> replaces real data with an empty output. Refuse, and say why.
+
+> ⚠️ **`sqlcipher_export` does not copy `PRAGMA user_version` — you must copy it yourself** (step 4a).
 > It copies every table and row, but the target keeps its default `user_version` of 0. For a container
 > whose reader keys off the schema version (this app uses Room, which does), a version-0 output whose
 > schema is *below* the reader's current version is treated as a brand-new/prepackaged database and
@@ -833,9 +939,44 @@ On any failure before step 6 the temp is deleted and the original is untouched.
 > decrypt, and re-key). Omitting this was a real data-integrity bug; existing bricked files are
 > recoverable only by restamping the correct `user_version` in place.
 
+### The commit swap — never hold zero copies
+
+The naive commit (delete the original, rename the temp in) has a window in which **no** copy of the
+user's data exists under a known name. A process kill in that window is unrecoverable data loss, and
+on a battery-powered e-ink device that window is hit for real.
+
+```
+fsync(tmp)
+  → delete any stale aside from a previous completed swap
+  → delete the original's WAL/SHM/journal sidecars
+  → rename  original → original + ".old.bak"      ← data now lives under the aside name
+  → rename  tmp      → original                   ← data now lives under the real name
+        on failure: rename aside back → original, and leave the verified tmp on disk
+        if the rollback ALSO fails: delete nothing, error out with both names — a human/next
+        launch can recover
+  → fsync(parent directory)                       ← the renames themselves must be durable
+  → delete the aside
+```
+
+At every instant at least one intact copy exists under a name the app knows how to find. Which is
+what makes the recovery pass possible:
+
+**Launch-time repair.** Before probing *any* database — the index included — repair a possible
+interrupted swap:
+
+| On-disk state | Meaning | Action |
+|---|---|---|
+| Real file present | Swap completed, or never started | Drop a stale aside if present |
+| Real file missing, aside present | Killed between the two renames | Rename the aside back |
+| Real file missing, only a verified `*.tmp` present | An older build's delete-then-rename window | Rename the tmp in |
+
+Run this over the whole document directory at launch, and over the index file specifically before its
+probe. **A missing file that probes as "invalid" means "fresh install"** — and for the index, "fresh
+install" means silently replacing the user's entire library with an empty one.
+
 **Re-key** — copies via `sqlcipher_export` FROM the old-keyed source TO a new-keyed temp (the same
-round-trip, so the `user_version` copy in step 3a applies here too). `PRAGMA rekey` was found
-unreliable on-device and is not used.
+round-trip, so the `user_version` copy in step 4a applies here too, as does the commit swap).
+`PRAGMA rekey` was found unreliable on-device and is not used.
 
 Encrypting an already-open document **requires a close → migrate → reopen cycle**: the live
 connection holds an open handle and in-memory WAL, and `sqlcipher_export` must run against a sealed,
@@ -890,85 +1031,48 @@ definitive encrypted-vs-garbage distinction requires the passphrase.
 
 ---
 
-# Part VIII — The Global Index
+# Part VIII — The Global Index (summary)
+
+> **Specified in full in [`global-index-format.md`](global-index-format.md)** — tables, payloads,
+> migrations, key lifecycle, app-content tables, and its own Paintsprout adaptation guide. This part
+> carries only the facts a *document container* implementer must know, and deliberately does not
+> duplicate the rest.
 
 `notesprout.db` — one per install, SQLCipher-encrypted under the global key, open for the whole app
 lifetime.
 
-## The `objects` table
+**Five things the document container depends on:**
 
-Deliberately the **same universal row shape** as the document table, so object serializers work
-unchanged across both databases.
+1. **Structure lives there, not here, and not on the filesystem.** A document file carries no
+   assumption about where it lives; that is what makes it portable. The `Garden/` directory is flat
+   blob storage with UUID filenames.
 
-```sql
-CREATE TABLE objects (
-    id        TEXT    PRIMARY KEY NOT NULL,
-    type      TEXT    NOT NULL,
-    name      TEXT    NOT NULL,        -- top-level, unlike .soil where name is in payload
-    parentId  TEXT,                    -- NULL = root
-    createdAt INTEGER NOT NULL,
-    updatedAt INTEGER NOT NULL,
-    deletedAt INTEGER,
-    data      TEXT    NOT NULL DEFAULT '{}'
-    -- plus columnar payload columns + blob (index v7/v8)
-);
-CREATE INDEX idx_objects_parent_type_deleted ON objects(parentId, type, deletedAt);
-```
+2. **The index row describes a closed document well enough that nothing has to open it** — name, page
+   count, encrypted flag, key scope, cover. This is a correctness requirement, not an optimization:
+   deciding whether to prompt for a key must not require the key.
 
-Index object types: `FOLDER` · `NOTEBOOK` · `LIST` · `TEMPLATE` · `TEMPLATE_FOLDER`.
+3. **No document content is ever written to the index** — no text, no recognized handwriting, no
+   search terms. The one exception is the cover image, governed by the key-scope rule in
+   [Leak hygiene](#leak-hygiene). Because content cannot reach the index, a future "search inside
+   documents" feature *must* be an explicit design decision.
 
-Note `TEMPLATE` here does **not** collide with the `.soil` `"template"` type — different databases,
-different meaning. The index holds the reusable **template library**; applying a library template
-**copies** it into the document.
+4. **The index uses the same universal row shape** (`id` / `type` / `parentId` / `createdAt` /
+   `updatedAt` / `deletedAt` + columnar payload + `blob`), so serializers, columnar mappings, and
+   subtree walks are shared across both databases. Two divergences: `name` is a top-level column, and
+   `parentId` is nullable with `NULL` for root (a document row uses `""`).
 
-## The notebook row payload
+5. **The index is the one file allowed to keep its WAL sidecars on disk**, because it is open for the
+   whole app lifetime and so has no clean-close moment. Every other rule in
+   [Part X](#part-x--durability-wal-sidecars-backup) applies to it unchanged — including the backup
+   ordering rule that the index is copied **last**.
 
-```kotlin
-data class NotebookObject(
-    val snapshot: String? = null,     // base64 cover — ALWAYS null when encrypted
-    val pageCount: Int = 0,
-    val encrypted: Boolean = false,
-    val keyScope: KeyScope? = null,   // non-null only when encrypted
-    val excludeFromBackup: Boolean = false,
-    val lastBackedUpLocal: Long? = null,
-    val lastBackedUpDrive: Long? = null,
-)
-```
+**The passphrase is never written to the index.** Neither is any raw key or token.
 
-These fields let every list, picker, and card renderer know a document is encrypted **without opening
-the file** — which is the whole point. Opening a file to learn whether it's locked would require the
-key you're trying to decide whether to ask for.
-
-**The passphrase is never written to the index.**
-
-## Index rules
-
-- `parentId = NULL` means root.
-- Soft deletes only; no hard delete without a deliberate GC pass.
-- All writes go through one repository; direct DAO access is read-only.
-- The index must be open before any UI touches it. Because opening may now be **async** (a one-time
-  plaintext→encrypted migration, or an unlock prompt), this cannot happen synchronously at app
-  startup — a bootstrap gate drives it and consumers suspend on a ready latch.
-- Membership lists (pins, ordering) are child rows, not JSON arrays.
-- `checkpointAndVacuum()` on app background: `PRAGMA incremental_vacuum` +
-  `PRAGMA wal_checkpoint(TRUNCATE)`, always via `rawQuery(...).use { it.moveToFirst() }`, never
-  `execSQL`.
-
-The index's WAL sidecars legitimately stay on disk (it's open the whole app lifetime) — this is the
-one documented exception to the no-stray-files rule.
-
-## Index open state machine
-
-```
-probe(notesprout.db):
-  Invalid   → fresh install: mint global key, create ENCRYPTED from the start
-  Plaintext → existing user upgrading: migrate schema plaintext, THEN encrypt in place, then open
-  Encrypted → cached key?  → raw-key open (verify first)
-              no key / verify fails → NEEDS_UNLOCK → prompt → verify → cache → open
-```
-
-The `Plaintext` branch ordering matters: bring the schema current **while still plaintext**, then
-encrypt. Migrating an encrypted file is strictly harder for no benefit.
+Opening the index is potentially async *and potentially interactive* (a one-time plaintext→encrypted
+migration, or an unlock prompt), so it cannot complete synchronously at application startup: a
+bootstrap gate drives it and every consumer suspends on a ready latch. Its open state machine —
+including the *repair-before-probe* rule that keeps a killed migration from reading as a fresh
+install — is in [`global-index-format.md`](global-index-format.md) Part VI.
 
 ---
 
@@ -1039,15 +1143,48 @@ alternative is prompting for a passphrase on export. It self-heals on the next o
 4.  Read manifest                  → notebook_meta + page count
                                      missing meta → fallback to filename, empty folderPath
                                      no object table → reject
+                                     VALIDATE every id against the UUID alphabet   ← see below
 5.  ID collision                   → Replace existing / Keep both (fresh UUID) / Cancel
 6.  Placement                      → "document's folders" (recreate via folderPath) or choose
+                                     folder recreation is strictly CREATE-ONLY               ← below
 7.  Name conflict                  → Replace / Keep both (append " Copy")
 8.  Keying chooser (encrypted)     → see table below
-9.  Write into Garden              → delete stale sidecars, copy temp → soilFile(resolvedId)
-10. Register in index
-11. Refresh embedded meta          → new id, new folderPath, resulting keying; checkpoint; close
-12. Cleanup temp
+9.  Write into Garden              → delete stale sidecars, copy temp → "<id>.soil.new", rename in
+10. Register in index              → all index writes for a Replace in ONE transaction
+11. Retire the replaced document   → only now, after the import has committed
+12. Refresh embedded meta          → new id, new folderPath, resulting keying; checkpoint; close
+13. Cleanup temp                   → on every path, including all prompt-cancel exits
 ```
+
+### Treat the incoming file as hostile
+
+It is a database authored by someone else, handed to you by a share sheet. Three rules:
+
+- **Validate every id in the manifest against the UUID alphabet before using it as a path
+  component.** The document id from the manifest becomes `Garden/<id>.soil` — an id containing `../`
+  is a path traversal that writes wherever the attacker likes. This is the only place in either
+  container where untrusted input reaches the filesystem.
+- **Folder recreation is create-only.** Recreating the source's ancestry with the same UUIDs is what
+  makes multi-device convergence work — but the ids come from an untrusted file. If an id is absent,
+  insert the folder. If it already exists as a live folder, use it **as-is: never rename, move, or
+  resurrect it.** Anything else (soft-deleted row, or an id that belongs to a non-folder) aborts the
+  descent and places the import one level up. Without this rule, a crafted file renames and rearranges
+  the user's own folder tree.
+- **Bounded decode everywhere**, per the image and blob rules in Parts IV–V.
+
+### Ordering: never destroy before you commit
+
+- **A "Replace" retires the victim only after the import commits.** Hard-deleting it up front means a
+  cancel at the keying chooser — three dialogs later — has already destroyed the document the user
+  was replacing.
+- **Refuse to replace a document that is currently open.** Keep a registry of open documents and fail
+  the import cleanly; swapping a file out from under a live connection corrupts both.
+- **Re-key on the temp file, before the copy into storage**, so any failure leaves the real storage
+  directory untouched.
+- **Install by copy-to-`.new` + rename**, so a torn copy never lands under the real name.
+- **Group the index writes of a replace into one transaction.** A partial index update leaves a row
+  describing a file that isn't what it says. Invalidate any cached raw key for the id immediately
+  after the file swap — the salt just changed.
 
 ### Keying chooser
 
@@ -1131,8 +1268,33 @@ hadn't happened yet.
 **Encrypted documents are copied as ciphertext.** No prompt, no decryption — a byte copy is
 sufficient and correct.
 
-**Restore is staging-first, replace-all:** stage everything, validate, then swap. Restart into the
-unlock flow afterward, since the restored index may be keyed to a different global secret.
+**A document whose WAL could not be absorbed must be backed up *with* its sidecar.** An encrypted
+document with no key available at backup time cannot be checkpointed, so its most recent writes are
+still in `-wal`. Copy the sidecar alongside the main file, and stamp the "backed up" timestamp only
+once **both** have landed. The inverse matters just as much: when the WAL *was* absorbed, delete any
+stale sidecar at the destination — a fresh main file paired with an old `-wal` restores as corruption.
+
+**Write to a temporary name and swap, at the destination too.** A mid-write failure must leave the
+*previous good* backup intact rather than a half-written file under the real name. And stamp
+"last run" only when something actually succeeded.
+
+**Restore is staging-first, replace-all** — never a merge:
+
+```
+fetch everything to staging   (per-file .part + rename; abort the entire run on any single
+                               file's failure; hard-fail up front on insufficient free space)
+  → probe the staged index AND every staged document before touching the live library
+  → commit by aside-rename swap, with the installed index as the commit marker
+  → on failure: roll back and reopen the previous index
+  → clear cached key state only AFTER the commit succeeds
+  → restart into the unlock flow
+```
+
+Restart matters because the restored index may be keyed to a **different global secret** (it came
+from another device, or from before a rotation), and the unlock flow is the only correct way back in.
+Clearing the cached key state before the commit would lock the user out of the library they still
+have. A mid-commit process kill is repaired at next launch by the same aside-name recovery that
+repairs an interrupted in-place migration.
 
 ---
 
@@ -1145,7 +1307,8 @@ wheel, which is precisely what this document exists to prevent.
 
 1. **One document = one SQLite file**, app-specific extension (`.paint`? `.canvas`? — pick one and
    never change it).
-2. **Flat UUID-named directory**; all hierarchy in a separate global index.
+2. **Flat UUID-named directory**; all hierarchy in a separate global index — whose own compatibility
+   surface is specified in [`global-index-format.md`](global-index-format.md) Part IX.
 3. **One universal object table**, string `type` discriminator, columnar payload + `blob`.
 4. **`id` / `parentId` / `type` / `order` / `createdAt` / `updatedAt` / `deletedAt`** — identical
    names, identical semantics, epoch-ms integers, soft delete via `deletedAt`.
@@ -1250,12 +1413,29 @@ local spaces with a transform on the parent is the only sane model. Consider add
    match reality must be quarantined and skipped, not allowed to stall the sweep.
 8. **Decide dp-vs-px per type and write it down.** It is invisible in the schema and silently wrong
    across devices.
+9. **Never let a commit swap hold zero copies.** Rename the original aside, rename the replacement
+   in, *then* delete the aside — and repair the interrupted states at launch, before any probe.
+10. **Every open and verification helper must require the file to exist.** Create-capable opens
+    fabricate empty databases that masquerade as the real thing and "verify" any passphrase.
+11. **Validate untrusted ids before they become paths.** The one place an imported file's bytes reach
+    your filesystem is the one place a traversal gets you.
+12. **Remap descendant ids on every subtree write, insert and replace alike** — in one shared helper,
+    not two.
+13. **Do not persist in-progress editor state to a plaintext temp file.** Persist into the encrypted
+    store it came from, debounced. (And do not try to carry a canvas in an activity-state bundle: a
+    real one serializes past the platform's transaction limit and is silently dropped.)
+14. **Guard per row, not per pass**, in every sweep, decoder, and batch job. One malformed row must
+    not permanently disable a whole subsystem for that document.
+15. **Close on an application-scoped, non-cancellable coroutine with an exception handler**, and guard
+    each step of the seal individually — a disk-full failure seconds after the user left the document
+    must not crash the app or skip the checkpoint.
 
 ## Suggested build order
 
 1. Container: `soilFile()`, schema constant, universal row entity, WAL PRAGMAs, seal sequence.
 2. **Non-destructive open helper wrapper.** Before anything touches a key.
-3. Global index: objects table, folder tree, repository, bootstrap gate.
+3. Global index: objects table, folder tree, repository, bootstrap gate — see
+   [`global-index-format.md`](global-index-format.md) Part IX for its own build order.
 4. Encryption: `Crypto` open helper, key scopes, keystore-backed store, recovery-key generation,
    raw-key cache, rate limiter.
 5. Object model: structural types (`document`/`canvas`/`layer`), then leaf content types.
@@ -1360,6 +1540,13 @@ no longer happens — every store it could reach is encrypted at rest. This is t
 once encryption is universal, per-operation "this leaves the encrypted zone" prompts stop being
 warnings and start being noise. Audit for them after any encrypt-everything migration.
 
+**A second round of the same drift (2026-07-24):** this document's own leak-hygiene table still said
+covers are *never* cached for an encrypted document. That was the pre-encrypted-index rule. The
+correct rule is key-scope-based — GLOBAL-scope covers are cached, NOTEBOOK-scope covers never are —
+and is now stated in [Leak hygiene](#leak-hygiene). The lesson generalizes past this one field:
+**a suppression rule written under an old threat model keeps costing features long after the threat
+is gone**, and reads as intentional to everyone who arrives later. Date them, or re-derive them.
+
 ## Content typing: the table name is the discriminator
 
 **A `.soil` file declares what it contains by which object table it has.** Notesprout's is
@@ -1400,7 +1587,9 @@ Rules that follow, and that both apps must honor:
   Decide before either app ships an importer that can receive the other's files.
 - **Who owns a mixed file's index row?** The global index has one row per document with one `type`.
   A file with both tables needs either a compound type, two rows pointing at one file, or a rule that
-  the index records only the content type the running app understands. Unresolved.
+  the index records only the content type the running app understands. Unresolved — see
+  [`global-index-format.md`](global-index-format.md) Appendix B, which also raises the related
+  question of whether two Sprout apps on one device should share an index at all.
 - **`data` and `boundingBox` legacy columns.** Notesprout keeps them `NOT NULL` for coexistence. A
   greenfield Paintsprout should omit them — but then a shared container module has to be
   parameterized on their presence. Simplest resolution: the shared module omits them, and Notesprout

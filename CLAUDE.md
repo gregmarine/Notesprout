@@ -16,8 +16,9 @@ matching doc before working in that area:**
 
 | Area | Doc |
 |---|---|
-| **Complete `.soil` format spec** — portable, self-contained; container invariants, full object catalog, binary encodings, encryption, export/import, backup. Written to hand to another project (Paintsprout) building a compatible container | [`docs/soil-file-format.md`](docs/soil-file-format.md) |
-| Global index (`notesprout.db`) + `.soil` file rules, Room/WAL, template library | [`docs/data-architecture.md`](docs/data-architecture.md) |
+| **Complete `.soil` format spec** — portable, self-contained; container invariants, full object catalog, binary encodings, encryption, export/import, backup, durability hardening. Written to hand to another project (Paintsprout) building a compatible container | [`docs/soil-file-format.md`](docs/soil-file-format.md) |
+| **Complete global-index (`notesprout.db`) spec** — the companion to the `.soil` spec: `objects` table + all app tables, sentinel ids, v1→v8 migrations, index encryption & key lifecycle, backup/restore ordering, stores outside both DBs. Also written to hand to Paintsprout | [`docs/global-index-format.md`](docs/global-index-format.md) |
+| Global index (`notesprout.db`) + `.soil` file rules, Room/WAL, template library — Notesprout-internal quick reference | [`docs/data-architecture.md`](docs/data-architecture.md) |
 | Full e-ink design system, AlertDialog / IME patterns | [`docs/design-system.md`](docs/design-system.md) |
 | Toolbar: base, overflow, full customization layer | [`docs/toolbar.md`](docs/toolbar.md) |
 | Drawing engines, EPD rules, **pen-activity gate (palm vs. finger gestures)**, perf, committed-content RenderNode render model + neighbor prefetch cache + cover snapshots, templates, undo/redo | [`docs/drawing-engine.md`](docs/drawing-engine.md) |

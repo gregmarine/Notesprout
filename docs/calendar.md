@@ -3,7 +3,7 @@
 A handwriting-first calendar. Every view (Month / Week / Day) is a real drawable page using the same
 universal object model as notebooks, the scratch pad, sticky notes, and shapes. The grid / timeline is
 a baked template behind the ink (exactly like a notebook ruling template); the whole surface — grid,
-notes band, and timeline alike — is writable. Content persists in `notesprout.db` (plaintext) and is
+notes band, and timeline alike — is writable. Content persists in `notesprout.db` (encrypted at rest) and is
 fully interoperable with every other canvas via the shared clipboard.
 
 ---
@@ -54,7 +54,7 @@ calendar_root  (type="calendar_root", parentId="", fixed id CALENDAR_ROOT_ID)
 | Month | `cal-month-YYYY-MM` | one per month |
 | Week  | `cal-week-YYYY-MM-DD` (Sunday of the week) | one per week |
 | Day   | `cal-day-YYYY-MM-DD-AM` / `-PM` | **two** per day (AM = 00–12, PM = 12–24) |
-| Day detail | `cal-daynote-YYYY-MM-DD` | **one** per day (see [Day detail](#day-detail--cal-daynote-)) |
+| Day detail | `cal-daynote-YYYY-MM-DD` | **one** per day (see [Day detail](#note-view-cal-daynote-)) |
 
 Pages are shared across the `calendar` table/root regardless of view, so a single day can carry
 month-cell writing, week-cell writing, both AM/PM timeline halves, **and** its day-detail page —
@@ -74,7 +74,7 @@ all independent, all keyed.
 | `data/CalendarRepository.kt` | Higher-level API (`ensureBootstrap`, `getOrCreatePageLayer`, `loadPage`, `saveStrokes`, `insertObjects`, `serializeForExport`, `softDeleteObjects`, `setPageSize`, `snapshotLayer`/`restoreLayer`, `insertTemplateRow`/`getTemplateById`/`setPageTemplate`) |
 | `data/PageCopier.kt` | `insertCalendarPagesIntoNotebook` / `loadNotebookPageIds` + `CalendarExportPage`/`CalendarExportChild` carriers — the engine for the full-view export (below) |
 | `data/index/ListIds.kt` | `CALENDAR_ROOT_ID` constant |
-| `data/index/NotesproutDatabase.kt` | `version=4`; `CalendarEntity` + `NotebookActivityEntity` in `@Database entities`; `MIGRATION_2_3`, `MIGRATION_3_4` |
+| `data/index/NotesproutDatabase.kt` | `CalendarEntity` + `NotebookActivityEntity` in `@Database entities`; `MIGRATION_2_3`, `MIGRATION_3_4` (DB is now at `version=8` — see [`global-index-format.md`](global-index-format.md)) |
 | `data/index/NotesproutIndex.kt` | registers `MIGRATION_2_3` + `MIGRATION_3_4`; `calendarDao()` / `notebookActivityDao()` accessors |
 | `data/index/NotebookActivityEntity.kt` / `NotebookActivityDao.kt` | `notebook_activity` log (OPENED/EDITED) — see [Day window](#day-detail--the-day-window) |
 | `data/DayHistoryRepository.kt` | query + logging layer for the Notebooks / History views + the long-press day list (`notebooksForDay`) |
@@ -216,7 +216,7 @@ real canvas pixel size via `setPageSize`.
 - **Single-finger tap does *not* select a day** (`handleDayTap`). It once selected/navigated on a single
   tap, but that caused accidental day switches while writing — day selection is the picker's job now. The
   tap still records `lastDayTapDate`/`lastDayTapTime` purely to detect a double-tap.
-- **Single-finger double-tap** → opens the day's full-page canvas ([`DayDetailActivity`](#day-detail--cal-daynote-)).
+- **Single-finger double-tap** → opens the day's full-page canvas ([`DayDetailActivity`](#note-view-cal-daynote-)).
   Month/Week: double-tap a day **cell** (`hitTest` resolves the date). Day: double-tap **anywhere** opens
   `selectedDate` (no cell hit-test). Second tap within `getDoubleTapTimeout()` on the same day opens.
 - **Single-finger long-press** → that day's [notebook list](#long-press--the-day-notebook-list)
@@ -473,7 +473,7 @@ calendar-**Events** system (birthdays / anniversaries / appointments), now built
 
 Calendar **Events** are structured, recurrable day-anchored entries — birthdays, anniversaries,
 vacations, meetings, appointments, and one-off items. They are **not** handwriting; they live in the
-plaintext global index (`notesprout.db`), never in a `.soil` file, and surface as the **Events** view
+global index (`notesprout.db`, encrypted at rest), never in a `.soil` file, and surface as the **Events** view
 of the [day window](#day-detail--the-day-window). (Distinct from the `notebook_activity` telemetry log,
 which deliberately avoided the word "events" so this system could claim it.)
 

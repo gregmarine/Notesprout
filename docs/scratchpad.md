@@ -267,7 +267,7 @@ another; encrypted is encrypted. The old warning dialog (shared with clipboard c
 Never launched from: PageIndex, Link picker, Template browser, settings, or any other surface.
 
 **Launch restore:** the scratch pad is one of the surfaces on the
-[surface stack](mainactivity-and-recents.md#surface-stack--launch-restore) — if the app is killed with
+[surface stack](mainactivity-and-recents.md#surface-stack--launch-restore-statesurfacestackkt) — if the app is killed with
 it open, a cold launch reopens it **over whatever it was opened from** (the notebook, the calendar, the
 day window), with the source notebook's `EXTRA_FROM_NOTEBOOK_*` replayed so Send-to-Notebook still
 targets what it did. It records itself via `SurfaceStack.attach` / `markTop` in `onCreate` / `onResume`;

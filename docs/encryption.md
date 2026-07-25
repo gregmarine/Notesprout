@@ -93,7 +93,7 @@ Encrypting the `.soil` is not enough. Several plaintext side-channels must also 
 
 | Side-channel | Rule |
 |---|---|
-| **Index snapshot** — `NotebookObject.snapshot` (base64 PNG cached in `notesprout.db`) | Clear on encrypt; never write for encrypted notebooks. `IndexRepository.setEncryptionState` clears it atomically. `IndexRepository` also guards `updateNotebookSnapshot` — refuses a non-null snapshot if the row is already encrypted. |
+| **Index snapshot** — `NotebookObject.snapshot` (cover image cached in `notesprout.db`) | Gated on **key scope**, not on `encrypted` — see [the snapshot rule](#notebookobject-snapshot-rule). GLOBAL-scope covers are kept (the index is encrypted under that same key); NOTEBOOK-scope covers are never written and are cleared atomically by `IndexRepository.setEncryptionState` on conversion. |
 | **Undo/redo sidecar** — `*.soil.undoredo` plaintext file | Skip writing on `onStop` when encrypted. Delete any stale sidecar when opening an encrypted notebook. |
 | **WAL/SHM** | SQLCipher encrypts WAL too — safe. Normal sidecar-cleanup rules still apply. |
 | **Original plaintext file** | After `encryptInPlace`, the original `.soil` and all siblings are deleted atomically. The zetetic temp file (`*.enc.tmp`) is renamed over the original only after `verifyPassphrase` passes. |
@@ -320,10 +320,23 @@ Encrypting an already-open notebook must go through a close → migrate → reop
 
 ## `NotebookObject` Snapshot Rule
 
-`IndexRepository.updateNotebookSnapshot` is a no-op when the notebook row has `encrypted = true`.
-`setEncryptionState(..., encrypted = true, ...)` atomically clears `snapshot` in the same write.
-No snapshot is ever written during an encrypted notebook's open session (guards in both
-`NotebookActivity.cacheSnapshotIfAllowed` and `CoverLoader`).
+The rule is keyed on **scope**, not on `encrypted`, and this changed when the index itself became
+encrypted (Phase 1b). The question is not "does this leave the encrypted zone?" — nothing does — but
+"does this cross a **key boundary**?":
+
+| Notebook | Cover in the index? |
+|---|---|
+| Unencrypted | Yes |
+| Encrypted, `GLOBAL` scope | **Yes** — `notesprout.db` is encrypted under that same global key, so the cover is protected by exactly the key that protects the notebook |
+| Encrypted, `NOTEBOOK` scope (own passphrase) | **Never** — the user chose a separate passphrase precisely so this content is not readable with the global key |
+
+`IndexRepository.updateNotebookSnapshot` returns early when `encrypted && keyScope != GLOBAL`;
+`setEncryptionState` clears `snapshot` in the same write when converting *to* that scope;
+`NotebookActivity.cacheSnapshotIfAllowed` applies the identical guard at capture time. Only
+NOTEBOOK-scope cards render the lock icon instead of a cover.
+
+Note the **embedded `notebook_meta` cover is stricter**: it is `null` for *any* encrypted notebook,
+both scopes. That file travels to other devices, where "the global key" means a different secret.
 
 ---
 
@@ -450,7 +463,8 @@ Full-notebook export of an encrypted notebook is a **silent pure copy** of the `
   key — no second prompt. For **cold** NOTEBOOK-scoped export (MainActivity context menu), the
   file is copied without opening it; embedded `notebook_meta` reflects the last open/close state.
 - `notebook_meta` is encrypted at rest inside the SQLCipher file. An encrypted notebook's cover
-  snapshot is always `null` in `notebook_meta` (same rule as the index snapshot suppression).
+  snapshot is always `null` in `notebook_meta` — at **both** scopes, which is stricter than the
+  index rule above, because the file travels to devices where the global key is a different secret.
 
 See [`docs/full-notebook-export.md`](full-notebook-export.md) for the full format, copy engine,
 and the encrypted-NOTEBOOK meta-freshness trade-off.
@@ -477,7 +491,7 @@ Encrypted `.soil` files follow a **probe → unlock → keying chooser → re-ke
 
 **Re-key order:** `rekeyInPlace` operates on the temp file before the copy into Garden. A failure leaves Garden untouched.
 
-**Leak hygiene:** the temp file is the still-encrypted `.soil` (never a plaintext copy); passphrases are never logged, never put in an Intent; the index never receives a `snapshot` for encrypted notebooks.
+**Leak hygiene:** the temp file is the still-encrypted `.soil` (never a plaintext copy); passphrases are never logged, never put in an Intent; the index never receives a `snapshot` for a NOTEBOOK-scope notebook (see [the snapshot rule](#notebookobject-snapshot-rule)).
 
 `KeyResolver.resolveForImportRead` lives in `crypto/KeyResolver.kt`. The `"IMPORT"` `AttemptLimiter` bucket lives in the same file and persists across process restarts.
 

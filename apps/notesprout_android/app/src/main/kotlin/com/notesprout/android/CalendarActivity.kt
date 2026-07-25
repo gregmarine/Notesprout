@@ -108,7 +108,7 @@ import kotlin.math.hypot
 /**
  * Calendar with handwriting on every view. Each view is a template-backed drawing canvas keyed by a
  * deterministic page id: month = one page per month, week = one page per week (Sunday), day = two
- * pages per day (AM / PM). Content lives in the `calendar` table of notesprout.db (plaintext) and
+ * pages per day (AM / PM). Content lives in the `calendar` table of notesprout.db (encrypted at rest) and
  * shares the universal object model + clipboard with notebooks, scratch pad, sticky notes & shapes.
  *
  * The grid/timeline is drawn into a template bitmap behind the ink (see [CalendarTemplateRenderer]).

@@ -7,7 +7,7 @@ import androidx.room.PrimaryKey
 /**
  * One calendar **Event** — birthday / anniversary / vacation / meeting / appointment / other.
  *
- * Lives in the plaintext global index (`notesprout.db`), never in a `.soil` file. Queryable fields
+ * Lives in the global index (`notesprout.db`, encrypted at rest), never in a `.soil` file. Queryable fields
  * are promoted to columns so a given day's events can be found by SQL range overlap; the recurrence
  * rule + notes ride as JSON in [data] (see `EventPayload`).
  *
