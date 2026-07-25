@@ -7,11 +7,13 @@ import android.os.Bundle
 import android.view.LayoutInflater
 import android.widget.LinearLayout
 import android.widget.TextView
+import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.core.view.isVisible
 import androidx.lifecycle.lifecycleScope
 import com.notesprout.android.core.TopGuard
+import com.notesprout.android.data.ReopenOutcome
 import com.notesprout.android.data.ResolvedGroup
 import com.notesprout.android.data.TaskSection
 import com.notesprout.android.data.TasksRepository
@@ -162,9 +164,12 @@ class TasksActivity : AppCompatActivity() {
                 TaskState.SKIPPED -> R.drawable.ic_checkbox_skipped
             }
         )
-        // The box is a state *glyph* until the resolve actions land; it must not look tappable and
-        // then do nothing.
-        row.btnTaskState.isClickable = false
+        // The box is the one-tap control, in both directions: check an open task off, or un-check a
+        // resolved one back into the list.
+        row.btnTaskState.contentDescription = if (state.isResolved) "Mark not done" else "Mark done"
+        row.btnTaskState.setOnClickListener {
+            if (state.isResolved) reopenTask(task) else resolveTask(task, TaskState.DONE)
+        }
 
         row.tvTaskTitle.text = task.title
         val meta = meta(task, state)
@@ -174,7 +179,28 @@ class TasksActivity : AppCompatActivity() {
         row.tvTaskDue.isVisible = dueLabel != null
 
         row.taskRow.setOnClickListener { openEditor(task) }
+        row.taskRow.setOnLongClickListener { showActions(task, state); true }
         binding.tasksList.addView(row.root)
+    }
+
+    /**
+     * The row's long-press menu. Skip lives here rather than on the row itself: it is the rarer
+     * choice of the two, and a second always-visible control on every row would clutter a list whose
+     * whole point is calm.
+     */
+    private fun showActions(task: TaskEntity, state: TaskState) {
+        val sheet = ActionSheetDialog(this)
+            .title(task.title)
+            .addAction(R.drawable.ic_edit, "Edit") { openEditor(task) }
+        if (state.isResolved) {
+            sheet.addAction(R.drawable.ic_undo, "Mark not done") { reopenTask(task) }
+        } else {
+            sheet.addAction(R.drawable.ic_checkbox_skipped, "Skip") {
+                resolveTask(task, TaskState.SKIPPED)
+            }
+        }
+        sheet.addAction(R.drawable.ic_trash, "Delete") { confirmDelete(task) }
+        sheet.show()
     }
 
     /** A bold black section label, matching the Events list's section treatment. */
@@ -230,6 +256,42 @@ class TasksActivity : AppCompatActivity() {
     }
 
     private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
+
+    // ── State changes ──────────────────────────────────────────────────────────
+
+    /**
+     * Complete or skip [task]. Both resolve the row and advance its series identically — a skip is a
+     * decision about the occurrence, not a deletion of it — so they share one path.
+     */
+    private fun resolveTask(task: TaskEntity, state: TaskState) {
+        lifecycleScope.launch {
+            val today = LocalDate.now()
+            val successor = when (state) {
+                TaskState.SKIPPED -> repo.skip(task, today)
+                else -> repo.complete(task, today)
+            }
+            refresh()
+            // Only recurring tasks produce a successor, and its date is the non-obvious part of the
+            // interaction — the row the user just checked off vanishes and a new one appears
+            // somewhere else in the list.
+            successor?.dueEpochDay?.let {
+                toast("Next due ${LocalDate.ofEpochDay(it).format(dueFmt)}")
+            }
+        }
+    }
+
+    private fun reopenTask(task: TaskEntity) {
+        lifecycleScope.launch {
+            when (repo.reopen(task)) {
+                ReopenOutcome.REOPENED -> refresh()
+                ReopenOutcome.SERIES_MOVED_ON ->
+                    toast("Later occurrences of this task have already been dealt with.")
+            }
+        }
+    }
+
+    private fun toast(message: String) =
+        Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
 
     // ── Editing ────────────────────────────────────────────────────────────────
 
