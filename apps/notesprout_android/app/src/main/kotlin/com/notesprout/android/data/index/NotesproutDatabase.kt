@@ -13,8 +13,9 @@ import com.notesprout.android.data.SoilSchema
         CalendarEntity::class,
         NotebookActivityEntity::class,
         EventEntity::class,
+        TaskEntity::class,
     ],
-    version = 8,
+    version = 9,
     exportSchema = false,
 )
 abstract class NotesproutDatabase : RoomDatabase() {
@@ -24,6 +25,7 @@ abstract class NotesproutDatabase : RoomDatabase() {
     abstract fun calendarDao(): CalendarDao
     abstract fun notebookActivityDao(): NotebookActivityDao
     abstract fun eventDao(): EventDao
+    abstract fun taskDao(): TaskDao
 
     companion object {
         val MIGRATION_1_2 = object : Migration(1, 2) {
@@ -181,6 +183,52 @@ abstract class NotesproutDatabase : RoomDatabase() {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE objects ADD COLUMN \"refId\" TEXT")
                 db.execSQL("ALTER TABLE objects ADD COLUMN \"sortOrder\" INTEGER")
+            }
+        }
+
+        /**
+         * The `tasks` table (see [TaskEntity]) — the task manager's store. Unlike `events` it is
+         * **fully columnar**: the recurrence rule lives in typed columns and there is no `data`
+         * payload, so nothing in this table is ever JSON.
+         *
+         * `type` + `parentId` are the reservation for routines; only `TASK` rows are written today.
+         */
+        val MIGRATION_8_9 = object : Migration(8, 9) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS tasks (
+                        id               TEXT    NOT NULL PRIMARY KEY,
+                        parentId         TEXT,
+                        type             TEXT    NOT NULL,
+                        title            TEXT    NOT NULL,
+                        state            TEXT    NOT NULL,
+                        dueEpochDay      INTEGER,
+                        "order"          INTEGER NOT NULL DEFAULT 0,
+                        seriesId         TEXT,
+                        seriesIndex      INTEGER,
+                        seriesAnchorDay  INTEGER,
+                        recurFreq        TEXT,
+                        recurInterval    INTEGER,
+                        recurWeekdays    INTEGER,
+                        recurMonthlyMode TEXT,
+                        recurEndMode     TEXT,
+                        recurEndEpochDay INTEGER,
+                        recurEndCount    INTEGER,
+                        resolvedAt       INTEGER,
+                        createdAt        INTEGER NOT NULL,
+                        updatedAt        INTEGER NOT NULL,
+                        deletedAt        INTEGER
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS index_tasks_state_dueEpochDay " +
+                        "ON tasks(state, dueEpochDay)"
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_tasks_seriesId ON tasks(seriesId)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_tasks_parentId ON tasks(parentId)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_tasks_deletedAt ON tasks(deletedAt)")
             }
         }
 
