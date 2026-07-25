@@ -19,16 +19,16 @@ Notesprout is an open source, handwriting-first notes app built for people who t
 ## Device Support
 
 **Tier 1 — Primary targets**
-- BOOX Go 10.3 Gen II (EMR stylus, large-format e-ink) — flagship
-- BOOX Go 6 Gen II (EMR stylus, compact e-ink)
-- BOOX Note Max (EMR stylus, large-format e-ink)
-- BOOX Palma2 Pro (USI 2.0 stylus, Android phone form factor)
+- BOOX Go 10.3 Gen II (large-format e-ink) — flagship
+- BOOX Go 6 Gen II (compact e-ink)
+- BOOX Note Max (large-format e-ink)
+- BOOX Palma2 Pro (Android phone form factor)
 
 **Tier 2 — QA / testing**
-- BOOX NoteAir5C (EMR stylus, e-ink color)
+- BOOX NoteAir5C (e-ink color)
 - BOOX NoteAir4C, Tab XC
 - BOOX Go Color 7 Gen II
-- Wacom Movink Pad 11 & 14 (Android, active stylus)
+- Wacom Movink Pad 11 & 14 (Android)
 
 **Future**
 - MacBook / Web
@@ -40,7 +40,7 @@ Notesprout is an open source, handwriting-first notes app built for people who t
 
 - **Kotlin** — native Android app (Java 17 target)
 - **Room / SQLite** — `.soil` notebook files, single unified table, one file per notebook
-- **Onyx SDK** — low-latency stylus input on BOOX e-ink devices, for both EMR and USI pens (not every BOOX device uses EMR — the Palma2 Pro and other pocket-sized models are USI 2.0)
+- **Onyx SDK** — low-latency stylus input on BOOX e-ink devices, for both EMR and USI pens
 - **SQLCipher** — full-database encryption for `.soil` notebooks and the global index; passphrase-derived keys, per-notebook or global scope, with password-protected PDF export via PDFBox
 - **Handwriting recognition** — on-device, two engines: **ML Kit** digital ink (default, always available) and an optional **TrOCR** personal engine running on **ONNX Runtime Mobile**, fine-tuned to your own handwriting; feeds heading text, full-page text extraction, and text/markdown export
 - **kotlinx.serialization** — code-generated JSON, zero reflection
