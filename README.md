@@ -13,6 +13,7 @@ Notesprout is an open source, handwriting-first notes app built for people who t
 | **v0.0 — First Bloom** | ✅ Shipped — MVP/proof-of-concept, source preserved on the [`mvp`](../../tree/mvp) branch |
 | **v1.0 — Seed** | ✅ Shipped — all major features complete, source preserved on the `seed` branch (archived) |
 | **v1.1 — Sprout** | ✅ Shipped — merged to `main`, source preserved on the `sprout` branch (archived) |
+| **v1.2 — Sapling** | 🌱 Active development on the [`sapling`](../../tree/sapling) branch |
 
 ---
 
