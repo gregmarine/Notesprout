@@ -1,0 +1,322 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@color/paperWhite"
+    android:fitsSystemWindows="true">
+
+    <!-- Top border -->
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="@color/inkBlack" />
+
+    <!-- Title bar -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="56dp"
+        android:orientation="horizontal"
+        android:background="@color/paperWhite"
+        android:gravity="center_vertical">
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnBack"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:src="@drawable/ic_arrow_left"
+            android:contentDescription="Back"
+            android:layout_marginStart="4dp" />
+
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="Handwriting Recognition"
+            android:textSize="18sp"
+            android:textColor="@color/inkBlack"
+            android:textStyle="bold"
+            android:paddingStart="8dp"
+            android:paddingEnd="8dp" />
+
+    </LinearLayout>
+
+    <!-- Divider -->
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="@color/inkBlack" />
+
+    <ScrollView
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:scrollbars="none">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:paddingStart="24dp"
+            android:paddingEnd="24dp"
+            android:paddingTop="20dp"
+            android:paddingBottom="20dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Engine"
+                android:textSize="16sp"
+                android:textStyle="bold"
+                android:textColor="@color/inkBlack"
+                android:layout_marginBottom="8dp" />
+
+            <!-- ML Kit row -->
+            <LinearLayout
+                android:id="@+id/rowMlKit"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:background="@drawable/shape_bordered"
+                android:padding="12dp"
+                android:gravity="center_vertical">
+
+                <androidx.appcompat.widget.AppCompatRadioButton
+                    android:id="@+id/radioMlKit"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:clickable="false"
+                    android:focusable="false" />
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:orientation="vertical"
+                    android:paddingStart="8dp">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Standard (ML Kit)"
+                        android:textSize="15sp"
+                        android:textColor="@color/inkBlack" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Google's on-device recognizer. Fast and accurate, but cannot learn your handwriting."
+                        android:textSize="13sp"
+                        android:textColor="@color/inkBlack" />
+                </LinearLayout>
+            </LinearLayout>
+
+            <!-- TrOCR row -->
+            <LinearLayout
+                android:id="@+id/rowTrOcr"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:background="@drawable/shape_bordered"
+                android:padding="12dp"
+                android:gravity="center_vertical"
+                android:layout_marginTop="8dp">
+
+                <androidx.appcompat.widget.AppCompatRadioButton
+                    android:id="@+id/radioTrOcr"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:clickable="false"
+                    android:focusable="false" />
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:orientation="vertical"
+                    android:paddingStart="8dp">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Personal (TrOCR) — experimental"
+                        android:textSize="15sp"
+                        android:textColor="@color/inkBlack" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="An open model that can be tuned to your handwriting. Requires an imported model file. Falls back to Standard when a line can't be read."
+                        android:textSize="13sp"
+                        android:textColor="@color/inkBlack" />
+                </LinearLayout>
+            </LinearLayout>
+
+            <!-- Model card -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Model"
+                android:textSize="16sp"
+                android:textStyle="bold"
+                android:textColor="@color/inkBlack"
+                android:layout_marginTop="20dp"
+                android:layout_marginBottom="8dp" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:background="@drawable/shape_bordered"
+                android:padding="12dp">
+
+                <TextView
+                    android:id="@+id/modelStatus"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:textSize="14sp"
+                    android:textColor="@color/inkBlack" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:layout_marginTop="8dp">
+
+                    <androidx.appcompat.widget.AppCompatButton
+                        android:id="@+id/btnImportModel"
+                        style="@style/Widget.Notesprout.OutlinedButton"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Import model…" />
+
+                    <androidx.appcompat.widget.AppCompatButton
+                        android:id="@+id/btnSwitchModel"
+                        style="@style/Widget.Notesprout.OutlinedButton"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="8dp"
+                        android:text="Switch…"
+                        android:visibility="gone" />
+
+                    <androidx.appcompat.widget.AppCompatButton
+                        android:id="@+id/btnDeleteModel"
+                        style="@style/Widget.Notesprout.OutlinedButton"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="8dp"
+                        android:text="Delete"
+                        android:visibility="gone" />
+                </LinearLayout>
+            </LinearLayout>
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Model files are produced by the Notesprout HWR tools and imported here. The Personal engine only takes effect while a model is installed; otherwise recognition uses Standard."
+                android:textSize="13sp"
+                android:textColor="@color/inkBlack"
+                android:layout_marginTop="12dp" />
+
+            <!-- Personalization -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Personalization"
+                android:textSize="16sp"
+                android:textStyle="bold"
+                android:textColor="@color/inkBlack"
+                android:layout_marginTop="20dp"
+                android:layout_marginBottom="8dp" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:background="@drawable/shape_bordered"
+                android:padding="12dp">
+
+                <LinearLayout
+                    android:id="@+id/rowPersonalization"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical">
+
+                    <androidx.appcompat.widget.AppCompatCheckBox
+                        android:id="@+id/checkPersonalization"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:clickable="false"
+                        android:focusable="false" />
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:paddingStart="8dp"
+                        android:text="Learn from my corrections"
+                        android:textSize="15sp"
+                        android:textColor="@color/inkBlack" />
+                </LinearLayout>
+
+                <TextView
+                    android:id="@+id/samplesStatus"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:textSize="13sp"
+                    android:textColor="@color/inkBlack"
+                    android:layout_marginTop="6dp" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Samples come from your fixes to recognized text and the teaching flow below. Nothing is collected from encrypted notebooks, and nothing ever leaves this device."
+                    android:textSize="13sp"
+                    android:textColor="@color/inkBlack"
+                    android:layout_marginTop="6dp" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:layout_marginTop="8dp">
+
+                    <androidx.appcompat.widget.AppCompatButton
+                        android:id="@+id/btnEnroll"
+                        style="@style/Widget.Notesprout.OutlinedButton"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Teach it your handwriting…" />
+
+                    <androidx.appcompat.widget.AppCompatButton
+                        android:id="@+id/btnClearTraining"
+                        style="@style/Widget.Notesprout.OutlinedButton"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="8dp"
+                        android:text="Clear my data" />
+                </LinearLayout>
+
+                <androidx.appcompat.widget.AppCompatButton
+                    android:id="@+id/btnExportTraining"
+                    style="@style/Widget.Notesprout.OutlinedButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:text="Export training data…"
+                    android:visibility="gone" />
+            </LinearLayout>
+
+            <!-- Debug-only lab entry -->
+            <androidx.appcompat.widget.AppCompatButton
+                android:id="@+id/btnOpenLab"
+                style="@style/Widget.Notesprout.OutlinedButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="20dp"
+                android:text="Open HWR Lab (debug)"
+                android:visibility="gone" />
+
+        </LinearLayout>
+    </ScrollView>
+</LinearLayout>

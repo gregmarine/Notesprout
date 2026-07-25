@@ -18,6 +18,7 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import com.notesprout.android.R
+import com.notesprout.android.core.TopGuard
 import kotlin.math.ceil
 import kotlin.math.floor
 import kotlin.math.roundToInt
@@ -97,6 +98,9 @@ class TocDialog(
         }
 
         flTocRoot = dialog.findViewById(R.id.flTocRoot)
+        // Immersive dialog filling the screen — reserve the top guard so the close button and the
+        // first entries aren't parked in the status bar's reveal zone.
+        TopGuard.applyRootPadding(flTocRoot)
         llTocPanel = dialog.findViewById(R.id.llTocPanel)
         btnTocClose = dialog.findViewById(R.id.btnTocClose)
         llTocList = dialog.findViewById(R.id.llTocList)

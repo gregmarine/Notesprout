@@ -8,7 +8,9 @@ import java.io.File
  * Creates the Garden/ directory if it doesn't exist yet.
  */
 fun soilFile(context: Context, notebookId: String): File {
-    val garden = File(context.getExternalFilesDir(null)!!, "Garden")
+    val ext = context.getExternalFilesDir(null)
+        ?: throw IllegalStateException("Device storage is unavailable — cannot locate the Garden directory")
+    val garden = File(ext, "Garden")
     garden.mkdirs()
     return File(garden, "$notebookId.soil")
 }

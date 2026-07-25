@@ -32,8 +32,14 @@ The row's `data` column holds a `ClipboardPayload` serialized to JSON
 // type ∈ {stroke, heading, text, line, link}
 ```
 
-The payload is always written **plaintext** — the global index is never encrypted. `sourceEncrypted`
-records that the user accepted the unencryption warning; it is not used at paste time.
+The payload is written as plaintext JSON **within** `notesprout.db`, which is itself
+[SQLCipher-encrypted at rest](encryption.md#the-global-index-is-encrypted) under the global
+passphrase.
+
+`sourceEncrypted` records whether the source notebook was encrypted. It was originally set to note
+that the user had accepted the (now-removed) unencryption warning. **Nothing reads it** — not at
+paste time, not anywhere. It is retained only because dropping a field changes the persisted payload
+shape; remove it deliberately if the payload is ever versioned.
 
 ### Relevant files
 
@@ -60,15 +66,19 @@ records that the user accepted the unencryption warning; it is not used at paste
 - Clear → `clearClipboard()` in `NotebookActivity` clears both (`NotesproutClipboard.clear()` +
   `indexRepo.clearClipboard()` on `appScope`). Never call `NotesproutClipboard.clear()` alone.
 
-### Encryption guard (objects)
+### Encryption guard (objects) — removed
 
-When `performLassoCopy` / `performLassyCut` runs and the current notebook is encrypted:
+There is **no encryption gate on clipboard copy/cut**. `performLassoCopy` / `performLassoCut` persist
+unconditionally.
 
-1. Show `awaitEncryptionClipboardConfirm()` (AlertDialog, `shape_bordered`): *"This notebook is
-   encrypted. Copying these objects places their contents in the app clipboard, which is stored
-   unencrypted on this device. Continue?"* — **Continue / Cancel**.
-2. Continue → proceed (in-memory + persist).
-3. Cancel → abort. For **Cut**, abort *before* the soft-delete (no data loss).
+The old `awaitEncryptionClipboardConfirm()` dialog warned that copying from an encrypted notebook put
+content somewhere plaintext. That was true when the global index was plaintext; it no longer is —
+`notesprout.db` is [encrypted at rest](encryption.md#the-global-index-is-encrypted). Encrypted is
+encrypted, including for NOTEBOOK-scoped content landing under the global key, so the prompt was
+removed rather than reworded (removed 2026-07-18 along with its three call sites).
+
+`ClipboardPayload.sourceEncrypted` is still written (it records whether the source notebook was
+encrypted) but nothing reads it — see the note under [Storage model](#storage-model).
 
 ### Clear button (`btnLassoClearClipboard`)
 

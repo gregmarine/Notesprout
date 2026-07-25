@@ -1,8 +1,6 @@
 package com.notesprout.android.crypto
 
 import android.content.Context
-import androidx.security.crypto.EncryptedSharedPreferences
-import androidx.security.crypto.MasterKey
 
 /**
  * Persisted per-notebook (and global) passphrase attempt counter.
@@ -21,13 +19,7 @@ object AttemptLimiter {
     private const val PREFIX_FAILURES = "attempt_failures_"
     private const val PREFIX_LOCKOUT  = "attempt_lockout_"
 
-    private fun prefs(context: Context) = EncryptedSharedPreferences.create(
-        context,
-        PREFS_FILE,
-        MasterKey.Builder(context).setKeyScheme(MasterKey.KeyScheme.AES256_GCM).build(),
-        EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-        EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
-    )
+    private fun prefs(context: Context) = SecurePrefs.get(context, PREFS_FILE)
 
     /**
      * Returns the epoch-ms timestamp when the lockout expires, or 0 if the user is allowed to try now.

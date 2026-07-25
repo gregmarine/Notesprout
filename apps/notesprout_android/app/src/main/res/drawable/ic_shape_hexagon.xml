@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- Regular hexagon, flat top. Vertices at radius 9 from center (12,12):
+         top-right (19.8,7.5), right (21,12), bottom-right (19.8,16.5),
+         bottom-left (4.2,16.5), left (3,12), top-left (4.2,7.5) -->
+    <path
+        android:fillColor="@android:color/transparent"
+        android:strokeColor="@color/inkBlack"
+        android:strokeWidth="1.5"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M19.8 7.5 L21 12 L19.8 16.5 L4.2 16.5 L3 12 L4.2 7.5 Z" />
+</vector>

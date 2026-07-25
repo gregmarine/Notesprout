@@ -27,8 +27,6 @@ object ToolbarButtonRegistry {
     private const val GROUP_NOTEBOOK = "notebook" // toc, cover, export, pin
     private const val GROUP_TOOLS = "tools"       // pen, eraser, lasso eraser, erase all, text, lines, lasso
     private const val GROUP_HISTORY = "history"   // undo, redo
-    private const val GROUP_PAGE_VIEW = "pageView" // template, page index
-    private const val GROUP_PAGE_EDIT = "pageEdit" // insert before/after, delete, copy, paste
     private const val GROUP_SETTINGS = "settings"  // customize toolbar (gear)
 
     /** The stable key of the pinned Close button — always present, never hideable. */
@@ -58,38 +56,69 @@ object ToolbarButtonRegistry {
     val SPECS: List<ButtonSpec> = listOf(
         ButtonSpec(PINNED_KEY, R.id.btnClose, R.drawable.ic_close, "Close", GROUP_FILE, pinned = true),
         ButtonSpec("recents", R.id.btnRecents, R.drawable.ic_clock, "Recents", GROUP_FILE),
-        ButtonSpec("toc", R.id.btnToc, R.drawable.ic_toc, "Table of Contents", GROUP_NOTEBOOK),
-        ButtonSpec("cover", R.id.btnCover, R.drawable.ic_polaroid, "Set Cover", GROUP_NOTEBOOK),
-        ButtonSpec("export", R.id.btnExport, R.drawable.ic_export, "Export", GROUP_NOTEBOOK),
-        ButtonSpec("pin", R.id.btnPin, R.drawable.ic_pinned, "Pin", GROUP_NOTEBOOK),
+        // "toc" (Table of Contents) retired from the toolbar — reachable via the canvas gesture, which
+        // is the sole entry point now; spec removed. "export" (Export) moved to the canvas long-press
+        // "Page" menu; spec removed. Persisted configs that still list these keys resolve to null and
+        // are skipped harmlessly.
+        // "textRecognition" (Text) moved to the canvas long-press "Page" menu — its two actions ("View
+        // recognized text" + the Real-time-text toggle) live there now; spec removed. A persisted config
+        // that still lists it resolves to null and is skipped harmlessly.
+        // "pin" moved to the top of the canvas long-press "Page" menu; spec removed. A persisted config
+        // that still lists it resolves to null and is skipped harmlessly.
         ButtonSpec("lock", R.id.btnLock, R.drawable.ic_lock, "Encrypt", GROUP_NOTEBOOK),
-        ButtonSpec("lockOff", R.id.btnLockOff, R.drawable.ic_lock_off, "Decrypt", GROUP_NOTEBOOK),
+        // "lockOff" (Decrypt) retired under encrypt-everything — a notebook is never downgraded to
+        // plaintext; scope is changed via the long-press "Change Encryption Scope" toggle instead.
+        // Persisted configs that still list "lockOff" resolve to null and are skipped harmlessly.
         ButtonSpec("pen", R.id.btnPen, R.drawable.ic_pen, "Pen", GROUP_TOOLS),
         ButtonSpec("eraser", R.id.btnEraser, R.drawable.ic_eraser, "Eraser", GROUP_TOOLS),
         ButtonSpec("lassoEraser", R.id.btnLassoEraser, R.drawable.ic_lasso_eraser, "Lasso Eraser", GROUP_TOOLS),
-        ButtonSpec("eraseAll", R.id.btnEraseAll, R.drawable.ic_erase_all, "Erase All", GROUP_TOOLS),
-        ButtonSpec("insertText", R.id.btnInsertText, R.drawable.ic_text_recognition, "Insert Text", GROUP_TOOLS),
+        // "eraseAll" (Erase Page) moved to the canvas long-press "Page" menu; spec removed. A
+        // persisted config that still lists it resolves to null and is skipped harmlessly.
+        // "insertText" (Insert Text) retired — strokes are converted to text instead; spec removed.
+        // A persisted config that still lists it resolves to null and is skipped harmlessly.
         ButtonSpec("insertLines", R.id.btnInsertLines, R.drawable.ic_density_small, "Insert Lines", GROUP_TOOLS),
         ButtonSpec("lasso", R.id.btnLasso, R.drawable.ic_lasso, "Lasso", GROUP_TOOLS),
         ButtonSpec("undo", R.id.btnUndo, R.drawable.ic_undo, "Undo", GROUP_HISTORY),
         ButtonSpec("redo", R.id.btnRedo, R.drawable.ic_redo, "Redo", GROUP_HISTORY),
-        ButtonSpec("template", R.id.btnTemplate, R.drawable.ic_template, "Template", GROUP_PAGE_VIEW),
-        ButtonSpec("pageIndex", R.id.btnPageIndex, R.drawable.ic_files, "Page Index", GROUP_PAGE_VIEW),
-        ButtonSpec("insertPageBefore", R.id.btnInsertPageBefore, R.drawable.ic_insert_page_before, "Insert Page Before", GROUP_PAGE_EDIT),
-        ButtonSpec("insertPageAfter", R.id.btnInsertPageAfter, R.drawable.ic_insert_page_after, "Insert Page After", GROUP_PAGE_EDIT),
-        ButtonSpec("deletePage", R.id.btnDeletePage, R.drawable.ic_page_delete, "Delete Page", GROUP_PAGE_EDIT),
-        ButtonSpec("copyPage", R.id.btnCopyPage, R.drawable.ic_copy_page, "Copy Page", GROUP_PAGE_EDIT),
-        ButtonSpec("pastePage", R.id.btnPastePage, R.drawable.ic_paste_page, "Paste Page", GROUP_PAGE_EDIT),
+        // The page-view / page-edit buttons (template, pageIndex, insertPageBefore, insertPageAfter,
+        // deletePage, copyPage, pastePage) moved to the canvas long-press "Page" menu; their specs are
+        // removed. Persisted configs that still list these keys resolve to null and are skipped.
         ButtonSpec("toolbarSettings", R.id.btnToolbarSettings, R.drawable.ic_adjustments, "Customize Toolbar", GROUP_SETTINGS, pinned = true),
+        ButtonSpec("scratchpad", R.id.btnScratchpad, R.drawable.ic_sketching, "Scratch Pad", GROUP_NOTEBOOK),
+        ButtonSpec("stickyNote", R.id.btnInsertStickyNote, R.drawable.ic_sticker_2, "Insert Sticky Note", GROUP_TOOLS),
+        ButtonSpec("insertShape", R.id.btnInsertShape, R.drawable.ic_convert_shape, "Insert Shape", GROUP_TOOLS),
+        ButtonSpec("calendar", R.id.btnCalendar, R.drawable.ic_calendar, "Calendar", GROUP_NOTEBOOK),
     )
 
     private val byKey: Map<String, ButtonSpec> = SPECS.associateBy { it.key }
 
     fun spec(key: String): ButtonSpec? = byKey[key]
 
-    /** Full default button order (current XML order, no spacer). */
-    val DEFAULT_ORDER: List<String> = SPECS.map { it.key }
+    /**
+     * Full default button order (no spacer). **Bracketed layout:** navigation on the edges, content
+     * tools centered under the hand. Left = enter/switch; center = ink & select → insert-objects →
+     * history; right = auxiliary surfaces, then the (runtime-hidden-on-encrypted) Encrypt button and
+     * the pinned Customize gear. Decoupled from [SPECS] declaration order on purpose — [SPECS] stays
+     * append-only/stable per the KEY STABILITY RULE, while this list defines the *display* default.
+     * Must contain every live [SPECS] key (else [ToolbarPreferencesManager.load] appends the missing
+     * ones to the end).
+     */
+    val DEFAULT_ORDER: List<String> = listOf(
+        // Navigation (left edge): exit + notebook switch.
+        "close", "recents",
+        // History — fixed spot right after navigation, the constantly-used actions while writing.
+        "undo", "redo",
+        // Content tools (center): ink & select …
+        "pen", "eraser", "lassoEraser", "lasso",
+        // … then insert-objects.
+        "insertLines", "insertShape", "stickyNote",
+        // Auxiliary surfaces (right edge).
+        "scratchpad", "calendar",
+        // Latent Encrypt (plaintext notebooks only; runtime-hidden otherwise) + pinned Customize gear.
+        "lock",
+        "toolbarSettings",
+    )
 
     /** Default mini set — a compact everyday subset. */
-    val DEFAULT_MINI: List<String> = listOf("pen", "eraser", "undo", "lasso", "pageIndex")
+    val DEFAULT_MINI: List<String> = listOf("pen", "eraser", "undo", "lasso")
 }

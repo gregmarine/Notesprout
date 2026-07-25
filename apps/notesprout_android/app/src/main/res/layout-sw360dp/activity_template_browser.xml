@@ -106,21 +106,11 @@
             android:orientation="vertical">
 
             <RadioButton
-                android:id="@+id/radioNoEncryption"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:checked="true"
-                android:text="No Encryption"
-                android:textColor="@color/inkBlack"
-                android:textSize="16sp"
-                android:paddingTop="4dp"
-                android:paddingBottom="4dp" />
-
-            <RadioButton
                 android:id="@+id/radioScopeGlobal"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="Encrypt (Global Passphrase)"
+                android:checked="true"
+                android:text="Encrypted (default)"
                 android:textColor="@color/inkBlack"
                 android:textSize="16sp"
                 android:paddingTop="4dp"
@@ -130,7 +120,7 @@
                 android:id="@+id/radioScopeNotebook"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="Encrypt (Notebook Passphrase)"
+                android:text="Private (separate passphrase)"
                 android:textColor="@color/inkBlack"
                 android:textSize="16sp"
                 android:paddingTop="4dp"

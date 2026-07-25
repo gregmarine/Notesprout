@@ -22,8 +22,8 @@ import com.notesprout.android.data.SoilDatabase
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import com.notesprout.android.data.PageData
-import com.notesprout.android.data.TemplateData
+import com.notesprout.android.data.pageData
+import com.notesprout.android.data.templateDataOrNull
 
 /**
  * Template selection dialog for NotebookActivity.
@@ -77,14 +77,14 @@ class TemplateDialog(
     private suspend fun loadData(): Pair<List<NotebookItem>, String> {
         // Current page template id
         val page = db.notebookDao().getObjectById(pageId)
-        val currentTemplateId = page?.let { parseTemplateId(it.data) } ?: ""
+        val currentTemplateId = page?.pageData()?.template ?: ""
 
         // Notebook templates (type="template" rows in the .soil)
         val nbObjects = db.notebookDao().getTemplatesSorted()
         val notebookItems = nbObjects.mapIndexed { index, obj ->
-            val thumb = decodeBase64Thumb(obj.data, THUMB_PX)
-            val name = TemplateData.fromJson(obj.data)?.name?.takeIf { it.isNotEmpty() }
-                ?: "Template ${index + 1}"
+            val td = obj.templateDataOrNull()
+            val thumb = decodeBase64Thumb(td?.image ?: "", THUMB_PX)
+            val name = td?.name?.takeIf { it.isNotEmpty() } ?: "Template ${index + 1}"
             NotebookItem(obj, thumb, name)
         }
 
@@ -189,7 +189,7 @@ class TemplateDialog(
                     add(Cell(item.label, item.thumbnail, item.obj.id == currentTemplateId) {
                         lifecycleScope.launch {
                             val fullBitmap = withContext(Dispatchers.IO) {
-                                decodeFullBitmap(item.obj.data)
+                                decodeFullBitmap(item.obj.templateDataOrNull()?.image ?: "")
                             }
                             onItemClicked(item.obj.id, fullBitmap)
                         }
@@ -239,7 +239,7 @@ class TemplateDialog(
         dialog.show()
         // Flat Notesprout styling — applied after show() because window only exists then.
         dialog.window?.setElevation(0f)
-        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
         // Constrain width to 90% of screen and height to 70% so the list is scrollable.
         val dm = ctx.resources.displayMetrics
         dialog.window?.setLayout(
@@ -250,9 +250,9 @@ class TemplateDialog(
 
     // ── Helper: decode full-res bitmap from stored template row ───────────────
 
-    private fun decodeFullBitmap(data: String): Bitmap? {
+    private fun decodeFullBitmap(imageB64: String): Bitmap? {
         return try {
-            val b64 = TemplateData.fromJson(data)?.image?.takeIf { it.isNotEmpty() } ?: return null
+            val b64 = imageB64.takeIf { it.isNotEmpty() } ?: return null
             val bytes = Base64.decode(b64, Base64.DEFAULT)
             BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
         } catch (e: Exception) {
@@ -320,9 +320,9 @@ class TemplateDialog(
 
     // ── Bitmap helpers ────────────────────────────────────────────────────────
 
-    private fun decodeBase64Thumb(data: String, maxSize: Int): Bitmap? {
+    private fun decodeBase64Thumb(imageB64: String, maxSize: Int): Bitmap? {
         return try {
-            val b64 = TemplateData.fromJson(data)?.image?.takeIf { it.isNotEmpty() } ?: return null
+            val b64 = imageB64.takeIf { it.isNotEmpty() } ?: return null
             val bytes = Base64.decode(b64, Base64.DEFAULT)
             Slog.d(TAG) { "decodeBase64Thumb: decoded ${bytes.size} bytes from base64" }
             val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
@@ -356,7 +356,5 @@ class TemplateDialog(
         private const val THUMB_HEIGHT_DP = 200
         // Target inSampleSize=2 for e-ink templates (1860×2480 → 930×1240 intermediate).
         private const val THUMB_PX = 1300
-
-        fun parseTemplateId(data: String): String = PageData.fromJson(data).template
     }
 }

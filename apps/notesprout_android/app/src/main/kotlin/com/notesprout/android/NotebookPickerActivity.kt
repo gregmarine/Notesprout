@@ -14,6 +14,7 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.lifecycleScope
+import com.notesprout.android.core.TopGuard
 import com.notesprout.android.data.index.IndexRepository
 import com.notesprout.android.data.index.NotesproutIndex
 import com.notesprout.android.data.index.ObjectEntity
@@ -65,6 +66,9 @@ class NotebookPickerActivity : AppCompatActivity() {
 
         binding = ActivityNotebookPickerBinding.inflate(layoutInflater)
         setContentView(binding.root)
+        // Immersive: system bars are hidden, so their inset is 0. Reserve the guard
+        // explicitly so the top bar isn't parked in the status bar's reveal zone.
+        TopGuard.applyRootPadding(binding.root)
 
         excludeId = intent.getStringExtra(EXTRA_EXCLUDE_NOTEBOOK_ID) ?: ""
 

@@ -3,6 +3,7 @@ package com.notesprout.android.notebook
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
+import android.os.SystemClock
 import androidx.appcompat.content.res.AppCompatResources
 import com.notesprout.android.R
 import android.graphics.Color
@@ -12,11 +13,13 @@ import android.graphics.Path
 import android.graphics.PointF
 import android.graphics.Rect
 import android.graphics.RectF
+import android.graphics.RenderNode
 import android.util.Base64
 import android.util.TypedValue
 import android.graphics.Region
 import android.view.MotionEvent
 import android.view.View
+import com.notesprout.android.core.ImageCodec
 import com.notesprout.android.core.markdown.TextObjectRenderer
 import com.notesprout.android.data.HeadingStroke
 import com.notesprout.android.data.LineObject
@@ -25,6 +28,8 @@ import com.notesprout.android.data.LineRender
 import com.notesprout.android.data.LineStyle
 import com.notesprout.android.data.LinkChrome
 import com.notesprout.android.data.LinkRender
+import com.notesprout.android.data.ShapeRender
+import com.notesprout.android.data.StickyNoteRender
 import com.notesprout.android.data.translate
 import com.notesprout.android.data.LiveStroke
 import com.notesprout.android.data.TextRender
@@ -45,8 +50,13 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
     }
 
     private val activePoints = ArrayList<PointF>()
-    private var renderBitmap: Bitmap? = null
-    private var renderCanvas: Canvas? = null
+    /**
+     * Committed content (template + objects + strokes) as a hardware [RenderNode] — the retained GPU
+     * layer, replacing the old software committed bitmap. Recorded by [redrawCanvas] on content
+     * changes; blitted in [onDraw]. Mirrors OnyxNotebookView (minus the EPD handoffs). Off-screen
+     * bitmaps (export, cover snapshot, drag backing) still build their own bitmaps.
+     */
+    private val committedNode = RenderNode("committed")
     private var isEraserActive = false
 
     private var lastEraseRedrawMs = 0L
@@ -68,6 +78,12 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
 
     // Link object store — populated from type="link" rows at page load time.
     private var links: List<LinkRender> = emptyList()
+
+    // Sticky note store — populated from type="sticky_note" rows at page load time.
+    private var stickyNotes: List<StickyNoteRender> = emptyList()
+
+    // Shape object store — populated from type="shape" rows at page load time.
+    private var shapeObjects: List<ShapeRender> = emptyList()
 
     private val textObjectTextSizePx = android.util.TypedValue.applyDimension(
         android.util.TypedValue.COMPLEX_UNIT_SP, 24f, resources.displayMetrics
@@ -119,6 +135,7 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
     private var lassoGestureStartPoint: PointF? = null
     private var lassoGesturePath: Path? = null
     private var lassoGestureHadSelection = false
+    private var lassoPreClearSelectionBox: RectF? = null
     private var lastLassoRefreshMs = 0L
 
     private var lassoEraserDisplayPath: Path? = null
@@ -138,6 +155,8 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
     private var dragOriginalTextObjects: List<TextRender> = emptyList()
     private var dragOriginalLineObjects: List<LineRender> = emptyList()
     private var dragOriginalLinks: List<LinkRender> = emptyList()
+    private var dragOriginalStickyNotes: List<StickyNoteRender> = emptyList()
+    private var dragOriginalShapeObjects: List<ShapeRender> = emptyList()
     private var dragBackingBitmap: Bitmap? = null
     private var activeSnapGuides: List<SnapGuide> = emptyList()
     private var snapObjectTargets: List<RectF> = emptyList()
@@ -179,18 +198,42 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
     override var onTextErased: ((TextRender) -> Unit)? = null
     override var onLineErased: ((LineRender) -> Unit)? = null
     override var onLinkErased: ((LinkRender) -> Unit)? = null
-    override var onScribbleEraseComplete: ((List<String>, List<HeadingStroke>, List<TextRender>, List<LineRender>, List<LinkRender>) -> Unit)? = null
+    override var onStickyNoteErased: ((StickyNoteRender) -> Unit)? = null
+    override var onShapeErased: ((ShapeRender) -> Unit)? = null
+    override var onShapeRecognized: ((LiveStroke, ShapeRecognizer.Result) -> Unit)? = null
+    override var onShapeTransformed: ((ShapeRender, ShapeRender) -> Unit)? = null
+    override var onShapeTransformTapOutside: (() -> Unit)? = null
+    override var onShapeTransformDragStarted: (() -> Unit)? = null
+    override var onShapeTransformMoved: ((android.graphics.RectF) -> Unit)? = null
+
+    // ── Shape transform mode ─────────────────────────────────────────────────
+    private var isShapeTransformMode = false
+    private var transformBeforeRender: ShapeRender? = null
+    private val transformController by lazy { ShapeTransformController(resources.displayMetrics.density) }
+    override var onScribbleEraseComplete: ((List<String>, List<HeadingStroke>, List<TextRender>, List<LineRender>, List<LinkRender>, List<StickyNoteRender>, List<ShapeRender>) -> Unit)? = null
     override var onSmartLassoComplete: ((List<String>, RectF) -> Unit)? = null
     override var onPenLifted: (() -> Unit)? = null
 
     // Wall-clock time of the last ACTION_DOWN, used to compute gesture duration for smart-lasso velocity.
     private var strokeStartTimeMs = 0L
-    override var onSnapshotReady: ((String) -> Unit)? = null
+
+    // ── Pen-activity gate (see [NotebookView.isPenActive]) ───────────────────
+    private var penDown       = false
+    private var penLastLiftMs = 0L
+
+    override val isPenActive: Boolean
+        get() = penDown || (SystemClock.uptimeMillis() - penLastLiftMs) < PEN_ACTIVE_TAIL_MS
+
+    // Dwell tracking: how long the stylus was still at the end of the stroke.
+    private var dwellAnchorX   = 0f
+    private var dwellAnchorY   = 0f
+    private var lastMoveTimeMs = 0L
+    private var dwellMs        = 0L
     override var onLassoComplete: ((Path, PointF) -> Unit)? = null
     override var onLassoTapToDismiss: (() -> Unit)? = null
     override var onLassoEraseComplete: ((List<String>) -> Unit)? = null
     override var lassoSelectedIds: Set<String> = emptySet()
-    override var onStrokesMoved: ((List<LiveStroke>, List<LiveStroke>, List<HeadingStroke>, List<HeadingStroke>, List<TextRender>, List<TextRender>, List<LineRender>, List<LineRender>, List<LinkRender>, List<LinkRender>) -> Unit)? = null
+    override var onStrokesMoved: ((List<LiveStroke>, List<LiveStroke>, List<HeadingStroke>, List<HeadingStroke>, List<TextRender>, List<TextRender>, List<LineRender>, List<LineRender>, List<LinkRender>, List<LinkRender>, List<StickyNoteRender>, List<StickyNoteRender>, List<ShapeRender>, List<ShapeRender>) -> Unit)? = null
     override var onLassoTap: ((Float, Float) -> Unit)? = null
     override var onDragStarted: (() -> Unit)? = null
     override var onLassoSelectionCleared: (() -> Unit)? = null
@@ -200,18 +243,39 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
         if (w == 0 || h == 0) return
-        renderBitmap?.recycle()
-        val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
-        renderBitmap = bmp
-        renderCanvas = Canvas(bmp)
-        // redrawCanvas handles white → template → strokes in one pass.
-        // This ensures any strokes already loaded before layout (race with loadStrokes())
-        // are not lost when the bitmap is first created.
+        committedNode.setPosition(0, 0, w, h)
+        // redrawCanvas records white → template → strokes into the node in one pass, so any strokes
+        // loaded before layout (race with loadStrokes()) are not lost on first record.
         redrawCanvas()
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
+        // Pen-activity gate: all ink on this engine arrives as MotionEvents, so tracking the
+        // stylus here covers every mode. Runs before any per-mode dispatch/early return.
+        val gateToolType = event.getToolType(0)
+        if (gateToolType == MotionEvent.TOOL_TYPE_STYLUS || gateToolType == MotionEvent.TOOL_TYPE_ERASER) {
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> penDown = true
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    penDown = false
+                    penLastLiftMs = SystemClock.uptimeMillis()
+                }
+            }
+        }
+
         if (isTextPlacementMode) return handleTextPlacementTouch(event)
+        // In any mode that bypasses the SDK raw-drawing path, intercept stylus button/eraser-end
+        // events before the per-mode handler drops them. Check both TOOL_TYPE_ERASER and
+        // BUTTON_STYLUS_PRIMARY to cover all platform/stylus variants.
+        if (isTextPlacementMode || isLassoMode || isLassoEraserMode || isShapeTransformMode) {
+            val t = event.getToolType(0)
+            if (t == MotionEvent.TOOL_TYPE_ERASER
+                || (t == MotionEvent.TOOL_TYPE_STYLUS
+                    && (event.buttonState and MotionEvent.BUTTON_STYLUS_PRIMARY) != 0)) {
+                return handleBarrelButtonErase(event)
+            }
+        }
+        if (isShapeTransformMode) return handleShapeTransformTouch(event)
         if (isLassoMode) return handleLassoTouch(event)
         if (isLassoEraserMode) return handleLassoEraserTouch(event)
 
@@ -219,12 +283,17 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
         if (toolType != MotionEvent.TOOL_TYPE_STYLUS && toolType != MotionEvent.TOOL_TYPE_ERASER) return false
 
         val erasing = toolType == MotionEvent.TOOL_TYPE_ERASER || isEraserActive
+            || (event.buttonState and MotionEvent.BUTTON_STYLUS_PRIMARY) != 0
 
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 activePoints.clear()
                 activePoints.add(PointF(event.x, event.y))
                 strokeStartTimeMs = System.currentTimeMillis()
+                dwellAnchorX   = event.x
+                dwellAnchorY   = event.y
+                lastMoveTimeMs = System.currentTimeMillis()
+                dwellMs        = 0L
                 invalidate()
             }
             MotionEvent.ACTION_MOVE -> {
@@ -237,6 +306,18 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
                     eraseAtPath(newPoints)
                 } else {
                     activePoints.addAll(newPoints)
+                    // Update dwell anchor: if any point moves beyond the dwell radius, reset.
+                    val dwellRadiusPx = SHAPE_DWELL_RADIUS_DP * resources.displayMetrics.density
+                    val now = System.currentTimeMillis()
+                    for (pt in newPoints) {
+                        val dx = pt.x - dwellAnchorX
+                        val dy = pt.y - dwellAnchorY
+                        if (dx * dx + dy * dy > dwellRadiusPx * dwellRadiusPx) {
+                            dwellAnchorX   = pt.x
+                            dwellAnchorY   = pt.y
+                            lastMoveTimeMs = now
+                        }
+                    }
                     invalidate()
                 }
             }
@@ -251,9 +332,33 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
                     commitActiveStroke()
                     activePoints.clear()
                     invalidate()
-                    val durationMs = (System.currentTimeMillis() - strokeStartTimeMs).coerceAtLeast(1L)
+                    val now = System.currentTimeMillis()
+                    dwellMs = now - lastMoveTimeMs
+                    val durationMs = (now - strokeStartTimeMs).coerceAtLeast(1L)
                     checkAndDispatchGesture(durationMs)
                 }
+            }
+        }
+        return true
+    }
+
+    private fun handleBarrelButtonErase(event: MotionEvent): Boolean {
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                eraseAtPath(listOf(PointF(event.x, event.y)))
+            }
+            MotionEvent.ACTION_MOVE -> {
+                val pts = mutableListOf<PointF>()
+                for (i in 0 until event.historySize) pts.add(PointF(event.getHistoricalX(i), event.getHistoricalY(i)))
+                pts.add(PointF(event.x, event.y))
+                eraseAtPath(pts)
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                eraseAtPath(listOf(PointF(event.x, event.y)))
+                finalizeEraseRedraw()
+                activePoints.clear()
+                invalidate()
+                onPenLifted?.invoke()
             }
         }
         return true
@@ -311,17 +416,26 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
                     dragOriginalLinks = links
                         .filter { it.id in lassoSelectedIds }
                         .map { it.translate(0f, 0f) }
+                    dragOriginalStickyNotes = stickyNotes
+                        .filter { it.id in lassoSelectedIds }
+                        .map { it.translate(0f, 0f) }
+                    dragOriginalShapeObjects = shapeObjects
+                        .filter { it.id in lassoSelectedIds }
+                        .map { it.copy(boundingBox = RectF(it.boundingBox)) }
                     val nonSelectedStrokes  = strokes.filter { it.id !in lassoSelectedIds }
                     val nonSelectedHeadings = headings.filter { it.id !in lassoSelectedIds }
                     val nonSelectedTexts    = textObjects.filter { it.id !in lassoSelectedIds }
                     val nonSelectedLines    = lineObjects.filter { it.id !in lassoSelectedIds }
                     val nonSelectedLinks    = links.filter { it.id !in lassoSelectedIds }
-                    dragBackingBitmap = buildRenderBitmap(nonSelectedStrokes, templateBitmap, nonSelectedHeadings, nonSelectedTexts, nonSelectedLines, nonSelectedLinks)
+                    val nonSelectedStickyNotes = stickyNotes.filter { it.id !in lassoSelectedIds }
+                    val nonSelectedShapes = shapeObjects.filter { it.id !in lassoSelectedIds }
+                    dragBackingBitmap = buildRenderBitmap(nonSelectedStrokes, templateBitmap, nonSelectedHeadings, nonSelectedTexts, nonSelectedLines, nonSelectedLinks, nonSelectedStickyNotes, shapeObjects = nonSelectedShapes)
                     snapObjectTargets = if (isSnapEnabled) (nonSelectedHeadings.map { RectF(it.boundingBox) } + nonSelectedTexts.map { RectF(it.boundingBox) } + nonSelectedLines.map { RectF(it.boundingBox) } + nonSelectedLinks.map { RectF(it.boundingBox) }) else emptyList()
                     return true
                 }
                 // Normal lasso: clear any existing selection so the user sees immediate feedback.
                 lassoGestureHadSelection = lassoSelectionBox != null
+                lassoPreClearSelectionBox = lassoSelectionBox?.let { RectF(it) }
                 lassoSelectionBox = null
                 lassoOverlayPath  = null
                 invalidate()
@@ -416,6 +530,14 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
                             )
                         }
                         val movedLinks = dragOriginalLinks.map { it.translate(dragDx, dragDy) }
+                        val movedStickyNotes = dragOriginalStickyNotes.map { it.translate(dragDx, dragDy) }
+                        val movedShapes = dragOriginalShapeObjects.map { s ->
+                            s.copy(
+                                centerX = s.centerX + dragDx,
+                                centerY = s.centerY + dragDy,
+                                boundingBox = RectF(s.boundingBox).apply { offset(dragDx, dragDy) },
+                            )
+                        }
                         val movedById = movedStrokes.associateBy { it.id }
                         val updated = strokes.map { movedById[it.id] ?: it }
                         strokes.clear(); strokes.addAll(updated)
@@ -427,6 +549,10 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
                         lineObjects = lineObjects.map { lineById[it.id] ?: it }
                         val linkById = movedLinks.associateBy { it.id }
                         links = links.map { linkById[it.id] ?: it }
+                        val stickyById = movedStickyNotes.associateBy { it.id }
+                        stickyNotes = stickyNotes.map { stickyById[it.id] ?: it }
+                        val shapeById = movedShapes.associateBy { it.id }
+                        shapeObjects = shapeObjects.map { shapeById[it.id] ?: it }
                         lassoSelectionBox = lassoSelectionBox?.let { b ->
                             RectF(b.left + dragDx, b.top + dragDy, b.right + dragDx, b.bottom + dragDy)
                         }
@@ -435,14 +561,17 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
                         val origTextObjects = dragOriginalTextObjects
                         val origLineObjects = dragOriginalLineObjects
                         val origLinks = dragOriginalLinks
+                        val origStickyNotes = dragOriginalStickyNotes
+                        val origShapes = dragOriginalShapeObjects
                         dragBackingBitmap?.recycle(); dragBackingBitmap = null
                         isDragMoveActive = false; dragThresholdMet = false
                         dragDx = 0f; dragDy = 0f; activeSnapGuides = emptyList(); snapObjectTargets = emptyList()
                         dragOriginalStrokes = emptyList(); dragOriginalHeadings = emptyList()
                         dragOriginalTextObjects = emptyList(); dragOriginalLineObjects = emptyList()
-                        dragOriginalLinks = emptyList()
+                        dragOriginalLinks = emptyList(); dragOriginalStickyNotes = emptyList()
+                        dragOriginalShapeObjects = emptyList()
                         redrawCanvas()
-                        onStrokesMoved?.invoke(origStrokes, movedStrokes, origHeadings, movedHeadings, origTextObjects, movedTextObjects, origLineObjects, movedLineObjects, origLinks, movedLinks)
+                        onStrokesMoved?.invoke(origStrokes, movedStrokes, origHeadings, movedHeadings, origTextObjects, movedTextObjects, origLineObjects, movedLineObjects, origLinks, movedLinks, origStickyNotes, movedStickyNotes, origShapes, movedShapes)
                     } else {
                         // Below threshold — treat as a tap inside the selection box.
                         val tapX = event.x; val tapY = event.y
@@ -451,7 +580,8 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
                         dragDx = 0f; dragDy = 0f; activeSnapGuides = emptyList(); snapObjectTargets = emptyList()
                         dragOriginalStrokes = emptyList(); dragOriginalHeadings = emptyList()
                         dragOriginalTextObjects = emptyList(); dragOriginalLineObjects = emptyList()
-                        dragOriginalLinks = emptyList()
+                        dragOriginalLinks = emptyList(); dragOriginalStickyNotes = emptyList()
+                        dragOriginalShapeObjects = emptyList()
                         onLassoTap?.invoke(tapX, tapY)
                     }
                     return true
@@ -474,10 +604,17 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
                 if (gestureBounds.width() < thresholdPx && gestureBounds.height() < thresholdPx) {
                     val hadSelection = lassoGestureHadSelection
                     lassoGestureHadSelection = false
-                    onLassoTapToDismiss?.invoke()
-                    if (!hadSelection) onLassoTap?.invoke(event.x, event.y)
+                    val savedBox = lassoPreClearSelectionBox
+                    lassoPreClearSelectionBox = null
+                    if (hadSelection && savedBox != null && savedBox.contains(event.x, event.y)) {
+                        onLassoTap?.invoke(event.x, event.y)
+                    } else {
+                        onLassoTapToDismiss?.invoke()
+                        if (!hadSelection) onLassoTap?.invoke(event.x, event.y)
+                    }
                 } else {
                     lassoGestureHadSelection = false
+                    lassoPreClearSelectionBox = null
                     onLassoComplete?.invoke(path, start)
                 }
             }
@@ -513,8 +650,14 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
             for (lineObj in dragOriginalLineObjects) {
                 drawLineObject(canvas, lineObj)
             }
+            for (shape in dragOriginalShapeObjects) {
+                drawShapeObject(canvas, shape)
+            }
             for (link in dragOriginalLinks) {
                 drawLinkObject(canvas, link, width)
+            }
+            for (note in dragOriginalStickyNotes) {
+                drawStickyNoteObject(canvas, note)
             }
             for (stroke in dragOriginalStrokes) {
                 val pts = stroke.points; if (pts.size < 2) continue
@@ -534,8 +677,22 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
             return
         }
 
-        canvas.drawColor(Color.WHITE)
-        renderBitmap?.let { canvas.drawBitmap(it, 0f, 0f, null) }
+        // Committed content: blit the cached hardware RenderNode; fall back to drawing the vector
+        // content directly on a software canvas or before the node's first record.
+        if (canvas.isHardwareAccelerated && committedNode.hasDisplayList()) {
+            canvas.drawRenderNode(committedNode)
+        } else {
+            drawCommittedContent(canvas)
+        }
+
+        // Shape transform overlay — drawn on top of the committed content.
+        if (isShapeTransformMode) {
+            val r = transformController.getWorkingRender()
+            if (r != null) {
+                drawShapeObject(canvas, r)
+                transformController.draw(canvas)
+            }
+        }
 
         if (!isEraserActive && !isLassoMode && activePoints.size >= 2) {
             val path = Path()
@@ -556,17 +713,12 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
     }
 
     private fun commitActiveStroke() {
-        val canvas = renderCanvas ?: return
         if (activePoints.size < 2) return
         val strokeId = UUID.randomUUID().toString()
         val strokePoints = activePoints.toList()
         strokes.add(LiveStroke(strokeId, strokePoints))
-        val path = Path()
-        path.moveTo(strokePoints[0].x, strokePoints[0].y)
-        for (i in 1 until strokePoints.size) {
-            path.lineTo(strokePoints[i].x, strokePoints[i].y)
-        }
-        canvas.drawPath(path, strokePaint)
+        // Re-record the committed node so the finished stroke is baked in (records a display list only).
+        redrawCanvas()
     }
 
     private fun eraseAtPath(eraserPoints: List<PointF>) {
@@ -618,6 +770,23 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
             val hitIds = hitLinks.mapTo(HashSet()) { it.id }
             links = links.filter { it.id !in hitIds }
             hitLinks.forEach { onLinkErased?.invoke(it) }
+            throttledEraseRedraw()
+        }
+
+        // Sticky-note hit-test: erase the entire note if eraser AABB intersects its icon box.
+        val hitStickyNotes = stickyNotes.filter { android.graphics.RectF.intersects(eBounds, it.boundingBox) }
+        if (hitStickyNotes.isNotEmpty()) {
+            val hitIds = hitStickyNotes.mapTo(HashSet()) { it.id }
+            stickyNotes = stickyNotes.filter { it.id !in hitIds }
+            hitStickyNotes.forEach { onStickyNoteErased?.invoke(it) }
+            throttledEraseRedraw()
+        }
+
+        val hitShapes = shapeObjects.filter { android.graphics.RectF.intersects(eBounds, it.boundingBox) }
+        if (hitShapes.isNotEmpty()) {
+            val hitIds = hitShapes.mapTo(HashSet()) { it.id }
+            shapeObjects = shapeObjects.filter { it.id !in hitIds }
+            hitShapes.forEach { onShapeErased?.invoke(it) }
             throttledEraseRedraw()
         }
 
@@ -735,6 +904,17 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
         }
     }
 
+    private fun drawShapeObject(canvas: Canvas, shape: ShapeRender) {
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE
+            color = android.graphics.Color.BLACK
+            strokeWidth = shape.strokeWidthPx
+            strokeJoin = Paint.Join.ROUND
+            strokeCap = Paint.Cap.ROUND
+        }
+        canvas.drawPath(ShapeGeometry.pathFor(shape), paint)
+    }
+
     /**
      * Render a type="link" object onto [canvas]: its embedded content (headings, text, lines,
      * strokes) painted via the existing per-type helpers, then the chrome around the union bbox.
@@ -756,6 +936,7 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
         }
         for (textObj in link.textObjects) drawTextObject(canvas, textObj, widthPx)
         for (lineObj in link.lines) drawLineObject(canvas, lineObj)
+        for (shape in link.shapes) drawShapeObject(canvas, shape)
         for (liveStroke in link.strokes) {
             val pts = liveStroke.points; if (pts.size < 2) continue
             val path = Path()
@@ -765,6 +946,14 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
         }
         val iconOutside = link.headings.isNotEmpty() || link.textObjects.isNotEmpty()
         drawLinkChrome(canvas, link.boundingBox, link.chrome, iconOutside)
+    }
+
+    private fun drawStickyNoteObject(canvas: Canvas, note: StickyNoteRender) {
+        val box = note.boundingBox
+        AppCompatResources.getDrawable(context, R.drawable.ic_sticker_2)?.let { icon ->
+            icon.setBounds(box.left.toInt(), box.top.toInt(), box.right.toInt(), box.bottom.toInt())
+            icon.draw(canvas)
+        }
     }
 
     /** Draw a link's visual indicator: none, an underline, or a dotted box with a corner chevron.
@@ -817,7 +1006,21 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
     }
 
     private fun redrawCanvas() {
-        val canvas = renderCanvas ?: return
+        val w = width; val h = height
+        if (w == 0 || h == 0) return
+        committedNode.setPosition(0, 0, w, h)
+        val rc = committedNode.beginRecording(w, h)
+        try {
+            drawCommittedContent(rc)
+        } finally {
+            committedNode.endRecording()
+        }
+        invalidate()
+    }
+
+    /** Draw the full committed page onto [canvas] — records the node and serves as the [onDraw]
+     *  software fallback (a [RenderNode] can't be drawn on a software canvas). */
+    private fun drawCommittedContent(canvas: Canvas) {
         canvas.drawColor(Color.WHITE)
         templateBitmap?.let { tb ->
             canvas.drawBitmap(tb, null, RectF(0f, 0f, width.toFloat(), height.toFloat()), null)
@@ -841,8 +1044,14 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
         for (lineObj in lineObjects) {
             drawLineObject(canvas, lineObj)
         }
+        for (shape in shapeObjects) {
+            drawShapeObject(canvas, shape)
+        }
         for (link in links) {
             drawLinkObject(canvas, link, width)
+        }
+        for (note in stickyNotes) {
+            drawStickyNoteObject(canvas, note)
         }
         for (liveStroke in strokes) {
             val points = liveStroke.points
@@ -854,7 +1063,6 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
             }
             canvas.drawPath(path, strokePaint)
         }
-        invalidate()
     }
 
     // Minimum squared distance from point p to segment a→b.
@@ -877,11 +1085,13 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
         return dx * dx + dy * dy
     }
 
-    // ── Gesture detection at pen lift (smart-lasso → scribble-to-erase → normal) ──────────
+    // ── Gesture detection at pen lift (shape-dwell → smart-lasso → scribble-to-erase → normal) ──
 
     /**
      * Called after [commitActiveStroke] on every non-eraser pen lift. Runs the detection
      * gate chain in priority order on a single background thread:
+     *   Gate 0 — Shape dwell: single stroke held still ≥ [SHAPE_DWELL_MS] → shape object.
+     *            Currently off via [SHAPE_DWELL_ENABLED]; the gate is skipped entirely.
      *   Gate 1 — Smart lasso: fast closed circle enclosing ≥1 object → enter lasso selection.
      *   Gate 2 — Scribble-to-erase: dense back-and-forth crossing ≥1 object → erase.
      *   Default — Normal stroke: fire [onPenLifted] so the activity saves the stroke to DB.
@@ -894,26 +1104,52 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
         val density   = resources.displayMetrics.density
         val strokeId  = lastStroke.id
 
-        val isSmartLasso = isSmartLassoCandidate(points, durationMs, density)
-        val isScribble   = !isSmartLasso && isScribbleCandidate(points)
-        if (!isSmartLasso && !isScribble) { onPenLifted?.invoke(); return }
+        // ── Gate 0 pre-check: single-stroke dwell candidate → always spawn a thread ──
+        val dwellCandidate = SHAPE_DWELL_ENABLED && dwellMs >= SHAPE_DWELL_MS
 
-        val strokeSnapshot  = strokes.filter { it.id != strokeId }.toList()
-        val headingSnapshot = headings.toList()
-        val textSnapshot    = textObjects.toList()
-        val lineSnapshot    = lineObjects.toList()
-        val linkSnapshot    = links.toList()
+        val isSmartLasso = !dwellCandidate && isSmartLassoCandidate(points, durationMs, density)
+        val isScribble   = !dwellCandidate && !isSmartLasso && isScribbleCandidate(points)
+        if (!dwellCandidate && !isSmartLasso && !isScribble) { onPenLifted?.invoke(); return }
+
+        val strokeSnapshot      = strokes.filter { it.id != strokeId }.toList()
+        val headingSnapshot     = headings.toList()
+        val textSnapshot        = textObjects.toList()
+        val lineSnapshot        = lineObjects.toList()
+        val linkSnapshot        = links.toList()
+        val stickyNoteSnapshot  = stickyNotes.toList()
+        val shapeSnapshot       = shapeObjects.toList()
 
         Thread {
+            // ── Gate 0: Shape dwell trigger ────────────────────────────────────────
+            // Runs first; on null falls through to gates 1 and 2.
+            var runSmartLasso = isSmartLasso
+            if (dwellCandidate) {
+                val result = ShapeRecognizer.recognize(points, density)
+                if (result != null) {
+                    post {
+                        strokes.removeAll { it.id == strokeId }
+                        onShapeRecognized?.invoke(lastStroke, result)
+                    }
+                    return@Thread
+                }
+                // No shape recognized — check gates 1 and 2 for this stroke.
+                runSmartLasso = isSmartLassoCandidate(points, durationMs, density)
+                val runScribble = !runSmartLasso && isScribbleCandidate(points)
+                if (!runSmartLasso && !runScribble) {
+                    post { onPenLifted?.invoke() }
+                    return@Thread
+                }
+            }
+
             // ── Gate 1: Smart lasso ────────────────────────────────────────────────
-            if (isSmartLasso) {
+            if (runSmartLasso) {
                 val path = Path().also { p ->
                     p.moveTo(points[0].x, points[0].y)
                     for (i in 1 until points.size) p.lineTo(points[i].x, points[i].y)
                     p.lineTo(points[0].x, points[0].y)
                     p.close()
                 }
-                val hitIds = runLassoHitTest(path, strokeSnapshot, headingSnapshot, textSnapshot, lineSnapshot, linkSnapshot)
+                val hitIds = runLassoHitTest(path, strokeSnapshot, headingSnapshot, textSnapshot, lineSnapshot, linkSnapshot, stickyNoteSnapshot, shapeSnapshot)
                 if (hitIds.isNotEmpty()) {
                     val hitSet      = hitIds.toSet()
                     val unionBounds = RectF()
@@ -922,6 +1158,8 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
                     for (t in textSnapshot)    { if (t.id in hitSet) unionBounds.union(t.boundingBox) }
                     for (l in lineSnapshot)    { if (l.id in hitSet) unionBounds.union(l.boundingBox) }
                     for (lk in linkSnapshot)   { if (lk.id in hitSet) unionBounds.union(lk.boundingBox) }
+                    for (sn in stickyNoteSnapshot) { if (sn.id in hitSet) unionBounds.union(sn.boundingBox) }
+                    for (sh in shapeSnapshot) { if (sh.id in hitSet) unionBounds.union(sh.boundingBox) }
                     post {
                         strokes.removeAll { it.id == strokeId }
                         onSmartLassoComplete?.invoke(hitIds, unionBounds)
@@ -937,18 +1175,21 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
             }
 
             // ── Gate 2: Scribble-to-erase ──────────────────────────────────────────
-            val hitIds = scribbleHitTest(points, strokeSnapshot, headingSnapshot, textSnapshot, lineSnapshot, density, linkSnapshot)
+            val hitIds = scribbleHitTest(points, strokeSnapshot, headingSnapshot, textSnapshot, lineSnapshot, density, linkSnapshot, stickyNoteSnapshot, shapeSnapshot)
             post {
                 if (hitIds.isEmpty()) {
                     onPenLifted?.invoke()
                 } else {
                     strokes.removeAll { it.id == strokeId }
-                    val hitSet         = hitIds.toSet()
-                    val erasedHeadings = headingSnapshot.filter { it.id in hitSet }
-                    val erasedTexts    = textSnapshot.filter { it.id in hitSet }
-                    val erasedLines    = lineSnapshot.filter { it.id in hitSet }
-                    val erasedLinks    = linkSnapshot.filter { it.id in hitSet }
-                    onScribbleEraseComplete?.invoke(hitIds, erasedHeadings, erasedTexts, erasedLines, erasedLinks)
+                    val hitSet            = hitIds.toSet()
+                    val erasedHeadings    = headingSnapshot.filter { it.id in hitSet }
+                    val erasedTexts       = textSnapshot.filter { it.id in hitSet }
+                    val erasedLines       = lineSnapshot.filter { it.id in hitSet }
+                    val erasedLinks       = linkSnapshot.filter { it.id in hitSet }
+                    val erasedStickyNotes = stickyNoteSnapshot.filter { it.id in hitSet }
+                    val erasedShapes      = shapeSnapshot.filter { it.id in hitSet }
+                    shapeObjects = shapeObjects.filter { it.id !in hitSet }
+                    onScribbleEraseComplete?.invoke(hitIds, erasedHeadings, erasedTexts, erasedLines, erasedLinks, erasedStickyNotes, erasedShapes)
                 }
             }
         }.start()
@@ -1040,6 +1281,8 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
         lineObjects: List<LineRender>,
         density: Float,
         links: List<LinkRender> = emptyList(),
+        stickyNotes: List<StickyNoteRender> = emptyList(),
+        shapes: List<ShapeRender> = emptyList(),
     ): List<String> {
         if (scribblePoints.size < 2) return emptyList()
         val touchRadiusPx = SCRIBBLE_STROKE_TOUCH_RADIUS_DP * density
@@ -1093,6 +1336,18 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
                 hitIds.add(link.id)
             }
         }
+        for (note in stickyNotes) {
+            if (!RectF.intersects(rawBounds, note.boundingBox)) continue
+            if (scribblePathPenetration(scribblePoints, note.boundingBox) >= penetrationPx) {
+                hitIds.add(note.id)
+            }
+        }
+        for (shape in shapes) {
+            if (!RectF.intersects(rawBounds, shape.boundingBox)) continue
+            if (scribblePathPenetration(scribblePoints, shape.boundingBox) >= penetrationPx) {
+                hitIds.add(shape.id)
+            }
+        }
         return hitIds
     }
 
@@ -1127,7 +1382,8 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
             dragDx = 0f; dragDy = 0f; activeSnapGuides = emptyList()
             dragOriginalStrokes = emptyList(); dragOriginalHeadings = emptyList()
             dragOriginalTextObjects = emptyList(); dragOriginalLineObjects = emptyList()
-            dragOriginalLinks = emptyList()
+            dragOriginalLinks = emptyList(); dragOriginalStickyNotes = emptyList()
+            dragOriginalShapeObjects = emptyList()
             invalidate()
         }
     }
@@ -1154,6 +1410,66 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
             invalidate()
         }
     }
+
+    // ── Shape transform mode ─────────────────────────────────────────────────
+
+    override fun enterShapeTransform(render: ShapeRender) {
+        transformBeforeRender = render
+        transformController.attach(render)
+        isShapeTransformMode = true
+        invalidate()
+    }
+
+    override fun exitShapeTransform() {
+        val before = transformBeforeRender ?: return
+        val after  = transformController.getWorkingRender() ?: before
+        onShapeTransformed?.invoke(before, after)
+        transformBeforeRender = null
+        isShapeTransformMode  = false
+        invalidate()
+    }
+
+    private fun handleShapeTransformTouch(event: MotionEvent): Boolean {
+        if (event.getToolType(0) != MotionEvent.TOOL_TYPE_STYLUS) return false
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                val grab = transformController.onDown(event.x, event.y)
+                if (grab == ShapeTransformController.Grab.NONE) {
+                    exitShapeTransform()
+                    post { onShapeTransformTapOutside?.invoke() }
+                } else {
+                    onShapeTransformDragStarted?.invoke()
+                }
+                invalidate()
+            }
+            MotionEvent.ACTION_MOVE -> {
+                transformController.onMove(event.x, event.y)
+                invalidate()
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                transformController.onUp()
+                if (event.actionMasked == MotionEvent.ACTION_UP) {
+                    transformController.getWorkingRender()?.let {
+                        onShapeTransformMoved?.invoke(it.boundingBox)
+                    }
+                }
+                invalidate()
+            }
+        }
+        return true
+    }
+
+    override fun toggleShapeAspectLock(): ShapeRender? {
+        if (!isShapeTransformMode) return null
+        val updated = transformController.toggleAspectLock()
+        if (updated != null) invalidate()
+        return updated
+    }
+
+    override fun getShapeTransformWorkingRender(): ShapeRender? =
+        if (isShapeTransformMode) transformController.getWorkingRender() else null
+
+    // ── Lasso eraser ─────────────────────────────────────────────────────────
 
     private fun handleLassoEraserTouch(event: MotionEvent): Boolean {
         if (event.getToolType(0) != MotionEvent.TOOL_TYPE_STYLUS) return false
@@ -1212,13 +1528,15 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
     private fun performLassoErase(drawnPath: Path, startPoint: PointF) {
         drawnPath.lineTo(startPoint.x, startPoint.y)
         drawnPath.close()
-        val strokeSnapshot  = strokes.toList()
-        val headingSnapshot = headings.toList()
-        val textSnapshot    = textObjects.toList()
-        val lineSnapshot    = lineObjects.toList()
-        val linkSnapshot    = links.toList()
+        val strokeSnapshot      = strokes.toList()
+        val headingSnapshot     = headings.toList()
+        val textSnapshot        = textObjects.toList()
+        val lineSnapshot        = lineObjects.toList()
+        val linkSnapshot        = links.toList()
+        val stickyNoteSnapshot  = stickyNotes.toList()
+        val shapeSnapshot       = shapeObjects.toList()
         Thread {
-            val hitIds = runLassoHitTest(drawnPath, strokeSnapshot, headingSnapshot, textSnapshot, lineSnapshot, linkSnapshot)
+            val hitIds = runLassoHitTest(drawnPath, strokeSnapshot, headingSnapshot, textSnapshot, lineSnapshot, linkSnapshot, stickyNoteSnapshot, shapeSnapshot)
             post {
                 lassoOverlayPath       = null
                 lassoEraserDisplayPath = null
@@ -1237,6 +1555,8 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
         textObjects: List<TextRender> = emptyList(),
         lineObjects: List<LineRender> = emptyList(),
         links: List<LinkRender> = emptyList(),
+        stickyNotes: List<StickyNoteRender> = emptyList(),
+        shapes: List<ShapeRender> = emptyList(),
     ): List<String> {
         val bounds = RectF()
         path.computeBounds(bounds, true)
@@ -1285,6 +1605,18 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
                 hitIds.add(link.id)
             }
         }
+        for (note in stickyNotes) {
+            if (!RectF.intersects(bounds, note.boundingBox)) continue
+            if (LassoGeometry.regionIntersectsBox(region, note.boundingBox)) {
+                hitIds.add(note.id)
+            }
+        }
+        for (shape in shapes) {
+            if (!RectF.intersects(bounds, shape.boundingBox)) continue
+            if (LassoGeometry.regionIntersectsBox(region, shape.boundingBox)) {
+                hitIds.add(shape.id)
+            }
+        }
         return hitIds
     }
 
@@ -1300,10 +1632,6 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
     }
 
     override fun setEraserMode(active: Boolean) {
-        if (active) {
-            // Capture snapshot BEFORE erasing begins — strokes still in memory at this point.
-            captureSnapshot()?.let { onSnapshotReady?.invoke(it) }
-        }
         isEraserActive = active
     }
 
@@ -1312,9 +1640,6 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
      * Null = plain white. Redraws the canvas immediately (strokes on top of new template).
      */
     override fun setTemplate(bitmap: Bitmap?) {
-        // Capture snapshot BEFORE the template changes — snapshot is strokes-only so it
-        // remains valid across template switches.  Must run before templateBitmap is updated.
-        captureSnapshot()?.let { onSnapshotReady?.invoke(it) }
         templateBitmap = bitmap
         redrawCanvas()
     }
@@ -1325,15 +1650,11 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
         headings = emptyList()
         textObjects = emptyList()
         lineObjects = emptyList()
+        shapeObjects = emptyList()
         links = emptyList()
-        // Clear to white then re-apply template so the template persists after erase.
-        renderCanvas?.let { canvas ->
-            canvas.drawColor(Color.WHITE)
-            templateBitmap?.let { tb ->
-                canvas.drawBitmap(tb, null, RectF(0f, 0f, width.toFloat(), height.toFloat()), null)
-            }
-        }
-        invalidate()
+        stickyNotes = emptyList()
+        // Re-record the (now empty) committed node: white → template only. redrawCanvas invalidates.
+        redrawCanvas()
     }
 
     override fun loadHeadings(headings: List<HeadingStroke>) {
@@ -1348,27 +1669,11 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
 
     override fun getTextObjects(): List<TextRender> = textObjects
 
-    override fun compositeTextObjects(bitmap: Bitmap) {
-        if (textObjects.isEmpty()) return
-        val canvas = Canvas(bitmap)
-        for (textObj in textObjects) {
-            drawTextObject(canvas, textObj, bitmap.width)
-        }
-    }
-
     override fun loadLineObjects(lineObjects: List<LineRender>) {
         this.lineObjects = lineObjects
     }
 
     override fun getLineObjects(): List<LineRender> = lineObjects
-
-    override fun compositeLineObjects(bitmap: Bitmap) {
-        if (lineObjects.isEmpty()) return
-        val canvas = Canvas(bitmap)
-        for (lineObj in lineObjects) {
-            drawLineObject(canvas, lineObj)
-        }
-    }
 
     override fun loadLinks(links: List<LinkRender>) {
         this.links = links
@@ -1376,13 +1681,19 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
 
     override fun getLinks(): List<LinkRender> = links
 
-    override fun compositeLinks(bitmap: Bitmap) {
-        if (links.isEmpty()) return
-        val canvas = Canvas(bitmap)
-        for (link in links) {
-            drawLinkObject(canvas, link, bitmap.width)
-        }
+    override fun loadStickyNotes(stickyNotes: List<StickyNoteRender>) {
+        this.stickyNotes = stickyNotes
+        redrawCanvas()
+        invalidate()
     }
+
+    override fun getStickyNotes(): List<StickyNoteRender> = stickyNotes
+
+    override fun loadShapeObjects(shapeObjects: List<ShapeRender>) {
+        this.shapeObjects = shapeObjects
+    }
+
+    override fun getShapeObjects(): List<ShapeRender> = shapeObjects
 
     override fun loadStrokes(strokes: List<LiveStroke>) {
         this.strokes.clear()
@@ -1402,6 +1713,8 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
         textObjects: List<TextRender>?,
         lineObjects: List<LineRender>?,
         links: List<LinkRender>?,
+        stickyNotes: List<StickyNoteRender>?,
+        shapeObjects: List<ShapeRender>?,
     ): Bitmap? {
         val w = width; val h = height
         if (w == 0 || h == 0) return null
@@ -1409,6 +1722,8 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
         val effectiveTextObjects = textObjects ?: this.textObjects
         val effectiveLineObjects = lineObjects ?: this.lineObjects
         val effectiveLinks = links ?: this.links
+        val effectiveStickyNotes = stickyNotes ?: this.stickyNotes
+        val effectiveShapeObjects = shapeObjects ?: this.shapeObjects
         val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bmp)
         canvas.drawColor(Color.WHITE)
@@ -1432,8 +1747,14 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
         for (lineObj in effectiveLineObjects) {
             drawLineObject(canvas, lineObj)
         }
+        for (shape in effectiveShapeObjects) {
+            drawShapeObject(canvas, shape)
+        }
         for (link in effectiveLinks) {
             drawLinkObject(canvas, link, w)
+        }
+        for (note in effectiveStickyNotes) {
+            drawStickyNoteObject(canvas, note)
         }
         for (liveStroke in strokes) {
             val pts = liveStroke.points
@@ -1446,31 +1767,20 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
         return bmp
     }
 
-    /** Swap in a pre-built bitmap on the main thread — skips the O(N) redraw. */
+    /** Load the page's content and record the committed node. Any off-thread-built [bitmap] is not
+     *  needed for display in the GPU path — released. */
     override fun loadStrokesWithBitmap(
         strokes: List<LiveStroke>,
-        bitmap: Bitmap,
+        bitmap: Bitmap?,
         templateBitmap: Bitmap?,
     ) {
         this.strokes.clear()
         this.strokes.addAll(strokes)
         this.templateBitmap = templateBitmap
-        renderBitmap?.recycle()
-        renderBitmap = bitmap
-        renderCanvas = Canvas(bitmap)
-        invalidate()
+        bitmap?.recycle()
+        redrawCanvas()
     }
 
-    /**
-     * Capture snapshot when the app loses window focus — equivalent non-writing transition
-     * boundary to OnyxNotebookView.onWindowFocusChanged(false).
-     */
-    override fun onWindowFocusChanged(hasWindowFocus: Boolean) {
-        super.onWindowFocusChanged(hasWindowFocus)
-        if (!hasWindowFocus) {
-            captureSnapshot()?.let { onSnapshotReady?.invoke(it) }
-        }
-    }
 
     /**
      * Capture the current strokes and heading backgrounds as a base64-encoded PNG with a
@@ -1479,12 +1789,18 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
      * Returns null if there are no strokes and no headings, or the view is not yet laid out.
      */
     override fun captureSnapshot(): String? {
-        if (strokes.isEmpty() && headings.isEmpty() && textObjects.isEmpty() && lineObjects.isEmpty() && links.isEmpty()) return null
+        if (strokes.isEmpty() && headings.isEmpty() && textObjects.isEmpty() && lineObjects.isEmpty() && links.isEmpty() && stickyNotes.isEmpty()) return null
         val w = width; val h = height
         if (w == 0 || h == 0) return null
         val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
-        // Transparent base — do NOT fill with white, do NOT paint the template.
+        // Complete cover image: white base + template + content. The snapshot's only consumer is the
+        // library-grid cover, shown directly (no compositing over a template at load), so it must
+        // paint the full page like the page-index/PDF render does.
         val snapshotCanvas = Canvas(bmp)
+        snapshotCanvas.drawColor(Color.WHITE)
+        templateBitmap?.let { tb ->
+            snapshotCanvas.drawBitmap(tb, null, RectF(0f, 0f, w.toFloat(), h.toFloat()), null)
+        }
         for (heading in headings) {
             if (heading.recognizedText != null) {
                 drawHeadingText(snapshotCanvas, heading)
@@ -1508,6 +1824,9 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
         for (link in links) {
             drawLinkObject(snapshotCanvas, link, w)
         }
+        for (note in stickyNotes) {
+            drawStickyNoteObject(snapshotCanvas, note)
+        }
         for (liveStroke in strokes) {
             val points = liveStroke.points
             if (points.size < 2) continue
@@ -1516,10 +1835,9 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
             for (i in 1 until points.size) path.lineTo(points[i].x, points[i].y)
             snapshotCanvas.drawPath(path, strokePaint)
         }
-        val stream = ByteArrayOutputStream()
-        bmp.compress(Bitmap.CompressFormat.PNG, 100, stream)
+        val b64 = ImageCodec.encodeBase64(bmp)
         bmp.recycle()
-        return Base64.encodeToString(stream.toByteArray(), Base64.DEFAULT)
+        return b64
     }
 
     /**
@@ -1534,9 +1852,7 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
     }
 
     override fun releaseResources() {
-        renderBitmap?.recycle()
-        renderBitmap = null
-        renderCanvas = null
+        committedNode.discardDisplayList()
         dragBackingBitmap?.recycle()
         dragBackingBitmap = null
     }

@@ -1,7 +1,54 @@
 # MainActivity Feature Systems & Recents
 
-> Referenced from `CLAUDE.md`. Covers notebook/folder management, browse state, search/sort, exports,
-> ML Kit, and the recents system.
+> Referenced from `CLAUDE.md`. Covers the library chrome, notebook/folder management, browse state,
+> search/sort, exports, ML Kit, and the recents system.
+
+## Library Chrome — Zones & Width Buckets (`activity_main.xml`)
+
+The library screen has a **top bar** that is swapped out per browse mode and a **bottom bar** that
+never is. Which bar a control lives in follows from that:
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│ breadcrumb / search / pinned / recents / picker  (swapped)   │  ← mode-specific top bar
+├──────────────────────────────────────────────────────────────┤
+│                        gridContainer                          │
+├──────────────────────────────────────────────────────────────┤
+│  📅 ✏️        |< < n/n > >|            📓+ 📁+ ⋯             │  ← bottom bar (always present)
+│  surface       pagination               actions               │
+└──────────────────────────────────────────────────────────────┘
+```
+
+- **`surfaceButtonsGroup` (start)** — `btnCalendar` + `btnScratchpad`. These are *sibling surfaces*
+  (places to go), not library actions, so they get their own zone opposite the create/overflow
+  group. Because the bottom bar is never replaced by search / pinned / recents mode, one button
+  each is reachable everywhere and needs **no per-mode duplicate** — the group is hidden only in
+  destination-picker mode (`applyPickerModeUI`), where launching another surface mid-flow would be
+  disruptive. Prior to this, `btnScratchpad` was mirrored four times (breadcrumb + pinned + recents
+  + search toolbars) and `btnCalendar` was buried in the overflow row; both are now single buttons.
+- **`paginationGroup` (centre)** — driven only by `isEnabled`, never `visibility`, from
+  `updatePaginationControls`. That matters: layout variants can `gone` individual page buttons without
+  any Kotlin change and without making the view-binding fields nullable.
+- **`actionButtonsGroup` (end)** — `btnNewNotebook` · `btnNewFolder` · `btnMore` (overflow row:
+  Import · Templates · Encryption · HWR · Backup · Compact).
+
+**Width buckets.** The full bar needs **520dp**. Three variants of `activity_main.xml` exist, and a
+device picks the highest matching qualifier:
+
+| Bucket | Range | Devices | Bottom bar |
+|---|---|---|---|
+| `layout/` | < 360dp | — | full bar, pagination centred |
+| `layout-sw360dp/` | 360–479dp | Palma2 Pro (439dp) | first/last-page `gone`, pagination anchored `toEndOf` the surface group — 428dp of 439dp |
+| `layout-sw480dp/` | ≥ 480dp | Go 6 Gen II (571dp), Go 10.3 Gen 2 (992dp), all larger tablets | full bar, pagination centred |
+
+Palma2 Pro is the only device genuinely too narrow for the full bar. The `sw480dp` bucket exists so
+the Go 6 Gen II does **not** fall back to the narrow variant and lose its first/last-page buttons
+despite having ~140dp spare. There is deliberately **no** `layout-sw600dp/activity_main.xml` — it
+would be a byte-identical fourth copy of a ~500-line file, and `sw480dp` already covers everything
+above 600dp. (`layout-sw600dp/` still holds `activity_template_browser.xml`.)
+
+Device dp = `px × 160 ÷ density`; all current BOOX devices report density 300, so
+`dp = px × 0.533`. Verify a bar change against the *narrowest* bucket member, not the flagship.
 
 ## Notebook & Folder Management
 
@@ -15,7 +62,7 @@
   a post-result dup check as a harmless safety net. On result, `createNotebook(name, libraryTemplateId)`
   seeds the first page's template (see Templates below).
 - **Move:** index update only — `.soil` file stays at `Garden/<id>.soil` (UUID unchanged).
-- **Rename:** index update only via `repository.renameNotebook` / `renameFolder` (`.soil` file/UUID untouched, same as Move). Context-menu actions use `ic_edit` (Tabler `edit`): "Rename Notebook" between Move Notebook and Set Cover; "Rename Folder" between Move Folder and Delete. Dialog reuses `DialogNewNotebookBinding`, pre-filled with the current name (cursor at end). Notebook rename runs `validateNotebookName`; folder rename runs `validateFolderRename` — same whitelist + `.`/`..` reject, but duplicate check is against the folder's own `parentId` (not the current browse folder) and excludes itself. No-op when name is unchanged. After rename, `refreshActiveView()` re-renders the active mode (normal/search via `scanAndRender`, pinned, or recents).
+- **Rename:** index update only via `repository.renameNotebook` / `renameFolder` (`.soil` file/UUID untouched, same as Move). Context-menu actions use `ic_edit` (Tabler `edit`): "Rename Notebook" after Move Notebook; "Rename Folder" between Move Folder and Delete. Dialog reuses `DialogNewNotebookBinding`, pre-filled with the current name (cursor at end). Notebook rename runs `validateNotebookName`; folder rename runs `validateFolderRename` — same whitelist + `.`/`..` reject, but duplicate check is against the folder's own `parentId` (not the current browse folder) and excludes itself. No-op when name is unchanged. After rename, `refreshActiveView()` re-renders the active mode (normal/search via `scanAndRender`, pinned, or recents).
 - **Copy notebook:** new `ObjectEntity` + copy `.soil` to new UUID path via `soilFile()`.
 - **Copy folder:** recursively create new index entries and copy all descendant `.soil` files.
 - **Conflict check:** if a sibling with the same name exists at the destination, show AlertDialog "A [notebook/folder] named '[name]' already exists here. Replace it?" Replace proceeds; Cancel stays in picker mode.
@@ -49,18 +96,45 @@ data class AppViewState(
     val recentsMode: Boolean = false,
     val searchMode: Boolean = false,
     val searchQuery: String = "",
-    val lastOpenedNotebookId: String? = null,
 )
 ```
 
 Persisted in `SharedPreferences("notesprout_view_state")`. Saved at every browse-context change — including entering/exiting search and recents modes.
 
-**Restore on launch:** `onCreate` loads state synchronously. Non-default state (any non-root folder, pinned/recents/search mode active, or a last-opened notebook ID on cold launch): set `isStateRestored = false`, launch coroutine `restoreSavedBrowseState(state, coldLaunch)`, set `isStateRestored = true`, trigger first render. Layout listener and `onResume` check `isStateRestored` — if false, defer scan to the restore coroutine.
+**Restore on launch:** `onCreate` loads state synchronously. Non-default state (any non-root folder, pinned/recents/search mode active, or a non-LIBRARY surface on cold launch): set `isStateRestored = false`, launch coroutine `restoreSavedBrowseState(state, surface, coldLaunch)`, set `isStateRestored = true`, trigger first render. Layout listener and `onResume` check `isStateRestored` — if false, defer scan to the restore coroutine.
 
-- **Last opened notebook (`lastOpenedNotebookId`):** on a **cold launch** (`savedInstanceState == null` — app was killed or crashed), if a notebook ID is persisted, the restore coroutine immediately relaunches it via `launchNotebookActivity`. On a **warm restart** (MainActivity killed by OS while notebook was open, then user closes notebook), `coldLaunch` is false and only the browse state is restored. The notebook ID is cleared from prefs in `onResume` when `notebookOpenedThisSession` is true (set by `launchNotebookActivity`, checked once on return).
 - **Mode restore:** after navigating to the saved folder, `restoreSavedBrowseState` applies the active mode: pinned → `applyPinnedModeUI()`; recents → `applyRecentsModeUI()`; search (query non-empty) → `applySearchModeUI()` + restores `currentSearchQuery`.
 - **Stale folder:** if `navigateStackToFolder` resolves to root (folder deleted), clear via `AppStateManager.save(context, AppViewState(null, false))`.
-- **Stale notebook:** if `getNotebook(id)` returns null or `deletedAt != null`, clear `lastOpenedNotebookId` from prefs and proceed to browse state restore only.
+
+## Surface Stack — Launch Restore (`state/SurfaceStack.kt`)
+
+A cold launch reopens **what the user was doing**, not just the library: the whole chain of open screens, so a scratch pad opened from a notebook comes back over *that notebook*, and stepping out of it lands where it did before the app died.
+
+```kotlin
+enum class AppSurface { NOTEBOOK, CALENDAR, DAY_WINDOW, SCRATCHPAD }  // library = implicit bottom
+
+data class SurfaceEntry(
+    val token: String,               // the Activity *instance* — survives onSaveInstanceState
+    val surface: AppSurface,
+    val notebookId: String? = null,  // NOTEBOOK
+    val dayDate: String? = null,     // DAY_WINDOW (ISO-8601)
+    val dayView: String? = null,     // DAY_WINDOW (DayDetailActivity.ViewMode name)
+)
+```
+
+Bottom-first list, kotlinx JSON under one key (`surface_stack`) in the same prefs file as the browse state — separate key + separate accessors, so the many `AppStateManager.save(AppViewState(...))` browse writes can't clobber it. Exact in memory for the process's life, mirrored to prefs on every mutation; the mirror is what survives the kill. Main thread only.
+
+- **The Activities maintain it themselves**, from two hooks: `onCreate` → `attach` (append, or refresh in place if this instance is a recreation), `onResume` → `markTop` (I'm on screen — drop anything still recorded above me). `markTop` is what pops a surface the user backed out of, so there's **no `onDestroy` bookkeeping** — which would be unreliable exactly when it matters, since a killed process gets no `onDestroy`. `attach` is needed as well because a restored stack is launched with `startActivities`, and everything below the top is created without ever being resumed.
+- **`MainActivity.onResume` calls `reset`** — the library is on screen, so nothing is stacked on it. Every path home therefore heals the stack; a stale entry can't outlive a visit to the library. Guarded by `isStateRestored`, since an in-flight restore is about to stack surfaces on top.
+- **Ordering holds** because the leaving Activity's `onPause` always precedes the revealed Activity's `onResume`.
+- **`token` identifies the instance, not the surface type** — the same notebook can legitimately appear twice in one stack (notebook → calendar → day window → same notebook again), so identity can't be surface + payload. It's stored in `onSaveInstanceState`, so an Activity Android rebuilds (config change, or a task the OS restores itself) re-attaches to its existing entry instead of duplicating it.
+- **DayDetail also `attach`es in `onPause`:** it's the one surface whose payload changes without the user leaving the Activity (`switchToDate`, `switchViewMode`).
+- **Restore (`MainActivity.restoreSurfaces`), cold launch only** (`savedInstanceState == null`; on a warm restart the surfaces are already on the back stack or were just closed): map the entries to intents and `startActivities` them bottom-first, then `reset` (the relaunched Activities re-record themselves).
+- **Only the notebook and day window need identity passed in.** The calendar (`calendar_state` prefs) and the scratch pad (`ScratchpadPreferences`) already persist their own position and restore it on open. The day window has no such store, so its date + view ride in the entry and reach it via `DayDetailActivity.EXTRA_VIEW` — absent on a normal open, which still lands on **Events**.
+- **The source notebook is passed back down:** a restored calendar / day window / scratch pad gets the `EXTRA_FROM_NOTEBOOK_*` of the notebook directly beneath it (for a day window, the one beneath its calendar), so Send-to-Notebook still targets what it did.
+- **This can put an encrypted notebook back underneath.** It only unlocks when the user steps down to it, but its `.soil` is opened for a screen they aren't looking at yet — accepted, so they land where they actually were.
+- **Anything unresolvable is dropped, the rest still comes back:** a deleted notebook (`getNotebook` null / `deletedAt != null`) or an unparseable date drops that one entry.
+- **Migration:** installs predating the stack only stored `last_notebook_id`. Read once, as a one-entry NOTEBOOK stack, then removed on the next write.
 
 ## Pinned Browse View
 
@@ -84,33 +158,51 @@ Fuzzy match against all notebooks: substring (3) > all words present (2) > prefi
 
 ## Notebook-Level Export
 
-Both `MainActivity` (long-press → Export) and `NotebookActivity` (toolbar Export button) first
+Both `MainActivity` (long-press → Export) and `NotebookActivity` (canvas "Page" menu → Export) first
 present a **format chooser** `ActionSheetDialog` with two rows before starting any export:
 
-- **Export as PDF** → existing PDF path (encrypted-unencrypted warning + optional PDF password)
+- **Export as PDF** → **template sub-choice** (see below) → existing PDF path (encrypted-unencrypted warning + optional PDF password)
 - **Export Notebook (.soil)** → full-notebook copy via `NotebookPackager`
+
+### Strokes-only (no-template) export
+
+Every **raster** export path (PDF + PNG, notebook-level and page-index) first offers an
+`ActionSheetDialog` template sub-choice: **"With template"** / **"Strokes only (no template)"**. This
+threads a single `includeTemplate: Boolean` flag through `NotebookExporter` (`export`,
+`exportPagesPdf`, `exportPagesPng`, `exportPage` → `renderPageBitmap`); when false,
+`renderPageBitmap` skips `loadTemplate` so the page renders content layers on white with **no
+template image**. Only the page template (lines/grid) is suppressed — headings, text, line/shape
+objects, links, sticky-note icons, and pen strokes all still render. Use case: writing on a lined
+template but exporting just the handwriting (blog posts, letters). No data-model or schema change.
+
+- Sub-choice entry points: MainActivity Export → "Export as PDF"; NotebookActivity Export → "Export
+  as PDF"; PageIndex single-page Export (PNG); PageIndex multi Export → PDF; PageIndex multi Export →
+  PNG → Save images. **PNG → Save as templates is excluded** (a saved template keeps its lines/grid —
+  always `includeTemplate=true`). Notebook-level export is PDF-only; whole-notebook strokes-only PNG
+  is reached via page index → Select All → Export → PNG → Save images → Strokes only.
 
 ### PDF Export
 
-- `NotebookExporter` renders all pages off-screen on `Dispatchers.IO` using white→template→headings→text→strokes pipeline
+- `NotebookExporter` renders all pages off-screen on `Dispatchers.IO` using white→template→headings→text→strokes pipeline (template skipped for strokes-only)
 - Output to `context.cacheDir/<title>.pdf`; FileProvider (`${applicationId}.fileprovider`) used for both save and share paths
 - Share intent **must** include `clipData = ClipData.newRawUri("", uri)` alongside `FLAG_GRANT_READ_URI_PERMISSION` — on Android 12+, the chooser intermediary does not forward URI permissions without `ClipData` (causes silent Google Drive upload failure on NA5C)
-- Progress dialog: "Exporting page X of N…" via `Handler(Looper.getMainLooper())`
-- After export: `showExportChoice(file)` presents an `AlertDialog` with "Save to device" (`ACTION_CREATE_DOCUMENT` via `savePdfLauncher`) or "Share" (existing `ACTION_SEND` flow).
-- **Encrypted-notebook warning:** the rendered PDF is plaintext — a warning dialog is shown before the export proceeds.
+- Progress is shown **inline on the export screen** ("Rendering page X of N…"), not in a modal dialog.
+- **Encrypted-notebook warning:** the rendered PDF is plaintext, so the export screen shows a
+  standing inline warning whenever the output would leave the app readable. Ticking "Protect PDF
+  with a password" clears it.
 
-### Full-Notebook Export (.soil)
+### The export screen
 
-- `NotebookPackager.packageForExport(context, repo, notebookId, openableKey)` (cold-file / MainActivity path)
-  or `NotebookPackager.packageOpenForExport(context, db, repo, notebookId)` (open-DB / NotebookActivity path).
-- No passphrase prompt; no "unencrypted" warning. Encrypted notebooks stay encrypted in the copy.
-- Export cache: `cacheDir/exported_notebooks/<safeName>.soil`. Directory is wiped+recreated each export.
+`startExportFromMain(entity)` opens `ExportActivity` — that is the whole implementation. Format,
+page scope, render options, encryption and destination are all chosen there, and the same screen
+serves NotebookActivity and PageIndexActivity. See
+[`docs/full-notebook-export.md` § The Export Screen](full-notebook-export.md#the-export-screen).
+
+- Export cache dirs: `cacheDir/exported_pdfs|exported_pngs|exported_text|exported_notebooks/`, each
+  wiped+recreated per export.
 - FileProvider entry: `<cache-path name="exported_notebooks" path="exported_notebooks/" />` in `file_paths.xml`.
-- After packaging: `showSoilExportChoice(file)` — `AlertDialog` with "Save to device"
-  (`saveSoilLauncher`, `CreateDocument("application/octet-stream")`) or "Share"
-  (`ACTION_SEND`, same `ClipData` + `FLAG_GRANT_READ_URI_PERMISSION` pattern as PDF share).
-- **openableKey semantics (cold path):** `""` = plaintext; non-empty = GLOBAL passphrase (cached,
-  no prompt); `null` = NOTEBOOK-scoped or key not cached → copy cold without meta refresh.
+- **openableKey semantics:** `""` = plaintext; non-empty = passphrase to open with; `null` = copy
+  cold without a meta refresh.
 
 See [`docs/full-notebook-export.md`](full-notebook-export.md) for the full format, `notebook_meta`
 schema, continuous upkeep, and encrypted trade-off.
@@ -145,7 +237,8 @@ See [`docs/full-notebook-export.md`](full-notebook-export.md) for the `.soil` fo
 
 ## Page Index — Multi-Page Selection (`PageIndexActivity`)
 
-The page index is a paginated grid of page snapshots. Long-press enters **action mode**; the user can
+The page index is a paginated grid of page thumbnails (rendered on demand from page content for the
+visible pagination page — there is no stored per-page snapshot). Long-press enters **action mode**; the user can
 then select any number of pages — across pagination — and apply every toolbar action to all of them at
 once. Calm/paper-like per `docs/design-system.md`: selection is shown with the existing card highlight
 (`bg_page_card_current`, 3dp inset border), no color, no Material chrome.
@@ -225,9 +318,12 @@ destination mode is entered. Back / system-back cancels destination mode → act
 
 ### Export (single vs. multi)
 
-`executeExport()` routes by selection size:
+`executeExport()` routes by selection size. Every raster sub-path first asks the **template
+sub-choice** (`chooseExportTemplate(title) { includeTemplate -> … }` — "With template" / "Strokes
+only (no template)") before rendering; the chosen `includeTemplate` flows to the matching
+`NotebookExporter` call. See **Strokes-only export** above.
 
-- **Single** (`selectedCount() == 1`) → the richer `showExportChoice`: Save to device
+- **Single** (`selectedCount() == 1`) → template sub-choice → the richer `showExportChoice`: Save to device
   (`savePngLauncher`, `CreateDocument("image/png")`) / Save as Template (`MODE_SAVE_TARGET`) / Share.
   Render via `NotebookExporter.exportPage(...)`.
 - **Multi** (`> 1`) → `showMultiExportDialog`: **PDF** / **PNG** / Cancel.
@@ -273,8 +369,10 @@ in every extras list.
 
 ## Table of Contents (TOC)
 
-The notebook TOC (`btnToc` → `toc/TocDialog`) is a **hierarchical** H1→H2→H3 outline of the notebook's
-headings, built by `toc/TocRepository.buildTocTree(): List<TocNode>`.
+The notebook TOC (`toc/TocDialog`) is a **hierarchical** H1→H2→H3 outline of the notebook's
+headings, built by `toc/TocRepository.buildTocTree(): List<TocNode>`. It is opened **only** by the
+swipe-down-on-canvas gesture (`NotebookActivity.evaluateSwipeDownToc` → `openToc()`) — the former
+`btnToc` toolbar button was retired.
 
 - **`TocNode`** (`toc/TocNode.kt`) — `pageNumber`, `pageIndex`, `pageId`, `level` (1–3), `title`
   (prefix-stripped; `""` for unrecognized stroke headings), `heading: HeadingStroke`, and a mutable
@@ -363,7 +461,8 @@ a **MainActivity recents browse mode** (notebook cards) and a **NotebookActivity
 
 ### NotebookActivity recents dialog (`notebook/RecentsDialog.kt`)
 
-- `btnRecents` (`ic_clock`) after `btnClose`, before the divider preceding `btnToc`. Modeled on
+- `btnRecents` (`ic_clock`) sits second in the default order, right after `btnClose` (see
+  `ToolbarButtonRegistry.DEFAULT_ORDER`). Modeled on
   `TocDialog`: paginated (measure row height → `itemsPerPage`; first/prev/next/last + indicator).
   Each row: notebook name (TOC heading style) / date-time (smaller) / folder path (smaller).
   Layouts: `dialog_recents.xml`, `item_recent_entry.xml`. Empty state "No recent notebooks".

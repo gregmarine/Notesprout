@@ -24,6 +24,36 @@ portability.
 
 ---
 
+## The Global Index Is Encrypted
+
+**`notesprout.db` is SQLCipher-encrypted at rest**, under the global passphrase, from first launch
+(encrypt-everything-by-default). Earlier phases of this doc described the index as plaintext; that is
+no longer true.
+
+`NotesproutIndex.ensureReady(context)` owns the open and branches on `SoilCrypto.probe`:
+
+| Probe result | Action |
+|---|---|
+| `Invalid` (fresh install / empty file) | Mint the global key (`GlobalKey.ensure`) and create the index **encrypted from the start** |
+| `Plaintext` (existing user upgrading) | Bring the schema current **while still plaintext**, close, `SoilMigrator.encryptInPlace`, reopen keyed |
+| `Encrypted` + resolvable key | Open via the raw-key cache (`KeyMaterial.rawKeyGlobal`, `INDEX_FILE_ID`) |
+| `Encrypted` + no usable key | `PrepareOutcome.NEEDS_UNLOCK` — caller prompts, then `unlockAndOpen` |
+
+Consequences:
+
+- **Opening the index is potentially async** (a one-time migration, or an unlock prompt), so it can
+  no longer complete synchronously in `Application.onCreate`. `BootstrapActivity` gates on it and
+  index consumers suspend via `awaitReady`; `MainActivity` self-guards for deep-link entries.
+- The index's raw key is cached under `KeyMaterial.INDEX_FILE_ID` and **invalidated on rotation** —
+  a rotated index re-derives on next launch.
+- Everything stored in the index — including the `scratchpad`, `calendar`, `events`,
+  `notebook_activity`, and clipboard tables — is therefore **encrypted at rest**.
+
+The [search-leak invariant](#search-leak-invariant) still holds and is still enforced: index
+encryption is defence in depth, not a licence to start writing page content there.
+
+---
+
 ## Passphrase Scopes
 
 | Scope | `KeyScope` value | Prompt behaviour | Cached? |
@@ -63,7 +93,7 @@ Encrypting the `.soil` is not enough. Several plaintext side-channels must also 
 
 | Side-channel | Rule |
 |---|---|
-| **Index snapshot** — `NotebookObject.snapshot` (base64 PNG cached in `notesprout.db`) | Clear on encrypt; never write for encrypted notebooks. `IndexRepository.setEncryptionState` clears it atomically. `IndexRepository` also guards `updateNotebookSnapshot` — refuses a non-null snapshot if the row is already encrypted. |
+| **Index snapshot** — `NotebookObject.snapshot` (cover image cached in `notesprout.db`) | Gated on **key scope**, not on `encrypted` — see [the snapshot rule](#notebookobject-snapshot-rule). GLOBAL-scope covers are kept (the index is encrypted under that same key); NOTEBOOK-scope covers are never written and are cleared atomically by `IndexRepository.setEncryptionState` on conversion. |
 | **Undo/redo sidecar** — `*.soil.undoredo` plaintext file | Skip writing on `onStop` when encrypted. Delete any stale sidecar when opening an encrypted notebook. |
 | **WAL/SHM** | SQLCipher encrypts WAL too — safe. Normal sidecar-cleanup rules still apply. |
 | **Original plaintext file** | After `encryptInPlace`, the original `.soil` and all siblings are deleted atomically. The zetetic temp file (`*.enc.tmp`) is renamed over the original only after `verifyPassphrase` passes. |
@@ -82,9 +112,9 @@ or open a zetetic `SQLiteDatabase` outside this object.
 |---|---|
 | `keyBytes(passphrase)` | `passphrase.toByteArray(Charsets.UTF_8)` — canonical encoding |
 | `roomFactory(passphrase)` | Returns `SupportOpenHelperFactory(keyBytes(passphrase))` for Room builder |
-| `openRawPlaintext(file)` | `android.database.sqlite.SQLiteDatabase` open — no zetetic involvement |
+| `openRawPlaintext(file)` | `android.database.sqlite.SQLiteDatabase` open — no zetetic involvement. Opened with `NonDeletingErrorHandler` so a corruption report never deletes the file (see [Never delete on corruption](#never-delete-on-corruption)) |
 | `openRawEncrypted(file, passphrase)` | `net.zetetic.database.sqlcipher.SQLiteDatabase` open |
-| `openRaw(file, passphrase?)` | Dispatches to `SoilRawDb.Plaintext` or `SoilRawDb.Encrypted` |
+| `openRaw(file, passphrase?)` | Dispatches to `SoilRawDb.Plaintext` or `SoilRawDb.Encrypted`. A `null` key against a file that probes as `Encrypted` throws `SoilLockedException` instead of opening it as plaintext — a null key means "not resolved yet", never "plaintext" |
 | `verifyPassphrase(file, passphrase)` | Opens, runs `SELECT count(*) FROM sqlite_master`, always closes; returns `false` on any error |
 
 `SoilRawDb` is a thin sealed wrapper providing a common `rawQuery/beginTransaction/…/close` API over
@@ -103,6 +133,23 @@ prompt, or verify.
 | `resolveForDecrypt(activity, notebookId, info)` | **Always** prompts (even if global is cached — the "extra are you sure"). Verify, return on success. |
 
 `null` return always means "couldn't get a usable key" — the caller must abort and not open anything.
+
+**Global-passphrase overwrite guard.** `resolveGlobalForOpen` adopts an entered passphrase as the
+device global (`PassphraseStore.setGlobalPassphrase`) **only when no global was cached** — i.e. the
+user is establishing it on a fresh device or after "Forget on this device". If a global is already
+cached but this notebook *diverged* from it (its file uses a different passphrase — restored from an
+older backup, keyed on another device), the entered passphrase unlocks **that file for this session
+only** and the stored global is left untouched. Overwriting it would silently re-point every other
+global notebook's key resolution and could strand the whole library from one outlier notebook. The
+prompt says so ("This notebook's passphrase differs from your global passphrase"). Re-keying a
+divergent notebook back onto the global is `NotebookRecovery`'s explicit repair, never a side effect.
+
+**Fast-path assumption.** When a notebook's raw key is already cached, `resolveGlobalForOpen` returns
+the cached global **without** re-verifying (skips the ~300 ms KDF). This is optimistic, not
+guaranteed: in-app flows invalidate the cache on rotation/delete/forget, but a file swapped
+out-of-band (restore from backup, re-key on another device) can leave a stale key that no longer
+fits. That mismatch is caught downstream by [self-heal](#never-delete-on-corruption) — a wrong
+assumption costs one self-heal, never a failed open.
 
 ### `PassphraseStore` (`crypto/PassphraseStore.kt`)
 
@@ -125,10 +172,106 @@ persisted.
 
 ### `SoilMigrator` (`crypto/SoilMigrator.kt`)
 
-`encryptInPlace` and `decryptInPlace` — both `suspend` on `Dispatchers.IO`, using a temp file then
-atomic rename, with full sidecar cleanup. Uses `sqlcipher_export()` via an ATTACH/export/DETACH
-sequence on a zetetic connection. Exception-safe: on any failure before the rename, the temp is
-deleted and the original is intact.
+`encryptInPlace`, `decryptInPlace`, and `rekeyInPlace` — all `suspend` on `Dispatchers.IO`, using a
+temp file then a **rename-first `commitReplace`** (`original → .old.bak → tmp into place → drop
+.old.bak`) so there is never an instant with zero intact copies, plus fsync and launch-time
+`recoverInterruptedMigration`. Uses `sqlcipher_export()` via an ATTACH/export/DETACH sequence on a
+zetetic connection. Exception-safe: a rename failure rolls the original back and **keeps** the
+verified temp. See [Migration Mechanics](#migration-mechanics-sqlcipher_export) for the full flow.
+
+**`sqlcipher_export` does not copy `PRAGMA user_version`** — every round-trip must restore it by hand
+(`copyUserVersion`), or the output is version 0. This is not cosmetic: a version-0 file whose schema
+is *below* the current Room version makes Room treat it as a brand-new/prepackaged database and
+reject the old-schema tables instead of migrating them — see [version-loss repair](#version-loss-repair).
+
+`repairMissingUserVersion(file, passphrase)` fixes a file already bricked that way: it opens with the
+key, and **only** if the exact brick signature holds (`user_version == 0`, `room_master_table`
+present, a `notebook` table present, and the v4 columnar columns absent) it restamps the version
+derived from which schema-version tables exist (`notebook_meta` ⇒ 3, `undo_redo_state` ⇒ 2, else 1),
+then checkpoints. Room then runs the remaining migrations normally. No-op on anything else.
+
+---
+
+## Data-Loss Defense (never violate)
+
+A `.soil` opened with the wrong key — or with **no** key, i.e. as plaintext — makes SQLite read
+ciphertext as a *corrupt database*. Two real incidents came out of that, and this section is the
+standing defense against a third. **The invariant: a notebook the user holds a valid passphrase for
+must never become permanently unopenable, and no open path may ever delete a `.soil` it failed to
+read.** Four independent layers enforce it.
+
+### Never delete on corruption
+
+Android's default SQLite corruption handler (`DefaultDatabaseErrorHandler`) and Room's default both
+**delete and recreate** a database reported corrupt. For a `.soil` opened with the wrong key that
+destroys the notebook and leaves an empty stub — exactly how a notebook was lost twice (link-picker
+thumbnail open; page-index raw open). Every open path must therefore use a non-deleting handler:
+
+- **Room path** — `NonDestructiveOpenHelperFactory` (`data/`) wraps the Room open factory; its
+  `onCorruption` logs and throws instead of deleting. Wired into `SoilDatabase.builder`,
+  `SoilCrypto.roomFactory`, and `roomFactoryRawKey`.
+- **Raw (non-Room) path** — `NonDeletingErrorHandler` (`crypto/SoilCrypto.kt`) is the framework-SQLite
+  analogue, passed to every `openRawPlaintext` (and `probe`). The ~18 raw open sites (`PageCopier`,
+  `ExportEngine`, `LinkTargetPickerActivity`, `PageList`, `NotebookImporter`) all inherit it.
+
+### Never open an encrypted file as plaintext
+
+`SoilCrypto.openRaw(file, passphrase=null)` probes the file first: if it is actually encrypted it
+throws `SoilLockedException` rather than opening it as plaintext. A `null` key means "the key was not
+resolved yet" (e.g. a `KeySession` miss on a non-foreground notebook after process death), **not**
+"this notebook is plaintext" — conflating the two is what wiped a notebook via `PageIndexActivity`.
+Callers already treat "can't read" as an empty/locked state, so this degrades safely. Screens that
+open a notebook they didn't launch from (e.g. `PageIndexActivity` reached by launch restore) resolve
+the key through the full `KeySession → KeyResolver/PassphraseStore` fallback, not a bare
+`KeySession.getFor`.
+
+### Self-heal a stale raw key
+
+The raw key is a cache — PBKDF2 over the passphrase **and the file's salt**. Anything that swaps the
+file behind a notebook id (restore from backup, re-key elsewhere, re-import) changes the salt, making
+the cached key wrong even though the passphrase is correct. `SelfHealingKeyFactory`
+(`crypto/SelfHealingKeyFactory.kt`) wraps the raw-key Room open: on the first failure it drops the
+cached key (`KeyMaterial.invalidate`), reopens with the **passphrase** (re-running the KDF against the
+file's real salt), and re-warms so the next open is fast again. Wired in `KeyOpener.roomFactoryFor`.
+This makes the common "same passphrase, stale key" case — including a notebook restored from a
+pre-conversion backup — heal automatically with no UI. Only if the passphrase open *also* fails does
+the failure propagate.
+
+### Recover with a user-supplied passphrase
+
+When an encrypted notebook still won't open (the passphrase the app knows is genuinely wrong for the
+file), `NotebookActivity.failOpen` calls `NotebookRecovery.offer` **before** falling back to the
+library. It tries the cached global first, then prompts (verifying each attempt against the file,
+rate-limited via `AttemptLimiter`). On success it drops the stale key and reopens via `recreate()`;
+for a GLOBAL-scope notebook whose file uses a *different* passphrase it offers **"Repair and Open"**,
+which `SoilMigrator.rekeyInPlace`-es the file onto the global passphrase so future opens are ordinary.
+A one-shot flag on the Intent (`EXTRA_RECOVERY_ATTEMPTED`) ensures the offer is made once per launch,
+never in a loop.
+
+**`failOpen` routes by failure kind, not blanket.** It first tries the silent version-loss repair
+(below) with the key it already has. Only if the failure is a genuine *key/decryption* problem
+(`isKeyFailure` — `SQLiteDatabaseCorruptException`, `SoilLockedException`, "file is not a database")
+does it invoke `NotebookRecovery`. A **schema/migration** failure (`IllegalStateException` with
+"invalid schema"/"migration") is explicitly *not* a key failure and never triggers a passphrase
+prompt — recovery can't fix schema drift and the prompt would mislead.
+
+### Version-loss repair
+
+A `.soil` encrypted (or rekeyed) by an older build carries `user_version = 0` because
+`sqlcipher_export` dropped it. If that notebook was also below the current Room schema at the time,
+the current build rejects it at Room `onCreate` with "Pre-packaged database has an invalid schema".
+`failOpen` calls `SoilMigrator.repairMissingUserVersion` with the resolved key: it restamps the
+correct version in place (no re-encryption, no backup restore) and retries via `recreate()`, after
+which the normal additive migration runs. The fix-forward `copyUserVersion` in the migrator prevents
+new occurrences; this repairs ones already on disk. Real incident: G6's v3 notebooks, encrypted while
+still v3, bricked exactly this way. (G102 survived because its notebooks were already v4 when
+encrypted, so their schema still matched.)
+
+> **Debug harness.** In debug builds a notebook's context menu has **"Break Keying (debug)"**
+> (`MainActivity.showBreakKeyingDialog`): it `rekeyInPlace`-es the file to a throwaway passphrase but
+> deliberately leaves the index scope and the cached raw key untouched — reproducing the
+> stale-key-plus-divergent-passphrase failure on demand to exercise self-heal and recovery. Never
+> ship an entry point to this.
 
 ---
 
@@ -136,15 +279,29 @@ deleted and the original is intact.
 
 Converting a `.soil` in place:
 
-1. Open the **source** file using the zetetic driver (plaintext = empty key `""`, encrypted = its passphrase).
-2. `ATTACH DATABASE '<tmp>' AS target KEY '<dest-passphrase>'` (empty key for decrypt).
-3. `SELECT sqlcipher_export('target')` — copies all pages into `<tmp>`.
-4. `DETACH DATABASE 'target'`.
-5. `SoilCrypto.verifyPassphrase(<tmp>, dest-passphrase)`.
-6. Delete the original + WAL/SHM/journal siblings, then `tmp.renameTo(original)`.
-7. Delete any `*.undoredo` sidecar.
+0. **Probe-before-encrypt.** `encryptInPlace` refuses input that isn't actually plaintext
+   (`SoilCrypto.probe(...) == Plaintext`). This stops the index-drift retry that could otherwise
+   read an already-encrypted file as an empty source and replace real data with an empty output.
+1. Checkpoint the source WAL with a **non-deleting** framework open (`NonDeletingErrorHandler`) — a
+   corruption report during this open must never delete the live file.
+2. Open the encrypted-destination temp via the zetetic driver; `ATTACH DATABASE '<src>'` (paths
+   single-quote-escaped), `SELECT sqlcipher_export(...)`, then `copyUserVersion` (see below), DETACH.
+3. `SoilCrypto.verifyPassphrase(<tmp>, dest-passphrase)` (or `verifyPlaintext` for decrypt).
+4. **Commit via `commitReplace` — never a state with zero intact copies:**
+   `original → <original>.old.bak` (rename), then `<tmp> → original` (rename), then delete
+   `.old.bak`. On a rename failure the original is rolled back and the verified `tmp` is **kept**,
+   never deleted. `fsync` of the file + parent dir brackets the swap.
 
-On any failure before step 6, `tmp` is deleted and the original is never touched.
+**Crash recovery.** A kill in the swap window (or an orphan `*.enc/.dec/.rekey.tmp` from an older
+build) is repaired at launch by `SoilMigrator.recoverInterruptedMigration` — called from
+`BootstrapActivity.recoverGardenOrphans` (Garden sweep) and `NotesproutIndex.ensureReady` (the index
+itself). If `original` is missing and a `.old.bak` (or verified `.tmp`) exists, it is renamed back;
+a stale `.old.bak` next to a present `original` is dropped. This is why the historical
+"delete-original-before-rename destroys both copies" hole is closed.
+
+**Creation is a separate path.** Only `SoilCrypto.createRawEncrypted`/`createRawPlaintext` may create
+a `.soil`; every other open is exists-guarded (`verifyPassphrase`/`openRaw` return/throw on a missing
+file) so a create-capable open can never fabricate an empty stub at a vanished notebook's path.
 
 ---
 
@@ -163,10 +320,23 @@ Encrypting an already-open notebook must go through a close → migrate → reop
 
 ## `NotebookObject` Snapshot Rule
 
-`IndexRepository.updateNotebookSnapshot` is a no-op when the notebook row has `encrypted = true`.
-`setEncryptionState(..., encrypted = true, ...)` atomically clears `snapshot` in the same write.
-No snapshot is ever written during an encrypted notebook's open session (guards in both
-`NotebookActivity.cacheSnapshotIfAllowed` and `CoverLoader`).
+The rule is keyed on **scope**, not on `encrypted`, and this changed when the index itself became
+encrypted (Phase 1b). The question is not "does this leave the encrypted zone?" — nothing does — but
+"does this cross a **key boundary**?":
+
+| Notebook | Cover in the index? |
+|---|---|
+| Unencrypted | Yes |
+| Encrypted, `GLOBAL` scope | **Yes** — `notesprout.db` is encrypted under that same global key, so the cover is protected by exactly the key that protects the notebook |
+| Encrypted, `NOTEBOOK` scope (own passphrase) | **Never** — the user chose a separate passphrase precisely so this content is not readable with the global key |
+
+`IndexRepository.updateNotebookSnapshot` returns early when `encrypted && keyScope != GLOBAL`;
+`setEncryptionState` clears `snapshot` in the same write when converting *to* that scope;
+`NotebookActivity.cacheSnapshotIfAllowed` applies the identical guard at capture time. Only
+NOTEBOOK-scope cards render the lock icon instead of a cover.
+
+Note the **embedded `notebook_meta` cover is stricter**: it is `null` for *any* encrypted notebook,
+both scopes. That file travels to other devices, where "the global key" means a different secret.
 
 ---
 
@@ -174,11 +344,12 @@ No snapshot is ever written during an encrypted notebook's open session (guards 
 
 ### Re-Keying a Single Notebook (`SoilMigrator.rekeyInPlace`)
 
-`SoilMigrator.rekeyInPlace(file, oldPassphrase, newPassphrase)` re-encrypts a `.soil` in place
-using SQLCipher's `PRAGMA rekey`. It opens the file with the old passphrase, runs
-`PRAGMA rekey = '<newPassphrase>'`, checkpoints, closes, then calls
-`SoilCrypto.verifyPassphrase(file, newPassphrase)` to confirm success. No temp file is needed —
-`PRAGMA rekey` modifies the file in place. WAL/SHM sidecars are cleaned up afterward.
+`SoilMigrator.rekeyInPlace(file, oldPassphrase, newPassphrase)` re-encrypts a `.soil` via the same
+`sqlcipher_export` round-trip as `encryptInPlace` — **not** `PRAGMA rekey`, which was found unreliable
+on-device. It opens a new-passphrase-keyed temp as the primary connection, ATTACHes the old-keyed
+source, exports source → main, **copies `PRAGMA user_version`** (sqlcipher_export drops it — see
+[SoilMigrator](#soilmigrator-cryptosoilmigratorkt)), verifies the temp with the new passphrase, then
+deletes the original + sidecars and renames the temp into place.
 
 On any failure the file remains intact and openable with the original passphrase; the caller
 receives an exception.
@@ -292,7 +463,8 @@ Full-notebook export of an encrypted notebook is a **silent pure copy** of the `
   key — no second prompt. For **cold** NOTEBOOK-scoped export (MainActivity context menu), the
   file is copied without opening it; embedded `notebook_meta` reflects the last open/close state.
 - `notebook_meta` is encrypted at rest inside the SQLCipher file. An encrypted notebook's cover
-  snapshot is always `null` in `notebook_meta` (same rule as the index snapshot suppression).
+  snapshot is always `null` in `notebook_meta` — at **both** scopes, which is stricter than the
+  index rule above, because the file travels to devices where the global key is a different secret.
 
 See [`docs/full-notebook-export.md`](full-notebook-export.md) for the full format, copy engine,
 and the encrypted-NOTEBOOK meta-freshness trade-off.
@@ -319,7 +491,7 @@ Encrypted `.soil` files follow a **probe → unlock → keying chooser → re-ke
 
 **Re-key order:** `rekeyInPlace` operates on the temp file before the copy into Garden. A failure leaves Garden untouched.
 
-**Leak hygiene:** the temp file is the still-encrypted `.soil` (never a plaintext copy); passphrases are never logged, never put in an Intent; the index never receives a `snapshot` for encrypted notebooks.
+**Leak hygiene:** the temp file is the still-encrypted `.soil` (never a plaintext copy); passphrases are never logged, never put in an Intent; the index never receives a `snapshot` for a NOTEBOOK-scope notebook (see [the snapshot rule](#notebookobject-snapshot-rule)).
 
 `KeyResolver.resolveForImportRead` lives in `crypto/KeyResolver.kt`. The `"IMPORT"` `AttemptLimiter` bucket lives in the same file and persists across process restarts.
 
@@ -363,8 +535,11 @@ Stroke data, images, text objects, and all other page content live exclusively i
 This invariant ensures that adding search over decrypted content in a future phase requires an
 explicit, opt-in design decision — no page content can leak into search results by accident.
 
-If any future feature proposes writing page content to the global index, it must go through Phase 3
-design with an encrypted-at-rest index.
+The index is now [encrypted at rest](#the-global-index-is-encrypted), but the invariant is
+**unchanged**: index encryption is under the *global* key, so writing a NOTEBOOK-scoped notebook's
+content there would still widen its blast radius from one passphrase to the device-global one. Any
+future feature that proposes writing page content to the index must still go through an explicit
+design decision.
 
 ---
 

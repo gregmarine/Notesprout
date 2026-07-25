@@ -1,0 +1,516 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    sw480dp variant — identical to the base layout, and deliberately so.
+
+    The bottom bar needs 520dp to show everything (surface buttons + full pagination + action
+    buttons). Devices land in one of three buckets:
+
+        layout/          < 360dp   full bar
+        layout-sw360dp/  360–479   first/last-page dropped, pagination anchored after the surface
+                                   buttons — the Palma2 Pro (439dp) is the only device that is
+                                   genuinely too narrow for the full bar
+        layout-sw480dp/  >= 480    full bar, pagination centred — Go 6 Gen II (571dp),
+                                   Go 10.3 Gen 2 (992dp), and every larger tablet
+
+    Without this file the Go 6 Gen II would fall back to the sw360dp variant and lose its
+    first/last-page buttons despite having ~140dp of spare room. This bucket also covers
+    everything the old layout-sw600dp/activity_main.xml used to, which is why that copy was
+    removed rather than left to drift out of sync.
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@color/paperWhite">
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="@color/inkBlack" />
+
+    <!--
+        Picker toolbar: shown only in destination picker mode (Copy/Move notebook or folder).
+        Hidden by default; VISIBLE when destinationPickerState != None.
+    -->
+    <LinearLayout
+        android:id="@+id/pickerToolbar"
+        android:layout_width="match_parent"
+        android:layout_height="56dp"
+        android:orientation="horizontal"
+        android:background="@color/paperWhite"
+        android:gravity="center_vertical"
+        android:visibility="gone">
+
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/btnPickerCancel"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center_vertical"
+            android:text="Cancel"
+            android:textSize="18sp"
+            android:textColor="@color/inkBlack"
+            android:background="@null"
+            android:stateListAnimator="@null"
+            android:paddingStart="16dp"
+            android:paddingEnd="16dp" />
+
+        <TextView
+            android:id="@+id/pickerTitle"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_gravity="center_vertical"
+            android:textSize="18sp"
+            android:textColor="@color/inkBlack"
+            android:gravity="center" />
+
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/btnPickerConfirm"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center_vertical"
+            android:text="Copy here"
+            android:textSize="18sp"
+            android:textColor="@color/inkBlack"
+            android:textStyle="bold"
+            android:background="@null"
+            android:stateListAnimator="@null"
+            android:paddingStart="16dp"
+            android:paddingEnd="16dp" />
+
+    </LinearLayout>
+
+    <View
+        android:id="@+id/pickerToolbarDivider"
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="@color/inkBlack"
+        android:visibility="gone" />
+
+    <!--
+        Pinned toolbar: shown only in pinned browse mode.
+        Hidden by default; VISIBLE when isPinnedMode is true.
+    -->
+    <LinearLayout
+        android:id="@+id/pinnedToolbar"
+        android:layout_width="match_parent"
+        android:layout_height="56dp"
+        android:orientation="horizontal"
+        android:background="@color/paperWhite"
+        android:gravity="center_vertical"
+        android:visibility="gone">
+
+        <TextView
+            android:id="@+id/pinnedTitle"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_gravity="center_vertical"
+            android:text="Pinned"
+            android:textSize="18sp"
+            android:textColor="@color/inkBlack"
+            android:paddingStart="16dp"
+            android:paddingEnd="16dp" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnPinnedCancel"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:src="@drawable/ic_x"
+            android:contentDescription="Exit pinned view" />
+
+    </LinearLayout>
+
+    <View
+        android:id="@+id/pinnedToolbarDivider"
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="@color/inkBlack"
+        android:visibility="gone" />
+
+    <!--
+        Recents toolbar: shown only in recents browse mode.
+        Hidden by default; VISIBLE when isRecentsMode is true.
+    -->
+    <LinearLayout
+        android:id="@+id/recentsToolbar"
+        android:layout_width="match_parent"
+        android:layout_height="56dp"
+        android:orientation="horizontal"
+        android:background="@color/paperWhite"
+        android:gravity="center_vertical"
+        android:visibility="gone">
+
+        <TextView
+            android:id="@+id/recentsTitle"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_gravity="center_vertical"
+            android:text="Recent Notebooks"
+            android:textSize="18sp"
+            android:textColor="@color/inkBlack"
+            android:paddingStart="16dp"
+            android:paddingEnd="16dp" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnRecentsCancel"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:src="@drawable/ic_x"
+            android:contentDescription="Exit recents view" />
+
+    </LinearLayout>
+
+    <View
+        android:id="@+id/recentsToolbarDivider"
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="@color/inkBlack"
+        android:visibility="gone" />
+
+    <!--
+        Search toolbar: shown only in search mode.
+        Hidden by default; VISIBLE when isSearchMode is true.
+    -->
+    <LinearLayout
+        android:id="@+id/searchToolbar"
+        android:layout_width="match_parent"
+        android:layout_height="56dp"
+        android:orientation="horizontal"
+        android:background="@color/paperWhite"
+        android:gravity="center_vertical"
+        android:visibility="gone">
+
+        <TextView
+            android:id="@+id/searchTitle"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_gravity="center_vertical"
+            android:textSize="18sp"
+            android:textColor="@color/inkBlack"
+            android:paddingStart="16dp"
+            android:paddingEnd="16dp"
+            android:singleLine="true"
+            android:ellipsize="end" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnSearchInToolbar"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:src="@drawable/ic_search"
+            android:contentDescription="Search notebooks" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnClearSearch"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:src="@drawable/ic_x"
+            android:contentDescription="Clear search" />
+
+    </LinearLayout>
+
+    <View
+        android:id="@+id/searchToolbarDivider"
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="@color/inkBlack"
+        android:visibility="gone" />
+
+    <!--
+        Breadcrumb bar: always visible for consistent layout.
+        Back button and chips are hidden at root; chips populate when navigated into a subfolder.
+    -->
+    <LinearLayout
+        android:id="@+id/breadcrumbBar"
+        android:layout_width="match_parent"
+        android:layout_height="56dp"
+        android:orientation="horizontal"
+        android:background="@color/paperWhite"
+        android:gravity="center_vertical">
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnBreadcrumbBack"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:src="@drawable/ic_arrow_left"
+            android:contentDescription="Go up one folder"
+            android:visibility="invisible" />
+
+        <!-- 1dp vertical divider between back button and breadcrumb chips -->
+        <View
+            android:id="@+id/breadcrumbBackDivider"
+            android:layout_width="1dp"
+            android:layout_height="28dp"
+            android:background="@color/inkBlack"
+            android:visibility="invisible" />
+
+        <HorizontalScrollView
+            android:id="@+id/breadcrumbScrollView"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:scrollbars="none">
+
+            <LinearLayout
+                android:id="@+id/breadcrumbContainer"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:paddingStart="8dp"
+                android:paddingEnd="8dp"
+                android:paddingTop="4dp"
+                android:paddingBottom="4dp"
+                android:gravity="center_vertical" />
+
+        </HorizontalScrollView>
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnPinned"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:src="@drawable/ic_pinned"
+            android:contentDescription="Pinned notebooks" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnSearch"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:src="@drawable/ic_search"
+            android:contentDescription="Search notebooks" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnRecents"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:src="@drawable/ic_clock"
+            android:contentDescription="Recent notebooks" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnSort"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:src="@drawable/ic_filter"
+            android:contentDescription="Sort" />
+
+    </LinearLayout>
+
+    <!-- 1dp separator below breadcrumb bar — always visible since the bar is always visible -->
+    <View
+        android:id="@+id/breadcrumbDivider"
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="@color/inkBlack" />
+
+    <!--
+        Grid area: fills all vertical space above the bottom bar.
+        Cards and the empty-state message are added programmatically.
+    -->
+    <FrameLayout
+        android:id="@+id/gridContainer"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1" />
+
+    <!--
+        Overflow toolbar: secondary row shown when btnMore is tapped.
+        Contains Import, Templates, and Encryption — right-aligned to mirror the bottom bar.
+        Hidden by default; toggled by btnMore.
+    -->
+    <View
+        android:id="@+id/overflowToolbarDivider"
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="@color/inkBlack"
+        android:visibility="gone" />
+
+    <LinearLayout
+        android:id="@+id/overflowToolbar"
+        android:layout_width="match_parent"
+        android:layout_height="56dp"
+        android:orientation="horizontal"
+        android:background="@color/paperWhite"
+        android:gravity="center_vertical|end"
+        android:paddingEnd="16dp"
+        android:visibility="gone">
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnImport"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:src="@drawable/ic_import"
+            android:contentDescription="Import Notebook" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnTemplates"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:layout_marginStart="4dp"
+            android:src="@drawable/ic_template"
+            android:contentDescription="Templates" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnEncryption"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:layout_marginStart="4dp"
+            android:src="@drawable/ic_lock"
+            android:contentDescription="Encryption" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnHwr"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:layout_marginStart="4dp"
+            android:src="@drawable/ic_text_recognition"
+            android:contentDescription="Handwriting Recognition" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnBackup"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:layout_marginStart="4dp"
+            android:src="@drawable/ic_backup"
+            android:contentDescription="Backup" />
+
+        <!-- TEMP: legacy-ts compaction sweep — remove after all devices compacted (see BACKLOG.md) -->
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnCompact"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:layout_marginStart="4dp"
+            android:src="@drawable/ic_compact"
+            android:contentDescription="Compact Notebooks" />
+
+    </LinearLayout>
+
+    <!--
+        Bottom bar: 1dp inkBlack top border, sibling-surface buttons left-aligned, pagination
+        centred, action buttons right-aligned.
+        Height 56dp — matches the notebook activity toolbar for uniformity.
+    -->
+    <RelativeLayout
+        android:id="@+id/bottomBar"
+        android:layout_width="match_parent"
+        android:layout_height="56dp"
+        android:background="@color/paperWhite">
+
+        <!-- Top border (1dp inkBlack) -->
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="@color/inkBlack"
+            android:layout_alignParentTop="true" />
+
+        <!--
+            Sibling-surface buttons: Calendar + Scratch Pad, left-aligned.
+            These are places to go, not library actions — hence their own zone, opposite the
+            create/overflow group. The bottom bar is the only chrome that is never swapped out by
+            search / pinned / recents mode, so one button each here is always reachable and needs
+            no per-mode duplicate. Hidden only in destination-picker mode.
+        -->
+        <LinearLayout
+            android:id="@+id/surfaceButtonsGroup"
+            android:layout_width="wrap_content"
+            android:layout_height="match_parent"
+            android:orientation="horizontal"
+            android:layout_alignParentStart="true"
+            android:layout_centerVertical="true"
+            android:layout_marginStart="16dp"
+            android:gravity="center_vertical">
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnCalendar"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:src="@drawable/ic_calendar"
+                android:contentDescription="Calendar" />
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnScratchpad"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:layout_marginStart="4dp"
+                android:src="@drawable/ic_sketching"
+                android:contentDescription="Scratch Pad" />
+
+        </LinearLayout>
+
+        <!--
+            Pagination group: |<  <  n/n  >  >|
+            Centered horizontally and vertically inside the bar.
+        -->
+        <LinearLayout
+            android:id="@+id/paginationGroup"
+            android:layout_width="wrap_content"
+            android:layout_height="match_parent"
+            android:orientation="horizontal"
+            android:layout_centerInParent="true"
+            android:gravity="center_vertical">
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnFirstPage"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:src="@drawable/ic_page_first"
+                android:contentDescription="First page" />
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnPrevPage"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:layout_marginStart="4dp"
+                android:src="@drawable/ic_page_prev"
+                android:contentDescription="Previous page" />
+
+            <TextView
+                android:id="@+id/tvPage"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:minWidth="72dp"
+                android:gravity="center"
+                android:textSize="16sp"
+                android:textStyle="normal"
+                android:textColor="@color/inkBlack"
+                android:paddingStart="8dp"
+                android:paddingEnd="8dp"
+                android:text="1/1" />
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnNextPage"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:src="@drawable/ic_page_next"
+                android:contentDescription="Next page" />
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnLastPage"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:layout_marginStart="4dp"
+                android:src="@drawable/ic_page_last"
+                android:contentDescription="Last page" />
+
+        </LinearLayout>
+
+        <!-- Right-side action buttons: New Notebook + New Folder + More, right-aligned -->
+        <LinearLayout
+            android:id="@+id/actionButtonsGroup"
+            android:layout_width="wrap_content"
+            android:layout_height="match_parent"
+            android:orientation="horizontal"
+            android:layout_alignParentEnd="true"
+            android:layout_centerVertical="true"
+            android:layout_marginEnd="16dp"
+            android:gravity="center_vertical">
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnNewNotebook"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:src="@drawable/ic_new_notebook"
+                android:contentDescription="New notebook" />
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnNewFolder"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:layout_marginStart="4dp"
+                android:src="@drawable/ic_folder_plus"
+                android:contentDescription="New folder" />
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnMore"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:layout_marginStart="4dp"
+                android:src="@drawable/ic_dots"
+                android:contentDescription="More actions" />
+
+        </LinearLayout>
+
+    </RelativeLayout>
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="@color/inkBlack" />
+
+</LinearLayout>

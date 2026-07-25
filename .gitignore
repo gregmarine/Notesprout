@@ -48,7 +48,14 @@ key.properties
 .vscode/
 
 # Claude Code local tooling
-.claude/
+.claude/*
+!.claude/skills/
+!.claude/skills/**
 
 # Logs
 *.log
+
+# HWR tooling — venv and model build artifacts (models are large, rebuilt from scripts)
+tools/hwr/.venv/
+tools/hwr/build/
+tools/hwr/__pycache__/

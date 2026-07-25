@@ -10,8 +10,8 @@ import kotlinx.serialization.json.Json
  * Serialized to/from JSON and stored in [NotebookObject.data].
  * Uses [kotlinx.serialization] — code-generated, no reflection, significantly
  * faster than [org.json] for large point arrays (the previous bottleneck).
- * Wire format is identical to the original org.json output so no DB migration
- * is required.
+ * Older rows carried a per-point `ts`; it is now optional and simply ignored on
+ * read (and never re-written), so no DB migration is required.
  *
  * JSON shape:
  * ```json
@@ -19,12 +19,13 @@ import kotlinx.serialization.json.Json
  *   "color": "#000000",
  *   "strokeWidth": 3.0,
  *   "points": [
- *     { "x": 100.0, "y": 200.0, "ts": 1716000000000 },
- *     { "x": 110.0, "y": 205.0, "pressure": 0.8, "tilt": 0.1, "ts": 1716000000016 }
+ *     { "x": 100.0, "y": 200.0 },
+ *     { "x": 110.0, "y": 205.0, "pressure": 0.8, "tilt": 0.1 }
  *   ]
  * }
  * ```
- * `pressure` and `tilt` are omitted from JSON when null ([explicitNulls] = false).
+ * `pressure`, `tilt`, and the legacy `ts` are omitted from JSON when null
+ * ([explicitNulls] = false); see [StrokePoint].
  */
 @Serializable
 data class StrokeData(

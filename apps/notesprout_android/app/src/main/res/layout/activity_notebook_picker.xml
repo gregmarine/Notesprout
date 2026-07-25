@@ -7,6 +7,13 @@
     android:orientation="vertical"
     android:background="@color/paperWhite">
 
+    <!-- Top border — the content area starts below the top guard band (see TopGuard), so it needs
+         its own 1dp rule to read as an edge rather than floating. -->
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="@color/inkBlack" />
+
     <!-- Top bar: back + breadcrumb title -->
     <LinearLayout
         android:id="@+id/topBar"

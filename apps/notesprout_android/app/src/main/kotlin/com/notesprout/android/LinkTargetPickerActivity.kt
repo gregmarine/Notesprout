@@ -27,17 +27,22 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.lifecycleScope
+import com.notesprout.android.core.Slog
+import com.notesprout.android.core.TopGuard
 import com.notesprout.android.crypto.KeyResolver
+import com.notesprout.android.crypto.KeyScope
 import com.notesprout.android.crypto.KeySession
 import com.notesprout.android.crypto.SoilCrypto
 import com.notesprout.android.data.LinkChrome
 import com.notesprout.android.data.createBlankNotebook
+import com.notesprout.android.data.SoilDatabase
 import com.notesprout.android.data.insertBlankPageRaw
 import com.notesprout.android.data.index.IndexRepository
 import com.notesprout.android.data.index.NotebookObject
 import com.notesprout.android.data.index.NotesproutIndex
 import com.notesprout.android.data.index.ObjectEntity
 import com.notesprout.android.data.index.ObjectType
+import com.notesprout.android.data.index.notebookMeta
 import com.notesprout.android.data.soilFile
 import com.notesprout.android.data.topHeadingNamesByPageId
 import com.notesprout.android.databinding.ActivityLinkTargetPickerBinding
@@ -46,6 +51,7 @@ import com.notesprout.android.search.SearchDialog
 import com.notesprout.android.search.SearchEngine
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
@@ -132,7 +138,7 @@ class LinkTargetPickerActivity : AppCompatActivity() {
         val itemsPerPage: Int get() = cols * rows
     }
 
-    private data class PageEntry(val id: String, val pageNumber: Int, val snapshot: String?, val headingName: String? = null)
+    private data class PageEntry(val id: String, val pageNumber: Int, val headingName: String? = null)
 
     /** A folder or notebook row in the Other-notebook browser. */
     private sealed class BrowseItem {
@@ -141,10 +147,20 @@ class LinkTargetPickerActivity : AppCompatActivity() {
         data class Notebook(override val entity: ObjectEntity, val label: String) : BrowseItem()
     }
 
-    @Serializable
-    private data class PageSnapshot(val snapshot: String? = null)
+    /** entry.id → the card's thumbnail ImageView for the current grid page; filled by
+     *  [buildPageCard], consumed by [renderVisibleThumbnails] which renders on demand. */
+    private val thumbnailTargets = mutableMapOf<String, AppCompatImageView>()
 
-    private val pageCodec = Json { ignoreUnknownKeys = true }
+    /** Rendered page thumbnails, keyed by page id (UUIDs are unique across notebooks). Reused across
+     *  state-only re-renders (page tap / selection highlight, tab switches) so those never re-render
+     *  a page bitmap. Invalidated wholesale when [thumbEpoch] advances (any content reload — see
+     *  [loadPagesFromSoil]) or the card size changes; off-screen entries are evicted. */
+    private val thumbnailCache = mutableMapOf<String, android.graphics.Bitmap>()
+    /** Bumped on every [loadPagesFromSoil]; a mismatch invalidates [thumbnailCache]. */
+    private var thumbEpoch = 0
+    private var thumbCacheEpoch = -1
+    private var thumbCardW = 0
+    private var thumbCardH = 0
 
     // ── State ─────────────────────────────────────────────────────────────────
 
@@ -171,6 +187,11 @@ class LinkTargetPickerActivity : AppCompatActivity() {
     private var otherNotebookId: String? = null
     private var otherNotebookName: String = ""
     private var otherPages: List<PageEntry> = emptyList()
+    // Resolved key for the notebook whose pages are showing (OtherView.PAGES). Set by
+    // loadOtherPagesAsync so thumbnail rendering opens the target with the SAME key it was unlocked
+    // with — never plaintext. Opening an encrypted .soil without its key trips Room's corruption
+    // handler, which deletes and recreates the file empty (data loss). null = plaintext target.
+    private var otherKey: String? = null
 
     // The currently visible grid page index (shared across all grids).
     private var currentGridPage: Int = 0
@@ -229,6 +250,9 @@ class LinkTargetPickerActivity : AppCompatActivity() {
 
         binding = ActivityLinkTargetPickerBinding.inflate(layoutInflater)
         setContentView(binding.root)
+        // Immersive: system bars are hidden, so their inset is 0. Reserve the guard
+        // explicitly so the top bar isn't parked in the status bar's reveal zone.
+        TopGuard.applyRootPadding(binding.root)
 
         notebookId       = intent.getStringExtra(EXTRA_NOTEBOOK_ID) ?: ""
         notebookSoilPath = if (notebookId.isNotEmpty()) soilFile(this, notebookId).absolutePath else null
@@ -397,6 +421,7 @@ class LinkTargetPickerActivity : AppCompatActivity() {
         if (targetTab == TargetTab.OTHER && otherView == OtherView.PAGES) {
             otherView = OtherView.BROWSE
             otherNotebookId = null
+            otherKey = null
             currentGridPage = 0
             render()
             return true
@@ -426,6 +451,7 @@ class LinkTargetPickerActivity : AppCompatActivity() {
 
     private fun openOtherNotebookPages(notebookId: String, name: String) {
         otherNotebookId = notebookId
+        otherKey = null            // cleared until loadOtherPagesAsync resolves this notebook's key
         otherNotebookName = name
         otherView = OtherView.PAGES
         currentGridPage = 0
@@ -456,10 +482,39 @@ class LinkTargetPickerActivity : AppCompatActivity() {
 
     // ── Data loading ──────────────────────────────────────────────────────────
 
+    /** Key resolved for the current notebook when [KeySession] was cold (process-death restore,
+     *  or the outgoing seal of a previous notebook cleared the session). See [resolveCurrentNotebookKey]. */
+    private var resolvedCurrentKey: String? = null
+
+    /**
+     * Resolve the current notebook's SQLCipher key, preferring the foreground session.
+     *
+     * A bare `KeySession.getFor()` is null after process death or when a slow async seal cleared
+     * the session — that means "not resolved yet", not "plaintext". The probe guard makes the
+     * null-key open throw instead of destroying anything, but this screen would then render an
+     * empty page grid and fail page creation. Mirrors PageIndexActivity.resolveNotebookKey().
+     */
+    private suspend fun resolveCurrentNotebookKey(): String? {
+        KeySession.getFor(notebookId)?.let { return it }
+        resolvedCurrentKey?.let { return it }
+        val info = withContext(Dispatchers.IO) { indexRepo.getEncryptionInfo(notebookId) }
+        if (!info.encrypted) return null
+        val key = if (info.keyScope == com.notesprout.android.crypto.KeyScope.GLOBAL) {
+            withContext(Dispatchers.IO) {
+                com.notesprout.android.crypto.PassphraseStore.getGlobalPassphrase(this@LinkTargetPickerActivity)
+            }
+        } else {
+            KeyResolver.resolveForOpen(this, notebookId, info)
+        }
+        resolvedCurrentKey = key
+        return key
+    }
+
     private fun loadCurrentPagesAsync() {
         val path = notebookSoilPath ?: return
         lifecycleScope.launch {
-            pages = withContext(Dispatchers.IO) { loadPagesFromSoil(path, KeySession.getFor(notebookId)) }
+            val key = resolveCurrentNotebookKey()
+            pages = withContext(Dispatchers.IO) { loadPagesFromSoil(path, key) }
             if (targetTab == TargetTab.CURRENT) {
                 val spec = gridSpec
                 if (spec != null && spec.itemsPerPage > 0) {
@@ -515,6 +570,7 @@ class LinkTargetPickerActivity : AppCompatActivity() {
             val loaded = withContext(Dispatchers.IO) { loadPagesFromSoil(path, key) }
             if (otherNotebookId != forNotebookId) return@launch
             otherPages = loaded
+            otherKey = key             // thumbnails must reuse this key, not KeySession (null for non-foreground)
             val spec = gridSpec
             if (spec != null && spec.itemsPerPage > 0 && initialNotebookId == forNotebookId) {
                 val anchorIdx = initialNotebookPageId?.let { id -> otherPages.indexOfFirst { it.id == id } }
@@ -526,6 +582,8 @@ class LinkTargetPickerActivity : AppCompatActivity() {
     }
 
     private fun loadPagesFromSoil(path: String, passphrase: String? = null): List<PageEntry> {
+        // Any reload means page content may have changed → invalidate cached thumbnails.
+        thumbEpoch++
         var db: com.notesprout.android.crypto.SoilRawDb? = null
         return try {
             db = SoilCrypto.openRaw(java.io.File(path), passphrase)
@@ -537,12 +595,8 @@ class LinkTargetPickerActivity : AppCompatActivity() {
                 val result = mutableListOf<PageEntry>()
                 var number = 1
                 while (c.moveToNext()) {
-                    val id       = c.getString(0)
-                    val dataJson = c.getString(1)
-                    val snapshot = try {
-                        pageCodec.decodeFromString<PageSnapshot>(dataJson).snapshot
-                    } catch (_: Exception) { null }
-                    result.add(PageEntry(id, number++, snapshot, headingNames[id]))
+                    val id = c.getString(0)
+                    result.add(PageEntry(id, number++, headingNames[id]))
                 }
                 result
             }
@@ -605,15 +659,26 @@ class LinkTargetPickerActivity : AppCompatActivity() {
 
         decodeJobs.forEach { it.cancel() }
         decodeJobs.clear()
+        thumbnailTargets.clear()
         binding.gridContainer.removeAllViews()
 
         when {
             targetTab == TargetTab.CURRENT ->
-                renderPageGrid(pages, highlightId = currentPageHighlightId()) { selectCurrentPage(it.id) }
-            otherView == OtherView.PAGES ->
-                renderPageGrid(otherPages, highlightId = otherPageHighlightId()) {
-                    selectOtherNotebookPage(otherNotebookId ?: return@renderPageGrid, it.id)
-                }
+                renderPageGrid(
+                    pages,
+                    highlightId = currentPageHighlightId(),
+                    sourcePath = notebookSoilPath,
+                    sourceKey = KeySession.getFor(notebookId),
+                ) { selectCurrentPage(it.id) }
+            otherView == OtherView.PAGES -> {
+                val otherId = otherNotebookId
+                renderPageGrid(
+                    otherPages,
+                    highlightId = otherPageHighlightId(),
+                    sourcePath = otherId?.let { soilFile(this, it).absolutePath },
+                    sourceKey = otherKey,
+                ) { selectOtherNotebookPage(otherNotebookId ?: return@renderPageGrid, it.id) }
+            }
             else -> renderBrowseGrid()
         }
 
@@ -706,6 +771,7 @@ class LinkTargetPickerActivity : AppCompatActivity() {
                     if (otherView == OtherView.PAGES) {
                         otherView = OtherView.BROWSE
                         otherNotebookId = null
+                        otherKey = null
                         currentGridPage = 0
                     }
                     while (directoryStack.size > index + 1) directoryStack.removeLast()
@@ -736,7 +802,13 @@ class LinkTargetPickerActivity : AppCompatActivity() {
 
     // ── Rendering: page grid (current or other notebook) ────────────────────────
 
-    private fun renderPageGrid(list: List<PageEntry>, highlightId: String?, onTap: (PageEntry) -> Unit) {
+    private fun renderPageGrid(
+        list: List<PageEntry>,
+        highlightId: String?,
+        sourcePath: String?,
+        sourceKey: String?,
+        onTap: (PageEntry) -> Unit,
+    ) {
         val spec = gridSpec ?: return
         if (list.isEmpty()) { renderEmptyState("No pages found."); return }
 
@@ -745,6 +817,117 @@ class LinkTargetPickerActivity : AppCompatActivity() {
         val pageItems = list.subList(start, end)
 
         renderRows(pageItems.size, spec) { idx -> buildPageCard(pageItems[idx], spec, highlightId, onTap) }
+
+        // Render thumbnails on demand for just the visible pagination page.
+        renderVisibleThumbnails(pageItems.toList(), spec, sourcePath, sourceKey)
+    }
+
+    /**
+     * Render a page-preview thumbnail for each currently-visible page and fill its card image.
+     * On-demand replacement for the removed per-page snapshot: opens one Room connection to the
+     * source .soil ([sourcePath] with [sourceKey]), renders each page via
+     * [NotebookExporter.renderPageThumbnail] at the card size, and posts the result to the matching
+     * [thumbnailTargets] view. Only the current pagination page's items are rendered; switching
+     * views cancels this pass (jobs tracked in [decodeJobs]).
+     */
+    private fun renderVisibleThumbnails(
+        items: List<PageEntry>, spec: GridSpec, sourcePath: String?, sourceKey: String?,
+    ) {
+        val path = sourcePath ?: return
+        if (items.isEmpty()) return
+
+        // Invalidate on content reload or a card-size change; otherwise keep the cache so state-only
+        // re-renders (page tap / selection highlight) don't re-render a page bitmap.
+        if (thumbCacheEpoch != thumbEpoch || thumbCardW != spec.cardWidthPx || thumbCardH != spec.cardHeightPx) {
+            thumbnailCache.values.forEach { it.recycle() }
+            thumbnailCache.clear()
+            thumbCacheEpoch = thumbEpoch
+            thumbCardW = spec.cardWidthPx
+            thumbCardH = spec.cardHeightPx
+        }
+
+        // Evict off-screen thumbnails (bounds memory). Their prior ImageViews were detached by the
+        // render()'s removeAllViews, so recycling is safe.
+        val visibleIds = items.mapTo(HashSet()) { it.id }
+        thumbnailCache.entries.removeAll { (id, bmp) ->
+            (id !in visibleIds).also { if (it) bmp.recycle() }
+        }
+
+        // Cache hits: set immediately. Collect misses for the async pass.
+        val misses = mutableListOf<PageEntry>()
+        for (entry in items) {
+            val cached = thumbnailCache[entry.id]
+            if (cached != null && !cached.isRecycled) {
+                thumbnailTargets[entry.id]?.apply {
+                    setImageBitmap(cached)
+                    visibility = View.VISIBLE
+                }
+            } else {
+                misses += entry
+            }
+        }
+        if (misses.isEmpty()) return
+
+        val job = lifecycleScope.launch {
+            withContext(Dispatchers.IO) {
+                var db: SoilDatabase? = null
+                try {
+                    val builder = SoilDatabase.builder(this@LinkTargetPickerActivity, path)
+                    if (sourceKey != null) builder.openHelperFactory(SoilCrypto.roomFactory(sourceKey))
+                    db = builder.build()
+                    val dao = db.notebookDao()
+                    // Render misses in parallel across a small worker pool sharing this one Room
+                    // connection (WAL allows concurrent reads); each posts its bitmap to Main as it
+                    // finishes so cards fill in progressively. Bounded to available cores to keep the
+                    // CPU-bound stroke parse + rasterization from over-subscribing.
+                    val cursor = java.util.concurrent.atomic.AtomicInteger(0)
+                    val workers = minOf(
+                        misses.size,
+                        Runtime.getRuntime().availableProcessors().coerceAtLeast(1),
+                        4,
+                    )
+                    kotlinx.coroutines.coroutineScope {
+                        repeat(workers) {
+                            launch {
+                                while (isActive) {
+                                    val i = cursor.getAndIncrement()
+                                    if (i >= misses.size) break
+                                    val entry = misses[i]
+                                    // Per-page guard: one bad page must not blank the rest of the grid.
+                                    val bitmap = try {
+                                        val pageRow = dao.getObjectById(entry.id) ?: continue
+                                        NotebookExporter.renderPageThumbnail(
+                                            dao, pageRow, this@LinkTargetPickerActivity, spec.cardWidthPx, spec.cardHeightPx,
+                                        )
+                                    } catch (e: kotlinx.coroutines.CancellationException) {
+                                        throw e
+                                    } catch (e: Exception) {
+                                        Slog.d("LinkTargetPicker") { "thumbnail render failed for page ${entry.id}: ${e.message}" }
+                                        null
+                                    } ?: continue
+                                    withContext(Dispatchers.Main) {
+                                        if (isActive) {
+                                            thumbnailCache[entry.id] = bitmap
+                                            thumbnailTargets[entry.id]?.apply {
+                                                setImageBitmap(bitmap)
+                                                visibility = View.VISIBLE
+                                            }
+                                        } else bitmap.recycle()
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    Slog.d("LinkTargetPicker") { "thumbnail render pass failed: ${e.message}" }
+                } finally {
+                    db?.close()
+                }
+            }
+        }
+        decodeJobs.add(job)
     }
 
     private fun renderBrowseGrid() {
@@ -853,6 +1036,7 @@ class LinkTargetPickerActivity : AppCompatActivity() {
             FrameLayout.LayoutParams.MATCH_PARENT,
             FrameLayout.LayoutParams.MATCH_PARENT,
         ))
+        thumbnailTargets[entry.id] = snapshotImage
 
         val label = AppCompatTextView(this).apply {
             text      = entry.headingName ?: "Page ${entry.pageNumber}"
@@ -866,7 +1050,6 @@ class LinkTargetPickerActivity : AppCompatActivity() {
             it.topMargin = spec.rowGapPx
         })
 
-        decodeSnapshotInto(entry.snapshot, snapshotImage, null)
         return group
     }
 
@@ -924,10 +1107,12 @@ class LinkTargetPickerActivity : AppCompatActivity() {
                 card.addView(icon, FrameLayout.LayoutParams(iconSize, iconSize, Gravity.CENTER))
 
                 val notebookObj = try {
-                    Json.decodeFromString<NotebookObject>(item.entity.data)
+                    item.entity.notebookMeta()
                 } catch (_: Exception) { null }
 
-                if (notebookObj?.encrypted == true) {
+                if (notebookObj?.encrypted == true && notebookObj.keyScope != KeyScope.GLOBAL) {
+                    // Private (NOTEBOOK-scope) encryption: show lock icon; never decode a snapshot.
+                    // GLOBAL-scope covers render — the index is encrypted at rest, key available.
                     icon.setImageResource(R.drawable.ic_lock_cover)
                 } else {
                     decodeSnapshotInto(notebookObj?.snapshot, cover, icon)
@@ -1070,8 +1255,9 @@ class LinkTargetPickerActivity : AppCompatActivity() {
         val w = resources.displayMetrics.widthPixels.toFloat()
         val h = resources.displayMetrics.heightPixels.toFloat()
         lifecycleScope.launch {
+            val key = resolveCurrentNotebookKey()
             val result = withContext(Dispatchers.IO) {
-                insertBlankPageRaw(path, anchorPageId, before, w, h, KeySession.getFor(notebookId))
+                insertBlankPageRaw(path, anchorPageId, before, w, h, key)
             } ?: run {
                 android.widget.Toast.makeText(
                     this@LinkTargetPickerActivity, "Could not create page", android.widget.Toast.LENGTH_SHORT
@@ -1080,7 +1266,7 @@ class LinkTargetPickerActivity : AppCompatActivity() {
             }
             currentNotebookPagesChanged = true
             pages = withContext(Dispatchers.IO) {
-                loadPagesFromSoil(path, KeySession.getFor(notebookId))
+                loadPagesFromSoil(path, key)
             }
             selectCurrentPage(result.first)
             val spec = gridSpec
@@ -1140,7 +1326,7 @@ class LinkTargetPickerActivity : AppCompatActivity() {
         dialog.window?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE)
         dialog.show()
         dialog.window?.setElevation(0f)
-        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
 
         dialogBinding.editNotebookName.requestFocus()
         dialogBinding.editNotebookName.postDelayed({

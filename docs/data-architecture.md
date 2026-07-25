@@ -12,7 +12,7 @@
 - Hierarchy: Notebook → Pages → Layers → Content Objects
 - Layers: base layer (template, locked) and content layers
 - Every object carries: id, parentId, boundingBox, order, createdAt, updatedAt, deletedAt, data
-- Stroke data: proprietary point arrays (x, y, pressure, tilt, timestamp), stored as JSON in the `data` TEXT column
+- Stroke data: point arrays (x, y; optional pressure/tilt) stored as a **binary blob** — float32 + zlib via `core/StrokeCodec`, ~5× smaller than the legacy JSON. Colour/width live in row columns. (Pre-v4 rows may still carry JSON in `data`; readers are format-agnostic. See **Schema Version 4** below.)
 - Soft deletes with cleanup process; stable UUIDs everywhere
 - Activities receive notebook identity as `EXTRA_NOTEBOOK_ID` (entity UUID) + `EXTRA_NOTEBOOK_NAME` — never a `File` object
 
@@ -22,7 +22,12 @@
 
 Room/SQLite at `getExternalFilesDir(null)/notesprout.db`. Owns the entire folder/notebook tree — the `Garden/` directory is flat blob storage, not a source of structure.
 
-### Schema (`objects` table)
+> **Full specification:** [`global-index-format.md`](global-index-format.md) — every table, every
+> payload, the v1→v8 migration history, the encryption/key lifecycle, and the portable-contract view
+> written for other Sprout apps. This section is the Notesprout-internal quick reference; when the two
+> disagree, that document is authoritative.
+
+### Schema (`objects` table, v8)
 
 ```sql
 CREATE TABLE objects (
@@ -33,20 +38,56 @@ CREATE TABLE objects (
     createdAt  INTEGER NOT NULL,
     updatedAt  INTEGER NOT NULL,
     deletedAt  INTEGER,
-    data       TEXT    NOT NULL DEFAULT '{}'
+    data       TEXT    NOT NULL DEFAULT '{}',
+    -- v7 columnar payload (present when data == "")
+    pageCount  INTEGER, flags INTEGER, keyScope TEXT,
+    lastBackedUpLocal INTEGER, lastBackedUpDrive INTEGER,
+    width      INTEGER, height INTEGER, blob BLOB,
+    -- v8 relational list membership
+    refId      TEXT, sortOrder INTEGER
 );
 
-CREATE INDEX idx_objects_parent_type_deleted
+CREATE INDEX index_objects_parentId_type_deletedAt
     ON objects(parentId, type, deletedAt);
 ```
+
+`ObjectType` also covers `LIST_ITEM` (a membership edge: `parentId` = list, `refId` = member,
+`sortOrder` = position), plus the `CLIPBOARD` and `BACKUP_CONFIG` singleton rows (payload stays JSON
+in `data`, by design). Sentinel ids live in `ListIds.kt`.
+
+### Auxiliary tables (same `notesprout.db`, Room `version = 8`)
+
+Beyond `objects`, the global index DB holds several auxiliary tables. **The index itself is
+SQLCipher-encrypted at rest** under the global passphrase (encrypt-everything-by-default) — see
+[`docs/encryption.md`](encryption.md#the-global-index-is-encrypted). The two object-canvas tables
+share the universal row schema
+(`id/parentId/type/boundingBox/order/createdAt/updatedAt/deletedAt/data`) so every `.soil` object
+serializer works unchanged.
+
+- **`scratchpad`** — added in `MIGRATION_1_2`. See [`docs/scratchpad.md`](scratchpad.md).
+- **`calendar`** — added in `MIGRATION_2_3` (keyed pages: month/week/day-AM/day-PM). See
+  [`docs/calendar.md`](calendar.md).
+- **`notebook_activity`** — added in `MIGRATION_3_4`; OPENED/EDITED telemetry for the Day-window
+  Notebooks/History views. See [`docs/calendar.md`](calendar.md).
+- **`events`** — added in `MIGRATION_4_5`; calendar Events (birthdays/anniversaries/appointments) with
+  RRULE-like recurrence. Own column schema (not the universal row shape). See
+  [`docs/calendar.md`](calendar.md#events--the-events-table).
+
+Later migrations widen existing tables rather than adding new ones: `MIGRATION_5_6` gives
+`scratchpad` + `calendar` the same columnar columns + `blob` as the `.soil` table; `MIGRATION_6_7`
+widens `objects` with the typed payload columns + `blob`; `MIGRATION_7_8` adds `refId`/`sortOrder`
+for `list_item` child rows. All additive, all rewrite zero rows.
+
+`NotesproutDatabase` (`@Database entities = [ObjectEntity, ScratchpadEntity, CalendarEntity,
+NotebookActivityEntity, EventEntity]`, `version = 8`) registers all migrations in `NotesproutIndex`.
 
 ### Key Classes
 
 - `ObjectEntity` (`data/index/ObjectEntity.kt`) — Room entity; universal index row
-- `ObjectType` (`data/index/ObjectType.kt`) — `FOLDER`, `NOTEBOOK`, `LIST`, `TEMPLATE`, `TEMPLATE_FOLDER`
+- `ObjectType` (`data/index/ObjectType.kt`) — `FOLDER`, `NOTEBOOK`, `LIST`, `TEMPLATE`, `TEMPLATE_FOLDER`, `LIST_ITEM`, `CLIPBOARD`, `BACKUP_CONFIG`
 - `FolderObject`, `NotebookObject`, `ListObject` — `@Serializable` data classes in `data` column. `NotebookObject` carries `snapshot: String?`, `pageCount: Int`, `encrypted: Boolean` (default `false`), and `keyScope: KeyScope?` (non-null only when `encrypted == true`). `ListObject` carries `notebookIds: List<String>` (array order = display order).
-  - **Snapshot suppression:** `snapshot` is **always `null`** for encrypted notebooks. `IndexRepository.updateNotebookSnapshot` is a no-op when the row has `encrypted = true`; `setEncryptionState(..., encrypted = true)` atomically clears `snapshot` in the same write. Lists and card renders show the lock icon instead. See [`docs/encryption.md`](docs/encryption.md).
-- `ListIds` (`data/index/ListIds.kt`) — `PINNED_LIST_ID = "00000000-0000-0000-0000-70696e6e6564"`, `PINNED_TEMPLATES_LIST_ID = "00000000-0000-0000-0000-746d706c7069"`
+  - **Snapshot suppression is keyed on *scope*, not on `encrypted`.** A GLOBAL-scope notebook keeps its cover — the index is itself encrypted under that same global key, so the cover is protected by exactly the key that protects the notebook. A **NOTEBOOK-scope** (own-passphrase) notebook never gets one: `IndexRepository.updateNotebookSnapshot` returns early when `encrypted && keyScope != GLOBAL`, and `setEncryptionState` clears `snapshot` in the same write when converting to that scope. Only those cards render the lock icon. See [`docs/encryption.md`](encryption.md) and [`global-index-format.md`](global-index-format.md#what-may-be-cached-in-the-index).
+- `ListIds` (`data/index/ListIds.kt`) — six sentinel ids, each the all-zero UUID with an ASCII string in hex as the last group: `PINNED_LIST_ID` (`pinned`), `PINNED_TEMPLATES_LIST_ID` (`tmplpi`), `CLIPBOARD_ID` (`clipbd`), `BACKUP_CONFIG_ID` (`backup`), `SCRATCHPAD_ROOT_ID` (`scrtch`), `CALENDAR_ROOT_ID` (`calndr`)
 - `TemplateListObject` (`data/index/TemplateListObject.kt`) — `@Serializable data class TemplateListObject(templateIds: List<String>)`; the `data` payload of the pinned-templates `LIST` object. A parallel to `ListObject` so notebook list code is untouched.
 - `ObjectDao` (`data/index/ObjectDao.kt`) — Room DAO for all index queries and mutations
 - `IndexRepository` (`data/index/IndexRepository.kt`) — higher-level API: create/rename/softDelete/move for folders and notebooks; list ops: `ensurePinnedListExists`, `getPinnedList`, `addNotebookToList`, `removeNotebookFromList`, `reorderList`, `getNotebooksInList`, `scrubNotebookFromAllLists`; pin helpers: `isNotebookPinned(notebookId)`, `togglePin(notebookId)`
@@ -73,7 +114,7 @@ The reusable **template library** lives in the global index — not the filesyst
   ```kotlin
   data class TemplateObject(val width: Int = 0, val height: Int = 0, val image: String = "")
   ```
-  `image` is the full-resolution PNG as base64 (`NO_WRAP`), stored in `ObjectEntity.data` — same pattern
+  `image` is the full-resolution image as base64 (`NO_WRAP`), stored in `ObjectEntity.data` — same pattern
   as `NotebookObject.snapshot`. The template **name lives in `ObjectEntity.name`** (the top-level
   column), like notebooks/folders — *not* inside the JSON. (Contrast the `.soil` `TemplateData`, which
   keeps name in JSON; that class is unchanged and still used inside `.soil`.)
@@ -130,30 +171,111 @@ The reusable **template library** lives in the global index — not the filesyst
 - **One file per notebook.** Each `.soil` file is a self-contained SQLite database.
 - **Single table.** Everything — pages, layers, strokes, images, text, metadata — is a row in one `notebook` table.
 - **Everything is an object.** No type special-casing at the schema level — type behavior lives in Kotlin.
-- **Assets are base64 strings.** No external files. Images stored inline in the `data` TEXT column.
+- **Payload is columnar, not JSON.** As of schema **v4** (the data-model-optimization work) every
+  object's payload lives in typed columns + a binary `blob`, not the opaque `data` TEXT column. Stroke
+  geometry is a binary blob (float32 + zlib, ~5× smaller than the old JSON); template images are a
+  binary WEBP blob (not base64). See **Schema Version 4** below. The legacy `data` column is retained
+  (readers are format-agnostic) but new writes leave it `""`; the `NotebookCompactor` converts legacy
+  rows lazily on seal, so a fully-swept notebook has **zero JSON** on the object path.
+- **Images are WEBP q100.** Template images (and the library-grid cover snapshot in the global index)
+  are **WEBP q100** via `core/ImageCodec` — a binary `blob` on a columnar `template` row, or base64 in
+  the index. q100 lossy is deliberate: on transparent-alpha ink it measured ~47% smaller than PNG and
+  visually lossless, whereas Android's `WEBP_LOSSLESS` bloats to 2–6× PNG. Decode is format-agnostic
+  (`BitmapFactory` reads the header) so legacy PNG/lossless-WEBP coexist; `NotebookCompactor` re-encodes
+  old ones in place.
 - **Decode embedded images bounded.** Route all embedded-asset decodes through `core/BitmapDecode.decodeSampled(bytes, reqW, reqH)` — never `BitmapFactory.decodeByteArray` directly on `.soil`-sourced bytes (OOM risk on e-ink). `MAX_DIMENSION=4096` fallback when there's no natural target.
+- **A `.soil` that won't open must never take the app down.** Two layers cooperate here, and both are
+  load-bearing:
+  - `NonDestructiveOpenHelperFactory` (installed by `SoilDatabase.builder`) refuses to delete on a
+    reported corruption. The framework default is delete-and-recreate — that is precisely how a notebook
+    was destroyed in the link-picker incident, and a mis-keyed open of an encrypted `.soil` looks exactly
+    like corruption. It throws instead, leaving the file byte-intact.
+  - `NotebookActivity` then **catches that throw broadly** and reports it via `state/NotebookOpenFailure`,
+    so the notebook steps back to the library with an explanation instead of killing the process. This
+    matters beyond tidiness: cold launch rebuilds the previous surface stack, so an uncaught open failure
+    reopened the same notebook on the next launch and crashed again — an unrecoverable loop whose only
+    exit was clearing app data. Failing back to the library is the fix, because `MainActivity.onResume`
+    resets the surface stack.
+  - Room opens the file **lazily**, so the failure usually surfaces on the *first query*, not at
+    `build()`. Any new `.soil` open path needs its guard where the first DAO call happens.
 - **SQLite must stay clean.** A file browser should show only `.soil` files — no WAL/SHM/journal sidecars.
   - `PRAGMA journal_mode = WAL`; `PRAGMA wal_autocheckpoint = 100`; `PRAGMA auto_vacuum = INCREMENTAL`
   - Run `PRAGMA incremental_vacuum` + `PRAGMA wal_checkpoint(TRUNCATE)` on clean close
 
 ### Object Schema
 
+The v1 shape below is the stable core; **v4** adds the columnar payload columns (see next section).
+
 ```sql
 CREATE TABLE IF NOT EXISTS notebook (
     id          TEXT    PRIMARY KEY NOT NULL,
     parentId    TEXT    NOT NULL,
     type        TEXT    NOT NULL,
-    boundingBox TEXT    NOT NULL,
+    boundingBox TEXT    NOT NULL,   -- v4: "" for content rows (geometry moved to x/y/width/height)
     "order"     INTEGER NOT NULL DEFAULT 0,
     createdAt   INTEGER NOT NULL,
     updatedAt   INTEGER NOT NULL,
     deletedAt   INTEGER,
-    data        TEXT    NOT NULL
+    data        TEXT    NOT NULL    -- v4: "" on columnar rows; legacy JSON only on un-swept rows
 );
 
 CREATE INDEX IF NOT EXISTS idx_notebook_parent_order
     ON notebook(parentId, "order", deletedAt);
 ```
+
+### `.soil` Schema Version 4 — columnar payload, binary strokes, relational composites
+
+`SoilDatabase.MIGRATION_3_4` adds 23 nullable typed columns + a `blob BLOB`
+(`SoilSchema.ADDED_COLUMNS_V4`) so an object's payload no longer lives in the opaque `data` JSON:
+
+- **Typed columns** — `x/y/width/height`, `text`, `color`, `strokeWidth`, `refId`, `level`,
+  `lineStyle`, `orientation`, `dotSpacing`, `shapeType`, `centerX/centerY`, `rotationDeg`,
+  `pointCount`, `contentW/contentH`, `linkTarget`, `chrome`, `flags`. Each type uses the subset it
+  needs (e.g. a `page` puts its template in `refId` and keeps size in `boundingBox`; a `layer` puts
+  its label in `text` and lock/visible bits in `flags`).
+- **`blob`** — binary stroke geometry (float32 x,y + zlib via `core/StrokeCodec`, ~5× smaller than
+  JSON), and the binary WEBP image on a `template` row.
+- **`ObjectColumns.kt`** is the single boundary between the render/domain models and the columnar row:
+  per-type `to<Type>()` readers, `<Render>.toRow()` builders, and the generic `updateColumns`.
+
+**Format-agnostic reading (lazy coexistence).** A columnar row has `data == ""`; readers use the
+typed columns/blob when present and fall back to the legacy `data` JSON otherwise, so pre-v4 rows keep
+working and convert on their next write. `NotebookCompactor` (run on every seal) sweeps the rest:
+legacy JSON strokes → binary blob, then **composites → child rows**, then legacy **structural rows →
+columnar**, then a VACUUM. A fully-swept notebook is 100% JSON-free on the object path.
+
+**Composites are relational child rows (Phase 2c).** A composite — a **sticky note**, a **link**, or a
+fallback (unrecognized) **heading**/**text** — no longer holds its nested content as `zlib(JSON)` in
+the blob. Instead it is a **parent row plus child rows**, each `child.parentId = composite.id`, and
+each child a normal columnar row of its own type (strokes, headings, text, lines, shapes; nested
+heading/text own their own stroke children). This is the pure "everything is an object — relational,
+compositional" model. Coordinate space: **sticky** children are LOCAL (the sticky's content window),
+so moving a sticky touches only the parent; **link** and fallback heading/text children are
+PAGE-ABSOLUTE, so a move rewrites them. The parentId hierarchy self-isolates composite content from
+the page — every page-level reader queries `parentId = layerId`, and a composite's children are
+parented to the composite, so they never leak into page rendering, lasso, or export. Recognized
+heading/text carry no strokes, so they remain a single bare parent row (behaviour- and perf-neutral).
+`ObjectColumns.kt` provides the subtree boundary (`loadXSubtree` / `insertXSubtree` /
+`replaceXSubtree` / `assembleX`); `PageCopier` deep-copies whole subtrees (`collectDescendants` /
+`deepCopyChildren`); deleting a composite soft-deletes only its parent, and a compactor orphan-sweep
+reclaims the child subtree once the parent is purged.
+
+**Materialized child rows always get fresh ids (`replaceXSubtree` → `remapDescendantIds`).** A
+composite's children are private content whose ids are never referenced from outside the subtree, so
+`replaceXSubtree` (delete-descendants-then-insert) reassigns every descendant a fresh UUID before
+insert, rewiring intra-subtree `parentId` through the map (top-level children keep `parentId =
+composite.id`). This is not optional: legacy `zlib(JSON)` composites were duplicated **keeping
+identical embedded child ids**, so two composites can carry the same child ids. A blob tolerates that
+(it is opaque); real child rows cannot (`id` is the PK). Once one side is compacted to child rows,
+materializing the other with its original ids hits `UNIQUE constraint failed: notebook.id` — the
+crash seen moving a selection containing a legacy-blob link whose children already lived under another
+link. Fresh ids make the insert collision-proof and never touch the other composite's rows.
+`hardDeleteDescendants` deletes by `parentId` (not child id) and readers reassemble from rows, so
+child-id stability is never required.
+
+**Calendar/scratchpad** index tables mirror the same columnar+binary model (`CalendarEntity` /
+`ScratchpadEntity`, `NotesproutDatabase` v6 / `MIGRATION_5_6`), but keep composites as blob (their
+own DBs; cross-DB transfer bridges via render models through the clipboard).
 
 ### `.soil` Schema Version 2 — `undo_redo_state`
 

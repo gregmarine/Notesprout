@@ -29,27 +29,27 @@ class IndexRepository(private val dao: ObjectDao) {
             createdAt = now,
             updatedAt = now,
             deletedAt = null,
-            data = Json.encodeToString(FolderObject())
+            data = "",
         )
         dao.insert(entity)
         return entity
     }
 
     /**
-     * Import helper: ensure a FOLDER with an exact [id] exists (for recreating the source
-     * notebook's folder hierarchy with the same UUIDs). If the folder is present and live,
-     * it is returned as-is. If soft-deleted, it is un-deleted and its name/parent updated.
-     * If absent, a new row is inserted with the given [id].
+     * Import placement helper, strictly create-only: recreate the source notebook's folder
+     * hierarchy with the same UUIDs, but never mutate rows the user already owns. The ids come
+     * from an untrusted imported file's manifest, so:
+     *  - absent id → insert a new FOLDER row with it;
+     *  - id exists as a live folder → returned as-is (never renamed, moved, or touched);
+     *  - anything else (soft-deleted row, or an id that belongs to a non-folder) → null; the
+     *    caller stops descending and places the import one level up.
      */
-    suspend fun ensureFolderWithId(id: String, name: String, parentId: String?): ObjectEntity {
+    suspend fun importFolderCreateOnly(id: String, name: String, parentId: String?): ObjectEntity? {
         val existing = dao.getById(id)
-        val now = System.currentTimeMillis()
         if (existing != null) {
-            if (existing.deletedAt == null) return existing
-            val restored = existing.copy(name = name, parentId = parentId, deletedAt = null, updatedAt = now)
-            dao.update(restored)
-            return restored
+            return existing.takeIf { it.type == ObjectType.FOLDER && it.deletedAt == null }
         }
+        val now = System.currentTimeMillis()
         val entity = ObjectEntity(
             id = id,
             type = ObjectType.FOLDER,
@@ -58,7 +58,7 @@ class IndexRepository(private val dao: ObjectDao) {
             createdAt = now,
             updatedAt = now,
             deletedAt = null,
-            data = Json.encodeToString(FolderObject()),
+            data = "",
         )
         dao.insert(entity)
         return entity
@@ -81,8 +81,7 @@ class IndexRepository(private val dao: ObjectDao) {
             createdAt = createdAt,
             updatedAt = updatedAt,
             deletedAt = null,
-            data = Json.encodeToString(obj),
-        )
+        ).withNotebookMeta(obj)
         val existing = dao.getById(id)
         if (existing != null) dao.update(entity) else dao.insert(entity)
         return entity
@@ -113,7 +112,7 @@ class IndexRepository(private val dao: ObjectDao) {
             createdAt = now,
             updatedAt = now,
             deletedAt = null,
-            data = Json.encodeToString(NotebookObject())
+            data = "",
         )
         dao.insert(entity)
         return entity
@@ -130,25 +129,24 @@ class IndexRepository(private val dao: ObjectDao) {
 
     suspend fun updateNotebookSnapshot(id: String, snapshot: String?) {
         val entity = dao.getById(id) ?: return
-        val obj = Json.decodeFromString<NotebookObject>(entity.data)
-        // Never cache plaintext page content for encrypted notebooks (leak hygiene).
-        if (obj.encrypted) return
+        // Malformed legacy meta: skip the write (never crash, and never overwrite the stored
+        // data with defaults — that would destroy whatever the legacy JSON still holds).
+        val obj = runCatching { entity.notebookMeta() }.getOrNull() ?: return
+        // Private (NOTEBOOK-scope) notebooks never cache page content into the index. GLOBAL-scope
+        // covers are fine now that the index itself is encrypted at rest under the global key.
+        if (obj.encrypted && obj.keyScope != KeyScope.GLOBAL) return
         dao.update(
-            entity.copy(
-                data = Json.encodeToString(obj.copy(snapshot = snapshot)),
-                updatedAt = System.currentTimeMillis()
-            )
+            entity.withNotebookMeta(obj.copy(snapshot = snapshot))
+                .copy(updatedAt = System.currentTimeMillis())
         )
     }
 
     suspend fun updateNotebookPageCount(id: String, pageCount: Int) {
         val entity = dao.getById(id) ?: return
-        val obj = Json.decodeFromString<NotebookObject>(entity.data)
+        val obj = runCatching { entity.notebookMeta() }.getOrNull() ?: return // see updateNotebookSnapshot
         dao.update(
-            entity.copy(
-                data = Json.encodeToString(obj.copy(pageCount = pageCount)),
-                updatedAt = System.currentTimeMillis()
-            )
+            entity.withNotebookMeta(obj.copy(pageCount = pageCount))
+                .copy(updatedAt = System.currentTimeMillis())
         )
     }
 
@@ -168,7 +166,7 @@ class IndexRepository(private val dao: ObjectDao) {
             createdAt = now,
             updatedAt = now,
             deletedAt = null,
-            data = Json.encodeToString(FolderObject())
+            data = "",
         )
         dao.insert(entity)
         return entity
@@ -184,8 +182,7 @@ class IndexRepository(private val dao: ObjectDao) {
             createdAt = now,
             updatedAt = now,
             deletedAt = null,
-            data = TemplateObject(width, height, imageBase64).toJson()
-        )
+        ).withTemplate(TemplateObject(width, height, imageBase64))
         dao.insert(entity)
         return entity
     }
@@ -226,15 +223,15 @@ class IndexRepository(private val dao: ObjectDao) {
     suspend fun copyTemplate(sourceId: String, destParentId: String?, newName: String? = null): ObjectEntity? {
         val source = dao.getById(sourceId) ?: return null
         val now = System.currentTimeMillis()
-        val entity = ObjectEntity(
+        // Carry every payload column (data / width / height / blob …) so the copy preserves the
+        // source's storage format — columnar rows stay columnar, legacy JSON stays JSON.
+        val entity = source.copy(
             id = UUID.randomUUID().toString(),
-            type = source.type,
             name = newName ?: source.name,
             parentId = destParentId,
             createdAt = now,
             updatedAt = now,
             deletedAt = null,
-            data = source.data
         )
         dao.insert(entity)
         return entity
@@ -321,115 +318,129 @@ class IndexRepository(private val dao: ObjectDao) {
     // endregion
 
     // region List operations
+    // A list's membership is modeled relationally as `list_item` child rows (Phase B): parentId = list
+    // id, refId = member id, sortOrder = position. Reads are format-agnostic — a legacy list still holds
+    // its inline `ListObject`/`TemplateListObject` JSON in `data` and is read from there until its first
+    // write (or the ensure* bootstrap) converts it to child rows and clears `data`. Membership churn
+    // hard-deletes the edge rows (no tombstones — not precious history).
 
-    suspend fun ensurePinnedListExists() {
-        // TODO: This only checks for the single known Pinned list. When
-        // user-defined lists are introduced, revisit this bootstrap to handle
-        // multiple lists / a general "ensure system lists exist" pass.
-        val existing = dao.getById(PINNED_LIST_ID)
+    /** Decode a legacy inline-membership `data` JSON (either notebookIds or templateIds). */
+    private fun legacyMemberIds(data: String): List<String> {
+        if (data.isEmpty()) return emptyList()
+        val nb = runCatching { lenientJson.decodeFromString<ListObject>(data).notebookIds }.getOrDefault(emptyList())
+        if (nb.isNotEmpty()) return nb
+        return runCatching { lenientJson.decodeFromString<TemplateListObject>(data).templateIds }.getOrDefault(emptyList())
+    }
+
+    /** Format-agnostic membership read: legacy inline JSON, else the ordered `list_item` child rows. */
+    private suspend fun memberIdsOf(list: ObjectEntity): List<String> =
+        if (list.data.isNotEmpty()) legacyMemberIds(list.data)
+        else dao.getListItems(list.id).mapNotNull { it.refId }
+
+    private fun listItemRow(listId: String, memberId: String, order: Int, now: Long) = ObjectEntity(
+        id = UUID.randomUUID().toString(),
+        type = ObjectType.LIST_ITEM,
+        name = "",
+        parentId = listId,
+        createdAt = now,
+        updatedAt = now,
+        deletedAt = null,
+        data = "",
+        refId = memberId,
+        sortOrder = order,
+    )
+
+    /**
+     * Ensure [list] is in child-row form: if it still holds inline JSON members, convert them to
+     * `list_item` rows (order preserved) and clear `data`. Idempotent — rebuilds children from the
+     * still-present JSON on a retry. `updatedAt` is preserved (a format change, not a content edit).
+     * Returns the (possibly refreshed) list row.
+     */
+    private suspend fun migrated(list: ObjectEntity): ObjectEntity {
+        if (list.data.isEmpty()) return list
+        val ids = legacyMemberIds(list.data)
+        dao.deleteAllListItems(list.id)
+        val now = System.currentTimeMillis()
+        ids.forEachIndexed { i, mid -> dao.insert(listItemRow(list.id, mid, i, now)) }
+        val updated = list.copy(data = "")
+        dao.update(updated)
+        return updated
+    }
+
+    private suspend fun ensureListRow(listId: String, name: String) {
+        val existing = dao.getById(listId)
         if (existing == null || existing.deletedAt != null) {
             val now = System.currentTimeMillis()
-            dao.insert(
-                ObjectEntity(
-                    id = PINNED_LIST_ID,
-                    type = ObjectType.LIST,
-                    name = "Pinned",
-                    parentId = null,
-                    createdAt = now,
-                    updatedAt = now,
-                    deletedAt = null,
-                    data = Json.encodeToString(ListObject())
-                )
-            )
+            dao.insert(ObjectEntity(
+                id = listId, type = ObjectType.LIST, name = name, parentId = null,
+                createdAt = now, updatedAt = now, deletedAt = null, data = "",
+            ))
+            return
         }
+        migrated(existing)
     }
+
+    suspend fun ensurePinnedListExists() = ensureListRow(PINNED_LIST_ID, "Pinned")
 
     suspend fun getPinnedList(): ObjectEntity? = dao.getById(PINNED_LIST_ID)
 
     suspend fun addNotebookToList(listId: String, notebookId: String) {
-        val entity = dao.getById(listId) ?: return
-        val listObj = Json.decodeFromString<ListObject>(entity.data)
-        if (notebookId in listObj.notebookIds) return
-        dao.update(
-            entity.copy(
-                data = Json.encodeToString(listObj.copy(notebookIds = listObj.notebookIds + notebookId)),
-                updatedAt = System.currentTimeMillis()
-            )
-        )
+        val list = migrated(dao.getById(listId) ?: return)
+        if (dao.listContains(list.id, notebookId)) return
+        dao.insert(listItemRow(list.id, notebookId, dao.maxListSortOrder(list.id) + 1, System.currentTimeMillis()))
     }
 
     suspend fun removeNotebookFromList(listId: String, notebookId: String) {
-        val entity = dao.getById(listId) ?: return
-        val listObj = Json.decodeFromString<ListObject>(entity.data)
-        if (notebookId !in listObj.notebookIds) return
-        dao.update(
-            entity.copy(
-                data = Json.encodeToString(listObj.copy(notebookIds = listObj.notebookIds - notebookId)),
-                updatedAt = System.currentTimeMillis()
-            )
-        )
+        val list = migrated(dao.getById(listId) ?: return)
+        dao.deleteListItem(list.id, notebookId)
     }
 
+    /** Rewrite membership order to match [newOrder] (assumed to be the complete member set). */
     suspend fun reorderList(listId: String, newOrder: List<String>) {
-        val entity = dao.getById(listId) ?: return
-        val listObj = Json.decodeFromString<ListObject>(entity.data)
-        dao.update(
-            entity.copy(
-                data = Json.encodeToString(listObj.copy(notebookIds = newOrder)),
-                updatedAt = System.currentTimeMillis()
-            )
-        )
+        val list = migrated(dao.getById(listId) ?: return)
+        newOrder.forEachIndexed { i, memberId -> dao.updateListItemOrder(list.id, memberId, i) }
     }
 
     suspend fun getNotebooksInList(listId: String): List<ObjectEntity> {
-        val entity = dao.getById(listId) ?: return emptyList()
-        val listObj = Json.decodeFromString<ListObject>(entity.data)
-        return listObj.notebookIds.mapNotNull { id ->
+        val list = dao.getById(listId) ?: return emptyList()
+        return memberIdsOf(list).mapNotNull { id ->
             val e = dao.getById(id)
             if (e == null || e.deletedAt != null || e.type != ObjectType.NOTEBOOK) null else e
         }
     }
 
     suspend fun isNotebookPinned(notebookId: String): Boolean {
-        val entity = dao.getById(PINNED_LIST_ID) ?: return false
-        val listObj = Json.decodeFromString<ListObject>(entity.data)
-        return notebookId in listObj.notebookIds
+        val list = dao.getById(PINNED_LIST_ID) ?: return false
+        return if (list.data.isNotEmpty()) notebookId in legacyMemberIds(list.data)
+               else dao.listContains(PINNED_LIST_ID, notebookId)
     }
 
     /**
-     * Toggles the pin state of a notebook in a single DB round-trip.
-     * Returns true if the notebook is now pinned, false if now unpinned.
+     * Toggles the pin state of a notebook. Returns true if now pinned, false if now unpinned.
      */
     suspend fun togglePin(notebookId: String): Boolean {
-        val entity = dao.getById(PINNED_LIST_ID) ?: return false
-        val listObj = Json.decodeFromString<ListObject>(entity.data)
-        val nowPinned = notebookId !in listObj.notebookIds
-        val newIds = if (nowPinned) listObj.notebookIds + notebookId
-                     else listObj.notebookIds - notebookId
-        dao.update(
-            entity.copy(
-                data = Json.encodeToString(listObj.copy(notebookIds = newIds)),
-                updatedAt = System.currentTimeMillis()
-            )
-        )
-        return nowPinned
+        val list = migrated(dao.getById(PINNED_LIST_ID) ?: return false)
+        return if (dao.listContains(list.id, notebookId)) {
+            dao.deleteListItem(list.id, notebookId); false
+        } else {
+            dao.insert(listItemRow(list.id, notebookId, dao.maxListSortOrder(list.id) + 1, System.currentTimeMillis())); true
+        }
     }
 
     suspend fun scrubNotebookFromAllLists(notebookId: String) {
-        val lists = dao.getAllNotDeleted().filter {
-            it.type == ObjectType.LIST && it.id != PINNED_TEMPLATES_LIST_ID
+        // Migrated lists: drop the member's edge rows across every list in one query.
+        dao.deleteListItemsForMember(notebookId)
+        // Legacy inline lists (not yet migrated): strip the id from their JSON array.
+        val legacyLists = dao.getAllNotDeleted().filter {
+            it.type == ObjectType.LIST && it.id != PINNED_TEMPLATES_LIST_ID && it.data.isNotEmpty()
         }
-        for (listEntity in lists) {
-            val listObj = try {
-                lenientJson.decodeFromString<ListObject>(listEntity.data)
-            } catch (_: Exception) { continue }
-            if (notebookId in listObj.notebookIds) {
-                dao.update(
-                    listEntity.copy(
-                        data = Json.encodeToString(listObj.copy(notebookIds = listObj.notebookIds - notebookId)),
-                        updatedAt = System.currentTimeMillis()
-                    )
-                )
+        for (list in legacyLists) {
+            val ids = try { lenientJson.decodeFromString<ListObject>(list.data).notebookIds } catch (_: Exception) { continue }
+            if (notebookId in ids) {
+                dao.update(list.copy(
+                    data = Json.encodeToString(ListObject(ids - notebookId)),
+                    updatedAt = System.currentTimeMillis(),
+                ))
             }
         }
     }
@@ -438,69 +449,46 @@ class IndexRepository(private val dao: ObjectDao) {
 
     // region Template pin operations
 
-    suspend fun ensurePinnedTemplatesListExists() {
-        val existing = dao.getById(PINNED_TEMPLATES_LIST_ID)
-        if (existing == null || existing.deletedAt != null) {
-            val now = System.currentTimeMillis()
-            dao.insert(
-                ObjectEntity(
-                    id = PINNED_TEMPLATES_LIST_ID,
-                    type = ObjectType.LIST,
-                    name = "Pinned Templates",
-                    parentId = null,
-                    createdAt = now,
-                    updatedAt = now,
-                    deletedAt = null,
-                    data = Json.encodeToString(TemplateListObject())
-                )
-            )
-        }
-    }
+    suspend fun ensurePinnedTemplatesListExists() = ensureListRow(PINNED_TEMPLATES_LIST_ID, "Pinned Templates")
 
     suspend fun isTemplatePinned(templateId: String): Boolean {
-        val entity = dao.getById(PINNED_TEMPLATES_LIST_ID) ?: return false
-        val listObj = Json.decodeFromString<TemplateListObject>(entity.data)
-        return templateId in listObj.templateIds
+        val list = dao.getById(PINNED_TEMPLATES_LIST_ID) ?: return false
+        return if (list.data.isNotEmpty()) templateId in legacyMemberIds(list.data)
+               else dao.listContains(PINNED_TEMPLATES_LIST_ID, templateId)
     }
 
     /**
-     * Toggles the pin state of a template in a single DB round-trip.
-     * Returns true if the template is now pinned, false if now unpinned.
+     * Toggles the pin state of a template. Returns true if now pinned, false if now unpinned.
      */
     suspend fun toggleTemplatePin(templateId: String): Boolean {
-        val entity = dao.getById(PINNED_TEMPLATES_LIST_ID) ?: return false
-        val listObj = Json.decodeFromString<TemplateListObject>(entity.data)
-        val nowPinned = templateId !in listObj.templateIds
-        val newIds = if (nowPinned) listObj.templateIds + templateId
-                     else listObj.templateIds - templateId
-        dao.update(
-            entity.copy(
-                data = Json.encodeToString(listObj.copy(templateIds = newIds)),
-                updatedAt = System.currentTimeMillis()
-            )
-        )
-        return nowPinned
+        val list = migrated(dao.getById(PINNED_TEMPLATES_LIST_ID) ?: return false)
+        return if (dao.listContains(list.id, templateId)) {
+            dao.deleteListItem(list.id, templateId); false
+        } else {
+            dao.insert(listItemRow(list.id, templateId, dao.maxListSortOrder(list.id) + 1, System.currentTimeMillis())); true
+        }
     }
 
     suspend fun getPinnedTemplates(): List<ObjectEntity> {
-        val entity = dao.getById(PINNED_TEMPLATES_LIST_ID) ?: return emptyList()
-        val listObj = Json.decodeFromString<TemplateListObject>(entity.data)
-        return listObj.templateIds.mapNotNull { id ->
+        val list = dao.getById(PINNED_TEMPLATES_LIST_ID) ?: return emptyList()
+        return memberIdsOf(list).mapNotNull { id ->
             val e = dao.getById(id)
             if (e == null || e.deletedAt != null || e.type != ObjectType.TEMPLATE) null else e
         }
     }
 
     suspend fun scrubTemplateFromPinned(templateId: String) {
-        val entity = dao.getById(PINNED_TEMPLATES_LIST_ID) ?: return
-        val listObj = Json.decodeFromString<TemplateListObject>(entity.data)
-        if (templateId in listObj.templateIds) {
-            dao.update(
-                entity.copy(
-                    data = Json.encodeToString(listObj.copy(templateIds = listObj.templateIds - templateId)),
-                    updatedAt = System.currentTimeMillis()
-                )
-            )
+        val list = dao.getById(PINNED_TEMPLATES_LIST_ID) ?: return
+        if (list.data.isNotEmpty()) {
+            val ids = try { lenientJson.decodeFromString<TemplateListObject>(list.data).templateIds } catch (_: Exception) { return }
+            if (templateId in ids) {
+                dao.update(list.copy(
+                    data = Json.encodeToString(TemplateListObject(ids - templateId)),
+                    updatedAt = System.currentTimeMillis(),
+                ))
+            }
+        } else {
+            dao.deleteListItem(PINNED_TEMPLATES_LIST_ID, templateId)
         }
     }
 
@@ -525,20 +513,20 @@ class IndexRepository(private val dao: ObjectDao) {
 
     suspend fun setNotebookExcludedFromBackup(notebookId: String, excluded: Boolean) {
         val entity = dao.getById(notebookId) ?: return
-        val obj = Json.decodeFromString<NotebookObject>(entity.data)
+        val obj = runCatching { entity.notebookMeta() }.getOrNull() ?: return // see updateNotebookSnapshot
         // Do NOT bump updatedAt — exclusion flag is not a content modification.
-        dao.update(entity.copy(data = Json.encodeToString(obj.copy(excludeFromBackup = excluded))))
+        dao.update(entity.withNotebookMeta(obj.copy(excludeFromBackup = excluded)))
     }
 
     suspend fun markNotebookBackedUp(notebookId: String, kind: BackupKind, timestamp: Long) {
         val entity = dao.getById(notebookId) ?: return
-        val obj = Json.decodeFromString<NotebookObject>(entity.data)
+        val obj = runCatching { entity.notebookMeta() }.getOrNull() ?: return // see updateNotebookSnapshot
         val updated = when (kind) {
             BackupKind.LOCAL -> obj.copy(lastBackedUpLocal = timestamp)
             BackupKind.DRIVE -> obj.copy(lastBackedUpDrive = timestamp)
         }
         // Do NOT bump updatedAt — stamping backup time is not a content modification.
-        dao.update(entity.copy(data = Json.encodeToString(updated)))
+        dao.update(entity.withNotebookMeta(updated))
     }
 
     suspend fun notebooksNeedingBackup(kind: BackupKind): List<ObjectEntity> {
@@ -546,7 +534,7 @@ class IndexRepository(private val dao: ObjectDao) {
             .filter { it.type == ObjectType.NOTEBOOK }
             .filter { entity ->
                 val obj = try {
-                    Json.decodeFromString<NotebookObject>(entity.data)
+                    entity.notebookMeta()
                 } catch (_: Exception) { return@filter false }
                 val lastBackedUp = when (kind) {
                     BackupKind.LOCAL -> obj.lastBackedUpLocal
@@ -564,7 +552,7 @@ class IndexRepository(private val dao: ObjectDao) {
         dao.getAllNotDeleted()
             .count { entity ->
                 if (entity.type != ObjectType.NOTEBOOK) return@count false
-                val obj = try { Json.decodeFromString<NotebookObject>(entity.data) } catch (_: Exception) { return@count false }
+                val obj = try { entity.notebookMeta() } catch (_: Exception) { return@count false }
                 obj.encrypted && obj.keyScope == KeyScope.GLOBAL
             }
 
@@ -572,30 +560,44 @@ class IndexRepository(private val dao: ObjectDao) {
         dao.getAllNotDeleted()
             .filter { entity ->
                 if (entity.type != ObjectType.NOTEBOOK) return@filter false
-                val obj = try { Json.decodeFromString<NotebookObject>(entity.data) } catch (_: Exception) { return@filter false }
+                val obj = try { entity.notebookMeta() } catch (_: Exception) { return@filter false }
                 obj.encrypted && obj.keyScope == KeyScope.GLOBAL
+            }
+            .map { it.id }
+
+    /** Ids of every non-deleted notebook still stored in plaintext — the Phase-4 bulk-convert set. */
+    suspend fun getPlaintextNotebookIds(): List<String> =
+        dao.getAllNotDeleted()
+            .filter { entity ->
+                if (entity.type != ObjectType.NOTEBOOK) return@filter false
+                val obj = try { entity.notebookMeta() } catch (_: Exception) { return@filter false }
+                !obj.encrypted
             }
             .map { it.id }
 
     suspend fun getEncryptionInfo(notebookId: String): EncryptionInfo {
         val entity = dao.getById(notebookId) ?: return EncryptionInfo.NONE
-        val obj = Json.decodeFromString<NotebookObject>(entity.data)
+        // This sits on the notebook-open path — a corrupt legacy row must not make the notebook
+        // unopenable via crash. NONE is safe post-hardening: opening an actually-encrypted file
+        // keyless now throws SoilLockedException / reports corruption without deleting anything.
+        val obj = runCatching { entity.notebookMeta() }.getOrNull() ?: return EncryptionInfo.NONE
         return EncryptionInfo(obj.encrypted, obj.keyScope)
     }
 
     /**
-     * Write encryption state to the index row. When [encrypted] is true, also clears the snapshot
-     * to prevent plaintext page content from leaking into the global (unencrypted) index.
+     * Write encryption state to the index row. Clears the snapshot only when converting to
+     * private (NOTEBOOK) scope — a GLOBAL-scope cover stays valid because the index is itself
+     * encrypted under the global key.
      */
     suspend fun setEncryptionState(notebookId: String, encrypted: Boolean, keyScope: KeyScope?) {
         val entity = dao.getById(notebookId) ?: return
-        val obj = Json.decodeFromString<NotebookObject>(entity.data)
+        val obj = runCatching { entity.notebookMeta() }.getOrNull() ?: return // see updateNotebookSnapshot
         val updated = obj.copy(
             encrypted = encrypted,
             keyScope = keyScope,
-            snapshot = if (encrypted) null else obj.snapshot,
+            snapshot = if (encrypted && keyScope != KeyScope.GLOBAL) null else obj.snapshot,
         )
-        dao.update(entity.copy(data = Json.encodeToString(updated), updatedAt = System.currentTimeMillis()))
+        dao.update(entity.withNotebookMeta(updated).copy(updatedAt = System.currentTimeMillis()))
     }
 
     // endregion

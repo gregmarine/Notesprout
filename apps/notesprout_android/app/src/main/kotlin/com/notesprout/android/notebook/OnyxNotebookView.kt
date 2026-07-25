@@ -3,6 +3,7 @@ package com.notesprout.android.notebook
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
+import android.os.SystemClock
 import androidx.appcompat.content.res.AppCompatResources
 import com.notesprout.android.R
 import android.graphics.Color
@@ -13,11 +14,13 @@ import android.graphics.PointF
 import android.graphics.Rect
 import android.graphics.RectF
 import android.graphics.Region
+import android.graphics.RenderNode
 import android.util.Base64
 import android.util.TypedValue
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewTreeObserver
+import com.notesprout.android.core.ImageCodec
 import com.notesprout.android.core.Slog
 import com.notesprout.android.core.markdown.TextObjectRenderer
 import com.notesprout.android.data.HeadingStroke
@@ -26,6 +29,8 @@ import com.notesprout.android.data.LineRender
 import com.notesprout.android.data.LineStyle
 import com.notesprout.android.data.LinkChrome
 import com.notesprout.android.data.LinkRender
+import com.notesprout.android.data.ShapeRender
+import com.notesprout.android.data.StickyNoteRender
 import com.notesprout.android.data.translate
 import com.notesprout.android.data.LiveStroke
 import com.notesprout.android.data.TextRender
@@ -46,9 +51,40 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
         // Suppresses EPD hardware auto-GC16 refresh mid-session; we control quality
         // refreshes explicitly via handwritingRepaint in eraseAll() and after erasing.
         private const val EPD_UPDATE_LIST_SIZE = 512
+
+        /**
+         * App-scope tag for the handwriting fast-mode that removes the first-stroke warm-up lag.
+         * Pinning the app's default update mode to [UpdateMode.HAND_WRITING_REPAINT_MODE] via
+         * [EpdController.applyAppScopeUpdate] keeps the panel in the fast handwriting waveform, so the
+         * first stroke after an open / page-flip no longer pays a GC→handwriting mode switch (1–2s on
+         * BOOX). Proven the sole fix by a device sweep of every EPD mode (scribble / view-mode /
+         * system-fast all still lagged; only app-scope was instant, no ghosting). Applied when the pen
+         * pipeline opens; cleared when this view relinquishes it ([closeRawDrawingIfOwner]).
+         */
+        private const val HWR_APP_SCOPE = "notesprout_hwr"
+
         private const val ERASER_RADIUS_PX = 15f
         private const val ERASE_REDRAW_INTERVAL_MS = 60L
         private const val LASSO_REFRESH_INTERVAL_MS = 60L
+
+        /**
+         * Process-global owner of the single Onyx raw-drawing pipeline.
+         *
+         * The BOOX pen layer (`TouchHelper` → `EpdController` raw input) is a **process-global
+         * hardware resource**: only one surface can own it at a time, even though each
+         * [OnyxNotebookView] holds its own [TouchHelper]. When screen A launches screen B and
+         * finishes, Android runs B's `openRawDrawing()` *before* A's `onDestroy →
+         * closeRawDrawing()`. A's late close would then tear down the pipeline **B** just claimed,
+         * leaving the visible screen unable to accept stylus input until a focus cycle re-arms it —
+         * the "canvas goes dead after switching screens / moving-copying pages" bug.
+         *
+         * Every successful [openRawDrawing] claims ownership here; every close routes through
+         * [closeRawDrawingIfOwner], which skips the global close when this view is no longer the
+         * owner. All access is on the main thread (view + lifecycle callbacks); [Volatile] is
+         * defensive belt-and-suspenders.
+         */
+        @Volatile
+        private var penOwner: OnyxNotebookView? = null
     }
 
     // ── EPD diagnostic helpers ───────────────────────────────────────────────
@@ -72,8 +108,16 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
 
     // ── View state ───────────────────────────────────────────────────────────
 
-    private var renderBitmap: Bitmap? = null
-    private var renderCanvas: Canvas? = null
+    /**
+     * Committed content (template + all objects + strokes) as a hardware [RenderNode] — the native
+     * equivalent of the Flutter port's retained GPU layer. Recorded (as vector paths, not a CPU
+     * bitmap) by [redrawCanvas] on every content change; blitted in [onDraw] via
+     * [Canvas.drawRenderNode] on a hardware canvas. Rasterization is deferred to the GPU/RenderThread
+     * and cached, so a static page is not re-rasterized frame to frame. The old software
+     * `renderBitmap`/`renderCanvas` blit is gone — off-screen bitmaps (export, cover snapshot, drag
+     * backing) still build their own bitmaps in [buildRenderBitmap] / [captureSnapshot].
+     */
+    private val committedNode = RenderNode("committed")
     /** Toolbar exclusion zone in view coords; the BOOX pen layer never captures inside it. */
     private var toolbarExclusion: Rect? = null
 
@@ -106,6 +150,12 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
 
     // Link object store — populated from type="link" rows at page load time.
     private var links: List<LinkRender> = emptyList()
+
+    // Sticky note store — populated from type="sticky_note" rows at page load time.
+    private var stickyNotes: List<StickyNoteRender> = emptyList()
+
+    // Shape object store — populated from type="shape" rows at page load time.
+    private var shapeObjects: List<ShapeRender> = emptyList()
 
     private val textObjectTextSizePx = android.util.TypedValue.applyDimension(
         android.util.TypedValue.COMPLEX_UNIT_SP, 24f, resources.displayMetrics
@@ -158,6 +208,7 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
     private var lassoGestureStartPoint: PointF? = null
     private var lassoGesturePath: Path? = null
     private var lassoGestureHadSelection = false
+    private var lassoPreClearSelectionBox: RectF? = null
     private var lastLassoRefreshMs = 0L
 
     // Lasso eraser display path: jitter baked in at point-add time so the grain is
@@ -179,6 +230,8 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
     private var dragOriginalTextObjects: List<TextRender> = emptyList()
     private var dragOriginalLineObjects: List<LineRender> = emptyList()
     private var dragOriginalLinks: List<LinkRender> = emptyList()
+    private var dragOriginalStickyNotes: List<StickyNoteRender> = emptyList()
+    private var dragOriginalShapeObjects: List<ShapeRender> = emptyList()
     // Backing bitmap: non-selected strokes/headings/textObjects + template, built once at drag start.
     private var dragBackingBitmap: Bitmap? = null
     private var activeSnapGuides: List<SnapGuide> = emptyList()
@@ -230,13 +283,51 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
     override var onTextErased: ((TextRender) -> Unit)? = null
     override var onLineErased: ((LineRender) -> Unit)? = null
     override var onLinkErased: ((LinkRender) -> Unit)? = null
-    override var onScribbleEraseComplete: ((List<String>, List<HeadingStroke>, List<TextRender>, List<LineRender>, List<LinkRender>) -> Unit)? = null
+    override var onStickyNoteErased: ((StickyNoteRender) -> Unit)? = null
+    override var onShapeErased: ((ShapeRender) -> Unit)? = null
+    override var onShapeRecognized: ((LiveStroke, ShapeRecognizer.Result) -> Unit)? = null
+    override var onShapeTransformed: ((ShapeRender, ShapeRender) -> Unit)? = null
+    override var onShapeTransformTapOutside: (() -> Unit)? = null
+    override var onShapeTransformDragStarted: (() -> Unit)? = null
+    override var onShapeTransformMoved: ((android.graphics.RectF) -> Unit)? = null
+
+    // ── Shape transform mode ─────────────────────────────────────────────────
+    private var isShapeTransformMode = false
+    private var transformBeforeRender: ShapeRender? = null
+    private val transformController by lazy { ShapeTransformController(resources.displayMetrics.density) }
+    override var onScribbleEraseComplete: ((List<String>, List<HeadingStroke>, List<TextRender>, List<LineRender>, List<LinkRender>, List<StickyNoteRender>, List<ShapeRender>) -> Unit)? = null
     override var onSmartLassoComplete: ((List<String>, RectF) -> Unit)? = null
 
     // Points and stroke IDs accumulated between onBeginRawDrawing and onEndRawDrawing.
     // Used for per-gesture scribble candidate detection after all points are collected.
     private val currentGesturePoints    = mutableListOf<PointF>()
     private val currentGestureStrokeIds = mutableListOf<String>()
+
+    // ── Pen-activity gate (see [NotebookView.isPenActive]) ───────────────────
+    // Driven by the raw-drawing / raw-erasing callbacks, which are the only place this view
+    // learns the stylus is on the glass — SDK ink never reaches onTouchEvent.
+    private var penDown          = false
+    private var penLastLiftMs    = 0L
+
+    override val isPenActive: Boolean
+        get() = penDown || (SystemClock.uptimeMillis() - penLastLiftMs) < PEN_ACTIVE_TAIL_MS
+
+    /** Mark the stylus as on the glass. Called from every raw begin callback. */
+    private fun markPenDown() {
+        penDown = true
+    }
+
+    /** Mark the stylus as lifted and start the tail window. Called from every raw end callback. */
+    private fun markPenUp() {
+        penDown = false
+        penLastLiftMs = SystemClock.uptimeMillis()
+    }
+
+    // Dwell tracking: how long the stylus was still at the end of the stroke.
+    private var dwellAnchorX    = 0f
+    private var dwellAnchorY    = 0f
+    private var lastMoveTimeMs  = 0L
+    private var dwellMs         = 0L
 
     /**
      * Invoked (on main thread) immediately after each pen lift (onEndRawDrawing).
@@ -246,24 +337,21 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
      */
     override var onPenLifted: (() -> Unit)? = null
 
-    /**
-     * Invoked (on main thread) at non-writing transition boundaries when a snapshot
-     * of the current strokes has been captured.  NotebookActivity wires this to persist
-     * the snapshot to the page's data JSON in the database.
-     */
-    override var onSnapshotReady: ((String) -> Unit)? = null
     override var onLassoComplete: ((Path, PointF) -> Unit)? = null
     override var onLassoTapToDismiss: (() -> Unit)? = null
     override var onLassoEraseComplete: ((List<String>) -> Unit)? = null
     override var lassoSelectedIds: Set<String> = emptySet()
-    override var onStrokesMoved: ((List<LiveStroke>, List<LiveStroke>, List<HeadingStroke>, List<HeadingStroke>, List<TextRender>, List<TextRender>, List<LineRender>, List<LineRender>, List<LinkRender>, List<LinkRender>) -> Unit)? = null
+    override var onStrokesMoved: ((List<LiveStroke>, List<LiveStroke>, List<HeadingStroke>, List<HeadingStroke>, List<TextRender>, List<TextRender>, List<LineRender>, List<LineRender>, List<LinkRender>, List<LinkRender>, List<StickyNoteRender>, List<StickyNoteRender>, List<ShapeRender>, List<ShapeRender>) -> Unit)? = null
 
     // ── Raw input callback ───────────────────────────────────────────────────
 
     private val rawInputCallback = object : RawInputCallback() {
         override fun onBeginRawDrawing(shortcutDrawing: Boolean, touchPoint: TouchPoint) {
             epd { "ON_BEGIN_RAW_DRAWING isEraserMode=$isEraserMode isLassoMode=$isLassoMode isLassoEraserMode=$isLassoEraserMode isTextPlacementMode=$isTextPlacementMode isSetup=$isSetup" }
-            if (isLassoMode || isLassoEraserMode || isTextPlacementMode) return
+            // Before the mode guard: the pen is on the glass in every mode, and the gate must
+            // hold off finger gestures regardless of what this contact will end up doing.
+            markPenDown()
+            if (isLassoMode || isLassoEraserMode || isTextPlacementMode || isShapeTransformMode) return
             if (isSetup && !isEraserMode) {
                 touchHelper.setRawDrawingRenderEnabled(true)
                 epd { "RENDER_ENABLED caller=onBeginRawDrawing" }
@@ -272,12 +360,17 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
             currentGestureStrokeIds.clear()
             beginRawDrawingTimeMs = System.currentTimeMillis()
             strokeRenderCount = 0
+            dwellAnchorX   = touchPoint.x
+            dwellAnchorY   = touchPoint.y
+            lastMoveTimeMs = System.currentTimeMillis()
+            dwellMs        = 0L
             epd { "ON_BEGIN_RAW_DRAWING_DONE beginTimeMs=$beginRawDrawingTimeMs" }
         }
 
         override fun onEndRawDrawing(shortcutDrawing: Boolean, touchPoint: TouchPoint) {
             epd { "ON_END_RAW_DRAWING isEraserMode=$isEraserMode isLassoMode=$isLassoMode isLassoEraserMode=$isLassoEraserMode isTextPlacementMode=$isTextPlacementMode" }
-            if (isLassoMode || isLassoEraserMode || isTextPlacementMode) return
+            markPenUp()
+            if (isLassoMode || isLassoEraserMode || isTextPlacementMode || isShapeTransformMode) return
             if (isEraserMode) {
                 // Flush any throttled-but-not-yet-drawn erase removals before the EPD repaint.
                 finalizeEraseRedraw()
@@ -289,20 +382,22 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
                 epd { "PEN_LIFTED caller=onEndRawDrawing_eraser" }
                 onPenLifted?.invoke()
             } else {
-                // Pen mode: smart-lasso → scribble-to-erase → normal stroke.
+                // Pen mode: shape-dwell → smart-lasso → scribble-to-erase → normal stroke.
                 epd { "PEN_LIFTED caller=onEndRawDrawing_pen gestureCheck" }
-                val durationMs = System.currentTimeMillis() - beginRawDrawingTimeMs
+                val now = System.currentTimeMillis()
+                dwellMs = now - lastMoveTimeMs
+                val durationMs = now - beginRawDrawingTimeMs
                 checkAndDispatchGesture(durationMs)
             }
         }
 
         override fun onRawDrawingTouchPointMoveReceived(touchPoint: TouchPoint) {
-            if (isLassoMode || isLassoEraserMode || isTextPlacementMode) return
+            if (isLassoMode || isLassoEraserMode || isTextPlacementMode || isShapeTransformMode) return
             if (isEraserMode) eraseAtPath(listOf(PointF(touchPoint.x, touchPoint.y)))
         }
 
         override fun onRawDrawingTouchPointListReceived(pointList: TouchPointList) {
-            if (isLassoMode || isLassoEraserMode || isTextPlacementMode) return
+            if (isLassoMode || isLassoEraserMode || isTextPlacementMode || isShapeTransformMode) return
             // When software eraser mode is active the SDK still routes pen-tip events here.
             if (isEraserMode) {
                 Slog.d(TAG) { "onRawDrawingTouchPointListReceived (eraser mode) count=${pointList.size()}" }
@@ -315,6 +410,7 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
 
         override fun onBeginRawErasing(shortcutErasing: Boolean, touchPoint: TouchPoint) {
             epd { "ON_BEGIN_RAW_ERASING isSetup=$isSetup" }
+            markPenDown()
             // Release the overlay render immediately so bitmap updates (erased strokes
             // disappearing) are visible right away — same issue as toolbar eraser toggle.
             // Without this the overlay obscures the updated bitmap.
@@ -329,6 +425,7 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
 
         override fun onEndRawErasing(shortcutErasing: Boolean, touchPoint: TouchPoint) {
             epd { "ON_END_RAW_ERASING" }
+            markPenUp()
             // Flush any throttled-but-not-yet-drawn erase removals before the EPD repaint.
             finalizeEraseRedraw()
             post {
@@ -353,24 +450,28 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
     // ── Drawing helpers ──────────────────────────────────────────────────────
 
     private fun renderStroke(pointList: TouchPointList) {
-        val canvas = renderCanvas ?: return
         val points = pointList.points
         if (points.isNullOrEmpty()) return
         val strokeId = UUID.randomUUID().toString()
         val strokePoints = points.map { PointF(it.x, it.y) }
         strokes.add(LiveStroke(strokeId, strokePoints))
-        // Accumulate for end-of-gesture scribble detection.
+        // Accumulate for end-of-gesture scribble/shape detection.
         currentGesturePoints.addAll(strokePoints)
         currentGestureStrokeIds.add(strokeId)
-        val path = Path()
-        path.moveTo(strokePoints[0].x, strokePoints[0].y)
-        for (i in 1 until strokePoints.size) {
-            path.lineTo(strokePoints[i].x, strokePoints[i].y)
-        }
-        canvas.drawPath(path, strokePaint)
-
-        strokeRenderCount++
+        // Update dwell anchor using per-point timestamps so the batch-delivery pattern
+        // (all points arrive at once at pen-lift) doesn't collapse the dwell window to ~0ms.
+        val dwellRadiusPx = SHAPE_DWELL_RADIUS_DP * resources.displayMetrics.density
         val now = System.currentTimeMillis()
+        for (raw in points) {
+            val dx = raw.x - dwellAnchorX
+            val dy = raw.y - dwellAnchorY
+            if (dx * dx + dy * dy > dwellRadiusPx * dwellRadiusPx) {
+                dwellAnchorX   = raw.x
+                dwellAnchorY   = raw.y
+                lastMoveTimeMs = if (raw.timestamp > 0L) raw.timestamp else now
+            }
+        }
+        strokeRenderCount++
         if (strokeRenderCount == 1 && beginRawDrawingTimeMs > 0) {
             epd { "FIRST_STROKE_AFTER_BEGIN delta=${now - beginRawDrawingTimeMs}ms strokeId=${strokeId.take(8)}" }
         }
@@ -378,7 +479,10 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
             epd { "RENDER_STROKE_SAMPLE count=$strokeRenderCount strokeId=${strokeId.take(8)}" }
         }
 
-        invalidate()
+        // Re-record the committed layer so the just-finished stroke is baked into the node,
+        // keeping the Android canvas current with the EPD overlay (which shows the live ink).
+        // The node re-record builds a display list only; GPU rasterization is deferred/cached.
+        redrawCanvas(caller = "renderStroke")
         if (strokeRenderCount == 1 || strokeRenderCount % 10 == 0) {
             epd { "INVALIDATE caller=renderStroke count=$strokeRenderCount" }
         }
@@ -436,6 +540,15 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
             val hitIds = hitLinks.mapTo(HashSet()) { it.id }
             links = links.filter { it.id !in hitIds }
             hitLinks.forEach { onLinkErased?.invoke(it) }
+            throttledEraseRedraw()
+        }
+
+        // Sticky-note hit-test: erase the icon if eraser AABB intersects its icon box.
+        val hitStickyNotes = stickyNotes.filter { android.graphics.RectF.intersects(eBounds, it.boundingBox) }
+        if (hitStickyNotes.isNotEmpty()) {
+            val hitIds = hitStickyNotes.mapTo(HashSet()) { it.id }
+            stickyNotes = stickyNotes.filter { it.id !in hitIds }
+            hitStickyNotes.forEach { onStickyNoteErased?.invoke(it) }
             throttledEraseRedraw()
         }
 
@@ -551,6 +664,17 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
         }
     }
 
+    private fun drawShapeObject(canvas: Canvas, shape: ShapeRender) {
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE
+            color = android.graphics.Color.BLACK
+            strokeWidth = shape.strokeWidthPx
+            strokeJoin = Paint.Join.ROUND
+            strokeCap = Paint.Cap.ROUND
+        }
+        canvas.drawPath(ShapeGeometry.pathFor(shape), paint)
+    }
+
     /**
      * Render a type="link" object onto [canvas]: its embedded content (headings, text, lines,
      * strokes) painted via the existing per-type helpers, then the chrome around the union bbox.
@@ -572,6 +696,7 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
         }
         for (textObj in link.textObjects) drawTextObject(canvas, textObj, widthPx)
         for (lineObj in link.lines) drawLineObject(canvas, lineObj)
+        for (shape in link.shapes) drawShapeObject(canvas, shape)
         for (liveStroke in link.strokes) {
             val pts = liveStroke.points; if (pts.size < 2) continue
             val path = Path()
@@ -618,6 +743,18 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
         }
     }
 
+    private fun drawStickyNoteObject(canvas: Canvas, note: StickyNoteRender) {
+        val box = note.boundingBox
+        val left = box.left.toInt()
+        val top = box.top.toInt()
+        val right = box.right.toInt()
+        val bottom = box.bottom.toInt()
+        androidx.appcompat.content.res.AppCompatResources.getDrawable(context, R.drawable.ic_sticker_2)?.let { icon ->
+            icon.setBounds(left, top, right, bottom)
+            icon.draw(canvas)
+        }
+    }
+
     private fun drawSnapGuides(canvas: Canvas) {
         if (activeSnapGuides.isEmpty()) return
         for (guide in activeSnapGuides) {
@@ -629,16 +766,39 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
     }
 
     /**
-     * Redraws the render bitmap from scratch: white base → template → all current strokes.
-     * Call whenever strokes are added/removed or the template changes.
+     * Re-records the committed [RenderNode] from scratch: white base → template → all objects →
+     * strokes. Call whenever strokes/objects are added/removed or the template changes. Only builds
+     * a display list (GPU rasterization is deferred); [onDraw] blits the node.
      */
     private fun redrawCanvas(caller: String = "unknown") {
         val redrawStart = System.currentTimeMillis()
         epd { "REDRAW_CANVAS_START caller=$caller strokeCount=${strokes.size}" }
-        val canvas = renderCanvas ?: run {
-            epd { "REDRAW_CANVAS_ABORT caller=$caller reason=nullCanvas" }
+        val w = width; val h = height
+        if (w == 0 || h == 0) {
+            epd { "REDRAW_CANVAS_ABORT caller=$caller reason=zeroSize" }
             return
         }
+        committedNode.setPosition(0, 0, w, h)
+        val rc = committedNode.beginRecording(w, h)
+        try {
+            drawCommittedContent(rc)
+        } finally {
+            committedNode.endRecording()
+        }
+        invalidate()
+        epd { "INVALIDATE caller=redrawCanvas($caller)" }
+        val elapsed = System.currentTimeMillis() - redrawStart
+        epd { "REDRAW_CANVAS_END caller=$caller elapsed=${elapsed}ms strokeCount=${strokes.size}" }
+    }
+
+    /**
+     * Draw the full committed page (white → template → headings → text → lines → shapes → links →
+     * sticky icons → strokes) onto [canvas]. Used both to record the committed [RenderNode] (hardware)
+     * and as the [onDraw] software fallback — the latter matters if the Onyx SDK ever captures the
+     * view through a software canvas (e.g. inside [EpdController.handwritingRepaint]), where a
+     * [RenderNode] cannot be drawn.
+     */
+    private fun drawCommittedContent(canvas: Canvas) {
         canvas.drawColor(Color.WHITE)
         templateBitmap?.let { tb ->
             canvas.drawBitmap(tb, null, RectF(0f, 0f, width.toFloat(), height.toFloat()), null)
@@ -662,8 +822,14 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
         for (lineObj in lineObjects) {
             drawLineObject(canvas, lineObj)
         }
+        for (shape in shapeObjects) {
+            drawShapeObject(canvas, shape)
+        }
         for (link in links) {
             drawLinkObject(canvas, link, width)
+        }
+        for (note in stickyNotes) {
+            drawStickyNoteObject(canvas, note)
         }
         for (liveStroke in strokes) {
             val points = liveStroke.points
@@ -675,10 +841,6 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
             }
             canvas.drawPath(path, strokePaint)
         }
-        invalidate()
-        epd { "INVALIDATE caller=redrawCanvas($caller)" }
-        val elapsed = System.currentTimeMillis() - redrawStart
-        epd { "REDRAW_CANVAS_END caller=$caller elapsed=${elapsed}ms strokeCount=${strokes.size}" }
     }
 
     // Minimum squared distance from point p to segment a→b.
@@ -701,11 +863,13 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
         return dx * dx + dy * dy
     }
 
-    // ── Gesture detection at pen lift (smart-lasso → scribble-to-erase → normal) ───────────
+    // ── Gesture detection at pen lift (shape-dwell → smart-lasso → scribble-to-erase → normal) ──
 
     /**
      * Called at the end of every non-eraser pen gesture.  Runs the detection gate chain
      * in priority order on a single background thread:
+     *   Gate 0 — Shape dwell: single stroke held still ≥ [SHAPE_DWELL_MS] → shape object.
+     *            Currently off via [SHAPE_DWELL_ENABLED]; the gate is skipped entirely.
      *   Gate 1 — Smart lasso: fast closed circle enclosing ≥1 object → enter lasso selection.
      *   Gate 2 — Scribble-to-erase: dense back-and-forth crossing ≥1 object → erase.
      *   Default — Normal stroke: fire [onPenLifted] so the activity saves the stroke to DB.
@@ -724,23 +888,70 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
         val density      = resources.displayMetrics.density
         val gestureIdSet = gestureStrokeIds.toSet()
 
-        // Cheap synchronous geometry checks — avoid thread spawn for the common case.
-        val isSmartLasso = isSmartLassoCandidate(gesturePoints, durationMs, density)
-        val isScribble   = !isSmartLasso && isScribbleCandidate(gesturePoints)
-        if (!isSmartLasso && !isScribble) {
+        // ── Gate 0 pre-check: dwell candidate → always spawn a thread ─────────
+        // On Onyx, a single pen contact produces multiple renderStroke batches
+        // (multiple IDs in gestureStrokeIds). All batches belong to the same gesture,
+        // so no stroke-count check — just the dwell time.
+        val dwellCandidate = SHAPE_DWELL_ENABLED && dwellMs >= SHAPE_DWELL_MS
+        // Merge all gesture points into one synthetic stroke for undo restoration.
+        // None of the gesture strokes are persisted (onPenLifted never fires for them).
+        val mergedStroke: com.notesprout.android.data.LiveStroke? = if (dwellCandidate) {
+            val strokeWidth = strokes.firstOrNull { it.id == gestureStrokeIds.firstOrNull() }?.strokeWidth
+                ?: com.notesprout.android.data.LiveStroke.DEFAULT_STROKE_WIDTH
+            com.notesprout.android.data.LiveStroke(
+                id     = gestureStrokeIds.firstOrNull() ?: UUID.randomUUID().toString(),
+                points = gesturePoints,
+                strokeWidth = strokeWidth,
+            )
+        } else null
+
+        // Cheap synchronous geometry checks — skip when already a dwell candidate (re-run
+        // inside the thread on the null-recognition fallthrough path).
+        val isSmartLasso = !dwellCandidate && isSmartLassoCandidate(gesturePoints, durationMs, density)
+        val isScribble   = !dwellCandidate && !isSmartLasso && isScribbleCandidate(gesturePoints)
+        if (!dwellCandidate && !isSmartLasso && !isScribble) {
             onPenLifted?.invoke()
             return
         }
 
-        val strokeSnapshot  = strokes.toList()
-        val headingSnapshot = headings.toList()
-        val textSnapshot    = textObjects.toList()
-        val lineSnapshot    = lineObjects.toList()
-        val linkSnapshot    = links.toList()
+        val strokeSnapshot    = strokes.toList()
+        val headingSnapshot  = headings.toList()
+        val textSnapshot     = textObjects.toList()
+        val lineSnapshot     = lineObjects.toList()
+        val linkSnapshot     = links.toList()
+        val stickyNoteSnapshot = stickyNotes.toList()
+        val shapeSnapshot      = shapeObjects.toList()
 
         Thread {
+            // ── Gate 0: Shape dwell trigger ────────────────────────────────────────
+            // Runs first; on null falls through to gates 1 and 2.
+            var runSmartLasso = isSmartLasso
+            if (dwellCandidate && mergedStroke != null) {
+                val result = ShapeRecognizer.recognize(gesturePoints, density)
+                if (result != null) {
+                    post {
+                        strokes.removeAll { it.id in gestureIdSet }
+                        if (isSetup) {
+                            touchHelper.setRawDrawingRenderEnabled(false)
+                            epd { "RENDER_DISABLED caller=shapeDwell" }
+                            invalidate()
+                            epd { "INVALIDATE caller=shapeDwell" }
+                        }
+                        onShapeRecognized?.invoke(mergedStroke, result)
+                    }
+                    return@Thread
+                }
+                // No shape recognized — check gates 1 and 2 for this stroke.
+                runSmartLasso = isSmartLassoCandidate(gesturePoints, durationMs, density)
+                val runScribble = !runSmartLasso && isScribbleCandidate(gesturePoints)
+                if (!runSmartLasso && !runScribble) {
+                    post { onPenLifted?.invoke() }
+                    return@Thread
+                }
+            }
+
             // ── Gate 1: Smart lasso ────────────────────────────────────────────────
-            if (isSmartLasso) {
+            if (runSmartLasso) {
                 val path = Path().also { p ->
                     p.moveTo(gesturePoints[0].x, gesturePoints[0].y)
                     for (i in 1 until gesturePoints.size) p.lineTo(gesturePoints[i].x, gesturePoints[i].y)
@@ -754,15 +965,19 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
                     textSnapshot,
                     lineSnapshot,
                     linkSnapshot,
+                    stickyNoteSnapshot,
+                    shapeSnapshot,
                 )
                 if (hitIds.isNotEmpty()) {
                     val hitSet      = hitIds.toSet()
                     val unionBounds = RectF()
-                    for (s in strokeSnapshot) { if (s.id in hitSet) unionBounds.union(s.boundingBox) }
-                    for (h in headingSnapshot) { if (h.id in hitSet) unionBounds.union(h.boundingBox) }
-                    for (t in textSnapshot)    { if (t.id in hitSet) unionBounds.union(t.boundingBox) }
-                    for (l in lineSnapshot)    { if (l.id in hitSet) unionBounds.union(l.boundingBox) }
-                    for (lk in linkSnapshot)   { if (lk.id in hitSet) unionBounds.union(lk.boundingBox) }
+                    for (s in strokeSnapshot)   { if (s.id in hitSet) unionBounds.union(s.boundingBox) }
+                    for (h in headingSnapshot)  { if (h.id in hitSet) unionBounds.union(h.boundingBox) }
+                    for (t in textSnapshot)     { if (t.id in hitSet) unionBounds.union(t.boundingBox) }
+                    for (l in lineSnapshot)     { if (l.id in hitSet) unionBounds.union(l.boundingBox) }
+                    for (lk in linkSnapshot)    { if (lk.id in hitSet) unionBounds.union(lk.boundingBox) }
+                    for (sn in stickyNoteSnapshot) { if (sn.id in hitSet) unionBounds.union(sn.boundingBox) }
+                    for (sh in shapeSnapshot) { if (sh.id in hitSet) unionBounds.union(sh.boundingBox) }
                     post {
                         // Discard the gesture stroke — it is never page content.
                         strokes.removeAll { it.id in gestureIdSet }
@@ -793,6 +1008,8 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
                 density,
                 lineSnapshot,
                 linkSnapshot,
+                stickyNoteSnapshot,
+                shapeSnapshot,
             )
             post {
                 if (hitIds.isEmpty()) {
@@ -805,12 +1022,15 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
                         invalidate()
                         epd { "INVALIDATE caller=scribbleErase" }
                     }
-                    val hitSet         = hitIds.toSet()
-                    val erasedHeadings = headingSnapshot.filter { it.id in hitSet }
-                    val erasedTexts    = textSnapshot.filter { it.id in hitSet }
-                    val erasedLines    = lineSnapshot.filter { it.id in hitSet }
-                    val erasedLinks    = linkSnapshot.filter { it.id in hitSet }
-                    onScribbleEraseComplete?.invoke(hitIds, erasedHeadings, erasedTexts, erasedLines, erasedLinks)
+                    val hitSet            = hitIds.toSet()
+                    val erasedHeadings    = headingSnapshot.filter { it.id in hitSet }
+                    val erasedTexts       = textSnapshot.filter { it.id in hitSet }
+                    val erasedLines       = lineSnapshot.filter { it.id in hitSet }
+                    val erasedLinks       = linkSnapshot.filter { it.id in hitSet }
+                    val erasedStickyNotes = stickyNoteSnapshot.filter { it.id in hitSet }
+                    val erasedShapes      = shapeSnapshot.filter { it.id in hitSet }
+                    shapeObjects = shapeObjects.filter { it.id !in hitSet }
+                    onScribbleEraseComplete?.invoke(hitIds, erasedHeadings, erasedTexts, erasedLines, erasedLinks, erasedStickyNotes, erasedShapes)
                 }
             }
         }.start()
@@ -922,6 +1142,8 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
         density: Float,
         lineObjects: List<LineRender> = emptyList(),
         links: List<LinkRender> = emptyList(),
+        stickyNotes: List<StickyNoteRender> = emptyList(),
+        shapes: List<ShapeRender> = emptyList(),
     ): List<String> {
         if (scribblePoints.size < 2) return emptyList()
 
@@ -990,6 +1212,21 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
             }
         }
 
+        // Sticky-note icon hit-test: same penetration rule.
+        for (note in stickyNotes) {
+            if (!android.graphics.RectF.intersects(rawBounds, note.boundingBox)) continue
+            if (scribblePathPenetration(scribblePoints, note.boundingBox) >= penetrationPx) {
+                hitIds.add(note.id)
+            }
+        }
+
+        for (shape in shapes) {
+            if (!android.graphics.RectF.intersects(rawBounds, shape.boundingBox)) continue
+            if (scribblePathPenetration(scribblePoints, shape.boundingBox) >= penetrationPx) {
+                hitIds.add(shape.id)
+            }
+        }
+
         return hitIds
     }
 
@@ -1041,8 +1278,6 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
                 epd { "INVALIDATE caller=onWindowFocusChanged_gained" }
             }
         } else {
-            // Capture snapshot when the app is backgrounded — non-writing transition boundary.
-            captureSnapshot()?.let { onSnapshotReady?.invoke(it) }
             if (isSetup) {
                 invalidate()
                 epd { "INVALIDATE caller=windowFocusLost" }
@@ -1055,21 +1290,65 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
         if (w == 0 || h == 0) return
-        renderBitmap?.recycle()
-        val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
-        renderBitmap = bmp
-        renderCanvas = Canvas(bmp)
-        // redrawCanvas handles white → template → strokes in one pass.
+        committedNode.setPosition(0, 0, w, h)
+        // redrawCanvas records white → template → strokes into the node in one pass.
         // This ensures any strokes already loaded before layout (race with loadStrokes())
-        // are not lost when the bitmap is first created.
+        // are not lost when the node is first recorded.
         redrawCanvas(caller = "onSizeChanged")
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
+        // Pen-activity gate, Android-event half. In the modes below the SDK raw-drawing path is
+        // off, so the raw begin/end callbacks never fire and the stylus arrives here instead —
+        // track it from MotionEvents so [isPenActive] stays correct in every mode.
+        val gateToolType = event.getToolType(0)
+        if (gateToolType == MotionEvent.TOOL_TYPE_STYLUS || gateToolType == MotionEvent.TOOL_TYPE_ERASER) {
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> markPenDown()
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> markPenUp()
+            }
+        }
+
+        // In any mode that disables the SDK raw-drawing path (setRawDrawingEnabled=false),
+        // the SDK never fires onBeginRawErasing for the stylus button/eraser-end. Intercept
+        // via Android events before the per-mode handler gets a chance to drop the event.
+        // BOOX reports the barrel button as TOOL_TYPE_ERASER; also check BUTTON_STYLUS_PRIMARY.
+        if (isTextPlacementMode || isLassoMode || isLassoEraserMode || isShapeTransformMode) {
+            val t = event.getToolType(0)
+            if (t == MotionEvent.TOOL_TYPE_ERASER
+                || (t == MotionEvent.TOOL_TYPE_STYLUS
+                    && (event.buttonState and MotionEvent.BUTTON_STYLUS_PRIMARY) != 0)) {
+                return handleBarrelButtonErase(event)
+            }
+        }
         if (isTextPlacementMode) return handleTextPlacementTouch(event)
+        if (isShapeTransformMode) return handleShapeTransformTouch(event)
         if (isLassoMode) return handleLassoTouch(event)
         if (isLassoEraserMode) return handleLassoEraserTouch(event)
         return if (isSetup) touchHelper.onTouchEvent(event) else super.onTouchEvent(event)
+    }
+
+    private fun handleBarrelButtonErase(event: MotionEvent): Boolean {
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                eraseAtPath(listOf(PointF(event.x, event.y)))
+            }
+            MotionEvent.ACTION_MOVE -> {
+                val pts = mutableListOf<PointF>()
+                for (i in 0 until event.historySize) pts.add(PointF(event.getHistoricalX(i), event.getHistoricalY(i)))
+                pts.add(PointF(event.x, event.y))
+                eraseAtPath(pts)
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                eraseAtPath(listOf(PointF(event.x, event.y)))
+                finalizeEraseRedraw()
+                post {
+                    EpdController.handwritingRepaint(this, Rect(0, 0, width, height))
+                }
+                onPenLifted?.invoke()
+            }
+        }
+        return true
     }
 
     private fun handleTextPlacementTouch(event: MotionEvent): Boolean {
@@ -1130,19 +1409,28 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
                     dragOriginalLinks = links
                         .filter { it.id in lassoSelectedIds }
                         .map { it.translate(0f, 0f) }
-                    // Build backing bitmap without selected strokes/headings/textObjects/lineObjects/links (held for drag).
+                    dragOriginalStickyNotes = stickyNotes
+                        .filter { it.id in lassoSelectedIds }
+                        .map { it.translate(0f, 0f) }
+                    dragOriginalShapeObjects = shapeObjects
+                        .filter { it.id in lassoSelectedIds }
+                        .map { it.copy(boundingBox = RectF(it.boundingBox)) }
+                    // Build backing bitmap without selected strokes/headings/textObjects/lineObjects/links/stickyNotes/shapes (held for drag).
                     val nonSelectedStrokes  = strokes.filter { it.id !in lassoSelectedIds }
                     val nonSelectedHeadings = headings.filter { it.id !in lassoSelectedIds }
                     val nonSelectedTexts    = textObjects.filter { it.id !in lassoSelectedIds }
                     val nonSelectedLines    = lineObjects.filter { it.id !in lassoSelectedIds }
                     val nonSelectedLinks    = links.filter { it.id !in lassoSelectedIds }
-                    dragBackingBitmap = buildRenderBitmap(nonSelectedStrokes, templateBitmap, nonSelectedHeadings, nonSelectedTexts, nonSelectedLines, nonSelectedLinks)
+                    val nonSelectedStickyNotes = stickyNotes.filter { it.id !in lassoSelectedIds }
+                    val nonSelectedShapes = shapeObjects.filter { it.id !in lassoSelectedIds }
+                    dragBackingBitmap = buildRenderBitmap(nonSelectedStrokes, templateBitmap, nonSelectedHeadings, nonSelectedTexts, nonSelectedLines, nonSelectedLinks, nonSelectedStickyNotes, shapeObjects = nonSelectedShapes)
                     snapObjectTargets = if (isSnapEnabled) (nonSelectedHeadings.map { RectF(it.boundingBox) } + nonSelectedTexts.map { RectF(it.boundingBox) } + nonSelectedLines.map { RectF(it.boundingBox) } + nonSelectedLinks.map { RectF(it.boundingBox) }) else emptyList()
                     epd { "DRAG_START selected=${lassoSelectedIds.size}" }
                     return true
                 }
                 // Normal lasso: clear any existing selection so the user sees immediate feedback.
                 lassoGestureHadSelection = lassoSelectionBox != null
+                lassoPreClearSelectionBox = lassoSelectionBox?.let { RectF(it) }
                 lassoSelectionBox  = null
                 lassoOverlayPath   = null
                 invalidate()
@@ -1248,6 +1536,15 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
                         }
                         // Translate selected links (bbox + every embedded object's coordinates).
                         val movedLinks = dragOriginalLinks.map { it.translate(dragDx, dragDy) }
+                        // Translate selected sticky notes (icon bbox only — content is in its own space).
+                        val movedStickyNotes = dragOriginalStickyNotes.map { it.translate(dragDx, dragDy) }
+                        val movedShapes = dragOriginalShapeObjects.map { s ->
+                            s.copy(
+                                centerX = s.centerX + dragDx,
+                                centerY = s.centerY + dragDy,
+                                boundingBox = RectF(s.boundingBox).apply { offset(dragDx, dragDy) },
+                            )
+                        }
                         // Update in-memory stroke list with translated positions.
                         val movedById = movedStrokes.associateBy { it.id }
                         val updated = strokes.map { movedById[it.id] ?: it }
@@ -1264,6 +1561,11 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
                         // Update in-memory link list with translated positions.
                         val linkById = movedLinks.associateBy { it.id }
                         links = links.map { linkById[it.id] ?: it }
+                        // Update in-memory sticky note list with translated icon boxes.
+                        val stickyById = movedStickyNotes.associateBy { it.id }
+                        stickyNotes = stickyNotes.map { stickyById[it.id] ?: it }
+                        val shapeById = movedShapes.associateBy { it.id }
+                        shapeObjects = shapeObjects.map { shapeById[it.id] ?: it }
                         // Translate selection box to match new positions.
                         lassoSelectionBox = lassoSelectionBox?.let { b ->
                             RectF(b.left + dragDx, b.top + dragDy, b.right + dragDx, b.bottom + dragDy)
@@ -1274,12 +1576,15 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
                         val origTextObjects = dragOriginalTextObjects
                         val origLineObjects = dragOriginalLineObjects
                         val origLinks = dragOriginalLinks
+                        val origStickyNotes = dragOriginalStickyNotes
+                        val origShapes = dragOriginalShapeObjects
                         dragBackingBitmap?.recycle(); dragBackingBitmap = null
                         isDragMoveActive = false; dragThresholdMet = false
                         dragDx = 0f; dragDy = 0f; activeSnapGuides = emptyList(); snapObjectTargets = emptyList()
                         dragOriginalStrokes = emptyList(); dragOriginalHeadings = emptyList()
                         dragOriginalTextObjects = emptyList(); dragOriginalLineObjects = emptyList()
-                        dragOriginalLinks = emptyList()
+                        dragOriginalLinks = emptyList(); dragOriginalStickyNotes = emptyList()
+                        dragOriginalShapeObjects = emptyList()
                         EpdController.setViewDefaultUpdateMode(this, UpdateMode.GU)
                         epd { "DRAG_COMMIT A2_MODE_OFF" }
                         redrawCanvas(caller = "dragCommit")
@@ -1287,7 +1592,7 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
                             EpdController.handwritingRepaint(this, Rect(0, 0, width, height))
                             epd { "HANDWRITING_REPAINT caller=dragCommit" }
                         }
-                        onStrokesMoved?.invoke(origStrokes, movedStrokes, origHeadings, movedHeadings, origTextObjects, movedTextObjects, origLineObjects, movedLineObjects, origLinks, movedLinks)
+                        onStrokesMoved?.invoke(origStrokes, movedStrokes, origHeadings, movedHeadings, origTextObjects, movedTextObjects, origLineObjects, movedLineObjects, origLinks, movedLinks, origStickyNotes, movedStickyNotes, origShapes, movedShapes)
                     } else {
                         // Below threshold — treat as a tap inside the selection box.
                         val tapX = event.x; val tapY = event.y
@@ -1296,7 +1601,8 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
                         dragDx = 0f; dragDy = 0f; activeSnapGuides = emptyList(); snapObjectTargets = emptyList()
                         dragOriginalStrokes = emptyList(); dragOriginalHeadings = emptyList()
                         dragOriginalTextObjects = emptyList(); dragOriginalLineObjects = emptyList()
-                        dragOriginalLinks = emptyList()
+                        dragOriginalLinks = emptyList(); dragOriginalStickyNotes = emptyList()
+                        dragOriginalShapeObjects = emptyList()
                         epd { "DRAG_CANCELLED threshold_not_met -> onLassoTap" }
                         onLassoTap?.invoke(tapX, tapY)
                     }
@@ -1321,10 +1627,19 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
                 if (gestureBounds.width() < thresholdPx && gestureBounds.height() < thresholdPx) {
                     val hadSelection = lassoGestureHadSelection
                     lassoGestureHadSelection = false
-                    onLassoTapToDismiss?.invoke()
-                    if (!hadSelection) onLassoTap?.invoke(event.x, event.y)
+                    val savedBox = lassoPreClearSelectionBox
+                    lassoPreClearSelectionBox = null
+                    if (hadSelection && savedBox != null && savedBox.contains(event.x, event.y)) {
+                        // Tap inside the former selection — let onLassoTap decide (e.g. shape
+                        // transform, heading edit). selectedObjectIds is still populated.
+                        onLassoTap?.invoke(event.x, event.y)
+                    } else {
+                        onLassoTapToDismiss?.invoke()
+                        if (!hadSelection) onLassoTap?.invoke(event.x, event.y)
+                    }
                 } else {
                     lassoGestureHadSelection = false
+                    lassoPreClearSelectionBox = null
                     onLassoComplete?.invoke(path, start)
                 }
             }
@@ -1360,8 +1675,14 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
             for (lineObj in dragOriginalLineObjects) {
                 drawLineObject(canvas, lineObj)
             }
+            for (shape in dragOriginalShapeObjects) {
+                drawShapeObject(canvas, shape)
+            }
             for (link in dragOriginalLinks) {
                 drawLinkObject(canvas, link, width)
+            }
+            for (note in dragOriginalStickyNotes) {
+                drawStickyNoteObject(canvas, note)
             }
             for (stroke in dragOriginalStrokes) {
                 val pts = stroke.points; if (pts.size < 2) continue
@@ -1381,7 +1702,23 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
             return
         }
 
-        renderBitmap?.let { canvas.drawBitmap(it, 0f, 0f, null) } ?: canvas.drawColor(Color.WHITE)
+        // Committed content: blit the cached hardware RenderNode on a hardware canvas; fall back to
+        // drawing the vector content directly on a software canvas (e.g. if the Onyx SDK captures the
+        // view through a software canvas) or before the node's first record.
+        if (canvas.isHardwareAccelerated && committedNode.hasDisplayList()) {
+            canvas.drawRenderNode(committedNode)
+        } else {
+            drawCommittedContent(canvas)
+        }
+
+        // Shape transform overlay — drawn on top of the committed content, below lasso chrome.
+        if (isShapeTransformMode) {
+            val r = transformController.getWorkingRender()
+            if (r != null) {
+                drawShapeObject(canvas, r)
+                transformController.draw(canvas)
+            }
+        }
 
         // Lasso overlay — drawn on top of everything.
         if (isLassoEraserMode) {
@@ -1395,11 +1732,32 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
     override fun onDetachedFromWindow() {
         epd { "ON_DETACHED_FROM_WINDOW isSetup=$isSetup" }
         super.onDetachedFromWindow()
-        if (isSetup) {
+        closeRawDrawingIfOwner("onDetachedFromWindow")
+    }
+
+    /**
+     * Close the global Onyx raw-drawing pipeline — but ONLY if this view still owns it.
+     *
+     * The pipeline is a single process-global resource (see [penOwner]). If a newer
+     * [OnyxNotebookView] has already claimed it (`penOwner !== this`), calling
+     * [TouchHelper.closeRawDrawing] here would tear down THAT view's live pen session — the
+     * "canvas goes dead after switching screens" bug. In that case we skip the global close and
+     * only drop our own [isSetup] flag; the current owner manages its own teardown. When we ARE the
+     * owner we close cleanly and relinquish ownership. Idempotent via the [isSetup] guard.
+     */
+    private fun closeRawDrawingIfOwner(caller: String) {
+        if (!isSetup) return
+        if (penOwner === this) {
             touchHelper.closeRawDrawing()
-            epd { "CLOSE_RAW_DRAWING caller=onDetachedFromWindow" }
-            isSetup = false
+            penOwner = null
+            // Drop the handwriting fast-mode so menus / dialogs / other screens render in normal
+            // quality; the next owner re-applies it when it opens the pen pipeline.
+            EpdController.clearAppScopeUpdate()
+            epd { "CLOSE_RAW_DRAWING caller=$caller owner=self" }
+        } else {
+            epd { "CLOSE_RAW_DRAWING_SKIPPED caller=$caller reason=notOwner" }
         }
+        isSetup = false
     }
 
     // ── NotebookView interface ────────────────────────────────────────────────
@@ -1425,7 +1783,7 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
     }
 
     override fun enableDrawing() {
-        if (isSetup && !isLassoMode && !isLassoEraserMode && !isTextPlacementMode) {
+        if (isSetup && !isLassoMode && !isLassoEraserMode && !isTextPlacementMode && !isShapeTransformMode) {
             touchHelper.setRawDrawingEnabled(true)
             epd { "RAW_DRAWING_ENABLED true caller=enableDrawing" }
             if (isEraserMode) {
@@ -1440,6 +1798,29 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
             touchHelper.setRawDrawingEnabled(false)
             epd { "RAW_DRAWING_ENABLED false caller=disableDrawing" }
         }
+    }
+
+    override fun resumeDrawing() {
+        epd { "RESUME_DRAWING isSetup=$isSetup isOwner=${penOwner === this} size=${width}x${height}" }
+        when {
+            // Pipeline was released (our onStop/handoff closed it, or it was never opened): reopen
+            // once the view is laid out. Before layout, openRawDrawing() runs from the global-layout
+            // listener in onAttachedToWindow instead.
+            !isSetup -> if (width > 0 && height > 0) openRawDrawing()
+            // Still marked open, but another drawing screen claimed the global pipeline while we were
+            // paused (typically a translucent scratch pad / sticky note overlay). onResume runs
+            // before that overlay's onDestroy, so the pipeline is still live here — openRawDrawing()
+            // restarts it and re-claims ownership; the overlay's later close is then skipped by the
+            // ownership guard. This reclaim is focus-event-independent (the BOOX-flaky path).
+            penOwner !== this -> openRawDrawing()
+            // We already own a live session: just re-enable input — lightweight, no EPD churn.
+            else -> enableDrawing()
+        }
+    }
+
+    override fun releaseForHandoff() {
+        epd { "RELEASE_FOR_HANDOFF isSetup=$isSetup isOwner=${penOwner === this}" }
+        closeRawDrawingIfOwner("releaseForHandoff")
     }
 
     override fun releaseRender() {
@@ -1483,7 +1864,8 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
             dragDx = 0f; dragDy = 0f; activeSnapGuides = emptyList()
             dragOriginalStrokes = emptyList(); dragOriginalHeadings = emptyList()
             dragOriginalTextObjects = emptyList(); dragOriginalLineObjects = emptyList()
-            dragOriginalLinks = emptyList()
+            dragOriginalLinks = emptyList(); dragOriginalStickyNotes = emptyList()
+            dragOriginalShapeObjects = emptyList()
             invalidate()
             epd { "INVALIDATE caller=setDragMoveMode_cancel" }
         }
@@ -1514,7 +1896,7 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
                 EpdController.handwritingRepaint(this, Rect(0, 0, width, height))
                 epd { "HANDWRITING_REPAINT caller=setLassoMode_exit" }
                 post {
-                    if (isSetup && !isLassoMode && !isLassoEraserMode) {
+                    if (isSetup && !isLassoMode && !isLassoEraserMode && !isShapeTransformMode) {
                         touchHelper.setRawDrawingEnabled(true)
                         epd { "RAW_DRAWING_ENABLED true caller=setLassoMode_exit" }
                         // setRawDrawingEnabled may re-enable the SDK render path internally;
@@ -1552,7 +1934,7 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
                 EpdController.handwritingRepaint(this, Rect(0, 0, width, height))
                 epd { "HANDWRITING_REPAINT caller=setLassoEraserMode_exit" }
                 post {
-                    if (isSetup && !isLassoMode && !isLassoEraserMode) {
+                    if (isSetup && !isLassoMode && !isLassoEraserMode && !isShapeTransformMode) {
                         touchHelper.setRawDrawingEnabled(true)
                         epd { "RAW_DRAWING_ENABLED true caller=setLassoEraserMode_exit" }
                         if (isEraserMode) {
@@ -1564,6 +1946,89 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
             }
         }
     }
+
+    // ── Shape transform mode ─────────────────────────────────────────────────
+
+    override fun enterShapeTransform(render: ShapeRender) {
+        transformBeforeRender = render
+        transformController.attach(render)
+        isShapeTransformMode = true
+        if (isSetup) {
+            touchHelper.setRawDrawingEnabled(false)
+            epd { "RAW_DRAWING_ENABLED false caller=enterShapeTransform" }
+            touchHelper.setRawDrawingRenderEnabled(false)
+            epd { "RENDER_DISABLED caller=enterShapeTransform" }
+        }
+        invalidate()
+        epd { "INVALIDATE caller=enterShapeTransform" }
+    }
+
+    override fun exitShapeTransform() {
+        val before = transformBeforeRender ?: return
+        val after  = transformController.getWorkingRender() ?: before
+        onShapeTransformed?.invoke(before, after)
+        transformBeforeRender = null
+        isShapeTransformMode  = false
+        invalidate()
+        epd { "INVALIDATE caller=exitShapeTransform" }
+        post {
+            EpdController.handwritingRepaint(this, Rect(0, 0, width, height))
+            epd { "HANDWRITING_REPAINT caller=exitShapeTransform" }
+            post {
+                if (isSetup && !isLassoMode && !isLassoEraserMode && !isShapeTransformMode) {
+                    touchHelper.setRawDrawingEnabled(true)
+                    epd { "RAW_DRAWING_ENABLED true caller=exitShapeTransform" }
+                    if (isEraserMode) {
+                        touchHelper.setRawDrawingRenderEnabled(false)
+                        epd { "RENDER_DISABLED caller=exitShapeTransform_eraserMode" }
+                    }
+                }
+            }
+        }
+    }
+
+    private fun handleShapeTransformTouch(event: MotionEvent): Boolean {
+        if (event.getToolType(0) != MotionEvent.TOOL_TYPE_STYLUS) return false
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                val grab = transformController.onDown(event.x, event.y)
+                if (grab == ShapeTransformController.Grab.NONE) {
+                    // Tap outside: commit and signal the activity to clear selection.
+                    exitShapeTransform()
+                    post { onShapeTransformTapOutside?.invoke() }
+                } else {
+                    onShapeTransformDragStarted?.invoke()
+                }
+                invalidate()
+            }
+            MotionEvent.ACTION_MOVE -> {
+                transformController.onMove(event.x, event.y)
+                invalidate()
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                transformController.onUp()
+                if (event.actionMasked == MotionEvent.ACTION_UP) {
+                    transformController.getWorkingRender()?.let {
+                        onShapeTransformMoved?.invoke(it.boundingBox)
+                    }
+                }
+                invalidate()
+            }
+        }
+        return true
+    }
+
+    override fun toggleShapeAspectLock(): ShapeRender? {
+        if (!isShapeTransformMode) return null
+        val updated = transformController.toggleAspectLock()
+        if (updated != null) invalidate()
+        return updated
+    }
+
+    override fun getShapeTransformWorkingRender(): ShapeRender? =
+        if (isShapeTransformMode) transformController.getWorkingRender() else null
+
+    // ── Lasso eraser ─────────────────────────────────────────────────────────
 
     private fun handleLassoEraserTouch(event: MotionEvent): Boolean {
         if (event.getToolType(0) != MotionEvent.TOOL_TYPE_STYLUS) return false
@@ -1630,13 +2095,15 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
     private fun performLassoErase(drawnPath: Path, startPoint: PointF) {
         drawnPath.lineTo(startPoint.x, startPoint.y)
         drawnPath.close()
-        val strokeSnapshot  = strokes.toList()
-        val headingSnapshot = headings.toList()
-        val textSnapshot    = textObjects.toList()
-        val lineSnapshot    = lineObjects.toList()
-        val linkSnapshot    = links.toList()
+        val strokeSnapshot    = strokes.toList()
+        val headingSnapshot   = headings.toList()
+        val textSnapshot      = textObjects.toList()
+        val lineSnapshot      = lineObjects.toList()
+        val linkSnapshot      = links.toList()
+        val stickyNoteSnapshot = stickyNotes.toList()
+        val shapeSnapshot      = shapeObjects.toList()
         Thread {
-            val hitIds = runLassoHitTest(drawnPath, strokeSnapshot, headingSnapshot, textSnapshot, lineSnapshot, linkSnapshot)
+            val hitIds = runLassoHitTest(drawnPath, strokeSnapshot, headingSnapshot, textSnapshot, lineSnapshot, linkSnapshot, stickyNoteSnapshot, shapeSnapshot)
             post {
                 // Clear overlay regardless of result.
                 lassoOverlayPath       = null
@@ -1659,6 +2126,8 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
         textObjects: List<TextRender> = emptyList(),
         lineObjects: List<LineRender> = emptyList(),
         links: List<LinkRender> = emptyList(),
+        stickyNotes: List<StickyNoteRender> = emptyList(),
+        shapes: List<ShapeRender> = emptyList(),
     ): List<String> {
         val bounds = RectF()
         path.computeBounds(bounds, true)
@@ -1707,6 +2176,18 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
                 hitIds.add(link.id)
             }
         }
+        for (note in stickyNotes) {
+            if (!RectF.intersects(bounds, note.boundingBox)) continue
+            if (LassoGeometry.regionIntersectsBox(region, note.boundingBox)) {
+                hitIds.add(note.id)
+            }
+        }
+        for (shape in shapes) {
+            if (!RectF.intersects(bounds, shape.boundingBox)) continue
+            if (LassoGeometry.regionIntersectsBox(region, shape.boundingBox)) {
+                hitIds.add(shape.id)
+            }
+        }
         return hitIds
     }
 
@@ -1716,8 +2197,14 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
     }
 
     override fun setLassoOverlay(path: Path?, selectionBox: RectF?) {
+        // Skip the full-panel EPD refresh when nothing was showing and nothing will show (e.g. a
+        // page turn clears a selection that isn't there) — avoids a wasted refresh. Still refreshes
+        // when actually dismissing a visible selection box (wasEmpty == false).
+        val wasEmpty = lassoOverlayPath == null && lassoSelectionBox == null
+        val isEmpty  = path == null && selectionBox == null
         lassoOverlayPath  = path
         lassoSelectionBox = selectionBox
+        if (wasEmpty && isEmpty) return
         invalidate()
         epd { "INVALIDATE caller=setLassoOverlay" }
         post {
@@ -1728,11 +2215,6 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
 
     override fun setEraserMode(active: Boolean) {
         epd { "SET_ERASER_MODE active=$active isSetup=$isSetup" }
-        if (active) {
-            // Capture snapshot BEFORE releasing the overlay so strokes are still in memory.
-            // This is a non-writing transition boundary: the user is switching tools.
-            captureSnapshot()?.let { onSnapshotReady?.invoke(it) }
-        }
         isEraserMode = active
         if (isSetup) {
             touchHelper.setEraserRawDrawingEnabled(active, if (active) (ERASER_RADIUS_PX * 2).toInt() else 0)
@@ -1759,9 +2241,6 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
      */
     override fun setTemplate(bitmap: Bitmap?) {
         epd { "SET_TEMPLATE_START hasTemplate=${bitmap != null} isSetup=$isSetup" }
-        // Capture snapshot BEFORE the template changes — snapshot is strokes-only so it
-        // remains valid across template switches.  Must run before templateBitmap is updated.
-        captureSnapshot()?.let { onSnapshotReady?.invoke(it) }
         templateBitmap = bitmap
         if (isSetup) {
             touchHelper.setRawDrawingRenderEnabled(false)
@@ -1784,27 +2263,44 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
         }
     }
 
+    /**
+     * Clear in-memory content for a page navigation with NO EPD refresh: the current page stays
+     * visible on the panel (the committed node is left intact) until the incoming page's
+     * [loadStrokesWithBitmap] swaps it in with a single refresh — eliminating the erase-to-white
+     * double-flash. Raw-drawing render is disabled so stray pen input during the load window does not
+     * land on the outgoing page; [loadStrokesWithBitmap] re-arms it.
+     */
+    override fun clearForPageLoad() {
+        epd { "CLEAR_FOR_PAGE_LOAD isSetup=$isSetup strokeCountBefore=${strokes.size}" }
+        strokes.clear()
+        headings = emptyList()
+        textObjects = emptyList()
+        lineObjects = emptyList()
+        shapeObjects = emptyList()
+        links = emptyList()
+        stickyNotes = emptyList()
+        if (isSetup) {
+            touchHelper.setRawDrawingRenderEnabled(false)
+            epd { "RENDER_DISABLED caller=clearForPageLoad" }
+        }
+        // Deliberately no redrawCanvas / invalidate / handwritingRepaint — keep the old node on screen.
+    }
+
     override fun eraseAll() {
         epd { "ERASE_ALL_START isSetup=$isSetup strokeCountBefore=${strokes.size}" }
         strokes.clear()
         headings = emptyList()
         textObjects = emptyList()
         lineObjects = emptyList()
+        shapeObjects = emptyList()
         links = emptyList()
+        stickyNotes = emptyList()
         if (isSetup) {
             touchHelper.setRawDrawingRenderEnabled(false)
             epd { "RENDER_DISABLED caller=eraseAll" }
         }
-        // Clear to white then re-apply template so the template persists after erase.
-        renderCanvas?.let { canvas ->
-            canvas.drawColor(Color.WHITE)
-            epd { "WHITE_BITMAP_FILL caller=eraseAll" }
-            templateBitmap?.let { tb ->
-                canvas.drawBitmap(tb, null, RectF(0f, 0f, width.toFloat(), height.toFloat()), null)
-            }
-        }
-        invalidate()
-        epd { "INVALIDATE caller=eraseAll" }
+        // Re-record the (now empty) committed layer: white → template only. redrawCanvas invalidates.
+        redrawCanvas(caller = "eraseAll")
         post {
             EpdController.handwritingRepaint(this, Rect(0, 0, width, height))
             epd { "HANDWRITING_REPAINT caller=eraseAll" }
@@ -1833,27 +2329,11 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
 
     override fun getTextObjects(): List<TextRender> = textObjects
 
-    override fun compositeTextObjects(bitmap: Bitmap) {
-        if (textObjects.isEmpty()) return
-        val canvas = android.graphics.Canvas(bitmap)
-        for (textObj in textObjects) {
-            drawTextObject(canvas, textObj, bitmap.width)
-        }
-    }
-
     override fun loadLineObjects(lineObjects: List<LineRender>) {
         this.lineObjects = lineObjects
     }
 
     override fun getLineObjects(): List<LineRender> = lineObjects
-
-    override fun compositeLineObjects(bitmap: Bitmap) {
-        if (lineObjects.isEmpty()) return
-        val canvas = android.graphics.Canvas(bitmap)
-        for (lineObj in lineObjects) {
-            drawLineObject(canvas, lineObj)
-        }
-    }
 
     override fun loadLinks(links: List<LinkRender>) {
         this.links = links
@@ -1861,13 +2341,18 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
 
     override fun getLinks(): List<LinkRender> = links
 
-    override fun compositeLinks(bitmap: Bitmap) {
-        if (links.isEmpty()) return
-        val canvas = android.graphics.Canvas(bitmap)
-        for (link in links) {
-            drawLinkObject(canvas, link, bitmap.width)
-        }
+    override fun loadStickyNotes(stickyNotes: List<StickyNoteRender>) {
+        this.stickyNotes = stickyNotes
+        redrawCanvas(caller = "loadStickyNotes")
     }
+
+    override fun getStickyNotes(): List<StickyNoteRender> = stickyNotes
+
+    override fun loadShapeObjects(shapeObjects: List<ShapeRender>) {
+        this.shapeObjects = shapeObjects
+    }
+
+    override fun getShapeObjects(): List<ShapeRender> = shapeObjects
 
     override fun loadStrokes(strokes: List<LiveStroke>) {
         val loadStart = System.currentTimeMillis()
@@ -1894,6 +2379,8 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
         textObjects: List<TextRender>?,
         lineObjects: List<LineRender>?,
         links: List<LinkRender>?,
+        stickyNotes: List<StickyNoteRender>?,
+        shapeObjects: List<ShapeRender>?,
     ): Bitmap? {
         val buildStart = System.currentTimeMillis()
         epd { "BUILD_RENDER_BITMAP_START strokeCount=${strokes.size} hasTemplate=${templateBitmap != null}" }
@@ -1906,6 +2393,8 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
         val effectiveTextObjects = textObjects ?: this.textObjects
         val effectiveLineObjects = lineObjects ?: this.lineObjects
         val effectiveLinks = links ?: this.links
+        val effectiveStickyNotes = stickyNotes ?: this.stickyNotes
+        val effectiveShapeObjects = shapeObjects ?: this.shapeObjects
         val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
         val canvas = android.graphics.Canvas(bmp)
         canvas.drawColor(android.graphics.Color.WHITE)
@@ -1929,8 +2418,14 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
         for (lineObj in effectiveLineObjects) {
             drawLineObject(canvas, lineObj)
         }
+        for (shape in effectiveShapeObjects) {
+            drawShapeObject(canvas, shape)
+        }
         for (link in effectiveLinks) {
             drawLinkObject(canvas, link, w)
+        }
+        for (note in effectiveStickyNotes) {
+            drawStickyNoteObject(canvas, note)
         }
         for (liveStroke in strokes) {
             val pts = liveStroke.points
@@ -1952,7 +2447,7 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
      */
     override fun loadStrokesWithBitmap(
         strokes: List<LiveStroke>,
-        bitmap: Bitmap,
+        bitmap: Bitmap?,
         templateBitmap: Bitmap?,
     ) {
         val loadStart = System.currentTimeMillis()
@@ -1967,14 +2462,12 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
             epd { "RENDER_DISABLED caller=loadStrokesWithBitmap" }
         }
 
-        // Swap in the pre-built bitmap and bind a new renderCanvas to it so future
-        // stroke commits via renderStroke() draw to the correct surface.
-        renderBitmap?.recycle()
-        renderBitmap = bitmap
-        renderCanvas = android.graphics.Canvas(bitmap)
-
-        invalidate()
-        epd { "INVALIDATE caller=loadStrokesWithBitmap" }
+        // GPU path: the content is already in the in-memory lists (strokes above; headings/text/
+        // lines/shapes/links/sticky set by the caller before this call), so record the committed node
+        // directly. Any off-thread-built [bitmap] is not needed for display — release it. redrawCanvas
+        // invalidates.
+        bitmap?.recycle()
+        redrawCanvas(caller = "loadStrokesWithBitmap")
         post {
             EpdController.handwritingRepaint(this, Rect(0, 0, width, height))
             epd { "HANDWRITING_REPAINT caller=loadStrokesWithBitmap" }
@@ -2001,12 +2494,18 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
      * Returns null if there are no strokes and no headings, or the view is not yet laid out.
      */
     override fun captureSnapshot(): String? {
-        if (strokes.isEmpty() && headings.isEmpty() && textObjects.isEmpty() && lineObjects.isEmpty() && links.isEmpty()) return null
+        if (strokes.isEmpty() && headings.isEmpty() && textObjects.isEmpty() && lineObjects.isEmpty() && links.isEmpty() && stickyNotes.isEmpty()) return null
         val w = width; val h = height
         if (w == 0 || h == 0) return null
         val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
-        // Transparent base — do NOT fill with white, do NOT paint the template.
+        // Complete cover image: white base + template + content. The snapshot's only consumer is the
+        // library-grid cover, shown directly (no compositing over a template at load), so it must
+        // paint the full page like the page-index/PDF render does.
         val snapshotCanvas = Canvas(bmp)
+        snapshotCanvas.drawColor(Color.WHITE)
+        templateBitmap?.let { tb ->
+            snapshotCanvas.drawBitmap(tb, null, RectF(0f, 0f, w.toFloat(), h.toFloat()), null)
+        }
         for (heading in headings) {
             if (heading.recognizedText != null) {
                 drawHeadingText(snapshotCanvas, heading)
@@ -2030,6 +2529,9 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
         for (link in links) {
             drawLinkObject(snapshotCanvas, link, w)
         }
+        for (note in stickyNotes) {
+            drawStickyNoteObject(snapshotCanvas, note)
+        }
         for (liveStroke in strokes) {
             val points = liveStroke.points
             if (points.size < 2) continue
@@ -2038,10 +2540,9 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
             for (i in 1 until points.size) path.lineTo(points[i].x, points[i].y)
             snapshotCanvas.drawPath(path, strokePaint)
         }
-        val stream = ByteArrayOutputStream()
-        bmp.compress(Bitmap.CompressFormat.PNG, 100, stream)
+        val b64 = ImageCodec.encodeBase64(bmp)
         bmp.recycle()
-        return Base64.encodeToString(stream.toByteArray(), Base64.DEFAULT)
+        return b64
     }
 
     /**
@@ -2057,14 +2558,8 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
 
     override fun releaseResources() {
         epd { "RELEASE_RESOURCES isSetup=$isSetup" }
-        if (isSetup) {
-            touchHelper.closeRawDrawing()
-            epd { "CLOSE_RAW_DRAWING caller=releaseResources" }
-            isSetup = false
-        }
-        renderBitmap?.recycle()
-        renderBitmap = null
-        renderCanvas = null
+        closeRawDrawingIfOwner("releaseResources")
+        committedNode.discardDisplayList()
         dragBackingBitmap?.recycle()
         dragBackingBitmap = null
     }
@@ -2079,8 +2574,8 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
         val limitRect = Rect(
             maxOf(0, frame.left - loc[0]),
             maxOf(0, frame.top - loc[1]),
-            frame.right - loc[0],
-            frame.bottom - loc[1]
+            minOf(width, frame.right - loc[0]),
+            minOf(height, frame.bottom - loc[1])
         )
         // Pass an off-screen dummy rect instead of emptyList() when there is no exclusion.
         // The Onyx SDK treats an empty list as a no-op — it silently ignores the call and
@@ -2109,12 +2604,24 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
             touchHelper.restartRawDrawing()
             epd { "RESTART_RAW_DRAWING caller=openRawDrawing_alreadySetup" }
         }
+        // This view now owns the single process-global raw-drawing pipeline (see [penOwner]).
+        // Any older view's pending close is neutralised by [closeRawDrawingIfOwner].
+        penOwner = this
+        epd { "PEN_OWNER_CLAIMED caller=openRawDrawing" }
         if (!isLassoMode && !isLassoEraserMode && !isTextPlacementMode) {
             touchHelper.setRawDrawingEnabled(true)
             epd { "RAW_DRAWING_ENABLED true caller=openRawDrawing" }
             if (isEraserMode) {
                 touchHelper.setRawDrawingRenderEnabled(false)
                 epd { "RENDER_DISABLED caller=openRawDrawing_eraserMode" }
+            } else {
+                // First-stroke fix: pin the app into the fast handwriting waveform so the first stroke
+                // after this open / a page-flip doesn't pay a GC→handwriting mode-switch. Stays active
+                // for the whole pen session (across page flips); cleared in closeRawDrawingIfOwner.
+                EpdController.applyAppScopeUpdate(
+                    HWR_APP_SCOPE, true, false, UpdateMode.HAND_WRITING_REPAINT_MODE, 0
+                )
+                epd { "APP_SCOPE_FAST applied caller=openRawDrawing" }
             }
         }
         EpdController.setUpdListSize(EPD_UPDATE_LIST_SIZE)

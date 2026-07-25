@@ -108,7 +108,7 @@ class CustomizeToolbarDialog(
 
         dialog.show()
         dialog.window?.setElevation(0f)
-        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
 
         // Cap the scrolling list height so the fixed header + the AlertDialog's title + button bar
         // always have room. With a wrap_content ScrollView, a tall list can squeeze the Save/Cancel

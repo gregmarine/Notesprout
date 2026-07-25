@@ -1,8 +1,8 @@
 # Full Notebook Export
 
 > Referenced from `CLAUDE.md`. Covers the export format, `notebook_meta` schema, continuous
-> upkeep, the copy engine, and the encrypted trade-off. Import is **out of scope** for the current
-> implementation (see stub below).
+> upkeep, the copy engine, and the encrypted trade-off — plus the **full import pipeline**
+> (probe → unlock → placement → collision → keying), which is implemented; see [Import](#import).
 
 ---
 
@@ -13,11 +13,17 @@ user-chosen destination via **Save to device** (`CreateDocument`) or **Share** (
 sheet via FileProvider). The file is **self-describing**: an embedded `notebook_meta` table inside
 the `.soil` carries the import metadata, so no external manifest or wrapper is needed.
 
+Every export in the app — `.soil` included — runs through the single **`ExportActivity`** screen.
 Entry points:
-- **MainActivity** — long-press context menu → Export → "Export Notebook (.soil)" (format chooser)
-- **NotebookActivity** — toolbar Export button → "Export Notebook (.soil)" (format chooser)
 
-Both flow through the same Save/Share AlertDialog after packaging.
+- **MainActivity** — long-press context menu → Export
+- **NotebookActivity** — canvas long-press "Page" menu → Export (bottom item; flushes ink first)
+- **PageIndexActivity** — select pages → Export (seeds the "Selected (n)" scope)
+
+The screen presents Pages / Format / Options / Encryption / Destination at once; the top-right
+Export button runs the job and hands the result straight to the chosen destination. `.soil` is
+offered only when the scope is **All pages** — it is inherently whole-notebook. See
+[The Export Screen](#the-export-screen).
 
 ---
 
@@ -97,13 +103,68 @@ Key classes:
 
 ---
 
+## The Export Screen
+
+`ExportActivity` (`ExportActivity.kt`, `res/layout/activity_export.xml`) is the only export UI.
+Supporting types live in `export/`:
+
+| File | Role |
+|---|---|
+| `export/ExportSpec.kt` | `ExportFormat` (PDF/PNG/MARKDOWN/TEXT/SOIL), `PageScope`, `ExportDestination`, `SoilKeying`, and the immutable `ExportSpec` describing one job |
+| `export/ExportEngine.kt` | Runs a spec — dispatches to `NotebookExporter` / `NotebookTextExporter` / `NotebookPackager`, and applies the `.soil` keying transform |
+| `export/ExportDelivery.kt` | SAF `CreateDocument` launchers (one per mime), the `OpenDocumentTree` folder write for multi-file PNG, share intents, and the PNG→template import |
+| `export/ExportNaming.kt` | Filename/template-name whitelisting and de-duplication |
+| `data/export/ExportPreset.kt` | One saved set of export choices |
+| `data/export/ExportPresetsManager.kt` | SharedPreferences + kotlinx JSON store for the preset list |
+
+### Presets
+
+The Presets section at the top of the screen saves the current choices for reuse. Rows apply a
+preset on tap and delete it on long-press (with confirmation); `+ Save current settings…` prompts
+for a name (empty field — the user names every preset).
+
+- **A preset never holds a secret.** `usePdfPassword` and `soilKeying` record what was *chosen*;
+  the PDF password and any new `.soil` passphrase are not stored. Applying a preset that needs one
+  re-opens its prompt immediately, so the secret is typed fresh each time. This is the same rule as
+  everywhere else in the app — see [`encryption.md`](encryption.md).
+- **Page scope is not captured.** It belongs to how the screen was opened (a Page Index selection,
+  the current page), not to a reusable preference. Changing scope therefore does *not* clear the
+  active preset, while changing anything a preset does capture does.
+- Applying a `.soil` preset widens the scope to All pages rather than falling back to another
+  format — `.soil` is inherently whole-notebook.
+- `ExportActivity.applyingPreset` guards the widget writes in `applyPreset`: setting a checkbox in
+  code fires its listener, and those listeners clear the active preset, so without the guard a
+  preset would instantly deselect itself.
+- Storage mirrors `ToolbarPreferencesManager` — device-local SharedPreferences, tolerant load, not
+  in `notesprout.db` and not in any `.soil`.
+
+Contract notes:
+
+- The screen receives **notebook identity only** (`EXTRA_NOTEBOOK_ID` / `_NAME`, optional
+  `EXTRA_CURRENT_PAGE_ID`, optional `EXTRA_SELECTED_PAGE_IDS`) — never a `File` or a live DB handle.
+  It reads the page list itself via `data/PageList.kt`'s `loadPageRefs(path, passphrase)`.
+- **Callers must flush unsaved ink before launching.** The screen renders from the `.soil` on disk;
+  `NotebookActivity.openExportScreen` calls `saveStrokes(db)` first for exactly this reason.
+- The key is resolved **once** in `onCreate`: `KeySession` → `PassphraseStore.getGlobalPassphrase`
+  (GLOBAL) → `KeyResolver.resolveForOpen` (NOTEBOOK). An unresolvable key shows a "locked" notice
+  and hides the Export button.
+- Encryption choices are **inline, not prompts**: the unencrypted-export warning is visible text,
+  and the `.soil` keying picker (Keep / Remove / New passphrase) replaces the old
+  `SoilExportKeying` action sheet. Only the two options that need typed input — the PDF password
+  and a new `.soil` passphrase — still open a `PassphrasePrompt`, and they fire from their row
+  rather than after Export.
+- Unavailable options are `GONE`, never disabled — a disabled control is visually silent on e-ink.
+- Progress is inline (`Exporting page 7 of 24…`); Back cancels the running job.
+
+---
+
 ## Export Copy Engine (`NotebookPackager`)
 
-`object NotebookPackager` (`NotebookPackager.kt`) provides two variants:
+### `packageForExport(context, repo, notebookId, openableKey)`
 
-### Cold-file variant — `packageForExport(context, repo, notebookId, openableKey)`
-
-Used from **MainActivity** (notebook is not currently open):
+The single packaging path. Because `ExportActivity` always works from the cold file, the former
+open-DB variant (`packageOpenForExport`) is gone — callers flush and let this open its own
+transient connection:
 
 - `openableKey`: `""` = plaintext; non-empty String = GLOBAL passphrase (open via SoilCrypto);
   `null` = encrypted-NOTEBOOK or key not cached — skip meta refresh, copy as-is.
@@ -115,28 +176,12 @@ Used from **MainActivity** (notebook is not currently open):
   sidecars — after TRUNCATE checkpoint, the WAL is empty and the main file is self-contained).
 - Returns the `File` in the export cache dir.
 
-### Open-DB variant — `packageOpenForExport(context, db, repo, notebookId)`
-
-Used from **NotebookActivity** (notebook is currently open, `db` is the live keyed connection):
-
-- Caller must flush strokes to `db` before invoking (NotebookActivity calls `saveStrokes(db)` first).
-- Refreshes `notebook_meta` with `exportedAt = now` **through the live keyed connection** — no
-  passphrase prompt; the key is already held by `db`. Works identically for plaintext and encrypted.
-- Checkpoints the live connection (`PRAGMA wal_checkpoint(TRUNCATE)`) so the main `.soil` holds all
-  committed content.
-- **Copies the main file only.** The live Room connection stays open; its `-wal`/`-shm` are NOT
-  deleted (SQLite manages them; same rule as `data/PageCopier.kt`). Because the TRUNCATE checkpoint
-  ran and the user isn't drawing during the "Exporting…" modal, the copied main file is complete.
-- Returns the `File` in the export cache dir.
-
 ### Sidecar / cache hygiene
 
 - `exported_notebooks/` is **wiped and recreated** at the start of every export (
   `deleteRecursively()` + `mkdirs()`). No stale `.soil` files accumulate.
 - The copy touches only the main `.soil` file — never `-wal`, `-shm`, or `-journal`.
-- The cold-file path closes the transient DB after checkpoint; Room removes the (empty) WAL and SHM
-  on close.
-- The open-DB path leaves Garden sidecars intact (the live connection owns them).
+- The transient DB is closed after checkpoint; Room removes the (empty) WAL and SHM on close.
 
 ---
 
@@ -204,15 +249,22 @@ Both paths call `startImportFromUri(uri)`.
 4. **Read manifest.** `NotebookImporter.readManifest(file, fallbackName, passphrase?)` opens the file via
    `SoilCrypto.openRaw`, reads `notebook_meta` + page count. Missing `notebook_meta` → `meta = null`,
    fallback name = file's display name minus `.soil`, empty `folderPath` (lands at root or chosen folder).
-   No `notebook` table → `ImportException` → rejected.
-5. **ID collision.** If `meta.notebookId` already exists in the index (live row): **Replace existing** /
-   **Keep both** (fresh UUID) / **Cancel**. Replace keeps the existing row's placement and skips the
-   placement dialog. Keep both proceeds to placement.
-6. **Placement dialog.** "Notebook's folders" (default — recreates missing folders with same UUIDs/names
-   via `ensureFolderWithId`, walking `folderPath` root→parent) or "Choose folder…" (enters
-   `DestinationPickerState.ImportNotebook` — existing picker, no folders created).
+   No `notebook` table → `ImportException` → rejected. **The manifest is untrusted input:** every
+   `notebookId` / folder id read from it is validated (`isSafeImportId` — UUID alphabet only) before it
+   is used as a `soilFile()` path or index key, closing path-traversal; a non-UUID id falls back to a
+   fresh UUID. `SoilMigrator`'s ATTACH statements single-quote-escape the file path.
+5. **ID collision.** If a (validated) `meta.notebookId` already exists in the index (live row):
+   **Replace existing** / **Keep both** (fresh UUID) / **Cancel**. Replace keeps the existing row's
+   placement and skips the placement dialog. Keep both proceeds to placement.
+6. **Placement dialog.** "Notebook's folders" (default) or "Choose folder…". Ancestry recreation is
+   **strictly create-only** (`importFolderCreateOnly`): a folder path segment whose id is missing is
+   created with that UUID/name; an id that already exists — as a live folder, a soft-deleted folder,
+   or a non-folder — is **never mutated**, and the descent stops there (the notebook lands one level
+   up). Imported ancestry can't resurrect, rename, or move the user's own folders.
 7. **Name conflict.** If a notebook of the same name already exists in the target folder: **Replace**
-   (soft-deletes the conflict, imports with same name) or **Keep both** (appends " Copy").
+   or **Keep both** (appends " Copy"). **Replace retires the existing notebook only *after* the import
+   fully commits** (soft-delete → normal trash), so cancelling at a later step leaves it intact; it is
+   refused outright if that notebook is currently open in a `NotebookActivity` (`OpenNotebooks`).
 8. **Keying chooser (encrypted only).** `ActionSheetDialog` after placement is resolved, before writing
    to Garden — "Keep existing passphrase" / "Use this device's global" / "New notebook passphrase".
    See [`docs/encryption.md`](encryption.md) for the scope rule (including GLOBAL→NOTEBOOK downgrade).

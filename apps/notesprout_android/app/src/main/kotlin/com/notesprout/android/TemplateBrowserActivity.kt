@@ -33,11 +33,12 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.lifecycleScope
 import com.notesprout.android.core.BitmapDecode
+import com.notesprout.android.core.ImageCodec
 import com.notesprout.android.core.Slog
 import com.notesprout.android.data.index.IndexRepository
 import com.notesprout.android.data.index.NotesproutIndex
 import com.notesprout.android.data.index.ObjectEntity
-import com.notesprout.android.data.index.TemplateObject
+import com.notesprout.android.data.index.templateObject
 import com.notesprout.android.databinding.ActivityTemplateBrowserBinding
 import com.notesprout.android.databinding.DialogNewNotebookBinding
 import com.notesprout.android.data.recents.TemplateRecentsManager
@@ -638,7 +639,7 @@ class TemplateBrowserActivity : AppCompatActivity() {
         dialog.window?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE)
         dialog.show()
         dialog.window?.setElevation(0f)
-        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
 
         dialogBinding.editNotebookName.requestFocus()
         dialogBinding.editNotebookName.postDelayed({
@@ -693,7 +694,9 @@ class TemplateBrowserActivity : AppCompatActivity() {
                     val w = boundsOpts.outWidth
                     val h = boundsOpts.outHeight
                     if (w <= 0 || h <= 0) throw IllegalStateException("Not a valid image")
-                    val base64 = Base64.encodeToString(bytes, Base64.NO_WRAP)
+                    // Store as lossless WEBP; fall back to the original bytes if it can't be decoded.
+                    val base64 = ImageCodec.transcodeBytesToWebpBase64(bytes)
+                        ?: Base64.encodeToString(bytes, Base64.NO_WRAP)
                     val siblings = repository.getTemplates(destFolderId)
                     val finalName = makeUniqueName(name, siblings.map { it.name })
                     repository.createTemplate(finalName, destFolderId, w, h, base64)
@@ -785,7 +788,7 @@ class TemplateBrowserActivity : AppCompatActivity() {
                     .create()
                 dialog.show()
                 dialog.window?.setElevation(0f)
-                dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+                dialog.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
             } else {
                 executePickerOperation(state, source, null)
             }
@@ -1279,7 +1282,7 @@ class TemplateBrowserActivity : AppCompatActivity() {
         val job = lifecycleScope.launch {
             val bitmap: Bitmap? = withContext(Dispatchers.IO) {
                 try {
-                    val tObj = TemplateObject.fromJson(entity.data) ?: return@withContext null
+                    val tObj = entity.templateObject() ?: return@withContext null
                     if (tObj.image.isEmpty()) return@withContext null
                     val bytes = Base64.decode(tObj.image, Base64.DEFAULT)
                     // Decode bounds first, then sample.
@@ -1417,7 +1420,7 @@ class TemplateBrowserActivity : AppCompatActivity() {
         lifecycleScope.launch {
             val bitmap: Bitmap? = withContext(Dispatchers.IO) {
                 try {
-                    val tObj = TemplateObject.fromJson(entity.data) ?: return@withContext null
+                    val tObj = entity.templateObject() ?: return@withContext null
                     if (tObj.image.isEmpty()) return@withContext null
                     val bytes = Base64.decode(tObj.image, Base64.DEFAULT)
                     BitmapDecode.decodeSampled(bytes, BitmapDecode.MAX_DIMENSION, BitmapDecode.MAX_DIMENSION)
@@ -1477,7 +1480,7 @@ class TemplateBrowserActivity : AppCompatActivity() {
     private suspend fun writeTemplatePng(entity: ObjectEntity): java.io.File? {
         return withContext(Dispatchers.IO) {
             try {
-                val tObj = TemplateObject.fromJson(entity.data)
+                val tObj = entity.templateObject()
                 if (tObj == null || tObj.image.isEmpty()) return@withContext null
                 val bytes = android.util.Base64.decode(tObj.image, android.util.Base64.DEFAULT)
                 val outDir = java.io.File(cacheDir, "exported_pngs").apply { mkdirs() }
@@ -1518,7 +1521,7 @@ class TemplateBrowserActivity : AppCompatActivity() {
                 .create()
             dialog.show()
             dialog.window?.setElevation(0f)
-            dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+            dialog.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
         }
     }
 
@@ -1567,7 +1570,7 @@ class TemplateBrowserActivity : AppCompatActivity() {
         dialog.window?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE)
         dialog.show()
         dialog.window?.setElevation(0f)
-        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
 
         dialogBinding.editNotebookName.requestFocus()
         dialogBinding.editNotebookName.postDelayed({
@@ -1615,7 +1618,7 @@ class TemplateBrowserActivity : AppCompatActivity() {
         dialog.window?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE)
         dialog.show()
         dialog.window?.setElevation(0f)
-        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
 
         dialogBinding.editNotebookName.requestFocus()
         dialogBinding.editNotebookName.postDelayed({
@@ -1644,7 +1647,7 @@ class TemplateBrowserActivity : AppCompatActivity() {
             .create()
         dialog.show()
         dialog.window?.setElevation(0f)
-        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
     }
 
     // ── Delete template folder confirmation ───────────────────────────────────
@@ -1662,7 +1665,7 @@ class TemplateBrowserActivity : AppCompatActivity() {
             .create()
         dialog.show()
         dialog.window?.setElevation(0f)
-        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
     }
 
     // ── New template folder dialog ────────────────────────────────────────────
@@ -1700,7 +1703,7 @@ class TemplateBrowserActivity : AppCompatActivity() {
         dialog.window?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE)
         dialog.show()
         dialog.window?.setElevation(0f)
-        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
 
         dialogBinding.editNotebookName.requestFocus()
         dialogBinding.editNotebookName.postDelayed({
@@ -1742,10 +1745,11 @@ class TemplateBrowserActivity : AppCompatActivity() {
                 binding.btnCreate.isEnabled = true
                 return@launch
             }
+            // Encryption-by-default: GLOBAL unless the user explicitly picks a private passphrase.
+            // Plaintext notebooks are no longer creatable (they only ever arrive via import).
             val scopeString = when (binding.scopeRadioGroup.checkedRadioButtonId) {
-                R.id.radioScopeGlobal    -> "GLOBAL"
                 R.id.radioScopeNotebook  -> "NOTEBOOK"
-                else                     -> ""
+                else                     -> "GLOBAL"
             }
             val resultIntent = Intent()
                 .putExtra(RESULT_NOTEBOOK_NAME, name)
@@ -1830,8 +1834,9 @@ class TemplateBrowserActivity : AppCompatActivity() {
                     val h = boundsOpts.outHeight
                     if (w <= 0 || h <= 0) throw IllegalStateException("Not a valid image")
 
-                    // 4. Base64-encode NO_WRAP.
-                    val base64 = Base64.encodeToString(bytes, Base64.NO_WRAP)
+                    // 4. Encode as lossless WEBP base64; fall back to original bytes if undecodable.
+                    val base64 = ImageCodec.transcodeBytesToWebpBase64(bytes)
+                        ?: Base64.encodeToString(bytes, Base64.NO_WRAP)
 
                     // 5. Uniqueness check — append (2), (3), … if needed.
                     val siblings = repository.getTemplates(currentParentId)

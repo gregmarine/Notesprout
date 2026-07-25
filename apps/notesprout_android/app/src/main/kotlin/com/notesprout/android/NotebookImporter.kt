@@ -1,6 +1,7 @@
 package com.notesprout.android
 
 import android.content.Context
+import androidx.room.withTransaction
 import com.notesprout.android.core.Slog
 import com.notesprout.android.crypto.KeyScope
 import com.notesprout.android.crypto.SoilCrypto
@@ -11,6 +12,7 @@ import com.notesprout.android.data.NotebookMetaStore
 import com.notesprout.android.data.SoilDatabase
 import com.notesprout.android.data.index.IndexRepository
 import com.notesprout.android.data.index.NotebookObject
+import com.notesprout.android.data.index.NotesproutIndex
 import com.notesprout.android.data.soilFile
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -79,91 +81,16 @@ object NotebookImporter {
     }
 
     /**
-     * Import a plaintext .soil from [file] into Garden and register it in the global index.
-     *
-     * [parentId] and [resolvedId] are pre-resolved by the caller (placement + collision
-     * dialogs in MainActivity). [file] is deleted after a successful import.
-     */
-    suspend fun importPlaintext(
-        context: Context,
-        repo: IndexRepository,
-        file: File,
-        manifest: ImportManifest,
-        displayName: String,
-        parentId: String?,
-        resolvedId: String,
-    ): String = withContext(Dispatchers.IO) {
-        val meta = manifest.meta
-
-        // Clear any stale sidecars before copying into Garden.
-        val gardenFile = soilFile(context, resolvedId)
-        File(gardenFile.parent!!, "$resolvedId.soil-wal").delete()
-        File(gardenFile.parent!!, "$resolvedId.soil-shm").delete()
-        File(gardenFile.parent!!, "$resolvedId.soil-journal").delete()
-        file.copyTo(gardenFile, overwrite = true)
-
-        val now = System.currentTimeMillis()
-        repo.importNotebookRow(
-            id = resolvedId,
-            name = displayName,
-            parentId = parentId,
-            obj = NotebookObject(
-                snapshot = meta?.cover,
-                pageCount = manifest.pageCount,
-                encrypted = false,
-                keyScope = null,
-            ),
-            createdAt = meta?.createdAt ?: now,
-            updatedAt = now,
-        )
-
-        refreshPlaintextMeta(context, repo, gardenFile, resolvedId, displayName, parentId, meta, now)
-
-        runCatching { file.delete() }
-        resolvedId
-    }
-
-    /**
-     * Replace an existing notebook in-place (same index row / folder / pin) with the contents
-     * of [file]. Updates name, page count, and snapshot from [manifest]; keeps placement.
-     * [file] is deleted after a successful replace.
-     */
-    suspend fun replacePlaintext(
-        context: Context,
-        repo: IndexRepository,
-        file: File,
-        manifest: ImportManifest,
-        displayName: String,
-        existingId: String,
-    ): String = withContext(Dispatchers.IO) {
-        val meta = manifest.meta
-        val parentId = repo.getNotebook(existingId)?.parentId
-
-        val gardenFile = soilFile(context, existingId)
-        File(gardenFile.parent!!, "$existingId.soil-wal").delete()
-        File(gardenFile.parent!!, "$existingId.soil-shm").delete()
-        File(gardenFile.parent!!, "$existingId.soil-journal").delete()
-        file.copyTo(gardenFile, overwrite = true)
-
-        repo.renameNotebook(existingId, displayName)
-        repo.updateNotebookPageCount(existingId, manifest.pageCount)
-        repo.updateNotebookSnapshot(existingId, meta?.cover)
-
-        val now = System.currentTimeMillis()
-        refreshPlaintextMeta(context, repo, gardenFile, existingId, displayName, parentId, meta, now)
-
-        runCatching { file.delete() }
-        existingId
-    }
-
-    /**
      * Import an encrypted .soil into Garden and register it in the global index.
      *
      * If [finalPass] differs from [enteredPass], the temp [file] is re-keyed in place before
      * copying into Garden. Re-keying on the temp keeps Garden clean on any failure.
      * [file] is deleted after a successful import.
      *
-     * NEVER pass a cover snapshot for encrypted notebooks — leak hygiene.
+     * The **index** snapshot is kept only for GLOBAL scope (the index is encrypted at rest and the
+     * key is available, so its card renders a cover like any other global notebook); NOTEBOOK scope
+     * stays cover-less. The **portable** in-`.soil` meta always stays cover-less (see
+     * [refreshEncryptedMeta]) so a keyless import on another device can't leak a preview.
      */
     suspend fun importEncrypted(
         context: Context,
@@ -182,10 +109,7 @@ object NotebookImporter {
         }
 
         val gardenFile = soilFile(context, resolvedId)
-        File(gardenFile.parent!!, "$resolvedId.soil-wal").delete()
-        File(gardenFile.parent!!, "$resolvedId.soil-shm").delete()
-        File(gardenFile.parent!!, "$resolvedId.soil-journal").delete()
-        file.copyTo(gardenFile, overwrite = true)
+        installIntoGarden(file, gardenFile)
 
         val now = System.currentTimeMillis()
         repo.importNotebookRow(
@@ -193,7 +117,7 @@ object NotebookImporter {
             name = displayName,
             parentId = parentId,
             obj = NotebookObject(
-                snapshot = null,
+                snapshot = if (scope == KeyScope.GLOBAL) manifest.meta?.cover else null,
                 pageCount = manifest.pageCount,
                 encrypted = true,
                 keyScope = scope,
@@ -232,21 +156,44 @@ object NotebookImporter {
 
         val parentId = repo.getNotebook(existingId)?.parentId
         val gardenFile = soilFile(context, existingId)
-        File(gardenFile.parent!!, "$existingId.soil-wal").delete()
-        File(gardenFile.parent!!, "$existingId.soil-shm").delete()
-        File(gardenFile.parent!!, "$existingId.soil-journal").delete()
-        file.copyTo(gardenFile, overwrite = true)
+        installIntoGarden(file, gardenFile)
 
-        repo.renameNotebook(existingId, displayName)
-        repo.updateNotebookPageCount(existingId, manifest.pageCount)
-        repo.updateNotebookSnapshot(existingId, null)
-        repo.setEncryptionState(existingId, true, scope)
+        // The file (and its salt) was just replaced — drop the stale cached raw key immediately,
+        // before anything can try to open the new file with it.
+        com.notesprout.android.crypto.KeyMaterial.invalidate(context, existingId)
+        // One transaction: a partial set of these writes (e.g. state written without the rename)
+        // leaves the index describing the new file with the old keying — stranding the notebook
+        // in a needless unlock loop until something repairs it.
+        NotesproutIndex.db().withTransaction {
+            repo.renameNotebook(existingId, displayName)
+            repo.updateNotebookPageCount(existingId, manifest.pageCount)
+            repo.updateNotebookSnapshot(existingId, if (scope == KeyScope.GLOBAL) manifest.meta?.cover else null)
+            repo.setEncryptionState(existingId, true, scope)
+        }
 
         val now = System.currentTimeMillis()
         refreshEncryptedMeta(context, repo, gardenFile, existingId, displayName, parentId, manifest, scope, finalPass, now)
 
         runCatching { file.delete() }
         existingId
+    }
+
+    /**
+     * Install the verified temp [file] at [gardenFile] atomically: copy to a `.new` sibling first,
+     * then rename into place. A plain `copyTo(overwrite = true)` truncates the destination up
+     * front, so a mid-copy process death would leave a torn `.soil` where a notebook (on the
+     * replace path, the user's existing notebook) used to be. Stale sidecars of the destination
+     * are dropped so the fresh file isn't paired with another database's WAL.
+     */
+    private fun installIntoGarden(file: File, gardenFile: File) {
+        val incoming = File("${gardenFile.absolutePath}.new")
+        incoming.delete()
+        file.copyTo(incoming, overwrite = true)
+        listOf("-wal", "-shm", "-journal").forEach { File("${gardenFile.absolutePath}$it").delete() }
+        if (!incoming.renameTo(gardenFile)) {
+            incoming.delete()
+            throw ImportException("Could not install the imported notebook file.")
+        }
     }
 
     private suspend fun refreshEncryptedMeta(
@@ -283,35 +230,4 @@ object NotebookImporter {
             db.close()
         }
     }.onFailure { Slog.d("NotebookImporter") { "encrypted meta refresh failed: ${it.message}" } }
-
-    private suspend fun refreshPlaintextMeta(
-        context: Context,
-        repo: IndexRepository,
-        gardenFile: File,
-        notebookId: String,
-        displayName: String,
-        parentId: String?,
-        meta: NotebookMeta?,
-        now: Long,
-    ) = runCatching {
-        val freshMeta = NotebookMeta(
-            notebookId = notebookId,
-            name = displayName,
-            createdAt = meta?.createdAt ?: now,
-            updatedAt = now,
-            encrypted = false,
-            keyScope = null,
-            cover = meta?.cover,
-            folderPath = repo.getFolderAncestry(parentId),
-        )
-        val db = SoilDatabase.builder(context, gardenFile.absolutePath).build()
-        try {
-            NotebookMetaStore.write(db, freshMeta)
-            db.openHelper.writableDatabase
-                .query("PRAGMA wal_checkpoint(TRUNCATE)")
-                .use { it.moveToFirst() }
-        } finally {
-            db.close()
-        }
-    }.onFailure { Slog.d("NotebookImporter") { "meta refresh failed: ${it.message}" } }
 }

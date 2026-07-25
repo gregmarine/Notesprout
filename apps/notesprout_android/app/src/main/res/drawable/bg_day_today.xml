@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Today (when not the selected day) in the day-grid picker: 2dp stroked inkBlack ring. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="oval">
+    <solid android:color="@color/paperWhite" />
+    <stroke android:width="2dp" android:color="@color/inkBlack" />
+</shape>

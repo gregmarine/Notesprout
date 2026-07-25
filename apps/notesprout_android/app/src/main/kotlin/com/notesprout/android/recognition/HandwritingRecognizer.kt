@@ -15,6 +15,12 @@ import com.notesprout.android.data.LiveStroke
 interface HandwritingRecognizer : AutoCloseable {
 
     /**
+     * Stable engine identifier stamped into recognition results (e.g. `PageText.engine`)
+     * so cached text can be re-generated per-engine later: "mlkit" | "trocr" | "onyx".
+     */
+    val engineName: String
+
+    /**
      * Returns true if this recognizer is ready to process strokes.
      * May return false if the ML model has not been downloaded yet.
      */
@@ -34,6 +40,28 @@ interface HandwritingRecognizer : AutoCloseable {
         bounds: RectF,
         onResult: (String) -> Unit
     )
+
+    /**
+     * Recognize a single text line, feeding [preContext] (the previously recognized line)
+     * into the model for per-line context chaining — the single biggest free accuracy win
+     * for page-scale recognition. Suspends until the model returns.
+     *
+     * [lineHeightHint], when > 0, is used as the recognizer's writing-area height instead of the
+     * line's tight [bounds] height. ML Kit interprets glyph meaning by size relative to the writing
+     * area, so a page-consistent line-height (from [StrokeSegmenter.PageLayout.medianLineHeight])
+     * is a better reference than a bbox that shrinks on lines with no ascenders/descenders.
+     *
+     * Returns the recognized string, or [FALLBACK_TEXT] if recognition fails or the
+     * recognizer is not ready. Safe to call off the main thread.
+     *
+     * Used by the page/notebook text pipeline (StrokeSegmenter → PageTextRecognizer).
+     */
+    suspend fun recognizeSegment(
+        strokes: List<LiveStroke>,
+        bounds: RectF,
+        preContext: String,
+        lineHeightHint: Float = 0f,
+    ): String
 
     companion object {
         /** Returned when recognition fails or the model is unavailable. */

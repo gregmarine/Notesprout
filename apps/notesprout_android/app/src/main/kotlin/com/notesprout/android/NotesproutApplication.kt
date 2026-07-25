@@ -2,6 +2,7 @@ package com.notesprout.android
 
 import android.app.Application
 import com.notesprout.android.data.toClipboardContent
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -16,13 +17,32 @@ class NotesproutApplication : Application() {
          * the activity immediately and lets the heavy save/checkpoint complete here instead
          * of blocking the UI thread. SupervisorJob so one failed seal can't cancel others;
          * never cancelled (lives as long as the process).
+         *
+         * The exception handler is the last line of defense: work here is fire-and-forget with
+         * no UI to surface into, so an escaped exception (disk full during a seal, a repo call on
+         * a just-sealed index) would otherwise crash the whole app seconds after the user moved
+         * on. Log it and keep the process alive — the data-side effects are the individual jobs'
+         * responsibility to contain.
          */
-        val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        val appScope = CoroutineScope(
+            SupervisorJob() + Dispatchers.IO + CoroutineExceptionHandler { _, e ->
+                android.util.Log.e("NotesproutApplication", "Uncaught exception in appScope job", e)
+            }
+        )
     }
 
     override fun onTerminate() {
         super.onTerminate()
         com.notesprout.android.recognition.HandwritingRecognizerProvider.shutdown()
+    }
+
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        // TrOCR's ORT sessions hold ~model-size native heap; drop them when the app goes
+        // to the background (they reload lazily on the next recognition).
+        if (level >= TRIM_MEMORY_UI_HIDDEN) {
+            com.notesprout.android.recognition.HandwritingRecognizerProvider.onTrimMemory()
+        }
     }
 
     override fun onCreate() {
@@ -39,22 +59,28 @@ class NotesproutApplication : Application() {
         // before any SDK code runs.
         HiddenApiBypass.addHiddenApiExemptions("")
 
-        com.notesprout.android.data.index.NotesproutIndex.open(this)
-
-        val repository = com.notesprout.android.data.index.IndexRepository(
-            com.notesprout.android.data.index.NotesproutIndex.dao()
-        )
-        appScope.launch { repository.ensurePinnedListExists() }
-        appScope.launch { repository.ensurePinnedTemplatesListExists() }
+        // The index is encrypted (Phase 1b) and may need an async plaintext→encrypted migration or an
+        // unlock prompt, so it can no longer open synchronously here. BootstrapActivity (launcher) and
+        // MainActivity (deep-link entry) drive NotesproutIndex.ensureReady(); these index-dependent
+        // startup tasks just wait until it's open.
         appScope.launch {
+            com.notesprout.android.data.index.NotesproutIndex.awaitReady()
+            val repository = com.notesprout.android.data.index.IndexRepository(
+                com.notesprout.android.data.index.NotesproutIndex.dao()
+            )
+            repository.ensurePinnedListExists()
+            repository.ensurePinnedTemplatesListExists()
             val payload = repository.loadClipboard()
             if (payload != null && NotesproutClipboard.content == null) {
                 NotesproutClipboard.content = payload.toClipboardContent()
             }
         }
 
+        // Both engines register with the Provider; the settings toggle decides routing.
+        // TrOCR does zero work here — its ORT sessions load lazily on first recognition.
         val mlKitRecognizer = com.notesprout.android.recognition.MlKitHandwritingRecognizer()
-        com.notesprout.android.recognition.HandwritingRecognizerProvider.init(mlKitRecognizer)
+        val trOcrRecognizer = com.notesprout.android.recognition.trocr.TrOcrHandwritingRecognizer(this, appScope)
+        com.notesprout.android.recognition.HandwritingRecognizerProvider.init(this, mlKitRecognizer, trOcrRecognizer)
         mlKitRecognizer.initModel { success ->
             if (!success) {
                 android.os.Handler(android.os.Looper.getMainLooper()).post {

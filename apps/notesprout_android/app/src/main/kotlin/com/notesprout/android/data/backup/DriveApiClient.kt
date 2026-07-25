@@ -11,7 +11,13 @@ import java.net.URLEncoder
 private const val TAG = "DriveApiClient"
 
 @Serializable private data class DriveFile(val id: String, val name: String? = null)
-@Serializable private data class DriveFileList(val files: List<DriveFile> = emptyList())
+@Serializable private data class DriveFileList(
+    val files: List<DriveFile> = emptyList(),
+    val nextPageToken: String? = null,
+)
+
+/** A Drive folder/file child: stable id + display name. */
+data class DriveEntry(val id: String, val name: String)
 @Serializable private data class CreateFolderBody(
     val name: String, val mimeType: String, val parents: List<String>,
 )
@@ -66,6 +72,73 @@ class DriveApiClient(private val accessToken: String) {
     /** Finds or creates a folder named [name] inside [parentId]. Returns the folder ID or null. */
     fun ensureFolder(name: String, parentId: String): String? =
         findChild(name, parentId, foldersOnly = true) ?: createFolder(name, parentId)
+
+    /**
+     * Lists every non-trashed child of [parentId] (folders only when [foldersOnly]). Pages through
+     * the full result set. A failure before anything was read returns an empty list ("nothing to
+     * restore"); a failure MID-pagination throws — returning the partial list would silently
+     * truncate the set, and a restore committed from it would drop notebooks.
+     */
+    fun listChildren(parentId: String, foldersOnly: Boolean): List<DriveEntry> {
+        val out = mutableListOf<DriveEntry>()
+        try {
+            var pageToken: String? = null
+            var q = "'$parentId' in parents and trashed = false"
+            if (foldersOnly) q += " and mimeType = '$FOLDER_MIME'"
+            do {
+                var url = "$FILES?q=${URLEncoder.encode(q, "UTF-8")}&spaces=drive" +
+                    "&fields=nextPageToken,files(id,name)&pageSize=1000"
+                if (pageToken != null) url += "&pageToken=${URLEncoder.encode(pageToken, "UTF-8")}"
+                val conn = open("GET", url)
+                val body = readBody(conn)
+                if (conn.responseCode != 200) {
+                    Log.e(TAG, "listChildren HTTP ${conn.responseCode}")
+                    if (out.isEmpty()) return emptyList()
+                    throw java.io.IOException("Google Drive listing failed partway (HTTP ${conn.responseCode}).")
+                }
+                val page = codec.decodeFromString(DriveFileList.serializer(), body)
+                page.files.forEach { f -> f.name?.let { out.add(DriveEntry(f.id, it)) } }
+                pageToken = page.nextPageToken
+            } while (pageToken != null)
+            return out
+        } catch (e: java.io.IOException) {
+            throw e
+        } catch (e: Exception) {
+            Log.e(TAG, "listChildren failed: ${e.message}")
+            if (out.isEmpty()) return emptyList()
+            throw java.io.IOException("Google Drive listing failed partway: ${e.message}")
+        }
+    }
+
+    /** Permanently delete a file by id. True on success (or already gone). */
+    fun delete(fileId: String): Boolean = try {
+        val conn = open("DELETE", "$FILES/$fileId")
+        conn.responseCode == 204 || conn.responseCode == 404
+    } catch (e: Exception) {
+        Log.e(TAG, "delete failed: ${e.message}")
+        false
+    }
+
+    /** Downloads the content of [fileId] to [dest]. Returns true on success. */
+    /** Streams into a `.part` sibling and renames on completion — a connection that drops mid-body
+     *  never leaves a truncated file under the final name (restore would install it as a notebook). */
+    fun downloadTo(fileId: String, dest: File): Boolean {
+        val part = File("${dest.absolutePath}.part")
+        return try {
+            val conn = open("GET", "$FILES/$fileId?alt=media")
+            if (conn.responseCode == 200) {
+                conn.inputStream.use { inp -> part.outputStream().use { out -> inp.copyTo(out) } }
+                if (part.renameTo(dest)) true else { part.delete(); false }
+            } else {
+                Log.e(TAG, "downloadTo HTTP ${conn.responseCode}")
+                false
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "downloadTo failed: ${e.message}")
+            part.delete()
+            false
+        }
+    }
 
     private fun createFolder(name: String, parentId: String): String? = try {
         val body = codec.encodeToString(CreateFolderBody.serializer(),

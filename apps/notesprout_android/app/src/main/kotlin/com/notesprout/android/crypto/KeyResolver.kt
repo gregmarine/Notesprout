@@ -126,18 +126,41 @@ object KeyResolver {
     private suspend fun resolveGlobalForOpen(activity: Activity, notebookId: String): String? {
         val cached = withContext(Dispatchers.IO) { PassphraseStore.getGlobalPassphrase(activity) }
         if (cached != null) {
+            // Fast path: if this notebook's raw key is already cached (RAM/Keystore), assume the cached
+            // global opens it and skip the ~300 ms KDF verify. This is an optimistic assumption, NOT a
+            // guarantee: the in-app flows invalidate the cache on rotation/delete/forget, but a file
+            // swapped underneath us out-of-band (restore from an older backup, re-keyed on another
+            // device) can leave a stale key that no longer fits. That mismatch is caught downstream by
+            // SelfHealingKeyFactory, which drops the stale key and re-derives from the passphrase — so a
+            // wrong assumption here costs one self-heal, never a failed open or data loss.
+            if (withContext(Dispatchers.IO) { KeyMaterial.peekOrLoad(activity, notebookId) } != null) return cached
             val file = soilFile(activity, notebookId)
             val valid = withContext(Dispatchers.IO) { SoilCrypto.verifyPassphrase(file, cached) }
             if (valid) return cached
             // Cached global doesn't match (e.g. notebook authored on another device with a different global) — fall through to prompt.
         }
+
+        // Whether the entered passphrase should BECOME the device global depends on why we're here:
+        //  - No cached global yet → the user is establishing it (fresh device / after "Forget"). Adopt it.
+        //  - A cached global exists but this notebook diverged from it → the entered passphrase unlocks
+        //    THIS file only. Adopting it would silently overwrite the device global and re-point every
+        //    other global notebook's key resolution — how a single restored/foreign notebook could
+        //    strand the whole library. Never overwrite; open this one for the session and leave the
+        //    global intact. (Repairing the divergence is NotebookRecovery's job, not a silent side effect.)
+        val establishingGlobal = cached == null
         return promptAndVerify(
             activity, notebookId,
             title = "Global Passphrase",
-            message = "Enter the global passphrase to open this notebook.",
+            message = if (establishingGlobal)
+                "Enter the global passphrase to open this notebook."
+            else
+                "This notebook's passphrase differs from your global passphrase. " +
+                    "Enter it to open this notebook.",
             limiterKey = AttemptLimiter.GLOBAL_KEY,
         ) { passphrase ->
-            withContext(Dispatchers.IO) { PassphraseStore.setGlobalPassphrase(activity, passphrase) }
+            if (establishingGlobal) {
+                withContext(Dispatchers.IO) { PassphraseStore.setGlobalPassphrase(activity, passphrase) }
+            }
         }
     }
 
@@ -166,6 +189,20 @@ object KeyResolver {
         limiterKey: String = notebookId,
         onSuccess: suspend (String) -> Unit = {},
     ): String? {
+        // A missing/empty file can never verify (and used to silently mint an empty DB that
+        // "verified" the first passphrase typed). Say what's wrong instead of looping the prompt
+        // and feeding the attempt limiter.
+        val target = soilFile(activity, notebookId)
+        if (withContext(Dispatchers.IO) { !target.exists() || target.length() == 0L }) {
+            withContext(Dispatchers.Main) {
+                android.widget.Toast.makeText(
+                    activity,
+                    "This notebook's file is missing on this device — restore it from a backup.",
+                    android.widget.Toast.LENGTH_LONG,
+                ).show()
+            }
+            return null
+        }
         var promptMessage = message
         while (true) {
             val lockedUntilMs = withContext(Dispatchers.IO) { AttemptLimiter.check(activity, limiterKey) }

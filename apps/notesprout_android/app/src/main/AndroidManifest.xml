@@ -14,16 +14,24 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.Notesprout">
 
-        <!-- Theme QA — launcher entry point -->
+        <!-- Launcher entry point: prepares (and, first launch, encrypts) the index before any UI,
+             then forwards to MainActivity so its cold-launch surface restore runs unchanged. -->
+        <activity
+            android:name=".BootstrapActivity"
+            android:exported="true"
+            android:launchMode="singleTop"
+            android:theme="@style/Theme.Notesprout">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
         <activity
             android:name=".MainActivity"
             android:exported="true"
             android:launchMode="singleTop"
             android:windowSoftInputMode="stateHidden">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
             <!-- Tap a .soil file — path-pattern match covers any MIME type the file manager sends -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
@@ -68,6 +76,20 @@
             </intent-filter>
         </activity>
 
+        <!-- Calendar — full-screen date navigation screen, launchable from MainActivity and NotebookActivity -->
+        <activity
+            android:name=".CalendarActivity"
+            android:exported="false"
+            android:configChanges="orientation|keyboardHidden|screenSize|smallestScreenSize|screenLayout|density"
+            android:windowSoftInputMode="stateHidden" />
+
+        <!-- Day detail — full-screen single-page handwriting canvas for one calendar day -->
+        <activity
+            android:name=".DayDetailActivity"
+            android:exported="false"
+            android:configChanges="orientation|keyboardHidden|screenSize|smallestScreenSize|screenLayout|density"
+            android:windowSoftInputMode="stateHidden" />
+
         <!-- Notebook screen — prevent recreation on rotation/resize so bitmap survives -->
         <activity
             android:name=".NotebookActivity"
@@ -78,6 +100,13 @@
         <!-- Page index screen — full-screen grid of page snapshots -->
         <activity
             android:name=".PageIndexActivity"
+            android:exported="false"
+            android:configChanges="orientation|keyboardHidden|screenSize|smallestScreenSize|screenLayout|density"
+            android:windowSoftInputMode="stateHidden" />
+
+        <!-- Recognized-text viewer — read-only handwriting-to-text (This Page / Whole Notebook) -->
+        <activity
+            android:name=".PageTextViewerActivity"
             android:exported="false"
             android:configChanges="orientation|keyboardHidden|screenSize|smallestScreenSize|screenLayout|density"
             android:windowSoftInputMode="stateHidden" />
@@ -103,9 +132,28 @@
             android:theme="@style/Theme.Notesprout"
             android:windowSoftInputMode="stateHidden" />
 
+        <!-- First-launch onboarding — reveals the recovery key before the library opens -->
+        <activity
+            android:name=".OnboardingActivity"
+            android:exported="false"
+            android:launchMode="singleTop"
+            android:windowSoftInputMode="stateHidden" />
+
         <!-- Encryption settings — global passphrase management (status, forget, change) -->
         <activity
             android:name=".EncryptionSettingsActivity"
+            android:exported="false"
+            android:windowSoftInputMode="stateHidden" />
+
+        <!-- Handwriting Recognition settings — engine toggle (ML Kit / TrOCR) + model bundles -->
+        <activity
+            android:name=".HwrSettingsActivity"
+            android:exported="false"
+            android:windowSoftInputMode="stateHidden" />
+
+        <!-- Handwriting enrollment — copy prescribed sentences to seed the personal model -->
+        <activity
+            android:name=".HwrEnrollmentActivity"
             android:exported="false"
             android:windowSoftInputMode="stateHidden" />
 
@@ -116,11 +164,34 @@
             android:theme="@style/Theme.Notesprout"
             android:windowSoftInputMode="stateHidden" />
 
+        <!-- Export screen — format, options, and destination for every export entry point -->
+        <activity
+            android:name=".ExportActivity"
+            android:exported="false"
+            android:theme="@style/Theme.Notesprout"
+            android:windowSoftInputMode="stateHidden" />
+
         <!-- Drive OAuth WebView — opens Google consent page, intercepts localhost redirect -->
         <activity
             android:name=".DriveAuthActivity"
             android:exported="false"
             android:theme="@style/Theme.Notesprout"
+            android:windowSoftInputMode="stateHidden" />
+
+        <!-- Scratch pad — translucent floating window over any launch surface -->
+        <activity
+            android:name=".ScratchpadActivity"
+            android:exported="false"
+            android:theme="@style/Theme.Notesprout.Scratchpad"
+            android:configChanges="orientation|keyboardHidden|screenSize|smallestScreenSize|screenLayout|density"
+            android:windowSoftInputMode="stateHidden" />
+
+        <!-- Sticky note editor — translucent in-memory popup over NotebookActivity -->
+        <activity
+            android:name=".StickyNoteEditorActivity"
+            android:exported="false"
+            android:theme="@style/Theme.Notesprout.Scratchpad"
+            android:configChanges="orientation|keyboardHidden|screenSize|smallestScreenSize|screenLayout|density"
             android:windowSoftInputMode="stateHidden" />
 
         <!-- FileProvider — exposes cacheDir PDF exports to the share sheet -->

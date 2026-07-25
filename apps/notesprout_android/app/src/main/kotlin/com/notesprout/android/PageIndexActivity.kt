@@ -1,14 +1,9 @@
 package com.notesprout.android
 
-import android.content.ClipData
 import android.content.Intent
-import android.graphics.BitmapFactory
-import android.net.Uri
-import android.provider.DocumentsContract
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import android.graphics.Bitmap
-import android.util.Base64
 import android.view.GestureDetector
 import android.view.Gravity
 import android.view.MotionEvent
@@ -20,25 +15,27 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.AppCompatImageView
 import androidx.appcompat.widget.AppCompatTextView
 import androidx.core.content.ContextCompat
-import androidx.core.content.FileProvider
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.lifecycleScope
 import com.notesprout.android.core.Slog
+import com.notesprout.android.core.TopGuard
 import com.notesprout.android.crypto.KeyResolver
 import com.notesprout.android.crypto.KeySession
 import com.notesprout.android.crypto.SoilCrypto
+import com.notesprout.android.data.SoilDatabase
 import com.notesprout.android.data.index.IndexRepository
 import com.notesprout.android.data.index.NotesproutIndex
-import com.notesprout.android.data.index.TemplateObject
+import com.notesprout.android.data.index.templateObject
 import com.notesprout.android.data.recents.TemplateRecentsManager
 import com.notesprout.android.data.soilFile
-import com.notesprout.android.data.topHeadingNamesByPageId
+import com.notesprout.android.data.loadPageRefs
 import com.notesprout.android.databinding.ActivityPageIndexBinding
 import kotlin.coroutines.resume
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
@@ -118,12 +115,7 @@ class PageIndexActivity : AppCompatActivity() {
 
     // ── Page data ─────────────────────────────────────────────────────────────
 
-    private data class PageEntry(val id: String, val pageNumber: Int, val snapshot: String?, val headingName: String? = null)
-
-    @Serializable
-    private data class PageSnapshot(val snapshot: String? = null)
-
-    private val pageCodec = Json { ignoreUnknownKeys = true }
+    private data class PageEntry(val id: String, val pageNumber: Int, val headingName: String? = null)
 
     // ── State ─────────────────────────────────────────────────────────────────
 
@@ -139,6 +131,21 @@ class PageIndexActivity : AppCompatActivity() {
     private val inkBlackColor by lazy { ContextCompat.getColor(this, R.color.inkBlack) }
 
     private val snapshotDecodeJobs = mutableListOf<Job>()
+
+    /** entry.id → the card's thumbnail ImageView for the current grid page; filled by
+     *  [buildCardGroup], consumed by [renderVisibleThumbnails] which renders on demand. */
+    private val thumbnailTargets = mutableMapOf<String, AppCompatImageView>()
+
+    /** Rendered page thumbnails, keyed by page id. Reused across state-only re-renders (selection,
+     *  action mode, destination highlight) so those never re-render a page bitmap. Invalidated
+     *  wholesale when [thumbEpoch] advances (any content/order reload — see [loadPagesFromSoil]) or
+     *  the card size changes; off-screen entries are evicted to bound memory to one grid page. */
+    private val thumbnailCache = mutableMapOf<String, android.graphics.Bitmap>()
+    /** Bumped on every [loadPagesFromSoil]; a mismatch invalidates [thumbnailCache]. */
+    private var thumbEpoch = 0
+    private var thumbCacheEpoch = -1
+    private var thumbCardW = 0
+    private var thumbCardH = 0
 
     // ── Action mode (long-press) and destination-picking mode ────────────────
 
@@ -221,23 +228,11 @@ class PageIndexActivity : AppCompatActivity() {
     /** Global-index repository (templates live in `notesprout.db`, not the `.soil`). */
     private val indexRepo: IndexRepository by lazy { IndexRepository(NotesproutIndex.dao()) }
 
+    /** Key resolved for this notebook when [KeySession] was cold. See [resolveNotebookKey]. */
+    private var resolvedKey: String? = null
+
     /** Pages whose template will be set once the picker returns (snapshot of the selection). */
     private var pendingTemplateTargets: List<String> = emptyList()
-
-    // ── Export save-to-device launchers ─────────────────────────────────────
-
-    private var pendingExportFile: java.io.File? = null
-
-    /** Files to write into the folder chosen by [openDocumentTreeLauncher] (PNG batch). */
-    private var pendingPngFiles: List<java.io.File> = emptyList()
-
-    private val saveTemplateLauncher = registerForActivityResult(
-        ActivityResultContracts.StartActivityForResult()
-    ) { result ->
-        if (result.resultCode == RESULT_OK) {
-            android.widget.Toast.makeText(this, "Saved to Templates", android.widget.Toast.LENGTH_SHORT).show()
-        }
-    }
 
     private val notebookPickerLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -253,26 +248,6 @@ class PageIndexActivity : AppCompatActivity() {
         enterCrossNotebookDestMode(destId, destName, pendingCrossIsCopy)
     }
 
-    /** Selected pages captured for a batch "PNG as templates" import, pending the folder pick. */
-    private var pendingTemplateEntries: List<PageEntry> = emptyList()
-
-    /**
-     * Folder picker for batch "PNG as templates" (P2.2). Returns the chosen library folder id
-     * ("" = root/null); the selected pages are then rendered and imported into that folder.
-     */
-    private val pickTemplateFolderLauncher = registerForActivityResult(
-        ActivityResultContracts.StartActivityForResult()
-    ) { result ->
-        if (result.resultCode != RESULT_OK) {
-            pendingTemplateEntries = emptyList()  // cancelled — selection stays in action mode
-            return@registerForActivityResult
-        }
-        val folderId = result.data
-            ?.getStringExtra(TemplateBrowserActivity.RESULT_TEMPLATE_FOLDER_ID)
-            ?.takeIf { it.isNotEmpty() }  // "" encodes root/null
-        renderAndImportTemplates(folderId)
-    }
-
     private val templatePickerLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
@@ -280,67 +255,6 @@ class PageIndexActivity : AppCompatActivity() {
         val templateId = result.data?.getStringExtra(TemplateBrowserActivity.RESULT_TEMPLATE_ID)
             ?: return@registerForActivityResult
         applyTemplateToSelection(templateId)
-    }
-
-    private val savePngLauncher = registerForActivityResult(
-        ActivityResultContracts.CreateDocument("image/png")
-    ) { uri ->
-        val file = pendingExportFile ?: return@registerForActivityResult
-        if (uri == null) return@registerForActivityResult
-        lifecycleScope.launch(Dispatchers.IO) {
-            try {
-                contentResolver.openOutputStream(uri)?.use { out ->
-                    file.inputStream().use { it.copyTo(out) }
-                }
-            } catch (e: Exception) {
-                android.os.Handler(android.os.Looper.getMainLooper()).post {
-                    android.widget.Toast.makeText(
-                        this@PageIndexActivity, "Save failed: ${e.message}", android.widget.Toast.LENGTH_LONG
-                    ).show()
-                }
-            }
-        }
-    }
-
-    /** Save a PDF to a location chosen by the user (multi-page PDF export). */
-    private val savePdfLauncher = registerForActivityResult(
-        ActivityResultContracts.CreateDocument("application/pdf")
-    ) { uri ->
-        val file = pendingExportFile ?: return@registerForActivityResult
-        if (uri == null) return@registerForActivityResult
-        lifecycleScope.launch(Dispatchers.IO) {
-            try {
-                contentResolver.openOutputStream(uri)?.use { out ->
-                    file.inputStream().use { it.copyTo(out) }
-                }
-            } catch (e: Exception) {
-                android.os.Handler(android.os.Looper.getMainLooper()).post {
-                    android.widget.Toast.makeText(
-                        this@PageIndexActivity, "Save failed: ${e.message}", android.widget.Toast.LENGTH_LONG
-                    ).show()
-                }
-            }
-        }
-    }
-
-    /**
-     * Folder picker for batch PNG export. Once the user selects a folder, all [pendingPngFiles]
-     * are written into it via [DocumentsContract.createDocument], one file per page.
-     */
-    private val openDocumentTreeLauncher = registerForActivityResult(
-        ActivityResultContracts.OpenDocumentTree()
-    ) { treeUri ->
-        val files = pendingPngFiles
-        pendingPngFiles = emptyList()
-        if (treeUri == null || files.isEmpty()) return@registerForActivityResult
-        lifecycleScope.launch {
-            val written = withContext(Dispatchers.IO) {
-                writePngFilesToTree(treeUri, files)
-            }
-            val msg = if (written == files.size) "Exported ${files.size} images"
-                      else "Exported $written of ${files.size} images"
-            android.widget.Toast.makeText(this@PageIndexActivity, msg, android.widget.Toast.LENGTH_SHORT).show()
-        }
     }
 
     // ── Swipe gesture (left/right to paginate) ────────────────────────────────
@@ -376,6 +290,9 @@ class PageIndexActivity : AppCompatActivity() {
 
         binding = ActivityPageIndexBinding.inflate(layoutInflater)
         setContentView(binding.root)
+        // Immersive: system bars are hidden, so their inset is 0. Reserve the guard
+        // explicitly so the top bar isn't parked in the status bar's reveal zone.
+        TopGuard.applyRootPadding(binding.root)
 
         notebookId       = intent.getStringExtra(EXTRA_NOTEBOOK_ID) ?: ""
         notebookSoilPath = if (notebookId.isNotEmpty()) soilFile(this, notebookId).absolutePath else null
@@ -439,9 +356,32 @@ class PageIndexActivity : AppCompatActivity() {
 
     // ── Data loading ──────────────────────────────────────────────────────────
 
+    /**
+     * Resolve this notebook's SQLCipher key, preferring the foreground session.
+     *
+     * [KeySession] is process-scoped and in-memory: after process death (or when this screen is
+     * reached by launch restore rather than from NotebookActivity) it is empty, and a bare
+     * `KeySession.getFor()` would hand a null key to the raw open path. That is not "plaintext" —
+     * it is "not resolved yet", and treating the two as the same is what destroyed a notebook.
+     * Mirrors ExportActivity.resolveKey().
+     */
+    private suspend fun resolveNotebookKey(): String? {
+        KeySession.getFor(notebookId)?.let { return it }
+        val info = withContext(Dispatchers.IO) { indexRepo.getEncryptionInfo(notebookId) } ?: return null
+        if (!info.encrypted) return null
+        val key = if (info.keyScope == com.notesprout.android.crypto.KeyScope.GLOBAL) {
+            com.notesprout.android.crypto.PassphraseStore.getGlobalPassphrase(this)
+        } else {
+            KeyResolver.resolveForOpen(this, notebookId, info)
+        }
+        resolvedKey = key
+        return key
+    }
+
     private fun loadPagesAsync() {
         val path = notebookSoilPath ?: return
         lifecycleScope.launch {
+            resolveNotebookKey()
             pages = withContext(Dispatchers.IO) { loadPagesFromSoil(path) }
             currentPageId = pages.getOrNull(currentPageIndex)?.id
             // Jump to the grid page that contains the currently-open page.
@@ -454,32 +394,13 @@ class PageIndexActivity : AppCompatActivity() {
         }
     }
 
-    private fun loadPagesFromSoil(path: String, passphrase: String? = KeySession.getFor(notebookId)): List<PageEntry> {
-        var db: com.notesprout.android.crypto.SoilRawDb? = null
-        return try {
-            db = SoilCrypto.openRaw(java.io.File(path), passphrase)
-            val headingNames = topHeadingNamesByPageId(db)
-            db.rawQuery(
-                "SELECT id, data FROM notebook WHERE type = 'page' AND deletedAt IS NULL ORDER BY `order` ASC",
-                null
-            ).use { c ->
-                val result = mutableListOf<PageEntry>()
-                var number = 1
-                while (c.moveToNext()) {
-                    val id       = c.getString(0)
-                    val dataJson = c.getString(1)
-                    val snapshot = try {
-                        pageCodec.decodeFromString<PageSnapshot>(dataJson).snapshot
-                    } catch (_: Exception) { null }
-                    result.add(PageEntry(id, number++, snapshot, headingNames[id]))
-                }
-                result
-            }
-        } catch (_: Exception) {
-            emptyList()
-        } finally {
-            db?.close()
-        }
+    /** Key for THIS notebook: live session first, then the key resolved by [resolveNotebookKey]. */
+    private fun notebookKey(): String? = KeySession.getFor(notebookId) ?: resolvedKey
+
+    private fun loadPagesFromSoil(path: String, passphrase: String? = notebookKey()): List<PageEntry> {
+        // Any reload means page content/order may have changed → invalidate cached thumbnails.
+        thumbEpoch++
+        return loadPageRefs(path, passphrase).map { PageEntry(it.id, it.number, it.headingName) }
     }
 
     // ── Grid specification ────────────────────────────────────────────────────
@@ -532,6 +453,7 @@ class PageIndexActivity : AppCompatActivity() {
     private fun renderGridPage() {
         snapshotDecodeJobs.forEach { it.cancel() }
         snapshotDecodeJobs.clear()
+        thumbnailTargets.clear()
 
         val spec = gridSpec ?: return
         binding.gridContainer.removeAllViews()
@@ -586,6 +508,117 @@ class PageIndexActivity : AppCompatActivity() {
         binding.gridContainer.addView(gridLayout, containerLp)
 
         updatePaginationControls()
+
+        // Render thumbnails on demand for just the visible pagination page.
+        renderVisibleThumbnails(pageItems.toList(), spec)
+    }
+
+    /**
+     * Fill each currently-visible card with a page-preview thumbnail. On-demand replacement for the
+     * removed per-page snapshot, with a [thumbnailCache] so state-only re-renders (selection, action
+     * mode, destination highlight, before/after toggle) reuse already-rendered bitmaps instead of
+     * re-rendering. Cache hits are set immediately; only misses open a Room connection and render via
+     * [NotebookExporter.renderPageThumbnail], caching the result. The cache is invalidated wholesale
+     * when [thumbEpoch] advances (any content/order reload) or the card size changes, and off-screen
+     * entries are evicted so memory stays bounded to one grid page.
+     */
+    private fun renderVisibleThumbnails(items: List<PageEntry>, spec: GridSpec) {
+        val path = notebookSoilPath ?: return
+        if (items.isEmpty()) return
+
+        // Invalidate on content/order change or a card-size change; otherwise keep the cache.
+        if (thumbCacheEpoch != thumbEpoch || thumbCardW != spec.cardWidthPx || thumbCardH != spec.cardHeightPx) {
+            thumbnailCache.values.forEach { it.recycle() }
+            thumbnailCache.clear()
+            thumbCacheEpoch = thumbEpoch
+            thumbCardW = spec.cardWidthPx
+            thumbCardH = spec.cardHeightPx
+        }
+
+        // Evict off-screen thumbnails (bounds memory to the visible grid page). Their previous
+        // ImageViews were detached by renderGridPage's removeAllViews, so recycling is safe.
+        val visibleIds = items.mapTo(HashSet()) { it.id }
+        thumbnailCache.entries.removeAll { (id, bmp) ->
+            (id !in visibleIds).also { if (it) bmp.recycle() }
+        }
+
+        // Cache hits: set immediately, no render work. Collect misses for the async pass.
+        val misses = mutableListOf<PageEntry>()
+        for (entry in items) {
+            val cached = thumbnailCache[entry.id]
+            if (cached != null && !cached.isRecycled) {
+                thumbnailTargets[entry.id]?.apply {
+                    setImageBitmap(cached)
+                    visibility = android.view.View.VISIBLE
+                }
+            } else {
+                misses += entry
+            }
+        }
+        if (misses.isEmpty()) return
+
+        val key = notebookKey()
+        val job = lifecycleScope.launch {
+            withContext(Dispatchers.IO) {
+                var db: SoilDatabase? = null
+                try {
+                    val builder = SoilDatabase.builder(this@PageIndexActivity, path)
+                    if (key != null) builder.openHelperFactory(SoilCrypto.roomFactory(key))
+                    db = builder.build()
+                    val dao = db.notebookDao()
+                    // Render misses in parallel across a small worker pool sharing this one Room
+                    // connection (WAL allows concurrent reads). Each worker pulls the next index off
+                    // a shared cursor and posts its bitmap to Main as it finishes, so cards fill in
+                    // progressively. Bounded to the cores actually available to keep CPU-bound stroke
+                    // parse + rasterization from over-subscribing.
+                    val cursor = java.util.concurrent.atomic.AtomicInteger(0)
+                    val workers = minOf(
+                        misses.size,
+                        Runtime.getRuntime().availableProcessors().coerceAtLeast(1),
+                        4,
+                    )
+                    kotlinx.coroutines.coroutineScope {
+                        repeat(workers) {
+                            launch {
+                                while (isActive) {
+                                    val i = cursor.getAndIncrement()
+                                    if (i >= misses.size) break
+                                    val entry = misses[i]
+                                    // Per-page guard: one bad page must not blank the rest of the grid.
+                                    val bitmap = try {
+                                        val pageRow = dao.getObjectById(entry.id) ?: continue
+                                        NotebookExporter.renderPageThumbnail(
+                                            dao, pageRow, this@PageIndexActivity, spec.cardWidthPx, spec.cardHeightPx,
+                                        )
+                                    } catch (e: kotlinx.coroutines.CancellationException) {
+                                        throw e
+                                    } catch (e: Exception) {
+                                        Slog.d("PageIndex") { "thumbnail render failed for page ${entry.id}: ${e.message}" }
+                                        null
+                                    } ?: continue
+                                    withContext(Dispatchers.Main) {
+                                        if (isActive) {
+                                            thumbnailCache[entry.id] = bitmap
+                                            thumbnailTargets[entry.id]?.apply {
+                                                setImageBitmap(bitmap)
+                                                visibility = android.view.View.VISIBLE
+                                            }
+                                        } else bitmap.recycle()
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    Slog.d("PageIndex") { "thumbnail render pass failed: ${e.message}" }
+                } finally {
+                    db?.close()
+                }
+            }
+        }
+        snapshotDecodeJobs.add(job)
     }
 
     private fun renderEmptyState() {
@@ -699,7 +732,8 @@ class PageIndexActivity : AppCompatActivity() {
         val padPx   = if (highlighted) (3 * density + 0.5f).toInt() else pad1dp
         card.setPadding(padPx, padPx, padPx, padPx)
 
-        // Snapshot image — filled once the bitmap is decoded off the main thread.
+        // Thumbnail image — filled once the page is rendered on demand off the main thread
+        // ([renderVisibleThumbnails]). Registered by entry id so the render pass can target it.
         val snapshotImage = AppCompatImageView(this).apply {
             scaleType  = ImageView.ScaleType.CENTER_CROP
             visibility = android.view.View.GONE
@@ -708,6 +742,7 @@ class PageIndexActivity : AppCompatActivity() {
             FrameLayout.LayoutParams.MATCH_PARENT,
             FrameLayout.LayoutParams.MATCH_PARENT,
         ))
+        thumbnailTargets[entry.id] = snapshotImage
 
         // ── Insertion-bar preview ──────────────────────────────────────────────
         // For the pending destination, draw a bold inkBlack bar on the leading edge (insertBefore)
@@ -736,23 +771,6 @@ class PageIndexActivity : AppCompatActivity() {
         group.addView(label, LinearLayout.LayoutParams(spec.cardWidthPx, spec.labelHeightPx).also {
             it.topMargin = spec.rowGapPx
         })
-
-        // ── Snapshot decode coroutine ─────────────────────────────────────────
-        if (!entry.snapshot.isNullOrEmpty()) {
-            val job = lifecycleScope.launch {
-                val bitmap: Bitmap? = withContext(Dispatchers.IO) {
-                    try {
-                        val bytes = Base64.decode(entry.snapshot, Base64.DEFAULT)
-                        BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
-                    } catch (_: Exception) { null }
-                }
-                if (bitmap != null) {
-                    snapshotImage.setImageBitmap(bitmap)
-                    snapshotImage.visibility = android.view.View.VISIBLE
-                }
-            }
-            snapshotDecodeJobs.add(job)
-        }
 
         return group
     }
@@ -994,7 +1012,7 @@ class PageIndexActivity : AppCompatActivity() {
 
         lifecycleScope.launch {
             val results = withContext(Dispatchers.IO) {
-                com.notesprout.android.data.movePagesRelativeRaw(sources, targetPageId, insertBefore, path, KeySession.getFor(notebookId))
+                com.notesprout.android.data.movePagesRelativeRaw(sources, targetPageId, insertBefore, path, notebookKey())
             }
             if (results == null) {
                 android.widget.Toast.makeText(this@PageIndexActivity, "Couldn't move pages", android.widget.Toast.LENGTH_SHORT).show()
@@ -1025,7 +1043,7 @@ class PageIndexActivity : AppCompatActivity() {
 
         lifecycleScope.launch {
             val results = withContext(Dispatchers.IO) {
-                com.notesprout.android.data.copyPagesRelativeRaw(sources, targetPageId, insertBefore, path, KeySession.getFor(notebookId))
+                com.notesprout.android.data.copyPagesRelativeRaw(sources, targetPageId, insertBefore, path, notebookKey())
             }
             if (results == null) {
                 android.widget.Toast.makeText(this@PageIndexActivity, "Couldn't paste pages", android.widget.Toast.LENGTH_SHORT).show()
@@ -1090,7 +1108,7 @@ class PageIndexActivity : AppCompatActivity() {
         val sourceIds = crossPendingSourceIds
         if (sourceIds.isEmpty()) { refreshActionMode(); renderGridPage(); return }
         val sourcePath = notebookSoilPath ?: return
-        val sourcePass = KeySession.getFor(notebookId)
+        val sourcePass = notebookKey()
         val destPath   = soilFile(this, destId).absolutePath
 
         lifecycleScope.launch {
@@ -1172,7 +1190,7 @@ class PageIndexActivity : AppCompatActivity() {
                         .create()
                     d.show()
                     d.window?.setElevation(0f)
-                    d.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+                    d.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
                     cont.invokeOnCancellation { d.dismiss() }
                 }
                 if (!confirmed) return@launch
@@ -1234,7 +1252,7 @@ class PageIndexActivity : AppCompatActivity() {
                     .create()
                 d.show()
                 d.window?.setElevation(0f)
-                d.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+                d.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
                 cont.invokeOnCancellation { d.dismiss() }
             }
             if (openChosen) {
@@ -1281,9 +1299,9 @@ class PageIndexActivity : AppCompatActivity() {
                     ""  // Blank — clear template.
                 } else {
                     val entity = indexRepo.getTemplate(libraryTemplateId) ?: return@withContext null
-                    val tObj = TemplateObject.fromJson(entity.data) ?: return@withContext null
+                    val tObj = entity.templateObject() ?: return@withContext null
                     if (tObj.image.isEmpty()) return@withContext null
-                    val key = KeySession.getFor(notebookId)
+                    val key = notebookKey()
                     val parentId = com.notesprout.android.data.readNotebookRowId(path, key)
                         ?: MainActivity.NIL_UUID
                     com.notesprout.android.data.insertSoilTemplateRaw(
@@ -1303,7 +1321,7 @@ class PageIndexActivity : AppCompatActivity() {
             }
 
             val pairs = withContext(Dispatchers.IO) {
-                com.notesprout.android.data.setPagesTemplateRaw(targets, soilTemplateId, path, KeySession.getFor(notebookId))
+                com.notesprout.android.data.setPagesTemplateRaw(targets, soilTemplateId, path, notebookKey())
             }
             if (pairs == null) {
                 android.widget.Toast.makeText(this@PageIndexActivity, "Couldn't set template", android.widget.Toast.LENGTH_SHORT).show()
@@ -1351,7 +1369,7 @@ class PageIndexActivity : AppCompatActivity() {
                 lifecycleScope.launch {
                     val deleted = withContext(kotlinx.coroutines.Dispatchers.IO) {
                         targetIds.mapNotNull { id ->
-                            val deletedAt = com.notesprout.android.data.deletePageRaw(id, path, KeySession.getFor(notebookId))
+                            val deletedAt = com.notesprout.android.data.deletePageRaw(id, path, notebookKey())
                             val originalIndex = indexById[id]
                             if (deletedAt != null && originalIndex != null) {
                                 Triple(id, originalIndex, deletedAt)
@@ -1380,554 +1398,27 @@ class PageIndexActivity : AppCompatActivity() {
             .create()
         dialog.show()
         dialog.window?.setElevation(0f)
-        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
     }
 
     /**
-     * Entry point for the Export toolbar button. Routes single-selection through the richer
-     * existing single-page flow ([showExportChoice]: Save to device / Save as Template / Share),
-     * and multi-selection through the new multi-export dialog (PDF / PNG / Cancel).
+     * Entry point for the Export toolbar button: hand the current selection to [ExportActivity],
+     * which owns format, options and destination for every export in the app.
      */
     private fun executeExport() {
         if (!inActionMode()) return
-        if (selectedCount() == 1) {
-            // Single-page export is always PNG — warn upfront if encrypted.
-            lifecycleScope.launch {
-                if (KeySession.getFor(notebookId) != null) {
-                    val confirmed = suspendCancellableCoroutine<Boolean> { cont ->
-                        val d = AlertDialog.Builder(this@PageIndexActivity)
-                            .setTitle("Export encrypted notebook")
-                            .setMessage("This notebook is encrypted. The exported file will be unencrypted — anyone with access to the exported file will be able to read its contents.")
-                            .setPositiveButton("Export anyway") { _, _ -> if (cont.isActive) cont.resume(true) }
-                            .setNegativeButton("Cancel") { _, _ -> if (cont.isActive) cont.resume(false) }
-                            .setOnCancelListener { if (cont.isActive) cont.resume(false) }
-                            .create()
-                        d.show()
-                        d.window?.setElevation(0f)
-                        d.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
-                        cont.invokeOnCancellation { d.dismiss() }
-                    }
-                    if (!confirmed) return@launch
-                }
-                executeSingleExport()
-            }
-        } else {
-            // Multi-page: each format path handles its own warning.
-            showMultiExportDialog()
-        }
-    }
-
-    /** Single-page export — renders a PNG then offers Save / Template / Share. */
-    private fun executeSingleExport() {
-        val pageId = selectedPageIds.singleOrNull() ?: return
-        val pageEntry = pages.firstOrNull { it.id == pageId } ?: return
-        val path = notebookSoilPath ?: return
-        val notebookName = intent.getStringExtra(EXTRA_NOTEBOOK_NAME) ?: "notebook"
-
-        val tvMessage = android.widget.TextView(this).apply {
-            text = "Exporting…"
-            setPadding(64, 48, 64, 48)
-            setTextColor(android.graphics.Color.BLACK)
-            textSize = 16f
-        }
-        val dialog = AlertDialog.Builder(this)
-            .setView(tvMessage)
-            .setCancelable(false)
-            .create()
-        dialog.show()
-        dialog.window?.setElevation(0f)
-        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
-
-        lifecycleScope.launch {
-            val pngFile = try {
-                withContext(Dispatchers.IO) {
-                    NotebookExporter.exportPage(
-                        context = this@PageIndexActivity,
-                        soilPath = path,
-                        pageId = pageEntry.id,
-                        pageNumber = pageEntry.pageNumber,
-                        notebookTitle = notebookName,
-                        passphrase = KeySession.getFor(notebookId),
-                    )
-                }
-            } catch (e: Exception) {
-                android.util.Log.e("PageIndexActivity", "PNG export failed", e)
-                dialog.dismiss()
-                android.widget.Toast.makeText(this@PageIndexActivity, "Export failed: ${e.message}", android.widget.Toast.LENGTH_LONG).show()
-                return@launch
-            }
-
-            dialog.dismiss()
-            exitActionMode()
-            val defaultName = sanitizeTemplateName(
-                pageEntry.headingName ?: "Page ${pageEntry.pageNumber}"
-            )
-            showExportChoice(pngFile, defaultName)
-        }
-    }
-
-    /**
-     * Multi-page export dialog: presents PDF / PNG / Cancel.
-     * Selected pages are sorted to page order (not selection order) before export.
-     */
-    private fun showMultiExportDialog() {
-        val n = selectedCount()
-        val d = AlertDialog.Builder(this)
-            .setTitle("Export $n pages")
-            .setPositiveButton("PDF") { _, _ -> exportMultiAsPdf() }
-            .setNeutralButton("PNG") { _, _ ->
-                // PNG is always unencrypted — warn upfront if the notebook is encrypted.
-                lifecycleScope.launch {
-                    if (KeySession.getFor(notebookId) != null) {
-                        val confirmed = suspendCancellableCoroutine<Boolean> { cont ->
-                            val dlg = AlertDialog.Builder(this@PageIndexActivity)
-                                .setTitle("Export encrypted notebook")
-                                .setMessage("This notebook is encrypted. The exported file will be unencrypted — anyone with access to the exported file will be able to read its contents.")
-                                .setPositiveButton("Export anyway") { _, _ -> if (cont.isActive) cont.resume(true) }
-                                .setNegativeButton("Cancel") { _, _ -> if (cont.isActive) cont.resume(false) }
-                                .setOnCancelListener { if (cont.isActive) cont.resume(false) }
-                                .create()
-                            dlg.show()
-                            dlg.window?.setElevation(0f)
-                            dlg.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
-                            cont.invokeOnCancellation { dlg.dismiss() }
-                        }
-                        if (!confirmed) return@launch
-                    }
-                    showPngSubchoiceDialog()
-                }
-            }
-            .setNegativeButton("Cancel", null)
-            .create()
-        d.show()
-        d.window?.setElevation(0f)
-        d.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
-    }
-
-    /**
-     * PNG sub-choice: Save images (to a folder) vs Save as templates (import into library).
-     */
-    private fun showPngSubchoiceDialog() {
-        val d = AlertDialog.Builder(this)
-            .setTitle("PNG export")
-            .setPositiveButton("Save images") { _, _ -> exportMultiAsPngFiles() }
-            .setNeutralButton("Save as templates") { _, _ -> exportMultiAsPngTemplates() }
-            .setNegativeButton("Cancel", null)
-            .create()
-        d.show()
-        d.window?.setElevation(0f)
-        d.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
-    }
-
-    /**
-     * Build the ordered page list for a multi-export (by page order, not selection insertion order).
-     * Returns null if there's nothing to export.
-     */
-    private fun orderedSelectedEntries(): List<PageEntry>? {
-        if (selectedPageIds.isEmpty()) return null
-        // Sort by position in the pages list (which is sorted by `order`) rather than selection order.
+        // Sort by position in [pages] (which is ordered by `order`) rather than by selection order.
         val idSet = selectedPageIds.toSet()
-        return pages.filter { it.id in idSet }.takeIf { it.isNotEmpty() }
-    }
-
-    /**
-     * Export all selected pages to a single PDF. Offers optional password protection before
-     * showing the progress dialog; afterwards offers Save to device ([savePdfLauncher]) and Share.
-     */
-    private fun exportMultiAsPdf() {
-        val entries = orderedSelectedEntries() ?: return
-        val path    = notebookSoilPath ?: return
-        val notebookName = intent.getStringExtra(EXTRA_NOTEBOOK_NAME) ?: "notebook"
-        val pageIds = entries.map { it.id }
-
-        lifecycleScope.launch {
-            // For encrypted notebooks only: offer PDF password protection first.
-            // If the user declines a password, warn that the export will be unencrypted.
-            val isEncrypted = KeySession.getFor(notebookId) != null
-            val exportPassword: String?
-            if (isEncrypted) {
-                val exportPwdChoice = com.notesprout.android.crypto.PassphrasePrompt.promptForPdfExportPassword(this@PageIndexActivity)
-                    ?: return@launch  // user cancelled
-                if (exportPwdChoice.isEmpty()) {
-                    val confirmed = suspendCancellableCoroutine<Boolean> { cont ->
-                        val d = AlertDialog.Builder(this@PageIndexActivity)
-                            .setTitle("Export encrypted notebook")
-                            .setMessage("This notebook is encrypted. The exported file will be unencrypted — anyone with access to the exported file will be able to read its contents.")
-                            .setPositiveButton("Export anyway") { _, _ -> if (cont.isActive) cont.resume(true) }
-                            .setNegativeButton("Cancel") { _, _ -> if (cont.isActive) cont.resume(false) }
-                            .setOnCancelListener { if (cont.isActive) cont.resume(false) }
-                            .create()
-                        d.show()
-                        d.window?.setElevation(0f)
-                        d.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
-                        cont.invokeOnCancellation { d.dismiss() }
-                    }
-                    if (!confirmed) return@launch
-                    exportPassword = null
-                } else {
-                    exportPassword = exportPwdChoice
-                }
-            } else {
-                exportPassword = null
-            }
-
-            val tvMessage = android.widget.TextView(this@PageIndexActivity).apply {
-                text = "Exporting…"
-                setPadding(64, 48, 64, 48)
-                setTextColor(android.graphics.Color.BLACK)
-                textSize = 16f
-            }
-            val progressDialog = AlertDialog.Builder(this@PageIndexActivity)
-                .setView(tvMessage)
-                .setCancelable(false)
-                .create()
-            progressDialog.show()
-            progressDialog.window?.setElevation(0f)
-            progressDialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
-
-            val handler = android.os.Handler(android.os.Looper.getMainLooper())
-
-            val pdfFile = try {
-                withContext(Dispatchers.IO) {
-                    NotebookExporter.exportPagesPdf(
-                        context        = this@PageIndexActivity,
-                        soilPath       = path,
-                        pageIds        = pageIds,
-                        notebookTitle  = notebookName,
-                        onProgress     = { current, total ->
-                            handler.post { tvMessage.text = "Exporting page $current of $total…" }
-                        },
-                        passphrase     = KeySession.getFor(notebookId),
-                        exportPassword = exportPassword,
-                    )
-                }
-            } catch (e: Exception) {
-                android.util.Log.e("PageIndexActivity", "PDF export failed", e)
-                progressDialog.dismiss()
-                android.widget.Toast.makeText(this@PageIndexActivity, "Export failed: ${e.message}", android.widget.Toast.LENGTH_LONG).show()
-                return@launch
-            }
-
-            progressDialog.dismiss()
-            exitActionMode()
-            showPdfExportChoice(pdfFile)
-        }
-    }
-
-    /**
-     * Offer Save to device or Share after a multi-page PDF is rendered.
-     */
-    private fun showPdfExportChoice(file: java.io.File) {
-        val d = AlertDialog.Builder(this)
-            .setTitle("Export PDF")
-            .setPositiveButton("Save to device") { _, _ ->
-                pendingExportFile = file
-                savePdfLauncher.launch(file.name)
-            }
-            .setNegativeButton("Share") { _, _ ->
-                val uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", file)
-                val shareIntent = Intent(Intent.ACTION_SEND).apply {
-                    type = "application/pdf"
-                    putExtra(Intent.EXTRA_STREAM, uri)
-                    clipData = ClipData.newRawUri("", uri)
-                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                }
-                startActivity(Intent.createChooser(shareIntent, "Share PDF"))
-            }
-            .create()
-        d.show()
-        d.window?.setElevation(0f)
-        d.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
-    }
-
-    /**
-     * Export all selected pages as individual PNGs, auto-named from notebook + page label.
-     * Renders to cache first (with a progress dialog), then prompts for a destination folder
-     * once via [openDocumentTreeLauncher]. No per-file prompts.
-     */
-    private fun exportMultiAsPngFiles() {
-        val entries = orderedSelectedEntries() ?: return
-        val path    = notebookSoilPath ?: return
-        val notebookName = intent.getStringExtra(EXTRA_NOTEBOOK_NAME) ?: "notebook"
-
-        // Build (pageId, filenameBase) pairs with sanitized, de-duplicated names.
-        val safeNotebook = notebookName.replace(Regex("[^a-zA-Z0-9_\\-. ]"), "_")
-            .trim('_', ' ').ifBlank { "notebook" }
-        val usedNames = mutableSetOf<String>()
-        val pageSpecs: List<Pair<String, String>> = entries.map { entry ->
-            val rawLabel = entry.headingName ?: "Page${entry.pageNumber}"
-            val safeLabel = rawLabel.replace(Regex("[^a-zA-Z0-9_\\-. ]"), "_").trim('_', ' ')
-                .ifBlank { "Page${entry.pageNumber}" }
-            val base = "${safeNotebook}_${safeLabel}"
-            val uniqueBase = makeUniqueFilename(base, usedNames)
-            usedNames.add(uniqueBase)
-            Pair(entry.id, uniqueBase)
-        }
-
-        val tvMessage = android.widget.TextView(this).apply {
-            text = "Exporting…"
-            setPadding(64, 48, 64, 48)
-            setTextColor(android.graphics.Color.BLACK)
-            textSize = 16f
-        }
-        val progressDialog = AlertDialog.Builder(this)
-            .setView(tvMessage)
-            .setCancelable(false)
-            .create()
-        progressDialog.show()
-        progressDialog.window?.setElevation(0f)
-        progressDialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
-
-        val handler = android.os.Handler(android.os.Looper.getMainLooper())
-
-        lifecycleScope.launch {
-            val pngFiles = try {
-                withContext(Dispatchers.IO) {
-                    NotebookExporter.exportPagesPng(
-                        context = this@PageIndexActivity,
-                        soilPath = path,
-                        pages = pageSpecs,
-                        onProgress = { current, total ->
-                            handler.post { tvMessage.text = "Exporting page $current of $total…" }
-                        },
-                        passphrase = KeySession.getFor(notebookId),
-                    )
-                }
-            } catch (e: Exception) {
-                android.util.Log.e("PageIndexActivity", "PNG batch export failed", e)
-                progressDialog.dismiss()
-                android.widget.Toast.makeText(this@PageIndexActivity, "Export failed: ${e.message}", android.widget.Toast.LENGTH_LONG).show()
-                return@launch
-            }
-
-            progressDialog.dismiss()
-            exitActionMode()
-
-            if (pngFiles.isEmpty()) {
-                android.widget.Toast.makeText(this@PageIndexActivity, "Nothing to export", android.widget.Toast.LENGTH_SHORT).show()
-                return@launch
-            }
-
-            // Prompt once for a destination folder; writes happen in openDocumentTreeLauncher callback.
-            pendingPngFiles = pngFiles
-            openDocumentTreeLauncher.launch(null)
-        }
-    }
-
-    /**
-     * Write [files] into the folder at [treeUri] using [DocumentsContract].
-     * Returns the count of files successfully written.
-     * Runs on the IO dispatcher (caller is responsible).
-     */
-    private fun writePngFilesToTree(treeUri: Uri, files: List<java.io.File>): Int {
-        val treeDocId = DocumentsContract.getTreeDocumentId(treeUri)
-        val treeDocUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, treeDocId)
-        var written = 0
-        for (file in files) {
-            try {
-                val docUri = DocumentsContract.createDocument(
-                    contentResolver, treeDocUri, "image/png", file.name
-                ) ?: continue
-                contentResolver.openOutputStream(docUri)?.use { out ->
-                    file.inputStream().use { it.copyTo(out) }
-                }
-                written++
-            } catch (e: Exception) {
-                android.util.Log.e("PageIndexActivity", "Failed to write ${file.name} to tree", e)
-            }
-        }
-        Slog.d("PageIndexActivity") { "writePngFilesToTree: wrote $written of ${files.size}" }
-        return written
-    }
-
-    /**
-     * Export all selected pages as PNGs and import each into the template library (P2.2). First lets
-     * the user pick a destination folder via [TemplateBrowserActivity.MODE_PICK_FOLDER]; the actual
-     * render + import happens in [renderAndImportTemplates] once the folder comes back.
-     */
-    private fun exportMultiAsPngTemplates() {
-        pendingTemplateEntries = orderedSelectedEntries() ?: return
-        val intent = Intent(this, TemplateBrowserActivity::class.java)
-            .putExtra(TemplateBrowserActivity.EXTRA_MODE, TemplateBrowserActivity.MODE_PICK_FOLDER)
-            .putExtra(TemplateBrowserActivity.EXTRA_TITLE, "Save templates to…")
-        pickTemplateFolderLauncher.launch(intent)
-    }
-
-    /**
-     * Render the [pendingTemplateEntries] to PNGs and import each into the template library under
-     * [parentId] (null = root). Page label is used as the template name (sanitized, de-duped against
-     * existing templates in that folder). All heavy work runs on [Dispatchers.IO].
-     */
-    private fun renderAndImportTemplates(parentId: String?) {
-        val entries = pendingTemplateEntries
-        pendingTemplateEntries = emptyList()
-        if (entries.isEmpty()) return
-        val path    = notebookSoilPath ?: return
-        val notebookName = intent.getStringExtra(EXTRA_NOTEBOOK_NAME) ?: "notebook"
-
-        // Build (pageId, filenameBase) specs for rendering; names will be re-sanitized for the
-        // template library below.
-        val safeNotebook = notebookName.replace(Regex("[^a-zA-Z0-9_\\-. ]"), "_")
-            .trim('_', ' ').ifBlank { "notebook" }
-        val renderUsedNames = mutableSetOf<String>()
-        val pageSpecs: List<Pair<String, String>> = entries.map { entry ->
-            val rawLabel = entry.headingName ?: "Page${entry.pageNumber}"
-            val safeLabel = rawLabel.replace(Regex("[^a-zA-Z0-9_\\-. ]"), "_").trim('_', ' ')
-                .ifBlank { "Page${entry.pageNumber}" }
-            val base = "${safeNotebook}_${safeLabel}"
-            val uniqueBase = makeUniqueFilename(base, renderUsedNames)
-            renderUsedNames.add(uniqueBase)
-            Pair(entry.id, uniqueBase)
-        }
-        // Template names: use the raw page label directly (shorter / more readable than the
-        // notebook-prefixed filename base).
-        val templateLabels: List<String> = entries.map { entry ->
-            sanitizeTemplateName(entry.headingName ?: "Page ${entry.pageNumber}")
-        }
-
-        val tvMessage = android.widget.TextView(this).apply {
-            text = "Exporting…"
-            setPadding(64, 48, 64, 48)
-            setTextColor(android.graphics.Color.BLACK)
-            textSize = 16f
-        }
-        val progressDialog = AlertDialog.Builder(this)
-            .setView(tvMessage)
-            .setCancelable(false)
-            .create()
-        progressDialog.show()
-        progressDialog.window?.setElevation(0f)
-        progressDialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
-
-        val handler = android.os.Handler(android.os.Looper.getMainLooper())
-
-        lifecycleScope.launch {
-            val pngFiles = try {
-                withContext(Dispatchers.IO) {
-                    NotebookExporter.exportPagesPng(
-                        context = this@PageIndexActivity,
-                        soilPath = path,
-                        pages = pageSpecs,
-                        onProgress = { current, total ->
-                            handler.post { tvMessage.text = "Rendering page $current of $total…" }
-                        },
-                        passphrase = KeySession.getFor(notebookId),
-                    )
-                }
-            } catch (e: Exception) {
-                android.util.Log.e("PageIndexActivity", "PNG-as-templates render failed", e)
-                progressDialog.dismiss()
-                android.widget.Toast.makeText(this@PageIndexActivity, "Export failed: ${e.message}", android.widget.Toast.LENGTH_LONG).show()
-                return@launch
-            }
-
-            if (pngFiles.isEmpty()) {
-                progressDialog.dismiss()
-                android.widget.Toast.makeText(this@PageIndexActivity, "Nothing to export", android.widget.Toast.LENGTH_SHORT).show()
-                return@launch
-            }
-
-            handler.post { tvMessage.text = "Importing templates…" }
-
-            val importedCount = withContext(Dispatchers.IO) {
-                // Fetch existing template names in the target folder once so de-dup is consistent.
-                val existing = runCatching { indexRepo.getTemplates(parentId) }.getOrElse { emptyList() }
-                val existingNames = existing.map { it.name }.toMutableList()
-
-                var count = 0
-                for ((idx, file) in pngFiles.withIndex()) {
-                    val rawName = templateLabels.getOrNull(idx) ?: sanitizeTemplateName(file.nameWithoutExtension)
-                    val finalName = makeUniqueTemplateName(rawName, existingNames)
-                    existingNames.add(finalName)  // reserve so subsequent iterations don't collide
-
-                    try {
-                        val bytes = file.readBytes()
-                        val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-                        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)
-                        val w = opts.outWidth; val h = opts.outHeight
-                        if (w <= 0 || h <= 0) {
-                            android.util.Log.w("PageIndexActivity", "Template import: invalid bounds for ${file.name}")
-                            continue
-                        }
-                        val base64 = Base64.encodeToString(bytes, Base64.NO_WRAP)
-                        indexRepo.createTemplate(finalName, parentId, w, h, base64)
-                        Slog.d("PageIndexActivity") { "Imported template '$finalName' (${w}x${h})" }
-                        count++
-                    } catch (e: Exception) {
-                        android.util.Log.e("PageIndexActivity", "Template import failed for ${file.name}", e)
-                    }
-                }
-                count
-            }
-
-            progressDialog.dismiss()
-            exitActionMode()
-
-            val total = pngFiles.size
-            val msg = if (importedCount == total) "Saved $total templates"
-                      else "Saved $importedCount of $total templates"
-            android.widget.Toast.makeText(this@PageIndexActivity, msg, android.widget.Toast.LENGTH_SHORT).show()
-        }
-    }
-
-    /**
-     * De-duplicate a filename base among [used] names by appending `_2`, `_3`, etc.
-     * Does NOT include an extension — callers add ".png" separately.
-     */
-    private fun makeUniqueFilename(base: String, used: Set<String>): String {
-        if (base !in used) return base
-        var n = 2
-        while ("${base}_$n" in used) n++
-        return "${base}_$n"
-    }
-
-    /**
-     * De-duplicate a template name among [existing] names using `(2)`, `(3)`, … suffix,
-     * matching the convention used in [TemplateBrowserActivity.makeUniqueName].
-     */
-    private fun makeUniqueTemplateName(name: String, existing: List<String>): String {
-        if (existing.none { it.equals(name, ignoreCase = true) }) return name
-        var n = 2
-        while (existing.any { it.equals("$name ($n)", ignoreCase = true) }) n++
-        return "$name ($n)"
-    }
-
-    /** Whitelist a proposed template name to the browser's accepted characters; never empty. */
-    private fun sanitizeTemplateName(raw: String): String {
-        val cleaned = raw.replace(Regex("[^a-zA-Z0-9_\\-. ]"), "_").trim()
-        return if (cleaned.isBlank() || cleaned == "." || cleaned == "..") "Template" else cleaned
-    }
-
-    private fun showExportChoice(file: java.io.File, templateDefaultName: String) {
-        val d = AlertDialog.Builder(this)
-            .setTitle("Export page")
-            .setPositiveButton("Save to device") { _, _ ->
-                pendingExportFile = file
-                savePngLauncher.launch(file.name)
-            }
-            .setNeutralButton("Save as Template") { _, _ ->
-                val intent = Intent(this, TemplateBrowserActivity::class.java).apply {
-                    putExtra(TemplateBrowserActivity.EXTRA_MODE, TemplateBrowserActivity.MODE_SAVE_TARGET)
-                    putExtra(TemplateBrowserActivity.EXTRA_SAVE_SOURCE_PATH, file.absolutePath)
-                    putExtra(TemplateBrowserActivity.EXTRA_SAVE_DEFAULT_NAME, templateDefaultName)
-                    putExtra(TemplateBrowserActivity.EXTRA_TITLE, "Save as Template")
-                }
-                saveTemplateLauncher.launch(intent)
-            }
-            .setNegativeButton("Share") { _, _ ->
-                val uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", file)
-                val shareIntent = Intent(Intent.ACTION_SEND).apply {
-                    type = "image/png"
-                    putExtra(Intent.EXTRA_STREAM, uri)
-                    clipData = ClipData.newRawUri("", uri)
-                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                }
-                startActivity(Intent.createChooser(shareIntent, "Share page"))
-            }
-            .create()
-        d.show()
-        d.window?.setElevation(0f)
-        d.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+        val entries = pages.filter { it.id in idSet }.takeIf { it.isNotEmpty() } ?: return
+        startActivity(
+            ExportActivity.intentFor(
+                context = this,
+                notebookId = notebookId,
+                notebookName = intent.getStringExtra(EXTRA_NOTEBOOK_NAME) ?: "notebook",
+                selectedPageIds = entries.map { it.id },
+            )
+        )
+        exitActionMode()
     }
 
     /** Encode all session paste/delete/move actions into the result and finish. */

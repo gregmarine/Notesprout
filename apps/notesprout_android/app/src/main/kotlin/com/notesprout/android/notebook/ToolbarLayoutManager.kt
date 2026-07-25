@@ -9,6 +9,7 @@ import android.widget.Space
 import androidx.appcompat.widget.AppCompatImageView
 import androidx.core.content.ContextCompat
 import com.notesprout.android.R
+import com.notesprout.android.core.TopGuard
 import com.notesprout.android.data.toolbar.ToolbarAxis
 import com.notesprout.android.data.toolbar.ToolbarConfig
 import com.notesprout.android.data.toolbar.ToolbarPlacement
@@ -51,6 +52,18 @@ class ToolbarLayoutManager(
 
     /** Fixed cross-axis thickness of the bar in px — see [barThicknessPx]. */
     fun barThickness(): Int = barThicknessPx
+
+    /**
+     * Height of the reserved strip along the top edge that the bar must not occupy — see [TopGuard].
+     * The notebook runs immersive, so the status bar is hidden and its inset is 0; without this the
+     * bar would sit hard against the top edge, where a reach for a button pulls the status bar down
+     * instead. Every placement that touches the top edge (TOP, LEFT, RIGHT, and a dragged FLOAT)
+     * starts below it. The canvas is unaffected — it stays full-bleed under the guard.
+     */
+    private val topGuardPx: Int = TopGuard.heightPx(context)
+
+    /** Height of the top guard band in px — see [topGuardPx]. */
+    fun topGuard(): Int = topGuardPx
 
     /**
      * Cached references to every button view, captured once from the inflated hierarchy. Views are
@@ -118,9 +131,11 @@ class ToolbarLayoutManager(
      * Anchor the bar to an edge (or float it), set its orientation + size, and select the matching
      * background. TOP/BOTTOM are horizontal (match_parent × thickness); LEFT/RIGHT are vertical
      * (thickness × match_parent) — both with an edge-aware border on the inner edge. FLOAT is a
-     * detached bar: a fixed length of [FLOAT_LENGTH_FRACTION] × the matching screen dimension on its
-     * main axis, [barThicknessPx] on the cross axis, positioned via margins from `floatX`/`floatY`
-     * (centered on -1), with a full `shape_bordered` border all around.
+     * detached bar: its main-axis length is the smaller of the buttons' natural extent
+     * ([floatContentMainSize]) and [FLOAT_LENGTH_FRACTION] × the matching screen dimension, so it hugs
+     * a short toolbar yet caps a long one at 75% (overflowing the rest); [barThicknessPx] on the cross
+     * axis, positioned via margins from `floatX`/`floatY` (centered on -1), with a full `shape_bordered`
+     * border all around.
      */
     private fun applyPlacement(config: ToolbarConfig) {
         val lp = toolbar.layoutParams as FrameLayout.LayoutParams
@@ -134,6 +149,8 @@ class ToolbarLayoutManager(
                 lp.gravity = Gravity.START
                 lp.width = barThicknessPx
                 lp.height = match
+                // A vertical bar reaches the top edge too — start it below the guard.
+                lp.topMargin = topGuardPx
                 toolbar.setBackgroundResource(R.drawable.toolbar_background_left)
             }
             ToolbarPlacement.RIGHT -> {
@@ -142,6 +159,8 @@ class ToolbarLayoutManager(
                 lp.gravity = Gravity.END
                 lp.width = barThicknessPx
                 lp.height = match
+                // A vertical bar reaches the top edge too — start it below the guard.
+                lp.topMargin = topGuardPx
                 toolbar.setBackgroundResource(R.drawable.toolbar_background_right)
             }
             ToolbarPlacement.BOTTOM -> {
@@ -158,14 +177,16 @@ class ToolbarLayoutManager(
                 toolbar.orientation = if (horizontal) LinearLayout.HORIZONTAL else LinearLayout.VERTICAL
                 toolbar.gravity = if (horizontal) Gravity.CENTER_VERTICAL else Gravity.CENTER_HORIZONTAL
                 lp.gravity = Gravity.TOP or Gravity.START
-                // Mini floats hug their content (only as long as the buttons need); full floats span a
-                // fixed FLOAT_LENGTH_FRACTION of the matching screen dimension on their main axis.
+                // Mini floats hug their content. Full floats span FLOAT_LENGTH_FRACTION of the matching
+                // screen dimension — but only as an upper bound: when the buttons' natural extent is
+                // shorter (a thinned toolbar), the bar hugs them so 75% never leaves a trailing gap.
+                // When they exceed that fraction the bar stays capped there and the overflow menu kicks in.
                 val mainSize = if (config.miniEnabled) {
                     FrameLayout.LayoutParams.WRAP_CONTENT
-                } else if (horizontal) {
-                    (dm.widthPixels * FLOAT_LENGTH_FRACTION).toInt()
                 } else {
-                    (dm.heightPixels * FLOAT_LENGTH_FRACTION).toInt()
+                    val screen = if (horizontal) dm.widthPixels else dm.heightPixels
+                    val cap = (screen * FLOAT_LENGTH_FRACTION).toInt()
+                    floatContentMainSize(config, horizontal).coerceAtMost(cap)
                 }
                 if (horizontal) {
                     lp.width = mainSize
@@ -181,7 +202,10 @@ class ToolbarLayoutManager(
                 val x = if (config.floatX < 0f) maxX / 2 else config.floatX.toInt()
                 val y = if (config.floatY < 0f) maxY / 2 else config.floatY.toInt()
                 lp.leftMargin = x.coerceIn(0, maxX)
-                lp.topMargin = y.coerceIn(0, maxY)
+                // The float bar is draggable, so the guard becomes its minimum Y — it can be parked
+                // anywhere except inside the status bar's reveal zone. A previously-saved floatY from
+                // before the guard existed is pulled down into range here.
+                lp.topMargin = y.coerceIn(topGuardPx, maxY.coerceAtLeast(topGuardPx))
                 toolbar.setBackgroundResource(R.drawable.shape_bordered)
             }
             else -> {
@@ -190,6 +214,9 @@ class ToolbarLayoutManager(
                 lp.gravity = Gravity.TOP
                 lp.width = match
                 lp.height = barThicknessPx
+                // Push the bar clear of the status bar's reveal zone. The canvas keeps its full
+                // height and simply shows through the guard band above the bar.
+                lp.topMargin = topGuardPx
                 toolbar.setBackgroundResource(R.drawable.toolbar_background_top)
             }
         }
@@ -203,6 +230,43 @@ class ToolbarLayoutManager(
             toolbar.setPadding(pad, 0, pad, 0)
         }
         toolbar.layoutParams = lp
+    }
+
+    /**
+     * The main-axis extent a *full* (non-mini) FLOAT bar needs to show all of its content with no gap:
+     * the leading drag handle, every visible button, the auto-dividers inserted between group
+     * boundaries, and the bar's own start/end padding. Computed from the same fixed layout-param sizes
+     * [ToolbarOverflowManager] sums (no measure pass required), so the two agree: when this comes in at
+     * or under the 75% cap the bar hugs its buttons and nothing overflows; when it exceeds the cap the
+     * bar is pinned at 75% and the surplus buttons spill into the overflow menu.
+     */
+    private fun floatContentMainSize(config: ToolbarConfig, horizontal: Boolean): Int {
+        val views = captureButtonViews()
+        var total = dp(4) + dp(4) // bar start/end padding on the main axis
+        total += dp(28)           // leading drag handle (28dp on either axis, no margins)
+        var prevGroup: String? = null
+        var first = true
+        for (key in resolveVisibleKeys(config)) {
+            val spec = ToolbarButtonRegistry.spec(key) ?: continue
+            val view = views[key] ?: continue
+            // A group divider is 1dp on its main axis with a 4dp margin on each side (see makeDivider).
+            if (!first && spec.group != prevGroup) total += dp(1) + dp(4) + dp(4)
+            total += buttonMainSize(view, horizontal)
+            prevGroup = spec.group
+            first = false
+        }
+        return total
+    }
+
+    /** Main-axis span a button view occupies: its fixed layout-param dimension plus that axis's margins
+     *  — mirrors [ToolbarOverflowManager]'s natural-size measure so sizing and overflow stay in sync. */
+    private fun buttonMainSize(view: View, horizontal: Boolean): Int {
+        val lp = view.layoutParams as? ViewGroup.MarginLayoutParams ?: return 0
+        return if (horizontal) {
+            (if (lp.width >= 0) lp.width else 0) + lp.leftMargin + lp.rightMargin
+        } else {
+            (if (lp.height >= 0) lp.height else 0) + lp.topMargin + lp.bottomMargin
+        }
     }
 
     /**
@@ -316,7 +380,9 @@ class ToolbarLayoutManager(
     private fun dp(value: Int): Int = (value * density).toInt()
 
     companion object {
-        /** A floating bar spans this fraction of the matching screen dimension on its main axis. */
+        /** Upper bound on a floating bar's main-axis length as a fraction of the matching screen
+         *  dimension. A short toolbar hugs its buttons ([floatContentMainSize]); a long one is capped
+         *  here and overflows the rest. */
         const val FLOAT_LENGTH_FRACTION = 0.75f
     }
 }

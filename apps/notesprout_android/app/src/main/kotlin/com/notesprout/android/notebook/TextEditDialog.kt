@@ -106,7 +106,7 @@ class TextEditDialog(
         )
         dialog.show()
         dialog.window?.setElevation(0f)
-        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
 
         binding.editMarkdown.requestFocus()
         if (initialMarkdown.isNotEmpty()) {
@@ -207,7 +207,8 @@ class TextEditDialog(
         val content = olMatch.groupValues[2]
         if (content.isBlank()) return // empty item → don't continue
 
-        val nextNum = olMatch.groupValues[1].toInt() + 1
+        // toIntOrNull: a digit run longer than Int.MAX ("99999999999. ") must not crash the editor.
+        val nextNum = (olMatch.groupValues[1].toIntOrNull() ?: return) + 1
         val insertPos = changeStartIndex + 1 // after the '\n'
         if (insertPos > s.length) return
 

@@ -68,14 +68,26 @@ so `isSelected` state, icon state, and listeners always survive.
   → `R.id`, icon, label, **group** (consecutive buttons whose group differs get an auto-divider), and
   a `pinned` flag. `PINNED_KEY = "close"` (always present, never hideable); `SETTINGS_KEY =
   "toolbarSettings"` (the gear; force-included in mini so the dialog is always reachable).
-  **KEY STABILITY RULE:** keys are persisted → append-only, never rename/reorder. `DEFAULT_ORDER` =
-  XML order (no spacer); `DEFAULT_MINI` = compact everyday subset.
+  **KEY STABILITY RULE:** keys are persisted → append-only, never rename/reorder `SPECS`. `DEFAULT_ORDER`
+  is an **explicit key list** (decoupled from `SPECS` declaration order) defining the *display* default —
+  a **bracketed layout**: Close/Recents then Undo/Redo on the left (history parked in a fixed spot right
+  after navigation), content tools centered (ink & select → insert-objects), Scratchpad/Calendar on the
+  right, with the latent Encrypt button + pinned gear at the far right. It must list every live `SPECS` key or `load()` appends the missing ones. `DEFAULT_MINI` =
+  compact everyday subset. **Changing `DEFAULT_ORDER` only affects fresh installs / a toolbar reset** — an
+  existing persisted `order` wins and is never reordered by `load()` (it only appends new keys).
   **Encryption buttons:** `"lock"` (`btnLock`, `ic_lock`, group `GROUP_NOTEBOOK`) and `"lockOff"`
   (`btnLockOff`, `ic_lock_off`, group `GROUP_NOTEBOOK`) were appended in S6. They are runtime-hidden
   based on encryption state — `btnLock` visible only on unencrypted notebooks, `btnLockOff` only on
   encrypted. Existing users' persisted `order` configs that pre-date S6 may not include these keys;
   a one-time migration in `ToolbarPreferencesManager` appends any registry keys missing from the
   persisted list (new keys appear at the end rather than being hidden until a manual reset).
+  **Text-recognition button:** `"textRecognition"` (`btnTextRecognition`, `ic_text_recognition`,
+  group `GROUP_NOTEBOOK`) was appended when export moved to its own screen. It opened a two-item
+  action sheet — "View recognized text" and the per-notebook "Real-time text: On/Off" toggle. Both
+  actions were **later moved into the canvas long-press "Page" menu** (just above Export — see
+  `showPageMenu()`), and the toolbar button (spec + view + `showTextRecognitionMenu`) was removed;
+  `openTextViewer()`/`toggleRtr()` are called directly from the Page menu now. The key retires
+  harmlessly under the append-only rule.
 - **`ToolbarLayoutManager`** — arranges the existing button views into `drawingToolbar` per
   `ToolbarConfig`: resolves the visible key list (`order − hidden`, Close always kept; or the mini
   set when `miniEnabled && FLOAT`), sets orientation + size + edge-aware background, inserts
@@ -93,8 +105,12 @@ so `isSelected` state, icon state, and listeners always survive.
   (`toolbar_background_{top,bottom,left,right}`). `barThickness()` (56dp, captured from the inflated
   layout before any flip) drives overflow-menu / page-indicator / floating-selection positioning so
   none assume a placement.
-- **Float:** a detached bar at `shape_bordered`, length = `FLOAT_LENGTH_FRACTION` (0.75) × the
-  matching screen dimension (or `WRAP_CONTENT` in mini), positioned by `floatX/floatY` margins. A
+- **Float:** a detached bar at `shape_bordered`, main-axis length = `min(natural content extent,
+  FLOAT_LENGTH_FRACTION (0.75) × matching screen dimension)` — so a thinned toolbar hugs its buttons
+  and 0.75 never leaves a trailing gap, while a longer one is capped at 0.75 and overflows the rest
+  (mini stays `WRAP_CONTENT`). The natural extent is summed deterministically by `floatContentMainSize()`
+  from the same fixed layout-param sizes `ToolbarOverflowManager` measures (drag handle + buttons +
+  group dividers + padding), so sizing and overflow agree. Positioned by `floatX/floatY` margins. A
   manager-owned **grip drag handle** (`ic_grip_vertical`) leads the bar; `wireFloatDragHandle()` does
   the long-drag (clamped to screen, persists `{floatX, floatY}` on release, re-pushes exclusion +
   overflow anchor). Overflow can flip to the bar's leading side near a far screen edge
@@ -134,3 +150,70 @@ the gear button `btnToolbarSettings`.
 - `applyCollapsedState()` hides/shows `drawingToolbar` (closing any open overflow first) + releases
   the EPD overlay; `collapsed` persists and is restored on open via `root.doOnLayout` (after the
   overflow-init `doOnLayout`, so fit is computed while the bar is still visible).
+- **The page indicator hides with the bar.** `applyCollapsedState()` also drives
+  `tvPageIndicator.visibility`, so one double-tap clears *all* chrome off the page. Because that single
+  site serves both the gesture and the restore path, a notebook opened with a persisted `collapsed`
+  state starts with the indicator already hidden — no flash.
+
+### Page indicator overlay
+
+`tvPageIndicator` (`activity_notebook.xml`) is a bare `TextView` layered above the toolbar in the root
+`FrameLayout` — it is *not* part of the bar. It reads `<notebook name> · <n> / <total>` (falling back to
+the bare `n / total` when the name is blank), at 18sp `inkBlack`.
+
+- `updatePageIndicator()` (`NotebookActivity`) sets the text and syncs the page count to the global
+  index when it changes.
+- `positionPageIndicator()` re-anchors it so it never collides with the bar: collapsed → `bottom|end`;
+  toolbar BOTTOM → `top|end`; RIGHT → `bottom|start`; TOP/LEFT → `bottom|end`.
+- The name makes this view far wider than the old `n / total`, so it is capped at `maxWidth=320dp` with
+  `maxLines=1` + `ellipsize=end`. On narrow devices a long name truncates rather than running across the
+  page — worth re-checking in every toolbar placement if that cap is ever changed.
+
+---
+
+## Page Long-Press Menu
+
+The **page-scoped** actions are **not** toolbar buttons — they live in a canvas long-press menu, so the
+bar stays focused on drawing tools. A one-finger stationary long-press anywhere on the canvas opens an
+`ActionSheetDialog` titled **"Page"** with: **Template · Page Index · Insert Page Before · Insert Page
+After · Copy Page · (Paste Page) · Erase Page · Delete Page**. Paste appears only when a page has been
+copied (`pendingCopyPageId != null`) — an unavailable action is simply absent, never a silently-inert
+row (disabled buttons are invisible on e-ink). Each row calls the same method its old button did.
+
+- **Gesture:** `handlePageMenuLongPress()` in `NotebookActivity.dispatchTouchEvent`'s finger fan-out,
+  alongside the swipe / toggle / multi-finger detectors. **Finger-only** (the stylus never reaches the
+  fan-out, so writing is untouched). Arms a posted runnable on `ACTION_DOWN` and lets it fire at
+  `getLongPressTimeout()` while the finger is still held; cancels on movement past `scaledTouchSlop`, a
+  second finger, `ACTION_UP`/`CANCEL`, or the pen-activity gate (`cancelFingerGestures`). The runnable
+  re-checks `isFinishing`/`isDestroyed`/`isPenActive` at fire time. A long-press is longer than the
+  toolbar-toggle tap window, so the two never collide.
+- **Suppressed** only for genuine *finger*-tap conflicts: over toolbar chrome, the shape-insert picker,
+  an open overflow menu, or a followable link / sticky note. It is deliberately **not** gated on the
+  active drawing tool — lasso / lasso-eraser / text-placement / shape-transform are *stylus*
+  interactions, orthogonal to a finger gesture, and the other finger gestures (swipe, double-tap
+  toggle) run in them freely. (An early build guarded on those modes and the menu silently did nothing
+  whenever the restored tool was Lasso — a finger long-press must work regardless of the stylus tool.)
+  `showPageMenu()` calls `releaseRender()` before showing so the sheet is visible on EPD.
+- **Registry impact:** the `template`, `pageIndex`, `insertPageBefore`, `insertPageAfter`, `deletePage`,
+  `copyPage`, `pastePage`, and `eraseAll` specs were **removed** from `ToolbarButtonRegistry` (and their
+  `activity_notebook.xml` views deleted). Per the append-only key rule these keys are simply retired —
+  a persisted config still listing them resolves to `null` and is skipped harmlessly, exactly like the
+  retired `lockOff`.
+- **Later retirements (`toc`, `export`, `insertText`, `textRecognition`, `pin`):** the `toc` spec/view
+  were removed — the table of contents is reachable via the swipe-down-on-canvas gesture only
+  (`evaluateSwipeDownToc` → `openToc()`, still live). `export` moved to the **bottom of the canvas
+  long-press "Page" menu** (`showPageMenu()` → `openExportScreen()`); its spec/view were removed from the
+  toolbar. `textRecognition` moved to the **Page menu just above Export** — its two actions ("View
+  recognized text" → `openTextViewer()`, and the "Real-time text: On/Off" toggle → `toggleRtr()`) are
+  added inline in `showPageMenu()`, and the button (spec + view + `showTextRecognitionMenu`) was removed.
+  `pin` moved to the **top of the Page menu** — its spec/view were removed; a synchronous in-memory
+  `notebookPinned` flag (loaded on open, updated by `toggleNotebookPin()`) drives the menu item's
+  label/icon ("Pin Notebook"/"Unpin Notebook"), replacing the old button's live icon swap.
+  `insertText` (the tap-to-place-text flow) was retired outright — strokes are converted to text instead —
+  so its spec/view **and** the Activity-side placement machinery
+  (`enterTextPlacementMode`/`exitTextPlacementMode`/`insertTextObject`, the `onTextPlacementTap` wiring,
+  and the toolbar-touch cancel guard) were deleted; existing `type="text"` objects stay editable via
+  `showTextEditDialogForTextObject` and the `TextInserted` undo path. The dormant `DrawingView` placement
+  hooks (`setTextPlacementMode`/`onTextPlacementTap`) are left in place, unused. All five keys retire
+  harmlessly under the append-only rule. `DEFAULT_MINI` is now `pen, eraser, undo, lasso` (its former
+  `toc` entry dropped).

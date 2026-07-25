@@ -6,6 +6,7 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
+import androidx.sqlite.db.framework.FrameworkSQLiteOpenHelperFactory
 
 /**
  * Room database for a single `.soil` notebook file.
@@ -22,7 +23,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
  *     .build()
  * ```
  */
-@Database(entities = [NotebookObject::class], version = 3, exportSchema = false)
+@Database(entities = [NotebookObject::class], version = 4, exportSchema = false)
 abstract class SoilDatabase : RoomDatabase() {
 
     abstract fun notebookDao(): NotebookDao
@@ -52,6 +53,20 @@ abstract class SoilDatabase : RoomDatabase() {
         }
 
         /**
+         * Data-model-optimization Phase 1: widen the `notebook` table with the columnar payload
+         * columns + binary `blob` (see [SoilSchema]). Additive only — every column is nullable and no
+         * existing data is rewritten, so this is a fast, safe upgrade. Rows keep their legacy `data`
+         * JSON; content is converted to the columnar form lazily (on open/save, via NotebookCompactor).
+         */
+        val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                for ((name, sqlType) in SoilSchema.ADDED_COLUMNS_V4) {
+                    db.execSQL("""ALTER TABLE notebook ADD COLUMN "$name" $sqlType""")
+                }
+            }
+        }
+
+        /**
          * Single factory that wires the open callback and full migration set onto every
          * SoilDatabase builder. Callers add `.openHelperFactory(SoilCrypto.roomFactory(key))`
          * on top where encryption is needed.
@@ -59,7 +74,11 @@ abstract class SoilDatabase : RoomDatabase() {
         fun builder(context: Context, absolutePath: String): RoomDatabase.Builder<SoilDatabase> =
             Room.databaseBuilder(context.applicationContext, SoilDatabase::class.java, absolutePath)
                 .addCallback(openCallback())
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+                // Default (plaintext) open path: never let a corrupt/mis-read file be deleted. An
+                // encrypted .soil opened without a key looks corrupt here; the default handler would
+                // wipe it. Keyed callers override this with the SQLCipher factory (also wrapped).
+                .openHelperFactory(NonDestructiveOpenHelperFactory(FrameworkSQLiteOpenHelperFactory()))
 
         /**
          * Room callback that (re-)applies connection-level PRAGMAs every time the

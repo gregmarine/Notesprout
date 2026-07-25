@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- Arch: semicircle top + straight sides + flat base.
+         Sides from bottom up to y=12, then arc from (3,12) to (21,12) through top (12,3),
+         then line back down. Base closed by Z. -->
+    <path
+        android:fillColor="@android:color/transparent"
+        android:strokeColor="@color/inkBlack"
+        android:strokeWidth="1.5"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M3 20 L3 12 A9 9 0 0 1 21 12 L21 20 Z" />
+</vector>

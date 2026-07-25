@@ -38,7 +38,7 @@ object SearchDialog {
         dialog.window?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE)
         dialog.show()
         dialog.window?.setElevation(0f)
-        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
 
         dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
             val query = dialogBinding.editNotebookName.text?.toString()?.trim().orEmpty()

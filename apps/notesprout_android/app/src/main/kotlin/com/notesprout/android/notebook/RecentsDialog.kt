@@ -19,6 +19,7 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import com.notesprout.android.R
+import com.notesprout.android.core.TopGuard
 import com.notesprout.android.data.recents.ResolvedRecent
 import java.util.Date
 import kotlin.math.ceil
@@ -80,6 +81,9 @@ class RecentsDialog(
         }
 
         flRoot = dialog.findViewById(R.id.flRecentsRoot)
+        // Immersive dialog filling the screen — reserve the top guard so the close button and the
+        // first entries aren't parked in the status bar's reveal zone.
+        TopGuard.applyRootPadding(flRoot)
         llPanel = dialog.findViewById(R.id.llRecentsPanel)
         btnClose = dialog.findViewById(R.id.btnRecentsClose)
         llList = dialog.findViewById(R.id.llRecentsList)

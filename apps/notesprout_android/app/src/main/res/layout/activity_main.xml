@@ -329,16 +329,32 @@
             android:contentDescription="Encryption" />
 
         <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnHwr"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:layout_marginStart="4dp"
+            android:src="@drawable/ic_text_recognition"
+            android:contentDescription="Handwriting Recognition" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
             android:id="@+id/btnBackup"
             style="@style/Widget.Notesprout.ToolbarButton"
             android:layout_marginStart="4dp"
             android:src="@drawable/ic_backup"
             android:contentDescription="Backup" />
 
+        <!-- TEMP: legacy-ts compaction sweep — remove after all devices compacted (see BACKLOG.md) -->
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnCompact"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:layout_marginStart="4dp"
+            android:src="@drawable/ic_compact"
+            android:contentDescription="Compact Notebooks" />
+
     </LinearLayout>
 
     <!--
-        Bottom bar: 1dp inkBlack top border, pagination centred, action buttons right-aligned.
+        Bottom bar: 1dp inkBlack top border, sibling-surface buttons left-aligned, pagination
+        centred, action buttons right-aligned.
         Height 56dp — matches the notebook activity toolbar for uniformity.
     -->
     <RelativeLayout
@@ -353,6 +369,38 @@
             android:layout_height="1dp"
             android:background="@color/inkBlack"
             android:layout_alignParentTop="true" />
+
+        <!--
+            Sibling-surface buttons: Calendar + Scratch Pad, left-aligned.
+            These are places to go, not library actions — hence their own zone, opposite the
+            create/overflow group. The bottom bar is the only chrome that is never swapped out by
+            search / pinned / recents mode, so one button each here is always reachable and needs
+            no per-mode duplicate. Hidden only in destination-picker mode.
+        -->
+        <LinearLayout
+            android:id="@+id/surfaceButtonsGroup"
+            android:layout_width="wrap_content"
+            android:layout_height="match_parent"
+            android:orientation="horizontal"
+            android:layout_alignParentStart="true"
+            android:layout_centerVertical="true"
+            android:layout_marginStart="16dp"
+            android:gravity="center_vertical">
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnCalendar"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:src="@drawable/ic_calendar"
+                android:contentDescription="Calendar" />
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnScratchpad"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:layout_marginStart="4dp"
+                android:src="@drawable/ic_sketching"
+                android:contentDescription="Scratch Pad" />
+
+        </LinearLayout>
 
         <!--
             Pagination group: |<  <  n/n  >  >|

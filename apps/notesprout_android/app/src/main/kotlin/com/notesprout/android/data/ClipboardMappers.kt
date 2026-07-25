@@ -2,12 +2,12 @@ package com.notesprout.android.data
 
 import com.notesprout.android.NotesproutClipboard
 import kotlinx.serialization.json.Json
+import com.notesprout.android.data.StickyNoteRender
 
 private val clipCodec = Json { ignoreUnknownKeys = true; explicitNulls = false }
 
 fun NotesproutClipboard.ClipboardContent.toPayload(
     sourceNotebookId: String,
-    sourceEncrypted: Boolean,
 ): ClipboardPayload {
     val items = mutableListOf<ClipItem>()
     strokes.forEach { s ->
@@ -40,32 +40,56 @@ fun NotesproutClipboard.ClipboardContent.toPayload(
             clipCodec.encodeToString(LinkRender.serializer(), lk),
         )
     }
+    stickyNotes.forEach { sn ->
+        items += ClipItem(
+            TYPE_STICKY_NOTE, BoundingBoxData.from(sn.boundingBox),
+            clipCodec.encodeToString(StickyNoteRender.serializer(), sn),
+        )
+    }
+    shapeObjects.forEach { shape ->
+        items += ClipItem(
+            TYPE_SHAPE, BoundingBoxData.from(shape.boundingBox),
+            clipCodec.encodeToString(ShapeRender.serializer(), shape),
+        )
+    }
     return ClipboardPayload(
         items = items,
         boundingBox = BoundingBoxData.from(boundingBox),
         sourceNotebookId = sourceNotebookId,
-        sourceEncrypted = sourceEncrypted,
         copiedAt = System.currentTimeMillis(),
     )
 }
 
 fun ClipboardPayload.toClipboardContent(): NotesproutClipboard.ClipboardContent? {
     if (items.isEmpty()) return null
-    val strokes     = mutableListOf<LiveStroke>()
-    val headings    = mutableListOf<HeadingStroke>()
-    val textObjects = mutableListOf<TextRender>()
-    val lineObjects = mutableListOf<LineRender>()
-    val links       = mutableListOf<LinkRender>()
+    val strokes      = mutableListOf<LiveStroke>()
+    val headings     = mutableListOf<HeadingStroke>()
+    val textObjects  = mutableListOf<TextRender>()
+    val lineObjects  = mutableListOf<LineRender>()
+    val links        = mutableListOf<LinkRender>()
+    val stickyNotes  = mutableListOf<StickyNoteRender>()
+    val shapes       = mutableListOf<ShapeRender>()
     for (item in items) {
-        when (item.type) {
-            TYPE_STROKE  -> strokes.add(clipCodec.decodeFromString(LiveStroke.serializer(), item.data))
-            TYPE_HEADING -> headings.add(clipCodec.decodeFromString(HeadingStroke.serializer(), item.data))
-            TYPE_TEXT    -> textObjects.add(clipCodec.decodeFromString(TextRender.serializer(), item.data))
-            TYPE_LINE    -> lineObjects.add(clipCodec.decodeFromString(LineRender.serializer(), item.data))
-            TYPE_LINK    -> links.add(clipCodec.decodeFromString(LinkRender.serializer(), item.data))
+        // Per-item guard: this decode runs unconditionally at app launch on a row persisted by a
+        // possibly different build (version-skewed schema, the LinkTarget FQCN discriminator, or
+        // plain corruption). One bad item must degrade to "that item is gone", never to an
+        // exception — an uncaught throw here crashes EVERY launch until the row is cleared, and
+        // the user has no way to reach the UI to clear it.
+        runCatching {
+            when (item.type) {
+                TYPE_STROKE       -> strokes.add(clipCodec.decodeFromString(LiveStroke.serializer(), item.data))
+                TYPE_HEADING      -> headings.add(clipCodec.decodeFromString(HeadingStroke.serializer(), item.data))
+                TYPE_TEXT         -> textObjects.add(clipCodec.decodeFromString(TextRender.serializer(), item.data))
+                TYPE_LINE         -> lineObjects.add(clipCodec.decodeFromString(LineRender.serializer(), item.data))
+                TYPE_LINK         -> links.add(clipCodec.decodeFromString(LinkRender.serializer(), item.data))
+                TYPE_STICKY_NOTE  -> stickyNotes.add(clipCodec.decodeFromString(StickyNoteRender.serializer(), item.data))
+                TYPE_SHAPE        -> shapes.add(clipCodec.decodeFromString(ShapeRender.serializer(), item.data))
+            }
+        }.onFailure {
+            android.util.Log.e("ClipboardMappers", "Skipping undecodable clipboard item (${item.type}): ${it.message}")
         }
     }
-    if (strokes.isEmpty() && headings.isEmpty() && textObjects.isEmpty() && lineObjects.isEmpty() && links.isEmpty()) return null
+    if (strokes.isEmpty() && headings.isEmpty() && textObjects.isEmpty() && lineObjects.isEmpty() && links.isEmpty() && stickyNotes.isEmpty() && shapes.isEmpty()) return null
     return NotesproutClipboard.ClipboardContent(
         strokes = strokes,
         headings = headings,
@@ -73,5 +97,7 @@ fun ClipboardPayload.toClipboardContent(): NotesproutClipboard.ClipboardContent?
         textObjects = textObjects,
         lineObjects = lineObjects,
         links = links,
+        stickyNotes = stickyNotes,
+        shapeObjects = shapes,
     )
 }

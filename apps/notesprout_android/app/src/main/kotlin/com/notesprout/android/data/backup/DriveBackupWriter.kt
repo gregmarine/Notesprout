@@ -24,4 +24,10 @@ object DriveBackupWriter {
         fileName: String,
         source: File,
     ): Boolean = client.uploadOrReplace(fileName, deviceFolderId, source)
+
+    /** Delete [fileName] from the device folder if present. True when absent afterwards. */
+    fun deleteFile(client: DriveApiClient, deviceFolderId: String, fileName: String): Boolean {
+        val id = client.findChild(fileName, deviceFolderId, foldersOnly = false) ?: return true
+        return client.delete(id)
+    }
 }

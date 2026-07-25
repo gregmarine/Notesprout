@@ -9,6 +9,7 @@ import android.webkit.WebViewClient
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
+import com.notesprout.android.core.TopGuard
 import com.notesprout.android.data.backup.DriveApiClient
 import com.notesprout.android.data.backup.DriveAuth
 import com.notesprout.android.data.backup.DriveTokenStore
@@ -51,6 +52,7 @@ class DriveAuthActivity : AppCompatActivity() {
 
         binding = ActivityDriveAuthBinding.inflate(layoutInflater)
         setContentView(binding.root)
+        TopGuard.applyInsetPadding(binding.root)
 
         binding.btnCancel.setOnClickListener {
             setResult(RESULT_CANCELED)
@@ -125,9 +127,23 @@ class DriveAuthActivity : AppCompatActivity() {
                 ).show()
             }
 
+            // The email is display/marker only — a transient failure here must not null it out:
+            // a null driveAccountEmail reads as "not connected" and silently disables Drive backup
+            // despite the valid refresh token just stored.
             val email = withContext(Dispatchers.IO) { DriveApiClient(accessToken).accountEmail() }
+                ?: "Google Drive (connected)"
             setResult(RESULT_OK, Intent().putExtra(EXTRA_EMAIL, email))
             finish()
         }
+    }
+
+    override fun onDestroy() {
+        // Stop and release the WebView explicitly — it otherwise keeps loading/leaks after the
+        // OAuth flow finishes.
+        if (::binding.isInitialized) {
+            binding.webView.stopLoading()
+            binding.webView.destroy()
+        }
+        super.onDestroy()
     }
 }

@@ -1,7 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Right-anchored toolbar: white background with a 1dp inkBlack left (inner) border.
-     Negative insets push the stroke rect outside the view bounds on three sides
-     so only the left edge of the stroke is visible. -->
+<!-- Right-anchored toolbar: white background with 1dp inkBlack left AND top (inner) borders.
+     The bar starts below the top guard band (see TopGuard) rather than at the screen edge,
+     so its top edge needs a border of its own.
+     Negative right/bottom insets push the stroke rect outside the view bounds on those sides
+     so only the left and top edges of the stroke are visible. -->
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
     <item>
         <shape android:shape="rectangle">
@@ -10,7 +12,6 @@
     </item>
     <item
         android:right="-2dp"
-        android:top="-2dp"
         android:bottom="-2dp">
         <shape android:shape="rectangle">
             <stroke

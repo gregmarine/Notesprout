@@ -10,6 +10,8 @@ import com.notesprout.android.data.HeadingStroke
 import com.notesprout.android.data.LineRender
 import com.notesprout.android.data.LinkRender
 import com.notesprout.android.data.LiveStroke
+import com.notesprout.android.data.ShapeRender
+import com.notesprout.android.data.StickyNoteRender
 import com.notesprout.android.data.TextRender
 
 // Option B: buildRenderBitmap + loadStrokesWithBitmap — pre-build bitmap on IO thread
@@ -35,6 +37,26 @@ interface NotebookView {
 
     fun enableDrawing()
     fun disableDrawing()
+
+    /**
+     * Called from the host Activity's onResume to (re)claim the drawing surface after the Activity
+     * was paused or stopped. On BOOX this reclaims the single **process-global** raw-drawing
+     * pipeline WITHOUT depending on the window-focus event (which is unreliable on e-ink):
+     * it reopens the pipeline if it was released, restarts it if another drawing screen claimed it
+     * while we were away (e.g. a translucent scratch pad / sticky note overlay), or just re-enables
+     * input if we still own a live session. Generic devices: defaults to [enableDrawing].
+     */
+    fun resumeDrawing() { enableDrawing() }
+
+    /**
+     * Called by the outgoing screen immediately before it launches (and finishes into) ANOTHER
+     * drawing screen, so the shared pen pipeline is released cleanly BEFORE the successor opens its
+     * own. On BOOX this closes this view's raw-drawing session while it still owns the global
+     * pipeline — preventing a dangling session and giving the successor a clean claim, instead of
+     * relying on the ownership guard to defuse a late close in onDestroy. Generic devices: no-op.
+     */
+    fun releaseForHandoff() {}
+
     fun resetOverlay() {}
 
     // Release the EPD writing overlay so the next screen refresh shows toolbar changes.
@@ -43,6 +65,16 @@ interface NotebookView {
     fun releaseRender() {}
 
     fun eraseAll()
+
+    /**
+     * Clear the in-memory content for a page navigation WITHOUT an EPD white-flash: the currently
+     * displayed page stays on the panel until [loadStrokesWithBitmap] swaps in the new page's content
+     * with a single EPD refresh. This replaces [eraseAll] on page-turn/load paths (where erasing to
+     * white then repainting caused a visible double-flash and two full-panel refreshes). Default: fall
+     * back to [eraseAll] for engines with no e-ink flash to avoid (e.g. Generic/LCD).
+     */
+    fun clearForPageLoad() { eraseAll() }
+
     fun setEraserMode(active: Boolean) {}
     fun releaseResources()
 
@@ -73,13 +105,19 @@ interface NotebookView {
     var onPenLifted: (() -> Unit)?
 
     /**
-     * Fired on the main thread when a snapshot has been captured at a non-writing
-     * transition boundary (eraser mode, template change, window focus loss).
-     * NotebookActivity wires this to [persistSnapshot] so the snapshot is written to
-     * the page's `data` JSON in the DB.
-     * Set this in onCreate; null by default.
+     * True while the stylus is writing, and for [PEN_ACTIVE_TAIL_MS] after it lifts.
+     *
+     * Exists so the host activity can suppress its finger-gesture detectors while the pen
+     * owns the surface. On Onyx the ink path runs through the SDK's raw-drawing pipeline and
+     * never produces Android `MotionEvent`s — but a palm resting on the glass still does. Without
+     * this gate a palm roll mid-word is evaluated as a tap/swipe/double-tap, and the handlers
+     * that fire reach into the live pen session (`releaseRender`, `setLimitRect`), dropping the
+     * stroke being written.
+     *
+     * The tail covers the window just after a lift, where a palm that was riding along with the
+     * hand settles or breaks contact and would otherwise register as a fresh gesture.
      */
-    var onSnapshotReady: ((snapshot: String) -> Unit)?
+    val isPenActive: Boolean get() = false
 
     // ── Lasso selection ───────────────────────────────────────────────────────
 
@@ -132,6 +170,10 @@ interface NotebookView {
         movedLineObjects: List<LineRender>,
         originalLinks: List<LinkRender>,
         movedLinks: List<LinkRender>,
+        originalStickyNotes: List<StickyNoteRender>,
+        movedStickyNotes: List<StickyNoteRender>,
+        originalShapes: List<ShapeRender>,
+        movedShapes: List<ShapeRender>,
     ) -> Unit)?
         get() = null
         @Suppress("UNUSED_PARAMETER")
@@ -263,14 +305,6 @@ interface NotebookView {
     fun getTextObjects(): List<TextRender> = emptyList()
 
     /**
-     * Paint the current [textObjects] onto [bitmap] using the view's text paint.
-     * Called from displayPage on the snapshot fast-path: the snapshot bitmap contains
-     * strokes and headings but NOT text objects (which are always loaded fresh from DB).
-     * Must be called on the main thread after [loadTextObjects].
-     */
-    fun compositeTextObjects(bitmap: Bitmap) {}
-
-    /**
      * Replace the in-memory line object list with [lineObjects] loaded from the database.
      * Call before [loadStrokes] or [loadStrokesWithBitmap] so lines are included in the
      * next canvas redraw.  Must be called on the main thread.
@@ -282,13 +316,6 @@ interface NotebookView {
      * Safe to call from any thread — line objects are replaced atomically.
      */
     fun getLineObjects(): List<LineRender> = emptyList()
-
-    /**
-     * Paint the current [lineObjects] onto [bitmap].
-     * Called from displayPage on the snapshot fast-path: lines are always loaded fresh from DB
-     * (identical reason to text objects).  Must be called on the main thread after [loadLineObjects].
-     */
-    fun compositeLineObjects(bitmap: Bitmap) {}
 
     /**
      * Replace the in-memory link object list with [links] loaded from the database.
@@ -304,11 +331,30 @@ interface NotebookView {
     fun getLinks(): List<LinkRender> = emptyList()
 
     /**
-     * Paint the current links onto [bitmap].
-     * Called from displayPage on the snapshot fast-path: links are always loaded fresh from DB
-     * (identical reason to text/line objects).  Must be called on the main thread after [loadLinks].
+     * Replace the in-memory sticky note list with [stickyNotes] loaded from the database.
+     * Call before [loadStrokes] or [loadStrokesWithBitmap] so the icons are included in the
+     * next canvas redraw.  Must be called on the main thread.
      */
-    fun compositeLinks(bitmap: Bitmap) {}
+    fun loadStickyNotes(stickyNotes: List<StickyNoteRender>) {}
+
+    /**
+     * Return the current in-memory sticky note list.
+     * Safe to call from any thread — sticky notes are replaced atomically.
+     */
+    fun getStickyNotes(): List<StickyNoteRender> = emptyList()
+
+    /**
+     * Replace the in-memory shape object list with [shapeObjects] loaded from the database.
+     * Call before [loadStrokes] or [loadStrokesWithBitmap] so shapes are included in the
+     * next canvas redraw.  Must be called on the main thread.
+     */
+    fun loadShapeObjects(shapeObjects: List<ShapeRender>) {}
+
+    /**
+     * Return the current in-memory shape object list.
+     * Safe to call from any thread — shape objects are replaced atomically.
+     */
+    fun getShapeObjects(): List<ShapeRender> = emptyList()
 
     /**
      * Fired on the main thread when a fast, closed pen gesture in pen mode encloses or
@@ -354,6 +400,8 @@ interface NotebookView {
         erasedTextObjects: List<TextRender>,
         erasedLineObjects: List<LineRender>,
         erasedLinks: List<LinkRender>,
+        erasedStickyNotes: List<StickyNoteRender>,
+        erasedShapes: List<ShapeRender>,
     ) -> Unit)?
         get() = null
         @Suppress("UNUSED_PARAMETER")
@@ -402,6 +450,110 @@ interface NotebookView {
         get() = null
         @Suppress("UNUSED_PARAMETER")
         set(value) {}
+
+    /**
+     * Fired on the main thread when the eraser path intersects a sticky note's icon bounding box.
+     * The note has already been removed from the view's in-memory list before this fires.
+     * NotebookActivity wires this to soft-delete the row from the DB and push an undo action.
+     * The full [StickyNoteRender] is passed so the caller has its data for undo restoration.
+     */
+    var onStickyNoteErased: ((note: StickyNoteRender) -> Unit)?
+        get() = null
+        @Suppress("UNUSED_PARAMETER")
+        set(value) {}
+
+    /**
+     * Fired on the main thread when the eraser path intersects a shape object's bounding box.
+     * The shape has already been removed from the view's in-memory list before this fires.
+     * NotebookActivity wires this to soft-delete the row from the DB and push an undo action.
+     * The full [ShapeRender] is passed so the caller has its data for undo restoration.
+     */
+    var onShapeErased: ((shape: ShapeRender) -> Unit)?
+        get() = null
+        @Suppress("UNUSED_PARAMETER")
+        set(value) {}
+
+    /**
+     * Fired on the main thread when a single-stroke dwell gesture is recognized as a shape.
+     * The gesture stroke has already been removed from the view's in-memory list before this fires
+     * and is NEVER persisted. The activity wires this to [convertStrokeToShape] to insert the
+     * shape row and push a [ShapeCreated] undo action.
+     *
+     * [originalStroke] — the full in-memory stroke (points + id) for undo restoration.
+     * [result] — the regularized geometry from [ShapeRecognizer].
+     */
+    var onShapeRecognized: ((originalStroke: LiveStroke, result: ShapeRecognizer.Result) -> Unit)?
+        get() = null
+        @Suppress("UNUSED_PARAMETER")
+        set(value) {}
+
+    /**
+     * Enter shape transform mode for [render], displaying resize handles and a rotate knob.
+     * The Onyx EPD overlay is disabled (like lasso mode) so the handles render via Canvas.
+     * Touch events are routed to [ShapeTransformController] until [exitShapeTransform] is called.
+     * Must be called on the main thread.
+     */
+    fun enterShapeTransform(render: ShapeRender) {}
+
+    /**
+     * Commit the current working geometry and exit shape transform mode.
+     * Fires [onShapeTransformed] with the before and after [ShapeRender] snapshots,
+     * then restores the drawing mode (re-enables EPD on Onyx devices).
+     * Must be called on the main thread.
+     */
+    fun exitShapeTransform() {}
+
+    /**
+     * Fired on the main thread when shape transform mode commits (via [exitShapeTransform]
+     * or a tap-outside). The activity wires this to persist the new geometry to the DB
+     * and push a [UndoRedoAction.ShapeTransformed] action.
+     */
+    var onShapeTransformed: ((before: ShapeRender, after: ShapeRender) -> Unit)?
+        get() = null
+        @Suppress("UNUSED_PARAMETER")
+        set(value) {}
+
+    /**
+     * Fired on the main thread when a stylus tap in shape transform mode lands outside the
+     * controller's hit area (no handle / body hit). Fires AFTER [onShapeTransformed].
+     * The activity uses this to also clear the lasso selection and return to pen mode.
+     */
+    var onShapeTransformTapOutside: (() -> Unit)?
+        get() = null
+        @Suppress("UNUSED_PARAMETER")
+        set(value) {}
+
+    /**
+     * Fired on the main thread when a non-outside grab begins in shape transform mode
+     * (body drag or handle resize/rotate). The activity uses this to hide the toolbar
+     * during the interaction, mirroring regular lasso drag behaviour.
+     */
+    var onShapeTransformDragStarted: (() -> Unit)?
+        get() = null
+        @Suppress("UNUSED_PARAMETER")
+        set(value) {}
+
+    /**
+     * Fired on the main thread after each stylus-up in shape transform mode so the activity
+     * can reposition the transform toolbar to track the shape's new bounding box.
+     */
+    var onShapeTransformMoved: ((newBoundingBox: android.graphics.RectF) -> Unit)?
+        get() = null
+        @Suppress("UNUSED_PARAMETER")
+        set(value) {}
+
+    /**
+     * Toggle [ShapeRender.aspectLocked] on the currently transforming shape and return the updated
+     * render, or null if not in transform mode. Also snaps ELLIPSE w=h when locking.
+     * Must be called on the main thread; triggers a canvas redraw.
+     */
+    fun toggleShapeAspectLock(): ShapeRender? = null
+
+    /**
+     * Return the current working [ShapeRender] from the active transform session, or null
+     * if not in transform mode. Safe to call from the main thread.
+     */
+    fun getShapeTransformWorkingRender(): ShapeRender? = null
 
     /**
      * Replace the in-memory stroke list with [strokes] loaded from the database,
@@ -464,6 +616,8 @@ interface NotebookView {
         textObjects: List<TextRender>? = null,
         lineObjects: List<LineRender>? = null,
         links: List<LinkRender>? = null,
+        stickyNotes: List<StickyNoteRender>? = null,
+        shapeObjects: List<ShapeRender>? = null,
     ): Bitmap?
 
     /**
@@ -474,5 +628,5 @@ interface NotebookView {
      * Must be called on the main thread — triggers invalidate (and EPD handoff on
      * Onyx devices).
      */
-    fun loadStrokesWithBitmap(strokes: List<LiveStroke>, bitmap: Bitmap, templateBitmap: Bitmap?)
+    fun loadStrokesWithBitmap(strokes: List<LiveStroke>, bitmap: Bitmap?, templateBitmap: Bitmap?)
 }

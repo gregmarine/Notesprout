@@ -1,0 +1,456 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:fillViewport="true">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="16dp">
+
+        <!-- Type -->
+        <TextView
+            style="@style/TextAppearance.Notesprout.TitleMedium"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Type" />
+
+        <androidx.appcompat.widget.AppCompatSpinner
+            android:id="@+id/spType"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:layout_marginTop="4dp"
+            android:background="@drawable/shape_bordered" />
+
+        <!-- Title -->
+        <TextView
+            style="@style/TextAppearance.Notesprout.TitleMedium"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:text="Title" />
+
+        <androidx.appcompat.widget.AppCompatEditText
+            android:id="@+id/etTitle"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:background="@drawable/shape_bordered"
+            android:padding="10dp"
+            android:inputType="textCapSentences"
+            android:maxLines="1"
+            android:textColor="@color/inkBlack"
+            android:textColorHint="@color/inkLight"
+            android:hint="e.g. Mom's birthday" />
+
+        <!-- Dates -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <TextView
+                style="@style/TextAppearance.Notesprout.TitleMedium"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_height="wrap_content"
+                android:text="Starts" />
+
+            <androidx.appcompat.widget.AppCompatButton
+                android:id="@+id/btnStartDate"
+                style="@style/Widget.Notesprout.OutlinedButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="—" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <TextView
+                style="@style/TextAppearance.Notesprout.TitleMedium"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_height="wrap_content"
+                android:text="Ends" />
+
+            <androidx.appcompat.widget.AppCompatButton
+                android:id="@+id/btnEndDate"
+                style="@style/Widget.Notesprout.OutlinedButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="—" />
+        </LinearLayout>
+
+        <!-- All day -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <TextView
+                style="@style/TextAppearance.Notesprout.TitleMedium"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_height="wrap_content"
+                android:text="All day" />
+
+            <androidx.appcompat.widget.SwitchCompat
+                android:id="@+id/swAllDay"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:checked="true" />
+        </LinearLayout>
+
+        <!-- Times (visible when not all-day) -->
+        <LinearLayout
+            android:id="@+id/grpTime"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:visibility="gone">
+
+            <TextView
+                style="@style/TextAppearance.Notesprout.LabelLarge"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Start" />
+
+            <androidx.appcompat.widget.AppCompatButton
+                android:id="@+id/btnStartTime"
+                style="@style/Widget.Notesprout.OutlinedButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:text="—" />
+
+            <TextView
+                style="@style/TextAppearance.Notesprout.LabelLarge"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="12dp"
+                android:text="End" />
+
+            <androidx.appcompat.widget.AppCompatButton
+                android:id="@+id/btnEndTime"
+                style="@style/Widget.Notesprout.OutlinedButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:text="None" />
+        </LinearLayout>
+
+        <!-- Divider -->
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:layout_marginTop="16dp"
+            android:layout_marginBottom="12dp"
+            android:background="@color/inkBlack" />
+
+        <!-- Repeats -->
+        <TextView
+            style="@style/TextAppearance.Notesprout.TitleMedium"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Repeats" />
+
+        <androidx.appcompat.widget.AppCompatSpinner
+            android:id="@+id/spRepeat"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:layout_marginTop="4dp"
+            android:background="@drawable/shape_bordered" />
+
+        <!-- Every N units -->
+        <LinearLayout
+            android:id="@+id/grpEvery"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:visibility="gone">
+
+            <TextView
+                style="@style/TextAppearance.Notesprout.LabelLarge"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Every" />
+
+            <androidx.appcompat.widget.AppCompatEditText
+                android:id="@+id/etInterval"
+                android:layout_width="64dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:background="@drawable/shape_bordered"
+                android:padding="8dp"
+                android:gravity="center"
+                android:inputType="number"
+                android:maxLength="3"
+                android:textColor="@color/inkBlack"
+                android:text="1" />
+
+            <TextView
+                android:id="@+id/tvUnit"
+                style="@style/TextAppearance.Notesprout.LabelLarge"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:text="weeks" />
+        </LinearLayout>
+
+        <!-- Weekly: weekday toggles -->
+        <LinearLayout
+            android:id="@+id/grpWeekdays"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:orientation="horizontal"
+            android:visibility="gone">
+
+            <androidx.appcompat.widget.AppCompatButton
+                android:id="@+id/tglMon"
+                style="@style/Widget.Notesprout.ToggleTextButton"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:paddingStart="0dp"
+                android:paddingEnd="0dp"
+                android:text="M" />
+
+            <androidx.appcompat.widget.AppCompatButton
+                android:id="@+id/tglTue"
+                style="@style/Widget.Notesprout.ToggleTextButton"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_marginStart="2dp"
+                android:paddingStart="0dp"
+                android:paddingEnd="0dp"
+                android:text="T" />
+
+            <androidx.appcompat.widget.AppCompatButton
+                android:id="@+id/tglWed"
+                style="@style/Widget.Notesprout.ToggleTextButton"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_marginStart="2dp"
+                android:paddingStart="0dp"
+                android:paddingEnd="0dp"
+                android:text="W" />
+
+            <androidx.appcompat.widget.AppCompatButton
+                android:id="@+id/tglThu"
+                style="@style/Widget.Notesprout.ToggleTextButton"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_marginStart="2dp"
+                android:paddingStart="0dp"
+                android:paddingEnd="0dp"
+                android:text="T" />
+
+            <androidx.appcompat.widget.AppCompatButton
+                android:id="@+id/tglFri"
+                style="@style/Widget.Notesprout.ToggleTextButton"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_marginStart="2dp"
+                android:paddingStart="0dp"
+                android:paddingEnd="0dp"
+                android:text="F" />
+
+            <androidx.appcompat.widget.AppCompatButton
+                android:id="@+id/tglSat"
+                style="@style/Widget.Notesprout.ToggleTextButton"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_marginStart="2dp"
+                android:paddingStart="0dp"
+                android:paddingEnd="0dp"
+                android:text="S" />
+
+            <androidx.appcompat.widget.AppCompatButton
+                android:id="@+id/tglSun"
+                style="@style/Widget.Notesprout.ToggleTextButton"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_marginStart="2dp"
+                android:paddingStart="0dp"
+                android:paddingEnd="0dp"
+                android:text="S" />
+        </LinearLayout>
+
+        <!-- Monthly: day-of-month vs ordinal weekday -->
+        <LinearLayout
+            android:id="@+id/grpMonthly"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:orientation="vertical"
+            android:visibility="gone">
+
+            <androidx.appcompat.widget.AppCompatButton
+                android:id="@+id/rbDayOfMonth"
+                style="@style/Widget.Notesprout.ToggleTextButton"
+                android:layout_width="match_parent"
+                android:gravity="start|center_vertical"
+                android:text="On day of the month" />
+
+            <androidx.appcompat.widget.AppCompatButton
+                android:id="@+id/rbOrdinal"
+                style="@style/Widget.Notesprout.ToggleTextButton"
+                android:layout_width="match_parent"
+                android:layout_marginTop="4dp"
+                android:gravity="start|center_vertical"
+                android:text="On the same weekday" />
+        </LinearLayout>
+
+        <!-- Ends -->
+        <LinearLayout
+            android:id="@+id/grpEndBlock"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:orientation="vertical"
+            android:visibility="gone">
+
+            <TextView
+                style="@style/TextAppearance.Notesprout.TitleMedium"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Ends" />
+
+            <androidx.appcompat.widget.AppCompatSpinner
+                android:id="@+id/spEnd"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:layout_marginTop="4dp"
+                android:background="@drawable/shape_bordered" />
+
+            <androidx.appcompat.widget.AppCompatButton
+                android:id="@+id/btnUntilDate"
+                style="@style/Widget.Notesprout.OutlinedButton"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:visibility="gone"
+                android:text="—" />
+
+            <LinearLayout
+                android:id="@+id/grpCount"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:visibility="gone">
+
+                <TextView
+                    style="@style/TextAppearance.Notesprout.LabelLarge"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="After" />
+
+                <androidx.appcompat.widget.AppCompatEditText
+                    android:id="@+id/etCount"
+                    android:layout_width="64dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="8dp"
+                    android:background="@drawable/shape_bordered"
+                    android:padding="8dp"
+                    android:gravity="center"
+                    android:inputType="number"
+                    android:maxLength="4"
+                    android:textColor="@color/inkBlack"
+                    android:text="10" />
+
+                <TextView
+                    style="@style/TextAppearance.Notesprout.LabelLarge"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="8dp"
+                    android:text="times" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <!-- Divider -->
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:layout_marginTop="16dp"
+            android:layout_marginBottom="12dp"
+            android:background="@color/inkBlack" />
+
+        <!-- Remind me — a paper-like look-ahead, not a notification -->
+        <TextView
+            style="@style/TextAppearance.Notesprout.TitleMedium"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Remind me" />
+
+        <TextView
+            style="@style/TextAppearance.Notesprout.LabelLarge"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:textColor="@color/inkLight"
+            android:text="Surfaces in the day's Upcoming list ahead of time." />
+
+        <!-- Existing reminders (populated in code) -->
+        <LinearLayout
+            android:id="@+id/llReminders"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:orientation="vertical" />
+
+        <!-- Add a reminder: N days/weeks before -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <androidx.appcompat.widget.AppCompatEditText
+                android:id="@+id/etRemindAmount"
+                android:layout_width="64dp"
+                android:layout_height="wrap_content"
+                android:background="@drawable/shape_bordered"
+                android:padding="8dp"
+                android:gravity="center"
+                android:inputType="number"
+                android:maxLength="3"
+                android:textColor="@color/inkBlack"
+                android:text="1" />
+
+            <androidx.appcompat.widget.AppCompatSpinner
+                android:id="@+id/spRemindUnit"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_height="48dp"
+                android:layout_marginStart="8dp"
+                android:background="@drawable/shape_bordered" />
+
+            <androidx.appcompat.widget.AppCompatButton
+                android:id="@+id/btnAddRemind"
+                style="@style/Widget.Notesprout.OutlinedButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:text="Add" />
+        </LinearLayout>
+
+    </LinearLayout>
+</ScrollView>

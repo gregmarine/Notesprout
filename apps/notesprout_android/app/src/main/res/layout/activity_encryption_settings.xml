@@ -99,6 +99,44 @@
 
             </LinearLayout>
 
+            <!-- Resume conversion banner — shown when a bulk-encrypt sweep was interrupted -->
+            <LinearLayout
+                android:id="@+id/resumeConversionBanner"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:background="@drawable/shape_bordered"
+                android:padding="12dp"
+                android:gravity="center_vertical"
+                android:layout_marginBottom="20dp"
+                android:visibility="gone">
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="Encrypting your notebooks was interrupted."
+                    android:textSize="14sp"
+                    android:textColor="@color/inkBlack" />
+
+                <androidx.appcompat.widget.AppCompatButton
+                    android:id="@+id/btnResumeConversion"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Resume"
+                    android:textSize="14sp"
+                    android:textColor="@color/inkBlack"
+                    android:textAllCaps="false"
+                    android:background="@drawable/shape_bordered"
+                    android:stateListAnimator="@null"
+                    android:paddingStart="12dp"
+                    android:paddingEnd="12dp"
+                    android:layout_marginStart="12dp"
+                    android:minWidth="0dp"
+                    android:minHeight="0dp" />
+
+            </LinearLayout>
+
             <!-- Status row -->
             <LinearLayout
                 android:layout_width="match_parent"
@@ -150,12 +188,43 @@
                 android:layout_height="1dp"
                 android:background="@color/inkBlack" />
 
+            <!-- Encrypt All Notebooks button — visible only when plaintext notebooks remain -->
+            <androidx.appcompat.widget.AppCompatButton
+                android:id="@+id/btnEncryptAll"
+                android:layout_width="match_parent"
+                android:layout_height="56dp"
+                android:layout_marginTop="24dp"
+                android:text="Encrypt All Notebooks…"
+                android:textSize="16sp"
+                android:textColor="@color/inkBlack"
+                android:textAllCaps="false"
+                android:background="@drawable/shape_bordered"
+                android:stateListAnimator="@null"
+                android:minWidth="0dp"
+                android:minHeight="0dp"
+                android:visibility="gone" />
+
+            <!-- Reveal Recovery Key button -->
+            <androidx.appcompat.widget.AppCompatButton
+                android:id="@+id/btnRevealRecoveryKey"
+                android:layout_width="match_parent"
+                android:layout_height="56dp"
+                android:layout_marginTop="24dp"
+                android:text="Reveal Recovery Key…"
+                android:textSize="16sp"
+                android:textColor="@color/inkBlack"
+                android:textAllCaps="false"
+                android:background="@drawable/shape_bordered"
+                android:stateListAnimator="@null"
+                android:minWidth="0dp"
+                android:minHeight="0dp" />
+
             <!-- Change Global Passphrase button -->
             <androidx.appcompat.widget.AppCompatButton
                 android:id="@+id/btnChangeGlobalPassphrase"
                 android:layout_width="match_parent"
                 android:layout_height="56dp"
-                android:layout_marginTop="24dp"
+                android:layout_marginTop="12dp"
                 android:text="Change Global Passphrase…"
                 android:textSize="16sp"
                 android:textColor="@color/inkBlack"

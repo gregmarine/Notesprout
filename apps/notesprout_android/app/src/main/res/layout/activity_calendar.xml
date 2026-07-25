@@ -1,0 +1,339 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@color/paperWhite">
+
+    <!-- Top border — the content area starts below the top guard band (see TopGuard), so it needs
+         its own 1dp rule to read as an edge rather than floating. -->
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="@color/inkBlack" />
+
+    <!-- Top toolbar -->
+    <LinearLayout
+        android:id="@+id/calendarToolbar"
+        android:layout_width="match_parent"
+        android:layout_height="56dp"
+        android:orientation="horizontal"
+        android:background="@color/paperWhite"
+        android:gravity="center_vertical"
+        android:paddingStart="4dp"
+        android:paddingEnd="4dp">
+
+        <!-- Left cluster (back/nav/tools) — managed by ToolbarOverflowManager. Weighted so it fills
+             the space up to the always-visible period-nav cluster; its trailing tools overflow into
+             calOverflowMenu when the bar is too narrow. -->
+        <LinearLayout
+            android:id="@+id/calLeftBar"
+            android:layout_width="0dp"
+            android:layout_weight="1"
+            android:layout_height="match_parent"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+        <!-- Back button -->
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnBack"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:src="@drawable/ic_arrow_left"
+            android:contentDescription="Back" />
+
+        <!-- Go to the notebook / folder library (MainActivity) -->
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnCalHome"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:layout_marginStart="2dp"
+            android:src="@drawable/ic_notebook"
+            android:contentDescription="Notebook library" />
+
+        <!-- Create a new notebook (pick a folder first, then the new-notebook screen) -->
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnCalNewNotebook"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:layout_marginStart="2dp"
+            android:src="@drawable/ic_new_notebook"
+            android:contentDescription="New notebook" />
+
+        <!-- Divider between back and view-toggle group -->
+        <View
+            android:layout_width="1dp"
+            android:layout_height="28dp"
+            android:background="@color/inkBlack"
+            android:layout_marginStart="4dp"
+            android:layout_marginEnd="4dp" />
+
+        <!-- Today button -->
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/btnToday"
+            style="@style/Widget.Notesprout.ToggleTextButton"
+            android:text="Today"
+            android:contentDescription="Go to today" />
+
+        <!-- Divider between Today and view toggles -->
+        <View
+            android:layout_width="1dp"
+            android:layout_height="28dp"
+            android:background="@color/inkBlack"
+            android:layout_marginStart="4dp"
+            android:layout_marginEnd="4dp" />
+
+        <!-- View-mode toggle buttons -->
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/btnMonthView"
+            style="@style/Widget.Notesprout.ToggleTextButton"
+            android:text="Month"
+            android:contentDescription="Month view" />
+
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/btnWeekView"
+            style="@style/Widget.Notesprout.ToggleTextButton"
+            android:layout_marginStart="2dp"
+            android:text="Week"
+            android:contentDescription="Week view" />
+
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/btnDayView"
+            style="@style/Widget.Notesprout.ToggleTextButton"
+            android:layout_marginStart="2dp"
+            android:text="Day"
+            android:contentDescription="Day view" />
+
+        <!-- Divider between view toggles and drawing tools -->
+        <View
+            android:layout_width="1dp"
+            android:layout_height="28dp"
+            android:background="@color/inkBlack"
+            android:layout_marginStart="4dp"
+            android:layout_marginEnd="4dp" />
+
+        <!-- Drawing tools -->
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnCalPen"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:src="@drawable/ic_pen"
+            android:contentDescription="Pen" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnCalEraser"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:layout_marginStart="2dp"
+            android:src="@drawable/ic_eraser"
+            android:contentDescription="Eraser" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnCalStickyNote"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:layout_marginStart="2dp"
+            android:src="@drawable/ic_sticker_2"
+            android:contentDescription="Insert sticky note" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnCalLassoEraser"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:layout_marginStart="2dp"
+            android:src="@drawable/ic_lasso_eraser"
+            android:contentDescription="Lasso eraser" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnCalLasso"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:layout_marginStart="2dp"
+            android:src="@drawable/ic_lasso"
+            android:contentDescription="Lasso select" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnCalErasePage"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:layout_marginStart="2dp"
+            android:src="@drawable/ic_erase_all"
+            android:contentDescription="Erase page" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnCalUndo"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:layout_marginStart="2dp"
+            android:src="@drawable/ic_undo"
+            android:contentDescription="Undo" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnCalRedo"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:layout_marginStart="2dp"
+            android:src="@drawable/ic_redo"
+            android:contentDescription="Redo" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnCalScratchpad"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:layout_marginStart="2dp"
+            android:src="@drawable/ic_sketching"
+            android:contentDescription="Scratch Pad" />
+
+        <!-- Send the current view to a notebook as a new page (template + optional writing) -->
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnCalSendPage"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:layout_marginStart="2dp"
+            android:src="@drawable/ic_page_add"
+            android:contentDescription="Send page to notebook" />
+
+        <!-- Flexible spacer pins the overflow controls (and, past them, the period nav) to the right -->
+        <Space
+            android:layout_width="0dp"
+            android:layout_height="1dp"
+            android:layout_weight="1" />
+
+        <!-- Overflow group divider — visible only when the overflow button is shown -->
+        <View
+            android:id="@+id/dividerCalOverflow"
+            android:layout_width="1dp"
+            android:layout_height="28dp"
+            android:background="@color/inkBlack"
+            android:layout_marginStart="4dp"
+            android:layout_marginEnd="4dp"
+            android:visibility="gone" />
+
+        <!-- Overflow button — reveals overflowed tools in a menu below the toolbar -->
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnCalOverflow"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:src="@drawable/ic_dots"
+            android:contentDescription="More actions"
+            android:visibility="gone" />
+
+        </LinearLayout>
+
+        <!-- Previous period (reuses existing chevron-left icon) -->
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnPrev"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:src="@drawable/ic_page_prev"
+            android:contentDescription="Previous" />
+
+        <!-- Month/year label — tappable to open picker -->
+        <TextView
+            android:id="@+id/tvMonthYear"
+            android:layout_width="wrap_content"
+            android:layout_height="44dp"
+            android:minWidth="148dp"
+            android:gravity="center"
+            android:textSize="16sp"
+            android:textColor="@color/inkBlack"
+            android:textStyle="bold"
+            android:paddingStart="8dp"
+            android:paddingEnd="8dp"
+            android:clickable="true"
+            android:focusable="true"
+            android:background="@drawable/bg_toolbar_button"
+            android:text="June 2026" />
+
+        <!-- Next period -->
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnNext"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:src="@drawable/ic_page_next"
+            android:contentDescription="Next" />
+
+    </LinearLayout>
+
+    <!-- 1dp border below toolbar -->
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="@color/inkBlack" />
+
+    <!-- Calendar content area — drawing view added programmatically; floating toolbar overlaid here -->
+    <FrameLayout
+        android:id="@+id/calendarContent"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:background="@color/paperWhite">
+
+        <!-- Overflow menu — appears directly below the toolbar when overflow is active. Built by
+             ToolbarOverflowManager (rows of overflowed buttons). Brought to front in onCreate. -->
+        <LinearLayout
+            android:id="@+id/calOverflowMenu"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_gravity="top"
+            android:orientation="vertical"
+            android:visibility="gone"
+            android:background="@drawable/shape_bordered"
+            android:elevation="0dp" />
+
+        <!-- Floating selection context toolbar — positioned programmatically on lasso selection -->
+        <LinearLayout
+            android:id="@+id/floatingSelectionToolbar"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:visibility="gone"
+            android:background="@drawable/shape_bordered"
+            android:padding="4dp"
+            android:elevation="0dp">
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnLassoCopy"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:src="@drawable/ic_copy_plus"
+                android:contentDescription="Copy selection" />
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnLassoCut"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:src="@drawable/ic_cut"
+                android:contentDescription="Cut selection" />
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnLassoDelete"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:src="@drawable/ic_lasso_delete"
+                android:contentDescription="Delete selection" />
+
+            <!-- Visible only for single-stroke selections that pass shape recognition -->
+            <View
+                android:id="@+id/shapeConvertDivider"
+                android:layout_width="1dp"
+                android:layout_height="28dp"
+                android:layout_marginHorizontal="2dp"
+                android:background="@color/inkBlack"
+                android:visibility="gone" />
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnConvertShape"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:src="@drawable/ic_convert_shape"
+                android:contentDescription="Convert to Shape"
+                android:visibility="gone" />
+
+            <!-- Send selection to a notebook -->
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnLassoSendToNotebook"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:src="@drawable/ic_sketching_receive"
+                android:contentDescription="Send selection to Notebook" />
+
+            <!-- Shape transform controls — visible only in shape transform mode -->
+            <androidx.appcompat.widget.AppCompatButton
+                android:id="@+id/btnShapeAspectLock"
+                style="@style/Widget.Notesprout.ToggleTextButton"
+                android:text="Lock ratio"
+                android:contentDescription="Toggle aspect ratio lock"
+                android:visibility="gone" />
+
+            <androidx.appcompat.widget.AppCompatButton
+                android:id="@+id/btnShapeTransformDone"
+                style="@style/Widget.Notesprout.ToggleTextButton"
+                android:text="Done"
+                android:contentDescription="Finish shape transform"
+                android:visibility="gone" />
+
+        </LinearLayout>
+
+    </FrameLayout>
+
+</LinearLayout>

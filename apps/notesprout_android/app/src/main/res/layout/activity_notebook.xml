@@ -49,36 +49,14 @@
             android:src="@drawable/ic_clock"
             android:contentDescription="Recent notebooks" />
 
-        <!-- Table of Contents button -->
-        <androidx.appcompat.widget.AppCompatImageButton
-            android:id="@+id/btnToc"
-            style="@style/Widget.Notesprout.ToolbarButton"
-            android:src="@drawable/ic_toc"
-            android:contentDescription="Table of Contents" />
+        <!-- Table of Contents (toc) reachable via the canvas gesture only; button removed.
+             Export moved to the canvas long-press "Page" menu — see NotebookActivity.showPageMenu(). -->
 
-        <!-- Cover button: set notebook cover image -->
-        <androidx.appcompat.widget.AppCompatImageButton
-            android:id="@+id/btnCover"
-            style="@style/Widget.Notesprout.ToolbarButton"
-            android:layout_marginStart="4dp"
-            android:src="@drawable/ic_polaroid"
-            android:contentDescription="Set cover" />
+        <!-- Text recognition (View recognized text + real-time text toggle) moved to the canvas
+             long-press "Page" menu — see NotebookActivity.showPageMenu(). Button removed. -->
 
-        <!-- Export button: export notebook to PDF -->
-        <androidx.appcompat.widget.AppCompatImageButton
-            android:id="@+id/btnExport"
-            style="@style/Widget.Notesprout.ToolbarButton"
-            android:layout_marginStart="4dp"
-            android:src="@drawable/ic_export"
-            android:contentDescription="Export notebook" />
-
-        <!-- Pin button: pin/unpin this notebook -->
-        <androidx.appcompat.widget.AppCompatImageButton
-            android:id="@+id/btnPin"
-            style="@style/Widget.Notesprout.ToolbarButton"
-            android:layout_marginStart="4dp"
-            android:src="@drawable/ic_pinned"
-            android:contentDescription="Pin notebook" />
+        <!-- Pin/unpin moved to the top of the canvas long-press "Page" menu — see
+             NotebookActivity.showPageMenu(). Button removed. -->
 
         <!-- Lock button: encrypt this notebook (visible only when unencrypted) -->
         <androidx.appcompat.widget.AppCompatImageButton
@@ -87,14 +65,6 @@
             android:layout_marginStart="4dp"
             android:src="@drawable/ic_lock"
             android:contentDescription="Encrypt notebook" />
-
-        <!-- Lock-off button: decrypt this notebook (visible only when encrypted) -->
-        <androidx.appcompat.widget.AppCompatImageButton
-            android:id="@+id/btnLockOff"
-            style="@style/Widget.Notesprout.ToolbarButton"
-            android:layout_marginStart="4dp"
-            android:src="@drawable/ic_lock_off"
-            android:contentDescription="Decrypt notebook" />
 
         <!-- Pen tool -->
         <androidx.appcompat.widget.AppCompatImageButton
@@ -119,21 +89,7 @@
             android:src="@drawable/ic_lasso_eraser"
             android:contentDescription="Lasso eraser" />
 
-        <!-- Erase all -->
-        <androidx.appcompat.widget.AppCompatImageButton
-            android:id="@+id/btnEraseAll"
-            style="@style/Widget.Notesprout.ToolbarButton"
-            android:layout_marginStart="4dp"
-            android:src="@drawable/ic_erase_all"
-            android:contentDescription="Erase all" />
-
-        <!-- Insert text object -->
-        <androidx.appcompat.widget.AppCompatImageButton
-            android:id="@+id/btnInsertText"
-            style="@style/Widget.Notesprout.ToolbarButton"
-            android:layout_marginStart="4dp"
-            android:src="@drawable/ic_text_recognition"
-            android:contentDescription="Insert text" />
+        <!-- Insert text (insertText) retired — strokes are converted to text instead; button removed. -->
 
         <!-- Insert line objects -->
         <androidx.appcompat.widget.AppCompatImageButton
@@ -142,6 +98,22 @@
             android:layout_marginStart="4dp"
             android:src="@drawable/ic_density_small"
             android:contentDescription="Insert lines" />
+
+        <!-- Insert sticky note -->
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnInsertStickyNote"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:layout_marginStart="4dp"
+            android:src="@drawable/ic_sticker_2"
+            android:contentDescription="Insert sticky note" />
+
+        <!-- Insert shape — opens shapeInsertToolbar secondary popup -->
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnInsertShape"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:layout_marginStart="4dp"
+            android:src="@drawable/ic_convert_shape"
+            android:contentDescription="Insert shape" />
 
         <!-- Lasso selection tool -->
         <androidx.appcompat.widget.AppCompatImageButton
@@ -166,59 +138,9 @@
             android:src="@drawable/ic_redo"
             android:contentDescription="Redo" />
 
-        <!-- Template picker -->
-        <androidx.appcompat.widget.AppCompatImageButton
-            android:id="@+id/btnTemplate"
-            style="@style/Widget.Notesprout.ToolbarButton"
-            android:src="@drawable/ic_template"
-            android:contentDescription="Template" />
-
-        <!-- Page index — same group as template, no separator -->
-        <androidx.appcompat.widget.AppCompatImageButton
-            android:id="@+id/btnPageIndex"
-            style="@style/Widget.Notesprout.ToolbarButton"
-            android:layout_marginStart="4dp"
-            android:src="@drawable/ic_files"
-            android:contentDescription="Page index" />
-
-        <!-- Insert page before current -->
-        <androidx.appcompat.widget.AppCompatImageButton
-            android:id="@+id/btnInsertPageBefore"
-            style="@style/Widget.Notesprout.ToolbarButton"
-            android:src="@drawable/ic_insert_page_before"
-            android:contentDescription="Insert page before" />
-
-        <!-- Insert page after current -->
-        <androidx.appcompat.widget.AppCompatImageButton
-            android:id="@+id/btnInsertPageAfter"
-            style="@style/Widget.Notesprout.ToolbarButton"
-            android:layout_marginStart="4dp"
-            android:src="@drawable/ic_insert_page_after"
-            android:contentDescription="Insert page after" />
-
-        <!-- Delete page -->
-        <androidx.appcompat.widget.AppCompatImageButton
-            android:id="@+id/btnDeletePage"
-            style="@style/Widget.Notesprout.ToolbarButton"
-            android:layout_marginStart="4dp"
-            android:src="@drawable/ic_page_delete"
-            android:contentDescription="Delete page" />
-
-        <!-- Copy page — same group as page management controls -->
-        <androidx.appcompat.widget.AppCompatImageButton
-            android:id="@+id/btnCopyPage"
-            style="@style/Widget.Notesprout.ToolbarButton"
-            android:layout_marginStart="4dp"
-            android:src="@drawable/ic_copy_page"
-            android:contentDescription="Copy page" />
-
-        <!-- Paste page — same group -->
-        <androidx.appcompat.widget.AppCompatImageButton
-            android:id="@+id/btnPastePage"
-            style="@style/Widget.Notesprout.ToolbarButton"
-            android:layout_marginStart="4dp"
-            android:src="@drawable/ic_paste_page"
-            android:contentDescription="Paste page" />
+        <!-- Page-related actions (Template, Page Index, Insert/Delete/Copy/Paste page,
+             Erase page) now live in the canvas long-press "Page" menu, not the toolbar —
+             see NotebookActivity.showPageMenu(). -->
 
         <!-- Customize toolbar (gear) — opens the reorder / show-hide dialog.
              Customizable + overflow-eligible like any other button. -->
@@ -228,6 +150,22 @@
             android:layout_marginStart="4dp"
             android:src="@drawable/ic_adjustments"
             android:contentDescription="Customize toolbar" />
+
+        <!-- Calendar launcher -->
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnCalendar"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:layout_marginStart="4dp"
+            android:src="@drawable/ic_calendar"
+            android:contentDescription="Calendar" />
+
+        <!-- Scratch pad launcher -->
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnScratchpad"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:layout_marginStart="4dp"
+            android:src="@drawable/ic_sketching"
+            android:contentDescription="Scratch Pad" />
 
         <!-- Overflow group divider — visible only when overflow button is shown -->
         <View
@@ -273,9 +211,12 @@
         android:layout_gravity="bottom|end"
         android:layout_marginBottom="8dp"
         android:layout_marginEnd="8dp"
+        android:ellipsize="end"
+        android:maxLines="1"
+        android:maxWidth="320dp"
         android:text="1 / 1"
         android:textColor="@color/inkBlack"
-        android:textSize="16sp" />
+        android:textSize="18sp" />
 
     <!-- Floating selection context toolbar — appears below (or above) the lasso selection box.
          Positioned programmatically in NotebookActivity.updateFloatingSelectionToolbar().
@@ -348,6 +289,22 @@
             android:contentDescription="Convert to Text"
             android:visibility="gone" />
 
+        <!-- Separator before convert-to-shape action — visible only for single-stroke selections that pass recognition -->
+        <View
+            android:id="@+id/shapeConvertDivider"
+            android:layout_width="1dp"
+            android:layout_height="28dp"
+            android:layout_marginHorizontal="2dp"
+            android:background="@color/inkBlack"
+            android:visibility="gone" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnConvertShape"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:src="@drawable/ic_convert_shape"
+            android:contentDescription="Convert to Shape"
+            android:visibility="gone" />
+
         <!-- Separator before align actions — visible only for multi-object non-stroke selections -->
         <View
             android:id="@+id/alignDivider"
@@ -414,12 +371,25 @@
             android:src="@drawable/ic_snap_on"
             android:contentDescription="Toggle snap to guides" />
 
+        <View
+            android:id="@+id/scratchpadSendDivider"
+            android:layout_width="1dp"
+            android:layout_height="28dp"
+            android:layout_marginHorizontal="2dp"
+            android:background="@color/inkBlack" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnLassoSendToScratchpad"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:src="@drawable/ic_sketching_send"
+            android:contentDescription="Send to Scratch Pad" />
+
     </LinearLayout>
 
     <!-- Heading-type submenu — appears below (or above) the selection box when the heading button
          in the floating selection toolbar is tapped. Positioned programmatically via positionPopover().
          Shared between S3 (pure-stroke selection → convert to H1/H2/H3) and S4 (single-heading
-         selection → change level / un-heading). The un-heading button is hidden in S3. -->
+         selection → change level). -->
     <LinearLayout
         android:id="@+id/headingTypeSubmenu"
         android:layout_width="wrap_content"
@@ -448,13 +418,6 @@
             android:src="@drawable/ic_h_3"
             android:contentDescription="Heading 3" />
 
-        <androidx.appcompat.widget.AppCompatImageButton
-            android:id="@+id/btnHeadingUnheading"
-            style="@style/Widget.Notesprout.ToolbarButton"
-            android:src="@drawable/ic_heading_off"
-            android:contentDescription="Remove Heading"
-            android:visibility="gone" />
-
     </LinearLayout>
 
     <!-- Lasso button popup toolbar — anchored below btnLasso.
@@ -477,6 +440,134 @@
             android:drawablePadding="6dp"
             android:text="Clear"
             android:contentDescription="Clear clipboard" />
+
+    </LinearLayout>
+
+    <!-- Shape transform toolbar — appears near the selected shape when in transform mode.
+         Lock-ratio / Circle-Oval toggle + Done button.
+         Positioned programmatically via positionPopover(). -->
+    <LinearLayout
+        android:id="@+id/shapeTransformToolbar"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:visibility="gone"
+        android:background="@drawable/shape_bordered"
+        android:padding="4dp"
+        android:elevation="0dp">
+
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/btnShapeAspectLock"
+            style="@style/Widget.Notesprout.ToggleTextButton"
+            android:text="Lock ratio"
+            android:contentDescription="Toggle aspect ratio lock" />
+
+        <View
+            android:layout_width="1dp"
+            android:layout_height="28dp"
+            android:layout_marginHorizontal="4dp"
+            android:background="@color/inkBlack" />
+
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/btnShapeTransformDone"
+            style="@style/Widget.Notesprout.ToggleTextButton"
+            android:text="Done"
+            android:contentDescription="Finish shape transform" />
+
+    </LinearLayout>
+
+    <!-- Shape insert secondary toolbar — appears anchored to btnInsertShape.
+         One button per shape type, in a single horizontal row. -->
+    <LinearLayout
+        android:id="@+id/shapeInsertToolbar"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:visibility="gone"
+        android:background="@drawable/shape_bordered"
+        android:padding="4dp"
+        android:elevation="0dp">
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnInsertShapeRectangle"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:src="@drawable/ic_shape_rectangle"
+            android:contentDescription="Insert Rectangle" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnInsertShapeEllipse"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:layout_marginStart="4dp"
+            android:src="@drawable/ic_shape_ellipse"
+            android:contentDescription="Insert Ellipse" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnInsertShapeTriangle"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:layout_marginStart="4dp"
+            android:src="@drawable/ic_shape_triangle"
+            android:contentDescription="Insert Triangle" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnInsertShapeDiamond"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:layout_marginStart="4dp"
+            android:src="@drawable/ic_shape_diamond"
+            android:contentDescription="Insert Diamond" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnInsertShapeTrapezoid"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:layout_marginStart="4dp"
+            android:src="@drawable/ic_shape_trapezoid"
+            android:contentDescription="Insert Trapezoid" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnInsertShapePentagon"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:layout_marginStart="4dp"
+            android:src="@drawable/ic_shape_pentagon"
+            android:contentDescription="Insert Pentagon" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnInsertShapeHexagon"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:layout_marginStart="4dp"
+            android:src="@drawable/ic_shape_hexagon"
+            android:contentDescription="Insert Hexagon" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnInsertShapeStar"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:layout_marginStart="4dp"
+            android:src="@drawable/ic_shape_star"
+            android:contentDescription="Insert Star" />
+
+        <View
+            android:layout_width="1dp"
+            android:layout_height="28dp"
+            android:layout_marginHorizontal="2dp"
+            android:background="@color/inkBlack" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnInsertShapeArch"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:src="@drawable/ic_shape_arch"
+            android:contentDescription="Insert Arch" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnInsertShapeLine"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:layout_marginStart="4dp"
+            android:src="@drawable/ic_shape_line"
+            android:contentDescription="Insert Line" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnInsertShapeArrow"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:layout_marginStart="4dp"
+            android:src="@drawable/ic_shape_arrow"
+            android:contentDescription="Insert Arrow" />
 
     </LinearLayout>
 

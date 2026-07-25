@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <bool name="is_large_screen">false</bool>
+
+    <!--
+        Day-window toolbar: false stacks it into rows (nav / view toggles / tools), true keeps it on
+        one row. Phone-width e-ink (P2P ~440dp, G6 ~572dp) cannot fit nav + four view toggles + date
+        + tools on one line — the toggles wrapped mid-word and the weighted tools group measured to
+        zero width, taking the overflow button down with it. See values-sw720dp.
+    -->
+    <bool name="day_toolbar_single_row">false</bool>
+</resources>

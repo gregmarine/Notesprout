@@ -66,7 +66,7 @@ class LineObjectDialog(
         )
         dialog.show()
         dialog.window?.setElevation(0f)
-        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
 
         val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
 

@@ -24,7 +24,9 @@ data class HeadingStroke(
     val id: String,
     @Serializable(with = RectFSerializer::class)
     val boundingBox: RectF,
-    val strokes: List<LiveStroke>,
+    // Empty for recognized headings (they render as canvas text); populated only for the
+    // ML-Kit-failed fallback where strokes are the visual representation. See [HeadingObject].
+    val strokes: List<LiveStroke> = emptyList(),
     val recognizedText: String? = null,
     val level: Int = 1,
 )

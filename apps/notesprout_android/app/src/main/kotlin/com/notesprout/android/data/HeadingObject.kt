@@ -3,16 +3,29 @@ package com.notesprout.android.data
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
+/**
+ * Serialized `type = "heading"` payload.
+ *
+ * [strokes] holds the original handwriting **only** for the ML-Kit-failed fallback
+ * (`recognizedText == null`), where the strokes are the sole visual representation.
+ * Once a heading is recognized ([recognizedText] non-null) it renders as canvas text and the
+ * strokes are dropped — [strokes] is [emptyList] and, with `encodeDefaults = false`, omitted
+ * from the JSON entirely. Headings are never revertible back to strokes (parity with text objects).
+ */
 @Serializable
 data class HeadingObject(
-    val strokes: List<LiveStroke>,
+    val strokes: List<LiveStroke> = emptyList(),
     val recognizedText: String? = null,
     val level: Int = 1,
 ) {
     fun toJson(): String = Json.encodeToString(serializer(), this)
 
     companion object {
-        fun fromJson(json: String): HeadingObject = Json.decodeFromString(serializer(), json)
+        // Lenient decode (codebase convention): a future added field must degrade gracefully
+        // on older builds, not make the object undecodable.
+        fun fromJson(json: String): HeadingObject = lenientJson.decodeFromString(serializer(), json)
+
+        private val lenientJson = Json { ignoreUnknownKeys = true }
 
         /** Returns the markdown prefix for [level] (clamped 1–3), e.g. `"## "` for level 2. */
         fun headingPrefix(level: Int): String = "#".repeat(level.coerceIn(1, 3)) + " "

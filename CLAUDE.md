@@ -16,18 +16,25 @@ matching doc before working in that area:**
 
 | Area | Doc |
 |---|---|
-| Global index (`notesprout.db`) + `.soil` file rules, Room/WAL, template library | [`docs/data-architecture.md`](docs/data-architecture.md) |
+| **Complete `.soil` format spec** — portable, self-contained; container invariants, full object catalog, binary encodings, encryption, export/import, backup, durability hardening. Written to hand to another project (Paintsprout) building a compatible container | [`docs/soil-file-format.md`](docs/soil-file-format.md) |
+| **Complete global-index (`notesprout.db`) spec** — the companion to the `.soil` spec: `objects` table + all app tables, sentinel ids, v1→v8 migrations, index encryption & key lifecycle, backup/restore ordering, stores outside both DBs. Also written to hand to Paintsprout | [`docs/global-index-format.md`](docs/global-index-format.md) |
+| Global index (`notesprout.db`) + `.soil` file rules, Room/WAL, template library — Notesprout-internal quick reference | [`docs/data-architecture.md`](docs/data-architecture.md) |
 | Full e-ink design system, AlertDialog / IME patterns | [`docs/design-system.md`](docs/design-system.md) |
 | Toolbar: base, overflow, full customization layer | [`docs/toolbar.md`](docs/toolbar.md) |
-| Drawing engines, EPD rules, perf, page snapshots, templates, undo/redo | [`docs/drawing-engine.md`](docs/drawing-engine.md) |
+| Drawing engines, EPD rules, **pen-activity gate (palm vs. finger gestures)**, perf, committed-content RenderNode render model + neighbor prefetch cache + cover snapshots, templates, undo/redo | [`docs/drawing-engine.md`](docs/drawing-engine.md) |
 | Heading / Text (+ markdown) / Line objects | [`docs/content-objects.md`](docs/content-objects.md) |
 | Link objects: data model, chrome, follow, back-stack, lasso/undo | [`docs/links.md`](docs/links.md) |
 | Scribble-erase, smart lasso, snap-to-guide, align & distribute | [`docs/lasso-and-gestures.md`](docs/lasso-and-gestures.md) |
-| MainActivity features (browse/search/sort/export/ML Kit) + recents | [`docs/mainactivity-and-recents.md`](docs/mainactivity-and-recents.md) |
-| Encryption: SQLCipher model, scopes, key lifecycle, leak hygiene, migration | [`docs/encryption.md`](docs/encryption.md) |
-| Full-notebook export + import: `.soil` format, `notebook_meta`, copy engine, import pipeline (probe/unlock/placement/keying) | [`docs/full-notebook-export.md`](docs/full-notebook-export.md) |
+| MainActivity features (browse/search/sort/export/ML Kit) + recents + launch restore (surface stack: a cold launch reopens the whole chain of screens the user had open) + **library chrome zones & bottom-bar width buckets** (`layout/`, `-sw360dp`, `-sw480dp`) | [`docs/mainactivity-and-recents.md`](docs/mainactivity-and-recents.md) |
+| Encryption: SQLCipher model, scopes, key lifecycle, leak hygiene, migration, **data-loss defense** (never-delete-on-corruption, no-plaintext-open-of-encrypted, self-heal stale raw key, passphrase recovery) | [`docs/encryption.md`](docs/encryption.md) |
+| **Export screen** (`ExportActivity` + `export/` — the single screen behind every export entry point: page scope, format, options, inline encryption, destination) + full-notebook export/import: `.soil` format, `notebook_meta`, copy engine, import pipeline (probe/unlock/placement/keying) | [`docs/full-notebook-export.md`](docs/full-notebook-export.md) |
 | Global clipboard (persist across restart, encrypted-source warning) + cross-notebook page copy/move (template remap, smart encryption gate, source-side undo, nav prompt) | [`docs/clipboard-and-page-transfer.md`](docs/clipboard-and-page-transfer.md) |
 | Backup: local (SAF) + Google Drive (REST API v3 + WebView OAuth PKCE), per-device subfolder, incremental-by-timestamp, index-last | [`docs/backup.md`](docs/backup.md) |
+| Scratch Pad: data model, host window, canvas reuse, multi-page, lasso, both transfer directions, encryption note | [`docs/scratchpad.md`](docs/scratchpad.md) |
+| Sticky Notes: data model, two coordinate spaces, editor transfer-singleton, on-page icon, tap-to-open, lasso/undo parity, create-flow, scratch pad parity, PDF footnote/endnote export, encryption note | [`docs/sticky-notes.md`](docs/sticky-notes.md) |
+| Shape objects: data model, oriented box vs AABB, recognizer pipeline + as-built constants, dwell trigger (**currently disabled**) + gate order, transform mode, aspect/circle-oval toggle, lasso/clipboard/erase/export parity, host coverage, undo actions | [`docs/shape-objects.md`](docs/shape-objects.md) |
+| Handwriting recognition: ML Kit single-shot + page-text pipeline (segmenter, `page_text` cache, RTR, viewer, text export) + **TrOCR personal engine** (settings toggle, ONNX Runtime Mobile, model bundles, engine-aware cache freshness, `tools/hwr/` Mac tooling, debug HwrLab) | [`docs/handwriting-recognition.md`](docs/handwriting-recognition.md) |
+| Calendar: handwriting-first Month/Week/Day canvas, `calendar` table (v3) + keyed pages, template renderer (grid/timeline + hit-test), page-load contract, finger gestures (swipe/double-tap-to-open/multi-finger undo-redo; single-tap no longer selects), toolbar overflow, shared DayPickerDialog, last-position persistence, lasso/clipboard parity, Send to Notebook, full-view export (grid→page template + optional writing, toolbar top-margin), day-detail four-view "day window" (`DayDetailActivity`, default **Events**, back = exit to calendar: **Events** attached + recurring events, add/edit/delete + **Reminders** paper-like look-ahead (`events` table v5/`MIGRATION_4_5`, no notifications) · **Note** editable canvas `cal-daynote-` + copy-into-table templates · **Notebooks** Opened/Edited/Created card grid · **History** past-year picker + read-only day-note bitmap; `notebook_activity` log v4/`MIGRATION_3_4`, `DayHistoryRepository`) | [`docs/calendar.md`](docs/calendar.md) |
 
 Backlog at monorepo root: `BACKLOG.md` — consolidated deferred/future items harvested from the
 completed-and-retired feature plans (toolbar Session-8 polish, multi-page Phase 2, encryption Phase 3,
@@ -89,47 +96,18 @@ inkBlack for any visible border/divider).
 - Theme is `Theme.AppCompat.Light.NoActionBar`; buttons are `AppCompatButton` with explicit drawable backgrounds.
 - **Source of truth — never hardcode:** colors `res/values/colors.xml`, styles `styles.xml`, theme `themes.xml`.
 
-AlertDialog styling + BOOX IME-dismissal patterns: [`docs/design-system.md`](docs/design-system.md).
+- **Top guard band:** no tappable chrome may sit against the top screen edge (on BOOX it pulls the
+  status bar down instead of tapping). Always via `core/TopGuard.kt` — `applyInsetPadding()` where the
+  system bars are visible, `applyRootPadding()` on immersive screens (their inset is 0, so the inset
+  listener alone does nothing). Applies to tap targets only — canvases stay full-bleed, and chrome
+  pushed off the edge needs its own 1dp inkBlack top border.
+
+Top guard details, AlertDialog styling + BOOX IME-dismissal patterns: [`docs/design-system.md`](docs/design-system.md).
 
 ---
 
-## Build Variants & Install
-
-- **Debug** (`com.notesprout.android.dev`) — active dev; installs alongside stable. **Default — always build/install debug unless told otherwise.**
-- **Release** (`com.notesprout.android`) — stable; release installs are always explicit.
-
-```sh
-# Debug → app/build/outputs/apk/debug/app-debug.apk
-cd apps/notesprout_android && ./gradlew assembleDebug
-
-# Release (unsigned — must sign before sideloading)
-cd apps/notesprout_android && ./gradlew assembleRelease
-~/development/android-sdk/build-tools/35.0.0/apksigner sign \
-  --ks ~/.android/debug.keystore --ks-pass pass:android --key-pass pass:android \
-  --ks-key-alias androiddebugkey \
-  --out app/build/outputs/apk/release/app-release-signed.apk \
-  app/build/outputs/apk/release/app-release-unsigned.apk
-
-adb -s <serial> install -r <apk-path>
-```
-
-Install all requested devices in a single shell block. If the user says devices are ready, **skip
-`adb devices`** — go straight to build and install. Users refer to devices by nickname (e.g. "G10").
-
-### Device Serials & Tiers
-
-| Device | Serial | | Device | Serial |
-|---|---|---|---|---|
-| BOOX NoteAir5C (NA5C) | `92c16533` | | BOOX Go Color 7 (GC7) | `98d56306` |
-| BOOX Note Max (MAX) | `6325773d` | | BOOX NoteAir4C (NA4C) | `1d36f870` |
-| BOOX Go 10.3 (G10) | `34E517F9` | | BOOX Tab XC (TXC) | `d852bed0` |
-| BOOX Go 7 (G7) | `17845014` | | Wacom Movink Pad 11 (MIP11) | `5HL21V5007384` |
-| BOOX Palma2 Pro (P2P) | `287d2364` | | Supernote Nomad (SNN) | `SN078D10012852` |
-| BOOX Go 10.3 Gen 2 (G102) | `b7a46e13` | | | |
-
-- **Tier 1 (primary, always-tested):** BOOX Go 10.3 (**flagship**), Go 10.3 Gen 2, Note Max, Go 7, Palma2 Pro
-- **Tier 2 (QA):** NoteAir5C/4C, Tab XC, Go Color 7 Gen II, Wacom Movink Pad 11 & 14 (GenericDrawingEngine)
-- **Future:** iPad + Apple Pencil, iPhone 14, MacBook/Web, Supernote Nomad & Manta (GenericDrawingEngine)
+Build variants, build/sign/install commands, and per-device serials/tiers: see the `device-build-install`
+skill (`.claude/skills/device-build-install/SKILL.md`) — invoked automatically for build/install/device work.
 
 ---
 

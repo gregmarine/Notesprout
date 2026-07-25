@@ -2,6 +2,7 @@ package com.notesprout.android.data
 
 import android.graphics.PointF
 import android.graphics.RectF
+import com.notesprout.android.core.StrokeCodec
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.Transient
@@ -9,6 +10,7 @@ import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.descriptors.SerialDescriptor
 import kotlinx.serialization.encoding.Decoder
 import kotlinx.serialization.encoding.Encoder
+import kotlinx.serialization.json.Json
 
 /**
  * An in-memory stroke with a stable UUID.
@@ -47,11 +49,12 @@ data class LiveStroke(
     val strokeWidth: Float = DEFAULT_STROKE_WIDTH,
 
     /**
-     * The original captured samples (x/y/pressure/tilt/timestamp) this stroke was
-     * loaded from, or null for strokes created this session with no persisted source.
-     * Carries pressure/tilt/timestamp through moves so they are not destroyed on
-     * re-save. [toStrokeData] reads x/y from [points] (which may have been translated)
-     * and pressure/tilt/timestamp from here when the two are index-aligned.
+     * The original captured samples (x/y/pressure/tilt) this stroke was loaded from,
+     * or null for strokes created this session with no persisted source. Carries
+     * pressure/tilt through moves so they are not destroyed on re-save. [toStrokeData]
+     * reads x/y from [points] (which may have been translated) and pressure/tilt from
+     * here when the two are index-aligned. (A legacy per-point `ts` may still ride along
+     * on rows loaded from old data, but it is never re-written — see [StrokePoint].)
      */
     val srcPoints: List<StrokePoint>? = null,
 ) {
@@ -74,20 +77,21 @@ data class LiveStroke(
 
     /**
      * Re-serialize this stroke to its persisted form, preserving colour, width, and
-     * per-point pressure/tilt/timestamp from [srcPoints] when available. Current x/y
-     * always come from [points] (so translated strokes save their new position).
+     * per-point pressure/tilt from [srcPoints] when available. Current x/y always come
+     * from [points] (so translated strokes save their new position).
      *
-     * [fallbackTimestamp] is stamped only on points with no preserved source — i.e.
-     * freshly drawn strokes that have never been persisted.
+     * Per-point timestamps are intentionally not written (see [StrokePoint.timestamp]):
+     * they were dead weight, and a stroke's creation time already lives on its row's
+     * `createdAt`. Old rows that still carry `"ts"` shed it here on their next save.
      */
-    fun toStrokeData(fallbackTimestamp: Long): StrokeData {
+    fun toStrokeData(): StrokeData {
         val src = srcPoints
         val outPoints = if (src != null && src.size == points.size) {
             points.mapIndexed { i, p ->
-                StrokePoint(x = p.x, y = p.y, pressure = src[i].pressure, tilt = src[i].tilt, timestamp = src[i].timestamp)
+                StrokePoint(x = p.x, y = p.y, pressure = src[i].pressure, tilt = src[i].tilt)
             }
         } else {
-            points.map { p -> StrokePoint(x = p.x, y = p.y, pressure = null, tilt = null, timestamp = fallbackTimestamp) }
+            points.map { p -> StrokePoint(x = p.x, y = p.y) }
         }
         return StrokeData(color = color, strokeWidth = strokeWidth, points = outPoints)
     }
@@ -107,8 +111,116 @@ data class LiveStroke(
             strokeWidth = sd.strokeWidth,
             srcPoints = sd.points,
         )
+
+        private val leanCodec = Json { ignoreUnknownKeys = true }
+
+        /**
+         * Lean load path for stroke rows with NO per-point pressure/tilt (all current data — hardware
+         * capture is unimplemented). Parses `points` straight into [PointF] via [PointFListSerializer],
+         * skipping the intermediate [StrokePoint] allocation — one object per point instead of two,
+         * roughly halving the per-point garbage that dominates dense-page load. [srcPoints] is null
+         * (nothing to preserve). Callers MUST gate on the absence of pressure/tilt and fall back to
+         * [fromStrokeData] otherwise, so those samples are never silently dropped.
+         */
+        fun fromPointsJson(id: String, json: String): LiveStroke {
+            val lean = leanCodec.decodeFromString(LeanStrokeSurrogate.serializer(), json)
+            return LiveStroke(
+                id = id,
+                points = lean.points,
+                color = lean.color,
+                strokeWidth = lean.strokeWidth,
+                srcPoints = null,
+            )
+        }
+
+        // ── Binary format (data-model-optimization Phase 1) ────────────────────
+
+        /**
+         * Pack points to the binary stroke blob ([StrokeCodec] format B — float32 + zlib, lossless).
+         * Colour and width live in the row's own columns, so the blob is geometry only.
+         */
+        fun packPoints(points: List<PointF>): ByteArray {
+            val xy = FloatArray(points.size * 2)
+            for (i in points.indices) { xy[i * 2] = points[i].x; xy[i * 2 + 1] = points[i].y }
+            return StrokeCodec.encode(xy)
+        }
+
+        /** Inverse of [packPoints]. */
+        fun unpackPoints(blob: ByteArray): List<PointF> {
+            val xy = StrokeCodec.decode(blob)
+            val out = ArrayList<PointF>(xy.size / 2)
+            var i = 0
+            while (i < xy.size) { out.add(PointF(xy[i], xy[i + 1])); i += 2 }
+            return out
+        }
+
+        /**
+         * Format-agnostic decode of a stroke row: prefer the binary [NotebookObject.blob] (with colour
+         * and width from the row columns); otherwise fall back to the legacy JSON in
+         * [NotebookObject.data] — lean, points-only path when there is no per-point pressure/tilt (all
+         * current data), full [StrokeData] otherwise. [lean] forces the points-only path (thumbnails).
+         * Returns null on malformed data.
+         */
+        fun fromRow(obj: NotebookObject, lean: Boolean = false): LiveStroke? = try {
+            val blob = obj.blob
+            if (blob != null && blob.isNotEmpty()) {
+                LiveStroke(
+                    id = obj.id,
+                    points = unpackPoints(blob),
+                    color = obj.color ?: DEFAULT_COLOR,
+                    strokeWidth = obj.strokeWidth ?: DEFAULT_STROKE_WIDTH,
+                    srcPoints = null,
+                )
+            } else {
+                val data = obj.data
+                if (lean || (data.indexOf("pressure") < 0 && data.indexOf("tilt") < 0)) {
+                    fromPointsJson(obj.id, data)
+                } else {
+                    fromStrokeData(obj.id, StrokeData.fromJson(data))
+                }
+            }
+        } catch (e: Exception) {
+            null
+        }
     }
 }
+
+/**
+ * Build a columnar stroke row (data-model-optimization Phase 1): points → binary [NotebookObject.blob],
+ * colour/width → columns. The bounding box is derived from points on load, so `boundingBox`/`data`
+ * stay empty (the legacy columns are NOT NULL, hence `""`).
+ */
+fun LiveStroke.toStrokeRow(
+    parentId: String,
+    order: Int,
+    createdAt: Long,
+    updatedAt: Long,
+    deletedAt: Long? = null,
+): NotebookObject = NotebookObject(
+    id = id,
+    parentId = parentId,
+    boundingBox = "",
+    sortOrder = order,
+    createdAt = createdAt,
+    updatedAt = updatedAt,
+    deletedAt = deletedAt,
+    type = TYPE_STROKE,
+    data = "",
+    color = color,
+    strokeWidth = strokeWidth,
+    blob = LiveStroke.packPoints(points),
+)
+
+/** The binary blob for this stroke's current points — used to persist translated coordinates. */
+fun LiveStroke.strokeBlob(): ByteArray = LiveStroke.packPoints(points)
+
+/** Minimal stroke surrogate whose `points` decode directly to [PointF] (see [LiveStroke.fromPointsJson]). */
+@Serializable
+private data class LeanStrokeSurrogate(
+    val color: String = LiveStroke.DEFAULT_COLOR,
+    val strokeWidth: Float = LiveStroke.DEFAULT_STROKE_WIDTH,
+    @Serializable(with = PointFListSerializer::class) val points: List<PointF> = emptyList(),
+)
 
 // ── Serialization support for android.graphics.PointF ────────────────────────
 

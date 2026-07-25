@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Selected month chip in the day-grid picker's month/year chooser: filled inkBlack, 4dp radius. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="@color/inkBlack" />
+    <corners android:radius="4dp" />
+</shape>

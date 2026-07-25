@@ -5,9 +5,26 @@
 
 ## Heading Objects
 
+> **Storage (schema v4 / Phase 2c).** Heading and text are columnar rows: `recognizedText`→`text`,
+> heading level→`level`, geometry→`x/y/width/height`. A **recognized** heading/text is a single bare
+> row (no strokes, no blob). Only the rare **unrecognized fallback** (`recognizedText == null`) keeps
+> ink, and it does so as `stroke` **child rows** (`parentId = heading.id`), not JSON. `HeadingObject`
+> is the legacy on-disk form only (format-agnostic read; converted by `NotebookCompactor`).
+> Persistence goes through the `*HeadingSubtree`/`*TextSubtree` helpers in `ObjectColumns.kt`; the
+> readers short-circuit for recognized rows, so this is behaviour- and perf-neutral on the happy path.
+> See [`data-architecture.md`](data-architecture.md) "Schema Version 4".
+
 - `type = "heading"` rows in `.soil`; `HeadingObject` serialized to `data`; `HeadingStroke` is the in-memory representation
 - Headings render **without a background fill** — strokes draw directly on the white page, or 20sp inkBlack canvas text when `recognizedText` is non-null. No grey rect is drawn at any render site.
 - `recognizedText: String?` — null = render strokes; non-null = canvas text (populated by ML Kit at creation)
+- **`strokes` are retained ONLY in the ML-Kit-failed fallback** (`recognizedText == null`), where they
+  are the sole visual. A recognized heading renders as canvas text and its `strokes` are dropped —
+  `strokes` defaults to `emptyList()` on both `HeadingObject` and `HeadingStroke`, and with
+  `encodeDefaults = false` an empty list is **omitted from the JSON entirely** (zero stroke bytes).
+  A recognized heading is **never revertible back to strokes** — this is parity with text objects, and
+  there is no "un-heading" command (see below). Every render site branches on `recognizedText != null`
+  first, so the (empty) stroke loop is never reached for a recognized heading. Legacy rows that still
+  carry dead strokes are stripped by `NotebookCompactor` (pass 3) on the next seal/sweep.
 - All lasso actions (move, copy, cut, paste, delete, eraser) treat headings as first-class participants
 - `copyPageAfter()` and `copyPageAfterRaw()` copy all object types, not just strokes
 
@@ -27,16 +44,18 @@
   (words only, no `#`); `updateHeadingText` re-applies `applyLevel(newText, level)` on Save, measures
   the box with the prefixed text, and preserves `level`. The `HeadingTextEdited` undo action stores
   **prefixed** text both directions (its undo/redo handlers assign `recognizedText` directly).
-- **Selection-menu submenu (`headingTypeSubmenu`):** a shared H1/H2/H3 popover (+ optional un-heading
-  button) opened from the floating selection toolbar. A `headingSubmenuMode` field disambiguates the
-  two uses of the H1/H2/H3 buttons:
+- **Selection-menu submenu (`headingTypeSubmenu`):** a shared H1/H2/H3 popover opened from the
+  floating selection toolbar. A `headingSubmenuMode` field disambiguates the two uses of the
+  H1/H2/H3 buttons:
   - **CONVERT** — `btnMakeHeading` (`ic_heading`, pure-stroke selection only) opens the submenu;
     picking a level calls `createHeadingFromStrokes(strokes, box, level)`.
-  - **CHANGE** — `btnHeadingMenu` (`ic_heading`, single-heading selection only; the old standalone
-    `btnUnheading` toolbar button was removed — un-heading lives in the submenu) opens the submenu
+  - **CHANGE** — `btnHeadingMenu` (`ic_heading`, single-heading selection only) opens the submenu
     with the heading's current level highlighted
-    (`bg_heading_type_selected`, a 1dp inkBlack border via `applyHeadingLevelHighlight`) and the
-    un-heading button shown. Picking a different level calls `changeHeadingLevel(heading, newLevel)`.
+    (`bg_heading_type_selected`, a 1dp inkBlack border via `applyHeadingLevelHighlight`).
+    Picking a different level calls `changeHeadingLevel(heading, newLevel)`.
+  - **No un-heading / revert-to-strokes command exists.** Once strokes are converted to a heading it
+    stays a heading (parity with text objects). The `btnHeadingUnheading` button, its `ic_heading_off`
+    drawable, the `removeHeading()` path, and the `HeadingRemoved` undo action were all removed.
 - **`changeHeadingLevel`** re-prefixes via `applyLevel(recognizedText, newLevel)` (null stays null),
   re-measures the box for text headings (keeps the existing box for stroke headings), persists
   `HeadingObject.copy(recognizedText, level)`, rebuilds, and pushes a `HeadingLevelChanged` undo
@@ -137,7 +156,7 @@ AlertDialog pattern: `setSoftInputMode(SOFT_INPUT_STATE_VISIBLE | SOFT_INPUT_ADJ
 
 1. Measure markdown via `TextObjectRenderer.measure()` on `Dispatchers.Default`
 2. Compute bounding box centered on tap, clamped to page bounds
-3. Insert `type="text"` row + `invalidatePageSnapshot(db, pageId)` on `Dispatchers.IO`
+3. Insert `type="text"` row + `noteContentEdit(db, pageId)` on `Dispatchers.IO`
 4. Append `TextRender` to `drawingView.getTextObjects()` + `loadTextObjects(...)`
 5. Rebuild render bitmap off-thread → swap via `loadStrokesWithBitmap`
 6. Enter lasso mode, select new object, show floating toolbar
@@ -155,10 +174,12 @@ While a text object is selected (single selection in lasso mode), a stylus tap w
 "Text" button (`btnConvertText`, `ic_text_recognition`) in the floating lasso toolbar — visible only when `selectionIsPureStrokes`.
 
 1. Run ML Kit recognition on selected strokes
-2. **Success:** measure text, resize bbox (left/top anchored); `data.text = recognizedText`
-3. **Failure:** keep original bbox; `data.text = ""`
-4. Both cases: `data.strokes = embeddedStrokes` (fresh-UUID copies of selected stroke data)
-5. Soft-delete original stroke rows + insert `type="text"` row in one transaction; invalidate snapshot; select new text object
+2. **Success:** measure text, resize bbox (left/top anchored); `data.text = recognizedText`; `data.strokes = null` (strokes discarded — the object renders from text and never reverts)
+3. **Failure:** keep original bbox; `data.text = ""`; `data.strokes = embeddedStrokes` (fresh-UUID copies — the strokes are the fallback visual)
+4. Soft-delete original stroke rows + insert `type="text"` row in one transaction; invalidate snapshot; select new text object
+
+> Recognized text objects no longer retain their strokes (mirrors headings). Legacy rows that still
+> carry dead strokes are stripped by `NotebookCompactor` (pass 3) on the next seal/sweep.
 
 Undo: `UndoRedoAction.TextConverted(textId, pageId, layerId, deletedAt, originalStrokeIds, textRender)` — undo restores original strokes and soft-deletes text row; redo reverses.
 

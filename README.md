@@ -2,7 +2,7 @@
 
 > Where thought has a place to grow 🌱
 
-Notesprout is an open source, handwriting-first notes app built for people who think on paper. Designed around the meditative experience of writing by hand, Notesprout gives you fixed screen-size pages — no infinite scrolling, no clutter — backed by an intelligent document model that understands what you write. Built first for BOOX e-ink devices, expanding to Android tablets, Wacom devices, iPad, and web.
+Notesprout is an open source, handwriting-first notes app built for people who think on paper. Designed around the meditative experience of writing by hand, Notesprout gives you fixed screen-size pages — no infinite scrolling, no clutter — backed by an intelligent document model that understands what you write. Built first for BOOX e-ink devices, expanding to Android tablets, Wacom devices, and web.
 
 ---
 
@@ -12,25 +12,27 @@ Notesprout is an open source, handwriting-first notes app built for people who t
 |---|---|
 | **v0.0 — First Bloom** | ✅ Shipped — MVP/proof-of-concept, source preserved on the [`mvp`](../../tree/mvp) branch |
 | **v1.0 — Seed** | ✅ Shipped — all major features complete, source preserved on the `seed` branch (archived) |
-| **v1.1 — Sprout** | 🌱 Active development on the [`sprout`](../../tree/sprout) branch |
+| **v1.1 — Sprout** | ✅ Shipped — merged to `main`, source preserved on the `sprout` branch (archived) |
 
 ---
 
 ## Device Support
 
 **Tier 1 — Primary targets**
-- BOOX NoteAir5C (EMR stylus, e-ink color) — flagship
+- BOOX Go 10.3 Gen II (EMR stylus, large-format e-ink) — flagship
+- BOOX Go 6 Gen II (EMR stylus, compact e-ink)
 - BOOX Note Max (EMR stylus, large-format e-ink)
 - BOOX Palma2 Pro (USI 2.0 stylus, Android phone form factor)
-- BOOX Go Color 7 Gen II
-- Wacom Movink Pad 11 & 14 (Android, active stylus)
-- iPhone 14 — future
-- MacBook / Web — future
 
 **Tier 2 — QA / testing**
+- BOOX NoteAir5C (EMR stylus, e-ink color)
 - BOOX NoteAir4C, Tab XC
-- iPad Air + Apple Pencil — future
-- Supernote Nomad & Manta — future
+- BOOX Go Color 7 Gen II
+- Wacom Movink Pad 11 & 14 (Android, active stylus)
+
+**Future**
+- MacBook / Web
+- Supernote Nomad & Manta
 
 ---
 
@@ -38,8 +40,9 @@ Notesprout is an open source, handwriting-first notes app built for people who t
 
 - **Kotlin** — native Android app (Java 17 target)
 - **Room / SQLite** — `.soil` notebook files, single unified table, one file per notebook
-- **Onyx SDK** — low-latency EMR stylus input on BOOX e-ink devices
-- **ML Kit** — on-device digital ink recognition for heading text
+- **Onyx SDK** — low-latency stylus input on BOOX e-ink devices, for both EMR and USI pens (not every BOOX device uses EMR — the Palma2 Pro and other pocket-sized models are USI 2.0)
+- **SQLCipher** — full-database encryption for `.soil` notebooks and the global index; passphrase-derived keys, per-notebook or global scope, with password-protected PDF export via PDFBox
+- **Handwriting recognition** — on-device, two engines: **ML Kit** digital ink (default, always available) and an optional **TrOCR** personal engine running on **ONNX Runtime Mobile**, fine-tuned to your own handwriting; feeds heading text, full-page text extraction, and text/markdown export
 - **kotlinx.serialization** — code-generated JSON, zero reflection
 - **Kotlin coroutines** — async operations throughout
 

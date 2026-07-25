@@ -35,6 +35,8 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.lifecycleScope
 import com.notesprout.android.crypto.EncryptionInfo
 import com.notesprout.android.crypto.KeyResolver
+import com.notesprout.android.crypto.PassphrasePrompt
+import com.notesprout.android.data.NotebookCompactor
 import com.notesprout.android.crypto.KeyScope
 import com.notesprout.android.crypto.KeySession
 import com.notesprout.android.crypto.PassphraseCache
@@ -44,19 +46,20 @@ import com.notesprout.android.crypto.SoilFileKind
 import com.notesprout.android.crypto.SoilMigrator
 import com.notesprout.android.core.Slog
 import com.notesprout.android.data.BoundingBox
-import com.notesprout.android.NotebookPackager
 import com.notesprout.android.data.NotebookMeta
 import com.notesprout.android.data.NotebookMetadata
 import com.notesprout.android.data.NotebookMetaStore
 import com.notesprout.android.data.PageData
 import com.notesprout.android.data.SoilDatabase
-import com.notesprout.android.data.checkpointTruncateAndClose
+import com.notesprout.android.data.SoilSchema
 import com.notesprout.android.data.index.IndexRepository
 import com.notesprout.android.data.index.PINNED_LIST_ID
 import com.notesprout.android.data.index.NotebookObject
 import com.notesprout.android.data.index.NotesproutIndex
 import com.notesprout.android.data.index.ObjectEntity
 import com.notesprout.android.data.index.ObjectType
+import com.notesprout.android.data.index.notebookMeta
+import com.notesprout.android.data.index.templateObject
 import com.notesprout.android.data.recents.RecentsManager
 import com.notesprout.android.data.recents.ResolvedRecent
 import com.notesprout.android.data.recents.TemplateRecentsManager
@@ -66,7 +69,11 @@ import com.notesprout.android.search.SearchEngine
 import com.notesprout.android.search.SearchResult
 import com.notesprout.android.sort.FolderSort
 import com.notesprout.android.state.AppStateManager
+import com.notesprout.android.state.NotebookOpenFailure
+import com.notesprout.android.state.AppSurface
 import com.notesprout.android.state.AppViewState
+import com.notesprout.android.state.SurfaceEntry
+import com.notesprout.android.state.SurfaceStack
 import com.notesprout.android.sort.SortDialog
 import com.notesprout.android.sort.SortField
 import com.notesprout.android.sort.SortOrder
@@ -79,10 +86,10 @@ import kotlin.coroutines.resume
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import java.io.ByteArrayOutputStream
+import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 import java.util.Date
@@ -96,6 +103,15 @@ class MainActivity : AppCompatActivity() {
          * Defined as a constant to avoid magic strings in notebook creation.
          */
         const val NIL_UUID = "00000000-0000-0000-0000-000000000000"
+
+        /**
+         * Boolean intent extra: launch straight into the "pick a folder for a new notebook" picker
+         * (used by [CalendarActivity]'s New Notebook button). Consumed once, then removed.
+         */
+        const val EXTRA_START_NEW_NOTEBOOK = "start_new_notebook"
+
+        /** One-time flag (in the notesprout_onboarding prefs) that the Phase-4 bulk-encrypt offer was shown. */
+        private const val KEY_CONVERSION_OFFERED = "conversion_offered"
 
         private val lenientJson = Json { ignoreUnknownKeys = true }
     }
@@ -124,6 +140,9 @@ class MainActivity : AppCompatActivity() {
     private var currentPage = 0
     private var gridSpec: GridSpec? = null
     private var pendingScan = false
+
+    /** Set when launched with [EXTRA_START_NEW_NOTEBOOK] but the grid isn't laid out / restored yet. */
+    private var pendingNewNotebookPicker = false
 
     /**
      * Navigation stack — null represents the root level; a non-null ObjectEntity represents a
@@ -161,11 +180,6 @@ class MainActivity : AppCompatActivity() {
     // listener and onResume from triggering a premature scan before the stack is rebuilt.
     private var isStateRestored = true
 
-    // Set to true whenever a NotebookActivity is launched; cleared in onResume when we return,
-    // which also clears the persisted lastOpenedNotebookId so the notebook is not re-launched
-    // on the next cold start (only a crash leaves it set for restore).
-    private var notebookOpenedThisSession = false
-
     // ── Color cache ───────────────────────────────────────────────────────────
 
     private val inkBlackColor by lazy { ContextCompat.getColor(this, R.color.inkBlack) }
@@ -195,16 +209,6 @@ class MainActivity : AppCompatActivity() {
         })
     }
 
-    // ── Cover image picker launcher ───────────────────────────────────────────
-
-    private var onCoverImagePicked: ((Uri) -> Unit)? = null
-
-    private val coverPickerLauncher = registerForActivityResult(
-        ActivityResultContracts.GetContent()
-    ) { uri ->
-        if (uri != null) onCoverImagePicked?.invoke(uri)
-    }
-
     // ── New notebook launcher (S6: launched from TemplateBrowserActivity) ─────
 
     private val newNotebookLauncher = registerForActivityResult(
@@ -232,46 +236,6 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // ── Export save-to-device launcher ───────────────────────────────────────
-
-    private var pendingExportFile: java.io.File? = null
-
-    private val savePdfLauncher = registerForActivityResult(
-        ActivityResultContracts.CreateDocument("application/pdf")
-    ) { uri ->
-        val file = pendingExportFile ?: return@registerForActivityResult
-        if (uri == null) return@registerForActivityResult
-        lifecycleScope.launch(Dispatchers.IO) {
-            try {
-                contentResolver.openOutputStream(uri)?.use { out ->
-                    file.inputStream().use { it.copyTo(out) }
-                }
-            } catch (e: Exception) {
-                android.os.Handler(android.os.Looper.getMainLooper()).post {
-                    Toast.makeText(this@MainActivity, "Save failed: ${e.message}", Toast.LENGTH_LONG).show()
-                }
-            }
-        }
-    }
-
-    private val saveSoilLauncher = registerForActivityResult(
-        ActivityResultContracts.CreateDocument("application/x-notesprout-soil")
-    ) { uri ->
-        val file = pendingExportFile ?: return@registerForActivityResult
-        if (uri == null) return@registerForActivityResult
-        lifecycleScope.launch(Dispatchers.IO) {
-            try {
-                contentResolver.openOutputStream(uri)?.use { out ->
-                    file.inputStream().use { it.copyTo(out) }
-                }
-            } catch (e: Exception) {
-                android.os.Handler(android.os.Looper.getMainLooper()).post {
-                    Toast.makeText(this@MainActivity, "Save failed: ${e.message}", Toast.LENGTH_LONG).show()
-                }
-            }
-        }
-    }
-
     // ── Import launcher ───────────────────────────────────────────────────────
 
     private val importSoilLauncher = registerForActivityResult(
@@ -284,6 +248,16 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // The encrypted index must be prepared before any index access. Normally BootstrapActivity
+        // (the launcher) has already done this and forwarded here; but a .soil deep-link or a
+        // task-root recreation can reach MainActivity cold with the index not yet ready — bounce back
+        // through the gate (preserving the intent) so preparation/unlock happens exactly once.
+        if (!com.notesprout.android.data.index.NotesproutIndex.isReady()) {
+            startActivity(Intent(intent).setClass(this, BootstrapActivity::class.java))
+            finish()
+            return
+        }
 
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
@@ -302,15 +276,16 @@ class MainActivity : AppCompatActivity() {
         sortPrefs = SortPreferencesManager.load(this)
 
         val savedViewState = AppStateManager.load(this)
+        val savedSurfaces  = SurfaceStack.load(this)
         val coldLaunch = savedInstanceState == null
         val hasNonDefaultState = savedViewState.folderId != null ||
                 savedViewState.pinnedMode ||
                 savedViewState.recentsMode ||
                 (savedViewState.searchMode && savedViewState.searchQuery.isNotEmpty()) ||
-                (coldLaunch && savedViewState.lastOpenedNotebookId != null)
+                (coldLaunch && savedSurfaces.isNotEmpty())
         if (hasNonDefaultState) {
             isStateRestored = false
-            lifecycleScope.launch { restoreSavedBrowseState(savedViewState, coldLaunch) }
+            lifecycleScope.launch { restoreSavedBrowseState(savedViewState, savedSurfaces, coldLaunch) }
         }
 
         setupBottomBar()
@@ -325,6 +300,10 @@ class MainActivity : AppCompatActivity() {
 
         binding.btnRecents.setOnClickListener { enterRecentsMode() }
         binding.btnRecentsCancel.setOnClickListener { exitRecentsMode() }
+
+        // Lives in the bottom bar, which is never swapped out by search / pinned / recents mode,
+        // so a single button covers every browse mode.
+        binding.btnScratchpad.setOnClickListener { launchScratchpad() }
 
         binding.btnSort.setOnClickListener {
             SortDialog(this, sortPrefs) { newPrefs ->
@@ -370,30 +349,33 @@ class MainActivity : AppCompatActivity() {
                     } else {
                         renderPage()
                     }
+                    tryStartPendingNewNotebookPicker()
                 }
             }
         )
 
         // Handle .soil open-with / share-to on cold launch only; config-change recreations
         // must not re-trigger the import pipeline.
-        if (savedInstanceState == null) handleIncomingIntent(intent)
+        if (savedInstanceState == null) {
+            handleIncomingIntent(intent)
+            handleNewNotebookIntent(intent)
+            maybeOfferBulkEncryption()
+        }
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
         handleIncomingIntent(intent)
+        handleNewNotebookIntent(intent)
     }
 
     override fun onResume() {
         super.onResume()
-        if (notebookOpenedThisSession) {
-            notebookOpenedThisSession = false
-            val st = AppStateManager.load(this)
-            if (st.lastOpenedNotebookId != null) {
-                AppStateManager.save(this, st.copy(lastOpenedNotebookId = null))
-            }
-        }
+        // The library is on screen, so nothing is stacked on it. Skipped while a restore is still in
+        // flight — that coroutine is about to stack surfaces on top of us, and they record themselves.
+        if (isStateRestored) SurfaceStack.reset(this)
+        showNotebookOpenFailureIfAny()
         if (!isStateRestored) {
             pendingScan = true
             return
@@ -473,6 +455,7 @@ class MainActivity : AppCompatActivity() {
         binding.btnMore.visibility              = if (inSearch) View.GONE   else View.VISIBLE
         if (inSearch) {
             binding.searchTitle.text = "Search: $currentSearchQuery"
+            binding.btnClearSearch.visibility = View.VISIBLE
         }
     }
 
@@ -675,21 +658,15 @@ class MainActivity : AppCompatActivity() {
         directoryStack.addAll(path)
     }
 
-    private suspend fun restoreSavedBrowseState(state: AppViewState, coldLaunch: Boolean = false) {
-        // Reopen the last notebook only on cold launch (crash/process-kill recovery).
-        // On a warm restart (MainActivity killed while notebook was open, user then closes notebook),
-        // coldLaunch is false and we just restore the browse state behind it instead.
-        if (coldLaunch && state.lastOpenedNotebookId != null) {
-            val notebook = withContext(Dispatchers.IO) {
-                repository.getNotebook(state.lastOpenedNotebookId)
-            }
-            if (notebook != null && notebook.deletedAt == null) {
-                launchNotebookActivity(notebook)
-            } else {
-                // Notebook gone — clear the stale entry.
-                AppStateManager.save(this@MainActivity, state.copy(lastOpenedNotebookId = null))
-            }
-        }
+    private suspend fun restoreSavedBrowseState(
+        state: AppViewState,
+        surfaces: List<SurfaceEntry>,
+        coldLaunch: Boolean = false,
+    ) {
+        // Reopen the surfaces only on cold launch (process start). On a warm restart — MainActivity
+        // recreated while a notebook sat on top, user then closes it — coldLaunch is false and we just
+        // restore the browse state behind it instead.
+        if (coldLaunch) restoreSurfaces(surfaces)
 
         navigateStackToFolder(state.folderId)
         if (state.folderId != null && currentParentId != state.folderId) {
@@ -718,9 +695,83 @@ class MainActivity : AppCompatActivity() {
                 isRecentsMode -> renderRecentsList()
                 else          -> scanAndRender()
             }
+            tryStartPendingNewNotebookPicker()
         }
         // If gridSpec is still null, the layout listener will handle the render now that
         // isStateRestored is true.
+    }
+
+    /**
+     * Rebuild the surfaces the user had open, over the library we're already building — the whole
+     * chain, not just the top one, so a scratch pad opened from a notebook (or from the calendar)
+     * comes back *over that screen*, and stepping out of it lands where it did before the app died.
+     *
+     * The calendar and the scratch pad restore their own position (view/date, page) when they open,
+     * so only the notebook and the day window need identity passed in. The **source notebook** is
+     * passed back down too, so a restored calendar / day window / scratch pad still has the
+     * Send-to-Notebook target it was opened with — the notebook directly beneath it, or for a day
+     * window, the one beneath its calendar.
+     *
+     * Anything unresolvable (deleted notebook, unparseable date) is dropped; the rest of the chain
+     * still comes back.
+     *
+     * Note this can put an **encrypted** notebook back underneath: it unlocks when the user steps
+     * down to it, not at launch, but its `.soil` does get opened for a screen they aren't looking at
+     * yet. That's the price of landing them where they actually were.
+     */
+    private suspend fun restoreSurfaces(surfaces: List<SurfaceEntry>) {
+        val intents = mutableListOf<Intent>()
+        // The notebook directly beneath the entry being rebuilt, and the one beneath the calendar
+        // (which is what a day window above it was opened from) — see CalendarActivity.openDayDetail.
+        var below: ObjectEntity? = null
+        var calendarBelow: ObjectEntity? = null
+
+        for (entry in surfaces) {
+            val notebook = if (entry.surface == AppSurface.NOTEBOOK) {
+                entry.notebookId
+                    ?.let { id -> withContext(Dispatchers.IO) { repository.getNotebook(id) } }
+                    ?.takeIf { it.deletedAt == null }
+            } else null
+            val from = below
+
+            val intent: Intent? = when (entry.surface) {
+                AppSurface.NOTEBOOK -> notebook?.let {
+                    Intent(this, NotebookActivity::class.java).apply {
+                        putExtra(NotebookActivity.EXTRA_NOTEBOOK_ID,   it.id)
+                        putExtra(NotebookActivity.EXTRA_NOTEBOOK_NAME, it.name)
+                    }
+                }
+                AppSurface.CALENDAR -> {
+                    calendarBelow = from
+                    if (from == null) Intent(this, CalendarActivity::class.java)
+                    else CalendarActivity.intentFromNotebook(this, from.id, from.name)
+                }
+                AppSurface.DAY_WINDOW -> entry.dayDate
+                    ?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
+                    ?.let { date ->
+                        val source = calendarBelow
+                        DayDetailActivity.intent(
+                            this, date,
+                            fromNotebookId        = source?.id,
+                            fromNotebookName      = source?.name,
+                            view = entry.dayView,
+                        )
+                    }
+                AppSurface.SCRATCHPAD -> Intent(this, ScratchpadActivity::class.java).apply {
+                    if (from != null) {
+                        putExtra(ScratchpadActivity.EXTRA_FROM_NOTEBOOK_ID,        from.id)
+                        putExtra(ScratchpadActivity.EXTRA_FROM_NOTEBOOK_NAME,      from.name)
+                    }
+                }
+            }
+            if (intent != null) intents += intent
+            below = notebook
+        }
+
+        // Drop the dead process's entries — the Activities we're about to launch record themselves,
+        // and anything we couldn't resolve should not be retried on the next launch.
+        SurfaceStack.reset(this)
+        if (intents.isNotEmpty()) startActivities(intents.toTypedArray())
     }
 
     private fun setupBackNavigation() {
@@ -760,6 +811,10 @@ class MainActivity : AppCompatActivity() {
         binding.btnNewNotebook.setOnClickListener    { showNewNotebookDialog() }
         binding.btnNewFolder.setOnClickListener      { showNewFolderDialog() }
         binding.btnMore.setOnClickListener           { toggleOverflowToolbar() }
+        binding.btnCalendar.setOnClickListener       {
+            closeOverflowToolbar()
+            CalendarActivity.launch(this)
+        }
         binding.btnImport.setOnClickListener         {
             closeOverflowToolbar()
             importSoilLauncher.launch(arrayOf("application/octet-stream", "*/*"))
@@ -775,9 +830,18 @@ class MainActivity : AppCompatActivity() {
             closeOverflowToolbar()
             startActivity(Intent(this, EncryptionSettingsActivity::class.java))
         }
+        binding.btnHwr.setOnClickListener {
+            closeOverflowToolbar()
+            startActivity(Intent(this, HwrSettingsActivity::class.java))
+        }
         binding.btnBackup.setOnClickListener {
             closeOverflowToolbar()
             startActivity(Intent(this, BackupSettingsActivity::class.java))
+        }
+        // TEMP: legacy-ts compaction sweep — remove after all devices compacted (see BACKLOG.md).
+        binding.btnCompact.setOnClickListener {
+            closeOverflowToolbar()
+            showCompactNotebooksDialog()
         }
         binding.btnBreadcrumbBack.setOnClickListener { navigateUpOneLevel() }
     }
@@ -1106,11 +1170,12 @@ class MainActivity : AppCompatActivity() {
 
                 // Read snapshot from the index — no .soil file access during list rendering.
                 val notebookObj = try {
-                    Json.decodeFromString<NotebookObject>(item.entity.data)
+                    item.entity.notebookMeta()
                 } catch (_: Exception) { null }
 
-                if (notebookObj?.encrypted == true) {
-                    // Encrypted: show lock icon; never decode a snapshot (plaintext-leak guard).
+                if (notebookObj?.encrypted == true && notebookObj.keyScope != KeyScope.GLOBAL) {
+                    // Private (NOTEBOOK-scope) encryption: show lock icon; never decode a snapshot.
+                    // GLOBAL-scope covers fall through and render — the index is encrypted at rest.
                     icon.setImageResource(R.drawable.ic_lock_cover)
                 } else {
                     val snapshotB64 = notebookObj?.snapshot
@@ -1227,10 +1292,19 @@ class MainActivity : AppCompatActivity() {
         launchNotebookActivity(entity)
     }
 
+    private fun launchScratchpad() {
+        startActivity(Intent(this, ScratchpadActivity::class.java))
+    }
+
+    /** Debounce for notebook-card taps — see [launchNotebookActivity]. */
+    private var lastNotebookLaunchAt = 0L
+
     private fun launchNotebookActivity(entity: ObjectEntity) {
-        val st = AppStateManager.load(this)
-        AppStateManager.save(this, st.copy(lastOpenedNotebookId = entity.id))
-        notebookOpenedThisSession = true
+        // E-ink refresh lag invites double-taps; two rapid taps used to stack two activities on
+        // the same .soil (benign for data — insert-only ink — but thoroughly confusing on screen).
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (now - lastNotebookLaunchAt < 800) return
+        lastNotebookLaunchAt = now
         val intent = Intent(this, NotebookActivity::class.java).apply {
             putExtra(NotebookActivity.EXTRA_NOTEBOOK_ID,   entity.id)
             putExtra(NotebookActivity.EXTRA_NOTEBOOK_NAME, entity.name)
@@ -1275,6 +1349,44 @@ class MainActivity : AppCompatActivity() {
 
     // ── New folder dialog ─────────────────────────────────────────────────────
 
+    /**
+     * A notebook stepped back here because its `.soil` would not open ([NotebookOpenFailure]).
+     * Explain it rather than leaving the user with a screen that just bounced them home.
+     *
+     * The copy is **deliberately verbose while dogfooding** — it names the likely cause, states
+     * plainly that the file was left intact (the important reassurance, since the last time this
+     * class of failure went unhandled it destroyed a notebook), and offers the raw exception chain
+     * behind a second tap for reporting. Trim this to a one-liner before a public release.
+     */
+    private fun showNotebookOpenFailureIfAny() {
+        val report = NotebookOpenFailure.take() ?: return
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("Couldn't open “${report.notebookName}”")
+            .setMessage(
+                report.diagnosis +
+                    "\n\nYour notebook file has not been changed, deleted, or rewritten — it is " +
+                    "still on disk exactly as it was. Everything else in your library is unaffected."
+            )
+            .setPositiveButton("OK", null)
+            .setNeutralButton("Details") { _, _ -> showOpenFailureDetail(report) }
+            .create()
+        dialog.show()
+        dialog.window?.setElevation(0f)
+        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
+    }
+
+    /** The raw exception chain behind the failure, for copying into a bug report while dogfooding. */
+    private fun showOpenFailureDetail(report: NotebookOpenFailure.Report) {
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("Technical detail")
+            .setMessage(report.technical)
+            .setPositiveButton("OK", null)
+            .create()
+        dialog.show()
+        dialog.window?.setElevation(0f)
+        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
+    }
+
     private fun showNewFolderDialog() {
         val dialogBinding = DialogNewNotebookBinding.inflate(layoutInflater)
         dialogBinding.editNotebookName.setText("")
@@ -1308,7 +1420,7 @@ class MainActivity : AppCompatActivity() {
         dialog.window?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE)
         dialog.show()
         dialog.window?.setElevation(0f)
-        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
 
         dialogBinding.editNotebookName.requestFocus()
         dialogBinding.editNotebookName.postDelayed({
@@ -1320,6 +1432,57 @@ class MainActivity : AppCompatActivity() {
                     imm.showSoftInput(dialogBinding.editNotebookName, InputMethodManager.SHOW_IMPLICIT)
                 }
         }, 100)
+    }
+
+    /**
+     * DEBUG ONLY — re-key a notebook to a throwaway passphrase to exercise [NotebookRecovery].
+     *
+     * Reproduces the real failure exactly: the file is re-encrypted (new salt, new passphrase) while
+     * the index still says GLOBAL **and the cached raw key is deliberately left in place**. That is
+     * what makes the next open take KeyResolver's skip-verify shortcut, hand KeyOpener a stale key,
+     * fail past [SelfHealingKeyFactory]'s passphrase retry, and land in the recovery dialog — the
+     * same chain that stranded notebook 0e5161f1. Enter the throwaway passphrase there to recover.
+     *
+     * Never ship an entry point to this: it makes a notebook unopenable by ordinary means.
+     */
+    private fun showBreakKeyingDialog(entity: ObjectEntity, encInfo: EncryptionInfo) {
+        AlertDialog.Builder(this)
+            .setTitle("Break Keying (debug)")
+            .setMessage(
+                "Re-encrypts \"${entity.name}\" with a throwaway passphrase, leaving the index and the " +
+                "cached key untouched — so the next open fails the way a restored-from-backup notebook does.\n\n" +
+                "You'll need the passphrase you set here to recover it. Debug builds only."
+            )
+            .setPositiveButton("Break It") { _, _ ->
+                lifecycleScope.launch {
+                    val rogue = PassphrasePrompt.promptForPassphrase(
+                        this@MainActivity,
+                        title = "Throwaway Passphrase",
+                        message = "Set the passphrase the notebook will be re-encrypted with. Remember it — " +
+                            "it's what you'll type into the recovery dialog.",
+                        confirm = true,
+                    ) ?: return@launch
+                    val current = KeyResolver.resolveCurrentKeyForRekey(this@MainActivity, entity.id, encInfo)
+                        ?: return@launch
+                    val ok = withContext(Dispatchers.IO) {
+                        runCatching { SoilMigrator.rekeyInPlace(soilFile(this@MainActivity, entity.id), current, rogue) }
+                    }.isSuccess
+                    // NOTE: deliberately NOT calling KeyMaterial.invalidate — the stale cached key is
+                    // the whole point of the repro.
+                    Toast.makeText(
+                        this@MainActivity,
+                        if (ok) "Keying broken. Open it to test recovery." else "Break failed — notebook unchanged.",
+                        Toast.LENGTH_LONG,
+                    ).show()
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .create()
+            .also { d ->
+                d.show()
+                d.window?.setElevation(0f)
+                d.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
+            }
     }
 
     // ── Rename notebook dialog ────────────────────────────────────────────────
@@ -1355,7 +1518,7 @@ class MainActivity : AppCompatActivity() {
         dialog.window?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE)
         dialog.show()
         dialog.window?.setElevation(0f)
-        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
 
         dialogBinding.editNotebookName.requestFocus()
         dialogBinding.editNotebookName.postDelayed({
@@ -1403,7 +1566,7 @@ class MainActivity : AppCompatActivity() {
         dialog.window?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE)
         dialog.show()
         dialog.window?.setElevation(0f)
-        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
 
         dialogBinding.editNotebookName.requestFocus()
         dialogBinding.editNotebookName.postDelayed({
@@ -1495,7 +1658,7 @@ class MainActivity : AppCompatActivity() {
             val seed: SeedTemplate? = if (libraryTemplateId.isNotEmpty()) {
                 withContext(Dispatchers.IO) {
                     val e = repository.getTemplate(libraryTemplateId)
-                    val t = e?.let { com.notesprout.android.data.index.TemplateObject.fromJson(it.data) }
+                    val t = e?.templateObject()
                     if (e != null && t != null && t.image.isNotEmpty())
                         SeedTemplate(t.width, t.height, e.name, t.image) else null
                 }
@@ -1519,12 +1682,12 @@ class MainActivity : AppCompatActivity() {
                 val pragma: (String) -> Unit
                 val closeDb: () -> Unit
                 if (key != null) {
-                    val db = SoilCrypto.openRawEncrypted(soilPath, key)
+                    val db = SoilCrypto.createRawEncrypted(soilPath, key)
                     exec = { sql, args -> if (args != null) db.execSQL(sql, args) else db.execSQL(sql) }
                     pragma = { sql -> db.rawQuery(sql, null).use { it.moveToFirst() } }
                     closeDb = { db.close() }
                 } else {
-                    val db = SQLiteDatabase.openOrCreateDatabase(soilPath, null)
+                    val db = SoilCrypto.createRawPlaintext(soilPath)
                     exec = { sql, args -> if (args != null) db.execSQL(sql, args) else db.execSQL(sql) }
                     pragma = { sql -> db.rawQuery(sql, null).use { it.moveToFirst() } }
                     closeDb = { db.close() }
@@ -1535,29 +1698,8 @@ class MainActivity : AppCompatActivity() {
                     pragma("PRAGMA wal_autocheckpoint = 100")
                     pragma("PRAGMA auto_vacuum = INCREMENTAL")
 
-                    exec(
-                        """
-                        CREATE TABLE IF NOT EXISTS notebook (
-                            id          TEXT    NOT NULL PRIMARY KEY,
-                            parentId    TEXT    NOT NULL,
-                            boundingBox TEXT    NOT NULL,
-                            "order"     INTEGER NOT NULL DEFAULT 0,
-                            createdAt   INTEGER NOT NULL,
-                            updatedAt   INTEGER NOT NULL,
-                            deletedAt   INTEGER,
-                            type        TEXT    NOT NULL,
-                            data        TEXT    NOT NULL
-                        )
-                        """.trimIndent(),
-                        null
-                    )
-                    exec(
-                        """
-                        CREATE INDEX IF NOT EXISTS idx_notebook_parent_order
-                            ON notebook(parentId, "order", deletedAt)
-                        """.trimIndent(),
-                        null
-                    )
+                    exec(SoilSchema.CREATE_NOTEBOOK_TABLE, null)
+                    exec(SoilSchema.CREATE_NOTEBOOK_INDEX, null)
                     // Meta table for undo/redo persistence inside encrypted .soil files (P2.S3).
                     // Plaintext notebooks never write to this table; Room migration 1→2 adds it
                     // to existing notebooks. id = 0 is the only row.
@@ -1578,38 +1720,32 @@ class MainActivity : AppCompatActivity() {
                     val bboxJson = BoundingBox(0f, 0f, screenW, screenH).toJson()
                     val now = System.currentTimeMillis()
 
+                    // Columnar (Phase 2b): notebook/page/template/layer write typed columns, data = "".
+                    // text = notebook.title / template.name / layer.label; refId = notebook.lastOpenedPage
+                    // / page.template; flags = layer bits; blob = template image bytes.
                     val insertSql =
-                        """INSERT INTO notebook (id, parentId, boundingBox, "order", createdAt, updatedAt, deletedAt, type, data)
-                           VALUES (?, ?, ?, 0, ?, ?, NULL, ?, ?)"""
+                        """INSERT INTO notebook (id, parentId, boundingBox, "order", createdAt, updatedAt, deletedAt, type, data, text, refId, flags, blob)
+                           VALUES (?, ?, ?, 0, ?, ?, NULL, ?, '', ?, ?, ?, ?)"""
 
                     val notebookId = UUID.randomUUID().toString()
                     val pageId     = UUID.randomUUID().toString()
 
-                    val notebookDataJson = NotebookMetadata(
-                        id             = notebookId,
-                        title          = name,
-                        cover          = "",
-                        lastOpenedPage = pageId,
-                    ).toJson()
-                    exec(insertSql, arrayOf(notebookId, "", "{}", now, now, "notebook", notebookDataJson))
+                    exec(insertSql, arrayOf(notebookId, "", "{}", now, now, "notebook", name, pageId, null, null))
 
                     val firstPageTemplate = if (seed != null) UUID.randomUUID().toString() else ""
-                    exec(insertSql, arrayOf(
-                        pageId, notebookId, bboxJson, now, now, "page",
-                        PageData(width = screenW, height = screenH, template = firstPageTemplate).toJson()
-                    ))
+                    exec(insertSql, arrayOf(pageId, notebookId, bboxJson, now, now, "page", null, firstPageTemplate, null, null))
                     if (seed != null) {
                         val tmplBbox = BoundingBox(0f, 0f, seed.width.toFloat(), seed.height.toFloat()).toJson()
                         exec(insertSql, arrayOf(
                             firstPageTemplate, notebookId, tmplBbox, now, now, "template",
-                            com.notesprout.android.data.TemplateData(seed.width, seed.height, seed.name, seed.image).toJson()
+                            seed.name, null, null, com.notesprout.android.data.templateImageBlob(seed.image),
                         ))
                     }
 
                     val layerId = UUID.randomUUID().toString()
                     exec(insertSql, arrayOf(
                         layerId, pageId, bboxJson, now, now, "layer",
-                        """{"label":"Content","isLocked":false,"isVisible":true}"""
+                        "Content", null, com.notesprout.android.data.LAYER_FLAGS_DEFAULT, null,
                     ))
 
                     val folderPath = repository.getFolderAncestry(currentParentId)
@@ -1644,6 +1780,8 @@ class MainActivity : AppCompatActivity() {
                 withContext(Dispatchers.IO) {
                     repository.setEncryptionState(entity.id, encrypted = true, keyScope = scope)
                 }
+                // Derive + cache the raw key now so the notebook's first open is a fast raw-key open.
+                if (key != null) com.notesprout.android.crypto.KeyOpener.warm(this, entity.id, soilPath, scope, key)
             }
 
             Toast.makeText(this@MainActivity, "Notebook '$name' created", Toast.LENGTH_SHORT).show()
@@ -1682,7 +1820,7 @@ class MainActivity : AppCompatActivity() {
         lifecycleScope.launch {
             val pinned = withContext(Dispatchers.IO) { repository.isNotebookPinned(entity.id) }
             val encInfo = withContext(Dispatchers.IO) { repository.getEncryptionInfo(entity.id) }
-            val excluded = try { Json.decodeFromString<NotebookObject>(entity.data).excludeFromBackup } catch (_: Exception) { false }
+            val excluded = try { entity.notebookMeta().excludeFromBackup } catch (_: Exception) { false }
             val pinIcon  = if (pinned) R.drawable.ic_pinned_off else R.drawable.ic_pinned
             val pinLabel = if (pinned) "Unpin Notebook" else "Pin Notebook"
             val menu = ActionSheetDialog(this@MainActivity)
@@ -1701,12 +1839,10 @@ class MainActivity : AppCompatActivity() {
                 .addAction(R.drawable.ic_move_page,       "Move Notebook")   { enterPickerMode(DestinationPickerState.MoveNotebook(entity)) }
                 .addAction(R.drawable.ic_edit,            "Rename Notebook") { showRenameNotebookDialog(entity) }
             if (!encInfo.encrypted) {
-                menu.addAction(R.drawable.ic_polaroid, "Set Cover") { openCoverDialog(entity) }
-            }
-            if (!encInfo.encrypted) {
                 menu.addAction(R.drawable.ic_lock,     "Encrypt Notebook") { showEncryptNotebookDialog(entity) }
             } else {
-                menu.addAction(R.drawable.ic_lock_off, "Decrypt Notebook") { showDecryptNotebookDialog(entity, encInfo) }
+                // No decrypt-to-plaintext under encrypt-everything — scope is toggled between the
+                // device-global and a private notebook passphrase, both still encrypted.
                 menu.addAction(R.drawable.ic_edit,     "Change Passphrase") { showChangePassphraseDialog(entity, encInfo) }
                 menu.addAction(R.drawable.ic_lock,     "Change Encryption Scope") { showChangeScopeDialog(entity, encInfo) }
             }
@@ -1719,7 +1855,105 @@ class MainActivity : AppCompatActivity() {
                 }
             }
             menu.addAction(R.drawable.ic_delete_notebook, "Delete Notebook") { showDeleteNotebookConfirmation(entity) }
+            if (BuildConfig.DEBUG && encInfo.encrypted) {
+                menu.addAction(R.drawable.ic_lock, "Break Keying (debug)") { showBreakKeyingDialog(entity, encInfo) }
+            }
             menu.show()
+        }
+    }
+
+    // ── Phase 4: one-time bulk-convert offer ──────────────────────────────────
+
+    /**
+     * On a normal cold launch (after onboarding), if any plaintext notebooks remain, offer once to
+     * bulk-encrypt them under the global passphrase. Guarded by a one-time flag so it never nags; if
+     * the user declines they can still run it from Encryption settings. Skipped for .soil deep-links
+     * so the offer never collides with an import flow.
+     */
+    private fun maybeOfferBulkEncryption() {
+        if (intent?.action == Intent.ACTION_VIEW || intent?.action == Intent.ACTION_SEND) return
+        val prefs = getSharedPreferences("notesprout_onboarding", MODE_PRIVATE)
+        if (prefs.getBoolean(KEY_CONVERSION_OFFERED, false)) return
+        lifecycleScope.launch {
+            val hasGlobal = withContext(Dispatchers.IO) {
+                com.notesprout.android.crypto.PassphraseStore.getGlobalPassphrase(this@MainActivity) != null
+            }
+            if (!hasGlobal) return@launch
+            // If a sweep is already mid-flight, the Encryption-settings Resume banner owns it.
+            if (com.notesprout.android.crypto.GlobalConversion.hasMarker(this@MainActivity)) return@launch
+            val plaintextIds = withContext(Dispatchers.IO) { repository.getPlaintextNotebookIds() }
+            prefs.edit().putBoolean(KEY_CONVERSION_OFFERED, true).apply()
+            if (plaintextIds.isEmpty()) return@launch
+
+            val count = plaintextIds.size
+            val dialog = AlertDialog.Builder(this@MainActivity)
+                .setTitle("Encrypt your notebooks?")
+                .setMessage(
+                    "You have $count unencrypted notebook${if (count == 1) "" else "s"}. " +
+                    "Encrypt ${if (count == 1) "it" else "them"} now with your global passphrase? " +
+                    "You can also do this later from Encryption settings."
+                )
+                .setPositiveButton("Encrypt Now") { _, _ -> runBulkConversion() }
+                .setNegativeButton("Later", null)
+                .create()
+            dialog.setOnShowListener {
+                dialog.window?.setElevation(0f)
+                dialog.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
+            }
+            dialog.show()
+        }
+    }
+
+    private fun runBulkConversion() {
+        lifecycleScope.launch {
+            val globalPass = withContext(Dispatchers.IO) {
+                com.notesprout.android.crypto.PassphraseStore.getGlobalPassphrase(this@MainActivity)
+            } ?: return@launch
+            val cancelSignal = java.util.concurrent.atomic.AtomicBoolean(false)
+
+            val tvMessage = android.widget.TextView(this@MainActivity).apply {
+                text = "Encrypting…"
+                setPadding(64, 48, 64, 48)
+                setTextColor(android.graphics.Color.BLACK)
+                textSize = 16f
+            }
+            val progress = AlertDialog.Builder(this@MainActivity)
+                .setView(tvMessage)
+                .setNegativeButton("Cancel") { _, _ -> cancelSignal.set(true) }
+                .setCancelable(false)
+                .create()
+            progress.show()
+            progress.window?.setElevation(0f)
+            progress.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
+
+            val result = try {
+                com.notesprout.android.crypto.GlobalConversion.start(
+                    context = this@MainActivity,
+                    repository = repository,
+                    globalPassphrase = globalPass,
+                    onProgress = { done, total ->
+                        withContext(Dispatchers.Main) { tvMessage.text = "Encrypting $done / $total…" }
+                    },
+                    cancelSignal = cancelSignal,
+                )
+            } catch (e: Exception) {
+                com.notesprout.android.crypto.GlobalConversion.Result.Failed(e.message ?: "unknown error")
+            } finally {
+                progress.dismiss()
+            }
+
+            val msg = when (result) {
+                is com.notesprout.android.crypto.GlobalConversion.Result.Complete -> buildString {
+                    append("Encrypted ${result.converted} notebook${if (result.converted == 1) "" else "s"}.")
+                    if (result.skipped > 0) append(" ${result.skipped} couldn't be encrypted and were left as-is.")
+                }
+                is com.notesprout.android.crypto.GlobalConversion.Result.Cancelled ->
+                    "Paused. ${result.converted} encrypted, ${result.remaining} remaining. Resume from Encryption settings."
+                is com.notesprout.android.crypto.GlobalConversion.Result.Failed ->
+                    "Encryption failed: ${result.message}"
+            }
+            Toast.makeText(this@MainActivity, msg, Toast.LENGTH_LONG).show()
+            scanAndRender()
         }
     }
 
@@ -1752,65 +1986,18 @@ class MainActivity : AppCompatActivity() {
             .create()
         dialog.show()
         dialog.window?.setElevation(0f)
-        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
 
         try {
             val file = soilFile(this, entity.id)
             withContext(Dispatchers.IO) { SoilMigrator.encryptInPlace(file, key) }
             withContext(Dispatchers.IO) { repository.setEncryptionState(entity.id, encrypted = true, keyScope = scope) }
+            com.notesprout.android.crypto.KeyOpener.warm(this, entity.id, file, scope, key)
             dialog.dismiss()
             scanAndRender()
         } catch (e: Exception) {
             dialog.dismiss()
             Toast.makeText(this, "Encryption failed: ${e.message}", Toast.LENGTH_LONG).show()
-        }
-    }
-
-    private fun showDecryptNotebookDialog(entity: ObjectEntity, encInfo: EncryptionInfo) {
-        AlertDialog.Builder(this)
-            .setTitle("Decrypt Notebook")
-            .setMessage(
-                "\"${entity.name}\" will be stored unencrypted. Anyone with access to the file " +
-                "can read its contents. This cannot be undone."
-            )
-            .setPositiveButton("Continue") { _, _ ->
-                lifecycleScope.launch { decryptNotebook(entity, encInfo) }
-            }
-            .setNegativeButton("Cancel", null)
-            .create()
-            .also { d ->
-                d.show()
-                d.window?.setElevation(0f)
-                d.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
-            }
-    }
-
-    private suspend fun decryptNotebook(entity: ObjectEntity, encInfo: EncryptionInfo) {
-        val key = KeyResolver.resolveForDecrypt(this, entity.id, encInfo) ?: return
-
-        val tvMessage = android.widget.TextView(this).apply {
-            text = "Decrypting…"
-            setPadding(64, 48, 64, 48)
-            setTextColor(android.graphics.Color.BLACK)
-            textSize = 16f
-        }
-        val dialog = AlertDialog.Builder(this)
-            .setView(tvMessage)
-            .setCancelable(false)
-            .create()
-        dialog.show()
-        dialog.window?.setElevation(0f)
-        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
-
-        try {
-            val file = soilFile(this, entity.id)
-            withContext(Dispatchers.IO) { SoilMigrator.decryptInPlace(file, key) }
-            withContext(Dispatchers.IO) { repository.setEncryptionState(entity.id, encrypted = false, keyScope = null) }
-            dialog.dismiss()
-            scanAndRender()
-        } catch (e: Exception) {
-            dialog.dismiss()
-            Toast.makeText(this, "Decryption failed: ${e.message}", Toast.LENGTH_LONG).show()
         }
     }
 
@@ -1829,7 +2016,7 @@ class MainActivity : AppCompatActivity() {
                 .also { d ->
                     d.show()
                     d.window?.setElevation(0f)
-                    d.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+                    d.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
                 }
             return
         }
@@ -1852,11 +2039,13 @@ class MainActivity : AppCompatActivity() {
             .create()
         dialog.show()
         dialog.window?.setElevation(0f)
-        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
 
         try {
             val file = soilFile(this, entity.id)
             withContext(Dispatchers.IO) { SoilMigrator.rekeyInPlace(file, oldKey, newKey) }
+            // Salt changed on re-key — the old cached raw key is stale.
+            com.notesprout.android.crypto.KeyMaterial.invalidate(this, entity.id)
             // Invalidate any in-process session so the old key isn't reused.
             if (KeySession.entry?.notebookId == entity.id) KeySession.clear()
             dialog.dismiss()
@@ -1886,13 +2075,20 @@ class MainActivity : AppCompatActivity() {
             .also { d ->
                 d.show()
                 d.window?.setElevation(0f)
-                d.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+                d.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
             }
     }
 
     private suspend fun changeScope(entity: ObjectEntity, encInfo: EncryptionInfo) {
         val currentScope = encInfo.keyScope ?: return
-        val oldKey = KeyResolver.resolveCurrentKeyForRekey(this, entity.id, encInfo) ?: return
+        // GLOBAL is already cached in memory, so switching a global notebook to a private passphrase
+        // doesn't need the global re-entered — mirrors the export flow. Only a NOTEBOOK-scope source
+        // has an uncached passphrase worth prompting for.
+        val oldKey = if (currentScope == KeyScope.GLOBAL)
+            PassphraseStore.getGlobalPassphrase(this)
+        else
+            KeyResolver.resolveCurrentKeyForRekey(this, entity.id, encInfo)
+        if (oldKey == null) return
         val newScope = when (currentScope) {
             KeyScope.NOTEBOOK -> KeyScope.GLOBAL
             KeyScope.GLOBAL   -> KeyScope.NOTEBOOK
@@ -1911,12 +2107,15 @@ class MainActivity : AppCompatActivity() {
             .create()
         dialog.show()
         dialog.window?.setElevation(0f)
-        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
 
         try {
             val file = soilFile(this, entity.id)
             withContext(Dispatchers.IO) { SoilMigrator.rekeyInPlace(file, oldKey, newKey) }
             withContext(Dispatchers.IO) { repository.setEncryptionState(entity.id, encrypted = true, keyScope = newScope) }
+            // Salt changed on re-key — drop the stale cached key, then warm the new one for GLOBAL.
+            com.notesprout.android.crypto.KeyMaterial.invalidate(this, entity.id)
+            com.notesprout.android.crypto.KeyOpener.warm(this, entity.id, file, newScope, newKey)
             if (KeySession.entry?.notebookId == entity.id) KeySession.clear()
             dialog.dismiss()
             scanAndRender()
@@ -1975,6 +2174,7 @@ class MainActivity : AppCompatActivity() {
             binding.btnSort.visibility          = View.GONE
             binding.btnPinned.visibility        = View.GONE
             binding.btnRecents.visibility       = View.GONE
+            binding.surfaceButtonsGroup.visibility = View.GONE
             closeOverflowToolbar()
         } else {
             binding.btnNewNotebook.visibility   = View.VISIBLE
@@ -1985,11 +2185,13 @@ class MainActivity : AppCompatActivity() {
             binding.btnSort.visibility          = View.VISIBLE
             binding.btnPinned.visibility        = View.VISIBLE
             binding.btnRecents.visibility       = View.VISIBLE
+            binding.surfaceButtonsGroup.visibility = View.VISIBLE
         }
     }
 
     private fun updatePickerTitle() {
         val (title, confirmLabel) = when (destinationPickerState) {
+            is DestinationPickerState.NewNotebook    -> "New notebook here"   to "Create here"
             is DestinationPickerState.CopyNotebook   -> "Copy notebook here"  to "Copy here"
             is DestinationPickerState.MoveNotebook   -> "Move notebook here"  to "Move here"
             is DestinationPickerState.CopyFolder     -> "Copy folder here"    to "Copy here"
@@ -2008,6 +2210,14 @@ class MainActivity : AppCompatActivity() {
         // Import picker: separate branch — no "source entity", just the in-flight import context.
         if (state is DestinationPickerState.ImportNotebook) {
             confirmImportPickerDestination(state)
+            return
+        }
+
+        // New-notebook picker: the current folder is the destination. Exit the picker (keeping the
+        // navigated-to folder as currentParent) and hand off to the normal new-notebook flow.
+        if (state is DestinationPickerState.NewNotebook) {
+            exitPickerMode()
+            showNewNotebookDialog()
             return
         }
 
@@ -2062,7 +2272,7 @@ class MainActivity : AppCompatActivity() {
                     .create()
                 dialog.show()
                 dialog.window?.setElevation(0f)
-                dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+                dialog.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
             } else {
                 executePickerOperation(state, source, null)
             }
@@ -2112,22 +2322,9 @@ class MainActivity : AppCompatActivity() {
         lifecycleScope.launch {
             val success = withContext(Dispatchers.IO) {
                 try {
-                    // Delete conflicting entry first.
-                    if (conflictId != null) {
-                        when (state) {
-                            is DestinationPickerState.CopyNotebook,
-                            is DestinationPickerState.MoveNotebook -> {
-                                repository.softDeleteNotebook(conflictId)
-                                soilFile(this@MainActivity, conflictId).delete()
-                            }
-                            is DestinationPickerState.CopyFolder,
-                            is DestinationPickerState.MoveFolder -> {
-                                deleteFolderRecursively(conflictId)
-                            }
-                            else -> {}
-                        }
-                    }
-
+                    // The conflicting entry is only deleted AFTER the operation succeeds (below).
+                    // Deleting it up front destroyed the user's notebook even when the copy/move
+                    // then failed or was interrupted.
                     when (state) {
                         is DestinationPickerState.MoveNotebook -> {
                             repository.moveObject(source.id, currentParentId)
@@ -2136,7 +2333,7 @@ class MainActivity : AppCompatActivity() {
                         }
                         is DestinationPickerState.CopyNotebook -> {
                             val sourceObj = try {
-                                Json.decodeFromString<NotebookObject>(source.data)
+                                source.notebookMeta()
                             } catch (_: Exception) { NotebookObject() }
                             val newEntity = repository.createNotebook(source.name, currentParentId)
                             // Encrypted notebooks never expose a plaintext snapshot.
@@ -2166,6 +2363,23 @@ class MainActivity : AppCompatActivity() {
                             true
                         }
                         else -> false
+                    }.also { ok ->
+                        // Operation committed — now retire the replaced entry (same semantics as a
+                        // user-confirmed delete).
+                        if (ok && conflictId != null) {
+                            when (state) {
+                                is DestinationPickerState.CopyNotebook,
+                                is DestinationPickerState.MoveNotebook -> {
+                                    repository.softDeleteNotebook(conflictId)
+                                    soilFile(this@MainActivity, conflictId).delete()
+                                }
+                                is DestinationPickerState.CopyFolder,
+                                is DestinationPickerState.MoveFolder -> {
+                                    deleteFolderRecursively(conflictId)
+                                }
+                                else -> {}
+                            }
+                        }
                     }
                 } catch (e: Exception) {
                     Log.e("MainActivity", "Picker operation failed", e)
@@ -2216,6 +2430,114 @@ class MainActivity : AppCompatActivity() {
         }
     }.onFailure { Slog.d("MainActivity") { "refreshNotebookMeta failed for $notebookId: ${it.message}" } }
 
+    // ── TEMP: legacy-ts compaction sweep (remove after all devices compacted — see BACKLOG.md) ──
+
+    /** Confirmation for the one-off "compact my whole library" migration button. */
+    private fun showCompactNotebooksDialog() {
+        AlertDialog.Builder(this)
+            .setTitle("Compact Notebooks")
+            .setMessage(
+                "Rewrites stored notebooks and the index to drop legacy per-point timestamps and " +
+                "re-encode images as WEBP, reclaiming the freed space. Unencrypted and " +
+                "globally-unlocked notebooks are done now; notebook-scoped encrypted ones compact " +
+                "themselves next time you open them."
+            )
+            .setPositiveButton("Compact") { _, _ -> lifecycleScope.launch { runCompactNotebooksSweep() } }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    /**
+     * One-off bulk compaction: opens every notebook that can be unlocked without a prompt
+     * (plaintext or GLOBAL scope with a cached passphrase), strips legacy stroke `ts`, transcodes
+     * PNG images to WEBP, VACUUMs, and flags the shrunk file for the next backup. Then compacts the
+     * global index the same way. NOTEBOOK-scope encrypted notebooks are skipped — they self-compact
+     * at seal the next time they are opened.
+     */
+    private suspend fun runCompactNotebooksSweep() {
+        val tvMessage = android.widget.TextView(this).apply {
+            text = "Compacting notebooks…"
+            setPadding(64, 48, 64, 48)
+            setTextColor(android.graphics.Color.BLACK)
+            textSize = 16f
+        }
+        val dialog = AlertDialog.Builder(this)
+            .setView(tvMessage)
+            .setCancelable(false)
+            .create()
+        dialog.show()
+        dialog.window?.setElevation(0f)
+        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
+
+        var compacted = 0
+        var bytesFreed = 0L
+        var skippedEncrypted = 0
+        var errors = 0
+        var indexColumnarRows = 0
+        var indexWebpImages = 0
+        var calScratchStrokes = 0
+
+        withContext(Dispatchers.IO) {
+            val notebooks = repository.getAllNotebooks()
+            for ((i, nb) in notebooks.withIndex()) {
+                runCatching {
+                    val info = repository.getEncryptionInfo(nb.id)
+                    val key: String? = when {
+                        !info.encrypted -> null
+                        info.keyScope == KeyScope.GLOBAL ->
+                            com.notesprout.android.crypto.PassphraseStore.getGlobalPassphrase(this@MainActivity)
+                                ?: run { skippedEncrypted++; return@runCatching }
+                        else -> { skippedEncrypted++; return@runCatching }
+                    }
+                    val file = soilFile(this@MainActivity, nb.id)
+                    if (!file.exists()) return@runCatching
+                    val before = file.length()
+                    val builder = SoilDatabase.builder(this@MainActivity, file.absolutePath)
+                    if (key != null) builder.openHelperFactory(com.notesprout.android.crypto.SoilCrypto.roomFactory(key))
+                    val db = builder.build()
+                    val result = try {
+                        NotebookCompactor.compact(db, resources.displayMetrics.density)
+                    } finally { db.close() }
+                    if (result.changed) {
+                        compacted++
+                        bytesFreed += (before - file.length()).coerceAtLeast(0L)
+                        repository.touchNotebook(nb.id)
+                    }
+                }.onFailure { errors++; Slog.d("MainActivity") { "compact sweep failed for ${nb.id}: ${it.message}" } }
+                withContext(Dispatchers.Main) { tvMessage.text = "Compacting notebooks…\n${i + 1} / ${notebooks.size}" }
+            }
+            // Finally, backfill the global index to columnar + transcode its images to WEBP.
+            withContext(Dispatchers.Main) { tvMessage.text = "Compacting index…" }
+            runCatching {
+                val r = NotebookCompactor.compactIndex()
+                indexColumnarRows = r.columnarRows; indexWebpImages = r.webpImages
+            }.onFailure { errors++; Slog.d("MainActivity") { "index compaction failed: ${it.message}" } }
+            // …and bulk-convert the calendar + scratchpad legacy strokes to binary (Phase 3 backlog).
+            withContext(Dispatchers.Main) { tvMessage.text = "Compacting calendar & scratch pad…" }
+            runCatching { calScratchStrokes = NotebookCompactor.compactCalendarScratchpadStrokes() }
+                .onFailure { errors++; Slog.d("MainActivity") { "calendar/scratchpad compaction failed: ${it.message}" } }
+        }
+
+        dialog.dismiss()
+        val freedMb = "%.1f".format(bytesFreed / (1024.0 * 1024.0))
+        val summary = StringBuilder("Compacted $compacted notebook${if (compacted == 1) "" else "s"} — freed $freedMb MB.")
+        if (indexColumnarRows > 0)
+            summary.append("\n\nConverted $indexColumnarRows index row${if (indexColumnarRows == 1) "" else "s"} to columnar.")
+        if (indexWebpImages > 0)
+            summary.append("\n\nConverted $indexWebpImages index image${if (indexWebpImages == 1) "" else "s"} to WEBP.")
+        if (calScratchStrokes > 0)
+            summary.append("\n\nConverted $calScratchStrokes calendar/scratch-pad stroke${if (calScratchStrokes == 1) "" else "s"} to binary.")
+        if (skippedEncrypted > 0)
+            summary.append("\n\n$skippedEncrypted encrypted notebook${if (skippedEncrypted == 1) "" else "s"} skipped — they compact when you open them.")
+        if (errors > 0)
+            summary.append("\n\n$errors notebook${if (errors == 1) "" else "s"} could not be processed.")
+        AlertDialog.Builder(this)
+            .setTitle("Compaction Complete")
+            .setMessage(summary.toString())
+            .setPositiveButton("OK", null)
+            .show()
+    }
+
     private suspend fun deleteFolderRecursively(folderId: String) {
         val children = repository.getChildren(folderId)
         for (child in children) {
@@ -2240,7 +2562,7 @@ class MainActivity : AppCompatActivity() {
             when (child.type) {
                 ObjectType.NOTEBOOK -> {
                     val sourceObj = try {
-                        Json.decodeFromString<NotebookObject>(child.data)
+                        child.notebookMeta()
                     } catch (_: Exception) { NotebookObject() }
                     val newNotebook = repository.createNotebook(child.name, newFolder.id)
                     if (sourceObj.snapshot != null && !sourceObj.encrypted) {
@@ -2272,154 +2594,12 @@ class MainActivity : AppCompatActivity() {
             .create()
         dialog.show()
         dialog.window?.setElevation(0f)
-        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
     }
 
     private fun deleteFolder(entity: ObjectEntity) {
         lifecycleScope.launch {
             withContext(Dispatchers.IO) { deleteFolderRecursively(entity.id) }
-            scanAndRender()
-        }
-    }
-
-    // ── Cover dialog ──────────────────────────────────────────────────────────
-
-    private fun openCoverDialog(entity: ObjectEntity) {
-        val snapshotB64 = try {
-            Json.decodeFromString<NotebookObject>(entity.data).snapshot
-        } catch (_: Exception) { null }
-
-        lifecycleScope.launch {
-            val snapshot: Bitmap? = if (snapshotB64 != null) {
-                withContext(Dispatchers.IO) {
-                    try {
-                        val bytes = Base64.decode(snapshotB64, Base64.DEFAULT)
-                        BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
-                    } catch (_: Exception) { null }
-                }
-            } else {
-                // Snapshot not in index yet — read from .soil and cache it.
-                withContext(Dispatchers.IO) { loadAndCacheSnapshot(entity) }
-            }
-
-            val dialog = CoverDialog(
-                activity           = this@MainActivity,
-                lifecycleScope     = lifecycleScope,
-                soilFilePath       = soilFile(this@MainActivity, entity.id).absolutePath,
-                lastOpenedSnapshot = snapshot,
-                onRequestImagePick = { callback ->
-                    onCoverImagePicked = callback
-                    coverPickerLauncher.launch("image/*")
-                },
-                onCoverChanged = { reloadCoverForNotebook(entity) },
-            )
-            dialog.show()
-        }
-    }
-
-    /**
-     * Reads the cover/snapshot from the .soil file and persists it to the index so
-     * future list renders can use the cached value without opening the .soil.
-     */
-    private suspend fun loadAndCacheSnapshot(entity: ObjectEntity): Bitmap? {
-        val isEncrypted = try {
-            Json.decodeFromString<NotebookObject>(entity.data).encrypted
-        } catch (_: Exception) { false }
-        if (isEncrypted) return null
-
-        val file = soilFile(this, entity.id)
-        if (!file.exists()) return null
-        var db: android.database.sqlite.SQLiteDatabase? = null
-        return try {
-            db = android.database.sqlite.SQLiteDatabase.openDatabase(
-                file.absolutePath, null,
-                android.database.sqlite.SQLiteDatabase.OPEN_READWRITE,
-            )
-            val (notebookId, metaJson) = db.rawQuery(
-                "SELECT id, data FROM notebook WHERE type = 'notebook' LIMIT 1", null
-            ).use { c ->
-                if (!c.moveToFirst()) return null
-                Pair(c.getString(0), c.getString(1))
-            }
-            val metadata = NotebookMetadata.fromJson(notebookId, metaJson)
-            val pageId = metadata.lastOpenedPage ?: return null
-            if (pageId.isEmpty()) return null
-
-            val pageJson = db.rawQuery(
-                "SELECT data FROM notebook WHERE id = ? AND deletedAt IS NULL LIMIT 1",
-                arrayOf(pageId)
-            ).use { c -> if (c.moveToFirst()) c.getString(0) else null } ?: return null
-
-            val snapshotB64 = PageData.fromJson(pageJson).snapshot ?: ""
-            if (snapshotB64.isEmpty()) return null
-
-            repository.updateNotebookSnapshot(entity.id, snapshotB64)
-
-            val bytes = Base64.decode(snapshotB64, Base64.DEFAULT)
-            BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
-        } catch (e: Exception) {
-            Log.e("MainActivity", "loadAndCacheSnapshot failed for ${entity.id}", e)
-            null
-        } finally {
-            db?.checkpointTruncateAndClose("MainActivity", file)
-        }
-    }
-
-    /**
-     * After a cover change in CoverDialog: reads the new cover from the .soil, persists the
-     * base64 to the index, then rescans so the grid card shows the updated image.
-     */
-    private fun reloadCoverForNotebook(entity: ObjectEntity) {
-        val isEncrypted = try {
-            Json.decodeFromString<NotebookObject>(entity.data).encrypted
-        } catch (_: Exception) { false }
-        if (isEncrypted) return
-
-        lifecycleScope.launch {
-            withContext(Dispatchers.IO) {
-                try {
-                    val file = soilFile(this@MainActivity, entity.id)
-                    if (!file.exists()) return@withContext
-                    var db: android.database.sqlite.SQLiteDatabase? = null
-                    try {
-                        db = android.database.sqlite.SQLiteDatabase.openDatabase(
-                            file.absolutePath, null,
-                            android.database.sqlite.SQLiteDatabase.OPEN_READWRITE,
-                        )
-                        // Read the explicit cover object if present.
-                        val (notebookId, metaJson) = db.rawQuery(
-                            "SELECT id, data FROM notebook WHERE type = 'notebook' LIMIT 1", null
-                        ).use { c ->
-                            if (!c.moveToFirst()) return@withContext
-                            Pair(c.getString(0), c.getString(1))
-                        }
-                        val metadata = NotebookMetadata.fromJson(notebookId, metaJson)
-
-                        val coverB64: String? = if (metadata.cover.isNotEmpty()) {
-                            db.rawQuery(
-                                "SELECT data FROM notebook WHERE parentId = ? AND type = 'cover' AND deletedAt IS NULL LIMIT 1",
-                                arrayOf(notebookId)
-                            ).use { c ->
-                                if (c.moveToFirst()) {
-                                    try {
-                                        val obj = lenientJson
-                                            .decodeFromString<com.notesprout.android.data.CoverObject>(c.getString(0))
-                                        obj.image.takeIf { it.isNotEmpty() }
-                                    } catch (_: Exception) { null }
-                                } else null
-                            }
-                        } else null
-
-                        if (coverB64 != null) {
-                            repository.updateNotebookSnapshot(entity.id, coverB64)
-                        }
-                    } finally {
-                        db?.checkpointTruncateAndClose("MainActivity", file)
-                    }
-                } catch (e: Exception) {
-                    Log.e("MainActivity", "reloadCoverForNotebook failed for ${entity.id}", e)
-                }
-            }
             scanAndRender()
         }
     }
@@ -2434,7 +2614,7 @@ class MainActivity : AppCompatActivity() {
             .create()
         dialog.show()
         dialog.window?.setElevation(0f)
-        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
     }
 
     private fun deleteNotebook(entity: ObjectEntity) {
@@ -2442,6 +2622,8 @@ class MainActivity : AppCompatActivity() {
             withContext(Dispatchers.IO) {
                 repository.scrubNotebookFromAllLists(entity.id)
                 repository.softDeleteNotebook(entity.id)
+                // Drop any cached raw key for this notebook (RAM + Keystore).
+                com.notesprout.android.crypto.KeyMaterial.invalidate(this@MainActivity, entity.id)
                 val file = soilFile(this@MainActivity, entity.id)
                 // Delete .soil and any sibling artefacts (-wal, -shm, -journal).
                 file.parentFile?.listFiles { f -> f.name.startsWith(file.name) }
@@ -2453,202 +2635,37 @@ class MainActivity : AppCompatActivity() {
 
     // ── Export ────────────────────────────────────────────────────────────────
 
+    /**
+     * Open the export screen for [entity]. Format, options and destination are all chosen there —
+     * see [ExportActivity].
+     */
     private fun startExportFromMain(entity: ObjectEntity) {
-        ActionSheetDialog(this)
-            .title("Export")
-            .addAction(R.drawable.ic_export,   "Export as PDF")          { startPdfExportFromMain(entity) }
-            .addAction(R.drawable.ic_notebook, "Export Notebook (.soil)") { startSoilExportFromMain(entity) }
-            .show()
-    }
-
-    private fun startPdfExportFromMain(entity: ObjectEntity) {
-        val file = soilFile(this, entity.id)
-
-        lifecycleScope.launch {
-            val info = withContext(Dispatchers.IO) { repository.getEncryptionInfo(entity.id) }
-
-            // For GLOBAL scope the passphrase is cached — no prompt needed.
-            // For NOTEBOOK scope there is no cache, so KeyResolver will prompt here.
-            // Either way this must finish before the modal progress dialog opens.
-            val key = KeyResolver.resolveForOpen(this@MainActivity, entity.id, info)
-            if (info.encrypted && key == null) {
-                Toast.makeText(this@MainActivity, "Notebook is locked", Toast.LENGTH_SHORT).show()
-                return@launch
-            }
-
-            // For encrypted notebooks only: offer PDF password protection first.
-            // If the user declines a password, warn that the export will be unencrypted.
-            val exportPassword: String?
-            if (info.encrypted) {
-                val exportPwdChoice = com.notesprout.android.crypto.PassphrasePrompt.promptForPdfExportPassword(this@MainActivity)
-                    ?: return@launch  // user cancelled
-                if (exportPwdChoice.isEmpty()) {
-                    val confirmed = suspendCancellableCoroutine<Boolean> { cont ->
-                        val d = AlertDialog.Builder(this@MainActivity)
-                            .setTitle("Export encrypted notebook")
-                            .setMessage("This notebook is encrypted. The exported file will be unencrypted — anyone with access to the exported file will be able to read its contents.")
-                            .setPositiveButton("Export anyway") { _, _ -> if (cont.isActive) cont.resume(true) }
-                            .setNegativeButton("Cancel") { _, _ -> if (cont.isActive) cont.resume(false) }
-                            .setOnCancelListener { if (cont.isActive) cont.resume(false) }
-                            .create()
-                        d.show()
-                        d.window?.setElevation(0f)
-                        d.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
-                        cont.invokeOnCancellation { d.dismiss() }
-                    }
-                    if (!confirmed) return@launch
-                    exportPassword = null
-                } else {
-                    exportPassword = exportPwdChoice
-                }
-            } else {
-                exportPassword = null
-            }
-
-            val tvMessage = android.widget.TextView(this@MainActivity).apply {
-                text = "Exporting…"
-                setPadding(64, 48, 64, 48)
-                setTextColor(android.graphics.Color.BLACK)
-                textSize = 16f
-            }
-            val dialog = AlertDialog.Builder(this@MainActivity)
-                .setView(tvMessage)
-                .setCancelable(false)
-                .create()
-            dialog.show()
-            dialog.window?.setElevation(0f)
-            dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
-
-            val handler = android.os.Handler(android.os.Looper.getMainLooper())
-
-            val pdfFile = try {
-                withContext(Dispatchers.IO) {
-                    val builder = SoilDatabase.builder(this@MainActivity, file.absolutePath)
-                    if (key != null) builder.openHelperFactory(SoilCrypto.roomFactory(key))
-                    val db = builder.build()
-                    try {
-                        NotebookExporter.export(
-                            context        = this@MainActivity,
-                            db             = db,
-                            onProgress     = { current, total ->
-                                handler.post { tvMessage.text = "Exporting page $current of $total…" }
-                            },
-                            exportPassword = exportPassword,
-                        )
-                    } finally {
-                        db.close()
-                    }
-                }
-            } catch (e: Exception) {
-                dialog.dismiss()
-                Toast.makeText(this@MainActivity, "Export failed: ${e.message}", Toast.LENGTH_LONG).show()
-                return@launch
-            }
-            dialog.dismiss()
-            showExportChoice(pdfFile)
-        }
-    }
-
-    private fun startSoilExportFromMain(entity: ObjectEntity) {
-        lifecycleScope.launch {
-            val info = withContext(Dispatchers.IO) { repository.getEncryptionInfo(entity.id) }
-
-            // Determine openableKey without prompting. Empty = plaintext; non-empty = GLOBAL key;
-            // null = skip refresh (NOTEBOOK-encrypted or GLOBAL key not yet cached).
-            val openableKey: String? = when {
-                !info.encrypted -> ""
-                info.keyScope == KeyScope.GLOBAL ->
-                    PassphraseStore.getGlobalPassphrase(this@MainActivity)
-                else -> null
-            }
-
-            val tvMessage = android.widget.TextView(this@MainActivity).apply {
-                text = "Exporting…"
-                setPadding(64, 48, 64, 48)
-                setTextColor(android.graphics.Color.BLACK)
-                textSize = 16f
-            }
-            val dialog = AlertDialog.Builder(this@MainActivity)
-                .setView(tvMessage)
-                .setCancelable(false)
-                .create()
-            dialog.show()
-            dialog.window?.setElevation(0f)
-            dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
-
-            val soilFile = try {
-                withContext(Dispatchers.IO) {
-                    NotebookPackager.packageForExport(
-                        context     = this@MainActivity,
-                        repo        = repository,
-                        notebookId  = entity.id,
-                        openableKey = openableKey,
-                    )
-                }
-            } catch (e: Exception) {
-                dialog.dismiss()
-                Toast.makeText(this@MainActivity, "Export failed: ${e.message}", Toast.LENGTH_LONG).show()
-                return@launch
-            }
-            dialog.dismiss()
-            showSoilExportChoice(soilFile)
-        }
-    }
-
-    private fun showSoilExportChoice(file: java.io.File) {
-        val d = AlertDialog.Builder(this)
-            .setTitle("Export Notebook")
-            .setPositiveButton("Save to device") { _, _ ->
-                pendingExportFile = file
-                saveSoilLauncher.launch(file.name)
-            }
-            .setNegativeButton("Share") { _, _ ->
-                val uri = androidx.core.content.FileProvider.getUriForFile(
-                    this, "$packageName.fileprovider", file
-                )
-                val shareIntent = Intent(Intent.ACTION_SEND).apply {
-                    type = "application/x-notesprout-soil"
-                    putExtra(Intent.EXTRA_STREAM, uri)
-                    clipData = android.content.ClipData.newRawUri("", uri)
-                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                }
-                startActivity(Intent.createChooser(shareIntent, "Share Notebook"))
-            }
-            .create()
-        d.show()
-        d.window?.setElevation(0f)
-        d.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
-    }
-
-    private fun showExportChoice(file: java.io.File) {
-        val d = AlertDialog.Builder(this)
-            .setTitle("Export PDF")
-            .setPositiveButton("Save to device") { _, _ ->
-                pendingExportFile = file
-                savePdfLauncher.launch(file.name)
-            }
-            .setNegativeButton("Share") { _, _ ->
-                val uri = androidx.core.content.FileProvider.getUriForFile(
-                    this, "$packageName.fileprovider", file
-                )
-                val shareIntent = Intent(Intent.ACTION_SEND).apply {
-                    type = "application/pdf"
-                    putExtra(Intent.EXTRA_STREAM, uri)
-                    clipData = android.content.ClipData.newRawUri("", uri)
-                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                }
-                startActivity(Intent.createChooser(shareIntent, "Share PDF"))
-            }
-            .create()
-        d.show()
-        d.window?.setElevation(0f)
-        d.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+        startActivity(ExportActivity.intentFor(this, entity.id, entity.name))
     }
 
     /**
      * Handle an incoming .soil URI from ACTION_VIEW or ACTION_SEND.
      * Called from onCreate (cold launch) and onNewIntent (app already open).
      */
+    /**
+     * Handle [EXTRA_START_NEW_NOTEBOOK] (from the calendar's New Notebook button): enter the
+     * folder-picker so the user chooses where the notebook lands, then the normal new-notebook
+     * flow. Consumed once — the extra is removed so config-change recreations don't re-trigger it.
+     */
+    private fun handleNewNotebookIntent(intent: Intent) {
+        if (!intent.getBooleanExtra(EXTRA_START_NEW_NOTEBOOK, false)) return
+        intent.removeExtra(EXTRA_START_NEW_NOTEBOOK)
+        pendingNewNotebookPicker = true
+        tryStartPendingNewNotebookPicker()
+    }
+
+    /** Enters the new-notebook folder picker once the grid is laid out and browse state restored. */
+    private fun tryStartPendingNewNotebookPicker() {
+        if (!pendingNewNotebookPicker || gridSpec == null || !isStateRestored) return
+        pendingNewNotebookPicker = false
+        enterPickerMode(DestinationPickerState.NewNotebook)
+    }
+
     private fun handleIncomingIntent(intent: Intent) {
         val uri: Uri = when (intent.action) {
             Intent.ACTION_VIEW -> intent.data
@@ -2660,12 +2677,17 @@ class MainActivity : AppCompatActivity() {
 
     private fun startImportFromUri(uri: android.net.Uri) {
         lifecycleScope.launch {
-            val uriDisplayName = contentResolver.query(
-                uri,
-                arrayOf(android.provider.OpenableColumns.DISPLAY_NAME),
-                null, null, null
-            )?.use { cursor ->
-                if (cursor.moveToFirst()) cursor.getString(0) else null
+            // IO: a slow document provider must not jank/ANR the main thread for a name lookup.
+            val uriDisplayName = withContext(Dispatchers.IO) {
+                runCatching {
+                    contentResolver.query(
+                        uri,
+                        arrayOf(android.provider.OpenableColumns.DISPLAY_NAME),
+                        null, null, null
+                    )?.use { cursor ->
+                        if (cursor.moveToFirst()) cursor.getString(0) else null
+                    }
+                }.getOrNull()
             }
             val fallbackName = uriDisplayName
                 ?.removeSuffix(".soil")
@@ -2721,7 +2743,12 @@ class MainActivity : AppCompatActivity() {
 
             val displayName = manifest.meta?.name?.trim()?.takeIf { it.isNotEmpty() } ?: fallbackName
 
-            val collision = manifest.meta?.notebookId?.let { id ->
+            // The manifest is untrusted input and its notebookId becomes a Garden filename via
+            // soilFile(). An id that isn't a plain UUID-shaped token (e.g. "../…") could escape
+            // the Garden directory — such files import under a fresh id instead.
+            val manifestId = manifest.meta?.notebookId?.takeIf(::isSafeImportId)
+
+            val collision = manifestId?.let { id ->
                 withContext(Dispatchers.IO) {
                     repository.getNotebook(id)?.takeIf { it.deletedAt == null }
                 }
@@ -2730,11 +2757,16 @@ class MainActivity : AppCompatActivity() {
             if (collision != null) {
                 showImportCollisionDialog(manifest, tempFile, displayName, collision.id, enteredPass)
             } else {
-                val resolvedId = manifest.meta?.notebookId ?: UUID.randomUUID().toString()
+                val resolvedId = manifestId ?: UUID.randomUUID().toString()
                 showImportPlacementDialog(manifest, tempFile, displayName, resolvedId, enteredPass)
             }
         }
     }
+
+    /** True when an id read from an imported file's manifest is safe to use as a Garden filename
+     *  and an index primary key: UUID-alphabet only — no path separators, dots, or quotes. */
+    private fun isSafeImportId(id: String): Boolean =
+        id.length in 1..64 && id.all { it in '0'..'9' || it in 'a'..'z' || it in 'A'..'Z' || it == '-' }
 
     private fun showImportCollisionDialog(
         manifest: ImportManifest,
@@ -2746,7 +2778,15 @@ class MainActivity : AppCompatActivity() {
         ActionSheetDialog(this)
             .title("\"$displayName\" already exists")
             .addAction(null, "Replace existing notebook") {
-                lifecycleScope.launch { executeReplace(manifest, tempFile, displayName, existingId, enteredPass) }
+                // Replacing swaps the .soil under the same id — refuse while a NotebookActivity
+                // holds it open (its live connection would keep writing to the unlinked file and
+                // silently lose every edit made after the swap).
+                if (com.notesprout.android.core.OpenNotebooks.isOpen(existingId)) {
+                    runCatching { tempFile.delete() }
+                    Toast.makeText(this, "That notebook is currently open — close it and import again.", Toast.LENGTH_LONG).show()
+                } else {
+                    lifecycleScope.launch { executeReplace(manifest, tempFile, displayName, existingId, enteredPass) }
+                }
             }
             .addAction(null, "Keep both") {
                 val freshId = UUID.randomUUID().toString()
@@ -2775,11 +2815,18 @@ class MainActivity : AppCompatActivity() {
             .setPositiveButton("Notebook's folders") { _, _ ->
                 lifecycleScope.launch {
                     // Walk folderPath to resolve parentId, then check for name conflict.
+                    // Strictly create-only: an unsafe id, or any collision with an existing row
+                    // (soft-deleted folder, non-folder id), stops the descent and the notebook
+                    // lands one level up — imported ancestry never mutates the user's own rows.
                     val (parentId, conflict) = withContext(Dispatchers.IO) {
                         var pid: String? = null
-                        manifest.meta?.folderPath?.forEach { ref ->
-                            val entity = repository.ensureFolderWithId(ref.id, ref.name, pid)
-                            pid = entity.id
+                        run {
+                            manifest.meta?.folderPath?.forEach { ref ->
+                                if (!isSafeImportId(ref.id)) return@run
+                                val entity = repository.importFolderCreateOnly(ref.id, ref.name, pid)
+                                    ?: return@run
+                                pid = entity.id
+                            }
                         }
                         val conflict = repository.getNotebooks(pid).find { it.name == displayName }
                         pid to conflict
@@ -2801,7 +2848,7 @@ class MainActivity : AppCompatActivity() {
             .also { d ->
                 d.show()
                 d.window?.setElevation(0f)
-                d.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+                d.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
             }
     }
 
@@ -2817,12 +2864,16 @@ class MainActivity : AppCompatActivity() {
         AlertDialog.Builder(this)
             .setMessage("A notebook named \"$displayName\" already exists here. Replace it or keep both?")
             .setPositiveButton("Replace") { _, _ ->
+                // The existing notebook is retired only AFTER the import commits (see
+                // retireReplacedNotebook) — cancelling any later step must leave it untouched.
+                if (com.notesprout.android.core.OpenNotebooks.isOpen(conflictId)) {
+                    runCatching { tempFile.delete() }
+                    Toast.makeText(this, "That notebook is currently open — close it and import again.", Toast.LENGTH_LONG).show()
+                    return@setPositiveButton
+                }
                 lifecycleScope.launch {
-                    withContext(Dispatchers.IO) {
-                        repository.softDeleteNotebook(conflictId)
-                        soilFile(this@MainActivity, conflictId).delete()
-                    }
-                    executeImport(manifest, tempFile, displayName, parentId, resolvedId, enteredPass)
+                    executeImport(manifest, tempFile, displayName, parentId, resolvedId, enteredPass,
+                        replaceVictimId = conflictId)
                 }
             }
             .setNeutralButton("Keep both") { _, _ ->
@@ -2836,7 +2887,7 @@ class MainActivity : AppCompatActivity() {
             .also { d ->
                 d.show()
                 d.window?.setElevation(0f)
-                d.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+                d.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
             }
     }
 
@@ -2847,27 +2898,28 @@ class MainActivity : AppCompatActivity() {
         parentId: String?,
         resolvedId: String,
         enteredPass: String? = null,
+        replaceVictimId: String? = null,
     ) {
         if (enteredPass != null) {
-            showKeyingChooserForImport(manifest, tempFile, displayName, parentId, resolvedId, enteredPass)
+            showKeyingChooserForImport(manifest, tempFile, displayName, parentId, resolvedId, enteredPass, replaceVictimId)
             return
         }
-        val modal = showImportingModal()
-        val name = try {
-            withContext(Dispatchers.IO) {
-                NotebookImporter.importPlaintext(
-                    this@MainActivity, repository, tempFile, manifest, displayName, parentId, resolvedId
-                )
-                displayName
-            }
-        } catch (e: Exception) {
-            modal.dismiss()
-            Toast.makeText(this@MainActivity, "Import failed: ${e.message}", Toast.LENGTH_LONG).show()
-            return
+        // Plaintext source: encrypt-on-import — never land as plaintext. Prompt for the scope.
+        showKeyingChooserForPlaintextImport(manifest, tempFile, displayName, parentId, resolvedId, replaceVictimId)
+    }
+
+    /**
+     * Retire the notebook a committed import replaced — same semantics as a user-confirmed
+     * delete. Runs only after the import fully succeeded, never before.
+     */
+    private suspend fun retireReplacedNotebook(id: String) = withContext(Dispatchers.IO) {
+        runCatching {
+            repository.scrubNotebookFromAllLists(id)
+            repository.softDeleteNotebook(id)
+            com.notesprout.android.crypto.KeyMaterial.invalidate(this@MainActivity, id)
+            val file = soilFile(this@MainActivity, id)
+            file.parentFile?.listFiles { f -> f.name.startsWith(file.name) }?.forEach { it.delete() }
         }
-        modal.dismiss()
-        Toast.makeText(this@MainActivity, "Imported “$name”", Toast.LENGTH_SHORT).show()
-        scanAndRender()
     }
 
     private suspend fun executeReplace(
@@ -2881,22 +2933,8 @@ class MainActivity : AppCompatActivity() {
             showKeyingChooserForReplace(manifest, tempFile, displayName, existingId, enteredPass)
             return
         }
-        val modal = showImportingModal()
-        val name = try {
-            withContext(Dispatchers.IO) {
-                NotebookImporter.replacePlaintext(
-                    this@MainActivity, repository, tempFile, manifest, displayName, existingId
-                )
-                displayName
-            }
-        } catch (e: Exception) {
-            modal.dismiss()
-            Toast.makeText(this@MainActivity, "Import failed: ${e.message}", Toast.LENGTH_LONG).show()
-            return
-        }
-        modal.dismiss()
-        Toast.makeText(this@MainActivity, "Replaced “$name”", Toast.LENGTH_SHORT).show()
-        scanAndRender()
+        // Plaintext source: encrypt-on-import — never land as plaintext. Prompt for the scope.
+        showKeyingChooserForPlaintextReplace(manifest, tempFile, displayName, existingId)
     }
 
     private fun showKeyingChooserForImport(
@@ -2906,6 +2944,7 @@ class MainActivity : AppCompatActivity() {
         parentId: String?,
         resolvedId: String,
         enteredPass: String,
+        replaceVictimId: String? = null,
     ) {
         ActionSheetDialog(this)
             .title("Import encrypted notebook")
@@ -2915,21 +2954,21 @@ class MainActivity : AppCompatActivity() {
                         PassphraseStore.getGlobalPassphrase(this@MainActivity)
                     }
                     val scope = if (enteredPass == globalPass) KeyScope.GLOBAL else KeyScope.NOTEBOOK
-                    doImportEncrypted(manifest, tempFile, displayName, parentId, resolvedId, enteredPass, enteredPass, scope)
+                    doImportEncrypted(manifest, tempFile, displayName, parentId, resolvedId, enteredPass, enteredPass, scope, replaceVictimId)
                 }
             }
             .addAction(null, "Use this device's global") {
                 lifecycleScope.launch {
                     val globalPass = KeyResolver.resolveForConvertToEncrypted(this@MainActivity, KeyScope.GLOBAL)
-                        ?: return@launch
-                    doImportEncrypted(manifest, tempFile, displayName, parentId, resolvedId, enteredPass, globalPass, KeyScope.GLOBAL)
+                        ?: run { runCatching { tempFile.delete() }; return@launch } // prompt cancelled — drop the cached import copy
+                    doImportEncrypted(manifest, tempFile, displayName, parentId, resolvedId, enteredPass, globalPass, KeyScope.GLOBAL, replaceVictimId)
                 }
             }
             .addAction(null, "New notebook passphrase") {
                 lifecycleScope.launch {
                     val newPass = KeyResolver.resolveForConvertToEncrypted(this@MainActivity, KeyScope.NOTEBOOK)
-                        ?: return@launch
-                    doImportEncrypted(manifest, tempFile, displayName, parentId, resolvedId, enteredPass, newPass, KeyScope.NOTEBOOK)
+                        ?: run { runCatching { tempFile.delete() }; return@launch } // prompt cancelled — drop the cached import copy
+                    doImportEncrypted(manifest, tempFile, displayName, parentId, resolvedId, enteredPass, newPass, KeyScope.NOTEBOOK, replaceVictimId)
                 }
             }
             .addAction(null, "Cancel") {
@@ -2959,14 +2998,14 @@ class MainActivity : AppCompatActivity() {
             .addAction(null, "Use this device's global") {
                 lifecycleScope.launch {
                     val globalPass = KeyResolver.resolveForConvertToEncrypted(this@MainActivity, KeyScope.GLOBAL)
-                        ?: return@launch
+                        ?: run { runCatching { tempFile.delete() }; return@launch } // prompt cancelled — drop the cached import copy
                     doReplaceEncrypted(manifest, tempFile, displayName, existingId, enteredPass, globalPass, KeyScope.GLOBAL)
                 }
             }
             .addAction(null, "New notebook passphrase") {
                 lifecycleScope.launch {
                     val newPass = KeyResolver.resolveForConvertToEncrypted(this@MainActivity, KeyScope.NOTEBOOK)
-                        ?: return@launch
+                        ?: run { runCatching { tempFile.delete() }; return@launch } // prompt cancelled — drop the cached import copy
                     doReplaceEncrypted(manifest, tempFile, displayName, existingId, enteredPass, newPass, KeyScope.NOTEBOOK)
                 }
             }
@@ -2974,6 +3013,125 @@ class MainActivity : AppCompatActivity() {
                 runCatching { tempFile.delete() }
             }
             .show()
+    }
+
+    /** A plaintext `.soil` is never imported as-is under encrypt-everything: choose whether to key it
+     *  to the device global passphrase or a private notebook passphrase, then encrypt it on the way in. */
+    private fun showKeyingChooserForPlaintextImport(
+        manifest: ImportManifest,
+        tempFile: java.io.File,
+        displayName: String,
+        parentId: String?,
+        resolvedId: String,
+        replaceVictimId: String? = null,
+    ) {
+        ActionSheetDialog(this)
+            .title("Encrypt imported notebook")
+            .addAction(null, "Use this device's global") {
+                lifecycleScope.launch {
+                    val pass = KeyResolver.resolveForConvertToEncrypted(this@MainActivity, KeyScope.GLOBAL)
+                        ?: run { runCatching { tempFile.delete() }; return@launch } // prompt cancelled — drop the cached import copy
+                    doImportPlaintextEncrypting(manifest, tempFile, displayName, parentId, resolvedId, pass, KeyScope.GLOBAL, replaceVictimId)
+                }
+            }
+            .addAction(null, "New notebook passphrase") {
+                lifecycleScope.launch {
+                    val pass = KeyResolver.resolveForConvertToEncrypted(this@MainActivity, KeyScope.NOTEBOOK)
+                        ?: run { runCatching { tempFile.delete() }; return@launch } // prompt cancelled — drop the cached import copy
+                    doImportPlaintextEncrypting(manifest, tempFile, displayName, parentId, resolvedId, pass, KeyScope.NOTEBOOK, replaceVictimId)
+                }
+            }
+            .addAction(null, "Cancel") {
+                runCatching { tempFile.delete() }
+            }
+            .show()
+    }
+
+    private fun showKeyingChooserForPlaintextReplace(
+        manifest: ImportManifest,
+        tempFile: java.io.File,
+        displayName: String,
+        existingId: String,
+    ) {
+        ActionSheetDialog(this)
+            .title("Encrypt imported notebook")
+            .addAction(null, "Use this device's global") {
+                lifecycleScope.launch {
+                    val pass = KeyResolver.resolveForConvertToEncrypted(this@MainActivity, KeyScope.GLOBAL)
+                        ?: run { runCatching { tempFile.delete() }; return@launch } // prompt cancelled — drop the cached import copy
+                    doReplacePlaintextEncrypting(manifest, tempFile, displayName, existingId, pass, KeyScope.GLOBAL)
+                }
+            }
+            .addAction(null, "New notebook passphrase") {
+                lifecycleScope.launch {
+                    val pass = KeyResolver.resolveForConvertToEncrypted(this@MainActivity, KeyScope.NOTEBOOK)
+                        ?: run { runCatching { tempFile.delete() }; return@launch } // prompt cancelled — drop the cached import copy
+                    doReplacePlaintextEncrypting(manifest, tempFile, displayName, existingId, pass, KeyScope.NOTEBOOK)
+                }
+            }
+            .addAction(null, "Cancel") {
+                runCatching { tempFile.delete() }
+            }
+            .show()
+    }
+
+    /** Encrypt the plaintext temp in place with the chosen key, then hand off to the (encrypted)
+     *  import path — so the notebook lands in Garden already encrypted at the requested scope. */
+    private suspend fun doImportPlaintextEncrypting(
+        manifest: ImportManifest,
+        tempFile: java.io.File,
+        displayName: String,
+        parentId: String?,
+        resolvedId: String,
+        passphrase: String,
+        scope: KeyScope,
+        replaceVictimId: String? = null,
+    ) {
+        val modal = showImportingModal()
+        try {
+            withContext(Dispatchers.IO) {
+                SoilMigrator.encryptInPlace(tempFile, passphrase)
+                NotebookImporter.importEncrypted(
+                    this@MainActivity, repository, tempFile, manifest, displayName, parentId, resolvedId,
+                    enteredPass = passphrase, finalPass = passphrase, scope = scope,
+                )
+            }
+        } catch (e: Exception) {
+            modal.dismiss()
+            Toast.makeText(this@MainActivity, "Import failed: ${e.message}", Toast.LENGTH_LONG).show()
+            return
+        }
+        replaceVictimId?.let { retireReplacedNotebook(it) }
+        modal.dismiss()
+        Toast.makeText(this@MainActivity, "Imported “$displayName”", Toast.LENGTH_SHORT).show()
+        scanAndRender()
+    }
+
+    private suspend fun doReplacePlaintextEncrypting(
+        manifest: ImportManifest,
+        tempFile: java.io.File,
+        displayName: String,
+        existingId: String,
+        passphrase: String,
+        scope: KeyScope,
+    ) {
+        val modal = showImportingModal()
+        try {
+            withContext(Dispatchers.IO) {
+                SoilMigrator.encryptInPlace(tempFile, passphrase)
+                NotebookImporter.replaceEncrypted(
+                    this@MainActivity, repository, tempFile, manifest, displayName, existingId,
+                    enteredPass = passphrase, finalPass = passphrase, scope = scope,
+                )
+            }
+        } catch (e: Exception) {
+            modal.dismiss()
+            Toast.makeText(this@MainActivity, "Import failed: ${e.message}", Toast.LENGTH_LONG).show()
+            return
+        }
+        modal.dismiss()
+        Toast.makeText(this@MainActivity, "Replaced “$displayName”", Toast.LENGTH_SHORT).show()
+        scanAndRender()
     }
 
     private suspend fun doImportEncrypted(
@@ -2985,6 +3143,7 @@ class MainActivity : AppCompatActivity() {
         enteredPass: String,
         finalPass: String,
         scope: KeyScope,
+        replaceVictimId: String? = null,
     ) {
         val modal = showImportingModal()
         val name = try {
@@ -3000,6 +3159,7 @@ class MainActivity : AppCompatActivity() {
             Toast.makeText(this@MainActivity, "Import failed: ${e.message}", Toast.LENGTH_LONG).show()
             return
         }
+        replaceVictimId?.let { retireReplacedNotebook(it) }
         modal.dismiss()
         Toast.makeText(this@MainActivity, "Imported “$name”", Toast.LENGTH_SHORT).show()
         scanAndRender()
@@ -3046,7 +3206,7 @@ class MainActivity : AppCompatActivity() {
             .create()
         dialog.show()
         dialog.window?.setElevation(0f)
-        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_bordered)
+        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
         return dialog
     }
 

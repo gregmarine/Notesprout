@@ -26,12 +26,13 @@ data class ClipboardPayload(
     val items: List<ClipItem>,
     val boundingBox: BoundingBoxData,
     val sourceNotebookId: String,
-    val sourceEncrypted: Boolean,
     val copiedAt: Long,
 ) {
     fun toJson(): String = codec.encodeToString(serializer(), this)
 
     companion object {
+        // `ignoreUnknownKeys` also carries the removed `sourceEncrypted` field: rows persisted by an
+        // older build still decode, the stale key is simply dropped. See docs/clipboard-and-page-transfer.md.
         private val codec = Json { ignoreUnknownKeys = true }
 
         fun fromJson(json: String): ClipboardPayload = codec.decodeFromString(serializer(), json)

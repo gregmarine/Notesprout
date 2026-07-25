@@ -13,8 +13,12 @@ import com.google.mlkit.common.model.DownloadConditions
 import com.google.mlkit.common.model.RemoteModelManager
 import com.notesprout.android.core.Slog
 import com.notesprout.android.data.LiveStroke
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlin.coroutines.resume
 
 class MlKitHandwritingRecognizer : HandwritingRecognizer {
+
+    override val engineName: String = "mlkit"
 
     private var recognizer: com.google.mlkit.vision.digitalink.recognition.DigitalInkRecognizer? = null
     private var modelReady = false
@@ -96,7 +100,8 @@ class MlKitHandwritingRecognizer : HandwritingRecognizer {
             inkBuilder.addStroke(strokeBuilder.build())
         }
 
-        val writingArea = WritingArea(bounds.width(), bounds.height())
+        // Floor the area like recognizeSegment — a dot-only selection has a 0×0 bbox.
+        val writingArea = WritingArea(bounds.width().coerceAtLeast(1f), bounds.height().coerceAtLeast(1f))
         val recognitionContext = RecognitionContext.builder()
             .setPreContext("")
             .setWritingArea(writingArea)
@@ -106,13 +111,57 @@ class MlKitHandwritingRecognizer : HandwritingRecognizer {
             .addOnSuccessListener { result ->
                 val text = result.candidates.firstOrNull()?.text
                 val recognized = if (!text.isNullOrBlank()) text else HandwritingRecognizer.FALLBACK_TEXT
-                Slog.d(TAG) { "Recognition result: \"$recognized\"" }
+                // Log counts only — recognized text is user content and must never be logged.
+                Slog.d(TAG) { "Recognition result: ${recognized.length} chars" }
                 onResult(recognized)
             }
             .addOnFailureListener { e ->
                 Log.e(TAG, "Recognition failed", e)
                 onResult(HandwritingRecognizer.FALLBACK_TEXT)
             }
+    }
+
+    override suspend fun recognizeSegment(
+        strokes: List<LiveStroke>,
+        bounds: RectF,
+        preContext: String,
+        lineHeightHint: Float,
+    ): String {
+        val r = recognizer
+        if (!modelReady || r == null || strokes.isEmpty()) {
+            return HandwritingRecognizer.FALLBACK_TEXT
+        }
+
+        val inkBuilder = Ink.builder()
+        for (liveStroke in strokes) {
+            val strokeBuilder = Ink.Stroke.builder()
+            for (point in liveStroke.points) {
+                strokeBuilder.addPoint(Ink.Point.create(point.x, point.y))
+            }
+            inkBuilder.addStroke(strokeBuilder.build())
+        }
+
+        // Prefer a page-consistent line height as the writing-area reference (see interface doc);
+        // fall back to the line's own bbox height when no hint is supplied.
+        val areaHeight = (if (lineHeightHint > 0f) lineHeightHint else bounds.height()).coerceAtLeast(1f)
+        val writingArea = WritingArea(bounds.width().coerceAtLeast(1f), areaHeight)
+        val recognitionContext = RecognitionContext.builder()
+            .setPreContext(preContext.takeLast(MAX_PRECONTEXT_CHARS))
+            .setWritingArea(writingArea)
+            .build()
+
+        return suspendCancellableCoroutine { cont ->
+            r.recognize(inkBuilder.build(), recognitionContext)
+                .addOnSuccessListener { result ->
+                    val text = result.candidates.firstOrNull()?.text
+                    val recognized = if (!text.isNullOrBlank()) text else HandwritingRecognizer.FALLBACK_TEXT
+                    if (cont.isActive) cont.resume(recognized)
+                }
+                .addOnFailureListener { e ->
+                    Log.e(TAG, "Segment recognition failed", e)
+                    if (cont.isActive) cont.resume(HandwritingRecognizer.FALLBACK_TEXT)
+                }
+        }
     }
 
     override fun close() {
@@ -123,5 +172,8 @@ class MlKitHandwritingRecognizer : HandwritingRecognizer {
 
     companion object {
         private const val TAG = "MlKitHwRecognizer"
+        /** Cap the pre-context handed to ML Kit — only the tail matters, and long strings hurt latency.
+         *  Google's guidance: as many chars as possible up to ~20; beyond that gives no benefit. */
+        private const val MAX_PRECONTEXT_CHARS = 20
     }
 }

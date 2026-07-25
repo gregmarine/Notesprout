@@ -82,7 +82,7 @@ dependencies {
     implementation("androidx.appcompat:appcompat:1.7.0")
     // SAF tree navigation for LOCAL backup destination (DocumentFile.fromTreeUri).
     implementation("androidx.documentfile:documentfile:1.0.1")
-    // Onyx BOOX SDK — same versions as proven in notesprout_flutter
+    // Onyx BOOX SDK
     implementation("com.onyx.android.sdk:onyxsdk-device:1.3.3")
     implementation("com.onyx.android.sdk:onyxsdk-pen:1.5.4")
 
@@ -107,6 +107,11 @@ dependencies {
 
     // ML Kit Digital Ink Recognition — general-purpose handwriting-to-text layer.
     implementation("com.google.mlkit:digital-ink-recognition:19.0.0")
+
+    // ONNX Runtime Mobile — runs the TrOCR handwriting engine (recognition/trocr/), the
+    // personalizable second engine behind the Handwriting Engine toggle (ML Kit stays the
+    // default + fallback). MIT license. Deliberate, discussed dependency addition (hwr-trocr).
+    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.22.0")
 
     // SQLCipher — full-file encryption for .soil notebooks. Key = user passphrase (portable).
     implementation("net.zetetic:sqlcipher-android:4.6.1")

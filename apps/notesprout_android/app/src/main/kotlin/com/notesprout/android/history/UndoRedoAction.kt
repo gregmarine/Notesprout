@@ -8,6 +8,8 @@ import com.notesprout.android.data.LinkRender
 import com.notesprout.android.data.LinkTarget
 import com.notesprout.android.data.LiveStroke
 import com.notesprout.android.data.RectFSerializer
+import com.notesprout.android.data.ShapeRender
+import com.notesprout.android.data.StickyNoteRender
 import com.notesprout.android.data.TextRender
 import kotlinx.serialization.Serializable
 
@@ -123,6 +125,7 @@ sealed class UndoRedoAction {
         val layerId: String,
         val deletedAt: Long,
         val headingIds: List<String> = emptyList(),
+        val stickyNoteIds: List<String> = emptyList(),
     ) : UndoRedoAction()
 
     /**
@@ -231,6 +234,10 @@ sealed class UndoRedoAction {
         val lines: List<LineRender> = emptyList(),
         val linkIds: List<String> = emptyList(),
         val links: List<LinkRender> = emptyList(),
+        val stickyNoteIds: List<String> = emptyList(),
+        val stickyNotes: List<StickyNoteRender> = emptyList(),
+        val shapeIds: List<String> = emptyList(),
+        val shapes: List<ShapeRender> = emptyList(),
     ) : UndoRedoAction()
 
     /**
@@ -255,6 +262,10 @@ sealed class UndoRedoAction {
         val movedLineObjects: List<LineRender> = emptyList(),
         val originalLinks: List<LinkRender> = emptyList(),
         val movedLinks: List<LinkRender> = emptyList(),
+        val originalStickyNotes: List<StickyNoteRender> = emptyList(),
+        val movedStickyNotes: List<StickyNoteRender> = emptyList(),
+        val originalShapes: List<ShapeRender> = emptyList(),
+        val movedShapes: List<ShapeRender> = emptyList(),
     ) : UndoRedoAction()
 
     /**
@@ -279,6 +290,10 @@ sealed class UndoRedoAction {
         val lines: List<LineRender> = emptyList(),
         val linkIds: List<String> = emptyList(),
         val links: List<LinkRender> = emptyList(),
+        val stickyNoteIds: List<String> = emptyList(),
+        val stickyNotes: List<StickyNoteRender> = emptyList(),
+        val shapeIds: List<String> = emptyList(),
+        val shapes: List<ShapeRender> = emptyList(),
     ) : UndoRedoAction()
 
     /**
@@ -308,6 +323,10 @@ sealed class UndoRedoAction {
         val lines: List<LineRender> = emptyList(),
         val linkIds: List<String> = emptyList(),
         val links: List<LinkRender> = emptyList(),
+        val stickyNoteIds: List<String> = emptyList(),
+        val stickyNotes: List<StickyNoteRender> = emptyList(),
+        val shapeIds: List<String> = emptyList(),
+        val shapes: List<ShapeRender> = emptyList(),
     ) : UndoRedoAction()
 
     /**
@@ -333,6 +352,10 @@ sealed class UndoRedoAction {
         val lines: List<LineRender> = emptyList(),
         val linkIds: List<String> = emptyList(),
         val links: List<LinkRender> = emptyList(),
+        val stickyNoteIds: List<String> = emptyList(),
+        val stickyNotes: List<StickyNoteRender> = emptyList(),
+        val shapeIds: List<String> = emptyList(),
+        val shapes: List<ShapeRender> = emptyList(),
     ) : UndoRedoAction()
 
     /**
@@ -398,28 +421,6 @@ sealed class UndoRedoAction {
         val newText: String?,
         @Serializable(with = RectFSerializer::class) val previousBox: RectF,
         @Serializable(with = RectFSerializer::class) val newBox: RectF,
-    ) : UndoRedoAction()
-
-    /**
-     * User removed a heading, dispersing its embedded strokes back onto the layer as
-     * individual live stroke rows with fresh UUIDs.
-     *
-     * Undo: soft-delete all [restoredStrokes] by ID, restore the heading row by ID.
-     * Redo: soft-delete the heading row, restore [restoredStrokes] by ID.
-     *
-     * [embeddedStrokes] carries the heading's original embedded stroke data so the heading's
-     * bounding box can be reconstructed in-memory on undo (same 8dp padding as creation).
-     * [recognizedText] carries the heading's recognized text so undo can restore the heading
-     * with its text rendering intact (null for legacy headings with no recognized text).
-     */
-    @Serializable
-    data class HeadingRemoved(
-        val headingId: String,
-        val pageId: String,
-        val restoredStrokes: List<LiveStroke>,
-        val embeddedStrokes: List<LiveStroke>,
-        val recognizedText: String? = null,
-        val level: Int = 1,
     ) : UndoRedoAction()
 
     /**
@@ -506,6 +507,10 @@ sealed class UndoRedoAction {
         val lines: List<LineRender> = emptyList(),
         val linkIds: List<String> = emptyList(),
         val links: List<LinkRender> = emptyList(),
+        val stickyNoteIds: List<String> = emptyList(),
+        val stickyNotes: List<StickyNoteRender> = emptyList(),
+        val shapeIds: List<String> = emptyList(),
+        val shapes: List<ShapeRender> = emptyList(),
     ) : UndoRedoAction()
 
     /**
@@ -583,6 +588,7 @@ sealed class UndoRedoAction {
         val originalHeadingIds: List<String> = emptyList(),
         val originalTextIds: List<String> = emptyList(),
         val originalLineIds: List<String> = emptyList(),
+        val originalShapeIds: List<String> = emptyList(),
         val link: LinkRender,
     ) : UndoRedoAction()
 
@@ -602,6 +608,75 @@ sealed class UndoRedoAction {
     ) : UndoRedoAction()
 
     /**
+     * User inserted a sticky note via the Insert Sticky Note toolbar button.
+     *
+     * Undo: soft-deletes the sticky note row; removes from in-memory list; rebuilds bitmap.
+     * Redo: restores the sticky note row; re-adds [note] to in-memory list; rebuilds bitmap.
+     *
+     * [note] carries the full render data (id, boundingBox, empty content) so redo can rebuild
+     * the in-memory list without a DB read.
+     */
+    @Serializable
+    data class StickyNoteInserted(
+        val noteId: String,
+        val pageId: String,
+        val layerId: String,
+        val note: StickyNoteRender,
+    ) : UndoRedoAction()
+
+    /**
+     * User edited the content of a sticky note via [StickyNoteEditorActivity].
+     *
+     * Undo: write [before] content JSON to the row; update the in-memory render; rebuild bitmap.
+     * Redo: write [after] content JSON to the row; update the in-memory render; rebuild bitmap.
+     *
+     * The icon [boundingBox] is identical in [before] and [after] — only embedded content changes.
+     * Full [StickyNoteRender] snapshots are stored so the in-memory list can be updated without
+     * a DB round-trip on same-page undo/redo.
+     */
+    @Serializable
+    data class StickyNoteContentEdited(
+        val noteId: String,
+        val pageId: String,
+        val before: StickyNoteRender,
+        val after: StickyNoteRender,
+    ) : UndoRedoAction()
+
+    /**
+     * User (or dwell gesture) converted a single drawn stroke into a shape object.
+     *
+     * Undo: soft-delete the shape row; restore (or re-insert) the original stroke.
+     * Redo: soft-delete the original stroke; restore the shape row.
+     *
+     * [deletedAt] is 0 when the original stroke was never persisted to the DB — in that case
+     * undo re-inserts the stroke row; otherwise undo just clears deletedAt.
+     * [originalStroke] is the ONLY place the raw drawn stroke is kept after conversion.
+     */
+    @Serializable
+    data class ShapeCreated(
+        val shapeId: String,
+        val pageId: String,
+        val layerId: String,
+        val deletedAt: Long,
+        val originalStroke: LiveStroke,
+        val shape: ShapeRender,
+    ) : UndoRedoAction()
+
+    /**
+     * User transformed a shape (resize, rotate, or aspect toggle) via shape transform mode.
+     *
+     * Undo: write [before] geometry to the DB row (boundingBox + data); update in-memory list; rebuild bitmap.
+     * Redo: write [after] geometry to the DB row (boundingBox + data); update in-memory list; rebuild bitmap.
+     */
+    @Serializable
+    data class ShapeTransformed(
+        val shapeId: String,
+        val pageId: String,
+        val before: ShapeRender,
+        val after: ShapeRender,
+    ) : UndoRedoAction()
+
+    /**
      * User removed a link, dispersing its embedded held objects back onto the layer as their own
      * live rows (fresh UUIDs).
      *
@@ -616,6 +691,7 @@ sealed class UndoRedoAction {
         val restoredHeadingIds: List<String> = emptyList(),
         val restoredTextIds: List<String> = emptyList(),
         val restoredLineIds: List<String> = emptyList(),
+        val restoredShapeIds: List<String> = emptyList(),
     ) : UndoRedoAction()
 
     /**
@@ -634,5 +710,19 @@ sealed class UndoRedoAction {
         val oldTarget: LinkTarget,
         val newChrome: LinkChrome,
         val newTarget: LinkTarget,
+    ) : UndoRedoAction()
+
+    /**
+     * User inserted a shape object directly via the toolbar shape picker (no original stroke).
+     *
+     * Undo: soft-delete the shape row; clear the in-memory selection.
+     * Redo: restore the shape row; re-add it to the in-memory list and re-select it.
+     */
+    @Serializable
+    data class ShapeInserted(
+        val shapeId: String,
+        val pageId: String,
+        val layerId: String,
+        val shape: ShapeRender,
     ) : UndoRedoAction()
 }

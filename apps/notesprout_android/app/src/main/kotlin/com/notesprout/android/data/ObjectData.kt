@@ -10,12 +10,13 @@ import kotlinx.serialization.json.Json
  *
  * Three shapes live here:
  *  - [BoundingBox] — the `boundingBox` column of every `notebook` row (`{x,y,width,height}`).
- *  - [PageData]    — the `data` column of a `type="page"` row (`{width,height,template,snapshot}`).
+ *  - [PageData]    — the `data` column of a `type="page"` row (`{width,height,template}`).
  *  - [TemplateData]— the `data` column of a `type="template"` row (`{width,height,name,image}`).
  *
  * Wire format is byte-compatible with the previous org.json/string-template output so no DB
  * migration is required. [encodeDefaults] = true keeps `{"x":0.0,...}` zero fields explicit;
- * [explicitNulls] = false omits the snapshot field when absent.
+ * [ignoreUnknownKeys] = true drops any legacy `snapshot` field on re-serialization (snapshots
+ * are no longer stored per page).
  */
 private val codec = Json {
     encodeDefaults = true
@@ -51,13 +52,12 @@ fun RectF.toBoundingBoxJson(): String = BoundingBox.fromRectF(this).toJson()
 /** Parse a `boundingBox` JSON string to a [RectF]; returns null on malformed input. */
 fun parseBoundingBox(json: String): RectF? = BoundingBox.fromJson(json)?.toRectF()
 
-/** `{width, height, template, snapshot}` — the `data` column of a `type="page"` row. */
+/** `{width, height, template}` — the `data` column of a `type="page"` row. */
 @Serializable
 data class PageData(
     val width: Float = 0f,
     val height: Float = 0f,
     val template: String = "",
-    val snapshot: String? = null,
 ) {
     fun toJson(): String = codec.encodeToString(serializer(), this)
 
