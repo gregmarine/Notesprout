@@ -90,6 +90,13 @@
             android:configChanges="orientation|keyboardHidden|screenSize|smallestScreenSize|screenLayout|density"
             android:windowSoftInputMode="stateHidden" />
 
+        <!-- Tasks — the to-do surface, a sibling of the calendar and the scratch pad -->
+        <activity
+            android:name=".TasksActivity"
+            android:exported="false"
+            android:configChanges="orientation|keyboardHidden|screenSize|smallestScreenSize|screenLayout|density"
+            android:windowSoftInputMode="stateHidden" />
+
         <!-- Notebook screen — prevent recreation on rotation/resize so bitmap survives -->
         <activity
             android:name=".NotebookActivity"

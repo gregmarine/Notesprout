@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Add / edit a task. Title and an optional due date; the recurrence builder is added below the due
+    row in a later phase.
+-->
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:fillViewport="true">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="16dp">
+
+        <!-- Title -->
+        <TextView
+            style="@style/TextAppearance.Notesprout.TitleMedium"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Task" />
+
+        <androidx.appcompat.widget.AppCompatEditText
+            android:id="@+id/etTaskTitle"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:background="@drawable/shape_bordered"
+            android:padding="10dp"
+            android:inputType="textCapSentences"
+            android:maxLines="2"
+            android:textColor="@color/inkBlack"
+            android:textColorHint="@color/inkLight"
+            android:hint="e.g. Change the furnace filter" />
+
+        <!-- Due date. Optional — an undated task is a perfectly good to-do, it just never goes
+             overdue. The clear button appears only once a date is set. -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <TextView
+                style="@style/TextAppearance.Notesprout.TitleMedium"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_height="wrap_content"
+                android:text="Due" />
+
+            <androidx.appcompat.widget.AppCompatButton
+                android:id="@+id/btnTaskDueDate"
+                style="@style/Widget.Notesprout.OutlinedButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="No date" />
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnTaskDueClear"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:layout_marginStart="4dp"
+                android:padding="10dp"
+                android:background="@android:color/transparent"
+                android:scaleType="fitCenter"
+                android:stateListAnimator="@null"
+                android:src="@drawable/ic_x"
+                android:visibility="gone"
+                android:contentDescription="Clear due date" />
+        </LinearLayout>
+
+    </LinearLayout>
+</ScrollView>

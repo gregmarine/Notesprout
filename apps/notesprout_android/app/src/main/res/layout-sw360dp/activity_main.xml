@@ -350,6 +350,22 @@
             android:src="@drawable/ic_compact"
             android:contentDescription="Compact Notebooks" />
 
+        <!--
+            Tasks lives in the overflow row on this bucket only. The wider variants put it in
+            surfaceButtonsGroup beside Calendar and Scratch Pad, but the bottom bar here is already
+            at 428dp of the Palma2 Pro's 439dp and cannot absorb another 48dp.
+
+            The id must still exist in EVERY variant of this layout or view binding makes the field
+            nullable — same reason the pagination buttons stay in the tree here (see the bottom-bar
+            comment below). MainActivity therefore wires it once, with no per-variant branch.
+        -->
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnTasks"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:layout_marginStart="4dp"
+            android:src="@drawable/ic_tasks"
+            android:contentDescription="Tasks" />
+
     </LinearLayout>
 
     <!--

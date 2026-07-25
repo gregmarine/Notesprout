@@ -400,6 +400,13 @@
                 android:src="@drawable/ic_sketching"
                 android:contentDescription="Scratch Pad" />
 
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnTasks"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:layout_marginStart="4dp"
+                android:src="@drawable/ic_tasks"
+                android:contentDescription="Tasks" />
+
         </LinearLayout>
 
         <!--

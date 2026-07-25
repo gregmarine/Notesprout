@@ -763,6 +763,9 @@ class MainActivity : AppCompatActivity() {
                         putExtra(ScratchpadActivity.EXTRA_FROM_NOTEBOOK_NAME,      from.name)
                     }
                 }
+                // Tasks carries no per-launch state — the screen reads the table fresh every time,
+                // so restoring it needs nothing beyond the intent itself.
+                AppSurface.TASKS -> TasksActivity.intent(this)
             }
             if (intent != null) intents += intent
             below = notebook
@@ -814,6 +817,12 @@ class MainActivity : AppCompatActivity() {
         binding.btnCalendar.setOnClickListener       {
             closeOverflowToolbar()
             CalendarActivity.launch(this)
+        }
+        // Lives in surfaceButtonsGroup on the wide variants and in the overflow row on sw360dp —
+        // one id in every variant, so this wiring is layout-agnostic.
+        binding.btnTasks.setOnClickListener          {
+            closeOverflowToolbar()
+            TasksActivity.launch(this)
         }
         binding.btnImport.setOnClickListener         {
             closeOverflowToolbar()
