@@ -141,7 +141,7 @@ LinearLayout (vertical, paperWhite)
   │     calLeftBar (weight=1, managed by ToolbarOverflowManager):
   │       btnBack · btnCalHome · btnCalNewNotebook │ btnToday │ btnMonthView · btnWeekView · btnDayView │
   │       btnCalPen · btnCalEraser · btnCalStickyNote · btnCalLassoEraser · btnCalLasso ·
-  │       btnCalErasePage · btnCalUndo · btnCalRedo · btnCalScratchpad · btnCalSendPage
+  │       btnCalErasePage · btnCalUndo · btnCalRedo · btnCalScratchpad · btnCalTasks · btnCalSendPage
   │       ─ spacer ─ dividerCalOverflow · btnCalOverflow (both gone until overflow)
   │     btnPrev · tvMonthYear (tap → day picker) · btnNext   ← always-visible period nav, outside calLeftBar
   ├── 1dp divider
@@ -161,6 +161,10 @@ button / leaving the screen (`onPause`) closes it. On EPD a pen-exclusion (`setT
 the open menu so the stylus can't draw under it. The wrap-content text toggles (Today/Month/Week/Day)
 have their measured widths pinned once (`pinToggleWidths`) so the manager — which sizes by LayoutParams
 px — counts them. `tvMonthYear` opens the shared [`DayPickerDialog`](#date-picker) (picks a specific day).
+
+`btnCalTasks` launches the [task manager](tasks.md) (`TasksActivity`). It is a convenience jump to a
+sibling surface, **not** a coupling of the two features: no task is ever drawn on a calendar grid and
+the calendar reads nothing from the `tasks` table.
 
 `btnCalScratchpad` launches the global scratch pad (`ScratchpadActivity`, plain — no from-notebook
 extras). Tool state (pen/eraser) is restored from and persisted to the shared `ToolPreferencesManager`.

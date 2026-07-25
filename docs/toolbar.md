@@ -71,8 +71,8 @@ so `isSelected` state, icon state, and listeners always survive.
   **KEY STABILITY RULE:** keys are persisted → append-only, never rename/reorder `SPECS`. `DEFAULT_ORDER`
   is an **explicit key list** (decoupled from `SPECS` declaration order) defining the *display* default —
   a **bracketed layout**: Close/Recents then Undo/Redo on the left (history parked in a fixed spot right
-  after navigation), content tools centered (ink & select → insert-objects), Scratchpad/Calendar on the
-  right, with the latent Encrypt button + pinned gear at the far right. It must list every live `SPECS` key or `load()` appends the missing ones. `DEFAULT_MINI` =
+  after navigation), content tools centered (ink & select → insert-objects), Scratchpad/Calendar/Tasks
+  on the right, with the latent Encrypt button + pinned gear at the far right. It must list every live `SPECS` key or `load()` appends the missing ones. `DEFAULT_MINI` =
   compact everyday subset. **Changing `DEFAULT_ORDER` only affects fresh installs / a toolbar reset** — an
   existing persisted `order` wins and is never reordered by `load()` (it only appends new keys).
   **Encryption buttons:** `"lock"` (`btnLock`, `ic_lock`, group `GROUP_NOTEBOOK`) and `"lockOff"`

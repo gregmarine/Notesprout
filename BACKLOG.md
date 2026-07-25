@@ -247,6 +247,31 @@ Phases 0–2 built (see `docs/handwriting-recognition.md` § "TrOCR engine"). De
 
 ---
 
+## Columnarize the `events` `data` payload
+
+> Noticed while building the task manager (2026-07-25). The `tasks` table shipped **fully columnar** —
+> no `data` column at all — which leaves `events` as the only app-content table still carrying a JSON
+> payload in a schema that is otherwise JSON-free apart from the two deliberate singletons
+> (`clipboard` / `backup_config`).
+
+`docs/global-index-format.md` currently documents the `events` payload as a considered choice, and it
+was: the recurrence rule carries `exceptionDates`, a genuinely open-ended list, and every field added
+to it since v5 has landed with an empty default and **no migration**. That is real value.
+
+Whether to columnarize is therefore a judgement call, not an obvious cleanup:
+
+- **For** — one consistent story across the index; queryable recurrence (e.g. "every yearly event")
+  becomes possible; the `tasks` schema proves the shape works.
+- **Against** — `exceptionDates` still needs somewhere to live (a child-row table, mirroring the
+  `list_item` pattern), which is a second table for one field; and every future event field then costs
+  a migration where today it costs nothing.
+
+If it is done, it must touch live on-device event data, so it needs the same care as any
+`.soil`/index migration: additive DDL, format-agnostic reads, convert-on-write, sweep in the
+background. Not scheduled.
+
+---
+
 ## Link Objects — Phase 2
 
 > From the retired `LINK_OBJECTS_PLAN.md` (Phase 1 — page + notebook links — shipped in full).

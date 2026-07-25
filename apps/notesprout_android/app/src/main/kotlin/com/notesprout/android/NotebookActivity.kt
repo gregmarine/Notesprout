@@ -1124,6 +1124,10 @@ class NotebookActivity : AppCompatActivity() {
             scratchpadLauncher.launch(intent)
         }
 
+        // Tasks is a plain launch, not a for-result one: nothing comes back from it into the page
+        // the way a scratch-pad or calendar selection does.
+        binding.btnTasks.setOnClickListener { TasksActivity.launch(this) }
+
         binding.btnUndo.setOnClickListener { performUndo() }
         binding.btnRedo.setOnClickListener { performRedo() }
         updateUndoRedoButtons()  // both disabled initially (empty stacks)

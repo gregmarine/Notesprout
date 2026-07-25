@@ -464,7 +464,7 @@ Powers "which documents did I open/edit on this day". Two design notes worth ste
   time, which means a renamed document's history renames with it and a deleted one's history
   disappears.
 
-## `events` — the one table that is not universal-row shaped
+## `events` — a bespoke, query-optimized table
 
 Calendar events (birthdays, anniversaries, vacations, meetings, appointments). This table
 **deliberately breaks the universal row pattern**, and the reason is a good rule of thumb:
@@ -518,6 +518,64 @@ Three semantics lessons paid for on-device, all of which generalize to any recur
 3. **Validate that an event can occur at all.** An "ends on" date before the start date produces a row
    that appears on no day — and is therefore uneditable and undeletable forever.
 
+## `tasks` — bespoke *and* fully columnar
+
+The task manager's store: one-time and recurring to-do items (see [`tasks.md`](tasks.md)). Like
+`events` it is query-shaped rather than universal-row, but unlike `events` it carries **no `data`
+payload at all** — the recurrence rule lives in typed columns, so nothing in this table is ever JSON.
+
+```sql
+CREATE TABLE tasks (
+    id               TEXT    NOT NULL PRIMARY KEY,
+    parentId         TEXT,              -- routine id; NULL today (reserved)
+    type             TEXT    NOT NULL,  -- TASK | ROUTINE
+    title            TEXT    NOT NULL,
+    state            TEXT    NOT NULL,  -- NOT_DONE | DONE | SKIPPED
+    dueEpochDay      INTEGER,           -- local epoch-day; NULL = undated
+    "order"          INTEGER NOT NULL DEFAULT 0,
+    seriesId         TEXT,              -- shared by every row generated from one rule
+    seriesIndex      INTEGER,           -- 0-based position; drives the COUNT end mode
+    seriesAnchorDay  INTEGER,           -- the series' ORIGINAL first due day
+    recurFreq        TEXT,              -- NULL = one-time
+    recurInterval    INTEGER,
+    recurWeekdays    INTEGER,           -- ISO weekday bitmask, Mon = bit 0
+    recurMonthlyMode TEXT,
+    recurEndMode     TEXT,              -- NEVER | UNTIL | COUNT
+    recurEndEpochDay INTEGER,
+    recurEndCount    INTEGER,
+    resolvedAt       INTEGER,           -- ms the row was completed/skipped
+    createdAt        INTEGER NOT NULL,
+    updatedAt        INTEGER NOT NULL,
+    deletedAt        INTEGER
+);
+```
+
+**Why this one can drop the payload when `events` could not.** An event stores a single anchor row and
+expands its occurrences in memory at read time, which forces it to carry an open-ended list of removed
+occurrence dates — a genuinely set-shaped field, and the thing a payload is for. A task series instead
+**materializes** its occurrences: exactly one row is open at a time, and resolving it inserts the
+successor. There is nothing to except out of, so the only remaining set — the weekly weekday
+selection — collapses into an integer bitmask and every field becomes a column.
+
+The lesson generalizes past this schema: *expansion forces a payload; materialization does not.*
+Which model to pick is a product question (a calendar wants to show every future occurrence at once; a
+to-do list wants exactly one), and the storage shape follows from it rather than the reverse.
+
+Two more semantics lessons, both paid for in this table:
+
+1. **A count is a count of rows, not of calendar positions.** Resolving COUNT the way the events
+   engine does — enumerate the first *N* valid dates — silently truncates a materialized series the
+   moment the user runs late: a daily "3 times" series started Jan 1 but finished Jan 5 finds no
+   enumerated start after Jan 5 and ends after one occurrence. Enforce it by series index, and run the
+   date walk with the count stripped.
+2. **A recurrence look-ahead bound that is too tight does not error — it silently ends the series.**
+   Size it per frequency *and* interval, generously: monthly-on-the-31st must clear a 59-day gap
+   (Jan 31 → Mar 31), and yearly-on-Feb-29 must reach eight years to clear a skipped century.
+
+`type` + `parentId` are reserved for **routines** (a named set of tasks). Nothing writes them today,
+but every query filters `type = 'TASK'` so those rows cannot leak into the task list when they arrive.
+A greenfield implementation that does not need routines can drop both columns.
+
 ---
 
 # Part V — Schema Versions & Migration
@@ -534,6 +592,7 @@ Three semantics lessons paid for on-device, all of which generalize to any recur
 | 6 | `scratchpad` + `calendar` gain the 23 columnar columns + `blob` | `ALTER TABLE … ADD COLUMN` ×2 tables |
 | 7 | `objects` gains `pageCount`, `flags`, `keyScope`, `lastBackedUpLocal`, `lastBackedUpDrive`, `width`, `height`, `blob` | 8 × `ALTER TABLE … ADD COLUMN` |
 | 8 | `objects` gains `refId`, `sortOrder` (list membership as child rows) | 2 × `ALTER TABLE … ADD COLUMN` |
+| 9 | `+ tasks` table (fully columnar — no `data` payload) | `CREATE TABLE IF NOT EXISTS` |
 
 **Every migration is additive and rewrites zero rows.** Nullable columns and
 `CREATE TABLE IF NOT EXISTS`, nothing else. Data conversion happens lazily on write plus an optional
@@ -823,11 +882,13 @@ database file is not surprised. It follows the same encryption and key-caching m
 
 - **The index type catalog.** `notebook` becomes your content type. Keep `folder`, the list/membership
   pair, and the singleton config rows; they are container furniture, not Notesprout concepts.
-- **The app-content tables.** `scratchpad` / `calendar` / `events` / `notebook_activity` are
+- **The app-content tables.** `scratchpad` / `calendar` / `events` / `notebook_activity` / `tasks` are
   Notesprout's app-level surfaces. Paintsprout will have its own — a palette library, a brush library,
   a reference-image shelf. Keep the *pattern*: an app-level canvas reuses the document row schema
   verbatim so every serializer works unchanged; an app-level record with range queries promotes its
-  queryable fields to columns and leaves the rest in a payload.
+  queryable fields to columns — and leaves the rest in a payload only if some field is genuinely
+  open-ended (compare `events` with `tasks`, which needs no payload because it materializes rather
+  than expands).
 - **The template library shape.** Paintsprout's equivalent (brushes, palettes, canvas presets)
   probably wants more than `width`/`height`/`image`. Add typed columns; the wide-sparse table makes
   that free.
@@ -904,6 +965,7 @@ The index is step 3 in the overall build order in `soil-file-format.md` Part XI.
 | `calendar` | v3 | **Document** row schema | App-level calendar canvases, deterministic page keys |
 | `notebook_activity` | v4 | Bespoke, append-only | Open/edit telemetry (ids + verbs only) |
 | `events` | v5 | Bespoke, query-optimized | Calendar events + recurrence payload |
+| `tasks` | v9 | Bespoke, **fully columnar** | To-do items + materialized recurrence series |
 
 ## Sentinel ids
 

@@ -19,13 +19,19 @@ never is. Which bar a control lives in follows from that:
 └──────────────────────────────────────────────────────────────┘
 ```
 
-- **`surfaceButtonsGroup` (start)** — `btnCalendar` + `btnScratchpad`. These are *sibling surfaces*
-  (places to go), not library actions, so they get their own zone opposite the create/overflow
-  group. Because the bottom bar is never replaced by search / pinned / recents mode, one button
-  each is reachable everywhere and needs **no per-mode duplicate** — the group is hidden only in
-  destination-picker mode (`applyPickerModeUI`), where launching another surface mid-flow would be
-  disruptive. Prior to this, `btnScratchpad` was mirrored four times (breadcrumb + pinned + recents
-  + search toolbars) and `btnCalendar` was buried in the overflow row; both are now single buttons.
+- **`surfaceButtonsGroup` (start)** — `btnCalendar` + `btnScratchpad` + `btnTasks`. These are *sibling
+  surfaces* (places to go), not library actions, so they get their own zone opposite the
+  create/overflow group. Because the bottom bar is never replaced by search / pinned / recents mode,
+  one button each is reachable everywhere and needs **no per-mode duplicate** — the group is hidden
+  only in destination-picker mode (`applyPickerModeUI`), where launching another surface mid-flow
+  would be disruptive. Prior to this, `btnScratchpad` was mirrored four times (breadcrumb + pinned +
+  recents + search toolbars) and `btnCalendar` was buried in the overflow row; both are now single
+  buttons.
+  **`btnTasks` is the exception in the narrow bucket:** `layout-sw360dp` has no room for a third
+  button (see the width table below), so it lives in `overflowToolbar` there instead. The id is still
+  declared in **all three** variants — a missing id makes the view-binding field nullable — so
+  `MainActivity` wires it once with no per-variant branch, and hiding falls out for free because
+  every mode that hides the surface group already calls `closeOverflowToolbar()`.
 - **`paginationGroup` (centre)** — driven only by `isEnabled`, never `visibility`, from
   `updatePaginationControls`. That matters: layout variants can `gone` individual page buttons without
   any Kotlin change and without making the view-binding fields nullable.
@@ -111,7 +117,7 @@ Persisted in `SharedPreferences("notesprout_view_state")`. Saved at every browse
 A cold launch reopens **what the user was doing**, not just the library: the whole chain of open screens, so a scratch pad opened from a notebook comes back over *that notebook*, and stepping out of it lands where it did before the app died.
 
 ```kotlin
-enum class AppSurface { NOTEBOOK, CALENDAR, DAY_WINDOW, SCRATCHPAD }  // library = implicit bottom
+enum class AppSurface { NOTEBOOK, CALENDAR, DAY_WINDOW, SCRATCHPAD, TASKS }  // library = implicit bottom
 
 data class SurfaceEntry(
     val token: String,               // the Activity *instance* — survives onSaveInstanceState

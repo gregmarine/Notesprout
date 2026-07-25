@@ -88,6 +88,7 @@ object ToolbarButtonRegistry {
         ButtonSpec("stickyNote", R.id.btnInsertStickyNote, R.drawable.ic_sticker_2, "Insert Sticky Note", GROUP_TOOLS),
         ButtonSpec("insertShape", R.id.btnInsertShape, R.drawable.ic_convert_shape, "Insert Shape", GROUP_TOOLS),
         ButtonSpec("calendar", R.id.btnCalendar, R.drawable.ic_calendar, "Calendar", GROUP_NOTEBOOK),
+        ButtonSpec("tasks", R.id.btnTasks, R.drawable.ic_tasks, "Tasks", GROUP_NOTEBOOK),
     )
 
     private val byKey: Map<String, ButtonSpec> = SPECS.associateBy { it.key }
@@ -113,7 +114,7 @@ object ToolbarButtonRegistry {
         // … then insert-objects.
         "insertLines", "insertShape", "stickyNote",
         // Auxiliary surfaces (right edge).
-        "scratchpad", "calendar",
+        "scratchpad", "calendar", "tasks",
         // Latent Encrypt (plaintext notebooks only; runtime-hidden otherwise) + pinned Customize gear.
         "lock",
         "toolbarSettings",

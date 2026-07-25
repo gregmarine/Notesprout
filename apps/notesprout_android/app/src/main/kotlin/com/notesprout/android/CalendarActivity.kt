@@ -414,6 +414,7 @@ class CalendarActivity : AppCompatActivity() {
         binding.btnNext.setOnClickListener { stepForward() }
         binding.tvMonthYear.setOnClickListener { showMonthYearPicker() }
         binding.btnCalScratchpad.setOnClickListener { openScratchpad() }
+        binding.btnCalTasks.setOnClickListener { TasksActivity.launch(this) }
         binding.btnCalSendPage.setOnClickListener { sendPageToNotebook() }
         binding.btnCalErasePage.setOnClickListener { confirmErasePage() }
         binding.btnCalUndo.setOnClickListener { undo() }
