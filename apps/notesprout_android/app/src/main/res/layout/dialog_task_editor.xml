@@ -1,7 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-    Add / edit a task. Title and an optional due date; the recurrence builder is added below the due
-    row in a later phase.
+    Add / edit a task: title, an optional due date, and the recurrence builder.
+
+    The recurrence block is ported from dialog_event_editor.xml so the two builders behave
+    identically — but it has no "ends after N times" ambiguity to resolve here: because a task series
+    materializes one row at a time, a count is a count of rows, which is what the user means.
 -->
 <ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
@@ -69,6 +72,250 @@
                 android:src="@drawable/ic_x"
                 android:visibility="gone"
                 android:contentDescription="Clear due date" />
+        </LinearLayout>
+
+        <!-- Divider -->
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:layout_marginTop="16dp"
+            android:layout_marginBottom="12dp"
+            android:background="@color/inkBlack" />
+
+        <!-- Repeats -->
+        <TextView
+            style="@style/TextAppearance.Notesprout.TitleMedium"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Repeats" />
+
+        <androidx.appcompat.widget.AppCompatSpinner
+            android:id="@+id/spTaskRepeat"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:layout_marginTop="4dp"
+            android:background="@drawable/shape_bordered" />
+
+        <!-- A recurring task must be anchored to a day, or there is no series to walk. Shown in
+             place of the whole builder until a due date is set. -->
+        <TextView
+            android:id="@+id/tvTaskRepeatNeedsDate"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:textSize="12sp"
+            android:textColor="@color/inkLight"
+            android:visibility="gone"
+            android:text="Set a due date to make this task repeat." />
+
+        <!-- Every N units -->
+        <LinearLayout
+            android:id="@+id/grpTaskEvery"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:visibility="gone">
+
+            <TextView
+                style="@style/TextAppearance.Notesprout.LabelLarge"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Every" />
+
+            <androidx.appcompat.widget.AppCompatEditText
+                android:id="@+id/etTaskInterval"
+                android:layout_width="64dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:background="@drawable/shape_bordered"
+                android:padding="8dp"
+                android:gravity="center"
+                android:inputType="number"
+                android:maxLength="2"
+                android:textColor="@color/inkBlack"
+                android:text="1" />
+
+            <TextView
+                android:id="@+id/tvTaskUnit"
+                style="@style/TextAppearance.Notesprout.LabelLarge"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:text="weeks" />
+        </LinearLayout>
+
+        <!-- Weekly: weekday toggles -->
+        <LinearLayout
+            android:id="@+id/grpTaskWeekdays"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:orientation="horizontal"
+            android:visibility="gone">
+
+            <androidx.appcompat.widget.AppCompatButton
+                android:id="@+id/tglTaskMon"
+                style="@style/Widget.Notesprout.ToggleTextButton"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:paddingStart="0dp"
+                android:paddingEnd="0dp"
+                android:text="M" />
+
+            <androidx.appcompat.widget.AppCompatButton
+                android:id="@+id/tglTaskTue"
+                style="@style/Widget.Notesprout.ToggleTextButton"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_marginStart="2dp"
+                android:paddingStart="0dp"
+                android:paddingEnd="0dp"
+                android:text="T" />
+
+            <androidx.appcompat.widget.AppCompatButton
+                android:id="@+id/tglTaskWed"
+                style="@style/Widget.Notesprout.ToggleTextButton"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_marginStart="2dp"
+                android:paddingStart="0dp"
+                android:paddingEnd="0dp"
+                android:text="W" />
+
+            <androidx.appcompat.widget.AppCompatButton
+                android:id="@+id/tglTaskThu"
+                style="@style/Widget.Notesprout.ToggleTextButton"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_marginStart="2dp"
+                android:paddingStart="0dp"
+                android:paddingEnd="0dp"
+                android:text="T" />
+
+            <androidx.appcompat.widget.AppCompatButton
+                android:id="@+id/tglTaskFri"
+                style="@style/Widget.Notesprout.ToggleTextButton"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_marginStart="2dp"
+                android:paddingStart="0dp"
+                android:paddingEnd="0dp"
+                android:text="F" />
+
+            <androidx.appcompat.widget.AppCompatButton
+                android:id="@+id/tglTaskSat"
+                style="@style/Widget.Notesprout.ToggleTextButton"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_marginStart="2dp"
+                android:paddingStart="0dp"
+                android:paddingEnd="0dp"
+                android:text="S" />
+
+            <androidx.appcompat.widget.AppCompatButton
+                android:id="@+id/tglTaskSun"
+                style="@style/Widget.Notesprout.ToggleTextButton"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_marginStart="2dp"
+                android:paddingStart="0dp"
+                android:paddingEnd="0dp"
+                android:text="S" />
+        </LinearLayout>
+
+        <!-- Monthly: day-of-month vs ordinal weekday -->
+        <LinearLayout
+            android:id="@+id/grpTaskMonthly"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:orientation="vertical"
+            android:visibility="gone">
+
+            <androidx.appcompat.widget.AppCompatButton
+                android:id="@+id/rbTaskDayOfMonth"
+                style="@style/Widget.Notesprout.ToggleTextButton"
+                android:layout_width="match_parent"
+                android:gravity="start|center_vertical"
+                android:text="On day of the month" />
+
+            <androidx.appcompat.widget.AppCompatButton
+                android:id="@+id/rbTaskOrdinal"
+                style="@style/Widget.Notesprout.ToggleTextButton"
+                android:layout_width="match_parent"
+                android:layout_marginTop="4dp"
+                android:gravity="start|center_vertical"
+                android:text="On the same weekday" />
+        </LinearLayout>
+
+        <!-- Ends -->
+        <LinearLayout
+            android:id="@+id/grpTaskEndBlock"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:orientation="vertical"
+            android:visibility="gone">
+
+            <TextView
+                style="@style/TextAppearance.Notesprout.TitleMedium"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Ends" />
+
+            <androidx.appcompat.widget.AppCompatSpinner
+                android:id="@+id/spTaskEnd"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:layout_marginTop="4dp"
+                android:background="@drawable/shape_bordered" />
+
+            <androidx.appcompat.widget.AppCompatButton
+                android:id="@+id/btnTaskUntilDate"
+                style="@style/Widget.Notesprout.OutlinedButton"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:visibility="gone"
+                android:text="—" />
+
+            <LinearLayout
+                android:id="@+id/grpTaskCount"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:visibility="gone">
+
+                <TextView
+                    style="@style/TextAppearance.Notesprout.LabelLarge"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="After" />
+
+                <androidx.appcompat.widget.AppCompatEditText
+                    android:id="@+id/etTaskCount"
+                    android:layout_width="64dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="8dp"
+                    android:background="@drawable/shape_bordered"
+                    android:padding="8dp"
+                    android:gravity="center"
+                    android:inputType="number"
+                    android:maxLength="4"
+                    android:textColor="@color/inkBlack"
+                    android:text="10" />
+
+                <TextView
+                    style="@style/TextAppearance.Notesprout.LabelLarge"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="8dp"
+                    android:text="times" />
+            </LinearLayout>
         </LinearLayout>
 
     </LinearLayout>
