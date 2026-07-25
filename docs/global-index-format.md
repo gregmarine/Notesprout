@@ -16,7 +16,7 @@
 > open/unlock state machine. [Part IX](#part-ix--adapting-this-index-for-paintsprout) says exactly
 > which parts are invariant and which you are expected to replace.
 >
-> Everything below describes Notesprout as built on the `sprout` branch (index schema v8, `.soil` v4,
+> Everything below describes Notesprout as built on the `main` branch (index schema v8, `.soil` v4,
 > global encryption phases 0–5). Legacy shapes still readable in the wild are called out explicitly; a
 > greenfield app should implement only the current shape.
 

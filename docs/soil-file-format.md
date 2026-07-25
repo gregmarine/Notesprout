@@ -15,7 +15,7 @@
 > document metadata, the template library, and app-level content. A document container is only half a
 > working app; read both.
 >
-> Everything below describes Notesprout as built on the `sprout` branch (schema `.soil` v4, global
+> Everything below describes Notesprout as built on the `main` branch (schema `.soil` v4, global
 > index v8, global encryption phases 0–5, plus the stability-hardening pass of July 2026). Where the
 > format has legacy shapes still readable in the wild, that is called out explicitly — a greenfield
 > app should implement only the current shape.

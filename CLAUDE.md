@@ -113,8 +113,10 @@ skill (`.claude/skills/device-build-install/SKILL.md`) — invoked automatically
 
 ## Branch Strategy
 
-- `main` — stable release branch (seed branch merged 2026-06-24, all major features complete)
-- `sprout` — active development for v1.1
+- `main` — stable release branch **and the current working branch** (v1.1 "Sprout" merged 2026-07-25 in
+  merge commit c118a7e; v1.0 "Seed" merged 2026-06-24). Until the next feature branch is cut, work lands here.
+- `sprout` — archived (v1.1, everything merged to `main`; branch deleted local + remote, history preserved
+  under the merge commit)
 - `germination` — previous post-MVP feature branch (reference, not active)
 - `seed` — archived (v1.0, all major features shipped in final commit cc2c7ca)
 
