@@ -45,12 +45,26 @@
             android:layout_marginStart="4dp"
             android:layout_marginEnd="4dp" />
 
-        <!-- View toggles: the open list vs the resolved history. -->
+        <!--
+            View toggles, widening in scope left to right: what needs attention now → every open
+            task, including ones their reminder window is still hiding → the resolved history.
+
+            "All" exists because the reminder gate can otherwise put a task out of reach entirely:
+            a hidden task cannot be opened, edited, or deleted, and unlike an event it has no
+            calendar grid to be found on. This is that escape hatch.
+        -->
         <androidx.appcompat.widget.AppCompatButton
             android:id="@+id/btnViewOpen"
             style="@style/Widget.Notesprout.ToggleTextButton"
             android:text="Tasks"
-            android:contentDescription="Open tasks" />
+            android:contentDescription="Tasks needing attention" />
+
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/btnViewAll"
+            style="@style/Widget.Notesprout.ToggleTextButton"
+            android:layout_marginStart="4dp"
+            android:text="All"
+            android:contentDescription="Every open task, including hidden ones" />
 
         <androidx.appcompat.widget.AppCompatButton
             android:id="@+id/btnViewDone"

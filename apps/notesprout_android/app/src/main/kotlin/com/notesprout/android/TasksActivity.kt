@@ -17,6 +17,7 @@ import com.notesprout.android.data.ReopenOutcome
 import com.notesprout.android.data.ResolvedGroup
 import com.notesprout.android.data.TaskSection
 import com.notesprout.android.data.TasksRepository
+import com.notesprout.android.data.visibleFrom
 import com.notesprout.android.data.index.TaskEntity
 import com.notesprout.android.data.tasks.TaskRecurrence
 import com.notesprout.android.data.tasks.TaskState
@@ -57,7 +58,8 @@ class TasksActivity : AppCompatActivity() {
         fun intent(context: Context): Intent = Intent(context, TasksActivity::class.java)
     }
 
-    private enum class ViewMode { OPEN, DONE }
+    /** Widening scope: what needs attention now → every open task → the resolved history. */
+    private enum class ViewMode { OPEN, ALL, DONE }
 
     private lateinit var binding: ActivityTasksBinding
     private val repo by lazy { TasksRepository() }
@@ -83,6 +85,7 @@ class TasksActivity : AppCompatActivity() {
 
         binding.btnTasksBack.setOnClickListener { finish() }
         binding.btnViewOpen.setOnClickListener { switchMode(ViewMode.OPEN) }
+        binding.btnViewAll.setOnClickListener { switchMode(ViewMode.ALL) }
         binding.btnViewDone.setOnClickListener { switchMode(ViewMode.DONE) }
         binding.btnAddTask.setOnClickListener { openEditor(null) }
 
@@ -113,9 +116,11 @@ class TasksActivity : AppCompatActivity() {
 
     private fun applyMode() {
         binding.btnViewOpen.isSelected = mode == ViewMode.OPEN
+        binding.btnViewAll.isSelected = mode == ViewMode.ALL
         binding.btnViewDone.isSelected = mode == ViewMode.DONE
         binding.tasksEmpty.text = when (mode) {
             ViewMode.OPEN -> "Nothing to do"
+            ViewMode.ALL -> "No open tasks"
             ViewMode.DONE -> "Nothing finished yet"
         }
     }
@@ -124,18 +129,19 @@ class TasksActivity : AppCompatActivity() {
 
     private fun refresh() {
         lifecycleScope.launch {
+            val today = LocalDate.now()
             when (mode) {
-                ViewMode.OPEN -> renderOpen(repo.openSections(LocalDate.now()))
+                ViewMode.OPEN -> renderOpen(repo.openSections(today), today)
+                ViewMode.ALL -> renderOpen(repo.openSections(today, gated = false), today)
                 ViewMode.DONE -> renderDone(repo.resolvedGroups())
             }
         }
     }
 
-    private fun renderOpen(sections: List<TaskSection>) {
+    private fun renderOpen(sections: List<TaskSection>, today: LocalDate) {
         val inflater = LayoutInflater.from(this)
         binding.tasksList.removeAllViews()
         binding.tasksEmpty.isVisible = sections.isEmpty()
-        val today = LocalDate.now()
         for ((index, section) in sections.withIndex()) {
             addSectionHeader(section.kind.label, topGap = index > 0)
             for (task in section.tasks) addTaskRow(inflater, task, dueLabel(task, today))
@@ -246,7 +252,17 @@ class TasksActivity : AppCompatActivity() {
         if (state.isResolved) {
             task.dueEpochDay?.let { parts += "due ${LocalDate.ofEpochDay(it).format(dueFmt)}" }
         }
+        // Only in All: say why the main list isn't showing this one, so it reads as held back rather
+        // than misfiled. In the gated list every row is surfacing by definition, so it never applies.
+        if (mode == ViewMode.ALL) hiddenNote(task)?.let { parts += it }
         return parts.takeIf { it.isNotEmpty() }?.joinToString(" · ")
+    }
+
+    /** "Hidden until 24 Jul" for a task whose reminder window has not opened yet; null otherwise. */
+    private fun hiddenNote(task: TaskEntity): String? {
+        val from = visibleFrom(task) ?: return null
+        if (from <= LocalDate.now().toEpochDay()) return null
+        return "hidden until ${LocalDate.ofEpochDay(from).format(dueFmt)}"
     }
 
     private fun resolvedGroupLabel(date: LocalDate, today: LocalDate): String = when (date) {

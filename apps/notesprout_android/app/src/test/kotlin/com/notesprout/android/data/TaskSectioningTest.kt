@@ -6,6 +6,7 @@ import com.notesprout.android.data.tasks.TaskReminders
 import com.notesprout.android.data.tasks.TaskRowType
 import com.notesprout.android.data.tasks.TaskState
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Test
 import java.time.LocalDate
@@ -107,6 +108,59 @@ class TaskSectioningTest {
     fun `a zero or negative reminder amount counts as no reminder`() {
         assertNull(sectionFor(task(due = today.plusDays(1), remindAmount = 0), todayDay))
         assertNull(sectionFor(task(due = today.plusDays(1), remindAmount = -3), todayDay))
+    }
+
+    // ── The All view (ungated) ─────────────────────────────────────────────────
+
+    @Test
+    fun `ungated, a future task with no reminder is still reachable in Upcoming`() {
+        val t = task(due = today.plusDays(3))
+        assertNull(sectionFor(t, todayDay))
+        assertEquals(TaskSectionKind.UPCOMING, sectionFor(t, todayDay, gated = false))
+    }
+
+    @Test
+    fun `ungated, a task whose window has not opened is still reachable`() {
+        val t = task(due = today.plusDays(90), remindAmount = 1)
+        assertNull(sectionFor(t, todayDay))
+        assertEquals(TaskSectionKind.UPCOMING, sectionFor(t, todayDay, gated = false))
+    }
+
+    @Test
+    fun `ungated never hides anything - every open task lands in a section`() {
+        val everyShape = listOf(
+            task(),
+            task(due = today),
+            task(due = today.minusDays(5)),
+            task(due = today.plusDays(1)),
+            task(due = today.plusDays(365)),
+            task(due = today.plusDays(365), remindAmount = 2, remindUnit = ReminderUnit.WEEKS),
+        )
+        for (t in everyShape) {
+            assertNotNull(
+                "due=${t.dueEpochDay} remind=${t.remindAmount} should be reachable in All",
+                sectionFor(t, todayDay, gated = false),
+            )
+        }
+    }
+
+    // ── "Hidden until" note ────────────────────────────────────────────────────
+
+    @Test
+    fun `visibleFrom is the due day less the lead`() {
+        val t = task(due = today.plusDays(30), remindAmount = 1, remindUnit = ReminderUnit.WEEKS)
+        assertEquals(today.plusDays(23).toEpochDay(), visibleFrom(t))
+    }
+
+    @Test
+    fun `visibleFrom with no reminder is the due day itself`() {
+        val t = task(due = today.plusDays(30))
+        assertEquals(today.plusDays(30).toEpochDay(), visibleFrom(t))
+    }
+
+    @Test
+    fun `visibleFrom is null for an undated task, which is never hidden`() {
+        assertNull(visibleFrom(task()))
     }
 
     // ── Lead-time helpers ──────────────────────────────────────────────────────

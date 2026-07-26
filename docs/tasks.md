@@ -155,7 +155,7 @@ full-bleed and no drawing engine at all — so the top guard comes from the live
 
 ```
 ┌──────────────────────────────────────────────┐
-│ ←  │ Tasks │ Done │                       +  │  56dp toolbar
+│ ←  │ Tasks │ All │ Done │                 +  │  56dp toolbar
 ├──────────────────────────────────────────────┤
 │ Overdue                                       │
 │ ☐  Change furnace filter            2d ago    │
@@ -169,16 +169,23 @@ full-bleed and no drawing engine at all — so the top guard comes from the live
 └──────────────────────────────────────────────┘
 ```
 
-### Two views
+### Three views
+
+Widening in scope, left to right:
 
 | View | Contents |
 |---|---|
 | **Tasks** *(default)* | every open task **the user should see today**, grouped **Overdue → Today → Upcoming → No date** |
+| **All** | every open task, **ungated** — including ones the reminder window is still hiding |
 | **Done** | completed + skipped tasks, grouped by the day they were resolved (Today / Yesterday / date), newest first |
 
 "Should see today" is doing real work in that first row — see [Reminders](#reminders--what-gates-upcoming).
-Empty sections are omitted entirely (`TasksRepository.openSections`), so checking off the last task
-of a section makes the header disappear with it. Sort within a section is due day ascending then
+**All** is the escape hatch that makes the gate safe: without it a hidden task could not be opened,
+edited, or deleted either. Both open views share `renderOpen` and differ only in the `gated` flag
+passed to `TasksRepository.openSections`.
+
+Empty sections are omitted entirely, so checking off the last task of a section makes the header
+disappear with it. Sort within a section is due day ascending then
 title, case-insensitive; **No date** sorts by `createdAt`. Section headers reuse the Events list's
 treatment (bold `inkBlack` 13sp) so the two lists read as one family.
 
@@ -210,13 +217,16 @@ Once the window opens the task stays visible every day until its due date, when 
 **Today**.
 
 > **The last row of that table is the one to understand.** A dated task with no reminder is in *no
-> section at all* until its due date arrives — it is invisible, and while invisible it also cannot be
-> opened, edited, or deleted from this screen. Unlike an event it has no calendar grid to fall back
-> on; the list is the only view a task has.
+> section at all* on the main list until its due date arrives. This is the deliberate, chosen
+> behaviour — strict parity with how events treat the look-ahead. The editor says so inline ("Leave
+> blank and this task stays out of the list until the day it is due") because it is the single most
+> surprising thing the screen does.
 >
-> This is the deliberate, chosen behaviour — strict parity with how events treat the look-ahead — not
-> an oversight. The editor says so inline ("Leave blank and this task stays out of the list until the
-> day it is due") because it is the single most surprising thing the screen does.
+> **The [All view](#three-views) is what keeps that safe.** An event that fails the look-ahead gate is
+> still drawn on the calendar grid; a task has no second view, so without All a hidden task could not
+> be opened, edited, or deleted either — it would be unreachable until its due date. All drops the
+> gate entirely, and marks each held-back row `hidden until <date>` (`visibleFrom`, rendered only in
+> that view) so it reads as deliberately withheld rather than misfiled.
 
 **One lead time, not a list.** An event carries several reminders; a task carries one. That loses
 nothing: the rule is "visible on every day from `due − lead` onwards", so N reminders behave exactly
@@ -331,8 +341,4 @@ existing query has to change to stay correct.
 - No notifications or alarms of any kind — the paper-planner model the
   [Events reminders](calendar.md#reminders--paper-like-look-ahead) established holds here too.
 - No notes, time-of-day, or priority field (deliberate v1 scope).
-- **No way to see or reach a task whose reminder window has not opened** (or that has no reminder). If
-  that becomes a problem in daily use, the options are a third "All" toggle, a collapsed "Later"
-  section, or defaulting new dated tasks to a reminder — none of which change the `sectionFor` rule
-  itself.
 - No cross-links to notebooks or calendar days.

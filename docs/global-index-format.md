@@ -581,9 +581,11 @@ Three more semantics lessons, all paid for in this table:
    (Jan 31 → Mar 31), and yearly-on-Feb-29 must reach eight years to clear a skipped century.
 3. **A visibility rule borrowed from another surface inherits that surface's assumptions.** Gating the
    list on a reminder is exactly how events behave — but an event that fails the gate is still drawn
-   on the calendar grid, and a task has no second view. The same rule therefore makes a task
-   *unreachable* rather than merely un-highlighted. Copy the rule, but re-check what the original
-   surface was quietly relying on.
+   on the calendar grid, and a task has no second view. The same rule therefore made a task
+   *unreachable* rather than merely un-highlighted: it could not be opened, edited, or deleted until
+   its due date. The fix was an ungated "All" view, not a change to the rule. Copy the rule, but
+   re-check what the original surface was quietly relying on — and make sure every row stays
+   reachable by *some* path.
 
 `type` + `parentId` are reserved for **routines** (a named set of tasks). Nothing writes them today,
 but every query filters `type = 'TASK'` so those rows cannot leak into the task list when they arrive.

@@ -29,18 +29,21 @@ class TasksRepository(
     // ── Reads ──────────────────────────────────────────────────────────────────
 
     /**
-     * Every open task the user should see today, split into the four display sections relative to
-     * [today] and sorted within each. Empty sections are omitted, so the caller can render headers
-     * unconditionally.
+     * Open tasks, split into the four display sections relative to [today] and sorted within each.
+     * Empty sections are omitted, so the caller can render headers unconditionally.
      *
-     * Not every open task is returned: a future-dated task appears only once its reminder window has
-     * opened (see [sectionFor]).
+     * With [gated] left true this is the main list: a future-dated task appears only once its
+     * reminder window has opened (see [sectionFor]). Pass false for the **All** view, which drops
+     * that filter so nothing can be out of reach.
      */
-    suspend fun openSections(today: LocalDate): List<TaskSection> = withContext(Dispatchers.IO) {
+    suspend fun openSections(
+        today: LocalDate,
+        gated: Boolean = true,
+    ): List<TaskSection> = withContext(Dispatchers.IO) {
         val todayDay = today.toEpochDay()
         val open = dao.openTasks()
         TaskSectionKind.entries.mapNotNull { kind ->
-            val rows = open.filter { sectionFor(it, todayDay) == kind }
+            val rows = open.filter { sectionFor(it, todayDay, gated) == kind }
             if (rows.isEmpty()) null else TaskSection(kind, rows.sortedWith(sectionOrder(kind)))
         }
     }
@@ -211,18 +214,36 @@ class TasksRepository(
  * no reminder therefore never appears there. That mirrors how calendar events behave — an event with
  * no reminder is simply not part of the look-ahead.
  *
- * The consequence is deliberate and worth stating plainly: a dated task with no reminder is in **no
- * section at all** until its due date arrives. Unlike an event it has no calendar grid to fall back
- * on, so it is invisible in the meantime. That is the chosen behaviour, not an oversight.
+ * The consequence is deliberate: a dated task with no reminder is in **no section at all** until its
+ * due date arrives, and unlike an event it has no calendar grid to fall back on. The **All** view
+ * ([gated] = false) is the escape hatch that keeps such a task reachable — without it a hidden task
+ * could not be opened, edited, or deleted either.
+ *
+ * With [gated] false every open task lands in a section and this never returns null.
  *
  * A top-level function rather than a repository method so the rule can be exercised directly.
  */
-fun sectionFor(task: TaskEntity, todayEpochDay: Long): TaskSectionKind? {
+fun sectionFor(
+    task: TaskEntity,
+    todayEpochDay: Long,
+    gated: Boolean = true,
+): TaskSectionKind? {
     val due = task.dueEpochDay ?: return TaskSectionKind.NO_DATE
     if (due < todayEpochDay) return TaskSectionKind.OVERDUE
     if (due == todayEpochDay) return TaskSectionKind.TODAY
+    if (!gated) return TaskSectionKind.UPCOMING
     val lead = TaskReminders.leadDays(task) ?: return null
     return if (due - todayEpochDay <= lead) TaskSectionKind.UPCOMING else null
+}
+
+/**
+ * The first day [task] will appear in the main (gated) list — its due day minus its reminder lead, or
+ * null when it is always visible (undated). Drives the "hidden until …" note in the **All** view, so
+ * a task the main list is holding back explains itself rather than looking misfiled.
+ */
+fun visibleFrom(task: TaskEntity): Long? {
+    val due = task.dueEpochDay ?: return null
+    return due - (TaskReminders.leadDays(task) ?: 0)
 }
 
 /** The four buckets the open-task list is grouped into, in display order. */
