@@ -241,7 +241,8 @@ thousands of views on the main thread. That is a bad stall anywhere and a worse 
   inheriting a full-history render forever.
 
 Windowing buys runway; it does not raise the rendering ceiling. If any of the three views starts
-feeling heavy, the fix is a `RecyclerView` — see [Deferred](#deferred).
+feeling heavy, the fix is to **paginate like the library grid**, not to reach for a `RecyclerView` —
+see [Deferred](#deferred).
 
 ### Reminders — what gates *Upcoming*
 
@@ -392,8 +393,22 @@ existing query has to change to stay correct.
   [Events reminders](calendar.md#reminders--paper-like-look-ahead) established holds here too.
 - No notes, time-of-day, or priority field (deliberate v1 scope).
 - No cross-links to notebooks or calendar days.
-- **All three views inflate one view per row into a `LinearLayout` with no recycling.** Windowing the
-  Done view removes the only unbounded source, so nothing is at risk today, but the ceiling is still
-  there — a `RecyclerView` is the fix when any view starts feeling heavy.
+- **All three views inflate one view per row into a `LinearLayout` inside a `ScrollView`.** Windowing
+  the Done view removed the only unbounded source, so nothing is at risk today, but the ceiling is
+  still there: cost is proportional to row count, not to what is on screen.
+
+  **The fix is pagination, matching MainActivity's card grid** (`itemsPerPage` / `renderGridPage` +
+  first/prev/next/last) — *not* a `RecyclerView`. RecyclerView is deliberately not a dependency
+  (`notebook/CustomizeToolbarDialog.kt:27` says so outright), every list in the app is built this same
+  manual way, and adding it would need explicit sign-off under the no-new-dependencies rule. Paging
+  gets the same property that actually matters — render cost proportional to a page, not the whole
+  set — with no dependency, and it suits e-ink better besides: a page turn is one clean repaint,
+  where scrolling on EPD is smeary and smooth-scroll recycling buys little.
+
+  RecyclerView would earn its place only if many screens converged on it at once, or on the non-e-ink
+  targets (iPad / Android tablets / phones / web) where smooth scrolling is the expected idiom.
+- **Every refresh rebuilds the whole list** (`removeAllViews()`), so checking one task off repaints
+  the full screen — visible on EPD. Updating just the changed row's views in place would remove most
+  of that flash without changing the rendering model at all. Small and self-contained if it grates.
 - Resolved rows are never pruned. Deliberate (they are a series' history), but it does mean the table
   grows for the life of the library; the window is what keeps that from mattering.
