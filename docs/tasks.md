@@ -153,9 +153,22 @@ every time.
 full-bleed and no drawing engine at all — so the top guard comes from the live inset
 (`TopGuard.applyInsetPadding`) rather than the fixed reservation the drawing screens use.
 
+**Everything on the screen is relative to *today*, so the day rolling over invalidates all of it**:
+yesterday's tasks become overdue, tomorrow's become today's, and reminder windows open. `onResume`
+recomputes `LocalDate.now()`, which covers closing the app one day and opening it the next. A
+`BroadcastReceiver` on `ACTION_DATE_CHANGED` / `ACTION_TIME_CHANGED` / `ACTION_TIMEZONE_CHANGED`
+(registered in `onResume`, released in `onPause`) covers the case that would otherwise go stale
+indefinitely — the screen left open *across* midnight, easy to do on a device that is never really
+switched off.
+
+Chrome deliberately mirrors the day window's **Events** view — a nav row, then a titled header row
+carrying the one create action:
+
 ```
 ┌──────────────────────────────────────────────┐
-│ ←  │ Tasks │ All │ Done │                 +  │  56dp toolbar
+│ ← │ Today │ All │ Done │      Sat 25 Jul │ ✎ │  56dp nav row
+├──────────────────────────────────────────────┤
+│ Tasks                                     +  │  56dp title row
 ├──────────────────────────────────────────────┤
 │ Overdue                                       │
 │ ☐  Change furnace filter            2d ago    │
@@ -163,11 +176,18 @@ full-bleed and no drawing engine at all — so the top guard comes from the live
 │ ☐  Pay water bill                             │
 │ ☐  Water the ferns    Every day               │
 │ Upcoming                                      │
-│ ☐  Oil change                    Fri 31 Jul   │
+│ ☐  Renew passport                Fri 31 Jul   │
 │ No date                                       │
 │ ☐  Read Gödel Escher Bach                     │
 └──────────────────────────────────────────────┘
 ```
+
+- **The date label is display only.** The list is always relative to the real today, so there is
+  nothing for a picker to scope; it earns its place by saying what "Today" means. A reference-day
+  picker was considered and dropped — projecting the list onto a future date would have had to show
+  tasks as *Overdue* that were not yet late, which is manufactured stress rather than information.
+- **The scratch pad launcher** (`btnTasksScratchpad`) opens the global scratch pad plain, exactly as
+  the calendar's does.
 
 ### Three views
 
@@ -175,11 +195,12 @@ Widening in scope, left to right:
 
 | View | Contents |
 |---|---|
-| **Tasks** *(default)* | every open task **the user should see today**, grouped **Overdue → Today → Upcoming → No date** |
+| **Today** *(default)* | every open task **that matters today**, grouped **Overdue → Today → Upcoming → No date** |
 | **All** | every open task, **ungated** — including ones the reminder window is still hiding |
 | **Done** | completed + skipped tasks, grouped by the day they were resolved (Today / Yesterday / date), newest first |
 
-"Should see today" is doing real work in that first row — see [Reminders](#reminders--what-gates-upcoming).
+"Matters today" is doing real work in that first row — see [Reminders](#reminders--what-gates-upcoming).
+It still carries Overdue and the reminder-window slice of Upcoming: both are things today asks of you.
 **All** is the escape hatch that makes the gate safe: without it a hidden task could not be opened,
 edited, or deleted either. Both open views share `renderOpen` and differ only in the `gated` flag
 passed to `TasksRepository.openSections`.

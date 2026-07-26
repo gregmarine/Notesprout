@@ -1,7 +1,9 @@
 package com.notesprout.android
 
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.graphics.Typeface
 import android.os.Bundle
 import android.view.LayoutInflater
@@ -72,6 +74,9 @@ class TasksActivity : AppCompatActivity() {
     private val dueFmt = DateTimeFormatter.ofPattern("EEE d MMM", Locale.getDefault())
     private val groupFmt = DateTimeFormatter.ofPattern("EEE d MMM yyyy", Locale.getDefault())
 
+    /** The toolbar's today label. Short enough to survive the narrowest bar alongside the toggles. */
+    private val headerFmt = DateTimeFormatter.ofPattern("EEE d MMM", Locale.getDefault())
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityTasksBinding.inflate(layoutInflater)
@@ -88,6 +93,9 @@ class TasksActivity : AppCompatActivity() {
         binding.btnViewAll.setOnClickListener { switchMode(ViewMode.ALL) }
         binding.btnViewDone.setOnClickListener { switchMode(ViewMode.DONE) }
         binding.btnAddTask.setOnClickListener { openEditor(null) }
+        binding.btnTasksScratchpad.setOnClickListener {
+            startActivity(Intent(this, ScratchpadActivity::class.java))
+        }
 
         applyMode()
     }
@@ -95,7 +103,31 @@ class TasksActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         SurfaceStack.markTop(this, surfaceEntry())
+        registerReceiver(dateChangeReceiver, IntentFilter().apply {
+            addAction(Intent.ACTION_DATE_CHANGED)
+            addAction(Intent.ACTION_TIME_CHANGED)
+            addAction(Intent.ACTION_TIMEZONE_CHANGED)
+        })
         refresh()
+    }
+
+    override fun onPause() {
+        super.onPause()
+        runCatching { unregisterReceiver(dateChangeReceiver) }
+    }
+
+    /**
+     * Everything on this screen is relative to *today*, so the day rolling over silently invalidates
+     * the whole list: yesterday's tasks become overdue, tomorrow's become today's, and a reminder
+     * window may have opened.
+     *
+     * Returning to the app re-reads the date anyway ([onResume] recomputes `LocalDate.now()`), which
+     * covers the common case of closing it one day and opening it the next. This covers the case that
+     * would otherwise go stale indefinitely: the screen left open *across* midnight — easy to do on a
+     * device that is never really switched off.
+     */
+    private val dateChangeReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) = refresh()
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
@@ -119,7 +151,7 @@ class TasksActivity : AppCompatActivity() {
         binding.btnViewAll.isSelected = mode == ViewMode.ALL
         binding.btnViewDone.isSelected = mode == ViewMode.DONE
         binding.tasksEmpty.text = when (mode) {
-            ViewMode.OPEN -> "Nothing to do"
+            ViewMode.OPEN -> "Nothing to do today"
             ViewMode.ALL -> "No open tasks"
             ViewMode.DONE -> "Nothing finished yet"
         }
@@ -130,6 +162,7 @@ class TasksActivity : AppCompatActivity() {
     private fun refresh() {
         lifecycleScope.launch {
             val today = LocalDate.now()
+            binding.tvTasksDate.text = today.format(headerFmt)
             when (mode) {
                 ViewMode.OPEN -> renderOpen(repo.openSections(today), today)
                 ViewMode.ALL -> renderOpen(repo.openSections(today, gated = false), today)

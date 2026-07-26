@@ -46,8 +46,8 @@
             android:layout_marginEnd="4dp" />
 
         <!--
-            View toggles, widening in scope left to right: what needs attention now → every open
-            task, including ones their reminder window is still hiding → the resolved history.
+            View toggles, widening in scope left to right: what matters today → every open task,
+            including ones their reminder window is still hiding → the resolved history.
 
             "All" exists because the reminder gate can otherwise put a task out of reach entirely:
             a hidden task cannot be opened, edited, or deleted, and unlike an event it has no
@@ -56,8 +56,8 @@
         <androidx.appcompat.widget.AppCompatButton
             android:id="@+id/btnViewOpen"
             style="@style/Widget.Notesprout.ToggleTextButton"
-            android:text="Tasks"
-            android:contentDescription="Tasks needing attention" />
+            android:text="Today"
+            android:contentDescription="What matters today" />
 
         <androidx.appcompat.widget.AppCompatButton
             android:id="@+id/btnViewAll"
@@ -73,11 +73,65 @@
             android:text="Done"
             android:contentDescription="Completed and skipped tasks" />
 
-        <!-- Spacer — pushes the add button to the trailing edge. -->
+        <!-- Spacer — pushes the date + scratch pad to the trailing edge. -->
         <View
             android:layout_width="0dp"
             android:layout_weight="1"
             android:layout_height="1dp" />
+
+        <!--
+            Today's date. Display only — the list is always relative to the real today, so there is
+            nothing for a picker to scope. It earns its place by saying what "Today" means, which
+            matters on a screen that can sit open across midnight (see TasksActivity's date-change
+            receiver).
+        -->
+        <TextView
+            android:id="@+id/tvTasksDate"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="8dp"
+            android:layout_marginEnd="8dp"
+            android:textSize="16sp"
+            android:textStyle="bold"
+            android:textColor="@color/inkBlack"
+            android:singleLine="true"
+            android:ellipsize="end"
+            android:text="" />
+
+        <View
+            android:layout_width="1dp"
+            android:layout_height="28dp"
+            android:background="@color/inkBlack"
+            android:layout_marginStart="4dp"
+            android:layout_marginEnd="4dp" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnTasksScratchpad"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:src="@drawable/ic_sketching"
+            android:contentDescription="Scratch Pad" />
+    </LinearLayout>
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="@color/inkBlack" />
+
+    <!-- Title bar: the screen's name and its one create action, mirroring the Events header. -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="56dp"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingStart="16dp"
+        android:paddingEnd="12dp">
+
+        <TextView
+            style="@style/TextAppearance.Notesprout.TitleLarge"
+            android:layout_width="0dp"
+            android:layout_weight="1"
+            android:layout_height="wrap_content"
+            android:text="Tasks" />
 
         <androidx.appcompat.widget.AppCompatImageButton
             android:id="@+id/btnAddTask"
