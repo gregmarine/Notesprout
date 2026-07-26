@@ -4,6 +4,7 @@ import com.notesprout.android.data.index.NotesproutIndex
 import com.notesprout.android.data.index.TaskDao
 import com.notesprout.android.data.index.TaskEntity
 import com.notesprout.android.data.tasks.TaskRecurrence
+import com.notesprout.android.data.tasks.TaskReminders
 import com.notesprout.android.data.tasks.TaskRowType
 import com.notesprout.android.data.tasks.TaskState
 import kotlinx.coroutines.Dispatchers
@@ -28,14 +29,18 @@ class TasksRepository(
     // ── Reads ──────────────────────────────────────────────────────────────────
 
     /**
-     * Every open task, split into the four display sections relative to [today] and sorted within
-     * each. Empty sections are omitted, so the caller can render headers unconditionally.
+     * Every open task the user should see today, split into the four display sections relative to
+     * [today] and sorted within each. Empty sections are omitted, so the caller can render headers
+     * unconditionally.
+     *
+     * Not every open task is returned: a future-dated task appears only once its reminder window has
+     * opened (see [sectionFor]).
      */
     suspend fun openSections(today: LocalDate): List<TaskSection> = withContext(Dispatchers.IO) {
         val todayDay = today.toEpochDay()
         val open = dao.openTasks()
         TaskSectionKind.entries.mapNotNull { kind ->
-            val rows = open.filter { sectionOf(it, todayDay) == kind }
+            val rows = open.filter { sectionFor(it, todayDay) == kind }
             if (rows.isEmpty()) null else TaskSection(kind, rows.sortedWith(sectionOrder(kind)))
         }
     }
@@ -170,15 +175,6 @@ class TasksRepository(
         )
     }
 
-    private fun sectionOf(task: TaskEntity, todayDay: Long): TaskSectionKind {
-        val due = task.dueEpochDay ?: return TaskSectionKind.NO_DATE
-        return when {
-            due < todayDay -> TaskSectionKind.OVERDUE
-            due == todayDay -> TaskSectionKind.TODAY
-            else -> TaskSectionKind.UPCOMING
-        }
-    }
-
     private fun sectionOrder(kind: TaskSectionKind): Comparator<TaskEntity> =
         if (kind == TaskSectionKind.NO_DATE) {
             compareBy<TaskEntity> { it.createdAt }.thenBy(String.CASE_INSENSITIVE_ORDER) { it.title }
@@ -204,6 +200,29 @@ class TasksRepository(
             )
         }
     }
+}
+
+/**
+ * Which section [task] belongs in on the day [todayEpochDay] — or **null when it should not be shown
+ * at all yet**.
+ *
+ * Overdue, today's, and undated tasks are always visible. A **future-dated** task is gated on its
+ * look-ahead reminder: it appears in *Upcoming* only from `due − leadDays` onwards, and a task with
+ * no reminder therefore never appears there. That mirrors how calendar events behave — an event with
+ * no reminder is simply not part of the look-ahead.
+ *
+ * The consequence is deliberate and worth stating plainly: a dated task with no reminder is in **no
+ * section at all** until its due date arrives. Unlike an event it has no calendar grid to fall back
+ * on, so it is invisible in the meantime. That is the chosen behaviour, not an oversight.
+ *
+ * A top-level function rather than a repository method so the rule can be exercised directly.
+ */
+fun sectionFor(task: TaskEntity, todayEpochDay: Long): TaskSectionKind? {
+    val due = task.dueEpochDay ?: return TaskSectionKind.NO_DATE
+    if (due < todayEpochDay) return TaskSectionKind.OVERDUE
+    if (due == todayEpochDay) return TaskSectionKind.TODAY
+    val lead = TaskReminders.leadDays(task) ?: return null
+    return if (due - todayEpochDay <= lead) TaskSectionKind.UPCOMING else null
 }
 
 /** The four buckets the open-task list is grouped into, in display order. */

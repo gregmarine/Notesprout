@@ -74,6 +74,56 @@
                 android:contentDescription="Clear due date" />
         </LinearLayout>
 
+        <!-- Remind me — a paper-like look-ahead, not a notification. It is the only thing that puts
+             a future task in the Upcoming section, so the hint below says so out loud: without one,
+             a dated task stays out of sight until the day it is due. -->
+        <LinearLayout
+            android:id="@+id/grpTaskRemind"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:visibility="gone">
+
+            <TextView
+                style="@style/TextAppearance.Notesprout.TitleMedium"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_height="wrap_content"
+                android:text="Remind me" />
+
+            <androidx.appcompat.widget.AppCompatEditText
+                android:id="@+id/etTaskRemindAmount"
+                android:layout_width="64dp"
+                android:layout_height="wrap_content"
+                android:background="@drawable/shape_bordered"
+                android:padding="8dp"
+                android:gravity="center"
+                android:inputType="number"
+                android:maxLength="3"
+                android:textColor="@color/inkBlack"
+                android:textColorHint="@color/inkLight"
+                android:hint="—" />
+
+            <androidx.appcompat.widget.AppCompatSpinner
+                android:id="@+id/spTaskRemindUnit"
+                android:layout_width="130dp"
+                android:layout_height="48dp"
+                android:layout_marginStart="8dp"
+                android:background="@drawable/shape_bordered" />
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/tvTaskRemindHint"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:textSize="12sp"
+            android:textColor="@color/inkLight"
+            android:visibility="gone"
+            android:text="Leave blank and this task stays out of the list until the day it is due." />
+
         <!-- Divider -->
         <View
             android:layout_width="match_parent"

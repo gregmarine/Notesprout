@@ -543,6 +543,8 @@ CREATE TABLE tasks (
     recurEndMode     TEXT,              -- NEVER | UNTIL | COUNT
     recurEndEpochDay INTEGER,
     recurEndCount    INTEGER,
+    remindAmount     INTEGER,           -- look-ahead lead time; NULL = no reminder (v10)
+    remindUnit       TEXT,              -- DAYS | WEEKS                             (v10)
     resolvedAt       INTEGER,           -- ms the row was completed/skipped
     createdAt        INTEGER NOT NULL,
     updatedAt        INTEGER NOT NULL,
@@ -561,7 +563,13 @@ The lesson generalizes past this schema: *expansion forces a payload; materializ
 Which model to pick is a product question (a calendar wants to show every future occurrence at once; a
 to-do list wants exactly one), and the storage shape follows from it rather than the reverse.
 
-Two more semantics lessons, both paid for in this table:
+**A reminder is one lead time, not a list.** Events carry a set of them; tasks carry a single value in
+two columns. That is not a reduced feature — the surfacing rule is "visible on every day from
+`due − lead` onwards", so N reminders are exactly equivalent to their maximum and only the largest can
+ever have an effect. Worth checking before modelling any look-ahead as a collection: if the rule is a
+threshold rather than a set of discrete firings, a set buys nothing and costs a child-row table.
+
+Three more semantics lessons, all paid for in this table:
 
 1. **A count is a count of rows, not of calendar positions.** Resolving COUNT the way the events
    engine does — enumerate the first *N* valid dates — silently truncates a materialized series the
@@ -571,6 +579,11 @@ Two more semantics lessons, both paid for in this table:
 2. **A recurrence look-ahead bound that is too tight does not error — it silently ends the series.**
    Size it per frequency *and* interval, generously: monthly-on-the-31st must clear a 59-day gap
    (Jan 31 → Mar 31), and yearly-on-Feb-29 must reach eight years to clear a skipped century.
+3. **A visibility rule borrowed from another surface inherits that surface's assumptions.** Gating the
+   list on a reminder is exactly how events behave — but an event that fails the gate is still drawn
+   on the calendar grid, and a task has no second view. The same rule therefore makes a task
+   *unreachable* rather than merely un-highlighted. Copy the rule, but re-check what the original
+   surface was quietly relying on.
 
 `type` + `parentId` are reserved for **routines** (a named set of tasks). Nothing writes them today,
 but every query filters `type = 'TASK'` so those rows cannot leak into the task list when they arrive.
@@ -593,6 +606,7 @@ A greenfield implementation that does not need routines can drop both columns.
 | 7 | `objects` gains `pageCount`, `flags`, `keyScope`, `lastBackedUpLocal`, `lastBackedUpDrive`, `width`, `height`, `blob` | 8 × `ALTER TABLE … ADD COLUMN` |
 | 8 | `objects` gains `refId`, `sortOrder` (list membership as child rows) | 2 × `ALTER TABLE … ADD COLUMN` |
 | 9 | `+ tasks` table (fully columnar — no `data` payload) | `CREATE TABLE IF NOT EXISTS` |
+| 10 | `tasks` gains `remindAmount`, `remindUnit` (look-ahead reminder) | 2 × `ALTER TABLE … ADD COLUMN` |
 
 **Every migration is additive and rewrites zero rows.** Nullable columns and
 `CREATE TABLE IF NOT EXISTS`, nothing else. Data conversion happens lazily on write plus an optional

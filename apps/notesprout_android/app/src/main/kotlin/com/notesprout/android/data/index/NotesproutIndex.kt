@@ -147,6 +147,7 @@ object NotesproutIndex {
                 NotesproutDatabase.MIGRATION_6_7,
                 NotesproutDatabase.MIGRATION_7_8,
                 NotesproutDatabase.MIGRATION_8_9,
+                NotesproutDatabase.MIGRATION_9_10,
             )
         // Plaintext opens (factory == null — the one-time upgrade path) must be wrapped too:
         // Room's default framework helper DELETES the database on a corruption report, and this

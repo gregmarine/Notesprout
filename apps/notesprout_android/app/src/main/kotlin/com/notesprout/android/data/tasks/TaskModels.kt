@@ -1,5 +1,8 @@
 package com.notesprout.android.data.tasks
 
+import com.notesprout.android.data.events.ReminderUnit
+import com.notesprout.android.data.index.TaskEntity
+
 /**
  * Value types for the `tasks` table. Deliberately **plain enums, not `@Serializable`** — the task
  * row is fully columnar, so these are stored by [Enum.name] in a TEXT column and nothing here is
@@ -56,4 +59,33 @@ object TaskWeekdays {
         val m = mask ?: return emptyList()
         return (1..7).filter { m and (1 shl (it - 1)) != 0 }
     }
+}
+
+/**
+ * The look-ahead reminder on a task: how many days before its due date it starts appearing in the
+ * *Upcoming* section.
+ *
+ * Like the calendar's reminders this is **not** a notification — no alarms, no receivers, nothing
+ * that interrupts. It only decides when a task becomes visible in a list the user chooses to open.
+ * Weeks are stored distinct from days purely so the editor can say "1 week" rather than "7 days";
+ * [leadDays] collapses both for the window math.
+ */
+object TaskReminders {
+
+    /** The reminder's lead time in whole days, or null when the task has no reminder. */
+    fun leadDays(task: TaskEntity): Int? {
+        val amount = task.remindAmount?.takeIf { it >= 1 } ?: return null
+        return amount * if (unitOf(task.remindUnit) == ReminderUnit.WEEKS) 7 else 1
+    }
+
+    /** Editor-facing label, e.g. "1 week before" / "3 days before". Null when there is no reminder. */
+    fun label(task: TaskEntity): String? {
+        val amount = task.remindAmount?.takeIf { it >= 1 } ?: return null
+        val unit = unitOf(task.remindUnit)
+        return "$amount ${if (amount == 1) unit.label else unit.labelPlural} before"
+    }
+
+    /** Safe parse of a stored unit name; unknown / legacy values read as [ReminderUnit.DAYS]. */
+    fun unitOf(name: String?): ReminderUnit =
+        ReminderUnit.entries.firstOrNull { it.name == name } ?: ReminderUnit.DAYS
 }

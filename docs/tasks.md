@@ -13,9 +13,10 @@ schema leaves room for it but nothing depends on it.
 
 ## Data model — `tasks` table in `notesprout.db`
 
-Room migration 8 → 9 (`MIGRATION_8_9`). Unlike [`events`](global-index-format.md#events--the-one-table-that-is-not-universal-row-shaped)
-this table is **fully columnar**: the recurrence rule lives in typed columns and there is **no `data`
-payload**, so nothing in it is ever JSON.
+Room migration 8 → 9 (`MIGRATION_8_9`), plus 9 → 10 (`MIGRATION_9_10`) for the reminder columns.
+Unlike [`events`](global-index-format.md#events--a-bespoke-query-optimized-table) this table is
+**fully columnar**: the recurrence rule lives in typed columns and there is **no `data` payload**, so
+nothing in it is ever JSON.
 
 ```sql
 CREATE TABLE tasks (
@@ -36,6 +37,8 @@ CREATE TABLE tasks (
     recurEndMode     TEXT,              -- NEVER | UNTIL | COUNT
     recurEndEpochDay INTEGER,
     recurEndCount    INTEGER,
+    remindAmount     INTEGER,           -- look-ahead lead; NULL = no reminder (added v10)
+    remindUnit       TEXT,              -- DAYS | WEEKS                        (added v10)
     resolvedAt       INTEGER,           -- ms the row went DONE or SKIPPED; NULL while NOT_DONE
     createdAt        INTEGER NOT NULL,
     updatedAt        INTEGER NOT NULL,
@@ -170,9 +173,10 @@ full-bleed and no drawing engine at all — so the top guard comes from the live
 
 | View | Contents |
 |---|---|
-| **Tasks** *(default)* | every open task, grouped **Overdue → Today → Upcoming → No date** |
+| **Tasks** *(default)* | every open task **the user should see today**, grouped **Overdue → Today → Upcoming → No date** |
 | **Done** | completed + skipped tasks, grouped by the day they were resolved (Today / Yesterday / date), newest first |
 
+"Should see today" is doing real work in that first row — see [Reminders](#reminders--what-gates-upcoming).
 Empty sections are omitted entirely (`TasksRepository.openSections`), so checking off the last task
 of a section makes the header disappear with it. Sort within a section is due day ascending then
 title, case-insensitive; **No date** sorts by `createdAt`. Section headers reuse the Events list's
@@ -181,6 +185,47 @@ treatment (bold `inkBlack` 13sp) so the two lists read as one family.
 The trailing date label is relative and deliberately quiet: nothing at all inside **Today** (the
 header already says it) or for an undated task, "Yesterday" / "*N*d ago" when overdue, "Tomorrow"
 then a formatted date when upcoming.
+
+### Reminders — what gates *Upcoming*
+
+A **reminder** is a per-task lead time (`remindAmount` + `remindUnit`) that decides **how far ahead of
+its due date a task becomes visible**. It is **not** a notification: no `AlarmManager`, no
+`POST_NOTIFICATIONS`, no receivers, nothing that interrupts. It is purely a query, exactly like the
+calendar's [Events reminders](calendar.md#reminders--paper-like-look-ahead) — the user only ever sees
+it by *looking*.
+
+The whole surfacing rule is `sectionFor(task, todayEpochDay)` in `TasksRepository.kt`, a top-level
+function so it can be exercised directly (`TaskSectioningTest`):
+
+| Task | Shown? |
+|---|---|
+| Undated | always, in **No date** |
+| Due today | always, in **Today** |
+| Overdue | always, in **Overdue** |
+| Due later, `due − lead ≤ today` | in **Upcoming** |
+| Due later, window not open yet | **not shown** |
+| Due later, **no reminder at all** | **never shown until it is due** |
+
+Once the window opens the task stays visible every day until its due date, when it graduates to
+**Today**.
+
+> **The last row of that table is the one to understand.** A dated task with no reminder is in *no
+> section at all* until its due date arrives — it is invisible, and while invisible it also cannot be
+> opened, edited, or deleted from this screen. Unlike an event it has no calendar grid to fall back
+> on; the list is the only view a task has.
+>
+> This is the deliberate, chosen behaviour — strict parity with how events treat the look-ahead — not
+> an oversight. The editor says so inline ("Leave blank and this task stays out of the list until the
+> day it is due") because it is the single most surprising thing the screen does.
+
+**One lead time, not a list.** An event carries several reminders; a task carries one. That loses
+nothing: the rule is "visible on every day from `due − lead` onwards", so N reminders behave exactly
+like their maximum and only the largest could ever have an effect. Storing one keeps the table
+columnar with two columns instead of needing a child-row table for a set.
+
+The reminder rides on the row, so a recurring task's successor inherits it through the same
+`task.copy(…)` that carries the rule. Clearing the due date clears the reminder with it — a lead time
+is measured back from a due date, so an undated task cannot carry one.
 
 ### Interaction
 
@@ -211,7 +256,8 @@ already acted on later occurrences, nothing changes and the caller Toasts
 
 ### Editor — `TaskEditorDialog`
 
-Title, an optional due date via the shared [`DayPickerDialog`](calendar.md#date-picker), and the
+Title, an optional due date via the shared [`DayPickerDialog`](calendar.md#date-picker), the
+[reminder](#reminders--what-gates-upcoming) (a blank amount means none), and the
 recurrence builder ported from [`EventEditorDialog`](calendar.md#repository--ui) (frequency, "every
 N", weekly weekday toggles, monthly day-vs-ordinal, ends Never / on a date / after N). Standard e-ink
 dialog treatment: `shape_dialog_bordered`, `setElevation(0f)`. Delete appears only when editing.
@@ -222,8 +268,9 @@ gets a fresh series anchored on its due day; and **moving an existing recurring 
 re-anchors it**, so a rescheduled "every 3 days" continues from the new date rather than snapping
 back to the old phase grid.
 
-**A recurring task must be anchored to a day**, so the whole builder is replaced by a one-line
-explanation until a due date is set — better than letting the user assemble a rule that silently
+**A recurring task must be anchored to a day** — and so is a reminder, which is a lead time measured
+back from one — so both blocks are gated on the due date: the recurrence builder is replaced by a
+one-line explanation and the reminder row is hidden entirely until a due date is set — better than letting the user assemble a rule that silently
 cannot be saved. Clearing the due date drops the rule rather than keeping a hidden one that would
 spring back. A weekday set equal to just the anchor's own day is stored as **mask 0**, so moving the
 due date carries the rule with it.
@@ -284,4 +331,8 @@ existing query has to change to stay correct.
 - No notifications or alarms of any kind — the paper-planner model the
   [Events reminders](calendar.md#reminders--paper-like-look-ahead) established holds here too.
 - No notes, time-of-day, or priority field (deliberate v1 scope).
+- **No way to see or reach a task whose reminder window has not opened** (or that has no reminder). If
+  that becomes a problem in daily use, the options are a third "All" toggle, a collapsed "Later"
+  section, or defaulting new dated tasks to a reminder — none of which change the `sectionFor` rule
+  itself.
 - No cross-links to notebooks or calendar days.

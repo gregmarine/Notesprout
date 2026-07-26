@@ -55,7 +55,7 @@ CREATE INDEX index_objects_parentId_type_deletedAt
 `sortOrder` = position), plus the `CLIPBOARD` and `BACKUP_CONFIG` singleton rows (payload stays JSON
 in `data`, by design). Sentinel ids live in `ListIds.kt`.
 
-### Auxiliary tables (same `notesprout.db`, Room `version = 9`)
+### Auxiliary tables (same `notesprout.db`, Room `version = 10`)
 
 Beyond `objects`, the global index DB holds several auxiliary tables. **The index itself is
 SQLCipher-encrypted at rest** under the global passphrase (encrypt-everything-by-default) — see
@@ -75,8 +75,9 @@ serializer works unchanged.
 - **`tasks`** — added in `MIGRATION_8_9`; the task manager's to-do items. Own column schema and
   **fully columnar — no `data` payload at all**, because a task series materializes its occurrences as
   real rows instead of expanding them at read time (so there is no exception list to store). Every
-  query filters `type = 'TASK'`, reserving `type`/`parentId` for routines. See
-  [`docs/tasks.md`](tasks.md).
+  query filters `type = 'TASK'`, reserving `type`/`parentId` for routines. `MIGRATION_9_10` adds the
+  look-ahead reminder columns (`remindAmount`/`remindUnit`), which gate whether a future-dated task
+  appears in the list at all. See [`docs/tasks.md`](tasks.md).
 
 `MIGRATION_5_6` / `MIGRATION_6_7` / `MIGRATION_7_8` widen existing tables rather than adding new ones:
 `scratchpad` + `calendar` gain the same columnar columns + `blob` as the `.soil` table; `objects`

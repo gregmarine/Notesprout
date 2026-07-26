@@ -13,8 +13,10 @@ import com.notesprout.android.data.TasksRepository
 import com.notesprout.android.data.events.EndMode
 import com.notesprout.android.data.events.Freq
 import com.notesprout.android.data.events.MonthlyMode
+import com.notesprout.android.data.events.ReminderUnit
 import com.notesprout.android.data.index.TaskEntity
 import com.notesprout.android.data.tasks.TaskRecurrence
+import com.notesprout.android.data.tasks.TaskReminders
 import com.notesprout.android.data.tasks.TaskWeekdays
 import com.notesprout.android.databinding.DialogTaskEditorBinding
 import java.time.LocalDate
@@ -35,6 +37,7 @@ object TaskEditorDialog {
 
     private val REPEAT_LABELS = listOf("Does not repeat", "Daily", "Weekly", "Monthly", "Yearly")
     private val END_LABELS = listOf("Never", "On a date", "After a number of times")
+    private val REMIND_UNIT_LABELS = listOf("days before", "weeks before")
 
     private val dateFmt = DateTimeFormatter.ofPattern("EEE d MMM yyyy", Locale.getDefault())
 
@@ -75,10 +78,13 @@ object TaskEditorDialog {
 
             // A recurring task has to be anchored to a day, or there is no series to walk. Rather
             // than let the user build a rule that silently cannot be saved, the whole builder is
-            // replaced by a one-line explanation until a due date exists.
+            // replaced by a one-line explanation until a due date exists. The reminder is gated on
+            // the same thing — a lead time is measured back from a due date.
             val dated = dueDate != null
             b.spTaskRepeat.isVisible = dated
             b.tvTaskRepeatNeedsDate.isVisible = !dated
+            b.grpTaskRemind.isVisible = dated
+            b.tvTaskRemindHint.isVisible = dated
 
             val freq = repeatFreq().takeIf { dated }
             val repeats = freq != null
@@ -110,6 +116,12 @@ object TaskEditorDialog {
         // ── Initial selection (before listeners, so we don't clobber loaded values) ──
         b.spTaskRepeat.attach(activity, REPEAT_LABELS)
         b.spTaskEnd.attach(activity, END_LABELS)
+        b.spTaskRemindUnit.attach(activity, REMIND_UNIT_LABELS)
+        b.spTaskRemindUnit.setSelection(
+            if (TaskReminders.unitOf(base.remindUnit) == ReminderUnit.WEEKS) 1 else 0
+        )
+        // Blank = no reminder, which is why the field has a "—" hint rather than a default value.
+        b.etTaskRemindAmount.setText(base.remindAmount?.takeIf { it >= 1 }?.toString() ?: "")
         b.spTaskRepeat.setSelection(
             when (TaskRecurrence.freqOf(base.recurFreq)) {
                 Freq.DAILY -> 1; Freq.WEEKLY -> 2; Freq.MONTHLY -> 3; Freq.YEARLY -> 4; null -> 0
@@ -170,6 +182,10 @@ object TaskEditorDialog {
         fun build(): TaskEntity {
             val due = dueDate
             val freq = repeatFreq().takeIf { due != null }
+            // A reminder only means anything measured back from a due date; an undated task drops it.
+            val remindAmount = b.etTaskRemindAmount.text?.toString()?.trim()
+                ?.toIntOrNull()?.coerceIn(1, 999)
+                ?.takeIf { due != null }
             val endMode = when (b.spTaskEnd.selectedItemPosition) {
                 1 -> EndMode.UNTIL; 2 -> EndMode.COUNT; else -> EndMode.NEVER
             }
@@ -194,6 +210,11 @@ object TaskEditorDialog {
                 recurEndCount = if (freq != null && endMode == EndMode.COUNT) {
                     b.etTaskCount.text?.toString()?.toIntOrNull()?.coerceAtLeast(1) ?: 1
                 } else null,
+                remindAmount = remindAmount,
+                remindUnit = remindAmount?.let {
+                    if (b.spTaskRemindUnit.selectedItemPosition == 1) ReminderUnit.WEEKS.name
+                    else ReminderUnit.DAYS.name
+                },
                 updatedAt = System.currentTimeMillis(),
             )
         }

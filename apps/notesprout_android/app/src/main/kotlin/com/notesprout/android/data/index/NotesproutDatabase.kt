@@ -15,7 +15,7 @@ import com.notesprout.android.data.SoilSchema
         EventEntity::class,
         TaskEntity::class,
     ],
-    version = 9,
+    version = 10,
     exportSchema = false,
 )
 abstract class NotesproutDatabase : RoomDatabase() {
@@ -229,6 +229,19 @@ abstract class NotesproutDatabase : RoomDatabase() {
                 db.execSQL("CREATE INDEX IF NOT EXISTS index_tasks_seriesId ON tasks(seriesId)")
                 db.execSQL("CREATE INDEX IF NOT EXISTS index_tasks_parentId ON tasks(parentId)")
                 db.execSQL("CREATE INDEX IF NOT EXISTS index_tasks_deletedAt ON tasks(deletedAt)")
+            }
+        }
+
+        /**
+         * Tasks gain a look-ahead reminder: how far ahead of its due date a task starts appearing in
+         * the *Upcoming* section. Two additive nullable columns rather than a child-row table,
+         * because a task carries a single lead time (see [TaskEntity.remindAmount] for why one is
+         * equivalent to a set here).
+         */
+        val MIGRATION_9_10 = object : Migration(9, 10) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE tasks ADD COLUMN \"remindAmount\" INTEGER")
+                db.execSQL("ALTER TABLE tasks ADD COLUMN \"remindUnit\" TEXT")
             }
         }
 

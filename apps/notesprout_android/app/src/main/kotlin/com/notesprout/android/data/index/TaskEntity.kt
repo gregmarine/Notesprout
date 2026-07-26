@@ -119,6 +119,25 @@ data class TaskEntity(
     @ColumnInfo(name = "recurEndCount")
     val recurEndCount: Int? = null,
 
+    // ── Reminder (look-ahead lead time) ────────────────────────────────────────
+
+    /**
+     * How far ahead of [dueEpochDay] this task starts appearing in the *Upcoming* section, as
+     * `amount` × [remindUnit]. Null = no reminder, and a task with no reminder **never** appears in
+     * Upcoming (see `TasksRepository.sectionFor`).
+     *
+     * A single lead time, where an event carries a *list* of them. That is not a lost feature: the
+     * surfacing rule is "visible on every day from `due − lead` onwards", so N reminders behave
+     * exactly like their maximum, and only the largest can ever have an effect. Storing one keeps the
+     * table columnar with two columns instead of needing a child-row table for a set.
+     */
+    @ColumnInfo(name = "remindAmount")
+    val remindAmount: Int? = null,
+
+    /** `DAYS` | `WEEKS` — matching [com.notesprout.android.data.events.ReminderUnit]. */
+    @ColumnInfo(name = "remindUnit")
+    val remindUnit: String? = null,
+
     // ── Lifecycle ──────────────────────────────────────────────────────────────
 
     /** Wall-clock ms the row went DONE or SKIPPED; null while NOT_DONE. */
