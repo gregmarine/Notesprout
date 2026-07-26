@@ -6,6 +6,7 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.graphics.Typeface
 import android.os.Bundle
+import android.view.Gravity
 import android.view.LayoutInflater
 import android.widget.LinearLayout
 import android.widget.TextView
@@ -16,7 +17,7 @@ import androidx.core.view.isVisible
 import androidx.lifecycle.lifecycleScope
 import com.notesprout.android.core.TopGuard
 import com.notesprout.android.data.ReopenOutcome
-import com.notesprout.android.data.ResolvedGroup
+import com.notesprout.android.data.ResolvedPage
 import com.notesprout.android.data.TaskSection
 import com.notesprout.android.data.TasksRepository
 import com.notesprout.android.data.visibleFrom
@@ -67,6 +68,9 @@ class TasksActivity : AppCompatActivity() {
     private val repo by lazy { TasksRepository() }
 
     private var mode = ViewMode.OPEN
+
+    /** Done view: whether the user has asked past the default window. Reset on leaving the view. */
+    private var doneShowAll = false
 
     /** This Activity instance's identity on the [SurfaceStack]. */
     private var surfaceToken: String = ""
@@ -140,6 +144,9 @@ class TasksActivity : AppCompatActivity() {
     private fun switchMode(next: ViewMode) {
         if (mode == next) return
         mode = next
+        // Leaving Done drops the expansion: the next visit starts cheap again, rather than silently
+        // inheriting a full-history render forever because it was expanded once.
+        doneShowAll = false
         applyMode()
         refresh()
     }
@@ -163,7 +170,7 @@ class TasksActivity : AppCompatActivity() {
             when (mode) {
                 ViewMode.OPEN -> renderOpen(repo.openSections(today), today)
                 ViewMode.ALL -> renderOpen(repo.openSections(today, gated = false), today)
-                ViewMode.DONE -> renderDone(repo.resolvedGroups())
+                ViewMode.DONE -> renderDone(repo.resolvedGroups(today, doneShowAll), today)
             }
         }
     }
@@ -178,15 +185,43 @@ class TasksActivity : AppCompatActivity() {
         }
     }
 
-    private fun renderDone(groups: List<ResolvedGroup>) {
+    private fun renderDone(page: ResolvedPage, today: LocalDate) {
         val inflater = LayoutInflater.from(this)
         binding.tasksList.removeAllViews()
-        binding.tasksEmpty.isVisible = groups.isEmpty()
-        val today = LocalDate.now()
-        for ((index, group) in groups.withIndex()) {
+        // Only truly empty when nothing is being withheld — otherwise "Nothing finished yet" would
+        // be a lie told to someone with a year of finished tasks just out of frame.
+        binding.tasksEmpty.isVisible = page.groups.isEmpty() && page.olderCount == 0
+        for ((index, group) in page.groups.withIndex()) {
             addSectionHeader(resolvedGroupLabel(group.date, today), topGap = index > 0)
             for (task in group.tasks) addTaskRow(inflater, task, dueLabel = null)
         }
+        if (page.olderCount > 0) addShowEarlierRow(page.olderCount, anythingAbove = page.groups.isNotEmpty())
+    }
+
+    /**
+     * The way past the Done view's window. Shown only when something is actually behind it, and
+     * labelled with the count so the tap has a known cost — this is the control that can turn a
+     * cheap render into a few thousand inflated rows.
+     */
+    private fun addShowEarlierRow(olderCount: Int, anythingAbove: Boolean) {
+        val row = TextView(this).apply {
+            text = if (anythingAbove) {
+                "Show $olderCount earlier"
+            } else {
+                "Nothing finished in the last ${TasksRepository.DONE_WINDOW_DAYS} days · show $olderCount earlier"
+            }
+            setTextColor(ContextCompat.getColor(this@TasksActivity, R.color.inkBlack))
+            textSize = 14f
+            gravity = Gravity.CENTER
+            minHeight = dp(44)
+            setPadding(dp(12), dp(12), dp(12), dp(12))
+            setBackgroundResource(R.drawable.shape_bordered)
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT,
+            ).apply { topMargin = dp(if (anythingAbove) 10 else 0) }
+            setOnClickListener { doneShowAll = true; refresh() }
+        }
+        binding.tasksList.addView(row)
     }
 
     private fun addTaskRow(inflater: LayoutInflater, task: TaskEntity, dueLabel: String?) {

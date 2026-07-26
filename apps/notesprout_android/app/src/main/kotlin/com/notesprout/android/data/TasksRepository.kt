@@ -48,13 +48,36 @@ class TasksRepository(
         }
     }
 
-    /** Completed + skipped tasks grouped by the day they were resolved, most recent day first. */
-    suspend fun resolvedGroups(): List<ResolvedGroup> = withContext(Dispatchers.IO) {
-        dao.resolvedTasks()
+    /**
+     * Completed + skipped tasks grouped by the day they were resolved, most recent day first.
+     *
+     * Windowed to the last [DONE_WINDOW_DAYS] days unless [showAll]. Resolved rows are never pruned —
+     * they are a recurring series' history — so the set grows for the life of the library, and the
+     * view renders one inflated row each with no recycling. The window keeps the common case cheap;
+     * [ResolvedPage.olderCount] tells the caller whether anything is being held back, so the escape
+     * hatch only appears when it would do something.
+     */
+    suspend fun resolvedGroups(
+        today: LocalDate,
+        showAll: Boolean = false,
+    ): ResolvedPage = withContext(Dispatchers.IO) {
+        val rows: List<TaskEntity>
+        val olderCount: Int
+        if (showAll) {
+            rows = dao.resolvedTasks()
+            olderCount = 0
+        } else {
+            val since = today.minusDays(DONE_WINDOW_DAYS)
+                .atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
+            rows = dao.resolvedTasksSince(since)
+            olderCount = dao.countResolvedBefore(since)
+        }
+        val groups = rows
             .groupBy { dayOf(it.resolvedAt ?: it.updatedAt) }
             .entries
             .sortedByDescending { it.key }
-            .map { (date, rows) -> ResolvedGroup(date, rows) }
+            .map { (date, tasks) -> ResolvedGroup(date, tasks) }
+        ResolvedPage(groups, olderCount)
     }
 
     suspend fun get(id: String): TaskEntity? = withContext(Dispatchers.IO) { dao.get(id) }
@@ -190,6 +213,13 @@ class TasksRepository(
         Instant.ofEpochMilli(epochMillis).atZone(ZoneId.systemDefault()).toLocalDate()
 
     companion object {
+        /**
+         * How far back the Done view reaches before asking. Long enough that "what did I get through
+         * lately" is always answered without a tap, short enough that the row count stays trivial
+         * even with several daily recurring tasks.
+         */
+        const val DONE_WINDOW_DAYS = 30L
+
         /** A blank Not-done task, ready for the editor to fill in. */
         fun blank(): TaskEntity {
             val now = System.currentTimeMillis()
@@ -259,6 +289,12 @@ data class TaskSection(val kind: TaskSectionKind, val tasks: List<TaskEntity>)
 
 /** One day's worth of resolved tasks in the Done view. */
 data class ResolvedGroup(val date: LocalDate, val tasks: List<TaskEntity>)
+
+/**
+ * A page of the Done view: the [groups] to render, and how many resolved tasks fall before the
+ * window ([olderCount], 0 when nothing is held back or everything is already shown).
+ */
+data class ResolvedPage(val groups: List<ResolvedGroup>, val olderCount: Int)
 
 /** What [TasksRepository.reopen] actually did. */
 enum class ReopenOutcome {

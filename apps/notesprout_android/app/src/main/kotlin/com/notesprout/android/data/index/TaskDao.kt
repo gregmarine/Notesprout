@@ -28,12 +28,40 @@ interface TaskDao {
     )
     suspend fun openTasks(): List<TaskEntity>
 
-    /** Completed + skipped tasks, most recently resolved first. */
+    /**
+     * Completed + skipped tasks, most recently resolved first — **every one ever**. Only the
+     * explicit "show earlier" path uses this; the Done view's default is [resolvedTasksSince].
+     */
     @Query(
         "SELECT * FROM tasks WHERE deletedAt IS NULL AND type = 'TASK' AND state <> 'NOT_DONE' " +
             "ORDER BY resolvedAt DESC, updatedAt DESC"
     )
     suspend fun resolvedTasks(): List<TaskEntity>
+
+    /**
+     * Resolved tasks from [sinceMillis] onwards — the Done view's default window.
+     *
+     * Resolved rows accumulate for the life of the library and recurring tasks make that fast: a
+     * daily chore alone leaves 365 rows a year behind it. Unwindowed, the view eventually inflates
+     * thousands of views on the main thread.
+     *
+     * `COALESCE` because rows resolved before `resolvedAt` existed carry only an `updatedAt`; the
+     * grouping in `TasksRepository` falls back the same way, so the two agree on which day a row
+     * belongs to.
+     */
+    @Query(
+        "SELECT * FROM tasks WHERE deletedAt IS NULL AND type = 'TASK' AND state <> 'NOT_DONE' " +
+            "AND COALESCE(resolvedAt, updatedAt) >= :sinceMillis " +
+            "ORDER BY resolvedAt DESC, updatedAt DESC"
+    )
+    suspend fun resolvedTasksSince(sinceMillis: Long): List<TaskEntity>
+
+    /** How many resolved tasks fall before [sinceMillis] — drives the "show earlier" affordance. */
+    @Query(
+        "SELECT COUNT(*) FROM tasks WHERE deletedAt IS NULL AND type = 'TASK' " +
+            "AND state <> 'NOT_DONE' AND COALESCE(resolvedAt, updatedAt) < :sinceMillis"
+    )
+    suspend fun countResolvedBefore(sinceMillis: Long): Int
 
     /**
      * The still-open row of a series — the successor a completion generated. At most one exists at a

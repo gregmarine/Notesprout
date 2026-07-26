@@ -200,7 +200,7 @@ Widening in scope, left to right:
 |---|---|
 | **Today** *(default)* | every open task **that matters today**, grouped **Overdue → Today → Upcoming → No date** |
 | **All** | every open task, **ungated** — including ones the reminder window is still hiding |
-| **Done** | completed + skipped tasks, grouped by the day they were resolved (Today / Yesterday / date), newest first |
+| **Done** | completed + skipped tasks from the **last 30 days**, grouped by the day they were resolved (Today / Yesterday / date), newest first — see [Done is windowed](#done-is-windowed) |
 
 "Matters today" is doing real work in that first row — see [Reminders](#reminders--what-gates-upcoming).
 It still carries Overdue and the reminder-window slice of Upcoming: both are things today asks of you.
@@ -216,6 +216,32 @@ treatment (bold `inkBlack` 13sp) so the two lists read as one family.
 The trailing date label is relative and deliberately quiet: nothing at all inside **Today** (the
 header already says it) or for an undated task, "Yesterday" / "*N*d ago" when overdue, "Tomorrow"
 then a formatted date when upcoming.
+
+### Done is windowed
+
+The Done view loads the last **`TasksRepository.DONE_WINDOW_DAYS`** (30) days by default, not the
+whole history.
+
+Resolved rows are never pruned — they are a recurring series' history — so the set grows for the life
+of the library, and **recurring tasks make it grow fast**: a single daily chore leaves 365 rows a year
+behind it, because every completion materializes a row. Unwindowed, and with the list inflating one
+view per row into a `LinearLayout` with no recycling, the view eventually spends seconds building
+thousands of views on the main thread. That is a bad stall anywhere and a worse one on e-ink.
+
+- `TaskDao.resolvedTasksSince` / `countResolvedBefore` do the work; `resolvedTasks` (everything) is
+  reached only by the explicit expansion.
+- Both use `COALESCE(resolvedAt, updatedAt)`, matching the fallback `resolvedGroups` uses when
+  grouping, so the query and the grouping always agree on which day a row belongs to.
+- `ResolvedPage.olderCount` drives a **"Show *N* earlier"** row, rendered only when something is
+  actually behind the window and labelled with the count so the tap has a known cost — it is the one
+  control that can turn a cheap render into thousands of rows.
+- When the window is empty but older rows exist, the generic empty state is suppressed: telling
+  someone with a year of finished tasks "Nothing finished yet" would simply be false.
+- The expansion **resets on leaving the view**, so the next visit starts cheap rather than silently
+  inheriting a full-history render forever.
+
+Windowing buys runway; it does not raise the rendering ceiling. If any of the three views starts
+feeling heavy, the fix is a `RecyclerView` — see [Deferred](#deferred).
 
 ### Reminders — what gates *Upcoming*
 
@@ -366,3 +392,8 @@ existing query has to change to stay correct.
   [Events reminders](calendar.md#reminders--paper-like-look-ahead) established holds here too.
 - No notes, time-of-day, or priority field (deliberate v1 scope).
 - No cross-links to notebooks or calendar days.
+- **All three views inflate one view per row into a `LinearLayout` with no recycling.** Windowing the
+  Done view removes the only unbounded source, so nothing is at risk today, but the ceiling is still
+  there — a `RecyclerView` is the fix when any view starts feeling heavy.
+- Resolved rows are never pruned. Deliberate (they are a series' history), but it does mean the table
+  grows for the life of the library; the window is what keeps that from mattering.
