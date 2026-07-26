@@ -106,6 +106,11 @@ class TasksRepository(
     suspend fun members(routineId: String): List<TaskEntity> =
         withContext(Dispatchers.IO) { dao.membersOf(routineId) }
 
+    /** Step counts keyed by routine id, for the main list's "2 of 5 done" meta. One query for all. */
+    suspend fun routineProgress(): Map<String, RoutineProgress> = withContext(Dispatchers.IO) {
+        dao.routineProgress().associate { it.parentId to RoutineProgress(it.done, it.total) }
+    }
+
     // ── Writes ─────────────────────────────────────────────────────────────────
 
     /**
@@ -546,6 +551,9 @@ enum class ReopenOutcome {
     /** Left untouched — a finished routine, or a step inside one, is immutable. */
     LOCKED,
 }
+
+/** How far through its steps a routine occurrence is. */
+data class RoutineProgress(val done: Int, val total: Int)
 
 /**
  * What resolving a routine member did. [routineCompleted] is true when that step was the last one

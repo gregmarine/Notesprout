@@ -18,11 +18,14 @@ import androidx.lifecycle.lifecycleScope
 import com.notesprout.android.core.TopGuard
 import com.notesprout.android.data.ReopenOutcome
 import com.notesprout.android.data.ResolvedPage
+import com.notesprout.android.data.RoutineProgress
 import com.notesprout.android.data.TaskSection
 import com.notesprout.android.data.TasksRepository
 import com.notesprout.android.data.visibleFrom
 import com.notesprout.android.data.index.TaskEntity
+import com.notesprout.android.data.tasks.RoutinePeriod
 import com.notesprout.android.data.tasks.TaskRecurrence
+import com.notesprout.android.data.tasks.TaskRowType
 import com.notesprout.android.data.tasks.TaskState
 import com.notesprout.android.databinding.ActivityTasksBinding
 import com.notesprout.android.databinding.ItemTaskBinding
@@ -94,6 +97,7 @@ class TasksActivity : AppCompatActivity() {
         binding.btnViewAll.setOnClickListener { switchMode(ViewMode.ALL) }
         binding.btnViewDone.setOnClickListener { switchMode(ViewMode.DONE) }
         binding.btnAddTask.setOnClickListener { openEditor(null) }
+        binding.btnAddRoutine.setOnClickListener { openRoutineEditor(null) }
         binding.btnTasksCalendar.setOnClickListener { CalendarActivity.launch(this) }
         binding.btnTasksScratchpad.setOnClickListener {
             startActivity(Intent(this, ScratchpadActivity::class.java))
@@ -168,21 +172,68 @@ class TasksActivity : AppCompatActivity() {
         lifecycleScope.launch {
             val today = LocalDate.now()
             when (mode) {
-                ViewMode.OPEN -> renderOpen(repo.openSections(today), today)
-                ViewMode.ALL -> renderOpen(repo.openSections(today, gated = false), today)
+                ViewMode.OPEN -> renderOpen(repo.openSections(today), today, repo.routineProgress())
+                ViewMode.ALL ->
+                    renderOpen(repo.openSections(today, gated = false), today, repo.routineProgress())
                 ViewMode.DONE -> renderDone(repo.resolvedGroups(today, doneShowAll), today)
             }
         }
     }
 
-    private fun renderOpen(sections: List<TaskSection>, today: LocalDate) {
+    private fun renderOpen(
+        sections: List<TaskSection>,
+        today: LocalDate,
+        progress: Map<String, RoutineProgress>,
+    ) {
         val inflater = LayoutInflater.from(this)
         binding.tasksList.removeAllViews()
         binding.tasksEmpty.isVisible = sections.isEmpty()
         for ((index, section) in sections.withIndex()) {
             addSectionHeader(section.kind.label, topGap = index > 0)
-            for (task in section.tasks) addTaskRow(inflater, task, dueLabel(task, today))
+            for (row in section.tasks) {
+                if (row.type == TaskRowType.ROUTINE.name) {
+                    addRoutineRow(inflater, row, dueLabel(row, today), progress[row.id])
+                } else {
+                    addTaskRow(inflater, row, dueLabel(row, today))
+                }
+            }
         }
+    }
+
+    /**
+     * A routine on the main list: no checkbox, because a routine is finished by working through its
+     * steps rather than by being ticked. The repeat glyph sits in the box's slot so rows stay
+     * aligned and the two kinds are still distinguishable at a glance.
+     */
+    private fun addRoutineRow(
+        inflater: LayoutInflater,
+        routine: TaskEntity,
+        dueLabel: String?,
+        progress: RoutineProgress?,
+    ) {
+        val row = ItemTaskBinding.inflate(inflater, binding.tasksList, false)
+        row.btnTaskState.setImageResource(R.drawable.ic_routine)
+        row.btnTaskState.isClickable = false
+        row.btnTaskState.contentDescription = "Routine"
+
+        row.tvTaskTitle.text = routine.title
+        row.tvTaskMeta.text = routineMeta(routine, progress)
+        row.tvTaskMeta.isVisible = true
+        row.tvTaskDue.text = dueLabel.orEmpty()
+        row.tvTaskDue.isVisible = dueLabel != null
+
+        row.taskRow.setOnClickListener { openRoutine(routine) }
+        row.taskRow.setOnLongClickListener { showRoutineActions(routine); true }
+        binding.tasksList.addView(row.root)
+    }
+
+    /** e.g. "Weekly · 2 of 5 done", or "Weekly · no steps yet" for one that has not been filled in. */
+    private fun routineMeta(routine: TaskEntity, progress: RoutineProgress?): String {
+        val freq = TaskRecurrence.freqOf(routine.recurFreq)
+        val rhythm = freq?.let { RoutinePeriod.label(it) } ?: "Routine"
+        val total = progress?.total ?: 0
+        return if (total == 0) "$rhythm · no steps yet"
+        else "$rhythm · ${progress!!.done} of $total done"
     }
 
     private fun renderDone(page: ResolvedPage, today: LocalDate) {
@@ -338,6 +389,83 @@ class TasksActivity : AppCompatActivity() {
 
     private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
 
+    // ── Routines ───────────────────────────────────────────────────────────────
+
+    /**
+     * Open a routine to work through its steps.
+     *
+     * The routine's own screen lands in the next phase; until then this opens its editor, so the row
+     * still does something coherent rather than being a tap that goes nowhere.
+     */
+    private fun openRoutine(routine: TaskEntity) = openRoutineEditor(routine)
+
+    private fun openRoutineEditor(existing: TaskEntity?) {
+        RoutineEditorDialog.show(
+            activity = this,
+            existing = existing,
+            today = LocalDate.now(),
+            onSaved = { title, freq ->
+                lifecycleScope.launch {
+                    if (existing == null) repo.createRoutine(title, freq, LocalDate.now())
+                    else repo.renameRoutine(existing, title)
+                    refresh()
+                }
+            },
+            onDeleted = { routine -> confirmDeleteRoutine(routine) },
+        )
+    }
+
+    private fun showRoutineActions(routine: TaskEntity) {
+        ActionSheetDialog(this)
+            .title(routine.title)
+            .addAction(R.drawable.ic_edit, "Edit") { openRoutineEditor(routine) }
+            .addAction(R.drawable.ic_checkbox_skipped, "Skip routine") { confirmSkipRoutine(routine) }
+            .addAction(R.drawable.ic_trash, "Delete") { confirmDeleteRoutine(routine) }
+            .show()
+    }
+
+    /** Skipping a routine resolves every step it still has open, so it is worth confirming. */
+    private fun confirmSkipRoutine(routine: TaskEntity) {
+        lifecycleScope.launch {
+            val open = repo.members(routine.id).count { !TaskState.fromName(it.state).isResolved }
+            val message = if (open == 0) {
+                "Skip “${routine.title}” and move on to the next one?"
+            } else {
+                "Skip “${routine.title}”? Its $open remaining " +
+                    (if (open == 1) "step" else "steps") + " will be marked skipped."
+            }
+            styled(
+                androidx.appcompat.app.AlertDialog.Builder(this@TasksActivity)
+                    .setTitle("Skip routine")
+                    .setMessage(message)
+                    .setPositiveButton("Skip") { _, _ ->
+                        lifecycleScope.launch {
+                            val next = repo.skipRoutine(routine, LocalDate.now())
+                            refresh()
+                            next?.dueEpochDay?.let {
+                                toast("Next due ${LocalDate.ofEpochDay(it).format(dueFmt)}")
+                            }
+                        }
+                    }
+                    .setNegativeButton("Cancel", null)
+                    .create(),
+            )
+        }
+    }
+
+    private fun confirmDeleteRoutine(routine: TaskEntity) {
+        styled(
+            androidx.appcompat.app.AlertDialog.Builder(this)
+                .setTitle("Delete routine")
+                .setMessage("Delete “${routine.title}”? Its steps are deleted with it.")
+                .setPositiveButton("Delete") { _, _ ->
+                    lifecycleScope.launch { repo.deleteRoutine(routine.id); refresh() }
+                }
+                .setNegativeButton("Cancel", null)
+                .create(),
+        )
+    }
+
     // ── State changes ──────────────────────────────────────────────────────────
 
     /**
@@ -388,14 +516,20 @@ class TasksActivity : AppCompatActivity() {
     }
 
     private fun confirmDelete(task: TaskEntity) {
-        val dialog = androidx.appcompat.app.AlertDialog.Builder(this)
-            .setTitle("Delete task")
-            .setMessage("Delete “${task.title}”?")
-            .setPositiveButton("Delete") { _, _ ->
-                lifecycleScope.launch { repo.delete(task.id); refresh() }
-            }
-            .setNegativeButton("Cancel", null)
-            .create()
+        styled(
+            androidx.appcompat.app.AlertDialog.Builder(this)
+                .setTitle("Delete task")
+                .setMessage("Delete “${task.title}”?")
+                .setPositiveButton("Delete") { _, _ ->
+                    lifecycleScope.launch { repo.delete(task.id); refresh() }
+                }
+                .setNegativeButton("Cancel", null)
+                .create(),
+        )
+    }
+
+    /** The standard e-ink dialog treatment: bordered window, no elevation. */
+    private fun styled(dialog: androidx.appcompat.app.AlertDialog) {
         dialog.show()
         dialog.window?.setElevation(0f)
         dialog.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)

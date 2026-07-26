@@ -119,11 +119,19 @@
             android:layout_height="wrap_content"
             android:text="Tasks" />
 
+        <!-- Two creates: a plain task, or a routine to collect several. -->
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnAddRoutine"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:layout_marginEnd="4dp"
+            android:src="@drawable/ic_routine"
+            android:contentDescription="New routine" />
+
         <androidx.appcompat.widget.AppCompatImageButton
             android:id="@+id/btnAddTask"
             style="@style/Widget.Notesprout.ToolbarButton"
             android:src="@drawable/ic_plus"
-            android:contentDescription="Add task" />
+            android:contentDescription="New task" />
     </LinearLayout>
 
     <View

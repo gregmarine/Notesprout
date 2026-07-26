@@ -111,6 +111,18 @@ interface TaskDao {
     )
     suspend fun maxMemberOrder(routineId: String): Int?
 
+    /**
+     * Step counts for **every** routine at once, so the main list can show "2 of 5 done" without a
+     * pair of queries per row.
+     */
+    @Query(
+        "SELECT parentId, COUNT(*) AS total, " +
+            "SUM(CASE WHEN state = 'NOT_DONE' THEN 0 ELSE 1 END) AS done " +
+            "FROM tasks WHERE deletedAt IS NULL AND type = 'TASK' AND parentId IS NOT NULL " +
+            "GROUP BY parentId"
+    )
+    suspend fun routineProgress(): List<RoutineProgressRow>
+
     /** Soft-delete every member of [routineId] — used when the routine itself is deleted. */
     @Query(
         "UPDATE tasks SET deletedAt = :ts, updatedAt = :ts " +
@@ -150,3 +162,10 @@ interface TaskDao {
     @Query("DELETE FROM tasks WHERE id = :id")
     suspend fun hardDelete(id: String)
 }
+
+/** One routine's step counts, as returned by [TaskDao.routineProgress]. */
+data class RoutineProgressRow(
+    val parentId: String,
+    val total: Int,
+    val done: Int,
+)
