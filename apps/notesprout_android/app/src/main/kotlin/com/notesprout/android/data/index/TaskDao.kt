@@ -117,7 +117,8 @@ interface TaskDao {
      */
     @Query(
         "SELECT parentId, COUNT(*) AS total, " +
-            "SUM(CASE WHEN state = 'NOT_DONE' THEN 0 ELSE 1 END) AS done " +
+            "SUM(CASE WHEN state = 'DONE' THEN 1 ELSE 0 END) AS done, " +
+            "SUM(CASE WHEN state = 'SKIPPED' THEN 1 ELSE 0 END) AS skipped " +
             "FROM tasks WHERE deletedAt IS NULL AND type = 'TASK' AND parentId IS NOT NULL " +
             "GROUP BY parentId"
     )
@@ -168,4 +169,5 @@ data class RoutineProgressRow(
     val parentId: String,
     val total: Int,
     val done: Int,
+    val skipped: Int,
 )

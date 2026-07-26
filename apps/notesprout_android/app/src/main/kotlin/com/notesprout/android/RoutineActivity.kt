@@ -61,6 +61,13 @@ class RoutineActivity : AppCompatActivity() {
     private lateinit var routineId: String
     private var routine: TaskEntity? = null
 
+    /**
+     * A finished occurrence is history: no steps to add, nothing to tick or un-tick, nothing to edit.
+     * The repository refuses these anyway ([ReopenOutcome.LOCKED]) — this is the screen not offering
+     * what would only be turned down.
+     */
+    private var readOnly = false
+
     private var surfaceToken: String = ""
 
     private val dueFmt = DateTimeFormatter.ofPattern("EEE d MMM", Locale.getDefault())
@@ -111,13 +118,26 @@ class RoutineActivity : AppCompatActivity() {
                 return@launch
             }
             routine = current
+            val state = TaskState.fromName(current.state)
+            readOnly = state.isResolved
             val today = LocalDate.now()
 
             binding.tvRoutineTitle.text = current.title
-            binding.tvRoutineDue.text = current.dueEpochDay
-                ?.let { "Due ${LocalDate.ofEpochDay(it).format(dueFmt)}" }.orEmpty()
+            binding.tvRoutineDue.text = when {
+                // A finished occurrence is named by what happened to it, not by a deadline it no
+                // longer has anything to do with.
+                state == TaskState.DONE -> "Completed"
+                state == TaskState.SKIPPED -> "Skipped"
+                else -> current.dueEpochDay
+                    ?.let { "Due ${LocalDate.ofEpochDay(it).format(dueFmt)}" }.orEmpty()
+            }
+            binding.btnAddStep.isVisible = !readOnly
+            binding.routineEmpty.text = if (readOnly) "No steps" else "No steps yet"
 
-            render(repo.memberSections(current, today), today)
+            // A finished occurrence is history, so date sections say nothing useful about it —
+            // "Upcoming" over steps that were completed a week ago is simply wrong. Flat list.
+            if (readOnly) renderFlat(repo.members(current.id), today)
+            else render(repo.memberSections(current, today), today)
         }
     }
 
@@ -131,6 +151,14 @@ class RoutineActivity : AppCompatActivity() {
         }
     }
 
+    /** A finished occurrence: every step in order, no date grouping. */
+    private fun renderFlat(steps: List<TaskEntity>, today: LocalDate) {
+        val inflater = LayoutInflater.from(this)
+        binding.routineList.removeAllViews()
+        binding.routineEmpty.isVisible = steps.isEmpty()
+        for (step in steps) addStepRow(inflater, step, today)
+    }
+
     private fun addStepRow(inflater: LayoutInflater, step: TaskEntity, today: LocalDate) {
         val row = ItemTaskBinding.inflate(inflater, binding.routineList, false)
         val state = TaskState.fromName(step.state)
@@ -142,9 +170,15 @@ class RoutineActivity : AppCompatActivity() {
                 TaskState.SKIPPED -> R.drawable.ic_checkbox_skipped
             }
         )
-        row.btnTaskState.contentDescription = if (state.isResolved) "Mark not done" else "Mark done"
-        row.btnTaskState.setOnClickListener {
-            if (state.isResolved) reopenStep(step) else resolveStep(step, TaskState.DONE)
+        if (readOnly) {
+            row.btnTaskState.isClickable = false
+            row.btnTaskState.contentDescription = state.label
+        } else {
+            row.btnTaskState.contentDescription =
+                if (state.isResolved) "Mark not done" else "Mark done"
+            row.btnTaskState.setOnClickListener {
+                if (state.isResolved) reopenStep(step) else resolveStep(step, TaskState.DONE)
+            }
         }
 
         row.tvTaskTitle.text = step.title
@@ -156,8 +190,10 @@ class RoutineActivity : AppCompatActivity() {
         row.tvTaskDue.text = due.orEmpty()
         row.tvTaskDue.isVisible = due != null
 
-        row.taskRow.setOnClickListener { openStepEditor(step) }
-        row.taskRow.setOnLongClickListener { showStepActions(step, state); true }
+        if (!readOnly) {
+            row.taskRow.setOnClickListener { openStepEditor(step) }
+            row.taskRow.setOnLongClickListener { showStepActions(step, state); true }
+        }
         binding.routineList.addView(row.root)
     }
 

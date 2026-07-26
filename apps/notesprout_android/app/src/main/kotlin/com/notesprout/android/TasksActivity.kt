@@ -175,7 +175,8 @@ class TasksActivity : AppCompatActivity() {
                 ViewMode.OPEN -> renderOpen(repo.openSections(today), today, repo.routineProgress())
                 ViewMode.ALL ->
                     renderOpen(repo.openSections(today, gated = false), today, repo.routineProgress())
-                ViewMode.DONE -> renderDone(repo.resolvedGroups(today, doneShowAll), today)
+                ViewMode.DONE ->
+                    renderDone(repo.resolvedGroups(today, doneShowAll), today, repo.routineProgress())
             }
         }
     }
@@ -229,14 +230,67 @@ class TasksActivity : AppCompatActivity() {
 
     /** e.g. "Weekly · 2 of 5 done", or "Weekly · no steps yet" for one that has not been filled in. */
     private fun routineMeta(routine: TaskEntity, progress: RoutineProgress?): String {
-        val freq = TaskRecurrence.freqOf(routine.recurFreq)
-        val rhythm = freq?.let { RoutinePeriod.label(it) } ?: "Routine"
         val total = progress?.total ?: 0
-        return if (total == 0) "$rhythm · no steps yet"
-        else "$rhythm · ${progress!!.done} of $total done"
+        return if (total == 0) "${rhythmOf(routine)} · no steps yet"
+        else "${rhythmOf(routine)} · ${progress!!.resolved} of $total done"
     }
 
-    private fun renderDone(page: ResolvedPage, today: LocalDate) {
+    /**
+     * A finished routine in the Done view: the repeat glyph rather than a checkbox (it is still a
+     * routine, and it was never ticked to get here), and no way to un-tick it — a finished routine
+     * is final. Tapping opens the occurrence read-only; long-press offers only Delete, since editing
+     * and reopening are both closed off.
+     */
+    private fun addResolvedRoutineRow(
+        inflater: LayoutInflater,
+        routine: TaskEntity,
+        progress: RoutineProgress?,
+    ) {
+        val row = ItemTaskBinding.inflate(inflater, binding.tasksList, false)
+        row.btnTaskState.setImageResource(R.drawable.ic_routine)
+        row.btnTaskState.isClickable = false
+        row.btnTaskState.contentDescription = "Routine"
+
+        row.tvTaskTitle.text = routine.title
+        row.tvTaskMeta.text = resolvedRoutineMeta(routine, progress)
+        row.tvTaskMeta.isVisible = true
+        row.tvTaskDue.isVisible = false
+
+        row.taskRow.setOnClickListener { openRoutine(routine) }
+        row.taskRow.setOnLongClickListener {
+            ActionSheetDialog(this)
+                .title(routine.title)
+                .addAction(R.drawable.ic_trash, "Delete") { confirmDeleteRoutine(routine) }
+                .show()
+            true
+        }
+        binding.tasksList.addView(row.root)
+    }
+
+    /** e.g. "Skipped · Weekly · 3 done · 1 skipped" — what actually happened to the occurrence. */
+    private fun resolvedRoutineMeta(routine: TaskEntity, progress: RoutineProgress?): String {
+        val parts = mutableListOf<String>()
+        if (TaskState.fromName(routine.state) == TaskState.SKIPPED) parts += TaskState.SKIPPED.label
+        parts += rhythmOf(routine)
+        val total = progress?.total ?: 0
+        when {
+            total == 0 -> parts += "no steps"
+            else -> {
+                if (progress!!.done > 0) parts += "${progress.done} done"
+                if (progress.skipped > 0) parts += "${progress.skipped} skipped"
+            }
+        }
+        return parts.joinToString(" · ")
+    }
+
+    private fun rhythmOf(routine: TaskEntity): String =
+        TaskRecurrence.freqOf(routine.recurFreq)?.let { RoutinePeriod.label(it) } ?: "Routine"
+
+    private fun renderDone(
+        page: ResolvedPage,
+        today: LocalDate,
+        progress: Map<String, RoutineProgress>,
+    ) {
         val inflater = LayoutInflater.from(this)
         binding.tasksList.removeAllViews()
         // Only truly empty when nothing is being withheld — otherwise "Nothing finished yet" would
@@ -244,7 +298,13 @@ class TasksActivity : AppCompatActivity() {
         binding.tasksEmpty.isVisible = page.groups.isEmpty() && page.olderCount == 0
         for ((index, group) in page.groups.withIndex()) {
             addSectionHeader(resolvedGroupLabel(group.date, today), topGap = index > 0)
-            for (task in group.tasks) addTaskRow(inflater, task, dueLabel = null)
+            for (row in group.tasks) {
+                if (row.type == TaskRowType.ROUTINE.name) {
+                    addResolvedRoutineRow(inflater, row, progress[row.id])
+                } else {
+                    addTaskRow(inflater, row, dueLabel = null)
+                }
+            }
         }
         if (page.olderCount > 0) addShowEarlierRow(page.olderCount, anythingAbove = page.groups.isNotEmpty())
     }

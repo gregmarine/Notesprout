@@ -108,7 +108,8 @@ class TasksRepository(
 
     /** Step counts keyed by routine id, for the main list's "2 of 5 done" meta. One query for all. */
     suspend fun routineProgress(): Map<String, RoutineProgress> = withContext(Dispatchers.IO) {
-        dao.routineProgress().associate { it.parentId to RoutineProgress(it.done, it.total) }
+        dao.routineProgress()
+            .associate { it.parentId to RoutineProgress(it.done, it.skipped, it.total) }
     }
 
     // ── Writes ─────────────────────────────────────────────────────────────────
@@ -552,8 +553,14 @@ enum class ReopenOutcome {
     LOCKED,
 }
 
-/** How far through its steps a routine occurrence is. */
-data class RoutineProgress(val done: Int, val total: Int)
+/**
+ * How far through its steps a routine occurrence is. [done] and [skipped] are kept apart because the
+ * Done view wants to say which was which, while the live list only cares that a step was answered.
+ */
+data class RoutineProgress(val done: Int, val skipped: Int, val total: Int) {
+    /** Steps that have been answered either way — what "2 of 5 done" counts. */
+    val resolved: Int get() = done + skipped
+}
 
 /**
  * What resolving a routine member did. [routineCompleted] is true when that step was the last one
