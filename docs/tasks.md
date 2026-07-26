@@ -393,9 +393,17 @@ existing query has to change to stay correct.
   [Events reminders](calendar.md#reminders--paper-like-look-ahead) established holds here too.
 - No notes, time-of-day, or priority field (deliberate v1 scope).
 - No cross-links to notebooks or calendar days.
-- **All three views inflate one view per row into a `LinearLayout` inside a `ScrollView`.** Windowing
-  the Done view removed the only unbounded source, so nothing is at risk today, but the ceiling is
-  still there: cost is proportional to row count, not to what is on screen.
+- **All three views inflate one view per row into a `LinearLayout` inside a `ScrollView`, and every
+  refresh rebuilds the lot** (`removeAllViews()`). Windowing the Done view removed the only unbounded
+  source, so nothing is at risk today, but the ceiling is still there: CPU cost is proportional to
+  row count, not to what is on screen.
+
+  This costs **CPU, not repaints**. The rebuild is a full redraw of the *view hierarchy*, which is not
+  the same thing as a full-screen EPD refresh: this screen has no Onyx raw-drawing surface, so BOOX
+  handles it on the ordinary partial-update path and only pushes pixels that actually changed — and a
+  rebuilt list is pixel-identical apart from the row the user just touched. Checking a task off
+  produces no perceivable flash on a G102. Don't reach for in-place row updates to fix a visual
+  problem that isn't there.
 
   **The fix is pagination, matching MainActivity's card grid** (`itemsPerPage` / `renderGridPage` +
   first/prev/next/last) — *not* a `RecyclerView`. RecyclerView is deliberately not a dependency
@@ -407,8 +415,5 @@ existing query has to change to stay correct.
 
   RecyclerView would earn its place only if many screens converged on it at once, or on the non-e-ink
   targets (iPad / Android tablets / phones / web) where smooth scrolling is the expected idiom.
-- **Every refresh rebuilds the whole list** (`removeAllViews()`), so checking one task off repaints
-  the full screen — visible on EPD. Updating just the changed row's views in place would remove most
-  of that flash without changing the rendering model at all. Small and self-contained if it grates.
 - Resolved rows are never pruned. Deliberate (they are a series' history), but it does mean the table
   grows for the life of the library; the window is what keeps that from mattering.
