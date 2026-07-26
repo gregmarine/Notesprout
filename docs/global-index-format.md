@@ -587,9 +587,26 @@ Three more semantics lessons, all paid for in this table:
    re-check what the original surface was quietly relying on — and make sure every row stays
    reachable by *some* path.
 
-`type` + `parentId` are reserved for **routines** (a named set of tasks). Nothing writes them today,
-but every query filters `type = 'TASK'` so those rows cannot leak into the task list when they arrive.
-A greenfield implementation that does not need routines can drop both columns.
+`type` + `parentId` + `"order"` carry **routines** — a named, always-recurring collection of related
+tasks. One table holds three kinds of row: a standalone task (`type='TASK'`, `parentId IS NULL`), a
+routine (`type='ROUTINE'`), and a routine's member step (`type='TASK'` with `parentId` set). A
+greenfield implementation that does not need routines can drop all three columns.
+
+Two things this pairing got right, both worth stealing:
+
+1. **Reserving the discriminator early cost nothing and saved a migration.** The columns were added
+   with the table and written as constants (`TASK`, `NULL`, `0`) long before routines existed, with
+   every query filtering on them from day one. When routines arrived they needed **no schema change
+   at all**. A discriminator column on a table that might grow a second row kind is close to free;
+   retrofitting one onto live user data is not.
+2. **Write the row-kind predicate once.** The main list wants standalone tasks and routines but never
+   a routine's steps — a predicate with two halves, which is exactly the kind a fourth query quietly
+   forgets half of. Held as a single named constant, it cannot drift.
+
+The routine itself reuses the same recurrence columns as a task but interprets them differently: its
+due date is **derived from the frequency** (weekly → that week's Saturday, monthly → the last day)
+rather than chosen, because a routine is anchored to a calendar period rather than an interval. Same
+columns, different reading — worth noticing before adding parallel ones.
 
 ---
 
