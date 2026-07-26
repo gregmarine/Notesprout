@@ -367,6 +367,8 @@ class TasksActivity : AppCompatActivity() {
                 ReopenOutcome.REOPENED -> refresh()
                 ReopenOutcome.SERIES_MOVED_ON ->
                     toast("Later occurrences of this task have already been dealt with.")
+                ReopenOutcome.LOCKED ->
+                    toast("A finished routine can't be reopened.")
             }
         }
     }

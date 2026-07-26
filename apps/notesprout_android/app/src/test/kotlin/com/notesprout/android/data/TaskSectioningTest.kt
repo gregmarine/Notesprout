@@ -1,11 +1,13 @@
 package com.notesprout.android.data
 
+import com.notesprout.android.data.events.Freq
 import com.notesprout.android.data.events.ReminderUnit
 import com.notesprout.android.data.index.TaskEntity
 import com.notesprout.android.data.tasks.TaskReminders
 import com.notesprout.android.data.tasks.TaskRowType
 import com.notesprout.android.data.tasks.TaskState
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Test
@@ -161,6 +163,83 @@ class TaskSectioningTest {
     @Test
     fun `visibleFrom is null for an undated task, which is never hidden`() {
         assertNull(visibleFrom(task()))
+    }
+
+    // ── Routines ───────────────────────────────────────────────────────────────
+
+    private fun routine(freq: Freq, due: LocalDate) = TaskEntity(
+        id = "r",
+        type = TaskRowType.ROUTINE.name,
+        title = "r",
+        state = TaskState.NOT_DONE.name,
+        dueEpochDay = due.toEpochDay(),
+        recurFreq = freq.name,
+        createdAt = 0,
+        updatedAt = 0,
+    )
+
+    /** Weekly routine for the reference week Sun 26 Jul – Sat 1 Aug 2026. */
+    private val weekly = routine(Freq.WEEKLY, LocalDate.of(2026, 8, 1))
+
+    @Test
+    fun `a routine is in Today for every day of its live period`() {
+        for (day in 26..31) {
+            val d = LocalDate.of(2026, 7, day)
+            assertEquals("$d", TaskSectionKind.TODAY, sectionFor(weekly, d.toEpochDay()))
+        }
+        // Including its due date itself.
+        assertEquals(
+            TaskSectionKind.TODAY,
+            sectionFor(weekly, LocalDate.of(2026, 8, 1).toEpochDay()),
+        )
+    }
+
+    @Test
+    fun `a routine drops to Overdue the day after its due date`() {
+        assertEquals(
+            TaskSectionKind.OVERDUE,
+            sectionFor(weekly, LocalDate.of(2026, 8, 2).toEpochDay()),
+        )
+    }
+
+    @Test
+    fun `a routine generated early waits in Upcoming until its period starts`() {
+        // Finishing the previous week's routine early generates this one before its week begins.
+        // It is real work, but not yet — so it must not claim a place in today's list.
+        assertEquals(
+            TaskSectionKind.UPCOMING,
+            sectionFor(weekly, LocalDate.of(2026, 7, 25).toEpochDay()),
+        )
+    }
+
+    @Test
+    fun `a yearly routine is visible all year, not hidden until December`() {
+        // The whole reason routines are not reminder-gated: under the task rule this would be
+        // invisible for 364 days.
+        val yearly = routine(Freq.YEARLY, LocalDate.of(2026, 12, 31))
+        assertEquals(
+            TaskSectionKind.TODAY,
+            sectionFor(yearly, LocalDate.of(2026, 1, 5).toEpochDay()),
+        )
+    }
+
+    @Test
+    fun `a routine is never gated away, whatever the gated flag says`() {
+        for (day in listOf("2026-07-25", "2026-07-29", "2026-08-05")) {
+            val today = LocalDate.parse(day).toEpochDay()
+            assertNotNull("gated $day", sectionFor(weekly, today, gated = true))
+            assertNotNull("ungated $day", sectionFor(weekly, today, gated = false))
+        }
+    }
+
+    @Test
+    fun `a routine never lands in No date`() {
+        for (offset in -400L..400L step 37L) {
+            assertNotEquals(
+                TaskSectionKind.NO_DATE,
+                sectionFor(weekly, LocalDate.of(2026, 8, 1).toEpochDay() + offset),
+            )
+        }
     }
 
     // ── Lead-time helpers ──────────────────────────────────────────────────────
