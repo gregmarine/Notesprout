@@ -74,9 +74,6 @@ class TasksActivity : AppCompatActivity() {
     private val dueFmt = DateTimeFormatter.ofPattern("EEE d MMM", Locale.getDefault())
     private val groupFmt = DateTimeFormatter.ofPattern("EEE d MMM yyyy", Locale.getDefault())
 
-    /** The toolbar's today label. Short enough to survive the narrowest bar alongside the toggles. */
-    private val headerFmt = DateTimeFormatter.ofPattern("EEE d MMM", Locale.getDefault())
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityTasksBinding.inflate(layoutInflater)
@@ -162,7 +159,6 @@ class TasksActivity : AppCompatActivity() {
     private fun refresh() {
         lifecycleScope.launch {
             val today = LocalDate.now()
-            binding.tvTasksDate.text = today.format(headerFmt)
             when (mode) {
                 ViewMode.OPEN -> renderOpen(repo.openSections(today), today)
                 ViewMode.ALL -> renderOpen(repo.openSections(today, gated = false), today)

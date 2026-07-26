@@ -166,7 +166,7 @@ carrying the one create action:
 
 ```
 ┌──────────────────────────────────────────────┐
-│ ← │ Today │ All │ Done │      Sat 25 Jul │ ✎ │  56dp nav row
+│ ← │ Today │ All │ Done │                  ✎  │  56dp nav row
 ├──────────────────────────────────────────────┤
 │ Tasks                                     +  │  56dp title row
 ├──────────────────────────────────────────────┤
@@ -182,10 +182,10 @@ carrying the one create action:
 └──────────────────────────────────────────────┘
 ```
 
-- **The date label is display only.** The list is always relative to the real today, so there is
-  nothing for a picker to scope; it earns its place by saying what "Today" means. A reference-day
-  picker was considered and dropped — projecting the list onto a future date would have had to show
-  tasks as *Overdue* that were not yet late, which is manufactured stress rather than information.
+- **There is no date control**, and deliberately so. A tappable reference-day picker was designed and
+  dropped: projecting the list onto a future date would have had to show tasks as *Overdue* that were
+  not yet late — manufactured stress rather than information. A display-only date label was then
+  dropped too, as chrome that did nothing. The list is always relative to the real today.
 - **The scratch pad launcher** (`btnTasksScratchpad`) opens the global scratch pad plain, exactly as
   the calendar's does.
 
