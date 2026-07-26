@@ -90,6 +90,7 @@ class TasksActivity : AppCompatActivity() {
         binding.btnViewAll.setOnClickListener { switchMode(ViewMode.ALL) }
         binding.btnViewDone.setOnClickListener { switchMode(ViewMode.DONE) }
         binding.btnAddTask.setOnClickListener { openEditor(null) }
+        binding.btnTasksCalendar.setOnClickListener { CalendarActivity.launch(this) }
         binding.btnTasksScratchpad.setOnClickListener {
             startActivity(Intent(this, ScratchpadActivity::class.java))
         }

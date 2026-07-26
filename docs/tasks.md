@@ -166,7 +166,7 @@ carrying the one create action:
 
 ```
 ┌──────────────────────────────────────────────┐
-│ ← │ Today │ All │ Done │                  ✎  │  56dp nav row
+│ ← │ Today │ All │ Done │              📅  ✎  │  56dp nav row
 ├──────────────────────────────────────────────┤
 │ Tasks                                     +  │  56dp title row
 ├──────────────────────────────────────────────┤
@@ -186,8 +186,11 @@ carrying the one create action:
   dropped: projecting the list onto a future date would have had to show tasks as *Overdue* that were
   not yet late — manufactured stress rather than information. A display-only date label was then
   dropped too, as chrome that did nothing. The list is always relative to the real today.
-- **The scratch pad launcher** (`btnTasksScratchpad`) opens the global scratch pad plain, exactly as
-  the calendar's does.
+- **Sibling-surface launchers, trailing** — calendar (`btnTasksCalendar`) then scratch pad
+  (`btnTasksScratchpad`), the latter opening the global scratch pad plain exactly as the calendar's
+  does. The [day window](calendar.md#day-detail--the-day-window) carries the mirrored pair — Tasks
+  then scratch pad — at the same end of its own bar, so hopping between the two screens is one tap
+  either way and the target is always in the same place.
 
 ### Three views
 

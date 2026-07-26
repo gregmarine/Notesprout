@@ -73,15 +73,27 @@
             android:text="Done"
             android:contentDescription="Completed and skipped tasks" />
 
-        <!-- Spacer — pushes the scratch pad to the trailing edge. -->
+        <!-- Spacer — pushes the sibling-surface launchers to the trailing edge. -->
         <View
             android:layout_width="0dp"
             android:layout_weight="1"
             android:layout_height="1dp" />
 
+        <!--
+            Sibling-surface launchers, trailing. The day window carries the same pair in the same
+            order at the same end of its bar, so switching between the two screens is one tap in
+            either direction and the target is always in the same place.
+        -->
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnTasksCalendar"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:src="@drawable/ic_calendar"
+            android:contentDescription="Calendar" />
+
         <androidx.appcompat.widget.AppCompatImageButton
             android:id="@+id/btnTasksScratchpad"
             style="@style/Widget.Notesprout.ToolbarButton"
+            android:layout_marginStart="4dp"
             android:src="@drawable/ic_sketching"
             android:contentDescription="Scratch Pad" />
     </LinearLayout>

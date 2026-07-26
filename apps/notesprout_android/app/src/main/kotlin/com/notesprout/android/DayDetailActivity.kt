@@ -420,6 +420,7 @@ class DayDetailActivity : AppCompatActivity() {
         binding.btnDayBack.setOnClickListener { handleBackNavigation() }
         binding.btnDayToday.setOnClickListener { switchToDate(LocalDate.now()) }
         binding.tvDayDate.setOnClickListener { showDayPicker() }
+        binding.btnDayTasks.setOnClickListener { TasksActivity.launch(this) }
         binding.btnDayScratchpad.setOnClickListener { startActivity(Intent(this, ScratchpadActivity::class.java)) }
         binding.btnDayUndo.setOnClickListener { undo() }
         binding.btnDayRedo.setOnClickListener { redo() }
@@ -666,6 +667,9 @@ class DayDetailActivity : AppCompatActivity() {
         binding.dayToolsGroup.isVisible = isNote
         // Stacked only: the tools row's own border. Inline, the toolbar's border already covers it.
         binding.dayToolsDivider.isVisible = isNote && !singleRowToolbar
+        // Inline, the tools group holds the weight that pushes the sibling-surface launchers to the
+        // trailing edge — so when it is hidden, something else has to. (Stacked, the date does it.)
+        binding.daySurfaceSpacer.isVisible = singleRowToolbar && !isNote
         if (!isNote && ::overflowManager.isInitialized && overflowManager.isOverflowMenuOpen()) {
             closeDayOverflowMenu()
         }

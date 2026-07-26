@@ -401,7 +401,16 @@ optional ruling template.
   navigation is dropped.
 - **Toolbar** (`res/layout/activity_day_detail.xml`): `btnDayBack` │ `btnDayToday` │ view toggles │
   the `dayToolsGroup` — pen · eraser · lasso-eraser · lasso · undo · redo · sticky · template ·
-  insert-shape · scratch-pad — then `tvDayDate` (full date, right). The **tools group is weighted and
+  insert-shape — then `tvDayDate` (full date), and trailing at the right edge the sibling-surface
+  pair `btnDayTasks` · `btnDayScratchpad`. Both sit outside `dayToolsGroup` so they stay on the bar
+  in all four views and never overflow, and outside the insertion point
+  `collapseToolbarToSingleRow` uses so they stay trailing when the bar folds to one row. The
+  [Tasks screen](tasks.md#screen--tasksactivity) carries the mirrored pair (calendar · scratch pad)
+  at the same end of its own bar — one tap either way, same place both times.
+  Keeping them pinned right needs `daySurfaceSpacer`: stacked, `tvDayDate` is weighted and absorbs
+  the bar's slack, but inline that weight moves to `dayToolsGroup`, which is hidden outside Note —
+  so the spacer takes the weight for exactly that case (`applyViewMode`), and is `gone` (and
+  therefore weightless) otherwise. The **tools group is weighted and
   overflows** exactly like the calendar: its trailing tools drop into `dayOverflowMenu` (below the bar)
   behind `btnDayOverflow` (⋯) when the bar is narrow, via the shared
   [`ToolbarOverflowManager`](toolbar.md). Overflow is **Note-mode-only** — outside Note the group is
