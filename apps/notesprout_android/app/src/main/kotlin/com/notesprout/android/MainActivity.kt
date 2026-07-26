@@ -766,6 +766,9 @@ class MainActivity : AppCompatActivity() {
                 // Tasks carries no per-launch state — the screen reads the table fresh every time,
                 // so restoring it needs nothing beyond the intent itself.
                 AppSurface.TASKS -> TasksActivity.intent(this)
+                // A routine that has since been deleted or rolled over resolves to nothing; the
+                // screen itself also re-checks and steps out if the row has gone.
+                AppSurface.ROUTINE -> entry.routineId?.let { RoutineActivity.intent(this, it) }
             }
             if (intent != null) intents += intent
             below = notebook

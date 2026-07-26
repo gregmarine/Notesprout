@@ -41,18 +41,29 @@ object TaskEditorDialog {
 
     private val dateFmt = DateTimeFormatter.ofPattern("EEE d MMM yyyy", Locale.getDefault())
 
+    /**
+     * The routine period a step belongs to. Supplying it puts the editor in **member mode**:
+     * recurrence and reminders disappear (the routine's series repeats, and a step has no main-list
+     * visibility to gate), and the due date is confined to the period.
+     */
+    data class MemberContext(val periodStart: Long, val periodEnd: Long)
+
     fun show(
         activity: Activity,
         existing: TaskEntity?,
         onSaved: (TaskEntity) -> Unit,
         onDeleted: ((TaskEntity) -> Unit)? = null,
+        member: MemberContext? = null,
     ) {
         val b = DialogTaskEditorBinding.inflate(activity.layoutInflater)
         val isNew = existing == null
         val base = existing ?: TasksRepository.blank()
 
         // ── Mutable working state ───────────────────────────────────────────────
+        // A new step defaults to the routine's own deadline — the safe answer when the user has not
+        // said which day inside the period they mean.
         var dueDate: LocalDate? = base.dueEpochDay?.let { LocalDate.ofEpochDay(it) }
+            ?: member?.let { LocalDate.ofEpochDay(it.periodEnd) }
         val weekdays = sortedSetOf<Int>().apply {
             // A stored mask of 0 means "the anchor's own weekday" (see TaskWeekdays), which unpacks
             // to nothing — seed it so the toggles never come up with no day selected.
@@ -81,10 +92,12 @@ object TaskEditorDialog {
             // replaced by a one-line explanation until a due date exists. The reminder is gated on
             // the same thing — a lead time is measured back from a due date.
             val dated = dueDate != null
-            b.spTaskRepeat.isVisible = dated
-            b.tvTaskRepeatNeedsDate.isVisible = !dated
-            b.grpTaskRemind.isVisible = dated
-            b.tvTaskRemindHint.isVisible = dated
+            val standalone = member == null
+            b.grpTaskRecurrence.isVisible = standalone
+            b.spTaskRepeat.isVisible = standalone && dated
+            b.tvTaskRepeatNeedsDate.isVisible = standalone && !dated
+            b.grpTaskRemind.isVisible = standalone && dated
+            b.tvTaskRemindHint.isVisible = standalone && dated
 
             val freq = repeatFreq().takeIf { dated }
             val repeats = freq != null
@@ -142,7 +155,19 @@ object TaskEditorDialog {
         b.btnTaskDueDate.setOnClickListener {
             // The shared e-ink calendar-grid picker, not the native spinner (whose coloured header
             // reads wrong on e-ink). Defaults to today when the task has no date yet.
-            DayPickerDialog.show(activity, dueDate ?: LocalDate.now()) { picked ->
+            DayPickerDialog.show(activity, dueDate ?: LocalDate.now()) { raw ->
+                // A step belongs to its routine's period; there is no reading of "next Tuesday" that
+                // belongs to this week's routine. Clamp, and say so rather than silently moving it.
+                val picked = member?.let {
+                    LocalDate.ofEpochDay(raw.toEpochDay().coerceIn(it.periodStart, it.periodEnd))
+                } ?: raw
+                if (picked != raw) {
+                    Toast.makeText(
+                        activity,
+                        "Steps sit inside the routine's period — moved to ${picked.format(dateFmt)}.",
+                        Toast.LENGTH_LONG,
+                    ).show()
+                }
                 dueDate = picked
                 // Keep a lone weekday selection following the anchor, as the event editor does, so
                 // "weekly" means "weekly on this task's own day" until the user says otherwise.

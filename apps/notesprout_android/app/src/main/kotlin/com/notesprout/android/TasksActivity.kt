@@ -391,13 +391,8 @@ class TasksActivity : AppCompatActivity() {
 
     // ── Routines ───────────────────────────────────────────────────────────────
 
-    /**
-     * Open a routine to work through its steps.
-     *
-     * The routine's own screen lands in the next phase; until then this opens its editor, so the row
-     * still does something coherent rather than being a tap that goes nowhere.
-     */
-    private fun openRoutine(routine: TaskEntity) = openRoutineEditor(routine)
+    /** Open a routine to work through its steps. */
+    private fun openRoutine(routine: TaskEntity) = RoutineActivity.launch(this, routine.id)
 
     private fun openRoutineEditor(existing: TaskEntity?) {
         RoutineEditorDialog.show(

@@ -124,6 +124,17 @@
             android:visibility="gone"
             android:text="Leave blank and this task stays out of the list until the day it is due." />
 
+        <!--
+            The whole recurrence block, wrapped so it can be hidden in one go. A routine's step never
+            recurs on its own — the routine's series is what repeats — so this is switched off
+            entirely when the editor is opened on a member.
+        -->
+        <LinearLayout
+            android:id="@+id/grpTaskRecurrence"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
+
         <!-- Divider -->
         <View
             android:layout_width="match_parent"
@@ -367,6 +378,8 @@
                     android:text="times" />
             </LinearLayout>
         </LinearLayout>
+
+        </LinearLayout><!-- /grpTaskRecurrence -->
 
     </LinearLayout>
 </ScrollView>

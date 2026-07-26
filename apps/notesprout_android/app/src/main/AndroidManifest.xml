@@ -97,6 +97,13 @@
             android:configChanges="orientation|keyboardHidden|screenSize|smallestScreenSize|screenLayout|density"
             android:windowSoftInputMode="stateHidden" />
 
+        <!-- Routine — one routine occurrence and its steps, opened from the Tasks list -->
+        <activity
+            android:name=".RoutineActivity"
+            android:exported="false"
+            android:configChanges="orientation|keyboardHidden|screenSize|smallestScreenSize|screenLayout|density"
+            android:windowSoftInputMode="stateHidden" />
+
         <!-- Notebook screen — prevent recreation on rotation/resize so bitmap survives -->
         <activity
             android:name=".NotebookActivity"
