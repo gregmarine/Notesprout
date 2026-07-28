@@ -91,7 +91,7 @@ object DriveAuth {
     suspend fun getAccessTokenSilent(context: Context): TokenResult = withContext(Dispatchers.IO) {
         if (BuildConfig.DRIVE_CLIENT_ID.isBlank() || BuildConfig.DRIVE_CLIENT_SECRET.isBlank()) {
             return@withContext TokenResult.Error(
-                "Drive OAuth not configured — add DRIVE_CLIENT_ID and DRIVE_CLIENT_SECRET to local.properties."
+                "Drive OAuth not configured — set DRIVE_CLIENT_ID and DRIVE_CLIENT_SECRET in your shell profile and rebuild."
             )
         }
         val refreshToken = DriveTokenStore.getRefreshToken(context)
