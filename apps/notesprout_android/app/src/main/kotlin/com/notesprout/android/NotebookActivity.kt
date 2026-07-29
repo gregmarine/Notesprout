@@ -1127,6 +1127,7 @@ class NotebookActivity : AppCompatActivity() {
         // Tasks is a plain launch, not a for-result one: nothing comes back from it into the page
         // the way a scratch-pad or calendar selection does.
         binding.btnTasks.setOnClickListener { TasksActivity.launch(this) }
+        binding.btnDocument.setOnClickListener { DocumentEditorActivity.launch(this) }
 
         binding.btnUndo.setOnClickListener { performUndo() }
         binding.btnRedo.setOnClickListener { performRedo() }

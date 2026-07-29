@@ -175,6 +175,14 @@
             android:src="@drawable/ic_tasks"
             android:contentDescription="Tasks" />
 
+        <!-- Document editor launcher -->
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnDocument"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:layout_marginStart="4dp"
+            android:src="@drawable/ic_file_text"
+            android:contentDescription="Document" />
+
         <!-- Overflow group divider — visible only when overflow button is shown -->
         <View
             android:id="@+id/dividerOverflow"

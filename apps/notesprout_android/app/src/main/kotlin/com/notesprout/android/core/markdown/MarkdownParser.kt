@@ -26,6 +26,8 @@ sealed class Inline {
     data class Bold(val children: List<Inline>) : Inline()
     data class Italic(val children: List<Inline>) : Inline()
     data class Strikethrough(val children: List<Inline>) : Inline()
+    /** `` `code` `` — literal content, so it holds text rather than children. */
+    data class Code(val text: String) : Inline()
     /** Rendered as underlined display text; url is discarded (not clickable). */
     data class Link(val displayText: String, val url: String) : Inline()
 }
@@ -178,6 +180,16 @@ object MarkdownParser {
         var i = 0
         while (i < text.length) {
             when {
+                // Inline code first — its content is literal, so nothing inside it is markup.
+                text[i] == '`' -> {
+                    val end = text.indexOf('`', i + 1)
+                    if (end >= 0) {
+                        result += Inline.Code(text.substring(i + 1, end))
+                        i = end + 1
+                    } else {
+                        appendChar(result, text[i]); i++
+                    }
+                }
                 // Strikethrough ~~text~~ (check before single ~)
                 text.startsWith("~~", i) -> {
                     val end = text.indexOf("~~", i + 2)
