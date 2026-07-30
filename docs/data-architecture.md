@@ -230,6 +230,22 @@ CREATE INDEX IF NOT EXISTS idx_notebook_parent_order
     ON notebook(parentId, "order", deletedAt);
 ```
 
+### `.soil` Schema Version 5 — `srcUpdatedAt` (documents)
+
+`SoilDatabase.MIGRATION_4_5` adds one nullable column (`SoilSchema.ADDED_COLUMNS_V5`): `srcUpdatedAt`,
+the page state a `document` row's text was drafted from. Only the `document` type uses it; see
+[`documents.md`](documents.md).
+
+Two things to keep straight when adding the next version:
+
+- **Never append to `ADDED_COLUMNS_V4`.** `NotesproutDatabase.MIGRATION_5_6` borrows that list verbatim
+  to widen the global index's `scratchpad` + `calendar` tables, so a column appended there lands in a
+  second database too — and only for installs that run that migration later. Each version gets its own
+  list (`SoilSchemaTest` asserts every listed column exists in `CREATE_NOTEBOOK_TABLE`).
+- **Extend `SoilMigrator.repairMissingUserVersion`'s ladder.** It diagnoses a `user_version`-zeroed file
+  from which columns it already has; a version that isn't in that ladder stops being recognized as
+  repairable once Room moves past it.
+
 ### `.soil` Schema Version 4 — columnar payload, binary strokes, relational composites
 
 `SoilDatabase.MIGRATION_3_4` adds 23 nullable typed columns + a `blob BLOB`

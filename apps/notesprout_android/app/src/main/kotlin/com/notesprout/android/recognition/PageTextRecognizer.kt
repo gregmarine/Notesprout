@@ -72,6 +72,11 @@ class PageTextRecognizer(
                 ) {
                     t = fallback.recognizeSegment(line.strokes, line.bounds, pre, lineHeight)
                 }
+                // Recognizers commonly return a leading space, and a line's own whitespace carries no
+                // information — where the line sits is geometry, not text. Left in, it survives as a
+                // dent at the start of every paragraph but the first (only the whole document is
+                // trimmed at the end), and it would be taught as part of a correction pair below.
+                t = t.trim()
                 // Never log the recognized text itself (privacy rule) — only structure/length.
                 Slog.d(TAG) { "line ${line.strokes.size} strokes @${line.bounds.top.toInt()} → ${t.length} chars" }
                 if (t.isNotBlank() && t != HandwritingRecognizer.FALLBACK_TEXT) {

@@ -22,10 +22,13 @@ import android.text.style.ReplacementSpan
  * ready for [android.text.StaticLayout] or an EditText-based WYSIWYG editor.
  *
  * Supported subset: headings (h1-h6), bold, italic, strikethrough, inline code, unordered
- * lists with nesting, ordered lists with auto-renumbering, task checkboxes, blockquotes,
- * horizontal rules, and links (underlined display text, no click).
+ * lists with nesting, ordered lists (counted from the run's first item — see
+ * [Block.ListItem.displayNumber]), task checkboxes, blockquotes, horizontal rules, and links
+ * (underlined display text, no click).
  *
- * Out of scope: code blocks, tables, images, HTML, underline-as-formatting.
+ * Out of scope: code blocks, tables, images, HTML, underline-as-formatting, and the lettered /
+ * roman-numeral ordered lists of Pandoc's `fancy_lists` — standard Markdown has only digits, and a
+ * document that rendered them as lists here would come out as run-together paragraphs everywhere else.
  *
  * @param availableWidthPx content width in pixels — used to size [HorizontalRuleSpan].
  * @param density screen density from [android.util.DisplayMetrics.density] — used for

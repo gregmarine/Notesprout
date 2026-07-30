@@ -139,14 +139,17 @@ Both functions **assert sourcePath ≠ destPath** and return null if equal (call
 ### Copy algorithm
 
 1. Open source raw (`SoilCrypto.openRaw`). Read each page row, its live layer, and all live
-   children. Soft-deleted objects are skipped.
+   children. Soft-deleted objects are skipped. The page's **document** row is captured separately
+   (`readPageDocument`) — it hangs off the page, not the layer, so the subtree walk never sees it and
+   dropping it would drop the user's writing. `page_text` is *not* copied: it is a cache and
+   regenerates. See [`documents.md`](documents.md).
 2. **Template remap.** Collect distinct `data.template` ids from the source pages. For each, read
    the source `template` row (`boundingBox` + `data`). After closing source, open dest and insert
    fresh template rows, building `sourceTemplateId → destTemplateId`. Each copied page's
    `data.template` is rewritten before insertion.
 3. Open dest. Compute insertion index from `targetPageId` / `before`. Shift existing dest page
-   orders to make room. Insert page / layer / children with fresh UUIDs, `now` timestamps, and
-   `destParentId` (the dest `type="notebook"` metadata row id).
+   orders to make room. Insert page / layer / children / document (`writePageDocument`) with fresh
+   UUIDs, `now` timestamps, and `destParentId` (the dest `type="notebook"` metadata row id).
 4. `checkpointAndVacuum()` on dest; `cleanStrayJournal` on both paths. Both DBs closed in
    `finally`.
 

@@ -24,6 +24,7 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import com.notesprout.android.R
 import com.notesprout.android.core.Slog
+import com.notesprout.android.core.markdown.MarkdownFormatter
 import com.notesprout.android.databinding.DialogTextEditBinding
 
 /**
@@ -70,8 +71,7 @@ class TextEditDialog(
     private var isWysiwygMode = true
     private var isApplyingFormatting = false
 
-    // Captured in beforeTextChanged to detect newline insertions for ordered-list continuation
-    private var textBeforeChange = ""
+    // Captured in beforeTextChanged to detect the newline insertion that continues a list
     private var changeStartIndex = 0
     private var changeInsertedCount = 0
 
@@ -159,7 +159,6 @@ class TextEditDialog(
 
     private fun createTextWatcher(binding: DialogTextEditBinding) = object : TextWatcher {
         override fun beforeTextChanged(s: CharSequence, start: Int, count: Int, after: Int) {
-            textBeforeChange = s.toString()
             changeStartIndex = start
             changeInsertedCount = after
         }
@@ -170,11 +169,11 @@ class TextEditDialog(
             if (isApplyingFormatting) return
             isApplyingFormatting = true
             try {
-                // 1. Auto-continue ordered list on Enter
-                autoContineOrderedList(s, binding)
+                // 1. Continue (or end) a list on Enter
+                continueListOnEnter(s, binding)
 
-                // 2. Renumber all ordered list blocks
-                renumberOrderedLists(s, binding)
+                // 2. Renumber ordered lists to match how they render
+                renumberLists(s, binding)
 
                 // 3. Apply WYSIWYG spans (span changes do not re-trigger TextWatcher)
                 if (isWysiwygMode) applyWysiwygSpans(s)
@@ -184,83 +183,58 @@ class TextEditDialog(
         }
     }
 
-    // ── Ordered list auto-continuation ───────────────────────────────────────
+    // ── Lists on Enter, and renumbering ──────────────────────────────────────
+    // Both defer to MarkdownFormatter, which the full-screen document editor uses too: one definition
+    // of how lists behave, so the two writing surfaces cannot drift apart. See docs/documents.md.
 
     /**
-     * When the user presses Enter at the end of an ordered list line, prefix the new line
-     * with the next sequential number. This is purely additive — the renumber pass below will
-     * correct the sequence for the whole block afterward.
+     * Enter inside a list item writes the next marker; a second Enter — on an item with nothing in it —
+     * removes that marker and ends the series, leaving a clean paragraph break.
      */
-    private fun autoContineOrderedList(s: Editable, binding: DialogTextEditBinding) {
-        // Detect a single newline insertion
+    private fun continueListOnEnter(s: Editable, binding: DialogTextEditBinding) {
         if (changeInsertedCount != 1) return
-        val insertedChar = s.getOrNull(changeStartIndex) ?: return
-        if (insertedChar != '\n') return
+        if (s.getOrNull(changeStartIndex) != '\n') return
 
-        // What line was the cursor on before the Enter?
-        val beforeText = textBeforeChange
-        val lineBeforeStart = beforeText.lastIndexOf('\n', changeStartIndex - 1) + 1
-        val lineBeforeText = beforeText.substring(lineBeforeStart, changeStartIndex)
+        val at = changeStartIndex
+        var lineStart = at
+        while (lineStart > 0 && s[lineStart - 1] != '\n') lineStart--
+        var lineEnd = at + 1
+        while (lineEnd < s.length && s[lineEnd] != '\n') lineEnd++
 
-        // Match ordered list item: "N. content"
-        val olMatch = Regex("""^(\d+)\. (.+)""").find(lineBeforeText) ?: return
-        val content = olMatch.groupValues[2]
-        if (content.isBlank()) return // empty item → don't continue
+        val before = s.substring(lineStart, at)
+        val after = s.substring((at + 1).coerceAtMost(s.length), lineEnd)
 
-        // toIntOrNull: a digit run longer than Int.MAX ("99999999999. ") must not crash the editor.
-        val nextNum = (olMatch.groupValues[1].toIntOrNull() ?: return) + 1
-        val insertPos = changeStartIndex + 1 // after the '\n'
-        if (insertPos > s.length) return
-
-        val prefix = "$nextNum. "
-        s.insert(insertPos, prefix)
-        // Move cursor to after the inserted prefix
-        binding.editMarkdown.setSelection((insertPos + prefix.length).coerceAtMost(s.length))
+        when (val action = MarkdownFormatter.listEnter(before, after)) {
+            is MarkdownFormatter.ListEnter.Continue -> {
+                val insertAt = (at + 1).coerceAtMost(s.length)
+                s.insert(insertAt, action.marker)
+                binding.editMarkdown.setSelection(
+                    (insertAt + action.marker.length).coerceAtMost(s.length)
+                )
+            }
+            is MarkdownFormatter.ListEnter.End ->
+                s.delete(lineStart, (lineStart + action.length).coerceAtMost(s.length))
+            null -> Unit
+        }
     }
 
-    // ── Ordered list renumbering ──────────────────────────────────────────────
-
     /**
-     * Rewrites the literal numbers in each contiguous ordered-list block so they read
-     * 1, 2, 3… from the top of the block. Operates directly on the [Editable] so cursor
-     * management is handled by Android's text machinery (individual replace calls preserve
-     * positions better than a full text swap).
+     * Make ordered lists read the way [MarkdownParser] renders them — counted from each run's first
+     * item, so a list written `3.` stays at 3 rather than being dragged back to 1.
+     *
+     * Applied as narrow per-marker edits, back-to-front so the computed offsets stay valid, with the
+     * caret carried by the length change of everything ending before it.
      */
-    private fun renumberOrderedLists(s: Editable, binding: DialogTextEditBinding) {
-        val text = s.toString()
-        val lines = text.split('\n')
-
-        var pos = 0        // current char offset into s
-        var blockCounter = 0
-
-        for (line in lines) {
-            val olMatch = Regex("""^(\d+)\. """).find(line)
-            if (olMatch != null) {
-                blockCounter++
-                val actual = olMatch.groupValues[1].toIntOrNull() ?: blockCounter
-                if (actual != blockCounter) {
-                    // Replace the number prefix on this line
-                    val prefixStart = pos
-                    val oldPrefix = "$actual. "
-                    val newPrefix = "$blockCounter. "
-                    if (s.length >= prefixStart + oldPrefix.length &&
-                        s.substring(prefixStart, prefixStart + oldPrefix.length) == oldPrefix
-                    ) {
-                        val cursorBefore = binding.editMarkdown.selectionStart
-                        s.replace(prefixStart, prefixStart + oldPrefix.length, newPrefix)
-                        // Adjust cursor: if it was after the replaced region, shift by delta
-                        val delta = newPrefix.length - oldPrefix.length
-                        if (cursorBefore > prefixStart + oldPrefix.length) {
-                            val newCursor = (cursorBefore + delta).coerceIn(0, s.length)
-                            binding.editMarkdown.setSelection(newCursor)
-                        }
-                    }
-                }
-            } else {
-                blockCounter = 0
-            }
-            pos += line.length + 1 // +1 for the '\n' separator
+    private fun renumberLists(s: Editable, binding: DialogTextEditBinding) {
+        val changes = MarkdownFormatter.renumberOrderedLists(s)
+        if (changes.isEmpty()) return
+        val caret = binding.editMarkdown.selectionEnd
+        var delta = 0
+        for (c in changes) if (c.at + c.length <= caret) delta += c.marker.length - c.length
+        for (c in changes.asReversed()) {
+            s.replace(c.at, (c.at + c.length).coerceAtMost(s.length), c.marker)
         }
+        binding.editMarkdown.setSelection((caret + delta).coerceIn(0, s.length))
     }
 
     // ── WYSIWYG span application ──────────────────────────────────────────────

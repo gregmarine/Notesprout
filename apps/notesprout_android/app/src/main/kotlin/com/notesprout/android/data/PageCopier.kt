@@ -44,6 +44,30 @@ private fun cursorRowToCv(c: android.database.Cursor): ContentValues {
 private class SubtreeNode(val cv: ContentValues, val id: String, val parentId: String)
 
 /**
+ * The page's `document` row, captured whole — or null when it has none.
+ *
+ * Documents hang off the **page**, not its layer, so the subtree copy below never sees them. Dropping
+ * one would drop the user's writing (unlike `page_text`, a cache that regenerates), so every page-copy
+ * path captures it here and writes it with [writePageDocument]. See docs/documents.md.
+ */
+private fun readPageDocument(db: SoilRawDb, pageId: String): ContentValues? = db.rawQuery(
+    "SELECT * FROM notebook WHERE type = 'document' AND parentId = ? AND deletedAt IS NULL LIMIT 1",
+    arrayOf(pageId),
+).use { c -> if (c.moveToFirst()) cursorRowToCv(c) else null }
+
+/** Write a captured document row onto [newPageId] with a fresh id. */
+private fun writePageDocument(db: SoilRawDb, document: ContentValues?, newPageId: String, now: Long) {
+    if (document == null) return
+    db.insert("notebook", null, ContentValues(document).apply {
+        put("id", UUID.randomUUID().toString())
+        put("parentId", newPageId)
+        put("createdAt", now)
+        put("updatedAt", now)
+        putNull("deletedAt")
+    })
+}
+
+/**
  * BFS-collect every non-deleted descendant of [rootParentId] from [db] (Phase 2c: composite content
  * lives in child rows, so a page copy must recurse past the layer's direct children). Parents come
  * before their children, so [writeDescendants] can remap ids in a single forward pass.
@@ -175,6 +199,8 @@ suspend fun copyPageAfter(
         ))
         // Deep-copy the whole layer subtree (direct children + composite content grandchildren).
         dao.deepCopyChildren(sourceLayer.id, newLayerId, now)
+        // The page's document hangs off the page, not the layer, so it needs copying by name.
+        DocumentRepository.copyToPage(dao, sourcePageId, newPageId, now)
     }
 
     return newPageId
@@ -324,6 +350,7 @@ suspend fun copyPagesRelativeRaw(
         data class SourcePage(
             val page: ContentValues, val layer: ContentValues,
             val layerId: String, val descendants: List<SubtreeNode>,
+            val document: ContentValues?,
         )
         val sources = sourcePageIds.mapNotNull { srcId ->
             val page = db.rawQuery(
@@ -338,7 +365,7 @@ suspend fun copyPagesRelativeRaw(
                 "SELECT * FROM notebook WHERE id = ? LIMIT 1", arrayOf(layerId)
             ).use { c -> if (c.moveToFirst()) cursorRowToCv(c) else null } ?: return@mapNotNull null
 
-            SourcePage(page, layer, layerId, collectDescendants(db, layerId))
+            SourcePage(page, layer, layerId, collectDescendants(db, layerId), readPageDocument(db, srcId))
         }
         if (sources.isEmpty()) return@withContext null
 
@@ -399,6 +426,7 @@ suspend fun copyPagesRelativeRaw(
                 // Copy the entire layer subtree (direct children + composite grandchildren), remapping
                 // every parentId through fresh ids.
                 writeDescendants(db, src.descendants, src.layerId, newLayerId, now)
+                writePageDocument(db, src.document, newPageId, now)
             }
 
             db.setTransactionSuccessful()
@@ -817,6 +845,7 @@ suspend fun copyPagesAcrossNotebooks(
     data class SourcePage(
         val page: ContentValues, val layer: ContentValues,
         val layerId: String, val descendants: List<SubtreeNode>,
+        val document: ContentValues?,
     )
 
     var sourceDb: SoilRawDb? = null
@@ -838,7 +867,10 @@ suspend fun copyPagesAcrossNotebooks(
                 "SELECT * FROM notebook WHERE id = ? LIMIT 1", arrayOf(layerId)
             ).use { c -> if (c.moveToFirst()) cursorRowToCv(c) else null } ?: return@mapNotNull null
 
-            SourcePage(page, layer, layerId, collectDescendants(sourceDb, layerId))
+            SourcePage(
+                page, layer, layerId, collectDescendants(sourceDb, layerId),
+                readPageDocument(sourceDb, srcId),
+            )
         }
         if (sources.isEmpty()) return@withContext null
 
@@ -943,6 +975,7 @@ suspend fun copyPagesAcrossNotebooks(
                 // Copy the entire layer subtree (direct children + composite grandchildren) into the
                 // destination, remapping every parentId through fresh ids.
                 writeDescendants(destDb, src.descendants, src.layerId, newLayerId, now)
+                writePageDocument(destDb, src.document, newPageId, now)
             }
 
             destDb.setTransactionSuccessful()

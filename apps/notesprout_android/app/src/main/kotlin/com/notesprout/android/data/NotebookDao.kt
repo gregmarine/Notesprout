@@ -325,6 +325,25 @@ interface NotebookDao {
     @Query("SELECT * FROM notebook WHERE type = 'page_text' AND parentId = :pageId LIMIT 1")
     suspend fun getPageTextRow(pageId: String): NotebookObject?
 
+    // ── Documents (the page's authored Markdown) ──────────────────────────────
+
+    /**
+     * The single `document` row for [pageId] (parentId = pageId), or null if the page has none.
+     *
+     * Filtered on soft-delete, unlike [getPageTextRow]: a document is user content that travels with
+     * its page, so it is soft-deleted when the page is and restored when the page is (which is also
+     * why it must never be resurrected by a plain upsert). See docs/documents.md.
+     */
+    @Query("SELECT * FROM notebook WHERE type = 'document' AND parentId = :pageId AND deletedAt IS NULL LIMIT 1")
+    suspend fun getDocumentRow(pageId: String): NotebookObject?
+
+    /**
+     * Overwrite a document row's Markdown and its source watermark. Clears the legacy `data` JSON —
+     * documents are columnar-only (text in the `text` column) and were never written any other way.
+     */
+    @Query("UPDATE notebook SET data = '', text = :text, srcUpdatedAt = :srcUpdatedAt, updatedAt = :updatedAt WHERE id = :id")
+    suspend fun updateDocument(id: String, text: String, srcUpdatedAt: Long?, updatedAt: Long)
+
     // ── Snapshot staleness check ──────────────────────────────────────────────
 
     /**

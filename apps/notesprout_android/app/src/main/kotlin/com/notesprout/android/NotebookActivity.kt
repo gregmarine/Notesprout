@@ -43,6 +43,7 @@ import com.notesprout.android.data.NotebookCompactor
 import androidx.room.withTransaction
 import com.notesprout.android.core.BitmapDecode
 import com.notesprout.android.core.Slog
+import com.notesprout.android.core.markdown.DocumentDraft
 import com.notesprout.android.crypto.EncryptionInfo
 import com.notesprout.android.crypto.KeyResolver
 import com.notesprout.android.crypto.KeySession
@@ -52,6 +53,7 @@ import com.notesprout.android.crypto.SoilCrypto
 import com.notesprout.android.crypto.SoilMigrator
 import com.notesprout.android.data.BoundingBox
 import com.notesprout.android.data.DayHistoryRepository
+import com.notesprout.android.data.DocumentRepository
 import com.notesprout.android.data.copyPageAfter
 import com.notesprout.android.data.HeadingObject
 import com.notesprout.android.data.HeadingStroke
@@ -183,6 +185,11 @@ class NotebookActivity : AppCompatActivity() {
 
         /** Max pages of parsed strokes held in the prefetch LRU cache (current + neighbours + slack). */
         private const val MAX_CACHED_PAGES = 6
+
+        /** Instance-state keys for an in-flight document-editor session (see onSaveInstanceState). */
+        private const val STATE_DOCUMENT_PAGE_ID    = "document_page_id"
+        private const val STATE_DOCUMENT_PAGE_INDEX = "document_page_index"
+        private const val STATE_DOCUMENT_SRC        = "document_src_updated_at"
 
         /** Intent extra key — the index UUID for the notebook (ObjectEntity id). */
         const val EXTRA_NOTEBOOK_ID   = "notebook_id"
@@ -867,6 +874,51 @@ class NotebookActivity : AppCompatActivity() {
         performScratchpadTransfer(content)
     }
 
+    // ── Document editor (host side) ───────────────────────────────────────────
+    // The editor never opens the .soil — this activity reads and writes on its behalf through
+    // DocumentTransfer. See docs/documents.md.
+
+    /** The page whose document is open in the editor, or "" when none is. */
+    private var documentPageId: String = ""
+
+    /** Index of that page. The editor can flip pages, so this drifts from [currentPageIndex]. */
+    private var documentPageIndex: Int = -1
+
+    /** That document's source watermark. Only a seed or a "bring in" moves it — never a keystroke. */
+    private var documentSrcUpdatedAt: Long? = null
+
+    /**
+     * Flushes whatever the editor last published, then catches the notebook up to the page the editor
+     * ended on. Fires even on a cancelled return, and after a low-memory kill of *this* activity behind
+     * the editor: the recreated host restores [documentPageId] from instance state, and this is where
+     * the text it kept alive lands.
+     */
+    private val documentLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { _ ->
+        val text = DocumentTransfer.live
+        val pageId = documentPageId
+        val endedOn = documentPageIndex
+        DocumentTransfer.clearSession()
+        documentPageId = ""
+        documentPageIndex = -1
+
+        val db = soilDatabase
+        if (text != null && pageId.isNotEmpty() && db != null) {
+            val src = documentSrcUpdatedAt
+            lifecycleScope.launch(Dispatchers.IO) {
+                runCatching { DocumentRepository.save(db.notebookDao(), pageId, text, src) }
+                    .onFailure { Log.e(TAG, "Failed to save document for page $pageId", it) }
+            }
+        }
+
+        // Follow the editor's page flips. Deferred to here on purpose: this navigates the drawing
+        // surface, which must not be driven while the activity is stopped behind the editor.
+        if (endedOn >= 0 && endedOn != currentPageIndex && endedOn < pages.size) {
+            navigateToPage(endedOn)
+        }
+    }
+
     /** Launched when opening a sticky note's content editor. */
     private val editorLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -1127,7 +1179,9 @@ class NotebookActivity : AppCompatActivity() {
         // Tasks is a plain launch, not a for-result one: nothing comes back from it into the page
         // the way a scratch-pad or calendar selection does.
         binding.btnTasks.setOnClickListener { TasksActivity.launch(this) }
-        binding.btnDocument.setOnClickListener { DocumentEditorActivity.launch(this) }
+        binding.btnDocument.setOnClickListener {
+            soilDatabase?.let { openDocumentEditor(it) }
+        }
 
         binding.btnUndo.setOnClickListener { performUndo() }
         binding.btnRedo.setOnClickListener { performRedo() }
@@ -2121,6 +2175,15 @@ class NotebookActivity : AppCompatActivity() {
             pendingStickyNote = StickyNoteEditorTransfer.decodeNote(it)
             pendingStickyInitialCreate = savedInstanceState.getBoolean(StickyNoteEditorTransfer.STATE_PENDING_CREATE, false)
         }
+        // Restore an in-flight document-editor session, and offer the editor a host again: it may
+        // still be in front of us, holding text that only this activity can store.
+        savedInstanceState?.getString(STATE_DOCUMENT_PAGE_ID)?.takeIf { it.isNotEmpty() }?.let {
+            documentPageId = it
+            documentPageIndex = savedInstanceState.getInt(STATE_DOCUMENT_PAGE_INDEX, -1)
+            documentSrcUpdatedAt =
+                if (savedInstanceState.containsKey(STATE_DOCUMENT_SRC)) savedInstanceState.getLong(STATE_DOCUMENT_SRC) else null
+            DocumentTransfer.host = documentHost
+        }
         SurfaceStack.attach(this, surfaceEntry())
         // A "fresh" open (from MainActivity/Recents) resets the link back-stack; a via-link open
         // (following a link or a back-swipe) preserves the trail. See [LinkBackStack].
@@ -2276,6 +2339,13 @@ class NotebookActivity : AppCompatActivity() {
             outState.putString(StickyNoteEditorTransfer.STATE_PENDING_NOTE, StickyNoteEditorTransfer.encodeNote(it))
             outState.putBoolean(StickyNoteEditorTransfer.STATE_PENDING_CREATE, pendingStickyInitialCreate)
         }
+        // Same reasoning for the open document: DocumentTransfer dies with the process, so which page
+        // the editor is writing to has to survive here or the text it kept alive lands nowhere.
+        if (documentPageId.isNotEmpty()) {
+            outState.putString(STATE_DOCUMENT_PAGE_ID, documentPageId)
+            outState.putInt(STATE_DOCUMENT_PAGE_INDEX, documentPageIndex)
+            documentSrcUpdatedAt?.let { outState.putLong(STATE_DOCUMENT_SRC, it) }
+        }
     }
 
     private fun surfaceEntry() = SurfaceEntry(surfaceToken, AppSurface.NOTEBOOK, notebookId = notebookId)
@@ -2286,6 +2356,10 @@ class NotebookActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
+        // Stop offering ourselves to the document editor — our connection is about to close. The
+        // editor keeps its text in DocumentTransfer.live, which the seal below (and, if this activity
+        // is recreated behind the editor, documentLauncher) flushes.
+        if (DocumentTransfer.host === documentHost) DocumentTransfer.host = null
         com.notesprout.android.core.OpenNotebooks.closed(notebookId)
         drawingView.releaseResources()
         // Safety net: if the activity is destroyed without the user tapping Close
@@ -3875,6 +3949,9 @@ class NotebookActivity : AppCompatActivity() {
         }
         runCatching { saveStrokes(db, strokesAtClose) }
             .onFailure { android.util.Log.e(TAG, "seal: stroke flush failed — unsaved ink lost", it) }
+        // A document editor may still be in front of this notebook, holding text that only this
+        // connection can store. Write it before the connection goes away.
+        flushPendingDocument(db)
         // RTR: stop pending debounce jobs and flush the sealed page's text synchronously, on this
         // IO context, so it completes before the DB is closed below (the "run once at page-seal" hook).
         rtrScheduler?.let { scheduler ->
@@ -4773,6 +4850,180 @@ class NotebookActivity : AppCompatActivity() {
                 )
             )
         }
+    }
+
+    // ── Document editor ───────────────────────────────────────────────────────
+
+    /**
+     * Open the current page's document. The page is the draft: on a page that has no document yet,
+     * its recognized text flows in once, here, before the editor is launched — which is also why the
+     * seed never lands in the DB, only in the editor's buffer. Everything after that is the user's.
+     *
+     * Ink is flushed first: the draft is recognized from the `.soil`, so strokes still sitting in the
+     * live view would be missing from it.
+     */
+    private fun openDocumentEditor(db: SoilDatabase) {
+        if (currentPageId.isEmpty()) return
+        val index = currentPageIndex
+        lifecycleScope.launch {
+            withContext(Dispatchers.IO) { saveStrokes(db) }
+            documentPageIndex = index
+            documentPageId = pages.getOrNull(index)?.id ?: currentPageId
+            val session = loadDocumentSession(db, documentPageId, index, showProgress = true)
+            documentSrcUpdatedAt = session.srcUpdatedAt
+            DocumentTransfer.host = documentHost
+            DocumentTransfer.input = session
+            DocumentTransfer.live = null
+            documentLauncher.launch(
+                DocumentEditorActivity.intent(this@NotebookActivity, session.pageLabel)
+            )
+        }
+    }
+
+    /**
+     * Everything the editor needs to show one page: its document (seeded from the page's recognized
+     * text when it has none yet), whether the page has moved on since that text was drafted, and where
+     * the page sits in the notebook. Shared by open and page-flip so both behave identically.
+     */
+    private suspend fun loadDocumentSession(
+        db: SoilDatabase,
+        pageId: String,
+        index: Int,
+        showProgress: Boolean,
+    ): DocumentTransfer.Session {
+        val dao = db.notebookDao()
+        var draft = withContext(Dispatchers.IO) {
+            DocumentRepository.get(dao, pageId)
+        }?.let { DocumentTransfer.Draft(it.text, it.srcUpdatedAt) }
+
+        if (DocumentDraft.isUndrafted(draft?.text)) {
+            draft = seedDocumentDraft(db, pageId, showProgress) ?: draft
+        }
+
+        val layerMax = withContext(Dispatchers.IO) {
+            com.notesprout.android.recognition.PageTextRepository.layerMaxUpdatedAt(dao, pageId)
+        }
+        val total = pages.size.coerceAtLeast(1)
+        return DocumentTransfer.Session(
+            text = draft?.text.orEmpty(),
+            srcUpdatedAt = draft?.srcUpdatedAt,
+            stale = DocumentDraft.isStale(draft?.srcUpdatedAt, layerMax),
+            pageLabel = "Page ${index + 1}/$total",
+            hasPrev = index > 0,
+            hasNext = index < pages.size - 1,
+        )
+    }
+
+    /**
+     * Recognize [pageId] and return it as a fresh draft, or null when there is nothing to draft from
+     * (no recognizer, or a page with no words on it). On a notebook without real-time text this is a
+     * full page recognition, which is not instant.
+     *
+     * [showProgress] must be false when the editor is in front of us: this activity is stopped then, so
+     * a dialog on its window is invisible at best and a bad-token crash at worst. The editor shows its
+     * own progress in the source strip for that path.
+     */
+    private suspend fun seedDocumentDraft(
+        db: SoilDatabase,
+        pageId: String,
+        showProgress: Boolean,
+    ): DocumentTransfer.Draft? {
+        val hwr = HandwritingRecognizerProvider.instance?.takeIf { it.isReady() } ?: return null
+
+        val dialog = if (!showProgress) null else {
+            val tvMessage = android.widget.TextView(this).apply {
+                text = "Reading this page…"
+                setPadding(64, 48, 64, 48)
+                setTextColor(android.graphics.Color.BLACK)
+                textSize = 16f
+            }
+            AlertDialog.Builder(this)
+                .setView(tvMessage)
+                .setCancelable(false)
+                .create()
+                .also {
+                    it.show()
+                    it.window?.setElevation(0f)
+                    it.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
+                }
+        }
+
+        return try {
+            withContext(Dispatchers.IO) {
+                val pageText = com.notesprout.android.recognition.PageTextRepository.freshOrRecognize(
+                    db.notebookDao(), pageId, com.notesprout.android.recognition.PageTextRecognizer(hwr),
+                )
+                pageText.text.takeIf { it.isNotBlank() }
+                    ?.let { DocumentTransfer.Draft(it, pageText.sourceMaxUpdatedAt) }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to draft page $pageId", e)
+            null
+        } finally {
+            runCatching { dialog?.dismiss() }
+        }
+    }
+
+    /**
+     * What the editor is allowed to ask of the notebook. Both calls are keyed on [documentPageId] —
+     * never on `currentPageId`, which a recreated host may have moved on from.
+     */
+    private val documentHost = object : DocumentTransfer.Host {
+
+        override fun saveDocument(text: String) {
+            val db = soilDatabase ?: return
+            val pageId = documentPageId.takeIf { it.isNotEmpty() } ?: return
+            val src = documentSrcUpdatedAt
+            lifecycleScope.launch(Dispatchers.IO) {
+                runCatching { DocumentRepository.save(db.notebookDao(), pageId, text, src) }
+                    .onFailure { Log.e(TAG, "Failed to save document for page $pageId", it) }
+            }
+        }
+
+        override fun requestPageDraft(onResult: (DocumentTransfer.Draft?) -> Unit) {
+            val db = soilDatabase
+            val pageId = documentPageId
+            if (db == null || pageId.isEmpty()) { onResult(null); return }
+            lifecycleScope.launch {
+                val draft = seedDocumentDraft(db, pageId, showProgress = false)
+                // Re-anchor the document to the page state it was just drafted from. Only ever here
+                // and at the seed — this is what makes "page has changed" meaningful.
+                if (draft != null) documentSrcUpdatedAt = draft.srcUpdatedAt
+                onResult(draft)
+            }
+        }
+
+        override fun requestPage(delta: Int, onResult: (DocumentTransfer.Session?) -> Unit) {
+            val db = soilDatabase
+            val target = documentPageIndex + delta
+            val pageId = pages.getOrNull(target)?.id
+            if (db == null || pageId == null) { onResult(null); return }
+            // Switch which page we write to *before* loading, and drop the outgoing page's published
+            // text with it: a teardown between here and the editor's next save must not write the page
+            // we left onto the page we arrived at. The editor has already stored it.
+            DocumentTransfer.live = null
+            documentPageIndex = target
+            documentPageId = pageId
+            documentSrcUpdatedAt = null
+            lifecycleScope.launch {
+                val session = loadDocumentSession(db, pageId, target, showProgress = false)
+                documentSrcUpdatedAt = session.srcUpdatedAt
+                DocumentTransfer.input = session
+                onResult(session)
+            }
+        }
+    }
+
+    /**
+     * Write the text the editor last published, before the connection it needs goes away. Called at
+     * the top of every seal so a notebook closing under an open editor still stores what was typed.
+     * Must run on [Dispatchers.IO].
+     */
+    private suspend fun flushPendingDocument(db: SoilDatabase) {
+        val text = DocumentTransfer.live ?: return
+        val pageId = documentPageId.takeIf { it.isNotEmpty() } ?: return
+        runCatching { DocumentRepository.save(db.notebookDao(), pageId, text, documentSrcUpdatedAt) }
+            .onFailure { Log.e(TAG, "Failed to flush document for page $pageId", it) }
     }
 
     /** Open the read-only recognized-text viewer for this notebook (flush current ink first). */

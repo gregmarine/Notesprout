@@ -9,7 +9,11 @@ sealed class Block {
     data class ListItem(
         val ordered: Boolean,
         val depth: Int,
-        /** Computed sequential number (1-based) for ordered items; 0 for unordered. */
+        /**
+         * The number to draw for an ordered item; 0 for unordered. Counted from the run's **first**
+         * item, whose written number is honoured (CommonMark's `start`) — so `3.` renders as 3 while
+         * the items after it count on regardless of what they claim.
+         */
         val displayNumber: Int,
         val isTask: Boolean,
         val checked: Boolean,
@@ -126,11 +130,15 @@ object MarkdownParser {
                 continue
             }
 
-            // Ordered list item (auto-renumbered; literal number in source is ignored)
+            // Ordered list item. The **first** item of a run sets where the numbering starts — that is
+            // CommonMark's `start` attribute, so a list written `3.` renders as 3 — and the items after
+            // it simply count on from there, whatever number they claim.
             val olMatch = orderedItemRegex.find(trimmed)
             if (olMatch != null && olMatch.range.first == 0) {
                 val text = olMatch.groupValues[2]
-                val num = (orderedCounters[depth] ?: 0) + 1
+                val running = orderedCounters[depth]
+                val num = if (running != null) running + 1
+                    else olMatch.groupValues[1].toIntOrNull() ?: 1
                 orderedCounters[depth] = num
                 blocks += Block.ListItem(
                     ordered = true, depth = depth, displayNumber = num,

@@ -485,3 +485,30 @@ git history if needed):
 7. Legacy PNGs are left untouched (copy, not move) — delete only if the user asks.
 
 `objects` columns: `id, type, name, parentId, createdAt, updatedAt, deletedAt, data`.
+
+---
+
+## Documents — deferred items
+
+Punted from the document-storage work (2026-07-29/30, `docs/documents.md`). The feature ships
+per-page and notebook-only; each item below is a deliberate omission, not an oversight.
+
+- **Notebook-level / multi-page documents.** Per-page storage composes into one later (text export
+  already concatenates pages) with no storage change.
+- **Documents on Scratch Pad / Calendar day pages.** Those pages live in the global index's
+  `scratchpad` / `calendar` tables, which would each need the `srcUpdatedAt` column added.
+- **Sticky-note text in the seed draft.** `PageTextRepository.loadPageContent` does not read sticky
+  contents; changing that belongs to recognition, not to documents.
+- **Editing a document from outside an open notebook** (Page Index, MainActivity). The editor writes
+  only through `NotebookActivity`'s connection, so the notebook is the only safe host today. A second
+  writing connection to a live `.soil` is the shape of this project's worst data-loss bugs.
+- **PDF / PNG export of a document.** Text formats only (MD/TXT prefer the document over recognized
+  text; the raster paths still render the page's ink).
+- **Lettered / roman-numeral ordered lists** (`a.`, `i.`). Decided against 2026-07-29: they exist only
+  in Pandoc's `fancy_lists` extension, not CommonMark or GFM, where they are paragraphs — and
+  consecutive lines get *joined*. Rendering them as lists in-app would send documents out as
+  run-together paragraphs everywhere else, which is the opposite of what a pre-export surface is for.
+  Revisit only if the export target becomes Pandoc; the change would be localized to
+  `MarkdownFormatter.listEnter` / `renumberOrderedLists` and the parser's ordered-item regex.
+- **A durable undo for "bring in page text".** In-session Ctrl+Z only (the refresh is applied through
+  the buffer, like a format-bar edit); beyond the session, the confirmation dialog is the guard.

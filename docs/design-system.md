@@ -39,6 +39,19 @@ hardcode a value or re-derive the inset:
   the same height on an immersive screen as it does in the library.
 - `TopGuard.applyInsetPadding(root)` — for screens that leave the system bars **visible**. Pads by
   the live `systemBars()` inset (MainActivity's long-standing behaviour).
+- `TopGuard.applyInsetPadding(root, followIme = true)` — same, but the bottom padding also clears the
+  **software keyboard**, so a screen that types shrinks instead of hiding its content behind the IME.
+  Used by the document editor. Two traps this exists to avoid:
+  - `android:windowSoftInputMode="adjustResize"` in the manifest is **not** sufficient. The framework
+    reports the inset, but nothing in a hand-built hierarchy consumes it unless a view is told to (no
+    `fitsSystemWindows` anywhere), and on a `targetSdk 35` edge-to-edge window the old automatic resize
+    is gone entirely. Keep the manifest flag — below API 30 it is what makes `Type.ime()` resolve at
+    all — but the padding is what actually moves the layout.
+  - Take `max(systemBars.bottom, ime.bottom)`, never the sum: the keyboard covers the navigation bar,
+    so adding them leaves a nav-bar-high dead strip under the keyboard.
+  - Shrinking the container is only half of it — the room the keyboard takes is the room the caret was
+    in. A surface that scrolls its own text must nudge the caret's line back into view on a height
+    change (`DocumentEditorActivity.keepCaretVisible`).
 - `TopGuard.applyRootPadding(root)` — for **immersive** screens (`controller.hide(systemBars())`).
   Their inset is `0`, so the inset listener is a no-op there and the guard must be reserved outright.
   This is the usual mistake: copying the inset listener onto an immersive screen fixes nothing.

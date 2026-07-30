@@ -5,6 +5,8 @@ import android.content.Intent
 import android.content.res.Configuration
 import android.graphics.Typeface
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.text.InputType
 import android.text.SpannableString
 import android.text.Spanned
@@ -28,11 +30,14 @@ import androidx.appcompat.widget.AppCompatButton
 import androidx.appcompat.widget.AppCompatEditText
 import androidx.appcompat.widget.AppCompatTextView
 import androidx.core.content.ContextCompat
+import com.notesprout.android.core.DocumentPreferences
 import com.notesprout.android.core.Slog
 import com.notesprout.android.core.TopGuard
+import com.notesprout.android.core.markdown.DocumentDraft
 import com.notesprout.android.core.markdown.EditableBuffer
 import com.notesprout.android.core.markdown.MarkdownFormatter
 import com.notesprout.android.core.markdown.MarkdownParser
+import com.notesprout.android.core.markdown.MarkdownReflow
 import com.notesprout.android.core.markdown.MarkdownRenderer
 import com.notesprout.android.core.markdown.TextBuffer
 
@@ -49,17 +54,32 @@ import com.notesprout.android.core.markdown.TextBuffer
  * [MarkdownFormatter] operations, which are plain text edits. A button press and a hand-typed
  * `**` are indistinguishable afterwards.
  *
- * Phase 1 is deliberately storage-free: the editor opens empty, nothing is loaded, nothing is
- * saved. It exists to settle the feel of the surface before it is wired to a document object.
+ * **The page is the draft; this is the result.** The text arrives once, seeded from the page's
+ * recognized handwriting, and from then on it is the user's — recognition never overwrites it. The
+ * source strip offers the page's text back on request, and nothing else does.
+ *
+ * The editor **never touches the `.soil`**. It holds text and asks [DocumentTransfer.host] — the
+ * notebook, which already owns the open connection — to read and write on its behalf. Text is
+ * autosaved (there is no Cancel: writing on paper is not cancellable) on an idle timer, on the
+ * Write↔Preview switch, on pause, and on Done.
  */
 class DocumentEditorActivity : AppCompatActivity() {
 
     companion object {
         private const val TAG = "DocEditor"
 
-        fun launch(context: Context) {
-            context.startActivity(Intent(context, DocumentEditorActivity::class.java))
-        }
+        /** Which page this document belongs to, for the header — e.g. "Page 4". */
+        const val EXTRA_PAGE_LABEL = "page_label"
+
+        private const val STATE_TEXT = "doc_text"
+        private const val STATE_PREVIEWING = "doc_previewing"
+
+        /** Pen-idle window before the text is written, matching RTR's own debounce. */
+        private const val AUTOSAVE_DELAY_MS = 2000L
+
+        fun intent(context: Context, pageLabel: String): Intent =
+            Intent(context, DocumentEditorActivity::class.java)
+                .putExtra(EXTRA_PAGE_LABEL, pageLabel)
     }
 
     private lateinit var editor: MarkdownEditText
@@ -68,8 +88,45 @@ class DocumentEditorActivity : AppCompatActivity() {
     private lateinit var previewText: AppCompatTextView
     private lateinit var btnWrite: AppCompatButton
     private lateinit var btnPreview: AppCompatButton
+    private lateinit var sourceStrip: View
+    private lateinit var sourceText: AppCompatTextView
+    private lateinit var titleText: AppCompatTextView
+
+    /** Source strip + rule + format bar: the writing chrome, shown and hidden as one piece. */
+    private lateinit var writingChrome: View
+
+    /** Editing-surface text size in sp, remembered across sessions ([DocumentPreferences]). */
+    private var textSizeSp = DocumentPreferences.DEFAULT_TEXT_SIZE
 
     private var previewing = false
+
+    /** Which page's document this is, for the header only — the page id stays with the host. */
+    private var pageLabel: String = ""
+
+    /** Whether the notebook has a page on either side of this one. */
+    private var hasPrev = false
+    private var hasNext = false
+
+    /** True while the page has been written on since this text was drafted from it. */
+    private var pageChanged = false
+
+    /** True once we know this text came from the page — at open, or after a "bring in". */
+    private var drafted = false
+
+    /** Last text handed to the host, so an idle tick with nothing new writes nothing. */
+    private var savedText: String = ""
+
+    /**
+     * Set while the host is reading a page for us — a "bring in" or a page flip. Blocks a second
+     * request from overlapping it and puts the strip into its reading state.
+     */
+    private var bringingIn = false
+
+    private val autosave = Handler(Looper.getMainLooper())
+    private val autosaveTick = Runnable { persist() }
+
+    /** Offset of a newline just typed, handed from `onTextChanged` to `afterTextChanged`. -1 = none. */
+    private var newlineAt = -1
 
     /**
      * Manual override for the soft keyboard: `null` follows the hardware (suppressed while a
@@ -81,16 +138,80 @@ class DocumentEditorActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        pageLabel = intent.getStringExtra(EXTRA_PAGE_LABEL).orEmpty()
+        // Read before the views are built — both surfaces are sized from it.
+        textSizeSp = DocumentPreferences.textSize(this)
+
         val root = buildUi()
         setContentView(root)
-        TopGuard.applyInsetPadding(root)
+        // followIme: this screen types, so the layout has to give the software keyboard its room back
+        // rather than let it cover the lines being written.
+        TopGuard.applyInsetPadding(root, followIme = true)
+
+        // The views are built in code with no ids, so nothing here is restored for us. A recreated
+        // editor prefers its own saved buffer over the hand-off, which may be a stale seed (or, after
+        // process death, gone entirely).
+        val restored = savedInstanceState?.getString(STATE_TEXT)
+        val session = DocumentTransfer.input
+        val opening = restored ?: session?.text.orEmpty()
+        editor.setText(opening)
+        editor.setSelection(opening.length)
+        // Whatever we open with counts as unsaved — a seed has never been written, and neither has a
+        // buffer recovered from process death. `savedText` only ever means "this exact text has been
+        // handed to the host", and the repository drops a write that would change nothing anyway.
+        savedText = ""
+        pageChanged = session?.stale == true
+        drafted = session?.srcUpdatedAt != null
+        hasPrev = session?.hasPrev == true
+        hasNext = session?.hasNext == true
+        session?.pageLabel?.takeIf { it.isNotBlank() }?.let { pageLabel = it }
+        updateTitle()
+        updateSourceStrip()
+
+        // A shorter editing surface can leave the caret below the fold, which is precisely what the
+        // keyboard appearing does. Only a real height change is worth reacting to.
+        editor.addOnLayoutChangeListener { _, _, top, _, bottom, _, oldTop, _, oldBottom ->
+            if (bottom - top != oldBottom - oldTop) editor.post { keepCaretVisible() }
+        }
+
+        editor.addTextChangedListener(object : android.text.TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
+
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+                // Note a plain newline for afterTextChanged, which is where the buffer may be edited.
+                // Watching the text rather than the Enter key covers both keyboards: a soft keyboard
+                // commits "\n" through the input connection and may send no key event at all.
+                newlineAt = if (before == 0 && count == 1 && s?.getOrNull(start) == '\n') start else -1
+            }
+
+            override fun afterTextChanged(s: android.text.Editable?) {
+                val at = newlineAt
+                newlineAt = -1
+                if (at >= 0 && s != null) continueListAt(s, at)
+                scheduleSave()
+            }
+        })
+
+        if (savedInstanceState?.getBoolean(STATE_PREVIEWING) == true) setPreviewing(true)
 
         editor.requestFocus()
         applyKeyboardMode()
     }
 
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        outState.putString(STATE_TEXT, currentText())
+        outState.putBoolean(STATE_PREVIEWING, previewing)
+    }
+
     override fun onResume() {
         super.onResume()
+        // A request whose host died mid-flight never calls back, which would leave the strip reading
+        // "Reading this page…" and the button refusing forever.
+        if (bringingIn && DocumentTransfer.host == null) {
+            bringingIn = false
+            updateSourceStrip()
+        }
         applyKeyboardMode()
     }
 
@@ -106,8 +227,48 @@ class DocumentEditorActivity : AppCompatActivity() {
 
     override fun onPause() {
         super.onPause()
+        // Leaving the screen is a save point: BOOX kills backgrounded activities freely, and there is
+        // no Cancel to honour.
+        persist()
         // BOOX devices do not reliably drop the IME when a screen goes away (see docs/design-system.md).
         hideIme()
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        autosave.removeCallbacks(autosaveTick)
+    }
+
+    // ── Storage (always through the host — see DocumentTransfer) ──────────────
+
+    private fun currentText(): String = editor.text?.toString().orEmpty()
+
+    /** Restart the idle timer; a burst of typing coalesces into one write. */
+    private fun scheduleSave() {
+        autosave.removeCallbacks(autosaveTick)
+        autosave.postDelayed(autosaveTick, AUTOSAVE_DELAY_MS)
+    }
+
+    /**
+     * Hand the current text to the host, and republish it for the host's teardown flush either way —
+     * if the notebook is destroyed under this screen it closes the DB with it, and [DocumentTransfer]
+     * is then the only place the text still exists.
+     */
+    private fun persist() {
+        autosave.removeCallbacks(autosaveTick)
+        val text = currentText()
+        DocumentTransfer.live = text
+        if (text == savedText) return
+        val host = DocumentTransfer.host
+        if (host == null) {
+            // The notebook was destroyed behind us (process death). The text stays in `live`, which
+            // the recreated host flushes when this screen closes.
+            Slog.d(TAG) { "No host — text held for the host's return (${text.length} chars)" }
+            return
+        }
+        host.saveDocument(text)
+        savedText = text
+        Slog.d(TAG) { "Saved ${text.length} chars" }
     }
 
     // ── UI (built programmatically to honor the e-ink design system) ─────────────
@@ -132,8 +293,18 @@ class DocumentEditorActivity : AppCompatActivity() {
         root.addView(rule(ink))
         root.addView(buildHeader(ink))
         root.addView(rule(ink))
-        formatBar = buildFormatBar(ink)
-        root.addView(formatBar)
+
+        // Writing chrome, hidden as one piece in Preview. The source strip reads as a caption under
+        // the header; the format bar is a band of its own and gets a rule to say so.
+        writingChrome = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            sourceStrip = buildSourceStrip(ink, light)
+            addView(sourceStrip)
+            addView(rule(ink))
+            formatBar = buildFormatBar(ink)
+            addView(formatBar)
+        }
+        root.addView(writingChrome)
         root.addView(rule(ink))
 
         editor = MarkdownEditText(this).apply {
@@ -141,7 +312,7 @@ class DocumentEditorActivity : AppCompatActivity() {
             setTextColor(ink)
             // Monospace: this is Markdown source, and columns carry meaning here.
             typeface = Typeface.MONOSPACE
-            textSize = 16f
+            textSize = textSizeSp
             setLineSpacing(0f, 1.2f)
             gravity = Gravity.TOP or Gravity.START
             setPadding(dp(20), dp(16), dp(20), dp(32))
@@ -162,7 +333,7 @@ class DocumentEditorActivity : AppCompatActivity() {
 
         previewText = AppCompatTextView(this).apply {
             setTextColor(ink)
-            textSize = 18f
+            textSize = textSizeSp + DocumentPreferences.PREVIEW_BUMP
             setLineSpacing(0f, 1.15f)
             setTextIsSelectable(true)
             setPadding(dp(20), dp(16), dp(20), dp(32))
@@ -190,13 +361,23 @@ class DocumentEditorActivity : AppCompatActivity() {
             setPadding(dp(16), dp(10), dp(16), dp(10))
         }
 
-        header.addView(AppCompatTextView(this).apply {
-            text = "Document"
+        titleText = AppCompatTextView(this).apply {
             setTextColor(ink)
             textSize = 18f
             isSingleLine = true
+            ellipsize = android.text.TextUtils.TruncateAt.END
             layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-        })
+        }
+        header.addView(titleText)
+
+        // Page flips live with the page label rather than in the format bar: they move the document,
+        // not the text. The notebook follows along when this screen closes.
+        header.addView(headerButton("‹", "Previous page  ·  Ctrl+PgUp") { flipPage(-1) })
+        header.addView(headerButton("›", "Next page  ·  Ctrl+PgDn") { flipPage(1) })
+
+        // Text size lives in the header rather than the writing chrome so it is still reachable in
+        // Preview — reading size matters at least as much as writing size.
+        header.addView(headerButton("A", "Text size") { promptTextSize() })
 
         btnWrite = modeButton("Write") { setPreviewing(false) }
         btnPreview = modeButton("Preview") { setPreviewing(true) }
@@ -214,12 +395,375 @@ class DocumentEditorActivity : AppCompatActivity() {
             layoutParams = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT
             ).apply { marginStart = dp(8) }
-            setOnClickListener { hideIme(); finish() }
+            setOnClickListener { persist(); hideIme(); finish() }
         })
 
         updateModeButtons()
         return header
     }
+
+    /**
+     * One line naming where this text came from, and the only way to bring the page's text back in.
+     * Giving provenance and staleness a home of their own keeps the header — which is already
+     * `Write | Preview | Done` — from crowding off a narrow screen.
+     */
+    private fun buildSourceStrip(ink: Int, light: Int): View {
+        val strip = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(16), dp(2), dp(8), dp(6))
+        }
+
+        sourceText = AppCompatTextView(this).apply {
+            setTextColor(light)
+            textSize = 12f
+            isSingleLine = true
+            ellipsize = android.text.TextUtils.TruncateAt.END
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+        }
+        strip.addView(sourceText)
+
+        // Reflow sits to the *left* of Bring in so Bring in keeps its position under the hand.
+        strip.addView(stripButton(ink, "Reflow", "Join wrapped lines into paragraphs  ·  Ctrl+Shift+F") {
+            reflowText()
+        })
+        strip.addView(stripButton(ink, "Bring in", "Bring this page's text into the document") {
+            promptBringIn()
+        })
+
+        return strip
+    }
+
+    private fun stripButton(ink: Int, label: String, hint: String, onClick: () -> Unit): AppCompatButton =
+        AppCompatButton(this).apply {
+            text = label
+            isAllCaps = false
+            textSize = 12f
+            setTextColor(ink)
+            setBackgroundResource(R.drawable.bg_toolbar_button)
+            stateListAnimator = null
+            minWidth = 0
+            minHeight = 0
+            setPadding(dp(10), dp(4), dp(10), dp(4))
+            // Never take focus: the editor must keep the caret and selection these act on.
+            isFocusable = false
+            isFocusableInTouchMode = false
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply { marginStart = dp(4) }
+            setOnClickListener { onClick() }
+            setOnLongClickListener { Toast.makeText(context, hint, Toast.LENGTH_SHORT).show(); true }
+        }
+
+    /**
+     * Provenance line: says whether the page has moved on since this text was drafted from it.
+     *
+     * Silent when we cannot say — a document written by hand, or a session recovered from process
+     * death, where the hand-off that carried the provenance is gone. No claim beats a wrong one, and
+     * *Bring in* is offered either way.
+     */
+    private fun updateSourceStrip() {
+        sourceText.text = when {
+            bringingIn -> "Reading this page…"
+            pageChanged -> "Page has changed since this draft"
+            drafted -> "Drafted from this page"
+            else -> ""
+        }
+    }
+
+    /**
+     * Carry a list on — or end it — after a newline was typed at [newlineIndex].
+     *
+     * A single Enter inside a list item writes the next marker, so a series keeps going by itself. A
+     * second Enter finds an item with nothing in it, deletes that marker and leaves a clean blank line:
+     * two Enters are a paragraph break, and no stray dash, number or checkbox is left behind.
+     *
+     * Runs from `afterTextChanged`, the one callback where the buffer may be edited. Neither edit it
+     * makes is a lone newline, so this cannot re-enter itself.
+     */
+    private fun continueListAt(text: android.text.Editable, newlineIndex: Int) {
+        var lineStart = newlineIndex
+        while (lineStart > 0 && text[lineStart - 1] != '\n') lineStart--
+        var lineEnd = newlineIndex + 1
+        while (lineEnd < text.length && text[lineEnd] != '\n') lineEnd++
+
+        val before = text.subSequence(lineStart, newlineIndex).toString()
+        val after = text.subSequence((newlineIndex + 1).coerceAtMost(text.length), lineEnd).toString()
+
+        when (val action = MarkdownFormatter.listEnter(before, after)) {
+            is MarkdownFormatter.ListEnter.Continue -> {
+                val at = (newlineIndex + 1).coerceAtMost(text.length)
+                text.insert(at, action.marker)
+                editor.setSelection((at + action.marker.length).coerceAtMost(text.length))
+            }
+            is MarkdownFormatter.ListEnter.End -> {
+                text.delete(lineStart, (lineStart + action.length).coerceAtMost(text.length))
+            }
+            null -> return
+        }
+        // An item added in the middle leaves the ones below it claiming numbers they no longer have.
+        renumberLists(text)
+    }
+
+    /**
+     * Make the ordered lists in the buffer read the way Markdown renders them, and report whether
+     * anything needed changing.
+     *
+     * Rewrites are applied back-to-front so the offsets computed against the old text stay valid, and
+     * the caret is carried by the change in length of everything that ends before it — a marker rewrite
+     * must not shuffle the caret out of the words it was sitting in.
+     */
+    private fun renumberLists(text: android.text.Editable): Boolean {
+        val changes = MarkdownFormatter.renumberOrderedLists(text)
+        if (changes.isEmpty()) return false
+        val caret = editor.selectionEnd
+        var delta = 0
+        for (c in changes) if (c.at + c.length <= caret) delta += c.marker.length - c.length
+        for (c in changes.asReversed()) {
+            text.replace(c.at, (c.at + c.length).coerceAtMost(text.length), c.marker)
+        }
+        editor.setSelection((caret + delta).coerceIn(0, text.length))
+        return true
+    }
+
+    /**
+     * Scroll the editing surface just enough to keep the caret's line in view.
+     *
+     * The layout shrinking is only half the fix: the room the keyboard takes is the room the caret was
+     * probably sitting in. Text coordinates are offset by the surface's own top padding and displaced by
+     * its scroll, so the caret's line is below the fold when
+     * `paddingTop + lineBottom - scrollY` passes `height - paddingBottom`.
+     */
+    private fun keepCaretVisible() {
+        if (previewing || !editor.hasFocus()) return
+        val layout = editor.layout ?: return
+        val caret = editor.selectionEnd.coerceIn(0, editor.text?.length ?: 0)
+        val lineBottom = layout.getLineBottom(layout.getLineForOffset(caret))
+        val overflow = editor.paddingTop + lineBottom - editor.scrollY -
+            (editor.height - editor.paddingBottom)
+        if (overflow > 0) editor.scrollBy(0, overflow)
+    }
+
+    // ── Text size ─────────────────────────────────────────────────────────────
+
+    /** Pick a text size. The tick marks the one in force; the choice is remembered for next time. */
+    private fun promptTextSize() {
+        val sheet = ActionSheetDialog(this).title("Text size")
+        for ((label, size) in DocumentPreferences.SIZES) {
+            val current = size == textSizeSp
+            sheet.addAction(null, if (current) "$label  ✓" else label) { applyTextSize(size) }
+        }
+        sheet.show()
+    }
+
+    private fun applyTextSize(sizeSp: Float) {
+        textSizeSp = sizeSp
+        DocumentPreferences.saveTextSize(this, sizeSp)
+        editor.textSize = sizeSp
+        previewText.textSize = sizeSp + DocumentPreferences.PREVIEW_BUMP
+        // The renderer bakes sizes into spans from the paint it was handed, so the preview has to be
+        // rebuilt rather than just re-measured.
+        if (previewing) renderPreview()
+        Slog.d(TAG) { "Text size → ${sizeSp}sp" }
+    }
+
+    // ── Reflow (join wrapped lines into paragraphs) ───────────────────────────
+
+    /**
+     * Join wrapped lines into paragraphs — over the selection when there is one, otherwise the whole
+     * document. Recognized handwriting arrives with a break at every hand-wrapped line, so this is
+     * usually the first thing a fresh draft wants.
+     *
+     * Applied as an ordinary buffer edit, exactly like a format-bar operation, so Ctrl+Z takes it back.
+     */
+    private fun reflowText() {
+        if (previewing) setPreviewing(false)
+        val text = editor.text ?: return
+        if (text.isEmpty()) return
+
+        // A selection is grown to whole lines first: reflowing half a line would join across a break
+        // the user cannot see the other side of.
+        val hasSelection = editor.selectionEnd > editor.selectionStart
+        val from = if (!hasSelection) 0 else
+            text.toString().lastIndexOf('\n', (editor.selectionStart - 1).coerceAtLeast(0))
+                .let { if (it < 0) 0 else it + 1 }
+        val to = if (!hasSelection) text.length else
+            text.toString().indexOf('\n', editor.selectionEnd).let { if (it < 0) text.length else it }
+
+        val slice = text.subSequence(from, to).toString()
+        val reflowed = MarkdownReflow.reflow(slice)
+        val joined = reflowed != slice
+        if (joined) {
+            text.replace(from, to, reflowed)
+            editor.setSelection((from + reflowed.length).coerceIn(0, text.length))
+        }
+        // Tidying the source is tidying the numbers too — including a list left with gaps by an item
+        // deleted long ago. Rendering-neutral, so it runs document-wide even for a selection.
+        val renumbered = renumberLists(text)
+        if (!joined && !renumbered) {
+            Toast.makeText(this, "Nothing to reflow.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        persist()
+        Slog.d(TAG) { "Reflowed ${if (hasSelection) "selection" else "document"}" }
+    }
+
+    // ── Page flips ────────────────────────────────────────────────────────────
+
+    /**
+     * Move to the next/previous page's document. The current text is stored first, and the host
+     * switches which page it writes to as part of the request — the notebook itself only catches up
+     * when this screen closes.
+     */
+    private fun flipPage(delta: Int) {
+        if (bringingIn) return
+        val host = DocumentTransfer.host
+        if (host == null) {
+            Toast.makeText(this, "The notebook is no longer open.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        if (delta < 0 && !hasPrev) { Toast.makeText(this, "First page.", Toast.LENGTH_SHORT).show(); return }
+        if (delta > 0 && !hasNext) { Toast.makeText(this, "Last page.", Toast.LENGTH_SHORT).show(); return }
+
+        persist()
+        bringingIn = true
+        updateSourceStrip()
+        host.requestPage(delta) { session ->
+            bringingIn = false
+            if (session == null) {
+                updateSourceStrip()
+                Toast.makeText(this, "Couldn't open that page.", Toast.LENGTH_SHORT).show()
+                return@requestPage
+            }
+            applySession(session)
+        }
+    }
+
+    /** Show a page's document: its text, its provenance, and where it sits in the notebook. */
+    private fun applySession(session: DocumentTransfer.Session) {
+        // `setText`, deliberately — not an Editable edit like every other change here. Arriving at
+        // another page is a new document, not an edit to this one, and it must not be left sitting on
+        // the undo stack: undoing "the flip" would put the page we left behind into the page we
+        // arrived at, and the next autosave would store it there.
+        editor.setText(session.text)
+        editor.setSelection(0)
+        editor.scrollTo(0, 0)
+        savedText = ""
+        pageChanged = session.stale
+        drafted = session.srcUpdatedAt != null
+        hasPrev = session.hasPrev
+        hasNext = session.hasNext
+        pageLabel = session.pageLabel
+        updateTitle()
+        updateSourceStrip()
+        // Store this page's seed right away, so the gap where the text exists only in memory is as
+        // short on a flip as it is on open.
+        persist()
+        if (previewing) renderPreview()
+    }
+
+    // ── Bringing the page's text in ───────────────────────────────────────────
+
+    /**
+     * The one path by which the page can overwrite the document, and only ever by asking. Both
+     * choices are offered because both situations are real: the edits were a false start, or more ink
+     * was written after the editing.
+     */
+    private fun promptBringIn() {
+        if (previewing) setPreviewing(false)
+        if (bringingIn) return
+        if (DocumentTransfer.host == null) {
+            Toast.makeText(this, "The notebook is no longer open.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        ActionSheetDialog(this)
+            .title("Bring in page text")
+            .addAction(null, "Replace this document") { bringIn(replace = true) }
+            .addAction(null, "Add below the current text") { bringIn(replace = false) }
+            .show()
+    }
+
+    private fun bringIn(replace: Boolean) {
+        val host = DocumentTransfer.host ?: return
+        // Anything typed so far is stored before the page's text lands on top of it.
+        persist()
+        bringingIn = true
+        updateSourceStrip()
+        host.requestPageDraft { draft ->
+            bringingIn = false
+            if (draft == null) {
+                updateSourceStrip()
+                Toast.makeText(this, "Nothing to bring in from this page yet.", Toast.LENGTH_SHORT).show()
+                return@requestPageDraft
+            }
+            applyDraft(draft.text, replace)
+            // The document now matches the page as of this recognition.
+            pageChanged = false
+            drafted = true
+            updateSourceStrip()
+            persist()
+        }
+    }
+
+    /**
+     * Apply [draft] to the buffer as an ordinary text edit — the same route the format bar takes — so
+     * the editor's own Ctrl+Z can take it back within the session.
+     */
+    private fun applyDraft(draft: String, replace: Boolean) {
+        val text = editor.text ?: return
+        if (replace) {
+            text.replace(0, text.length, draft)
+            editor.setSelection(text.length)
+        } else {
+            val merged = DocumentDraft.append(text.toString(), draft)
+            val insertAt = merged.length - draft.trim().length
+            text.replace(0, text.length, merged)
+            editor.setSelection(insertAt.coerceIn(0, text.length))
+        }
+        Slog.d(TAG) { "Brought in page text (${if (replace) "replace" else "append"})" }
+    }
+
+    /**
+     * On a narrow screen the header's five controls leave the title almost no room, so it drops the
+     * word "Document" and keeps the part that says where you are. Which page you are on matters more
+     * than being told, on the document screen, that this is a document.
+     */
+    private fun updateTitle() {
+        val narrow = resources.configuration.smallestScreenWidthDp < 400
+        titleText.text = when {
+            pageLabel.isBlank() -> "Document"
+            narrow -> pageLabel
+            else -> "Document · $pageLabel"
+        }
+    }
+
+    /**
+     * A compact header control — the page arrows and the text-size button.
+     *
+     * The arrows stay visible and tappable at the ends of the notebook: a disabled button is visually
+     * silent on e-ink (see docs/design-system.md), so the guard lives in the handler and says what
+     * happened instead.
+     */
+    private fun headerButton(glyph: String, hint: String, onClick: () -> Unit): AppCompatButton =
+        AppCompatButton(this).apply {
+            text = glyph
+            isAllCaps = false
+            textSize = 18f
+            setTextColor(ContextCompat.getColor(this@DocumentEditorActivity, R.color.inkBlack))
+            setBackgroundResource(R.drawable.bg_toolbar_button)
+            stateListAnimator = null
+            minWidth = 0
+            minHeight = 0
+            setPadding(dp(12), dp(2), dp(12), dp(4))
+            // Never take focus: the editor must keep the caret and selection.
+            isFocusable = false
+            isFocusableInTouchMode = false
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply { marginStart = dp(2) }
+            setOnClickListener { onClick() }
+            setOnLongClickListener { Toast.makeText(context, hint, Toast.LENGTH_SHORT).show(); true }
+        }
 
     /** Segmented mode toggle — the selected half shows its border, the way the app's other
      *  two-way view switches read on e-ink (no tint, no fill). */
@@ -319,14 +863,16 @@ class DocumentEditorActivity : AppCompatActivity() {
         if (previewing == on) return
         previewing = on
         if (on) {
+            // Switching to reading is a natural save point, and the writing chrome goes with it.
+            persist()
             hideIme()
             editor.visibility = View.GONE
-            formatBar.visibility = View.GONE
+            writingChrome.visibility = View.GONE
             previewScroll.visibility = View.VISIBLE
             renderPreview()
         } else {
             previewScroll.visibility = View.GONE
-            formatBar.visibility = View.VISIBLE
+            writingChrome.visibility = View.VISIBLE
             editor.visibility = View.VISIBLE
             editor.requestFocus()
             applyKeyboardMode()
@@ -403,12 +949,18 @@ class DocumentEditorActivity : AppCompatActivity() {
      */
     private fun handleShortcut(event: KeyEvent): Boolean {
         val shift = event.isShiftPressed
+        // Page flips move the document, not the text, so they work in both modes.
+        when (event.keyCode) {
+            KeyEvent.KEYCODE_PAGE_UP -> { flipPage(-1); return true }
+            KeyEvent.KEYCODE_PAGE_DOWN -> { flipPage(1); return true }
+        }
         // Preview is read-only; only the mode toggle stays live there.
         if (previewing) {
             if (event.keyCode == KeyEvent.KEYCODE_P && !shift) { setPreviewing(false); return true }
             return false
         }
         when (event.keyCode) {
+            KeyEvent.KEYCODE_F -> if (shift) { reflowText(); return true }
             KeyEvent.KEYCODE_B -> if (!shift) { wrapInline("**"); return true }
             KeyEvent.KEYCODE_I -> if (!shift) { wrapInline("*"); return true }
             KeyEvent.KEYCODE_X -> if (shift) { wrapInline("~~"); return true }

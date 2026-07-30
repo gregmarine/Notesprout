@@ -46,11 +46,21 @@ object TopGuard {
     /**
      * Pad [root] by the live system bar insets — the library's behaviour, for screens that keep the
      * system bars visible. Preserves any horizontal padding already set on the view.
+     *
+     * With [followIme], the bottom padding also clears the software keyboard, so a screen that types
+     * shrinks instead of hiding its content behind the IME. `android:windowSoftInputMode="adjustResize"`
+     * alone does **not** do this: the framework reports the inset, but nothing in a hand-built
+     * hierarchy consumes it unless a view is told to (and on a `targetSdk 35` edge-to-edge window the
+     * old automatic resize is gone entirely). The keyboard inset and the navigation-bar inset overlap,
+     * hence `max` rather than a sum — adding them would leave a nav-bar-high gap under the keyboard.
      */
-    fun applyInsetPadding(root: View) {
+    fun applyInsetPadding(root: View, followIme: Boolean = false) {
         ViewCompat.setOnApplyWindowInsetsListener(root) { v, insets ->
             val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
-            v.setPadding(v.paddingLeft, bars.top, v.paddingRight, bars.bottom)
+            val bottom = if (!followIme) bars.bottom else {
+                maxOf(bars.bottom, insets.getInsets(WindowInsetsCompat.Type.ime()).bottom)
+            }
+            v.setPadding(v.paddingLeft, bars.top, v.paddingRight, bottom)
             insets
         }
     }

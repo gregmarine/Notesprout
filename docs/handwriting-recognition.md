@@ -230,6 +230,11 @@ data class PageText(
   already exposes `getMaxContentUpdatedAt(layerId)` (which counts soft-deletes, since deleted rows
   carry `updatedAt = deletedAt`). If the layer's current max exceeds the stored `sourceMaxUpdatedAt`,
   the cached text is stale → re-recognize (RTR) or badge it "updating…" (viewer).
+- **Never user-editable.** `page_text` is a *cache*: RTR, export, and the viewer's recognize-on-open all
+  rewrite it whenever the page changes, so nothing the user authored can live here. The editable
+  counterpart is the `document` row, whose only writer is the editor — see
+  [`documents.md`](documents.md). The two are deliberately separate objects, and page text seeds a
+  document exactly once.
 - **Encryption for free.** The row lives inside the `.soil`; on an encrypted notebook it is
   SQLCipher-encrypted at rest exactly like `recognizedText` today. No plaintext leak, no new crypto code.
 - **Portable for free.** It travels inside the `.soil` on export / import — no `NotebookPackager` changes.
@@ -346,8 +351,10 @@ Behavior:
 
 ## Deferred / open questions
 
-- **Editable recognized text** — reconciling text edits back onto ink is out of scope; the viewer is
-  read-only in v1.
+- **Editable recognized text** — the viewer stays read-only, and reconciling text edits back onto ink
+  remains out of scope. Editing *did* arrive, but as a separate object rather than a writable cache: a
+  page's recognized text seeds a **document** once, which the user then owns
+  (see [`documents.md`](documents.md)). Nothing flows back to the ink.
 - **Multi-column / tables** — single-column assembly only; horizontal-gap data is captured but unused.
 - **List recognition (numbered / bulleted / checkbox)** — v1 takes ML Kit's line text verbatim, so a
   list only becomes Markdown when ML Kit happens to return a clean `N. ` / `- ` prefix. Two failure

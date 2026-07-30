@@ -1,6 +1,7 @@
 package com.notesprout.android.core.markdown
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Test
 
 /**
@@ -188,5 +189,168 @@ class MarkdownFormatterTest {
 
         assertEquals("above\n---\n", buf.sb.toString())
         assertEquals(buf.sb.length, sel.start)
+    }
+
+    // ── Enter inside a list ───────────────────────────────────────────────────
+
+    private fun enter(before: String, after: String = "") =
+        MarkdownFormatter.listEnter(before, after)
+
+    @Test
+    fun `enter after a bullet writes the next bullet`() {
+        assertEquals(MarkdownFormatter.ListEnter.Continue("- "), enter("- milk"))
+    }
+
+    @Test
+    fun `the bullet character carries over`() {
+        assertEquals(MarkdownFormatter.ListEnter.Continue("* "), enter("* milk"))
+        assertEquals(MarkdownFormatter.ListEnter.Continue("+ "), enter("+ milk"))
+    }
+
+    @Test
+    fun `enter after a numbered item counts on`() {
+        assertEquals(MarkdownFormatter.ListEnter.Continue("2. "), enter("1. first"))
+        assertEquals(MarkdownFormatter.ListEnter.Continue("10. "), enter("9. ninth"))
+    }
+
+    @Test
+    fun `enter after a task writes an unchecked task`() {
+        assertEquals(MarkdownFormatter.ListEnter.Continue("- [ ] "), enter("- [ ] buy milk"))
+    }
+
+    @Test
+    fun `a finished task still yields an unfinished one`() {
+        // The next thing you write is not already done.
+        assertEquals(MarkdownFormatter.ListEnter.Continue("- [ ] "), enter("- [x] done"))
+    }
+
+    @Test
+    fun `indentation carries over so a nested list stays nested`() {
+        assertEquals(MarkdownFormatter.ListEnter.Continue("  - "), enter("  - nested"))
+        assertEquals(MarkdownFormatter.ListEnter.Continue("  3. "), enter("  2. nested"))
+    }
+
+    @Test
+    fun `a second enter ends the series and takes the marker with it`() {
+        assertEquals(MarkdownFormatter.ListEnter.End(2), enter("- "))
+        assertEquals(MarkdownFormatter.ListEnter.End(3), enter("1. "))
+        assertEquals(MarkdownFormatter.ListEnter.End(6), enter("- [ ] "))
+        // Indentation goes too, or the new paragraph starts indented.
+        assertEquals(MarkdownFormatter.ListEnter.End(4), enter("  - "))
+    }
+
+    @Test
+    fun `splitting an item mid-way carries on rather than ending`() {
+        // Caret sits right after the marker of an item that still has content: the text moved down
+        // keeps its place in the list instead of losing its marker.
+        assertEquals(MarkdownFormatter.ListEnter.Continue("- "), enter("- ", after = "milk"))
+    }
+
+    // ── Renumbering ordered lists ─────────────────────────────────────────────
+
+    /** Apply the rewrites back-to-front so earlier offsets stay valid — as the editor does. */
+    private fun renumbered(text: String): String {
+        val sb = StringBuilder(text)
+        for (change in MarkdownFormatter.renumberOrderedLists(text).asReversed()) {
+            sb.replace(change.at, change.at + change.length, change.marker)
+        }
+        return sb.toString()
+    }
+
+    @Test
+    fun `an item inserted in the middle renumbers what follows`() {
+        // What the editor holds right after Enter in the middle of 1-2-3.
+        assertEquals(
+            "1. a\n2. b\n3. \n4. c",
+            renumbered("1. a\n2. b\n3. \n3. c"),
+        )
+    }
+
+    @Test
+    fun `a gap left by a deleted item closes up`() {
+        assertEquals("1. a\n2. c", renumbered("1. a\n3. c"))
+    }
+
+    @Test
+    fun `a list that starts at three keeps starting at three`() {
+        // Markdown renders 3, 4 — so that is what the source should say. Never change the output.
+        assertEquals("3. a\n4. b", renumbered("3. a\n9. b"))
+    }
+
+    @Test
+    fun `all-ones counts up`() {
+        assertEquals("1. a\n2. b\n3. c", renumbered("1. a\n1. b\n1. c"))
+    }
+
+    @Test
+    fun `nested runs count separately`() {
+        assertEquals(
+            "1. a\n   1. sub\n   2. sub two\n2. b",
+            renumbered("1. a\n   1. sub\n   1. sub two\n5. b"),
+        )
+    }
+
+    @Test
+    fun `a wrapped continuation line does not break the run`() {
+        assertEquals(
+            "1. a\n   still item a\n2. b",
+            renumbered("1. a\n   still item a\n7. b"),
+        )
+    }
+
+    @Test
+    fun `a paragraph between two lists starts the second afresh`() {
+        val text = "1. a\n\nA paragraph.\n\n1. b"
+        assertEquals(text, renumbered(text))
+    }
+
+    @Test
+    fun `one blank line keeps the list going but two end it`() {
+        // A loose list is still one list, and Markdown renders it 1, 2.
+        assertEquals("1. a\n\n2. b", renumbered("1. a\n\n6. b"))
+        // Two blank lines are a break; the second list keeps its own start.
+        assertEquals("1. a\n\n\n6. b", renumbered("1. a\n\n\n6. b"))
+    }
+
+    @Test
+    fun `bullets and tasks are left alone`() {
+        val text = "- a\n- b\n- [ ] c"
+        assertEquals(text, renumbered(text))
+    }
+
+    @Test
+    fun `a bullet in the middle ends the ordered run`() {
+        assertEquals("1. a\n- b\n4. c", renumbered("1. a\n- b\n4. c"))
+    }
+
+    @Test
+    fun `fenced code is not renumbered`() {
+        val text = "1. a\n\n```\n1. not a list\n1. still not\n```\n\n1. b"
+        assertEquals(text, renumbered(text))
+    }
+
+    @Test
+    fun `an indented block with no list above it is left alone`() {
+        val text = "Some prose.\n\n    1. looks like code\n    1. also code"
+        assertEquals(text, renumbered(text))
+    }
+
+    @Test
+    fun `an already-correct list costs no edits`() {
+        assertEquals(emptyList<MarkdownFormatter.Renumber>(), MarkdownFormatter.renumberOrderedLists("1. a\n2. b"))
+    }
+
+    @Test
+    fun `spacing after the dot is preserved`() {
+        assertEquals("1. a\n2.   wide", renumbered("1. a\n9.   wide"))
+    }
+
+    @Test
+    fun `enter outside a list is left alone`() {
+        assertNull(enter("just a paragraph"))
+        assertNull(enter("# A heading"))
+        assertNull(enter("> quoted"))
+        assertNull(enter(""))
+        assertNull(enter("---"))
     }
 }
