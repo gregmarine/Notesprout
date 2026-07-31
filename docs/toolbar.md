@@ -241,6 +241,20 @@ Three things that fall out of that table and are easy to get wrong:
 
 Day-detail additionally hides the panel in `switchViewMode` — the pen only exists in Note mode.
 
+**`show()` calls `bringToFront()`, and it is load-bearing.** Calendar and day-detail add their canvas
+to the panel's parent at runtime, which stacks it *above* the XML-declared panel — the panel then
+renders behind the page and every tap lands on the canvas, so it looks completely inert. The other
+popovers on those screens each call it for the same reason.
+
+**Ink changes propagate live via `PenColorPreferences.addListener`.** The value is global but each
+host read it only once, and the surfaces overlap — a sticky note or scratch pad floats over a
+notebook that is merely paused. Without the listener the host underneath kept a stale pen tint until
+it was reopened. Each host registers in `onCreate`, unregisters in `onDestroy`, and reacts by arming
+the view and re-tinting; `applyPenColor` now only persists, so the originating host and every other
+live one take the same path. `OnyxNotebookView.setPenColor` pushes to the SDK **only when it owns the
+process-global pen pipeline** — otherwise a paused host would reach into the session the foreground
+overlay is using.
+
 ### Custom colour picker (`notebook/CustomColorDialog.kt` + `ColorFieldViews.kt`)
 
 Reached from the panel's "Custom color…". Three inputs onto one value — an SV field + hue strip, R/G/B

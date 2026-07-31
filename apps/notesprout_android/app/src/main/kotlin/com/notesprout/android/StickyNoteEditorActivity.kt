@@ -171,6 +171,7 @@ class StickyNoteEditorActivity : AppCompatActivity() {
             onCustomRequested = { showCustomColorDialog() },
         )
         applyPenTintToButton()
+        PenColorPreferences.addListener(penColorListener)
         when (ToolPreferencesManager.load(this)) {
             ActiveTool.ERASER -> {
                 isEraserActive = true
@@ -1352,6 +1353,7 @@ class StickyNoteEditorActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        PenColorPreferences.removeListener(penColorListener)
         super.onDestroy()
         drawingView.releaseResources()
         runCatching { notebookDbCache?.close() }
@@ -1433,11 +1435,23 @@ class StickyNoteEditorActivity : AppCompatActivity() {
         drawingView.setToolbarExclusion(penColorPanel.panelRectIn(drawingView.asView()))
     }
 
+    /**
+     * Persist the chosen ink. Arming the drawing view and re-tinting the button happen in
+     * [penColorListener], so this host and every other live one react through one path.
+     */
     private fun applyPenColor(hex: String) {
         PenColorPreferences.save(this, hex)
+        pushPenPanelExclusion()
+    }
+
+    /**
+     * Reacts to the global ink changing — from this surface or any other live one. The overlapping
+     * surfaces (a sticky note or scratch pad floating over a notebook) are the reason this exists:
+     * without it the host underneath kept showing a stale pen tint until it was reopened.
+     */
+    private val penColorListener: (String) -> Unit = { hex ->
         drawingView.setPenColor(hex)
         applyPenTintToButton()
-        pushPenPanelExclusion()
     }
 
     private fun applyPenTintToButton() {

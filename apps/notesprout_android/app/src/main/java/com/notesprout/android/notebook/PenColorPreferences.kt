@@ -24,11 +24,33 @@ object PenColorPreferences {
     /** How many mixed colours the panel offers back. Small — this is a shortcut, not a library. */
     const val MAX_RECENT = 4
 
+    /**
+     * Live listeners, so a colour chosen on one surface reaches the others **while they are still
+     * alive**.
+     *
+     * The value is global, but each host reads it once when it opens — and the drawing surfaces
+     * overlap: the sticky-note editor and scratch pad are windows floating over a notebook or
+     * calendar that is merely paused, not destroyed. Without this, picking a colour in the overlay
+     * left the host behind it showing a stale pen tint until it was closed and reopened. The colour
+     * was always persisted correctly; only the chrome lied.
+     *
+     * Main-thread only, matching every caller. Hosts register in `onCreate` and unregister in
+     * `onDestroy`.
+     */
+    private val listeners = mutableSetOf<(String) -> Unit>()
+
+    fun addListener(listener: (String) -> Unit) { listeners += listener }
+
+    fun removeListener(listener: (String) -> Unit) { listeners -= listener }
+
     fun load(context: Context): String =
         prefs(context).getString(KEY_COLOR, null)?.takeIf { it.isNotBlank() } ?: InkColor.DEFAULT
 
+    /** Persist [hex] and notify every live surface, including the one that chose it. */
     fun save(context: Context, hex: String) {
         prefs(context).edit().putString(KEY_COLOR, hex).apply()
+        // Copy: a listener that unregisters itself mid-notify would otherwise mutate the set.
+        listeners.toList().forEach { it(hex) }
     }
 
     /** Mixed colours, newest first. */

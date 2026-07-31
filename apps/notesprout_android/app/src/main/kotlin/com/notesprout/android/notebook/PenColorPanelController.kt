@@ -142,6 +142,11 @@ class PenColorPanelController(
 
     fun show(current: String, recents: List<String>) {
         bind(current, recents)
+        // Hosts that add their canvas to the panel's parent at runtime (calendar, day detail) end up
+        // with the canvas stacked ON TOP of this XML-declared panel — it then renders behind the page
+        // and every tap lands on the canvas, so the panel looks completely inert. The other popovers
+        // in those screens each call bringToFront() for the same reason.
+        panel.bringToFront()
         // INVISIBLE, not VISIBLE: the panel still lays out (so [position] has real measurements) but
         // never paints at the default 0,0. Going straight to VISIBLE would flash it in the top-left
         // corner for a frame and then jump — two EPD refreshes and a visible stutter.

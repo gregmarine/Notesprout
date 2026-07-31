@@ -147,9 +147,12 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
     override fun setPenColor(hex: String) {
         penColorHex = hex
         penColorInt = InkColor.paintColor(hex)
-        // Live overlay: takes effect mid-session, no restartRawDrawing needed (Phase-0 spike).
-        if (isSetup) touchHelper.setStrokeColor(penColorInt)
-        Slog.d(TAG) { "setPenColor $hex isSetup=$isSetup" }
+        // Only the view that owns the process-global pen pipeline may touch the SDK. Every drawing
+        // host listens for colour changes, so a *paused* notebook sitting under a sticky-note editor
+        // would otherwise reach into the session the editor is actively using. A non-owner just
+        // stores the value; openRawDrawing re-asserts it when this view reclaims the pipeline.
+        if (isSetup && penOwner === this) touchHelper.setStrokeColor(penColorInt)
+        Slog.d(TAG) { "setPenColor $hex isSetup=$isSetup owner=${penOwner === this}" }
     }
 
     /**

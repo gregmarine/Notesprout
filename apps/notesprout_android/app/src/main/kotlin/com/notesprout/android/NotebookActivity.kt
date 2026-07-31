@@ -2133,6 +2133,7 @@ class NotebookActivity : AppCompatActivity() {
             onCustomRequested = { showCustomColorDialog() },
         )
         applyPenTintToButton()
+        PenColorPreferences.addListener(penColorListener)
 
         // ── Toolbar overflow ──────────────────────────────────────────────────
         // Constructed before positionOverflowMenu()/positionPageIndicator(): those read the overflow
@@ -2403,6 +2404,7 @@ class NotebookActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        PenColorPreferences.removeListener(penColorListener)
         super.onDestroy()
         // Stop offering ourselves to the document editor — our connection is about to close. The
         // editor keeps its text in DocumentTransfer.live, which the seal below (and, if this activity
@@ -7859,12 +7861,23 @@ class NotebookActivity : AppCompatActivity() {
         pushToolbarExclusion()
     }
 
-    /** Persist the chosen ink, arm the drawing view with it, and re-tint the pen button. */
+    /**
+     * Persist the chosen ink. Arming the drawing view and re-tinting the button happen in
+     * [penColorListener], so this host and every other live one react through one path.
+     */
     private fun applyPenColor(hex: String) {
         PenColorPreferences.save(this, hex)
+        pushToolbarExclusion()
+    }
+
+    /**
+     * Reacts to the global ink changing — from this surface or any other live one. The overlapping
+     * surfaces (a sticky note or scratch pad floating over a notebook) are the reason this exists:
+     * without it the host underneath kept showing a stale pen tint until it was reopened.
+     */
+    private val penColorListener: (String) -> Unit = { hex ->
         drawingView.setPenColor(hex)
         applyPenTintToButton()
-        pushToolbarExclusion()
     }
 
     private fun applyPenTintToButton() {
