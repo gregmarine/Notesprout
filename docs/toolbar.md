@@ -213,6 +213,33 @@ other tool mode, so that one flag is sufficient).
   a wordless colour cell is still learnable by long-press. Selection is drawn as a heavier black ring
   plus a white gap ring — never as a colour change, since colour is the content here.
 
+### Custom colour picker (`notebook/CustomColorDialog.kt` + `ColorFieldViews.kt`)
+
+Reached from the panel's "Custom color…". Three inputs onto one value — an SV field + hue strip, R/G/B
+sliders, and a hex field — kept in sync through a single `apply(argb, from)` write path, where `from`
+names the input that must **not** be written back to. An `applying` flag suppresses the listeners
+while it fans out; without it, setting the hex field from a slider re-enters the hex watcher and
+fights the slider that started it.
+
+- **The hex field is the one input that can be mid-nonsense.** Its watcher commits only on a complete
+  `#RRGGBB`, so a half-typed `#1A` never rewrites what is being typed.
+- **Drag throttling is the e-ink concession** and it throttles the *callback*, not just the repaint —
+  the consumers are expensive (a hue change rebuilds the SV bitmap; every change rewrites three
+  numbers, the hex field and the preview). At most one emission per 60 ms, plus a guaranteed final one
+  on `ACTION_UP` so the committed value is still exact. Mirrors `throttledEraseRedraw` /
+  `finalizeEraseRedraw`.
+- **The SV gradient is rasterized once per hue into a bitmap**, never re-shaded per frame. It only
+  changes when the hue does, so dragging inside the square re-blits a cache and moves a ring.
+- **The hue marker is edge notches, not a full-width bar.** A bar spanning the strip reads as a seam,
+  as though the ramp were two stacked gradients. The SV thumb is likewise inset by its own radius so a
+  fully-saturated pick shows a whole ring instead of a half one clipped by the edge.
+- **The brightness floor is surfaced before committing** — pick something under
+  `InkColor.MIN_DOMINANT_CHANNEL` and the dialog says so, rather than letting the user discover it as
+  ink that mysteriously writes black. Informational, never blocking: a greyscale device renders
+  everything black anyway, and the colour may still be wanted.
+- Only **mixed** colours enter the recents row; palette entries never do, since they are already one
+  tap away.
+
 See [`design-system.md`](design-system.md) for the colour-in-chrome exception this feature creates,
 and `core/InkColor` for the Kaleido brightness floor that constrains which colours are usable.
 

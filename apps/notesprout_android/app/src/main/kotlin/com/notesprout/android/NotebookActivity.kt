@@ -152,6 +152,7 @@ import com.notesprout.android.notebook.ToolbarOverflowManager
 import com.notesprout.android.notebook.ToolbarLayoutManager
 import com.notesprout.android.notebook.PenColorPreferences
 import com.notesprout.android.notebook.PenColorPanelController
+import com.notesprout.android.notebook.CustomColorDialog
 import com.notesprout.android.data.toolbar.ToolbarAxis
 import com.notesprout.android.data.toolbar.ToolbarConfig
 import com.notesprout.android.data.toolbar.ToolbarPlacement
@@ -2129,7 +2130,7 @@ class NotebookActivity : AppCompatActivity() {
             boundsProvider   = { Rect(0, 0, binding.root.width, binding.root.height) },
             topGuardProvider = { toolbarLayoutManager.topGuard() },
             onColorChosen    = { hex -> applyPenColor(hex) },
-            onCustomRequested = { /* Phase 3: custom colour picker */ },
+            onCustomRequested = { showCustomColorDialog() },
         )
         applyPenTintToButton()
 
@@ -7868,6 +7869,22 @@ class NotebookActivity : AppCompatActivity() {
 
     private fun applyPenTintToButton() {
         PenColorPanelController.applyPenTint(binding.btnPen, PenColorPreferences.load(this))
+    }
+
+    /**
+     * Mix an ink colour. Only a *mixed* colour joins the recents — the palette is always one tap
+     * away, so re-offering an entry that is already on screen would just crowd the panel.
+     */
+    private fun showCustomColorDialog() {
+        drawingView.releaseRender()   // flush the EPD frame so the dialog paints cleanly
+        CustomColorDialog(
+            context = this,
+            initial = PenColorPreferences.load(this),
+            onChosen = { hex ->
+                PenColorPreferences.addRecent(this, hex)
+                applyPenColor(hex)
+            },
+        ).show()
     }
 
     private fun insertShape(type: com.notesprout.android.data.ShapeType) {
