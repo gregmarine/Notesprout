@@ -14,13 +14,26 @@ Page flips (`‹ ›`) and text size (`A`) sit with the page label in the header
 sit in the source strip below it.
 
 Chrome layout, top to bottom: header (notebook name · `‹ 4 / 12 ›` · text-size · Write / Preview /
-Done) — rule — source strip — **rule** — format bar — rule — the text.
+Done) — rule — source strip — **rule** — format bar — overflow panel — rule — the text.
 
 The title names the **notebook**: the screen is evidently a document, so the word would only take room
 from the one piece of context the editor cannot otherwise give you. The page count sits *between* its
-two arrows — the number belongs to the control that changes it, and the three read as one unit. The strip, its rule and the
-format bar are one view (`writingChrome`) shown and hidden together, so Preview cannot leave a stray
-divider behind.
+two arrows — the number belongs to the control that changes it, and the three read as one unit. The
+strip, its rule, the format bar and the panel are one view (`writingChrome`) shown and hidden together,
+so Preview cannot leave a stray divider or an open menu behind.
+
+**The format bar overflows rather than scrolling.** The full palette is ~730dp of tools and a 6" screen
+is `sw571dp`, so a scrolling bar hid its last few tools with nothing to say they existed. Reuses the
+notebook's `ToolbarOverflowManager` unchanged — it takes four views and reads the bar's own children, so
+it never knew anything about NotebookActivity (see [`toolbar.md`](toolbar.md) for the two contracts a
+caller must honour). Because it *moves* the real views, their click handlers and long-press hints come
+along untouched. What stays on the bar is stable for a given screen, so muscle memory holds; only the
+tail moves, and it moves to one place.
+
+Three details: the panel is **in-flow**, so it pushes the text rather than covering the line being
+written (the notebook's floats because a canvas must not be pushed); a tap outside dismisses it but is
+**not consumed**, since that touch is the writer choosing where to type; and the dots button is the one
+control that does not auto-dismiss, or it would close and immediately re-open itself.
 
 **Tools are icons; named actions keep their words.** Every tool — the format bar, the page flips, text
 size — is a 24dp Tabler outline glyph in `inkBlack` at stroke width 2, the same set and weight as the

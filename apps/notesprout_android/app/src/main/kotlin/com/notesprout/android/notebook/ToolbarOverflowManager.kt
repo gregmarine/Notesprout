@@ -6,7 +6,13 @@ import android.view.ViewGroup
 import android.widget.LinearLayout
 
 /**
- * Manages toolbar overflow for NotebookActivity.
+ * Manages toolbar overflow — for NotebookActivity's toolbar, and for the document editor's format bar.
+ *
+ * Nothing here knows which: it takes four views and reads the bar's own children, so a second caller
+ * cost only the wiring. Two things a caller has to honour, both of which the algorithm depends on:
+ * every moveable item needs an **exact px** main-axis `LayoutParams` dimension (`WRAP_CONTENT`
+ * measures as 0 here), and group separators must be plain [View] instances, which is how [isDivider]
+ * tells them from tools.
  *
  * When all buttons + dividers fit within the toolbar, the toolbar renders exactly as
  * defined in XML with btnOverflow/dividerOverflow hidden.  When they don't fit, the

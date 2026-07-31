@@ -17,7 +17,6 @@ import android.view.ViewGroup
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputConnection
 import android.view.inputmethod.InputMethodManager
-import android.widget.HorizontalScrollView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.Toast
@@ -37,6 +36,7 @@ import com.notesprout.android.core.markdown.MarkdownParser
 import com.notesprout.android.core.markdown.MarkdownReflow
 import com.notesprout.android.core.markdown.MarkdownRenderer
 import com.notesprout.android.core.markdown.TextBuffer
+import com.notesprout.android.notebook.ToolbarOverflowManager
 
 /**
  * Full-screen Markdown document editor.
@@ -81,7 +81,7 @@ class DocumentEditorActivity : AppCompatActivity() {
     }
 
     private lateinit var editor: MarkdownEditText
-    private lateinit var formatBar: View
+    private lateinit var formatBar: LinearLayout
     private lateinit var previewScroll: ScrollView
     private lateinit var previewText: AppCompatTextView
     private lateinit var btnWrite: AppCompatButton
@@ -91,8 +91,20 @@ class DocumentEditorActivity : AppCompatActivity() {
     private lateinit var titleText: AppCompatTextView
     private lateinit var pageText: AppCompatTextView
 
-    /** Source strip + rule + format bar: the writing chrome, shown and hidden as one piece. */
+    /** Source strip + rule + format bar + overflow panel: the writing chrome, shown and hidden together. */
     private lateinit var writingChrome: View
+
+    // ── Format-bar overflow ───────────────────────────────────────────────────
+    // The same ToolbarOverflowManager the notebook toolbar uses: it moves the trailing tools that do
+    // not fit into a bordered panel below the bar, moving the actual views so their click listeners
+    // and long-press hints come along untouched.
+    private lateinit var overflowMenu: LinearLayout
+    private lateinit var btnOverflow: View
+    private lateinit var dividerOverflow: View
+    private var overflow: ToolbarOverflowManager? = null
+
+    /** Last bar width a recalc ran for — the layout listener fires for reasons other than resizing. */
+    private var lastBarWidth = 0
 
     /** Editing-surface text size in sp, remembered across sessions ([DocumentPreferences]). */
     private var textSizeSp = DocumentPreferences.DEFAULT_TEXT_SIZE
@@ -167,6 +179,19 @@ class DocumentEditorActivity : AppCompatActivity() {
         updateTitle()
         updatePageLabel()
         updateSourceStrip()
+
+        // Overflow: work out what fits once the bar has a width, and again whenever that width changes
+        // (rotation, a folding screen). Guarded on the width itself — the listener also fires for
+        // layout passes that change nothing, and a recalc rebuilds the bar, which would loop.
+        val bar = formatBar
+        overflow = ToolbarOverflowManager(bar, overflowMenu, dividerOverflow, btnOverflow)
+        bar.addOnLayoutChangeListener { _, left, _, right, _, _, _, _, _ ->
+            val width = right - left
+            if (width > 0 && width != lastBarWidth) {
+                lastBarWidth = width
+                bar.post { overflow?.recalc() }
+            }
+        }
 
         // A shorter editing surface can leave the caret below the fold, which is precisely what the
         // keyboard appearing does. Only a real height change is worth reacting to.
@@ -307,6 +332,8 @@ class DocumentEditorActivity : AppCompatActivity() {
             addView(rule(ink))
             formatBar = buildFormatBar(ink)
             addView(formatBar)
+            // The overflow panel belongs to the chrome, so Preview takes it away with everything else.
+            addView(buildOverflowMenu())
         }
         root.addView(writingChrome)
         root.addView(rule(ink))
@@ -469,7 +496,7 @@ class DocumentEditorActivity : AppCompatActivity() {
             layoutParams = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT
             ).apply { marginStart = dp(4) }
-            setOnClickListener { onClick() }
+            setOnClickListener { closeOverflowMenu(); onClick() }
             setOnLongClickListener { Toast.makeText(context, hint, Toast.LENGTH_SHORT).show(); true }
         }
 
@@ -763,7 +790,7 @@ class DocumentEditorActivity : AppCompatActivity() {
      * happened instead.
      */
     private fun headerIcon(iconRes: Int, hint: String, onClick: () -> Unit): AppCompatImageButton =
-        iconButton(iconRes, hint, size = dp(36), inset = dp(6), onClick).apply {
+        iconButton(iconRes, hint, size = dp(36), inset = dp(6), onClick = onClick).apply {
             (layoutParams as LinearLayout.LayoutParams).marginStart = dp(2)
         }
 
@@ -789,19 +816,17 @@ class DocumentEditorActivity : AppCompatActivity() {
             setOnClickListener { onClick() }
         }
 
-    private fun buildFormatBar(ink: Int): View {
+    private fun buildFormatBar(ink: Int): LinearLayout {
         val bar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(8), dp(6), dp(8), dp(6))
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+            )
         }
 
-        fun divider() = bar.addView(View(this).apply {
-            setBackgroundColor(ink)
-            layoutParams = LinearLayout.LayoutParams(dp(1), dp(28)).apply {
-                marginStart = dp(6); marginEnd = dp(6)
-            }
-        })
+        fun divider() = bar.addView(groupDivider(ink))
 
         bar.addView(formatIcon(R.drawable.ic_h_1, "Heading 1  ·  Ctrl+1") { applyBlock(MarkdownFormatter.Block.HEADING, 1) })
         bar.addView(formatIcon(R.drawable.ic_h_2, "Heading 2  ·  Ctrl+2") { applyBlock(MarkdownFormatter.Block.HEADING, 2) })
@@ -821,20 +846,77 @@ class DocumentEditorActivity : AppCompatActivity() {
         bar.addView(formatIcon(R.drawable.ic_photo, "Image  ·  Ctrl+Shift+K") { runFormat(MarkdownFormatter::insertImage) })
         bar.addView(formatIcon(R.drawable.ic_separator_horizontal, "Horizontal rule  ·  Ctrl+Shift+−") { runFormat(MarkdownFormatter::insertRule) })
 
-        // The bar always scrolls rather than wrapping — a format palette that reflows under the
-        // hand would move the buttons out from under muscle memory.
-        return HorizontalScrollView(this).apply {
-            isHorizontalScrollBarEnabled = false
+        // Overflow controls, pinned at the trailing edge and hidden whenever everything fits. The full
+        // palette is ~730dp of buttons, so a 6" screen (sw571dp) cannot show it whole — and a bar that
+        // scrolls hides its tail with no sign that there is one. What is on the bar stays put for a
+        // given screen, so muscle memory still holds; only the tail moves, and it moves to one place.
+        dividerOverflow = groupDivider(ink)
+        btnOverflow = iconButton(
+            R.drawable.ic_dots, "More tools", size = dp(44), inset = dp(10), closesOverflow = false,
+        ) { toggleOverflowMenu() }
+        bar.addView(dividerOverflow)
+        bar.addView(btnOverflow)
+        return bar
+    }
+
+    /** A group separator in the format bar — a plain [View], which is how the overflow manager tells
+     *  dividers from tools when it decides where to cut. */
+    private fun groupDivider(ink: Int): View = View(this).apply {
+        setBackgroundColor(ink)
+        layoutParams = LinearLayout.LayoutParams(dp(1), dp(28)).apply {
+            marginStart = dp(6); marginEnd = dp(6)
+        }
+    }
+
+    /** The panel the overflowed tools drop into: bordered, below the bar, collapsed until asked for. */
+    private fun buildOverflowMenu(): View {
+        overflowMenu = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundResource(R.drawable.shape_bordered)
+            visibility = View.GONE
             layoutParams = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
             )
-            addView(bar)
         }
+        return overflowMenu
+    }
+
+    private fun toggleOverflowMenu() {
+        val manager = overflow ?: return
+        if (manager.isOverflowMenuOpen()) manager.closeOverflowMenu() else manager.openOverflowMenu()
+    }
+
+    private fun closeOverflowMenu() {
+        overflow?.takeIf { it.isOverflowMenuOpen() }?.closeOverflowMenu()
+    }
+
+    /**
+     * A tap anywhere that is not the bar or the panel puts the overflow away — placing the caret in the
+     * text should not have to be preceded by dismissing a menu. Deliberately **not** consumed: unlike
+     * the notebook's canvas, where a stray touch would start a stroke, here the touch is the user
+     * choosing where to type and it must still land.
+     */
+    override fun dispatchTouchEvent(event: android.view.MotionEvent): Boolean {
+        if (event.actionMasked == android.view.MotionEvent.ACTION_DOWN &&
+            overflow?.isOverflowMenuOpen() == true &&
+            !isInside(formatBar, event) && !isInside(overflowMenu, event)
+        ) {
+            closeOverflowMenu()
+        }
+        return super.dispatchTouchEvent(event)
+    }
+
+    private fun isInside(view: View, event: android.view.MotionEvent): Boolean {
+        if (view.visibility != View.VISIBLE) return false
+        val xy = IntArray(2).also { view.getLocationOnScreen(it) }
+        val x = event.rawX
+        val y = event.rawY
+        return x >= xy[0] && x <= xy[0] + view.width && y >= xy[1] && y <= xy[1] + view.height
     }
 
     /** A format-bar tool: a 44dp target around a 24dp Tabler glyph. */
     private fun formatIcon(iconRes: Int, hint: String, onClick: () -> Unit): AppCompatImageButton =
-        iconButton(iconRes, hint, size = dp(44), inset = dp(10), onClick)
+        iconButton(iconRes, hint, size = dp(44), inset = dp(10), onClick = onClick)
 
     /**
      * The one icon button this screen builds, so every bar shares a hit area, a background and a
@@ -849,6 +931,8 @@ class DocumentEditorActivity : AppCompatActivity() {
         hint: String,
         size: Int,
         inset: Int,
+        /** False only for the overflow button itself, which would otherwise close then re-open. */
+        closesOverflow: Boolean = true,
         onClick: () -> Unit,
     ): AppCompatImageButton =
         AppCompatImageButton(this).apply {
@@ -864,7 +948,8 @@ class DocumentEditorActivity : AppCompatActivity() {
             isFocusable = false
             isFocusableInTouchMode = false
             layoutParams = LinearLayout.LayoutParams(size, size).apply { marginEnd = dp(2) }
-            setOnClickListener { onClick() }
+            // Using a tool puts the overflow away: it opened to reach that tool, and its job is done.
+            setOnClickListener { if (closesOverflow) closeOverflowMenu(); onClick() }
             setOnLongClickListener { Toast.makeText(context, hint, Toast.LENGTH_SHORT).show(); true }
         }
 
@@ -876,6 +961,7 @@ class DocumentEditorActivity : AppCompatActivity() {
         if (on) {
             // Switching to reading is a natural save point, and the writing chrome goes with it.
             persist()
+            closeOverflowMenu()
             hideIme()
             editor.visibility = View.GONE
             writingChrome.visibility = View.GONE

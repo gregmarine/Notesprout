@@ -30,6 +30,15 @@ stored value is the name of the `ActiveTool` enum: `PEN`, `ERASER`, `LASSO`, `LA
 
 ## Toolbar Overflow System (`notebook/ToolbarOverflowManager.kt`)
 
+> **Shared with the document editor's format bar** (see [`documents.md`](documents.md)) — the manager
+> takes four views and reads the bar's own children, so it knew nothing about NotebookActivity to begin
+> with. Two contracts a caller must honour, because the algorithm depends on them: every moveable item
+> needs an **exact px** main-axis `LayoutParams` dimension (`WRAP_CONTENT` measures as 0 in
+> `naturalSize`), and group separators must be plain `View` instances (`isDivider` tests the class).
+> The editor's panel sits *in-flow* rather than floating — a text surface may be pushed down, a canvas
+> may not.
+
+
 - If all buttons + dividers fit, `btnOverflow`/`dividerOverflow` stay `GONE`. Otherwise `btnOverflow` (Tabler "dots") appears at the far right; overflowed buttons move into `overflowMenu` — a vertical `LinearLayout` below the toolbar with `shape_bordered` background.
 - **Move-not-clone:** actual `View` instances are moved (no cloning) — `isSelected` state, icon state, and click listeners are preserved with zero extra wiring.
 - **Cut-point:** sums natural widths left-to-right; finds the largest prefix fitting in `availableWidth - overflow controls`; if the last visible item is a divider, steps back one to prevent a double-divider. Greedy row packing in the overflow menu.
