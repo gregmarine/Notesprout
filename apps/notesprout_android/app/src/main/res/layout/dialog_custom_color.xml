@@ -172,14 +172,15 @@
 
     </LinearLayout>
 
-    <!-- Shown only when the chosen colour sits under the overlay's brightness floor, where it would
-         write as black on colour e-paper. Informational, never blocking. -->
+    <!-- Shown when the colour sits under the overlay's brightness floor. The ink is still stored and
+         drawn correctly — only the live pen preview can't render it — so this describes a cosmetic
+         lag, not data loss. Informational, never blocking. -->
     <TextView
         android:id="@+id/tvDimWarning"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginTop="8dp"
-        android:text="Too dark for colour e-paper — this will write as black. Try a brighter shade."
+        android:text="Too dark for this screen's live ink — strokes look black while you write, then show their true colour on the next refresh."
         android:textColor="@color/inkBlack"
         android:textSize="12sp"
         android:visibility="gone" />

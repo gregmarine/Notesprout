@@ -74,6 +74,9 @@ import kotlinx.coroutines.withContext
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.abs
+import com.notesprout.android.notebook.PenColorPanelController
+import com.notesprout.android.notebook.CustomColorDialog
+import com.notesprout.android.core.TopGuard
 
 class ScratchpadActivity : AppCompatActivity() {
 
@@ -138,6 +141,9 @@ class ScratchpadActivity : AppCompatActivity() {
     /** This Activity instance's identity on the [SurfaceStack]. */
     private var surfaceToken: String = ""
     private lateinit var drawingView: NotebookView
+
+    /** Pen-colour swatch panel docked to [btnScratchPen]. See [togglePenColorPanel]. */
+    private lateinit var penColorPanel: PenColorPanelController
     private lateinit var repository: ScratchpadRepository
 
     private var pages: List<ScratchpadEntity> = emptyList()
@@ -278,6 +284,22 @@ class ScratchpadActivity : AppCompatActivity() {
 
         // Restore the pen's ink colour — one global value, the same way the active tool below is.
         drawingView.setPenColor(PenColorPreferences.load(this))
+        penColorPanel = PenColorPanelController(
+            root          = binding.root,
+            panel         = binding.penColorPanel.root,
+            anchor        = binding.btnScratchPen,
+            swatchRow1    = binding.penColorPanel.penSwatchRow1,
+            swatchRow2    = binding.penColorPanel.penSwatchRow2,
+            recentDivider = binding.penColorPanel.penRecentDivider,
+            recentRow     = binding.penColorPanel.penRecentRow,
+            customButton  = binding.penColorPanel.btnPenCustomColor,
+            sideProvider  = { PenColorPanelController.Side.ABOVE },
+            boundsProvider   = { windowRectInRoot(binding.scratchpadWindow) },
+            topGuardProvider = { TopGuard.heightPx(this) },
+            onColorChosen     = { hex -> applyPenColor(hex) },
+            onCustomRequested = { showCustomColorDialog() },
+        )
+        applyPenTintToButton()
         // Restore last-used tool state.
         when (ToolPreferencesManager.load(this)) {
             ActiveTool.ERASER -> {
@@ -711,6 +733,7 @@ class ScratchpadActivity : AppCompatActivity() {
 
     private fun wireToolButtons() {
         binding.btnScratchPen.setOnClickListener {
+            val wasPenActive = binding.btnScratchPen.isSelected
             if (isLassoMode) exitLassoMode()
             isEraserActive = false
             drawingView.setEraserMode(false)
@@ -718,9 +741,11 @@ class ScratchpadActivity : AppCompatActivity() {
             binding.btnScratchEraser.isSelected = false
             drawingView.releaseRender()
             ToolPreferencesManager.save(this, ActiveTool.PEN)
+            if (wasPenActive) togglePenColorPanel() else hidePenColorPanel()
         }
 
         binding.btnScratchEraser.setOnClickListener {
+            hidePenColorPanel()
             if (isLassoMode) exitLassoMode()
             isEraserActive = !isEraserActive
             drawingView.setEraserMode(isEraserActive)
@@ -731,6 +756,7 @@ class ScratchpadActivity : AppCompatActivity() {
         }
 
         binding.btnScratchLasso.setOnClickListener {
+            hidePenColorPanel()
             if (!isLassoMode) enterLassoMode() else exitLassoMode()
             drawingView.releaseRender()
         }
@@ -1677,6 +1703,14 @@ class ScratchpadActivity : AppCompatActivity() {
                 handlePageSwipe(event)
             }
         }
+        // Dismiss the pen colour panel on a touch outside it — except on btnScratchPen itself, whose
+        // own listener owns the toggle (handling it here too would close then immediately reopen).
+        if (event.actionMasked == MotionEvent.ACTION_DOWN
+            && ::penColorPanel.isInitialized && penColorPanel.isVisible) {
+            val inPanel = penColorPanel.containsScreenPoint(event.rawX.toInt(), event.rawY.toInt())
+            if (!inPanel && !isTouchInView(event, binding.btnScratchPen)) hidePenColorPanel()
+        }
+
         return super.dispatchTouchEvent(event)
     }
 
@@ -2064,4 +2098,69 @@ class ScratchpadActivity : AppCompatActivity() {
         NotesproutApplication.appScope.launch { saveStrokes() }
         drawingView.releaseResources()
     }
+
+    /**
+     * The bordered window's bounds in root coordinates. The panel is a sibling of the window rather
+     * than a child (the window is `clipToOutline`, which would crop an overhanging popover), so it
+     * has to be clamped to the window explicitly — clamping to the screen would let it float outside
+     * the border on the large-screen 75%x75% layout.
+     */
+    private fun windowRectInRoot(window: View): Rect {
+        val w = IntArray(2).also { window.getLocationOnScreen(it) }
+        val r = IntArray(2).also { binding.root.getLocationOnScreen(it) }
+        val left = w[0] - r[0]
+        val top = w[1] - r[1]
+        return Rect(left, top, left + window.width, top + window.height)
+    }
+
+    // ── Pen colour ───────────────────────────────────────────────────────────
+
+    private fun togglePenColorPanel() {
+        if (penColorPanel.isVisible) {
+            hidePenColorPanel()
+        } else {
+            drawingView.releaseRender()   // flush the EPD frame so the panel is visible on e-ink
+            penColorPanel.show(
+                PenColorPreferences.load(this),
+                PenColorPreferences.loadRecent(this),
+            )
+            binding.penColorPanel.root.post { pushPenPanelExclusion() }
+        }
+    }
+
+    private fun hidePenColorPanel() {
+        if (!::penColorPanel.isInitialized || !penColorPanel.isVisible) return
+        penColorPanel.hide()
+        pushPenPanelExclusion()
+    }
+
+    /** Keep the pen from writing underneath the panel while it is open. */
+    private fun pushPenPanelExclusion() {
+        drawingView.setToolbarExclusion(penColorPanel.panelRectIn(drawingView.asView()))
+    }
+
+    private fun applyPenColor(hex: String) {
+        PenColorPreferences.save(this, hex)
+        drawingView.setPenColor(hex)
+        applyPenTintToButton()
+        pushPenPanelExclusion()
+    }
+
+    private fun applyPenTintToButton() {
+        PenColorPanelController.applyPenTint(binding.btnScratchPen, PenColorPreferences.load(this))
+    }
+
+    /** Only a *mixed* colour joins the recents; palette entries are already one tap away. */
+    private fun showCustomColorDialog() {
+        drawingView.releaseRender()
+        CustomColorDialog(
+            context = this,
+            initial = PenColorPreferences.load(this),
+            onChosen = { hex ->
+                PenColorPreferences.addRecent(this, hex)
+                applyPenColor(hex)
+            },
+        ).show()
+    }
+
 }

@@ -102,6 +102,8 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.UUID
 import kotlin.math.ceil
 import kotlin.math.hypot
+import com.notesprout.android.notebook.PenColorPanelController
+import com.notesprout.android.notebook.CustomColorDialog
 
 /**
  * A full-screen, single-page handwriting canvas "into" one calendar day, opened by single-finger
@@ -136,6 +138,9 @@ class DayDetailActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityDayDetailBinding
     private lateinit var drawingView: NotebookView
+
+    /** Pen-colour swatch panel docked to [btnDayPen]. See [togglePenColorPanel]. */
+    private lateinit var penColorPanel: PenColorPanelController
     private lateinit var overflowManager: ToolbarOverflowManager
     // True between a press inside the open overflow menu and its release, so the menu closes only
     // after the tapped item's click has been dispatched.
@@ -390,6 +395,22 @@ class DayDetailActivity : AppCompatActivity() {
 
         // Restore the pen's ink colour — one global value, the same way the active tool below is.
         drawingView.setPenColor(PenColorPreferences.load(this))
+        penColorPanel = PenColorPanelController(
+            root          = binding.dayContent,
+            panel         = binding.penColorPanel.root,
+            anchor        = binding.btnDayPen,
+            swatchRow1    = binding.penColorPanel.penSwatchRow1,
+            swatchRow2    = binding.penColorPanel.penSwatchRow2,
+            recentDivider = binding.penColorPanel.penRecentDivider,
+            recentRow     = binding.penColorPanel.penRecentRow,
+            customButton  = binding.penColorPanel.btnPenCustomColor,
+            sideProvider  = { PenColorPanelController.Side.BELOW },
+            boundsProvider   = { Rect(0, 0, binding.dayContent.width, binding.dayContent.height) },
+            topGuardProvider = { 0 },
+            onColorChosen     = { hex -> applyPenColor(hex) },
+            onCustomRequested = { showCustomColorDialog() },
+        )
+        applyPenTintToButton()
         when (ToolPreferencesManager.load(this)) {
             ActiveTool.ERASER -> {
                 isEraserActive = true
@@ -588,6 +609,8 @@ class DayDetailActivity : AppCompatActivity() {
             if (isLassoMode) exitLassoMode()
             hideShapeInsertToolbar()
             hideFloatingSelectionToolbar()
+            // The pen only exists in Note mode, so its colour panel must not survive the switch.
+            hidePenColorPanel()
             NotesproutApplication.appScope.launch { saveStrokes() }
         }
         viewMode = mode
@@ -1452,6 +1475,7 @@ class DayDetailActivity : AppCompatActivity() {
 
     private fun wireToolButtons() {
         binding.btnDayPen.setOnClickListener {
+            val wasPenActive = binding.btnDayPen.isSelected
             if (isLassoMode) exitLassoMode()
             hideShapeInsertToolbar()
             isEraserActive = false; isLassoEraserActive = false
@@ -1461,8 +1485,10 @@ class DayDetailActivity : AppCompatActivity() {
             binding.btnDayLassoEraser.isSelected = false
             drawingView.releaseRender()
             ToolPreferencesManager.save(this, ActiveTool.PEN)
+            if (wasPenActive) togglePenColorPanel() else hidePenColorPanel()
         }
         binding.btnDayEraser.setOnClickListener {
+            hidePenColorPanel()
             if (isLassoMode) exitLassoMode()
             hideShapeInsertToolbar()
             isLassoEraserActive = false; drawingView.setLassoEraserMode(false)
@@ -1475,6 +1501,7 @@ class DayDetailActivity : AppCompatActivity() {
             ToolPreferencesManager.save(this, if (isEraserActive) ActiveTool.ERASER else ActiveTool.PEN)
         }
         binding.btnDayLassoEraser.setOnClickListener {
+            hidePenColorPanel()
             if (isLassoMode) exitLassoMode()
             hideShapeInsertToolbar()
             isEraserActive = false; drawingView.setEraserMode(false)
@@ -1486,6 +1513,7 @@ class DayDetailActivity : AppCompatActivity() {
             drawingView.releaseRender()
         }
         binding.btnDayLasso.setOnClickListener {
+            hidePenColorPanel()
             hideShapeInsertToolbar()
             if (!isLassoMode) enterLassoMode() else exitLassoMode()
             drawingView.releaseRender()
@@ -2169,6 +2197,14 @@ class DayDetailActivity : AppCompatActivity() {
                 handleMultiFingerDoubleTap(event)
             }
         }
+        // Dismiss the pen colour panel on a touch outside it — except on btnDayPen itself, whose
+        // own listener owns the toggle (handling it here too would close then immediately reopen).
+        if (event.actionMasked == MotionEvent.ACTION_DOWN
+            && ::penColorPanel.isInitialized && penColorPanel.isVisible) {
+            val inPanel = penColorPanel.containsScreenPoint(event.rawX.toInt(), event.rawY.toInt())
+            if (!inPanel && !isTouchInView(event, binding.btnDayPen)) hidePenColorPanel()
+        }
+
         return super.dispatchTouchEvent(event)
     }
 
@@ -2378,4 +2414,58 @@ class DayDetailActivity : AppCompatActivity() {
     }
 
     private fun toast(msg: String) = Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
+
+    // ── Pen colour ───────────────────────────────────────────────────────────
+
+    private fun togglePenColorPanel() {
+        if (penColorPanel.isVisible) {
+            hidePenColorPanel()
+        } else {
+            // One exclusion rect per host, so the two popovers cannot both own it — and two stacked
+            // popovers over one bar is not a state worth supporting anyway.
+            closeDayOverflowMenu()
+            drawingView.releaseRender()   // flush the EPD frame so the panel is visible on e-ink
+            penColorPanel.show(
+                PenColorPreferences.load(this),
+                PenColorPreferences.loadRecent(this),
+            )
+            binding.penColorPanel.root.post { pushPenPanelExclusion() }
+        }
+    }
+
+    private fun hidePenColorPanel() {
+        if (!::penColorPanel.isInitialized || !penColorPanel.isVisible) return
+        penColorPanel.hide()
+        pushPenPanelExclusion()
+    }
+
+    /** Keep the pen from writing underneath the panel while it is open. */
+    private fun pushPenPanelExclusion() {
+        drawingView.setToolbarExclusion(penColorPanel.panelRectIn(drawingView.asView()))
+    }
+
+    private fun applyPenColor(hex: String) {
+        PenColorPreferences.save(this, hex)
+        drawingView.setPenColor(hex)
+        applyPenTintToButton()
+        pushPenPanelExclusion()
+    }
+
+    private fun applyPenTintToButton() {
+        PenColorPanelController.applyPenTint(binding.btnDayPen, PenColorPreferences.load(this))
+    }
+
+    /** Only a *mixed* colour joins the recents; palette entries are already one tap away. */
+    private fun showCustomColorDialog() {
+        drawingView.releaseRender()
+        CustomColorDialog(
+            context = this,
+            initial = PenColorPreferences.load(this),
+            onChosen = { hex ->
+                PenColorPreferences.addRecent(this, hex)
+                applyPenColor(hex)
+            },
+        ).show()
+    }
+
 }

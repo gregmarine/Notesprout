@@ -207,6 +207,23 @@ class PenColorPanelController(
         )
     }
 
+    /**
+     * The panel's rect translated into [target]'s coordinate space, or null when hidden.
+     *
+     * Hosts need this because the panel and the drawing view rarely share a parent — the scratch pad
+     * and sticky editor park the panel on the root while the canvas lives inside a window — and the
+     * BOOX exclusion rect must be in the *drawing view's* coordinates to keep the pen out from under
+     * the panel. Going via screen coordinates makes the nesting irrelevant.
+     */
+    fun panelRectIn(target: View): Rect? {
+        if (panel.visibility != View.VISIBLE || panel.width <= 0 || panel.height <= 0) return null
+        val p = IntArray(2).also { panel.getLocationOnScreen(it) }
+        val t = IntArray(2).also { target.getLocationOnScreen(it) }
+        val left = p[0] - t[0]
+        val top = p[1] - t[1]
+        return Rect(left, top, left + panel.width, top + panel.height)
+    }
+
     /** True when [rawX]/[rawY] (screen coords, e.g. `MotionEvent.rawX`) land on the panel. */
     fun containsScreenPoint(rawX: Int, rawY: Int): Boolean {
         if (!isVisible) return false

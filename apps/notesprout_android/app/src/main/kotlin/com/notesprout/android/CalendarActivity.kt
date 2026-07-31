@@ -106,6 +106,8 @@ import java.time.format.TextStyle
 import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.hypot
+import com.notesprout.android.notebook.PenColorPanelController
+import com.notesprout.android.notebook.CustomColorDialog
 
 /**
  * Calendar with handwriting on every view. Each view is a template-backed drawing canvas keyed by a
@@ -164,6 +166,9 @@ class CalendarActivity : AppCompatActivity() {
     // after the tapped item's click has been dispatched.
     private var pendingMenuTapClose = false
     private lateinit var drawingView: NotebookView
+
+    /** Pen-colour swatch panel docked to [btnCalPen]. See [togglePenColorPanel]. */
+    private lateinit var penColorPanel: PenColorPanelController
     private lateinit var repository: CalendarRepository
     private val eventsRepo: EventsRepository by lazy { EventsRepository() }
     // Events for the visible period, keyed by day — baked into the grid template. Reloaded on
@@ -385,6 +390,22 @@ class CalendarActivity : AppCompatActivity() {
 
         // Restore the pen's ink colour — one global value, the same way the active tool below is.
         drawingView.setPenColor(PenColorPreferences.load(this))
+        penColorPanel = PenColorPanelController(
+            root          = binding.calendarContent,
+            panel         = binding.penColorPanel.root,
+            anchor        = binding.btnCalPen,
+            swatchRow1    = binding.penColorPanel.penSwatchRow1,
+            swatchRow2    = binding.penColorPanel.penSwatchRow2,
+            recentDivider = binding.penColorPanel.penRecentDivider,
+            recentRow     = binding.penColorPanel.penRecentRow,
+            customButton  = binding.penColorPanel.btnPenCustomColor,
+            sideProvider  = { PenColorPanelController.Side.BELOW },
+            boundsProvider   = { Rect(0, 0, binding.calendarContent.width, binding.calendarContent.height) },
+            topGuardProvider = { 0 },
+            onColorChosen     = { hex -> applyPenColor(hex) },
+            onCustomRequested = { showCustomColorDialog() },
+        )
+        applyPenTintToButton()
         // Restore last-used tool
         when (ToolPreferencesManager.load(this)) {
             ActiveTool.ERASER -> {
@@ -945,6 +966,7 @@ class CalendarActivity : AppCompatActivity() {
 
     private fun wireToolButtons() {
         binding.btnCalPen.setOnClickListener {
+            val wasPenActive = binding.btnCalPen.isSelected
             if (isLassoMode) exitLassoMode()
             isEraserActive = false; isLassoEraserActive = false
             drawingView.setEraserMode(false); drawingView.setLassoEraserMode(false)
@@ -953,8 +975,10 @@ class CalendarActivity : AppCompatActivity() {
             binding.btnCalLassoEraser.isSelected = false
             drawingView.releaseRender()
             ToolPreferencesManager.save(this, ActiveTool.PEN)
+            if (wasPenActive) togglePenColorPanel() else hidePenColorPanel()
         }
         binding.btnCalEraser.setOnClickListener {
+            hidePenColorPanel()
             if (isLassoMode) exitLassoMode()
             isLassoEraserActive = false; drawingView.setLassoEraserMode(false)
             binding.btnCalLassoEraser.isSelected = false
@@ -966,6 +990,7 @@ class CalendarActivity : AppCompatActivity() {
             ToolPreferencesManager.save(this, if (isEraserActive) ActiveTool.ERASER else ActiveTool.PEN)
         }
         binding.btnCalLassoEraser.setOnClickListener {
+            hidePenColorPanel()
             if (isLassoMode) exitLassoMode()
             isEraserActive = false; drawingView.setEraserMode(false)
             isLassoEraserActive = !isLassoEraserActive
@@ -976,6 +1001,7 @@ class CalendarActivity : AppCompatActivity() {
             drawingView.releaseRender()
         }
         binding.btnCalLasso.setOnClickListener {
+            hidePenColorPanel()
             if (!isLassoMode) enterLassoMode() else exitLassoMode()
             drawingView.releaseRender()
         }
@@ -1906,6 +1932,14 @@ class CalendarActivity : AppCompatActivity() {
                 if (handleCalendarFingerGesture(event)) return true
             }
         }
+        // Dismiss the pen colour panel on a touch outside it — except on btnCalPen itself, whose
+        // own listener owns the toggle (handling it here too would close then immediately reopen).
+        if (event.actionMasked == MotionEvent.ACTION_DOWN
+            && ::penColorPanel.isInitialized && penColorPanel.isVisible) {
+            val inPanel = penColorPanel.containsScreenPoint(event.rawX.toInt(), event.rawY.toInt())
+            if (!inPanel && !isTouchInView(event, binding.btnCalPen)) hidePenColorPanel()
+        }
+
         return super.dispatchTouchEvent(event)
     }
 
@@ -2293,4 +2327,58 @@ class CalendarActivity : AppCompatActivity() {
     private fun dp(v: Int) = (v * density + 0.5f).toInt()
 
     private fun toast(msg: String) = Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
+
+    // ── Pen colour ───────────────────────────────────────────────────────────
+
+    private fun togglePenColorPanel() {
+        if (penColorPanel.isVisible) {
+            hidePenColorPanel()
+        } else {
+            // One exclusion rect per host, so the two popovers cannot both own it — and two stacked
+            // popovers over one bar is not a state worth supporting anyway.
+            closeCalOverflowMenu()
+            drawingView.releaseRender()   // flush the EPD frame so the panel is visible on e-ink
+            penColorPanel.show(
+                PenColorPreferences.load(this),
+                PenColorPreferences.loadRecent(this),
+            )
+            binding.penColorPanel.root.post { pushPenPanelExclusion() }
+        }
+    }
+
+    private fun hidePenColorPanel() {
+        if (!::penColorPanel.isInitialized || !penColorPanel.isVisible) return
+        penColorPanel.hide()
+        pushPenPanelExclusion()
+    }
+
+    /** Keep the pen from writing underneath the panel while it is open. */
+    private fun pushPenPanelExclusion() {
+        drawingView.setToolbarExclusion(penColorPanel.panelRectIn(drawingView.asView()))
+    }
+
+    private fun applyPenColor(hex: String) {
+        PenColorPreferences.save(this, hex)
+        drawingView.setPenColor(hex)
+        applyPenTintToButton()
+        pushPenPanelExclusion()
+    }
+
+    private fun applyPenTintToButton() {
+        PenColorPanelController.applyPenTint(binding.btnCalPen, PenColorPreferences.load(this))
+    }
+
+    /** Only a *mixed* colour joins the recents; palette entries are already one tap away. */
+    private fun showCustomColorDialog() {
+        drawingView.releaseRender()
+        CustomColorDialog(
+            context = this,
+            initial = PenColorPreferences.load(this),
+            onChosen = { hex ->
+                PenColorPreferences.addRecent(this, hex)
+                applyPenColor(hex)
+            },
+        ).show()
+    }
+
 }

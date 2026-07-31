@@ -155,9 +155,9 @@ class CustomColorDialog(
                 )
             }
 
-            // The Kaleido brightness floor, surfaced before the user commits rather than discovered
-            // afterwards as ink that mysteriously writes black. Informational only — a greyscale
-            // device renders everything black anyway, and the user may want the colour regardless.
+            // The Kaleido brightness floor, surfaced before committing rather than discovered as ink
+            // that looks black until something forces a refresh. It describes a *preview* limit —
+            // the stroke is stored and drawn in its true colour either way — so it never blocks.
             binding.tvDimWarning.visibility =
                 if (InkColor.isOverlaySafe(InkColor.toHex(argb))) View.GONE else View.VISIBLE
         } finally {

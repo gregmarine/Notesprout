@@ -51,6 +51,9 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import com.notesprout.android.notebook.PenColorPanelController
+import com.notesprout.android.notebook.CustomColorDialog
+import com.notesprout.android.core.TopGuard
 
 /**
  * In-memory sticky note editor — opened by [NotebookActivity] when inserting or tapping a sticky
@@ -64,6 +67,9 @@ class StickyNoteEditorActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityStickyNoteEditorBinding
     private lateinit var drawingView: NotebookView
+
+    /** Pen-colour swatch panel docked to [btnStickyPen]. See [togglePenColorPanel]. */
+    private lateinit var penColorPanel: PenColorPanelController
 
     private var contentWidth = 0f
     private var contentHeight = 0f
@@ -149,6 +155,22 @@ class StickyNoteEditorActivity : AppCompatActivity() {
 
         // Restore the pen's ink colour — one global value, the same way the active tool below is.
         drawingView.setPenColor(PenColorPreferences.load(this))
+        penColorPanel = PenColorPanelController(
+            root          = binding.root,
+            panel         = binding.penColorPanel.root,
+            anchor        = binding.btnStickyPen,
+            swatchRow1    = binding.penColorPanel.penSwatchRow1,
+            swatchRow2    = binding.penColorPanel.penSwatchRow2,
+            recentDivider = binding.penColorPanel.penRecentDivider,
+            recentRow     = binding.penColorPanel.penRecentRow,
+            customButton  = binding.penColorPanel.btnPenCustomColor,
+            sideProvider  = { PenColorPanelController.Side.ABOVE },
+            boundsProvider   = { windowRectInRoot(binding.stickyNoteEditorWindow) },
+            topGuardProvider = { TopGuard.heightPx(this) },
+            onColorChosen     = { hex -> applyPenColor(hex) },
+            onCustomRequested = { showCustomColorDialog() },
+        )
+        applyPenTintToButton()
         when (ToolPreferencesManager.load(this)) {
             ActiveTool.ERASER -> {
                 isEraserActive = true
@@ -654,6 +676,7 @@ class StickyNoteEditorActivity : AppCompatActivity() {
 
     private fun wireToolButtons() {
         binding.btnStickyPen.setOnClickListener {
+            val wasPenActive = binding.btnStickyPen.isSelected
             if (isLassoMode) exitLassoMode()
             isEraserActive = false
             drawingView.setEraserMode(false)
@@ -661,8 +684,10 @@ class StickyNoteEditorActivity : AppCompatActivity() {
             binding.btnStickyEraser.isSelected = false
             drawingView.releaseRender()
             ToolPreferencesManager.save(this, ActiveTool.PEN)
+            if (wasPenActive) togglePenColorPanel() else hidePenColorPanel()
         }
         binding.btnStickyEraser.setOnClickListener {
+            hidePenColorPanel()
             if (isLassoMode) exitLassoMode()
             isEraserActive = !isEraserActive
             drawingView.setEraserMode(isEraserActive)
@@ -672,6 +697,7 @@ class StickyNoteEditorActivity : AppCompatActivity() {
             ToolPreferencesManager.save(this, if (isEraserActive) ActiveTool.ERASER else ActiveTool.PEN)
         }
         binding.btnStickyLasso.setOnClickListener {
+            hidePenColorPanel()
             if (!isLassoMode) enterLassoMode() else exitLassoMode()
             drawingView.releaseRender()
         }
@@ -1167,6 +1193,14 @@ class StickyNoteEditorActivity : AppCompatActivity() {
             }
             if (!inChrome && !inToolbar && !inFloating) handleMultiFingerDoubleTap(event)
         }
+        // Dismiss the pen colour panel on a touch outside it — except on btnStickyPen itself, whose
+        // own listener owns the toggle (handling it here too would close then immediately reopen).
+        if (event.actionMasked == MotionEvent.ACTION_DOWN
+            && ::penColorPanel.isInitialized && penColorPanel.isVisible) {
+            val inPanel = penColorPanel.containsScreenPoint(event.rawX.toInt(), event.rawY.toInt())
+            if (!inPanel && !isTouchInView(event, binding.btnStickyPen)) hidePenColorPanel()
+        }
+
         return super.dispatchTouchEvent(event)
     }
 
@@ -1358,4 +1392,69 @@ class StickyNoteEditorActivity : AppCompatActivity() {
             .putExtra(EXTRA_BBOX_R, sticky.boundingBox.right)
             .putExtra(EXTRA_BBOX_B, sticky.boundingBox.bottom)
     }
+
+    /**
+     * The bordered window's bounds in root coordinates. The panel is a sibling of the window rather
+     * than a child (the window is `clipToOutline`, which would crop an overhanging popover), so it
+     * has to be clamped to the window explicitly — clamping to the screen would let it float outside
+     * the border on the large-screen 75%x75% layout.
+     */
+    private fun windowRectInRoot(window: View): Rect {
+        val w = IntArray(2).also { window.getLocationOnScreen(it) }
+        val r = IntArray(2).also { binding.root.getLocationOnScreen(it) }
+        val left = w[0] - r[0]
+        val top = w[1] - r[1]
+        return Rect(left, top, left + window.width, top + window.height)
+    }
+
+    // ── Pen colour ───────────────────────────────────────────────────────────
+
+    private fun togglePenColorPanel() {
+        if (penColorPanel.isVisible) {
+            hidePenColorPanel()
+        } else {
+            drawingView.releaseRender()   // flush the EPD frame so the panel is visible on e-ink
+            penColorPanel.show(
+                PenColorPreferences.load(this),
+                PenColorPreferences.loadRecent(this),
+            )
+            binding.penColorPanel.root.post { pushPenPanelExclusion() }
+        }
+    }
+
+    private fun hidePenColorPanel() {
+        if (!::penColorPanel.isInitialized || !penColorPanel.isVisible) return
+        penColorPanel.hide()
+        pushPenPanelExclusion()
+    }
+
+    /** Keep the pen from writing underneath the panel while it is open. */
+    private fun pushPenPanelExclusion() {
+        drawingView.setToolbarExclusion(penColorPanel.panelRectIn(drawingView.asView()))
+    }
+
+    private fun applyPenColor(hex: String) {
+        PenColorPreferences.save(this, hex)
+        drawingView.setPenColor(hex)
+        applyPenTintToButton()
+        pushPenPanelExclusion()
+    }
+
+    private fun applyPenTintToButton() {
+        PenColorPanelController.applyPenTint(binding.btnStickyPen, PenColorPreferences.load(this))
+    }
+
+    /** Only a *mixed* colour joins the recents; palette entries are already one tap away. */
+    private fun showCustomColorDialog() {
+        drawingView.releaseRender()
+        CustomColorDialog(
+            context = this,
+            initial = PenColorPreferences.load(this),
+            onChosen = { hex ->
+                PenColorPreferences.addRecent(this, hex)
+                applyPenColor(hex)
+            },
+        ).show()
+    }
+
 }

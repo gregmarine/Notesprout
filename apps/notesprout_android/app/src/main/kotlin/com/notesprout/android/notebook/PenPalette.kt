@@ -6,11 +6,11 @@ import com.notesprout.android.core.InkColor
  * The default ink palette — the swatches the colour panel offers before the user mixes anything.
  *
  * **Tuned for colour e-paper, not for a screen.** Kaleido's colour filter array costs roughly half
- * the luminance and mutes everything, and the Phase-0 device sweep found the Onyx overlay drops a
- * colour to black once its **dominant RGB channel falls below ~180**
- * ([InkColor.MIN_DOMINANT_CHANNEL]). So every entry here is bright *and* saturated. A dark forest
- * green — the obvious "green ink" choice, and the one this palette originally shipped with — is not
- * usable ink on this hardware.
+ * the luminance and mutes everything, and the Phase-0 device sweep found the Onyx overlay draws a
+ * colour as black once its **dominant RGB channel falls below ~180**
+ * ([InkColor.MIN_DOMINANT_CHANNEL]) — the stroke still stores and renders correctly, but it previews
+ * black under the stylus. So every entry here is bright *and* saturated: a dark forest green, the
+ * obvious "green ink" choice and the one this palette first shipped with, writes invisibly.
  *
  * Kept deliberately small. BOOX's own 16-colour palette draws the complaint that muted colours are
  * hard to tell apart on these panels; eight well-separated hues beat sixteen that blur together.

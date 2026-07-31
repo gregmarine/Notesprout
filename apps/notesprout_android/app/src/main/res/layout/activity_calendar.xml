@@ -343,6 +343,12 @@
 
         </LinearLayout>
 
+    <!-- Pen colour panel — anchored to the pen button. Positioned programmatically by
+         PenColorPanelController; must live in a FrameLayout so it can overhang. -->
+    <include
+        android:id="@+id/penColorPanel"
+        layout="@layout/panel_pen_color" />
+
     </FrameLayout>
 
 </LinearLayout>

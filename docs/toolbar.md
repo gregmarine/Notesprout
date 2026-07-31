@@ -213,6 +213,34 @@ other tool mode, so that one flag is sufficient).
   a wordless colour cell is still learnable by long-press. Selection is drawn as a heavier black ring
   plus a white gap ring — never as a colour change, since colour is the content here.
 
+**All five drawing surfaces host it.** The controller's three injected differences are exactly what
+varies; nothing else is per-host:
+
+| Host | Anchor | Panel parent | Side | Clamped to | Guard |
+|---|---|---|---|---|---|
+| `NotebookActivity` | `btnPen` | root `FrameLayout` | from `ToolbarConfig.placement` | root | `toolbarLayoutManager.topGuard()` |
+| `ScratchpadActivity` | `btnScratchPen` | root | `ABOVE` (bar sits at the window's bottom) | **the window** | `TopGuard.heightPx` |
+| `StickyNoteEditorActivity` | `btnStickyPen` | root | `ABOVE` | **the window** | `TopGuard.heightPx` |
+| `CalendarActivity` | `btnCalPen` | `calendarContent` | `BELOW` | content frame | `0` |
+| `DayDetailActivity` | `btnDayPen` | `dayContent` | `BELOW` | content frame | `0` |
+
+Three things that fall out of that table and are easy to get wrong:
+
+- **The scratch pad and sticky editor clamp to their *window*, not the screen.** Both are 75%×75%
+  bordered windows on large screens, and a panel clamped to the screen would float outside the border.
+  The panel is also a *sibling* of the window rather than a child, because the window is
+  `clipToOutline` and would crop an overhanging popover.
+- **Calendar and day-detail pass a guard of `0`.** Their content frame already begins below the
+  toolbar, which is itself below the guard band; passing the real guard would push the panel down by
+  a status-bar height for no reason. Their anchor also lives *above* the panel's parent, giving a
+  negative anchor Y — `anchorRectInRoot()` goes via screen coordinates, so the nesting is irrelevant.
+- **Both top-bar hosts express the pen-exclusion zone as a single rect** (see `openCalOverflowMenu`),
+  so the panel and the overflow menu cannot both own it. Opening the panel closes the menu.
+  `panelRectIn(drawingView.asView())` converts the panel's bounds into the canvas's coordinate space,
+  which is what makes one exclusion call work across all the differing parentage above.
+
+Day-detail additionally hides the panel in `switchViewMode` — the pen only exists in Note mode.
+
 ### Custom colour picker (`notebook/CustomColorDialog.kt` + `ColorFieldViews.kt`)
 
 Reached from the panel's "Custom color…". Three inputs onto one value — an SV field + hue strip, R/G/B

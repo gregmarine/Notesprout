@@ -13,10 +13,15 @@ import android.graphics.Color
  *
  * ### The Kaleido brightness floor
  * The Phase-0 spike (NoteAir5C, 2026-07-31) found the Onyx raw-drawing overlay renders colour fine —
- * including under the pinned `HAND_WRITING_REPAINT_MODE` fast waveform — but collapses a colour to
- * black once its **dominant RGB channel drops below roughly 180**. Every probe colour at ≥184
- * survived; the sole failure sat at 122. [MIN_DOMINANT_CHANNEL] records that threshold and
- * [isOverlaySafe] tests it, so palette entries can be checked rather than guessed at.
+ * including under the pinned `HAND_WRITING_REPAINT_MODE` fast waveform — but draws a colour as black
+ * once its **dominant RGB channel drops below roughly 180**. Every probe colour at ≥184 survived; the
+ * sole failure sat at 122.
+ *
+ * **This is a live-preview limit, not a storage or rendering one.** A below-floor stroke is captured,
+ * stored and drawn in its true colour; it merely *looks* black while the stylus is moving, and
+ * corrects itself the next time the committed layer repaints. So [isOverlaySafe] answers "will this
+ * preview honestly while writing", which is worth telling the user about but is never a reason to
+ * refuse a colour.
  */
 object InkColor {
 
