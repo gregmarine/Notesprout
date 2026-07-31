@@ -246,6 +246,14 @@ to the panel's parent at runtime, which stacks it *above* the XML-declared panel
 renders behind the page and every tap lands on the canvas, so it looks completely inert. The other
 popovers on those screens each call it for the same reason.
 
+**The panel must be excluded from each host's finger gestures.** Those hosts consume finger events
+for their own detectors — the calendar's `handleCalendarFingerGesture` consumes the UP of any tap
+(that is how double-tap-to-open-a-day works), and `handleStickyNoteTapGesture` consumes it when the
+tap lands on a sticky icon. A swatch then gets the DOWN, holds long enough to raise its tooltip, and
+never receives the UP that would make it a click — so the panel appears to need a stylus. Each host
+adds an `inPenPanel` term alongside its existing `inToolbar` / `inFloating` / `inMenu` chrome
+exclusions. Symptom to recognise: **tooltip appears, tap does nothing.**
+
 **Ink changes propagate live via `PenColorPreferences.addListener`.** The value is global but each
 host read it only once, and the surfaces overlap — a sticky note or scratch pad floats over a
 notebook that is merely paused. Without the listener the host underneath kept a stale pen tint until

@@ -1696,10 +1696,15 @@ class ScratchpadActivity : AppCompatActivity() {
             // Mirrors NotebookActivity.handleLinkFollowGesture — uses event.x/y (window-relative)
             // with getLocationInWindow offset to convert into drawing-container coordinates.
             // Returns true when a sticky note was opened; consume the event so lasso doesn't also fire.
-            if (handleStickyNoteTapGesture(event)) return true
+            // The pen colour panel is chrome and must be excluded from the gestures below, for the
+            // same reason the toolbar is: this consumes the UP when a tap lands on a sticky icon, so
+            // a swatch drawn over one would raise its tooltip and never register a click.
+            val inPenPanel = ::penColorPanel.isInitialized &&
+                    penColorPanel.containsScreenPoint(event.rawX.toInt(), event.rawY.toInt())
+            if (!inPenPanel && handleStickyNoteTapGesture(event)) return true
 
             // Swipe outside chrome/toolbar in any tool mode — lasso is stylus-only, finger navigates.
-            if (!inChrome && !inToolbar) {
+            if (!inChrome && !inToolbar && !inPenPanel) {
                 if (!inFloating) handleMultiFingerDoubleTap(event)
                 handlePageSwipe(event)
             }

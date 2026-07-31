@@ -2193,8 +2193,15 @@ class DayDetailActivity : AppCompatActivity() {
                     hideShapeInsertToolbar()
                 }
             }
-            if (!inMenu && handleStickyNoteTapGesture(event)) return true
-            if (!inToolbar && !inFloating && !inShapeToolbar && !inMenu) {
+            // Exclude the pen colour panel from the finger gestures, as the toolbar and the popovers
+            // above already are: handleStickyNoteTapGesture consumes the UP when a tap lands on a
+            // sticky icon, so a swatch drawn over one would raise its tooltip and never register a
+            // click. Latent here (the panel has to overlap an icon) and acute on the calendar, whose
+            // gesture handler consumes taps generally — same guard, same reason.
+            val inPenPanel = ::penColorPanel.isInitialized &&
+                    penColorPanel.containsScreenPoint(event.rawX.toInt(), event.rawY.toInt())
+            if (!inMenu && !inPenPanel && handleStickyNoteTapGesture(event)) return true
+            if (!inToolbar && !inFloating && !inShapeToolbar && !inMenu && !inPenPanel) {
                 handleMultiFingerDoubleTap(event)
             }
         }

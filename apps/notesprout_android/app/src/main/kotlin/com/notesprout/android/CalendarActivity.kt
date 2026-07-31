@@ -1926,9 +1926,16 @@ class CalendarActivity : AppCompatActivity() {
                     isTouchInView(event, binding.calOverflowMenu)
             val inFloating = binding.floatingSelectionToolbar.visibility == View.VISIBLE &&
                     isTouchInView(event, binding.floatingSelectionToolbar)
-            if (event.actionMasked == MotionEvent.ACTION_DOWN && (inToolbar || inFloating || inMenu)) drawingView.releaseRender()
-            if (!inMenu && handleStickyNoteTapGesture(event)) return true
-            if (!inToolbar && !inFloating && !inMenu) {
+            // The pen colour panel is chrome, like the toolbar and the floating bar above it, and
+            // must be excluded for the same reason: handleCalendarFingerGesture consumes the UP of a
+            // finger tap (that is how double-tap-to-open-a-day works), so a swatch would receive the
+            // DOWN — long enough to raise its tooltip — and never the UP that makes it a click. That
+            // is why the panel needed a stylus here and worked with a finger everywhere else.
+            val inPenPanel = ::penColorPanel.isInitialized &&
+                    penColorPanel.containsScreenPoint(event.rawX.toInt(), event.rawY.toInt())
+            if (event.actionMasked == MotionEvent.ACTION_DOWN && (inToolbar || inFloating || inMenu || inPenPanel)) drawingView.releaseRender()
+            if (!inMenu && !inPenPanel && handleStickyNoteTapGesture(event)) return true
+            if (!inToolbar && !inFloating && !inMenu && !inPenPanel) {
                 handleMultiFingerDoubleTap(event)
                 if (handleCalendarFingerGesture(event)) return true
             }
