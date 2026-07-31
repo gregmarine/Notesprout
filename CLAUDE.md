@@ -99,6 +99,12 @@ information takes inkBlack and is made *smaller* to read as secondary) · `borde
   narrowest device first — P2P is `sw439dp`**; a control that falls off the edge is worse than one that
   must be learned. Details: [`docs/design-system.md`](docs/design-system.md).
 
+- **The one colour exception — ink, and only ink.** Colour appears in chrome *only where the colour
+  itself is the thing being chosen or reported*: the pen-colour panel's swatches, and the pen button's
+  icon tinted with the armed ink. Nothing else. Everything routes through `core/InkColor.paintColor()`,
+  so on a greyscale device it all renders black and the rule holds unchanged. Adding colour anywhere
+  else — a status, a highlight, an accent — is still forbidden. See [`docs/design-system.md`](docs/design-system.md).
+
 - No shadows, elevation, gradients, blur. No Material ripple (`rippleColor=transparent`, `stateListAnimator=null`).
 - Animations none/minimal, never decorative (`android:windowAnimationStyle="@null"` in `Theme.Notesprout`).
 - Borders 1dp solid inkBlack; corner radius 4dp. Typography: high-contrast black on white.

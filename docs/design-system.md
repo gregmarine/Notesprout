@@ -11,7 +11,31 @@
   is. E-ink washes mid-greys out, and a caption the user has to squint at has failed at the one job it
   had. Make it smaller to make it secondary; do not make it grey.
 - `borderGray` = `#CCCCCC` — subtle dividers only (**invisible on e-ink** — use inkBlack for any visible border)
-- No color in UI chrome — ever.
+- No color in UI chrome — ever, with exactly one exception (below).
+
+**The ink exception (colour ink, v1.2):**
+
+Colour is allowed in chrome **only where the colour itself is the content** — where the control's
+whole job is to choose or report an ink:
+
+- **The pen-colour panel's swatches** (`panel_pen_color.xml` + `PenColorPanelController`). A swatch
+  that could not show its colour would be useless.
+- **The pen button's icon**, tinted with the armed ink. Without it the only way to learn what colour
+  is loaded is to open the panel — a real cost on a device where every panel open is an EPD refresh.
+
+That is the whole list. A status, a highlight, an accent, a category tag, a selected state anywhere
+else: still forbidden. Two properties keep the exception from spreading:
+
+- Everything goes through **`core/InkColor.paintColor()`**, which returns black on a greyscale device.
+  So on the B&W devices the rule is not merely respected, it is *unchanged* — the panel is hidden and
+  the pen icon is black, exactly as before colour existed.
+- **Selection is never signalled with colour** inside the panel, because colour is already carrying
+  the content. A selected swatch gets a heavier black outer ring plus a white gap ring — which is what
+  makes selection legible on the black swatch, where a heavier black border would be invisible.
+
+Colour choices are constrained by hardware, not taste: the Onyx overlay drops an ink to black once
+its dominant RGB channel falls below ~180 (`InkColor.MIN_DOMINANT_CHANNEL`, measured on a Kaleido 3
+panel). `InkColor.isOverlaySafe()` tests a candidate; `PenPalette` holds the vetted set.
 
 **Visual Rules:**
 - No shadows, elevation, gradients, or blur

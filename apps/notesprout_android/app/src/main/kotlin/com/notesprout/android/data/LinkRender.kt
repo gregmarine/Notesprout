@@ -40,12 +40,12 @@ fun LinkRender.translate(dx: Float, dy: Float, newId: String = id): LinkRender =
     boundingBox = RectF(boundingBox).apply { offset(dx, dy) },
     target = target,
     chrome = chrome,
-    strokes = strokes.map { s -> LiveStroke(s.id, s.points.map { PointF(it.x + dx, it.y + dy) }) },
+    strokes = strokes.map { s -> s.translated(dx, dy) },
     headings = headings.map { h ->
         HeadingStroke(
             h.id,
             RectF(h.boundingBox).apply { offset(dx, dy) },
-            h.strokes.map { s -> LiveStroke(s.id, s.points.map { PointF(it.x + dx, it.y + dy) }) },
+            h.strokes.map { s -> s.translated(dx, dy) },
             recognizedText = h.recognizedText,
             level = h.level,
         )

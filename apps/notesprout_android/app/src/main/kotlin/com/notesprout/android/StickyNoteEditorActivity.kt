@@ -36,6 +36,7 @@ import com.notesprout.android.data.index.NotesproutIndex
 import com.notesprout.android.data.replaceStickyNoteSubtree
 import com.notesprout.android.data.soilFile
 import com.notesprout.android.data.toStickyNoteObject
+import com.notesprout.android.data.deepCopy
 import com.notesprout.android.databinding.ActivityStickyNoteEditorBinding
 import com.notesprout.android.notebook.ActiveTool
 import com.notesprout.android.notebook.GenericNotebookView
@@ -44,6 +45,7 @@ import com.notesprout.android.notebook.NotebookView
 import com.notesprout.android.notebook.OnyxNotebookView
 import com.notesprout.android.notebook.ShapeRecognizer
 import com.notesprout.android.notebook.ToolPreferencesManager
+import com.notesprout.android.notebook.PenColorPreferences
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -145,6 +147,8 @@ class StickyNoteEditorActivity : AppCompatActivity() {
         wireToolButtons()
         updateLassoButtonIcon()
 
+        // Restore the pen's ink colour — one global value, the same way the active tool below is.
+        drawingView.setPenColor(PenColorPreferences.load(this))
         when (ToolPreferencesManager.load(this)) {
             ActiveTool.ERASER -> {
                 isEraserActive = true
@@ -715,10 +719,10 @@ class StickyNoteEditorActivity : AppCompatActivity() {
         shapes.forEach { box.union(it.boundingBox) }
 
         NotesproutClipboard.content = NotesproutClipboard.ClipboardContent(
-            strokes = strokes.map { LiveStroke(it.id, it.points.map { pt -> PointF(pt.x, pt.y) }) },
+            strokes = strokes.map { it.deepCopy() },
             headings = headings.map { h ->
                 HeadingStroke(h.id, RectF(h.boundingBox),
-                    h.strokes.map { s -> LiveStroke(s.id, s.points.map { PointF(it.x, it.y) }) },
+                    h.strokes.map { s -> s.deepCopy() },
                     recognizedText = h.recognizedText, level = h.level)
             },
             boundingBox = box,
@@ -752,10 +756,10 @@ class StickyNoteEditorActivity : AppCompatActivity() {
         shapes.forEach { box.union(it.boundingBox) }
 
         NotesproutClipboard.content = NotesproutClipboard.ClipboardContent(
-            strokes = strokes.map { LiveStroke(it.id, it.points.map { pt -> PointF(pt.x, pt.y) }) },
+            strokes = strokes.map { it.deepCopy() },
             headings = headings.map { h ->
                 HeadingStroke(h.id, RectF(h.boundingBox),
-                    h.strokes.map { s -> LiveStroke(s.id, s.points.map { PointF(it.x, it.y) }) },
+                    h.strokes.map { s -> s.deepCopy() },
                     recognizedText = h.recognizedText, level = h.level)
             },
             boundingBox = box,

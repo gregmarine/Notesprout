@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Pen colour panel — docked to the pen button on whichever toolbar hosts it.
+     Shown when the pen is ALREADY the active tool and its button is tapped again; tapping the pen
+     button while another tool is active just selects the pen (see NotebookActivity.btnPen).
+
+     The swatch cells are NOT declared here: the palette is data (PenPalette.DEFAULTS) and the
+     recents row is dynamic, so PenColorPanelController fills both rows programmatically. This file
+     only provides the containers, so one layout serves all five drawing hosts via <include>.
+
+     Positioned programmatically by PenColorPanelController (placement-aware, clamped to the host's
+     bounds and the top guard) — never by layout_gravity. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:visibility="gone"
+    android:background="@drawable/shape_bordered"
+    android:padding="4dp"
+    android:elevation="0dp">
+
+    <!-- Default palette — two rows of four, filled from PenPalette.DEFAULTS. -->
+    <LinearLayout
+        android:id="@+id/penSwatchRow1"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal" />
+
+    <LinearLayout
+        android:id="@+id/penSwatchRow2"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal" />
+
+    <!-- Recents — colours mixed in the custom picker, newest first. Both the divider and the row are
+         GONE until there is at least one, so the panel stays compact on a fresh install. -->
+    <View
+        android:id="@+id/penRecentDivider"
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:layout_marginTop="4dp"
+        android:layout_marginBottom="4dp"
+        android:background="@color/inkBlack"
+        android:visibility="gone" />
+
+    <LinearLayout
+        android:id="@+id/penRecentRow"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:visibility="gone" />
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:layout_marginTop="4dp"
+        android:layout_marginBottom="4dp"
+        android:background="@color/inkBlack" />
+
+    <androidx.appcompat.widget.AppCompatButton
+        android:id="@+id/btnPenCustomColor"
+        style="@style/Widget.Notesprout.ToggleTextButton"
+        android:layout_width="match_parent"
+        android:text="Custom color…"
+        android:contentDescription="Mix a custom ink colour" />
+
+</LinearLayout>

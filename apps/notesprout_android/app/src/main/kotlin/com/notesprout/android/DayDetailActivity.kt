@@ -72,6 +72,7 @@ import com.notesprout.android.data.toBoundingBoxJson
 import com.notesprout.android.data.toLinkObject
 import com.notesprout.android.data.toStickyNoteObject
 import com.notesprout.android.data.translate
+import com.notesprout.android.data.deepCopy
 import com.notesprout.android.databinding.ActivityDayDetailBinding
 import com.notesprout.android.notebook.ActiveTool
 import com.notesprout.android.notebook.GenericNotebookView
@@ -82,6 +83,7 @@ import com.notesprout.android.notebook.STICKY_NOTE_ICON_SIZE_DP
 import com.notesprout.android.notebook.ShapeRecognizer
 import com.notesprout.android.notebook.ToolPreferencesManager
 import com.notesprout.android.notebook.ToolbarOverflowManager
+import com.notesprout.android.notebook.PenColorPreferences
 import com.notesprout.android.state.AppSurface
 import com.notesprout.android.state.SurfaceEntry
 import com.notesprout.android.state.SurfaceStack
@@ -386,6 +388,8 @@ class DayDetailActivity : AppCompatActivity() {
             override fun handleOnBackPressed() { handleBackNavigation() }
         })
 
+        // Restore the pen's ink colour — one global value, the same way the active tool below is.
+        drawingView.setPenColor(PenColorPreferences.load(this))
         when (ToolPreferencesManager.load(this)) {
             ActiveTool.ERASER -> {
                 isEraserActive = true
@@ -1574,10 +1578,10 @@ class DayDetailActivity : AppCompatActivity() {
         stickyNotes.forEach { box.union(it.boundingBox) }
         shapes.forEach { box.union(it.boundingBox) }
         return NotesproutClipboard.ClipboardContent(
-            strokes = strokes.map { LiveStroke(it.id, it.points.map { pt -> PointF(pt.x, pt.y) }) },
+            strokes = strokes.map { it.deepCopy() },
             headings = headings.map { h ->
                 HeadingStroke(h.id, RectF(h.boundingBox),
-                    h.strokes.map { s -> LiveStroke(s.id, s.points.map { PointF(it.x, it.y) }) },
+                    h.strokes.map { s -> s.deepCopy() },
                     recognizedText = h.recognizedText, level = h.level)
             },
             boundingBox = box,

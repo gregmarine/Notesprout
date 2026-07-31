@@ -16,17 +16,48 @@
 
 ---
 
-## Stroke-attribute fidelity through lasso move/copy (Paintsprout interop)
+## Sticky-note editor opens a second connection to the same `.soil` (crash: database is locked)
 
-Deferred from the 2026-07 stability review (`CODE_REVIEW_STABILITY.md` P2-2) — revisit when
-Paintsprout `.soil` interop approaches. The lasso drag deep-copy rebuilds strokes as
-`LiveStroke(id, points)` (`OnyxNotebookView.kt` ~1394, `GenericNotebookView.kt` ~401), dropping
-`color`/`strokeWidth`/`srcPoints`; the persist (`NotebookActivity` ~1882 and undo path) then writes
-defaults (`#000000`/3.0f) and replaces legacy JSON (per-point pressure/tilt) with a points-only
-blob — permanent, and `performLassoCopy` (~5148) strips the same into the clipboard. Invisible
-today because all in-app ink uses default attributes, but the first lasso-move of imported
-attributed ink silently and irreversibly flattens it. Fix shape: carry the attribute fields through
-the drag copy and the clipboard snapshot so the persisted row round-trips them.
+**Reproduced on NA5C 2026-07-31.** Create a sticky note → write → close → **move it** → **tap to
+reopen** → `SQLiteDatabaseLockedException: database is locked (code 5)` at
+`beginTransactionNonExclusive`, process dies. On relaunch the sticky is back at its **old** position
+(the move transaction rolled back) but its contents are intact. Moving again, with no editor
+involved, is fine.
+
+**Cause — two Room/SQLCipher connections to one `.soil` file.** `StickyNoteEditorActivity` builds
+its **own** connection (`notebookDbCache` / `notebookDb()`, ~line 271) for its debounced real-time
+persist, while `NotebookActivity.soilDatabase` is still open. Tapping a sticky launches the editor
+while the host's move write — `onStrokesMoved` → `db.withTransaction { … replaceStickyNoteSubtree }`
+(~line 1826) — is still in flight on a `lifecycleScope.launch`. Two concurrent **write**
+transactions on two connections → `SQLITE_BUSY`.
+
+The host dies rather than the editor purely because of error handling: the editor's persist wraps
+its transaction in `try/catch` and logs, the host's `onStrokesMoved` coroutine has **no catch at
+all**, so the exception reaches the default handler.
+
+**This violates a rule the codebase states elsewhere:** secondary editor Activities must not open
+the `.soil` — `docs/documents.md` ("The editor never opens the `.soil` — the notebook host reads and
+writes for it via `DocumentTransfer`") and `docs/drawing-engine.md` (the template browser "never
+opens a `.soil` — avoids cross-Activity WAL/sidecar risk"). `DocumentEditorActivity` obeys it;
+`StickyNoteEditorActivity` does not. Note `core/OpenNotebooks.kt` is only a ref **counter** for
+import-replace safety — there is no shared-connection registry to reuse.
+
+Pre-existing; unrelated to the colour work (the editor's DB path was untouched by it).
+
+Fix shapes, cheapest first:
+1. **Defensive only** — try/catch + busy-retry around the host's `onStrokesMoved` transaction. Stops
+   the crash; on its own a lost move is merely silent instead of fatal, so pair it with a retry.
+2. **Remove the second connection** — host writes on the editor's behalf via the transfer singleton,
+   matching `DocumentTransfer`. Costs the editor's crash-safety-while-editing, which is why the
+   connection exists at all (the comment calls the host's close callback "the fallback").
+3. **Share one connection** — a process-global ref-counted `.soil` handle both Activities use.
+   Structurally correct and keeps real-time persist, but needs care over who closes it and when
+   (WAL/sidecar rules in `docs/data-architecture.md`).
+
+There is a second, follow-on crash in the same log: after the process died, launch-restore reopened
+`CalendarActivity`, which called `NotesproutIndex.db()` in `onCreate` before `ensureReady()` →
+`IllegalStateException: NotesproutIndex is not open`. That is the surface-stack restore path failing
+on a cold process; worth its own guard regardless of the sticky fix.
 
 ---
 

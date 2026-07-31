@@ -69,7 +69,7 @@ object ToolbarButtonRegistry {
         // "lockOff" (Decrypt) retired under encrypt-everything — a notebook is never downgraded to
         // plaintext; scope is changed via the long-press "Change Encryption Scope" toggle instead.
         // Persisted configs that still list "lockOff" resolve to null and are skipped harmlessly.
-        ButtonSpec("pen", R.id.btnPen, R.drawable.ic_pen, "Pen", GROUP_TOOLS),
+        ButtonSpec("pen", R.id.btnPen, R.drawable.ic_pen_filled, "Pen", GROUP_TOOLS),
         ButtonSpec("eraser", R.id.btnEraser, R.drawable.ic_eraser, "Eraser", GROUP_TOOLS),
         ButtonSpec("lassoEraser", R.id.btnLassoEraser, R.drawable.ic_lasso_eraser, "Lasso Eraser", GROUP_TOOLS),
         // "eraseAll" (Erase Page) moved to the canvas long-press "Page" menu; spec removed. A

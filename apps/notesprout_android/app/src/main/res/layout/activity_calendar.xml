@@ -113,7 +113,7 @@
         <androidx.appcompat.widget.AppCompatImageButton
             android:id="@+id/btnCalPen"
             style="@style/Widget.Notesprout.ToolbarButton"
-            android:src="@drawable/ic_pen"
+            android:src="@drawable/ic_pen_filled"
             android:contentDescription="Pen" />
 
         <androidx.appcompat.widget.AppCompatImageButton

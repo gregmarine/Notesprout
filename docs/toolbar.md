@@ -180,6 +180,44 @@ the bare `n / total` when the name is blank), at 18sp `inkBlack`.
 
 ---
 
+## Pen Colour Panel (`notebook/PenColorPanelController.kt`)
+
+A swatch popover docked to the pen button. **Tapping the pen button when the pen is already the
+active tool opens it; tapping it from any other tool just selects the pen** and leaves the previously
+chosen ink in place — the same two-role pattern `btnLasso` uses for its clipboard popup. The test is
+`btnPen.isSelected`, read **before** the handler's mode-exits flip it (`isSelected` is false in every
+other tool mode, so that one flag is sufficient).
+
+- **Layout** — `res/layout/panel_pen_color.xml`, `<include>`d per host so one file serves all five
+  drawing surfaces. It declares only containers: the palette is data (`PenPalette.DEFAULTS`) and the
+  recents row is dynamic, so the controller fills both programmatically. Contents: 4×2 defaults grid →
+  recents row (row **and** its divider `GONE` until a custom colour exists) → "Custom color…".
+- **Controller** — takes the host's differences as inputs rather than branching internally: a
+  `sideProvider` (the notebook derives it from `ToolbarConfig.placement`; fixed-toolbar hosts return a
+  constant), a `boundsProvider` (full-screen hosts clamp to the root; the scratch pad and sticky editor
+  are 75%×75% windows and must clamp to the *window*), and a `topGuardProvider`. The panel is parented
+  to the host **root**, never the window or bar — those `clipToOutline` and a popover must overhang.
+- **Placement** — centred on the anchor, pushed to the requested side with an 8dp gap, then clamped
+  into the bounds. **That clamp is the near-the-edge behaviour**: a pen button parked at the end of the
+  bar still gets a fully on-screen panel.
+- **Show is two-phase** — `INVISIBLE` → `post { position(); VISIBLE }`. Going straight to `VISIBLE`
+  paints it at 0,0 for a frame and then jumps: two EPD refreshes and a visible stutter. Consequently
+  `isVisible` is `!= GONE` (so a fast second tap closes rather than re-opens) while `panelRect()`
+  requires `== VISIBLE` (so an unpositioned rect never reaches the pen-exclusion zone).
+- **Pen exclusion + dismissal** — `computeToolbarExclusionRect()` unions `panelRect()` alongside the
+  shape-insert toolbar; `dispatchTouchEvent` dismisses on any outside touch **except** on `btnPen`
+  itself, whose own listener owns the toggle (handling it in both places would close-then-reopen).
+  Also hidden on eraser / lasso / lasso-eraser selection and on page flip — but **not** in `btnPen`'s
+  handler, which would defeat the toggle.
+- **Swatches** carry a `contentDescription` *and* a platform tooltip (`ViewCompat.setTooltipText`), so
+  a wordless colour cell is still learnable by long-press. Selection is drawn as a heavier black ring
+  plus a white gap ring — never as a colour change, since colour is the content here.
+
+See [`design-system.md`](design-system.md) for the colour-in-chrome exception this feature creates,
+and `core/InkColor` for the Kaleido brightness floor that constrains which colours are usable.
+
+---
+
 ## Page Long-Press Menu
 
 The **page-scoped** actions are **not** toolbar buttons — they live in a canvas long-press menu, so the

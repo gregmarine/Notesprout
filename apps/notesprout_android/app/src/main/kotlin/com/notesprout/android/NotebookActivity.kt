@@ -150,10 +150,14 @@ import com.notesprout.android.notebook.TextEditDialog
 import com.notesprout.android.notebook.CustomizeToolbarDialog
 import com.notesprout.android.notebook.ToolbarOverflowManager
 import com.notesprout.android.notebook.ToolbarLayoutManager
+import com.notesprout.android.notebook.PenColorPreferences
+import com.notesprout.android.notebook.PenColorPanelController
 import com.notesprout.android.data.toolbar.ToolbarAxis
 import com.notesprout.android.data.toolbar.ToolbarConfig
 import com.notesprout.android.data.toolbar.ToolbarPlacement
 import com.notesprout.android.data.toolbar.ToolbarPreferencesManager
+import com.notesprout.android.data.deepCopy
+import com.notesprout.android.data.translated
 import com.notesprout.android.history.UndoRedoAction
 import com.notesprout.android.history.UndoRedoManager
 import com.notesprout.android.recognition.HandwritingRecognizer
@@ -244,6 +248,9 @@ class NotebookActivity : AppCompatActivity() {
     private lateinit var drawingView: NotebookView
     private lateinit var overflowManager: ToolbarOverflowManager
     private lateinit var toolbarLayoutManager: ToolbarLayoutManager
+
+    /** The pen-colour swatch panel docked to [btnPen]. See [togglePenColorPanel]. */
+    private lateinit var penColorPanel: PenColorPanelController
     private var toolbarConfig: ToolbarConfig = ToolbarConfig()
     /** True while we're waiting for ACTION_UP to close the overflow menu after a button tap. */
     private var overflowCloseOnUp = false
@@ -1017,8 +1024,12 @@ class NotebookActivity : AppCompatActivity() {
         // Page actions (insert before/after, delete, erase, template, page index, copy, paste)
         // now live in the canvas long-press "Page" menu — see showPageMenu(). No toolbar buttons.
 
-        // Pen tool button — activates pen mode (default)
+        // Pen tool button — activates pen mode (default). Tapping it when the pen is *already*
+        // active opens the colour panel instead; the same two-role pattern btnLasso uses for its
+        // clipboard popup. btnPen.isSelected is false in every other tool mode, so it alone is a
+        // sufficient test — but it must be read before the mode exits below flip it.
         binding.btnPen.setOnClickListener {
+            val wasPenActive = binding.btnPen.isSelected
             hideLassoPopupToolbar()
             hideShapeInsertToolbar()
             if (isShapeTransformMode) exitShapeTransformMode()
@@ -1033,11 +1044,13 @@ class NotebookActivity : AppCompatActivity() {
             binding.btnLassoEraser.isSelected = false
             binding.btnLasso.isSelected = false
             ToolPreferencesManager.save(this, ActiveTool.PEN)
+            if (wasPenActive) togglePenColorPanel() else hidePenColorPanel()
         }
 
         binding.btnEraser.setOnClickListener {
             hideLassoPopupToolbar()
             hideShapeInsertToolbar()
+            hidePenColorPanel()
             if (isShapeTransformMode) exitShapeTransformMode()
             if (isLassoMode) exitLassoMode()
             if (isLassoEraserMode) exitLassoEraserMode()
@@ -1053,6 +1066,7 @@ class NotebookActivity : AppCompatActivity() {
         binding.btnLassoEraser.setOnClickListener {
             hideLassoPopupToolbar()
             hideShapeInsertToolbar()
+            hidePenColorPanel()
             if (!isLassoEraserMode) {
                 enterLassoEraserMode()
                 ToolPreferencesManager.save(this, ActiveTool.LASSO_ERASER)
@@ -1122,6 +1136,7 @@ class NotebookActivity : AppCompatActivity() {
         }
 
         binding.btnLasso.setOnClickListener {
+            hidePenColorPanel()
             if (isLassoEraserMode) exitLassoEraserMode()
             if (!isLassoMode) {
                 enterLassoMode()
@@ -1208,6 +1223,8 @@ class NotebookActivity : AppCompatActivity() {
         drawingView = if (isBooxDevice()) OnyxNotebookView(this) else GenericNotebookView(this)
         isSnapEnabled = SnapPreferences.load(this)
         drawingView.isSnapEnabled = isSnapEnabled
+        // Restore the pen's ink colour — one global value, the same way the active tool below is.
+        drawingView.setPenColor(PenColorPreferences.load(this))
         // Restore the last-used tool — survives notebook switches and app restarts.
         when (ToolPreferencesManager.load(this)) {
             ActiveTool.ERASER      -> {
@@ -1254,7 +1271,7 @@ class NotebookActivity : AppCompatActivity() {
                 // Deep-copy before any async work so the undo action holds stable data.
                 val capturedHeading = HeadingStroke(
                     heading.id, RectF(heading.boundingBox),
-                    heading.strokes.map { s -> LiveStroke(s.id, s.points.map { PointF(it.x, it.y) }) },
+                    heading.strokes.map { s -> s.deepCopy() },
                     recognizedText = heading.recognizedText,
                     level = heading.level,
                 )
@@ -1606,7 +1623,7 @@ class NotebookActivity : AppCompatActivity() {
                         val erasedHeadingIds  = erasedHeadings.mapTo(mutableSetOf()) { it.id }
                         val capturedHeadings  = erasedHeadings.map { h ->
                             HeadingStroke(h.id, RectF(h.boundingBox),
-                                h.strokes.map { s -> LiveStroke(s.id, s.points.map { PointF(it.x, it.y) }) },
+                                h.strokes.map { s -> s.deepCopy() },
                                 recognizedText = h.recognizedText,
                                 level = h.level)
                         }
@@ -1686,7 +1703,7 @@ class NotebookActivity : AppCompatActivity() {
                         HeadingStroke(
                             id             = h.id,
                             boundingBox    = RectF(h.boundingBox),
-                            strokes        = h.strokes.map { s -> LiveStroke(s.id, s.points.map { PointF(it.x, it.y) }) },
+                            strokes        = h.strokes.map { s -> s.deepCopy() },
                             recognizedText = h.recognizedText,
                             level          = h.level,
                         )
@@ -2088,6 +2105,33 @@ class NotebookActivity : AppCompatActivity() {
         )
         toolbarConfig = ToolbarPreferencesManager.load(this)
         toolbarLayoutManager.apply(toolbarConfig)
+
+        // ── Pen colour panel ──────────────────────────────────────────────────
+        // Built after the toolbar manager because it asks it for the placement-derived side and the
+        // top guard on every open, so the bar can move (or float) and the panel follows.
+        penColorPanel = PenColorPanelController(
+            root          = binding.root,
+            panel         = binding.penColorPanel.root,
+            anchor        = binding.btnPen,
+            swatchRow1    = binding.penColorPanel.penSwatchRow1,
+            swatchRow2    = binding.penColorPanel.penSwatchRow2,
+            recentDivider = binding.penColorPanel.penRecentDivider,
+            recentRow     = binding.penColorPanel.penRecentRow,
+            customButton  = binding.penColorPanel.btnPenCustomColor,
+            sideProvider  = {
+                when (toolbarConfig.placement) {
+                    ToolbarPlacement.LEFT   -> PenColorPanelController.Side.RIGHT_OF
+                    ToolbarPlacement.RIGHT  -> PenColorPanelController.Side.LEFT_OF
+                    ToolbarPlacement.BOTTOM -> PenColorPanelController.Side.ABOVE
+                    else                    -> PenColorPanelController.Side.BELOW
+                }
+            },
+            boundsProvider   = { Rect(0, 0, binding.root.width, binding.root.height) },
+            topGuardProvider = { toolbarLayoutManager.topGuard() },
+            onColorChosen    = { hex -> applyPenColor(hex) },
+            onCustomRequested = { /* Phase 3: custom colour picker */ },
+        )
+        applyPenTintToButton()
 
         // ── Toolbar overflow ──────────────────────────────────────────────────
         // Constructed before positionOverflowMenu()/positionPageIndicator(): those read the overflow
@@ -2521,6 +2565,16 @@ class NotebookActivity : AppCompatActivity() {
             }
         }
 
+        // Dismiss the pen colour panel on any touch outside it — except on btnPen itself, whose own
+        // click listener owns the toggle (handling it here too would close then immediately reopen).
+        if (event.actionMasked == MotionEvent.ACTION_DOWN
+            && ::penColorPanel.isInitialized && penColorPanel.isVisible) {
+            val inPanel = penColorPanel.containsScreenPoint(event.rawX.toInt(), event.rawY.toInt())
+            if (!inPanel && !isTouchInView(event, binding.btnPen)) {
+                hidePenColorPanel()
+            }
+        }
+
         return super.dispatchTouchEvent(event)
     }
 
@@ -2604,6 +2658,8 @@ class NotebookActivity : AppCompatActivity() {
                 (sit.y + sit.height).toInt(),
             )
         }
+        // Same for the pen colour panel — it overhangs the bar, and the pen must not write under it.
+        if (::penColorPanel.isInitialized) penColorPanel.panelRect()?.let(base::union)
         return base
     }
 
@@ -4401,6 +4457,9 @@ class NotebookActivity : AppCompatActivity() {
      * Also keeps [currentTemplateBitmap] in sync for the undo/redo optimised stroke path.
      */
     private fun displayPage(result: PageLoadResult) {
+        // A page flip is a context change — a popover anchored to the old view state shouldn't ride
+        // along. (The armed ink itself persists; only the panel closes.)
+        hidePenColorPanel()
         currentTemplateBitmap = result.templateBitmap
         drawingView.loadHeadings(result.headings)
         drawingView.loadTextObjects(result.textObjects)
@@ -5514,9 +5573,9 @@ class NotebookActivity : AppCompatActivity() {
         stickyNotes.forEach { box.union(it.boundingBox) }
         shapeObjects.forEach { box.union(it.boundingBox) }
         val clip = NotesproutClipboard.ClipboardContent(
-            strokes  = strokes.map { LiveStroke(it.id, it.points.map { pt -> PointF(pt.x, pt.y) }) },
+            strokes  = strokes.map { it.deepCopy() },
             headings = headings.map { h -> HeadingStroke(h.id, RectF(h.boundingBox),
-                h.strokes.map { s -> LiveStroke(s.id, s.points.map { PointF(it.x, it.y) }) },
+                h.strokes.map { s -> s.deepCopy() },
                 recognizedText = h.recognizedText,
                 level = h.level) },
             boundingBox = box,
@@ -5918,11 +5977,11 @@ class NotebookActivity : AppCompatActivity() {
         selectedShapes.forEach { box.union(it.boundingBox) }
 
         val clipStrokes  = selectedStrokes.map { s ->
-            LiveStroke(s.id, s.points.map { pt -> PointF(pt.x, pt.y) })
+            s.deepCopy()
         }
         val clipHeadings = selectedHeadings.map { h ->
             HeadingStroke(h.id, RectF(h.boundingBox),
-                h.strokes.map { s -> LiveStroke(s.id, s.points.map { PointF(it.x, it.y) }) },
+                h.strokes.map { s -> s.deepCopy() },
                 recognizedText = h.recognizedText,
                 level = h.level)
         }
@@ -6138,10 +6197,7 @@ class NotebookActivity : AppCompatActivity() {
         val density = resources.displayMetrics.density
         val translatedContent = NotesproutClipboard.ClipboardContent(
             strokes = strokes.map { s ->
-                LiveStroke(
-                    id = java.util.UUID.randomUUID().toString(),
-                    points = s.points.map { android.graphics.PointF(it.x + dx, it.y + dy) },
-                )
+                s.translated(dx, dy, newId = java.util.UUID.randomUUID().toString())
             },
             headings = headings.map { h ->
                 HeadingStroke(
@@ -6240,11 +6296,11 @@ class NotebookActivity : AppCompatActivity() {
         val stickyNoteIds  = selectedStickyNotes.map { it.id }
         val shapeIds       = selectedShapes.map { it.id }
         val capturedStrokes  = selectedStrokes.map { s ->
-            LiveStroke(s.id, s.points.map { pt -> PointF(pt.x, pt.y) })
+            s.deepCopy()
         }
         val capturedHeadings = selectedHeadings.map { h ->
             HeadingStroke(h.id, RectF(h.boundingBox),
-                h.strokes.map { s -> LiveStroke(s.id, s.points.map { PointF(it.x, it.y) }) },
+                h.strokes.map { s -> s.deepCopy() },
                 recognizedText = h.recognizedText,
                 level = h.level)
         }
@@ -7779,6 +7835,41 @@ class NotebookActivity : AppCompatActivity() {
         pushToolbarExclusion()
     }
 
+    // ── Pen colour ───────────────────────────────────────────────────────────
+
+    private fun togglePenColorPanel() {
+        if (penColorPanel.isVisible) {
+            hidePenColorPanel()
+        } else {
+            drawingView.releaseRender()   // flush the EPD frame so the panel is visible on e-ink
+            penColorPanel.show(
+                PenColorPreferences.load(this),
+                PenColorPreferences.loadRecent(this),
+            )
+            // The panel is measured a frame later; push the exclusion zone once it has bounds so the
+            // pen can't write underneath it.
+            binding.penColorPanel.root.post { pushToolbarExclusion() }
+        }
+    }
+
+    private fun hidePenColorPanel() {
+        if (!penColorPanel.isVisible) return
+        penColorPanel.hide()
+        pushToolbarExclusion()
+    }
+
+    /** Persist the chosen ink, arm the drawing view with it, and re-tint the pen button. */
+    private fun applyPenColor(hex: String) {
+        PenColorPreferences.save(this, hex)
+        drawingView.setPenColor(hex)
+        applyPenTintToButton()
+        pushToolbarExclusion()
+    }
+
+    private fun applyPenTintToButton() {
+        PenColorPanelController.applyPenTint(binding.btnPen, PenColorPreferences.load(this))
+    }
+
     private fun insertShape(type: com.notesprout.android.data.ShapeType) {
         hideShapeInsertToolbar()
         closeOverflowMenu()
@@ -8785,9 +8876,9 @@ class NotebookActivity : AppCompatActivity() {
                 action.stickyNotes.forEach { clipBox.union(it.boundingBox) }
                 action.shapes.forEach { clipBox.union(it.boundingBox) }
                 NotesproutClipboard.content = NotesproutClipboard.ClipboardContent(
-                    strokes     = action.strokes.map { s -> LiveStroke(s.id, s.points.map { pt -> PointF(pt.x, pt.y) }) },
+                    strokes     = action.strokes.map { s -> s.deepCopy() },
                     headings    = action.headings.map { h -> HeadingStroke(h.id, RectF(h.boundingBox),
-                        h.strokes.map { s -> LiveStroke(s.id, s.points.map { PointF(it.x, it.y) }) },
+                        h.strokes.map { s -> s.deepCopy() },
                         recognizedText = h.recognizedText,
                         level = h.level) },
                     boundingBox = clipBox,
@@ -10581,9 +10672,9 @@ class NotebookActivity : AppCompatActivity() {
                 action.stickyNotes.forEach { clipBox.union(it.boundingBox) }
                 action.shapes.forEach { clipBox.union(it.boundingBox) }
                 NotesproutClipboard.content = NotesproutClipboard.ClipboardContent(
-                    strokes     = action.strokes.map { s -> LiveStroke(s.id, s.points.map { pt -> PointF(pt.x, pt.y) }) },
+                    strokes     = action.strokes.map { s -> s.deepCopy() },
                     headings    = action.headings.map { h -> HeadingStroke(h.id, RectF(h.boundingBox),
-                        h.strokes.map { s -> LiveStroke(s.id, s.points.map { PointF(it.x, it.y) }) },
+                        h.strokes.map { s -> s.deepCopy() },
                         recognizedText = h.recognizedText,
                         level = h.level) },
                     boundingBox = clipBox,

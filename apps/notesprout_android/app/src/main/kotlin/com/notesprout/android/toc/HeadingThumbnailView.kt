@@ -8,6 +8,7 @@ import android.graphics.Path
 import android.graphics.RectF
 import android.util.AttributeSet
 import android.view.View
+import com.notesprout.android.core.InkColor
 import com.notesprout.android.data.HeadingStroke
 
 class HeadingThumbnailView @JvmOverloads constructor(
@@ -18,7 +19,8 @@ class HeadingThumbnailView @JvmOverloads constructor(
 
     private var headingBounds: RectF? = null
     private var maxHeightPx: Int = 0
-    private var cachedPaths: List<Path> = emptyList()
+    /** Each heading stroke's path paired with its own ink colour. */
+    private var cachedPaths: List<Pair<Path, Int>> = emptyList()
     private val cachedMatrix = Matrix()
     private var matrixWidth = -1
 
@@ -37,10 +39,11 @@ class HeadingThumbnailView @JvmOverloads constructor(
         cachedPaths = heading.strokes.mapNotNull { stroke ->
             val pts = stroke.points
             if (pts.isEmpty()) return@mapNotNull null
-            Path().apply {
+            val path = Path().apply {
                 moveTo(pts[0].x, pts[0].y)
                 for (i in 1 until pts.size) lineTo(pts[i].x, pts[i].y)
             }
+            path to InkColor.paintColor(stroke.color)
         }
         invalidate()
     }
@@ -65,7 +68,10 @@ class HeadingThumbnailView @JvmOverloads constructor(
         canvas.save()
         canvas.clipRect(0f, 0f, width.toFloat(), height.toFloat())
         canvas.concat(cachedMatrix)
-        for (path in cachedPaths) canvas.drawPath(path, strokePaint)
+        for ((path, argb) in cachedPaths) {
+            strokePaint.color = argb
+            canvas.drawPath(path, strokePaint)
+        }
         canvas.restore()
     }
 }
