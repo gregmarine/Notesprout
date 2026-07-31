@@ -3,9 +3,13 @@
      Shown when the pen is ALREADY the active tool and its button is tapped again; tapping the pen
      button while another tool is active just selects the pen (see NotebookActivity.btnPen).
 
-     The swatch cells are NOT declared here: the palette is data (PenPalette.DEFAULTS) and the
-     recents row is dynamic, so PenColorPanelController fills both rows programmatically. This file
-     only provides the containers, so one layout serves all five drawing hosts via <include>.
+     Two palettes behind a segmented control: 16 greys (the panel's own 4-bit ladder) and 16 colours
+     (matching BOOX Notes), the latter with a third row of user-assignable custom slots. The chosen
+     palette persists, like the colour itself.
+
+     Swatch cells are NOT declared here: both palettes are data (PenPalette) and the custom row is
+     dynamic, so PenColorPanelController fills every row programmatically. This file provides only the
+     containers, so one layout serves all five drawing hosts via <include>.
 
      Positioned programmatically by PenColorPanelController (placement-aware, clamped to the host's
      bounds and the top guard) — never by layout_gravity. -->
@@ -18,7 +22,40 @@
     android:padding="4dp"
     android:elevation="0dp">
 
-    <!-- Default palette — two rows of four, filled from PenPalette.DEFAULTS. -->
+    <!-- Palette switch. Selected state is the standard bordered-button treatment, so it reads the
+         same as every other toggle in the app. -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:layout_marginBottom="4dp">
+
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/btnPaletteGrey"
+            style="@style/Widget.Notesprout.ToggleTextButton"
+            android:layout_width="0dp"
+            android:layout_weight="1"
+            android:text="B&amp;W"
+            android:contentDescription="Greyscale palette" />
+
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/btnPaletteColor"
+            style="@style/Widget.Notesprout.ToggleTextButton"
+            android:layout_width="0dp"
+            android:layout_weight="1"
+            android:layout_marginStart="4dp"
+            android:text="Color"
+            android:contentDescription="Color palette" />
+
+    </LinearLayout>
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:layout_marginBottom="4dp"
+        android:background="@color/inkBlack" />
+
+    <!-- The active palette — two rows of eight, filled from PenPalette. -->
     <LinearLayout
         android:id="@+id/penSwatchRow1"
         android:layout_width="wrap_content"
@@ -31,10 +68,9 @@
         android:layout_height="wrap_content"
         android:orientation="horizontal" />
 
-    <!-- Recents — colours mixed in the custom picker, newest first. Both the divider and the row are
-         GONE until there is at least one, so the panel stays compact on a fresh install. -->
+    <!-- Custom slots — colour palette only; both this and its divider are GONE on greyscale. -->
     <View
-        android:id="@+id/penRecentDivider"
+        android:id="@+id/penCustomDivider"
         android:layout_width="match_parent"
         android:layout_height="1dp"
         android:layout_marginTop="4dp"
@@ -43,24 +79,10 @@
         android:visibility="gone" />
 
     <LinearLayout
-        android:id="@+id/penRecentRow"
+        android:id="@+id/penCustomRow"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:orientation="horizontal"
         android:visibility="gone" />
-
-    <View
-        android:layout_width="match_parent"
-        android:layout_height="1dp"
-        android:layout_marginTop="4dp"
-        android:layout_marginBottom="4dp"
-        android:background="@color/inkBlack" />
-
-    <androidx.appcompat.widget.AppCompatButton
-        android:id="@+id/btnPenCustomColor"
-        style="@style/Widget.Notesprout.ToggleTextButton"
-        android:layout_width="match_parent"
-        android:text="Custom color…"
-        android:contentDescription="Mix a custom ink colour" />
 
 </LinearLayout>

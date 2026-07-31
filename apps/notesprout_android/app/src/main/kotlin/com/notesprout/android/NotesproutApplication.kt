@@ -58,10 +58,6 @@ class NotesproutApplication : Application() {
         // SDK cannot bootstrap itself. This bypasses the enforcement at the JNI level
         // before any SDK code runs.
         HiddenApiBypass.addHiddenApiExemptions("")
-        // Resolve whether this screen can show colour, before any Activity reads it. Must follow the
-        // hidden-API bypass: the detection asks the Onyx SDK for the panel's colour type, and that
-        // call reflects into a hidden framework API.
-        com.notesprout.android.core.DisplayColor.init(this)
 
         // The index is encrypted (Phase 1b) and may need an async plaintext→encrypted migration or an
         // unlock prompt, so it can no longer open synchronously here. BootstrapActivity (launcher) and

@@ -1,23 +1,26 @@
 package com.notesprout.android.notebook
 
+import android.content.Context
+import android.content.res.ColorStateList
 import android.graphics.Color
 import android.graphics.Rect
+import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.LayerDrawable
+import android.view.Gravity
 import android.view.View
 import android.widget.ImageView
 import android.widget.LinearLayout
+import android.widget.TextView
 import androidx.core.view.ViewCompat
 import androidx.core.widget.ImageViewCompat
-import android.content.res.ColorStateList
-import com.notesprout.android.core.DisplayColor
 import com.notesprout.android.core.InkColor
 
 /**
- * The pen-colour panel: a swatch popover docked to whichever pen button opens it.
+ * The pen-colour panel: two palettes of swatches, docked to whichever pen button opens it.
  *
  * Written once and shared by all five drawing hosts (notebook, scratch pad, calendar, day detail,
- * sticky-note editor). The hosts differ in three ways, so those are constructor inputs rather than
+ * sticky-note editor). The hosts differ in four ways, so those are constructor inputs rather than
  * branches in here:
  *
  * - **Which side to open on** ([sideProvider]) — the notebook's toolbar is user-placeable, so it
@@ -27,6 +30,8 @@ import com.notesprout.android.core.InkColor
  *   float outside the window's border.
  * - **The top guard** ([topGuardProvider]) — a popover is tappable chrome, so it must never enter the
  *   guard band (see `core/TopGuard`).
+ * - **Reacting to visibility** ([onVisibilityChanged]) — every host maintains its own pen-exclusion
+ *   rect and must recompute it whenever the panel appears or disappears.
  *
  * The panel is parented to the host's **root**, not to the window/toolbar, because those clip their
  * children (`clipToOutline`) and a popover has to overhang.
@@ -35,24 +40,26 @@ class PenColorPanelController(
     private val root: View,
     private val panel: View,
     private val anchor: View,
+    private val paletteGreyButton: View,
+    private val paletteColorButton: View,
     private val swatchRow1: LinearLayout,
     private val swatchRow2: LinearLayout,
-    private val recentDivider: View,
-    private val recentRow: LinearLayout,
-    customButton: View,
+    private val customDivider: View,
+    private val customRow: LinearLayout,
     private val sideProvider: () -> Side,
     private val boundsProvider: () -> Rect,
     private val topGuardProvider: () -> Int,
     private val onColorChosen: (String) -> Unit,
-    onCustomRequested: () -> Unit,
+    /** Open the mixer for custom slot [index], pre-loaded with its current ink (or the pen's). */
+    private val onSlotEditRequested: (index: Int, initial: String) -> Unit,
+    private val onPaletteChanged: (PenPalette.Kind) -> Unit,
     /**
      * Invoked on **every** visibility change, so the host can re-push its BOOX pen-exclusion rect.
      *
      * Required rather than optional because forgetting it leaves a **dead zone the user cannot write
      * in**: the exclusion keeps covering ground the panel no longer occupies. The controller hides
-     * itself from several places (a swatch tap, the custom button, [toggle]), and any of them that
-     * did not tell the host would strand the rect. Making it a constructor parameter means a new host
-     * cannot omit it.
+     * itself from several places (a swatch tap, a slot tap, [toggle]), and any of them that did not
+     * tell the host would strand the rect.
      */
     private val onVisibilityChanged: () -> Unit,
 ) {
@@ -66,6 +73,12 @@ class PenColorPanelController(
     /** Ink currently armed — drives which swatch is drawn as selected. */
     private var selected: String = InkColor.DEFAULT
 
+    /** Which palette is on screen. */
+    private var kind: PenPalette.Kind = PenPalette.Kind.GREYSCALE
+
+    /** The user's custom slots, `null` where empty. */
+    private var slots: List<String?> = List(PenPalette.CUSTOM_SLOTS) { null }
+
     /**
      * "Open" from the caller's point of view — deliberately `!= GONE`, so the one INVISIBLE frame
      * [show] uses to measure still counts as open. Otherwise a fast second tap on the pen button
@@ -74,58 +87,164 @@ class PenColorPanelController(
     val isVisible: Boolean get() = panel.visibility != View.GONE
 
     init {
-        customButton.setOnClickListener {
-            hide()
-            onCustomRequested()
+        paletteGreyButton.setOnClickListener { switchPalette(PenPalette.Kind.GREYSCALE) }
+        paletteColorButton.setOnClickListener { switchPalette(PenPalette.Kind.COLOR) }
+    }
+
+    private fun switchPalette(next: PenPalette.Kind) {
+        if (kind == next) return
+        kind = next
+        onPaletteChanged(next)
+        bind(selected, kind, slots)
+        // The palettes are different heights (the colour one carries a third row), so the panel has
+        // to be re-placed and its exclusion re-pushed after it re-measures.
+        panel.post {
+            position()
+            onVisibilityChanged()
         }
     }
 
     // ── Content ──────────────────────────────────────────────────────────────
 
     /**
-     * Rebuild the swatches for [current] ink and [recents]. Cheap enough to run on every open, which
-     * keeps the panel correct without any invalidation bookkeeping.
+     * Rebuild every row for [current] ink, [palette] and [customSlots]. Cheap enough to run on every
+     * open and every palette switch, which keeps the panel correct with no invalidation bookkeeping.
      */
-    fun bind(current: String, recents: List<String>) {
+    fun bind(current: String, palette: PenPalette.Kind, customSlots: List<String?>) {
         selected = current
-        val defaults = PenPalette.DEFAULTS
-        fillRow(swatchRow1, defaults.take(PenPalette.COLUMNS).map { it.name to it.hex })
-        fillRow(swatchRow2, defaults.drop(PenPalette.COLUMNS).map { it.name to it.hex })
+        kind = palette
+        slots = customSlots
 
-        val shown = recents.take(PenColorPreferences.MAX_RECENT)
-        fillRow(recentRow, shown.map { PenPalette.labelFor(it) to it })
-        val hasRecents = shown.isNotEmpty()
-        recentRow.visibility = if (hasRecents) View.VISIBLE else View.GONE
-        recentDivider.visibility = if (hasRecents) View.VISIBLE else View.GONE
+        paletteGreyButton.isSelected = palette == PenPalette.Kind.GREYSCALE
+        paletteColorButton.isSelected = palette == PenPalette.Kind.COLOR
+
+        val entries = PenPalette.swatches(palette)
+        fillRow(swatchRow1, entries.take(PenPalette.COLUMNS))
+        fillRow(swatchRow2, entries.drop(PenPalette.COLUMNS))
+
+        // Custom slots belong to the colour palette only — mixing a custom grey is what the
+        // sixteen-step ladder is already for.
+        val showCustom = palette == PenPalette.Kind.COLOR
+        customDivider.visibility = if (showCustom) View.VISIBLE else View.GONE
+        customRow.visibility = if (showCustom) View.VISIBLE else View.GONE
+        if (showCustom) fillCustomRow()
     }
 
-    private fun fillRow(row: LinearLayout, entries: List<Pair<String, String>>) {
+    private fun fillRow(row: LinearLayout, entries: List<PenPalette.Swatch>) {
         row.removeAllViews()
-        for ((name, hex) in entries) row.addView(swatchView(name, hex))
+        for (entry in entries) row.addView(swatchCell(entry.name, entry.hex))
     }
 
-    private fun swatchView(name: String, hex: String): View = View(root.context).apply {
-        layoutParams = LinearLayout.LayoutParams(dpi(44f), dpi(44f)).apply {
-            marginStart = dpi(2f); marginEnd = dpi(2f)
-            topMargin = dpi(2f); bottomMargin = dpi(2f)
+    private fun fillCustomRow() {
+        customRow.removeAllViews()
+        for (i in 0 until PenPalette.CUSTOM_SLOTS) {
+            customRow.addView(slots[i]?.let { hex -> customCell(i, hex) } ?: emptySlotCell(i))
         }
-        background = swatchDrawable(InkColor.toInt(hex), hex.equals(selected, ignoreCase = true))
-        // A wordless swatch has to be learnable: the same string serves the long-press hint and the
-        // content description, per the icon rule in the design system. Uses the platform tooltip
-        // rather than a Toast — it self-dismisses and costs one less EPD refresh.
-        contentDescription = name
-        ViewCompat.setTooltipText(this, name)
-        setOnClickListener {
-            selected = hex
-            // Hide *first*: the host recomputes its pen-exclusion rect inside onColorChosen, and a
-            // still-visible panel would be folded into it and then never cleared.
-            hide()
-            onColorChosen(hex)
+    }
+
+    // ── Cells ────────────────────────────────────────────────────────────────
+
+    /**
+     * A swatch and its name, stacked.
+     *
+     * The name sits **below** the colour rather than on top of it. BOOX prints letters inside the
+     * ambiguous swatches; putting the text underneath instead names every colour without ever
+     * obscuring the thing being chosen — which matters most on the greyscale panels, where several
+     * colours render alike and the label is the only thing telling them apart.
+     */
+    private fun swatchCell(name: String, hex: String): View =
+        cell(name) { swatchTile(hex, isSelected = hex.equals(selected, ignoreCase = true)) }
+            .apply {
+                contentDescription = name
+                ViewCompat.setTooltipText(this, name)
+                setOnClickListener {
+                    selected = hex
+                    hide()          // hide first — the host recomputes its exclusion rect below
+                    onColorChosen(hex)
+                }
+            }
+
+    /** A filled custom slot: tap to use it, long-press to remix it in place. */
+    private fun customCell(index: Int, hex: String): View =
+        cell(PenPalette.labelFor(hex)) { swatchTile(hex, isSelected = hex.equals(selected, ignoreCase = true)) }
+            .apply {
+                val label = "Custom ${index + 1}, $hex"
+                contentDescription = label
+                ViewCompat.setTooltipText(this, "$label — long-press to change")
+                setOnClickListener {
+                    selected = hex
+                    hide()
+                    onColorChosen(hex)
+                }
+                setOnLongClickListener {
+                    hide()
+                    onSlotEditRequested(index, hex)
+                    true
+                }
+            }
+
+    /**
+     * An empty slot: a `+` on an outlined tile.
+     *
+     * Not a blank or a greyed-out cell — a disabled-looking control is visually silent on e-ink and
+     * reads as broken rather than available. The `+` says "free slot, tap to fill" without any state
+     * the panel has to explain.
+     */
+    private fun emptySlotCell(index: Int): View =
+        cell(label = "Add") { plusTile() }
+            .apply {
+                contentDescription = "Empty custom slot ${index + 1}"
+                ViewCompat.setTooltipText(this, "Add a custom colour")
+                setOnClickListener {
+                    hide()
+                    onSlotEditRequested(index, selected)
+                }
+            }
+
+    /** Tile + caption in a fixed-width column, so all rows align regardless of label length. */
+    private inline fun cell(label: String, tile: () -> View): LinearLayout =
+        LinearLayout(root.context).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_HORIZONTAL
+            layoutParams = LinearLayout.LayoutParams(dpi(46f), LinearLayout.LayoutParams.WRAP_CONTENT)
+                .apply { marginStart = dpi(1f); marginEnd = dpi(1f); bottomMargin = dpi(2f) }
+            addView(tile())
+            addView(TextView(root.context).apply {
+                text = label
+                textSize = 9f
+                // inkBlack, never grey: the caption carries information, so the design system says it
+                // gets full contrast and is made *smaller* to read as secondary.
+                setTextColor(Color.BLACK)
+                gravity = Gravity.CENTER
+                maxLines = 2
+                typeface = Typeface.DEFAULT
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                ).apply { topMargin = dpi(1f) }
+            })
+        }
+
+    private fun swatchTile(hex: String, isSelected: Boolean): View = View(root.context).apply {
+        layoutParams = LinearLayout.LayoutParams(dpi(40f), dpi(40f))
+        background = swatchDrawable(InkColor.toInt(hex), isSelected)
+    }
+
+    private fun plusTile(): View = TextView(root.context).apply {
+        layoutParams = LinearLayout.LayoutParams(dpi(40f), dpi(40f))
+        text = "+"
+        textSize = 20f
+        setTextColor(Color.BLACK)
+        gravity = Gravity.CENTER
+        background = GradientDrawable().apply {
+            setColor(Color.WHITE)
+            cornerRadius = dp(4f)
+            setStroke(dpi(1f).coerceAtLeast(1), Color.BLACK)
         }
     }
 
     /**
-     * A swatch cell: black outer ring, the ink as fill, and — when selected — a white gap ring
+     * A swatch tile: black outer ring, the ink as fill, and — when selected — a white gap ring
      * between them plus a thicker outer ring.
      *
      * The white gap is what makes selection legible on **black**, where a heavier black border would
@@ -149,18 +268,12 @@ class PenColorPanelController(
 
     // ── Visibility + placement ───────────────────────────────────────────────
 
-    fun toggle(current: String, recents: List<String>) {
-        if (isVisible) hide() else show(current, recents)
+    fun toggle(current: String, palette: PenPalette.Kind, customSlots: List<String?>) {
+        if (isVisible) hide() else show(current, palette, customSlots)
     }
 
-    fun show(current: String, recents: List<String>) {
-        // Greyscale screen: offering a palette that cannot be seen is worse than not offering one, so
-        // the panel simply never opens and re-tapping the pen button is the silent no-op it has always
-        // been. Guarded here rather than in each host so a future host cannot forget it. Deliberately
-        // *hidden*, never disabled — a disabled control is visually silent on e-ink (it looks broken,
-        // not unavailable), which is why the app has no disabled states anywhere.
-        if (!DisplayColor.supportsColor) return
-        bind(current, recents)
+    fun show(current: String, palette: PenPalette.Kind, customSlots: List<String?>) {
+        bind(current, palette, customSlots)
         // Hosts that add their canvas to the panel's parent at runtime (calendar, day detail) end up
         // with the canvas stacked ON TOP of this XML-declared panel — it then renders behind the page
         // and every tap lands on the canvas, so the panel looks completely inert. The other popovers
@@ -220,23 +333,6 @@ class PenColorPanelController(
     }
 
     /**
-     * The panel's laid-out rect in root coordinates, or null when hidden — used by hosts to union it
-     * into the BOOX pen-exclusion zone and to detect outside taps. Returns null until it has a size,
-     * so a rect is never published before [position] has run.
-     */
-    fun panelRect(): Rect? {
-        // Stricter than [isVisible] on purpose: during the measure frame the panel is still parked at
-        // 0,0, and publishing that as a pen-exclusion zone would block the top-left of the canvas.
-        if (panel.visibility != View.VISIBLE || panel.width <= 0 || panel.height <= 0) return null
-        return Rect(
-            panel.x.toInt(),
-            panel.y.toInt(),
-            (panel.x + panel.width).toInt(),
-            (panel.y + panel.height).toInt(),
-        )
-    }
-
-    /**
      * The panel's rect translated into [target]'s coordinate space, or null when hidden.
      *
      * Hosts need this because the panel and the drawing view rarely share a parent — the scratch pad
@@ -245,6 +341,8 @@ class PenColorPanelController(
      * the panel. Going via screen coordinates makes the nesting irrelevant.
      */
     fun panelRectIn(target: View): Rect? {
+        // Stricter than [isVisible] on purpose: during the measure frame the panel is still parked at
+        // 0,0, and publishing that as a pen-exclusion zone would block the top-left of the canvas.
         if (panel.visibility != View.VISIBLE || panel.width <= 0 || panel.height <= 0) return null
         val p = IntArray(2).also { panel.getLocationOnScreen(it) }
         val t = IntArray(2).also { target.getLocationOnScreen(it) }
@@ -266,8 +364,7 @@ class PenColorPanelController(
          * Tint a pen button's icon with the ink it will write in.
          *
          * A narrow, deliberate exception to "no colour in UI chrome": without it, the only way to
-         * learn what colour is armed is to open the panel. Uses [InkColor.paintColor], so on a
-         * greyscale device the icon is simply black — identical to how it has always looked.
+         * learn what colour is armed is to open the panel.
          */
         fun applyPenTint(button: ImageView, hex: String) {
             ImageViewCompat.setImageTintList(

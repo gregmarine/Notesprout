@@ -4,25 +4,21 @@ import android.content.Context
 import com.notesprout.android.core.InkColor
 
 /**
- * The pen's ink colour, persisted across notebook switches and app restarts.
+ * The pen's ink colour, the palette it was chosen from, and the user's custom slots.
  *
  * **Global, one value for the whole app** — the same shape as [ToolPreferencesManager] and
- * [SnapPreferences], and for the same reason: all five drawing surfaces (notebook, scratch pad,
- * calendar, day-detail note, sticky-note editor) already share one active tool, so they share one
- * ink too. Not in `notesprout.db`, not in any `.soil`.
- *
- * [recentCustom] holds colours the user mixed in the custom picker, newest first, capped at
- * [MAX_RECENT]. Palette colours never enter it — only mixed ones, since the palette is always one
- * tap away regardless.
+ * [SnapPreferences], and for the same reason: all five drawing surfaces already share one active
+ * tool, so they share one ink too. Not in `notesprout.db`, not in any `.soil`.
  */
 object PenColorPreferences {
 
     private const val PREFS_NAME = "notesprout_pen_prefs"
     private const val KEY_COLOR = "pen_color"
-    private const val KEY_RECENT = "recent_custom"
+    private const val KEY_PALETTE = "pen_palette"
+    private const val KEY_SLOTS = "custom_slots"
 
-    /** How many mixed colours the panel offers back. Small — this is a shortcut, not a library. */
-    const val MAX_RECENT = 4
+    /** Empty slots are stored as this placeholder, so a slot's *position* is stable. */
+    private const val EMPTY = "-"
 
     /**
      * Live listeners, so a colour chosen on one surface reaches the others **while they are still
@@ -34,7 +30,7 @@ object PenColorPreferences {
      * left the host behind it showing a stale pen tint until it was closed and reopened. The colour
      * was always persisted correctly; only the chrome lied.
      *
-     * Main-thread only, matching every caller. Hosts register in `onCreate` and unregister in
+     * Main-thread only, matching every caller. Hosts register in `onCreate`, unregister in
      * `onDestroy`.
      */
     private val listeners = mutableSetOf<(String) -> Unit>()
@@ -53,20 +49,49 @@ object PenColorPreferences {
         listeners.toList().forEach { it(hex) }
     }
 
-    /** Mixed colours, newest first. */
-    fun loadRecent(context: Context): List<String> =
-        prefs(context).getString(KEY_RECENT, null)
+    /**
+     * Which palette the panel opens on. **Greyscale is the default** — it is the set that renders
+     * exactly on every panel in the fleet, so it is the safe thing to show someone who has not
+     * expressed a preference. Once they switch, the choice sticks, like the colour itself.
+     */
+    fun loadPalette(context: Context): PenPalette.Kind =
+        runCatching { PenPalette.Kind.valueOf(prefs(context).getString(KEY_PALETTE, "")!!) }
+            .getOrDefault(PenPalette.Kind.GREYSCALE)
+
+    fun savePalette(context: Context, kind: PenPalette.Kind) {
+        prefs(context).edit().putString(KEY_PALETTE, kind.name).apply()
+    }
+
+    /**
+     * The user's custom colours as **fixed, assignable slots** — always [PenPalette.CUSTOM_SLOTS]
+     * long, with `null` for an empty one.
+     *
+     * Slots rather than a recents list on purpose: a recents list silently pushes out a colour you
+     * rely on as soon as you experiment with a ninth. Here a colour stays exactly where you put it,
+     * and position is itself information — the third slot is always the same ink.
+     */
+    fun loadSlots(context: Context): List<String?> {
+        val stored = prefs(context).getString(KEY_SLOTS, null)
             ?.split(',')
             ?.map { it.trim() }
-            ?.filter { it.isNotEmpty() }
             ?: emptyList()
-
-    /** Promote [hex] to the front of the recents, de-duplicating and trimming to [MAX_RECENT]. */
-    fun addRecent(context: Context, hex: String) {
-        val updated = (listOf(hex) + loadRecent(context).filter { !it.equals(hex, ignoreCase = true) })
-            .take(MAX_RECENT)
-        prefs(context).edit().putString(KEY_RECENT, updated.joinToString(",")).apply()
+        return List(PenPalette.CUSTOM_SLOTS) { i ->
+            stored.getOrNull(i)?.takeIf { it.isNotEmpty() && it != EMPTY }
+        }
     }
+
+    /** Write [hex] (or `null` to clear) into [index], leaving every other slot untouched. */
+    fun saveSlot(context: Context, index: Int, hex: String?) {
+        if (index !in 0 until PenPalette.CUSTOM_SLOTS) return
+        val updated = loadSlots(context).toMutableList().also { it[index] = hex }
+        prefs(context).edit()
+            .putString(KEY_SLOTS, updated.joinToString(",") { it ?: EMPTY })
+            .apply()
+    }
+
+    /** The first empty slot, or null when all are taken. */
+    fun firstEmptySlot(context: Context): Int? =
+        loadSlots(context).indexOfFirst { it == null }.takeIf { it >= 0 }
 
     private fun prefs(context: Context) =
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)

@@ -41,19 +41,17 @@ object InkColor {
     fun toHex(argb: Int): String = String.format("#%06X", argb and 0xFFFFFF)
 
     /**
-     * The colour to actually paint [hex] with **on this device**.
+     * The colour to paint [hex] with.
      *
-     * On a greyscale screen every ink renders black. That is a presentation decision made here and
-     * nowhere else: the stored value is never rewritten, so a notebook written in red on a colour
-     * panel opens as legible black on a greyscale one and is still red when it goes back. Letting the
-     * real colour through instead would be worse than useless — the panel dithers it to a mid-grey
-     * and a yellow or light-green note all but disappears against white paper.
+     * **Every device is treated the same.** An earlier version forced black on greyscale panels; that
+     * was dropped once it was tried on the hardware — the dithered greys turned out legible, and the
+     * greyscale *palette* is the better answer anyway, since it lets the user pick tones the panel
+     * renders exactly instead of having their choice overridden.
      *
-     * Every render site routes through this one function, which is what makes that guarantee
-     * auditable rather than a convention. Exports deliberately do **not** — see [exportColor].
+     * Kept as the single chokepoint every render site routes through, because that is what made the
+     * fallback a one-line change to add and a one-line change to remove.
      */
-    fun paintColor(hex: String?): Int =
-        if (DisplayColor.supportsColor) toInt(hex ?: DEFAULT) else Color.BLACK
+    fun paintColor(hex: String?): Int = toInt(hex ?: DEFAULT)
 
     /**
      * The colour to write [hex] with into a **file** — PNG, PDF, any export.

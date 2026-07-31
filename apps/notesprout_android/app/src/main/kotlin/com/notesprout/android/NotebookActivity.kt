@@ -2114,11 +2114,12 @@ class NotebookActivity : AppCompatActivity() {
             root          = binding.root,
             panel         = binding.penColorPanel.root,
             anchor        = binding.btnPen,
+            paletteGreyButton  = binding.penColorPanel.btnPaletteGrey,
+            paletteColorButton = binding.penColorPanel.btnPaletteColor,
             swatchRow1    = binding.penColorPanel.penSwatchRow1,
             swatchRow2    = binding.penColorPanel.penSwatchRow2,
-            recentDivider = binding.penColorPanel.penRecentDivider,
-            recentRow     = binding.penColorPanel.penRecentRow,
-            customButton  = binding.penColorPanel.btnPenCustomColor,
+            customDivider = binding.penColorPanel.penCustomDivider,
+            customRow     = binding.penColorPanel.penCustomRow,
             sideProvider  = {
                 when (toolbarConfig.placement) {
                     ToolbarPlacement.LEFT   -> PenColorPanelController.Side.RIGHT_OF
@@ -2130,7 +2131,8 @@ class NotebookActivity : AppCompatActivity() {
             boundsProvider   = { Rect(0, 0, binding.root.width, binding.root.height) },
             topGuardProvider = { toolbarLayoutManager.topGuard() },
             onColorChosen    = { hex -> applyPenColor(hex) },
-            onCustomRequested = { showCustomColorDialog() },
+            onSlotEditRequested = { index, initial -> showCustomColorDialog(index, initial) },
+            onPaletteChanged  = { PenColorPreferences.savePalette(this, it) },
             onVisibilityChanged = { pushToolbarExclusion() },
         )
         applyPenTintToButton()
@@ -2663,7 +2665,10 @@ class NotebookActivity : AppCompatActivity() {
             )
         }
         // Same for the pen colour panel — it overhangs the bar, and the pen must not write under it.
-        if (::penColorPanel.isInitialized) penColorPanel.panelRect()?.let(base::union)
+        // Asked for in the drawing view's own coordinates, which is what the exclusion rect is in.
+        if (::penColorPanel.isInitialized) {
+            penColorPanel.panelRectIn(drawingView.asView())?.let(base::union)
+        }
         return base
     }
 
@@ -7848,7 +7853,8 @@ class NotebookActivity : AppCompatActivity() {
             drawingView.releaseRender()   // flush the EPD frame so the panel is visible on e-ink
             penColorPanel.show(
                 PenColorPreferences.load(this),
-                PenColorPreferences.loadRecent(this),
+                PenColorPreferences.loadPalette(this),
+                PenColorPreferences.loadSlots(this),
             )
         }
     }
@@ -7881,16 +7887,16 @@ class NotebookActivity : AppCompatActivity() {
     }
 
     /**
-     * Mix an ink colour. Only a *mixed* colour joins the recents — the palette is always one tap
-     * away, so re-offering an entry that is already on screen would just crowd the panel.
+     * Mix a colour into custom slot [index]. Slots are positional and never shuffle, so a colour
+     * stays exactly where the user put it — the whole point of slots over a recents list.
      */
-    private fun showCustomColorDialog() {
+    private fun showCustomColorDialog(index: Int, initial: String) {
         drawingView.releaseRender()   // flush the EPD frame so the dialog paints cleanly
         CustomColorDialog(
             context = this,
-            initial = PenColorPreferences.load(this),
+            initial = initial,
             onChosen = { hex ->
-                PenColorPreferences.addRecent(this, hex)
+                PenColorPreferences.saveSlot(this, index, hex)
                 applyPenColor(hex)
             },
         ).show()

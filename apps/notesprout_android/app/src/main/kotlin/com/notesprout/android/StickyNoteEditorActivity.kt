@@ -159,16 +159,18 @@ class StickyNoteEditorActivity : AppCompatActivity() {
             root          = binding.root,
             panel         = binding.penColorPanel.root,
             anchor        = binding.btnStickyPen,
+            paletteGreyButton  = binding.penColorPanel.btnPaletteGrey,
+            paletteColorButton = binding.penColorPanel.btnPaletteColor,
             swatchRow1    = binding.penColorPanel.penSwatchRow1,
             swatchRow2    = binding.penColorPanel.penSwatchRow2,
-            recentDivider = binding.penColorPanel.penRecentDivider,
-            recentRow     = binding.penColorPanel.penRecentRow,
-            customButton  = binding.penColorPanel.btnPenCustomColor,
+            customDivider = binding.penColorPanel.penCustomDivider,
+            customRow     = binding.penColorPanel.penCustomRow,
             sideProvider  = { PenColorPanelController.Side.ABOVE },
             boundsProvider   = { windowRectInRoot(binding.stickyNoteEditorWindow) },
             topGuardProvider = { TopGuard.heightPx(this) },
             onColorChosen     = { hex -> applyPenColor(hex) },
-            onCustomRequested = { showCustomColorDialog() },
+            onSlotEditRequested = { index, initial -> showCustomColorDialog(index, initial) },
+            onPaletteChanged  = { PenColorPreferences.savePalette(this, it) },
             onVisibilityChanged = { pushPenPanelExclusion() },
         )
         applyPenTintToButton()
@@ -1419,7 +1421,8 @@ class StickyNoteEditorActivity : AppCompatActivity() {
             drawingView.releaseRender()   // flush the EPD frame so the panel is visible on e-ink
             penColorPanel.show(
                 PenColorPreferences.load(this),
-                PenColorPreferences.loadRecent(this),
+                PenColorPreferences.loadPalette(this),
+                PenColorPreferences.loadSlots(this),
             )
         }
     }
@@ -1456,14 +1459,17 @@ class StickyNoteEditorActivity : AppCompatActivity() {
         PenColorPanelController.applyPenTint(binding.btnStickyPen, PenColorPreferences.load(this))
     }
 
-    /** Only a *mixed* colour joins the recents; palette entries are already one tap away. */
-    private fun showCustomColorDialog() {
-        drawingView.releaseRender()
+    /**
+     * Mix a colour into custom slot [index]. Slots are positional and never shuffle, so a colour
+     * stays exactly where the user put it — the whole point of slots over a recents list.
+     */
+    private fun showCustomColorDialog(index: Int, initial: String) {
+        drawingView.releaseRender()   // flush the EPD frame so the dialog paints cleanly
         CustomColorDialog(
             context = this,
-            initial = PenColorPreferences.load(this),
+            initial = initial,
             onChosen = { hex ->
-                PenColorPreferences.addRecent(this, hex)
+                PenColorPreferences.saveSlot(this, index, hex)
                 applyPenColor(hex)
             },
         ).show()
