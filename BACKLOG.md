@@ -18,11 +18,20 @@
 
 ## Sticky-note editor opens a second connection to the same `.soil` (crash: database is locked)
 
-**Reproduced on NA5C 2026-07-31.** Create a sticky note → write → close → **move it** → **tap to
-reopen** → `SQLiteDatabaseLockedException: database is locked (code 5)` at
-`beginTransactionNonExclusive`, process dies. On relaunch the sticky is back at its **old** position
-(the move transaction rolled back) but its contents are intact. Moving again, with no editor
-involved, is fine.
+> **Deliberately deferred (2026-07-31) until the colour-ink work is finished — but it must be fixed.**
+> Not a colour regression: the stack is byte-identical to the first occurrence, which predates any of
+> that work.
+
+**This crashes during ordinary writing, not just in the original edge case.** Second repro, NA5C
+2026-07-31: **write on a sticky note → return to the notebook → keep writing** → the app dies ~5–10 s
+in (the editor's debounced persist landing on top of the notebook's `saveStrokes`). It fired **twice
+in 45 seconds** (15:46:04 PID 20160, 15:46:49 PID 20285) — crash, relaunch, write, crash — so any ink
+since the last save is at risk each time. Treat the severity as high even though the fix is queued.
+
+**Original (narrower) repro.** Create a sticky note → write → close → **move it** → **tap to reopen**
+→ `SQLiteDatabaseLockedException: database is locked (code 5)` at `beginTransactionNonExclusive`,
+process dies. On relaunch the sticky is back at its **old** position (the move transaction rolled
+back) but its contents are intact. Moving again, with no editor involved, is fine.
 
 **Cause — two Room/SQLCipher connections to one `.soil` file.** `StickyNoteEditorActivity` builds
 its **own** connection (`notebookDbCache` / `notebookDb()`, ~line 271) for its debounced real-time
