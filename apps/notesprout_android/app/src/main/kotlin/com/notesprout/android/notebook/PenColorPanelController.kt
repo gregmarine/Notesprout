@@ -10,6 +10,7 @@ import android.widget.LinearLayout
 import androidx.core.view.ViewCompat
 import androidx.core.widget.ImageViewCompat
 import android.content.res.ColorStateList
+import com.notesprout.android.core.DisplayColor
 import com.notesprout.android.core.InkColor
 
 /**
@@ -141,6 +142,12 @@ class PenColorPanelController(
     }
 
     fun show(current: String, recents: List<String>) {
+        // Greyscale screen: offering a palette that cannot be seen is worse than not offering one, so
+        // the panel simply never opens and re-tapping the pen button is the silent no-op it has always
+        // been. Guarded here rather than in each host so a future host cannot forget it. Deliberately
+        // *hidden*, never disabled — a disabled control is visually silent on e-ink (it looks broken,
+        // not unavailable), which is why the app has no disabled states anywhere.
+        if (!DisplayColor.supportsColor) return
         bind(current, recents)
         // Hosts that add their canvas to the panel's parent at runtime (calendar, day detail) end up
         // with the canvas stacked ON TOP of this XML-declared panel — it then renders behind the page

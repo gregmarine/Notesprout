@@ -33,9 +33,34 @@ else: still forbidden. Two properties keep the exception from spreading:
   the content. A selected swatch gets a heavier black outer ring plus a white gap ring — which is what
   makes selection legible on the black swatch, where a heavier black border would be invisible.
 
-Colour choices are constrained by hardware, not taste: the Onyx overlay drops an ink to black once
-its dominant RGB channel falls below ~180 (`InkColor.MIN_DOMINANT_CHANNEL`, measured on a Kaleido 3
-panel). `InkColor.isOverlaySafe()` tests a candidate; `PenPalette` holds the vetted set.
+Colour choices are constrained by hardware, not taste: the Onyx overlay draws an ink as black once its
+dominant RGB channel falls below ~180 (`InkColor.MIN_DOMINANT_CHANNEL`, measured on a Kaleido 3
+panel) — a *live-preview* limit, since the stroke still stores and renders correctly.
+`InkColor.isOverlaySafe()` tests a candidate; `PenPalette` holds the vetted set.
+
+**Greyscale devices (`core/DisplayColor`):**
+
+Most of the fleet cannot show colour at all, so colour ink is offered only where it can be seen.
+
+- **Detection** resolves once at process start (`DisplayColor.init` from `Application.onCreate`, after
+  the hidden-API bypass — the probe reflects into a hidden framework call). On BOOX the signal is
+  `Device.currentDevice().colorType` (`1` on a NoteAir5C, `0` on the base implementation); **no system
+  property exposes this**, the SDK call is all there is. A `0` is ambiguous — genuinely greyscale, or
+  a failed reflection — so an explicit model allowlist backs it up. Non-BOOX devices are ordinary
+  LCD/OLED and assumed colour, minus a small known-B&W-e-ink deny list.
+- **Every ink renders black**, via the single `InkColor.paintColor()` chokepoint. The stored value is
+  **never rewritten**: a notebook written in red on a colour panel opens as legible black on a
+  greyscale one and is still red when it goes back. Verified in both directions.
+- Letting the true colour through instead would be *worse* than black — the panel dithers it to a
+  mid-grey and a yellow or light-green note nearly vanishes against white paper.
+- **The palette is hidden, not disabled.** `PenColorPanelController.show()` returns early, so
+  re-tapping the pen button is the silent no-op it was before colour existed. Disabled controls are
+  visually silent on e-ink (they read as broken, not unavailable), which is why the app has none.
+- **Exports are unaffected** — `InkColor.exportColor()` is deliberately separate and always true
+  colour, because the file leaves the device.
+- **Debug builds can force either mode**, so the greyscale path is testable on a colour device (the
+  colour devices are Tier 2; the greyscale fleet is Tier 1, so the fallback would otherwise ship
+  having never been seen). See `DisplayColor.debugOverride`.
 
 **Visual Rules:**
 - No shadows, elevation, gradients, or blur
