@@ -15,6 +15,19 @@
             android:name="com.notesprout.android.debug.CryptoSpikeActivity"
             android:exported="true"
             android:label="Crypto Spike" />
+        <!-- Colour Ink Spike: debug-only harness for colour ink on a Kaleido panel.
+             Phase-0 findings (NoteAir5C, 2026-07-31): the raw-drawing overlay DOES render colour;
+             a colour change needs no restartRawDrawing; the first-stroke fast-mode app-scope
+             (HAND_WRITING_REPAINT_MODE) does NOT suppress it; getColorType()=1 via SDMDevice.
+             13 of 14 probe colours rendered live — the sole failure, #1E7A34, sits below an
+             observed **brightness floor of ~180 in the dominant channel** (every survivor was
+             ≥184). Retained past Phase 0 as the palette-calibration tool: cycle Ink through the
+             probe set to re-measure that floor against real writing.
+             adb shell am start -n com.notesprout.android.dev/com.notesprout.android.debug.ColorInkSpikeActivity -->
+        <activity
+            android:name="com.notesprout.android.debug.ColorInkSpikeActivity"
+            android:exported="true"
+            android:label="Color Ink Spike" />
         <!-- Reveals the global passphrase so the encrypted index stays sqlcipher-inspectable. Debug only.
              adb shell am start -n com.notesprout.android.dev/com.notesprout.android.debug.DebugKeyActivity -->
         <activity
