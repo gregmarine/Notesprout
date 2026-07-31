@@ -1,15 +1,19 @@
 package com.notesprout.android.recognition
 
 import com.notesprout.android.core.Slog
+import com.notesprout.android.data.HeadingStroke
 import com.notesprout.android.data.LiveStroke
 import com.notesprout.android.data.NotebookDao
 import com.notesprout.android.data.NotebookObject
 import com.notesprout.android.data.PageText
+import com.notesprout.android.data.ShapeRender
 import com.notesprout.android.data.ShapeType
 import com.notesprout.android.data.TYPE_PAGE_TEXT
-import com.notesprout.android.data.toHeadingStroke
+import com.notesprout.android.data.TextRender
+import com.notesprout.android.data.loadHeadingsSubtree
+import com.notesprout.android.data.loadLinksSubtree
+import com.notesprout.android.data.loadTextsSubtree
 import com.notesprout.android.data.toShapeRender
-import com.notesprout.android.data.toTextRender
 import java.util.UUID
 import kotlin.math.abs
 import kotlin.math.sin
@@ -28,40 +32,101 @@ object PageTextRepository {
     /** A SHAPE line counts as a horizontal rule when its rotation is within this of horizontal. */
     private const val RULE_MAX_TILT_DEG = 15f
 
-    /** Load everything on [pageId]'s content layer that recognition can consume. */
+    /**
+     * Load everything on [pageId]'s content layer that recognition can consume.
+     *
+     * The page-level queries are all scoped to `parentId = layerId`, which is exactly what makes a
+     * composite's content invisible to them — so this walks into composites too:
+     *
+     * - **Links** wrap ordinary page content (that is what a link *is*), and their children carry
+     *   page-absolute coordinates, so they merge straight into the page's own reading order. A text
+     *   object made into a link is still a text object the reader can see.
+     * - A **heading or text object whose recognition failed** keeps its ink as child rows. That ink is
+     *   what is actually on the page, so it goes into the stroke pool and gets another pass here —
+     *   this pipeline segments line by line and can succeed where the single-shot attempt did not.
+     *
+     * Deliberately left out, all of them things the reader is not meant to read as prose:
+     * **sticky notes** (collapsed to an icon, and their children are in the note's *local* coordinate
+     * space, so merging them would scatter text across the page), **shapes** other than horizontal
+     * rules, and **line objects** — the Lines tool draws page guides, not content, which is why they
+     * render in `inkLight` (see docs/content-objects.md).
+     */
     suspend fun loadPageContent(dao: NotebookDao, pageId: String): PageContent {
         val layer = dao.getLayerForPage(pageId)
             ?: return PageContent(emptyList(), emptyList(), emptyList(), emptyList())
 
-        val strokes: List<LiveStroke> = dao.getStrokesForLayer(layer.id).mapNotNull { row ->
+        val strokes = mutableListOf<LiveStroke>()
+        val headings = mutableListOf<PageContent.HeadingBlock>()
+        val textBlocks = mutableListOf<PageContent.TextBlock>()
+        val ruleTops = mutableListOf<Float>()
+
+        strokes += dao.getStrokesForLayer(layer.id).mapNotNull { row ->
             runCatching { LiveStroke.fromRow(row) }.getOrNull()
         }
 
-        val headings = dao.getHeadingsForLayer(layer.id).mapNotNull { row ->
-            val h = row.toHeadingStroke() ?: return@mapNotNull null
-            val text = h.recognizedText?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
-            PageContent.HeadingBlock(top = h.boundingBox.top, left = h.boundingBox.left, level = h.level, text = text)
+        // Subtree loads rather than the bare rows: a recognized heading/text is a single row and reads
+        // the same either way, while a failed one brings its ink along.
+        dao.loadHeadingsSubtree(layer.id).forEach { collectHeading(it, headings, strokes) }
+        dao.loadTextsSubtree(layer.id).forEach { collectText(it, textBlocks, strokes) }
+
+        // Density is irrelevant to everything read here (stroke geometry is px; a shape's type,
+        // rotation and centre are density-independent), so decode with density = 1f.
+        for (link in dao.loadLinksSubtree(layer.id, 1f)) {
+            strokes += link.strokes
+            link.headings.forEach { collectHeading(it, headings, strokes) }
+            link.textObjects.forEach { collectText(it, textBlocks, strokes) }
+            ruleTops += link.shapes.mapNotNull { ruleTopOf(it) }
         }
 
-        val textBlocks = dao.getTextObjectsForLayer(layer.id).mapNotNull { row ->
-            val t = row.toTextRender() ?: return@mapNotNull null
-            val md = t.text.takeIf { it.isNotBlank() } ?: return@mapNotNull null
-            PageContent.TextBlock(top = t.boundingBox.top, left = t.boundingBox.left, markdown = md)
-        }
-
-        // Horizontal SHAPE lines → horizontal rules. The Lines tool (type = "line") is template
-        // ruling / guides and is intentionally NOT fed here. Density is irrelevant here (we only read
-        // type / rotation / centerY, all density-independent), so decode with density = 1f.
-        val ruleTops = dao.getShapeObjectsForLayer(layer.id).mapNotNull { row ->
-            val sr = row.toShapeRender(1f) ?: return@mapNotNull null
-            if (sr.type != ShapeType.LINE) return@mapNotNull null
-            // sin(rotation) ≈ 0 for horizontal (rotation near 0° or 180°).
-            val tilt = abs(sin(Math.toRadians(sr.rotationDeg.toDouble())))
-            if (tilt > sin(Math.toRadians(RULE_MAX_TILT_DEG.toDouble()))) return@mapNotNull null
-            sr.centerY
+        ruleTops += dao.getShapeObjectsForLayer(layer.id).mapNotNull { row ->
+            ruleTopOf(row.toShapeRender(1f) ?: return@mapNotNull null)
         }
 
         return PageContent(strokes, headings, textBlocks, ruleTops)
+    }
+
+    /** A recognized heading is a block; one whose recognition failed contributes its ink instead. */
+    private fun collectHeading(
+        h: HeadingStroke,
+        headings: MutableList<PageContent.HeadingBlock>,
+        strokes: MutableList<LiveStroke>,
+    ) {
+        val text = h.recognizedText?.takeIf { it.isNotBlank() }
+        if (text != null) {
+            headings += PageContent.HeadingBlock(
+                top = h.boundingBox.top, left = h.boundingBox.left, level = h.level, text = text,
+            )
+        } else {
+            strokes += h.strokes
+        }
+    }
+
+    /**
+     * The same for text objects — but only ever one or the other. A text object converted from ink
+     * keeps the original strokes alongside its text, and feeding both would say everything twice.
+     */
+    private fun collectText(
+        t: TextRender,
+        textBlocks: MutableList<PageContent.TextBlock>,
+        strokes: MutableList<LiveStroke>,
+    ) {
+        val md = t.text.takeIf { it.isNotBlank() }
+        if (md != null) {
+            textBlocks += PageContent.TextBlock(
+                top = t.boundingBox.top, left = t.boundingBox.left, markdown = md,
+            )
+        } else {
+            strokes += t.strokes.orEmpty()
+        }
+    }
+
+    /** The y of a shape that reads as a horizontal rule, or null when it is any other shape. */
+    private fun ruleTopOf(sr: ShapeRender): Float? {
+        if (sr.type != ShapeType.LINE) return null
+        // sin(rotation) ≈ 0 for horizontal (rotation near 0° or 180°).
+        val tilt = abs(sin(Math.toRadians(sr.rotationDeg.toDouble())))
+        if (tilt > sin(Math.toRadians(RULE_MAX_TILT_DEG.toDouble()))) return null
+        return sr.centerY
     }
 
     /** The layer's content watermark for staleness comparison (0 if the page has no content). */
@@ -77,13 +142,17 @@ object PageTextRepository {
     }
 
     /**
-     * A cache entry is fresh when its watermark is at least the layer's current max AND
-     * (when [expectedEngine] is given) it was produced by that engine — switching the
-     * Handwriting Engine toggle must invalidate the other engine's cached text, or the
-     * viewer/export would keep serving stale results forever after a switch.
+     * A cache entry is fresh when its watermark is at least the layer's current max, it was written by
+     * the pipeline this build has, AND (when [expectedEngine] is given) by that engine.
+     *
+     * The engine check is why switching the Handwriting Engine toggle does not leave the viewer and
+     * export serving the other engine's results forever. The schema check is the same idea one level
+     * up: the watermark only notices the *page* changing, so a page that has sat still since a
+     * recognizer improvement would otherwise keep its incomplete text indefinitely.
      */
     fun isFresh(cached: PageText?, currentMax: Long, expectedEngine: String? = null): Boolean =
         cached != null && cached.sourceMaxUpdatedAt >= currentMax &&
+            cached.schema >= PageText.CURRENT_SCHEMA &&
             (expectedEngine == null || cached.engine == expectedEngine)
 
     /** Insert-or-replace the single page_text row for [pageId]. */

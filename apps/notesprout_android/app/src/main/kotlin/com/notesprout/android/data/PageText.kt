@@ -30,7 +30,13 @@ data class PageText(
     val recognizedAt: Long,
     /** `getMaxContentUpdatedAt(layerId)` at recognition time — the freshness watermark. */
     val sourceMaxUpdatedAt: Long,
-    val schema: Int = 2,
+    /**
+     * What the pipeline knew how to read when this text was produced. The watermark only catches the
+     * *page* changing; this catches the *recognizer* changing, which a page that has sat still since
+     * would otherwise never notice. Bump [CURRENT_SCHEMA] whenever a pass starts covering content it
+     * used to miss, and every cache written before it re-recognizes on next use.
+     */
+    val schema: Int = CURRENT_SCHEMA,
     /**
      * Schema 2: per-line provenance for **handwriting-derived** lines only (headings /
      * text objects / rules excluded) in reading order — powers the viewer's tap-to-correct
@@ -55,6 +61,13 @@ data class PageText(
     companion object {
         const val ENGINE_MLKIT = "mlkit"
         const val ENGINE_TROCR = "trocr"
+
+        /**
+         * 1 — original. 2 — per-line provenance ([lines]). 3 — reads inside composites: content
+         * wrapped in a **link**, and the ink of a heading/text object whose recognition failed. Caches
+         * below this are incomplete for any page that has one, so they are treated as stale.
+         */
+        const val CURRENT_SCHEMA = 3
 
         private val codec = Json { ignoreUnknownKeys = true }
 

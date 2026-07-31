@@ -561,13 +561,19 @@ columnar form). Included here because it demonstrates the two patterns worth ste
   "engine": "mlkit",           // producer id — lets you upgrade per-engine
   "recognizedAt": 1750000000000,
   "sourceMaxUpdatedAt": 1749999999000,
-  "schema": 2,
+  "schema": 3,
   "lines": [ { "text": "…", "strokeIds": ["…"], "top": 120.0, "height": 42.0 } ]
 }
 ```
 
-Note `engine` and `schema` inside the payload — the cache knows what produced it, so a better engine
-can invalidate only its predecessor's output.
+Note `engine` and `schema` inside the payload — the cache knows what produced it, so a better engine can
+invalidate only its predecessor's output.
+
+**`schema` is the second half of the freshness test, and the half that is easy to miss.** The watermark
+notices the *page* changing; `schema` notices the *pipeline* changing. Without it, a page nobody has
+touched since keeps its old text forever — so when a recognizer starts covering content it used to skip,
+every existing cache is silently, permanently wrong. Bump it and the caches re-earn themselves. Ours
+went to 3 when the pass learned to read content nested inside composites.
 
 **Read the watermark before you read the content it describes.** Reading content first and the
 watermark second lets a write that lands between the two reads make a stale cache look fresh — the

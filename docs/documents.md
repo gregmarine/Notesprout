@@ -350,8 +350,10 @@ Encryption, full-notebook export/import, and backup need no changes at all — t
   concatenates pages) with no storage change.
 - **Documents on Scratch Pad / Calendar day pages.** Those pages live in the global index's
   `scratchpad` / `calendar` tables, which would each need `srcUpdatedAt` added.
-- **Sticky-note text in the seed.** `PageTextRepository.loadPageContent` does not read sticky contents;
-  changing that belongs to recognition, not here.
+- **Sticky-note text in the seed.** `PageTextRepository.loadPageContent` reads content nested inside
+  *links*, and the ink of a heading/text whose recognition failed, but not sticky notes — they are
+  collapsed to an icon, and their children live in the note's local coordinate space. Changing that
+  belongs to recognition, not here (see [`handwriting-recognition.md`](handwriting-recognition.md)).
 - **Editing a document from outside an open notebook** (Page Index, MainActivity). Invariant 3 makes
   the notebook the only safe host.
 - **PDF/PNG export of a document.** Text formats only.
