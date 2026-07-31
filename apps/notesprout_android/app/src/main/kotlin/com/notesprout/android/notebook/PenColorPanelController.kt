@@ -45,6 +45,16 @@ class PenColorPanelController(
     private val topGuardProvider: () -> Int,
     private val onColorChosen: (String) -> Unit,
     onCustomRequested: () -> Unit,
+    /**
+     * Invoked on **every** visibility change, so the host can re-push its BOOX pen-exclusion rect.
+     *
+     * Required rather than optional because forgetting it leaves a **dead zone the user cannot write
+     * in**: the exclusion keeps covering ground the panel no longer occupies. The controller hides
+     * itself from several places (a swatch tap, the custom button, [toggle]), and any of them that
+     * did not tell the host would strand the rect. Making it a constructor parameter means a new host
+     * cannot omit it.
+     */
+    private val onVisibilityChanged: () -> Unit,
 ) {
 
     enum class Side { BELOW, ABOVE, RIGHT_OF, LEFT_OF }
@@ -107,8 +117,10 @@ class PenColorPanelController(
         ViewCompat.setTooltipText(this, name)
         setOnClickListener {
             selected = hex
-            onColorChosen(hex)
+            // Hide *first*: the host recomputes its pen-exclusion rect inside onColorChosen, and a
+            // still-visible panel would be folded into it and then never cleared.
             hide()
+            onColorChosen(hex)
         }
     }
 
@@ -161,11 +173,16 @@ class PenColorPanelController(
         panel.post {
             position()
             panel.visibility = View.VISIBLE
+            // Only now does the panel have a real rect to exclude — panelRect() withholds one until
+            // it is VISIBLE and positioned, precisely so an unplaced 0,0 rect never reaches the pen.
+            onVisibilityChanged()
         }
     }
 
     fun hide() {
+        if (panel.visibility == View.GONE) return
         panel.visibility = View.GONE
+        onVisibilityChanged()
     }
 
     /**

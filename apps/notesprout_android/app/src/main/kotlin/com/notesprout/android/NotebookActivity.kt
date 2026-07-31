@@ -2131,6 +2131,7 @@ class NotebookActivity : AppCompatActivity() {
             topGuardProvider = { toolbarLayoutManager.topGuard() },
             onColorChosen    = { hex -> applyPenColor(hex) },
             onCustomRequested = { showCustomColorDialog() },
+            onVisibilityChanged = { pushToolbarExclusion() },
         )
         applyPenTintToButton()
         PenColorPreferences.addListener(penColorListener)
@@ -7849,16 +7850,12 @@ class NotebookActivity : AppCompatActivity() {
                 PenColorPreferences.load(this),
                 PenColorPreferences.loadRecent(this),
             )
-            // The panel is measured a frame later; push the exclusion zone once it has bounds so the
-            // pen can't write underneath it.
-            binding.penColorPanel.root.post { pushToolbarExclusion() }
         }
     }
 
     private fun hidePenColorPanel() {
         if (!penColorPanel.isVisible) return
-        penColorPanel.hide()
-        pushToolbarExclusion()
+        penColorPanel.hide()   // pushes the exclusion rect via onVisibilityChanged
     }
 
     /**
@@ -7867,7 +7864,6 @@ class NotebookActivity : AppCompatActivity() {
      */
     private fun applyPenColor(hex: String) {
         PenColorPreferences.save(this, hex)
-        pushToolbarExclusion()
     }
 
     /**

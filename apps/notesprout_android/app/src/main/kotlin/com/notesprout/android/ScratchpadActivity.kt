@@ -298,6 +298,7 @@ class ScratchpadActivity : AppCompatActivity() {
             topGuardProvider = { TopGuard.heightPx(this) },
             onColorChosen     = { hex -> applyPenColor(hex) },
             onCustomRequested = { showCustomColorDialog() },
+            onVisibilityChanged = { pushPenPanelExclusion() },
         )
         applyPenTintToButton()
         PenColorPreferences.addListener(penColorListener)
@@ -2131,14 +2132,12 @@ class ScratchpadActivity : AppCompatActivity() {
                 PenColorPreferences.load(this),
                 PenColorPreferences.loadRecent(this),
             )
-            binding.penColorPanel.root.post { pushPenPanelExclusion() }
         }
     }
 
     private fun hidePenColorPanel() {
         if (!::penColorPanel.isInitialized || !penColorPanel.isVisible) return
-        penColorPanel.hide()
-        pushPenPanelExclusion()
+        penColorPanel.hide()   // pushes the exclusion rect via onVisibilityChanged
     }
 
     /** Keep the pen from writing underneath the panel while it is open. */
@@ -2152,7 +2151,6 @@ class ScratchpadActivity : AppCompatActivity() {
      */
     private fun applyPenColor(hex: String) {
         PenColorPreferences.save(this, hex)
-        pushPenPanelExclusion()
     }
 
     /**
