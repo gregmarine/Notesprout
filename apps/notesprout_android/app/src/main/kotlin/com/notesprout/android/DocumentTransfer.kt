@@ -28,16 +28,21 @@ object DocumentTransfer {
         val srcUpdatedAt: Long?,
         /** True when the page has been written on since [text] was drafted from it. */
         val stale: Boolean,
-        /** Header label — e.g. "Page 4/12". */
+        /** Header label — the page's place in the notebook, e.g. "4 / 12". */
         val pageLabel: String,
         val hasPrev: Boolean,
         val hasNext: Boolean,
+        /** Where the caret was left last time; 0 (the top) when this page has not been open before. */
+        val caret: Int,
     )
 
     /** What the host does for the editor. Implemented by [NotebookActivity]. */
     interface Host {
-        /** Persist [text] as the open page's document, keeping the current source watermark. */
-        fun saveDocument(text: String)
+        /**
+         * Persist [text] as the open page's document, keeping the current source watermark, and
+         * remember [caret] as where the writer left off on this page.
+         */
+        fun saveDocument(text: String, caret: Int)
 
         /**
          * Recognize the page afresh and call back with its text on the main thread (null when
@@ -65,9 +70,13 @@ object DocumentTransfer {
     /** The editor's current text, for the host's teardown flush. */
     var live: String? = null
 
+    /** The caret that goes with [live], so a teardown remembers the place as well as the words. */
+    var liveCaret: Int = 0
+
     /** Drop everything but [host] — called by the host once a session's text is safely stored. */
     fun clearSession() {
         input = null
         live = null
+        liveCaret = 0
     }
 }

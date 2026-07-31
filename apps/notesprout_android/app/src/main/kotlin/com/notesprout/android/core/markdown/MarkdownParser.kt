@@ -228,6 +228,25 @@ object MarkdownParser {
                         appendChar(result, text[i]); i++
                     }
                 }
+                // Image ![alt](url) — the renderer draws no images, so this shows the alt text in
+                // italic, the way a caption reads. Without this the `!` would be left as literal text
+                // and the rest parsed as a link, so an image reference came out as "!alt", underlined
+                // and pretending to be one.
+                text[i] == '!' && i + 1 < text.length && text[i + 1] == '[' -> {
+                    val altEnd = text.indexOf(']', i + 2)
+                    if (altEnd >= 0 && altEnd + 1 < text.length && text[altEnd + 1] == '(') {
+                        val urlEnd = text.indexOf(')', altEnd + 2)
+                        if (urlEnd >= 0) {
+                            val alt = text.substring(i + 2, altEnd)
+                            if (alt.isNotEmpty()) result += Inline.Italic(listOf(Inline.Text(alt)))
+                            i = urlEnd + 1
+                        } else {
+                            appendChar(result, text[i]); i++
+                        }
+                    } else {
+                        appendChar(result, text[i]); i++
+                    }
+                }
                 // Link [text](url)
                 text[i] == '[' -> {
                     val textEnd = text.indexOf(']', i + 1)

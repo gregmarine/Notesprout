@@ -120,6 +120,9 @@ Rendering: `StaticLayout` + `TextPaint` at **24sp** `Color.BLACK`. Entry point: 
 - Headers h1–h6 (`#` … `######`)
 - Bold (`**text**` / `__text__`), italic (`*text*` / `_text_`), strikethrough (`~~text~~`)
 - Links (`[text](url)`) — underlined, not clickable
+- Image references (`![alt](url)`) — the **alt text in italic**, the way a caption reads. No image is
+  drawn (still out of scope); the syntax is understood so that an image reference is not mangled into a
+  literal `!` followed by an underlined pseudo-link.
 - Unordered lists, 3-level nesting, bullet glyphs: `• ◦ ▪`
 - Ordered lists, nesting supported. Each run is counted from its **first** item, whose written number is
   honoured (CommonMark's `<ol start>`), so `3.` renders as 3 and the items after it count on regardless
@@ -132,7 +135,7 @@ Rendering: `StaticLayout` + `TextPaint` at **24sp** `Color.BLACK`. Entry point: 
 - Blockquotes (`>`) — left bar via `QuoteSpan`
 - Horizontal rules (`---` / `***` / `___`) via `HorizontalRuleSpan : ReplacementSpan`
 
-**Out of scope (do not add without discussion):** inline code, fenced code blocks, tables, embedded images, raw HTML.
+**Out of scope (do not add without discussion):** inline code, fenced code blocks, tables, **drawing** embedded images (the `![alt](url)` reference parses; nothing is fetched or rendered), raw HTML.
 
 **WYSIWYG regex safety:** inline patterns do NOT use `RegexOption.DOT_MATCHES_ALL` — use `[^*\n]` / `[^~\n]` exclusion classes to prevent cross-line matches.
 

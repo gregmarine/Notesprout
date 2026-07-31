@@ -138,6 +138,26 @@ object MarkdownFormatter {
         return Selection(s + 1, s + 5)
     }
 
+    /**
+     * Insert an image reference, the mirror of [insertLink]: the selection becomes the alt text with
+     * the `url` placeholder selected, or a whole `![description](url)` skeleton is inserted with
+     * `description` selected.
+     *
+     * There is no picker behind this — it writes the Markdown and leaves the address to the writer.
+     */
+    fun insertImage(buf: TextBuffer, selStart: Int, selEnd: Int): Selection {
+        val s = minOf(selStart, selEnd)
+        val t = maxOf(selStart, selEnd)
+        if (t > s) {
+            val alt = buf.substring(s, t)
+            buf.replace(s, t, "![$alt](url)")
+            val urlStart = s + alt.length + 4   // "![" + alt + "]("
+            return Selection(urlStart, urlStart + 3)
+        }
+        buf.insert(s, "![description](url)")
+        return Selection(s + 2, s + 13)
+    }
+
     /** Insert a horizontal rule on its own line, reusing the current line when it is blank. */
     fun insertRule(buf: TextBuffer, selStart: Int, selEnd: Int): Selection {
         val pos = maxOf(selStart, selEnd)

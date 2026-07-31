@@ -6,7 +6,10 @@
 **Palette (UI Chrome Only):**
 - `inkBlack` = `#000000`
 - `paperWhite` = `#FFFFFF`
-- `inkLight` = `#888888` — disabled/secondary text only
+- `inkLight` = `#888888` — text the user is **meant not to read**: a hint that disappears on the first
+  keystroke, a disabled control. Anything carrying information takes `inkBlack`, however secondary it
+  is. E-ink washes mid-greys out, and a caption the user has to squint at has failed at the one job it
+  had. Make it smaller to make it secondary; do not make it grey.
 - `borderGray` = `#CCCCCC` — subtle dividers only (**invisible on e-ink** — use inkBlack for any visible border)
 - No color in UI chrome — ever.
 
@@ -16,6 +19,26 @@
 - Animations: none or minimum — never decorative. `android:windowAnimationStyle="@null"` in `Theme.Notesprout` suppresses all system slide/fade transitions globally.
 - Borders: 1dp solid inkBlack; corner radius: 4dp
 - Typography: clear, high-contrast, black on white
+
+**Icons — Tabler outline, one house style:**
+- Every icon in the app is a [Tabler](https://tabler.io/icons) **outline** glyph (MIT), converted to a
+  vector drawable at `res/drawable/ic_<name>.xml`. Icons are the app's one visual vocabulary — mixing
+  sets is as jarring on e-ink as mixing fonts.
+- The template, identical in all of them: `24dp × 24dp`, `viewport 24×24`, and every path
+  `fillColor=@android:color/transparent`, `strokeColor=@color/inkBlack`, `strokeWidth=2`,
+  `strokeLineCap/Join=round`. Stroke weight is what makes a set look like a set — never rescale a glyph
+  to a different weight.
+- Head the file with a comment naming the source (`<!-- Tabler "list-check" icon (outline/list-check.svg) -->`),
+  which is both the attribution and the breadcrumb for re-fetching it.
+- **Look before you download** — there are ~100 already, and reuse keeps meanings stable: the same
+  chevrons serve page navigation in the notebook and in the document editor. To add one, fetch
+  `https://raw.githubusercontent.com/tabler/tabler-icons/main/icons/outline/<name>.svg` and map each
+  `<path d="…">` to `android:pathData`, dropping any `stroke="none"` bounding rect (it is not part of
+  the drawing).
+- **Tools get icons; named actions keep their words.** A mode switch or a commit action (Write /
+  Preview / Done, Save, Cancel) reads better as a word on e-ink, where an unfamiliar glyph costs a
+  long-press to decode. Give every icon button a long-press hint naming it, and use that same string as
+  the content description.
 
 **Source of Truth:**
 - Colors: `app/src/main/res/values/colors.xml`

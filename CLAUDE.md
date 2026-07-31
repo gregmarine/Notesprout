@@ -23,7 +23,7 @@ matching doc before working in that area:**
 | Toolbar: base, overflow, full customization layer | [`docs/toolbar.md`](docs/toolbar.md) |
 | Drawing engines, EPD rules, **pen-activity gate (palm vs. finger gestures)**, perf, committed-content RenderNode render model + neighbor prefetch cache + cover snapshots, templates, undo/redo | [`docs/drawing-engine.md`](docs/drawing-engine.md) |
 | Heading / Text (+ markdown) / Line objects | [`docs/content-objects.md`](docs/content-objects.md) |
-| **Documents** — the page's authored Markdown (`DocumentEditorActivity`): the page is the draft, the document is the result. `document` row (`.soil` v5, `srcUpdatedAt`), seeded **once** from the page's recognized text and never overwritten by recognition again; "bring in page text" (Replace / Append) is the only path back in. **Reflow** joins recognition's per-line breaks into paragraphs, keeping blank-line breaks. Lists continue on Enter and end on a second one; ordered runs renumber to match how they render (shared with `TextEditDialog`). **Page flips** in the editor; the notebook follows on return (never while it is stopped). Saved text-size preference; the soft keyboard shrinks the layout. The editor never opens the `.soil` — the notebook host reads and writes for it via `DocumentTransfer`. Export prefers the document over recognized text | [`docs/documents.md`](docs/documents.md) |
+| **Documents** — the page's authored Markdown (`DocumentEditorActivity`): the page is the draft, the document is the result. `document` row (`.soil` v5, `srcUpdatedAt`), seeded **once** from the page's recognized text and never overwritten by recognition again; "bring in page text" (Replace / Append) is the only path back in. **Reflow** joins recognition's per-line breaks into paragraphs, keeping blank-line breaks. Lists continue on Enter and end on a second one; ordered runs renumber to match how they render (shared with `TextEditDialog`). **Page flips** in the editor; the notebook follows on return (never while it is stopped). Opens where the caret was left (per page, device-local; top when unknown). Image references are a source-level placeholder (`![alt](url)`, no picker; Preview shows the alt text). Saved text-size preference; the soft keyboard shrinks the layout. The editor never opens the `.soil` — the notebook host reads and writes for it via `DocumentTransfer`. Export prefers the document over recognized text | [`docs/documents.md`](docs/documents.md) |
 | Link objects: data model, chrome, follow, back-stack, lasso/undo | [`docs/links.md`](docs/links.md) |
 | Scribble-erase, smart lasso, snap-to-guide, align & distribute | [`docs/lasso-and-gestures.md`](docs/lasso-and-gestures.md) |
 | MainActivity features (browse/search/sort/export/ML Kit) + recents + launch restore (surface stack: a cold launch reopens the whole chain of screens the user had open) + **library chrome zones & bottom-bar width buckets** (`layout/`, `-sw360dp`, `-sw480dp`) | [`docs/mainactivity-and-recents.md`](docs/mainactivity-and-recents.md) |
@@ -89,8 +89,13 @@ Full schema, Room setup, and WAL/sidecar rules: [`docs/data-architecture.md`](do
 ## Design System — E-Ink First (Never Violate These)
 
 **Palette (UI chrome only — no color, ever):** `inkBlack` `#000000` · `paperWhite` `#FFFFFF` ·
-`inkLight` `#888888` (disabled/secondary text) · `borderGray` `#CCCCCC` (**invisible on e-ink** — use
-inkBlack for any visible border/divider).
+`inkLight` `#888888` (text meant **not** to be read — hints, disabled controls; anything carrying
+information takes inkBlack and is made *smaller* to read as secondary) · `borderGray` `#CCCCCC`
+(**invisible on e-ink** — use inkBlack for any visible border/divider).
+
+- **Icons: Tabler outline only**, 24dp, `inkBlack` stroke 2, round caps — one visual vocabulary. Look
+  before you download (~100 exist). Tools get icons; modes and named actions keep their words. Details:
+  [`docs/design-system.md`](docs/design-system.md).
 
 - No shadows, elevation, gradients, blur. No Material ripple (`rippleColor=transparent`, `stateListAnimator=null`).
 - Animations none/minimal, never decorative (`android:windowAnimationStyle="@null"` in `Theme.Notesprout`).

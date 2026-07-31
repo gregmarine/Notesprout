@@ -1,6 +1,9 @@
 package com.notesprout.android.core
 
 import android.content.Context
+import kotlinx.serialization.builtins.MapSerializer
+import kotlinx.serialization.builtins.serializer
+import kotlinx.serialization.json.Json
 
 /**
  * Reading and writing comfort for the document editor, remembered across sessions.
@@ -12,6 +15,13 @@ object DocumentPreferences {
 
     private const val PREFS_NAME = "notesprout_document_prefs"
     private const val KEY_TEXT_SIZE = "text_size_sp"
+    private const val KEY_CARETS = "caret_offsets"
+
+    /**
+     * How many pages' caret positions to remember. Old entries fall off the front, so the store cannot
+     * grow without bound in a notebook of a thousand pages.
+     */
+    private const val CARET_LIMIT = 100
 
     /** Editing-surface text size in sp. The Preview surface renders [PREVIEW_BUMP] larger. */
     const val DEFAULT_TEXT_SIZE = 16f
@@ -43,4 +53,38 @@ object DocumentPreferences {
             .putFloat(KEY_TEXT_SIZE, sizeSp)
             .apply()
     }
+
+    // ── Where the writer left off ─────────────────────────────────────────────
+    // Kept here rather than in the `.soil` on purpose: where a caret sits is this device's view state,
+    // not part of the document, and it would otherwise need a column in a format written to be handed
+    // to other projects. The cost is that it does not travel with an exported notebook, which is the
+    // right trade for something the next keystroke overwrites anyway.
+
+    /** The caret offset last seen on [pageId]'s document, or 0 — the top — if we have never seen it. */
+    fun caret(context: Context, pageId: String): Int = carets(context)[pageId] ?: 0
+
+    /** Remember where the caret was on [pageId], evicting the oldest page once past [CARET_LIMIT]. */
+    fun saveCaret(context: Context, pageId: String, offset: Int) {
+        if (pageId.isEmpty()) return
+        val map = carets(context)
+        // Remove first so a re-saved page moves to the back: eviction is then least-recently-written.
+        map.remove(pageId)
+        map[pageId] = offset.coerceAtLeast(0)
+        while (map.size > CARET_LIMIT) map.remove(map.keys.first())
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .putString(KEY_CARETS, codec.encodeToString(MapSerializer(String.serializer(), Int.serializer()), map))
+            .apply()
+    }
+
+    private fun carets(context: Context): LinkedHashMap<String, Int> {
+        val raw = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .getString(KEY_CARETS, null) ?: return LinkedHashMap()
+        // A store this disposable must never be the reason a screen fails to open.
+        return runCatching {
+            LinkedHashMap(codec.decodeFromString(MapSerializer(String.serializer(), Int.serializer()), raw))
+        }.getOrElse { LinkedHashMap() }
+    }
+
+    private val codec = Json { ignoreUnknownKeys = true }
 }

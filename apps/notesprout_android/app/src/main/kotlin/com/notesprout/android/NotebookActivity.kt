@@ -42,6 +42,7 @@ import com.notesprout.android.data.NotebookMetaStore
 import com.notesprout.android.data.NotebookCompactor
 import androidx.room.withTransaction
 import com.notesprout.android.core.BitmapDecode
+import com.notesprout.android.core.DocumentPreferences
 import com.notesprout.android.core.Slog
 import com.notesprout.android.core.markdown.DocumentDraft
 import com.notesprout.android.crypto.EncryptionInfo
@@ -897,6 +898,7 @@ class NotebookActivity : AppCompatActivity() {
         ActivityResultContracts.StartActivityForResult()
     ) { _ ->
         val text = DocumentTransfer.live
+        val caret = DocumentTransfer.liveCaret
         val pageId = documentPageId
         val endedOn = documentPageIndex
         DocumentTransfer.clearSession()
@@ -906,6 +908,7 @@ class NotebookActivity : AppCompatActivity() {
         val db = soilDatabase
         if (text != null && pageId.isNotEmpty() && db != null) {
             val src = documentSrcUpdatedAt
+            DocumentPreferences.saveCaret(this, pageId, caret)
             lifecycleScope.launch(Dispatchers.IO) {
                 runCatching { DocumentRepository.save(db.notebookDao(), pageId, text, src) }
                     .onFailure { Log.e(TAG, "Failed to save document for page $pageId", it) }
@@ -4875,7 +4878,7 @@ class NotebookActivity : AppCompatActivity() {
             DocumentTransfer.input = session
             DocumentTransfer.live = null
             documentLauncher.launch(
-                DocumentEditorActivity.intent(this@NotebookActivity, session.pageLabel)
+                DocumentEditorActivity.intent(this@NotebookActivity, notebookDisplayName)
             )
         }
     }
@@ -4908,9 +4911,10 @@ class NotebookActivity : AppCompatActivity() {
             text = draft?.text.orEmpty(),
             srcUpdatedAt = draft?.srcUpdatedAt,
             stale = DocumentDraft.isStale(draft?.srcUpdatedAt, layerMax),
-            pageLabel = "Page ${index + 1}/$total",
+            pageLabel = "${index + 1} / $total",
             hasPrev = index > 0,
             hasNext = index < pages.size - 1,
+            caret = DocumentPreferences.caret(this, pageId),
         )
     }
 
@@ -4970,10 +4974,11 @@ class NotebookActivity : AppCompatActivity() {
      */
     private val documentHost = object : DocumentTransfer.Host {
 
-        override fun saveDocument(text: String) {
+        override fun saveDocument(text: String, caret: Int) {
             val db = soilDatabase ?: return
             val pageId = documentPageId.takeIf { it.isNotEmpty() } ?: return
             val src = documentSrcUpdatedAt
+            DocumentPreferences.saveCaret(this@NotebookActivity, pageId, caret)
             lifecycleScope.launch(Dispatchers.IO) {
                 runCatching { DocumentRepository.save(db.notebookDao(), pageId, text, src) }
                     .onFailure { Log.e(TAG, "Failed to save document for page $pageId", it) }
@@ -5022,6 +5027,7 @@ class NotebookActivity : AppCompatActivity() {
     private suspend fun flushPendingDocument(db: SoilDatabase) {
         val text = DocumentTransfer.live ?: return
         val pageId = documentPageId.takeIf { it.isNotEmpty() } ?: return
+        DocumentPreferences.saveCaret(this, pageId, DocumentTransfer.liveCaret)
         runCatching { DocumentRepository.save(db.notebookDao(), pageId, text, documentSrcUpdatedAt) }
             .onFailure { Log.e(TAG, "Failed to flush document for page $pageId", it) }
     }

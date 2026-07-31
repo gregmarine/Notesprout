@@ -191,6 +191,26 @@ class MarkdownFormatterTest {
         assertEquals(buf.sb.length, sel.start)
     }
 
+    // ── Images ────────────────────────────────────────────────────────────────
+
+    @Test
+    fun `an image with no selection lands with its description selected`() {
+        val buf = StringBuffer("")
+        val sel = MarkdownFormatter.insertImage(buf, 0, 0)
+
+        assertEquals("![description](url)", buf.sb.toString())
+        assertEquals("description", buf.sb.substring(sel.start, sel.end))
+    }
+
+    @Test
+    fun `a selection becomes the alt text and the url is left selected`() {
+        val buf = StringBuffer("the barn")
+        val sel = MarkdownFormatter.insertImage(buf, 0, 8)
+
+        assertEquals("![the barn](url)", buf.sb.toString())
+        assertEquals("url", buf.sb.substring(sel.start, sel.end))
+    }
+
     // ── Enter inside a list ───────────────────────────────────────────────────
 
     private fun enter(before: String, after: String = "") =

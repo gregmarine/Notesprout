@@ -13,9 +13,37 @@ matching Ctrl shortcuts (`MarkdownFormatter`), opened from the notebook toolbar'
 Page flips (`‹ ›`) and text size (`A`) sit with the page label in the header; **Reflow** and **Bring in**
 sit in the source strip below it.
 
-Chrome layout, top to bottom: header (title · `‹ › A` · Write / Preview / Done) — rule — source strip —
-**rule** — format bar — rule — the text. The strip, its rule and the format bar are one view
-(`writingChrome`) shown and hidden together, so Preview cannot leave a stray divider behind.
+Chrome layout, top to bottom: header (notebook name · `‹ 4 / 12 ›` · text-size · Write / Preview /
+Done) — rule — source strip — **rule** — format bar — rule — the text.
+
+The title names the **notebook**: the screen is evidently a document, so the word would only take room
+from the one piece of context the editor cannot otherwise give you. The page count sits *between* its
+two arrows — the number belongs to the control that changes it, and the three read as one unit. The strip, its rule and the
+format bar are one view (`writingChrome`) shown and hidden together, so Preview cannot leave a stray
+divider behind.
+
+**Tools are icons; named actions keep their words.** Every tool — the format bar, the page flips, text
+size — is a 24dp Tabler outline glyph in `inkBlack` at stroke width 2, the same set and weight as the
+notebook's own toolbar, which is what makes the two screens read as one app. Write / Preview / Done and
+the strip's Reflow / Bring in stay as words: they are modes and named actions, not tools, and the app's
+other view switches (`PageTextViewerActivity`, `TextEditDialog`) are worded the same way. Every icon
+button is built by one factory (`iconButton`) so hit area, background and the long-press that names the
+tool cannot drift apart; the long-press string doubles as the content description.
+
+**The editor opens where you left off.** `DocumentPreferences` remembers the caret per page (a bounded
+LRU of 100, oldest evicted) and the `Session` carries it in. Deliberately **device-local rather than in
+the `.soil`**: where a caret sits is this device's view state, not part of the document, and putting it
+in the file would mean a column in a format written to be handed to other projects. The cost is that it
+does not travel with an exported notebook — the right trade for something the next keystroke overwrites.
+Failing that, the caret starts at the **top**, not the end: a document is usually read before it is added
+to, and landing at the bottom hides everything that was written. The caret is handed over on every save
+even when the words are unchanged, or browsing a page without typing would lose the place.
+
+**Images** are a source-level placeholder — `![description](url)`, the mirror of the link button, with
+no picker behind it. `MarkdownParser` understands the syntax so Preview shows the alt text in italic, the
+way a caption reads; without that the `!` would be left as literal text and the rest parsed as a link, so
+an image reference came out as "!alt", underlined and pretending to be one. The renderer still draws no
+images (out of scope — see [`content-objects.md`](content-objects.md)).
 
 **Text size** is a saved global preference (`DocumentPreferences`, five steps from Small to Largest),
 not a per-document one — it is about the user's eyes and their device. Preview renders

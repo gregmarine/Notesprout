@@ -8,10 +8,6 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.text.InputType
-import android.text.SpannableString
-import android.text.Spanned
-import android.text.style.StrikethroughSpan
-import android.text.style.StyleSpan
 import android.util.TypedValue
 import android.view.Gravity
 import android.view.InputDevice
@@ -28,6 +24,7 @@ import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.AppCompatButton
 import androidx.appcompat.widget.AppCompatEditText
+import androidx.appcompat.widget.AppCompatImageButton
 import androidx.appcompat.widget.AppCompatTextView
 import androidx.core.content.ContextCompat
 import com.notesprout.android.core.DocumentPreferences
@@ -68,18 +65,19 @@ class DocumentEditorActivity : AppCompatActivity() {
     companion object {
         private const val TAG = "DocEditor"
 
-        /** Which page this document belongs to, for the header — e.g. "Page 4". */
-        const val EXTRA_PAGE_LABEL = "page_label"
+        /** The notebook this document belongs to — the header's title. */
+        const val EXTRA_NOTEBOOK_NAME = "notebook_name"
 
         private const val STATE_TEXT = "doc_text"
         private const val STATE_PREVIEWING = "doc_previewing"
+        private const val STATE_CARET = "doc_caret"
 
         /** Pen-idle window before the text is written, matching RTR's own debounce. */
         private const val AUTOSAVE_DELAY_MS = 2000L
 
-        fun intent(context: Context, pageLabel: String): Intent =
+        fun intent(context: Context, notebookName: String): Intent =
             Intent(context, DocumentEditorActivity::class.java)
-                .putExtra(EXTRA_PAGE_LABEL, pageLabel)
+                .putExtra(EXTRA_NOTEBOOK_NAME, notebookName)
     }
 
     private lateinit var editor: MarkdownEditText
@@ -91,6 +89,7 @@ class DocumentEditorActivity : AppCompatActivity() {
     private lateinit var sourceStrip: View
     private lateinit var sourceText: AppCompatTextView
     private lateinit var titleText: AppCompatTextView
+    private lateinit var pageText: AppCompatTextView
 
     /** Source strip + rule + format bar: the writing chrome, shown and hidden as one piece. */
     private lateinit var writingChrome: View
@@ -100,7 +99,10 @@ class DocumentEditorActivity : AppCompatActivity() {
 
     private var previewing = false
 
-    /** Which page's document this is, for the header only — the page id stays with the host. */
+    /** The notebook's name — the header title. */
+    private var notebookName: String = ""
+
+    /** This page's place in the notebook ("4 / 12"), shown between the flip arrows. */
     private var pageLabel: String = ""
 
     /** Whether the notebook has a page on either side of this one. */
@@ -112,9 +114,6 @@ class DocumentEditorActivity : AppCompatActivity() {
 
     /** True once we know this text came from the page — at open, or after a "bring in". */
     private var drafted = false
-
-    /** Last text handed to the host, so an idle tick with nothing new writes nothing. */
-    private var savedText: String = ""
 
     /**
      * Set while the host is reading a page for us — a "bring in" or a page flip. Blocks a second
@@ -138,7 +137,7 @@ class DocumentEditorActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        pageLabel = intent.getStringExtra(EXTRA_PAGE_LABEL).orEmpty()
+        notebookName = intent.getStringExtra(EXTRA_NOTEBOOK_NAME).orEmpty()
         // Read before the views are built — both surfaces are sized from it.
         textSizeSp = DocumentPreferences.textSize(this)
 
@@ -155,17 +154,18 @@ class DocumentEditorActivity : AppCompatActivity() {
         val session = DocumentTransfer.input
         val opening = restored ?: session?.text.orEmpty()
         editor.setText(opening)
-        editor.setSelection(opening.length)
-        // Whatever we open with counts as unsaved — a seed has never been written, and neither has a
-        // buffer recovered from process death. `savedText` only ever means "this exact text has been
-        // handed to the host", and the repository drops a write that would change nothing anyway.
-        savedText = ""
+        // Open where the writer left off. Falling back to the **top** rather than the end: a document
+        // is usually read before it is added to, and landing at the bottom of a page of text hides
+        // everything that was written.
+        val caret = savedInstanceState?.getInt(STATE_CARET) ?: session?.caret ?: 0
+        editor.setSelection(caret.coerceIn(0, opening.length))
         pageChanged = session?.stale == true
         drafted = session?.srcUpdatedAt != null
         hasPrev = session?.hasPrev == true
         hasNext = session?.hasNext == true
         session?.pageLabel?.takeIf { it.isNotBlank() }?.let { pageLabel = it }
         updateTitle()
+        updatePageLabel()
         updateSourceStrip()
 
         // A shorter editing surface can leave the caret below the fold, which is precisely what the
@@ -202,6 +202,7 @@ class DocumentEditorActivity : AppCompatActivity() {
         super.onSaveInstanceState(outState)
         outState.putString(STATE_TEXT, currentText())
         outState.putBoolean(STATE_PREVIEWING, previewing)
+        outState.putInt(STATE_CARET, editor.selectionEnd)
     }
 
     override fun onResume() {
@@ -257,8 +258,10 @@ class DocumentEditorActivity : AppCompatActivity() {
     private fun persist() {
         autosave.removeCallbacks(autosaveTick)
         val text = currentText()
+        val caret = editor.selectionEnd
         DocumentTransfer.live = text
-        if (text == savedText) return
+        DocumentTransfer.liveCaret = caret
+
         val host = DocumentTransfer.host
         if (host == null) {
             // The notebook was destroyed behind us (process death). The text stays in `live`, which
@@ -266,9 +269,10 @@ class DocumentEditorActivity : AppCompatActivity() {
             Slog.d(TAG) { "No host — text held for the host's return (${text.length} chars)" }
             return
         }
-        host.saveDocument(text)
-        savedText = text
-        Slog.d(TAG) { "Saved ${text.length} chars" }
+        // Handed over unconditionally, even when the words are unchanged: the caret may still have
+        // moved, and the repository drops a write that would change nothing anyway.
+        host.saveDocument(text, caret)
+        Slog.d(TAG) { "Saved ${text.length} chars, caret $caret" }
     }
 
     // ── UI (built programmatically to honor the e-ink design system) ─────────────
@@ -370,14 +374,25 @@ class DocumentEditorActivity : AppCompatActivity() {
         }
         header.addView(titleText)
 
-        // Page flips live with the page label rather than in the format bar: they move the document,
-        // not the text. The notebook follows along when this screen closes.
-        header.addView(headerButton("‹", "Previous page  ·  Ctrl+PgUp") { flipPage(-1) })
-        header.addView(headerButton("›", "Next page  ·  Ctrl+PgDn") { flipPage(1) })
+        // Page flips live in the header rather than the format bar: they move the document, not the
+        // text. The notebook follows along when this screen closes. Same chevrons the notebook uses for
+        // its own page navigation, with the count between them — the number belongs to the control that
+        // changes it, and reads as one unit: ‹ 4 / 12 ›
+        header.addView(headerIcon(R.drawable.ic_page_prev, "Previous page  ·  Ctrl+PgUp") { flipPage(-1) })
+        pageText = AppCompatTextView(this).apply {
+            setTextColor(ink)
+            textSize = 13f
+            isSingleLine = true
+            gravity = Gravity.CENTER
+            minWidth = dp(44)
+            setPadding(dp(2), 0, dp(2), 0)
+        }
+        header.addView(pageText)
+        header.addView(headerIcon(R.drawable.ic_page_next, "Next page  ·  Ctrl+PgDn") { flipPage(1) })
 
         // Text size lives in the header rather than the writing chrome so it is still reachable in
         // Preview — reading size matters at least as much as writing size.
-        header.addView(headerButton("A", "Text size") { promptTextSize() })
+        header.addView(headerIcon(R.drawable.ic_text_size, "Text size") { promptTextSize() })
 
         btnWrite = modeButton("Write") { setPreviewing(false) }
         btnPreview = modeButton("Preview") { setPreviewing(true) }
@@ -415,7 +430,10 @@ class DocumentEditorActivity : AppCompatActivity() {
         }
 
         sourceText = AppCompatTextView(this).apply {
-            setTextColor(light)
+            // Full ink, not the grey a caption would take elsewhere: mid-greys wash out on e-ink (see
+            // docs/design-system.md) and this line is the only place the document says how it stands
+            // to its page. Its smaller size is what keeps it secondary.
+            setTextColor(ink)
             textSize = 12f
             isSingleLine = true
             ellipsize = android.text.TextUtils.TruncateAt.END
@@ -646,15 +664,15 @@ class DocumentEditorActivity : AppCompatActivity() {
         // the undo stack: undoing "the flip" would put the page we left behind into the page we
         // arrived at, and the next autosave would store it there.
         editor.setText(session.text)
-        editor.setSelection(0)
+        // Where this page was left off, same as opening it directly.
+        editor.setSelection(session.caret.coerceIn(0, session.text.length))
         editor.scrollTo(0, 0)
-        savedText = ""
         pageChanged = session.stale
         drafted = session.srcUpdatedAt != null
         hasPrev = session.hasPrev
         hasNext = session.hasNext
         pageLabel = session.pageLabel
-        updateTitle()
+        updatePageLabel()
         updateSourceStrip()
         // Store this page's seed right away, so the gap where the text exists only in memory is as
         // short on a flip as it is on open.
@@ -724,17 +742,17 @@ class DocumentEditorActivity : AppCompatActivity() {
     }
 
     /**
-     * On a narrow screen the header's five controls leave the title almost no room, so it drops the
-     * word "Document" and keeps the part that says where you are. Which page you are on matters more
-     * than being told, on the document screen, that this is a document.
+     * The title names the **notebook** — the screen itself is evidently a document, so the word would
+     * only take room from the one piece of context the editor cannot otherwise give you: which
+     * notebook you are writing in. Falls back to "Document" only when the name is unknown.
      */
     private fun updateTitle() {
-        val narrow = resources.configuration.smallestScreenWidthDp < 400
-        titleText.text = when {
-            pageLabel.isBlank() -> "Document"
-            narrow -> pageLabel
-            else -> "Document · $pageLabel"
-        }
+        titleText.text = notebookName.ifBlank { "Document" }
+    }
+
+    /** The page's place in the notebook, sitting between the two arrows that change it. */
+    private fun updatePageLabel() {
+        pageText.text = pageLabel
     }
 
     /**
@@ -744,25 +762,9 @@ class DocumentEditorActivity : AppCompatActivity() {
      * silent on e-ink (see docs/design-system.md), so the guard lives in the handler and says what
      * happened instead.
      */
-    private fun headerButton(glyph: String, hint: String, onClick: () -> Unit): AppCompatButton =
-        AppCompatButton(this).apply {
-            text = glyph
-            isAllCaps = false
-            textSize = 18f
-            setTextColor(ContextCompat.getColor(this@DocumentEditorActivity, R.color.inkBlack))
-            setBackgroundResource(R.drawable.bg_toolbar_button)
-            stateListAnimator = null
-            minWidth = 0
-            minHeight = 0
-            setPadding(dp(12), dp(2), dp(12), dp(4))
-            // Never take focus: the editor must keep the caret and selection.
-            isFocusable = false
-            isFocusableInTouchMode = false
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT
-            ).apply { marginStart = dp(2) }
-            setOnClickListener { onClick() }
-            setOnLongClickListener { Toast.makeText(context, hint, Toast.LENGTH_SHORT).show(); true }
+    private fun headerIcon(iconRes: Int, hint: String, onClick: () -> Unit): AppCompatImageButton =
+        iconButton(iconRes, hint, size = dp(36), inset = dp(6), onClick).apply {
+            (layoutParams as LinearLayout.LayoutParams).marginStart = dp(2)
         }
 
     /** Segmented mode toggle — the selected half shows its border, the way the app's other
@@ -801,22 +803,23 @@ class DocumentEditorActivity : AppCompatActivity() {
             }
         })
 
-        bar.addView(formatButton("H1", "Heading 1  ·  Ctrl+1") { applyBlock(MarkdownFormatter.Block.HEADING, 1) })
-        bar.addView(formatButton("H2", "Heading 2  ·  Ctrl+2") { applyBlock(MarkdownFormatter.Block.HEADING, 2) })
-        bar.addView(formatButton("H3", "Heading 3  ·  Ctrl+3") { applyBlock(MarkdownFormatter.Block.HEADING, 3) })
+        bar.addView(formatIcon(R.drawable.ic_h_1, "Heading 1  ·  Ctrl+1") { applyBlock(MarkdownFormatter.Block.HEADING, 1) })
+        bar.addView(formatIcon(R.drawable.ic_h_2, "Heading 2  ·  Ctrl+2") { applyBlock(MarkdownFormatter.Block.HEADING, 2) })
+        bar.addView(formatIcon(R.drawable.ic_h_3, "Heading 3  ·  Ctrl+3") { applyBlock(MarkdownFormatter.Block.HEADING, 3) })
         divider()
-        bar.addView(formatButton(styled("B", StyleSpan(Typeface.BOLD)), "Bold  ·  Ctrl+B") { wrapInline("**") })
-        bar.addView(formatButton(styled("I", StyleSpan(Typeface.ITALIC)), "Italic  ·  Ctrl+I") { wrapInline("*") })
-        bar.addView(formatButton(styled("S", StrikethroughSpan()), "Strikethrough  ·  Ctrl+Shift+X") { wrapInline("~~") })
-        bar.addView(formatButton("Code", "Inline code  ·  Ctrl+E") { wrapInline("`") })
+        bar.addView(formatIcon(R.drawable.ic_bold, "Bold  ·  Ctrl+B") { wrapInline("**") })
+        bar.addView(formatIcon(R.drawable.ic_italic, "Italic  ·  Ctrl+I") { wrapInline("*") })
+        bar.addView(formatIcon(R.drawable.ic_strikethrough, "Strikethrough  ·  Ctrl+Shift+X") { wrapInline("~~") })
+        bar.addView(formatIcon(R.drawable.ic_code, "Inline code  ·  Ctrl+E") { wrapInline("`") })
         divider()
-        bar.addView(formatButton("Quote", "Blockquote  ·  Ctrl+Shift+Q") { applyBlock(MarkdownFormatter.Block.QUOTE) })
-        bar.addView(formatButton("•", "Bullet list  ·  Ctrl+Shift+8") { applyBlock(MarkdownFormatter.Block.BULLET) })
-        bar.addView(formatButton("1.", "Numbered list  ·  Ctrl+Shift+7") { applyBlock(MarkdownFormatter.Block.ORDERED) })
-        bar.addView(formatButton("☐", "Task list  ·  Ctrl+Shift+9") { applyBlock(MarkdownFormatter.Block.TASK) })
+        bar.addView(formatIcon(R.drawable.ic_blockquote, "Blockquote  ·  Ctrl+Shift+Q") { applyBlock(MarkdownFormatter.Block.QUOTE) })
+        bar.addView(formatIcon(R.drawable.ic_list, "Bullet list  ·  Ctrl+Shift+8") { applyBlock(MarkdownFormatter.Block.BULLET) })
+        bar.addView(formatIcon(R.drawable.ic_list_numbers, "Numbered list  ·  Ctrl+Shift+7") { applyBlock(MarkdownFormatter.Block.ORDERED) })
+        bar.addView(formatIcon(R.drawable.ic_list_check, "Task list  ·  Ctrl+Shift+9") { applyBlock(MarkdownFormatter.Block.TASK) })
         divider()
-        bar.addView(formatButton("Link", "Link  ·  Ctrl+K") { runFormat(MarkdownFormatter::insertLink) })
-        bar.addView(formatButton("—", "Horizontal rule  ·  Ctrl+Shift+−") { runFormat(MarkdownFormatter::insertRule) })
+        bar.addView(formatIcon(R.drawable.ic_link, "Link  ·  Ctrl+K") { runFormat(MarkdownFormatter::insertLink) })
+        bar.addView(formatIcon(R.drawable.ic_photo, "Image  ·  Ctrl+Shift+K") { runFormat(MarkdownFormatter::insertImage) })
+        bar.addView(formatIcon(R.drawable.ic_separator_horizontal, "Horizontal rule  ·  Ctrl+Shift+−") { runFormat(MarkdownFormatter::insertRule) })
 
         // The bar always scrolls rather than wrapping — a format palette that reflows under the
         // hand would move the buttons out from under muscle memory.
@@ -829,33 +832,41 @@ class DocumentEditorActivity : AppCompatActivity() {
         }
     }
 
-    private fun formatButton(label: CharSequence, hint: String, onClick: () -> Unit): AppCompatButton =
-        AppCompatButton(this).apply {
-            text = label
-            isAllCaps = false
-            textSize = 15f
-            setTextColor(ContextCompat.getColor(this@DocumentEditorActivity, R.color.inkBlack))
+    /** A format-bar tool: a 44dp target around a 24dp Tabler glyph. */
+    private fun formatIcon(iconRes: Int, hint: String, onClick: () -> Unit): AppCompatImageButton =
+        iconButton(iconRes, hint, size = dp(44), inset = dp(10), onClick)
+
+    /**
+     * The one icon button this screen builds, so every bar shares a hit area, a background and a
+     * long-press that names the tool.
+     *
+     * Tabler outline glyphs at 24dp, drawn in `inkBlack` at stroke width 2 — the same set and the same
+     * weight as the notebook's own toolbar, which is what makes the two read as one app rather than two.
+     * [inset] is the padding that leaves the glyph its 24dp inside a [size] target.
+     */
+    private fun iconButton(
+        iconRes: Int,
+        hint: String,
+        size: Int,
+        inset: Int,
+        onClick: () -> Unit,
+    ): AppCompatImageButton =
+        AppCompatImageButton(this).apply {
+            setImageResource(iconRes)
+            scaleType = android.widget.ImageView.ScaleType.FIT_CENTER
             setBackgroundResource(R.drawable.bg_toolbar_button)
             stateListAnimator = null
-            minWidth = dp(44)
-            minHeight = dp(44)
-            minimumWidth = dp(44)
-            minimumHeight = dp(44)
-            setPadding(dp(10), 0, dp(10), 0)
+            setPadding(inset, inset, inset, inset)
+            // Long-press names the tool and teaches its shortcut — an icon bar carries no labels — and
+            // the same string is what a screen reader announces.
+            contentDescription = hint
             // Never take focus: the editor must keep the caret and selection the button acts on.
             isFocusable = false
             isFocusableInTouchMode = false
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, dp(44)
-            ).apply { marginEnd = dp(2) }
+            layoutParams = LinearLayout.LayoutParams(size, size).apply { marginEnd = dp(2) }
             setOnClickListener { onClick() }
-            // Long-press names the button and teaches its shortcut — the bar carries no labels.
             setOnLongClickListener { Toast.makeText(context, hint, Toast.LENGTH_SHORT).show(); true }
         }
-
-    /** A one-character button label wearing the style it applies (bold `B`, italic `I`, struck `S`). */
-    private fun styled(label: String, span: Any): CharSequence =
-        SpannableString(label).apply { setSpan(span, 0, length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE) }
 
     // ── Write / Preview ───────────────────────────────────────────────────────
 
@@ -965,7 +976,9 @@ class DocumentEditorActivity : AppCompatActivity() {
             KeyEvent.KEYCODE_I -> if (!shift) { wrapInline("*"); return true }
             KeyEvent.KEYCODE_X -> if (shift) { wrapInline("~~"); return true }
             KeyEvent.KEYCODE_E -> if (!shift) { wrapInline("`"); return true }
-            KeyEvent.KEYCODE_K -> if (!shift) { runFormat(MarkdownFormatter::insertLink); return true }
+            KeyEvent.KEYCODE_K ->
+                if (shift) { runFormat(MarkdownFormatter::insertImage); return true }
+                else { runFormat(MarkdownFormatter::insertLink); return true }
             KeyEvent.KEYCODE_P -> if (!shift) { setPreviewing(true); return true }
             KeyEvent.KEYCODE_Q -> if (shift) { applyBlock(MarkdownFormatter.Block.QUOTE); return true }
             KeyEvent.KEYCODE_MINUS -> if (shift) { runFormat(MarkdownFormatter::insertRule); return true }
