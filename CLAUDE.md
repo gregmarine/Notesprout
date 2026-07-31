@@ -94,8 +94,10 @@ information takes inkBlack and is made *smaller* to read as secondary) · `borde
 (**invisible on e-ink** — use inkBlack for any visible border/divider).
 
 - **Icons: Tabler outline only**, 24dp, `inkBlack` stroke 2, round caps — one visual vocabulary. Look
-  before you download (~100 exist). Tools get icons; modes and named actions keep their words. Details:
-  [`docs/design-system.md`](docs/design-system.md).
+  before you download (~100 exist). Every icon button needs a long-press hint naming it (also its
+  content description). Words read better than glyphs on e-ink, but **measure the row against the
+  narrowest device first — P2P is `sw439dp`**; a control that falls off the edge is worse than one that
+  must be learned. Details: [`docs/design-system.md`](docs/design-system.md).
 
 - No shadows, elevation, gradients, blur. No Material ripple (`rippleColor=transparent`, `stateListAnimator=null`).
 - Animations none/minimal, never decorative (`android:windowAnimationStyle="@null"` in `Theme.Notesprout`).

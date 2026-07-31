@@ -35,13 +35,23 @@ written (the notebook's floats because a canvas must not be pushed); a tap outsi
 **not consumed**, since that touch is the writer choosing where to type; and the dots button is the one
 control that does not auto-dismiss, or it would close and immediately re-open itself.
 
-**Tools are icons; named actions keep their words.** Every tool — the format bar, the page flips, text
-size — is a 24dp Tabler outline glyph in `inkBlack` at stroke width 2, the same set and weight as the
-notebook's own toolbar, which is what makes the two screens read as one app. Write / Preview / Done and
-the strip's Reflow / Bring in stay as words: they are modes and named actions, not tools, and the app's
-other view switches (`PageTextViewerActivity`, `TextEditDialog`) are worded the same way. Every icon
-button is built by one factory (`iconButton`) so hit area, background and the long-press that names the
-tool cannot drift apart; the long-press string doubles as the content description.
+**The header is all icons; the strip keeps its words.** Every header control — page flips, text size,
+and now Write (`pencil`) / Preview (`eye`) / Done (`check`) — is a 24dp Tabler outline glyph in
+`inkBlack` at stroke width 2, the same set and weight as the notebook's own toolbar, which is what makes
+the two screens read as one app.
+
+Write / Preview / Done began as words, because a mode switch and a commit read better as words on e-ink.
+They lost that argument on **P2P (`sw439dp`)**, where *Done* fell off the edge — a button you cannot
+reach is worse than one you have to learn. A **check** rather than an X for Done: everything is already
+saved, so it finishes rather than discards, and an X would promise a way out that does not exist. Long
+pressing Write is still the soft-keyboard override rather than a hint, which is acceptable because that
+override announces itself with a toast of its own.
+
+The strip's Reflow / Bring in stay as words — that row has the space, and neither has an obvious glyph.
+
+Every icon button is built by one factory (`iconButton`) so hit area, background and the long-press that
+names the control cannot drift apart; the long-press string doubles as the content description, which is
+what makes an icon-only row learnable.
 
 **The editor opens where you left off.** `DocumentPreferences` remembers the caret per page (a bounded
 LRU of 100, oldest evicted) and the `Session` carries it in. Deliberately **device-local rather than in

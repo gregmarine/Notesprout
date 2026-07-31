@@ -35,10 +35,15 @@
   `https://raw.githubusercontent.com/tabler/tabler-icons/main/icons/outline/<name>.svg` and map each
   `<path d="…">` to `android:pathData`, dropping any `stroke="none"` bounding rect (it is not part of
   the drawing).
-- **Tools get icons; named actions keep their words.** A mode switch or a commit action (Write /
-  Preview / Done, Save, Cancel) reads better as a word on e-ink, where an unfamiliar glyph costs a
-  long-press to decode. Give every icon button a long-press hint naming it, and use that same string as
-  the content description.
+- **Words where they fit; icons where they must.** A mode switch or a commit action reads better as a
+  word on e-ink, where an unfamiliar glyph costs a long-press to decode — but only if the row still
+  fits. **Measure a chrome row against the narrowest supported device before choosing words**: P2P is
+  `sw439dp` (G6 is 571dp, and the 10" devices are far wider, so a row that looks roomy in development
+  can drop its last control on a phone-shaped screen). The document editor's header started as
+  `Write | Preview | Done` and lost *Done* off the edge there; it is now all icons. A button you cannot
+  reach is worse than one you have to learn.
+- Give every icon button a **long-press hint naming it**, and use that same string as the content
+  description. This is what makes an icon-only row learnable, so it is not optional.
 
 **Source of Truth:**
 - Colors: `app/src/main/res/values/colors.xml`

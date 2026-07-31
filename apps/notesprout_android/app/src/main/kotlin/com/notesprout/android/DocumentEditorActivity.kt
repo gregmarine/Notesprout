@@ -84,8 +84,8 @@ class DocumentEditorActivity : AppCompatActivity() {
     private lateinit var formatBar: LinearLayout
     private lateinit var previewScroll: ScrollView
     private lateinit var previewText: AppCompatTextView
-    private lateinit var btnWrite: AppCompatButton
-    private lateinit var btnPreview: AppCompatButton
+    private lateinit var btnWrite: AppCompatImageButton
+    private lateinit var btnPreview: AppCompatImageButton
     private lateinit var sourceStrip: View
     private lateinit var sourceText: AppCompatTextView
     private lateinit var titleText: AppCompatTextView
@@ -421,23 +421,25 @@ class DocumentEditorActivity : AppCompatActivity() {
         // Preview — reading size matters at least as much as writing size.
         header.addView(headerIcon(R.drawable.ic_text_size, "Text size") { promptTextSize() })
 
-        btnWrite = modeButton("Write") { setPreviewing(false) }
-        btnPreview = modeButton("Preview") { setPreviewing(true) }
-        // Escape hatch: force the soft keyboard on or off when the hardware detection is wrong.
+        // Write / Preview / Done are icons too, which is not where this started: they are modes and a
+        // commit, and words read better for those. But three words plus five controls do not fit a
+        // 439dp screen (P2P) — Done fell off the edge — and a button you cannot reach is worse than one
+        // you have to learn. Each carries a long-press hint naming it, and the pencil/eye pair reads as
+        // the toggle it is.
+        btnWrite = headerIcon(R.drawable.ic_pen, "Write") { setPreviewing(false) }
+        btnPreview = headerIcon(R.drawable.ic_eye, "Preview") { setPreviewing(true) }
+        // Escape hatch: force the soft keyboard on or off when the hardware detection is wrong. This
+        // replaces Write's hint toast — the override announces itself with a toast of its own.
         btnWrite.setOnLongClickListener { toggleSoftKeyboardOverride(); true }
         header.addView(btnWrite)
         header.addView(btnPreview)
 
-        header.addView(AppCompatButton(this).apply {
-            text = "Done"
-            isAllCaps = false
-            setTextColor(ink)
+        // A check, not an X: everything is already saved, so this finishes rather than discards, and an
+        // X would promise a way out that does not exist. Keeps the bordered background that set the
+        // commit action apart when it was a word.
+        header.addView(headerIcon(R.drawable.ic_check, "Done") { persist(); hideIme(); finish() }.apply {
             setBackgroundResource(R.drawable.shape_bordered)
-            stateListAnimator = null
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT
-            ).apply { marginStart = dp(8) }
-            setOnClickListener { persist(); hideIme(); finish() }
+            (layoutParams as LinearLayout.LayoutParams).marginStart = dp(8)
         })
 
         updateModeButtons()
@@ -792,28 +794,6 @@ class DocumentEditorActivity : AppCompatActivity() {
     private fun headerIcon(iconRes: Int, hint: String, onClick: () -> Unit): AppCompatImageButton =
         iconButton(iconRes, hint, size = dp(36), inset = dp(6), onClick = onClick).apply {
             (layoutParams as LinearLayout.LayoutParams).marginStart = dp(2)
-        }
-
-    /** Segmented mode toggle — the selected half shows its border, the way the app's other
-     *  two-way view switches read on e-ink (no tint, no fill). */
-    private fun modeButton(label: String, onClick: () -> Unit): AppCompatButton =
-        AppCompatButton(this).apply {
-            text = label
-            isAllCaps = false
-            textSize = 13f
-            setTextColor(ContextCompat.getColor(this@DocumentEditorActivity, R.color.inkBlack))
-            setBackgroundResource(R.drawable.bg_toolbar_button)
-            stateListAnimator = null
-            minWidth = 0
-            minHeight = 0
-            setPadding(dp(12), dp(6), dp(12), dp(6))
-            // Never take focus: the editor must keep the caret and selection the button acts on.
-            isFocusable = false
-            isFocusableInTouchMode = false
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT
-            ).apply { marginStart = dp(4) }
-            setOnClickListener { onClick() }
         }
 
     private fun buildFormatBar(ink: Int): LinearLayout {
