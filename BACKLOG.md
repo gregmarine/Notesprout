@@ -18,7 +18,11 @@
 
 ## Sticky-note editor opens a second connection to the same `.soil` (crash: database is locked)
 
-> **Deliberately deferred (2026-07-31) until the colour-ink work is finished — but it must be fixed.**
+> **Contained, not cured (2026-07-31).** The crash itself is fixed — `.soil` connections now set
+> `PRAGMA busy_timeout = 5000` so SQLite waits for a short-lived write lock instead of raising
+> SQLITE_BUSY, and the notebook's stroke-save and move-persist coroutines catch and log instead of
+> killing the process. **The architectural fault below is still open**: the sticky-note editor should
+> not be opening a second connection to the same file at all. Fix shapes 2 and 3 remain.
 > Not a colour regression: the stack is byte-identical to the first occurrence, which predates any of
 > that work.
 

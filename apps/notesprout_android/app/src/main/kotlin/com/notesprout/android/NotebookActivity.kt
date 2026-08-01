@@ -1412,7 +1412,18 @@ class NotebookActivity : AppCompatActivity() {
             val db = soilDatabase
             if (db != null) {
                 lifecycleScope.launch {
-                    val newIds = withContext(Dispatchers.IO) { saveStrokes(db) }
+                    // The stroke-save path must never kill the process. This is the one the
+                    // sticky-note lock collision actually lands on — write in a sticky, come back,
+                    // keep writing, and the editor's debounced persist meets this transaction.
+                    // On failure nothing is marked persisted, so the same strokes are retried on the
+                    // next pen lift; the ink stays in memory either way. An empty list here just
+                    // means no undo entries for a save that did not happen.
+                    val newIds = runCatching { withContext(Dispatchers.IO) { saveStrokes(db) } }
+                        .onFailure { e ->
+                            if (e is kotlinx.coroutines.CancellationException) throw e
+                            Log.e(TAG, "Stroke save failed — will retry on the next pen lift", e)
+                        }
+                        .getOrDefault(emptyList())
                     // Push one StrokeAdded per newly persisted stroke.
                     val pageId  = currentPageId
                     val layerId = currentLayerId
@@ -1837,6 +1848,12 @@ class NotebookActivity : AppCompatActivity() {
                 lifecycleScope.launch {
                     val now = System.currentTimeMillis()
                     val density = resources.displayMetrics.density
+                    // A failed write must not take the process with it. This coroutine had no catch
+                    // at all, which is the only reason a lock collision with the sticky-note editor
+                    // killed the app rather than being logged — the editor's own persist wraps its
+                    // transaction and survived the same contention. A lost move is bad; losing the
+                    // page's unsaved ink to a crash is worse.
+                    runCatching {
                     withContext(Dispatchers.IO) {
                         db.withTransaction {
                             for (moved in movedStrokes) {
@@ -1862,6 +1879,10 @@ class NotebookActivity : AppCompatActivity() {
                             }
                         }
                         if (movedLinks.isNotEmpty() || movedStickyNotes.isNotEmpty() || movedShapes.isNotEmpty()) noteContentEdit(db, pageId)
+                    }
+                    }.onFailure { e ->
+                        if (e is kotlinx.coroutines.CancellationException) throw e
+                        Log.e(TAG, "Move persist failed — the move is not saved", e)
                     }
                     undoRedoManager.push(
                         UndoRedoAction.StrokesMoved(
