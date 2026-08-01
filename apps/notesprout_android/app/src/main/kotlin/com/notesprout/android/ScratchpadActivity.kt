@@ -229,6 +229,7 @@ class ScratchpadActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (bounceIfIndexNotReady()) return
         binding = ActivityScratchpadBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
@@ -2101,6 +2102,10 @@ class ScratchpadActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        // onCreate aborted before building any of this — see [bounceIfIndexNotReady]. Android
+        // still calls onDestroy on a half-constructed Activity, and every teardown below assumes
+        // state that was never created.
+        if (indexBounced) { super.onDestroy(); return }
         PenColorPreferences.removeListener(penColorListener)
         super.onDestroy()
         // Final safety-net flush on appScope (outlives this Activity). releaseResources only

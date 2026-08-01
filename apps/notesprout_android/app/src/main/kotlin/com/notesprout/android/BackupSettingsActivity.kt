@@ -63,6 +63,7 @@ class BackupSettingsActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (bounceIfIndexNotReady()) return
         binding = ActivityBackupSettingsBinding.inflate(layoutInflater)
         setContentView(binding.root)
         TopGuard.applyInsetPadding(binding.root)

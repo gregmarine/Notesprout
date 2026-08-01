@@ -263,6 +263,7 @@ class TemplateBrowserActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (bounceIfIndexNotReady()) return
         binding = ActivityTemplateBrowserBinding.inflate(layoutInflater)
         setContentView(binding.root)
 

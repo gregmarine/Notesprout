@@ -16,21 +16,6 @@
 
 ---
 
-## `NotesproutIndex is not open` on a cold-process launch restore
-
-Surfaced while chasing the sticky-note `.soil` crash (both are fixed; this one is not). After a
-process death, launch-restore reopened `CalendarActivity`, which calls `NotesproutIndex.db()` in
-`onCreate` **before** `ensureReady()` → `IllegalStateException: NotesproutIndex is not open — call
-ensureReady() first` (`NotesproutIndex.kt:169`, `CalendarActivity.kt:344`), so the relaunch itself
-crashes.
-
-Only reproduced as a follow-on from another crash, but the trigger is just "cold process restoring
-straight into a surface that reads the index in `onCreate`" — nothing about it is specific to having
-crashed first, so a cold launch into a restored surface stack should hit it too. Worth a guard on the
-restore path rather than in one Activity: every surface the stack can reopen has the same exposure.
-
----
-
 ## TEMP — legacy-`ts` + PNG→WEBP compaction (remove after all my devices are compacted)
 
 > Transitional single-user migration, **not** a permanent feature. New writes already omit the dead

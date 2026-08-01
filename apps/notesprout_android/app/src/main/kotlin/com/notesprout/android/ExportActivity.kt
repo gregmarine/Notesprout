@@ -136,6 +136,7 @@ class ExportActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (bounceIfIndexNotReady()) return
         binding = ActivityExportBinding.inflate(layoutInflater)
         setContentView(binding.root)
         TopGuard.applyInsetPadding(binding.root)
@@ -595,6 +596,10 @@ class ExportActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        // onCreate aborted before building any of this — see [bounceIfIndexNotReady]. Android
+        // still calls onDestroy on a half-constructed Activity, and every teardown below assumes
+        // state that was never created.
+        if (indexBounced) { super.onDestroy(); return }
         runningJob?.cancel()
         super.onDestroy()
     }

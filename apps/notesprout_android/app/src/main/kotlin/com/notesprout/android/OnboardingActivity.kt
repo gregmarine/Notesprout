@@ -36,6 +36,7 @@ class OnboardingActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (bounceIfIndexNotReady()) return
         setContentView(R.layout.activity_onboarding)
 
         val key = PassphraseStore.getGlobalPassphrase(this)

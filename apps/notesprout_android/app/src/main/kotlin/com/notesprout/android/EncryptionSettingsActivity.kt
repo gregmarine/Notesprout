@@ -29,6 +29,7 @@ class EncryptionSettingsActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (bounceIfIndexNotReady()) return
         binding = ActivityEncryptionSettingsBinding.inflate(layoutInflater)
         setContentView(binding.root)
         TopGuard.applyInsetPadding(binding.root)

@@ -1007,6 +1007,7 @@ class NotebookActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (bounceIfIndexNotReady()) return
 
         // Fullscreen immersive — equivalent to Flutter's SystemUiMode.immersiveSticky.
         WindowCompat.setDecorFitsSystemWindows(window, false)
@@ -2429,6 +2430,10 @@ class NotebookActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        // onCreate aborted before building any of this — see [bounceIfIndexNotReady]. Android
+        // still calls onDestroy on a half-constructed Activity, and every teardown below assumes
+        // state that was never created.
+        if (indexBounced) { super.onDestroy(); return }
         PenColorPreferences.removeListener(penColorListener)
         // Belt-and-braces against leaking this Activity through the process-global transfer: the
         // launcher callback clears it on the normal path, but that never runs if we are destroyed

@@ -334,6 +334,7 @@ class CalendarActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (bounceIfIndexNotReady()) return
         WindowCompat.setDecorFitsSystemWindows(window, false)
         val insetsController = WindowInsetsControllerCompat(window, window.decorView)
         insetsController.hide(WindowInsetsCompat.Type.systemBars())
@@ -2325,6 +2326,10 @@ class CalendarActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        // onCreate aborted before building any of this — see [bounceIfIndexNotReady]. Android
+        // still calls onDestroy on a half-constructed Activity, and every teardown below assumes
+        // state that was never created.
+        if (indexBounced) { super.onDestroy(); return }
         PenColorPreferences.removeListener(penColorListener)
         super.onDestroy()
         // Final safety-net flush. appScope outlives this Activity so the write still lands;

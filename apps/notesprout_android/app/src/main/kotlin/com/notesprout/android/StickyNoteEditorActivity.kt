@@ -115,6 +115,7 @@ class StickyNoteEditorActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (bounceIfIndexNotReady()) return
         binding = ActivityStickyNoteEditorBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
@@ -1337,6 +1338,10 @@ class StickyNoteEditorActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        // onCreate aborted before building any of this — see [bounceIfIndexNotReady]. Android
+        // still calls onDestroy on a half-constructed Activity, and every teardown below assumes
+        // state that was never created.
+        if (indexBounced) { super.onDestroy(); return }
         PenColorPreferences.removeListener(penColorListener)
         super.onDestroy()
         drawingView.releaseResources()

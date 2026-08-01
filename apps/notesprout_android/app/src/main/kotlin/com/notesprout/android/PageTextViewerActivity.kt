@@ -94,6 +94,7 @@ class PageTextViewerActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (bounceIfIndexNotReady()) return
 
         notebookId = intent.getStringExtra(EXTRA_NOTEBOOK_ID).orEmpty()
         notebookName = intent.getStringExtra(EXTRA_NOTEBOOK_NAME).orEmpty().ifBlank { "Notebook" }
