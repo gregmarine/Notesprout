@@ -101,9 +101,11 @@ information takes inkBlack and is made *smaller* to read as secondary) · `borde
 
 - **The one colour exception — ink, and only ink.** Colour appears in chrome *only where the colour
   itself is the thing being chosen or reported*: the pen-colour panel's swatches, and the pen button's
-  icon tinted with the armed ink. Nothing else. Everything routes through `core/InkColor.paintColor()`,
-  so on a greyscale device it all renders black and the rule holds unchanged. Adding colour anywhere
-  else — a status, a highlight, an accent — is still forbidden. See [`docs/design-system.md`](docs/design-system.md).
+  icon tinted with the armed ink. Nothing else. Every render site routes through
+  `core/InkColor.paintColor()`, which is what keeps that auditable. Adding colour anywhere else — a
+  status, a highlight, an accent — is still forbidden. **Ink is never device-gated**: the panel offers
+  a 16-level greyscale palette (the ladder e-paper actually renders) alongside the 16 colours, and
+  greyscale is the default. See [`docs/design-system.md`](docs/design-system.md).
 
 - No shadows, elevation, gradients, blur. No Material ripple (`rippleColor=transparent`, `stateListAnimator=null`).
 - Animations none/minimal, never decorative (`android:windowAnimationStyle="@null"` in `Theme.Notesprout`).

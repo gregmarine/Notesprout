@@ -188,10 +188,33 @@ chosen ink in place — the same two-role pattern `btnLasso` uses for its clipbo
 `btnPen.isSelected`, read **before** the handler's mode-exits flip it (`isSelected` is false in every
 other tool mode, so that one flag is sufficient).
 
+- **Two palettes** (`PenPalette`), behind a segmented control at the top of the panel. **Greyscale is
+  the default** — it is the set every panel in the fleet renders exactly. The choice persists like the
+  colour itself, so the panel reopens where you left it.
+  - **`GREYSCALE`** — the sixteen levels e-paper actually has. E-ink is a **4-bit** display, so the
+    hardware quantizes to exactly sixteen, and the canonical mapping is increments of `0x11`:
+    `#000000`, `#111111` … `#FFFFFF`. Any other ramp is just rounded to these. Labelled with the level
+    number, not a name: the number makes a grey **referable** ("grey 5 for margin notes") and shows the
+    ramp is the panel's own, where "Grey 5" under a grey swatch in a grey palette would say nothing.
+  - **`COLOR`** — sixteen matching BOOX Notes: five greys (spaced `0x40`) then eleven colours. These
+    are **measured, not chosen.** BOOX builds its palette programmatically into a `RecyclerView`
+    rather than storing it in resources, so it cannot be read out of the APK; the values were sampled
+    from the live picker's framebuffer on a NoteAir5C, and the whole second row independently matches
+    the `colour_list` / `shape_colour_1..8` array that *is* in the APK's resources.
+- **Custom slots** — a third row of eight, colour palette only. **Positional slots, not a recents
+  list**: a recents list silently pushes out a colour you depend on the moment you experiment with a
+  ninth, whereas a slot keeps it where you put it and the position is itself information. Empty slots
+  show a `+` — not a blank or a greyed-out cell, since a disabled-looking control is visually silent on
+  e-ink and reads as broken rather than available. Tap `+` to mix into that slot; long-press a filled
+  one to remix it.
 - **Layout** — `res/layout/panel_pen_color.xml`, `<include>`d per host so one file serves all five
-  drawing surfaces. It declares only containers: the palette is data (`PenPalette.DEFAULTS`) and the
-  recents row is dynamic, so the controller fills both programmatically. Contents: 4×2 defaults grid →
-  recents row (row **and** its divider `GONE` until a custom colour exists) → "Custom color…".
+  drawing surfaces. It declares only containers — both palettes are data and the custom row is
+  dynamic, so the controller fills every row programmatically.
+- **Cell width is derived, never a dp constant** (`cellWidthPx()`). Eight columns is a lot for the
+  narrow end of the fleet, and BOOX's EinkWise settings expose a **per-app dp override**, so a user can
+  shrink any screen's effective width at will — a fixed 46dp cell clipped the eighth column clean off a
+  Palma2 Pro. Sizing from `boundsProvider` fits whatever it is given, capped at 46dp and floored at
+  30dp so a swatch stays a viable stylus target.
 - **Controller** — takes the host's differences as inputs rather than branching internally: a
   `sideProvider` (the notebook derives it from `ToolbarConfig.placement`; fixed-toolbar hosts return a
   constant), a `boundsProvider` (full-screen hosts clamp to the root; the scratch pad and sticky editor
@@ -265,7 +288,7 @@ overlay is using.
 
 ### Custom colour picker (`notebook/CustomColorDialog.kt` + `ColorFieldViews.kt`)
 
-Reached from the panel's "Custom color…". Three inputs onto one value — an SV field + hue strip, R/G/B
+Reached by tapping an empty `+` slot, or long-pressing a filled one to remix it. Three inputs onto one value — an SV field + hue strip, R/G/B
 sliders, and a hex field — kept in sync through a single `apply(argb, from)` write path, where `from`
 names the input that must **not** be written back to. An `applying` flag suppresses the listeners
 while it fans out; without it, setting the hex field from a slider re-enters the hex watcher and
@@ -285,10 +308,10 @@ fights the slider that started it.
   fully-saturated pick shows a whole ring instead of a half one clipped by the edge.
 - **The brightness floor is surfaced before committing** — pick something under
   `InkColor.MIN_DOMINANT_CHANNEL` and the dialog says so, rather than letting the user discover it as
-  ink that mysteriously writes black. Informational, never blocking: a greyscale device renders
-  everything black anyway, and the colour may still be wanted.
-- Only **mixed** colours enter the recents row; palette entries never do, since they are already one
-  tap away.
+  ink that looks black until something forces a refresh. It describes a **preview** limit: the stroke
+  is stored and drawn in its true colour either way, so the warning never blocks.
+- The mixer always writes into a **specific slot** — the one whose `+` was tapped, or the filled one
+  that was long-pressed — so a colour lands where the user aimed it and nothing shuffles.
 
 See [`design-system.md`](design-system.md) for the colour-in-chrome exception this feature creates,
 and `core/InkColor` for the Kaleido brightness floor that constrains which colours are usable.

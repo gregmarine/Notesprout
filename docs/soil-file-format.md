@@ -253,7 +253,7 @@ title. Read the type first, then interpret.
 |---|---|---|
 | `x`, `y`, `width`, `height` | most content types | Bounding box, page-absolute px. `x`/`y` are the top-left; `width`/`height` are extents (**not** right/bottom). |
 | `text` | heading, text, document, template, layer, notebook | See above — role varies by type. (`page_text` is the exception: its payload is JSON in `data`.) |
-| `color` | stroke | `#RRGGBB` or `#AARRGGBB` |
+| `color` | stroke | `#RRGGBB` or `#AARRGGBB`. **Do not assume black** — since v1.2 the pen offers a 16-level greyscale ladder and a 16-colour palette, so real files carry arbitrary values here. |
 | `strokeWidth` | stroke (px), line (dp), shape (dp) | Note the unit difference — see "Density" below |
 | `refId` | page → template id · notebook → lastOpenedPage · link → target id | A foreign reference within the same file |
 | `level` | heading | 1–3 |
