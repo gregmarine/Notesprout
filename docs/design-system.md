@@ -91,6 +91,13 @@ Most of the fleet cannot show colour at all, so colour ink is offered only where
   can drop its last control on a phone-shaped screen). The document editor's header started as
   `Write | Preview | Done` and lost *Done* off the edge there; it is now all icons. A button you cannot
   reach is worse than one you have to learn.
+- **Those dp figures are the *default*, not a guarantee.** BOOX exposes a **per-app dp override** in
+  its EinkWise settings, so a user can shrink the effective width of any screen at will — a P2P set
+  that way lays out nearer `sw379dp` than its nominal `sw439dp`. Anything that packs a fixed number of
+  cells across the width should therefore **derive its cell size from the space it is actually given**
+  rather than from a dp constant, or it clips on a device that measures fine in development.
+  `PenColorPanelController.cellWidthPx()` is the worked example — its eight swatch columns lost the
+  last one entirely until they were sized from the available width.
 - Give every icon button a **long-press hint naming it**, and use that same string as the content
   description. This is what makes an icon-only row learnable, so it is not optional.
 

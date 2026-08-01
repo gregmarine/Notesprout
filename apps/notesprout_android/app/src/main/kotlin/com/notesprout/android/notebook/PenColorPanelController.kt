@@ -201,12 +201,30 @@ class PenColorPanelController(
                 }
             }
 
+    /**
+     * Cell width, derived from the space actually available rather than a fixed dp.
+     *
+     * Eight columns is a lot for the narrow end of the fleet: on a Palma2 Pro the fixed 46dp cell
+     * overflowed the screen and clipped the eighth column clean off. Sizing from
+     * [boundsProvider] instead means the panel fits **whatever** it is given — no per-device
+     * qualifier to maintain, and no assumption about density that a display-scale setting can
+     * quietly invalidate. Wide screens still cap at [MAX_CELL_DP] so the panel never sprawls.
+     */
+    private fun cellWidthPx(): Int {
+        val available = boundsProvider().width()
+        if (available <= 0) return dpi(MAX_CELL_DP)
+        // The panel's own padding + border, then the per-cell horizontal margins.
+        val chrome = dpi(10f)
+        val perColumn = (available - chrome) / PenPalette.COLUMNS
+        return (perColumn - dpi(2f)).coerceIn(dpi(MIN_CELL_DP), dpi(MAX_CELL_DP))
+    }
+
     /** Tile + caption in a fixed-width column, so all rows align regardless of label length. */
     private inline fun cell(label: String, tile: () -> View): LinearLayout =
         LinearLayout(root.context).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_HORIZONTAL
-            layoutParams = LinearLayout.LayoutParams(dpi(46f), LinearLayout.LayoutParams.WRAP_CONTENT)
+            layoutParams = LinearLayout.LayoutParams(cellWidthPx(), LinearLayout.LayoutParams.WRAP_CONTENT)
                 .apply { marginStart = dpi(1f); marginEnd = dpi(1f); bottomMargin = dpi(2f) }
             addView(tile())
             addView(TextView(root.context).apply {
@@ -225,13 +243,16 @@ class PenColorPanelController(
             })
         }
 
+    /** Square, inset inside the cell so the caption underneath has breathing room. */
+    private fun tileSizePx(): Int = (cellWidthPx() - dpi(6f)).coerceAtLeast(dpi(20f))
+
     private fun swatchTile(hex: String, isSelected: Boolean): View = View(root.context).apply {
-        layoutParams = LinearLayout.LayoutParams(dpi(40f), dpi(40f))
+        layoutParams = LinearLayout.LayoutParams(tileSizePx(), tileSizePx())
         background = swatchDrawable(InkColor.toInt(hex), isSelected)
     }
 
     private fun plusTile(): View = TextView(root.context).apply {
-        layoutParams = LinearLayout.LayoutParams(dpi(40f), dpi(40f))
+        layoutParams = LinearLayout.LayoutParams(tileSizePx(), tileSizePx())
         text = "+"
         textSize = 20f
         setTextColor(Color.BLACK)
@@ -360,6 +381,12 @@ class PenColorPanelController(
     }
 
     companion object {
+        /** Cell width on a roomy screen — the design size. */
+        private const val MAX_CELL_DP = 46f
+
+        /** Floor for the narrow end of the fleet; below this a swatch stops being a stylus target. */
+        private const val MIN_CELL_DP = 30f
+
         /**
          * Tint a pen button's icon with the ink it will write in.
          *
