@@ -16,61 +16,18 @@
 
 ---
 
-## Sticky-note editor opens a second connection to the same `.soil` (crash: database is locked)
+## `NotesproutIndex is not open` on a cold-process launch restore
 
-> **Contained, not cured (2026-07-31).** The crash itself is fixed — `.soil` connections now set
-> `PRAGMA busy_timeout = 5000` so SQLite waits for a short-lived write lock instead of raising
-> SQLITE_BUSY, and the notebook's stroke-save and move-persist coroutines catch and log instead of
-> killing the process. **The architectural fault below is still open**: the sticky-note editor should
-> not be opening a second connection to the same file at all. Fix shapes 2 and 3 remain.
-> Not a colour regression: the stack is byte-identical to the first occurrence, which predates any of
-> that work.
+Surfaced while chasing the sticky-note `.soil` crash (both are fixed; this one is not). After a
+process death, launch-restore reopened `CalendarActivity`, which calls `NotesproutIndex.db()` in
+`onCreate` **before** `ensureReady()` → `IllegalStateException: NotesproutIndex is not open — call
+ensureReady() first` (`NotesproutIndex.kt:169`, `CalendarActivity.kt:344`), so the relaunch itself
+crashes.
 
-**This crashes during ordinary writing, not just in the original edge case.** Second repro, NA5C
-2026-07-31: **write on a sticky note → return to the notebook → keep writing** → the app dies ~5–10 s
-in (the editor's debounced persist landing on top of the notebook's `saveStrokes`). It fired **twice
-in 45 seconds** (15:46:04 PID 20160, 15:46:49 PID 20285) — crash, relaunch, write, crash — so any ink
-since the last save is at risk each time. Treat the severity as high even though the fix is queued.
-
-**Original (narrower) repro.** Create a sticky note → write → close → **move it** → **tap to reopen**
-→ `SQLiteDatabaseLockedException: database is locked (code 5)` at `beginTransactionNonExclusive`,
-process dies. On relaunch the sticky is back at its **old** position (the move transaction rolled
-back) but its contents are intact. Moving again, with no editor involved, is fine.
-
-**Cause — two Room/SQLCipher connections to one `.soil` file.** `StickyNoteEditorActivity` builds
-its **own** connection (`notebookDbCache` / `notebookDb()`, ~line 271) for its debounced real-time
-persist, while `NotebookActivity.soilDatabase` is still open. Tapping a sticky launches the editor
-while the host's move write — `onStrokesMoved` → `db.withTransaction { … replaceStickyNoteSubtree }`
-(~line 1826) — is still in flight on a `lifecycleScope.launch`. Two concurrent **write**
-transactions on two connections → `SQLITE_BUSY`.
-
-The host dies rather than the editor purely because of error handling: the editor's persist wraps
-its transaction in `try/catch` and logs, the host's `onStrokesMoved` coroutine has **no catch at
-all**, so the exception reaches the default handler.
-
-**This violates a rule the codebase states elsewhere:** secondary editor Activities must not open
-the `.soil` — `docs/documents.md` ("The editor never opens the `.soil` — the notebook host reads and
-writes for it via `DocumentTransfer`") and `docs/drawing-engine.md` (the template browser "never
-opens a `.soil` — avoids cross-Activity WAL/sidecar risk"). `DocumentEditorActivity` obeys it;
-`StickyNoteEditorActivity` does not. Note `core/OpenNotebooks.kt` is only a ref **counter** for
-import-replace safety — there is no shared-connection registry to reuse.
-
-Pre-existing; unrelated to the colour work (the editor's DB path was untouched by it).
-
-Fix shapes, cheapest first:
-1. **Defensive only** — try/catch + busy-retry around the host's `onStrokesMoved` transaction. Stops
-   the crash; on its own a lost move is merely silent instead of fatal, so pair it with a retry.
-2. **Remove the second connection** — host writes on the editor's behalf via the transfer singleton,
-   matching `DocumentTransfer`. Costs the editor's crash-safety-while-editing, which is why the
-   connection exists at all (the comment calls the host's close callback "the fallback").
-3. **Share one connection** — a process-global ref-counted `.soil` handle both Activities use.
-   Structurally correct and keeps real-time persist, but needs care over who closes it and when
-   (WAL/sidecar rules in `docs/data-architecture.md`).
-
-There is a second, follow-on crash in the same log: after the process died, launch-restore reopened
-`CalendarActivity`, which called `NotesproutIndex.db()` in `onCreate` before `ensureReady()` →
-`IllegalStateException: NotesproutIndex is not open`. That is the surface-stack restore path failing
-on a cold process; worth its own guard regardless of the sticky fix.
+Only reproduced as a follow-on from another crash, but the trigger is just "cold process restoring
+straight into a surface that reads the index in `onCreate`" — nothing about it is specific to having
+crashed first, so a cold launch into a restored surface stack should hit it too. Worth a guard on the
+restore path rather than in one Activity: every surface the stack can reopen has the same exposure.
 
 ---
 

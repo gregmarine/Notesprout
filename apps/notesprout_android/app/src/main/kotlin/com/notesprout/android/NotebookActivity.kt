@@ -937,6 +937,8 @@ class NotebookActivity : AppCompatActivity() {
         val out = StickyNoteEditorTransfer.output
         StickyNoteEditorTransfer.input  = null
         StickyNoteEditorTransfer.output = null
+        // The editor is gone; stop holding a lambda that captures this Activity.
+        StickyNoteEditorTransfer.persistToHost = null
         val pending          = pendingStickyNote ?: return@registerForActivityResult
         pendingStickyNote    = null
         val wasInitialCreate = pendingStickyInitialCreate
@@ -1412,9 +1414,9 @@ class NotebookActivity : AppCompatActivity() {
             val db = soilDatabase
             if (db != null) {
                 lifecycleScope.launch {
-                    // The stroke-save path must never kill the process. This is the one the
-                    // sticky-note lock collision actually lands on — write in a sticky, come back,
-                    // keep writing, and the editor's debounced persist meets this transaction.
+                    // The stroke-save path must never kill the process. The contention that used to
+                    // land here is gone (the sticky editor no longer opens its own connection), so
+                    // this is now a general safety net rather than a fix for anything specific.
                     // On failure nothing is marked persisted, so the same strokes are retried on the
                     // next pen lift; the ink stays in memory either way. An empty list here just
                     // means no undo entries for a save that did not happen.
@@ -1849,10 +1851,9 @@ class NotebookActivity : AppCompatActivity() {
                     val now = System.currentTimeMillis()
                     val density = resources.displayMetrics.density
                     // A failed write must not take the process with it. This coroutine had no catch
-                    // at all, which is the only reason a lock collision with the sticky-note editor
-                    // killed the app rather than being logged — the editor's own persist wraps its
-                    // transaction and survived the same contention. A lost move is bad; losing the
-                    // page's unsaved ink to a crash is worse.
+                    // at all, which is why a lock collision here killed the app rather than being
+                    // logged. That collision no longer happens, but an unguarded DB write on a
+                    // lifecycleScope coroutine is a process-killer regardless of the cause.
                     runCatching {
                     withContext(Dispatchers.IO) {
                         db.withTransaction {
@@ -2429,6 +2430,10 @@ class NotebookActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         PenColorPreferences.removeListener(penColorListener)
+        // Belt-and-braces against leaking this Activity through the process-global transfer: the
+        // launcher callback clears it on the normal path, but that never runs if we are destroyed
+        // while the editor is still up.
+        StickyNoteEditorTransfer.persistToHost = null
         super.onDestroy()
         // Stop offering ourselves to the document editor — our connection is about to close. The
         // editor keeps its text in DocumentTransfer.live, which the seal below (and, if this activity
@@ -8248,9 +8253,36 @@ class NotebookActivity : AppCompatActivity() {
             contentHeight = note.contentHeight,
         )
         StickyNoteEditorTransfer.output = null
+        // Service the editor's real-time saves ourselves. It used to open its own connection to this
+        // same `.soil`, which put two writers on one WAL file and killed the app mid-writing; ours is
+        // already open, so both saves now serialize through Room instead of fighting for the lock.
+        StickyNoteEditorTransfer.persistToHost = { render -> persistStickyNoteFromEditor(render) }
         pendingStickyNote          = note
         pendingStickyInitialCreate = initialCreate
         editorLauncher.launch(StickyNoteEditorActivity.intent(this, note, StickyNoteEditorActivity.HOST_NOTEBOOK, notebookId, encryptionInfo.encrypted))
+    }
+
+    /**
+     * Write the editor's in-progress sticky content on **this** Activity's connection.
+     *
+     * Called from the editor's debounced persist while it is in the foreground and we are merely
+     * paused — same process, so a direct call, and our `soilDatabase` is still open. Failures are
+     * logged, never thrown: this runs inside the editor's coroutine and must not take it (or the
+     * process) down. The host's normal close-callback write remains the backstop.
+     */
+    private suspend fun persistStickyNoteFromEditor(render: StickyNoteRender) {
+        val db = soilDatabase ?: return
+        val density = resources.displayMetrics.density
+        withContext(Dispatchers.IO) {
+            runCatching {
+                db.withTransaction {
+                    db.notebookDao().replaceStickyNoteSubtree(render, System.currentTimeMillis(), density)
+                }
+            }.onFailure { e ->
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                Log.e(TAG, "Sticky real-time persist failed", e)
+            }
+        }
     }
 
     /** Topmost sticky note icon whose bbox contains the view-space point ([x],[y]), or null. */

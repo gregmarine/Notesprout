@@ -21,20 +21,16 @@ import androidx.lifecycle.lifecycleScope
 import androidx.room.withTransaction
 import com.notesprout.android.core.Slog
 import com.notesprout.android.core.isBooxDevice
-import com.notesprout.android.crypto.KeySession
-import com.notesprout.android.crypto.SoilCrypto
 import com.notesprout.android.data.HeadingStroke
 import com.notesprout.android.data.LineRender
 import com.notesprout.android.data.LiveStroke
 import com.notesprout.android.data.ShapeObject
 import com.notesprout.android.data.ShapeRender
 import com.notesprout.android.data.ShapeType
-import com.notesprout.android.data.SoilDatabase
 import com.notesprout.android.data.StickyNoteRender
 import com.notesprout.android.data.TextRender
 import com.notesprout.android.data.index.NotesproutIndex
 import com.notesprout.android.data.replaceStickyNoteSubtree
-import com.notesprout.android.data.soilFile
 import com.notesprout.android.data.toStickyNoteObject
 import com.notesprout.android.data.deepCopy
 import com.notesprout.android.databinding.ActivityStickyNoteEditorBinding
@@ -211,7 +207,6 @@ class StickyNoteEditorActivity : AppCompatActivity() {
         stickyId       = intent.getStringExtra(EXTRA_STICKY_ID).orEmpty()
         hostKind       = intent.getStringExtra(EXTRA_HOST).orEmpty()
         hostNotebookId = intent.getStringExtra(EXTRA_NOTEBOOK_ID).orEmpty()
-        hostEncrypted  = intent.getBooleanExtra(EXTRA_ENCRYPTED, false)
         stickyBbox.set(
             intent.getFloatExtra(EXTRA_BBOX_L, 0f), intent.getFloatExtra(EXTRA_BBOX_T, 0f),
             intent.getFloatExtra(EXTRA_BBOX_R, 0f), intent.getFloatExtra(EXTRA_BBOX_B, 0f),
@@ -227,20 +222,21 @@ class StickyNoteEditorActivity : AppCompatActivity() {
         }
     }
 
-    // ── Real-time persistence to the sticky's own (encrypted) database ───────────
-    // The editor is launched DB-agnostic, but a durable, encrypted-at-rest save can't wait for the
-    // return-to-host callback (which never runs on process death). So it writes straight to the
-    // sticky's real DB — the notebook's `.soil` (keyed from the in-memory [KeySession], never an
-    // Intent) or the already-open, already-encrypted global index — debounced on each content
-    // change plus a flush on onStop. No plaintext file is ever written.
+    // ── Real-time persistence ────────────────────────────────────────────────────
+    // A durable save can't wait for the return-to-host callback, which never runs on process death,
+    // so content is flushed during editing: debounced on each change plus a flush on onStop.
+    //
+    // The editor never opens a database itself. A notebook sticky goes through
+    // [StickyNoteEditorTransfer.persistToHost], so the host writes on the connection it already
+    // holds — opening a second one here put two writers on one WAL file and killed the app mid-write
+    // (see BACKLOG.md). Scratch-pad and calendar stickies use the shared, already-open global index.
+    // No plaintext file is ever written, and nothing is keyed from an Intent.
 
     /** DB id of the sticky being edited (from the launching host). */
     private var stickyId: String = ""
     private var hostKind: String = ""          // "notebook" | "scratchpad" | "calendar"
     private var hostNotebookId: String = ""    // notebook host only
-    private var hostEncrypted: Boolean = false // notebook host only
     private val stickyBbox = RectF()
-    private var notebookDbCache: SoilDatabase? = null
     private var persistJob: Job? = null
 
     /** True once the canvas holds the session's content (initial load done or blank-note sizing). */
@@ -273,11 +269,9 @@ class StickyNoteEditorActivity : AppCompatActivity() {
         withContext(Dispatchers.IO) {
             try {
                 when (hostKind) {
-                    HOST_NOTEBOOK -> notebookDb()?.let { db ->
-                        db.withTransaction {
-                            db.notebookDao().replaceStickyNoteSubtree(render, System.currentTimeMillis(), density)
-                        }
-                    }
+                    // Ask the notebook host to write on the connection it already holds. Opening our
+                    // own here meant two writers on one WAL file, which collided and killed the app.
+                    HOST_NOTEBOOK -> StickyNoteEditorTransfer.persistToHost?.invoke(render)
                     HOST_SCRATCHPAD -> NotesproutIndex.scratchpadDao()
                         .updateData(stickyId, render.toStickyNoteObject(density).toJson(), System.currentTimeMillis())
                     HOST_CALENDAR -> NotesproutIndex.calendarDao()
@@ -291,19 +285,6 @@ class StickyNoteEditorActivity : AppCompatActivity() {
         }
     }
 
-    /** Lazily-opened connection to the notebook's `.soil`, keyed from [KeySession] (in-memory).
-     *  Null when this isn't a notebook sticky, or the notebook is encrypted and no key is resolved
-     *  (then the host's normal-close callback remains the fallback). Closed in onDestroy. */
-    private fun notebookDb(): SoilDatabase? {
-        notebookDbCache?.let { return it }
-        if (hostKind != HOST_NOTEBOOK || hostNotebookId.isEmpty()) return null
-        val key = KeySession.getFor(hostNotebookId)
-        if (hostEncrypted && key == null) return null
-        val path = soilFile(this, hostNotebookId).absolutePath
-        val builder = SoilDatabase.builder(this, path)
-        if (key != null) builder.openHelperFactory(SoilCrypto.roomFactory(key))
-        return builder.build().also { notebookDbCache = it }
-    }
 
     // ── Content load ──────────────────────────────────────────────────────────
 
@@ -1359,7 +1340,6 @@ class StickyNoteEditorActivity : AppCompatActivity() {
         PenColorPreferences.removeListener(penColorListener)
         super.onDestroy()
         drawingView.releaseResources()
-        runCatching { notebookDbCache?.close() }
     }
 
     companion object {

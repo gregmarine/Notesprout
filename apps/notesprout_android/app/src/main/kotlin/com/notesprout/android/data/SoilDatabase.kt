@@ -107,20 +107,15 @@ abstract class SoilDatabase : RoomDatabase() {
                 // Re-apply wal_autocheckpoint on every open — it is connection-level only
                 // and is not persisted in the database file.
                 db.query("PRAGMA wal_autocheckpoint = 100").use { it.moveToFirst() }
-                // Wait for a busy write lock instead of failing instantly.
+                // Wait briefly for a busy lock rather than failing instantly. General hygiene: writes
+                // run off the main thread, so the wait cannot ANR, and a real deadlock still surfaces.
                 //
-                // A `.soil` can legitimately have TWO connections open at once: the sticky-note
-                // editor opens its own for its debounced real-time persist while the notebook host's
-                // is still live. WAL allows one writer at a time, so their transactions collide —
-                // and with no busy handler SQLite raises SQLITE_BUSY the moment it cannot take the
-                // lock, which surfaced as `SQLiteDatabaseLockedException: database is locked (code 5)`
-                // killing the app mid-writing. These transactions are milliseconds long, so waiting
-                // resolves the contention outright; five seconds is far longer than any of them and
-                // still short enough that a genuine deadlock surfaces rather than hanging.
-                //
-                // This is the containment, not the cure — the editor should not be opening a second
-                // connection at all (see BACKLOG.md). Writes run off the main thread, so the wait
-                // cannot ANR.
+                // **Do not rely on this to make concurrent writers safe.** It was added trying to fix
+                // the sticky-note editor's second connection to this same file and did **nothing** —
+                // five collisions in a minute, every one throwing immediately. When a connection
+                // already holds a read snapshot SQLite returns SQLITE_BUSY without ever invoking the
+                // busy handler, because retrying cannot succeed. The fix was to stop opening a second
+                // connection; this is kept only because a busy timeout is worth having anyway.
                 db.query("PRAGMA busy_timeout = 5000").use { it.moveToFirst() }
             }
         }
