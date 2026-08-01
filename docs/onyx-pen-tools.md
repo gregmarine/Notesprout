@@ -1,0 +1,532 @@
+# Onyx Pen SDK — Writing Tool Capabilities (Research)
+
+> Referenced from `CLAUDE.md`. **Research only — nothing here is planned or scheduled.** This is a
+> capability survey of what the Onyx SDK actually offers for writing tools (pen kinds, widths,
+> pressure, tilt, texture), written so a future session can plan a tool picker without re-deriving
+> the SDK surface.
+>
+> Notesprout today arms exactly one tool: `setStrokeWidth(3.0f)` + `setStrokeColor(...)`, and never
+> calls `setStrokeStyle` at all. Everything below is unused headroom.
+
+## Where these facts come from
+
+The public Onyx documentation is **years behind the shipped binaries** and is not a usable source.
+[`OnyxAndroidDemo/doc/Onyx-Pen-SDK.md`](https://github.com/onyx-intl/OnyxAndroidDemo/blob/master/doc/Onyx-Pen-SDK.md)
+still documents `onyxsdk-pen:1.2.1`, names only **two** stroke styles (`STROKE_STYLE_FOUNTAIN`,
+`STROKE_STYLE_PENCIL`), and does not mention `setStrokeColor`, `NeoPenConfig`, or any of the
+`NeoPen*` renderer classes. The demo repo has no NeoPen sample.
+
+Everything in this document was instead read out of the **decompiled AARs in the Gradle cache**
+(`javap -p -c -l`) at the exact versions this app builds against:
+
+| Artifact | Version we use | Latest on `repo.boox.com` (2026-08-01) | Role |
+|---|---|---|---|
+| `com.onyx.android.sdk:onyxsdk-pen` | **1.5.4** | 1.5.4.1 | `TouchHelper`, raw input, EPD overlay plumbing, `NeoPenRender` |
+| `com.onyx.android.sdk:onyxsdk-penbrush` | **1.1.1** (transitive) | 1.1.1.1 | The `NeoPen` family — every software pen renderer |
+| `com.onyx.android.sdk:onyxsdk-pennative` | **1.0.4** (transitive) | — | `libneopen_jni.so`, the native stroke solver |
+| `com.onyx.android.sdk:onyxsdk-base` | **1.8.5** (transitive) | — | `TouchPoint`, `NoteShapeType`, `PenTexture`, `NoteConstant` |
+| `com.onyx.android.sdk:onyxsdk-device` | **1.3.3** (resolves 1.3.4) | — | `EpdController` → firmware |
+
+**Note for future work:** `onyxsdk-penbrush` and `onyxsdk-pennative` are already `compile`-scope
+transitive dependencies of `onyxsdk-pen:1.5.4`. Every software pen renderer described in this
+document is **already on our classpath and already in our APK** — using them would add no new Gradle
+dependency (`libneopen_jni.so` ships `arm64-v8a` + `armeabi-v7a`; our `abiFilters` keeps arm64-v8a).
+
+---
+
+## The single most important structural fact: there are two render paths
+
+An Onyx stroke is drawn **twice**, by two completely different engines, and the SDK gives you
+separate controls for each:
+
+| | **Path A — live EPD overlay** | **Path B — software repaint** |
+|---|---|---|
+| Who draws | BOOX **firmware**, straight to the panel, bypassing Android's view system | Your own `Canvas`, via SDK `NeoPen*` classes |
+| When | While the pen is down | On pen-up / page load / any redraw |
+| API | `TouchHelper.setStrokeStyle/Width/Color` → `EpdController` | `NeoPen` + `NeoPenConfig` + `NeoPenRender`, or the `*Wrapper.drawStroke()` helpers |
+| Configurable | style int, width float, ARGB colour — **that is the entire surface** | ~30 fields: pressure curve, tilt, velocity, brush shape/ratio/angle, spacing, smoothing, alpha |
+| Runs where | Firmware; unsupported values silently do nothing | In-process; deterministic, testable, device-independent |
+
+Notesprout currently uses Path A for the live stroke and **plain `Paint`/`Path` polylines** for
+Path B (`OnyxNotebookView.drawStrokePath` — one `strokeWidth`, `Cap.ROUND`, no pressure). The two
+paths already disagree slightly today; any richer tool set has to keep them in agreement, because
+the user sees Path A while writing and Path B forever after.
+
+---
+
+## Path A — `TouchHelper` / `EpdController` (the live overlay)
+
+### Stroke style constants
+
+`TouchHelper.setStrokeStyle(int style)`. The same values are mirrored on
+`com.onyx.android.sdk.pen.style.StrokeStyle`:
+
+| Value | `TouchHelper` constant | `StrokeStyle` constant | `EpdController` constant | Note |
+|---:|---|---|---|---|
+| 0 | `STROKE_STYLE_PENCIL` | `PENCIL` | `STROKE_STYLE_PENCIL` | |
+| 1 | `STROKE_STYLE_FOUNTAIN` | `FOUNTAIN` | `STROKE_STYLE_BRUSH` | **Name collision — see below** |
+| 2 | `STROKE_STYLE_MARKER` | `MARKER` | `STROKE_STYLE_MARKER` | |
+| 3 | `STROKE_STYLE_NEO_BRUSH` | `NEO_BRUSH` | `STROKE_STYLE_NEO_BRUSH` | |
+| 4 | `STROKE_STYLE_CHARCOAL` | `CHARCOAL` | `STROKE_STYLE_CHARCOAL` | |
+| 5 | `STROKE_STYLE_DASH` | `DASH` | *(none)* | |
+| 6 | `STROKE_STYLE_CHARCOAL_V2` | `CHARCOAL_V2` | *(none)* | |
+| 7 | `STROKE_STYLE_SQUARE_PEN` | `SQUARE_PEN` | *(none)* | |
+| 8 | *(none)* | `SOFT_ERASER` | *(none)* | Only on `StrokeStyle` |
+
+**The name collision at value 1 is real and worth remembering.** The device layer calls style `1`
+`STROKE_STYLE_BRUSH`; the pen layer calls the identical int `STROKE_STYLE_FOUNTAIN`. They are the
+same firmware mode. `EpdController` knows only styles **0–4**; the pen SDK exposes **0–7 (8)**.
+
+### What `setStrokeStyle` actually does — verified by bytecode
+
+There is **no translation table and no software fallback**. The call is a pass-through to firmware:
+
+```
+TouchHelper.setStrokeStyle(style)
+  → for each TouchRender in the helper's render list:
+      SFTouchRender.setStrokeStyle(style)  → EpdPenManager.setStrokeStyle(style)
+                                           → EpdController.setStrokeStyle(style)
+      AppTouchRender.setStrokeStyle(style) → EpdController.setStrokeStyle(style)   (direct)
+  → EpdController.setStrokeStyle(int) = Device.currentDevice().setStrokeStyle(int)
+  → BaseDevice.setStrokeStyle(int) { return }                       // no-op default
+  → SDMDevice / RK33XXDevice override:
+       ReflectUtil.invokeMethodSafely(cachedMethod, null, Integer.valueOf(style))
+```
+
+Consequences that matter:
+
+- The int is handed **verbatim** to a reflected hidden framework method. Styles 5/6/7 are meaningful
+  only if that device's firmware understands them. Nothing in the SDK validates the value.
+- `ReflectUtil.invokeMethodSafely` swallows failures. On an unsupported style you get **no
+  exception, no return value, no log** — just the previous style, or nothing.
+- `BaseDevice` is a no-op, so on any non-Onyx device the whole call silently disappears.
+- **Therefore per-device capability has to be established empirically.** There is no
+  `isStrokeStyleSupported()` anywhere in the SDK. (Tier-1 devices — G102, G6, MAX, P2P — would each
+  need a visual check.)
+
+### Width and colour routing
+
+`setStrokeWidth(float w)` and `setStrokeColor(int argb)` fan out over the same render list, but land
+in different places depending on which `TouchRender` is active:
+
+| | `SFTouchRender` (BOOX/stylus path) | `AppTouchRender` (fallback path) |
+|---|---|---|
+| `setStrokeWidth` | `RawInputManager` → `RawInputReader.setStrokeWidth` → `nativeSetStrokeWidth()` **and** `EpdController.setStrokeWidth()` | `AppTouchInputReader.setStrokeWidth()` **and** `EpdController.setStrokeWidth()` |
+| `setStrokeColor` | `EpdPenManager.setStrokeColor` → `EpdController.setStrokeColor` **and** `RawInputReader.setStrokeColor` | `EpdController.setStrokeColor` only |
+| `setStrokeStyle` | `EpdPenManager` → `EpdController` | `EpdController` |
+
+Width is a raw `float`, not dp and not clamped — the SDK imposes no minimum or maximum. (BOOX's own
+Notes app exposes [25 discrete widths and 16 colours](https://shop.boox.com/blogs/news/what-makes-boox-a-powerful-note-taker);
+that ladder is a product decision, not an SDK constraint.)
+
+### Which render path we get
+
+`TouchHelper.create(view, callback)` — the overload `OnyxNotebookView` uses — picks the feature set
+itself:
+
+```java
+int feature = DeviceFeatureUtil.hasStylus(view.getContext())
+        ? FEATURE_SF_TOUCH_RENDER    // 2  → SFTouchRender
+        : FEATURE_APP_TOUCH_RENDER;  // 1  → AppTouchRender
+```
+
+| Constant | Value | Renderer |
+|---|---:|---|
+| `FEATURE_APP_TOUCH_RENDER` | 1 | `AppTouchRender` — MotionEvent-driven |
+| `FEATURE_SF_TOUCH_RENDER` | 2 | `SFTouchRender` — SurfaceFlinger/raw-input overlay (**what BOOX uses**) |
+| `FEATURE_APP_PEN_TOUCH_RENDER` | 4 | `AppPenTouchRender` (extends `AppTouchRender`) |
+| `FEATURE_ALL_TOUCH_RENDER` | 3 | APP \| SF — note this does **not** include 4 |
+
+`TouchHelper.create(view, feature, callback[, touchListenerEnabled])` lets you pick explicitly.
+
+### Eraser styles
+
+`setEraserRawDrawingEnabled(boolean drawing, int eraserStyle)` — the second argument is an eraser
+style int, again pass-through. `StrokeStyle.SOFT_ERASER = 8` is the only named eraser constant in the
+pen SDK. `onyxsdk-base` separately defines `NoteShapeType.ERASER_STROKE = 0`, `ERASER_MOVE = 1`,
+`ERASER_AREA = 2` (BOOX Notes' three eraser modes).
+
+---
+
+## Path B — the `NeoPen` family (software rendering)
+
+This is the large, genuinely configurable half of the SDK, and it is almost entirely undocumented
+publicly. It renders to any `Canvas`, so it works identically on BOOX, on a generic tablet, and in
+an export bitmap.
+
+### The ten pen types
+
+`NeoPenConfig.type` (identical constants on `com.onyx.android.sdk.pennative.PenConfig`):
+
+| Value | Constant | Implementation class | Result type |
+|---:|---|---|---|
+| 1 | `NEOPEN_PEN_TYPE_BRUSH` | `NeoBrushPen` | `PenPointResult` (variable-size points) |
+| 2 | `NEOPEN_PEN_TYPE_FOUNTAIN` | `NeoFountainPen` | `PenPointResult` |
+| 3 | `NEOPEN_PEN_TYPE_MARKER` | `NeoMarkerPen` | `PenPointResult` |
+| 4 | `NEOPEN_PEN_TYPE_CHARCOAL` | `NeoCharcoalPen` | `PenTextureResult` (bitmap stamps) |
+| 5 | `NEOPEN_PEN_TYPE_CHARCOAL_V2` | `NeoCharcoalPenV2` | `PenTextureResult` |
+| 6 | `NEOPEN_PEN_TYPE_FOUNTAIN_V2` | `NeoFountainPenV2` | `PenPointResult` — holds its own `NeoPenConfig` |
+| 7 | `NEOPEN_PEN_TYPE_PENCIL` | `NeoPencilPen` | `PenBrushResult` (masked grain stamps) |
+| 8 | `NEOPEN_PEN_TYPE_BALLPOINT` | `NeoBallpointInkPen` (`NeoBallpointPen.create(fastMode)`) | `PenPathResult` |
+| 9 | `NEOPEN_PEN_TYPE_SQUARE` | `NeoSquarePen` | `PenPointResult` — flat/calligraphic nib |
+| 10 | `NEOPEN_PEN_TYPE_BRUSH_SIGN` | *(no dedicated class in 1.1.1)* | — |
+
+Non-native pens also exist for simple cases: `NeoSinglePathResultPen` (one `Path` for the whole
+stroke), `NeoSegmentPathResultPen` (per-segment paths), `NeoMarkerPenV2` (extends
+`NeoSinglePathResultPen`).
+
+### `NeoPenConfig` — the full field list, with real defaults
+
+Constructed via `new NeoPenConfig()`; fields are public and there are fluent setters for a subset.
+Defaults below are read from the constructor bytecode (fields not listed default to `0`/`false`):
+
+| Field | Type | Default | Meaning |
+|---|---|---|---|
+| `type` | `int` | `1` (BRUSH) | Pen type constant above |
+| `color` | `int` | `0xFF000000` | ARGB |
+| `width` | `float` | `3.0` | Nominal stroke width |
+| `minWidth` | `float` | `0.001` | Width floor at minimum pressure |
+| `fastMode` | `boolean` | `false` | Cheaper solve; fewer output points |
+| `rotateAngle` | `int` | `0` | Nib rotation (square/calligraphy) |
+| `tiltEnabled` | `boolean` | `false` | Feed stylus tilt into width/shape |
+| `tiltScale` | `float` | `3.0` | Tilt gain (`TILT_SCALE_VALUE` const is `5.0`) |
+| `directionEnabled` | `boolean` | `false` | Stroke direction affects nib orientation |
+| `maxTouchPressure` | `float` | `1.0` | Pressure normalizer — feed `EpdController.getMaxTouchPressure()` |
+| `dpi` | `float` | `320.0` | Screen DPI |
+| `displayScaleX` / `displayScaleY` | `float` | `1.0` / `1.0` | Display scale |
+| `scalePrecision` | `float` | `1.0` | Zoom precision; `NeoPenConfig.Companion.getPrecision(f)` computes it |
+| `brushSpacing` | `float` | `0.25` | Gap between stamps (`PenUtils.DEFAULT_BRUSH_SPACING`) |
+| `brushShape` | `int` | `0` (CIRCLE) | `NEOPEN_BRUSH_SHAPE_CIRCLE`=0, `ELLIPSE`=1, `RECTANGLE`=2 |
+| `brushRatio` | `float` | `5.0` | Stamp aspect ratio |
+| `brushAngle` | `float` | `0.0` | Stamp angle in degrees |
+| `pressureSensitivity` | `float` | `0.3` | Pressure→width curve |
+| `velocitySensitivity` | `float` | `0.5` | Velocity→width curve |
+| `smoothLevel` | `float` | `0.6` | Path smoothing |
+| `velocityAmplifier` | `float` | `0.0` | Velocity→width multiplier |
+| `velocityIgnoreThreshold` | `float` | `0.0` | Below this, ignore velocity |
+| `velocityLowerBound` / `velocityUpperBound` | `float` | `0.0` | Velocity clamp |
+| `startPointLimit` | `float` | `0.0` | Start-of-stroke shaping |
+| `startLengthLimit` | `float` | `0.0` | Start-of-stroke shaping |
+| `endVelocitySensitivity` | `float` | `0.0` | End-of-stroke taper |
+| `alphaFactor` | `float` | `1.0` | Opacity multiplier (private; getter/setter) |
+| `brushShapes` | `List<Bitmap>` | `null` | Custom stamp bitmaps (pencil/charcoal) |
+
+`NeoPenConfig.toNativeConfig()` converts to `pennative.PenConfig`, which carries **two extra fields
+not present on `NeoPenConfig`**: `endThinningRate` and `ignorePressure`. Those are reachable only by
+building a `PenConfig` directly and calling `NeoPenNative.createPen(type, config)`.
+
+`resetBrushRatioAndAngle()` restores `brushRatio`/`brushAngle` to type-appropriate values.
+
+### Per-pen default configs shipped by the SDK
+
+Only three pens expose a `defaultPenConfig()`; the rest take a config you build:
+
+```kotlin
+NeoPencilPen.defaultPenConfig()      // type=7, minWidth=1.0f, brushSpacing=0.25f, pressureSensitivity=0.3f
+NeoBallpointInkPen.defaultPenConfig()// type=8, smoothLevel=0.6f
+NeoSquarePen.defaultPenConfig()      // type=9, directionEnabled=false, brushShape=RECTANGLE(2),
+                                     //         brushRatio=10.0f, brushAngle=45.0f
+```
+
+`NeoSquarePen.NEO_SQUARE_PEN_DEFAULT_BRUSH_RATION = 10.0f` is the named constant for that ratio.
+`FountainShapes.createNeoPenV2(width, minWidth, displayScaleX, displayScaleY, scalePrecision,
+createScale, pressureSensitivity: Float?, fastMode: Boolean, smoothLevel: Float?)` is the
+purpose-built factory for the fountain-v2 pen (parameter names preserved in the AAR).
+
+### Tuning constants worth copying rather than inventing
+
+From `com.onyx.android.sdk.pen.utils.PenUtils` (penbrush):
+
+| Constant | Value |
+|---|---:|
+| `DEFAULT_BRUSH_SPACING` | `0.25` |
+| `MIN_PRESSURE` | `0.001` |
+| `DEFAULT_PRESSURE_SENSITIVITY` | `0.375` (range `0.15`–`0.6`) |
+| `DEFAULT_VELOCITY_SENSITIVITY` | `0.5` |
+| `DEFAULT_SMOOTH_LEVEL` | `0.6` |
+| `DEFAULT_ALPHA_FACTOR` | `1.0` |
+| `DEFAULT_DPI` | `320.0` |
+| `MIN_PRECISION` / `MIDDLE_PRECISION` / `MAX_PRECISION` | `1.0` / `4.0` / `8.0` |
+| `KEPLER_*_PRESSURE_SENSITIVITY` | min `0.0`, default `0.3`, max `1.0` |
+| `KEPLER_*_SMOOTH_LEVEL` | min `0.0`, max `1.0` |
+
+`toNormalizedPressureSensitivity(f)` / `toPercentPressureSensitivity(f)` convert between the
+0.15–0.6 internal range and a 0–1 UI slider.
+
+From `com.onyx.android.sdk.data.note.NoteConstant` (base) — the width multipliers BOOX Notes itself
+applies so different pens *feel* like the same nominal width:
+
+| Constant | Value |
+|---|---:|
+| `BRUSH_STROKE_WIDTH_EXTRA_SCALE` | `2.0` |
+| `CHARCOAL_STROKE_WIDTH_EXTRA_SCALE` | `5.0` |
+| `PEN_STROKE_WIDTH_WITH_TILT_EXTRA_SCALE` | `3.0` |
+| `FILL_WIDTH_EXTRA_SCALE` | `2.0` |
+| `MIN_STROKE_WIDTH_FOR_ENABLE_ANTI_ALIAS` | `2.0` |
+| `COMMON_PEN_RESUME_DELAY_TIME_MS` | `150` |
+| `COLOR_DEVICE_PEN_RESUME_DELAY_TIME_MS` | `500` |
+| `COMMON_DEVICE_QUIT_FAST_MODE_DELAY_TIME_MS` | `5000` |
+
+`MIN_FOUNTAIN_PEN_WIDTH = 1.0f` lives on `NeoFountainPenWrapper`.
+
+### How a `NeoPen` is driven
+
+```
+NeoPen (abstract, holds a native penHandle)
+  ├─ onPenDown(TouchPoint, predict: Boolean) : Pair<PenResult, PenResult>   // (real, prediction)
+  ├─ onPenMove(List<TouchPoint>, TouchPoint) : Pair<PenResult, PenResult>
+  ├─ onPenUp(TouchPoint, predict) : Pair<PenResult, PenResult>
+  └─ destroy()
+```
+
+Each call returns `(realInk, predictionInk)` — the second is the *speculative* forward extrapolation
+used to hide latency. `NeoPenRender` wraps a `NeoPen` and manages result accumulation:
+
+- `NeoPenRender(neoPen)` · `render(canvas, paint)` · `render(canvas, paint, points)`
+- `onTouchDown/onTouchMove/onTouchDone`, `onTouchPointList(points)`, `onTouchData(TouchData)`
+- `loadPenPointArrays(): FloatArray` / `loadPenPointSizeArrays(): IntArray` — extract the solved
+  geometry, e.g. to persist a rasterized-width stroke
+- `POINT_LIST_BATCH_LIMIT = 1000`, `DEFAULT_POINT_COUNT_THRESHOLD = 100`
+- `reset()` / `resetPredict()` / `destroyPen()`
+
+Subclasses: `PencilNeoPenRender` (tracks `brushPointCount`), `CharcoalNeoPenRender`,
+`NeoPenRenderWrapper` (adds prediction append + a `segment` flag), `BallpointPenRenderWrapper`.
+
+### `PenResult` — the four geometry shapes a pen can emit
+
+All four expose `getRect(): RectF`, `append(PenResult)`, `draw(Canvas, Paint)`, `clearCache()`:
+
+| Class | Payload | Drawn as |
+|---|---|---|
+| `PenPathResult` | `Path` + `points: FloatArray` + `pointSizeArray: IntArray` | Path fill/stroke |
+| `PenPointResult` | `List<PenPointInk(x, y, size)>` | Per-point dabs of varying size |
+| `PenBrushResult` | `List<PenBrushInk(x, y, size: UByte, angle36: UByte, alpha: UByte)>` + a `BrushMaskGenerator` | Alpha-masked bitmap stamps |
+| `PenTextureResult` | `List<PenTextureInk(x, y, bitmap)>` | Bitmap blits |
+
+`PenBrushResult` details: `POINT_SIZE_FACTOR = 255.0f`, alpha clamped to `[4, 255]`, minimum point
+size `2`, and it caches a `PaintHolder` per (size, alpha) pair. It also supports `matrix`,
+`pointSizeScale`, and `isEnabledClipRect` for zoomed rendering.
+
+### How the pencil texture is actually produced
+
+This answers "Pencil … texture has 2 variations" from the SDK side, and it is more interesting than
+a flag:
+
+- `onyxsdk-penbrush` ships exactly one asset: **`res/drawable/pencil.png`, a 256×256 8-bit RGBA
+  greyscale graphite blob.** That is the entire grain vocabulary.
+- `NeoPencilPen.Companion.prepareRotatedBitmaps()` decodes it once and pre-rotates it into **36
+  variants** (10° apart), cached in a `ConcurrentHashMap<Int, Bitmap>`.
+- Per output point the native solver returns a `PenBrushInk` carrying `angle36` (which rotation) plus
+  a `size` and `alpha` byte. `BrushMaskGenerator.getMaskBitmap(MaskKey(size, angle))` memoizes the
+  scaled+rotated mask, and `PenBrushResult.drawMask()` blits it.
+- So "pencil texture" = *stamp a rotated, scaled, alpha-modulated grain bitmap along the solved
+  path*. Substituting `NeoPenConfig.brushShapes: List<Bitmap>` replaces the grain entirely.
+
+The **two texture variations** the BOOX UI offers are a separate, explicit enum in `onyxsdk-base`:
+
+```java
+com.onyx.android.sdk.data.note.PenTexture {
+    int CHARCOAL_SHAPE_V1 = 1;
+    int CHARCOAL_SHAPE_V2 = 2;
+}
+```
+
+carried on a stroke via `PenAttrs.setTexture(int)` / `getTexture()`, which is what
+`ShapeCreateArgs.setPenAttrs(...)` and `PenArgs.setAttrs(...)` transport. V1/V2 correspond to
+`NeoCharcoalPen` (type 4) vs `NeoCharcoalPenV2` (type 5) — i.e. **the "texture" toggle selects
+between two whole pen implementations**, not a parameter on one.
+
+### Charcoal rendering is bitmap-pool based
+
+`NeoCharcoalPenWrapper` / `NeoCharcoalPenV2Wrapper` take a `PenRenderArgs` plus a caller-supplied
+`List<Bitmap>` pool:
+
+```java
+NeoRenderPoint[] computeStrokeRenderPoints(PenRenderArgs renderArgs, List<Bitmap> pixelBitmapPool);
+float[]          computeStrokePoints(PenRenderArgs renderArgs, List<Bitmap> pixelBitmapPool);
+void             drawNormalStroke(PenRenderArgs renderArgs);   // ≤ threshold points
+void             drawBigStroke(PenRenderArgs renderArgs);      // long strokes; batched
+```
+
+`PenRenderArgs` is a fluent bag: `canvas`, `paint`, `points`, `penType`, `color`, `strokeWidth`,
+`createArgs: ShapeCreateArgs`, `screenMatrix`, `renderMatrix`, `contentRect`, `tiltEnabled`, `erase`.
+`NeoRenderPoint` is `{ x, y, size, bitmapIndex }` — an index into that bitmap pool.
+The V1 wrapper batches at 5000/1000 points; V2 at 5000/500.
+
+### The easy path: three one-call software renderers
+
+For fountain / brush / marker there is no need to touch `NeoPen` at all. `onyxsdk-pen` ships static
+helpers that build the pen, solve the stroke, and draw it in a single call (parameter names below are
+preserved in the AAR, not guessed):
+
+```java
+NeoFountainPenWrapper.drawStroke(Canvas canvas, Paint paint, List<TouchPoint> points,
+                                 float displayScale, float strokeWidth,
+                                 float maxTouchPressure, boolean erase);
+
+NeoBrushPenWrapper.drawStroke(Canvas canvas, Paint paint, List<TouchPoint> points,
+                              float strokeWidth, float maxTouchPressure, boolean erase);
+
+NeoMarkerPenWrapper.drawStroke(Canvas canvas, Paint paint, List<TouchPoint> list,
+                               float strokeWidth, boolean erase);
+```
+
+Each also exposes `computeStrokePoints(...)` returning a `List<TouchPoint>` whose `size` field is the
+solved per-point width — useful if you want to persist the solved geometry instead of re-solving.
+`NeoFountainPenWrapper.hasPressure(points)` reports whether a captured stroke carries usable
+pressure. All three route through `NeoPenUtils.computeStrokePoints(type, points, strokeWidth,
+maxTouchPressure)`, which dispatches to `NeoMarkerPen` / `NeoFountainPen` / `NeoBrushPen`
+`Companion.create(config)` — i.e. the legacy-looking wrappers are thin shims over the modern native
+pens, and are fully supported.
+
+`PenUtils.drawStrokeByPointSize(canvas, paint, points, erase)` is the shared rasterizer underneath.
+
+### One trap in this package
+
+`com.onyx.android.sdk.pen.NeoPenWrapper` (note: **not** `NeoPenUtils`) is a **static, process-global,
+single-pen** legacy API whose static initializer does `System.loadLibrary("neo_pen")`. **`libneo_pen.so`
+is not shipped in any Onyx AAR** — it exists only inside BOOX firmware/the stock Notes app. Calling
+`NeoPenWrapper` from a third-party app will throw `UnsatisfiedLinkError`. The supported native entry
+point is `com.onyx.android.sdk.pennative.NeoPenNative`, which loads `neopen_jni` — and *that* library
+**is** bundled in `onyxsdk-pennative`. `NeoPenConfigWrapper` is the matching legacy config (only 7
+fields) and should likewise be ignored in favour of `NeoPenConfig`.
+
+---
+
+## What the input layer already gives us
+
+`RawInputCallback` (which `OnyxNotebookView` already implements) delivers
+`com.onyx.android.sdk.data.note.TouchPoint`, which extends `com.onyx.android.sdk.base.data.TouchPoint`:
+
+```kotlin
+class TouchPoint {
+    var x: Float
+    var y: Float
+    var pressure: Float      // raw; normalize against EpdController.getMaxTouchPressure()
+    var size: Float          // contact size / solved width, depending on producer
+    var tiltX: Int
+    var tiltY: Int
+    var timestamp: Long
+}
+```
+
+**Pressure and tilt are already arriving on every point we receive** — `onRawDrawingTouchPointListReceived`
+gets a `TouchPointList` of these. Notesprout reads only `x`/`y` today (`OnyxNotebookView.kt:435`).
+
+Supporting API:
+
+- `EpdController.getMaxTouchPressure()` — the divisor for normalizing `pressure`; every `NeoPen`
+  helper wants it as `maxTouchPressure`.
+- `EpdController.getTouchWidth()` / `getTouchHeight()` — digitizer resolution (differs from screen).
+- `TouchPointList` — `getPoints()`, `getRenderPoints()`, `applyMatrix`, `scaleAllPoints`,
+  `translateAllPoints`, `rotateAllPoints`, `mirrorAllPoints`, `toTinyPointList()`,
+  `getBoundingRect(points)`.
+- `TouchPoint.size2Tilt(int)` / `tilt2Size(int, int)` — BOOX packs tilt into the size channel in its
+  own compact `TinyPoint` format; these are the converters.
+- `RawInputCallback.onPenActive(TouchPoint)` and `onPenUpRefresh(RectF)` are optional overrides.
+- Events on the SDK bus: `PenActiveEvent`, `PenDeactivateEvent`, `PenDownPointLostEvent`
+  (`TouchHelper.register/unregister(Any)`, `TouchHelper.getEventBusHolder()`).
+
+`TouchPoint.OBJECT_BYTE_COUNT = 32` — the SDK's own per-point wire size, for comparison with our
+8 bytes/point in `StrokeCodec`.
+
+---
+
+## Mapping the BOOX Notes tool list onto the SDK
+
+The tool set visible in BOOX's own Notes app maps onto SDK constants as follows. The `NoteShapeType`
+column is BOOX Notes' *persisted* tool identifier (from `onyxsdk-base`) — useful as evidence of intent,
+and as a compatibility reference if we ever import BOOX notes.
+
+| BOOX Notes UI tool | `NoteShapeType` | Overlay style (Path A) | Software pen (Path B) | Extra settings BOOX exposes |
+|---|---:|---|---|---|
+| **Pen** | `SHAPE_PENCIL_SCRIBBLE` = 2 | `STROKE_STYLE_PENCIL` = 0 | — (plain solver) | width, pressure sensitivity |
+| **Pen → Calligraphy** | `SHAPE_LATIN_CALLIGRAPHY_PEN_SCRIBBLE` = 60 / `SHAPE_SQUARE_PEN` = 47 | `STROKE_STYLE_SQUARE_PEN` = 7 | `NEOPEN_PEN_TYPE_SQUARE` = 9 | width |
+| **Pen → Fountain** | `SHAPE_FOUNTAIN_PEN_SCRIBBLE` = 4 | `STROKE_STYLE_FOUNTAIN` = 1 | `NEOPEN_PEN_TYPE_FOUNTAIN(_V2)` = 2 / 6 | width |
+| **Brush Pen** | `SHAPE_NEO_BRUSH` = 21 (`SHAPE_BRUSH_SCRIBBLE` = 5 legacy) | `STROKE_STYLE_NEO_BRUSH` = 3 | `NEOPEN_PEN_TYPE_BRUSH` = 1 | width |
+| **Ballpoint Pen** | `SHAPE_OILY_PEN_SCRIBBLE` = 3 | *(no overlay style)* | `NEOPEN_PEN_TYPE_BALLPOINT` = 8 | width |
+| **Pencil** | `SHAPE_CHARCOAL_SCRIBBLE` = 22 | `STROKE_STYLE_CHARCOAL` = 4 / `CHARCOAL_V2` = 6 | `NEOPEN_PEN_TYPE_PENCIL` = 7, `CHARCOAL` = 4, `CHARCOAL_V2` = 5 | width + **texture** (`PenTexture.CHARCOAL_SHAPE_V1/V2`) |
+| **Marker** | `SHAPE_MARKER_SCRIBBLE` = 15 | `STROKE_STYLE_MARKER` = 2 | `NEOPEN_PEN_TYPE_MARKER` = 3 | width |
+| *(also present)* | — | `STROKE_STYLE_DASH` = 5 | — | dashed stroke |
+| *(also present)* | `SHAPE_ASIA_CALLIGRAPHY_PEN_SCRIBBLE` = 61 | — | `NEOPEN_PEN_TYPE_BRUSH_SIGN` = 10 | — |
+
+Notes on this mapping:
+
+- The names do **not** line up cleanly across layers. BOOX's UI "Pencil" is the SDK's *charcoal*
+  family; the SDK's `STROKE_STYLE_PENCIL` is what the UI calls plain "Pen". BOOX's "Ballpoint" is
+  internally *oily pen*. Do not assume a constant means what its English name suggests.
+- **Ballpoint has no Path A overlay style at all** — there is no `STROKE_STYLE_BALLPOINT`. It exists
+  only as a software pen (type 8). Any ballpoint tool would have to render its live stroke as some
+  other overlay style and only become a true ballpoint on repaint.
+- BOOX also stores per-tool preferences rather than one global width — `NotePenInfo` keeps four
+  `Map<Int, Float>` keyed by shape type: `penWithMap` [sic], `eraseWidthMap`,
+  `penPressureSensitivityMap`, `penSmoothLevelMap`. That is a useful shape for a persisted tool model:
+  **width, pressure sensitivity and smoothing are remembered per tool, and the eraser has its own
+  width per tool too.**
+- `PenArgs` is BOOX's per-tool record: `{ id: String, type: Int, width: Float, color: Int,
+  attrs: PenAttrs, pressureSensitivityV2: Float?, smoothLevel: Float? }`, and `QuickPenList` holds
+  the user's favourites row.
+
+---
+
+## Where Notesprout stands today
+
+Purely factual, so a future session knows what already exists and what does not.
+
+**Currently armed** (`OnyxNotebookView.kt`):
+
+```kotlin
+touchHelper
+    .setStrokeWidth(3.0f)          // hardcoded, line 2564
+    .setStrokeColor(penColorInt)   // the one thing that is user-controlled
+// setStrokeStyle is never called → the overlay runs whatever style the firmware defaults to
+```
+
+Committed strokes repaint as a flat polyline: `Path` of `lineTo` segments through
+`strokePaint` (`Style.STROKE`, `Cap.ROUND`, `Join.ROUND`, `strokeWidth = 3f`, anti-aliased), with only
+the colour varying per stroke (`drawStrokePath`).
+
+**Storage already has room, unused:**
+
+| Slot | State |
+|---|---|
+| `StrokePoint.pressure: Float?`, `StrokePoint.tilt: Float?` | Present in the model, always `null` — "hardware capture is not implemented yet" |
+| `StrokeCodec` `FLAG_PRESSURE = 0x01`, `FLAG_TILT = 0x02` | Reserved in the binary format; v1 writes `flags = 0`. The decoder already derives stride from flags, **so per-point pressure/tilt can be added without a blob version bump** |
+| `notebook.width` / `notebook.strokeWidth` columns | Exist (`NotebookObject`) |
+| A per-stroke *tool/style* field | **Does not exist** in any form — not in the columns, not in `StrokeData`, not in `StrokeCodec` |
+| `LiveStroke` pressure/tilt preservation | Already implemented — `srcPoints` carries them through moves so a re-save cannot destroy them |
+
+---
+
+## Open questions a future implementation session must answer on-device
+
+None of these can be resolved from the binaries:
+
+1. **Which overlay styles each Tier-1 device actually renders.** Styles 5 (`DASH`), 6
+   (`CHARCOAL_V2`), 7 (`SQUARE_PEN`) are unknown on G102 / G6 / MAX / P2P; failures are silent.
+   Needs a visual sweep writing one stroke per style.
+2. **Whether style survives our fast-mode pin.** `openRawDrawing` applies
+   `HWR_APP_SCOPE` fast mode (see [`docs/drawing-engine.md`](drawing-engine.md)). Colour is known to
+   survive it (see the colour-ink work); style is untested. A texture-heavy style plausibly interacts
+   with the handwriting waveform differently.
+3. **Whether `setStrokeStyle` needs `restartRawDrawing()`** the way `setLimitRect` does — a known
+   Onyx pattern where a setter is ignored on a live session.
+4. **Pressure fidelity per device.** `getMaxTouchPressure()` varies; BOOX advertises 4096 levels but
+   the reported value is what matters.
+5. **Cost of Path-B pens on a full page.** Charcoal/pencil stamp per point with bitmap blits; a page
+   of ~11k strokes repainting through `PenBrushResult.drawMask` has not been measured, and our render
+   model (committed-content `RenderNode` + neighbour prefetch) assumes cheap polylines.
+6. **Whether style 1's dual name means dual behaviour** — i.e. whether firmware "BRUSH" and the
+   SDK's "FOUNTAIN" produce the stroke either name implies.
+
+## References
+
+- [OnyxAndroidDemo — Onyx-Pen-SDK.md](https://github.com/onyx-intl/OnyxAndroidDemo/blob/master/doc/Onyx-Pen-SDK.md) (stale; documents 1.2.1 and two stroke styles)
+- [OnyxAndroidDemo repository](https://github.com/onyx-intl/OnyxAndroidDemo) — `ScribbleTouchHelperDemoActivity` etc.; no NeoPen sample
+- [Maven: com.onyx.android.sdk » onyxsdk-pen](https://mvnrepository.com/artifact/com.onyx.android.sdk/onyxsdk-pen)
+- BOOX artifact repository (version lists): `http://repo.boox.com/repository/maven-public/com/onyx/android/sdk/`
+- [BOOX — What Makes BOOX Stand Out as a Powerful Note-Taker](https://shop.boox.com/blogs/news/what-makes-boox-a-powerful-note-taker) (5 brushes, 16 colours, 25 widths, 4096 pressure levels)
+- [BOOX Stylus & Pen Guide](https://help.boox.com/hc/en-us/articles/9146157867668-BOOX-Stylus-Pen-Guide)
+- Related internal docs: [`docs/drawing-engine.md`](drawing-engine.md) (EPD rules, render model),
+  [`docs/design-system.md`](design-system.md) (the ink-only colour exception),
+  [`docs/toolbar.md`](toolbar.md) (where a tool picker would live)
