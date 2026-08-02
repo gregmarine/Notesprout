@@ -28,6 +28,15 @@
             android:name="com.notesprout.android.debug.ColorInkSpikeActivity"
             android:exported="true"
             android:label="Color Ink Spike" />
+        <!-- Pen Tool Spike: the on-device half of docs/onyx-pen-tools.md. Walks all 9 overlay
+             stroke styles (path A, firmware) against all 13 software renderers (path B, NeoPen),
+             and reports pressure/tilt actually observed per stroke. Findings pending — first run
+             is NoteAir5C.
+             adb shell am start -n com.notesprout.android.dev/com.notesprout.android.debug.PenToolSpikeActivity -->
+        <activity
+            android:name="com.notesprout.android.debug.PenToolSpikeActivity"
+            android:exported="true"
+            android:label="Pen Tool Spike" />
         <!-- Reveals the global passphrase so the encrypted index stays sqlcipher-inspectable. Debug only.
              adb shell am start -n com.notesprout.android.dev/com.notesprout.android.debug.DebugKeyActivity -->
         <activity
