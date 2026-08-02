@@ -133,6 +133,12 @@ class PenToolSpikeActivity : AppCompatActivity() {
          */
         val RENDERERS: List<PenSpec> = listOf(
             PenSpec("Polyline (production today)", Kind.POLYLINE, fill = false),
+            // Commits nothing and skips the white fill, so the firmware's own overlay ink is left
+            // untouched on the panel and accumulates stroke after stroke. That is what makes the
+            // path-A style walk a side-by-side comparison of a finished page rather than nine
+            // separate did-it-change-when-I-lifted judgements. Kept next to Polyline so it is one
+            // tap away from the baseline.
+            PenSpec("None (leave overlay ink)", Kind.NONE, fill = false),
             PenSpec("Fountain (wrapper)", Kind.W_FOUNTAIN, fill = false),
             PenSpec("Brush (wrapper)", Kind.W_BRUSH, fill = false),
             PenSpec("Marker (wrapper)", Kind.W_MARKER, fill = false),
@@ -152,7 +158,7 @@ class PenToolSpikeActivity : AppCompatActivity() {
             listOf("Auto" to null, "STROKE" to false, "FILL" to true)
     }
 
-    enum class Kind { POLYLINE, W_FOUNTAIN, W_BRUSH, W_MARKER, NEOPEN }
+    enum class Kind { POLYLINE, NONE, W_FOUNTAIN, W_BRUSH, W_MARKER, NEOPEN }
 
     data class PenSpec(
         val label: String,
@@ -178,6 +184,7 @@ class PenToolSpikeActivity : AppCompatActivity() {
     private lateinit var controlBar: LinearLayout
 
     private lateinit var styleButton: AppCompatButton
+    private lateinit var autoButton: AppCompatButton
     private lateinit var widthButton: AppCompatButton
     private lateinit var renderButton: AppCompatButton
     private lateinit var paintButton: AppCompatButton
@@ -189,14 +196,27 @@ class PenToolSpikeActivity : AppCompatActivity() {
     private var paintIndex = 0
     private var scopeIndex = 0
     private var showLabels = true
+    private var autoAdvance = false
     private var lastAction = "—"
 
     /** Environment probes, read once at startup. */
     private var envReport = "not read"
     private var nativeProbe = "not probed"
+    private var resManagerProbe = "not probed"
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // REQUIRED before any bitmap-backed pen. NeoPencilPen decodes `pencil.png` out of the SDK's
+        // own resources and the charcoal pens stamp bitmaps too, all of which resolve through
+        // ResManager's `appContext`. Nothing in TouchHelper or NeoPenNative initializes it — BOOX's
+        // Notes app does it at its own startup — and without it the pencil silently renders as a
+        // solid grainless stroke until something forces the pen to be rebuilt, at which point it
+        // throws UninitializedPropertyAccessException instead.
+        resManagerProbe = runCatching {
+            com.onyx.android.sdk.base.utils.ResManager.init(applicationContext)
+            "ResManager.init OK"
+        }.getOrElse { "ResManager.init FAILED — ${it.javaClass.simpleName}: ${it.message}" }
 
         envReport = readEnv()
         nativeProbe = probeNativePen()
@@ -294,6 +314,17 @@ class PenToolSpikeActivity : AppCompatActivity() {
                 lastAction = "setStrokeStyle + restartRawDrawing"
                 refreshStatus()
             })
+            // Steps the style forward on each pen-up so a full style walk needs no chrome taps at
+            // all. That matters more than convenience: touching chrome calls releaseRender(), which
+            // hands the panel back to the Android layer — and under the "None" renderer that layer
+            // is blank, so the overlay ink being compared vanishes. Not touching anything is the
+            // only way the accumulated-page comparison survives.
+            autoButton = button("Auto") {
+                autoAdvance = !autoAdvance
+                lastAction = "autoAdvance=${if (autoAdvance) "on" else "off"}"
+                refreshStatus()
+            }
+            addSpaced(autoButton)
             widthButton = button("Width") {
                 widthIndex = (widthIndex + 1) % WIDTHS.size
                 canvas.setWidth(currentWidth())
@@ -418,6 +449,7 @@ class PenToolSpikeActivity : AppCompatActivity() {
 
     private fun refreshStatus() {
         styleButton.text = "Style: ${styleLabel()}"
+        autoButton.text = if (autoAdvance) "Auto: ON" else "Auto: off"
         widthButton.text = "W: ${currentWidth().toInt()}"
         renderButton.text = "Render: ${RENDERERS[renderIndex].label}"
         paintButton.text = "Paint: ${PAINT_MODES[paintIndex].first}"
@@ -425,7 +457,7 @@ class PenToolSpikeActivity : AppCompatActivity() {
 
         val text = buildString {
             append(envReport).append('\n')
-            append(nativeProbe).append('\n')
+            append(nativeProbe).append("  ").append(resManagerProbe).append('\n')
             append("style=${styleLabel()}  width=${currentWidth()}  render=${RENDERERS[renderIndex].label}")
             append("  paint=${PAINT_MODES[paintIndex].first}  scope=${scopeLabel()}  strokes=${canvas.strokeCount()}\n")
             append("stroke: ").append(canvas.lastStrokeReport).append('\n')
@@ -550,6 +582,14 @@ class PenToolSpikeActivity : AppCompatActivity() {
                 lastStrokeReport = "pts=${copied.size} ${pressureSummary(stroke)}"
                 Slog.d(TAG) { "STROKE style=$overlayStyle w=$strokeWidth $lastStrokeReport" }
                 invalidate()
+                if (autoAdvance) post {
+                    styleIndex = (styleIndex + 1) % OVERLAY_STYLES.size
+                    // Deliberately no restart and no chrome interaction — the next stroke reports
+                    // whether a bare setStrokeStyle on a live session took effect.
+                    setOverlayStyle(currentStyle(), restart = false)
+                    lastAction = "auto → ${styleLabel()}"
+                    refreshStatus()
+                }
             }
 
             override fun onBeginRawErasing(shortcutErasing: Boolean, touchPoint: TouchPoint) = Unit
@@ -650,6 +690,17 @@ class PenToolSpikeActivity : AppCompatActivity() {
 
         override fun onDraw(c: Canvas) {
             super.onDraw(c)
+
+            // "None": paint nothing at all, not even the white ground — a white fill would be the
+            // one thing capable of hiding the overlay ink we are trying to preserve. The panel then
+            // shows pure firmware output. Labels are skipped too, so nothing composites over it;
+            // strokes are identified by their order down the page instead.
+            // ...except with nothing captured, where the white fill is how Clear wipes the page.
+            if (RENDERERS[renderIndex].kind == Kind.NONE && strokes.isNotEmpty()) {
+                lastRenderReport = "none — overlay ink left on panel (${strokes.size} strokes captured)"
+                return
+            }
+
             c.drawColor(Color.WHITE)
             if (strokes.isEmpty()) return
 
@@ -697,6 +748,9 @@ class PenToolSpikeActivity : AppCompatActivity() {
 
             when (spec.kind) {
                 Kind.POLYLINE -> drawPolyline(c, stroke)
+                // Reachable only for a stroke *captured* under "None" that is now being repainted
+                // under some other renderer — it stays unpainted until Restamp adopts it.
+                Kind.NONE -> Unit
 
                 // displayScale=1f — the spike draws 1:1, no zoom.
                 Kind.W_FOUNTAIN -> NeoFountainPenWrapper.drawStroke(

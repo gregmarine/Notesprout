@@ -498,26 +498,160 @@ the colour varying per stroke (`drawStrokePath`).
 
 ---
 
-## Open questions a future implementation session must answer on-device
+## Device findings — NoteAir5C, 2026-08-01
 
-None of these can be resolved from the binaries:
+Measured with `debug/PenToolSpikeActivity` (see below). Every question this document originally
+listed as unanswerable from the binaries came back **positive**, including the three I expected to
+fail. Device under test:
 
-1. **Which overlay styles each Tier-1 device actually renders.** Styles 5 (`DASH`), 6
-   (`CHARCOAL_V2`), 7 (`SQUARE_PEN`) are unknown on G102 / G6 / MAX / P2P; failures are silent.
-   Needs a visual sweep writing one stroke per style.
-2. **Whether style survives our fast-mode pin.** `openRawDrawing` applies
-   `HWR_APP_SCOPE` fast mode (see [`docs/drawing-engine.md`](drawing-engine.md)). Colour is known to
-   survive it (see the colour-ink work); style is untested. A texture-heavy style plausibly interacts
-   with the handwriting waveform differently.
-3. **Whether `setStrokeStyle` needs `restartRawDrawing()`** the way `setLimitRect` does — a known
-   Onyx pattern where a setter is ignored on a live session.
-4. **Pressure fidelity per device.** `getMaxTouchPressure()` varies; BOOX advertises 4096 levels but
-   the reported value is what matters.
-5. **Cost of Path-B pens on a full page.** Charcoal/pencil stamp per point with bitmap blits; a page
-   of ~11k strokes repainting through `PenBrushResult.drawMask` has not been measured, and our render
-   model (committed-content `RenderNode` + neighbour prefetch) assumes cheap polylines.
-6. **Whether style 1's dual name means dual behaviour** — i.e. whether firmware "BRUSH" and the
-   SDK's "FOUNTAIN" produce the stroke either name implies.
+```
+model=NoteAir5C  impl=SDMDevice  colorType=1
+maxPressure=4095.0  touch=20832x15624  dpi=350
+```
+
+### Overlay styles (path A) — all 9 render, all visually distinct
+
+Written as nine strokes down one page, each style set by a bare `setStrokeStyle` with no restart:
+
+| Style | Observed on panel |
+|---|---|
+| `0 PENCIL` | plain even line — **this is what production ships today** |
+| `1 FOUNTAIN` | fluid, clearly pressure-responsive |
+| `2 MARKER` | even width, thinnest of all nine |
+| `3 NEO_BRUSH` | fluid and pressure-responsive, **much thicker** than style 1 |
+| `4 CHARCOAL` | visibly textured, pressure-responsive |
+| `5 DASH` | even-width **dashed** line |
+| `6 CHARCOAL_V2` | textured, **much thicker** than style 4 |
+| `7 SQUARE_PEN` | **45° chisel nib** — one diagonal thick, the other thin and faint, H ≈ V between them |
+| `8 SOFT_ERASER` | draws a very faint mark; true erase behaviour **not tested** (needs crossing existing ink) |
+
+- **Styles 5, 6 and 7 work**, despite sitting past where `EpdController`'s own constant list stops.
+  That was the single biggest risk in this document and it is cleared. **There were no silent
+  failures at all** on this device.
+- **`SQUARE_PEN` is confirmed a 45° chisel**, matching `NeoSquarePen`'s own
+  `brushShape=RECTANGLE, brushAngle=45°, brushRatio=10.0` defaults.
+- **Style 1 behaves like its pen-SDK name, not its device-SDK name.** It is a thin fluid pen
+  (fountain); the fat brush is style 3 `NEO_BRUSH`. When the two layers disagree, trust `TouchHelper`.
+
+### `setStrokeStyle` needs no restart, and survives fast mode
+
+Each style took effect **on the very next stroke** after a bare `setStrokeStyle` on a live session —
+no `restartRawDrawing()`, no teardown, no `setLimitRect` dance. The two `PENCIL` strokes at either
+end of the nine-style walk were indistinguishable, so nothing drifted across it.
+
+The entire walk ran under `scope=HAND_WRITING_REPAINT_MODE` — the app-scope fast-mode pin production
+applies for the whole pen session. **Fast mode does not suppress stroke style**, exactly as it does
+not suppress colour.
+
+### Pressure and tilt are real, and already arriving
+
+| Stroke | Observed |
+|---|---|
+| deliberately light | `pressure=1.0..1067.0  distinct=701` |
+| deliberately heavy | `pressure=80.0..4095.0  distinct=138` |
+| ordinary writing | `pressure=216.0..3610.0  distinct=927` |
+
+Full 1–4095 range reachable, hundreds of distinct values per stroke, and `getMaxTouchPressure()`
+is accurate. Tilt moves too (`tiltX=-17..55`, `tiltY=-13..30` across the session). Two caveats:
+
+- **Pressure saturates at the ceiling.** A firm stroke pins at 4095 and `distinct` collapses; the
+  usable band for width modulation sits below maximum.
+- **Sample density is speed-dependent and can be large.** Observed 114 points for a quick full-width
+  stroke against 2946 for a slow one — a 26× spread. Slow, careful writing samples densely.
+
+Also observed once: **a single continuous pen-down→pen-up produced two
+`onRawDrawingTouchPointListReceived` callbacks.** One callback per stroke is not guaranteed.
+
+### Software renderers (path B) — 13 of 13 work, and some beat our polyline
+
+`libneopen_jni.so` loads and `createPen`/`destroy` round-trips inside a third-party app. Timings
+below are one repaint of a single 2506-point stroke at width 8:
+
+| Renderer | ms | vs production polyline |
+|---|---:|---|
+| Fountain (wrapper) | **1.1** | **6× faster** |
+| Square (NeoPen 9) | 5.9 | faster |
+| FountainV2 (NeoPen 6) | 6.2 | faster |
+| **Polyline — production today** | **7.1** | baseline |
+| Marker (wrapper) | 8.4 | ~same |
+| Fountain (NeoPen 2) | 9.0 | ~same |
+| Brush (wrapper) | 11.5 | 1.6× |
+| Ballpoint (NeoPen 8) | 27.7 | 3.9× |
+| Marker (NeoPen 3) | 35.3 | 5× |
+| Charcoal (NeoPen 4) | 38.0 | 5.4× |
+| Brush (NeoPen 1) | 41.3 | 5.8× |
+| CharcoalV2 (NeoPen 5) | 104.8 | 15× |
+| Pencil (NeoPen 7) | 175.8 | 25× |
+
+**Several solvers are faster than the flat polyline we draw today** — the `NeoFountainPenWrapper`
+one-call helper is 6× faster than building a 2506-segment `Path`, because it reduces the stroke to
+far fewer draw operations. Richer ink is not automatically more expensive.
+
+The stamp-based pens are the expensive tail. Cost tracks point count far more than width (pencil at
+width 32 cost *less* than at width 8 on a shorter stroke).
+
+### Two traps that cost real time here
+
+**1. `ResManager.init(context)` is mandatory before any bitmap-backed pen.**
+
+```kotlin
+com.onyx.android.sdk.base.utils.ResManager.init(applicationContext)   // onyxsdk-baselite
+```
+
+`NeoPencilPen` decodes `pencil.png` from the SDK's own resources and the charcoal pens stamp
+bitmaps; all of it resolves through `ResManager`'s `appContext` lateinit. **Nothing in `TouchHelper`
+or `NeoPenNative` initializes it** — BOOX's Notes app does it at its own startup. The failure mode is
+nasty: the pencil first renders as a **solid, grainless stroke with no error at all**, and only
+throws `UninitializedPropertyAccessException` later, when something forces the pen to be rebuilt.
+
+**2. Texture pens need large widths or their texture does not exist.**
+
+At width 8 the pencil is solid black and the charcoal is a faint dotted hairline — the grain bitmap
+is scaled to the stroke width, so at 8 px there is no room for texture. At width 32 both show proper
+grain. This is what `NoteConstant.CHARCOAL_STROKE_WIDTH_EXTRA_SCALE = 5.0` and
+`BRUSH_STROKE_WIDTH_EXTRA_SCALE = 2.0` are for: BOOX multiplies the nominal width per pen kind before
+rendering. Those multipliers are not cosmetic.
+
+**Also confirmed:** the Paint-style reading in this document is correct — `FILL` for the ballpoint's
+`PenPathResult` outline, `STROKE` for the per-point pens.
+
+### Still open
+
+- **Tier-1 devices are untested.** All of the above is NoteAir5C only. G102 / G6 / MAX / P2P each
+  need their own style sweep, since `setStrokeStyle` failures are silent and firmware-dependent.
+- **Full-page cost is unmeasured.** Single strokes were timed; a page of thousands of strokes
+  repainting through the stamp pens was not. Our render model (committed-content `RenderNode` +
+  neighbour prefetch) should amortize it, but that is an assumption.
+- **`SOFT_ERASER` (style 8) behaviour** — it marks rather than doing nothing, but was never tested
+  against existing ink. Low value: Notesprout has its own eraser.
+
+## The harness
+
+`app/src/debug/kotlin/com/notesprout/android/debug/PenToolSpikeActivity.kt` — debug source set, never
+ships. Retained past its go/no-go, as the colour spike was, because it is the tool for re-running the
+style sweep on each remaining Tier-1 device.
+
+```
+adb shell am start -n com.notesprout.android.dev/com.notesprout.android.debug.PenToolSpikeActivity
+```
+
+Two independent cyclers: **Style** walks the 9 firmware overlay styles (path A), **Render** walks the
+13 software renderers plus a `None` (path B). **Auto** advances the style on each pen-up, which is
+how a full style walk runs without touching chrome. **Restamp** re-renders captured strokes with the
+current pen — the way one piece of handwriting gets compared across all 13.
+
+Three things learned about *running* it that are not obvious:
+
+- **`Render: None` only works if you never touch the chrome.** Any button tap calls `releaseRender()`,
+  which hands the panel back to the Android layer — and with nothing committed that layer is blank,
+  so the overlay ink being compared vanishes. Hence `Auto`.
+- **`screencap` cannot capture path A.** The firmware overlay is not in the Android framebuffer, so
+  overlay-style results are eyes-only and must be reported by the tester. Path B *is* capturable,
+  which is why the software sweep can be driven entirely over adb.
+- **Button coordinates shift between taps.** The controls are `WRAP_CONTENT` in horizontal rows, so a
+  label changing length (`Render: Polyline (production today)` → `Render: Pencil (NeoPen 7)`) moves
+  every button after it. Drive it by resolving live bounds from `uiautomator dump` per tap, not by
+  cached coordinates.
 
 ## References
 

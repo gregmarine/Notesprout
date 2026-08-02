@@ -30,8 +30,17 @@
             android:label="Color Ink Spike" />
         <!-- Pen Tool Spike: the on-device half of docs/onyx-pen-tools.md. Walks all 9 overlay
              stroke styles (path A, firmware) against all 13 software renderers (path B, NeoPen),
-             and reports pressure/tilt actually observed per stroke. Findings pending — first run
-             is NoteAir5C.
+             and reports pressure/tilt actually observed per stroke.
+             Findings (NoteAir5C, 2026-08-01): ALL 9 overlay styles render and are visually
+             distinct — including DASH/CHARCOAL_V2/SQUARE_PEN, which sit past EpdController's own
+             constant list; no silent failures. setStrokeStyle needs no restartRawDrawing and
+             survives the HAND_WRITING_REPAINT_MODE fast-mode pin. Pressure is a real full-range
+             1..4095 channel (tilt too) already arriving on points production discards. All 13
+             software renderers work — libneopen_jni.so loads in a third-party app — and several
+             are FASTER than our polyline. Two traps: ResManager.init(context) is mandatory before
+             any bitmap-backed pen (pencil otherwise renders solid+grainless, then throws on
+             rebuild), and texture pens need large widths or their grain does not exist.
+             Retained as the tool for sweeping the remaining Tier-1 devices.
              adb shell am start -n com.notesprout.android.dev/com.notesprout.android.debug.PenToolSpikeActivity -->
         <activity
             android:name="com.notesprout.android.debug.PenToolSpikeActivity"
