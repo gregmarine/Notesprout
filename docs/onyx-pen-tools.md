@@ -674,8 +674,17 @@ This only became visible with a third device:
 | G102 | `-60..2` | `-4..38` |
 | **G6** | **`2251..3156`** | **`-179..2446`** |
 
-Pressure is a clean 1–4095 everywhere, but **tilt on G6 is reported ~100× larger and with a large
-positive offset.** There is no `getMaxTilt()` anywhere in the SDK to normalize against. So while
+Pressure is a clean 1–4095 everywhere, but **tilt on G6 is reported on a completely different scale**
+— cause unconfirmed, plausibly raw digitizer units rather than degrees (the SDK does carry
+`TouchPoint.size2Tilt`/`tilt2Size` converters for that kind of packing).
+
+*This is not a "the tester tilted the pen more on the small device" artifact*: the span **within a
+single G6 stroke** was 2625 units, where the other three devices' entire observed range across whole
+sessions was about −60..55. A stylus tilts at most ~90° from vertical, so neither the magnitudes nor
+the within-stroke variation can be an angle. MAX later came in at `−24..44`, in line with NA5C and
+G102 — so **G6 is the outlier, not the rule.**
+
+There is no `getMaxTilt()` anywhere in the SDK to normalize against. So while
 `NeoPenConfig.tiltEnabled` / `tiltScale` are tempting, **any tilt-driven feature needs per-device
 calibration**, not merely a per-device maximum the way pressure does. Treat tilt as unusable until
 someone characterizes it per model.
@@ -686,29 +695,54 @@ someone characterizes it per model.
 does `Companion.create(config)` → `onPenDown/Move/Up` → `NeoPen.destroy()` **on every call**. It does
 not leak, but it does construct and tear down a native pen per stroke, per repaint.
 
-The cost is invisible with one stroke and severe in a loop. Same 10-stroke page on G6:
+The **first** call is measurably expensive — the fountain wrapper's cold render of a full page cost
+431 ms on G6 and 789 ms on MAX, against ~60 ms for the cached-pen renderers. Beyond that first call
+the picture is muddy: on MAX it warmed back to 69.7 ms (in line with everything else), on G6 it
+stayed at 413 ms. **Those measurements are too noisy to rank renderers by** — see the benchmark
+warning above; they are single samples on a device that is also refreshing an e-ink panel.
 
-| | cold | warm |
-|---|---:|---:|
-| Polyline | 57.1 ms | **14.0 ms** |
-| `NeoPenRender` pens (cached), typical | ~57 ms | ~55 ms |
-| **Fountain (wrapper)** | **431.9 ms** | **413.7 ms** |
+**What is solid is the structural fact, not the numbers:** the wrappers rebuild a native pen every
+time they are called. **Use them for one-off rendering; for repainting a page, hold a `NeoPen` in a
+`NeoPenRender` and reuse it** — remembering that width is baked in at create time, so the cache has
+to be invalidated when width changes.
 
-On the NA5C's *single*-stroke page that same wrapper was the fastest renderer of all. The reversal is
-entirely stroke count.
+## Fourth device — MAX (BOOX Note Max), 2026-08-03
 
-**Guidance: use the wrappers only for one-off rendering. For repainting a page, hold a `NeoPen` in a
-`NeoPenRender` and reuse it** (remembering that width is baked in at create time, so the cache has to
-be invalidated when width changes). The cached path is what the ~55 ms column above measures.
+The largest panel tested: 13.3", 2400×3200 at dpi 450, digitizer 27040×20280.
+
+```
+model=NoteMax  impl=SDMDevice  colorType=0
+maxPressure=4095.0  touch=27040x20280  dpi=450
+neopen_jni OK   ResManager.init OK
+```
+
+**All 9 overlay styles render, all 13 software renderers pass** — on the heaviest input of the whole
+survey (9 strokes, ~31,600 points; the big digitizer samples far denser, 2655–4051 points per stroke
+against ~1600 on G102).
+
+### Four-device summary
+
+| | NA5C | G102 | G6 | MAX |
+|---|---|---|---|---|
+| Overlay styles | **9/9** | **9/9** | **9/9** | **9/9** |
+| Software renderers | **13/13** | **13/13** | **13/13** | **13/13** |
+| `colorType` | 1 | 0 | 0 | 0 |
+| `getMaxTouchPressure()` | 4095 | **4096** | **4096** | 4095 |
+| tilt scale | ±60 | ±60 | **thousands** | ±44 |
+| panel | 10.3" Kaleido | 10.3" mono | 6" mono | 13.3" mono |
+
+**Onyx's implementation is consistent across their line.** Four devices, four firmwares, three size
+classes, one colour panel — every stroke style renders and every software pen works, with no silent
+failure anywhere. The two things that genuinely vary per device are **`maxTouchPressure` (4095 vs
+4096, split 2–2)** and **tilt scale (G6 alone)** — both read at runtime, never hardcoded.
 
 ### Still open
 
 - **Timings need a real benchmark.** See the warning above: every figure recorded here is a single
   cold render, and warmup dominates. Nothing about relative solver cost should be planned against
   until someone runs repeated passes.
-- **MAX and P2P are untested.** Three of four Tier-1 devices are done (NA5C is Tier 2, also done);
-  `setStrokeStyle` failures are silent and firmware-dependent, so the remaining two still need their
-  own sweep. Nothing has failed on any device so far.
+- **P2P is the last untested Tier-1 device.** `setStrokeStyle` failures are silent, so it still needs
+  its own sweep — but nothing has failed on any of the four devices tested.
 - **Tilt needs per-device characterization** before any tilt-driven feature — see the G6 numbers.
 - **Full-page cost is unmeasured.** Single strokes were timed; a page of thousands of strokes
   repainting through the stamp pens was not. Our render model (committed-content `RenderNode` +

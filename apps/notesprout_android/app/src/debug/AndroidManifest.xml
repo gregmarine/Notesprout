@@ -48,7 +48,9 @@
              no getMaxTilt to normalize against), and the one-call *Wrapper.drawStroke helpers
              create+destroy a native pen per invocation, so they are fine one-off but pathological
              in a page repaint — use a cached NeoPen in a NeoPenRender there.
-             Retained as the tool for sweeping the remaining Tier-1 devices (MAX, P2P).
+             MAX (2026-08-03) makes it 4/4 devices: every style and every renderer works on all of
+             NA5C/G102/G6/MAX. Only maxTouchPressure (4095 vs 4096) and tilt scale vary per device.
+             Retained as the tool for sweeping the last Tier-1 device (P2P).
              adb shell am start -n com.notesprout.android.dev/com.notesprout.android.debug.PenToolSpikeActivity -->
         <activity
             android:name="com.notesprout.android.debug.PenToolSpikeActivity"
