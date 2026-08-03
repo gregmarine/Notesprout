@@ -584,11 +584,16 @@ below are one repaint of a single 2506-point stroke at width 8:
 | Pencil (NeoPen 7) | 175.8 | 25× |
 
 **Several solvers are faster than the flat polyline we draw today** — the `NeoFountainPenWrapper`
-one-call helper is 6× faster than building a 2506-segment `Path`, because it reduces the stroke to
-far fewer draw operations. Richer ink is not automatically more expensive.
+one-call helper reduces the stroke to far fewer draw operations than a 2506-segment `Path`. The
+useful conclusion is qualitative: **richer ink is not automatically more expensive**, and the
+stamp-based pens (pencil, charcoal) are the expensive tail.
 
-The stamp-based pens are the expensive tail. Cost tracks point count far more than width (pencil at
-width 32 cost *less* than at width 8 on a shorter stroke).
+> ⚠️ **Do not treat these absolute numbers as a benchmark.** Each is a *single* measurement of a
+> *cold* render. On G102 the same 9 strokes re-rendered immediately after dropped from 43.5 ms to
+> 5.2 ms (polyline) and 39.4 ms to 6.3 ms (pencil) — roughly **7× warmup** on the first pass after
+> any change. So first-render figures are dominated by JIT/allocation warmup, not by solver cost, and
+> the ordering above is only trustworthy where the gaps are large (fountain-wrapper vs pencil).
+> Anyone planning against this needs a proper repeated-run benchmark first.
 
 ### Two traps that cost real time here
 
@@ -615,10 +620,42 @@ rendering. Those multipliers are not cosmetic.
 **Also confirmed:** the Paint-style reading in this document is correct — `FILL` for the ballpoint's
 `PenPathResult` outline, `STROKE` for the per-point pens.
 
+## Second device — G102 (BOOX Go 10.3 Gen 2), 2026-08-02
+
+The flagship, and a genuinely different panel: monochrome where the NA5C is Kaleido.
+
+```
+model=Go103_2  impl=SDMDevice  colorType=0
+maxPressure=4096.0  touch=12399x9299  dpi=350
+neopen_jni OK   ResManager.init OK
+```
+
+- **All 9 overlay styles render correctly here too**, verified by a clean 9-stroke walk (one stroke
+  per style, styles 0–8 in order). Including `DASH`, `CHARCOAL_V2` and `SQUARE_PEN`. **Two panels,
+  two firmwares, zero silent failures** — the pessimism in the original survey was unwarranted.
+- **All 13 software renderers ran without a single failure**, on a heavier input than the NA5C used
+  (9 strokes, ~14,400 points, repainted per renderer).
+- Pressure is equally healthy: every stroke reached 4095 with 400–570 distinct values.
+
+Two device deltas worth carrying forward:
+
+| | NA5C | G102 |
+|---|---|---|
+| `colorType` | `1` | `0` | ← the colour-panel discriminator |
+| `getMaxTouchPressure()` | `4095.0` | **`4096.0`** | ← **differs between devices** |
+| digitizer | 20832×15624 | 12399×9299 | |
+
+**`maxTouchPressure` is not a constant.** It differs by one between these two devices, and every
+`NeoPen` config and wrapper call takes it as a normalizer. Hardcoding 4095 would be quietly wrong on
+the flagship — always read `EpdController.getMaxTouchPressure()`.
+
 ### Still open
 
-- **Tier-1 devices are untested.** All of the above is NoteAir5C only. G102 / G6 / MAX / P2P each
-  need their own style sweep, since `setStrokeStyle` failures are silent and firmware-dependent.
+- **Timings need a real benchmark.** See the warning above: every figure recorded here is a single
+  cold render, and warmup dominates. Nothing about relative solver cost should be planned against
+  until someone runs repeated passes.
+- **G6 / MAX / P2P are untested.** Two of four Tier-1 devices are done; `setStrokeStyle` failures are
+  silent and firmware-dependent, so the remaining two still need their own sweep.
 - **Full-page cost is unmeasured.** Single strokes were timed; a page of thousands of strokes
   repainting through the stamp pens was not. Our render model (committed-content `RenderNode` +
   neighbour prefetch) should amortize it, but that is an assumption.

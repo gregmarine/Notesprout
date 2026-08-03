@@ -40,7 +40,10 @@
              are FASTER than our polyline. Two traps: ResManager.init(context) is mandatory before
              any bitmap-backed pen (pencil otherwise renders solid+grainless, then throws on
              rebuild), and texture pens need large widths or their grain does not exist.
-             Retained as the tool for sweeping the remaining Tier-1 devices.
+             G102 (2026-08-02) confirms all 9 styles + all 13 renderers, no failures; note
+             getMaxTouchPressure differs per device (4095 NA5C vs 4096 G102) so never hardcode it.
+             Timings in the doc are single cold renders and warmup-dominated — not a benchmark.
+             Retained as the tool for sweeping the remaining Tier-1 devices (G6, MAX, P2P).
              adb shell am start -n com.notesprout.android.dev/com.notesprout.android.debug.PenToolSpikeActivity -->
         <activity
             android:name="com.notesprout.android.debug.PenToolSpikeActivity"

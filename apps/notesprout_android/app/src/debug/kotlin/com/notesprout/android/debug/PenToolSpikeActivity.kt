@@ -73,8 +73,11 @@ import com.onyx.android.sdk.pen.data.TouchPointList
  * The two halves are deliberately independent: **Style** drives the live firmware overlay (path A),
  * **Render** drives the software repaint (path B). Default Render is `Polyline`, exactly what
  * production draws today, so anything you see while writing that vanishes on pen-up is the overlay
- * and nothing else. **Restamp** re-renders every captured stroke with the current pen, which is how
- * you compare one piece of handwriting across all 13 renderers.
+ * and nothing else. Every captured stroke always repaints with the **currently selected** renderer,
+ * so turning the Render dial re-renders the same handwriting all 13 ways — that comparison is the
+ * point, and making it automatic is deliberate: an earlier build kept each stroke's capture-time pen
+ * and needed a separate confirm tap, which silently produced a whole device run of mislabelled
+ * timings when that tap was skipped.
  *
  * Launch:
  *   adb shell am start -n com.notesprout.android.dev/com.notesprout.android.debug.PenToolSpikeActivity
@@ -350,13 +353,6 @@ class PenToolSpikeActivity : AppCompatActivity() {
                 canvas.invalidate()
                 refreshStatus()
             })
-            // The comparison that matters: same handwriting, every renderer in turn.
-            addSpaced(button("Restamp") {
-                canvas.restampAll(renderIndex)
-                lastAction = "restamp all → ${RENDERERS[renderIndex].label}"
-                canvas.invalidate()
-                refreshStatus()
-            })
             paintButton = button("Paint") {
                 paintIndex = (paintIndex + 1) % PAINT_MODES.size
                 lastAction = "paint=${PAINT_MODES[paintIndex].first}"
@@ -602,10 +598,6 @@ class PenToolSpikeActivity : AppCompatActivity() {
 
         fun forEachStroke(block: (Int, Stroke) -> Unit) = strokes.forEachIndexed(block)
 
-        fun restampAll(penIndex: Int) {
-            strokes.forEach { it.penIndex = penIndex }
-        }
-
         fun setExclusion(rect: Rect?) {
             exclusion = rect
             if (isSetup) applyLimitRect()
@@ -709,7 +701,11 @@ class PenToolSpikeActivity : AppCompatActivity() {
             var lastError: String? = null
 
             for (stroke in strokes) {
-                val spec = RENDERERS[stroke.penIndex]
+                // Always the *currently selected* renderer, never the one a stroke happened to be
+                // captured under. Anything else makes the Render dial silently cosmetic: it would
+                // relabel the status line while still drawing the old pen, which is exactly the trap
+                // that invalidated the first G102 run.
+                val spec = RENDERERS[renderIndex]
                 val result = runCatching { drawStroke(c, stroke, spec) }
                 if (result.isFailure) {
                     errors++
@@ -748,8 +744,8 @@ class PenToolSpikeActivity : AppCompatActivity() {
 
             when (spec.kind) {
                 Kind.POLYLINE -> drawPolyline(c, stroke)
-                // Reachable only for a stroke *captured* under "None" that is now being repainted
-                // under some other renderer — it stays unpainted until Restamp adopts it.
+                // Unreachable in practice — onDraw returns before this when "None" is selected — but
+                // the branch keeps the `when` exhaustive.
                 Kind.NONE -> Unit
 
                 // displayScale=1f — the spike draws 1:1, no zoom.
@@ -782,7 +778,7 @@ class PenToolSpikeActivity : AppCompatActivity() {
 
         private fun drawLabel(c: Canvas, stroke: Stroke, spec: PenSpec) {
             val p = stroke.points.firstOrNull() ?: return
-            c.drawText("S${stroke.overlayStyle}·${spec.label}", p.x + 6f, p.y - 6f, labelPaint)
+            c.drawText("S${stroke.overlayStyle}·${RENDERERS[renderIndex].label}", p.x + 6f, p.y - 6f, labelPaint)
         }
 
         /**
