@@ -649,13 +649,67 @@ Two device deltas worth carrying forward:
 `NeoPen` config and wrapper call takes it as a normalizer. Hardcoding 4095 would be quietly wrong on
 the flagship — always read `EpdController.getMaxTouchPressure()`.
 
+## Third device — G6 (BOOX Go 6 Gen II), 2026-08-03
+
+A different size class: 6", 1072×1448, half the linear resolution of the two 10.3" panels.
+
+```
+model=Go6_2  impl=SDMDevice  colorType=0
+maxPressure=4096.0  touch=7239x5359  dpi=350
+neopen_jni OK   ResManager.init OK
+```
+
+**All 9 overlay styles render, and all 13 software renderers pass.** Three devices, three firmwares,
+two size classes — **no silent style failure has been observed anywhere.** The concern this document
+opened with, that styles past `EpdController`'s enum would be firmware-dependent, is not borne out on
+any Tier-1 hardware tested.
+
+### Tilt is *not* on a common scale across devices
+
+This only became visible with a third device:
+
+| Device | `tiltX` observed | `tiltY` observed |
+|---|---|---|
+| NA5C | `-43..55` | `-13..38` |
+| G102 | `-60..2` | `-4..38` |
+| **G6** | **`2251..3156`** | **`-179..2446`** |
+
+Pressure is a clean 1–4095 everywhere, but **tilt on G6 is reported ~100× larger and with a large
+positive offset.** There is no `getMaxTilt()` anywhere in the SDK to normalize against. So while
+`NeoPenConfig.tiltEnabled` / `tiltScale` are tempting, **any tilt-driven feature needs per-device
+calibration**, not merely a per-device maximum the way pressure does. Treat tilt as unusable until
+someone characterizes it per model.
+
+### The one-call wrappers build a pen per invocation
+
+`NeoPenUtils.computeStrokePoints` — which every `*Wrapper.drawStroke()` helper routes through —
+does `Companion.create(config)` → `onPenDown/Move/Up` → `NeoPen.destroy()` **on every call**. It does
+not leak, but it does construct and tear down a native pen per stroke, per repaint.
+
+The cost is invisible with one stroke and severe in a loop. Same 10-stroke page on G6:
+
+| | cold | warm |
+|---|---:|---:|
+| Polyline | 57.1 ms | **14.0 ms** |
+| `NeoPenRender` pens (cached), typical | ~57 ms | ~55 ms |
+| **Fountain (wrapper)** | **431.9 ms** | **413.7 ms** |
+
+On the NA5C's *single*-stroke page that same wrapper was the fastest renderer of all. The reversal is
+entirely stroke count.
+
+**Guidance: use the wrappers only for one-off rendering. For repainting a page, hold a `NeoPen` in a
+`NeoPenRender` and reuse it** (remembering that width is baked in at create time, so the cache has to
+be invalidated when width changes). The cached path is what the ~55 ms column above measures.
+
 ### Still open
 
 - **Timings need a real benchmark.** See the warning above: every figure recorded here is a single
   cold render, and warmup dominates. Nothing about relative solver cost should be planned against
   until someone runs repeated passes.
-- **G6 / MAX / P2P are untested.** Two of four Tier-1 devices are done; `setStrokeStyle` failures are
-  silent and firmware-dependent, so the remaining two still need their own sweep.
+- **MAX and P2P are untested.** Three of four Tier-1 devices are done (NA5C is Tier 2, also done);
+  `setStrokeStyle` failures are silent and firmware-dependent, so the remaining two still need their
+  own sweep. Nothing has failed on any device so far.
+- **Tilt needs per-device characterization** before any tilt-driven feature — see the G6 numbers.
 - **Full-page cost is unmeasured.** Single strokes were timed; a page of thousands of strokes
   repainting through the stamp pens was not. Our render model (committed-content `RenderNode` +
   neighbour prefetch) should amortize it, but that is an assumption.

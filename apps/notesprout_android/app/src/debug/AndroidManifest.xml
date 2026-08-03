@@ -43,7 +43,12 @@
              G102 (2026-08-02) confirms all 9 styles + all 13 renderers, no failures; note
              getMaxTouchPressure differs per device (4095 NA5C vs 4096 G102) so never hardcode it.
              Timings in the doc are single cold renders and warmup-dominated — not a benchmark.
-             Retained as the tool for sweeping the remaining Tier-1 devices (G6, MAX, P2P).
+             G6 (2026-08-03) also confirms all 9 styles + all 13 renderers. Two further findings:
+             tilt is NOT on a common scale across devices (G6 reports ~100x larger than NA5C/G102,
+             no getMaxTilt to normalize against), and the one-call *Wrapper.drawStroke helpers
+             create+destroy a native pen per invocation, so they are fine one-off but pathological
+             in a page repaint — use a cached NeoPen in a NeoPenRender there.
+             Retained as the tool for sweeping the remaining Tier-1 devices (MAX, P2P).
              adb shell am start -n com.notesprout.android.dev/com.notesprout.android.debug.PenToolSpikeActivity -->
         <activity
             android:name="com.notesprout.android.debug.PenToolSpikeActivity"
