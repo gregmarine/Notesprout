@@ -288,12 +288,20 @@ class PenToolSpikeActivity : AppCompatActivity() {
         }
 
         // Buttons need breathing room or a near-miss lands on the neighbour.
-        fun LinearLayout.addSpaced(v: View) = addView(
+        // Buttons need breathing room or a near-miss lands on the neighbour.
+        fun LinearLayout.add(v: View) = addView(
             v,
             LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply {
                 marginStart = dp(6); topMargin = dp(4); bottomMargin = dp(4)
             },
         )
+
+        // P2P is sw439dp — roughly half the width these controls were laid out for, and the
+        // overflow was silent: Report and Clear simply sat off the right edge with nothing on screen
+        // to say so. The standard protocol only ever touches Style/Auto/Render/Labels/Clear, so on a
+        // narrow panel the rest are omitted rather than shrunk. They still exist and still update;
+        // they are just not added to the view.
+        val compact = resources.displayMetrics.widthPixels < 1000
 
         // Row 1 — path A, the live firmware overlay.
         val row1 = LinearLayout(this).apply {
@@ -304,15 +312,15 @@ class PenToolSpikeActivity : AppCompatActivity() {
                 lastAction = "style=${styleLabel()} no-restart"
                 refreshStatus()
             }
-            addSpaced(styleButton)
-            addSpaced(button("⏮") {
+            add(styleButton)
+            add(button("⏮") {
                 styleIndex = (styleIndex + OVERLAY_STYLES.size - 1) % OVERLAY_STYLES.size
                 canvas.setOverlayStyle(currentStyle(), restart = false)
                 lastAction = "style=${styleLabel()} no-restart"
                 refreshStatus()
             })
             // Question 2: same style, but with the session torn down and rebuilt around it.
-            addSpaced(button("+Restart") {
+            if (!compact) add(button("+Restart") {
                 canvas.setOverlayStyle(currentStyle(), restart = true)
                 lastAction = "setStrokeStyle + restartRawDrawing"
                 refreshStatus()
@@ -327,14 +335,14 @@ class PenToolSpikeActivity : AppCompatActivity() {
                 lastAction = "autoAdvance=${if (autoAdvance) "on" else "off"}"
                 refreshStatus()
             }
-            addSpaced(autoButton)
+            add(autoButton)
             widthButton = button("Width") {
                 widthIndex = (widthIndex + 1) % WIDTHS.size
                 canvas.setWidth(currentWidth())
                 lastAction = "width=${currentWidth()}"
                 refreshStatus()
             }
-            addSpaced(widthButton)
+            if (!compact) add(widthButton)
         }
 
         // Row 2 — path B, the software repaint.
@@ -346,8 +354,8 @@ class PenToolSpikeActivity : AppCompatActivity() {
                 canvas.invalidate()
                 refreshStatus()
             }
-            addSpaced(renderButton)
-            addSpaced(button("⏮") {
+            add(renderButton)
+            add(button("⏮") {
                 renderIndex = (renderIndex + RENDERERS.size - 1) % RENDERERS.size
                 lastAction = "render=${RENDERERS[renderIndex].label}"
                 canvas.invalidate()
@@ -359,7 +367,7 @@ class PenToolSpikeActivity : AppCompatActivity() {
                 canvas.invalidate()
                 refreshStatus()
             }
-            addSpaced(paintButton)
+            if (!compact) add(paintButton)
         }
 
         // Row 3 — environment and bookkeeping.
@@ -371,24 +379,24 @@ class PenToolSpikeActivity : AppCompatActivity() {
                 lastAction = "appScope=${scopeLabel()}"
                 refreshStatus()
             }
-            addSpaced(scopeButton)
-            addSpaced(button("Labels") {
+            if (!compact) add(scopeButton)
+            add(button("Labels") {
                 showLabels = !showLabels
                 canvas.invalidate()
                 lastAction = "labels=${if (showLabels) "on" else "off"}"
                 refreshStatus()
             })
-            addSpaced(button("Repaint") {
+            if (!compact) add(button("Repaint") {
                 canvas.forceRepaint()
                 lastAction = "handwritingRepaint"
                 refreshStatus()
             })
-            addSpaced(button("Report") {
+            if (!compact) add(button("Report") {
                 dumpReport()
                 lastAction = "report → logcat"
                 refreshStatus()
             })
-            addSpaced(button("Clear") {
+            add(button("Clear") {
                 canvas.clearStrokes()
                 lastAction = "clear"
                 refreshStatus()

@@ -641,7 +641,7 @@ Two device deltas worth carrying forward:
 
 | | NA5C | G102 |
 |---|---|---|
-| `colorType` | `1` | `0` | ← the colour-panel discriminator |
+| `colorType` | `1` | `0` | ← *not* a boolean; see P2P |
 | `getMaxTouchPressure()` | `4095.0` | **`4096.0`** | ← **differs between devices** |
 | digitizer | 20832×15624 | 12399×9299 | |
 
@@ -720,29 +720,54 @@ neopen_jni OK   ResManager.init OK
 survey (9 strokes, ~31,600 points; the big digitizer samples far denser, 2655–4051 points per stroke
 against ~1600 on G102).
 
-### Four-device summary
+## Fifth device — P2P (BOOX Palma2 Pro), 2026-08-03
 
-| | NA5C | G102 | G6 | MAX |
-|---|---|---|---|---|
-| Overlay styles | **9/9** | **9/9** | **9/9** | **9/9** |
-| Software renderers | **13/13** | **13/13** | **13/13** | **13/13** |
-| `colorType` | 1 | 0 | 0 | 0 |
-| `getMaxTouchPressure()` | 4095 | **4096** | **4096** | 4095 |
-| tilt scale | ±60 | ±60 | **thousands** | ±44 |
-| panel | 10.3" Kaleido | 10.3" mono | 6" mono | 13.3" mono |
+Phone-sized: 824×1648 at density 300, i.e. **`sw439dp` — the narrowest device in the fleet.**
 
-**Onyx's implementation is consistent across their line.** Four devices, four firmwares, three size
-classes, one colour panel — every stroke style renders and every software pen works, with no silent
-failure anywhere. The two things that genuinely vary per device are **`maxTouchPressure` (4095 vs
-4096, split 2–2)** and **tilt scale (G6 alone)** — both read at runtime, never hardcoded.
+```
+model=Palma2_Pro_C  impl=SDMDevice  colorType=1017
+maxPressure=4096.0  touch=8319x4159  dpi=350
+neopen_jni OK   ResManager.init OK
+```
+
+**All 9 overlay styles render, all 13 software renderers pass.**
+
+**`colorType=1017` kills the boolean reading of that field.** After three devices reporting `0` and
+one reporting `1` it looked like a colour/mono flag, and this document said so. P2P is a colour
+device reporting `1017`. Whatever it encodes — panel model, most likely — **anything gating on
+`colorType == 1` would misread this device.** Use it only as an opaque identifier.
+
+## Five-device summary — the survey is complete
+
+| | NA5C | G102 | G6 | MAX | P2P |
+|---|---|---|---|---|---|
+| Overlay styles | **9/9** | **9/9** | **9/9** | **9/9** | **9/9** |
+| Software renderers | **13/13** | **13/13** | **13/13** | **13/13** | **13/13** |
+| `colorType` | 1 | 0 | 0 | 0 | **1017** |
+| `getMaxTouchPressure()` | 4095 | **4096** | **4096** | 4095 | **4096** |
+| tilt scale | ±60 | ±60 | **thousands** | ±44 | ±30 |
+| panel | 10.3" Kaleido | 10.3" mono | 6" mono | 13.3" mono | 6.1" colour |
+
+**Onyx's implementation is consistent across their entire line.** Five devices, five firmwares, four
+size classes from 6.1" to 13.3", two colour panels — **every stroke style renders and every software
+pen works, with no silent failure anywhere.** The premise this document opened with, that styles past
+`EpdController`'s constant list would be firmware-dependent gambles, is simply not borne out.
+
+Three things vary per device and must be read at runtime, never assumed:
+
+| Field | Variation | Consequence |
+|---|---|---|
+| `getMaxTouchPressure()` | 4095 or 4096 | the normalizer every `NeoPen` config takes |
+| tilt scale | G6 ~100× the others | no `getMaxTilt()` exists; needs per-device calibration |
+| `colorType` | `0`, `1`, `1017` | **not a boolean** — opaque identifier only |
 
 ### Still open
 
 - **Timings need a real benchmark.** See the warning above: every figure recorded here is a single
   cold render, and warmup dominates. Nothing about relative solver cost should be planned against
   until someone runs repeated passes.
-- **P2P is the last untested Tier-1 device.** `setStrokeStyle` failures are silent, so it still needs
-  its own sweep — but nothing has failed on any of the four devices tested.
+- **All Tier-1 devices are now swept** (plus NA5C, Tier 2). Nothing failed anywhere. Remaining gaps
+  are the non-BOOX targets (Wacom Movink, Supernote) which do not use this SDK at all.
 - **Tilt needs per-device characterization** before any tilt-driven feature — see the G6 numbers.
 - **Full-page cost is unmeasured.** Single strokes were timed; a page of thousands of strokes
   repainting through the stamp pens was not. Our render model (committed-content `RenderNode` +
@@ -773,6 +798,10 @@ Three things learned about *running* it that are not obvious:
 - **`screencap` cannot capture path A.** The firmware overlay is not in the Android framebuffer, so
   overlay-style results are eyes-only and must be reported by the tester. Path B *is* capturable,
   which is why the software sweep can be driven entirely over adb.
+- **The controls need a narrow-screen mode.** P2P is `sw439dp`, about half the width these rows were
+  laid out for, and the overflow was **silent** — `Report` and `Clear` sat off the right edge with
+  nothing on screen to indicate it. The harness now drops the controls the protocol does not use when
+  `widthPixels < 1000`. Worth remembering generally: measure chrome against P2P first, per `CLAUDE.md`.
 - **Button coordinates shift between taps.** The controls are `WRAP_CONTENT` in horizontal rows, so a
   label changing length (`Render: Polyline (production today)` → `Render: Pencil (NeoPen 7)`) moves
   every button after it. Drive it by resolving live bounds from `uiautomator dump` per tap, not by
