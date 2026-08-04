@@ -802,12 +802,60 @@ to interpret the `PenInkResult` — their `create()` factories hardcode a type, 
 parameter is not directly expressible from Kotlin, so expect to need reflection or a small Java shim.
 Untested.
 
+### Type 10 wired up and rendered — G102, 2026-08-03
+
+The reflection route works: `NeoPenNative.createPen(10, cfg)` → handle → wrapped in `NeoBrushPen` via
+its handle-taking constructor (reached with `getDeclaredConstructor(long, DefaultConstructorMarker)`
+since that synthetic parameter cannot be named from Kotlin). It constructs, renders in ~4 ms, and
+throws nothing.
+
+**But with a default config it is pixel-identical to type 1.** Rendering the same 1318-point stroke
+as type 1 and as type 10 and diffing the canvases:
+
+```
+canvas pixels differing: 957 / 1,450,800 (0.066%)
+diff bounding box: (232,223)–(388,240)   ← exactly the on-canvas label text
+ink pixels — type 1: 18,515   type 10: 18,669  (Δ154 = the longer label)
+```
+
+The stroke geometry is identical. This is **not** a wrapper artifact: `buildPenResult` only reads the
+native `PenInkResult`'s points and sizes, so if the solver produced different geometry for type 10 it
+would show regardless of which subclass interprets it. The native solver is genuinely returning the
+same output for both — under the config we supplied.
+
+**Most likely explanation, untested:** the config was bare (`type`, `width`, `color`,
+`maxTouchPressure`, `dpi`). A sign/calligraphy brush plausibly differentiates only once the nib and
+direction fields are set — `directionEnabled`, `brushShape`, `brushRatio`, `brushAngle` — exactly the
+group `NeoSquarePen.defaultPenConfig()` populates and we left at zero. Resolving that belongs with the
+config exploration, not here.
+
+So: **type 10 is real and reachable, but not yet shown to be a distinct tool.** Do not count it as a
+tenth pen in any planning until it has been driven with a non-default nib config.
+
+### Width is per-pen-family, not global
+
+A separate finding from the same session, and one that matters for any tool picker:
+
+| Pen family | Result type | Behaviour |
+|---|---|---|
+| Pencil, charcoal | `PenBrushResult` / `PenTextureResult` (stamps) | **need width ≥ 20** — at 8 the grain has no room to exist and renders solid or as a faint dotted hairline |
+| Brush, fountain, marker, square | `PenPointResult` (per-point dabs) | **flood the canvas black at width ≥ 12** on G102 — fine at 8 |
+
+The two families have **opposite and non-overlapping width regimes.** A single global width slider
+cannot serve both; width has to be interpreted per pen kind — which is what `NoteConstant`'s
+`CHARCOAL_STROKE_WIDTH_EXTRA_SCALE = 5.0` / `BRUSH_STROKE_WIDTH_EXTRA_SCALE = 2.0` multipliers are for.
+
+The flooding cause is not pinned down (probably point-size scaling inside `PenPointResult.draw`, which
+assigns `paint.strokeWidth` straight from the solved point size). Verified it is not a paint-style or
+harness error: state was confirmed as `paint=Auto`, correct renderer, and the same pens render
+correctly at width 8.
+
 ### The tool space, settled
 
 | | count | status |
 |---|---|---|
 | Firmware overlay styles | **9** (0–8) | all render on all 5 devices; 9–15 ignored |
-| Native software pens | **10** (1–10) | 9 rendered and verified; **type 10 never rendered** |
+| Native software pens | **10** (1–10) | 9 rendered and verified; type 10 renders but is **indistinguishable from type 1 under a default config** |
 
 ### Still open
 

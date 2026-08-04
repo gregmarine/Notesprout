@@ -175,6 +175,9 @@ class PenToolSpikeActivity : AppCompatActivity() {
             PenSpec("Charcoal (NeoPen 4)", Kind.NEOPEN, type = 4, fill = true),
             PenSpec("CharcoalV2 (NeoPen 5)", Kind.NEOPEN, type = 5, fill = true),
             PenSpec("Pencil (NeoPen 7)", Kind.NEOPEN, type = 7, fill = true),
+            // Type 10, BRUSH_SIGN — the one pen the SDK declares but ships no wrapper class for.
+            // Reached by asking the native layer for a handle directly; see renderFor.
+            PenSpec("BrushSign (NeoPen 10)", Kind.NEOPEN, type = 10, fill = false),
         )
 
         /** Paint-style override applied to path B. `null` = use each spec's own default. */
@@ -901,6 +904,29 @@ class PenToolSpikeActivity : AppCompatActivity() {
                 )
                 9 -> NeoSquarePen.Companion.create(config(NeoSquarePen.Companion.defaultPenConfig()))
                     ?.let { NeoPenRender(it) }
+                // BRUSH_SIGN. `onyxsdk-penbrush` declares the type on NeoPenConfig and the native
+                // solver accepts it (probed: createPen succeeds for 1..10), but there is no
+                // NeoBrushSignPen class to call. So take the handle straight from the native layer
+                // and wrap it in a concrete NeoNativePen subclass purely to interpret the
+                // PenInkResult — NeoBrushPen, because BRUSH_SIGN is brush-family and that subclass
+                // reads results as a PenPointResult of variable-size dabs.
+                //
+                // Its factory hardcodes type 1, so the handle-taking constructor is used instead.
+                // That constructor's second parameter is Kotlin's synthetic DefaultConstructorMarker,
+                // which cannot be named from Kotlin source — hence reflection rather than a direct
+                // call. Experimental: the pairing of type 10 with NeoBrushPen's result reader is an
+                // assumption, not something the SDK states.
+                10 -> {
+                    val handle = com.onyx.android.sdk.pennative.NeoPenNative
+                        .createPen(10, config().toNativeConfig())
+                    if (handle == 0L) null else {
+                        val ctor = NeoBrushPen::class.java.getDeclaredConstructor(
+                            java.lang.Long.TYPE,
+                            Class.forName("kotlin.jvm.internal.DefaultConstructorMarker"),
+                        ).apply { isAccessible = true }
+                        NeoPenRender(ctor.newInstance(handle, null) as com.onyx.android.sdk.pen.NeoPen)
+                    }
+                }
                 else -> null
             }
 
