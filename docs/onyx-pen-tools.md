@@ -832,23 +832,28 @@ config exploration, not here.
 So: **type 10 is real and reachable, but not yet shown to be a distinct tool.** Do not count it as a
 tenth pen in any planning until it has been driven with a non-default nib config.
 
-### Width is per-pen-family, not global
+### Width behaves very differently per pen family — cause unresolved
 
-A separate finding from the same session, and one that matters for any tool picker:
+Observed on G102, and **most likely a defect in how this harness configures the pens rather than an
+SDK property.** Recorded because it will bite whoever explores the config next, not as a finding:
 
-| Pen family | Result type | Behaviour |
+| Pen family | Result type | Observed |
 |---|---|---|
-| Pencil, charcoal | `PenBrushResult` / `PenTextureResult` (stamps) | **need width ≥ 20** — at 8 the grain has no room to exist and renders solid or as a faint dotted hairline |
-| Brush, fountain, marker, square | `PenPointResult` (per-point dabs) | **flood the canvas black at width ≥ 12** on G102 — fine at 8 |
+| Pencil, charcoal | `PenBrushResult` / `PenTextureResult` (stamps) | need width ≥ 20 or the grain has no room to exist — renders solid, or a faint dotted hairline |
+| Brush, fountain, marker, square | `PenPointResult` (per-point dabs) | fine at width 8; **flood the whole canvas black at width ≥ 12** |
 
-The two families have **opposite and non-overlapping width regimes.** A single global width slider
-cannot serve both; width has to be interpreted per pen kind — which is what `NoteConstant`'s
-`CHARCOAL_STROKE_WIDTH_EXTRA_SCALE = 5.0` / `BRUSH_STROKE_WIDTH_EXTRA_SCALE = 2.0` multipliers are for.
+Flooding an entire canvas from a width change of 8→12 is not plausible SDK behaviour, so **suspect the
+config first.** Two fields are prime candidates, both left at their defaults here and neither
+understood: `scalePrecision` — which has a dedicated helper, `NeoPenConfig.Companion.getPrecision(f)`,
+that this harness never calls — and `displayScaleX`/`displayScaleY`. A solver handed an unscaled
+precision could easily return point sizes in the thousands, and `PenPointResult.draw` assigns
+`paint.strokeWidth` straight from the solved size.
 
-The flooding cause is not pinned down (probably point-size scaling inside `PenPointResult.draw`, which
-assigns `paint.strokeWidth` straight from the solved point size). Verified it is not a paint-style or
-harness error: state was confirmed as `paint=Auto`, correct renderer, and the same pens render
-correctly at width 8.
+What *is* confirmed is only that it isn't a paint-style or harness-driving error: state was verified as
+`paint=Auto` with the correct renderer armed, and the same pens render correctly at width 8. **Do not
+plan a width UI against the table above** until the scaling fields are understood; `NoteConstant`'s
+per-pen multipliers (`CHARCOAL × 5.0`, `BRUSH × 2.0`) suggest BOOX does scale width per pen kind, but
+that is a separate question from this flooding.
 
 ### The tool space, settled
 
