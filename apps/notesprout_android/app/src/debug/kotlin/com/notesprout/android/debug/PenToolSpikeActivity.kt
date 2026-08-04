@@ -110,6 +110,27 @@ class PenToolSpikeActivity : AppCompatActivity() {
         )
 
         /**
+         * Undocumented-style probe. `StrokeStyle` names 0–8, but `setStrokeStyle` is an unvalidated
+         * pass-through to firmware — and 5/6/7 render on every device despite having no name at the
+         * device layer, which is direct evidence the firmware's style space is wider than the SDK's
+         * constant list. So 9–15 are untested, not absent.
+         *
+         * The baseline is interleaved between every probe **because that is what makes a negative
+         * result readable**: an unsupported style leaves the firmware on whatever was set last, so a
+         * probe that renders identically to the `0 PENCIL` before it was ignored, while anything that
+         * looks different is a real tenth-or-later tool.
+         */
+        val PROBE_STYLES: List<Pair<String, Int>> = listOf(
+            "0 base" to 0, "9 ?" to 9,
+            "0 base" to 0, "10 ?" to 10,
+            "0 base" to 0, "11 ?" to 11,
+            "0 base" to 0, "12 ?" to 12,
+            "0 base" to 0, "13 ?" to 13,
+            "0 base" to 0, "14 ?" to 14,
+            "0 base" to 0, "15 ?" to 15,
+        )
+
+        /**
          * Chunky by default: at width 3 the styles are visually indistinguishable on e-ink, which
          * would read as "nothing works" when the truth is "nothing is visible".
          */
@@ -188,6 +209,7 @@ class PenToolSpikeActivity : AppCompatActivity() {
 
     private lateinit var styleButton: AppCompatButton
     private lateinit var autoButton: AppCompatButton
+    private lateinit var probeButton: AppCompatButton
     private lateinit var widthButton: AppCompatButton
     private lateinit var renderButton: AppCompatButton
     private lateinit var paintButton: AppCompatButton
@@ -198,6 +220,7 @@ class PenToolSpikeActivity : AppCompatActivity() {
     private var renderIndex = 0
     private var paintIndex = 0
     private var scopeIndex = 0
+    private var probeMode = false
     private var showLabels = true
     private var autoAdvance = false
     private var lastAction = "—"
@@ -206,6 +229,7 @@ class PenToolSpikeActivity : AppCompatActivity() {
     private var envReport = "not read"
     private var nativeProbe = "not probed"
     private var resManagerProbe = "not probed"
+    private var penTypeProbe = "not probed"
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -223,6 +247,8 @@ class PenToolSpikeActivity : AppCompatActivity() {
 
         envReport = readEnv()
         nativeProbe = probeNativePen()
+        penTypeProbe = probePenTypes()
+        Slog.d(TAG) { "PENTYPES $penTypeProbe" }
         Slog.d(TAG) { "ENV $envReport" }
         Slog.d(TAG) { "NATIVE $nativeProbe" }
 
@@ -307,14 +333,14 @@ class PenToolSpikeActivity : AppCompatActivity() {
         val row1 = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             styleButton = button("Style") {
-                styleIndex = (styleIndex + 1) % OVERLAY_STYLES.size
+                styleIndex = (styleIndex + 1) % styles().size
                 canvas.setOverlayStyle(currentStyle(), restart = false)
                 lastAction = "style=${styleLabel()} no-restart"
                 refreshStatus()
             }
             add(styleButton)
             add(button("⏮") {
-                styleIndex = (styleIndex + OVERLAY_STYLES.size - 1) % OVERLAY_STYLES.size
+                styleIndex = (styleIndex + styles().size - 1) % styles().size
                 canvas.setOverlayStyle(currentStyle(), restart = false)
                 lastAction = "style=${styleLabel()} no-restart"
                 refreshStatus()
@@ -330,6 +356,14 @@ class PenToolSpikeActivity : AppCompatActivity() {
             // hands the panel back to the Android layer — and under the "None" renderer that layer
             // is blank, so the overlay ink being compared vanishes. Not touching anything is the
             // only way the accumulated-page comparison survives.
+            probeButton = button("Probe") {
+                probeMode = !probeMode
+                styleIndex = 0
+                canvas.setOverlayStyle(currentStyle(), restart = false)
+                lastAction = "probeMode=${if (probeMode) "on (9..15)" else "off (0..8)"}"
+                refreshStatus()
+            }
+            add(probeButton)
             autoButton = button("Auto") {
                 autoAdvance = !autoAdvance
                 lastAction = "autoAdvance=${if (autoAdvance) "on" else "off"}"
@@ -413,8 +447,10 @@ class PenToolSpikeActivity : AppCompatActivity() {
         }
     }
 
-    private fun currentStyle(): Int = OVERLAY_STYLES[styleIndex].second
-    private fun styleLabel(): String = OVERLAY_STYLES[styleIndex].first
+    /** The armed style sequence — the documented 0–8 walk, or the 9–15 probe. */
+    private fun styles(): List<Pair<String, Int>> = if (probeMode) PROBE_STYLES else OVERLAY_STYLES
+    private fun currentStyle(): Int = styles()[styleIndex].second
+    private fun styleLabel(): String = styles()[styleIndex].first
     private fun currentWidth(): Float = WIDTHS[widthIndex]
     private fun scopeLabel(): String = SCOPE_MODES[scopeIndex]?.name ?: "CLEARED"
 
@@ -451,9 +487,48 @@ class PenToolSpikeActivity : AppCompatActivity() {
         "neopen_jni OK (createPen/destroy round-tripped)"
     }.getOrElse { "neopen_jni FAILED — ${it.javaClass.simpleName}: ${it.message}" }
 
+    /**
+     * Which pen types does the native solver actually know?
+     *
+     * `NeoPenConfig` names 1–10, but `onyxsdk-penbrush` ships a wrapper class for only nine of them —
+     * `NEOPEN_PEN_TYPE_BRUSH_SIGN = 10` has none, which is why the renderer sweep never covered it.
+     * The native layer is the authority, so ask it directly: a non-zero handle from `createPen` means
+     * the type exists regardless of whether a Kotlin wrapper does. Probing past 10 also tests whether
+     * the native type space runs beyond the constant list, the same question the overlay probe asks
+     * of firmware.
+     *
+     * Each type is logged *before* it is attempted: an unknown type could conceivably fault in native
+     * code rather than return 0, and a SIGSEGV takes the process with it — no `runCatching` saves
+     * that. If the app dies during startup, the last PENTYPE line names the culprit.
+     */
+    private fun probePenTypes(): String {
+        val ok = mutableListOf<Int>()
+        val no = mutableListOf<Int>()
+        for (type in 1..15) {
+            Slog.d(TAG) { "PENTYPE probing $type" }
+            val good = runCatching {
+                val cfg = com.onyx.android.sdk.pennative.PenConfig().apply {
+                    this.type = type
+                    width = 8f
+                    color = Color.BLACK
+                    maxTouchPressure = 4096f
+                    dpi = 350f
+                }
+                val handle = com.onyx.android.sdk.pennative.NeoPenNative.createPen(type, cfg)
+                if (handle != 0L) {
+                    com.onyx.android.sdk.pennative.NeoPenNative.destroyPen(handle)
+                    true
+                } else false
+            }.getOrElse { false }
+            if (good) ok += type else no += type
+        }
+        return "nativePenTypes ok=$ok none=$no"
+    }
+
     private fun refreshStatus() {
         styleButton.text = "Style: ${styleLabel()}"
         autoButton.text = if (autoAdvance) "Auto: ON" else "Auto: off"
+        probeButton.text = if (probeMode) "Probe: 9-15" else "Probe: off"
         widthButton.text = "W: ${currentWidth().toInt()}"
         renderButton.text = "Render: ${RENDERERS[renderIndex].label}"
         paintButton.text = "Paint: ${PAINT_MODES[paintIndex].first}"
@@ -462,6 +537,7 @@ class PenToolSpikeActivity : AppCompatActivity() {
         val text = buildString {
             append(envReport).append('\n')
             append(nativeProbe).append("  ").append(resManagerProbe).append('\n')
+            append(penTypeProbe).append('\n')
             append("style=${styleLabel()}  width=${currentWidth()}  render=${RENDERERS[renderIndex].label}")
             append("  paint=${PAINT_MODES[paintIndex].first}  scope=${scopeLabel()}  strokes=${canvas.strokeCount()}\n")
             append("stroke: ").append(canvas.lastStrokeReport).append('\n')
@@ -537,7 +613,7 @@ class PenToolSpikeActivity : AppCompatActivity() {
         var renderErrors = 0
             private set
 
-        private var overlayStyle = OVERLAY_STYLES[0].second
+        private var overlayStyle = OVERLAY_STYLES[0].second   // 0 PENCIL either way
         private var strokeWidth = WIDTHS[DEFAULT_WIDTH_INDEX]
 
         /**
@@ -587,7 +663,7 @@ class PenToolSpikeActivity : AppCompatActivity() {
                 Slog.d(TAG) { "STROKE style=$overlayStyle w=$strokeWidth $lastStrokeReport" }
                 invalidate()
                 if (autoAdvance) post {
-                    styleIndex = (styleIndex + 1) % OVERLAY_STYLES.size
+                    styleIndex = (styleIndex + 1) % styles().size
                     // Deliberately no restart and no chrome interaction — the next stroke reports
                     // whether a bare setStrokeStyle on a live session took effect.
                     setOverlayStyle(currentStyle(), restart = false)

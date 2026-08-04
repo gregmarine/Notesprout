@@ -761,6 +761,54 @@ Three things vary per device and must be read at runtime, never assumed:
 | tilt scale | G6 ~100× the others | no `getMaxTilt()` exists; needs per-device calibration |
 | `colorType` | `0`, `1`, `1017` | **not a boolean** — opaque identifier only |
 
+## Is the tool list complete? — probed on G102, 2026-08-03
+
+Both halves were deliberately left open by the constant tables: `setStrokeStyle` is unvalidated, and
+`NEOPEN_PEN_TYPE_BRUSH_SIGN = 10` is declared but has no wrapper class. Both are now settled.
+
+### Firmware overlay: **9 styles, and that is all**
+
+Styles **9–15 are ignored.** Walked as seven baseline/probe pairs — `0, 9, 0, 10, … 0, 15` — with the
+`0 PENCIL` baseline interleaved so a negative result is readable (an unsupported style leaves the
+firmware on whatever was set last, so an ignored probe renders as the baseline before it). All 14
+strokes came out identical, and the log confirms all 15 `setStrokeStyle` calls were made with the
+right values. Positive control: the same device's 0–8 walk produced nine visually distinct rows.
+
+So the firmware's style space really is what `StrokeStyle` names, despite 5/6/7 having no
+`EpdController` constant. **Path A is closed at nine.**
+
+### Native solver: **10 pen types — one more than we have ever rendered**
+
+`NeoPenNative.createPen(type, config)` asked directly for types 1–15:
+
+```
+nativePenTypes ok=[1,2,3,4,5,6,7,8,9,10]  none=[11,12,13,14,15]
+```
+
+- **Nothing exists beyond 10** — the native type space matches the constant list exactly.
+- **`NEOPEN_PEN_TYPE_BRUSH_SIGN = 10` is real and constructible**, and is the one pen this survey has
+  never rendered. `onyxsdk-penbrush` 1.1.1 ships no `NeoBrushSignPen`, which is the only reason it was
+  skipped — the native layer knows it perfectly well.
+
+`NoteShapeType` suggests what it is: BOOX carries **two** calligraphy tools,
+`SHAPE_LATIN_CALLIGRAPHY_PEN_SCRIBBLE = 60` (the 45° chisel we confirmed as `SQUARE`, type 9) and
+`SHAPE_ASIA_CALLIGRAPHY_PEN_SCRIBBLE = 61`. Type 10 is very likely the **East-Asian brush** (*fudepen*)
+— a genuinely different tool from both the chisel and `NEO_BRUSH`.
+
+**Route to rendering it**, for whoever picks this up: get a handle from
+`NeoPenNative.createPen(10, PenConfig)`, then wrap it in one of the concrete `NeoNativePen` subclasses
+to interpret the `PenInkResult` — their `create()` factories hardcode a type, but their
+`(long, DefaultConstructorMarker)` constructors take a handle directly. That synthetic marker
+parameter is not directly expressible from Kotlin, so expect to need reflection or a small Java shim.
+Untested.
+
+### The tool space, settled
+
+| | count | status |
+|---|---|---|
+| Firmware overlay styles | **9** (0–8) | all render on all 5 devices; 9–15 ignored |
+| Native software pens | **10** (1–10) | 9 rendered and verified; **type 10 never rendered** |
+
 ### Still open
 
 - **Timings need a real benchmark.** See the warning above: every figure recorded here is a single
