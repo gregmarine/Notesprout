@@ -180,10 +180,62 @@ class PenToolSpikeActivity : AppCompatActivity() {
             PenSpec("BrushSign (NeoPen 10)", Kind.NEOPEN, type = 10, fill = false),
         )
 
+        /**
+         * The config playground: every `NeoPenConfig` field worth turning, with a value ladder each.
+         *
+         * Sliders are not an option on a panel this size, so a field cycler plus a value cycler
+         * covers ~25 fields in two buttons. Each field keeps its own selection, so several can be
+         * combined and the combination survives moving between them.
+         *
+         * **`scalePrecision` and `displayScale` come first deliberately.** They are the prime
+         * suspects for the width flooding — point pens blacking out the whole canvas at width ≥ 12 —
+         * and every other field is measured *through* them, so nothing further is trustworthy until
+         * they are understood. `NeoPenConfig.Companion.getPrecision(f)` exists precisely to compute
+         * the first one and this harness has never called it.
+         */
+        val TUNABLES: List<Tunable> = listOf(
+            Tunable("scalePrecision", listOf(1f, 2f, 4f, 8f)) { c, v -> c.scalePrecision = v },
+            Tunable("displayScale", listOf(0.5f, 1f, 2f, 4f)) { c, v ->
+                c.displayScaleX = v; c.displayScaleY = v
+            },
+            Tunable("minWidth", listOf(0.001f, 0.5f, 1f, 2f, 4f)) { c, v -> c.minWidth = v },
+            Tunable("pressureSens", listOf(0f, 0.15f, 0.3f, 0.375f, 0.5f, 0.6f, 1f)) { c, v ->
+                c.pressureSensitivity = v
+            },
+            Tunable("velocitySens", listOf(0f, 0.25f, 0.5f, 0.75f, 1f)) { c, v ->
+                c.velocitySensitivity = v
+            },
+            Tunable("velocityAmp", listOf(0f, 0.5f, 1f, 2f)) { c, v -> c.velocityAmplifier = v },
+            Tunable("smoothLevel", listOf(0f, 0.3f, 0.6f, 1f)) { c, v -> c.smoothLevel = v },
+            Tunable("alphaFactor", listOf(0.25f, 0.5f, 0.75f, 1f)) { c, v -> c.alphaFactor = v },
+            Tunable("brushSpacing", listOf(0.05f, 0.1f, 0.25f, 0.5f, 1f)) { c, v ->
+                c.brushSpacing = v
+            },
+            // 0 circle · 1 ellipse · 2 rectangle
+            Tunable("brushShape", listOf(0f, 1f, 2f)) { c, v -> c.brushShape = v.toInt() },
+            Tunable("brushRatio", listOf(1f, 2f, 5f, 10f, 20f)) { c, v -> c.brushRatio = v },
+            Tunable("brushAngle", listOf(0f, 30f, 45f, 60f, 90f)) { c, v -> c.brushAngle = v },
+            Tunable("rotateAngle", listOf(0f, 45f, 90f)) { c, v -> c.rotateAngle = v.toInt() },
+            Tunable("directionOn", listOf(0f, 1f)) { c, v -> c.directionEnabled = v > 0f },
+            Tunable("tiltOn", listOf(0f, 1f)) { c, v -> c.tiltEnabled = v > 0f },
+            Tunable("tiltScale", listOf(1f, 3f, 5f, 10f)) { c, v -> c.tiltScale = v },
+            Tunable("fastMode", listOf(0f, 1f)) { c, v -> c.fastMode = v > 0f },
+            Tunable("startPointLimit", listOf(0f, 0.5f, 1f)) { c, v -> c.startPointLimit = v },
+            Tunable("startLengthLimit", listOf(0f, 0.5f, 1f)) { c, v -> c.startLengthLimit = v },
+            Tunable("endVelocitySens", listOf(0f, 0.5f, 1f)) { c, v -> c.endVelocitySensitivity = v },
+        )
+
         /** Paint-style override applied to path B. `null` = use each spec's own default. */
         val PAINT_MODES: List<Pair<String, Boolean?>> =
             listOf("Auto" to null, "STROKE" to false, "FILL" to true)
     }
+
+    /** One tunable field: a name, the ladder of values to walk, and how to write it onto a config. */
+    class Tunable(
+        val name: String,
+        val values: List<Float>,
+        val apply: (NeoPenConfig, Float) -> Unit,
+    )
 
     enum class Kind { POLYLINE, NONE, W_FOUNTAIN, W_BRUSH, W_MARKER, NEOPEN }
 
@@ -213,6 +265,8 @@ class PenToolSpikeActivity : AppCompatActivity() {
     private lateinit var styleButton: AppCompatButton
     private lateinit var autoButton: AppCompatButton
     private lateinit var probeButton: AppCompatButton
+    private lateinit var fieldButton: AppCompatButton
+    private lateinit var valueButton: AppCompatButton
     private lateinit var widthButton: AppCompatButton
     private lateinit var renderButton: AppCompatButton
     private lateinit var paintButton: AppCompatButton
@@ -223,6 +277,9 @@ class PenToolSpikeActivity : AppCompatActivity() {
     private var renderIndex = 0
     private var paintIndex = 0
     private var scopeIndex = 0
+    private var fieldIndex = 0
+    /** field name → index into that field's ladder. Absent = leave the SDK default alone. */
+    private val tuning = mutableMapOf<String, Int>()
     private var probeMode = false
     private var showLabels = true
     private var autoAdvance = false
@@ -251,6 +308,13 @@ class PenToolSpikeActivity : AppCompatActivity() {
         envReport = readEnv()
         nativeProbe = probeNativePen()
         penTypeProbe = probePenTypes()
+        // What does the helper we never called actually produce? If getPrecision(1.0) returns
+        // something far from the 1.0 default this harness has been using, that alone would explain
+        // the width flooding.
+        Slog.d(TAG) { "PRECISION " + listOf(0.5f, 1f, 2f, 4f).joinToString("  ") { s ->
+            "getPrecision($s)=" + runCatching { NeoPenConfig.Companion.getPrecision(s) }
+                .getOrElse { "ERR:" + it.javaClass.simpleName }
+        } }
         Slog.d(TAG) { "PENTYPES $penTypeProbe" }
         Slog.d(TAG) { "ENV $envReport" }
         Slog.d(TAG) { "NATIVE $nativeProbe" }
@@ -407,6 +471,35 @@ class PenToolSpikeActivity : AppCompatActivity() {
             if (!compact) add(paintButton)
         }
 
+        // Row 4 — the config playground. Two cyclers cover every tunable field.
+        val row4 = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            fieldButton = button("Field") {
+                fieldIndex = (fieldIndex + 1) % TUNABLES.size
+                lastAction = "field=${TUNABLES[fieldIndex].name}"
+                refreshStatus()
+            }
+            add(fieldButton)
+            valueButton = button("⏭") {
+                val f = TUNABLES[fieldIndex]
+                // Absent → start at the bottom of the ladder; then walk and wrap back to absent, so
+                // "leave the SDK default alone" is always reachable rather than a one-way door.
+                val cur = tuning[f.name]
+                val next = if (cur == null) 0 else cur + 1
+                if (next >= f.values.size) tuning.remove(f.name) else tuning[f.name] = next
+                lastAction = "${f.name}=${tuningLabel(f)}"
+                canvas.rebuildPens()
+                refreshStatus()
+            }
+            add(valueButton)
+            add(button("Reset cfg") {
+                tuning.clear()
+                lastAction = "config reset to SDK defaults"
+                canvas.rebuildPens()
+                refreshStatus()
+            })
+        }
+
         // Row 3 — environment and bookkeeping.
         val row3 = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -447,6 +540,7 @@ class PenToolSpikeActivity : AppCompatActivity() {
             addView(row1)
             addView(row2)
             addView(row3)
+            addView(row4)
         }
     }
 
@@ -528,10 +622,28 @@ class PenToolSpikeActivity : AppCompatActivity() {
         return "nativePenTypes ok=$ok none=$no"
     }
 
+    /** The ladder value armed for a field, or "default" when the SDK's own value is left in place. */
+    private fun tuningLabel(f: Tunable): String =
+        tuning[f.name]?.let { f.values[it].toString() } ?: "default"
+
+    /** Only the fields actually overridden — the whole point is knowing what is not stock. */
+    private fun tuningSummary(): String {
+        val set = TUNABLES.filter { tuning.containsKey(it.name) }
+        return if (set.isEmpty()) "all SDK defaults"
+        else set.joinToString("  ") { "${it.name}=${tuningLabel(it)}" }
+    }
+
+    /** Write every armed override onto a freshly built config. */
+    private fun applyTuning(c: NeoPenConfig) {
+        for (f in TUNABLES) tuning[f.name]?.let { f.apply(c, f.values[it]) }
+    }
+
     private fun refreshStatus() {
         styleButton.text = "Style: ${styleLabel()}"
         autoButton.text = if (autoAdvance) "Auto: ON" else "Auto: off"
         probeButton.text = if (probeMode) "Probe: 9-15" else "Probe: off"
+        fieldButton.text = "Field: ${TUNABLES[fieldIndex].name}"
+        valueButton.text = "Val: ${tuningLabel(TUNABLES[fieldIndex])}"
         widthButton.text = "W: ${currentWidth().toInt()}"
         renderButton.text = "Render: ${RENDERERS[renderIndex].label}"
         paintButton.text = "Paint: ${PAINT_MODES[paintIndex].first}"
@@ -541,6 +653,7 @@ class PenToolSpikeActivity : AppCompatActivity() {
             append(envReport).append('\n')
             append(nativeProbe).append("  ").append(resManagerProbe).append('\n')
             append(penTypeProbe).append('\n')
+            append("cfg: ").append(tuningSummary()).append('\n')
             append("style=${styleLabel()}  width=${currentWidth()}  render=${RENDERERS[renderIndex].label}")
             append("  paint=${PAINT_MODES[paintIndex].first}  scope=${scopeLabel()}  strokes=${canvas.strokeCount()}\n")
             append("stroke: ").append(canvas.lastStrokeReport).append('\n')
@@ -744,6 +857,12 @@ class PenToolSpikeActivity : AppCompatActivity() {
             }
         }
 
+        /** Config changed — drop the cached native pens so the next repaint rebuilds them. */
+        fun rebuildPens() {
+            destroyRenderCache()
+            invalidate()
+        }
+
         private fun destroyRenderCache() {
             renderCache.values.forEach { runCatching { it.destroyPen() } }
             renderCache.clear()
@@ -822,7 +941,11 @@ class PenToolSpikeActivity : AppCompatActivity() {
 
             val fill = PAINT_MODES[paintIndex].second ?: spec.fill
             paint.style = if (fill) Paint.Style.FILL else Paint.Style.STROKE
-            paint.strokeWidth = stroke.width
+            // The width dialled *now*, not the one the stroke happened to be captured under.
+            // `stroke.width` records what path A drew it with and stays for the record; path B is a
+            // re-render and must follow the current setting or the Width control does nothing here.
+            val w = currentWidth()
+            paint.strokeWidth = w
             paint.color = Color.BLACK
 
             val maxPressure = runCatching { EpdController.getMaxTouchPressure() }
@@ -837,18 +960,22 @@ class PenToolSpikeActivity : AppCompatActivity() {
 
                 // displayScale=1f — the spike draws 1:1, no zoom.
                 Kind.W_FOUNTAIN -> NeoFountainPenWrapper.drawStroke(
-                    c, paint, pts, 1f, stroke.width, maxPressure, false,
+                    c, paint, pts, 1f, w, maxPressure, false,
                 )
                 Kind.W_BRUSH -> NeoBrushPenWrapper.drawStroke(
-                    c, paint, pts, stroke.width, maxPressure, false,
+                    c, paint, pts, w, maxPressure, false,
                 )
                 Kind.W_MARKER -> NeoMarkerPenWrapper.drawStroke(
-                    c, paint, pts, stroke.width, false,
+                    c, paint, pts, w, false,
                 )
 
                 // render(canvas, paint, points) = onTouchPointList + render + reset, so one call
                 // draws a whole committed stroke.
-                Kind.NEOPEN -> renderFor(stroke.penIndex, spec, stroke.width, maxPressure)
+                // Keyed on the *currently selected* renderer. Keying on the stroke's capture-time
+                // pen meant every NeoPen entry collided on one cache slot, so switching renderers
+                // silently kept re-using whichever pen was built first — the renderers appeared to
+                // work while only one of them ever ran.
+                Kind.NEOPEN -> renderFor(renderIndex, spec, w, maxPressure)
                     .render(c, paint, pts)
             }
         }
@@ -856,7 +983,7 @@ class PenToolSpikeActivity : AppCompatActivity() {
         private fun drawPolyline(c: Canvas, stroke: Stroke) {
             val pts = stroke.points
             paint.style = Paint.Style.STROKE
-            paint.strokeWidth = stroke.width
+            paint.strokeWidth = currentWidth()
             val path = Path()
             path.moveTo(pts[0].x, pts[0].y)
             for (i in 1 until pts.size) path.lineTo(pts[i].x, pts[i].y)
@@ -885,6 +1012,8 @@ class PenToolSpikeActivity : AppCompatActivity() {
                 color = Color.BLACK
                 this.maxTouchPressure = maxPressure
                 dpi = resources.displayMetrics.densityDpi.toFloat()
+                // Last, so the playground can override anything the per-pen defaults set.
+                applyTuning(this)
             }
 
             val built: NeoPenRender? = when (spec.type) {

@@ -802,35 +802,69 @@ to interpret the `PenInkResult` — their `create()` factories hardcode a type, 
 parameter is not directly expressible from Kotlin, so expect to need reflection or a small Java shim.
 Untested.
 
-### Type 10 wired up and rendered — G102, 2026-08-03
+### Type 10: constructs, but does **not** render — G102, 2026-08-03
 
-The reflection route works: `NeoPenNative.createPen(10, cfg)` → handle → wrapped in `NeoBrushPen` via
-its handle-taking constructor (reached with `getDeclaredConstructor(long, DefaultConstructorMarker)`
-since that synthetic parameter cannot be named from Kotlin). It constructs, renders in ~4 ms, and
-throws nothing.
-
-**But with a default config it is pixel-identical to type 1.** Rendering the same 1318-point stroke
-as type 1 and as type 10 and diffing the canvases:
+`NeoPenNative.createPen(10, cfg)` returns a valid handle, and wrapping it in `NeoBrushPen` via
+reflection (its handle-taking constructor, reached with `getDeclaredConstructor(long,
+DefaultConstructorMarker)` since that synthetic parameter cannot be named from Kotlin) constructs
+fine. **Rendering then throws:**
 
 ```
-canvas pixels differing: 957 / 1,450,800 (0.066%)
-diff bounding box: (232,223)–(388,240)   ← exactly the on-canvas label text
-ink pixels — type 1: 18,515   type 10: 18,669  (Δ154 = the longer label)
+FAILED · BrushSign (NeoPen 10): ArrayIndexOutOfBoundsException: length=24904; index=24904
 ```
 
-The stroke geometry is identical. This is **not** a wrapper artifact: `buildPenResult` only reads the
-native `PenInkResult`'s points and sizes, so if the solver produced different geometry for type 10 it
-would show regardless of which subclass interprets it. The native solver is genuinely returning the
-same output for both — under the config we supplied.
+`NeoBrushPen.buildPenResult` walks the native `PenInkResult` one element past its end. **This is
+evidence that type 10 is a genuinely distinct pen**, not an alias: if BRUSH_SIGN returned
+BRUSH-shaped data, the brush reader would have consumed it without complaint. We have the right pen
+and the wrong interpreter.
 
-**Most likely explanation, untested:** the config was bare (`type`, `width`, `color`,
-`maxTouchPressure`, `dpi`). A sign/calligraphy brush plausibly differentiates only once the nib and
-direction fields are set — `directionEnabled`, `brushShape`, `brushRatio`, `brushAngle` — exactly the
-group `NeoSquarePen.defaultPenConfig()` populates and we left at zero. Resolving that belongs with the
-config exploration, not here.
+**Correction:** an earlier run of this survey reported type 10 rendering successfully in ~4 ms and
+producing pixel-identical output to type 1. That was wrong — a harness bug (see below) meant it was
+drawing a *cached type-1 pen* and reporting type 1's timing. Disregard it entirely.
 
-So: **type 10 is real and reachable, but not yet shown to be a distinct tool.** Do not count it as a
-tenth pen in any planning until it has been driven with a non-default nib config.
+**Next step if this is picked up:** try the other concrete `NeoNativePen` subclasses as the result
+reader — `NeoFountainPen`, `NeoMarkerPen`, `NeoSquarePen`, `NeoCharcoalPen(V2)`, `NeoBallpointInkPen`
+— until one consumes the array cleanly. Whichever fits tells you what shape BRUSH_SIGN emits, and
+therefore what kind of pen it is. Untested.
+
+### Harness bugs that invalidated earlier path-B results
+
+Recorded because the same mistakes are easy to repeat, and because they explain why some numbers in
+this document's history disagree with each other.
+
+1. **Pen cache keyed on the wrong index.** `renderFor` used the stroke's *capture-time* renderer as
+   its cache key rather than the currently selected one, so every `NeoPen` entry collided on a single
+   slot: once any pen was built, switching renderers returned that same pen while the label changed.
+   Renderers appeared to work while only one of them ever ran. **This was introduced by the fix for
+   an earlier silent-desync** (removing the confirm tap stopped the key from ever varying) — one
+   silent failure traded for another.
+2. **Path B ignored the width control**, using the stroke's capture-time width instead of the current
+   setting, so the `W` button never affected software rendering at all.
+
+Both fixed. Consequences:
+
+- The **width flooding described in earlier revisions of this document never happened** as described.
+  The `W` control was not reaching path B, so those "width ≥ 12 floods the canvas" observations were
+  measuring something else entirely. **Width behaviour in path B is now simply untested.**
+- Per-renderer timings taken on G6, MAX and P2P are unreliable for the same reason and are not
+  reproduced here.
+- **Path A is untouched by all of this.** Overlay styles go through `setStrokeStyle` to firmware and
+  share no code with the renderer cache; the five-device style results stand.
+
+### Verified renderer sweep — G102, cache bug fixed
+
+Every step confirmed armed and repainted before capture (earlier sweeps screenshotted on a fixed
+sleep and sometimes caught the previous frame):
+
+**13 of 13 renderers work.** Only `BrushSign (NeoPen 10)` fails, as above. Ink coverage of one
+1249-point stroke ranged from 2,516 px (brush) to 80,496 px (square) — they are emphatically not the
+same pen. Two pairs render identically, both **expected**, and they confirm the bytecode reading that
+the one-call wrappers are thin shims over the same native pens:
+
+| Pair | Reason |
+|---|---|
+| `Fountain (wrapper)` ≡ `Fountain (NeoPen 2)` | wrapper → `NeoPenUtils` → `NeoFountainPen.create()` |
+| `Brush (wrapper)` ≡ `Brush (NeoPen 1)` | wrapper → `NeoBrushPen.create()` |
 
 ### Width behaves very differently per pen family — cause unresolved
 
@@ -860,7 +894,7 @@ that is a separate question from this flooding.
 | | count | status |
 |---|---|---|
 | Firmware overlay styles | **9** (0–8) | all render on all 5 devices; 9–15 ignored |
-| Native software pens | **10** (1–10) | 9 rendered and verified; type 10 renders but is **indistinguishable from type 1 under a default config** |
+| Native software pens | **10** (1–10) | 9 rendered and verified; **type 10 constructs but throws on render** — wrong result reader, and that failure is itself evidence it is a distinct pen |
 
 ### Still open
 
