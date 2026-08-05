@@ -597,3 +597,30 @@ Options, none decided:
 
 Whichever is chosen, `ReopenOutcome.LOCKED` stays as the backstop for the paths that genuinely cannot
 be reopened (a surface restore into an occurrence that completed while the user was away).
+
+## A long event title truncates where a long task title wraps
+
+> Found 2026-08-05 while testing the Today dashboard's Events section. **Pre-existing** — the same
+> truncation is in the day window today; the dashboard only puts the two row styles side by side,
+> where the inconsistency is obvious.
+
+`item_event.xml`'s `tvEventTitle` is `maxLines="1"`, so *"Call the bank about the mortgage renewal"*
+renders as *"Call the bank about the mortgage re…"*. `item_task.xml`'s `tvTaskTitle` is
+`maxLines="2"` and wraps. On the dashboard both sit in adjacent bands, so a truncated event reads as
+a different *class* of thing rather than a longer one.
+
+Events are the odd one out, not tasks: the event row spends 72dp on a leading time badge plus a
+divider before the title even starts, so it loses more width than any other row in the app — the one
+place a second line is most needed is the one place it is refused.
+
+- **Raise `tvEventTitle` to `maxLines="2"`.** One attribute, and it fixes the day window at the same
+  time — the layout is shared, which is the point. Safe for pagination: `TodaySection` measures each
+  cell rather than assuming a fixed row height, so a taller row simply takes more of the band and one
+  fewer row lands on the page.
+- **Give the dashboard its own event row.** Rejected on sight; `EventRowFormat` exists specifically so
+  these two surfaces cannot describe an event differently, and forking the layout re-opens that door
+  from the other side.
+
+Check the meta line at the same time. It is already `maxLines="2"`, but a multi-day recurring event
+(`Vacation · 4 Aug – 7 Aug · Every 2 weeks on Mon, Wed`) is the longest string the formatter can
+produce and has not been measured on P2P, the narrowest Tier-1 device.
