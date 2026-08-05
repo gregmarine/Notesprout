@@ -77,6 +77,58 @@ interface TaskDao {
     )
     suspend fun countResolvedBefore(sinceMillis: Long): Int
 
+    // ── Today dashboard ────────────────────────────────────────────────────────
+
+    /**
+     * Open tasks due on or before [dayEpochDay] — the dashboard's "overdue, or due today".
+     *
+     * **This is the one query that deliberately steps outside [MAIN_LIST].** `type = 'TASK'` with no
+     * `parentId` test catches standalone tasks *and* routine steps, because the dashboard surfaces a
+     * step outside its routine, labelled with the routine's name. Routines themselves are still
+     * excluded, by the type filter: a routine row beside its own steps would put the same work on a
+     * screen that has no room to spare.
+     *
+     * Undated tasks fall out for free — `NULL <= :day` is not true — which is what keeps the
+     * dashboard's "today" honest. They remain reachable on the Tasks screen.
+     */
+    @Query(
+        "SELECT * FROM tasks WHERE deletedAt IS NULL AND type = 'TASK' AND state = 'NOT_DONE' " +
+            "AND dueEpochDay <= :dayEpochDay ORDER BY dueEpochDay ASC, createdAt ASC"
+    )
+    suspend fun openDueBy(dayEpochDay: Long): List<TaskEntity>
+
+    /**
+     * Tasks resolved within `[startMillis, endMillis)` that were **also** due by [dayEpochDay] — the
+     * rows the dashboard keeps in place, ticked, until the day rolls over. That is what makes an
+     * accidental tap on an e-ink screen undoable where it happened.
+     *
+     * The due-day restriction is the point of the second predicate: a task finished early from
+     * another screen was never on the dashboard, so having it appear there the moment it was
+     * completed elsewhere would be noise rather than progress.
+     *
+     * `COALESCE` matches [resolvedTasksSince] — rows resolved before `resolvedAt` existed carry only
+     * an `updatedAt`, and the two queries must agree on which day such a row belongs to.
+     */
+    @Query(
+        "SELECT * FROM tasks WHERE deletedAt IS NULL AND type = 'TASK' AND state <> 'NOT_DONE' " +
+            "AND dueEpochDay <= :dayEpochDay " +
+            "AND COALESCE(resolvedAt, updatedAt) >= :startMillis " +
+            "AND COALESCE(resolvedAt, updatedAt) < :endMillis " +
+            "ORDER BY dueEpochDay ASC, createdAt ASC"
+    )
+    suspend fun resolvedOnDay(
+        startMillis: Long,
+        endMillis: Long,
+        dayEpochDay: Long,
+    ): List<TaskEntity>
+
+    /**
+     * Every live routine's id and title, in one query, so the dashboard can name the routine a step
+     * belongs to without a lookup per row.
+     */
+    @Query("SELECT id, title FROM tasks WHERE deletedAt IS NULL AND type = 'ROUTINE'")
+    suspend fun routineTitles(): List<RoutineTitleRow>
+
     // ── Routine members ────────────────────────────────────────────────────────
 
     /** Every live member of [routineId], in step order. Undated members sort last. */
@@ -163,6 +215,12 @@ interface TaskDao {
     @Query("DELETE FROM tasks WHERE id = :id")
     suspend fun hardDelete(id: String)
 }
+
+/** A routine's id and name, as returned by [TaskDao.routineTitles]. */
+data class RoutineTitleRow(
+    val id: String,
+    val title: String,
+)
 
 /** One routine's step counts, as returned by [TaskDao.routineProgress]. */
 data class RoutineProgressRow(

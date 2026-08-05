@@ -10,8 +10,12 @@
     Shape: a title row carrying the section's one create action, a rule, the list (with a centred
     empty state behind it), and the pager. The pager is prev/next only — deliberately no first/last.
     "Today" is a small set by construction; jumping to the end of a two-page list is chrome that
-    earns nothing. It is GONE at one page rather than disabled, because a disabled control is
-    visually silent on e-ink.
+    earns nothing.
+
+    The pager is INVISIBLE at one page rather than GONE, and never merely disabled. Not disabled
+    because a disabled control is visually silent on e-ink; not GONE because its 44dp has to stay
+    reserved either way — the list is measured against the space it can actually keep, and a pager
+    that appears later would clip the rows that had been made to fit.
 -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
@@ -67,8 +71,14 @@
             android:paddingStart="16dp"
             android:paddingEnd="16dp"
             android:paddingTop="10dp"
-            android:paddingBottom="8dp"
+            android:paddingBottom="0dp"
             android:clipToPadding="false" />
+        <!--
+            No paddingBottom: every row already carries an 8dp bottom margin, so padding here would
+            simply double the gap above the pager — and it is charged against the height the rows are
+            measured to fit, which is expensive. At ~75dp a row and a ~464dp band, 8dp of duplicated
+            padding is most of the margin that decides whether a sixth row fits at all.
+        -->
 
         <TextView
             android:id="@+id/sectionEmpty"
@@ -82,14 +92,14 @@
 
     </FrameLayout>
 
-    <!-- Pager: ‹ n/m › — hidden entirely at one page. -->
+    <!-- Pager: ‹ n/m › — invisible (but still occupying its 44dp) at one page. -->
     <LinearLayout
         android:id="@+id/sectionPager"
         android:layout_width="match_parent"
         android:layout_height="44dp"
         android:orientation="horizontal"
         android:gravity="center"
-        android:visibility="gone">
+        android:visibility="invisible">
 
         <androidx.appcompat.widget.AppCompatImageButton
             android:id="@+id/btnSectionPrev"

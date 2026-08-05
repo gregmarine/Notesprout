@@ -5,13 +5,22 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.os.Bundle
+import android.view.View
+import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.isVisible
 import androidx.lifecycle.lifecycleScope
 import com.notesprout.android.core.TopGuard
 import com.notesprout.android.data.EventsRepository
+import com.notesprout.android.data.ReopenOutcome
 import com.notesprout.android.data.TasksRepository
+import com.notesprout.android.data.TodayRepository
+import com.notesprout.android.data.TodayTask
+import com.notesprout.android.data.index.NotesproutIndex
+import com.notesprout.android.data.index.TaskEntity
+import com.notesprout.android.data.tasks.TaskState
 import com.notesprout.android.databinding.ActivityTodayBinding
+import com.notesprout.android.databinding.ItemTaskBinding
 import com.notesprout.android.databinding.ViewTodaySectionBinding
 import com.notesprout.android.state.AppSurface
 import com.notesprout.android.state.SurfaceEntry
@@ -60,6 +69,11 @@ class TodayActivity : AppCompatActivity() {
 
     private val tasksRepo by lazy { TasksRepository() }
     private val eventsRepo by lazy { EventsRepository() }
+    private val todayRepo by lazy { TodayRepository() }
+
+    private lateinit var tasksSection: TodaySection<TodayTask>
+
+    private val dueFmt = DateTimeFormatter.ofPattern("EEE d MMM", Locale.getDefault())
 
     /** True when every section is on screen at once — see `R.bool.today_single_screen`. */
     private var singleScreen = false
@@ -100,6 +114,7 @@ class TodayActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        if (!indexReady()) return
         SurfaceStack.markTop(this, surfaceEntry())
         registerReceiver(dateChangeReceiver, IntentFilter().apply {
             addAction(Intent.ACTION_DATE_CHANGED)
@@ -132,20 +147,53 @@ class TodayActivity : AppCompatActivity() {
 
     private fun surfaceEntry() = SurfaceEntry(surfaceToken, AppSurface.TODAY)
 
+    /**
+     * True when the global index is open, so this screen may read it.
+     *
+     * It is [BootstrapActivity] that opens (and if necessary unlocks) the index —
+     * `Application.onCreate` only *awaits* it, because opening can need a passphrase prompt and so
+     * cannot happen there. Every normal route here has been through Bootstrap. One route has not:
+     * Android recreating this Activity by itself after the process was killed in the background,
+     * which on a memory-tight e-ink device is an ordinary Tuesday. Nothing has opened the index in
+     * that case, and the first read would throw.
+     *
+     * So bounce back through Bootstrap, which is the single owner of opening and unlocking — and
+     * which then restores this whole surface chain via the [SurfaceStack], landing the user back
+     * here. Returning `false` also skips `markTop`, leaving the stack intact for that restore to
+     * read.
+     */
+    private fun indexReady(): Boolean {
+        if (NotesproutIndex.isReady()) return true
+        startActivity(
+            Intent(this, BootstrapActivity::class.java)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+        )
+        finish()
+        return false
+    }
+
     // ── Sections ───────────────────────────────────────────────────────────────
 
     /**
-     * Name each section and wire its create action. The lists themselves arrive in later phases;
-     * for now every section renders its empty state.
+     * Name each section and wire its create action. Events and Notebooks arrive in later phases; for
+     * now they render their empty state.
      */
     private fun setupSections() {
-        title(binding.sectionTasks, "Tasks", "New task", "Nothing due today") { newTask() }
+        tasksSection = TodaySection(
+            ui = binding.sectionTasks,
+            title = "Tasks",
+            addHint = "New task",
+            emptyText = "Nothing due today",
+            onAdd = { newTask() },
+            makeRow = { row -> taskRow(row) },
+        )
         title(binding.sectionEvents, "Events", "New event", "Nothing on today") { newEvent() }
         title(binding.sectionNotebooks, "Notebooks", "New notebook", "Nothing opened today") {
             newNotebook()
         }
     }
 
+    /** Phase-1 stand-in for the two sections that are not yet lists — see [TodaySection]. */
     private fun title(
         section: ViewTodaySectionBinding,
         name: String,
@@ -195,9 +243,121 @@ class TodayActivity : AppCompatActivity() {
         binding.tvTodayDate.text =
             today.format(DateTimeFormatter.ofLocalizedDate(style).withLocale(Locale.getDefault()))
 
-        // The three section lists land in phases 2–4. Until then each renders its empty state, set
-        // once in setupSections.
+        // Events and Notebooks land in phases 3–4; until then they render their empty state.
+        lifecycleScope.launch { tasksSection.submit(todayRepo.tasks(today)) }
     }
+
+    // ── Task rows ──────────────────────────────────────────────────────────────
+
+    /**
+     * One task. The state box is the screen's only edit; the rest of the row jumps to wherever the
+     * task actually lives, which for a routine step is its routine rather than the task list.
+     */
+    private fun taskRow(row: TodayTask): View {
+        val task = row.task
+        val state = TaskState.fromName(task.state)
+        val item = ItemTaskBinding.inflate(layoutInflater, binding.sectionTasks.sectionList, false)
+
+        item.btnTaskState.setImageResource(
+            when (state) {
+                TaskState.NOT_DONE -> R.drawable.ic_checkbox_empty
+                TaskState.DONE -> R.drawable.ic_checkbox_checked
+                TaskState.SKIPPED -> R.drawable.ic_checkbox_skipped
+            }
+        )
+        item.btnTaskState.contentDescription = if (state.isResolved) "Mark not done" else "Mark done"
+        item.btnTaskState.setOnClickListener {
+            if (state.isResolved) reopenTask(task) else completeTask(row)
+        }
+
+        item.tvTaskTitle.text = task.title
+        val meta = taskMeta(row, state)
+        item.tvTaskMeta.text = meta.orEmpty()
+        item.tvTaskMeta.isVisible = meta != null
+
+        val overdue = overdueLabel(task)
+        item.tvTaskDue.text = overdue.orEmpty()
+        item.tvTaskDue.isVisible = overdue != null
+
+        item.taskRow.setOnClickListener { openTaskHome(task) }
+        return item.root
+    }
+
+    /**
+     * The meta line, kept deliberately spare: the routine a step belongs to, and the word "Skipped"
+     * where that is what happened. Recurrence summaries and reminder notes stay on the Tasks screen —
+     * the dashboard's job is to say what is left, not to explain each row's rules.
+     */
+    private fun taskMeta(row: TodayTask, state: TaskState): String? {
+        val parts = mutableListOf<String>()
+        if (state == TaskState.SKIPPED) parts += state.label
+        row.routineName?.let { parts += it }
+        return parts.takeIf { it.isNotEmpty() }?.joinToString(" · ")
+    }
+
+    /** How late a row is. Nothing at all inside Today — the group header already said it. */
+    private fun overdueLabel(task: TaskEntity): String? {
+        val due = task.dueEpochDay ?: return null
+        val delta = due - LocalDate.now().toEpochDay()
+        return when {
+            delta >= 0L -> null
+            delta == -1L -> "Yesterday"
+            else -> "${-delta}d ago"
+        }
+    }
+
+    /** Where this task lives: a step belongs to its routine, everything else to the task list. */
+    private fun openTaskHome(task: TaskEntity) {
+        val routineId = task.parentId
+        if (routineId != null) RoutineActivity.launch(this, routineId) else TasksActivity.launch(this)
+    }
+
+    /**
+     * Check a task off. A routine step goes through [TasksRepository.resolveMember], so ticking the
+     * last open step completes its routine and rolls it forward exactly as it would inside
+     * [RoutineActivity] — a step is a step wherever it is ticked. Unlike that screen this one stays
+     * put and simply refreshes; there is nothing to step out of.
+     */
+    private fun completeTask(row: TodayTask) {
+        lifecycleScope.launch {
+            val today = LocalDate.now()
+            val task = row.task
+            if (task.parentId != null) {
+                val outcome = tasksRepo.resolveMember(task, TaskState.DONE, today)
+                refresh()
+                if (outcome.routineCompleted) {
+                    val next = outcome.nextRoutineDue
+                        ?.let { " · next due ${LocalDate.ofEpochDay(it).format(dueFmt)}" }.orEmpty()
+                    toast("${row.routineName ?: "Routine"} complete$next")
+                }
+            } else {
+                val successor = tasksRepo.complete(task, today)
+                refresh()
+                // Only recurring tasks produce one, and its date is the non-obvious part: the row
+                // just ticked stays put, but its replacement is dated somewhere the dashboard may
+                // not be showing at all.
+                successor?.dueEpochDay?.let {
+                    toast("Next due ${LocalDate.ofEpochDay(it).format(dueFmt)}")
+                }
+            }
+        }
+    }
+
+    /** Un-tick a task resolved today — the undo for a mis-tap, available where the mis-tap happened. */
+    private fun reopenTask(task: TaskEntity) {
+        lifecycleScope.launch {
+            when (tasksRepo.reopen(task)) {
+                ReopenOutcome.REOPENED -> refresh()
+                ReopenOutcome.SERIES_MOVED_ON ->
+                    toast("Later occurrences of this task have already been dealt with.")
+                ReopenOutcome.LOCKED ->
+                    toast("This routine is finished — its steps can't be changed.")
+            }
+        }
+    }
+
+    private fun toast(message: String) =
+        Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
 
     // ── Create actions ─────────────────────────────────────────────────────────
 

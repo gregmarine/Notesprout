@@ -115,7 +115,10 @@ The section most likely to overflow, so it builds the paging scaffolding the oth
   - rows resolved today, restricted to `dueEpochDay <= :today` so a task completed early elsewhere
     doesn't appear on a screen it was never on.
   - routine id → title, one query, for the step meta line.
-- Grouped **Overdue** then **Today**, resolved rows sorted last within their group.
+- Grouped **Overdue** then **Today**, sorted by due day then title. **State is not a sort key** —
+  ticking a task changes its checkbox and nothing else. (First built with resolved rows sorted to the
+  bottom of their group; that let a ticked row sink onto another page, which defeats the point of
+  keeping it visible. Paper doesn't reflow when you tick it either.)
 - Row rendering reuses `item_task.xml`. Meta line carries the routine name for a step.
 - Check off / un-check; routine last-step completion → roll-forward toast; `ReopenOutcome.LOCKED`
   toast for a finished routine's step.

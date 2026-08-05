@@ -58,6 +58,33 @@
             android:name="com.notesprout.android.debug.PenToolSpikeActivity"
             android:exported="true"
             android:label="Pen Tool Spike" />
+        <!-- Today Seed: writes (and removes) dashboard test data — the shape a real library rarely
+             has on any one day: enough rows to paginate, routine steps that surface outside their
+             routine, a routine with one open step so ticking it rolls it forward, and rows resolved
+             today that should stay in place ticked.
+             Every row is titled "[TEST] …" and CLEAR removes exactly those, hard-deleted so no
+             tombstone is left inside a series. Writes through the app's own open index, never the
+             database file.
+
+             Actions, passed as a string extra "action": full | minimal | clear | open | probe | raw
+             ("raw" also takes a "target" extra: tasks | calendar | main | today).
+
+             "open" launches the dashboard, which is exported="false" and so unreachable from a shell
+             am start — this is the same UID, so the export check doesn't apply, and no production
+             manifest is weakened to make layout work possible.
+
+             "probe" and "raw" are the diagnostics behind the BACKLOG item "Surfaces crash when
+             Android rebuilds a task with the index closed" (found 2026-08-04). In a fresh process,
+             with the index never opened, ALL SEVEN repositories throw
+             (Tasks/Today/Events/Calendar/Scratchpad/DayHistory/Index), and raw+target=tasks
+             reproduces the crash in TasksActivity. Only BootstrapActivity ever opens the index, and
+             it finishes itself, so an OS task rebuild after a background kill re-runs nothing.
+             TodayActivity is guarded; the rest are not.
+             adb shell am start -n com.notesprout.android.dev/com.notesprout.android.debug.TodaySeedActivity -->
+        <activity
+            android:name="com.notesprout.android.debug.TodaySeedActivity"
+            android:exported="true"
+            android:label="Today Seed" />
         <!-- Reveals the global passphrase so the encrypted index stays sqlcipher-inspectable. Debug only.
              adb shell am start -n com.notesprout.android.dev/com.notesprout.android.debug.DebugKeyActivity -->
         <activity
