@@ -307,6 +307,66 @@ gracefully instead of fatally. Options, none decided: a real migration for drift
 pre-open schema probe that flags the notebook in the library so its card shows it can't be opened; or
 accepting graceful failure as the permanent answer if drift can only originate from test devices.
 
+## Surfaces crash when Android rebuilds a task with the index closed
+
+> Found 2026-08-04 while building the Today dashboard, which tripped it deterministically via a
+> debug same-UID launch. Pre-existing and app-wide; **`TodayActivity` is already guarded**, the
+> other six are not.
+
+`BootstrapActivity` is the only thing that ever *opens* the global index — it is the launcher entry
+point, calls `NotesproutIndex.ensureReady`, unlocks if needed, forwards, and `finish()`es.
+`Application.onCreate` deliberately only `awaitReady()`s, because opening can need a passphrase
+prompt and so cannot happen there.
+
+Because Bootstrap finishes itself, it is not on the back stack. When **Android rebuilds a task's
+activities on its own after a background process kill** — tapping the app in Recents is the everyday
+case — nothing re-runs it, and the surface reads a closed database:
+
+```
+java.lang.IllegalStateException: NotesproutIndex is not open — call ensureReady() first
+    at NotesproutIndex.db(NotesproutIndex.kt:169)
+    at …Repository.<init> → <Surface>Activity.onResume
+```
+
+Reproduced on G102 by launching `TasksActivity` into a fresh process. Every repository throws when
+constructed against a closed index (measured, same run):
+
+```
+TasksRepository · TodayRepository · EventsRepository · CalendarRepository
+ScratchpadRepository · DayHistoryRepository · IndexRepository   — all THROW
+```
+
+Two shapes, both exposed:
+
+- **Lazy** — `TasksActivity`, `MainActivity` (`by lazy { IndexRepository(NotesproutIndex.dao()) }`):
+  the DAO is a default constructor argument, evaluated on first read, i.e. inside `onResume`.
+- **Eager** — `CalendarActivity:350`, `ScratchpadActivity:242` call `NotesproutIndex.db()` **directly
+  in `onCreate`**, so there is no first-read to defer it past.
+
+**The `NotesproutIndex` KDoc is stale and says otherwise** — *"BootstrapActivity (launcher) and
+MainActivity (deep-link entry) drive NotesproutIndex.ensureReady()"*. The MainActivity half is not
+true of the current code (no `ensureReady` / `isReady` / Bootstrap reference exists there). Fix the
+comment along with the code, or the next person will read it as handled — as it was read this time.
+
+**The fix, as already applied to `TodayActivity`** (`indexReady()`): in `onResume`, if
+`NotesproutIndex.isReady()` is false, start `BootstrapActivity` with `NEW_TASK|CLEAR_TASK` and
+`finish()`. Bootstrap is the single owner of opening and unlocking, and its forward to MainActivity
+then restores the whole chain through the `SurfaceStack`, landing the user back where they were.
+Returning early **before** `SurfaceStack.markTop` matters — it leaves the stack intact for that
+restore to read.
+
+Applies to `MainActivity`, `TasksActivity`, `RoutineActivity`, `CalendarActivity`,
+`DayDetailActivity`, `ScratchpadActivity`. The eager pair need the guard before their `onCreate`
+repository construction, not in `onResume`.
+
+**Not measured: how often real usage actually hits this.** The mechanism and the crash are proven;
+the frequency of the OS-restore path versus a launcher-icon start is not. Worth confirming the
+Recents path end-to-end on-device before deciding urgency.
+
+Diagnostics for re-testing live in the debug-only `TodaySeedActivity`:
+`--es action probe` (which repositories throw, in a fresh process) and
+`--es action raw --es target tasks|calendar|main|today` (create a surface with the index closed).
+
 ## Serialization hardening — pin `@SerialName` on `LinkTarget` (latent, not urgent)
 
 > Found 2026-07-14 while evaluating (and rejecting) an app package rename. Nothing is broken today —
@@ -498,3 +558,42 @@ per-page and notebook-only; each item below is a deliberate omission, not an ove
   `MarkdownFormatter.listEnter` / `renumberOrderedLists` and the parser's ordered-item regex.
 - **A durable undo for "bring in page text".** In-session Ctrl+Z only (the refresh is applied through
   the buffer, like a format-bar edit); beyond the session, the confirmation dialog is the guard.
+
+## Routines — an accidental last tick is irreversible
+
+> Found 2026-08-04 while testing the Today dashboard. **Working as designed** (see
+> `docs/tasks.md` → *Finished is final*); recorded because the dashboard makes it easier to trigger
+> without meaning to, not because the rule is wrong.
+
+Resolving a routine's **last open step** auto-completes the occurrence and rolls it forward. From that
+instant the occurrence is immutable: `TasksRepository.reopen` returns `ReopenOutcome.LOCKED` for the
+routine row and for every step inside it. So a mis-tap on the final step cannot be undone at all —
+there is no path back, from any screen.
+
+The rule itself is sound. Un-checking a step would leave a live step inside an occurrence that has
+already spawned its successor, which is a worse state than the one it fixes.
+
+**What the dashboard changes is the context around the tap.** `RoutineActivity` shows the routine, its
+deadline, and the other steps, so "this is the last one" is visible before you touch it. The dashboard
+deliberately shows steps *without* their routine row (no "4 of 5 done" progress line — see
+`docs/today-dashboard.md`), so the final step looks exactly like any other row, and the only signal
+that something irreversible happened is a toast **after** the fact.
+
+Options, none decided:
+
+- **Confirm on the last step only** — "This is the last step of *X*. Completing it finishes the
+  routine." Cheap and targeted, but it puts a dialog on the one screen whose whole point is calm, and
+  the confirm would fire on the legitimate path too (finishing a routine on purpose is the normal
+  case, not the exception).
+- **Make the rollover reversible** — the most principled, and there is precedent: `reopen` already
+  withdraws a *task's* machine-generated successor by hard-deleting it, guarded on `maxSeriesIndex`
+  so it refuses once the user has acted on later rows. The routine equivalent has to withdraw the
+  successor routine **and** the steps `rollForward` copied into it, and only while none of them has
+  been touched. Bigger, but it removes the sharp edge rather than papering over it.
+- **Warn in the row's meta line** — e.g. "Weekly reset · last step". Zero interaction cost, no dialog,
+  and it restores the context the dashboard removed. Weakest guarantee: it informs, it doesn't
+  protect.
+- **Accept as-is.** The behaviour is documented and consistent; a toast already names what happened.
+
+Whichever is chosen, `ReopenOutcome.LOCKED` stays as the backstop for the paths that genuinely cannot
+be reopened (a surface restore into an occurrence that completed while the user was away).
