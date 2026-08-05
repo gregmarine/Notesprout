@@ -15,7 +15,11 @@ import com.notesprout.android.MainActivity
 import com.notesprout.android.TasksActivity
 import com.notesprout.android.TodayActivity
 import com.notesprout.android.data.events.EndMode
+import com.notesprout.android.data.events.EventPayload
+import com.notesprout.android.data.events.EventType
 import com.notesprout.android.data.events.Freq
+import com.notesprout.android.data.events.RecurrenceRule
+import com.notesprout.android.data.index.EventEntity
 import com.notesprout.android.data.index.NotesproutIndex
 import com.notesprout.android.data.index.TaskEntity
 import com.notesprout.android.data.tasks.RoutinePeriod
@@ -208,7 +212,115 @@ class TodaySeedActivity : AppCompatActivity() {
         dao.upsert(daily); written++
         task("Lights out by eleven", today, parentId = daily.id)
 
-        "$written rows (2 routines, 5 of their steps, 14 standalone)"
+        val events = seedEvents(today, now)
+        written += events
+
+        "$written rows — ${written - events} tasks (2 routines + 5 steps + 14 standalone), " +
+            "$events events"
+    }
+
+    /**
+     * Today's events, in two parts.
+     *
+     * **The shapes** — one of each thing the row wording has to handle: all-day, timed with and
+     * without an end, a multi-day span, and each recurrence frequency that renders a different
+     * summary.
+     *
+     * **The bulk** — an ordinary over-full day, there only to make pages. Real dashboards will
+     * rarely look like this, but a section that only ever holds two pages never exercises the middle
+     * of the pager (where both arrows are live) and never shows a part-full last page. The times
+     * deliberately interleave with the shape events above, so the render order is proof the sort ran
+     * and not just the insert order.
+     */
+    private suspend fun seedEvents(today: Long, now: Long): Int {
+        val dao = NotesproutIndex.eventDao()
+        var written = 0
+
+        suspend fun event(
+            title: String,
+            type: EventType,
+            start: Long = today,
+            end: Long = today,
+            allDay: Boolean = false,
+            startMinute: Int? = null,
+            endMinute: Int? = null,
+            rule: RecurrenceRule? = null,
+        ) {
+            dao.upsert(
+                EventEntity(
+                    id = UUID.randomUUID().toString(),
+                    type = type.name,
+                    title = "$PREFIX $title",
+                    startEpochDay = start,
+                    endEpochDay = end,
+                    allDay = allDay,
+                    startMinute = startMinute,
+                    endMinute = endMinute,
+                    // Mirrors data.recurrence != null — the DAO pulls only these for expansion.
+                    recurring = rule != null,
+                    data = EventPayload(recurrence = rule).toJson(),
+                    createdAt = now,
+                    updatedAt = now,
+                    deletedAt = null,
+                )
+            )
+            written++
+        }
+
+        // ── The shapes ──
+        event("Standup", EventType.MEETING, startMinute = 9 * 60, endMinute = 9 * 60 + 15)
+        event("Lunch with Sam", EventType.APPOINTMENT, startMinute = 12 * 60 + 30)
+        event("Dentist", EventType.APPOINTMENT, startMinute = 14 * 60 + 30, endMinute = 15 * 60 + 15)
+        event("Team retro", EventType.MEETING, startMinute = 16 * 60, endMinute = 17 * 60)
+        event("Deploy window", EventType.OTHER, startMinute = 22 * 60)
+        event("Pick up the parcel", EventType.OTHER, allDay = true)
+        // Yearly, anchored decades back — the common birthday shape, and an O(1) recurrence check.
+        // Anchored with real date arithmetic, NOT `today - 365 * 40`: forty 365-day years land ten
+        // days short of the calendar date, and a YEARLY rule matches on month+day, so the event
+        // would simply never occur today.
+        val birthday = LocalDate.now().minusYears(40).toEpochDay()
+        event(
+            "Mum's birthday", EventType.BIRTHDAY, start = birthday, end = birthday,
+            allDay = true, rule = RecurrenceRule(freq = Freq.YEARLY),
+        )
+        // Multi-day span straddling today, so the meta line has a date range to render.
+        event(
+            "Conference", EventType.VACATION, start = today - 1, end = today + 2, allDay = true,
+        )
+        // Weekly on today's own weekday (empty weekdays = the anchor's own day).
+        event(
+            "Bin day", EventType.OTHER, start = today - 70, end = today - 70, allDay = true,
+            rule = RecurrenceRule(freq = Freq.WEEKLY),
+        )
+        // Monthly on today's own day-of-month, and an anniversary — the two remaining summaries.
+        // Anchored with real month arithmetic for the same reason the birthday is: a DAY_OF_MONTH
+        // rule matches on the calendar day, which fixed-length arithmetic drifts off.
+        val lastQuarter = LocalDate.now().minusMonths(3).toEpochDay()
+        event(
+            "Month-end close", EventType.OTHER, start = lastQuarter, end = lastQuarter,
+            allDay = true, rule = RecurrenceRule(freq = Freq.MONTHLY),
+        )
+        val anniversary = LocalDate.now().minusYears(12).toEpochDay()
+        event(
+            "Wedding anniversary", EventType.ANNIVERSARY, start = anniversary, end = anniversary,
+            allDay = true, rule = RecurrenceRule(freq = Freq.YEARLY),
+        )
+
+        // ── The bulk ── an ordinary crowded day, purely to fill pages.
+        event("Swim", EventType.OTHER, startMinute = 6 * 60 + 30, endMinute = 7 * 60 + 15)
+        event("School run", EventType.OTHER, startMinute = 7 * 60 + 45)
+        event("Coffee with Priya", EventType.APPOINTMENT, startMinute = 8 * 60 + 45, endMinute = 9 * 60)
+        event("One-to-one with Alex", EventType.MEETING, startMinute = 10 * 60, endMinute = 10 * 60 + 30)
+        event("Design review", EventType.MEETING, startMinute = 11 * 60, endMinute = 12 * 60)
+        event("Physio", EventType.APPOINTMENT, startMinute = 13 * 60, endMinute = 13 * 60 + 45)
+        event("Call the bank about the mortgage renewal", EventType.OTHER, startMinute = 13 * 60 + 30)
+        event("Pick up the kids", EventType.OTHER, startMinute = 15 * 60 + 30)
+        event("Guitar lesson", EventType.APPOINTMENT, startMinute = 17 * 60 + 30, endMinute = 18 * 60 + 15)
+        event("Book club", EventType.MEETING, startMinute = 18 * 60 + 30)
+        event("Dinner at the Nawabs'", EventType.APPOINTMENT, startMinute = 19 * 60)
+        event("Call Mum", EventType.OTHER, startMinute = 20 * 60)
+        event("Read a chapter", EventType.OTHER, startMinute = 21 * 60)
+        return written
     }
 
     /** Just enough to land in one group, so the single-group "no header" case is visible. */
@@ -302,13 +414,19 @@ class TodaySeedActivity : AppCompatActivity() {
      */
     private fun clear() = run("Cleared") {
         val raw = NotesproutIndex.db().openHelper.writableDatabase
-        val ids = mutableListOf<String>()
+        val taskIds = mutableListOf<String>()
         raw.query("SELECT id FROM tasks WHERE title LIKE ?", arrayOf("$PREFIX %")).use { c ->
-            while (c.moveToNext()) ids += c.getString(0)
+            while (c.moveToNext()) taskIds += c.getString(0)
         }
         val dao = NotesproutIndex.taskDao()
-        for (id in ids) dao.hardDelete(id)
-        "${ids.size} rows removed"
+        for (id in taskIds) dao.hardDelete(id)
+
+        // Events are hard-deleted straight through the raw connection: EventDao offers only a soft
+        // delete (correct for user content — the recurrence engine needs tombstones to behave), and
+        // a soft-deleted seed row would linger in the table forever.
+        val events = raw.delete("events", "title LIKE ?", arrayOf("$PREFIX %"))
+
+        "${taskIds.size} task rows, $events event rows"
     }
 
     // ── Plumbing ───────────────────────────────────────────────────────────────

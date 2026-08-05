@@ -2,7 +2,6 @@ package com.notesprout.android
 
 import android.app.Activity
 import android.graphics.Typeface
-import android.text.format.DateFormat
 import android.view.LayoutInflater
 import android.view.View
 import android.widget.LinearLayout
@@ -15,13 +14,13 @@ import com.notesprout.android.data.EventsRepository
 import com.notesprout.android.data.UpcomingEvent
 import com.notesprout.android.data.events.EventPayload
 import com.notesprout.android.data.events.EventRecurrence
+import com.notesprout.android.data.events.EventRowFormat
 import com.notesprout.android.data.events.EventType
 import com.notesprout.android.data.index.EventEntity
 import com.notesprout.android.databinding.ItemEventBinding
 import kotlinx.coroutines.launch
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
-import java.util.Calendar
 import java.util.Locale
 
 /**
@@ -42,9 +41,10 @@ class EventsController(
     private val repo: EventsRepository = EventsRepository(),
 ) {
 
-    private val dateFmt = DateTimeFormatter.ofPattern("d MMM", Locale.getDefault())
     private val occFmt = DateTimeFormatter.ofPattern("EEE d MMM", Locale.getDefault())
-    private val timeFmt = DateFormat.getTimeFormat(activity)
+
+    /** Row wording, shared with the Today dashboard so the two can't describe an event differently. */
+    private val rowFormat = EventRowFormat(activity)
 
     init {
         addButton.setOnClickListener { openEditor(null) }
@@ -78,9 +78,9 @@ class EventsController(
 
     private fun addEventRow(inflater: LayoutInflater, ev: EventEntity) {
         val row = ItemEventBinding.inflate(inflater, listView, false)
-        row.tvEventTime.text = if (ev.allDay) "All day" else ev.startMinute?.let(::fmtMin) ?: "—"
+        row.tvEventTime.text = rowFormat.time(ev)
         row.tvEventTitle.text = ev.title
-        row.tvEventMeta.text = meta(ev)
+        row.tvEventMeta.text = rowFormat.meta(ev)
         row.eventRow.setOnClickListener { openEditor(ev) }
         row.btnEventDelete.setOnClickListener { confirmDelete(ev) }
         listView.addView(row.root)
@@ -119,26 +119,15 @@ class EventsController(
 
     private fun countdown(days: Int): String = if (days == 1) "Tomorrow" else "In $days days"
 
+    /** An Upcoming row says *when* rather than how it ends — the occurrence date is the point. */
     private fun upcomingMeta(u: UpcomingEvent): String {
         val parts = mutableListOf(EventType.fromName(u.event.type).label)
         parts += u.occurrenceStart.format(occFmt)
-        if (!u.event.allDay) u.event.startMinute?.let { parts += fmtMin(it) }
+        if (!u.event.allDay) u.event.startMinute?.let { parts += rowFormat.minute(it) }
         return parts.joinToString(" · ")
     }
 
     private fun dp(v: Int): Int = (v * activity.resources.displayMetrics.density).toInt()
-
-    private fun meta(ev: EventEntity): String {
-        val parts = mutableListOf(EventType.fromName(ev.type).label)
-        if (!ev.allDay && ev.endMinute != null) parts += "ends ${fmtMin(ev.endMinute)}"
-        if (ev.startEpochDay != ev.endEpochDay) {
-            val s = LocalDate.ofEpochDay(ev.startEpochDay).format(dateFmt)
-            val e = LocalDate.ofEpochDay(ev.endEpochDay).format(dateFmt)
-            parts += "$s – $e"
-        }
-        EventPayload.fromJson(ev.data).recurrence?.let { parts += it.summary() }
-        return parts.joinToString(" · ")
-    }
 
     /** [contextDay] is the occurrence day the edit/delete scopes key off — the viewed day for a
      *  today row, the occurrence day for an Upcoming row (so recurring scopes resolve correctly). */
@@ -224,10 +213,4 @@ class EventsController(
         dialog.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
     }
 
-    private fun fmtMin(m: Int): String {
-        val cal = Calendar.getInstance().apply {
-            set(Calendar.HOUR_OF_DAY, m / 60); set(Calendar.MINUTE, m % 60)
-        }
-        return timeFmt.format(cal.time)
-    }
 }

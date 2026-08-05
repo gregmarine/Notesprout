@@ -1,5 +1,6 @@
 package com.notesprout.android.data
 
+import com.notesprout.android.data.index.EventEntity
 import com.notesprout.android.data.index.NotesproutIndex
 import com.notesprout.android.data.index.TaskDao
 import com.notesprout.android.data.index.TaskEntity
@@ -18,6 +19,7 @@ import java.time.ZoneId
  */
 class TodayRepository(
     private val taskDao: TaskDao = NotesproutIndex.taskDao(),
+    private val eventsRepo: EventsRepository = EventsRepository(),
 ) {
 
     /**
@@ -51,6 +53,23 @@ class TodayRepository(
             val items = rows.filter { kindOf(it.task, day) == kind }.sortedWith(ROW_ORDER)
             if (items.isEmpty()) null else TodayGroup(kind.label, items)
         }
+    }
+
+    /**
+     * The day's events — those actually **on** today, direct and recurring alike, all-day first then
+     * by start time (the ordering [EventsRepository.eventsForDay] already applies).
+     *
+     * **No look-ahead.** The day window's Events view also carries reminder-gated *Upcoming* rows;
+     * the dashboard deliberately does not. "Today" here means today, and an event you asked to be
+     * warned about a week early is exactly the sort of thing that would crowd out what is actually
+     * happening now. The look-ahead stays where it already lives, one tap away.
+     *
+     * One group, so [com.notesprout.android.TodaySection] draws no header for it — the section is
+     * already called Events.
+     */
+    suspend fun events(today: LocalDate): List<TodayGroup<EventEntity>> {
+        val rows = eventsRepo.eventsForDay(today)
+        return if (rows.isEmpty()) emptyList() else listOf(TodayGroup("Today", rows))
     }
 
     private fun kindOf(task: TaskEntity, todayEpochDay: Long): TaskSectionKind =

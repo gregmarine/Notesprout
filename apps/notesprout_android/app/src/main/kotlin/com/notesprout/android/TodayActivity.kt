@@ -16,10 +16,13 @@ import com.notesprout.android.data.ReopenOutcome
 import com.notesprout.android.data.TasksRepository
 import com.notesprout.android.data.TodayRepository
 import com.notesprout.android.data.TodayTask
+import com.notesprout.android.data.events.EventRowFormat
+import com.notesprout.android.data.index.EventEntity
 import com.notesprout.android.data.index.NotesproutIndex
 import com.notesprout.android.data.index.TaskEntity
 import com.notesprout.android.data.tasks.TaskState
 import com.notesprout.android.databinding.ActivityTodayBinding
+import com.notesprout.android.databinding.ItemEventBinding
 import com.notesprout.android.databinding.ItemTaskBinding
 import com.notesprout.android.databinding.ViewTodaySectionBinding
 import com.notesprout.android.state.AppSurface
@@ -72,8 +75,12 @@ class TodayActivity : AppCompatActivity() {
     private val todayRepo by lazy { TodayRepository() }
 
     private lateinit var tasksSection: TodaySection<TodayTask>
+    private lateinit var eventsSection: TodaySection<EventEntity>
 
     private val dueFmt = DateTimeFormatter.ofPattern("EEE d MMM", Locale.getDefault())
+
+    /** Row wording, shared with the day window's Events list so the two never disagree. */
+    private val eventFormat by lazy { EventRowFormat(this) }
 
     /** True when every section is on screen at once — see `R.bool.today_single_screen`. */
     private var singleScreen = false
@@ -187,7 +194,14 @@ class TodayActivity : AppCompatActivity() {
             onAdd = { newTask() },
             makeRow = { row -> taskRow(row) },
         )
-        title(binding.sectionEvents, "Events", "New event", "Nothing on today") { newEvent() }
+        eventsSection = TodaySection(
+            ui = binding.sectionEvents,
+            title = "Events",
+            addHint = "New event",
+            emptyText = "Nothing on today",
+            onAdd = { newEvent() },
+            makeRow = { event -> eventRow(event) },
+        )
         title(binding.sectionNotebooks, "Notebooks", "New notebook", "Nothing opened today") {
             newNotebook()
         }
@@ -243,8 +257,50 @@ class TodayActivity : AppCompatActivity() {
         binding.tvTodayDate.text =
             today.format(DateTimeFormatter.ofLocalizedDate(style).withLocale(Locale.getDefault()))
 
-        // Events and Notebooks land in phases 3–4; until then they render their empty state.
-        lifecycleScope.launch { tasksSection.submit(todayRepo.tasks(today)) }
+        // Notebooks lands in phase 4; until then it renders its empty state.
+        lifecycleScope.launch {
+            tasksSection.submit(todayRepo.tasks(today))
+            eventsSection.submit(todayRepo.events(today))
+        }
+    }
+
+    // ── Event rows ─────────────────────────────────────────────────────────────
+
+    /**
+     * One event, in the same row layout the day window uses — minus its delete button. Nothing is
+     * edited here: a tap opens the day window, which owns editing and the recurring-scope prompts
+     * that go with it ("this occurrence / this and following / all"). Reproducing any of that on a
+     * focus view would be a second place to get it wrong.
+     */
+    private fun eventRow(event: EventEntity): View {
+        val item = ItemEventBinding.inflate(layoutInflater, binding.sectionEvents.sectionList, false)
+        item.tvEventTime.text = eventFormat.time(event)
+        item.tvEventTitle.text = event.title
+        item.tvEventMeta.text = eventFormat.meta(event)
+        item.btnEventDelete.isVisible = false
+        item.eventRow.setOnClickListener { openDayWindow() }
+        return item.root
+    }
+
+    /**
+     * Today's day window — where an event can actually be edited.
+     *
+     * No view is passed: a normal open already lands on **Events**, and `EXTRA_VIEW` exists only for
+     * launch restore. Nothing here is coupled to the day window's own view enum, which is private to
+     * it.
+     *
+     * No source notebook either — the dashboard is not one, so Send-to-Notebook there falls back to
+     * the picker rather than offering "this notebook".
+     */
+    private fun openDayWindow() {
+        startActivity(
+            DayDetailActivity.intent(
+                this,
+                LocalDate.now(),
+                fromNotebookId = null,
+                fromNotebookName = null,
+            )
+        )
     }
 
     // ── Task rows ──────────────────────────────────────────────────────────────
