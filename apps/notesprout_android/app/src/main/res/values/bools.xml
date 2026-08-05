@@ -9,4 +9,13 @@
         zero width, taking the overflow button down with it. See values-sw720dp.
     -->
     <bool name="day_toolbar_single_row">false</bool>
+
+    <!--
+        Today dashboard: false puts its three sections behind a tab row (one at a time); true lays
+        all three out at once — Tasks | Events side by side over a full-width Notebooks band.
+        See values-sw600dp. Deliberately its own flag rather than reusing is_large_screen: the
+        dashboard's breakpoint is about fitting three lists on one screen, which is a different
+        question from whatever else "large" comes to mean.
+    -->
+    <bool name="today_single_screen">false</bool>
 </resources>

@@ -1,4 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <bool name="is_large_screen">true</bool>
+
+    <!--
+        Today dashboard: everything on one screen. 600dp splits Tier 1 cleanly — Go 10.3 Gen 2
+        (992dp) and Note Max get the single screen; Go 6 Gen II (571dp) and Palma2 Pro (439dp) stay
+        tabbed, where three sections at once would leave one or two rows each and read as cramped
+        rather than focused.
+    -->
+    <bool name="today_single_screen">true</bool>
 </resources>

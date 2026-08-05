@@ -7,7 +7,7 @@ import kotlinx.serialization.json.Json
 
 /** A screen a cold launch can reopen. The library is implicit — it is always the bottom of the stack. */
 @Serializable
-enum class AppSurface { NOTEBOOK, CALENDAR, DAY_WINDOW, SCRATCHPAD, TASKS, ROUTINE }
+enum class AppSurface { NOTEBOOK, CALENDAR, DAY_WINDOW, SCRATCHPAD, TASKS, ROUTINE, TODAY }
 
 /**
  * One surface Activity, as it sits on the task's back stack.

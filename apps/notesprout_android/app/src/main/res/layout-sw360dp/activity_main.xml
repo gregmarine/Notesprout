@@ -351,14 +351,25 @@
             android:contentDescription="Compact Notebooks" />
 
         <!--
-            Tasks lives in the overflow row on this bucket only. The wider variants put it in
-            surfaceButtonsGroup beside Calendar and Scratch Pad, but the bottom bar here is already
-            at 428dp of the Palma2 Pro's 439dp and cannot absorb another 48dp.
+            Today and Tasks both live in the overflow row here. The wider variants put Today in
+            surfaceButtonsGroup beside Calendar and Scratch Pad, but the bottom bar in this bucket is
+            already at 428dp of the Palma2 Pro's 439dp and cannot absorb another 48dp — for either
+            of them.
 
-            The id must still exist in EVERY variant of this layout or view binding makes the field
-            nullable — same reason the pagination buttons stay in the tree here (see the bottom-bar
-            comment below). MainActivity therefore wires it once, with no per-variant branch.
+            The row itself has room: eight buttons come to 44×8 + 4×7 + 16 = 396dp of 439dp.
+
+            Both ids must still exist in EVERY variant of this layout or view binding makes the
+            fields nullable — same reason the pagination buttons stay in the tree here (see the
+            bottom-bar comment below). MainActivity therefore wires them once, with no per-variant
+            branch.
         -->
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnToday"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:layout_marginStart="4dp"
+            android:src="@drawable/ic_layout_dashboard"
+            android:contentDescription="Today" />
+
         <androidx.appcompat.widget.AppCompatImageButton
             android:id="@+id/btnTasks"
             style="@style/Widget.Notesprout.ToolbarButton"

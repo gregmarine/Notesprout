@@ -350,6 +350,16 @@
             android:src="@drawable/ic_compact"
             android:contentDescription="Compact Notebooks" />
 
+        <!-- Tasks lives in the overflow row in every variant now — the Today dashboard took its
+             place in surfaceButtonsGroup. The id must exist in EVERY variant or view binding makes
+             the field nullable. -->
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnTasks"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:layout_marginStart="4dp"
+            android:src="@drawable/ic_tasks"
+            android:contentDescription="Tasks" />
+
     </LinearLayout>
 
     <!--
@@ -387,9 +397,18 @@
             android:layout_marginStart="16dp"
             android:gravity="center_vertical">
 
+            <!-- Today leads the group — the screen that reaches all the others. It took Tasks'
+                 slot rather than adding a fourth button; see layout-sw480dp for the arithmetic. -->
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnToday"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:src="@drawable/ic_layout_dashboard"
+                android:contentDescription="Today" />
+
             <androidx.appcompat.widget.AppCompatImageButton
                 android:id="@+id/btnCalendar"
                 style="@style/Widget.Notesprout.ToolbarButton"
+                android:layout_marginStart="4dp"
                 android:src="@drawable/ic_calendar"
                 android:contentDescription="Calendar" />
 
@@ -399,13 +418,6 @@
                 android:layout_marginStart="4dp"
                 android:src="@drawable/ic_sketching"
                 android:contentDescription="Scratch Pad" />
-
-            <androidx.appcompat.widget.AppCompatImageButton
-                android:id="@+id/btnTasks"
-                style="@style/Widget.Notesprout.ToolbarButton"
-                android:layout_marginStart="4dp"
-                android:src="@drawable/ic_tasks"
-                android:contentDescription="Tasks" />
 
         </LinearLayout>
 

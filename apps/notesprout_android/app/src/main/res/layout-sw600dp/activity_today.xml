@@ -1,0 +1,187 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Today — the dashboard surface. SINGLE-SCREEN variant (sw600dp+: Go 10.3 Gen 2, Note Max).
+
+    Everything at once: Tasks | Events side by side over a full-width Notebooks band. Tasks and
+    events are narrow rows and pair well in columns; a notebook row needs the full width for name +
+    folder breadcrumb + activity flags, which is why it gets the band rather than a third column.
+
+    Carries the **same id set** as layout/activity_today.xml — including todayTabs, kept in the tree
+    and GONE — so the view-binding fields stay non-null and TodayActivity needs no per-variant branch
+    beyond reading R.bool.today_single_screen. Anything the Kotlin never touches (the top band, the
+    dividers) deliberately has no id at all, so it cannot become a nullable field either.
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/todayRoot"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@color/paperWhite">
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="@color/inkBlack" />
+
+    <LinearLayout
+        android:id="@+id/todayToolbar"
+        android:layout_width="match_parent"
+        android:layout_height="56dp"
+        android:orientation="horizontal"
+        android:background="@color/paperWhite"
+        android:gravity="center_vertical"
+        android:paddingStart="4dp"
+        android:paddingEnd="4dp">
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnTodayBack"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:src="@drawable/ic_arrow_left"
+            android:contentDescription="Back" />
+
+        <View
+            android:layout_width="1dp"
+            android:layout_height="28dp"
+            android:background="@color/inkBlack"
+            android:layout_marginStart="4dp"
+            android:layout_marginEnd="8dp" />
+
+        <TextView
+            android:id="@+id/tvTodayTitle"
+            style="@style/TextAppearance.Notesprout.TitleLarge"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Today" />
+
+        <View
+            android:layout_width="0dp"
+            android:layout_weight="1"
+            android:layout_height="1dp" />
+
+        <TextView
+            android:id="@+id/tvTodayDate"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginEnd="12dp"
+            android:textSize="15sp"
+            android:textColor="@color/inkBlack" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnTodayCalendar"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:src="@drawable/ic_calendar"
+            android:contentDescription="Calendar" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnTodayTasks"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:layout_marginStart="4dp"
+            android:src="@drawable/ic_tasks"
+            android:contentDescription="Tasks" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnTodayScratchpad"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:layout_marginStart="4dp"
+            android:src="@drawable/ic_sketching"
+            android:contentDescription="Scratch Pad" />
+
+    </LinearLayout>
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="@color/inkBlack" />
+
+    <!-- Present so the id set matches the tabbed variant; never shown here. -->
+    <LinearLayout
+        android:id="@+id/todayTabs"
+        android:layout_width="match_parent"
+        android:layout_height="52dp"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingStart="12dp"
+        android:paddingEnd="12dp"
+        android:visibility="gone">
+
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/btnTabTasks"
+            style="@style/Widget.Notesprout.ToggleTextButton"
+            android:layout_width="0dp"
+            android:layout_weight="1"
+            android:text="Tasks"
+            android:contentDescription="Tasks due today" />
+
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/btnTabEvents"
+            style="@style/Widget.Notesprout.ToggleTextButton"
+            android:layout_width="0dp"
+            android:layout_weight="1"
+            android:layout_marginStart="8dp"
+            android:text="Events"
+            android:contentDescription="Events on today" />
+
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/btnTabNotebooks"
+            style="@style/Widget.Notesprout.ToggleTextButton"
+            android:layout_width="0dp"
+            android:layout_weight="1"
+            android:layout_marginStart="8dp"
+            android:text="Notebooks"
+            android:contentDescription="Notebooks today and recent" />
+
+    </LinearLayout>
+
+    <!--
+        Both bands. 55/45 rather than an even split: the two top sections are the day's commitments
+        and are what the screen is for, while notebooks is the jump-point list underneath them.
+    -->
+    <LinearLayout
+        android:id="@+id/todayBands"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:orientation="vertical">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="55"
+            android:orientation="horizontal">
+
+            <include
+                android:id="@+id/sectionTasks"
+                layout="@layout/view_today_section"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1" />
+
+            <View
+                android:layout_width="1dp"
+                android:layout_height="match_parent"
+                android:background="@color/inkBlack" />
+
+            <include
+                android:id="@+id/sectionEvents"
+                layout="@layout/view_today_section"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1" />
+
+        </LinearLayout>
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="@color/inkBlack" />
+
+        <include
+            android:id="@+id/sectionNotebooks"
+            layout="@layout/view_today_section"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="45" />
+
+    </LinearLayout>
+
+</LinearLayout>

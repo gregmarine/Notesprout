@@ -1,0 +1,195 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Today — the dashboard surface. TABBED variant (< sw600dp: Palma2 Pro, Go 6 Gen II).
+
+    Three sections behind a tab row, one visible at a time. layout-sw600dp/ has the single-screen
+    variant; the two carry the **same id set** — including todayTabs, which is merely GONE there —
+    so the view-binding fields stay non-null and TodayActivity needs no per-variant branch beyond
+    reading R.bool.today_single_screen.
+
+    Like TasksActivity this screen keeps the system bars visible (there is no canvas that wants to
+    be full-bleed), so the top guard comes from the live inset via TopGuard.applyInsetPadding rather
+    than a fixed reservation — hence the 1dp rule below, which gives the chrome an edge to sit on.
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/todayRoot"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@color/paperWhite">
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="@color/inkBlack" />
+
+    <!--
+        Top bar, mirroring TasksActivity: back · rule · title · date · sibling-surface jumps.
+        There is no Library button — Back already goes there, since the library is the only place
+        the dashboard launches from.
+    -->
+    <LinearLayout
+        android:id="@+id/todayToolbar"
+        android:layout_width="match_parent"
+        android:layout_height="56dp"
+        android:orientation="horizontal"
+        android:background="@color/paperWhite"
+        android:gravity="center_vertical"
+        android:paddingStart="4dp"
+        android:paddingEnd="4dp">
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnTodayBack"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:src="@drawable/ic_arrow_left"
+            android:contentDescription="Back" />
+
+        <View
+            android:layout_width="1dp"
+            android:layout_height="28dp"
+            android:background="@color/inkBlack"
+            android:layout_marginStart="4dp"
+            android:layout_marginEnd="8dp" />
+
+        <TextView
+            android:id="@+id/tvTodayTitle"
+            style="@style/TextAppearance.Notesprout.TitleLarge"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Today" />
+
+        <View
+            android:layout_width="0dp"
+            android:layout_weight="1"
+            android:layout_height="1dp" />
+
+        <!--
+            The date. inkBlack, not inkLight: it carries information, so it takes the readable ink
+            and is made smaller to read as secondary (see the design system).
+        -->
+        <TextView
+            android:id="@+id/tvTodayDate"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginEnd="8dp"
+            android:textSize="14sp"
+            android:textColor="@color/inkBlack" />
+
+        <!--
+            Sibling-surface jumps, trailing — same order and same end of the bar as the Tasks screen
+            and the day window, so hopping between these screens is one tap and the target is always
+            in the same place.
+        -->
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnTodayCalendar"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:src="@drawable/ic_calendar"
+            android:contentDescription="Calendar" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnTodayTasks"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:layout_marginStart="4dp"
+            android:src="@drawable/ic_tasks"
+            android:contentDescription="Tasks" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnTodayScratchpad"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:layout_marginStart="4dp"
+            android:src="@drawable/ic_sketching"
+            android:contentDescription="Scratch Pad" />
+
+    </LinearLayout>
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="@color/inkBlack" />
+
+    <!--
+        Tab row — this variant's reason for existing. Reuses ToggleTextButton, the same treatment the
+        Tasks screen's Today/All/Done toggles use, so a tab reads as the same kind of control it
+        already does elsewhere. GONE in the sw600dp variant.
+    -->
+    <LinearLayout
+        android:id="@+id/todayTabs"
+        android:layout_width="match_parent"
+        android:layout_height="52dp"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingStart="12dp"
+        android:paddingEnd="12dp">
+
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/btnTabTasks"
+            style="@style/Widget.Notesprout.ToggleTextButton"
+            android:layout_width="0dp"
+            android:layout_weight="1"
+            android:text="Tasks"
+            android:contentDescription="Tasks due today" />
+
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/btnTabEvents"
+            style="@style/Widget.Notesprout.ToggleTextButton"
+            android:layout_width="0dp"
+            android:layout_weight="1"
+            android:layout_marginStart="8dp"
+            android:text="Events"
+            android:contentDescription="Events on today" />
+
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/btnTabNotebooks"
+            style="@style/Widget.Notesprout.ToggleTextButton"
+            android:layout_width="0dp"
+            android:layout_weight="1"
+            android:layout_marginStart="8dp"
+            android:text="Notebooks"
+            android:contentDescription="Notebooks today and recent" />
+
+    </LinearLayout>
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="@color/inkBlack" />
+
+    <!--
+        The three sections, stacked. Exactly one is VISIBLE at a time (the rest GONE), so the visible
+        one takes the whole band by weight. A vertical LinearLayout rather than a FrameLayout keeps
+        this container the same view type as its sw600dp counterpart, which is what lets view
+        binding give todayBands a single non-null type across both variants.
+    -->
+    <LinearLayout
+        android:id="@+id/todayBands"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:orientation="vertical">
+
+        <include
+            android:id="@+id/sectionTasks"
+            layout="@layout/view_today_section"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1" />
+
+        <include
+            android:id="@+id/sectionEvents"
+            layout="@layout/view_today_section"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:visibility="gone" />
+
+        <include
+            android:id="@+id/sectionNotebooks"
+            layout="@layout/view_today_section"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:visibility="gone" />
+
+    </LinearLayout>
+
+</LinearLayout>

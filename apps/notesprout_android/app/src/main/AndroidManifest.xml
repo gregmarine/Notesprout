@@ -90,6 +90,17 @@
             android:configChanges="orientation|keyboardHidden|screenSize|smallestScreenSize|screenLayout|density"
             android:windowSoftInputMode="stateHidden" />
 
+        <!--
+            Today — the dashboard: a focus view of the day and the jump point for the rest of the
+            app. No drawing surface, so it may recreate freely on rotation/resize; it simply
+            recomputes how many rows fit per page.
+        -->
+        <activity
+            android:name=".TodayActivity"
+            android:exported="false"
+            android:configChanges="orientation|keyboardHidden|screenSize|smallestScreenSize|screenLayout|density"
+            android:windowSoftInputMode="stateHidden" />
+
         <!-- Tasks — the to-do surface, a sibling of the calendar and the scratch pad -->
         <activity
             android:name=".TasksActivity"

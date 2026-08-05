@@ -368,6 +368,21 @@
             android:src="@drawable/ic_compact"
             android:contentDescription="Compact Notebooks" />
 
+        <!--
+            Tasks now lives here in every variant — the Today dashboard took its place in
+            surfaceButtonsGroup, which had no room to grow (see the width arithmetic there). Still
+            one tap from the dashboard's own top bar.
+
+            The id must exist in EVERY variant of this layout or view binding makes the field
+            nullable; MainActivity therefore wires it once, with no per-variant branch.
+        -->
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnTasks"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:layout_marginStart="4dp"
+            android:src="@drawable/ic_tasks"
+            android:contentDescription="Tasks" />
+
     </LinearLayout>
 
     <!--
@@ -405,9 +420,27 @@
             android:layout_marginStart="16dp"
             android:gravity="center_vertical">
 
+            <!--
+                Today leads the group: it is the screen that reaches all the others.
+
+                It took Tasks' slot rather than adding a fourth button, and the reason is arithmetic.
+                The pagination group is centred, so the real constraint is
+                2 × max(surface, actions) + pagination ≤ width. At three buttons that is
+                2 × 156 + 256 = 568dp — and the tightest device in this bucket is the Go 6 Gen II at
+                571dp, i.e. ~1.5dp of clearance. A fourth button pushes the surface group to 204dp
+                and overlaps the pagination by ~47dp. Tasks moved to the overflow row instead; the
+                dashboard's own top bar carries a Tasks jump, so it is arguably closer than before.
+            -->
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnToday"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:src="@drawable/ic_layout_dashboard"
+                android:contentDescription="Today" />
+
             <androidx.appcompat.widget.AppCompatImageButton
                 android:id="@+id/btnCalendar"
                 style="@style/Widget.Notesprout.ToolbarButton"
+                android:layout_marginStart="4dp"
                 android:src="@drawable/ic_calendar"
                 android:contentDescription="Calendar" />
 
@@ -417,13 +450,6 @@
                 android:layout_marginStart="4dp"
                 android:src="@drawable/ic_sketching"
                 android:contentDescription="Scratch Pad" />
-
-            <androidx.appcompat.widget.AppCompatImageButton
-                android:id="@+id/btnTasks"
-                style="@style/Widget.Notesprout.ToolbarButton"
-                android:layout_marginStart="4dp"
-                android:src="@drawable/ic_tasks"
-                android:contentDescription="Tasks" />
 
         </LinearLayout>
 

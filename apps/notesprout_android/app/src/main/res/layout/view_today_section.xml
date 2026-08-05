@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    One section of the Today dashboard — Tasks, Events, or Notebooks.
+
+    Included three times by activity_today.xml, once per section. Each <include> carries its own id,
+    so view binding hands back three separate ViewTodaySectionBinding objects and the child ids can
+    stay identical without colliding. That is the whole reason this is an include rather than three
+    hand-written copies: the sections differ in what they list, not in how they are framed.
+
+    Shape: a title row carrying the section's one create action, a rule, the list (with a centred
+    empty state behind it), and the pager. The pager is prev/next only — deliberately no first/last.
+    "Today" is a small set by construction; jumping to the end of a two-page list is chrome that
+    earns nothing. It is GONE at one page rather than disabled, because a disabled control is
+    visually silent on e-ink.
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@color/paperWhite">
+
+    <!-- Title row: the section's name and its create action. -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="48dp"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingStart="16dp"
+        android:paddingEnd="8dp">
+
+        <TextView
+            android:id="@+id/tvSectionTitle"
+            style="@style/TextAppearance.Notesprout.TitleMedium"
+            android:layout_width="0dp"
+            android:layout_weight="1"
+            android:layout_height="wrap_content"
+            android:text="Section" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnSectionAdd"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:src="@drawable/ic_plus"
+            android:contentDescription="Add" />
+
+    </LinearLayout>
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="@color/inkBlack" />
+
+    <!--
+        The list. Rows are inflated straight into sectionList and the whole thing is rebuilt on
+        refresh, matching every other list in the app — RecyclerView is deliberately not a
+        dependency. Pagination is what bounds the cost, so the row count here is always small.
+    -->
+    <FrameLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1">
+
+        <LinearLayout
+            android:id="@+id/sectionList"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:paddingStart="16dp"
+            android:paddingEnd="16dp"
+            android:paddingTop="10dp"
+            android:paddingBottom="8dp"
+            android:clipToPadding="false" />
+
+        <TextView
+            android:id="@+id/sectionEmpty"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center"
+            android:textSize="14sp"
+            android:textColor="@color/inkLight"
+            android:visibility="gone"
+            android:text="Nothing here" />
+
+    </FrameLayout>
+
+    <!-- Pager: ‹ n/m › — hidden entirely at one page. -->
+    <LinearLayout
+        android:id="@+id/sectionPager"
+        android:layout_width="match_parent"
+        android:layout_height="44dp"
+        android:orientation="horizontal"
+        android:gravity="center"
+        android:visibility="gone">
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnSectionPrev"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:src="@drawable/ic_page_prev"
+            android:contentDescription="Previous page" />
+
+        <TextView
+            android:id="@+id/tvSectionPage"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:minWidth="56dp"
+            android:gravity="center"
+            android:textSize="14sp"
+            android:textColor="@color/inkBlack"
+            android:paddingStart="8dp"
+            android:paddingEnd="8dp"
+            android:text="1/1" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnSectionNext"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:src="@drawable/ic_page_next"
+            android:contentDescription="Next page" />
+
+    </LinearLayout>
+
+</LinearLayout>

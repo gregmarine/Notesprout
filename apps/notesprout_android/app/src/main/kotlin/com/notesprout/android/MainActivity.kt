@@ -758,8 +758,10 @@ class MainActivity : AppCompatActivity() {
                     }
                 }
                 // Tasks carries no per-launch state — the screen reads the table fresh every time,
-                // so restoring it needs nothing beyond the intent itself.
+                // so restoring it needs nothing beyond the intent itself. The dashboard is the same,
+                // and more so: everything on it is derived from "now".
                 AppSurface.TASKS -> TasksActivity.intent(this)
+                AppSurface.TODAY -> TodayActivity.intent(this)
                 // A routine that has since been deleted or rolled over resolves to nothing; the
                 // screen itself also re-checks and steps out if the row has gone.
                 AppSurface.ROUTINE -> entry.routineId?.let { RoutineActivity.intent(this, it) }
@@ -816,7 +818,12 @@ class MainActivity : AppCompatActivity() {
             CalendarActivity.launch(this)
         }
         // Lives in surfaceButtonsGroup on the wide variants and in the overflow row on sw360dp —
-        // one id in every variant, so this wiring is layout-agnostic.
+        // one id in every variant, so this wiring is layout-agnostic. Same for btnTasks, which the
+        // dashboard displaced from the bar entirely (see the layout comments).
+        binding.btnToday.setOnClickListener          {
+            closeOverflowToolbar()
+            TodayActivity.launch(this)
+        }
         binding.btnTasks.setOnClickListener          {
             closeOverflowToolbar()
             TasksActivity.launch(this)
