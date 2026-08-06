@@ -35,6 +35,15 @@ class TodaySection<T>(
     emptyText: String,
     onAdd: () -> Unit,
     private val makeRow: (T) -> View,
+    /**
+     * Draw a group's label even when it is the only group.
+     *
+     * Off by default, because a lone group usually needs no header — "Events" over a single run of
+     * rows already says what they are. That reasoning fails wherever the section title names a
+     * *category* and the groups name something the title doesn't imply: Notebooks holds **Today**
+     * and **Recent**, and an unlabelled lone Recent group would read as today's work.
+     */
+    private val alwaysLabelGroups: Boolean = false,
 ) {
 
     private val context: Context = ui.root.context
@@ -113,7 +122,7 @@ class TodaySection<T>(
 
     private fun buildCells(groups: List<TodayGroup<T>>): List<Cell> {
         // A lone group needs no header: the section's own title already names what these rows are.
-        val labelled = groups.size > 1
+        val labelled = groups.size > 1 || alwaysLabelGroups
         val cells = mutableListOf<Cell>()
         for (group in groups) {
             if (labelled) cells += Cell(header(group.label), isHeader = true)

@@ -110,6 +110,21 @@ class MainActivity : AppCompatActivity() {
          */
         const val EXTRA_START_NEW_NOTEBOOK = "start_new_notebook"
 
+        /**
+         * Boolean intent extra, paired with [EXTRA_START_NEW_NOTEBOOK]: when the flow ends by
+         * opening the new notebook, put the **Today** dashboard back underneath it.
+         *
+         * [TodayActivity] cannot run this flow itself — choosing the destination folder is a mode of
+         * *this* screen's grid, and the dashboard deliberately has no browsing — so it hands over and
+         * is popped on the way (`CLEAR_TOP` onto the root library). Without this the notebook's back
+         * step lands in the library, which is right for the library's own button and wrong for the
+         * dashboard: opening an *existing* notebook from there comes straight back.
+         *
+         * Consumed once, like [EXTRA_START_NEW_NOTEBOOK]. A process death mid-flow simply loses it
+         * and the older behaviour returns; nothing is left inconsistent.
+         */
+        const val EXTRA_RETURN_TO_TODAY = "return_to_today"
+
         /** One-time flag (in the notesprout_onboarding prefs) that the Phase-4 bulk-encrypt offer was shown. */
         private const val KEY_CONVERSION_OFFERED = "conversion_offered"
 
@@ -143,6 +158,9 @@ class MainActivity : AppCompatActivity() {
 
     /** Set when launched with [EXTRA_START_NEW_NOTEBOOK] but the grid isn't laid out / restored yet. */
     private var pendingNewNotebookPicker = false
+
+    /** Set by [EXTRA_RETURN_TO_TODAY]; consumed when the new notebook opens. */
+    private var returnToTodayAfterCreate = false
 
     /**
      * Navigation stack — null represents the root level; a non-null ObjectEntity represents a
@@ -1819,6 +1837,15 @@ class MainActivity : AppCompatActivity() {
                 PassphraseCache.storeOnce(entity.id, key)
             }
 
+            // Started from the Today dashboard: rebuild it under the notebook, so backing out of
+            // the notebook returns where the "+" was tapped rather than to the library. Started
+            // first, and on its own — the dashboard reads everything fresh from "now", so a new
+            // instance is indistinguishable from the one that was popped getting here.
+            if (returnToTodayAfterCreate) {
+                returnToTodayAfterCreate = false
+                startActivity(TodayActivity.intent(this@MainActivity))
+            }
+
             // Open the new notebook immediately.
             launchNotebookActivity(entity)
 
@@ -2668,6 +2695,8 @@ class MainActivity : AppCompatActivity() {
     private fun handleNewNotebookIntent(intent: Intent) {
         if (!intent.getBooleanExtra(EXTRA_START_NEW_NOTEBOOK, false)) return
         intent.removeExtra(EXTRA_START_NEW_NOTEBOOK)
+        returnToTodayAfterCreate = intent.getBooleanExtra(EXTRA_RETURN_TO_TODAY, false)
+        intent.removeExtra(EXTRA_RETURN_TO_TODAY)
         pendingNewNotebookPicker = true
         tryStartPendingNewNotebookPicker()
     }

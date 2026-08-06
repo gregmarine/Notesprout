@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.os.Bundle
+import android.text.format.DateFormat
 import android.view.View
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
@@ -14,6 +15,7 @@ import com.notesprout.android.core.TopGuard
 import com.notesprout.android.data.EventsRepository
 import com.notesprout.android.data.ReopenOutcome
 import com.notesprout.android.data.TasksRepository
+import com.notesprout.android.data.TodayNotebook
 import com.notesprout.android.data.TodayRepository
 import com.notesprout.android.data.TodayTask
 import com.notesprout.android.data.events.EventRowFormat
@@ -24,14 +26,18 @@ import com.notesprout.android.data.tasks.TaskState
 import com.notesprout.android.databinding.ActivityTodayBinding
 import com.notesprout.android.databinding.ItemEventBinding
 import com.notesprout.android.databinding.ItemTaskBinding
-import com.notesprout.android.databinding.ViewTodaySectionBinding
+import com.notesprout.android.databinding.ItemTodayNotebookBinding
 import com.notesprout.android.state.AppSurface
 import com.notesprout.android.state.SurfaceEntry
 import com.notesprout.android.state.SurfaceStack
 import kotlinx.coroutines.launch
+import java.time.Instant
 import java.time.LocalDate
+import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
+import java.time.temporal.ChronoUnit
+import java.util.Date
 import java.util.Locale
 import java.util.UUID
 
@@ -76,8 +82,13 @@ class TodayActivity : AppCompatActivity() {
 
     private lateinit var tasksSection: TodaySection<TodayTask>
     private lateinit var eventsSection: TodaySection<EventEntity>
+    private lateinit var notebooksSection: TodaySection<TodayNotebook>
 
     private val dueFmt = DateTimeFormatter.ofPattern("EEE d MMM", Locale.getDefault())
+
+    /** The device's own 12/24-hour and date preferences, as every other list in the app uses them. */
+    private val clockFmt by lazy { DateFormat.getTimeFormat(this) }
+    private val dateFmt by lazy { DateFormat.getMediumDateFormat(this) }
 
     /** Row wording, shared with the day window's Events list so the two never disagree. */
     private val eventFormat by lazy { EventRowFormat(this) }
@@ -181,10 +192,7 @@ class TodayActivity : AppCompatActivity() {
 
     // ── Sections ───────────────────────────────────────────────────────────────
 
-    /**
-     * Name each section and wire its create action. Events and Notebooks arrive in later phases; for
-     * now they render their empty state.
-     */
+    /** Name each section, wire its create action, and say how one of its rows is built. */
     private fun setupSections() {
         tasksSection = TodaySection(
             ui = binding.sectionTasks,
@@ -202,26 +210,18 @@ class TodayActivity : AppCompatActivity() {
             onAdd = { newEvent() },
             makeRow = { event -> eventRow(event) },
         )
-        title(binding.sectionNotebooks, "Notebooks", "New notebook", "Nothing opened today") {
-            newNotebook()
-        }
-    }
-
-    /** Phase-1 stand-in for the two sections that are not yet lists — see [TodaySection]. */
-    private fun title(
-        section: ViewTodaySectionBinding,
-        name: String,
-        addHint: String,
-        empty: String,
-        onAdd: () -> Unit,
-    ) {
-        section.tvSectionTitle.text = name
-        // Doubles as the long-press hint — Android surfaces contentDescription as a tooltip, which
-        // is what keeps a bare glyph learnable on e-ink (see the design system).
-        section.btnSectionAdd.contentDescription = addHint
-        section.btnSectionAdd.setOnClickListener { onAdd() }
-        section.sectionEmpty.text = empty
-        section.sectionEmpty.isVisible = true
+        notebooksSection = TodaySection(
+            ui = binding.sectionNotebooks,
+            title = "Notebooks",
+            addHint = "New notebook",
+            // Only reachable with an empty library: any notebook ever opened stays in recents.
+            emptyText = "No notebooks yet",
+            onAdd = { newNotebook() },
+            makeRow = { notebook -> notebookRow(notebook) },
+            // "Notebooks" names a category, not a time. Left unlabelled, a lone Recent group would
+            // read as today's work — see TodaySection.alwaysLabelGroups.
+            alwaysLabelGroups = true,
+        )
     }
 
     // ── Tabs ───────────────────────────────────────────────────────────────────
@@ -257,10 +257,71 @@ class TodayActivity : AppCompatActivity() {
         binding.tvTodayDate.text =
             today.format(DateTimeFormatter.ofLocalizedDate(style).withLocale(Locale.getDefault()))
 
-        // Notebooks lands in phase 4; until then it renders its empty state.
         lifecycleScope.launch {
             tasksSection.submit(todayRepo.tasks(today))
             eventsSection.submit(todayRepo.events(today))
+            notebooksSection.submit(todayRepo.notebooks(this@TodayActivity, today))
+        }
+    }
+
+    // ── Notebook rows ──────────────────────────────────────────────────────────
+
+    /**
+     * One notebook. The whole row opens it through the ordinary [NotebookActivity] path, so an
+     * encrypted notebook meets its usual unlock prompt — the dashboard knows nothing about keys
+     * beyond drawing the lock.
+     */
+    private fun notebookRow(notebook: TodayNotebook): View {
+        val item = ItemTodayNotebookBinding.inflate(
+            layoutInflater, binding.sectionNotebooks.sectionList, false,
+        )
+        item.ivNotebookIcon.setImageResource(
+            if (notebook.locked) R.drawable.ic_lock else R.drawable.ic_notebook
+        )
+        item.ivNotebookIcon.contentDescription =
+            if (notebook.locked) "Encrypted notebook" else "Notebook"
+
+        item.tvNotebookName.text = notebook.name
+        item.tvNotebookMeta.text = notebookMeta(notebook)
+        item.tvNotebookTime.text = notebookTime(notebook)
+
+        item.notebookRow.setOnClickListener {
+            startActivity(
+                Intent(this, NotebookActivity::class.java)
+                    .putExtra(NotebookActivity.EXTRA_NOTEBOOK_ID, notebook.id)
+                    .putExtra(NotebookActivity.EXTRA_NOTEBOOK_NAME, notebook.name)
+            )
+        }
+        return item.root
+    }
+
+    /**
+     * Where the notebook lives, and — for a Today row — what happened to it there.
+     *
+     * Only the **last** folder segment, not the full breadcrumb: it is what tells two same-named
+     * notebooks apart, and a deep path would swallow the activity that follows it. The library is
+     * where the whole tree is worth seeing.
+     */
+    private fun notebookMeta(notebook: TodayNotebook): String {
+        val folder = notebook.folderPath.substringAfterLast(" › ")
+        return notebook.activity?.let { "$folder · $it" } ?: folder
+    }
+
+    /**
+     * The trailing label: a clock time for something touched today, a relative day for a Recent row
+     * — and a date once "N days ago" stops being easier to read than the date itself.
+     */
+    private fun notebookTime(notebook: TodayNotebook): String {
+        if (notebook.activity != null) return clockFmt.format(Date(notebook.timestamp))
+        val days = ChronoUnit.DAYS.between(
+            Instant.ofEpochMilli(notebook.timestamp).atZone(ZoneId.systemDefault()).toLocalDate(),
+            LocalDate.now(),
+        )
+        return when {
+            days <= 0L -> clockFmt.format(Date(notebook.timestamp))
+            days == 1L -> "Yesterday"
+            days <= 7L -> "${days}d ago"
+            else -> dateFmt.format(Date(notebook.timestamp))
         }
     }
 
@@ -440,14 +501,24 @@ class TodayActivity : AppCompatActivity() {
      *
      * The dashboard has no "current folder", so the folder picker is not optional here the way it is
      * on the library screen — which is exactly what [MainActivity.EXTRA_START_NEW_NOTEBOOK] already
-     * does for the calendar's New Notebook button. Reused verbatim, including its `finish()`: the
-     * flow ends in the library with the new notebook, not back on a dashboard behind it.
+     * does for the calendar's New Notebook button. Choosing that folder *is* a mode of the library's
+     * grid, and this screen has no browsing by design, so the flow genuinely belongs over there.
+     *
+     * Handing it over costs this Activity: `CLEAR_TOP` onto the root library pops the dashboard, and
+     * the `finish()` covers the case where the library isn't below us to be cleared to. So
+     * [MainActivity.EXTRA_RETURN_TO_TODAY] asks for it back — the library rebuilds the dashboard
+     * beneath the new notebook, and closing that notebook returns here, exactly as it does when an
+     * existing notebook is opened from this list.
+     *
+     * **Cancelling the flow still ends in the library**, since nothing is created and there is no
+     * notebook to sit under. Same as the calendar's button, which has always behaved this way.
      */
     private fun newNotebook() {
         startActivity(
             Intent(this, MainActivity::class.java)
                 .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
                 .putExtra(MainActivity.EXTRA_START_NEW_NOTEBOOK, true)
+                .putExtra(MainActivity.EXTRA_RETURN_TO_TODAY, true)
         )
         finish()
     }
