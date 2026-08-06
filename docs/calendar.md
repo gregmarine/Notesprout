@@ -548,6 +548,12 @@ occurrence preserves the anchor's **span length**, so an occurrence starting on 
   tiebreak (the ordering the user asked for). Plus `upcomingForDay(date)` — the reminder look-ahead
   (see [Reminders](#reminders--paper-like-look-ahead)). No encryption gate — plaintext-on-device like
   the scratch pad.
+- **`data/events/EventRowFormat.kt`** — the row *wording*: the leading time badge and the meta line
+  (type · end-time · multi-day span · recurrence summary). Extracted here because the
+  [Today dashboard](today-dashboard.md) renders the same events in the same `item_event.xml`; kept
+  inside `EventsController`, the two surfaces would eventually describe one event two different ways.
+  Formatting only — edit/delete scoping stays with the surface that offers it, and the dashboard
+  offers none (it hides the delete button and taps through to this screen).
 - **`EventsController.kt`** — drives the Events view: `refresh()` loads today's events **and**
   `upcomingForDay`, rendering **two sections** — **Today** then **Upcoming** (black bold labels; the
   "Today" label appears only when an Upcoming section follows it). Today rows (`item_event.xml`:

@@ -353,7 +353,8 @@ bug the events editor [paid for on-device](global-index-format.md#events--the-on
 
 | Surface | Control | Notes |
 |---|---|---|
-| Library bottom bar | `btnTasks` in `surfaceButtonsGroup` | Third sibling-surface button, after Calendar and Scratch Pad |
+| Library bottom bar | `btnTasks` in `overflowToolbar` | Moved off the bar when the [Today dashboard](today-dashboard.md) took a seat — the bar holds three surfaces and there are four |
+| [Today dashboard](today-dashboard.md) | Top-bar jump, plus every task row | A row opens `TasksActivity`, or `RoutineActivity` for a routine step |
 | Notebook toolbar | `btnTasks`, registry key `"tasks"` | Plain launch, not for-result — nothing comes back into the page |
 | Calendar toolbar | `btnCalTasks` in `calLeftBar` | Overflows via the shared `ToolbarOverflowManager` like every other tool |
 
@@ -405,6 +406,12 @@ were reserved for exactly this and covered it (see [Data model](#data-model--tas
 `TaskDao.MAIN_LIST` is the "first two, never the third" predicate, written once so no query can
 forget half of it. Steps never recur individually and never carry a reminder: the routine's series is
 what repeats, and reminders gate main-list visibility, which a step does not have.
+
+**One query deliberately steps outside it.** The [Today dashboard](today-dashboard.md) shows steps
+*standalone* — real work due today is real work whether or not its routine is open — so `openDueBy`
+filters on `type = 'TASK'` alone, catching tasks **and** steps while still excluding routines. It
+shows the step with its routine's name and **not** the routine row, which would be the same work
+counted twice. Nothing else may do this without the same justification.
 
 ### Periods — the due date is derived, never chosen
 

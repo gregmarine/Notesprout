@@ -19,19 +19,25 @@ never is. Which bar a control lives in follows from that:
 └──────────────────────────────────────────────────────────────┘
 ```
 
-- **`surfaceButtonsGroup` (start)** — `btnCalendar` + `btnScratchpad` + `btnTasks`. These are *sibling
-  surfaces* (places to go), not library actions, so they get their own zone opposite the
-  create/overflow group. Because the bottom bar is never replaced by search / pinned / recents mode,
-  one button each is reachable everywhere and needs **no per-mode duplicate** — the group is hidden
-  only in destination-picker mode (`applyPickerModeUI`), where launching another surface mid-flow
-  would be disruptive. Prior to this, `btnScratchpad` was mirrored four times (breadcrumb + pinned +
-  recents + search toolbars) and `btnCalendar` was buried in the overflow row; both are now single
-  buttons.
-  **`btnTasks` is the exception in the narrow bucket:** `layout-sw360dp` has no room for a third
-  button (see the width table below), so it lives in `overflowToolbar` there instead. The id is still
-  declared in **all three** variants — a missing id makes the view-binding field nullable — so
-  `MainActivity` wires it once with no per-variant branch, and hiding falls out for free because
-  every mode that hides the surface group already calls `closeOverflowToolbar()`.
+- **`surfaceButtonsGroup` (start)** — [`btnToday`](today-dashboard.md) + `btnCalendar` +
+  `btnScratchpad`. These are *sibling surfaces* (places to go), not library actions, so they get their
+  own zone opposite the create/overflow group. Because the bottom bar is never replaced by search /
+  pinned / recents mode, one button each is reachable everywhere and needs **no per-mode duplicate** —
+  the group is hidden only in destination-picker mode (`applyPickerModeUI`), where launching another
+  surface mid-flow would be disruptive. Prior to this, `btnScratchpad` was mirrored four times
+  (breadcrumb + pinned + recents + search toolbars) and `btnCalendar` was buried in the overflow row;
+  both are now single buttons.
+
+  **The bar seats three surfaces, and there are four.** Adding the dashboard is what moved `btnTasks`
+  into `overflowToolbar` — in **all three** variants, so the bar reads the same everywhere rather than
+  shuffling its contents by device. Today leads the group because it is the surface that leads to the
+  others. In the narrow bucket **both** live in the overflow: `layout-sw360dp`'s bar is already at
+  428dp of the Palma2 Pro's 439dp and cannot absorb another 48dp for either of them (see the width
+  table below), while the overflow row has room at 396dp of 439dp.
+
+  Both ids are declared in **all three** variants either way — a missing id makes the view-binding
+  field nullable — so `MainActivity` wires them once with no per-variant branch, and hiding falls out
+  for free because every mode that hides the surface group already calls `closeOverflowToolbar()`.
 - **`paginationGroup` (centre)** — driven only by `isEnabled`, never `visibility`, from
   `updatePaginationControls`. That matters: layout variants can `gone` individual page buttons without
   any Kotlin change and without making the view-binding fields nullable.

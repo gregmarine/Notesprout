@@ -625,6 +625,47 @@ Check the meta line at the same time. It is already `maxLines="2"`, but a multi-
 (`Vacation · 4 Aug – 7 Aug · Every 2 weeks on Mon, Wed`) is the longest string the formatter can
 produce and has not been measured on P2P, the narrowest Tier-1 device.
 
+## Today dashboard — deferred by design
+
+> Decided during planning (2026-08-04) and carried out of the retired `TODAY_DASHBOARD_PLAN.md`. These
+> are choices, not omissions — see [`docs/today-dashboard.md`](docs/today-dashboard.md) → *What this
+> screen is not*.
+
+- **"Open on launch: Library / Today" preference** — the separable change that would make the
+  dashboard the home screen. Kept out of the feature deliberately: as a sibling surface reached from
+  the library, it leaves `BootstrapActivity`'s forwarding and the library's "implicit bottom of the
+  stack" invariant untouched, and `MainActivity.reset` still means what it always meant. A launch
+  preference has to answer what Back does from a dashboard that nothing launched, which is a question
+  worth its own thinking rather than a flag.
+- **No day-note or scratch-pad content preview.** Those stay jump buttons. Rendering a preview means
+  decoding a page bitmap on a focus view, and the dashboard already declined that for notebook covers.
+- **No weather, greeting, counts or streaks.** It is a focus view, not a metrics screen.
+
+## Today dashboard — every row is inflated, not just the visible page
+
+> Found 2026-08-05 in the Today dashboard's phase-6 review. Not observed biting; recorded because the
+> planning note claimed "pagination is what bounds the cost", and that is not quite true.
+
+`TodaySection.buildCells` inflates and measures a View for the **whole** result set before packing it
+into pages. Pagination bounds what is *attached*, not what is *built*. A user with 200 overdue tasks
+inflates 200 `item_task` rows on every refresh to display six of them, and `TaskDao.openDueBy` has no
+`LIMIT`.
+
+"Today" is small by construction for anyone keeping up, which is why this has not been felt — but a
+long-ignored overdue tail is exactly the state a dashboard is supposed to help with, so the cost
+arrives precisely when the screen is most needed.
+
+Options, cheapest first:
+
+- **`LIMIT` on `openDueBy`** with a "+N more" affordance into the Tasks screen. Honest and small, but
+  it needs a design decision about what the overflow row says.
+- **Build lazily per page.** `TodaySection` would keep the *data*, not the Views, and call `makeRow`
+  only for the page being shown. That breaks the current packer, which needs every cell measured up
+  front to know where pages break — so it means measuring a representative row and accepting
+  estimated breaks, losing the exact fit that took two bugs to get right.
+- **Cache the built rows across refreshes**, keyed on row identity. Helps the check-off path (already
+  narrowed to `refreshTasks()`), does nothing for the first paint.
+
 ## Landscape — three findings, parked
 
 > Found 2026-08-05 during the Today dashboard's Tier-1 device pass (MAX, P2P, G6). **Portrait is the
