@@ -624,3 +624,60 @@ place a second line is most needed is the one place it is refused.
 Check the meta line at the same time. It is already `maxLines="2"`, but a multi-day recurring event
 (`Vacation · 4 Aug – 7 Aug · Every 2 weeks on Mon, Wed`) is the longest string the formatter can
 produce and has not been measured on P2P, the narrowest Tier-1 device.
+
+## Landscape — three findings, parked
+
+> Found 2026-08-05 during the Today dashboard's Tier-1 device pass (MAX, P2P, G6). **Portrait is the
+> target orientation on every device**, so none of this was fixed. Recorded with measurements so that
+> whenever landscape does matter, the diagnosis is already done.
+
+### 1. Horizontal window insets are dropped app-wide — controls hide under the nav bar
+
+The one with real consequences, and **not** a dashboard bug. In landscape the navigation bar moves to
+the *side* of the screen. Nothing applies the horizontal inset, so right-aligned chrome renders
+underneath it and cannot be tapped.
+
+Measured on P2P, dashboard in landscape:
+
+```
+navigationBarBackground   [1558,0][1648,824]
+"Scratch Pad" button      [1560,84][1639,163]   ← entirely beneath the nav bar
+Notebooks tab             ends x=1622           ← partly beneath it
+```
+
+`TopGuard.applyInsetPadding` passes the view's existing left/right padding straight through and only
+ever sets top and bottom from the insets:
+
+```kotlin
+v.setPadding(v.paddingLeft, bars.top, v.paddingRight, bottom)
+```
+
+**14 screens** call it, and `MainActivity` doesn't call it at all — it hand-rolls
+`setPadding(0, bars.top, 0, bars.bottom)`, with the same omission. So the library's own bottom bar
+(`btnMore` at the far right) is exposed too.
+
+The fix is two lines — `bars.left` / `bars.right` in both places — and it repairs all fifteen at once.
+Note that `applyInsetPadding` documents itself as *"preserves any horizontal padding already set"*, so
+check no caller is relying on that before overwriting it.
+
+### 2. The tabbed variant has almost no room in landscape
+
+P2P, landscape, Tasks: **one row per page, `1/19`**. The packer is doing the right thing — there is
+simply no room:
+
+```
+band 276px · "Overdue" header 40px · row 128px
+header + 1 row = 168 ✓      header + 2 rows = 296 ✗ (misses by 20px)
+```
+
+The chrome is what eats it: toolbar, tab row, section header, pager. The section header row
+(`Tasks  +`) is the only part that is pure duplication — on a tabbed device the tab row already names
+the section — so hiding it there and moving its `+` into the top toolbar would buy back exactly the
+row that is missing. That is also a small portrait win on the same devices.
+
+### 3. The single-screen split is tuned for portrait
+
+MAX in landscape gives roughly 40% of the height to the Notebooks band whether or not it has anything
+in it, leaving Tasks and Events 3 and 4 rows. A fix means content-dependent band weights or a
+`layout-land/` variant of the wide layout (which must carry an identical id set — see
+`docs/today-dashboard.md`). Portrait on MAX and both orientations on G102 are unaffected.
