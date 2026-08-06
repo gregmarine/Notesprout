@@ -120,8 +120,12 @@ class MainActivity : AppCompatActivity() {
          * step lands in the library, which is right for the library's own button and wrong for the
          * dashboard: opening an *existing* notebook from there comes straight back.
          *
-         * Consumed once, like [EXTRA_START_NEW_NOTEBOOK]. A process death mid-flow simply loses it
-         * and the older behaviour returns; nothing is left inconsistent.
+         * Consumed once, like [EXTRA_START_NEW_NOTEBOOK], and deliberately **not** saved instance
+         * state. This Activity is recreated on rotation (it declares no `configChanges`), so rotating
+         * mid-flow loses the flag and the notebook opens over the library — the behaviour before this
+         * existed, and no worse. Keeping it on the Intent instead would survive that, but the Intent
+         * outlives the flow: the next notebook created from the library's *own* button would then be
+         * sent to the dashboard too.
          */
         const val EXTRA_RETURN_TO_TODAY = "return_to_today"
 

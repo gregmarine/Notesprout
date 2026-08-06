@@ -264,6 +264,20 @@ class TodayActivity : AppCompatActivity() {
         }
     }
 
+    /**
+     * Re-read the tasks section alone — for the check-off, which is the one thing that happens
+     * *on* this screen rather than to it.
+     *
+     * Ticking a task cannot change an event or a notebook, and a full [refresh] is not free: the
+     * notebooks read alone walks the folder tree three times, lists every notebook in the library,
+     * and looks up a row per card. Paying that on every checkbox tap is work the user waits for on a
+     * device that repaints slowly. Everything else still refreshes on resume, on a date change, and
+     * on return from any surface this screen opens.
+     */
+    private fun refreshTasks() {
+        lifecycleScope.launch { tasksSection.submit(todayRepo.tasks(LocalDate.now())) }
+    }
+
     // ── Notebook rows ──────────────────────────────────────────────────────────
 
     /**
@@ -441,7 +455,7 @@ class TodayActivity : AppCompatActivity() {
             val task = row.task
             if (task.parentId != null) {
                 val outcome = tasksRepo.resolveMember(task, TaskState.DONE, today)
-                refresh()
+                refreshTasks()
                 if (outcome.routineCompleted) {
                     val next = outcome.nextRoutineDue
                         ?.let { " · next due ${LocalDate.ofEpochDay(it).format(dueFmt)}" }.orEmpty()
@@ -449,7 +463,7 @@ class TodayActivity : AppCompatActivity() {
                 }
             } else {
                 val successor = tasksRepo.complete(task, today)
-                refresh()
+                refreshTasks()
                 // Only recurring tasks produce one, and its date is the non-obvious part: the row
                 // just ticked stays put, but its replacement is dated somewhere the dashboard may
                 // not be showing at all.
@@ -464,7 +478,7 @@ class TodayActivity : AppCompatActivity() {
     private fun reopenTask(task: TaskEntity) {
         lifecycleScope.launch {
             when (tasksRepo.reopen(task)) {
-                ReopenOutcome.REOPENED -> refresh()
+                ReopenOutcome.REOPENED -> refreshTasks()
                 ReopenOutcome.SERIES_MOVED_ON ->
                     toast("Later occurrences of this task have already been dealt with.")
                 ReopenOutcome.LOCKED ->
