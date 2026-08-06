@@ -38,6 +38,7 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.core.view.doOnLayout
 import androidx.lifecycle.lifecycleScope
+import com.notesprout.android.core.IndexGuard
 import com.notesprout.android.data.NotebookMetaStore
 import com.notesprout.android.data.NotebookCompactor
 import androidx.room.withTransaction
@@ -1007,6 +1008,8 @@ class NotebookActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Nothing has opened the index if Android rebuilt this task itself — see IndexGuard.
+        if (!IndexGuard.ready(this)) return
         if (bounceIfIndexNotReady()) return
 
         // Fullscreen immersive — equivalent to Flutter's SystemUiMode.immersiveSticky.
@@ -2430,6 +2433,8 @@ class NotebookActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        // A guard-bounced screen never finished building — there is nothing to release.
+        if (IndexGuard.bounced(this)) { super.onDestroy(); return }
         // onCreate aborted before building any of this — see [bounceIfIndexNotReady]. Android
         // still calls onDestroy on a half-constructed Activity, and every teardown below assumes
         // state that was never created.

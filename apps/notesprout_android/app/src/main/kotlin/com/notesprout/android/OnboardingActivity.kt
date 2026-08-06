@@ -10,6 +10,7 @@ import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.AppCompatButton
 import androidx.lifecycle.lifecycleScope
+import com.notesprout.android.core.IndexGuard
 import com.notesprout.android.crypto.GlobalRotation
 import com.notesprout.android.crypto.PassphrasePrompt
 import com.notesprout.android.crypto.PassphraseStore
@@ -36,6 +37,8 @@ class OnboardingActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Nothing has opened the index if Android rebuilt this task itself — see IndexGuard.
+        if (!IndexGuard.ready(this)) return
         if (bounceIfIndexNotReady()) return
         setContentView(R.layout.activity_onboarding)
 

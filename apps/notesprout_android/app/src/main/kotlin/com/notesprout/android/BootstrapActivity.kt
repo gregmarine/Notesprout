@@ -28,8 +28,11 @@ import java.io.File
  * real UI. Then forwards the (possibly deep-link) intent to [MainActivity], so its cold-launch
  * surface restore and `.soil` import paths run exactly as before.
  *
- * [MainActivity] also self-guards (bounces here if it is ever entered without a ready index), so this
- * gate covers every cold entry, not just the launcher.
+ * **Every surface self-guards back to here** via [com.notesprout.android.core.IndexGuard], so this
+ * gate covers every cold entry and not just the launcher — including the one route that bypasses it
+ * entirely, Android rebuilding a task's activities on its own after a background process kill. Those
+ * bounces arrive with `NEW_TASK|CLEAR_TASK`, so this becomes the root of a clean task and
+ * [forwardNext] hands to [MainActivity], whose surface restore rebuilds the chain the user had open.
  */
 class BootstrapActivity : AppCompatActivity() {
 

@@ -307,66 +307,6 @@ gracefully instead of fatally. Options, none decided: a real migration for drift
 pre-open schema probe that flags the notebook in the library so its card shows it can't be opened; or
 accepting graceful failure as the permanent answer if drift can only originate from test devices.
 
-## Surfaces crash when Android rebuilds a task with the index closed
-
-> Found 2026-08-04 while building the Today dashboard, which tripped it deterministically via a
-> debug same-UID launch. Pre-existing and app-wide; **`TodayActivity` is already guarded**, the
-> other six are not.
-
-`BootstrapActivity` is the only thing that ever *opens* the global index — it is the launcher entry
-point, calls `NotesproutIndex.ensureReady`, unlocks if needed, forwards, and `finish()`es.
-`Application.onCreate` deliberately only `awaitReady()`s, because opening can need a passphrase
-prompt and so cannot happen there.
-
-Because Bootstrap finishes itself, it is not on the back stack. When **Android rebuilds a task's
-activities on its own after a background process kill** — tapping the app in Recents is the everyday
-case — nothing re-runs it, and the surface reads a closed database:
-
-```
-java.lang.IllegalStateException: NotesproutIndex is not open — call ensureReady() first
-    at NotesproutIndex.db(NotesproutIndex.kt:169)
-    at …Repository.<init> → <Surface>Activity.onResume
-```
-
-Reproduced on G102 by launching `TasksActivity` into a fresh process. Every repository throws when
-constructed against a closed index (measured, same run):
-
-```
-TasksRepository · TodayRepository · EventsRepository · CalendarRepository
-ScratchpadRepository · DayHistoryRepository · IndexRepository   — all THROW
-```
-
-Two shapes, both exposed:
-
-- **Lazy** — `TasksActivity`, `MainActivity` (`by lazy { IndexRepository(NotesproutIndex.dao()) }`):
-  the DAO is a default constructor argument, evaluated on first read, i.e. inside `onResume`.
-- **Eager** — `CalendarActivity:350`, `ScratchpadActivity:242` call `NotesproutIndex.db()` **directly
-  in `onCreate`**, so there is no first-read to defer it past.
-
-**The `NotesproutIndex` KDoc is stale and says otherwise** — *"BootstrapActivity (launcher) and
-MainActivity (deep-link entry) drive NotesproutIndex.ensureReady()"*. The MainActivity half is not
-true of the current code (no `ensureReady` / `isReady` / Bootstrap reference exists there). Fix the
-comment along with the code, or the next person will read it as handled — as it was read this time.
-
-**The fix, as already applied to `TodayActivity`** (`indexReady()`): in `onResume`, if
-`NotesproutIndex.isReady()` is false, start `BootstrapActivity` with `NEW_TASK|CLEAR_TASK` and
-`finish()`. Bootstrap is the single owner of opening and unlocking, and its forward to MainActivity
-then restores the whole chain through the `SurfaceStack`, landing the user back where they were.
-Returning early **before** `SurfaceStack.markTop` matters — it leaves the stack intact for that
-restore to read.
-
-Applies to `MainActivity`, `TasksActivity`, `RoutineActivity`, `CalendarActivity`,
-`DayDetailActivity`, `ScratchpadActivity`. The eager pair need the guard before their `onCreate`
-repository construction, not in `onResume`.
-
-**Not measured: how often real usage actually hits this.** The mechanism and the crash are proven;
-the frequency of the OS-restore path versus a launcher-icon start is not. Worth confirming the
-Recents path end-to-end on-device before deciding urgency.
-
-Diagnostics for re-testing live in the debug-only `TodaySeedActivity`:
-`--es action probe` (which repositories throw, in a fresh process) and
-`--es action raw --es target tasks|calendar|main|today` (create a surface with the index closed).
-
 ## Serialization hardening — pin `@SerialName` on `LinkTarget` (latent, not urgent)
 
 > Found 2026-07-14 while evaluating (and rejecting) an app package rename. Nothing is broken today —

@@ -35,6 +35,7 @@ import androidx.core.view.WindowInsetsControllerCompat
 import androidx.core.view.doOnLayout
 import androidx.lifecycle.lifecycleScope
 import com.notesprout.android.core.ImageCodec
+import com.notesprout.android.core.IndexGuard
 import com.notesprout.android.core.TopGuard
 import com.notesprout.android.core.isBooxDevice
 import com.notesprout.android.crypto.KeyResolver
@@ -334,6 +335,8 @@ class CalendarActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Nothing has opened the index if Android rebuilt this task itself — see IndexGuard.
+        if (!IndexGuard.ready(this)) return
         if (bounceIfIndexNotReady()) return
         WindowCompat.setDecorFitsSystemWindows(window, false)
         val insetsController = WindowInsetsControllerCompat(window, window.decorView)
@@ -2326,6 +2329,8 @@ class CalendarActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        // A guard-bounced screen never finished building — there is nothing to release.
+        if (IndexGuard.bounced(this)) { super.onDestroy(); return }
         // onCreate aborted before building any of this — see [bounceIfIndexNotReady]. Android
         // still calls onDestroy on a half-constructed Activity, and every teardown below assumes
         // state that was never created.

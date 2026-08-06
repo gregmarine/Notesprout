@@ -87,14 +87,11 @@ on a device that is never really switched off. Same reasoning and the same recei
 
 ### The index guard
 
-`onResume` calls `indexReady()` **before** `SurfaceStack.markTop`. If the global index is closed it
-bounces through `BootstrapActivity` — the single owner of opening and unlocking — and returns `false`,
-which also skips `markTop` so the surface stack survives intact for Bootstrap's restore to read.
-
-This is not a dashboard-specific concern. Every repository in the app throws when constructed against
-a closed index, and Android rebuilding a task after a background process kill is a route that never
-touches Bootstrap. `TodayActivity` is currently the **only** guarded surface; the other six are
-recorded in `BACKLOG.md`.
+`onCreate` calls `IndexGuard.ready(this)` before anything else and returns if it is false. The
+dashboard is where this problem was found — Android rebuilding a task after a background process kill
+never runs `BootstrapActivity`, so every surface reads a closed index and throws — but it was never a
+dashboard-specific concern, and the guard now covers all eighteen index-backed surfaces. See
+`core/IndexGuard.kt`.
 
 ---
 

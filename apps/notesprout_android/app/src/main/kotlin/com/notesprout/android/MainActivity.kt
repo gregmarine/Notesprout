@@ -33,6 +33,7 @@ import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.lifecycleScope
+import com.notesprout.android.core.IndexGuard
 import com.notesprout.android.crypto.EncryptionInfo
 import com.notesprout.android.crypto.KeyResolver
 import com.notesprout.android.crypto.PassphrasePrompt
@@ -270,6 +271,8 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Nothing has opened the index if Android rebuilt this task itself — see IndexGuard.
+        if (!IndexGuard.ready(this)) return
 
         // The encrypted index must be prepared before any index access. This guard began here and now
         // lives in one place — every index-touching screen needs it, not just the deep-link entry.

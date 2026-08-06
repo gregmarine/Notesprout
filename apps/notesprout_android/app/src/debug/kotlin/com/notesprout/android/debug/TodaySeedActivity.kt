@@ -11,7 +11,10 @@ import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import com.notesprout.android.CalendarActivity
+import com.notesprout.android.DayDetailActivity
 import com.notesprout.android.MainActivity
+import com.notesprout.android.NotebookActivity
+import com.notesprout.android.ScratchpadActivity
 import com.notesprout.android.TasksActivity
 import com.notesprout.android.TodayActivity
 import com.notesprout.android.data.events.EndMode
@@ -90,21 +93,37 @@ class TodaySeedActivity : AppCompatActivity() {
             // Deliberately does NOT open the index — reproduces the state Android leaves a surface
             // in when it rebuilds the task after a background process kill, BootstrapActivity having
             // finished itself long ago.
-            //   --es action raw --es target tasks|calendar|main|today
+            //   --es action raw --es target tasks|calendar|scratchpad|main|today
+            // scratchpad and calendar are the *eager* shape — they build their repository directly
+            // in onCreate rather than in a `by lazy`, so they fail earlier than the rest and are the
+            // ones that prove an onCreate guard is placed early enough.
             "raw" -> {
                 val target = when (intent.getStringExtra("target")) {
                     "tasks" -> TasksActivity::class.java
                     "calendar" -> CalendarActivity::class.java
+                    "scratchpad" -> ScratchpadActivity::class.java
+                    "notebook" -> NotebookActivity::class.java
+                    "daydetail" -> DayDetailActivity::class.java
                     "main" -> MainActivity::class.java
                     else -> TodayActivity::class.java
                 }
                 // NEW_TASK|CLEAR_TASK so the target really is created fresh as the task root —
                 // without it `am start` just resumes whatever task already exists and the probe
                 // measures the wrong activity.
-                startActivity(
-                    Intent(this, target)
-                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
-                )
+                val launch = Intent(this, target)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+                // A deliberately bogus notebook id. The guard fires before anything reads it, which
+                // is the point: this exercises onCreate → bounce → onDestroy on the heaviest screen
+                // in the app, without needing a real notebook (looking one up would mean opening the
+                // index, which is exactly the state being tested).
+                if (target == NotebookActivity::class.java) {
+                    launch.putExtra(NotebookActivity.EXTRA_NOTEBOOK_ID, "index-guard-probe")
+                        .putExtra(NotebookActivity.EXTRA_NOTEBOOK_NAME, "Index guard probe")
+                }
+                if (target == DayDetailActivity::class.java) {
+                    launch.putExtra(DayDetailActivity.EXTRA_DATE, LocalDate.now().toString())
+                }
+                startActivity(launch)
                 finish()
             }
             // Which repositories throw when the index is closed? Tests the shared root cause

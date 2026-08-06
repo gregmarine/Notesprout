@@ -11,6 +11,7 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.isVisible
 import androidx.lifecycle.lifecycleScope
 import com.notesprout.android.R
+import com.notesprout.android.core.IndexGuard
 import com.notesprout.android.core.TopGuard
 import com.notesprout.android.data.backup.BackupConfig
 import com.notesprout.android.data.backup.BackupEngine
@@ -63,6 +64,8 @@ class BackupSettingsActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Nothing has opened the index if Android rebuilt this task itself — see IndexGuard.
+        if (!IndexGuard.ready(this)) return
         if (bounceIfIndexNotReady()) return
         binding = ActivityBackupSettingsBinding.inflate(layoutInflater)
         setContentView(binding.root)

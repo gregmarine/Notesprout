@@ -11,6 +11,7 @@ import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.isVisible
 import androidx.lifecycle.lifecycleScope
+import com.notesprout.android.core.IndexGuard
 import com.notesprout.android.core.TopGuard
 import com.notesprout.android.data.EventsRepository
 import com.notesprout.android.data.ReopenOutcome
@@ -103,6 +104,8 @@ class TodayActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Nothing has opened the index if Android rebuilt this task itself — see IndexGuard.
+        if (!IndexGuard.ready(this)) return
         binding = ActivityTodayBinding.inflate(layoutInflater)
         setContentView(binding.root)
         TopGuard.applyInsetPadding(binding.root)
@@ -132,7 +135,6 @@ class TodayActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
-        if (!indexReady()) return
         SurfaceStack.markTop(this, surfaceEntry())
         registerReceiver(dateChangeReceiver, IntentFilter().apply {
             addAction(Intent.ACTION_DATE_CHANGED)
@@ -165,30 +167,6 @@ class TodayActivity : AppCompatActivity() {
 
     private fun surfaceEntry() = SurfaceEntry(surfaceToken, AppSurface.TODAY)
 
-    /**
-     * True when the global index is open, so this screen may read it.
-     *
-     * It is [BootstrapActivity] that opens (and if necessary unlocks) the index —
-     * `Application.onCreate` only *awaits* it, because opening can need a passphrase prompt and so
-     * cannot happen there. Every normal route here has been through Bootstrap. One route has not:
-     * Android recreating this Activity by itself after the process was killed in the background,
-     * which on a memory-tight e-ink device is an ordinary Tuesday. Nothing has opened the index in
-     * that case, and the first read would throw.
-     *
-     * So bounce back through Bootstrap, which is the single owner of opening and unlocking — and
-     * which then restores this whole surface chain via the [SurfaceStack], landing the user back
-     * here. Returning `false` also skips `markTop`, leaving the stack intact for that restore to
-     * read.
-     */
-    private fun indexReady(): Boolean {
-        if (NotesproutIndex.isReady()) return true
-        startActivity(
-            Intent(this, BootstrapActivity::class.java)
-                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
-        )
-        finish()
-        return false
-    }
 
     // ── Sections ───────────────────────────────────────────────────────────────
 
