@@ -33,6 +33,7 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.core.view.doOnLayout
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import com.notesprout.android.core.ImageCodec
 import com.notesprout.android.core.IndexGuard
@@ -2176,20 +2177,35 @@ class CalendarActivity : AppCompatActivity() {
      * The date is resolved at DOWN: Month/Week hit-test the pressed **cell** (a press off the grid —
      * the notes band, say — resolves to nothing and never arms); Day view has no cell hit-test, so a
      * press anywhere on either half opens [selectedDate].
+     *
+     * A press that lands on a **sticky-note icon** never arms: that touch belongs to the note.
+     * Tapping one opens its editor and consumes the UP ([handleStickyNoteTapGesture] returns true,
+     * so [handleCalendarFingerGesture] — which owns the cancel — never sees it), leaving this
+     * runnable posted with nothing to stop it. It fired behind the open editor, and the day's
+     * notebook list was sitting there when the editor closed. Day view made it certain: with no
+     * cell hit-test, every press there arms.
      */
     private fun armDayNotebooksLongPress(event: MotionEvent) {
         cancelDayNotebooksLongPress()
         calLongPressFired = false
+        val loc = IntArray(2)
+        binding.calendarContent.getLocationInWindow(loc)
+        val localX = event.x - loc[0]
+        val localY = event.y - loc[1]
+        if (stickyNoteAt(localX, localY) != null) return
         val date = if (currentView == CalView.DAY) selectedDate else {
-            val loc = IntArray(2)
-            binding.calendarContent.getLocationInWindow(loc)
             CalendarTemplateRenderer.hitTest(
-                currentSpec(), event.x - loc[0], event.y - loc[1],
+                currentSpec(), localX, localY,
                 binding.calendarContent.width, binding.calendarContent.height, density,
             ) ?: return
         }
         val runnable = Runnable {
             calLongPressRunnable = null
+            // Only the screen in front of the user may raise it. A dialog posted after something
+            // else took over — an editor launched by this very gesture — opens behind that screen
+            // and is found on the way back, which is the sticky-note bug above arriving by some
+            // other route. The gesture is abandoned rather than deferred: the press is long over.
+            if (!lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) return@Runnable
             calLongPressFired = true
             if (isLassoMode) exitLassoMode()
             DayNotebooksDialog.show(this, date)
@@ -2271,6 +2287,14 @@ class CalendarActivity : AppCompatActivity() {
                         event.eventTime - stickyNoteTapDownTime <= ViewConfiguration.getLongPressTimeout()
                 if (isTap && candidate != null && candidate.boundingBox.contains(localX, localY)) {
                     if (isLassoMode) exitLassoMode()
+                    // Consuming this UP means [handleCalendarFingerGesture] never sees it, so the
+                    // state it opened on DOWN has to be closed out here. The day-notebooks
+                    // long-press is already off — a press on an icon never arms one — but say so
+                    // anyway: this is the one place that knows the UP is being taken away.
+                    cancelDayNotebooksLongPress()
+                    calLongPressFired = false
+                    calVelocityTracker?.recycle()
+                    calVelocityTracker = null
                     openStickyNote(candidate, initialCreate = false)
                     return true
                 }

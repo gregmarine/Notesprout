@@ -276,6 +276,13 @@ calendar.
   swallows the following ACTION_UP so the release can't also register as a swipe or day tap.
 - **Month/Week presses off the grid never arm** — `hitTest` returns null in the notes band, so writing
   there is undisturbed.
+- **A press on a sticky-note icon never arms** — that touch belongs to the note. Step 1 of the touch
+  routing below consumes the UP of a sticky tap, so step 3 never sees it and the cancel that lives in
+  its UP branch never runs: the runnable stayed posted and fired behind the just-opened sticky editor,
+  leaving the day list waiting there when the editor closed. Day view made that certain (no cell
+  hit-test → every press arms). `armDayNotebooksLongPress` hit-tests the sticky icons and returns; the
+  sticky tap also cancels on its way out, and the runnable itself does nothing unless the calendar is
+  still RESUMED — so no other path can strand a dialog behind a screen either.
 
 ---
 
@@ -284,7 +291,9 @@ calendar.
 Only **finger** events (`TOOL_TYPE_FINGER`) are intercepted; stylus and lasso events fall through to
 the drawing view untouched. Order for a finger touch outside the toolbar/floating toolbar:
 
-1. `handleStickyNoteTapGesture` — tap an on-canvas sticky-note icon → open its editor.
+1. `handleStickyNoteTapGesture` — tap an on-canvas sticky-note icon → open its editor. **Consumes the
+   UP**, so steps 2–3 never see it; anything they armed on DOWN has to be cancelled here or skipped
+   there (see the sticky-icon rule under the long-press above).
 2. `handleMultiFingerDoubleTap` — **2-finger** stationary double-tap = undo, **3-finger** = redo.
 3. `handleCalendarFingerGesture` — single-finger horizontal swipe = step period; quick tap = select day;
    long-press = day notebook list.
