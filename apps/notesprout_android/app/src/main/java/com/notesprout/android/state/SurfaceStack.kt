@@ -7,7 +7,7 @@ import kotlinx.serialization.json.Json
 
 /** A screen a cold launch can reopen. The library is implicit — it is always the bottom of the stack. */
 @Serializable
-enum class AppSurface { NOTEBOOK, CALENDAR, DAY_WINDOW, SCRATCHPAD }
+enum class AppSurface { NOTEBOOK, CALENDAR, DAY_WINDOW, SCRATCHPAD, TASKS, ROUTINE, TODAY }
 
 /**
  * One surface Activity, as it sits on the task's back stack.
@@ -28,6 +28,8 @@ data class SurfaceEntry(
     val dayDate: String? = null,
     /** DAY_WINDOW — `DayDetailActivity.ViewMode` name. */
     val dayView: String? = null,
+    /** ROUTINE — the routine row's id. */
+    val routineId: String? = null,
 )
 
 /**

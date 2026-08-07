@@ -85,11 +85,40 @@
             android:layout_marginStart="4dp"
             android:layout_marginEnd="4dp" />
 
-        <!-- Scratch Pad launcher — outside dayToolsGroup so it stays on the bar in all four views
-             (Events / Note / Notebooks / History) and never overflows into dayOverflowMenu. -->
+        <!--
+            Keeps the launchers pinned right when nothing else is absorbing the bar's slack. While
+            stacked, tvDayDate is weighted and does it; in single-row mode that weight moves to
+            dayToolsGroup — which is hidden outside Note view, leaving the trailing buttons stranded
+            mid-bar. This fills in for exactly that case (see applyViewMode); a GONE view contributes
+            no weight, so it costs nothing the rest of the time.
+        -->
+        <View
+            android:id="@+id/daySurfaceSpacer"
+            android:layout_width="0dp"
+            android:layout_weight="1"
+            android:layout_height="1dp"
+            android:visibility="gone" />
+
+        <!--
+            Sibling-surface launchers, trailing. Both sit outside dayToolsGroup so they stay on the
+            bar in all four views (Events / Note / Notebooks / History) and never overflow into
+            dayOverflowMenu — and outside the insertion point used by collapseToolbarToSingleRow, so
+            they stay at the trailing edge when the bar folds to one row.
+
+            The Tasks screen carries the same pair in the same order at the same end of its bar, so
+            switching between the two screens is one tap in either direction and the target is always
+            in the same place.
+        -->
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnDayTasks"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:src="@drawable/ic_tasks"
+            android:contentDescription="Tasks" />
+
         <androidx.appcompat.widget.AppCompatImageButton
             android:id="@+id/btnDayScratchpad"
             style="@style/Widget.Notesprout.ToolbarButton"
+            android:layout_marginStart="4dp"
             android:src="@drawable/ic_sketching"
             android:contentDescription="Scratch Pad" />
 
@@ -181,7 +210,7 @@
         <androidx.appcompat.widget.AppCompatImageButton
             android:id="@+id/btnDayPen"
             style="@style/Widget.Notesprout.ToolbarButton"
-            android:src="@drawable/ic_pen"
+            android:src="@drawable/ic_pen_filled"
             android:contentDescription="Pen" />
 
         <androidx.appcompat.widget.AppCompatImageButton
@@ -784,6 +813,12 @@
                 android:contentDescription="Insert Arrow" />
 
         </LinearLayout>
+
+    <!-- Pen colour panel — anchored to the pen button. Positioned programmatically by
+         PenColorPanelController; must live in a FrameLayout so it can overhang. -->
+    <include
+        android:id="@+id/penColorPanel"
+        layout="@layout/panel_pen_color" />
 
     </FrameLayout>
 

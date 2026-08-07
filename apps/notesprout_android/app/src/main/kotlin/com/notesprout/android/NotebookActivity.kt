@@ -38,11 +38,15 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.core.view.doOnLayout
 import androidx.lifecycle.lifecycleScope
+import com.notesprout.android.core.IndexGuard
 import com.notesprout.android.data.NotebookMetaStore
 import com.notesprout.android.data.NotebookCompactor
 import androidx.room.withTransaction
 import com.notesprout.android.core.BitmapDecode
+import com.notesprout.android.core.DocumentPreferences
 import com.notesprout.android.core.Slog
+import com.notesprout.android.core.TwoFingerSwipeDown
+import com.notesprout.android.core.markdown.DocumentDraft
 import com.notesprout.android.crypto.EncryptionInfo
 import com.notesprout.android.crypto.KeyResolver
 import com.notesprout.android.crypto.KeySession
@@ -52,6 +56,7 @@ import com.notesprout.android.crypto.SoilCrypto
 import com.notesprout.android.crypto.SoilMigrator
 import com.notesprout.android.data.BoundingBox
 import com.notesprout.android.data.DayHistoryRepository
+import com.notesprout.android.data.DocumentRepository
 import com.notesprout.android.data.copyPageAfter
 import com.notesprout.android.data.HeadingObject
 import com.notesprout.android.data.HeadingStroke
@@ -147,10 +152,15 @@ import com.notesprout.android.notebook.TextEditDialog
 import com.notesprout.android.notebook.CustomizeToolbarDialog
 import com.notesprout.android.notebook.ToolbarOverflowManager
 import com.notesprout.android.notebook.ToolbarLayoutManager
+import com.notesprout.android.notebook.PenColorPreferences
+import com.notesprout.android.notebook.PenColorPanelController
+import com.notesprout.android.notebook.CustomColorDialog
 import com.notesprout.android.data.toolbar.ToolbarAxis
 import com.notesprout.android.data.toolbar.ToolbarConfig
 import com.notesprout.android.data.toolbar.ToolbarPlacement
 import com.notesprout.android.data.toolbar.ToolbarPreferencesManager
+import com.notesprout.android.data.deepCopy
+import com.notesprout.android.data.translated
 import com.notesprout.android.history.UndoRedoAction
 import com.notesprout.android.history.UndoRedoManager
 import com.notesprout.android.recognition.HandwritingRecognizer
@@ -183,6 +193,11 @@ class NotebookActivity : AppCompatActivity() {
 
         /** Max pages of parsed strokes held in the prefetch LRU cache (current + neighbours + slack). */
         private const val MAX_CACHED_PAGES = 6
+
+        /** Instance-state keys for an in-flight document-editor session (see onSaveInstanceState). */
+        private const val STATE_DOCUMENT_PAGE_ID    = "document_page_id"
+        private const val STATE_DOCUMENT_PAGE_INDEX = "document_page_index"
+        private const val STATE_DOCUMENT_SRC        = "document_src_updated_at"
 
         /** Intent extra key — the index UUID for the notebook (ObjectEntity id). */
         const val EXTRA_NOTEBOOK_ID   = "notebook_id"
@@ -236,6 +251,9 @@ class NotebookActivity : AppCompatActivity() {
     private lateinit var drawingView: NotebookView
     private lateinit var overflowManager: ToolbarOverflowManager
     private lateinit var toolbarLayoutManager: ToolbarLayoutManager
+
+    /** The pen-colour swatch panel docked to [btnPen]. See [togglePenColorPanel]. */
+    private lateinit var penColorPanel: PenColorPanelController
     private var toolbarConfig: ToolbarConfig = ToolbarConfig()
     /** True while we're waiting for ACTION_UP to close the overflow menu after a button tap. */
     private var overflowCloseOnUp = false
@@ -285,6 +303,14 @@ class NotebookActivity : AppCompatActivity() {
     private var twoFingerSwipeStartX = 0f
     private var twoFingerSwipeStartY = 0f
     private var twoFingerSwipeVelocityTracker: VelocityTracker? = null
+
+    /**
+     * Two-finger downward swipe → the Today dashboard. Runs alongside the page-insert swipe above
+     * rather than inside it: the two can never both fire — one demands vertical dominance, the other
+     * horizontal — and the dashboard shortcut belongs to every screen, so it lives in one shared
+     * detector rather than being ported into each the way the multi-finger double-tap was.
+     */
+    private val todaySwipe by lazy { TwoFingerSwipeDown(this) { TodayActivity.launch(this) } }
 
     // ── Multi-finger double-tap: 2-finger = undo, 3-finger = redo ─────────────
     // Stationary (tap slop) and short (long-press timeout). Movement guard ensures
@@ -867,6 +893,53 @@ class NotebookActivity : AppCompatActivity() {
         performScratchpadTransfer(content)
     }
 
+    // ── Document editor (host side) ───────────────────────────────────────────
+    // The editor never opens the .soil — this activity reads and writes on its behalf through
+    // DocumentTransfer. See docs/documents.md.
+
+    /** The page whose document is open in the editor, or "" when none is. */
+    private var documentPageId: String = ""
+
+    /** Index of that page. The editor can flip pages, so this drifts from [currentPageIndex]. */
+    private var documentPageIndex: Int = -1
+
+    /** That document's source watermark. Only a seed or a "bring in" moves it — never a keystroke. */
+    private var documentSrcUpdatedAt: Long? = null
+
+    /**
+     * Flushes whatever the editor last published, then catches the notebook up to the page the editor
+     * ended on. Fires even on a cancelled return, and after a low-memory kill of *this* activity behind
+     * the editor: the recreated host restores [documentPageId] from instance state, and this is where
+     * the text it kept alive lands.
+     */
+    private val documentLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { _ ->
+        val text = DocumentTransfer.live
+        val caret = DocumentTransfer.liveCaret
+        val pageId = documentPageId
+        val endedOn = documentPageIndex
+        DocumentTransfer.clearSession()
+        documentPageId = ""
+        documentPageIndex = -1
+
+        val db = soilDatabase
+        if (text != null && pageId.isNotEmpty() && db != null) {
+            val src = documentSrcUpdatedAt
+            DocumentPreferences.saveCaret(this, pageId, caret)
+            lifecycleScope.launch(Dispatchers.IO) {
+                runCatching { DocumentRepository.save(db.notebookDao(), pageId, text, src) }
+                    .onFailure { Log.e(TAG, "Failed to save document for page $pageId", it) }
+            }
+        }
+
+        // Follow the editor's page flips. Deferred to here on purpose: this navigates the drawing
+        // surface, which must not be driven while the activity is stopped behind the editor.
+        if (endedOn >= 0 && endedOn != currentPageIndex && endedOn < pages.size) {
+            navigateToPage(endedOn)
+        }
+    }
+
     /** Launched when opening a sticky note's content editor. */
     private val editorLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -874,6 +947,8 @@ class NotebookActivity : AppCompatActivity() {
         val out = StickyNoteEditorTransfer.output
         StickyNoteEditorTransfer.input  = null
         StickyNoteEditorTransfer.output = null
+        // The editor is gone; stop holding a lambda that captures this Activity.
+        StickyNoteEditorTransfer.persistToHost = null
         val pending          = pendingStickyNote ?: return@registerForActivityResult
         pendingStickyNote    = null
         val wasInitialCreate = pendingStickyInitialCreate
@@ -942,6 +1017,9 @@ class NotebookActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Nothing has opened the index if Android rebuilt this task itself — see IndexGuard.
+        if (!IndexGuard.ready(this)) return
+        if (bounceIfIndexNotReady()) return
 
         // Fullscreen immersive — equivalent to Flutter's SystemUiMode.immersiveSticky.
         WindowCompat.setDecorFitsSystemWindows(window, false)
@@ -962,8 +1040,12 @@ class NotebookActivity : AppCompatActivity() {
         // Page actions (insert before/after, delete, erase, template, page index, copy, paste)
         // now live in the canvas long-press "Page" menu — see showPageMenu(). No toolbar buttons.
 
-        // Pen tool button — activates pen mode (default)
+        // Pen tool button — activates pen mode (default). Tapping it when the pen is *already*
+        // active opens the colour panel instead; the same two-role pattern btnLasso uses for its
+        // clipboard popup. btnPen.isSelected is false in every other tool mode, so it alone is a
+        // sufficient test — but it must be read before the mode exits below flip it.
         binding.btnPen.setOnClickListener {
+            val wasPenActive = binding.btnPen.isSelected
             hideLassoPopupToolbar()
             hideShapeInsertToolbar()
             if (isShapeTransformMode) exitShapeTransformMode()
@@ -978,11 +1060,13 @@ class NotebookActivity : AppCompatActivity() {
             binding.btnLassoEraser.isSelected = false
             binding.btnLasso.isSelected = false
             ToolPreferencesManager.save(this, ActiveTool.PEN)
+            if (wasPenActive) togglePenColorPanel() else hidePenColorPanel()
         }
 
         binding.btnEraser.setOnClickListener {
             hideLassoPopupToolbar()
             hideShapeInsertToolbar()
+            hidePenColorPanel()
             if (isShapeTransformMode) exitShapeTransformMode()
             if (isLassoMode) exitLassoMode()
             if (isLassoEraserMode) exitLassoEraserMode()
@@ -998,6 +1082,7 @@ class NotebookActivity : AppCompatActivity() {
         binding.btnLassoEraser.setOnClickListener {
             hideLassoPopupToolbar()
             hideShapeInsertToolbar()
+            hidePenColorPanel()
             if (!isLassoEraserMode) {
                 enterLassoEraserMode()
                 ToolPreferencesManager.save(this, ActiveTool.LASSO_ERASER)
@@ -1067,6 +1152,7 @@ class NotebookActivity : AppCompatActivity() {
         }
 
         binding.btnLasso.setOnClickListener {
+            hidePenColorPanel()
             if (isLassoEraserMode) exitLassoEraserMode()
             if (!isLassoMode) {
                 enterLassoMode()
@@ -1124,6 +1210,13 @@ class NotebookActivity : AppCompatActivity() {
             scratchpadLauncher.launch(intent)
         }
 
+        // Tasks is a plain launch, not a for-result one: nothing comes back from it into the page
+        // the way a scratch-pad or calendar selection does.
+        binding.btnTasks.setOnClickListener { TasksActivity.launch(this) }
+        binding.btnDocument.setOnClickListener {
+            soilDatabase?.let { openDocumentEditor(it) }
+        }
+
         binding.btnUndo.setOnClickListener { performUndo() }
         binding.btnRedo.setOnClickListener { performRedo() }
         updateUndoRedoButtons()  // both disabled initially (empty stacks)
@@ -1146,6 +1239,8 @@ class NotebookActivity : AppCompatActivity() {
         drawingView = if (isBooxDevice()) OnyxNotebookView(this) else GenericNotebookView(this)
         isSnapEnabled = SnapPreferences.load(this)
         drawingView.isSnapEnabled = isSnapEnabled
+        // Restore the pen's ink colour — one global value, the same way the active tool below is.
+        drawingView.setPenColor(PenColorPreferences.load(this))
         // Restore the last-used tool — survives notebook switches and app restarts.
         when (ToolPreferencesManager.load(this)) {
             ActiveTool.ERASER      -> {
@@ -1192,7 +1287,7 @@ class NotebookActivity : AppCompatActivity() {
                 // Deep-copy before any async work so the undo action holds stable data.
                 val capturedHeading = HeadingStroke(
                     heading.id, RectF(heading.boundingBox),
-                    heading.strokes.map { s -> LiveStroke(s.id, s.points.map { PointF(it.x, it.y) }) },
+                    heading.strokes.map { s -> s.deepCopy() },
                     recognizedText = heading.recognizedText,
                     level = heading.level,
                 )
@@ -1332,7 +1427,18 @@ class NotebookActivity : AppCompatActivity() {
             val db = soilDatabase
             if (db != null) {
                 lifecycleScope.launch {
-                    val newIds = withContext(Dispatchers.IO) { saveStrokes(db) }
+                    // The stroke-save path must never kill the process. The contention that used to
+                    // land here is gone (the sticky editor no longer opens its own connection), so
+                    // this is now a general safety net rather than a fix for anything specific.
+                    // On failure nothing is marked persisted, so the same strokes are retried on the
+                    // next pen lift; the ink stays in memory either way. An empty list here just
+                    // means no undo entries for a save that did not happen.
+                    val newIds = runCatching { withContext(Dispatchers.IO) { saveStrokes(db) } }
+                        .onFailure { e ->
+                            if (e is kotlinx.coroutines.CancellationException) throw e
+                            Log.e(TAG, "Stroke save failed — will retry on the next pen lift", e)
+                        }
+                        .getOrDefault(emptyList())
                     // Push one StrokeAdded per newly persisted stroke.
                     val pageId  = currentPageId
                     val layerId = currentLayerId
@@ -1544,7 +1650,7 @@ class NotebookActivity : AppCompatActivity() {
                         val erasedHeadingIds  = erasedHeadings.mapTo(mutableSetOf()) { it.id }
                         val capturedHeadings  = erasedHeadings.map { h ->
                             HeadingStroke(h.id, RectF(h.boundingBox),
-                                h.strokes.map { s -> LiveStroke(s.id, s.points.map { PointF(it.x, it.y) }) },
+                                h.strokes.map { s -> s.deepCopy() },
                                 recognizedText = h.recognizedText,
                                 level = h.level)
                         }
@@ -1624,7 +1730,7 @@ class NotebookActivity : AppCompatActivity() {
                         HeadingStroke(
                             id             = h.id,
                             boundingBox    = RectF(h.boundingBox),
-                            strokes        = h.strokes.map { s -> LiveStroke(s.id, s.points.map { PointF(it.x, it.y) }) },
+                            strokes        = h.strokes.map { s -> s.deepCopy() },
                             recognizedText = h.recognizedText,
                             level          = h.level,
                         )
@@ -1757,6 +1863,11 @@ class NotebookActivity : AppCompatActivity() {
                 lifecycleScope.launch {
                     val now = System.currentTimeMillis()
                     val density = resources.displayMetrics.density
+                    // A failed write must not take the process with it. This coroutine had no catch
+                    // at all, which is why a lock collision here killed the app rather than being
+                    // logged. That collision no longer happens, but an unguarded DB write on a
+                    // lifecycleScope coroutine is a process-killer regardless of the cause.
+                    runCatching {
                     withContext(Dispatchers.IO) {
                         db.withTransaction {
                             for (moved in movedStrokes) {
@@ -1782,6 +1893,10 @@ class NotebookActivity : AppCompatActivity() {
                             }
                         }
                         if (movedLinks.isNotEmpty() || movedStickyNotes.isNotEmpty() || movedShapes.isNotEmpty()) noteContentEdit(db, pageId)
+                    }
+                    }.onFailure { e ->
+                        if (e is kotlinx.coroutines.CancellationException) throw e
+                        Log.e(TAG, "Move persist failed — the move is not saved", e)
                     }
                     undoRedoManager.push(
                         UndoRedoAction.StrokesMoved(
@@ -2027,6 +2142,37 @@ class NotebookActivity : AppCompatActivity() {
         toolbarConfig = ToolbarPreferencesManager.load(this)
         toolbarLayoutManager.apply(toolbarConfig)
 
+        // ── Pen colour panel ──────────────────────────────────────────────────
+        // Built after the toolbar manager because it asks it for the placement-derived side and the
+        // top guard on every open, so the bar can move (or float) and the panel follows.
+        penColorPanel = PenColorPanelController(
+            root          = binding.root,
+            panel         = binding.penColorPanel.root,
+            anchor        = binding.btnPen,
+            paletteGreyButton  = binding.penColorPanel.btnPaletteGrey,
+            paletteColorButton = binding.penColorPanel.btnPaletteColor,
+            swatchRow1    = binding.penColorPanel.penSwatchRow1,
+            swatchRow2    = binding.penColorPanel.penSwatchRow2,
+            customDivider = binding.penColorPanel.penCustomDivider,
+            customRow     = binding.penColorPanel.penCustomRow,
+            sideProvider  = {
+                when (toolbarConfig.placement) {
+                    ToolbarPlacement.LEFT   -> PenColorPanelController.Side.RIGHT_OF
+                    ToolbarPlacement.RIGHT  -> PenColorPanelController.Side.LEFT_OF
+                    ToolbarPlacement.BOTTOM -> PenColorPanelController.Side.ABOVE
+                    else                    -> PenColorPanelController.Side.BELOW
+                }
+            },
+            boundsProvider   = { Rect(0, 0, binding.root.width, binding.root.height) },
+            topGuardProvider = { toolbarLayoutManager.topGuard() },
+            onColorChosen    = { hex -> applyPenColor(hex) },
+            onSlotEditRequested = { index, initial -> showCustomColorDialog(index, initial) },
+            onPaletteChanged  = { PenColorPreferences.savePalette(this, it) },
+            onVisibilityChanged = { pushToolbarExclusion() },
+        )
+        applyPenTintToButton()
+        PenColorPreferences.addListener(penColorListener)
+
         // ── Toolbar overflow ──────────────────────────────────────────────────
         // Constructed before positionOverflowMenu()/positionPageIndicator(): those read the overflow
         // manager (FLOAT's menu anchoring asks it for the menu extent), so it must exist first.
@@ -2115,6 +2261,15 @@ class NotebookActivity : AppCompatActivity() {
         savedInstanceState?.getString(StickyNoteEditorTransfer.STATE_PENDING_NOTE)?.let {
             pendingStickyNote = StickyNoteEditorTransfer.decodeNote(it)
             pendingStickyInitialCreate = savedInstanceState.getBoolean(StickyNoteEditorTransfer.STATE_PENDING_CREATE, false)
+        }
+        // Restore an in-flight document-editor session, and offer the editor a host again: it may
+        // still be in front of us, holding text that only this activity can store.
+        savedInstanceState?.getString(STATE_DOCUMENT_PAGE_ID)?.takeIf { it.isNotEmpty() }?.let {
+            documentPageId = it
+            documentPageIndex = savedInstanceState.getInt(STATE_DOCUMENT_PAGE_INDEX, -1)
+            documentSrcUpdatedAt =
+                if (savedInstanceState.containsKey(STATE_DOCUMENT_SRC)) savedInstanceState.getLong(STATE_DOCUMENT_SRC) else null
+            DocumentTransfer.host = documentHost
         }
         SurfaceStack.attach(this, surfaceEntry())
         // A "fresh" open (from MainActivity/Recents) resets the link back-stack; a via-link open
@@ -2271,6 +2426,13 @@ class NotebookActivity : AppCompatActivity() {
             outState.putString(StickyNoteEditorTransfer.STATE_PENDING_NOTE, StickyNoteEditorTransfer.encodeNote(it))
             outState.putBoolean(StickyNoteEditorTransfer.STATE_PENDING_CREATE, pendingStickyInitialCreate)
         }
+        // Same reasoning for the open document: DocumentTransfer dies with the process, so which page
+        // the editor is writing to has to survive here or the text it kept alive lands nowhere.
+        if (documentPageId.isNotEmpty()) {
+            outState.putString(STATE_DOCUMENT_PAGE_ID, documentPageId)
+            outState.putInt(STATE_DOCUMENT_PAGE_INDEX, documentPageIndex)
+            documentSrcUpdatedAt?.let { outState.putLong(STATE_DOCUMENT_SRC, it) }
+        }
     }
 
     private fun surfaceEntry() = SurfaceEntry(surfaceToken, AppSurface.NOTEBOOK, notebookId = notebookId)
@@ -2280,7 +2442,22 @@ class NotebookActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        // A guard-bounced screen never finished building — there is nothing to release.
+        if (IndexGuard.bounced(this)) { super.onDestroy(); return }
+        // onCreate aborted before building any of this — see [bounceIfIndexNotReady]. Android
+        // still calls onDestroy on a half-constructed Activity, and every teardown below assumes
+        // state that was never created.
+        if (indexBounced) { super.onDestroy(); return }
+        PenColorPreferences.removeListener(penColorListener)
+        // Belt-and-braces against leaking this Activity through the process-global transfer: the
+        // launcher callback clears it on the normal path, but that never runs if we are destroyed
+        // while the editor is still up.
+        StickyNoteEditorTransfer.persistToHost = null
         super.onDestroy()
+        // Stop offering ourselves to the document editor — our connection is about to close. The
+        // editor keeps its text in DocumentTransfer.live, which the seal below (and, if this activity
+        // is recreated behind the editor, documentLauncher) flushes.
+        if (DocumentTransfer.host === documentHost) DocumentTransfer.host = null
         com.notesprout.android.core.OpenNotebooks.closed(notebookId)
         drawingView.releaseResources()
         // Safety net: if the activity is destroyed without the user tapping Close
@@ -2318,6 +2495,7 @@ class NotebookActivity : AppCompatActivity() {
             } else {
                 fingerGesturesSuppressed = false
                 handlePageSwipe(event)
+                todaySwipe.onTouchEvent(event)
                 handleLinkFollowGesture(event)
                 handleToolbarToggleGesture(event)
                 handleMultiFingerDoubleTap(event)
@@ -2439,6 +2617,16 @@ class NotebookActivity : AppCompatActivity() {
             }
         }
 
+        // Dismiss the pen colour panel on any touch outside it — except on btnPen itself, whose own
+        // click listener owns the toggle (handling it here too would close then immediately reopen).
+        if (event.actionMasked == MotionEvent.ACTION_DOWN
+            && ::penColorPanel.isInitialized && penColorPanel.isVisible) {
+            val inPanel = penColorPanel.containsScreenPoint(event.rawX.toInt(), event.rawY.toInt())
+            if (!inPanel && !isTouchInView(event, binding.btnPen)) {
+                hidePenColorPanel()
+            }
+        }
+
         return super.dispatchTouchEvent(event)
     }
 
@@ -2521,6 +2709,11 @@ class NotebookActivity : AppCompatActivity() {
                 (sit.x + sit.width).toInt(),
                 (sit.y + sit.height).toInt(),
             )
+        }
+        // Same for the pen colour panel — it overhangs the bar, and the pen must not write under it.
+        // Asked for in the drawing view's own coordinates, which is what the exclusion rect is in.
+        if (::penColorPanel.isInitialized) {
+            penColorPanel.panelRectIn(drawingView.asView())?.let(base::union)
         }
         return base
     }
@@ -3013,6 +3206,9 @@ class NotebookActivity : AppCompatActivity() {
         twoFingerSwipeActive = false
         twoFingerSwipeVelocityTracker?.recycle()
         twoFingerSwipeVelocityTracker = null
+
+        // Two-finger swipe down → Today.
+        todaySwipe.cancel()
 
         // Link / sticky-note tap-to-follow.
         linkTapMoved = true
@@ -3870,6 +4066,9 @@ class NotebookActivity : AppCompatActivity() {
         }
         runCatching { saveStrokes(db, strokesAtClose) }
             .onFailure { android.util.Log.e(TAG, "seal: stroke flush failed — unsaved ink lost", it) }
+        // A document editor may still be in front of this notebook, holding text that only this
+        // connection can store. Write it before the connection goes away.
+        flushPendingDocument(db)
         // RTR: stop pending debounce jobs and flush the sealed page's text synchronously, on this
         // IO context, so it completes before the DB is closed below (the "run once at page-seal" hook).
         rtrScheduler?.let { scheduler ->
@@ -4316,6 +4515,9 @@ class NotebookActivity : AppCompatActivity() {
      * Also keeps [currentTemplateBitmap] in sync for the undo/redo optimised stroke path.
      */
     private fun displayPage(result: PageLoadResult) {
+        // A page flip is a context change — a popover anchored to the old view state shouldn't ride
+        // along. (The armed ink itself persists; only the panel closes.)
+        hidePenColorPanel()
         currentTemplateBitmap = result.templateBitmap
         drawingView.loadHeadings(result.headings)
         drawingView.loadTextObjects(result.textObjects)
@@ -4768,6 +4970,183 @@ class NotebookActivity : AppCompatActivity() {
                 )
             )
         }
+    }
+
+    // ── Document editor ───────────────────────────────────────────────────────
+
+    /**
+     * Open the current page's document. The page is the draft: on a page that has no document yet,
+     * its recognized text flows in once, here, before the editor is launched — which is also why the
+     * seed never lands in the DB, only in the editor's buffer. Everything after that is the user's.
+     *
+     * Ink is flushed first: the draft is recognized from the `.soil`, so strokes still sitting in the
+     * live view would be missing from it.
+     */
+    private fun openDocumentEditor(db: SoilDatabase) {
+        if (currentPageId.isEmpty()) return
+        val index = currentPageIndex
+        lifecycleScope.launch {
+            withContext(Dispatchers.IO) { saveStrokes(db) }
+            documentPageIndex = index
+            documentPageId = pages.getOrNull(index)?.id ?: currentPageId
+            val session = loadDocumentSession(db, documentPageId, index, showProgress = true)
+            documentSrcUpdatedAt = session.srcUpdatedAt
+            DocumentTransfer.host = documentHost
+            DocumentTransfer.input = session
+            DocumentTransfer.live = null
+            documentLauncher.launch(
+                DocumentEditorActivity.intent(this@NotebookActivity, notebookDisplayName)
+            )
+        }
+    }
+
+    /**
+     * Everything the editor needs to show one page: its document (seeded from the page's recognized
+     * text when it has none yet), whether the page has moved on since that text was drafted, and where
+     * the page sits in the notebook. Shared by open and page-flip so both behave identically.
+     */
+    private suspend fun loadDocumentSession(
+        db: SoilDatabase,
+        pageId: String,
+        index: Int,
+        showProgress: Boolean,
+    ): DocumentTransfer.Session {
+        val dao = db.notebookDao()
+        var draft = withContext(Dispatchers.IO) {
+            DocumentRepository.get(dao, pageId)
+        }?.let { DocumentTransfer.Draft(it.text, it.srcUpdatedAt) }
+
+        if (DocumentDraft.isUndrafted(draft?.text)) {
+            draft = seedDocumentDraft(db, pageId, showProgress) ?: draft
+        }
+
+        val layerMax = withContext(Dispatchers.IO) {
+            com.notesprout.android.recognition.PageTextRepository.layerMaxUpdatedAt(dao, pageId)
+        }
+        val total = pages.size.coerceAtLeast(1)
+        return DocumentTransfer.Session(
+            text = draft?.text.orEmpty(),
+            srcUpdatedAt = draft?.srcUpdatedAt,
+            stale = DocumentDraft.isStale(draft?.srcUpdatedAt, layerMax),
+            pageLabel = "${index + 1} / $total",
+            hasPrev = index > 0,
+            hasNext = index < pages.size - 1,
+            caret = DocumentPreferences.caret(this, pageId),
+        )
+    }
+
+    /**
+     * Recognize [pageId] and return it as a fresh draft, or null when there is nothing to draft from
+     * (no recognizer, or a page with no words on it). On a notebook without real-time text this is a
+     * full page recognition, which is not instant.
+     *
+     * [showProgress] must be false when the editor is in front of us: this activity is stopped then, so
+     * a dialog on its window is invisible at best and a bad-token crash at worst. The editor shows its
+     * own progress in the source strip for that path.
+     */
+    private suspend fun seedDocumentDraft(
+        db: SoilDatabase,
+        pageId: String,
+        showProgress: Boolean,
+    ): DocumentTransfer.Draft? {
+        val hwr = HandwritingRecognizerProvider.instance?.takeIf { it.isReady() } ?: return null
+
+        val dialog = if (!showProgress) null else {
+            val tvMessage = android.widget.TextView(this).apply {
+                text = "Reading this page…"
+                setPadding(64, 48, 64, 48)
+                setTextColor(android.graphics.Color.BLACK)
+                textSize = 16f
+            }
+            AlertDialog.Builder(this)
+                .setView(tvMessage)
+                .setCancelable(false)
+                .create()
+                .also {
+                    it.show()
+                    it.window?.setElevation(0f)
+                    it.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
+                }
+        }
+
+        return try {
+            withContext(Dispatchers.IO) {
+                val pageText = com.notesprout.android.recognition.PageTextRepository.freshOrRecognize(
+                    db.notebookDao(), pageId, com.notesprout.android.recognition.PageTextRecognizer(hwr),
+                )
+                pageText.text.takeIf { it.isNotBlank() }
+                    ?.let { DocumentTransfer.Draft(it, pageText.sourceMaxUpdatedAt) }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to draft page $pageId", e)
+            null
+        } finally {
+            runCatching { dialog?.dismiss() }
+        }
+    }
+
+    /**
+     * What the editor is allowed to ask of the notebook. Both calls are keyed on [documentPageId] —
+     * never on `currentPageId`, which a recreated host may have moved on from.
+     */
+    private val documentHost = object : DocumentTransfer.Host {
+
+        override fun saveDocument(text: String, caret: Int) {
+            val db = soilDatabase ?: return
+            val pageId = documentPageId.takeIf { it.isNotEmpty() } ?: return
+            val src = documentSrcUpdatedAt
+            DocumentPreferences.saveCaret(this@NotebookActivity, pageId, caret)
+            lifecycleScope.launch(Dispatchers.IO) {
+                runCatching { DocumentRepository.save(db.notebookDao(), pageId, text, src) }
+                    .onFailure { Log.e(TAG, "Failed to save document for page $pageId", it) }
+            }
+        }
+
+        override fun requestPageDraft(onResult: (DocumentTransfer.Draft?) -> Unit) {
+            val db = soilDatabase
+            val pageId = documentPageId
+            if (db == null || pageId.isEmpty()) { onResult(null); return }
+            lifecycleScope.launch {
+                val draft = seedDocumentDraft(db, pageId, showProgress = false)
+                // Re-anchor the document to the page state it was just drafted from. Only ever here
+                // and at the seed — this is what makes "page has changed" meaningful.
+                if (draft != null) documentSrcUpdatedAt = draft.srcUpdatedAt
+                onResult(draft)
+            }
+        }
+
+        override fun requestPage(delta: Int, onResult: (DocumentTransfer.Session?) -> Unit) {
+            val db = soilDatabase
+            val target = documentPageIndex + delta
+            val pageId = pages.getOrNull(target)?.id
+            if (db == null || pageId == null) { onResult(null); return }
+            // Switch which page we write to *before* loading, and drop the outgoing page's published
+            // text with it: a teardown between here and the editor's next save must not write the page
+            // we left onto the page we arrived at. The editor has already stored it.
+            DocumentTransfer.live = null
+            documentPageIndex = target
+            documentPageId = pageId
+            documentSrcUpdatedAt = null
+            lifecycleScope.launch {
+                val session = loadDocumentSession(db, pageId, target, showProgress = false)
+                documentSrcUpdatedAt = session.srcUpdatedAt
+                DocumentTransfer.input = session
+                onResult(session)
+            }
+        }
+    }
+
+    /**
+     * Write the text the editor last published, before the connection it needs goes away. Called at
+     * the top of every seal so a notebook closing under an open editor still stores what was typed.
+     * Must run on [Dispatchers.IO].
+     */
+    private suspend fun flushPendingDocument(db: SoilDatabase) {
+        val text = DocumentTransfer.live ?: return
+        val pageId = documentPageId.takeIf { it.isNotEmpty() } ?: return
+        DocumentPreferences.saveCaret(this, pageId, DocumentTransfer.liveCaret)
+        runCatching { DocumentRepository.save(db.notebookDao(), pageId, text, documentSrcUpdatedAt) }
+            .onFailure { Log.e(TAG, "Failed to flush document for page $pageId", it) }
     }
 
     /** Open the read-only recognized-text viewer for this notebook (flush current ink first). */
@@ -5252,9 +5631,9 @@ class NotebookActivity : AppCompatActivity() {
         stickyNotes.forEach { box.union(it.boundingBox) }
         shapeObjects.forEach { box.union(it.boundingBox) }
         val clip = NotesproutClipboard.ClipboardContent(
-            strokes  = strokes.map { LiveStroke(it.id, it.points.map { pt -> PointF(pt.x, pt.y) }) },
+            strokes  = strokes.map { it.deepCopy() },
             headings = headings.map { h -> HeadingStroke(h.id, RectF(h.boundingBox),
-                h.strokes.map { s -> LiveStroke(s.id, s.points.map { PointF(it.x, it.y) }) },
+                h.strokes.map { s -> s.deepCopy() },
                 recognizedText = h.recognizedText,
                 level = h.level) },
             boundingBox = box,
@@ -5656,11 +6035,11 @@ class NotebookActivity : AppCompatActivity() {
         selectedShapes.forEach { box.union(it.boundingBox) }
 
         val clipStrokes  = selectedStrokes.map { s ->
-            LiveStroke(s.id, s.points.map { pt -> PointF(pt.x, pt.y) })
+            s.deepCopy()
         }
         val clipHeadings = selectedHeadings.map { h ->
             HeadingStroke(h.id, RectF(h.boundingBox),
-                h.strokes.map { s -> LiveStroke(s.id, s.points.map { PointF(it.x, it.y) }) },
+                h.strokes.map { s -> s.deepCopy() },
                 recognizedText = h.recognizedText,
                 level = h.level)
         }
@@ -5876,10 +6255,7 @@ class NotebookActivity : AppCompatActivity() {
         val density = resources.displayMetrics.density
         val translatedContent = NotesproutClipboard.ClipboardContent(
             strokes = strokes.map { s ->
-                LiveStroke(
-                    id = java.util.UUID.randomUUID().toString(),
-                    points = s.points.map { android.graphics.PointF(it.x + dx, it.y + dy) },
-                )
+                s.translated(dx, dy, newId = java.util.UUID.randomUUID().toString())
             },
             headings = headings.map { h ->
                 HeadingStroke(
@@ -5978,11 +6354,11 @@ class NotebookActivity : AppCompatActivity() {
         val stickyNoteIds  = selectedStickyNotes.map { it.id }
         val shapeIds       = selectedShapes.map { it.id }
         val capturedStrokes  = selectedStrokes.map { s ->
-            LiveStroke(s.id, s.points.map { pt -> PointF(pt.x, pt.y) })
+            s.deepCopy()
         }
         val capturedHeadings = selectedHeadings.map { h ->
             HeadingStroke(h.id, RectF(h.boundingBox),
-                h.strokes.map { s -> LiveStroke(s.id, s.points.map { PointF(it.x, it.y) }) },
+                h.strokes.map { s -> s.deepCopy() },
                 recognizedText = h.recognizedText,
                 level = h.level)
         }
@@ -7517,6 +7893,64 @@ class NotebookActivity : AppCompatActivity() {
         pushToolbarExclusion()
     }
 
+    // ── Pen colour ───────────────────────────────────────────────────────────
+
+    private fun togglePenColorPanel() {
+        if (penColorPanel.isVisible) {
+            hidePenColorPanel()
+        } else {
+            drawingView.releaseRender()   // flush the EPD frame so the panel is visible on e-ink
+            penColorPanel.show(
+                PenColorPreferences.load(this),
+                PenColorPreferences.loadPalette(this),
+                PenColorPreferences.loadSlots(this),
+            )
+        }
+    }
+
+    private fun hidePenColorPanel() {
+        if (!penColorPanel.isVisible) return
+        penColorPanel.hide()   // pushes the exclusion rect via onVisibilityChanged
+    }
+
+    /**
+     * Persist the chosen ink. Arming the drawing view and re-tinting the button happen in
+     * [penColorListener], so this host and every other live one react through one path.
+     */
+    private fun applyPenColor(hex: String) {
+        PenColorPreferences.save(this, hex)
+    }
+
+    /**
+     * Reacts to the global ink changing — from this surface or any other live one. The overlapping
+     * surfaces (a sticky note or scratch pad floating over a notebook) are the reason this exists:
+     * without it the host underneath kept showing a stale pen tint until it was reopened.
+     */
+    private val penColorListener: (String) -> Unit = { hex ->
+        drawingView.setPenColor(hex)
+        applyPenTintToButton()
+    }
+
+    private fun applyPenTintToButton() {
+        PenColorPanelController.applyPenTint(binding.btnPen, PenColorPreferences.load(this))
+    }
+
+    /**
+     * Mix a colour into custom slot [index]. Slots are positional and never shuffle, so a colour
+     * stays exactly where the user put it — the whole point of slots over a recents list.
+     */
+    private fun showCustomColorDialog(index: Int, initial: String) {
+        drawingView.releaseRender()   // flush the EPD frame so the dialog paints cleanly
+        CustomColorDialog(
+            context = this,
+            initial = initial,
+            onChosen = { hex ->
+                PenColorPreferences.saveSlot(this, index, hex)
+                applyPenColor(hex)
+            },
+        ).show()
+    }
+
     private fun insertShape(type: com.notesprout.android.data.ShapeType) {
         hideShapeInsertToolbar()
         closeOverflowMenu()
@@ -7842,9 +8276,36 @@ class NotebookActivity : AppCompatActivity() {
             contentHeight = note.contentHeight,
         )
         StickyNoteEditorTransfer.output = null
+        // Service the editor's real-time saves ourselves. It used to open its own connection to this
+        // same `.soil`, which put two writers on one WAL file and killed the app mid-writing; ours is
+        // already open, so both saves now serialize through Room instead of fighting for the lock.
+        StickyNoteEditorTransfer.persistToHost = { render -> persistStickyNoteFromEditor(render) }
         pendingStickyNote          = note
         pendingStickyInitialCreate = initialCreate
         editorLauncher.launch(StickyNoteEditorActivity.intent(this, note, StickyNoteEditorActivity.HOST_NOTEBOOK, notebookId, encryptionInfo.encrypted))
+    }
+
+    /**
+     * Write the editor's in-progress sticky content on **this** Activity's connection.
+     *
+     * Called from the editor's debounced persist while it is in the foreground and we are merely
+     * paused — same process, so a direct call, and our `soilDatabase` is still open. Failures are
+     * logged, never thrown: this runs inside the editor's coroutine and must not take it (or the
+     * process) down. The host's normal close-callback write remains the backstop.
+     */
+    private suspend fun persistStickyNoteFromEditor(render: StickyNoteRender) {
+        val db = soilDatabase ?: return
+        val density = resources.displayMetrics.density
+        withContext(Dispatchers.IO) {
+            runCatching {
+                db.withTransaction {
+                    db.notebookDao().replaceStickyNoteSubtree(render, System.currentTimeMillis(), density)
+                }
+            }.onFailure { e ->
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                Log.e(TAG, "Sticky real-time persist failed", e)
+            }
+        }
     }
 
     /** Topmost sticky note icon whose bbox contains the view-space point ([x],[y]), or null. */
@@ -8523,9 +8984,9 @@ class NotebookActivity : AppCompatActivity() {
                 action.stickyNotes.forEach { clipBox.union(it.boundingBox) }
                 action.shapes.forEach { clipBox.union(it.boundingBox) }
                 NotesproutClipboard.content = NotesproutClipboard.ClipboardContent(
-                    strokes     = action.strokes.map { s -> LiveStroke(s.id, s.points.map { pt -> PointF(pt.x, pt.y) }) },
+                    strokes     = action.strokes.map { s -> s.deepCopy() },
                     headings    = action.headings.map { h -> HeadingStroke(h.id, RectF(h.boundingBox),
-                        h.strokes.map { s -> LiveStroke(s.id, s.points.map { PointF(it.x, it.y) }) },
+                        h.strokes.map { s -> s.deepCopy() },
                         recognizedText = h.recognizedText,
                         level = h.level) },
                     boundingBox = clipBox,
@@ -10319,9 +10780,9 @@ class NotebookActivity : AppCompatActivity() {
                 action.stickyNotes.forEach { clipBox.union(it.boundingBox) }
                 action.shapes.forEach { clipBox.union(it.boundingBox) }
                 NotesproutClipboard.content = NotesproutClipboard.ClipboardContent(
-                    strokes     = action.strokes.map { s -> LiveStroke(s.id, s.points.map { pt -> PointF(pt.x, pt.y) }) },
+                    strokes     = action.strokes.map { s -> s.deepCopy() },
                     headings    = action.headings.map { h -> HeadingStroke(h.id, RectF(h.boundingBox),
-                        h.strokes.map { s -> LiveStroke(s.id, s.points.map { PointF(it.x, it.y) }) },
+                        h.strokes.map { s -> s.deepCopy() },
                         recognizedText = h.recognizedText,
                         level = h.level) },
                     boundingBox = clipBox,

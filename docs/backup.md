@@ -46,9 +46,12 @@ without collision. The subfolder name is:
 <sanitized Build.MODEL>-<8-char random hex>
 ```
 
-Generated once by `DeviceIdentity.defaultDeviceFolderName()`, persisted in `BackupConfig.deviceFolderName`,
-user-editable in Backup Settings. Sanitization strips everything except `[a-zA-Z0-9_-]`. The same
-name is used as the Drive subfolder name, so it must not contain path separators.
+Generated once by `DeviceIdentity.defaultDeviceFolderName()` (each run of any character outside
+`[a-zA-Z0-9_-]` collapses to `-`, then the ends are trimmed), persisted in
+`BackupConfig.deviceFolderName`, user-editable in Backup Settings. The Settings-screen editor applies
+a **looser** filter — only `/ \ : * ? " < > |` runs become `-` — so a hand-typed name may keep spaces
+and punctuation the generated default would have stripped. Both filters exist for the same reason:
+the name doubles as the Drive subfolder name, so it must not contain path separators.
 
 **Hardware serial is NOT used** — `Build.getSerial()` requires `READ_PHONE_STATE` (privileged) and
 returns `"UNKNOWN"` on normal sideloaded builds.
@@ -63,8 +66,9 @@ Backup files are named by **notebook UUID**, not display name:
 - `notesprout.db` — the global index
 
 UUID filenames give stable replace-in-place identity: renaming a notebook in the app does not
-orphan its backup. The display name travels inside the `.soil` via `notebook_meta` for future
-restore.
+orphan its backup. Display names and folder ancestry come back from the restored `notesprout.db`, not
+from the filenames; each `.soil` also carries its own copy in `notebook_meta`, which is what makes a
+single backed-up file importable on its own via the full-notebook import flow.
 
 ---
 
@@ -74,10 +78,16 @@ A notebook needs backup to destination *X* when **all** of:
 - `excludeFromBackup == false`
 - `lastBackedUp[X] == null` **OR** `notebook.updatedAt > lastBackedUp[X]`
 
-The predicate lives in `BackupPredicates.kt` (`fun needsBackup(updatedAt, lastBackedUp, excluded): Boolean`).
-Timestamps are per-destination (`lastBackedUpLocal` / `lastBackedUpDrive` on `NotebookObject`).
-A failed copy does **not** stamp the timestamp — the notebook is automatically retried on the next
-run.
+The predicate lives in `BackupPredicates.kt`
+(`fun needsBackup(updatedAt, lastBackedUp, excludeFromBackup): Boolean`); `IndexRepository.notebooksNeedingBackup(kind)`
+applies it to every non-deleted notebook row. Timestamps are per-destination (`lastBackedUpLocal` /
+`lastBackedUpDrive`). A failed copy does **not** stamp the timestamp — the notebook is automatically
+retried on the next run.
+
+**Where exclusion is set:** the notebook context menu in MainActivity (long-press a notebook →
+"Exclude from Backup" / "Include in Backup"). Neither the exclusion toggle nor a backup stamp bumps
+`updatedAt` — they are policy/bookkeeping, not content edits, and bumping it would immediately
+re-flag the file that was just backed up.
 
 ---
 
@@ -87,20 +97,30 @@ The engine processes notebooks first, then copies `notesprout.db` **last** — a
 timestamps have been written. This ensures the backed-up index reflects the completed run. The
 sequence:
 
-1. Resolve destination directories (fail-fast per destination, not global abort).
-2. Pre-flight DRIVE token fetch (`DriveAuth.getAccessTokenSilent`).
-3. For each (notebook, destination) pair needing backup: copy `.soil`, stamp timestamp on success.
-   Pre-backup compaction opens+closes each notebook, which absorbs its WAL — so the main file is a
-   complete copy. A notebook that **couldn't** be checkpointed unattended (NOTEBOOK-scope encrypted,
-   or GLOBAL without a cached passphrase) has its non-empty `-wal` **sidecar copied alongside** the
-   `.soil`, and both must land before the notebook is stamped backed-up; when the WAL *was* absorbed,
-   any stale destination sidecar is deleted (a fresh `.soil` paired with an old `-wal` would corrupt
-   on restore).
-4. `NotesproutIndex.checkpointAndVacuum()`, then snapshot the index to a local temp and **probe it**
-   before streaming to destinations (guards against a torn copy of the live, still-open index).
-5. Copy `notesprout.db` to each enabled destination (writes stream to `.part` then rename — a torn
-   write never replaces a good backup).
-6. Persist `config.lastRunAt` **only if at least one destination succeeded** (a fully-failed run no
+1. Resolve destination directories (fail-fast per destination, not global abort). A destination that
+   can't be resolved records its error and is dropped from the run; the other still goes.
+2. Pre-flight DRIVE token fetch (`DriveAuth.getAccessTokenSilent`), then find-or-create the device
+   folder.
+3. Build the work list — one `(notebook, destination)` pair per notebook needing that destination.
+4. **Compact pass.** Each notebook in the work list (unique across destinations) is opened and closed
+   once, running the same seal-time `NotebookCompactor.compact` used on close, so the bytes about to
+   be copied are the leanest form. Compaction preserves `updatedAt`, so a notebook stays flagged and
+   is copied in its now-smaller form below. Opening also absorbs the WAL — so the main file alone is a
+   complete copy. Notebooks that **can't** be opened unattended (NOTEBOOK-scope encrypted, or GLOBAL
+   without a cached passphrase) are skipped; failure here is swallowed, never a reason to skip the
+   copy that follows.
+5. For each pair: copy the `.soil`, stamp the timestamp on success. A notebook that couldn't be
+   checkpointed in step 4 has its non-empty `-wal` **sidecar copied alongside** the `.soil`, and both
+   must land before the notebook is stamped backed-up; when the WAL *was* absorbed, any stale
+   destination sidecar is deleted (a fresh `.soil` paired with an old `-wal` would corrupt on
+   restore). A `.soil` missing from disk is counted *skipped*, not failed.
+6. `NotesproutIndex.checkpointAndVacuum()`, then snapshot the index to a local temp and **probe it**
+   before streaming to destinations (guards against a torn copy of the live, still-open index). If
+   the snapshot or probe fails, the run falls back to streaming the live file.
+7. Copy `notesprout.db` to each enabled destination. LOCAL writes stream to a `.part` sibling, move
+   the previous file to `.old`, then rename in — a torn write never replaces a good backup. DRIVE
+   PATCHes the existing file id via resumable upload (see [Replace-in-place](#replace-in-place-d16)).
+8. Persist `config.lastRunAt` **only if at least one destination succeeded** (a fully-failed run no
    longer reports "backed up just now").
 
 ---
@@ -108,8 +128,14 @@ sequence:
 ## Encrypted Notebook Behavior (D10)
 
 Encrypted `.soil` files are copied **as ciphertext** — no passphrase prompt, no decryption.
-SQLCipher encrypts the entire file; a byte-level copy is sufficient. The restore path (future) will
-prompt for the passphrase.
+SQLCipher encrypts the entire file; a byte-level copy is sufficient. Under encrypt-everything the
+index itself is encrypted too, so a backup is opaque without the source device's passphrase. Restore
+never asks for it inline: it stages and commits the ciphertext as-is, then the post-restart unlock
+gate collects that library's recovery key (see [Restore](#restore)).
+
+The one thing encryption costs the backup run is **compaction**: a NOTEBOOK-scope notebook — or a
+GLOBAL one on a device with no cached passphrase — can't be opened unattended, so it is copied
+un-compacted and with its `-wal` sidecar (step 4 above).
 
 ---
 
@@ -117,10 +143,18 @@ prompt for the passphrase.
 
 All backup state lives in `notesprout.db` (the global index):
 
-- **Per-notebook timestamps** — `excludeFromBackup`, `lastBackedUpLocal`, `lastBackedUpDrive` fields
-  on `NotebookObject` JSON. No migration needed; absent keys decode to defaults.
+- **Per-notebook state** — typed **columns** on the notebook's `objects` row: `excludeFromBackup` is
+  bit 1 of `flags`, alongside the `lastBackedUpLocal` / `lastBackedUpDrive` INTEGER columns. Notebook
+  rows went columnar in DB **v7** (`data = ""`); the accessors in `IndexObjectColumns.kt`
+  (`notebookMeta()` / `withNotebookMeta()`) are format-agnostic, so a pre-v7 row still reads its
+  values out of the legacy `NotebookObject` JSON and converts on next write. No other code touches
+  these fields directly. See [`global-index-format.md`](global-index-format.md).
 - **Global config** — a singleton `BACKUP_CONFIG` row (`id = BACKUP_CONFIG_ID`) holding
   `BackupConfig` JSON (mirrors the `CLIPBOARD` row pattern). Read/written by `BackupConfigStore`.
+  This row **keeps its JSON by design** — it is a single low-traffic blob, not a queried shape.
+
+`NotebookObject` remains the in-memory carrier for the per-notebook values regardless of which
+storage form the row is in.
 
 `BackupConfig` fields:
 
@@ -230,16 +264,20 @@ This is required before the Drive OAuth flow will succeed.
 | `BackupConfig` | `data/backup/BackupConfig.kt` | `@Serializable` config data class; `toJson()`/`fromJson()` |
 | `BackupConfigStore` | `data/backup/BackupConfigStore.kt` | Read/write singleton BACKUP_CONFIG row in `notesprout.db` |
 | `BackupKind` | `data/backup/BackupKind.kt` | `enum { LOCAL, DRIVE }` |
-| `BackupPredicates` | `data/backup/BackupPredicates.kt` | `needsBackup(updatedAt, lastBackedUp, excluded)` |
+| `BackupPredicates` | `data/backup/BackupPredicates.kt` | `needsBackup(updatedAt, lastBackedUp, excludeFromBackup)` |
 | `BackupResult` / `DestResult` | `data/backup/BackupResult.kt` | Run summary: per-destination counts + errors |
 | `BackupEngine` | `data/backup/BackupEngine.kt` | Orchestrates a full backup run on `Dispatchers.IO` |
-| `SafBackupWriter` | `data/backup/SafBackupWriter.kt` | SAF/`DocumentFile` helpers for LOCAL writes |
+| `SafBackupWriter` | `data/backup/SafBackupWriter.kt` | SAF/`DocumentFile` helpers for LOCAL writes (`.part` → rename) |
+| `SafBackupReader` | `data/backup/SafBackupReader.kt` | Read side of a SAF destination — enumerate device folders, copy files out |
 | `DriveAuth` | `data/backup/DriveAuth.kt` | PKCE helpers, auth URL builder, token exchange, silent refresh |
 | `DriveTokenStore` | `data/backup/DriveTokenStore.kt` | `EncryptedSharedPreferences`-backed refresh token storage |
-| `DriveAuthActivity` | `ui/DriveAuthActivity.kt` | WebView OAuth activity; intercepts the redirect URI |
-| `DriveApiClient` | `data/backup/DriveApiClient.kt` | Hand-rolled Drive REST v3 (`findChild`, `ensureFolder`, `uploadOrReplace`) |
+| `DriveAuthActivity` | `DriveAuthActivity.kt` | WebView OAuth activity; intercepts the redirect URI |
+| `DriveApiClient` | `data/backup/DriveApiClient.kt` | Hand-rolled Drive REST v3 (`findChild`, `listChildren`, `ensureFolder`, `uploadOrReplace`, `downloadTo`, `delete`) |
 | `DriveBackupWriter` | `data/backup/DriveBackupWriter.kt` | Engine-facing facade over `DriveApiClient` |
 | `DeviceIdentity` | `data/backup/DeviceIdentity.kt` | `defaultDeviceFolderName()` — sanitized model + random suffix |
+| `RestoreSource` | `data/backup/RestoreSource.kt` | Restore-side interface + `SafRestoreSource` / `DriveRestoreSource`; `listDevices()` / `fetchInto()` |
+| `RestoreEngine` | `data/backup/RestoreEngine.kt` | Staging-first, aside-swap restore + `recoverInterrupted()` launch repair |
+| `BackupSettingsActivity` | `BackupSettingsActivity.kt` | The Backup Settings screen (destinations, Back Up Now, Restore) |
 
 ---
 
@@ -248,15 +286,21 @@ This is required before the Drive OAuth flow will succeed.
 `BackupSettingsActivity` — reachable from the MainActivity overflow toolbar (Backup icon).
 
 Sections:
-- **Device folder name** — editable field (`etDeviceFolderName`); used as the Drive subfolder.
-- **Local backup** — status, "Choose folder…" button (`btnChooseLocal`), enable toggle.
+- **Device folder name** — editable field (`etDeviceFolderName`) + "Save" (`btnSaveDeviceName`); used
+  as the Drive subfolder.
+- **Local backup** — status, "Choose folder…" button (`btnChooseLocal`), enable toggle. Picking a
+  folder takes a persistable read+write URI permission and enables the slot in one step.
 - **Google Drive backup** — status, "Connect Google Drive" / "Disconnect" buttons, enable toggle.
+  "Disconnect" clears the stored refresh token as well as the config fields.
 - **Actions** — "Back Up Now" (`btnBackUpNow`), enabled when at least one destination is ready;
   "Last backup: …" timestamp.
+- **Restore** — "Restore from Backup…" (`btnRestore`); see [Restore](#restore).
 
 "Back Up Now" is guarded by an `AtomicBoolean` to prevent concurrent runs. Progress is shown in an
 `AlertDialog` updated by `onProgress`. On completion a summary dialog shows per-destination counts
-and any errors.
+and any errors. The whole run is wrapped in a `try/catch`: the engine guards each file copy, but its
+own repo/index calls can still throw (index sealed underneath, SQLite error), and that must surface
+as a failed-backup message rather than a crash mid-run.
 
 **Debug builds** write into a `dev/` subfolder inside each destination root (LOCAL: `<tree>/dev/`;
 DRIVE: `My Drive / Notesprout Backups / <deviceFolderName> / dev /`). Release builds write directly
@@ -264,13 +308,18 @@ to the destination root.
 
 ---
 
-## Known Limitations (Phase 1)
+## Known Limitations
 
-- **Restore is not implemented.** The backed-up `.soil` files can be imported manually via the
-  full-notebook import flow (share / open `.soil`), but there is no automated restore. Future work.
 - Renaming the device folder orphans the old Drive subfolder — prior backups in the old folder are
   not migrated.
-- Deleting a notebook does not remove its backup file. Restore / GC is future work.
+- Deleting a notebook does not remove its backup file (the needs-backup sweep skips deleted rows, it
+  never reaps). Harmless for restore — the restored index simply doesn't reference the orphan — but
+  the bytes accumulate. GC is future work.
+- **Debug builds cannot restore from Drive.** Debug backups land in `<deviceFolderName>/dev/`, but
+  `DriveRestoreSource` only treats a direct child of "Notesprout Backups" that *itself* holds a
+  `notesprout.db` as a device folder, so a debug Drive backup is never listed. LOCAL restore is
+  unaffected: the picker scans the chosen tree **and** one level of subfolders, so `dev/` is offered
+  as a device. Release builds write to the destination root and restore normally on both.
 - A notebook currently open in another Activity is backed up from its last cold/sealed state.
   Backup is launched from MainActivity (where notebooks are closed), so this is not expected in
   normal usage, but live-edit data is not flushed.
@@ -291,30 +340,49 @@ a per-notebook import (that is what full-notebook import is for).
 **Key classes:** `RestoreSource` (LOCAL/SAF or DRIVE, with device-folder selection) and
 `RestoreEngine` (`data/backup/RestoreEngine.kt`).
 
+**Choosing a backup.** "Restore from Backup…" asks for the source (Local folder / Google Drive), then
+lists the device folders found there with their notebook counts, then requires an explicit
+"Replace your library?" confirmation that names the backup and warns the recovery key will be needed.
+Device enumeration is one level deep: SAF treats the picked tree as a device folder if it directly
+holds a `notesprout.db`, and also scans its immediate subfolders; Drive scans the children of
+"Notesprout Backups". Only `*.soil` names are taken as notebooks, so a leftover `.part` / `.old` from
+a killed backup run is never mistaken for one.
+
 **Staging-first, aside-swap commit** — the live library is never in a state with no intact copy:
 
 1. Wipe + recreate `cacheDir/restore_staging`.
 2. Fetch the backup's `notesprout.db` and every `.soil` (plus any `-wal` sidecar) into staging.
    **Every per-file result is checked — a single failure aborts the whole restore**, and each file
    streams to a `.part` name then renames, so a dropped connection never stages a truncated file.
-   The live library is untouched if this fails.
+   Drive listing is equally strict: a paging failure *after* the first page throws rather than
+   returning a short list, because a truncated set would commit as the entire library. The live
+   library is untouched if any of this fails.
 3. **Validate + free-space gate:** probe the staged index and every staged `.soil` (reject a
-   non-database); require ~2× the staged size free, else hard-fail with a clear message.
+   non-database; encrypted files pass, they can't be read deeper without the backup's key). Then
+   require the staged payload's size **plus 64 MB of headroom** free on the library volume — the
+   commit copies the staged set in while the old library still exists aside — else hard-fail with a
+   message naming the shortfall.
 4. Seal the index, then **move (rename) the live index + `Garden/` aside** into `restore_replaced/`,
-   copy the staged Garden in, and install the staged index **last** as the commit marker.
+   copy the staged Garden in, and install the staged index **last** as the commit marker. A failure
+   inside this step rolls the aside copy back and reopens the index, so the app keeps working without
+   a restart.
 5. Only after the index is in place: clear the cached global passphrase **and all cached raw keys**
    (`KeyMaterial` / `KeySession` / `PassphraseStore`), then delete the aside copy.
 
 **Crash recovery.** A kill mid-commit is repaired at launch by `RestoreEngine.recoverInterrupted`
 (called from `BootstrapActivity`): aside present + no live index ⇒ roll the old library back; aside
-present + live index present ⇒ the commit finished, discard the aside. WAL sidecars staged in step 2
-travel with their `.soil` (see the backup side's un-checkpointable-notebook handling).
+present + live index present ⇒ the commit finished, discard the aside. Either way a leftover
+`notesprout.db.part` from the interrupted install is deleted — it is stale on both branches. WAL
+sidecars staged in step 2 travel with their `.soil` (see the backup side's un-checkpointable-notebook
+handling).
 
 **Restart into unlock.** The restored index is encrypted under the **backup device's** global
 passphrase, which is not this device's. So the next launch necessarily lands in
-`NotesproutIndex.PrepareOutcome.NEEDS_UNLOCK`, and the caller restarts into the bootstrap gate to
-prompt for that library's recovery key. Clearing the cached keys in step 3 is what makes this
-deterministic — a stale cached key would otherwise fail verification and look like corruption.
+`NotesproutIndex.PrepareOutcome.NEEDS_UNLOCK`. The success dialog therefore has a single
+non-cancelable "Restart" action: it relaunches the app and hard-exits the process, landing on the
+bootstrap gate to prompt for that library's recovery key. Clearing the cached keys in step 5 is what
+makes this deterministic — a stale cached key would otherwise fail verification and look like
+corruption.
 
 **Entry point:** the Restore section of Backup Settings.
 

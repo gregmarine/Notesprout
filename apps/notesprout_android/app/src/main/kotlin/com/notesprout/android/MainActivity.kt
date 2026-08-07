@@ -33,6 +33,7 @@ import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.lifecycleScope
+import com.notesprout.android.core.IndexGuard
 import com.notesprout.android.crypto.EncryptionInfo
 import com.notesprout.android.crypto.KeyResolver
 import com.notesprout.android.crypto.PassphrasePrompt
@@ -110,6 +111,25 @@ class MainActivity : AppCompatActivity() {
          */
         const val EXTRA_START_NEW_NOTEBOOK = "start_new_notebook"
 
+        /**
+         * Boolean intent extra, paired with [EXTRA_START_NEW_NOTEBOOK]: when the flow ends by
+         * opening the new notebook, put the **Today** dashboard back underneath it.
+         *
+         * [TodayActivity] cannot run this flow itself — choosing the destination folder is a mode of
+         * *this* screen's grid, and the dashboard deliberately has no browsing — so it hands over and
+         * is popped on the way (`CLEAR_TOP` onto the root library). Without this the notebook's back
+         * step lands in the library, which is right for the library's own button and wrong for the
+         * dashboard: opening an *existing* notebook from there comes straight back.
+         *
+         * Consumed once, like [EXTRA_START_NEW_NOTEBOOK], and deliberately **not** saved instance
+         * state. This Activity is recreated on rotation (it declares no `configChanges`), so rotating
+         * mid-flow loses the flag and the notebook opens over the library — the behaviour before this
+         * existed, and no worse. Keeping it on the Intent instead would survive that, but the Intent
+         * outlives the flow: the next notebook created from the library's *own* button would then be
+         * sent to the dashboard too.
+         */
+        const val EXTRA_RETURN_TO_TODAY = "return_to_today"
+
         /** One-time flag (in the notesprout_onboarding prefs) that the Phase-4 bulk-encrypt offer was shown. */
         private const val KEY_CONVERSION_OFFERED = "conversion_offered"
 
@@ -143,6 +163,9 @@ class MainActivity : AppCompatActivity() {
 
     /** Set when launched with [EXTRA_START_NEW_NOTEBOOK] but the grid isn't laid out / restored yet. */
     private var pendingNewNotebookPicker = false
+
+    /** Set by [EXTRA_RETURN_TO_TODAY]; consumed when the new notebook opens. */
+    private var returnToTodayAfterCreate = false
 
     /**
      * Navigation stack — null represents the root level; a non-null ObjectEntity represents a
@@ -248,16 +271,12 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Nothing has opened the index if Android rebuilt this task itself — see IndexGuard.
+        if (!IndexGuard.ready(this)) return
 
-        // The encrypted index must be prepared before any index access. Normally BootstrapActivity
-        // (the launcher) has already done this and forwarded here; but a .soil deep-link or a
-        // task-root recreation can reach MainActivity cold with the index not yet ready — bounce back
-        // through the gate (preserving the intent) so preparation/unlock happens exactly once.
-        if (!com.notesprout.android.data.index.NotesproutIndex.isReady()) {
-            startActivity(Intent(intent).setClass(this, BootstrapActivity::class.java))
-            finish()
-            return
-        }
+        // The encrypted index must be prepared before any index access. This guard began here and now
+        // lives in one place — every index-touching screen needs it, not just the deep-link entry.
+        if (bounceIfIndexNotReady()) return
 
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
@@ -763,6 +782,14 @@ class MainActivity : AppCompatActivity() {
                         putExtra(ScratchpadActivity.EXTRA_FROM_NOTEBOOK_NAME,      from.name)
                     }
                 }
+                // Tasks carries no per-launch state — the screen reads the table fresh every time,
+                // so restoring it needs nothing beyond the intent itself. The dashboard is the same,
+                // and more so: everything on it is derived from "now".
+                AppSurface.TASKS -> TasksActivity.intent(this)
+                AppSurface.TODAY -> TodayActivity.intent(this)
+                // A routine that has since been deleted or rolled over resolves to nothing; the
+                // screen itself also re-checks and steps out if the row has gone.
+                AppSurface.ROUTINE -> entry.routineId?.let { RoutineActivity.intent(this, it) }
             }
             if (intent != null) intents += intent
             below = notebook
@@ -814,6 +841,17 @@ class MainActivity : AppCompatActivity() {
         binding.btnCalendar.setOnClickListener       {
             closeOverflowToolbar()
             CalendarActivity.launch(this)
+        }
+        // Lives in surfaceButtonsGroup on the wide variants and in the overflow row on sw360dp —
+        // one id in every variant, so this wiring is layout-agnostic. Same for btnTasks, which the
+        // dashboard displaced from the bar entirely (see the layout comments).
+        binding.btnToday.setOnClickListener          {
+            closeOverflowToolbar()
+            TodayActivity.launch(this)
+        }
+        binding.btnTasks.setOnClickListener          {
+            closeOverflowToolbar()
+            TasksActivity.launch(this)
         }
         binding.btnImport.setOnClickListener         {
             closeOverflowToolbar()
@@ -1806,6 +1844,15 @@ class MainActivity : AppCompatActivity() {
                 PassphraseCache.storeOnce(entity.id, key)
             }
 
+            // Started from the Today dashboard: rebuild it under the notebook, so backing out of
+            // the notebook returns where the "+" was tapped rather than to the library. Started
+            // first, and on its own — the dashboard reads everything fresh from "now", so a new
+            // instance is indistinguishable from the one that was popped getting here.
+            if (returnToTodayAfterCreate) {
+                returnToTodayAfterCreate = false
+                startActivity(TodayActivity.intent(this@MainActivity))
+            }
+
             // Open the new notebook immediately.
             launchNotebookActivity(entity)
 
@@ -2655,6 +2702,8 @@ class MainActivity : AppCompatActivity() {
     private fun handleNewNotebookIntent(intent: Intent) {
         if (!intent.getBooleanExtra(EXTRA_START_NEW_NOTEBOOK, false)) return
         intent.removeExtra(EXTRA_START_NEW_NOTEBOOK)
+        returnToTodayAfterCreate = intent.getBooleanExtra(EXTRA_RETURN_TO_TODAY, false)
+        intent.removeExtra(EXTRA_RETURN_TO_TODAY)
         pendingNewNotebookPicker = true
         tryStartPendingNewNotebookPicker()
     }

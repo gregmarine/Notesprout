@@ -113,7 +113,7 @@
         <androidx.appcompat.widget.AppCompatImageButton
             android:id="@+id/btnCalPen"
             style="@style/Widget.Notesprout.ToolbarButton"
-            android:src="@drawable/ic_pen"
+            android:src="@drawable/ic_pen_filled"
             android:contentDescription="Pen" />
 
         <androidx.appcompat.widget.AppCompatImageButton
@@ -171,6 +171,15 @@
             android:layout_marginStart="2dp"
             android:src="@drawable/ic_sketching"
             android:contentDescription="Scratch Pad" />
+
+        <!-- Tasks launcher. A convenience jump to a sibling surface, not a coupling of the two
+             features: no task is ever drawn on a calendar grid. -->
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnCalTasks"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:layout_marginStart="2dp"
+            android:src="@drawable/ic_tasks"
+            android:contentDescription="Tasks" />
 
         <!-- Send the current view to a notebook as a new page (template + optional writing) -->
         <androidx.appcompat.widget.AppCompatImageButton
@@ -333,6 +342,12 @@
                 android:visibility="gone" />
 
         </LinearLayout>
+
+    <!-- Pen colour panel — anchored to the pen button. Positioned programmatically by
+         PenColorPanelController; must live in a FrameLayout so it can overhang. -->
+    <include
+        android:id="@+id/penColorPanel"
+        layout="@layout/panel_pen_color" />
 
     </FrameLayout>
 

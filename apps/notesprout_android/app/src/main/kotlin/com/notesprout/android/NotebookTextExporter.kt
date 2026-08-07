@@ -2,6 +2,7 @@ package com.notesprout.android
 
 import android.content.Context
 import com.notesprout.android.crypto.SoilCrypto
+import com.notesprout.android.data.DocumentRepository
 import com.notesprout.android.data.NotebookDao
 import com.notesprout.android.data.SoilDatabase
 import com.notesprout.android.recognition.HandwritingRecognizerProvider
@@ -11,9 +12,11 @@ import com.notesprout.android.recognition.PageTextRepository
 import java.io.File
 
 /**
- * Exports a notebook's recognized handwriting to a **Markdown** (`.md`, the default) or
- * **plain-text** (`.txt`) file. Recognition runs through the shared core
- * ([PageTextRepository] → [PageTextRecognizer]); pages that already have a fresh cached
+ * Exports a notebook's writing to a **Markdown** (`.md`, the default) or **plain-text** (`.txt`) file.
+ *
+ * Per page, a **document** wins when the page has one — the user's edited text is the finished version
+ * of the same words (see docs/documents.md). Otherwise the page's handwriting is recognized through the
+ * shared core ([PageTextRepository] → [PageTextRecognizer]); pages that already have a fresh cached
  * `page_text` (e.g. written by RTR) are reused, so a partially-recognized notebook exports fast.
  *
  * Text is always assembled as Markdown; the plain-text format strips the Markdown syntax at the
@@ -82,12 +85,19 @@ object NotebookTextExporter {
         val pageTexts = ArrayList<String>(total)
         for ((i, pageId) in ids.withIndex()) {
             onProgress(i + 1, total)
-            val pageText = if (recognizer != null) {
-                PageTextRepository.freshOrRecognize(dao, pageId, recognizer)
-            } else {
-                PageTextRepository.getCached(dao, pageId)
-            }
-            val md = pageText?.text?.takeIf { it.isNotBlank() } ?: continue
+            // A page with a document exports the document: it is the same text carried one step
+            // further, and it is what the user meant by "the writing on this page". Recognition is
+            // skipped entirely for those pages — the draft has already served its purpose.
+            val md = DocumentRepository.get(dao, pageId)?.text?.takeIf { it.isNotBlank() }
+                ?: run {
+                    val pageText = if (recognizer != null) {
+                        PageTextRepository.freshOrRecognize(dao, pageId, recognizer)
+                    } else {
+                        PageTextRepository.getCached(dao, pageId)
+                    }
+                    pageText?.text?.takeIf { it.isNotBlank() }
+                }
+                ?: continue
             pageTexts += when (format) {
                 Format.MARKDOWN -> md
                 Format.PLAIN -> MarkdownText.toPlainText(md)

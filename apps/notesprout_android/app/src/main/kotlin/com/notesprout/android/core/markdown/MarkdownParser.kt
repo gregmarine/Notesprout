@@ -9,7 +9,11 @@ sealed class Block {
     data class ListItem(
         val ordered: Boolean,
         val depth: Int,
-        /** Computed sequential number (1-based) for ordered items; 0 for unordered. */
+        /**
+         * The number to draw for an ordered item; 0 for unordered. Counted from the run's **first**
+         * item, whose written number is honoured (CommonMark's `start`) — so `3.` renders as 3 while
+         * the items after it count on regardless of what they claim.
+         */
         val displayNumber: Int,
         val isTask: Boolean,
         val checked: Boolean,
@@ -26,6 +30,8 @@ sealed class Inline {
     data class Bold(val children: List<Inline>) : Inline()
     data class Italic(val children: List<Inline>) : Inline()
     data class Strikethrough(val children: List<Inline>) : Inline()
+    /** `` `code` `` — literal content, so it holds text rather than children. */
+    data class Code(val text: String) : Inline()
     /** Rendered as underlined display text; url is discarded (not clickable). */
     data class Link(val displayText: String, val url: String) : Inline()
 }
@@ -124,11 +130,15 @@ object MarkdownParser {
                 continue
             }
 
-            // Ordered list item (auto-renumbered; literal number in source is ignored)
+            // Ordered list item. The **first** item of a run sets where the numbering starts — that is
+            // CommonMark's `start` attribute, so a list written `3.` renders as 3 — and the items after
+            // it simply count on from there, whatever number they claim.
             val olMatch = orderedItemRegex.find(trimmed)
             if (olMatch != null && olMatch.range.first == 0) {
                 val text = olMatch.groupValues[2]
-                val num = (orderedCounters[depth] ?: 0) + 1
+                val running = orderedCounters[depth]
+                val num = if (running != null) running + 1
+                    else olMatch.groupValues[1].toIntOrNull() ?: 1
                 orderedCounters[depth] = num
                 blocks += Block.ListItem(
                     ordered = true, depth = depth, displayNumber = num,
@@ -178,6 +188,16 @@ object MarkdownParser {
         var i = 0
         while (i < text.length) {
             when {
+                // Inline code first — its content is literal, so nothing inside it is markup.
+                text[i] == '`' -> {
+                    val end = text.indexOf('`', i + 1)
+                    if (end >= 0) {
+                        result += Inline.Code(text.substring(i + 1, end))
+                        i = end + 1
+                    } else {
+                        appendChar(result, text[i]); i++
+                    }
+                }
                 // Strikethrough ~~text~~ (check before single ~)
                 text.startsWith("~~", i) -> {
                     val end = text.indexOf("~~", i + 2)
@@ -204,6 +224,25 @@ object MarkdownParser {
                     if (end >= 0) {
                         result += Inline.Bold(parseInlines(text.substring(i + 2, end)))
                         i = end + 2
+                    } else {
+                        appendChar(result, text[i]); i++
+                    }
+                }
+                // Image ![alt](url) — the renderer draws no images, so this shows the alt text in
+                // italic, the way a caption reads. Without this the `!` would be left as literal text
+                // and the rest parsed as a link, so an image reference came out as "!alt", underlined
+                // and pretending to be one.
+                text[i] == '!' && i + 1 < text.length && text[i + 1] == '[' -> {
+                    val altEnd = text.indexOf(']', i + 2)
+                    if (altEnd >= 0 && altEnd + 1 < text.length && text[altEnd + 1] == '(') {
+                        val urlEnd = text.indexOf(')', altEnd + 2)
+                        if (urlEnd >= 0) {
+                            val alt = text.substring(i + 2, altEnd)
+                            if (alt.isNotEmpty()) result += Inline.Italic(listOf(Inline.Text(alt)))
+                            i = urlEnd + 1
+                        } else {
+                            appendChar(result, text[i]); i++
+                        }
                     } else {
                         appendChar(result, text[i]); i++
                     }

@@ -214,6 +214,28 @@ fun LiveStroke.toStrokeRow(
 /** The binary blob for this stroke's current points — used to persist translated coordinates. */
 fun LiveStroke.strokeBlob(): ByteArray = LiveStroke.packPoints(points)
 
+/**
+ * Deep-copy this stroke, cloning its points so the copy can be moved without aliasing the original,
+ * and **preserving every other field** — colour, width, and the original pressure/tilt samples.
+ *
+ * Use this (or [translated]) instead of rebuilding a stroke with the `LiveStroke(id, points)`
+ * constructor. That two-argument form silently defaults `color` back to black, `strokeWidth` back to
+ * 3.0, and `srcPoints` to null, so every copy/move/paste/undo path that used it was quietly
+ * flattening the user's ink. It was invisible while all ink was black; it is data loss now.
+ */
+fun LiveStroke.deepCopy(newId: String = id): LiveStroke =
+    copy(id = newId, points = points.map { PointF(it.x, it.y) })
+
+/**
+ * [deepCopy] shifted by ([dx], [dy]) — for moves, pastes, and link-subtree translation.
+ *
+ * `srcPoints` rides along untouched and stays index-aligned with the shifted points, which is exactly
+ * what [LiveStroke.toStrokeData] expects: it reads x/y from `points` and pressure/tilt from
+ * `srcPoints` by index, so a translated stroke keeps its stylus data.
+ */
+fun LiveStroke.translated(dx: Float, dy: Float, newId: String = id): LiveStroke =
+    copy(id = newId, points = points.map { PointF(it.x + dx, it.y + dy) })
+
 /** Minimal stroke surrogate whose `points` decode directly to [PointF] (see [LiveStroke.fromPointsJson]). */
 @Serializable
 private data class LeanStrokeSurrogate(

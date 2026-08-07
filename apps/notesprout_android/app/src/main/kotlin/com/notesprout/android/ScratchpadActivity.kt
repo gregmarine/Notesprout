@@ -20,6 +20,7 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.doOnLayout
 import androidx.lifecycle.lifecycleScope
+import com.notesprout.android.core.IndexGuard
 import com.notesprout.android.core.Slog
 import com.notesprout.android.core.isBooxDevice
 import com.notesprout.android.data.BoundingBox
@@ -49,6 +50,7 @@ import com.notesprout.android.data.translate
 import com.notesprout.android.data.index.NotesproutIndex
 import com.notesprout.android.data.index.ScratchpadEntity
 import com.notesprout.android.data.index.toNotebookObject
+import com.notesprout.android.data.deepCopy
 import com.notesprout.android.notebook.ShapeRecognizer
 import com.notesprout.android.notebook.STICKY_NOTE_ICON_SIZE_DP
 import com.notesprout.android.databinding.ActivityScratchpadBinding
@@ -59,6 +61,7 @@ import com.notesprout.android.notebook.NotebookView
 import com.notesprout.android.notebook.OnyxNotebookView
 import com.notesprout.android.notebook.ScratchpadPreferences
 import com.notesprout.android.notebook.ToolPreferencesManager
+import com.notesprout.android.notebook.PenColorPreferences
 import com.notesprout.android.state.AppSurface
 import com.notesprout.android.state.SurfaceEntry
 import com.notesprout.android.state.SurfaceStack
@@ -72,6 +75,9 @@ import kotlinx.coroutines.withContext
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.abs
+import com.notesprout.android.notebook.PenColorPanelController
+import com.notesprout.android.notebook.CustomColorDialog
+import com.notesprout.android.core.TopGuard
 
 class ScratchpadActivity : AppCompatActivity() {
 
@@ -136,6 +142,9 @@ class ScratchpadActivity : AppCompatActivity() {
     /** This Activity instance's identity on the [SurfaceStack]. */
     private var surfaceToken: String = ""
     private lateinit var drawingView: NotebookView
+
+    /** Pen-colour swatch panel docked to [btnScratchPen]. See [togglePenColorPanel]. */
+    private lateinit var penColorPanel: PenColorPanelController
     private lateinit var repository: ScratchpadRepository
 
     private var pages: List<ScratchpadEntity> = emptyList()
@@ -221,6 +230,9 @@ class ScratchpadActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Nothing has opened the index if Android rebuilt this task itself — see IndexGuard.
+        if (!IndexGuard.ready(this)) return
+        if (bounceIfIndexNotReady()) return
         binding = ActivityScratchpadBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
@@ -274,6 +286,28 @@ class ScratchpadActivity : AppCompatActivity() {
         wireToolButtons()
         updateLassoButtonIcon()
 
+        // Restore the pen's ink colour — one global value, the same way the active tool below is.
+        drawingView.setPenColor(PenColorPreferences.load(this))
+        penColorPanel = PenColorPanelController(
+            root          = binding.root,
+            panel         = binding.penColorPanel.root,
+            anchor        = binding.btnScratchPen,
+            paletteGreyButton  = binding.penColorPanel.btnPaletteGrey,
+            paletteColorButton = binding.penColorPanel.btnPaletteColor,
+            swatchRow1    = binding.penColorPanel.penSwatchRow1,
+            swatchRow2    = binding.penColorPanel.penSwatchRow2,
+            customDivider = binding.penColorPanel.penCustomDivider,
+            customRow     = binding.penColorPanel.penCustomRow,
+            sideProvider  = { PenColorPanelController.Side.ABOVE },
+            boundsProvider   = { windowRectInRoot(binding.scratchpadWindow) },
+            topGuardProvider = { TopGuard.heightPx(this) },
+            onColorChosen     = { hex -> applyPenColor(hex) },
+            onSlotEditRequested = { index, initial -> showCustomColorDialog(index, initial) },
+            onPaletteChanged  = { PenColorPreferences.savePalette(this, it) },
+            onVisibilityChanged = { pushPenPanelExclusion() },
+        )
+        applyPenTintToButton()
+        PenColorPreferences.addListener(penColorListener)
         // Restore last-used tool state.
         when (ToolPreferencesManager.load(this)) {
             ActiveTool.ERASER -> {
@@ -707,6 +741,7 @@ class ScratchpadActivity : AppCompatActivity() {
 
     private fun wireToolButtons() {
         binding.btnScratchPen.setOnClickListener {
+            val wasPenActive = binding.btnScratchPen.isSelected
             if (isLassoMode) exitLassoMode()
             isEraserActive = false
             drawingView.setEraserMode(false)
@@ -714,9 +749,11 @@ class ScratchpadActivity : AppCompatActivity() {
             binding.btnScratchEraser.isSelected = false
             drawingView.releaseRender()
             ToolPreferencesManager.save(this, ActiveTool.PEN)
+            if (wasPenActive) togglePenColorPanel() else hidePenColorPanel()
         }
 
         binding.btnScratchEraser.setOnClickListener {
+            hidePenColorPanel()
             if (isLassoMode) exitLassoMode()
             isEraserActive = !isEraserActive
             drawingView.setEraserMode(isEraserActive)
@@ -727,6 +764,7 @@ class ScratchpadActivity : AppCompatActivity() {
         }
 
         binding.btnScratchLasso.setOnClickListener {
+            hidePenColorPanel()
             if (!isLassoMode) enterLassoMode() else exitLassoMode()
             drawingView.releaseRender()
         }
@@ -790,10 +828,10 @@ class ScratchpadActivity : AppCompatActivity() {
         shapes.forEach { box.union(it.boundingBox) }
 
         NotesproutClipboard.content = NotesproutClipboard.ClipboardContent(
-            strokes = strokes.map { LiveStroke(it.id, it.points.map { pt -> PointF(pt.x, pt.y) }) },
+            strokes = strokes.map { it.deepCopy() },
             headings = headings.map { h ->
                 HeadingStroke(h.id, RectF(h.boundingBox),
-                    h.strokes.map { s -> LiveStroke(s.id, s.points.map { PointF(it.x, it.y) }) },
+                    h.strokes.map { s -> s.deepCopy() },
                     recognizedText = h.recognizedText, level = h.level)
             },
             boundingBox = box,
@@ -832,10 +870,10 @@ class ScratchpadActivity : AppCompatActivity() {
         shapes.forEach { box.union(it.boundingBox) }
 
         NotesproutClipboard.content = NotesproutClipboard.ClipboardContent(
-            strokes = strokes.map { LiveStroke(it.id, it.points.map { pt -> PointF(pt.x, pt.y) }) },
+            strokes = strokes.map { it.deepCopy() },
             headings = headings.map { h ->
                 HeadingStroke(h.id, RectF(h.boundingBox),
-                    h.strokes.map { s -> LiveStroke(s.id, s.points.map { PointF(it.x, it.y) }) },
+                    h.strokes.map { s -> s.deepCopy() },
                     recognizedText = h.recognizedText, level = h.level)
             },
             boundingBox = box,
@@ -952,10 +990,10 @@ class ScratchpadActivity : AppCompatActivity() {
         shapes.forEach { box.union(it.boundingBox) }
 
         ScratchpadTransfer.pending = NotesproutClipboard.ClipboardContent(
-            strokes = strokes.map { LiveStroke(it.id, it.points.map { pt -> PointF(pt.x, pt.y) }) },
+            strokes = strokes.map { it.deepCopy() },
             headings = headings.map { h ->
                 HeadingStroke(h.id, RectF(h.boundingBox),
-                    h.strokes.map { s -> LiveStroke(s.id, s.points.map { PointF(it.x, it.y) }) },
+                    h.strokes.map { s -> s.deepCopy() },
                     recognizedText = h.recognizedText, level = h.level)
             },
             boundingBox = box,
@@ -993,10 +1031,10 @@ class ScratchpadActivity : AppCompatActivity() {
         shapes.forEach { box.union(it.boundingBox) }
 
         ScratchpadTransfer.pending = NotesproutClipboard.ClipboardContent(
-            strokes = strokes.map { LiveStroke(it.id, it.points.map { pt -> PointF(pt.x, pt.y) }) },
+            strokes = strokes.map { it.deepCopy() },
             headings = headings.map { h ->
                 HeadingStroke(h.id, RectF(h.boundingBox),
-                    h.strokes.map { s -> LiveStroke(s.id, s.points.map { PointF(it.x, it.y) }) },
+                    h.strokes.map { s -> s.deepCopy() },
                     recognizedText = h.recognizedText, level = h.level)
             },
             boundingBox = box,
@@ -1665,14 +1703,27 @@ class ScratchpadActivity : AppCompatActivity() {
             // Mirrors NotebookActivity.handleLinkFollowGesture — uses event.x/y (window-relative)
             // with getLocationInWindow offset to convert into drawing-container coordinates.
             // Returns true when a sticky note was opened; consume the event so lasso doesn't also fire.
-            if (handleStickyNoteTapGesture(event)) return true
+            // The pen colour panel is chrome and must be excluded from the gestures below, for the
+            // same reason the toolbar is: this consumes the UP when a tap lands on a sticky icon, so
+            // a swatch drawn over one would raise its tooltip and never register a click.
+            val inPenPanel = ::penColorPanel.isInitialized &&
+                    penColorPanel.containsScreenPoint(event.rawX.toInt(), event.rawY.toInt())
+            if (!inPenPanel && handleStickyNoteTapGesture(event)) return true
 
             // Swipe outside chrome/toolbar in any tool mode — lasso is stylus-only, finger navigates.
-            if (!inChrome && !inToolbar) {
+            if (!inChrome && !inToolbar && !inPenPanel) {
                 if (!inFloating) handleMultiFingerDoubleTap(event)
                 handlePageSwipe(event)
             }
         }
+        // Dismiss the pen colour panel on a touch outside it — except on btnScratchPen itself, whose
+        // own listener owns the toggle (handling it here too would close then immediately reopen).
+        if (event.actionMasked == MotionEvent.ACTION_DOWN
+            && ::penColorPanel.isInitialized && penColorPanel.isVisible) {
+            val inPanel = penColorPanel.containsScreenPoint(event.rawX.toInt(), event.rawY.toInt())
+            if (!inPanel && !isTouchInView(event, binding.btnScratchPen)) hidePenColorPanel()
+        }
+
         return super.dispatchTouchEvent(event)
     }
 
@@ -2054,10 +2105,95 @@ class ScratchpadActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        // A guard-bounced screen never finished building — there is nothing to release.
+        if (IndexGuard.bounced(this)) { super.onDestroy(); return }
+        // onCreate aborted before building any of this — see [bounceIfIndexNotReady]. Android
+        // still calls onDestroy on a half-constructed Activity, and every teardown below assumes
+        // state that was never created.
+        if (indexBounced) { super.onDestroy(); return }
+        PenColorPreferences.removeListener(penColorListener)
         super.onDestroy()
         // Final safety-net flush on appScope (outlives this Activity). releaseResources only
         // recycles bitmaps, so the async getStrokes() read stays valid.
         NotesproutApplication.appScope.launch { saveStrokes() }
         drawingView.releaseResources()
     }
+
+    /**
+     * The bordered window's bounds in root coordinates. The panel is a sibling of the window rather
+     * than a child (the window is `clipToOutline`, which would crop an overhanging popover), so it
+     * has to be clamped to the window explicitly — clamping to the screen would let it float outside
+     * the border on the large-screen 75%x75% layout.
+     */
+    private fun windowRectInRoot(window: View): Rect {
+        val w = IntArray(2).also { window.getLocationOnScreen(it) }
+        val r = IntArray(2).also { binding.root.getLocationOnScreen(it) }
+        val left = w[0] - r[0]
+        val top = w[1] - r[1]
+        return Rect(left, top, left + window.width, top + window.height)
+    }
+
+    // ── Pen colour ───────────────────────────────────────────────────────────
+
+    private fun togglePenColorPanel() {
+        if (penColorPanel.isVisible) {
+            hidePenColorPanel()
+        } else {
+            drawingView.releaseRender()   // flush the EPD frame so the panel is visible on e-ink
+            penColorPanel.show(
+                PenColorPreferences.load(this),
+                PenColorPreferences.loadPalette(this),
+                PenColorPreferences.loadSlots(this),
+            )
+        }
+    }
+
+    private fun hidePenColorPanel() {
+        if (!::penColorPanel.isInitialized || !penColorPanel.isVisible) return
+        penColorPanel.hide()   // pushes the exclusion rect via onVisibilityChanged
+    }
+
+    /** Keep the pen from writing underneath the panel while it is open. */
+    private fun pushPenPanelExclusion() {
+        drawingView.setToolbarExclusion(penColorPanel.panelRectIn(drawingView.asView()))
+    }
+
+    /**
+     * Persist the chosen ink. Arming the drawing view and re-tinting the button happen in
+     * [penColorListener], so this host and every other live one react through one path.
+     */
+    private fun applyPenColor(hex: String) {
+        PenColorPreferences.save(this, hex)
+    }
+
+    /**
+     * Reacts to the global ink changing — from this surface or any other live one. The overlapping
+     * surfaces (a sticky note or scratch pad floating over a notebook) are the reason this exists:
+     * without it the host underneath kept showing a stale pen tint until it was reopened.
+     */
+    private val penColorListener: (String) -> Unit = { hex ->
+        drawingView.setPenColor(hex)
+        applyPenTintToButton()
+    }
+
+    private fun applyPenTintToButton() {
+        PenColorPanelController.applyPenTint(binding.btnScratchPen, PenColorPreferences.load(this))
+    }
+
+    /**
+     * Mix a colour into custom slot [index]. Slots are positional and never shuffle, so a colour
+     * stays exactly where the user put it — the whole point of slots over a recents list.
+     */
+    private fun showCustomColorDialog(index: Int, initial: String) {
+        drawingView.releaseRender()   // flush the EPD frame so the dialog paints cleanly
+        CustomColorDialog(
+            context = this,
+            initial = initial,
+            onChosen = { hex ->
+                PenColorPreferences.saveSlot(this, index, hex)
+                applyPenColor(hex)
+            },
+        ).show()
+    }
+
 }

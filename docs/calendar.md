@@ -141,7 +141,7 @@ LinearLayout (vertical, paperWhite)
   │     calLeftBar (weight=1, managed by ToolbarOverflowManager):
   │       btnBack · btnCalHome · btnCalNewNotebook │ btnToday │ btnMonthView · btnWeekView · btnDayView │
   │       btnCalPen · btnCalEraser · btnCalStickyNote · btnCalLassoEraser · btnCalLasso ·
-  │       btnCalErasePage · btnCalUndo · btnCalRedo · btnCalScratchpad · btnCalSendPage
+  │       btnCalErasePage · btnCalUndo · btnCalRedo · btnCalScratchpad · btnCalTasks · btnCalSendPage
   │       ─ spacer ─ dividerCalOverflow · btnCalOverflow (both gone until overflow)
   │     btnPrev · tvMonthYear (tap → day picker) · btnNext   ← always-visible period nav, outside calLeftBar
   ├── 1dp divider
@@ -161,6 +161,10 @@ button / leaving the screen (`onPause`) closes it. On EPD a pen-exclusion (`setT
 the open menu so the stylus can't draw under it. The wrap-content text toggles (Today/Month/Week/Day)
 have their measured widths pinned once (`pinToggleWidths`) so the manager — which sizes by LayoutParams
 px — counts them. `tvMonthYear` opens the shared [`DayPickerDialog`](#date-picker) (picks a specific day).
+
+`btnCalTasks` launches the [task manager](tasks.md) (`TasksActivity`). It is a convenience jump to a
+sibling surface, **not** a coupling of the two features: no task is ever drawn on a calendar grid and
+the calendar reads nothing from the `tasks` table.
 
 `btnCalScratchpad` launches the global scratch pad (`ScratchpadActivity`, plain — no from-notebook
 extras). Tool state (pen/eraser) is restored from and persisted to the shared `ToolPreferencesManager`.
@@ -222,6 +226,10 @@ real canvas pixel size via `setPageSize`.
 - **Single-finger long-press** → that day's [notebook list](#long-press--the-day-notebook-list)
   (`DayNotebooksDialog`). Same date resolution as the double-tap: Month/Week hit-test the cell, Day
   uses `selectedDate` from anywhere on either half.
+- **Two-finger swipe down** → the [Today dashboard](today-dashboard.md#the-two-finger-swipe-down),
+  from all three views. `core/TwoFingerSwipeDown.kt`, shared verbatim with `NotebookActivity` — the
+  same detector object, not another port. The dashboard is pushed on top, so Back returns to the
+  calendar exactly as it was.
 
 ### Last-position persistence
 
@@ -272,6 +280,13 @@ calendar.
   swallows the following ACTION_UP so the release can't also register as a swipe or day tap.
 - **Month/Week presses off the grid never arm** — `hitTest` returns null in the notes band, so writing
   there is undisturbed.
+- **A press on a sticky-note icon never arms** — that touch belongs to the note. Step 1 of the touch
+  routing below consumes the UP of a sticky tap, so step 3 never sees it and the cancel that lives in
+  its UP branch never runs: the runnable stayed posted and fired behind the just-opened sticky editor,
+  leaving the day list waiting there when the editor closed. Day view made that certain (no cell
+  hit-test → every press arms). `armDayNotebooksLongPress` hit-tests the sticky icons and returns; the
+  sticky tap also cancels on its way out, and the runnable itself does nothing unless the calendar is
+  still RESUMED — so no other path can strand a dialog behind a screen either.
 
 ---
 
@@ -280,9 +295,14 @@ calendar.
 Only **finger** events (`TOOL_TYPE_FINGER`) are intercepted; stylus and lasso events fall through to
 the drawing view untouched. Order for a finger touch outside the toolbar/floating toolbar:
 
-1. `handleStickyNoteTapGesture` — tap an on-canvas sticky-note icon → open its editor.
+1. `handleStickyNoteTapGesture` — tap an on-canvas sticky-note icon → open its editor. **Consumes the
+   UP**, so steps 2–3 never see it; anything they armed on DOWN has to be cancelled here or skipped
+   there (see the sticky-icon rule under the long-press above).
 2. `handleMultiFingerDoubleTap` — **2-finger** stationary double-tap = undo, **3-finger** = redo.
-3. `handleCalendarFingerGesture` — single-finger horizontal swipe = step period; quick tap = select day;
+3. `todaySwipe` (`TwoFingerSwipeDown`) — **2-finger** swipe down → the Today dashboard. Does **not**
+   consume: step 4 disarmed itself at the second pointer-down (`calMultiTouch`), so there is nothing
+   left for the rest of the sequence to trip.
+4. `handleCalendarFingerGesture` — single-finger horizontal swipe = step period; quick tap = select day;
    long-press = day notebook list.
 
 A `releaseRender()` is issued when a finger ACTION_DOWN lands on the toolbar/floating toolbar (EPD).
@@ -381,6 +401,13 @@ drives all show/hide + `isSelected`).
   and the tappable date label (`tvDayDate` → shared [`DayPickerDialog`](#date-picker)) reload the whole
   window **in place** — flush the note page, swap the date, reset the History-year state, reload the
   canvas, and re-apply the active view (current view mode preserved).
+- **Two-finger swipe down → the [Today dashboard](today-dashboard.md#the-two-finger-swipe-down)**,
+  from **all four views** — the one finger gesture here that belongs to the window rather than to the
+  Note canvas, so it sits outside the `viewMode == NOTE` branch in `dispatchTouchEvent` (and *after*
+  it, so `handleMultiFingerDoubleTap` still sees the sequence — a two-finger stationary double-tap is
+  undo). Not consumed: the Events `ScrollView` does slide a little under the swipe, and the swallow
+  that once prevented it threw away Android's per-pointer split dispatch along with it. The linked
+  section is the one place that records why — and the G102 touch-panel behaviour found chasing it.
 - **The pen layer follows the mode** (`applyViewMode` tail): `drawingView.resumeDrawing()` in Note,
   `disableDrawing()` in every other view (so a stray pen touch can't be captured *invisibly* under the
   hidden card grid / read-only note / events list), then `releaseRender()` for a clean EPD repaint.
@@ -397,7 +424,16 @@ optional ruling template.
   navigation is dropped.
 - **Toolbar** (`res/layout/activity_day_detail.xml`): `btnDayBack` │ `btnDayToday` │ view toggles │
   the `dayToolsGroup` — pen · eraser · lasso-eraser · lasso · undo · redo · sticky · template ·
-  insert-shape · scratch-pad — then `tvDayDate` (full date, right). The **tools group is weighted and
+  insert-shape — then `tvDayDate` (full date), and trailing at the right edge the sibling-surface
+  pair `btnDayTasks` · `btnDayScratchpad`. Both sit outside `dayToolsGroup` so they stay on the bar
+  in all four views and never overflow, and outside the insertion point
+  `collapseToolbarToSingleRow` uses so they stay trailing when the bar folds to one row. The
+  [Tasks screen](tasks.md#screen--tasksactivity) carries the mirrored pair (calendar · scratch pad)
+  at the same end of its own bar — one tap either way, same place both times.
+  Keeping them pinned right needs `daySurfaceSpacer`: stacked, `tvDayDate` is weighted and absorbs
+  the bar's slack, but inline that weight moves to `dayToolsGroup`, which is hidden outside Note —
+  so the spacer takes the weight for exactly that case (`applyViewMode`), and is `gone` (and
+  therefore weightless) otherwise. The **tools group is weighted and
   overflows** exactly like the calendar: its trailing tools drop into `dayOverflowMenu` (below the bar)
   behind `btnDayOverflow` (⋯) when the bar is narrow, via the shared
   [`ToolbarOverflowManager`](toolbar.md). Overflow is **Note-mode-only** — outside Note the group is
@@ -535,6 +571,12 @@ occurrence preserves the anchor's **span length**, so an occurrence starting on 
   tiebreak (the ordering the user asked for). Plus `upcomingForDay(date)` — the reminder look-ahead
   (see [Reminders](#reminders--paper-like-look-ahead)). No encryption gate — plaintext-on-device like
   the scratch pad.
+- **`data/events/EventRowFormat.kt`** — the row *wording*: the leading time badge and the meta line
+  (type · end-time · multi-day span · recurrence summary). Extracted here because the
+  [Today dashboard](today-dashboard.md) renders the same events in the same `item_event.xml`; kept
+  inside `EventsController`, the two surfaces would eventually describe one event two different ways.
+  Formatting only — edit/delete scoping stays with the surface that offers it, and the dashboard
+  offers none (it hides the delete button and taps through to this screen).
 - **`EventsController.kt`** — drives the Events view: `refresh()` loads today's events **and**
   `upcomingForDay`, rendering **two sections** — **Today** then **Upcoming** (black bold labels; the
   "Today" label appears only when an Upcoming section follows it). Today rows (`item_event.xml`:

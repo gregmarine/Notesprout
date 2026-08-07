@@ -6,9 +6,56 @@
 **Palette (UI Chrome Only):**
 - `inkBlack` = `#000000`
 - `paperWhite` = `#FFFFFF`
-- `inkLight` = `#888888` — disabled/secondary text only
+- `inkLight` = `#888888` — text the user is **meant not to read**: a hint that disappears on the first
+  keystroke, a disabled control. Anything carrying information takes `inkBlack`, however secondary it
+  is. E-ink washes mid-greys out, and a caption the user has to squint at has failed at the one job it
+  had. Make it smaller to make it secondary; do not make it grey.
 - `borderGray` = `#CCCCCC` — subtle dividers only (**invisible on e-ink** — use inkBlack for any visible border)
-- No color in UI chrome — ever.
+- No color in UI chrome — ever, with exactly one exception (below).
+
+**The ink exception (colour ink, v1.2):**
+
+Colour is allowed in chrome **only where the colour itself is the content** — where the control's
+whole job is to choose or report an ink:
+
+- **The pen-colour panel's swatches** (`panel_pen_color.xml` + `PenColorPanelController`). A swatch
+  that could not show its colour would be useless.
+- **The pen button's icon**, tinted with the armed ink. Without it the only way to learn what colour
+  is loaded is to open the panel — a real cost on a device where every panel open is an EPD refresh.
+
+That is the whole list. A status, a highlight, an accent, a category tag, a selected state anywhere
+else: still forbidden. Two properties keep the exception from spreading:
+
+- Everything goes through **`core/InkColor.paintColor()`** — one chokepoint, so the rule is auditable
+  rather than a convention spread across ~25 draw sites.
+- **Selection is never signalled with colour** inside the panel, because colour is already carrying
+  the content. A selected swatch gets a heavier black outer ring plus a white gap ring — which is what
+  makes selection legible on the black swatch, where a heavier black border would be invisible.
+- **Names sit under the swatch**, in small full-contrast text. BOOX prints letters *inside* its
+  ambiguous swatches; putting the text below names every colour without ever obscuring the thing being
+  chosen — which matters most on greyscale panels, where several colours render alike and the label is
+  the only thing telling them apart.
+
+**Every device is treated the same.** An earlier build detected colour panels (`core/DisplayColor`,
+via the Onyx SDK's `Device.currentDevice().colorType`) and forced black on greyscale ones. It was
+deleted after being tried on a Go 10.3: the dithered greys were perfectly legible, and overriding the
+user's choice bought nothing. **The greyscale palette is the better answer to the same problem** —
+rather than reinterpreting a colour the panel cannot show, offer tones it renders *exactly*.
+
+If detection is ever needed again, the mechanics are worth knowing: `colorType` returns non-zero on a
+colour panel and `0` on the base implementation, **no system property exposes it**, the call reflects
+into a hidden framework API (so it must run after the hidden-API bypass), and a `0` is ambiguous —
+genuinely greyscale, or a failed reflection. Measured: `1` on NoteAir5C, and non-zero on a Palma2 Pro
+whose model string no allowlist would have matched.
+
+Colour choices are still constrained by hardware: the Onyx overlay draws an ink as black once its
+dominant RGB channel falls below ~180 (`InkColor.MIN_DOMINANT_CHANNEL`, measured on a Kaleido 3
+panel) — a **live-preview limit only**, since the stroke stores and renders in its true colour and
+corrects on the next refresh. `InkColor.isOverlaySafe()` tests a candidate and the custom-colour
+dialog warns on one; `PenPalette` holds vetted sets.
+
+**Exports never take any device-dependent path** — `InkColor.exportColor()` is deliberately separate
+from `paintColor()` and always true colour, because the file leaves the device.
 
 **Visual Rules:**
 - No shadows, elevation, gradients, or blur
@@ -16,6 +63,38 @@
 - Animations: none or minimum — never decorative. `android:windowAnimationStyle="@null"` in `Theme.Notesprout` suppresses all system slide/fade transitions globally.
 - Borders: 1dp solid inkBlack; corner radius: 4dp
 - Typography: clear, high-contrast, black on white
+
+**Icons — Tabler outline, one house style:**
+- Every icon in the app is a [Tabler](https://tabler.io/icons) **outline** glyph (MIT), converted to a
+  vector drawable at `res/drawable/ic_<name>.xml`. Icons are the app's one visual vocabulary — mixing
+  sets is as jarring on e-ink as mixing fonts.
+- The template, identical in all of them: `24dp × 24dp`, `viewport 24×24`, and every path
+  `fillColor=@android:color/transparent`, `strokeColor=@color/inkBlack`, `strokeWidth=2`,
+  `strokeLineCap/Join=round`. Stroke weight is what makes a set look like a set — never rescale a glyph
+  to a different weight.
+- Head the file with a comment naming the source (`<!-- Tabler "list-check" icon (outline/list-check.svg) -->`),
+  which is both the attribution and the breadcrumb for re-fetching it.
+- **Look before you download** — there are ~100 already, and reuse keeps meanings stable: the same
+  chevrons serve page navigation in the notebook and in the document editor. To add one, fetch
+  `https://raw.githubusercontent.com/tabler/tabler-icons/main/icons/outline/<name>.svg` and map each
+  `<path d="…">` to `android:pathData`, dropping any `stroke="none"` bounding rect (it is not part of
+  the drawing).
+- **Words where they fit; icons where they must.** A mode switch or a commit action reads better as a
+  word on e-ink, where an unfamiliar glyph costs a long-press to decode — but only if the row still
+  fits. **Measure a chrome row against the narrowest supported device before choosing words**: P2P is
+  `sw439dp` (G6 is 571dp, and the 10" devices are far wider, so a row that looks roomy in development
+  can drop its last control on a phone-shaped screen). The document editor's header started as
+  `Write | Preview | Done` and lost *Done* off the edge there; it is now all icons. A button you cannot
+  reach is worse than one you have to learn.
+- **Those dp figures are the *default*, not a guarantee.** BOOX exposes a **per-app dp override** in
+  its EinkWise settings, so a user can shrink the effective width of any screen at will — a P2P set
+  that way lays out nearer `sw379dp` than its nominal `sw439dp`. Anything that packs a fixed number of
+  cells across the width should therefore **derive its cell size from the space it is actually given**
+  rather than from a dp constant, or it clips on a device that measures fine in development.
+  `PenColorPanelController.cellWidthPx()` is the worked example — its eight swatch columns lost the
+  last one entirely until they were sized from the available width.
+- Give every icon button a **long-press hint naming it**, and use that same string as the content
+  description. This is what makes an icon-only row learnable, so it is not optional.
 
 **Source of Truth:**
 - Colors: `app/src/main/res/values/colors.xml`
@@ -39,6 +118,19 @@ hardcode a value or re-derive the inset:
   the same height on an immersive screen as it does in the library.
 - `TopGuard.applyInsetPadding(root)` — for screens that leave the system bars **visible**. Pads by
   the live `systemBars()` inset (MainActivity's long-standing behaviour).
+- `TopGuard.applyInsetPadding(root, followIme = true)` — same, but the bottom padding also clears the
+  **software keyboard**, so a screen that types shrinks instead of hiding its content behind the IME.
+  Used by the document editor. Two traps this exists to avoid:
+  - `android:windowSoftInputMode="adjustResize"` in the manifest is **not** sufficient. The framework
+    reports the inset, but nothing in a hand-built hierarchy consumes it unless a view is told to (no
+    `fitsSystemWindows` anywhere), and on a `targetSdk 35` edge-to-edge window the old automatic resize
+    is gone entirely. Keep the manifest flag — below API 30 it is what makes `Type.ime()` resolve at
+    all — but the padding is what actually moves the layout.
+  - Take `max(systemBars.bottom, ime.bottom)`, never the sum: the keyboard covers the navigation bar,
+    so adding them leaves a nav-bar-high dead strip under the keyboard.
+  - Shrinking the container is only half of it — the room the keyboard takes is the room the caret was
+    in. A surface that scrolls its own text must nudge the caret's line back into view on a height
+    change (`DocumentEditorActivity.keepCaretVisible`).
 - `TopGuard.applyRootPadding(root)` — for **immersive** screens (`controller.hide(systemBars())`).
   Their inset is `0`, so the inset listener is a no-op there and the guard must be reserved outright.
   This is the usual mistake: copying the inset listener onto an immersive screen fixes nothing.

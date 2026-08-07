@@ -223,7 +223,10 @@ CREATE TABLE IF NOT EXISTS notebook (
     linkTarget  TEXT,
     chrome      TEXT,
     flags       INTEGER,
-    blob        BLOB
+    blob        BLOB,
+
+    -- ── v5 ───────────────────────────────────────────────────────────
+    srcUpdatedAt INTEGER   -- document → page state its text was drafted from
 );
 
 CREATE INDEX IF NOT EXISTS idx_notebook_parent_order
@@ -249,8 +252,8 @@ title. Read the type first, then interpret.
 | Column | Used by | Meaning |
 |---|---|---|
 | `x`, `y`, `width`, `height` | most content types | Bounding box, page-absolute px. `x`/`y` are the top-left; `width`/`height` are extents (**not** right/bottom). |
-| `text` | heading, text, page_text, template, layer, notebook | See above — role varies by type |
-| `color` | stroke | `#RRGGBB` or `#AARRGGBB` |
+| `text` | heading, text, document, template, layer, notebook | See above — role varies by type. (`page_text` is the exception: its payload is JSON in `data`.) |
+| `color` | stroke | `#RRGGBB` or `#AARRGGBB`. **Do not assume black** — since v1.2 the pen offers a 16-level greyscale ladder and a 16-colour palette, so real files carry arbitrary values here. |
 | `strokeWidth` | stroke (px), line (dp), shape (dp) | Note the unit difference — see "Density" below |
 | `refId` | page → template id · notebook → lastOpenedPage · link → target id | A foreign reference within the same file |
 | `level` | heading | 1–3 |
@@ -260,6 +263,7 @@ title. Read the type first, then interpret.
 | `linkTarget`, `chrome` | link | Target JSON + chrome enum name |
 | `flags` | layer, shape | Bitfield — see per-type sections |
 | `blob` | stroke, template, legacy composites | Binary payload |
+| `srcUpdatedAt` | document | Epoch ms of the page state the text was drafted from; NULL = authored by hand |
 
 ### The `boundingBox` and `data` columns
 
@@ -301,7 +305,7 @@ Type discriminators are lowercase snake_case strings. Notesprout's set:
 
 ```
 Structural:  "notebook"  "page"  "layer"  "template"
-Content:     "stroke"  "heading"  "text"  "line"  "shape"  "link"  "sticky_note"
+Content:     "stroke"  "heading"  "text"  "line"  "shape"  "link"  "sticky_note"  "document"
 Derived:     "page_text"
 ```
 
@@ -542,8 +546,8 @@ correctly on a device with a differently-sized screen.
 
 ## `page_text` — cached recognized text
 
-`parentId` = page id, one per page. Payload is JSON in `text`. Included here because it demonstrates
-the two patterns worth stealing:
+`parentId` = page id, one per page. Payload is JSON in `data` (this type was never converted to
+columnar form). Included here because it demonstrates the two patterns worth stealing:
 
 1. **A derived cache lives inside the encrypted document**, so it is encrypted at rest for free and
    travels on export/import with no extra code.
@@ -557,18 +561,56 @@ the two patterns worth stealing:
   "engine": "mlkit",           // producer id — lets you upgrade per-engine
   "recognizedAt": 1750000000000,
   "sourceMaxUpdatedAt": 1749999999000,
-  "schema": 2,
+  "schema": 3,
   "lines": [ { "text": "…", "strokeIds": ["…"], "top": 120.0, "height": 42.0 } ]
 }
 ```
 
-Note `engine` and `schema` inside the payload — the cache knows what produced it, so a better engine
-can invalidate only its predecessor's output.
+Note `engine` and `schema` inside the payload — the cache knows what produced it, so a better engine can
+invalidate only its predecessor's output.
+
+**`schema` is the second half of the freshness test, and the half that is easy to miss.** The watermark
+notices the *page* changing; `schema` notices the *pipeline* changing. Without it, a page nobody has
+touched since keeps its old text forever — so when a recognizer starts covering content it used to skip,
+every existing cache is silently, permanently wrong. Bump it and the caches re-earn themselves. Ours
+went to 3 when the pass learned to read content nested inside composites.
 
 **Read the watermark before you read the content it describes.** Reading content first and the
 watermark second lets a write that lands between the two reads make a stale cache look fresh — the
 freshness test compares the new content's timestamps against a watermark written after them. This is
 a one-line ordering fix and an invisible bug: the export just quietly contains yesterday's text.
+
+---
+
+## `document` — the page's authored text
+
+`parentId` = page id, one per page. Markdown in `text`; no JSON anywhere.
+
+| Field | Column | Notes |
+|---|---|---|
+| markdown | `text` | The user's text, authored in Markdown |
+| source watermark | `srcUpdatedAt` | Page state (`max(content.updatedAt)` over the layer) at the last seed/refresh; NULL = authored by hand |
+
+This is the counterpart to `page_text` and the pair is worth copying **as a pair**, because the
+distinction between them is the whole design:
+
+- `page_text` is **derived**. Any number of writers may rewrite it at any time; it is a cache.
+- `document` is **authored**. Its only writer is the editor. Recognition never touches it.
+
+A page's handwriting is recognized into a document exactly once — when the page has no document text
+yet — and after that the two evolve independently. The page can be rewritten freely without disturbing
+finished prose, and the user can ask for the page's text again (replacing or appending), which is the
+only path by which recognition output re-enters a document. `srcUpdatedAt` exists solely so the editor
+can say "the page has changed since this draft" without storing a second copy of anything.
+
+Two consequences for any implementation:
+
+1. **A derived row may be dropped; an authored row may not.** Page copy/duplicate/move must carry the
+   document. Notesprout's page copy walks the *layer* subtree, so page-parented rows are invisible to
+   it and the document is copied by name at each copy site — a caveat worth designing away if your
+   copy is a whole-subtree walk from the page.
+2. **Blank means absent.** A document with no text is not stored, which is what keeps "seed once" from
+   needing a separate "has been seeded" flag.
 
 ---
 
@@ -699,6 +741,7 @@ recognize it if you ever ingest a real Notesprout file.
 | 2 | `+ undo_redo_state` table | `CREATE TABLE IF NOT EXISTS` |
 | 3 | `+ notebook_meta` table | `CREATE TABLE IF NOT EXISTS` |
 | 4 | `+ 23 typed columns + blob` | 24 × `ALTER TABLE … ADD COLUMN` |
+| 5 | `+ srcUpdatedAt` (for `document`) | 1 × `ALTER TABLE … ADD COLUMN` |
 
 **Every migration to date is additive and non-rewriting.** v4 — the big one — adds 24 nullable
 columns and rewrites zero rows. Opening a 44 MB legacy notebook is instant; content converts lazily
@@ -731,6 +774,17 @@ The `CREATE TABLE` statement is written in exactly one place and referenced by e
 and the migration. Notesprout has three sites that create the table (two creation paths + the
 migration) and all three must produce a byte-identically-validating schema or the ORM's on-open
 validation crashes. Centralize this from the start.
+
+Keep the **per-version column lists** separate, too, and never append to a shipped one. Notesprout's v4
+list is borrowed verbatim by a *different* database's migration (the index's canvas tables share this
+row shape), so a column appended there would silently appear in a second schema — and only for installs
+that run that migration later. v5 therefore has its own list. A unit test asserts every listed column
+also exists in the fresh-file `CREATE TABLE`, which is the failure this split otherwise invites.
+
+One repair path also depends on the version list. A file whose `user_version` was zeroed (see the
+`sqlcipher_export` note in Part VII) is diagnosed by *which* columns it already has — so each new
+version must extend that ladder. Otherwise a file at the previous version stops being recognized as
+repairable the moment the current version moves past it.
 
 ---
 

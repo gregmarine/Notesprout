@@ -19,23 +19,21 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.doOnLayout
 import androidx.lifecycle.lifecycleScope
 import androidx.room.withTransaction
+import com.notesprout.android.core.IndexGuard
 import com.notesprout.android.core.Slog
 import com.notesprout.android.core.isBooxDevice
-import com.notesprout.android.crypto.KeySession
-import com.notesprout.android.crypto.SoilCrypto
 import com.notesprout.android.data.HeadingStroke
 import com.notesprout.android.data.LineRender
 import com.notesprout.android.data.LiveStroke
 import com.notesprout.android.data.ShapeObject
 import com.notesprout.android.data.ShapeRender
 import com.notesprout.android.data.ShapeType
-import com.notesprout.android.data.SoilDatabase
 import com.notesprout.android.data.StickyNoteRender
 import com.notesprout.android.data.TextRender
 import com.notesprout.android.data.index.NotesproutIndex
 import com.notesprout.android.data.replaceStickyNoteSubtree
-import com.notesprout.android.data.soilFile
 import com.notesprout.android.data.toStickyNoteObject
+import com.notesprout.android.data.deepCopy
 import com.notesprout.android.databinding.ActivityStickyNoteEditorBinding
 import com.notesprout.android.notebook.ActiveTool
 import com.notesprout.android.notebook.GenericNotebookView
@@ -44,11 +42,15 @@ import com.notesprout.android.notebook.NotebookView
 import com.notesprout.android.notebook.OnyxNotebookView
 import com.notesprout.android.notebook.ShapeRecognizer
 import com.notesprout.android.notebook.ToolPreferencesManager
+import com.notesprout.android.notebook.PenColorPreferences
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import com.notesprout.android.notebook.PenColorPanelController
+import com.notesprout.android.notebook.CustomColorDialog
+import com.notesprout.android.core.TopGuard
 
 /**
  * In-memory sticky note editor — opened by [NotebookActivity] when inserting or tapping a sticky
@@ -62,6 +64,9 @@ class StickyNoteEditorActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityStickyNoteEditorBinding
     private lateinit var drawingView: NotebookView
+
+    /** Pen-colour swatch panel docked to [btnStickyPen]. See [togglePenColorPanel]. */
+    private lateinit var penColorPanel: PenColorPanelController
 
     private var contentWidth = 0f
     private var contentHeight = 0f
@@ -111,6 +116,9 @@ class StickyNoteEditorActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Nothing has opened the index if Android rebuilt this task itself — see IndexGuard.
+        if (!IndexGuard.ready(this)) return
+        if (bounceIfIndexNotReady()) return
         binding = ActivityStickyNoteEditorBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
@@ -145,6 +153,28 @@ class StickyNoteEditorActivity : AppCompatActivity() {
         wireToolButtons()
         updateLassoButtonIcon()
 
+        // Restore the pen's ink colour — one global value, the same way the active tool below is.
+        drawingView.setPenColor(PenColorPreferences.load(this))
+        penColorPanel = PenColorPanelController(
+            root          = binding.root,
+            panel         = binding.penColorPanel.root,
+            anchor        = binding.btnStickyPen,
+            paletteGreyButton  = binding.penColorPanel.btnPaletteGrey,
+            paletteColorButton = binding.penColorPanel.btnPaletteColor,
+            swatchRow1    = binding.penColorPanel.penSwatchRow1,
+            swatchRow2    = binding.penColorPanel.penSwatchRow2,
+            customDivider = binding.penColorPanel.penCustomDivider,
+            customRow     = binding.penColorPanel.penCustomRow,
+            sideProvider  = { PenColorPanelController.Side.ABOVE },
+            boundsProvider   = { windowRectInRoot(binding.stickyNoteEditorWindow) },
+            topGuardProvider = { TopGuard.heightPx(this) },
+            onColorChosen     = { hex -> applyPenColor(hex) },
+            onSlotEditRequested = { index, initial -> showCustomColorDialog(index, initial) },
+            onPaletteChanged  = { PenColorPreferences.savePalette(this, it) },
+            onVisibilityChanged = { pushPenPanelExclusion() },
+        )
+        applyPenTintToButton()
+        PenColorPreferences.addListener(penColorListener)
         when (ToolPreferencesManager.load(this)) {
             ActiveTool.ERASER -> {
                 isEraserActive = true
@@ -181,7 +211,6 @@ class StickyNoteEditorActivity : AppCompatActivity() {
         stickyId       = intent.getStringExtra(EXTRA_STICKY_ID).orEmpty()
         hostKind       = intent.getStringExtra(EXTRA_HOST).orEmpty()
         hostNotebookId = intent.getStringExtra(EXTRA_NOTEBOOK_ID).orEmpty()
-        hostEncrypted  = intent.getBooleanExtra(EXTRA_ENCRYPTED, false)
         stickyBbox.set(
             intent.getFloatExtra(EXTRA_BBOX_L, 0f), intent.getFloatExtra(EXTRA_BBOX_T, 0f),
             intent.getFloatExtra(EXTRA_BBOX_R, 0f), intent.getFloatExtra(EXTRA_BBOX_B, 0f),
@@ -197,20 +226,21 @@ class StickyNoteEditorActivity : AppCompatActivity() {
         }
     }
 
-    // ── Real-time persistence to the sticky's own (encrypted) database ───────────
-    // The editor is launched DB-agnostic, but a durable, encrypted-at-rest save can't wait for the
-    // return-to-host callback (which never runs on process death). So it writes straight to the
-    // sticky's real DB — the notebook's `.soil` (keyed from the in-memory [KeySession], never an
-    // Intent) or the already-open, already-encrypted global index — debounced on each content
-    // change plus a flush on onStop. No plaintext file is ever written.
+    // ── Real-time persistence ────────────────────────────────────────────────────
+    // A durable save can't wait for the return-to-host callback, which never runs on process death,
+    // so content is flushed during editing: debounced on each change plus a flush on onStop.
+    //
+    // The editor never opens a database itself. A notebook sticky goes through
+    // [StickyNoteEditorTransfer.persistToHost], so the host writes on the connection it already
+    // holds — opening a second one here put two writers on one WAL file and killed the app mid-write
+    // (see BACKLOG.md). Scratch-pad and calendar stickies use the shared, already-open global index.
+    // No plaintext file is ever written, and nothing is keyed from an Intent.
 
     /** DB id of the sticky being edited (from the launching host). */
     private var stickyId: String = ""
     private var hostKind: String = ""          // "notebook" | "scratchpad" | "calendar"
     private var hostNotebookId: String = ""    // notebook host only
-    private var hostEncrypted: Boolean = false // notebook host only
     private val stickyBbox = RectF()
-    private var notebookDbCache: SoilDatabase? = null
     private var persistJob: Job? = null
 
     /** True once the canvas holds the session's content (initial load done or blank-note sizing). */
@@ -243,11 +273,9 @@ class StickyNoteEditorActivity : AppCompatActivity() {
         withContext(Dispatchers.IO) {
             try {
                 when (hostKind) {
-                    HOST_NOTEBOOK -> notebookDb()?.let { db ->
-                        db.withTransaction {
-                            db.notebookDao().replaceStickyNoteSubtree(render, System.currentTimeMillis(), density)
-                        }
-                    }
+                    // Ask the notebook host to write on the connection it already holds. Opening our
+                    // own here meant two writers on one WAL file, which collided and killed the app.
+                    HOST_NOTEBOOK -> StickyNoteEditorTransfer.persistToHost?.invoke(render)
                     HOST_SCRATCHPAD -> NotesproutIndex.scratchpadDao()
                         .updateData(stickyId, render.toStickyNoteObject(density).toJson(), System.currentTimeMillis())
                     HOST_CALENDAR -> NotesproutIndex.calendarDao()
@@ -261,19 +289,6 @@ class StickyNoteEditorActivity : AppCompatActivity() {
         }
     }
 
-    /** Lazily-opened connection to the notebook's `.soil`, keyed from [KeySession] (in-memory).
-     *  Null when this isn't a notebook sticky, or the notebook is encrypted and no key is resolved
-     *  (then the host's normal-close callback remains the fallback). Closed in onDestroy. */
-    private fun notebookDb(): SoilDatabase? {
-        notebookDbCache?.let { return it }
-        if (hostKind != HOST_NOTEBOOK || hostNotebookId.isEmpty()) return null
-        val key = KeySession.getFor(hostNotebookId)
-        if (hostEncrypted && key == null) return null
-        val path = soilFile(this, hostNotebookId).absolutePath
-        val builder = SoilDatabase.builder(this, path)
-        if (key != null) builder.openHelperFactory(SoilCrypto.roomFactory(key))
-        return builder.build().also { notebookDbCache = it }
-    }
 
     // ── Content load ──────────────────────────────────────────────────────────
 
@@ -650,6 +665,7 @@ class StickyNoteEditorActivity : AppCompatActivity() {
 
     private fun wireToolButtons() {
         binding.btnStickyPen.setOnClickListener {
+            val wasPenActive = binding.btnStickyPen.isSelected
             if (isLassoMode) exitLassoMode()
             isEraserActive = false
             drawingView.setEraserMode(false)
@@ -657,8 +673,10 @@ class StickyNoteEditorActivity : AppCompatActivity() {
             binding.btnStickyEraser.isSelected = false
             drawingView.releaseRender()
             ToolPreferencesManager.save(this, ActiveTool.PEN)
+            if (wasPenActive) togglePenColorPanel() else hidePenColorPanel()
         }
         binding.btnStickyEraser.setOnClickListener {
+            hidePenColorPanel()
             if (isLassoMode) exitLassoMode()
             isEraserActive = !isEraserActive
             drawingView.setEraserMode(isEraserActive)
@@ -668,6 +686,7 @@ class StickyNoteEditorActivity : AppCompatActivity() {
             ToolPreferencesManager.save(this, if (isEraserActive) ActiveTool.ERASER else ActiveTool.PEN)
         }
         binding.btnStickyLasso.setOnClickListener {
+            hidePenColorPanel()
             if (!isLassoMode) enterLassoMode() else exitLassoMode()
             drawingView.releaseRender()
         }
@@ -715,10 +734,10 @@ class StickyNoteEditorActivity : AppCompatActivity() {
         shapes.forEach { box.union(it.boundingBox) }
 
         NotesproutClipboard.content = NotesproutClipboard.ClipboardContent(
-            strokes = strokes.map { LiveStroke(it.id, it.points.map { pt -> PointF(pt.x, pt.y) }) },
+            strokes = strokes.map { it.deepCopy() },
             headings = headings.map { h ->
                 HeadingStroke(h.id, RectF(h.boundingBox),
-                    h.strokes.map { s -> LiveStroke(s.id, s.points.map { PointF(it.x, it.y) }) },
+                    h.strokes.map { s -> s.deepCopy() },
                     recognizedText = h.recognizedText, level = h.level)
             },
             boundingBox = box,
@@ -752,10 +771,10 @@ class StickyNoteEditorActivity : AppCompatActivity() {
         shapes.forEach { box.union(it.boundingBox) }
 
         NotesproutClipboard.content = NotesproutClipboard.ClipboardContent(
-            strokes = strokes.map { LiveStroke(it.id, it.points.map { pt -> PointF(pt.x, pt.y) }) },
+            strokes = strokes.map { it.deepCopy() },
             headings = headings.map { h ->
                 HeadingStroke(h.id, RectF(h.boundingBox),
-                    h.strokes.map { s -> LiveStroke(s.id, s.points.map { PointF(it.x, it.y) }) },
+                    h.strokes.map { s -> s.deepCopy() },
                     recognizedText = h.recognizedText, level = h.level)
             },
             boundingBox = box,
@@ -1163,6 +1182,14 @@ class StickyNoteEditorActivity : AppCompatActivity() {
             }
             if (!inChrome && !inToolbar && !inFloating) handleMultiFingerDoubleTap(event)
         }
+        // Dismiss the pen colour panel on a touch outside it — except on btnStickyPen itself, whose
+        // own listener owns the toggle (handling it here too would close then immediately reopen).
+        if (event.actionMasked == MotionEvent.ACTION_DOWN
+            && ::penColorPanel.isInitialized && penColorPanel.isVisible) {
+            val inPanel = penColorPanel.containsScreenPoint(event.rawX.toInt(), event.rawY.toInt())
+            if (!inPanel && !isTouchInView(event, binding.btnStickyPen)) hidePenColorPanel()
+        }
+
         return super.dispatchTouchEvent(event)
     }
 
@@ -1314,9 +1341,15 @@ class StickyNoteEditorActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        // A guard-bounced screen never finished building — there is nothing to release.
+        if (IndexGuard.bounced(this)) { super.onDestroy(); return }
+        // onCreate aborted before building any of this — see [bounceIfIndexNotReady]. Android
+        // still calls onDestroy on a half-constructed Activity, and every teardown below assumes
+        // state that was never created.
+        if (indexBounced) { super.onDestroy(); return }
+        PenColorPreferences.removeListener(penColorListener)
         super.onDestroy()
         drawingView.releaseResources()
-        runCatching { notebookDbCache?.close() }
     }
 
     companion object {
@@ -1354,4 +1387,82 @@ class StickyNoteEditorActivity : AppCompatActivity() {
             .putExtra(EXTRA_BBOX_R, sticky.boundingBox.right)
             .putExtra(EXTRA_BBOX_B, sticky.boundingBox.bottom)
     }
+
+    /**
+     * The bordered window's bounds in root coordinates. The panel is a sibling of the window rather
+     * than a child (the window is `clipToOutline`, which would crop an overhanging popover), so it
+     * has to be clamped to the window explicitly — clamping to the screen would let it float outside
+     * the border on the large-screen 75%x75% layout.
+     */
+    private fun windowRectInRoot(window: View): Rect {
+        val w = IntArray(2).also { window.getLocationOnScreen(it) }
+        val r = IntArray(2).also { binding.root.getLocationOnScreen(it) }
+        val left = w[0] - r[0]
+        val top = w[1] - r[1]
+        return Rect(left, top, left + window.width, top + window.height)
+    }
+
+    // ── Pen colour ───────────────────────────────────────────────────────────
+
+    private fun togglePenColorPanel() {
+        if (penColorPanel.isVisible) {
+            hidePenColorPanel()
+        } else {
+            drawingView.releaseRender()   // flush the EPD frame so the panel is visible on e-ink
+            penColorPanel.show(
+                PenColorPreferences.load(this),
+                PenColorPreferences.loadPalette(this),
+                PenColorPreferences.loadSlots(this),
+            )
+        }
+    }
+
+    private fun hidePenColorPanel() {
+        if (!::penColorPanel.isInitialized || !penColorPanel.isVisible) return
+        penColorPanel.hide()   // pushes the exclusion rect via onVisibilityChanged
+    }
+
+    /** Keep the pen from writing underneath the panel while it is open. */
+    private fun pushPenPanelExclusion() {
+        drawingView.setToolbarExclusion(penColorPanel.panelRectIn(drawingView.asView()))
+    }
+
+    /**
+     * Persist the chosen ink. Arming the drawing view and re-tinting the button happen in
+     * [penColorListener], so this host and every other live one react through one path.
+     */
+    private fun applyPenColor(hex: String) {
+        PenColorPreferences.save(this, hex)
+    }
+
+    /**
+     * Reacts to the global ink changing — from this surface or any other live one. The overlapping
+     * surfaces (a sticky note or scratch pad floating over a notebook) are the reason this exists:
+     * without it the host underneath kept showing a stale pen tint until it was reopened.
+     */
+    private val penColorListener: (String) -> Unit = { hex ->
+        drawingView.setPenColor(hex)
+        applyPenTintToButton()
+    }
+
+    private fun applyPenTintToButton() {
+        PenColorPanelController.applyPenTint(binding.btnStickyPen, PenColorPreferences.load(this))
+    }
+
+    /**
+     * Mix a colour into custom slot [index]. Slots are positional and never shuffle, so a colour
+     * stays exactly where the user put it — the whole point of slots over a recents list.
+     */
+    private fun showCustomColorDialog(index: Int, initial: String) {
+        drawingView.releaseRender()   // flush the EPD frame so the dialog paints cleanly
+        CustomColorDialog(
+            context = this,
+            initial = initial,
+            onChosen = { hex ->
+                PenColorPreferences.saveSlot(this, index, hex)
+                applyPenColor(hex)
+            },
+        ).show()
+    }
+
 }

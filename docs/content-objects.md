@@ -120,13 +120,22 @@ Rendering: `StaticLayout` + `TextPaint` at **24sp** `Color.BLACK`. Entry point: 
 - Headers h1–h6 (`#` … `######`)
 - Bold (`**text**` / `__text__`), italic (`*text*` / `_text_`), strikethrough (`~~text~~`)
 - Links (`[text](url)`) — underlined, not clickable
+- Image references (`![alt](url)`) — the **alt text in italic**, the way a caption reads. No image is
+  drawn (still out of scope); the syntax is understood so that an image reference is not mangled into a
+  literal `!` followed by an underlined pseudo-link.
 - Unordered lists, 3-level nesting, bullet glyphs: `• ◦ ▪`
-- Ordered lists with auto-renumbering; nesting supported
+- Ordered lists, nesting supported. Each run is counted from its **first** item, whose written number is
+  honoured (CommonMark's `<ol start>`), so `3.` renders as 3 and the items after it count on regardless
+  of what they claim. The parser used to force every run to start at 1, which made `3. a` preview as
+  `1. a` — the source and the render disagreeing about a document that was fine.
+- **Not** lettered or roman-numeral lists (`a.`, `i.`). Those are a Pandoc `fancy_lists` extension, not
+  standard Markdown: rendering them as lists here would send documents out as run-together paragraphs
+  everywhere else. Decided 2026-07-29 — see docs/documents.md.
 - Task checkboxes (`- [ ]` → `☐`, `- [x]` → `☑`)
 - Blockquotes (`>`) — left bar via `QuoteSpan`
 - Horizontal rules (`---` / `***` / `___`) via `HorizontalRuleSpan : ReplacementSpan`
 
-**Out of scope (do not add without discussion):** inline code, fenced code blocks, tables, embedded images, raw HTML.
+**Out of scope (do not add without discussion):** inline code, fenced code blocks, tables, **drawing** embedded images (the `![alt](url)` reference parses; nothing is fetched or rendered), raw HTML.
 
 **WYSIWYG regex safety:** inline patterns do NOT use `RegexOption.DOT_MATCHES_ALL` — use `[^*\n]` / `[^~\n]` exclusion classes to prevent cross-line matches.
 
@@ -136,7 +145,7 @@ Markdown WYSIWYG/source editor. Two modes: **WYSIWYG** (live formatting spans) a
 
 Formatting toolbar (HorizontalScrollView): B, I, S̶, H▾ (H1–H6/Normal), •, 1., ☐ (task checkbox toggle), ❝, —, [⊞] (link). `shape_bordered` background, 36dp height, 10dp H padding.
 
-Auto-renumbering: ordered list blocks renumbered on every `afterTextChanged`. Auto-continue: Enter at end of a numbered list line inserts the next number prefix.
+Lists on Enter, and renumbering: both defer to `MarkdownFormatter.listEnter` / `renumberOrderedLists` — the same functions the full-screen document editor uses, so the two writing surfaces cannot drift apart (see [`documents.md`](documents.md)). Enter continues bullets, tasks and numbers; a second Enter ends the series and takes the marker with it; ordered runs are renumbered on every `afterTextChanged` to match how they render. This replaced a private, ordered-only implementation here that always renumbered from 1 — which fought the user once the parser started honouring a run's start number.
 
 AlertDialog pattern: `setSoftInputMode(SOFT_INPUT_STATE_VISIBLE | SOFT_INPUT_ADJUST_RESIZE)` before `show()`; `setElevation(0f)` + `shape_bordered` after `show()`. IME hidden in both Save and Cancel handlers via `editMarkdown.windowToken` (dialog's window token, not the activity's).
 

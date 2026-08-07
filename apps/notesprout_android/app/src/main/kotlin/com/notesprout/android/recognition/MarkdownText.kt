@@ -50,6 +50,7 @@ object MarkdownText {
                 is Inline.Bold -> sb.append(flatten(inline.children))
                 is Inline.Italic -> sb.append(flatten(inline.children))
                 is Inline.Strikethrough -> sb.append(flatten(inline.children))
+                is Inline.Code -> sb.append(inline.text)
                 is Inline.Link -> sb.append(inline.displayText)
             }
         }

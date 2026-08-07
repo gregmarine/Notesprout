@@ -23,9 +23,18 @@ import java.io.File
  *
  * Opening is now potentially async (a one-time plaintext→encrypted migration, or an unlock prompt on
  * a device with no cached key), so it can no longer complete synchronously in Application.onCreate.
- * [ensureReady] does the work; [awaitReady] lets index consumers suspend until it's open. The
- * BootstrapActivity gate drives this before the UI touches the index; MainActivity self-guards for
- * deep-link entries.
+ * [ensureReady] does the work; [awaitReady] lets index consumers suspend until it's open.
+ *
+ * **`BootstrapActivity` is the only caller of [ensureReady]** — it is the launcher gate and the sole
+ * owner of opening and unlocking. Because it `finish()`es itself it is not on the back stack, so it
+ * does *not* run when Android rebuilds a task's activities after a background process kill. Every
+ * surface therefore checks [isReady] in `onCreate` via
+ * [com.notesprout.android.core.IndexGuard], which bounces back through Bootstrap when the answer is
+ * no. Read that class before adding a screen that touches this index.
+ *
+ * **Nothing ever closes it.** There is no `close()`: the index opens once per process and stays open
+ * until the process dies. That is what makes a single `onCreate` check sufficient — a surface past
+ * that point cannot find it shut.
  */
 object NotesproutIndex {
 
@@ -146,6 +155,8 @@ object NotesproutIndex {
                 NotesproutDatabase.MIGRATION_5_6,
                 NotesproutDatabase.MIGRATION_6_7,
                 NotesproutDatabase.MIGRATION_7_8,
+                NotesproutDatabase.MIGRATION_8_9,
+                NotesproutDatabase.MIGRATION_9_10,
             )
         // Plaintext opens (factory == null — the one-time upgrade path) must be wrapped too:
         // Room's default framework helper DELETES the database on a corruption report, and this
@@ -175,6 +186,8 @@ object NotesproutIndex {
     fun notebookActivityDao(): NotebookActivityDao = db().notebookActivityDao()
 
     fun eventDao(): EventDao = db().eventDao()
+
+    fun taskDao(): TaskDao = db().taskDao()
 
     suspend fun checkpointAndVacuum() = withContext(Dispatchers.IO) {
         try {

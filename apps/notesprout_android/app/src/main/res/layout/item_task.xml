@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    One task row: state box · title over meta · trailing due label.
+
+    The box is its own tap target (tap = done); the rest of the row opens the editor, and a finger
+    long-press anywhere opens the action sheet. Modelled on item_event.xml so the two lists read as
+    the same family.
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/taskRow"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:layout_marginBottom="8dp"
+    android:orientation="horizontal"
+    android:gravity="center_vertical"
+    android:background="@drawable/shape_bordered"
+    android:padding="12dp">
+
+    <androidx.appcompat.widget.AppCompatImageButton
+        android:id="@+id/btnTaskState"
+        android:layout_width="44dp"
+        android:layout_height="44dp"
+        android:padding="10dp"
+        android:background="@android:color/transparent"
+        android:scaleType="fitCenter"
+        android:stateListAnimator="@null"
+        android:src="@drawable/ic_checkbox_empty"
+        android:contentDescription="Mark done" />
+
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_weight="1"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="10dp"
+        android:orientation="vertical">
+
+        <TextView
+            android:id="@+id/tvTaskTitle"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textSize="16sp"
+            android:textStyle="bold"
+            android:textColor="@color/inkBlack"
+            android:maxLines="2"
+            android:ellipsize="end"
+            android:text="Title" />
+
+        <TextView
+            android:id="@+id/tvTaskMeta"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:textSize="12sp"
+            android:textColor="@color/inkLight"
+            android:maxLines="2"
+            android:ellipsize="end"
+            android:visibility="gone"
+            android:text="Meta" />
+    </LinearLayout>
+
+    <!-- Due / relative-date label. Right-aligned, wraps to two short lines at most. -->
+    <TextView
+        android:id="@+id/tvTaskDue"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="10dp"
+        android:gravity="end"
+        android:textSize="13sp"
+        android:textColor="@color/inkBlack"
+        android:maxLines="1"
+        android:ellipsize="end"
+        android:visibility="gone"
+        android:text="" />
+
+</LinearLayout>

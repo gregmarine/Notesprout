@@ -35,6 +35,29 @@ object StickyNoteEditorTransfer {
     var input: Content? = null
     var output: Content? = null
 
+    /**
+     * How the editor's debounced real-time save reaches disk for a **notebook** sticky.
+     *
+     * The editor used to open its own Room/SQLCipher connection to the notebook's `.soil` for this.
+     * Two connections to one file meant two writers, and WAL allows only one — their transactions
+     * collided and killed the app *during ordinary writing* (write in a sticky, return to the
+     * notebook, keep writing). Set by [NotebookActivity] before it launches the editor and cleared
+     * when it is destroyed; the host then writes on the connection it already holds, so the two
+     * saves serialize through Room instead of fighting over a lock.
+     *
+     * **The crash-safety this replaces is intact.** The point of the real-time save is that content
+     * reaches disk *during* editing rather than only at close, because the close callback never runs
+     * on process death. Both Activities live in the same process, so process death takes the host
+     * too — routing through it loses no window in which persistence was ever possible. Only the
+     * connection changes, not the schedule.
+     *
+     * Null when no notebook host is listening (a scratch-pad or calendar sticky, or the host is
+     * gone); those hosts write through the shared [NotesproutIndex] and never had a second
+     * connection to begin with.
+     */
+    @Volatile
+    var persistToHost: (suspend (StickyNoteRender) -> Unit)? = null
+
     private val codec = Json { ignoreUnknownKeys = true; explicitNulls = false }
 
     fun encodeNote(n: StickyNoteRender): String = codec.encodeToString(StickyNoteRender.serializer(), n)

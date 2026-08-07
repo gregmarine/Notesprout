@@ -55,7 +55,7 @@ CREATE INDEX index_objects_parentId_type_deletedAt
 `sortOrder` = position), plus the `CLIPBOARD` and `BACKUP_CONFIG` singleton rows (payload stays JSON
 in `data`, by design). Sentinel ids live in `ListIds.kt`.
 
-### Auxiliary tables (same `notesprout.db`, Room `version = 8`)
+### Auxiliary tables (same `notesprout.db`, Room `version = 10`)
 
 Beyond `objects`, the global index DB holds several auxiliary tables. **The index itself is
 SQLCipher-encrypted at rest** under the global passphrase (encrypt-everything-by-default) — see
@@ -72,11 +72,18 @@ serializer works unchanged.
 - **`events`** — added in `MIGRATION_4_5`; calendar Events (birthdays/anniversaries/appointments) with
   RRULE-like recurrence. Own column schema (not the universal row shape). See
   [`docs/calendar.md`](calendar.md#events--the-events-table).
+- **`tasks`** — added in `MIGRATION_8_9`; the task manager's to-do items. Own column schema and
+  **fully columnar — no `data` payload at all**, because a task series materializes its occurrences as
+  real rows instead of expanding them at read time (so there is no exception list to store). Every
+  table holds three kinds of row — standalone tasks, **routines**, and a routine's member steps
+  (`type` + `parentId`) — and the main-list queries return the first two and never the third.
+  `MIGRATION_9_10` adds the look-ahead reminder columns (`remindAmount`/`remindUnit`), which gate
+  whether a future-dated task appears in the list at all. See [`docs/tasks.md`](tasks.md).
 
-Later migrations widen existing tables rather than adding new ones: `MIGRATION_5_6` gives
-`scratchpad` + `calendar` the same columnar columns + `blob` as the `.soil` table; `MIGRATION_6_7`
-widens `objects` with the typed payload columns + `blob`; `MIGRATION_7_8` adds `refId`/`sortOrder`
-for `list_item` child rows. All additive, all rewrite zero rows.
+`MIGRATION_5_6` / `MIGRATION_6_7` / `MIGRATION_7_8` widen existing tables rather than adding new ones:
+`scratchpad` + `calendar` gain the same columnar columns + `blob` as the `.soil` table; `objects`
+gains the typed payload columns + `blob`, then `refId`/`sortOrder` for `list_item` child rows. All
+additive, all rewrite zero rows.
 
 `NotesproutDatabase` (`@Database entities = [ObjectEntity, ScratchpadEntity, CalendarEntity,
 NotebookActivityEntity, EventEntity]`, `version = 8`) registers all migrations in `NotesproutIndex`.
@@ -222,6 +229,22 @@ CREATE TABLE IF NOT EXISTS notebook (
 CREATE INDEX IF NOT EXISTS idx_notebook_parent_order
     ON notebook(parentId, "order", deletedAt);
 ```
+
+### `.soil` Schema Version 5 — `srcUpdatedAt` (documents)
+
+`SoilDatabase.MIGRATION_4_5` adds one nullable column (`SoilSchema.ADDED_COLUMNS_V5`): `srcUpdatedAt`,
+the page state a `document` row's text was drafted from. Only the `document` type uses it; see
+[`documents.md`](documents.md).
+
+Two things to keep straight when adding the next version:
+
+- **Never append to `ADDED_COLUMNS_V4`.** `NotesproutDatabase.MIGRATION_5_6` borrows that list verbatim
+  to widen the global index's `scratchpad` + `calendar` tables, so a column appended there lands in a
+  second database too — and only for installs that run that migration later. Each version gets its own
+  list (`SoilSchemaTest` asserts every listed column exists in `CREATE_NOTEBOOK_TABLE`).
+- **Extend `SoilMigrator.repairMissingUserVersion`'s ladder.** It diagnoses a `user_version`-zeroed file
+  from which columns it already has; a version that isn't in that ladder stops being recognized as
+  repairable once Room moves past it.
 
 ### `.soil` Schema Version 4 — columnar payload, binary strokes, relational composites
 

@@ -23,7 +23,7 @@ import androidx.sqlite.db.framework.FrameworkSQLiteOpenHelperFactory
  *     .build()
  * ```
  */
-@Database(entities = [NotebookObject::class], version = 4, exportSchema = false)
+@Database(entities = [NotebookObject::class], version = 5, exportSchema = false)
 abstract class SoilDatabase : RoomDatabase() {
 
     abstract fun notebookDao(): NotebookDao
@@ -67,6 +67,19 @@ abstract class SoilDatabase : RoomDatabase() {
         }
 
         /**
+         * Adds `srcUpdatedAt` — the page-state watermark a `document` row was drafted from (see
+         * [SoilSchema.ADDED_COLUMNS_V5]). Additive and nullable, like the v4 widening: no existing
+         * row is rewritten.
+         */
+        val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                for ((name, sqlType) in SoilSchema.ADDED_COLUMNS_V5) {
+                    db.execSQL("""ALTER TABLE notebook ADD COLUMN "$name" $sqlType""")
+                }
+            }
+        }
+
+        /**
          * Single factory that wires the open callback and full migration set onto every
          * SoilDatabase builder. Callers add `.openHelperFactory(SoilCrypto.roomFactory(key))`
          * on top where encryption is needed.
@@ -74,7 +87,7 @@ abstract class SoilDatabase : RoomDatabase() {
         fun builder(context: Context, absolutePath: String): RoomDatabase.Builder<SoilDatabase> =
             Room.databaseBuilder(context.applicationContext, SoilDatabase::class.java, absolutePath)
                 .addCallback(openCallback())
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
                 // Default (plaintext) open path: never let a corrupt/mis-read file be deleted. An
                 // encrypted .soil opened without a key looks corrupt here; the default handler would
                 // wipe it. Keyed callers override this with the SQLCipher factory (also wrapped).
@@ -94,6 +107,16 @@ abstract class SoilDatabase : RoomDatabase() {
                 // Re-apply wal_autocheckpoint on every open — it is connection-level only
                 // and is not persisted in the database file.
                 db.query("PRAGMA wal_autocheckpoint = 100").use { it.moveToFirst() }
+                // Wait briefly for a busy lock rather than failing instantly. General hygiene: writes
+                // run off the main thread, so the wait cannot ANR, and a real deadlock still surfaces.
+                //
+                // **Do not rely on this to make concurrent writers safe.** It was added trying to fix
+                // the sticky-note editor's second connection to this same file and did **nothing** —
+                // five collisions in a minute, every one throwing immediately. When a connection
+                // already holds a read snapshot SQLite returns SQLITE_BUSY without ever invoking the
+                // busy handler, because retrying cannot succeed. The fix was to stop opening a second
+                // connection; this is kept only because a busy timeout is worth having anyway.
+                db.query("PRAGMA busy_timeout = 5000").use { it.moveToFirst() }
             }
         }
 

@@ -12,6 +12,7 @@ import android.text.style.QuoteSpan
 import android.text.style.RelativeSizeSpan
 import android.text.style.StrikethroughSpan
 import android.text.style.StyleSpan
+import android.text.style.TypefaceSpan
 import android.text.style.UnderlineSpan
 import android.graphics.Typeface
 import android.text.style.ReplacementSpan
@@ -20,11 +21,14 @@ import android.text.style.ReplacementSpan
  * Converts a [Block] list from [MarkdownParser] into a [SpannableStringBuilder]
  * ready for [android.text.StaticLayout] or an EditText-based WYSIWYG editor.
  *
- * Supported subset: headings (h1-h6), bold, italic, strikethrough, unordered lists
- * with nesting, ordered lists with auto-renumbering, task checkboxes, blockquotes,
- * horizontal rules, and links (underlined display text, no click).
+ * Supported subset: headings (h1-h6), bold, italic, strikethrough, inline code, unordered
+ * lists with nesting, ordered lists (counted from the run's first item — see
+ * [Block.ListItem.displayNumber]), task checkboxes, blockquotes, horizontal rules, and links
+ * (underlined display text, no click).
  *
- * Out of scope: inline code, code blocks, tables, images, HTML, underline-as-formatting.
+ * Out of scope: code blocks, tables, images, HTML, underline-as-formatting, and the lettered /
+ * roman-numeral ordered lists of Pandoc's `fancy_lists` — standard Markdown has only digits, and a
+ * document that rendered them as lists here would come out as run-together paragraphs everywhere else.
  *
  * @param availableWidthPx content width in pixels — used to size [HorizontalRuleSpan].
  * @param density screen density from [android.util.DisplayMetrics.density] — used for
@@ -165,6 +169,10 @@ object MarkdownRenderer {
                 is Inline.Strikethrough -> {
                     appendInlines(sb, inline.children)
                     sb.setSpan(StrikethroughSpan(), start, sb.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                }
+                is Inline.Code -> {
+                    sb.append(inline.text)
+                    sb.setSpan(TypefaceSpan("monospace"), start, sb.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
                 }
                 is Inline.Link -> {
                     sb.append(inline.displayText)

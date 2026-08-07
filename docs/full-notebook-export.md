@@ -112,6 +112,12 @@ Supporting types live in `export/`:
 |---|---|
 | `export/ExportSpec.kt` | `ExportFormat` (PDF/PNG/MARKDOWN/TEXT/SOIL), `PageScope`, `ExportDestination`, `SoilKeying`, and the immutable `ExportSpec` describing one job |
 | `export/ExportEngine.kt` | Runs a spec — dispatches to `NotebookExporter` / `NotebookTextExporter` / `NotebookPackager`, and applies the `.soil` keying transform |
+
+**MARKDOWN / TEXT prefer the page's document.** `NotebookTextExporter` exports a page's `document` row
+when it has one and falls back to recognized handwriting otherwise — the document is the finished
+version of the same words, and those pages skip recognition entirely (see [`documents.md`](documents.md)).
+Documents live inside the `.soil`, so `.soil` export/import carries them with no changes at all.
+
 | `export/ExportDelivery.kt` | SAF `CreateDocument` launchers (one per mime), the `OpenDocumentTree` folder write for multi-file PNG, share intents, and the PNG→template import |
 | `export/ExportNaming.kt` | Filename/template-name whitelisting and de-duplication |
 | `data/export/ExportPreset.kt` | One saved set of export choices |

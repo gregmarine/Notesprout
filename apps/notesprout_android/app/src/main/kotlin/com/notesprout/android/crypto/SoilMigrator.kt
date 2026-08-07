@@ -194,14 +194,16 @@ object SoilMigrator {
      * which fails, instead of running the additive migration that would upgrade them.
      *
      * The fix is to restore the version Room needs to see so it migrates normally. We derive it from
-     * which schema-version tables are already present (every historical migration only *adds* tables/
-     * columns, so table presence is a reliable version floor): `notebook_meta` ⇒ v3, else
-     * `undo_redo_state` ⇒ v2, else v1. Room then runs the remaining migrations (all idempotent for a
-     * pre-v4 file — the v3→v4 `ADD COLUMN`s target columns this file is missing).
+     * which schema-version tables/columns are already present (every historical migration only *adds*,
+     * so presence is a reliable version floor): the v4 columnar columns ⇒ v4, else `notebook_meta` ⇒
+     * v3, else `undo_redo_state` ⇒ v2, else v1. Room then runs the remaining migrations, which are all
+     * `ADD COLUMN`s / `CREATE TABLE IF NOT EXISTS` for columns and tables the file is missing.
      *
      * No-ops (returns null, file untouched) unless the exact brick signature holds: opens with the
      * key, `user_version == 0`, `room_master_table` present (it *was* a versioned Room DB), a
-     * `notebook` table exists, and it lacks the v4 columnar columns. [passphrase] null ⇒ plaintext.
+     * `notebook` table exists, and it lacks the **current** schema's columns (a file whose schema
+     * already matches the entity passes Room's `onCreate` validation and opens fine even at version
+     * 0). [passphrase] null ⇒ plaintext.
      *
      * Returns the version stamped, or null if nothing was done. Must run on Dispatchers.IO.
      */
@@ -228,23 +230,24 @@ object SoilMigrator {
             // notebook table, means this is some other file we must not touch.
             if (!tableExists("room_master_table") || !tableExists("notebook")) return@withContext null
 
-            // If the notebook table already has the v4 columns, the schema matches and this isn't the
-            // brick (a v4 file with version 0 opens fine) — leave it alone.
-            val v4Marker = SoilSchema.ADDED_COLUMNS_V4.firstOrNull()?.first
-            if (v4Marker != null) {
-                val hasV4 = runCatching {
-                    var found = false
+            val columns = runCatching {
+                buildSet {
                     db.rawQuery("PRAGMA table_info(notebook)", null).use { c ->
                         val nameIdx = c.getColumnIndex("name")
-                        while (c.moveToNext()) if (c.getString(nameIdx) == v4Marker) { found = true; break }
+                        while (c.moveToNext()) add(c.getString(nameIdx))
                     }
-                    found
-                }.getOrDefault(false)
-                if (hasV4) return@withContext null
-            }
+                }
+            }.getOrDefault(emptySet())
+            fun hasColumns(added: List<Pair<String, String>>): Boolean =
+                added.isNotEmpty() && added.all { it.first in columns }
 
-            // Derive the version floor from present tables (every historical migration only *adds*).
+            // If the notebook table already has the CURRENT schema's columns, it validates against the
+            // entity and this isn't the brick (such a file opens fine at version 0) — leave it alone.
+            if (hasColumns(SoilSchema.ADDED_COLUMNS_V5)) return@withContext null
+
+            // Derive the version floor from what is already present (every migration only *adds*).
             val target = when {
+                hasColumns(SoilSchema.ADDED_COLUMNS_V4) -> 4
                 tableExists("notebook_meta")    -> 3
                 tableExists("undo_redo_state")  -> 2
                 else                            -> 1

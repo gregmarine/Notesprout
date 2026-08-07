@@ -33,9 +33,12 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.core.view.doOnLayout
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import com.notesprout.android.core.ImageCodec
+import com.notesprout.android.core.IndexGuard
 import com.notesprout.android.core.TopGuard
+import com.notesprout.android.core.TwoFingerSwipeDown
 import com.notesprout.android.core.isBooxDevice
 import com.notesprout.android.crypto.KeyResolver
 import com.notesprout.android.crypto.KeySession
@@ -73,6 +76,7 @@ import com.notesprout.android.data.toBoundingBoxJson
 import com.notesprout.android.data.toLinkObject
 import com.notesprout.android.data.toStickyNoteObject
 import com.notesprout.android.data.translate
+import com.notesprout.android.data.deepCopy
 import com.notesprout.android.databinding.ActivityCalendarBinding
 import com.notesprout.android.notebook.ActiveTool
 import com.notesprout.android.notebook.CalendarTemplateRenderer
@@ -85,6 +89,7 @@ import com.notesprout.android.notebook.STICKY_NOTE_ICON_SIZE_DP
 import com.notesprout.android.notebook.ShapeRecognizer
 import com.notesprout.android.notebook.ToolPreferencesManager
 import com.notesprout.android.notebook.ToolbarOverflowManager
+import com.notesprout.android.notebook.PenColorPreferences
 import com.notesprout.android.state.AppSurface
 import com.notesprout.android.state.SurfaceEntry
 import com.notesprout.android.state.SurfaceStack
@@ -104,6 +109,8 @@ import java.time.format.TextStyle
 import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.hypot
+import com.notesprout.android.notebook.PenColorPanelController
+import com.notesprout.android.notebook.CustomColorDialog
 
 /**
  * Calendar with handwriting on every view. Each view is a template-backed drawing canvas keyed by a
@@ -162,6 +169,9 @@ class CalendarActivity : AppCompatActivity() {
     // after the tapped item's click has been dispatched.
     private var pendingMenuTapClose = false
     private lateinit var drawingView: NotebookView
+
+    /** Pen-colour swatch panel docked to [btnCalPen]. See [togglePenColorPanel]. */
+    private lateinit var penColorPanel: PenColorPanelController
     private lateinit var repository: CalendarRepository
     private val eventsRepo: EventsRepository by lazy { EventsRepository() }
     // Events for the visible period, keyed by day — baked into the grid template. Reloaded on
@@ -225,6 +235,12 @@ class CalendarActivity : AppCompatActivity() {
     private var calMoved = false
     private var calMultiTouch = false
     private var calVelocityTracker: VelocityTracker? = null
+
+    /**
+     * Two-finger downward swipe → the Today dashboard. One detector for Month, Week and Day: it
+     * sits above the canvas, not in the template, so the shortcut means the same thing in all three.
+     */
+    private val todaySwipe by lazy { TwoFingerSwipeDown(this) { TodayActivity.launch(this) } }
 
     // Single-finger double-tap on a day cell (Month/Week) → open that day's full-page canvas.
     private var lastDayTapDate: LocalDate? = null
@@ -327,6 +343,9 @@ class CalendarActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Nothing has opened the index if Android rebuilt this task itself — see IndexGuard.
+        if (!IndexGuard.ready(this)) return
+        if (bounceIfIndexNotReady()) return
         WindowCompat.setDecorFitsSystemWindows(window, false)
         val insetsController = WindowInsetsControllerCompat(window, window.decorView)
         insetsController.hide(WindowInsetsCompat.Type.systemBars())
@@ -381,6 +400,28 @@ class CalendarActivity : AppCompatActivity() {
         wireToolButtons()
         updateLassoButtonIcon()
 
+        // Restore the pen's ink colour — one global value, the same way the active tool below is.
+        drawingView.setPenColor(PenColorPreferences.load(this))
+        penColorPanel = PenColorPanelController(
+            root          = binding.calendarContent,
+            panel         = binding.penColorPanel.root,
+            anchor        = binding.btnCalPen,
+            paletteGreyButton  = binding.penColorPanel.btnPaletteGrey,
+            paletteColorButton = binding.penColorPanel.btnPaletteColor,
+            swatchRow1    = binding.penColorPanel.penSwatchRow1,
+            swatchRow2    = binding.penColorPanel.penSwatchRow2,
+            customDivider = binding.penColorPanel.penCustomDivider,
+            customRow     = binding.penColorPanel.penCustomRow,
+            sideProvider  = { PenColorPanelController.Side.BELOW },
+            boundsProvider   = { Rect(0, 0, binding.calendarContent.width, binding.calendarContent.height) },
+            topGuardProvider = { 0 },
+            onColorChosen     = { hex -> applyPenColor(hex) },
+            onSlotEditRequested = { index, initial -> showCustomColorDialog(index, initial) },
+            onPaletteChanged  = { PenColorPreferences.savePalette(this, it) },
+            onVisibilityChanged = { pushPenPanelExclusion() },
+        )
+        applyPenTintToButton()
+        PenColorPreferences.addListener(penColorListener)
         // Restore last-used tool
         when (ToolPreferencesManager.load(this)) {
             ActiveTool.ERASER -> {
@@ -414,6 +455,7 @@ class CalendarActivity : AppCompatActivity() {
         binding.btnNext.setOnClickListener { stepForward() }
         binding.tvMonthYear.setOnClickListener { showMonthYearPicker() }
         binding.btnCalScratchpad.setOnClickListener { openScratchpad() }
+        binding.btnCalTasks.setOnClickListener { TasksActivity.launch(this) }
         binding.btnCalSendPage.setOnClickListener { sendPageToNotebook() }
         binding.btnCalErasePage.setOnClickListener { confirmErasePage() }
         binding.btnCalUndo.setOnClickListener { undo() }
@@ -940,6 +982,7 @@ class CalendarActivity : AppCompatActivity() {
 
     private fun wireToolButtons() {
         binding.btnCalPen.setOnClickListener {
+            val wasPenActive = binding.btnCalPen.isSelected
             if (isLassoMode) exitLassoMode()
             isEraserActive = false; isLassoEraserActive = false
             drawingView.setEraserMode(false); drawingView.setLassoEraserMode(false)
@@ -948,8 +991,10 @@ class CalendarActivity : AppCompatActivity() {
             binding.btnCalLassoEraser.isSelected = false
             drawingView.releaseRender()
             ToolPreferencesManager.save(this, ActiveTool.PEN)
+            if (wasPenActive) togglePenColorPanel() else hidePenColorPanel()
         }
         binding.btnCalEraser.setOnClickListener {
+            hidePenColorPanel()
             if (isLassoMode) exitLassoMode()
             isLassoEraserActive = false; drawingView.setLassoEraserMode(false)
             binding.btnCalLassoEraser.isSelected = false
@@ -961,6 +1006,7 @@ class CalendarActivity : AppCompatActivity() {
             ToolPreferencesManager.save(this, if (isEraserActive) ActiveTool.ERASER else ActiveTool.PEN)
         }
         binding.btnCalLassoEraser.setOnClickListener {
+            hidePenColorPanel()
             if (isLassoMode) exitLassoMode()
             isEraserActive = false; drawingView.setEraserMode(false)
             isLassoEraserActive = !isLassoEraserActive
@@ -971,6 +1017,7 @@ class CalendarActivity : AppCompatActivity() {
             drawingView.releaseRender()
         }
         binding.btnCalLasso.setOnClickListener {
+            hidePenColorPanel()
             if (!isLassoMode) enterLassoMode() else exitLassoMode()
             drawingView.releaseRender()
         }
@@ -1055,10 +1102,10 @@ class CalendarActivity : AppCompatActivity() {
         stickyNotes.forEach { box.union(it.boundingBox) }
         shapes.forEach { box.union(it.boundingBox) }
         return NotesproutClipboard.ClipboardContent(
-            strokes = strokes.map { LiveStroke(it.id, it.points.map { pt -> PointF(pt.x, pt.y) }) },
+            strokes = strokes.map { it.deepCopy() },
             headings = headings.map { h ->
                 HeadingStroke(h.id, RectF(h.boundingBox),
-                    h.strokes.map { s -> LiveStroke(s.id, s.points.map { PointF(it.x, it.y) }) },
+                    h.strokes.map { s -> s.deepCopy() },
                     recognizedText = h.recognizedText, level = h.level)
             },
             boundingBox = box,
@@ -1894,13 +1941,32 @@ class CalendarActivity : AppCompatActivity() {
                     isTouchInView(event, binding.calOverflowMenu)
             val inFloating = binding.floatingSelectionToolbar.visibility == View.VISIBLE &&
                     isTouchInView(event, binding.floatingSelectionToolbar)
-            if (event.actionMasked == MotionEvent.ACTION_DOWN && (inToolbar || inFloating || inMenu)) drawingView.releaseRender()
-            if (!inMenu && handleStickyNoteTapGesture(event)) return true
-            if (!inToolbar && !inFloating && !inMenu) {
+            // The pen colour panel is chrome, like the toolbar and the floating bar above it, and
+            // must be excluded for the same reason: handleCalendarFingerGesture consumes the UP of a
+            // finger tap (that is how double-tap-to-open-a-day works), so a swatch would receive the
+            // DOWN — long enough to raise its tooltip — and never the UP that makes it a click. That
+            // is why the panel needed a stylus here and worked with a finger everywhere else.
+            val inPenPanel = ::penColorPanel.isInitialized &&
+                    penColorPanel.containsScreenPoint(event.rawX.toInt(), event.rawY.toInt())
+            if (event.actionMasked == MotionEvent.ACTION_DOWN && (inToolbar || inFloating || inMenu || inPenPanel)) drawingView.releaseRender()
+            if (!inMenu && !inPenPanel && handleStickyNoteTapGesture(event)) return true
+            if (!inToolbar && !inFloating && !inMenu && !inPenPanel) {
                 handleMultiFingerDoubleTap(event)
+                // Not consumed, as on the notebook: the gesture is two-fingered, so the nav-swipe /
+                // day-tap detector below has already written itself off (calMultiTouch) and will do
+                // nothing with the rest of the sequence.
+                todaySwipe.onTouchEvent(event)
                 if (handleCalendarFingerGesture(event)) return true
             }
         }
+        // Dismiss the pen colour panel on a touch outside it — except on btnCalPen itself, whose
+        // own listener owns the toggle (handling it here too would close then immediately reopen).
+        if (event.actionMasked == MotionEvent.ACTION_DOWN
+            && ::penColorPanel.isInitialized && penColorPanel.isVisible) {
+            val inPanel = penColorPanel.containsScreenPoint(event.rawX.toInt(), event.rawY.toInt())
+            if (!inPanel && !isTouchInView(event, binding.btnCalPen)) hidePenColorPanel()
+        }
+
         return super.dispatchTouchEvent(event)
     }
 
@@ -2032,6 +2098,9 @@ class CalendarActivity : AppCompatActivity() {
         calVelocityTracker?.recycle()
         calVelocityTracker = null
 
+        // Two-finger swipe down → Today.
+        todaySwipe.cancel()
+
         stickyNoteTapCandidate = null
         stickyNoteTapMoved = true
 
@@ -2122,20 +2191,35 @@ class CalendarActivity : AppCompatActivity() {
      * The date is resolved at DOWN: Month/Week hit-test the pressed **cell** (a press off the grid —
      * the notes band, say — resolves to nothing and never arms); Day view has no cell hit-test, so a
      * press anywhere on either half opens [selectedDate].
+     *
+     * A press that lands on a **sticky-note icon** never arms: that touch belongs to the note.
+     * Tapping one opens its editor and consumes the UP ([handleStickyNoteTapGesture] returns true,
+     * so [handleCalendarFingerGesture] — which owns the cancel — never sees it), leaving this
+     * runnable posted with nothing to stop it. It fired behind the open editor, and the day's
+     * notebook list was sitting there when the editor closed. Day view made it certain: with no
+     * cell hit-test, every press there arms.
      */
     private fun armDayNotebooksLongPress(event: MotionEvent) {
         cancelDayNotebooksLongPress()
         calLongPressFired = false
+        val loc = IntArray(2)
+        binding.calendarContent.getLocationInWindow(loc)
+        val localX = event.x - loc[0]
+        val localY = event.y - loc[1]
+        if (stickyNoteAt(localX, localY) != null) return
         val date = if (currentView == CalView.DAY) selectedDate else {
-            val loc = IntArray(2)
-            binding.calendarContent.getLocationInWindow(loc)
             CalendarTemplateRenderer.hitTest(
-                currentSpec(), event.x - loc[0], event.y - loc[1],
+                currentSpec(), localX, localY,
                 binding.calendarContent.width, binding.calendarContent.height, density,
             ) ?: return
         }
         val runnable = Runnable {
             calLongPressRunnable = null
+            // Only the screen in front of the user may raise it. A dialog posted after something
+            // else took over — an editor launched by this very gesture — opens behind that screen
+            // and is found on the way back, which is the sticky-note bug above arriving by some
+            // other route. The gesture is abandoned rather than deferred: the press is long over.
+            if (!lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) return@Runnable
             calLongPressFired = true
             if (isLassoMode) exitLassoMode()
             DayNotebooksDialog.show(this, date)
@@ -2217,6 +2301,14 @@ class CalendarActivity : AppCompatActivity() {
                         event.eventTime - stickyNoteTapDownTime <= ViewConfiguration.getLongPressTimeout()
                 if (isTap && candidate != null && candidate.boundingBox.contains(localX, localY)) {
                     if (isLassoMode) exitLassoMode()
+                    // Consuming this UP means [handleCalendarFingerGesture] never sees it, so the
+                    // state it opened on DOWN has to be closed out here. The day-notebooks
+                    // long-press is already off — a press on an icon never arms one — but say so
+                    // anyway: this is the one place that knows the UP is being taken away.
+                    cancelDayNotebooksLongPress()
+                    calLongPressFired = false
+                    calVelocityTracker?.recycle()
+                    calVelocityTracker = null
                     openStickyNote(candidate, initialCreate = false)
                     return true
                 }
@@ -2275,6 +2367,13 @@ class CalendarActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        // A guard-bounced screen never finished building — there is nothing to release.
+        if (IndexGuard.bounced(this)) { super.onDestroy(); return }
+        // onCreate aborted before building any of this — see [bounceIfIndexNotReady]. Android
+        // still calls onDestroy on a half-constructed Activity, and every teardown below assumes
+        // state that was never created.
+        if (indexBounced) { super.onDestroy(); return }
+        PenColorPreferences.removeListener(penColorListener)
         super.onDestroy()
         // Final safety-net flush. appScope outlives this Activity so the write still lands;
         // releaseResources only recycles bitmaps (stroke data is untouched), so the async
@@ -2288,4 +2387,71 @@ class CalendarActivity : AppCompatActivity() {
     private fun dp(v: Int) = (v * density + 0.5f).toInt()
 
     private fun toast(msg: String) = Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
+
+    // ── Pen colour ───────────────────────────────────────────────────────────
+
+    private fun togglePenColorPanel() {
+        if (penColorPanel.isVisible) {
+            hidePenColorPanel()
+        } else {
+            // One exclusion rect per host, so the two popovers cannot both own it — and two stacked
+            // popovers over one bar is not a state worth supporting anyway.
+            closeCalOverflowMenu()
+            drawingView.releaseRender()   // flush the EPD frame so the panel is visible on e-ink
+            penColorPanel.show(
+                PenColorPreferences.load(this),
+                PenColorPreferences.loadPalette(this),
+                PenColorPreferences.loadSlots(this),
+            )
+        }
+    }
+
+    private fun hidePenColorPanel() {
+        if (!::penColorPanel.isInitialized || !penColorPanel.isVisible) return
+        penColorPanel.hide()   // pushes the exclusion rect via onVisibilityChanged
+    }
+
+    /** Keep the pen from writing underneath the panel while it is open. */
+    private fun pushPenPanelExclusion() {
+        drawingView.setToolbarExclusion(penColorPanel.panelRectIn(drawingView.asView()))
+    }
+
+    /**
+     * Persist the chosen ink. Arming the drawing view and re-tinting the button happen in
+     * [penColorListener], so this host and every other live one react through one path.
+     */
+    private fun applyPenColor(hex: String) {
+        PenColorPreferences.save(this, hex)
+    }
+
+    /**
+     * Reacts to the global ink changing — from this surface or any other live one. The overlapping
+     * surfaces (a sticky note or scratch pad floating over a notebook) are the reason this exists:
+     * without it the host underneath kept showing a stale pen tint until it was reopened.
+     */
+    private val penColorListener: (String) -> Unit = { hex ->
+        drawingView.setPenColor(hex)
+        applyPenTintToButton()
+    }
+
+    private fun applyPenTintToButton() {
+        PenColorPanelController.applyPenTint(binding.btnCalPen, PenColorPreferences.load(this))
+    }
+
+    /**
+     * Mix a colour into custom slot [index]. Slots are positional and never shuffle, so a colour
+     * stays exactly where the user put it — the whole point of slots over a recents list.
+     */
+    private fun showCustomColorDialog(index: Int, initial: String) {
+        drawingView.releaseRender()   // flush the EPD frame so the dialog paints cleanly
+        CustomColorDialog(
+            context = this,
+            initial = initial,
+            onChosen = { hex ->
+                PenColorPreferences.saveSlot(this, index, hex)
+                applyPenColor(hex)
+            },
+        ).show()
+    }
+
 }

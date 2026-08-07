@@ -207,6 +207,30 @@ class PageTextRecognizer(private val hwr: HandwritingRecognizer) {
 
 ---
 
+### What counts as page content (`PageTextRepository.loadPageContent`)
+
+The rule is **everything the reader can see as prose**, which is not the same as everything parented to
+the layer. The page-level queries are all scoped to `parentId = layerId`, and that is exactly what makes
+a composite's content invisible to them — so the loader walks into composites too:
+
+| Source | Contributes | Why |
+|---|---|---|
+| Strokes on the layer | Recognized lines | The main event |
+| Heading objects | `#`/`##`/`###` blocks | Already recognized; reused verbatim |
+| Text objects | Their Markdown | Already text |
+| **Content inside a `link`** | Its strokes, headings and text objects | A link *wraps* page content — a text object made into a link is still a text object the reader sees. Children carry page-absolute coordinates, so they merge straight into reading order |
+| **Ink of a heading/text whose recognition failed** | Its strokes, into the stroke pool | That ink is what is on the page. This pipeline segments line by line and can succeed where the single-shot attempt failed |
+| Horizontal `shape` lines (±15°) | `---` | Reads as a rule |
+
+Left out, all of them things not meant to be read as prose: **sticky notes** (collapsed to an icon, and
+their children are in the note's *local* coordinate space — merging them would scatter text across the
+page), **shapes** other than horizontal rules, and **line objects** (the Lines tool draws page guides,
+which is why they render in `inkLight` — see [`content-objects.md`](content-objects.md)).
+
+One trap worth remembering: a text object converted from ink keeps its original strokes *alongside* its
+text. Feed both and the page says everything twice — take the text when there is text, the ink only when
+there is not.
+
 ## Storage — a `page_text` object (no schema migration)
 
 Because `type` on the `notebook` table is a plain string discriminator (see
@@ -230,6 +254,17 @@ data class PageText(
   already exposes `getMaxContentUpdatedAt(layerId)` (which counts soft-deletes, since deleted rows
   carry `updatedAt = deletedAt`). If the layer's current max exceeds the stored `sourceMaxUpdatedAt`,
   the cached text is stale → re-recognize (RTR) or badge it "updating…" (viewer).
+- **…and the pipeline's own version.** The watermark only notices the *page* changing, so a page that
+  has sat still since the recognizer learned to read something new would keep its incomplete text
+  forever. `PageText.schema` records what the pipeline could read; `isFresh` treats anything below
+  `CURRENT_SCHEMA` as stale. **Bump it whenever a pass starts covering content it used to miss** —
+  every cache written before it then re-recognizes on next use, at the cost of one pass over the
+  notebook. (Schema 3 = reads inside links and failed heading/text composites.)
+- **Never user-editable.** `page_text` is a *cache*: RTR, export, and the viewer's recognize-on-open all
+  rewrite it whenever the page changes, so nothing the user authored can live here. The editable
+  counterpart is the `document` row, whose only writer is the editor — see
+  [`documents.md`](documents.md). The two are deliberately separate objects, and page text seeds a
+  document exactly once.
 - **Encryption for free.** The row lives inside the `.soil`; on an encrypted notebook it is
   SQLCipher-encrypted at rest exactly like `recognizedText` today. No plaintext leak, no new crypto code.
 - **Portable for free.** It travels inside the `.soil` on export / import — no `NotebookPackager` changes.
@@ -346,8 +381,10 @@ Behavior:
 
 ## Deferred / open questions
 
-- **Editable recognized text** — reconciling text edits back onto ink is out of scope; the viewer is
-  read-only in v1.
+- **Editable recognized text** — the viewer stays read-only, and reconciling text edits back onto ink
+  remains out of scope. Editing *did* arrive, but as a separate object rather than a writable cache: a
+  page's recognized text seeds a **document** once, which the user then owns
+  (see [`documents.md`](documents.md)). Nothing flows back to the ink.
 - **Multi-column / tables** — single-column assembly only; horizontal-gap data is captured but unused.
 - **List recognition (numbered / bulleted / checkbox)** — v1 takes ML Kit's line text verbatim, so a
   list only becomes Markdown when ML Kit happens to return a clean `N. ` / `- ` prefix. Two failure

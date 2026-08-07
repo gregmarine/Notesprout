@@ -15,6 +15,7 @@ import android.util.Base64
 import android.util.TypedValue
 import androidx.appcompat.content.res.AppCompatResources
 import com.notesprout.android.core.BitmapDecode
+import com.notesprout.android.core.InkColor
 import com.notesprout.android.crypto.SoilCrypto
 import com.notesprout.android.core.markdown.TextObjectRenderer
 import com.notesprout.android.data.BoundingBox
@@ -553,6 +554,18 @@ object NotebookExporter {
             strokeJoin = Paint.Join.ROUND
             strokeWidth = 2.5f
         }
+
+        // Every stroke paints in its own stored ink. InkColor.exportColor, not paintColor: an export
+        // carries the author's true colours regardless of what panel it was produced on.
+        fun drawStroke(stroke: LiveStroke) {
+            val pts = stroke.points
+            if (pts.size < 2) return
+            val path = Path()
+            path.moveTo(pts[0].x, pts[0].y)
+            for (i in 1 until pts.size) path.lineTo(pts[i].x, pts[i].y)
+            strokePaint.color = InkColor.exportColor(stroke.color)
+            canvas.drawPath(path, strokePaint)
+        }
         val densityDp = context.resources.displayMetrics.density
         val textObjectTextSizePx = TypedValue.applyDimension(
             TypedValue.COMPLEX_UNIT_SP, 16f, context.resources.displayMetrics
@@ -574,14 +587,7 @@ object NotebookExporter {
                     TextObjectRenderer.draw(canvas, TextRender(heading.id, innerBox, heading.recognizedText), widthPx, textObjectPaint, densityDp, maxLines = 1)
                     canvas.restore()
                 } else {
-                    for (liveStroke in heading.strokes) {
-                        val pts = liveStroke.points
-                        if (pts.size < 2) continue
-                        val path = Path()
-                        path.moveTo(pts[0].x, pts[0].y)
-                        for (i in 1 until pts.size) path.lineTo(pts[i].x, pts[i].y)
-                        canvas.drawPath(path, strokePaint)
-                    }
+                    for (liveStroke in heading.strokes) drawStroke(liveStroke)
                 }
             }
         }
@@ -644,14 +650,7 @@ object NotebookExporter {
         }
 
         fun drawStrokeList(list: List<LiveStroke>) {
-            for (liveStroke in list) {
-                val pts = liveStroke.points
-                if (pts.size < 2) continue
-                val path = Path()
-                path.moveTo(pts[0].x, pts[0].y)
-                for (i in 1 until pts.size) path.lineTo(pts[i].x, pts[i].y)
-                canvas.drawPath(path, strokePaint)
-            }
+            for (liveStroke in list) drawStroke(liveStroke)
         }
 
         drawHeadingList(headings)

@@ -82,7 +82,10 @@ data class NotebookObject(
     @ColumnInfo(name = "height") val height: Float? = null,
 
     // Shared content columns.
-    /** heading.recognizedText · text.text · page_text · template.name · layer.label · notebook.title */
+    /**
+     * heading.recognizedText · text.text · document.markdown · template.name · layer.label ·
+     * notebook.title. (`page_text` is *not* here — its payload is JSON in [data].)
+     */
     @ColumnInfo(name = "text") val text: String? = null,
     /** stroke colour (`#RRGGBB`/`#AARRGGBB`). */
     @ColumnInfo(name = "color") val color: String? = null,
@@ -114,6 +117,14 @@ data class NotebookObject(
      * ML-fail heading·text fallback) held as zlib(JSON) until it is normalized in a later phase.
      */
     @ColumnInfo(name = "blob", typeAffinity = ColumnInfo.BLOB) val blob: ByteArray? = null,
+
+    // ── v5 ─────────────────────────────────────────────────────────────────────
+    /**
+     * `document` → the page-state watermark its text was drafted from (`getMaxContentUpdatedAt` at
+     * seed/refresh time). NULL on every other type, and on a document authored by hand rather than
+     * drafted from the page. Drives the editor's "page has changed since this draft" line.
+     */
+    @ColumnInfo(name = "srcUpdatedAt") val srcUpdatedAt: Long? = null,
 )
 
 const val TYPE_STROKE       = "stroke"
@@ -125,3 +136,9 @@ const val TYPE_STICKY_NOTE  = "sticky_note"
 const val TYPE_SHAPE        = "shape"
 /** Cached, reading-order recognized text for one page. One row per page; parentId = pageId. */
 const val TYPE_PAGE_TEXT    = "page_text"
+/**
+ * The page's Markdown **document** — user-authored, seeded once from the page's recognized text and
+ * never overwritten by recognition again. One row per page; parentId = pageId. Distinct from
+ * [TYPE_PAGE_TEXT], which is a derived cache RTR rewrites freely. See docs/documents.md.
+ */
+const val TYPE_DOCUMENT     = "document"

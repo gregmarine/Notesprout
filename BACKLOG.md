@@ -16,20 +16,6 @@
 
 ---
 
-## Stroke-attribute fidelity through lasso move/copy (Paintsprout interop)
-
-Deferred from the 2026-07 stability review (`CODE_REVIEW_STABILITY.md` P2-2) — revisit when
-Paintsprout `.soil` interop approaches. The lasso drag deep-copy rebuilds strokes as
-`LiveStroke(id, points)` (`OnyxNotebookView.kt` ~1394, `GenericNotebookView.kt` ~401), dropping
-`color`/`strokeWidth`/`srcPoints`; the persist (`NotebookActivity` ~1882 and undo path) then writes
-defaults (`#000000`/3.0f) and replaces legacy JSON (per-point pressure/tilt) with a points-only
-blob — permanent, and `performLassoCopy` (~5148) strips the same into the clipboard. Invisible
-today because all in-app ink uses default attributes, but the first lasso-move of imported
-attributed ink silently and irreversibly flattens it. Fix shape: carry the attribute fields through
-the drag copy and the clipboard snapshot so the persisted row round-trips them.
-
----
-
 ## TEMP — legacy-`ts` + PNG→WEBP compaction (remove after all my devices are compacted)
 
 > Transitional single-user migration, **not** a permanent feature. New writes already omit the dead
@@ -247,6 +233,31 @@ Phases 0–2 built (see `docs/handwriting-recognition.md` § "TrOCR engine"). De
 
 ---
 
+## Columnarize the `events` `data` payload
+
+> Noticed while building the task manager (2026-07-25). The `tasks` table shipped **fully columnar** —
+> no `data` column at all — which leaves `events` as the only app-content table still carrying a JSON
+> payload in a schema that is otherwise JSON-free apart from the two deliberate singletons
+> (`clipboard` / `backup_config`).
+
+`docs/global-index-format.md` currently documents the `events` payload as a considered choice, and it
+was: the recurrence rule carries `exceptionDates`, a genuinely open-ended list, and every field added
+to it since v5 has landed with an empty default and **no migration**. That is real value.
+
+Whether to columnarize is therefore a judgement call, not an obvious cleanup:
+
+- **For** — one consistent story across the index; queryable recurrence (e.g. "every yearly event")
+  becomes possible; the `tasks` schema proves the shape works.
+- **Against** — `exceptionDates` still needs somewhere to live (a child-row table, mirroring the
+  `list_item` pattern), which is a second table for one field; and every future event field then costs
+  a migration where today it costs nothing.
+
+If it is done, it must touch live on-device event data, so it needs the same care as any
+`.soil`/index migration: additive DDL, format-agnostic reads, convert-on-write, sweep in the
+background. Not scheduled.
+
+---
+
 ## Link Objects — Phase 2
 
 > From the retired `LINK_OBJECTS_PLAN.md` (Phase 1 — page + notebook links — shipped in full).
@@ -460,3 +471,194 @@ git history if needed):
 7. Legacy PNGs are left untouched (copy, not move) — delete only if the user asks.
 
 `objects` columns: `id, type, name, parentId, createdAt, updatedAt, deletedAt, data`.
+
+---
+
+## Documents — deferred items
+
+Punted from the document-storage work (2026-07-29/30, `docs/documents.md`). The feature ships
+per-page and notebook-only; each item below is a deliberate omission, not an oversight.
+
+- **Notebook-level / multi-page documents.** Per-page storage composes into one later (text export
+  already concatenates pages) with no storage change.
+- **Documents on Scratch Pad / Calendar day pages.** Those pages live in the global index's
+  `scratchpad` / `calendar` tables, which would each need the `srcUpdatedAt` column added.
+- **Sticky-note text in the seed draft.** `PageTextRepository.loadPageContent` does not read sticky
+  contents; changing that belongs to recognition, not to documents.
+- **Editing a document from outside an open notebook** (Page Index, MainActivity). The editor writes
+  only through `NotebookActivity`'s connection, so the notebook is the only safe host today. A second
+  writing connection to a live `.soil` is the shape of this project's worst data-loss bugs.
+- **PDF / PNG export of a document.** Text formats only (MD/TXT prefer the document over recognized
+  text; the raster paths still render the page's ink).
+- **Lettered / roman-numeral ordered lists** (`a.`, `i.`). Decided against 2026-07-29: they exist only
+  in Pandoc's `fancy_lists` extension, not CommonMark or GFM, where they are paragraphs — and
+  consecutive lines get *joined*. Rendering them as lists in-app would send documents out as
+  run-together paragraphs everywhere else, which is the opposite of what a pre-export surface is for.
+  Revisit only if the export target becomes Pandoc; the change would be localized to
+  `MarkdownFormatter.listEnter` / `renumberOrderedLists` and the parser's ordered-item regex.
+- **A durable undo for "bring in page text".** In-session Ctrl+Z only (the refresh is applied through
+  the buffer, like a format-bar edit); beyond the session, the confirmation dialog is the guard.
+
+## Routines — an accidental last tick is irreversible
+
+> Found 2026-08-04 while testing the Today dashboard. **Working as designed** (see
+> `docs/tasks.md` → *Finished is final*); recorded because the dashboard makes it easier to trigger
+> without meaning to, not because the rule is wrong.
+
+Resolving a routine's **last open step** auto-completes the occurrence and rolls it forward. From that
+instant the occurrence is immutable: `TasksRepository.reopen` returns `ReopenOutcome.LOCKED` for the
+routine row and for every step inside it. So a mis-tap on the final step cannot be undone at all —
+there is no path back, from any screen.
+
+The rule itself is sound. Un-checking a step would leave a live step inside an occurrence that has
+already spawned its successor, which is a worse state than the one it fixes.
+
+**What the dashboard changes is the context around the tap.** `RoutineActivity` shows the routine, its
+deadline, and the other steps, so "this is the last one" is visible before you touch it. The dashboard
+deliberately shows steps *without* their routine row (no "4 of 5 done" progress line — see
+`docs/today-dashboard.md`), so the final step looks exactly like any other row, and the only signal
+that something irreversible happened is a toast **after** the fact.
+
+Options, none decided:
+
+- **Confirm on the last step only** — "This is the last step of *X*. Completing it finishes the
+  routine." Cheap and targeted, but it puts a dialog on the one screen whose whole point is calm, and
+  the confirm would fire on the legitimate path too (finishing a routine on purpose is the normal
+  case, not the exception).
+- **Make the rollover reversible** — the most principled, and there is precedent: `reopen` already
+  withdraws a *task's* machine-generated successor by hard-deleting it, guarded on `maxSeriesIndex`
+  so it refuses once the user has acted on later rows. The routine equivalent has to withdraw the
+  successor routine **and** the steps `rollForward` copied into it, and only while none of them has
+  been touched. Bigger, but it removes the sharp edge rather than papering over it.
+- **Warn in the row's meta line** — e.g. "Weekly reset · last step". Zero interaction cost, no dialog,
+  and it restores the context the dashboard removed. Weakest guarantee: it informs, it doesn't
+  protect.
+- **Accept as-is.** The behaviour is documented and consistent; a toast already names what happened.
+
+Whichever is chosen, `ReopenOutcome.LOCKED` stays as the backstop for the paths that genuinely cannot
+be reopened (a surface restore into an occurrence that completed while the user was away).
+
+## A long event title truncates where a long task title wraps
+
+> Found 2026-08-05 while testing the Today dashboard's Events section. **Pre-existing** — the same
+> truncation is in the day window today; the dashboard only puts the two row styles side by side,
+> where the inconsistency is obvious.
+
+`item_event.xml`'s `tvEventTitle` is `maxLines="1"`, so *"Call the bank about the mortgage renewal"*
+renders as *"Call the bank about the mortgage re…"*. `item_task.xml`'s `tvTaskTitle` is
+`maxLines="2"` and wraps. On the dashboard both sit in adjacent bands, so a truncated event reads as
+a different *class* of thing rather than a longer one.
+
+Events are the odd one out, not tasks: the event row spends 72dp on a leading time badge plus a
+divider before the title even starts, so it loses more width than any other row in the app — the one
+place a second line is most needed is the one place it is refused.
+
+- **Raise `tvEventTitle` to `maxLines="2"`.** One attribute, and it fixes the day window at the same
+  time — the layout is shared, which is the point. Safe for pagination: `TodaySection` measures each
+  cell rather than assuming a fixed row height, so a taller row simply takes more of the band and one
+  fewer row lands on the page.
+- **Give the dashboard its own event row.** Rejected on sight; `EventRowFormat` exists specifically so
+  these two surfaces cannot describe an event differently, and forking the layout re-opens that door
+  from the other side.
+
+Check the meta line at the same time. It is already `maxLines="2"`, but a multi-day recurring event
+(`Vacation · 4 Aug – 7 Aug · Every 2 weeks on Mon, Wed`) is the longest string the formatter can
+produce and has not been measured on P2P, the narrowest Tier-1 device.
+
+## Today dashboard — deferred by design
+
+> Decided during planning (2026-08-04) and carried out of the retired `TODAY_DASHBOARD_PLAN.md`. These
+> are choices, not omissions — see [`docs/today-dashboard.md`](docs/today-dashboard.md) → *What this
+> screen is not*.
+
+- **"Open on launch: Library / Today" preference** — the separable change that would make the
+  dashboard the home screen. Kept out of the feature deliberately: as a sibling surface reached from
+  the library, it leaves `BootstrapActivity`'s forwarding and the library's "implicit bottom of the
+  stack" invariant untouched, and `MainActivity.reset` still means what it always meant. A launch
+  preference has to answer what Back does from a dashboard that nothing launched, which is a question
+  worth its own thinking rather than a flag.
+- **No day-note or scratch-pad content preview.** Those stay jump buttons. Rendering a preview means
+  decoding a page bitmap on a focus view, and the dashboard already declined that for notebook covers.
+- **No weather, greeting, counts or streaks.** It is a focus view, not a metrics screen.
+
+## Today dashboard — every row is inflated, not just the visible page
+
+> Found 2026-08-05 in the Today dashboard's phase-6 review. Not observed biting; recorded because the
+> planning note claimed "pagination is what bounds the cost", and that is not quite true.
+
+`TodaySection.buildCells` inflates and measures a View for the **whole** result set before packing it
+into pages. Pagination bounds what is *attached*, not what is *built*. A user with 200 overdue tasks
+inflates 200 `item_task` rows on every refresh to display six of them, and `TaskDao.openDueBy` has no
+`LIMIT`.
+
+"Today" is small by construction for anyone keeping up, which is why this has not been felt — but a
+long-ignored overdue tail is exactly the state a dashboard is supposed to help with, so the cost
+arrives precisely when the screen is most needed.
+
+Options, cheapest first:
+
+- **`LIMIT` on `openDueBy`** with a "+N more" affordance into the Tasks screen. Honest and small, but
+  it needs a design decision about what the overflow row says.
+- **Build lazily per page.** `TodaySection` would keep the *data*, not the Views, and call `makeRow`
+  only for the page being shown. That breaks the current packer, which needs every cell measured up
+  front to know where pages break — so it means measuring a representative row and accepting
+  estimated breaks, losing the exact fit that took two bugs to get right.
+- **Cache the built rows across refreshes**, keyed on row identity. Helps the check-off path (already
+  narrowed to `refreshTasks()`), does nothing for the first paint.
+
+## Landscape — three findings, parked
+
+> Found 2026-08-05 during the Today dashboard's Tier-1 device pass (MAX, P2P, G6). **Portrait is the
+> target orientation on every device**, so none of this was fixed. Recorded with measurements so that
+> whenever landscape does matter, the diagnosis is already done.
+
+### 1. Horizontal window insets are dropped app-wide — controls hide under the nav bar
+
+The one with real consequences, and **not** a dashboard bug. In landscape the navigation bar moves to
+the *side* of the screen. Nothing applies the horizontal inset, so right-aligned chrome renders
+underneath it and cannot be tapped.
+
+Measured on P2P, dashboard in landscape:
+
+```
+navigationBarBackground   [1558,0][1648,824]
+"Scratch Pad" button      [1560,84][1639,163]   ← entirely beneath the nav bar
+Notebooks tab             ends x=1622           ← partly beneath it
+```
+
+`TopGuard.applyInsetPadding` passes the view's existing left/right padding straight through and only
+ever sets top and bottom from the insets:
+
+```kotlin
+v.setPadding(v.paddingLeft, bars.top, v.paddingRight, bottom)
+```
+
+**14 screens** call it, and `MainActivity` doesn't call it at all — it hand-rolls
+`setPadding(0, bars.top, 0, bars.bottom)`, with the same omission. So the library's own bottom bar
+(`btnMore` at the far right) is exposed too.
+
+The fix is two lines — `bars.left` / `bars.right` in both places — and it repairs all fifteen at once.
+Note that `applyInsetPadding` documents itself as *"preserves any horizontal padding already set"*, so
+check no caller is relying on that before overwriting it.
+
+### 2. The tabbed variant has almost no room in landscape
+
+P2P, landscape, Tasks: **one row per page, `1/19`**. The packer is doing the right thing — there is
+simply no room:
+
+```
+band 276px · "Overdue" header 40px · row 128px
+header + 1 row = 168 ✓      header + 2 rows = 296 ✗ (misses by 20px)
+```
+
+The chrome is what eats it: toolbar, tab row, section header, pager. The section header row
+(`Tasks  +`) is the only part that is pure duplication — on a tabbed device the tab row already names
+the section — so hiding it there and moving its `+` into the top toolbar would buy back exactly the
+row that is missing. That is also a small portrait win on the same devices.
+
+### 3. The single-screen split is tuned for portrait
+
+MAX in landscape gives roughly 40% of the height to the Notebooks band whether or not it has anything
+in it, leaving Tasks and Events 3 and 4 rows. A fix means content-dependent band weights or a
+`layout-land/` variant of the wide layout (which must carry an identical id set — see
+`docs/today-dashboard.md`). Portrait on MAX and both orientations on G102 are unaffected.

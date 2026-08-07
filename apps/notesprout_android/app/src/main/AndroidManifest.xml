@@ -90,6 +90,31 @@
             android:configChanges="orientation|keyboardHidden|screenSize|smallestScreenSize|screenLayout|density"
             android:windowSoftInputMode="stateHidden" />
 
+        <!--
+            Today — the dashboard: a focus view of the day and the jump point for the rest of the
+            app. No drawing surface, so it may recreate freely on rotation/resize; it simply
+            recomputes how many rows fit per page.
+        -->
+        <activity
+            android:name=".TodayActivity"
+            android:exported="false"
+            android:configChanges="orientation|keyboardHidden|screenSize|smallestScreenSize|screenLayout|density"
+            android:windowSoftInputMode="stateHidden" />
+
+        <!-- Tasks — the to-do surface, a sibling of the calendar and the scratch pad -->
+        <activity
+            android:name=".TasksActivity"
+            android:exported="false"
+            android:configChanges="orientation|keyboardHidden|screenSize|smallestScreenSize|screenLayout|density"
+            android:windowSoftInputMode="stateHidden" />
+
+        <!-- Routine — one routine occurrence and its steps, opened from the Tasks list -->
+        <activity
+            android:name=".RoutineActivity"
+            android:exported="false"
+            android:configChanges="orientation|keyboardHidden|screenSize|smallestScreenSize|screenLayout|density"
+            android:windowSoftInputMode="stateHidden" />
+
         <!-- Notebook screen — prevent recreation on rotation/resize so bitmap survives -->
         <activity
             android:name=".NotebookActivity"
@@ -110,6 +135,16 @@
             android:exported="false"
             android:configChanges="orientation|keyboardHidden|screenSize|smallestScreenSize|screenLayout|density"
             android:windowSoftInputMode="stateHidden" />
+
+        <!-- Markdown document editor — full-screen Markdown writing surface + rendered preview.
+             `keyboard` is in configChanges so pairing a physical keyboard does not recreate the
+             activity (an unsaved draft would go with it); the soft-keyboard decision is re-made in
+             onConfigurationChanged instead. Soft input is driven from code, hence stateUnchanged. -->
+        <activity
+            android:name=".DocumentEditorActivity"
+            android:exported="false"
+            android:configChanges="orientation|keyboard|keyboardHidden|screenSize|smallestScreenSize|screenLayout|density"
+            android:windowSoftInputMode="stateUnchanged|adjustResize" />
 
         <!-- Notebook picker — folder-browse list for cross-notebook page copy/move destination -->
         <activity

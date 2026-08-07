@@ -15,6 +15,76 @@
             android:name="com.notesprout.android.debug.CryptoSpikeActivity"
             android:exported="true"
             android:label="Crypto Spike" />
+        <!-- Colour Ink Spike: debug-only harness for colour ink on a Kaleido panel.
+             Phase-0 findings (NoteAir5C, 2026-07-31): the raw-drawing overlay DOES render colour;
+             a colour change needs no restartRawDrawing; the first-stroke fast-mode app-scope
+             (HAND_WRITING_REPAINT_MODE) does NOT suppress it; getColorType()=1 via SDMDevice.
+             13 of 14 probe colours rendered live — the sole failure, #1E7A34, sits below an
+             observed **brightness floor of ~180 in the dominant channel** (every survivor was
+             ≥184). Retained past Phase 0 as the palette-calibration tool: cycle Ink through the
+             probe set to re-measure that floor against real writing.
+             adb shell am start -n com.notesprout.android.dev/com.notesprout.android.debug.ColorInkSpikeActivity -->
+        <activity
+            android:name="com.notesprout.android.debug.ColorInkSpikeActivity"
+            android:exported="true"
+            android:label="Color Ink Spike" />
+        <!-- Pen Tool Spike: the on-device half of docs/onyx-pen-tools.md. Walks all 9 overlay
+             stroke styles (path A, firmware) against all 13 software renderers (path B, NeoPen),
+             and reports pressure/tilt actually observed per stroke.
+             Findings (NoteAir5C, 2026-08-01): ALL 9 overlay styles render and are visually
+             distinct — including DASH/CHARCOAL_V2/SQUARE_PEN, which sit past EpdController's own
+             constant list; no silent failures. setStrokeStyle needs no restartRawDrawing and
+             survives the HAND_WRITING_REPAINT_MODE fast-mode pin. Pressure is a real full-range
+             1..4095 channel (tilt too) already arriving on points production discards. All 13
+             software renderers work — libneopen_jni.so loads in a third-party app — and several
+             are FASTER than our polyline. Two traps: ResManager.init(context) is mandatory before
+             any bitmap-backed pen (pencil otherwise renders solid+grainless, then throws on
+             rebuild), and texture pens need large widths or their grain does not exist.
+             G102 (2026-08-02) confirms all 9 styles + all 13 renderers, no failures; note
+             getMaxTouchPressure differs per device (4095 NA5C vs 4096 G102) so never hardcode it.
+             Timings in the doc are single cold renders and warmup-dominated — not a benchmark.
+             G6 (2026-08-03) also confirms all 9 styles + all 13 renderers. Two further findings:
+             tilt is NOT on a common scale across devices (G6 reports ~100x larger than NA5C/G102,
+             no getMaxTilt to normalize against), and the one-call *Wrapper.drawStroke helpers
+             create+destroy a native pen per invocation, so they are fine one-off but pathological
+             in a page repaint — use a cached NeoPen in a NeoPenRender there.
+             MAX (2026-08-03) makes it 4/4 devices: every style and every renderer works on all of
+             NA5C/G102/G6/MAX. Only maxTouchPressure (4095 vs 4096) and tilt scale vary per device.
+             P2P (2026-08-03) completes the sweep: 5/5 devices, every style and every renderer, no
+             failure anywhere. P2P also shows colorType is NOT a boolean (it reports 1017, vs 0/1
+             elsewhere) and needs compact chrome at sw439dp.
+             adb shell am start -n com.notesprout.android.dev/com.notesprout.android.debug.PenToolSpikeActivity -->
+        <activity
+            android:name="com.notesprout.android.debug.PenToolSpikeActivity"
+            android:exported="true"
+            android:label="Pen Tool Spike" />
+        <!-- Today Seed: writes (and removes) dashboard test data — the shape a real library rarely
+             has on any one day: enough rows to paginate, routine steps that surface outside their
+             routine, a routine with one open step so ticking it rolls it forward, and rows resolved
+             today that should stay in place ticked.
+             Every row is titled "[TEST] …" and CLEAR removes exactly those, hard-deleted so no
+             tombstone is left inside a series. Writes through the app's own open index, never the
+             database file.
+
+             Actions, passed as a string extra "action": full | minimal | clear | open | probe | raw
+             ("raw" also takes a "target" extra: tasks | calendar | main | today).
+
+             "open" launches the dashboard, which is exported="false" and so unreachable from a shell
+             am start — this is the same UID, so the export check doesn't apply, and no production
+             manifest is weakened to make layout work possible.
+
+             "probe" and "raw" are the diagnostics behind the BACKLOG item "Surfaces crash when
+             Android rebuilds a task with the index closed" (found 2026-08-04). In a fresh process,
+             with the index never opened, ALL SEVEN repositories throw
+             (Tasks/Today/Events/Calendar/Scratchpad/DayHistory/Index), and raw+target=tasks
+             reproduces the crash in TasksActivity. Only BootstrapActivity ever opens the index, and
+             it finishes itself, so an OS task rebuild after a background kill re-runs nothing.
+             TodayActivity is guarded; the rest are not.
+             adb shell am start -n com.notesprout.android.dev/com.notesprout.android.debug.TodaySeedActivity -->
+        <activity
+            android:name="com.notesprout.android.debug.TodaySeedActivity"
+            android:exported="true"
+            android:label="Today Seed" />
         <!-- Reveals the global passphrase so the encrypted index stays sqlcipher-inspectable. Debug only.
              adb shell am start -n com.notesprout.android.dev/com.notesprout.android.debug.DebugKeyActivity -->
         <activity

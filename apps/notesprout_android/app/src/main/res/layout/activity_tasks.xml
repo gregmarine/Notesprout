@@ -1,0 +1,177 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Tasks — the "list of things I need to do" surface.
+
+    A sibling of the calendar and the scratch pad, and deliberately independent of both: nothing here
+    reads or writes calendar content. Unlike those screens this one keeps the system bars visible
+    (there is no canvas that wants to be full-bleed), so the top guard comes from the live inset via
+    TopGuard.applyInsetPadding rather than a fixed reservation.
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/tasksRoot"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@color/paperWhite">
+
+    <!-- Top border — the content area starts below the top guard band (see TopGuard), so it needs
+         its own 1dp rule to read as an edge rather than floating. -->
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="@color/inkBlack" />
+
+    <!-- Top toolbar -->
+    <LinearLayout
+        android:id="@+id/tasksToolbar"
+        android:layout_width="match_parent"
+        android:layout_height="56dp"
+        android:orientation="horizontal"
+        android:background="@color/paperWhite"
+        android:gravity="center_vertical"
+        android:paddingStart="4dp"
+        android:paddingEnd="4dp">
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnTasksBack"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:src="@drawable/ic_arrow_left"
+            android:contentDescription="Back" />
+
+        <View
+            android:layout_width="1dp"
+            android:layout_height="28dp"
+            android:background="@color/inkBlack"
+            android:layout_marginStart="4dp"
+            android:layout_marginEnd="4dp" />
+
+        <!--
+            View toggles, widening in scope left to right: what matters today → every open task,
+            including ones their reminder window is still hiding → the resolved history.
+
+            "All" exists because the reminder gate can otherwise put a task out of reach entirely:
+            a hidden task cannot be opened, edited, or deleted, and unlike an event it has no
+            calendar grid to be found on. This is that escape hatch.
+        -->
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/btnViewOpen"
+            style="@style/Widget.Notesprout.ToggleTextButton"
+            android:text="Today"
+            android:contentDescription="What matters today" />
+
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/btnViewAll"
+            style="@style/Widget.Notesprout.ToggleTextButton"
+            android:layout_marginStart="4dp"
+            android:text="All"
+            android:contentDescription="Every open task, including hidden ones" />
+
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/btnViewDone"
+            style="@style/Widget.Notesprout.ToggleTextButton"
+            android:layout_marginStart="4dp"
+            android:text="Done"
+            android:contentDescription="Completed and skipped tasks" />
+
+        <!-- Spacer — pushes the sibling-surface launchers to the trailing edge. -->
+        <View
+            android:layout_width="0dp"
+            android:layout_weight="1"
+            android:layout_height="1dp" />
+
+        <!--
+            Sibling-surface launchers, trailing. The day window carries the same pair in the same
+            order at the same end of its bar, so switching between the two screens is one tap in
+            either direction and the target is always in the same place.
+        -->
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnTasksCalendar"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:src="@drawable/ic_calendar"
+            android:contentDescription="Calendar" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnTasksScratchpad"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:layout_marginStart="4dp"
+            android:src="@drawable/ic_sketching"
+            android:contentDescription="Scratch Pad" />
+    </LinearLayout>
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="@color/inkBlack" />
+
+    <!-- Title bar: the screen's name and its one create action, mirroring the Events header. -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="56dp"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingStart="16dp"
+        android:paddingEnd="12dp">
+
+        <TextView
+            style="@style/TextAppearance.Notesprout.TitleLarge"
+            android:layout_width="0dp"
+            android:layout_weight="1"
+            android:layout_height="wrap_content"
+            android:text="Tasks" />
+
+        <!-- Two creates: a plain task, or a routine to collect several. -->
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnAddRoutine"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:layout_marginEnd="4dp"
+            android:src="@drawable/ic_routine"
+            android:contentDescription="New routine" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnAddTask"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:src="@drawable/ic_plus"
+            android:contentDescription="New task" />
+    </LinearLayout>
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="@color/inkBlack" />
+
+    <!-- List -->
+    <FrameLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1">
+
+        <ScrollView
+            android:id="@+id/tasksScroll"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:fillViewport="true"
+            android:scrollbars="none">
+
+            <LinearLayout
+                android:id="@+id/tasksList"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:paddingStart="16dp"
+                android:paddingEnd="16dp"
+                android:paddingTop="12dp"
+                android:paddingBottom="24dp" />
+        </ScrollView>
+
+        <TextView
+            android:id="@+id/tasksEmpty"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center"
+            android:textSize="15sp"
+            android:textColor="@color/inkLight"
+            android:visibility="gone"
+            android:text="Nothing to do" />
+    </FrameLayout>
+
+</LinearLayout>

@@ -21,6 +21,7 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.ViewTreeObserver
 import com.notesprout.android.core.ImageCodec
+import com.notesprout.android.core.InkColor
 import com.notesprout.android.core.Slog
 import com.notesprout.android.core.markdown.TextObjectRenderer
 import com.notesprout.android.data.HeadingStroke
@@ -34,6 +35,7 @@ import com.notesprout.android.data.StickyNoteRender
 import com.notesprout.android.data.translate
 import com.notesprout.android.data.LiveStroke
 import com.notesprout.android.data.TextRender
+import com.notesprout.android.data.deepCopy
 import com.onyx.android.sdk.api.device.epd.EpdController
 import com.onyx.android.sdk.api.device.epd.UpdateMode
 import com.onyx.android.sdk.data.note.TouchPoint
@@ -124,6 +126,11 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
     /** Template bitmap — drawn as the base layer behind all strokes. Null = white background. */
     private var templateBitmap: Bitmap? = null
 
+    /**
+     * Shared paint for every stroke draw. Its colour is **not** fixed — [drawStrokePath] sets it per
+     * stroke from that stroke's own stored ink. Anything drawing a stroke must go through that
+     * helper rather than using this paint as-is, or it will inherit whatever colour ran last.
+     */
     private val strokePaint = Paint().apply {
         isAntiAlias = true
         color = Color.BLACK
@@ -131,6 +138,35 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
         strokeCap = Paint.Cap.ROUND
         strokeJoin = Paint.Join.ROUND
         strokeWidth = 3f
+    }
+
+    /** Ink armed for new strokes — see [setPenColor]. Stored as hex; cached as an int for painting. */
+    private var penColorHex: String = InkColor.DEFAULT
+    private var penColorInt: Int = Color.BLACK
+
+    override fun setPenColor(hex: String) {
+        penColorHex = hex
+        penColorInt = InkColor.paintColor(hex)
+        // Only the view that owns the process-global pen pipeline may touch the SDK. Every drawing
+        // host listens for colour changes, so a *paused* notebook sitting under a sticky-note editor
+        // would otherwise reach into the session the editor is actively using. A non-owner just
+        // stores the value; openRawDrawing re-asserts it when this view reclaims the pipeline.
+        if (isSetup && penOwner === this) touchHelper.setStrokeColor(penColorInt)
+        Slog.d(TAG) { "setPenColor $hex isSetup=$isSetup owner=${penOwner === this}" }
+    }
+
+    /**
+     * Draw one stroke's polyline in **its own** stored ink. The single place stroke geometry becomes
+     * pixels, so the per-stroke colour can never be forgotten at a call site.
+     */
+    private fun drawStrokePath(canvas: Canvas, stroke: LiveStroke) {
+        val pts = stroke.points
+        if (pts.size < 2) return
+        val path = Path()
+        path.moveTo(pts[0].x, pts[0].y)
+        for (i in 1 until pts.size) path.lineTo(pts[i].x, pts[i].y)
+        strokePaint.color = InkColor.paintColor(stroke.color)
+        canvas.drawPath(path, strokePaint)
     }
 
     private val touchHelper: TouchHelper by lazy { TouchHelper.create(this, rawInputCallback) }
@@ -454,7 +490,7 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
         if (points.isNullOrEmpty()) return
         val strokeId = UUID.randomUUID().toString()
         val strokePoints = points.map { PointF(it.x, it.y) }
-        strokes.add(LiveStroke(strokeId, strokePoints))
+        strokes.add(LiveStroke(strokeId, strokePoints, color = penColorHex))
         // Accumulate for end-of-gesture scribble/shape detection.
         currentGesturePoints.addAll(strokePoints)
         currentGestureStrokeIds.add(strokeId)
@@ -616,13 +652,7 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
             textObj.text.isNotBlank() ->
                 TextObjectRenderer.draw(canvas, textObj, widthPx, textObjectPaint, resources.displayMetrics.density)
             !textObj.strokes.isNullOrEmpty() -> {
-                for (liveStroke in textObj.strokes) {
-                    val pts = liveStroke.points; if (pts.size < 2) continue
-                    val path = Path()
-                    path.moveTo(pts[0].x, pts[0].y)
-                    for (i in 1 until pts.size) path.lineTo(pts[i].x, pts[i].y)
-                    canvas.drawPath(path, strokePaint)
-                }
+                for (liveStroke in textObj.strokes) drawStrokePath(canvas, liveStroke)
             }
         }
     }
@@ -685,25 +715,13 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
             if (heading.recognizedText != null) {
                 drawHeadingText(canvas, heading)
             } else {
-                for (liveStroke in heading.strokes) {
-                    val pts = liveStroke.points; if (pts.size < 2) continue
-                    val path = Path()
-                    path.moveTo(pts[0].x, pts[0].y)
-                    for (i in 1 until pts.size) path.lineTo(pts[i].x, pts[i].y)
-                    canvas.drawPath(path, strokePaint)
-                }
+                for (liveStroke in heading.strokes) drawStrokePath(canvas, liveStroke)
             }
         }
         for (textObj in link.textObjects) drawTextObject(canvas, textObj, widthPx)
         for (lineObj in link.lines) drawLineObject(canvas, lineObj)
         for (shape in link.shapes) drawShapeObject(canvas, shape)
-        for (liveStroke in link.strokes) {
-            val pts = liveStroke.points; if (pts.size < 2) continue
-            val path = Path()
-            path.moveTo(pts[0].x, pts[0].y)
-            for (i in 1 until pts.size) path.lineTo(pts[i].x, pts[i].y)
-            canvas.drawPath(path, strokePaint)
-        }
+        for (liveStroke in link.strokes) drawStrokePath(canvas, liveStroke)
         val iconOutside = link.headings.isNotEmpty() || link.textObjects.isNotEmpty()
         drawLinkChrome(canvas, link.boundingBox, link.chrome, iconOutside)
     }
@@ -807,13 +825,7 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
             if (heading.recognizedText != null) {
                 drawHeadingText(canvas, heading)
             } else {
-                for (liveStroke in heading.strokes) {
-                    val pts = liveStroke.points; if (pts.size < 2) continue
-                    val path = Path()
-                    path.moveTo(pts[0].x, pts[0].y)
-                    for (i in 1 until pts.size) path.lineTo(pts[i].x, pts[i].y)
-                    canvas.drawPath(path, strokePaint)
-                }
+                for (liveStroke in heading.strokes) drawStrokePath(canvas, liveStroke)
             }
         }
         for (textObj in textObjects) {
@@ -831,16 +843,7 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
         for (note in stickyNotes) {
             drawStickyNoteObject(canvas, note)
         }
-        for (liveStroke in strokes) {
-            val points = liveStroke.points
-            if (points.size < 2) continue
-            val path = Path()
-            path.moveTo(points[0].x, points[0].y)
-            for (i in 1 until points.size) {
-                path.lineTo(points[i].x, points[i].y)
-            }
-            canvas.drawPath(path, strokePaint)
-        }
+        for (liveStroke in strokes) drawStrokePath(canvas, liveStroke)
     }
 
     // Minimum squared distance from point p to segment a→b.
@@ -896,12 +899,15 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
         // Merge all gesture points into one synthetic stroke for undo restoration.
         // None of the gesture strokes are persisted (onPenLifted never fires for them).
         val mergedStroke: com.notesprout.android.data.LiveStroke? = if (dwellCandidate) {
-            val strokeWidth = strokes.firstOrNull { it.id == gestureStrokeIds.firstOrNull() }?.strokeWidth
-                ?: com.notesprout.android.data.LiveStroke.DEFAULT_STROKE_WIDTH
+            val source = strokes.firstOrNull { it.id == gestureStrokeIds.firstOrNull() }
             com.notesprout.android.data.LiveStroke(
                 id     = gestureStrokeIds.firstOrNull() ?: UUID.randomUUID().toString(),
                 points = gesturePoints,
-                strokeWidth = strokeWidth,
+                // The gesture's own strokes were captured with the armed ink; the merge keeps it so
+                // an undo after a failed shape recognition restores the colour that was written.
+                color  = source?.color ?: penColorHex,
+                strokeWidth = source?.strokeWidth
+                    ?: com.notesprout.android.data.LiveStroke.DEFAULT_STROKE_WIDTH,
             )
         } else null
 
@@ -1393,11 +1399,11 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
                     // Deep-copy selected strokes/headings/textObjects — original positions before any drag.
                     dragOriginalStrokes = strokes
                         .filter { it.id in lassoSelectedIds }
-                        .map { LiveStroke(it.id, it.points.map { pt -> PointF(pt.x, pt.y) }) }
+                        .map { it.deepCopy() }
                     dragOriginalHeadings = headings
                         .filter { it.id in lassoSelectedIds }
                         .map { h -> HeadingStroke(h.id, android.graphics.RectF(h.boundingBox),
-                            h.strokes.map { s -> LiveStroke(s.id, s.points.map { PointF(it.x, it.y) }) },
+                            h.strokes.map { s -> s.deepCopy() },
                             recognizedText = h.recognizedText,
                             level = h.level) }
                     dragOriginalTextObjects = textObjects
@@ -1660,13 +1666,7 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
                 if (heading.recognizedText != null) {
                     drawHeadingText(canvas, heading)
                 } else {
-                    for (stroke in heading.strokes) {
-                        val pts = stroke.points; if (pts.size < 2) continue
-                        val path = Path()
-                        path.moveTo(pts[0].x, pts[0].y)
-                        for (i in 1 until pts.size) path.lineTo(pts[i].x, pts[i].y)
-                        canvas.drawPath(path, strokePaint)
-                    }
+                    for (stroke in heading.strokes) drawStrokePath(canvas, stroke)
                 }
             }
             for (textObj in dragOriginalTextObjects) {
@@ -1684,13 +1684,7 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
             for (note in dragOriginalStickyNotes) {
                 drawStickyNoteObject(canvas, note)
             }
-            for (stroke in dragOriginalStrokes) {
-                val pts = stroke.points; if (pts.size < 2) continue
-                val path = Path()
-                path.moveTo(pts[0].x, pts[0].y)
-                for (i in 1 until pts.size) path.lineTo(pts[i].x, pts[i].y)
-                canvas.drawPath(path, strokePaint)
-            }
+            for (stroke in dragOriginalStrokes) drawStrokePath(canvas, stroke)
             canvas.restoreToCount(save)
             lassoSelectionBox?.let { box ->
                 canvas.drawRect(
@@ -2403,13 +2397,7 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
             if (heading.recognizedText != null) {
                 drawHeadingText(canvas, heading)
             } else {
-                for (liveStroke in heading.strokes) {
-                    val pts = liveStroke.points; if (pts.size < 2) continue
-                    val path = android.graphics.Path()
-                    path.moveTo(pts[0].x, pts[0].y)
-                    for (i in 1 until pts.size) path.lineTo(pts[i].x, pts[i].y)
-                    canvas.drawPath(path, strokePaint)
-                }
+                for (liveStroke in heading.strokes) drawStrokePath(canvas, liveStroke)
             }
         }
         for (textObj in effectiveTextObjects) {
@@ -2427,14 +2415,7 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
         for (note in effectiveStickyNotes) {
             drawStickyNoteObject(canvas, note)
         }
-        for (liveStroke in strokes) {
-            val pts = liveStroke.points
-            if (pts.size < 2) continue
-            val path = android.graphics.Path()
-            path.moveTo(pts[0].x, pts[0].y)
-            for (i in 1 until pts.size) path.lineTo(pts[i].x, pts[i].y)
-            canvas.drawPath(path, strokePaint)
-        }
+        for (liveStroke in strokes) drawStrokePath(canvas, liveStroke)
         epd { "BUILD_RENDER_BITMAP_END elapsed=${System.currentTimeMillis() - buildStart}ms strokeCount=${strokes.size}" }
         return bmp
     }
@@ -2510,14 +2491,7 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
             if (heading.recognizedText != null) {
                 drawHeadingText(snapshotCanvas, heading)
             } else {
-                for (liveStroke in heading.strokes) {
-                    val points = liveStroke.points
-                    if (points.size < 2) continue
-                    val path = Path()
-                    path.moveTo(points[0].x, points[0].y)
-                    for (i in 1 until points.size) path.lineTo(points[i].x, points[i].y)
-                    snapshotCanvas.drawPath(path, strokePaint)
-                }
+                for (liveStroke in heading.strokes) drawStrokePath(snapshotCanvas, liveStroke)
             }
         }
         for (textObj in textObjects) {
@@ -2532,14 +2506,7 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
         for (note in stickyNotes) {
             drawStickyNoteObject(snapshotCanvas, note)
         }
-        for (liveStroke in strokes) {
-            val points = liveStroke.points
-            if (points.size < 2) continue
-            val path = Path()
-            path.moveTo(points[0].x, points[0].y)
-            for (i in 1 until points.size) path.lineTo(points[i].x, points[i].y)
-            snapshotCanvas.drawPath(path, strokePaint)
-        }
+        for (liveStroke in strokes) drawStrokePath(snapshotCanvas, liveStroke)
         val b64 = ImageCodec.encodeBase64(bmp)
         bmp.recycle()
         return b64
@@ -2595,13 +2562,16 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
             applyLimitRect()
             touchHelper
                 .setStrokeWidth(3.0f)
-                .setStrokeColor(Color.BLACK)
+                .setStrokeColor(penColorInt)
                 .openRawDrawing()
             epd { "OPEN_RAW_DRAWING_SDK_CALL done" }
             isSetup = true
         } else {
             applyLimitRect()
             touchHelper.restartRawDrawing()
+            // Re-assert the ink: the panel does not reliably default to it across a restart (the
+            // same reason init has always had to set it explicitly — see the NoteAir5C note).
+            touchHelper.setStrokeColor(penColorInt)
             epd { "RESTART_RAW_DRAWING caller=openRawDrawing_alreadySetup" }
         }
         // This view now owns the single process-global raw-drawing pipeline (see [penOwner]).

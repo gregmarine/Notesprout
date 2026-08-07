@@ -8,7 +8,7 @@
 - `notebook/NotebookView.kt` — interface for both engines; all drawing, lasso, heading, render ops
 - `notebook/OnyxNotebookView.kt` — BOOX: TouchHelper, RawInputCallback. `onPenLifted` fires on `onEndRawDrawing`. `onBeginRawDrawing` re-enables render guarded by `!isEraserMode`.
 - `notebook/GenericNotebookView.kt` — standard Canvas: two-layer Bitmap, stylus-only (`TOOL_TYPE_STYLUS` + `TOOL_TYPE_ERASER`), historical point capture. `onPenLifted` fires on `ACTION_UP`.
-- `NotebookActivity.kt` — fullscreen immersive, multi-page state, incremental save via `insertOrIgnore`. One-finger deliberate swipe for page navigation (three guards: distance ≥50% screen width, velocity ≥1.5× fling threshold, horizontal dominance). Two-finger swipe left/right inserts a page after/before current and navigates to it (same guards). Two-finger stationary double-tap = undo; three-finger stationary double-tap = redo. On BOOX the Onyx SDK intercepts 3-finger touches and sends `ACTION_CANCEL` before `ACTION_UP` — the 3-finger detector treats a cancel on an armed, stationary 3-finger gesture as tap completion. All of these detectors sit behind the pen-activity gate (see below) so a resting palm can't drive them.
+- `NotebookActivity.kt` — fullscreen immersive, multi-page state, incremental save via `insertOrIgnore`. One-finger deliberate swipe for page navigation (three guards: distance ≥50% screen width, velocity ≥1.5× fling threshold, horizontal dominance). Two-finger swipe left/right inserts a page after/before current and navigates to it (same guards). Two-finger swipe **down** opens the [Today dashboard](today-dashboard.md#the-two-finger-swipe-down) — a shared detector (`core/TwoFingerSwipeDown.kt`), not a per-screen port, and vertical-dominant where the insert swipe is horizontal-dominant, so the two can never both fire. Two-finger stationary double-tap = undo; three-finger stationary double-tap = redo. On BOOX the Onyx SDK intercepts 3-finger touches and sends `ACTION_CANCEL` before `ACTION_UP` — the 3-finger detector treats a cancel on an armed, stationary 3-finger gesture as tap completion. All of these detectors sit behind the pen-activity gate (see below) so a resting palm can't drive them.
 - `MainActivity.kt` — notebook list, adaptive grid (3/2 cols at 480dp), pagination, empty state, bottom bar.
 
 ## Key Build Facts
@@ -89,10 +89,10 @@ finger branch in `dispatchTouchEvent` and, on the first suppressed event, latche
 
 | Screen | Gated detectors |
 |---|---|
-| `NotebookActivity` | page swipe, link/sticky follow, toolbar toggle, multi-finger undo/redo |
+| `NotebookActivity` | page swipe, two-finger swipe down → Today, link/sticky follow, toolbar toggle, multi-finger undo/redo |
 | `ScratchpadActivity` | page swipe, sticky tap, multi-finger undo/redo |
-| `CalendarActivity` | nav swipe + day tap, sticky tap, multi-finger undo/redo |
-| `DayDetailActivity` | sticky tap, multi-finger undo/redo (NOTE view only) |
+| `CalendarActivity` | nav swipe + day tap, two-finger swipe down → Today, sticky tap, multi-finger undo/redo |
+| `DayDetailActivity` | sticky tap, multi-finger undo/redo (NOTE view only); two-finger swipe down → Today (**all four views** — it gates on the pen itself rather than riding the NOTE branch's gate, and consumes nothing) |
 | `StickyNoteEditorActivity` | multi-finger undo/redo |
 
 **Two rules when touching this code:**

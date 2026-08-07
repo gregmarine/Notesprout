@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Add / edit a routine. Deliberately small: a routine is a name and a rhythm, and its steps are
+    added on its own screen rather than here.
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:padding="16dp">
+
+    <TextView
+        style="@style/TextAppearance.Notesprout.TitleMedium"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Routine" />
+
+    <androidx.appcompat.widget.AppCompatEditText
+        android:id="@+id/etRoutineTitle"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="4dp"
+        android:background="@drawable/shape_bordered"
+        android:padding="10dp"
+        android:inputType="textCapSentences"
+        android:maxLines="2"
+        android:textColor="@color/inkBlack"
+        android:textColorHint="@color/inkLight"
+        android:hint="e.g. Weekly reset" />
+
+    <TextView
+        style="@style/TextAppearance.Notesprout.TitleMedium"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:text="Repeats" />
+
+    <androidx.appcompat.widget.AppCompatSpinner
+        android:id="@+id/spRoutineFreq"
+        android:layout_width="match_parent"
+        android:layout_height="48dp"
+        android:layout_marginTop="4dp"
+        android:background="@drawable/shape_bordered" />
+
+    <!--
+        The due date follows from the frequency, so it is shown rather than chosen. Saying it out
+        loud here is the only place the user learns that a weekly routine is due its Saturday.
+    -->
+    <TextView
+        android:id="@+id/tvRoutineDue"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:textSize="12sp"
+        android:textColor="@color/inkLight"
+        android:text="" />
+
+</LinearLayout>

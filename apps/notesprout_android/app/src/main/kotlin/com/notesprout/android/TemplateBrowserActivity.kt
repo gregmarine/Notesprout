@@ -34,6 +34,7 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.lifecycleScope
 import com.notesprout.android.core.BitmapDecode
 import com.notesprout.android.core.ImageCodec
+import com.notesprout.android.core.IndexGuard
 import com.notesprout.android.core.Slog
 import com.notesprout.android.data.index.IndexRepository
 import com.notesprout.android.data.index.NotesproutIndex
@@ -263,6 +264,9 @@ class TemplateBrowserActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Nothing has opened the index if Android rebuilt this task itself — see IndexGuard.
+        if (!IndexGuard.ready(this)) return
+        if (bounceIfIndexNotReady()) return
         binding = ActivityTemplateBrowserBinding.inflate(layoutInflater)
         setContentView(binding.root)
 

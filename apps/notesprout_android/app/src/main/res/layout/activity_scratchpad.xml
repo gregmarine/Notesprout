@@ -188,7 +188,7 @@
             <androidx.appcompat.widget.AppCompatImageButton
                 android:id="@+id/btnScratchPen"
                 style="@style/Widget.Notesprout.ToolbarButton"
-                android:src="@drawable/ic_pen"
+                android:src="@drawable/ic_pen_filled"
                 android:contentDescription="Pen" />
 
             <androidx.appcompat.widget.AppCompatImageButton
@@ -256,5 +256,11 @@
         </LinearLayout>
 
     </LinearLayout>
+
+    <!-- Pen colour panel — anchored to the pen button. Positioned programmatically by
+         PenColorPanelController; must live in a FrameLayout so it can overhang. -->
+    <include
+        android:id="@+id/penColorPanel"
+        layout="@layout/panel_pen_color" />
 
 </FrameLayout>

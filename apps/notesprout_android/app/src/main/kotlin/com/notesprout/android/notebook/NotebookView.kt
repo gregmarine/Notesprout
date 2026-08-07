@@ -79,6 +79,19 @@ interface NotebookView {
     fun releaseResources()
 
     /**
+     * Set the ink colour, as `#RRGGBB`, that **new** strokes are drawn and stored with. Already
+     * committed strokes keep whatever colour they were captured with — this only arms the pen.
+     *
+     * Engines apply it in two places: the live overlay (so the ink is coloured while the stylus is
+     * moving) and the [LiveStroke] built at commit (so it persists). On Onyx no session restart is
+     * needed — the Phase-0 spike proved `setStrokeColor` takes effect mid-session, and that the
+     * pinned handwriting fast-mode does not suppress colour.
+     *
+     * Hosts push the value from `PenColorPreferences` on open and on every colour change.
+     */
+    fun setPenColor(hex: String) {}
+
+    /**
      * Set the template bitmap to render as the page background, behind all stroke layers.
      * Pass null for a plain white background (no template).
      * The template is NOT erased by the eraser and is NOT saved as strokes.

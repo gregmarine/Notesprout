@@ -70,7 +70,7 @@
         <androidx.appcompat.widget.AppCompatImageButton
             android:id="@+id/btnPen"
             style="@style/Widget.Notesprout.ToolbarButton"
-            android:src="@drawable/ic_pen"
+            android:src="@drawable/ic_pen_filled"
             android:contentDescription="Pen tool" />
 
         <!-- Eraser tool -->
@@ -166,6 +166,22 @@
             android:layout_marginStart="4dp"
             android:src="@drawable/ic_sketching"
             android:contentDescription="Scratch Pad" />
+
+        <!-- Tasks launcher -->
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnTasks"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:layout_marginStart="4dp"
+            android:src="@drawable/ic_tasks"
+            android:contentDescription="Tasks" />
+
+        <!-- Document editor launcher -->
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnDocument"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:layout_marginStart="4dp"
+            android:src="@drawable/ic_file_text"
+            android:contentDescription="Document" />
 
         <!-- Overflow group divider — visible only when overflow button is shown -->
         <View
@@ -570,6 +586,13 @@
             android:contentDescription="Insert Arrow" />
 
     </LinearLayout>
+
+    <!-- Pen colour panel — anchored to btnPen wherever the toolbar places it.
+         Opens only when the pen is already the active tool and its button is tapped again.
+         Positioned programmatically by PenColorPanelController. -->
+    <include
+        android:id="@+id/penColorPanel"
+        layout="@layout/panel_pen_color" />
 
     <!-- Opening overlay — shown only while an encrypted notebook is unlocking + loading the first
          page. Intercepts all touches while visible. Never shown for plaintext notebooks. -->

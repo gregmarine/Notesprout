@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    One notebook row on the Today dashboard: icon · name over folder + activity · trailing time.
+
+    Modelled on item_task.xml so the three dashboard sections read as one family. The leading slot is
+    an ImageView, not a button: unlike the task row's state box there is nothing to tap here but the
+    row itself, which opens the notebook.
+
+    No cover thumbnail, deliberately. This is a jump list, not the library — a name and its folder
+    identify a notebook faster than a 44dp corner of its first page, and decoding a snapshot per row
+    on every refresh (which the dashboard does whenever a task is ticked) is real work for no
+    information.
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/notebookRow"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:layout_marginBottom="8dp"
+    android:orientation="horizontal"
+    android:gravity="center_vertical"
+    android:background="@drawable/shape_bordered"
+    android:padding="12dp">
+
+    <!-- Notebook, or a lock for NOTEBOOK-scope encryption: opening one asks for a passphrase, and
+         that is worth knowing before the tap rather than after it. -->
+    <androidx.appcompat.widget.AppCompatImageView
+        android:id="@+id/ivNotebookIcon"
+        android:layout_width="44dp"
+        android:layout_height="44dp"
+        android:padding="10dp"
+        android:scaleType="fitCenter"
+        android:src="@drawable/ic_notebook"
+        android:contentDescription="Notebook" />
+
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_weight="1"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="10dp"
+        android:orientation="vertical">
+
+        <TextView
+            android:id="@+id/tvNotebookName"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textSize="16sp"
+            android:textStyle="bold"
+            android:textColor="@color/inkBlack"
+            android:maxLines="2"
+            android:ellipsize="end"
+            android:text="Name" />
+
+        <TextView
+            android:id="@+id/tvNotebookMeta"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:textSize="12sp"
+            android:textColor="@color/inkLight"
+            android:maxLines="2"
+            android:ellipsize="end"
+            android:text="Meta" />
+    </LinearLayout>
+
+    <!-- Clock time for a Today row, a relative day for a Recent one. -->
+    <TextView
+        android:id="@+id/tvNotebookTime"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="10dp"
+        android:gravity="end"
+        android:textSize="13sp"
+        android:textColor="@color/inkBlack"
+        android:maxLines="1"
+        android:ellipsize="end"
+        android:text="" />
+
+</LinearLayout>
