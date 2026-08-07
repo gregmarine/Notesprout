@@ -101,8 +101,8 @@ Consequences that matter:
   exception, no return value, no log** — just the previous style, or nothing.
 - `BaseDevice` is a no-op, so on any non-Onyx device the whole call silently disappears.
 - **Therefore per-device capability has to be established empirically.** There is no
-  `isStrokeStyleSupported()` anywhere in the SDK. (Tier-1 devices — G102, G6, MAX, P2P — would each
-  need a visual check.)
+  `isStrokeStyleSupported()` anywhere in the SDK. (Tier-1 devices — G102, G6, MAX, P2P, NA5C — would
+  each need a visual check.)
 
 ### Width and colour routing
 
@@ -901,8 +901,9 @@ that is a separate question from this flooding.
 - **Timings need a real benchmark.** See the warning above: every figure recorded here is a single
   cold render, and warmup dominates. Nothing about relative solver cost should be planned against
   until someone runs repeated passes.
-- **All Tier-1 devices are now swept** (plus NA5C, Tier 2). Nothing failed anywhere. Remaining gaps
-  are the non-BOOX targets (Wacom Movink, Supernote) which do not use this SDK at all.
+- **All five Tier-1 devices are now swept**, NA5C included (it was Tier 2 when the sweep ran).
+  Nothing failed anywhere. Remaining gaps are the non-BOOX targets (Wacom Movink, Supernote) which do
+  not use this SDK at all.
 - **Tilt needs per-device characterization** before any tilt-driven feature — see the G6 numbers.
 - **Full-page cost is unmeasured.** Single strokes were timed; a page of thousands of strokes
   repainting through the stamp pens was not. Our render model (committed-content `RenderNode` +
@@ -914,7 +915,7 @@ that is a separate question from this flooding.
 
 `app/src/debug/kotlin/com/notesprout/android/debug/PenToolSpikeActivity.kt` — debug source set, never
 ships. Retained past its go/no-go, as the colour spike was, because it is the tool for re-running the
-style sweep on each remaining Tier-1 device.
+style sweep on any device the sweep has not covered.
 
 ```
 adb shell am start -n com.notesprout.android.dev/com.notesprout.android.debug.PenToolSpikeActivity

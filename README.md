@@ -31,7 +31,7 @@ Notesprout is an open source, handwriting-first notes app built for people who p
 - BOOX Tab XC (extra large-format color e-ink)
 - BOOX Go Color 7 Gen II (compact color e-ink)
 - Wacom Movink Pad 11 (Android art tablet)
-- Wacam Movink Pad 14 Pro (Android art tablet)
+- Wacom Movink Pad 14 Pro (Android art tablet)
 
 **Future**
 - Desktop / Web

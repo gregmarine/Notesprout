@@ -172,7 +172,7 @@ fires `onBeginRawErasing` instead.
 
 ## 11. Phase 6 — Device validation, then flag removal
 
-Validate on **all Tier-1 devices plus NA5C** (`.claude/skills/device-build-install`), because
+Validate on **all Tier-1 devices** (`.claude/skills/device-build-install`), because
 `setStrokeStyle` failures are silent and firmware-dependent:
 
 | Check | G102 | G6 | MAX | P2P | NA5C |
