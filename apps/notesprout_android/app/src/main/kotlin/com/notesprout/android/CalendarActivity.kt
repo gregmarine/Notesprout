@@ -38,6 +38,7 @@ import androidx.lifecycle.lifecycleScope
 import com.notesprout.android.core.ImageCodec
 import com.notesprout.android.core.IndexGuard
 import com.notesprout.android.core.TopGuard
+import com.notesprout.android.core.TwoFingerSwipeDown
 import com.notesprout.android.core.isBooxDevice
 import com.notesprout.android.crypto.KeyResolver
 import com.notesprout.android.crypto.KeySession
@@ -234,6 +235,12 @@ class CalendarActivity : AppCompatActivity() {
     private var calMoved = false
     private var calMultiTouch = false
     private var calVelocityTracker: VelocityTracker? = null
+
+    /**
+     * Two-finger downward swipe → the Today dashboard. One detector for Month, Week and Day: it
+     * sits above the canvas, not in the template, so the shortcut means the same thing in all three.
+     */
+    private val todaySwipe by lazy { TwoFingerSwipeDown(this) { TodayActivity.launch(this) } }
 
     // Single-finger double-tap on a day cell (Month/Week) → open that day's full-page canvas.
     private var lastDayTapDate: LocalDate? = null
@@ -1945,6 +1952,10 @@ class CalendarActivity : AppCompatActivity() {
             if (!inMenu && !inPenPanel && handleStickyNoteTapGesture(event)) return true
             if (!inToolbar && !inFloating && !inMenu && !inPenPanel) {
                 handleMultiFingerDoubleTap(event)
+                // Not consumed, as on the notebook: the gesture is two-fingered, so the nav-swipe /
+                // day-tap detector below has already written itself off (calMultiTouch) and will do
+                // nothing with the rest of the sequence.
+                todaySwipe.onTouchEvent(event)
                 if (handleCalendarFingerGesture(event)) return true
             }
         }
@@ -2086,6 +2097,9 @@ class CalendarActivity : AppCompatActivity() {
         calLongPressFired = false
         calVelocityTracker?.recycle()
         calVelocityTracker = null
+
+        // Two-finger swipe down → Today.
+        todaySwipe.cancel()
 
         stickyNoteTapCandidate = null
         stickyNoteTapMoved = true

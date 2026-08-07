@@ -5,6 +5,7 @@ import android.content.Intent
 import android.graphics.Typeface
 import android.os.Bundle
 import android.view.LayoutInflater
+import android.view.MotionEvent
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
@@ -15,6 +16,7 @@ import androidx.core.view.isVisible
 import androidx.lifecycle.lifecycleScope
 import com.notesprout.android.core.IndexGuard
 import com.notesprout.android.core.TopGuard
+import com.notesprout.android.core.TwoFingerSwipeDown
 import com.notesprout.android.data.ReopenOutcome
 import com.notesprout.android.data.TaskSection
 import com.notesprout.android.data.TasksRepository
@@ -72,6 +74,21 @@ class RoutineActivity : AppCompatActivity() {
     private var surfaceToken: String = ""
 
     private val dueFmt = DateTimeFormatter.ofPattern("EEE d MMM", Locale.getDefault())
+
+    /**
+     * Two-finger downward swipe → the Today dashboard, exactly as on the task list this screen is
+     * opened from. A shortcut that stopped working one tap deeper would read as broken.
+     *
+     * Available on a **finished** occurrence too: [readOnly] withdraws what would edit the routine,
+     * and leaving for another screen is not that.
+     */
+    private val todaySwipe by lazy { TwoFingerSwipeDown(this) { TodayActivity.launch(this) } }
+
+    /** Feed the Today shortcut, then hand every event on — see [TasksActivity.dispatchTouchEvent]. */
+    override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+        todaySwipe.onTouchEvent(event)
+        return super.dispatchTouchEvent(event)
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)

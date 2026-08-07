@@ -302,6 +302,14 @@ is measured back from a due date, so an undated task cannot carry one.
 | Tap the state box | mark **Done** (+ generate the successor) | **un-complete** back to Not done |
 | Tap the row | open the editor | open the editor |
 | Long-press the row | `ActionSheetDialog`: Edit · **Skip** · Delete | Edit · **Mark not done** · Delete |
+| **Two-finger swipe down** (anywhere) | the [Today dashboard](today-dashboard.md#the-two-finger-swipe-down) | — |
+
+The swipe is the shared `core/TwoFingerSwipeDown.kt`, fed from a `dispatchTouchEvent` override — with
+no pen gate and no tool-type filter, unlike the drawing hosts: there is no canvas here to protect a
+stroke on. Nothing is consumed, so the list may scroll a little under the gesture; taking the sequence
+from it would throw away Android's per-pointer split dispatch with it. `RoutineActivity` carries the
+same override, including on a **finished** (read-only) occurrence — leaving for another screen is not
+one of the edits `readOnly` withdraws.
 
 Skip lives in the long-press menu rather than on the row: it is the rarer of the two choices, and a
 second always-visible control on every row would clutter a list whose whole point is calm. Its glyph

@@ -8,6 +8,7 @@ import android.graphics.Typeface
 import android.os.Bundle
 import android.view.Gravity
 import android.view.LayoutInflater
+import android.view.MotionEvent
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
@@ -17,6 +18,7 @@ import androidx.core.view.isVisible
 import androidx.lifecycle.lifecycleScope
 import com.notesprout.android.core.IndexGuard
 import com.notesprout.android.core.TopGuard
+import com.notesprout.android.core.TwoFingerSwipeDown
 import com.notesprout.android.data.ReopenOutcome
 import com.notesprout.android.data.ResolvedPage
 import com.notesprout.android.data.RoutineProgress
@@ -81,6 +83,26 @@ class TasksActivity : AppCompatActivity() {
 
     private val dueFmt = DateTimeFormatter.ofPattern("EEE d MMM", Locale.getDefault())
     private val groupFmt = DateTimeFormatter.ofPattern("EEE d MMM yyyy", Locale.getDefault())
+
+    /**
+     * Two-finger downward swipe → the Today dashboard, as on the notebook, the calendar and the day
+     * window. This screen and the dashboard are the two list surfaces a day is planned from, so the
+     * shortcut earns its place here as much as anywhere.
+     */
+    private val todaySwipe by lazy { TwoFingerSwipeDown(this) { TodayActivity.launch(this) } }
+
+    /**
+     * Feed the Today shortcut, then hand every event straight on.
+     *
+     * No pen gate and no tool-type filter, unlike the drawing hosts: there is no canvas here to
+     * protect a stroke on, and needing two pointers already makes the gesture deliberate. Nothing is
+     * consumed either — the task list scrolls, and a swipe that took the sequence from it would eat
+     * ordinary taps whenever a second finger was resting on the glass (see [TwoFingerSwipeDown]).
+     */
+    override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+        todaySwipe.onTouchEvent(event)
+        return super.dispatchTouchEvent(event)
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)

@@ -74,9 +74,93 @@ full-bleed. See [`design-system.md`](design-system.md).
   the bar is already at 428dp of P2P's 439dp, and a fourth surface button would overlap the centred
   pagination. Adding Today is what moved Tasks off the bar in **all three** variants — see
   [`mainactivity-and-recents.md`](mainactivity-and-recents.md).
+- **Two-finger swipe down** (`core/TwoFingerSwipeDown.kt`) — the shortcut, on the notebook, all three
+  calendar views, all four views of the day window, and both task screens. A jump point reachable only from the library
+  is not much of a jump point; this is the way back to it from wherever the user is. The dashboard is
+  **pushed**, not brought forward: Back returns to the page or the day that was open, and the
+  `SurfaceStack` records it above them, so a cold launch reopens the whole chain. See
+  [the gesture](#the-two-finger-swipe-down) below.
 - **Launch restore.** `AppSurface.TODAY` on the `SurfaceStack`, so a cold launch reopens the dashboard
   along with whatever was above it. The entry carries **no payload** — the screen reads everything
   from "now" on every resume, so a restored instance is indistinguishable from the original.
+
+### The two-finger swipe down
+
+`core/TwoFingerSwipeDown.kt` — a self-contained detector each screen feeds finger events to, plus a
+`cancel()` its `cancelFingerGestures()` calls. It is the one gesture in the app that is **shared
+rather than ported**: it means the same thing everywhere, and the copies of the multi-finger
+double-tap on five screens are the argument for not making a sixth set.
+
+**The gates** mirror `NotebookActivity.evaluateSwipeDownToc` — the one-finger down-swipe that opens
+the table of contents — so the two feel like siblings. The centroid of the two fingers must travel
+downward, be vertical-dominant, cover ≥ 30% of screen *height*, and either carry velocity ≥
+`scaledMinimumFlingVelocity` or reach ≥ 50% of height. Direction comes from displacement, never from
+velocity, which flips sign as a finger decelerates at lift-off.
+
+- **Why two fingers, and vertical.** One finger down already opens the ToC, and two fingers sideways
+  already inserts a page. Vertical *and* two-fingered is the free corner of the notebook's existing
+  vocabulary; nothing had to be given up to make room. The insert swipe demands horizontal dominance
+  and this one vertical, so the two can never both fire on one gesture — which is why the notebook
+  runs this detector alongside its own two-finger tracker instead of inside it.
+- **Armed on the second finger down, fired on the first finger up** (`ACTION_POINTER_UP`, where both
+  pointers are still reported so the end centroid is measured exactly as the start one was). A third
+  finger landing on a swipe that *already* qualifies commits it before disarming — the same
+  early-commit the page-insert swipe makes, so a palm joining late can't swallow a real gesture.
+- **Behind the pen-activity gate** on every host, like every other finger detector: a palm rolling
+  across the glass mid-word is not a gesture. See [`drawing-engine.md`](drawing-engine.md).
+- **Where the gesture runs among the other detectors.** Last. A two-finger stationary double-tap is
+  the undo gesture and arms this detector too; anything that took the sequence before
+  `handleMultiFingerDoubleTap` saw it would cost undo.
+- **The task screens have neither a pen gate nor a tool-type filter.** There is no canvas to protect a
+  stroke on, and needing two pointers already makes the gesture deliberate, so `TasksActivity` and
+  `RoutineActivity` each override `dispatchTouchEvent` to feed the detector everything and pass it
+  straight on. A **finished** routine is read-only but still swipes: `readOnly` withdraws what would
+  edit the occurrence, and leaving for another screen is not that.
+- **Not on the scratch pad or the sticky-note editor**, by decision rather than omission: both are
+  focus surfaces — one thing, briefly, then out — and a jump to another screen has no place in them.
+
+#### No host consumes — and why the day window tried to
+
+Every host returns the event to normal dispatch. On the notebook and the calendar there was never a
+reason not to: their content cannot scroll, and their single-finger detectors have already written
+themselves off at the second pointer-down (`calMultiTouch` and the notebook's equivalent).
+
+The day window looked like the exception. Its **Events** view — the view it opens on — is a
+`ScrollView`, and a `ScrollView` re-targets to whichever pointer went down last, so it follows a
+two-finger swipe as readily as a one-finger drag; the list slides a little under the gesture on the
+way out, and on e-ink a scroll is a full repaint. It briefly took the whole sequence instead
+(cancel the content, then swallow through to the last finger up, and only once the fingers had moved
+past `scaledTouchSlop`).
+
+**That was reverted.** Android splits pointers across children by default, so a second finger landing
+on a different row is a real tap on a real view — and an Activity-level swallow throws that away for
+every touch in the sequence, not just the swipe. **A list scrolling slightly on the way out is the
+far cheaper problem.**
+
+The removal came out of a false lead worth recording, because the next person will hit it too. Tapping
+a row with a thumb resting on the glass does nothing on the **G102** — which looked exactly like the
+swallow eating taps, and was not: it still failed with the swallow gone, and it fails the same way on
+screens that have no gesture code at all. A `getevent` capture off `onyx_ts_istaric` settles where it
+goes wrong: the digitizer reports **both** contacts, slot 1 with its own tracking id, position and
+pressure, so the panel is fine and something above the driver drops the second tap. See
+[the device note](#a-resting-contact-suppresses-taps-on-the-g102).
+
+#### A resting contact suppresses taps on the G102
+
+Device behaviour, not ours, and not something the app can route around — but it shapes what gestures
+are worth designing. On the BOOX Go 10.3 Gen 2, a contact resting on the glass suppresses taps from a
+second finger **app-wide**, including screens with no custom touch handling. The raw stream shows the
+hardware reporting both contacts, so this sits above the driver.
+
+Two things follow. First, **never diagnose a missing tap on that device from app code alone** — check
+whether the same tap works with nothing resting on the glass before suspecting a detector. Second,
+this gesture is unaffected: it needs two fingers that *travel*, and the capture shows both contacts
+tracked continuously through a drag.
+
+Also from the capture, for anyone tuning thresholds: the digitizer is 1:1 with the panel (X max 1859,
+Y max 2479 against 1860×2480) at 300 dpi, and a resting thumb drifts on the order of 15 px — right at
+`scaledTouchSlop` (8dp ≈ 15 px here). Any "has it moved?" test on a centroid that includes a resting
+finger is therefore borderline by construction.
 
 ### Staying on today
 

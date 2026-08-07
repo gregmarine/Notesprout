@@ -226,6 +226,10 @@ real canvas pixel size via `setPageSize`.
 - **Single-finger long-press** → that day's [notebook list](#long-press--the-day-notebook-list)
   (`DayNotebooksDialog`). Same date resolution as the double-tap: Month/Week hit-test the cell, Day
   uses `selectedDate` from anywhere on either half.
+- **Two-finger swipe down** → the [Today dashboard](today-dashboard.md#the-two-finger-swipe-down),
+  from all three views. `core/TwoFingerSwipeDown.kt`, shared verbatim with `NotebookActivity` — the
+  same detector object, not another port. The dashboard is pushed on top, so Back returns to the
+  calendar exactly as it was.
 
 ### Last-position persistence
 
@@ -295,7 +299,10 @@ the drawing view untouched. Order for a finger touch outside the toolbar/floatin
    UP**, so steps 2–3 never see it; anything they armed on DOWN has to be cancelled here or skipped
    there (see the sticky-icon rule under the long-press above).
 2. `handleMultiFingerDoubleTap` — **2-finger** stationary double-tap = undo, **3-finger** = redo.
-3. `handleCalendarFingerGesture` — single-finger horizontal swipe = step period; quick tap = select day;
+3. `todaySwipe` (`TwoFingerSwipeDown`) — **2-finger** swipe down → the Today dashboard. Does **not**
+   consume: step 4 disarmed itself at the second pointer-down (`calMultiTouch`), so there is nothing
+   left for the rest of the sequence to trip.
+4. `handleCalendarFingerGesture` — single-finger horizontal swipe = step period; quick tap = select day;
    long-press = day notebook list.
 
 A `releaseRender()` is issued when a finger ACTION_DOWN lands on the toolbar/floating toolbar (EPD).
@@ -394,6 +401,13 @@ drives all show/hide + `isSelected`).
   and the tappable date label (`tvDayDate` → shared [`DayPickerDialog`](#date-picker)) reload the whole
   window **in place** — flush the note page, swap the date, reset the History-year state, reload the
   canvas, and re-apply the active view (current view mode preserved).
+- **Two-finger swipe down → the [Today dashboard](today-dashboard.md#the-two-finger-swipe-down)**,
+  from **all four views** — the one finger gesture here that belongs to the window rather than to the
+  Note canvas, so it sits outside the `viewMode == NOTE` branch in `dispatchTouchEvent` (and *after*
+  it, so `handleMultiFingerDoubleTap` still sees the sequence — a two-finger stationary double-tap is
+  undo). Not consumed: the Events `ScrollView` does slide a little under the swipe, and the swallow
+  that once prevented it threw away Android's per-pointer split dispatch along with it. The linked
+  section is the one place that records why — and the G102 touch-panel behaviour found chasing it.
 - **The pen layer follows the mode** (`applyViewMode` tail): `drawingView.resumeDrawing()` in Note,
   `disableDrawing()` in every other view (so a stray pen touch can't be captured *invisibly* under the
   hidden card grid / read-only note / events list), then `releaseRender()` for a clean EPD repaint.

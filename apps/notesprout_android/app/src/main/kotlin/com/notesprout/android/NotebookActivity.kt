@@ -45,6 +45,7 @@ import androidx.room.withTransaction
 import com.notesprout.android.core.BitmapDecode
 import com.notesprout.android.core.DocumentPreferences
 import com.notesprout.android.core.Slog
+import com.notesprout.android.core.TwoFingerSwipeDown
 import com.notesprout.android.core.markdown.DocumentDraft
 import com.notesprout.android.crypto.EncryptionInfo
 import com.notesprout.android.crypto.KeyResolver
@@ -302,6 +303,14 @@ class NotebookActivity : AppCompatActivity() {
     private var twoFingerSwipeStartX = 0f
     private var twoFingerSwipeStartY = 0f
     private var twoFingerSwipeVelocityTracker: VelocityTracker? = null
+
+    /**
+     * Two-finger downward swipe → the Today dashboard. Runs alongside the page-insert swipe above
+     * rather than inside it: the two can never both fire — one demands vertical dominance, the other
+     * horizontal — and the dashboard shortcut belongs to every screen, so it lives in one shared
+     * detector rather than being ported into each the way the multi-finger double-tap was.
+     */
+    private val todaySwipe by lazy { TwoFingerSwipeDown(this) { TodayActivity.launch(this) } }
 
     // ── Multi-finger double-tap: 2-finger = undo, 3-finger = redo ─────────────
     // Stationary (tap slop) and short (long-press timeout). Movement guard ensures
@@ -2486,6 +2495,7 @@ class NotebookActivity : AppCompatActivity() {
             } else {
                 fingerGesturesSuppressed = false
                 handlePageSwipe(event)
+                todaySwipe.onTouchEvent(event)
                 handleLinkFollowGesture(event)
                 handleToolbarToggleGesture(event)
                 handleMultiFingerDoubleTap(event)
@@ -3196,6 +3206,9 @@ class NotebookActivity : AppCompatActivity() {
         twoFingerSwipeActive = false
         twoFingerSwipeVelocityTracker?.recycle()
         twoFingerSwipeVelocityTracker = null
+
+        // Two-finger swipe down → Today.
+        todaySwipe.cancel()
 
         // Link / sticky-note tap-to-follow.
         linkTapMoved = true

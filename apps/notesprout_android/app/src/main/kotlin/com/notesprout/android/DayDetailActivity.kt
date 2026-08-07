@@ -40,6 +40,7 @@ import androidx.lifecycle.lifecycleScope
 import com.notesprout.android.core.BitmapDecode
 import com.notesprout.android.core.IndexGuard
 import com.notesprout.android.core.TopGuard
+import com.notesprout.android.core.TwoFingerSwipeDown
 import com.notesprout.android.core.isBooxDevice
 import com.notesprout.android.data.BoundingBox
 import com.notesprout.android.data.CalendarRepository
@@ -255,6 +256,14 @@ class DayDetailActivity : AppCompatActivity() {
 
     /** True while finger gestures are suppressed because the pen owns the surface. */
     private var fingerGesturesSuppressed = false
+
+    /**
+     * Two-finger downward swipe → the Today dashboard. The one finger gesture that belongs to the
+     * **whole day window** rather than to the Note canvas: Events, Notebooks and History are as
+     * good a place to jump to the dashboard from as the page is, and a shortcut that worked on one
+     * view out of four would read as broken on the other three.
+     */
+    private val todaySwipe by lazy { TwoFingerSwipeDown(this) { TodayActivity.launch(this) } }
 
     private val touchSlopPx by lazy { ViewConfiguration.get(this).scaledTouchSlop }
     private val doubleTapSlopPx by lazy { ViewConfiguration.get(this).scaledDoubleTapSlop }
@@ -2212,6 +2221,19 @@ class DayDetailActivity : AppCompatActivity() {
                 handleMultiFingerDoubleTap(event)
             }
         }
+
+        // ── Two-finger swipe down → Today ────────────────────────────────────────────
+        // Outside the Note-mode branch above, and deliberately *after* it: this is the day
+        // window's one whole-screen gesture, and the swallow below must not run before
+        // handleMultiFingerDoubleTap has seen the sequence — a two-finger stationary double-tap
+        // arms this detector too, and starving that handler would cost the undo gesture.
+        // Self-contained rather than leaning on the Note branch's gate above, which does not run in
+        // the other three views: the pen check belongs to this block wherever it is reached from.
+        // Never consumed — see the note on [TwoFingerSwipeDown] about the swallow this once had.
+        if (event.getToolType(0) == MotionEvent.TOOL_TYPE_FINGER) {
+            if (drawingView.isPenActive) todaySwipe.cancel() else todaySwipe.onTouchEvent(event)
+        }
+
         // Dismiss the pen colour panel on a touch outside it — except on btnDayPen itself, whose
         // own listener owns the toggle (handling it here too would close then immediately reopen).
         if (event.actionMasked == MotionEvent.ACTION_DOWN
@@ -2231,6 +2253,8 @@ class DayDetailActivity : AppCompatActivity() {
      * Mirrors `NotebookActivity.cancelFingerGestures`.
      */
     private fun cancelFingerGestures() {
+        todaySwipe.cancel()
+
         stickyNoteTapCandidate = null
         stickyNoteTapMoved = true
 
