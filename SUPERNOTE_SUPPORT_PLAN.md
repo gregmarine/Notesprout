@@ -1,7 +1,8 @@
 # Supernote (Ratta) Support — Implementation Plan
 
 > **Branch:** `supernote` · **Targets:** Supernote Nomad + Supernote Manta
-> **Overall status:** Phase 0 not started. Nothing built yet.
+> **Overall status:** Phase 0 part 1 (adb interrogation) ✅ done — see its Findings. Part 2 (the
+> probe app) not started. No production code written yet.
 
 ---
 
@@ -28,7 +29,7 @@ This plan is written to survive a cleared context. At the start of every session
 
 | # | Phase | Device test | Status |
 |---|---|---|---|
-| 0 | Baseline & firmware probe | ✅ yes | ⬜ NOT STARTED |
+| 0 | Baseline & firmware probe | ✅ yes | 🔧 IN PROGRESS — adb half ✅, probe app ⬜ |
 | 1 | `SupernoteInk` binder client + live-ink proof | ✅ yes | ⬜ NOT STARTED |
 | 2 | Device gate + engine factory (no behaviour change) | ✅ yes | ⬜ NOT STARTED |
 | 3 | `RattaNotebookView` — core writing loop | ✅ yes | ⬜ NOT STARTED |
@@ -157,6 +158,54 @@ adb -s <serial> shell am start -n com.notesprout.android.dev/com.notesprout.andr
 
 Phases 0–1 use exactly this pattern (`SupernoteProbeActivity`). Findings get written into the
 manifest comment, the same way the pen-tool and colour-ink spikes did.
+
+---
+
+## Prior art — `org.iccnet.supernotedemo` (the user's own app)
+
+**Discovered during the Phase 0 adb probe, 2026-08-08.** A package built by the user is installed and
+running on the Nomad, and it already contains a working Kotlin port of the ink client:
+
+```
+org/iccnet/supernotedemo/SupernoteInk.kt        ← Kotlin object, same shape as our Phase 1 target
+org/iccnet/supernotedemo/SupernoteInk$Pen       ← NEEDLE 10 · MARK 11 · CALLIGRAPHY 15 · INK 16
+org/iccnet/supernotedemo/SupernoteInk$Color     ← BLACK 0 · DARK_GRAY −101 · GRAY −102 · LIGHT_GRAY 254
+org/iccnet/supernotedemo/DrawingView.kt         ← has a Tool enum (incl. ERASER)
+org/iccnet/supernotedemo/MainActivity.kt
+org/iccnet/supernotedemo/SupernoteDemoApp.kt    ← calls addHiddenApiExemptions
+```
+
+Read out of the installed APK's dex (constants are `PRIVATE STATIC FINAL`, values below are the
+actual compiled values, not guesses):
+
+| Constant | Value |
+|---|---|
+| `IFACE_TOKEN` | `"android.demo.IMyService"` |
+| `APP_NAME` | `"supernote-demo"` |
+| `TX_WRITE_APP_INFO` / `TX_DISABLE_AREA` / `TX_PEN` / `TX_DRAW_BUFFER` | 0 / 1 / 2 / 6 |
+| Pen codes | 10 / 11 / 15 / 16 — identical to the Lua |
+| Colour codes | 0 / −101 / −102 / 254 — identical to the Lua |
+
+Its `SupernoteInk` API is a **superset** of what this plan's Phase 1 specifies:
+
+```
+isAvailable  lookupBinder  transact  claimPen  setPen  setEraser  clearAll
+setDisableAreas  setFullScreenDisable  clearDisableAreas  enableFullUiAuto
+enableAutoRegal  screenRefresh  sendOneFullFrame  einkApiDumped
+```
+
+— i.e. it also drives `enableAutoRegal`, `screenRefresh` and `sendOneFullFrame`, and carries an
+`einkApiDumped` diagnostic that reflects the eink service's method list. Its error strings
+(`"binder gone, marking unavailable"`, `"eink system service not present"`,
+`"enableFullUiAuto unavailable: "`) show it already handles the failure paths the Lua guards.
+
+**Implication for Phase 1:** if the source for this app is available, Phase 1 becomes a *port of
+proven, on-device code* rather than a fresh translation of the Lua plus discovery. That is a large
+de-risk and should be the first thing established at Phase 1 start. Ask the user.
+
+**It also settles Risk 6 outright:** `APP_NAME` is `"supernote-demo"` — an arbitrary string the
+firmware evidently accepts. The firmware does **not** whitelist app names, so `"notesprout"` is fine
+and there is no need to masquerade as `"koreader-pencil"`.
 
 ---
 
@@ -289,7 +338,74 @@ Ask the user to, **on each device**:
 
 ### Findings
 
-_(record here after the test — this is what Phase 1 builds on)_
+#### Part 1 — adb interrogation (2026-08-08) ✅
+
+Everything reachable over adb is **done**; only the runtime half (tool type, pressure, the binder
+handshake, the pen-type sweep) still needs the probe app. Both devices attached and interrogated.
+
+**Devices.** Serials: Nomad `SN078D10012852`, Manta `SN100C10023972`.
+
+| Prop | Nomad | Manta |
+|---|---|---|
+| `ro.product.manufacturer` | `Supernote` | `Supernote` |
+| `ro.product.model` | `Supernote Nomad` | **`Supernote Nomad`** ⚠️ |
+| `ro.product.brand` / `.device` / `.name` | `Supernote` | `Supernote` |
+| `ro.build.display.id` | `Chauvet.E103.2605211001.2347_release` | *identical* |
+| Android | 11 (SDK 30) | 11 (SDK 30) |
+| Physical size | 1404 × 1872 | 1920 × 2560 |
+| Density | 300 | 300 |
+
+Three things fall out of that table:
+
+1. **`Build.MANUFACTURER` is `"Supernote"`, not `"ratta"`.** The `isRattaDevice()` sketch in Phase 2
+   guessed `contains("ratta")` — that would return **false** on both devices. Match on
+   `"supernote"` (manufacturer *or* brand; both carry it). Phase 2 has been corrected.
+2. ⚠️ **The Manta identifies itself as a Nomad.** Every product property is byte-identical across the
+   two devices — model included. **There is no name-based way to tell them apart**; the only
+   difference visible to an app is the resolution (1404×1872 ≈ 7.8″ vs 1920×2560 ≈ 10.7″, both at
+   300 dpi). Any future per-device branching must key off screen size, never `Build.MODEL`.
+3. **They run the identical firmware build**, down to the build id — and have identical service
+   tables (179 services each, `service_myservice` at the same index). This is much stronger evidence
+   for the plan's "treat them as one target" premise than the KOReader author's inference was.
+
+**The binder is present on both.** `service list` reports `service_myservice: []` on each. The empty
+interface descriptor is expected and *good* — it means a raw `Binder`, not an AIDL stub, which is
+exactly the `Parcel`/`transact` design the Lua implements. Only `service_myservice` is registered;
+the legacy `service.myservice` alias is **not** present, so the first name always wins. No system app
+under `/system/priv-app` or `/system/app` contains the token — the service is registered natively
+(`ht.hardware.hteink@1.0-service` is the likely host), so there is nothing further to decompile and
+the Lua remains the spec for the transaction payloads.
+
+**The eink service is real, and richer than the Lua uses.** `eink: [android.os.IEinkManager]` is
+registered, and `android.os.EinkManager` was dumped out of `/system/framework/framework.jar` with
+`dexdump`. **Confirmed present, with exact signatures:**
+
+```
+enableFullUiAuto(Z)V            enableFullUiAuto(ZZ)V      ← the one the Lua needs, plus an overload
+isValid()Z                      getEinkEnabled()Z
+screenRefresh(ZI)V              sendOneFullFrame()V        freezeScreen(ZI)V
+setScreenMode(IZ)V              setDitherType(I)V
+enableAutoRegal(ZI)V            disableRegal(ZI)V
+setStylusGuestureEnabled(Z)V    setGlobalGuestureEnabled(Z)V     [sic — "Guesture"]
+```
+
+with screen-mode constants `EINK_SCREEN_MODE_CLEAR / DEFAULT / SMOOTH / SPEED`.
+
+Two of these are likely to matter later and are **not** in the Lua:
+
+- **`setScreenMode(EINK_SCREEN_MODE_SPEED)`** looks like the Supernote analogue of the BOOX app-scope
+  handwriting fast-mode that fixed our first-stroke lag (`docs/drawing-engine.md`). If Phase 3 shows
+  a warm-up delay on the first stroke, this is the first thing to try.
+- **`setStylusGuestureEnabled(false)`** may be needed to stop the firmware's own system stylus
+  gestures competing with our lasso and scribble gestures.
+
+**Prior art found.** `org.iccnet.supernotedemo` — see the *Prior art* section above. It changes how
+Phase 1 should be approached.
+
+#### Part 2 — probe app ⬜ NOT STARTED
+
+_(still needed: pen `getToolType(0)`, pressure/tilt, eraser-end and barrel-button reporting, the
+runtime binder handshake, and the 0…31 pen-type sweep)_
 
 ---
 
@@ -380,11 +496,16 @@ Doing it separately gives a clean regression checkpoint before any Ratta code ex
 
   ```kotlin
   fun isRattaDevice(): Boolean =
-      Build.MANUFACTURER.lowercase(Locale.ROOT).contains("ratta") ||
-      Build.BRAND.lowercase(Locale.ROOT).contains("supernote")
+      Build.MANUFACTURER.lowercase(Locale.ROOT).contains("supernote")
   ```
 
-  Use the **actual** strings recorded in Phase 0's findings, not these guesses.
+  **This is the measured string, not a guess** — Phase 0 confirmed `ro.product.manufacturer` is
+  `Supernote` on both devices (`ro.product.brand` too, if a second check is ever wanted). Do **not**
+  match on `"ratta"`: the company name appears nowhere in the build properties, and an earlier draft
+  of this plan guessed it and would have returned false on both devices.
+
+  Note the function keeps the `isRattaDevice` name for symmetry with `isBooxDevice` (both name the
+  vendor, not the brand) — the *string* it matches is what had to change.
 
 - `notebook/NotebookViewFactory.kt` — new:
 
@@ -802,11 +923,13 @@ No device test. Documentation and housekeeping.
 
 ## Risks / open questions
 
-1. **Reverse-engineered, firmware-specific.** Pen codes are confirmed for **Nomad (deviceType = 3 /
-   A5X2)** only. Manta is *believed* to share firmware and chipset, differing only in screen size —
-   but that is the KOReader author's inference from not owning a Manta, not a tested fact. We have
-   both devices; Phase 0 and Phase 1 exit criteria explicitly require them to match, and any
-   divergence gets recorded rather than assumed away.
+1. **Reverse-engineered, firmware-specific.** ~~Manta is *believed* to share firmware with the
+   Nomad~~ — **Phase 0 measured this and it holds**: both devices run the byte-identical firmware
+   build `Chauvet.E103.2605211001.2347_release` with identical 179-entry service tables. The
+   one-target premise is now evidence, not inference. Phase 1's exit criteria still require the two
+   to match behaviourally, since identical firmware does not guarantee identical *panel* behaviour.
+   ⚠️ **New trap from the same measurement: the Manta reports `Build.MODEL` as `Supernote Nomad`.**
+   The two are indistinguishable by name — branch on screen size or not at all.
 2. **Pen-lift sequencing** (Phase 3, edit 4) is the most likely thing to look wrong first: clear too
    early and the stroke blinks, clear too late and it double-darkens. Three candidate orderings are
    written into the phase.
@@ -816,16 +939,22 @@ No device test. Documentation and housekeeping.
    stroke that jumps on pen-lift.
 4. **Translucent hosts** (scratch pad, sticky editor) — a screen-space overlay under a translucent
    window is untested territory. Phase 7.
-5. **`enableFullUiAuto` may be absent** on some firmware revisions (the Lua guards for it). Per
-   Decision 2 we do not silently degrade: log + toast, keep going.
-6. **`APP_NAME`.** We send `"notesprout"`; the Lua sends `"koreader-pencil"`. If the firmware
-   whitelists app names, Phase 1 fails and the first thing to try is the known-working string.
+5. ~~**`enableFullUiAuto` may be absent**~~ — **resolved in Phase 0.** `android.os.EinkManager`
+   on this firmware exposes both `enableFullUiAuto(Z)V` and `enableFullUiAuto(ZZ)V`, dumped from
+   `framework.jar`. Keep the guard anyway (it costs nothing and protects future firmware), but this
+   is no longer an open risk. Per Decision 2, a failure logs + toasts rather than degrading.
+6. ~~**`APP_NAME` may be whitelisted**~~ — **resolved in Phase 0.** The user's own
+   `org.iccnet.supernotedemo` sends `"supernote-demo"` and works, so the firmware accepts arbitrary
+   names. `"notesprout"` is fine.
 7. **No point data from the firmware.** Everything we persist comes from `MotionEvent`. If the
    Supernote's `MotionEvent` stream is lower-resolution than the firmware's own sampling, baked
    strokes will look slightly coarser than the live ink did. Watch for it in Phase 3.
 
 ### Open — needs the user
 
-- **Manta ADB serial is unknown.** `.claude/skills/device-build-install/SKILL.md` lists
-  `Supernote Nomad (SNN) SN078D10012852` but has no Manta entry. Needed before the first device
-  test; add it to the skill's device table at the same time (Phase 9 covers the tier move).
+- ~~**Manta ADB serial is unknown.**~~ **Resolved 2026-08-08: `SN100C10023972`.** Added to
+  `.claude/skills/device-build-install/SKILL.md` alongside the Nomad's `SN078D10012852`. The skill's
+  entry carries the "identifies as a Nomad" warning, since serial is the only reliable way to tell
+  the two apart from the host side. (Phase 9 still covers the tier move.)
+- **Is the source for `org.iccnet.supernotedemo` available?** See *Prior art*. If yes, Phase 1 is a
+  port of working code instead of a fresh translation. **Ask before starting Phase 1.**
