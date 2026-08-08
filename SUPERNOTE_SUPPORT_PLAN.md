@@ -10,7 +10,7 @@
 This plan is written to survive a cleared context. At the start of every session:
 
 1. Read this file top to bottom (it is the only Supernote document — there is no `docs/` companion
-   until Phase 8).
+   until Phase 9).
 2. Read **Phase status** below to find the first phase that is not `✅ DONE`.
 3. Read that phase's section in full — it lists the files, the exact changes, the exit criteria, and
    the device-test script.
@@ -33,10 +33,11 @@ This plan is written to survive a cleared context. At the start of every session
 | 2 | Device gate + engine factory (no behaviour change) | ✅ yes | ⬜ NOT STARTED |
 | 3 | `RattaNotebookView` — core writing loop | ✅ yes | ⬜ NOT STARTED |
 | 4 | Mode transitions & disable areas | ✅ yes | ⬜ NOT STARTED |
-| 5 | Lifecycle, page nav, snapshots, close | ✅ yes | ⬜ NOT STARTED |
-| 6 | The remaining five drawing hosts | ✅ yes | ⬜ NOT STARTED |
-| 7 | Ink mapping & EMR stroke-width tuning | ✅ yes | ⬜ NOT STARTED |
-| 8 | Docs, device tiers, wrap-up | — | ⬜ NOT STARTED |
+| 5 | Firmware dashed ink for the live lasso path | ✅ yes | ⬜ NOT STARTED |
+| 6 | Lifecycle, page nav, snapshots, close | ✅ yes | ⬜ NOT STARTED |
+| 7 | The remaining five drawing hosts | ✅ yes | ⬜ NOT STARTED |
+| 8 | Ink mapping & EMR stroke-width tuning | ✅ yes | ⬜ NOT STARTED |
+| 9 | Docs, device tiers, wrap-up | — | ⬜ NOT STARTED |
 
 Legend: ⬜ NOT STARTED · 🔧 IN PROGRESS · 🧪 AWAITING DEVICE TEST · ✅ DONE · ⛔ BLOCKED
 
@@ -52,7 +53,7 @@ These were settled with the user at plan time. Do not re-litigate them mid-branc
    Ratta hardware with provably zero risk to the ten non-BOOX devices already shipping on the
    Generic engine. The user's words: *"I know this isn't the wisest… but for now, this gets us up and
    running on Ratta's hardware. We can review and make a better solution in a future effort."*
-   Phase 8 files the follow-up (collapse Generic + Ratta into a `CanvasNotebookView` base) into
+   Phase 9 files the follow-up (collapse Generic + Ratta into a `CanvasNotebookView` base) into
    `BACKLOG.md`.
 
 2. **No fallback.** There is no kill switch and no mid-session engine swap. Engine choice is decided
@@ -66,7 +67,7 @@ These were settled with the user at plan time. Do not re-litigate them mid-branc
 
 3. **Host scope: notebook first, then all six.** The factory (Phase 2) routes all six drawing hosts
    from day one, but the firmware path is proven on `NotebookActivity` through Phases 3–5 and only
-   then extended to the other five in Phase 6. The scratch pad and sticky-note editor are
+   then extended to the other five in Phase 7. The scratch pad and sticky-note editor are
    **translucent overlay windows** and are the likeliest place a firmware overlay misbehaves — they
    get their own test pass rather than riding along.
 
@@ -176,7 +177,7 @@ https://github.com/plateaukao/supernote_draw/blob/main/app/src/main/java/com/exa
 ```
 
 A decompile of the Supernote Document app's `HandWriteClient`. **The EMR size → stroke-width mapping
-is missing from the Lua and lives only here** — pull it before Phase 7 (and ideally before Phase 3,
+is missing from the Lua and lives only here** — pull it before Phase 8 (and ideally before Phase 3,
 so the first ink is a sane width).
 
 ---
@@ -202,7 +203,7 @@ daemon**:
   Calligraphy 15. Eraser is written through **tx=2** as type `1` (freehand) or `3` (rectangular)
   with colour `255`.
 - Colour codes: `BLACK 0`, `DARK_GRAY -101`, `GRAY -102`, `LIGHT_GRAY 254`. **Four values, that's
-  the whole palette** (see the ink-mapping problem in Phase 7).
+  the whole palette** (see the ink-mapping problem in Phase 8).
 - `enableFullUiAuto(true)` via reflection on `getSystemService("eink")` — required so a
   *third-party* app gets ink painted everywhere, not just inside whitelisted firmware apps.
 
@@ -318,8 +319,19 @@ inside *our* app window, then clear on command. If this fails, nothing downstrea
     try** — it is a known-working value.
   - Every failure path logs; no exception escapes into the drawing loop.
 - `SupernoteProbeActivity` gains a driver panel: buttons for *Claim pen*, *Full UI auto on/off*,
-  *Pen: Needle/Ink/Mark/Calligraphy*, *Size −/+*, *Colour cycle*, *Eraser*, *Clear all*,
-  *Disable top strip*, *Clear disable areas* — plus a plain white write area below them.
+  *Pen type −/+*, *Size −/+*, *Colour cycle*, *Eraser*, *Clear all*, *Disable top strip*,
+  *Clear disable areas* — plus a plain white write area below them.
+
+- **Pen-type sweep.** The Lua names only four codes (Needle 10, Ink 16, Mark 11, Calligraphy 15),
+  but those are the four the *Supernote UI* exposes — the firmware's `penTypeArray` may hold more.
+  Make *Pen type* a raw code stepper over **0…31**, not a four-item cycler, and have the user write a
+  short stroke at each code, recording what renders (or nothing). This is the same sweep
+  `PenToolSpikeActivity` ran against Onyx's overlay styles, which turned up three working styles past
+  the SDK's own published constant list — including `STROKE_STYLE_DASH`.
+
+  **What we're hunting for is a dashed / patterned stroke style**, because that unlocks Phase 5.
+  Record the full table of code → appearance in Findings; it is also the raw material for a future
+  pen-tool offering.
 
 ### Device test
 
@@ -327,12 +339,14 @@ Install both. On **each** device, in the probe:
 1. Write in the white area **before** claiming the pen → note whether the firmware paints anyway.
 2. *Claim pen* → *Full UI auto on* → write → **does firmware ink appear, and is it instant?**
 3. *Clear all* → does the ink vanish?
-4. Cycle pen types and sizes → does the stroke visibly change?
-5. Cycle colours → what do the four codes actually look like on this panel?
-6. *Disable top strip* → write across the strip → does ink stop at the boundary?
-7. *Clear disable areas* → does it paint there again?
-8. *Eraser* → write → what does the firmware draw (if anything)?
-9. Leave the probe and return (home button, then relaunch) → does ink still work without re-claiming?
+4. Step the pen-type code from 0 to 31, writing a short stroke at each → which codes render, and
+   what does each look like? **Is any of them dashed or patterned?**
+5. Cycle sizes at the default type → does the stroke visibly change?
+6. Cycle colours → what do the four codes actually look like on this panel?
+7. *Disable top strip* → write across the strip → does ink stop at the boundary?
+8. *Clear disable areas* → does it paint there again?
+9. *Eraser* → write → what does the firmware draw (if anything)?
+10. Leave the probe and return (home button, then relaunch) → does ink still work without re-claiming?
 
 ### Exit criteria
 
@@ -342,6 +356,9 @@ Install both. On **each** device, in the probe:
 - [ ] Disable areas actually suppress painting in the given rect (this is what protects the toolbar).
 - [ ] The four colour codes are characterised (what grey each one actually renders).
 - [ ] A usable default pen type + EMR size is chosen for Phase 3 (Ink 16 is the expected default).
+- [ ] The 0…31 pen-type sweep is recorded, with an explicit yes/no on **whether any code renders a
+      dashed or patterned stroke**. This decides whether Phase 5 is buildable — if nothing dashed
+      exists, Phase 5 becomes ⛔ BLOCKED and the lasso keeps Phase 4's Canvas path.
 - [ ] Nomad and Manta behave identically. **If Manta differs, record exactly how** — the plan's
       one-target premise is a claim from the KOReader author who never had a Manta.
 
@@ -447,7 +464,7 @@ _(record here)_
 - Firmware lifecycle, minimum viable version for this phase: `onAttachedToWindow` (after first
   layout, same `OnGlobalLayoutListener` shape Onyx uses) → `claimPen()` + `enableFullUiAuto(true)`.
   `onDetachedFromWindow` → `clearAll()` + `enableFullUiAuto(false)` + `clearDisableAreas()`.
-  Anything subtler is Phase 5.
+  Anything subtler is Phase 6.
 
 ### Device test
 
@@ -490,7 +507,7 @@ on top of our dashed overlays and the page is unusable.
 |---|---|
 | `setEraserMode(true)` | `clearAll()` + `setFullScreenDisable(w, h)`. Erase stays a software hit-test (already in the copy). Do **not** use the firmware eraser — its trail is not our eraser's geometry. |
 | `setEraserMode(false)` | `clearDisableAreas()` + re-apply toolbar disable areas |
-| `setLassoMode(true)` / `setLassoEraserMode(true)` | `clearAll()` + `setFullScreenDisable(w, h)` — the Canvas draws the dashed path |
+| `setLassoMode(true)` / `setLassoEraserMode(true)` | `clearAll()` + `setFullScreenDisable(w, h)` — the Canvas draws the dashed path. **Phase 5 revisits this**: if the firmware has a dashed stroke style, the live path becomes firmware ink instead. |
 | `setLassoMode(false)` / `setLassoEraserMode(false)` | restore, as for eraser-off |
 | `setTextPlacementMode(true)` | `clearAll()` + full-screen disable so the placement tap starts no ink |
 | `enterShapeTransform` / `exitShapeTransform` | same pair — handles and the rotate knob are Canvas-drawn |
@@ -529,7 +546,88 @@ _(record here)_
 
 ---
 
-## Phase 5 — Lifecycle, page nav, snapshots, close · ⬜ NOT STARTED
+## Phase 5 — Firmware dashed ink for the live lasso path · ⬜ NOT STARTED
+
+> **Gated on Phase 0/1's pen-type sweep.** If no firmware pen code renders a dashed or patterned
+> stroke, mark this phase ⛔ BLOCKED, leave Phase 4's Canvas path in place, and move on. Everything
+> downstream is independent of it.
+
+**Goal:** the lasso outline should be *drawn by the stylus in hardware*, at pen speed, the same way
+ink is — not chased by a software Canvas path at e-ink redraw rates.
+
+Today every engine draws the lasso with `lassoPaint` — a Canvas `Paint` with
+`DashPathEffect(floatArrayOf(12f, 8f), 0f)` — refreshed at most every `LASSO_REFRESH_INTERVAL_MS`
+(60 ms). That throttle *is* the look the user dislikes: the dashed line visibly trails the pen.
+The Onyx SDK has a real hardware dashed stroke (`STROKE_STYLE_DASH = 5`, confirmed rendering on all
+five BOOX devices by `PenToolSpikeActivity` — see `docs/onyx-pen-tools.md`) that we have never
+leveraged. **Doing it on Supernote from day one is the point of this phase**; the Onyx equivalent is
+filed to `BACKLOG.md` in Phase 9.
+
+### Scope — what can and cannot move to the firmware
+
+The firmware only paints **where the pen is touching**. So:
+
+| Lasso visual | Drawn by | Can it be firmware ink? |
+|---|---|---|
+| Live outline while the stylus is down (`lassoOverlayPath`) | stylus contact | ✅ **yes — this phase** |
+| Lasso-eraser's jittered grey trail (`lassoEraserDisplayPath`) | stylus contact | ✅ **yes — this phase** |
+| Dashed selection box after lift (`lassoSelectionBox`) | no contact | ❌ stays Canvas |
+| Drag-move preview (backing bitmap + translated objects + box) | contact, but it's a *drag*, not a trace | ❌ stays Canvas |
+| Snap guides | no contact | ❌ stays Canvas |
+
+So this is precisely the thing the user called out — the line being drawn under the stylus — and
+nothing more.
+
+### Build — `RattaNotebookView.kt`
+
+1. **Lasso mode no longer full-screen-disables.** Replace Phase 4's blanket suppression for
+   `setLassoMode(true)` / `setLassoEraserMode(true)` with: arm the firmware pen at the dashed code
+   found in Phase 1 (lasso-eraser: whichever code best matches its grey trail), keep disable areas on
+   the toolbar only.
+2. **`handleLassoTouch` / `handleLassoEraserTouch` `ACTION_MOVE`** — keep building `lassoGesturePath`
+   (the hit test needs the real geometry), but stop assigning `lassoOverlayPath` /
+   `lassoEraserDisplayPath` and drop the throttled `invalidate()`. The firmware paints the trace.
+   The `LASSO_REFRESH_INTERVAL_MS` throttle becomes dead code on this path — that is the win.
+3. **`ACTION_UP`** — `clearAll()` to wipe the firmware trace, then the existing flow runs unchanged:
+   hit test → `onLassoComplete` → the host calls `setLassoOverlay(null, box)` → Canvas draws the
+   selection box. Same sequencing risk as the Phase 3 pen-lift handoff; reuse whichever of (a)/(b)/(c)
+   won there.
+4. **Drag-move** is entered from `ACTION_DOWN` inside an existing selection box. That branch must
+   suppress firmware ink immediately (`setFullScreenDisable`) — a drag must not leave a dashed trail
+   — and restore on `ACTION_UP`.
+5. **`setLassoOverlay` / `setLassoSelectedIds`** — no firmware involvement; they only set the box.
+
+### Device test
+
+Install both. In a notebook:
+1. Lasso some writing — **does the dashed outline keep up with the pen?** Compare against the same
+   gesture on the G102 (the current software look) if one is to hand.
+2. Lasso quickly and in a tight circle — does the trace break up or lag?
+3. On lift — does the trace vanish cleanly and the dashed selection box appear in its place, with no
+   double image?
+4. Drag the selection — no dashed trail follows the pen; the box and objects move as before.
+5. Tap outside to dismiss; lasso again — no stale trace.
+6. Smart lasso (fast closed circle in **pen** mode) still selects — it must not have picked up the
+   dashed pen.
+7. Lasso-eraser: draw across some strokes — trail keeps up, strokes erase, no residue.
+8. Lasso, then switch tools mid-gesture via the toolbar — nothing left painted.
+
+### Exit criteria
+
+- [ ] The live lasso outline is drawn in hardware and keeps pace with the stylus.
+- [ ] Lift → box handoff is clean, no double image, no residue.
+- [ ] Drag-move leaves no trail.
+- [ ] Smart lasso and scribble-erase (pen mode) are unaffected.
+- [ ] Lasso-eraser trail likewise.
+- [ ] Identical on Nomad and Manta.
+
+### Findings
+
+_(record here — including which firmware pen code was used for each of the two trails)_
+
+---
+
+## Phase 6 — Lifecycle, page nav, snapshots, close · ⬜ NOT STARTED
 
 **Goal:** the overlay must never outlive its page. A firmware overlay lingering across a page flip
 paints the old page's ink onto the new one.
@@ -579,7 +677,7 @@ _(record here)_
 
 ---
 
-## Phase 6 — The remaining five drawing hosts · ⬜ NOT STARTED
+## Phase 7 — The remaining five drawing hosts · ⬜ NOT STARTED
 
 **Goal:** extend the proven path to calendar, day-note, scratch pad, sticky editor, and HWR
 enrollment. The factory already routes them (Phase 2); this phase is about the host-specific quirks.
@@ -615,7 +713,7 @@ _(record here)_
 
 ---
 
-## Phase 7 — Ink mapping & EMR stroke-width tuning · ⬜ NOT STARTED
+## Phase 8 — Ink mapping & EMR stroke-width tuning · ⬜ NOT STARTED
 
 **Goal:** make the live firmware ink *look like* the ink we bake. Until now Phase 3 has hardcoded
 black at a default width.
@@ -668,7 +766,7 @@ _(record here)_
 
 ---
 
-## Phase 8 — Docs, device tiers, wrap-up · ⬜ NOT STARTED
+## Phase 9 — Docs, device tiers, wrap-up · ⬜ NOT STARTED
 
 No device test. Documentation and housekeeping.
 
@@ -683,9 +781,17 @@ No device test. Documentation and housekeeping.
 - `BACKLOG.md` — file the deferred work:
   - collapse `GenericNotebookView` + `RattaNotebookView` into a shared `CanvasNotebookView` base
     (the explicit Decision-1 follow-up)
-  - firmware pen types beyond the default (Needle / Mark / Calligraphy) as a possible pen-tool
-    offering, alongside the Onyx equivalents in `docs/onyx-pen-tools.md`
-  - anything Phases 0–7 punted
+  - **Onyx: draw the live lasso outline with the SDK's hardware `STROKE_STYLE_DASH` (= 5)** instead
+    of the software `DashPathEffect` Canvas path. This is the BOOX half of Phase 5 — the user has
+    explicitly said the current software look is not what they want. `PenToolSpikeActivity` already
+    proved `DASH` renders on all five BOOX devices and that `setStrokeStyle` needs no
+    `restartRawDrawing` and survives the handwriting fast-mode pin (`docs/onyx-pen-tools.md`), so the
+    research is done — this is a build task, not a spike. Whatever Phase 5 learns about the
+    lift → selection-box handoff applies directly.
+  - firmware pen types beyond the default (Needle / Mark / Calligraphy, plus whatever the Phase 1
+    sweep turns up) as a possible pen-tool offering, alongside the Onyx equivalents in
+    `docs/onyx-pen-tools.md`
+  - anything Phases 0–8 punted
 - Decide the fate of `SupernoteProbeActivity`: keep it (like `PenToolSpikeActivity`, as the
   calibration tool for EMR width and colour codes) with its findings written into the debug manifest
   comment. Recommended: **keep**.
@@ -709,7 +815,7 @@ No device test. Documentation and housekeeping.
    `getLocationOnScreen`. A mismatch shows up as ink that stops at the wrong boundary, or a baked
    stroke that jumps on pen-lift.
 4. **Translucent hosts** (scratch pad, sticky editor) — a screen-space overlay under a translucent
-   window is untested territory. Phase 6.
+   window is untested territory. Phase 7.
 5. **`enableFullUiAuto` may be absent** on some firmware revisions (the Lua guards for it). Per
    Decision 2 we do not silently degrade: log + toast, keep going.
 6. **`APP_NAME`.** We send `"notesprout"`; the Lua sends `"koreader-pencil"`. If the firmware
@@ -722,4 +828,4 @@ No device test. Documentation and housekeeping.
 
 - **Manta ADB serial is unknown.** `.claude/skills/device-build-install/SKILL.md` lists
   `Supernote Nomad (SNN) SN078D10012852` but has no Manta entry. Needed before the first device
-  test; add it to the skill's device table at the same time (Phase 8 covers the tier move).
+  test; add it to the skill's device table at the same time (Phase 9 covers the tier move).
