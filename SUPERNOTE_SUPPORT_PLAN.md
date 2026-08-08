@@ -11,7 +11,8 @@
 This plan is written to survive a cleared context. At the start of every session:
 
 1. Read this file top to bottom (it is the only Supernote document — there is no `docs/` companion
-   until Phase 9).
+   until Phase 9). **Read the *Prior art* section carefully** — a working PoC exists at
+   `~/git/SupernoteDemo` and it corrects several things this plan originally got wrong.
 2. Read **Phase status** below to find the first phase that is not `✅ DONE`.
 3. Read that phase's section in full — it lists the files, the exact changes, the exit criteria, and
    the device-test script.
@@ -30,12 +31,12 @@ This plan is written to survive a cleared context. At the start of every session
 | # | Phase | Device test | Status |
 |---|---|---|---|
 | 0 | Baseline & firmware probe | ✅ yes | 🔧 IN PROGRESS — adb half ✅, probe app ⬜ |
-| 1 | `SupernoteInk` binder client + live-ink proof | ✅ yes | ⬜ NOT STARTED |
+| 1 | Port `SupernoteInk` + live-ink proof | ✅ yes | ⬜ NOT STARTED |
 | 2 | Device gate + engine factory (no behaviour change) | ✅ yes | ⬜ NOT STARTED |
 | 3 | `RattaNotebookView` — core writing loop | ✅ yes | ⬜ NOT STARTED |
-| 4 | Mode transitions & disable areas | ✅ yes | ⬜ NOT STARTED |
+| 4 | Handoff boundaries & mode transitions | ✅ yes | ⬜ NOT STARTED |
 | 5 | Firmware dashed ink for the live lasso path | ✅ yes | ⬜ NOT STARTED |
-| 6 | Lifecycle, page nav, snapshots, close | ✅ yes | ⬜ NOT STARTED |
+| 6 | Lifecycle, process-global state, close | ✅ yes | ⬜ NOT STARTED |
 | 7 | The remaining five drawing hosts | ✅ yes | ⬜ NOT STARTED |
 | 8 | Ink mapping & EMR stroke-width tuning | ✅ yes | ⬜ NOT STARTED |
 | 9 | Docs, device tiers, wrap-up | — | ⬜ NOT STARTED |
@@ -161,51 +162,90 @@ manifest comment, the same way the pen-tool and colour-ink spikes did.
 
 ---
 
-## Prior art — `org.iccnet.supernotedemo` (the user's own app)
+## Prior art — `~/git/SupernoteDemo` (the user's own working PoC) ⭐
 
-**Discovered during the Phase 0 adb probe, 2026-08-08.** A package built by the user is installed and
-running on the Nomad, and it already contains a working Kotlin port of the ink client:
-
-```
-org/iccnet/supernotedemo/SupernoteInk.kt        ← Kotlin object, same shape as our Phase 1 target
-org/iccnet/supernotedemo/SupernoteInk$Pen       ← NEEDLE 10 · MARK 11 · CALLIGRAPHY 15 · INK 16
-org/iccnet/supernotedemo/SupernoteInk$Color     ← BLACK 0 · DARK_GRAY −101 · GRAY −102 · LIGHT_GRAY 254
-org/iccnet/supernotedemo/DrawingView.kt         ← has a Tool enum (incl. ERASER)
-org/iccnet/supernotedemo/MainActivity.kt
-org/iccnet/supernotedemo/SupernoteDemoApp.kt    ← calls addHiddenApiExemptions
-```
-
-Read out of the installed APK's dex (constants are `PRIVATE STATIC FINAL`, values below are the
-actual compiled values, not guesses):
-
-| Constant | Value |
-|---|---|
-| `IFACE_TOKEN` | `"android.demo.IMyService"` |
-| `APP_NAME` | `"supernote-demo"` |
-| `TX_WRITE_APP_INFO` / `TX_DISABLE_AREA` / `TX_PEN` / `TX_DRAW_BUFFER` | 0 / 1 / 2 / 6 |
-| Pen codes | 10 / 11 / 15 / 16 — identical to the Lua |
-| Colour codes | 0 / −101 / −102 / 254 — identical to the Lua |
-
-Its `SupernoteInk` API is a **superset** of what this plan's Phase 1 specifies:
+**This is the single most important input to the whole branch.** The user has a complete,
+hardware-validated proof of concept, and it **corrects several things this plan got wrong**.
 
 ```
-isAvailable  lookupBinder  transact  claimPen  setPen  setEraser  clearAll
-setDisableAreas  setFullScreenDisable  clearDisableAreas  enableFullUiAuto
-enableAutoRegal  screenRefresh  sendOneFullFrame  einkApiDumped
+~/git/SupernoteDemo/
+  NOTESPROUT_SUPERNOTE_INTEGRATION_PLAN.md   ← the user's own integration plan; read it
+  README.md
+  app/src/main/java/org/iccnet/supernotedemo/
+    SupernoteInk.kt      ← 261 lines, self-contained, production-ready. Phase 1 ports this.
+    DrawingView.kt       ← the reference implementation of the deferred handoff. Phase 3 mirrors it.
+    MainActivity.kt  SupernoteDemoApp.kt  model/Note.kt  io/NoteStore.kt
 ```
 
-— i.e. it also drives `enableAutoRegal`, `screenRefresh` and `sendOneFullFrame`, and carries an
-`einkApiDumped` diagnostic that reflects the eink service's method list. Its error strings
-(`"binder gone, marking unavailable"`, `"eink system service not present"`,
-`"enableFullUiAuto unavailable: "`) show it already handles the failure paths the Lua guards.
+Validated on **both** a Nomad and a Manta. What it proved on real hardware: the binder is reachable;
+**live hardware ink under the pen is smooth at sub-frame latency**; points come from `MotionEvent`
+(the firmware returns none); real EMR pressure arrives per point; software-hit-test erase works;
+persistence round-trips; it survives a task switch; and — the headline — **no per-stroke flash or
+ghost, once the deferred handoff model was adopted.**
 
-**Implication for Phase 1:** if the source for this app is available, Phase 1 becomes a *port of
-proven, on-device code* rather than a fresh translation of the Lua plus discovery. That is a large
-de-risk and should be the first thing established at Phase 1 start. Ask the user.
+`SupernoteInk.kt` has **no Notesprout dependencies** and ports verbatim with a package rename.
 
-**It also settles Risk 6 outright:** `APP_NAME` is `"supernote-demo"` — an arbitrary string the
-firmware evidently accepts. The firmware does **not** whitelist app names, so `"notesprout"` is fine
-and there is no need to masquerade as `"koreader-pencil"`.
+### ⚠️ Corrections the PoC forces on this plan
+
+Read these before Phase 1. Each one was written into this plan from the KOReader source and is
+**wrong**; the PoC found out on hardware.
+
+1. **Never bake + `clearAll()` on every pen-lift.** This plan's Phase 3 originally specified exactly
+   that, complete with three candidate orderings for the flash it produces. **The whole exercise was
+   misconceived** — per-lift handoff fights the hardware and causes a flash plus a ghost/enlargement
+   artefact. The correct model is a **deferred handoff** (below). Phase 3 has been rewritten.
+2. **Pen type is `NEEDLE` (10), not `INK` (16).** This plan expected Ink. NEEDLE is the uniform-width
+   ballpoint and matches our uniform-width baked polyline; INK and CALLIGRAPHY vary width with
+   pressure/angle, so the live overlay visibly disagrees with the baked stroke.
+3. **EMR size is `(widthPx * 100).coerceIn(200, 1200)`** — a width-3 pen → EMR **300**. This plan
+   said to start "≈ our 3.0f stroke", i.e. EMR ≈ 3, which paints a **sub-pixel, invisible** line.
+   The PoC hit this: *"This one bug masqueraded as 'no live ink.'"* Had we shipped the plan as
+   written, Phase 1 would likely have been recorded as a failure. Eraser EMR is
+   `(eraserRadius * 50).coerceAtLeast(400)`.
+4. **Eraser mode calls `setEraser`** rather than merely suppressing the pen. The point is to stop the
+   firmware painting NEEDLE ink along the eraser path while our software hit-test does the real
+   removal. (Full-screen disable is still the right tool for lasso / text / dialog modes, where we
+   want *no* firmware painting at all.)
+5. **`enableAutoRegal(context, true)` at setup** — the anti-ghosting waveform. And **avoid
+   `screenRefresh` / `sendOneFullFrame` per stroke**; both flash. `sendOneFullFrame` is fine on
+   clear / erase-all, where a flash is expected anyway.
+6. **`onWindowFocusChanged(true)` must re-assert the whole setup**, not just re-enable. The view
+   stays attached across a task switch so `onAttachedToWindow` never re-runs, and while we are away
+   the firmware hands the pen back to other apps and resets full-UI ink.
+
+### The deferred handoff model (replaces per-lift baking)
+
+```
+While writing, per stroke:
+  ACTION_DOWN / MOVE  → capture points from MotionEvent
+  ACTION_UP           → add the stroke to the model AND to pendingStrokes.
+                        Do NOTHING to the overlay — no bake, no clearAll, no refresh.
+                        The firmware keeps showing it.
+
+At a handoff boundary → releaseFirmwareOverlay():
+  1. bake the pending strokes into the app layer   (one repaint)
+  2. SupernoteInk.clearAll()                       (wipe the firmware overlay)
+  3. invalidate()
+```
+
+The stroke enters the **model** on pen-up, so saves, snapshots, hit-tests and gesture gates are all
+correct immediately — only the *visual* bake is deferred. This is exactly how `OnyxNotebookView`
+already behaves, which is why `NotebookView` already exposes every hook the boundaries need.
+
+**In Notesprout this is simpler than in the PoC.** The PoC keeps a separate `pendingStrokes` list and
+replays it onto its bitmap. Our committed `RenderNode` re-records from the whole `strokes` list, so
+the bake is just the existing `redrawCanvas()` call — deferring it means *skipping* `redrawCanvas()`
+in `commitActiveStroke()` and calling it at the boundary instead. `pendingStrokes` shrinks to a
+boolean "is anything pending".
+
+### On the README's "injected touch events" caveat
+
+`SupernoteDemo/README.md` says its verification table was produced "via injected touch events",
+which would not exercise the EMR digitizer at all. The later
+`NOTESPROUT_SUPERNOTE_INTEGRATION_PLAN.md` supersedes it, reporting live hardware ink verified on
+both devices — and its account of the invisible-sub-pixel-EMR bug could only have come from real pen
+testing. Treat the integration plan as authoritative. Phase 1 still confirms live ink under a real
+pen as its exit criterion: it is the make-or-break, and it costs one minute.
 
 ---
 
@@ -286,7 +326,7 @@ byte-for-byte the Generic logic and needs no change.
 
 ---
 
-## Phase 0 — Baseline & firmware probe · ⬜ NOT STARTED
+## Phase 0 — Baseline & firmware probe · 🔧 IN PROGRESS
 
 **Goal:** answer "is the firmware path even available to us, and does the pen reach us as a stylus?"
 before writing a line of engine code. Also establish the latency baseline we are trying to beat.
@@ -409,78 +449,73 @@ runtime binder handshake, and the 0…31 pen-type sweep)_
 
 ---
 
-## Phase 1 — `SupernoteInk` binder client + live-ink proof · ⬜ NOT STARTED
+## Phase 1 — Port `SupernoteInk` + live-ink proof · ⬜ NOT STARTED
 
-**Goal:** the make-or-break phase. Port the Lua to Kotlin and prove the firmware will paint ink
-inside *our* app window, then clear on command. If this fails, nothing downstream is worth building.
+**Goal:** get the proven firmware client into Notesprout and confirm live ink under a real pen.
+Thanks to the PoC this is now a **port, not a translation** — most of the original Phase 1 scope is
+already done and hardware-validated.
 
 ### Build
 
-- `app/src/main/kotlin/com/notesprout/android/notebook/ratta/SupernoteInk.kt` — new Kotlin `object`.
-  Port `supernote_ink.lua` call for call:
-  - `getService` via reflection on `android.os.ServiceManager`; try both service names; cache the
-    `IBinder`.
-  - `private fun transact(code: Int, write: (Parcel) -> Unit)` mirroring the Lua's `transact`:
-    `Parcel.obtain()` × 2 → `writeInterfaceToken(IFACE_TOKEN)` → `writeString(APP_NAME)` →
-    `write(data)` → `binder.transact(code, data, reply, 0)` → `recycle()` both in a `finally`.
-    Catch `DeadObjectException` → re-lookup once → on second failure mark unavailable and **report**
-    (per Decision 2: `Log.w` + one toast, never a silent degrade).
-  - Public API: `isAvailable(context)`, `claimPen()`, `setPen(type, sizeEmr, color)`,
-    `setEraser(rectangular, sizeEmr)`, `clearAll()`, `setFullScreenDisable(w, h)`,
-    `setDisableAreas(rects: List<Rect>)`, `clearDisableAreas()`, `enableFullUiAuto(activity, Boolean)`.
-  - Constants: `Pen.NEEDLE/INK/MARK/CALLIGRAPHY`, `Color.BLACK/DARK_GRAY/GRAY/LIGHT_GRAY`, the four
-    tx codes, `IFACE_TOKEN = "android.demo.IMyService"`, `APP_NAME = "notesprout"`.
-  - `APP_NAME`: the Lua sends `"koreader-pencil"`. Unknown whether the firmware whitelists specific
-    names. If Phase 1 fails to paint, **retrying with `"koreader-pencil"` is the first thing to
-    try** — it is a known-working value.
-  - Every failure path logs; no exception escapes into the drawing loop.
-- `SupernoteProbeActivity` gains a driver panel: buttons for *Claim pen*, *Full UI auto on/off*,
-  *Pen type −/+*, *Size −/+*, *Colour cycle*, *Eraser*, *Clear all*, *Disable top strip*,
-  *Clear disable areas* — plus a plain white write area below them.
+- `notebook/ratta/SupernoteInk.kt` — **copy
+  `~/git/SupernoteDemo/app/src/main/java/org/iccnet/supernotedemo/SupernoteInk.kt` verbatim.** It has
+  no Notesprout dependencies. Changes to make:
+  - package → `com.notesprout.android.notebook.ratta`
+  - `APP_NAME` → `"notesprout"` (arbitrary strings are accepted — proven, see Prior art)
+  - logging → keep `Log.w` / `Log.i` as-is. **Do not** convert to `Slog.d`: per Decision 2 firmware
+    failures must survive into release builds.
+  - add the one-toast-per-Activity reporting required by Decision 2, or expose a failure callback the
+    view can toast from. Keep `SupernoteInk` itself Context-light.
+  - keep `einkApiDumped` — it is a useful one-time diagnostic and already gated.
+  - keep both `SERVICE_NAMES` entries even though Phase 0 found only `service_myservice` registered;
+    the fallback costs one null check.
 
-- **Pen-type sweep.** The Lua names only four codes (Needle 10, Ink 16, Mark 11, Calligraphy 15),
-  but those are the four the *Supernote UI* exposes — the firmware's `penTypeArray` may hold more.
-  Make *Pen type* a raw code stepper over **0…31**, not a four-item cycler, and have the user write a
-  short stroke at each code, recording what renders (or nothing). This is the same sweep
-  `PenToolSpikeActivity` ran against Onyx's overlay styles, which turned up three working styles past
-  the SDK's own published constant list — including `STROKE_STYLE_DASH`.
+- `SupernoteProbeActivity` (debug) — the driver panel for the sweep below. Do **not** rebuild the
+  read-only detection UI; Phase 0 part 1 already answered all of it over adb. What is still needed:
+  - a live readout of the last touch: `getToolType(0)`, `pressure`, `AXIS_TILT`, `buttonState`
+  - **the pen-type sweep** (below)
+  - a white write area, and buttons for *Clear all*, *Disable top strip*, *Clear disable areas*
 
-  **What we're hunting for is a dashed / patterned stroke style**, because that unlocks Phase 5.
-  Record the full table of code → appearance in Findings; it is also the raw material for a future
-  pen-tool offering.
+- **Pen-type sweep.** The Lua and the PoC both name four codes (Needle 10, Mark 11, Calligraphy 15,
+  Ink 16) — those are the four the *Supernote UI* exposes, not necessarily all the firmware holds.
+  Step a raw code over **0…31**, writing a short stroke at each, and record what renders. This is the
+  same sweep `PenToolSpikeActivity` ran against Onyx, which found three working styles past the SDK's
+  published constant list — including `STROKE_STYLE_DASH`.
+
+  **We are hunting for a dashed or patterned style**, because that is what unlocks Phase 5. Use a
+  known-visible EMR (300) for every code, or a thin one will read as "renders nothing".
 
 ### Device test
 
-Install both. On **each** device, in the probe:
-1. Write in the white area **before** claiming the pen → note whether the firmware paints anyway.
-2. *Claim pen* → *Full UI auto on* → write → **does firmware ink appear, and is it instant?**
-3. *Clear all* → does the ink vanish?
-4. Step the pen-type code from 0 to 31, writing a short stroke at each → which codes render, and
-   what does each look like? **Is any of them dashed or patterned?**
-5. Cycle sizes at the default type → does the stroke visibly change?
-6. Cycle colours → what do the four codes actually look like on this panel?
-7. *Disable top strip* → write across the strip → does ink stop at the boundary?
-8. *Clear disable areas* → does it paint there again?
-9. *Eraser* → write → what does the firmware draw (if anything)?
-10. Leave the probe and return (home button, then relaunch) → does ink still work without re-claiming?
+Install both. In the probe, on **each** device:
+
+1. Write in the white area → **is the ink instant and smooth?** (Setup runs on attach.)
+2. *Clear all* → does it vanish cleanly, no ghost?
+3. Step the pen-type code 0 → 31, writing a short stroke at each. Record which render and what each
+   looks like. **Is any of them dashed or patterned?**
+4. Confirm the tool-type readout says `TOOL_TYPE_STYLUS` for the pen tip, and what the eraser end and
+   barrel button report.
+5. *Disable top strip* → write across it → does ink stop at the boundary? *Clear disable areas* →
+   does it paint there again?
+6. Home, then relaunch → does ink still work? (This is the focus-regain re-assert.)
+7. Touch with a finger → no ink.
 
 ### Exit criteria
 
-- [ ] Firmware paints live ink inside our window on both devices, visibly faster than the Phase 0
-      baseline.
-- [ ] `clearAll()` removes it completely, leaving no ghost.
-- [ ] Disable areas actually suppress painting in the given rect (this is what protects the toolbar).
-- [ ] The four colour codes are characterised (what grey each one actually renders).
-- [ ] A usable default pen type + EMR size is chosen for Phase 3 (Ink 16 is the expected default).
-- [ ] The 0…31 pen-type sweep is recorded, with an explicit yes/no on **whether any code renders a
-      dashed or patterned stroke**. This decides whether Phase 5 is buildable — if nothing dashed
-      exists, Phase 5 becomes ⛔ BLOCKED and the lasso keeps Phase 4's Canvas path.
-- [ ] Nomad and Manta behave identically. **If Manta differs, record exactly how** — the plan's
-      one-target premise is a claim from the KOReader author who never had a Manta.
+- [ ] Live firmware ink under a **real pen**, on both devices, visibly faster than Generic.
+- [ ] `clearAll()` leaves no ghost.
+- [ ] Disable areas suppress painting in the given rect.
+- [ ] Pen reports `TOOL_TYPE_STYLUS`; finger does not ink.
+- [ ] The 0…31 sweep is recorded, with an explicit yes/no on **whether any code renders a dashed or
+      patterned stroke**. If nothing dashed exists, mark Phase 5 ⛔ BLOCKED — nothing else depends on it.
+- [ ] Identical on Nomad and Manta.
+
+> **If live ink does not appear, check the EMR size first.** An EMR near zero paints an invisible
+> sub-pixel line and looks exactly like a dead firmware path. The PoC lost time to this. Use 300.
 
 ### Findings
 
-_(record here — especially the EMR size scale and what each colour code renders as)_
+_(record here — especially the full pen-code → appearance table)_
 
 ---
 
@@ -513,7 +548,7 @@ Doing it separately gives a clean regression checkpoint before any Ratta code ex
   fun createNotebookView(context: Context): NotebookView = when {
       isBooxDevice()                    -> OnyxNotebookView(context)
       isRattaDevice() &&
-          SupernoteInk.isAvailable(context) -> RattaNotebookView(context)
+          SupernoteInk.isAvailable()    -> RattaNotebookView(context)
       else                              -> GenericNotebookView(context)
   }
   ```
@@ -550,114 +585,168 @@ _(record here)_
 
 ## Phase 3 — `RattaNotebookView`, core writing loop · ⬜ NOT STARTED
 
-**Goal:** first real ink in a real notebook. Pen tool only — every other tool is Phase 4.
+**Goal:** first real ink in a real notebook, on the **deferred handoff** model. Pen tool only —
+other tools are Phase 4.
+
+> **This phase was rewritten after the PoC was found.** An earlier version specified baking and
+> clearing the overlay on every pen-lift, with three candidate orderings to chase the resulting
+> flash. That is the wrong model and the flash is what it produces. See *Prior art → Corrections*.
+> `~/git/SupernoteDemo/app/.../DrawingView.kt` is the reference implementation — mirror it.
 
 ### Build
 
 - `notebook/RattaNotebookView.kt` — **copy `GenericNotebookView.kt` verbatim**, rename the class,
-  then make exactly these edits (per Decision 1; `GenericNotebookView.kt` is not touched):
+  then make these edits (per Decision 1, `GenericNotebookView.kt` is not touched):
 
-  1. **`ACTION_DOWN`** — after the existing `activePoints` setup, configure and claim the firmware
-     pen for this stroke (`setPen(INK, defaultSizeEmr, Color.BLACK)`). Keep the existing
-     `invalidate()`; it is one frame at stroke start, not per move.
-  2. **`ACTION_MOVE`** — keep collecting points into `activePoints` and keep the dwell tracking
-     (`checkAndDispatchGesture` depends on it), but **delete the `invalidate()`**. This is the
-     latency fix.
-  3. **`onDraw`** — delete the in-progress-stroke block entirely (the `activePoints.size >= 2` path).
-     The firmware owns live ink. Everything else in `onDraw` stays: drag layer, committed
-     `RenderNode` blit, shape-transform overlay, lasso overlay.
-  4. **`ACTION_UP`** — after `commitActiveStroke()` + `invalidate()`, clear the firmware overlay so
-     the baked stroke is the only copy on screen. **Sequencing is the #1 risk in this phase** —
-     `invalidate()` is asynchronous, so an immediate `clearAll()` wipes the overlay before our frame
-     reaches the panel and the stroke visibly blinks out and back. Try in this order and record what
-     works:
-     - **(a)** `post { SupernoteInk.clearAll() }` — clear on the next looper turn.
-     - **(b)** clear from a one-shot flag consumed at the end of `onDraw`, after the committed node
-       has been blitted.
-     - **(c)** `postDelayed(clearAll, N)` with the smallest N that looks clean — the crude fallback.
-     Mirror the intent of Onyx's `setRawDrawingRenderEnabled(false)` → bitmap → repaint order.
-  5. **Class header comment** — state plainly that this file is a copy of `GenericNotebookView`,
-     what the six edits are, and that the two are slated to collapse into a shared base (BACKLOG).
-     Someone fixing a lasso bug must know to fix it in both.
+  1. **`firmware` flag** — `private val firmware by lazy { SupernoteInk.isAvailable() }`. Every
+     firmware call sites off it, so the file still behaves exactly like Generic if the binder
+     vanishes.
+
+  2. **`ACTION_MOVE`** — keep collecting points and keep the dwell tracking
+     (`checkAndDispatchGesture` needs it), but **drop the `invalidate()`**. The firmware paints the
+     live trace. This is the latency fix.
+
+  3. **`onDraw`** — delete the in-progress-stroke block (`activePoints.size >= 2`). Everything else
+     stays: drag layer, committed `RenderNode` blit, shape-transform overlay, lasso overlay.
+
+  4. **`commitActiveStroke()` — defer the bake.** Add the `LiveStroke` to `strokes` exactly as now,
+     but **skip `redrawCanvas()`** and set a `pendingBake = true` flag instead. The stroke is in the
+     model immediately, so saves, snapshots, erase hit-tests and the smart-lasso / scribble gates all
+     stay correct — only the *visual* bake waits. Do **not** call `clearAll()` or any refresh here.
+
+  5. **`releaseFirmwareOverlay()`** — the handoff, called only at boundaries (Phase 4 wires them all):
+     ```kotlin
+     private fun releaseFirmwareOverlay() {
+         if (!firmware) return
+         if (pendingBake) { pendingBake = false; redrawCanvas() }   // bake: re-records the node
+         SupernoteInk.clearAll()                                    // wipe the firmware overlay
+     }
+     ```
+     `redrawCanvas()` already re-records from the full `strokes` list and invalidates, so there is no
+     separate replay list to maintain — this is where our `RenderNode` model is simpler than the
+     PoC's bitmap.
+
+  6. **`setupFirmwareInk()` / `teardownFirmwareInk()`** — mirror the PoC:
+     ```kotlin
+     claimPen(); enableFullUiAuto(context, true); enableAutoRegal(context, true)
+     applyDisableAreas(); applyToolToFirmware()
+     ```
+     Called from `onAttachedToWindow` (after first layout) **and from `onWindowFocusChanged(true)`** —
+     the view stays attached across a task switch, so attach alone is not enough. Teardown on focus
+     loss and detach.
+
+  7. **Pen configuration** — `setPen(Pen.NEEDLE, emrSize(strokeWidthPx), Color.BLACK)` where
+     `emrSize(w) = (w * 100f).toInt().coerceIn(200, 1200)`. NEEDLE for uniform width; the EMR clamp
+     is what makes the ink visible at all. Colour stays BLACK this phase — Phase 8 maps the palette.
+
+  8. **Class header comment** — state that this file is a copy of `GenericNotebookView`, list the
+     edits, and note the two are slated to collapse into a shared base (BACKLOG). A lasso fix must be
+     applied to both files.
 
 - `NotebookViewFactory.kt` — enable the Ratta branch.
 
-- Firmware lifecycle, minimum viable version for this phase: `onAttachedToWindow` (after first
-  layout, same `OnGlobalLayoutListener` shape Onyx uses) → `claimPen()` + `enableFullUiAuto(true)`.
-  `onDetachedFromWindow` → `clearAll()` + `enableFullUiAuto(false)` + `clearDisableAreas()`.
-  Anything subtler is Phase 6.
+**Minimum boundaries for this phase** (the full table is Phase 4): `releaseRender()`,
+`onWindowFocusChanged(false)`, page load/`setTemplate`, and detach. Without at least these the
+overlay outlives its page.
 
 ### Device test
 
-Install both. In the dev app, open a notebook and **use the pen tool only**:
+Install both. Open a notebook, **pen tool only**:
 
-1. Write a sentence — is the ink instant, and does it match the Phase 1 probe?
-2. Watch the moment the pen lifts — does the stroke stay put, blink, double-darken, or shift
-   position? (A position shift means the screen-vs-view coordinate offset is wrong.)
-3. Write near all four screen edges and in the corners.
-4. Write across the toolbar — expected to be **wrong** in this phase (that's Phase 4); just record
-   what happens.
-5. Fill a page with ~30 strokes, then flip pages and come back — is every stroke there?
+1. Write several sentences — is the ink instant and smooth, matching the Phase 1 probe?
+2. **Write ten strokes in a row without touching anything else — is there any flash or size/darkness
+   jump between strokes?** There should be none; nothing is baking yet.
+3. Now touch the toolbar. **One** clean handoff should occur: the firmware ink is replaced by the
+   app's baked strokes. Look for a size shift, a darkness shift, or a ghost.
+4. Write near all four edges and in the corners.
+5. Fill a page (~30 strokes), flip pages, come back — every stroke present?
 6. Draw a fast closed circle around some writing (smart lasso) and a scribble over some writing
-   (scribble-erase) — both must still fire, since they run off `activePoints`, not the overlay.
-7. Close the notebook, reopen it — is everything persisted?
+   (scribble-erase) — both must still fire; they run off `activePoints`, not the overlay.
+7. Close the notebook and reopen — everything persisted, and the cover thumbnail correct?
+8. Task-switch away and back, then write — is ink still live? (This is the focus re-assert.)
 
 ### Exit criteria
 
-- [ ] Live ink is instant and visually correct.
-- [ ] Pen-lift handoff is clean — no blink, no double-darkening, no offset.
-- [ ] Strokes persist across page flips and notebook close/reopen.
+- [ ] Live ink is instant, and **there is no per-stroke flash, ghost or enlargement**.
+- [ ] The handoff at the first boundary is a single clean transition with no visible size or darkness
+      shift (minor width mismatch is Phase 8's tuning, but note it here).
+- [ ] Strokes persist across page flips and close/reopen; covers are correct.
 - [ ] Smart lasso and scribble-erase still fire.
+- [ ] Ink survives a task switch.
 - [ ] Identical on Nomad and Manta.
 
 ### Findings
 
-_(record here — especially which of (a)/(b)/(c) sequencing won)_
+_(record here)_
 
 ---
 
-## Phase 4 — Mode transitions & disable areas · ⬜ NOT STARTED
+## Phase 4 — Handoff boundaries & mode transitions · ⬜ NOT STARTED
 
-**Goal:** every non-writing mode must take the firmware overlay away, exactly as Onyx's
-`setRawDrawingEnabled(false)` table does. If the firmware keeps painting during lasso, its ink lands
-on top of our dashed overlays and the page is unusable.
+**Goal:** wire every boundary to `releaseFirmwareOverlay()`, and make every non-writing mode stop the
+firmware painting. **This is where the "no flash, no ghost" behaviour actually comes from** — Phase 3
+builds the mechanism, this phase decides when it fires.
 
 ### Build — all in `RattaNotebookView.kt`
 
-| Trigger | Firmware action |
-|---|---|
-| `setEraserMode(true)` | `clearAll()` + `setFullScreenDisable(w, h)`. Erase stays a software hit-test (already in the copy). Do **not** use the firmware eraser — its trail is not our eraser's geometry. |
-| `setEraserMode(false)` | `clearDisableAreas()` + re-apply toolbar disable areas |
-| `setLassoMode(true)` / `setLassoEraserMode(true)` | `clearAll()` + `setFullScreenDisable(w, h)` — the Canvas draws the dashed path. **Phase 5 revisits this**: if the firmware has a dashed stroke style, the live path becomes firmware ink instead. |
-| `setLassoMode(false)` / `setLassoEraserMode(false)` | restore, as for eraser-off |
-| `setTextPlacementMode(true)` | `clearAll()` + full-screen disable so the placement tap starts no ink |
-| `enterShapeTransform` / `exitShapeTransform` | same pair — handles and the rotate knob are Canvas-drawn |
-| `setDragMoveMode` | drag runs inside lasso mode, so it is already suppressed; verify no extra call is needed |
-| `releaseRender()` (fires on **every** toolbar touch, from all six hosts) | `clearAll()` + `invalidate()` — the Ratta analogue of Onyx releasing the overlay so toolbar state becomes visible |
-| `resetOverlay()` | `clearAll()` then re-arm |
-| `setToolbarExclusion(rect)` | `setDisableAreas([rect])`. **Generic no-ops this** — Ratta must implement it. Convert view coords → screen coords via `getLocationOnScreen` before sending; the firmware paints in screen space. Null/empty ⇒ `clearDisableAreas()`. |
+**Handoff boundaries** — each calls `releaseFirmwareOverlay()` (bake + `clearAll()`):
 
-Note `setToolbarExclusion` is also how the **pen-colour panel** protects itself
-(`penColorPanel.panelRectIn(drawingView.asView())` — see `ScratchpadActivity.kt:2158` and siblings),
-so getting the coordinate conversion right covers both.
+| Trigger | Notes |
+|---|---|
+| Tool change (pen ↔ eraser ↔ lasso ↔ lasso-eraser ↔ text ↔ shape-transform) | release **first**, then reconfigure the firmware for the new tool |
+| `releaseRender()` — fires on **every** toolbar touch, from all six hosts | the Ratta analogue of Onyx releasing its overlay so toolbar state is visible |
+| `releaseForHandoff()` — before launching another drawing screen | also `enableFullUiAuto(false)` |
+| `resetOverlay()` | release, then re-arm |
+| `onWindowFocusChanged(false)` | release + `enableFullUiAuto(false)` + drop the pen claim |
+| Snapshot capture | release **first** so the panel matches the snapshot (the snapshot itself renders from `strokes`, so its data is already correct) |
+| Page nav, `clearForPageLoad()`, `loadStrokesWithBitmap()`, `setTemplate()` | release **before** the content swap, or old-page ink survives onto the new page |
+| `eraseAll()` / clear | clear the model + `clearAll()`; `sendOneFullFrame()` is acceptable here — a flash is expected on a clear |
+
+**Per-tool firmware state:**
+
+| Mode | Firmware action |
+|---|---|
+| Pen | `claimPen()` + `setPen(NEEDLE, emrSize(w), BLACK)` |
+| Eraser | **`setEraser(false, eraserEmr())`** where `eraserEmr() = (eraserRadius * 50).coerceAtLeast(400)`. This stops the firmware painting NEEDLE ink along the eraser path; our software hit-test still does the actual removal. *(An earlier draft said to suppress the pen instead — the PoC uses `setEraser`, and it is proven.)* |
+| Lasso / lasso-eraser | `setFullScreenDisable(w, h)` — we want **no** firmware painting; the Canvas draws the dashed path. **Phase 5 revisits this**: if a dashed firmware style exists, the live path becomes firmware ink instead. |
+| Text placement | `setFullScreenDisable(w, h)` so the placement tap starts no ink |
+| Shape transform | `setFullScreenDisable(w, h)` — handles and the rotate knob are Canvas-drawn |
+| Drag-move (inside lasso) | already suppressed by lasso mode; verify no extra call is needed |
+| Leaving any of the above | `clearDisableAreas()` then re-apply the toolbar areas |
+
+**`setToolbarExclusion(rect)`** — Generic no-ops this; Ratta must implement it. ⚠️ **Our geometry
+differs from the PoC's.** The PoC's `applyDisableAreas()` assumes the toolbar sits *above* the view
+and disables `Rect(0, 0, screenW, top)` from `getLocationOnScreen`. In Notesprout the toolbar
+**overlays** the drawing view inside a `FrameLayout` — same origin and size — so the incoming rect is
+in *view* coordinates and must be offset by `getLocationOnScreen` into *screen* coordinates before
+being sent. Null/empty ⇒ `clearDisableAreas()`.
+
+The pen-colour panel protects itself through the same call
+(`penColorPanel.panelRectIn(drawingView.asView())` — `ScratchpadActivity.kt:2158` and siblings), so
+one correct conversion covers both.
+
+**Do not** call `screenRefresh()` or `sendOneFullFrame()` per stroke or per handoff — both flash.
+`enableAutoRegal(true)` at setup is what keeps handoffs clean.
 
 ### Device test
 
 Install both. In a notebook, for **each** of pen / eraser / lasso / lasso-eraser / insert-text /
 shape-transform:
-1. Switch to the tool, use it, switch away — does firmware ink appear where it shouldn't?
-2. Specifically: in lasso mode, drag a selection — is the dashed box clean, with no firmware ink
-   over it?
-3. Write across the toolbar with the pen — ink must stop at the toolbar edge.
-4. Open the pen-colour panel and drag the stylus across it — no ink on the panel.
-5. Open the overflow menu, a text-edit dialog, and the page-index screen — no stray ink anywhere.
-6. Erase some strokes — do they disappear cleanly with no firmware residue?
+
+1. Switch to the tool, use it, switch away — a single clean handoff each, no stale overlay ink.
+2. Eraser: erase strokes — **no ink painted along the eraser path**, strokes removed cleanly.
+3. Lasso: drag a selection — dashed box clean, no firmware ink over it.
+4. Write with the pen across the toolbar — ink stops at the toolbar edge.
+5. Open the pen-colour panel and drag the stylus over it — no ink on the panel.
+6. Open the overflow menu, a text-edit dialog, the page-index screen — no stray ink anywhere.
+7. Write, then touch the toolbar repeatedly — one handoff, then nothing further to bake.
 
 ### Exit criteria
 
-- [ ] No firmware ink over the toolbar, the colour panel, any dialog, or any menu.
-- [ ] Lasso / lasso-eraser / text-placement / shape-transform overlays render clean.
-- [ ] Every tool switch leaves no stale overlay ink.
+- [ ] No firmware ink over the toolbar, colour panel, any dialog or menu.
+- [ ] Eraser leaves no painted trail.
+- [ ] Every tool switch is one clean handoff with no stale overlay ink.
+- [ ] Lasso / text / shape overlays render clean.
 - [ ] Returning to the pen restores instant firmware ink.
 - [ ] Identical on Nomad and Manta.
 
@@ -748,48 +837,53 @@ _(record here — including which firmware pen code was used for each of the two
 
 ---
 
-## Phase 6 — Lifecycle, page nav, snapshots, close · ⬜ NOT STARTED
+## Phase 6 — Lifecycle, process-global state, close · ⬜ NOT STARTED
 
-**Goal:** the overlay must never outlive its page. A firmware overlay lingering across a page flip
-paints the old page's ink onto the new one.
+**Goal:** the parts of the lifecycle Phase 4's boundary table doesn't cover — re-claiming across
+screens, and the fact that firmware ink state is **process-global**, exactly like Onyx's
+`TouchHelper` pipeline.
+
+Phase 4 already wired the boundaries; do not duplicate them here. What is left:
 
 ### Build — `RattaNotebookView.kt`
 
-- `onWindowFocusChanged(false)` → `clearAll()` + `setFullScreenDisable(w, h)` + `enableFullUiAuto(false)`.
-  On regain → `enableFullUiAuto(true)` + `claimPen()` + `clearDisableAreas()` + re-apply toolbar
-  disable areas. (Onyx treats focus as unreliable on e-ink and leans on `resumeDrawing()` instead —
-  expect the same here and wire both.)
-- `resumeDrawing()` (called from every host's `onResume`) → re-claim + re-arm. This is the reliable
-  path; treat focus as a bonus.
-- `disableDrawing()` → full-screen disable. `enableDrawing()` → restore.
-- `releaseForHandoff()` (called before launching another drawing screen) → `clearAll()` +
-  `enableFullUiAuto(false)` + `clearDisableAreas()`. Unlike Onyx there is no process-global
-  single-owner pipeline to protect, but the *panel overlay* is shared state, so hand it over clean.
-- `clearForPageLoad()` / `eraseAll()` / `loadStrokesWithBitmap()` / `setTemplate()` → `clearAll()`
-  **before** the content swap, so no old-page ink survives onto the new page.
-- `releaseResources()` → `clearAll()` + `enableFullUiAuto(false)` + `clearDisableAreas()`, then the
-  inherited `RenderNode`/bitmap teardown.
-- `captureSnapshot()` needs no firmware call (it renders from `strokes`, never from the screen), but
-  verify the cover it produces has no missing final stroke.
+- **Re-claim discipline.** `setupFirmwareInk()` must run from `onAttachedToWindow` (after first
+  layout) **and** `onWindowFocusChanged(true)` **and** `resumeDrawing()` (every host calls the latter
+  from `onResume`). The firmware hands the pen back to other apps while we are away and resets
+  full-UI ink, so a partial re-enable is not enough — re-assert the whole setup. Onyx treats focus as
+  unreliable on e-ink and leans on `resumeDrawing()`; expect the same and wire both.
+- **`enableDrawing()` / `disableDrawing()`** — disable = `setFullScreenDisable`; enable = restore
+  disable areas + `applyToolToFirmware()`.
+- **Process-global state.** Full-UI ink and the pen claim are system-wide, not per-view. When screen
+  A launches drawing screen B, A must relinquish (`releaseForHandoff()` → release overlay +
+  `enableFullUiAuto(false)`) before B claims. Unlike Onyx there is no single-owner *pipeline* to
+  protect, so no `penOwner` guard is needed — but the **panel overlay** is shared state and must be
+  handed over clean. Verify a late `onDetachedFromWindow` from the outgoing screen cannot wipe the
+  incoming screen's overlay; if it can, an ownership guard mirroring Onyx's becomes necessary.
+- **`releaseResources()`** — `releaseFirmwareOverlay()` + `clearDisableAreas()` +
+  `enableFullUiAuto(false)`, then the inherited `RenderNode` / bitmap teardown.
 
 ### Device test
 
 Install both. In a notebook:
-1. Write on page 1, flip to page 2 — is page 2 clean? Flip back — is page 1 intact?
-2. Write, then immediately flip before the ink settles.
-3. Write, press home, return — ink still works, no stale overlay.
-4. Write, lock the screen, unlock.
-5. Write, open the scratch pad from the toolbar, come back.
-6. Write, open a sticky note, come back.
-7. Write, close the notebook, check the library cover thumbnail includes the last stroke.
-8. Insert a page, delete a page, change the page template.
-9. Two-finger swipe down to Today, then back.
+
+1. Write, flip to the next page — is it clean? Flip back — intact?
+2. Write, then flip immediately, before touching anything (the flip is the first boundary).
+3. Write, press home, return, write again.
+4. Write, lock the screen, unlock, write again.
+5. Write, open the scratch pad from the toolbar, come back, write again.
+6. Write, open a sticky note, come back, write again.
+7. Notebook A → notebook B → back to A, writing on each.
+8. Write, close the notebook — library cover includes the last stroke?
+9. Insert a page, delete a page, change the page template.
+10. Two-finger swipe down to Today, then back.
 
 ### Exit criteria
 
-- [ ] No overlay ink ever survives a page change.
-- [ ] Ink still works after every background/foreground round trip above.
-- [ ] Covers/snapshots include the final stroke.
+- [ ] No overlay ink ever survives a page change or a screen change.
+- [ ] Ink is live again after every background/foreground and screen-to-screen round trip above.
+- [ ] Covers and snapshots include the final stroke.
+- [ ] Leaving the app entirely restores normal system ink behaviour (nothing left claimed).
 - [ ] Identical on Nomad and Manta.
 
 ### Findings
@@ -851,12 +945,21 @@ greyscale panel. So:
   panel is greyscale, its rendering of a colour is a grey anyway — the mapping only has to match
   what the panel would have shown.
 - Build the mapping off the Phase 1 findings (what each code actually renders), not off theory.
+- **A legitimate cheaper option:** the PoC simply left the live preview BLACK and let the baked
+  stroke carry the real colour. The handoff already produces one visible transition; if the mapped
+  greys turn out not to help, keeping BLACK is a defensible outcome for this phase rather than a
+  failure. Decide on-device.
 
 Also in this phase:
-- Pull the **EMR size → stroke-width mapping** from the upstream `supernote_draw` repo and map our
-  stroke width (`LiveStroke.DEFAULT_STROKE_WIDTH`; Generic paints at 2.5f, Onyx at 3.0f) onto it, so
-  the live overlay's thickness matches the baked polyline.
-- Pen type: decide whether Ink (16) or Needle (10) better matches our round-cap polyline.
+- **Width match.** Phase 3 already ships `emrSize(w) = (w * 100).coerceIn(200, 1200)` from the PoC,
+  which reports 3px paint ↔ EMR 300 looking good. What is left is *tuning*: our stroke widths are
+  2.5f (Generic's paint) and 3.0f (Onyx's), and any mismatch shows as a one-time size or darkness
+  shift **at the handoff moment**, when firmware ink is replaced by the baked polyline. Nudge the
+  multiplier until that transition is invisible. The firmware's Needle `penSizeArray` runs
+  ~200…2400, so there is headroom above the current 1200 clamp if a thicker pen is ever wanted.
+- ~~Pen type: decide whether Ink (16) or Needle (10) better matches our round-cap polyline.~~
+  **Settled by the PoC: NEEDLE (10)** — uniform width, matching our uniform-width baked polyline.
+  Already wired in Phase 3.
 
 ### Build
 
@@ -930,9 +1033,13 @@ No device test. Documentation and housekeeping.
    to match behaviourally, since identical firmware does not guarantee identical *panel* behaviour.
    ⚠️ **New trap from the same measurement: the Manta reports `Build.MODEL` as `Supernote Nomad`.**
    The two are indistinguishable by name — branch on screen size or not at all.
-2. **Pen-lift sequencing** (Phase 3, edit 4) is the most likely thing to look wrong first: clear too
-   early and the stroke blinks, clear too late and it double-darkens. Three candidate orderings are
-   written into the phase.
+2. ~~**Pen-lift sequencing** — clear too early and the stroke blinks, clear too late and it
+   double-darkens~~ — **dissolved by the PoC.** The question only existed because the plan assumed a
+   per-lift bake. Under the deferred handoff there is no per-lift sequencing at all: the firmware
+   simply keeps its ink until a boundary. The residual risk moves to **boundary coverage** — miss a
+   boundary and stale overlay ink outlives its page (Phase 4's table is the mitigation) — and to
+   **baked-vs-firmware width match**, which shows as a one-time size or darkness shift at the
+   handoff moment (Phase 8 tunes it; the PoC reports 3px paint ↔ EMR 300 looked good).
 3. **Screen-space vs view-space coordinates.** The firmware paints in screen coordinates; every
    `MotionEvent` we bake is in view coordinates. Disable areas must be converted via
    `getLocationOnScreen`. A mismatch shows up as ink that stops at the wrong boundary, or a baked
@@ -956,5 +1063,8 @@ No device test. Documentation and housekeeping.
   `.claude/skills/device-build-install/SKILL.md` alongside the Nomad's `SN078D10012852`. The skill's
   entry carries the "identifies as a Nomad" warning, since serial is the only reliable way to tell
   the two apart from the host side. (Phase 9 still covers the tier move.)
-- **Is the source for `org.iccnet.supernotedemo` available?** See *Prior art*. If yes, Phase 1 is a
-  port of working code instead of a fresh translation. **Ask before starting Phase 1.**
+- ~~**Is the source for `org.iccnet.supernotedemo` available?**~~ **Yes — `~/git/SupernoteDemo`,
+  read 2026-08-08.** It carries the user's own `NOTESPROUT_SUPERNOTE_INTEGRATION_PLAN.md`, whose
+  substance is now folded into this file (see *Prior art*, and the rewritten Phases 1, 3 and 4).
+  That repo stays the reference for `SupernoteInk.kt` and `DrawingView.kt`; **this file is the single
+  source of truth for the branch** — do not work from two plans.
