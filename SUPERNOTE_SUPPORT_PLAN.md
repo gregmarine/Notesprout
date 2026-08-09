@@ -1,7 +1,7 @@
 # Supernote (Ratta) Support — Implementation Plan
 
 > **Branch:** `supernote` · **Targets:** Supernote Nomad + Supernote Manta
-> **Overall status:** Phases 0–5 ✅ done (2026-08-08/09, both devices, firmware 2389).
+> **Overall status:** Phases 0–6 ✅ done (2026-08-08/09, both devices, firmware 2389).
 > `RattaNotebookView` ships the deferred-handoff writing loop — live firmware ink is
 > hardware-validated ("the writing experience is gold"), smart lasso / scribble-erase traces
 > self-clear via the **clear+frame retry ladder** (see Phase 3 findings: the two measured
@@ -11,7 +11,11 @@
 > must be issued from the HOVER stream, before the tip lands.**
 > Phase 5 shipped the hardware lasso trails (code 4 dashes / code 3 x-stream) and folded
 > the physical eraser end into the hover-ahead barrel suppress.
-> Next: Phase 6 (lifecycle, process-global state, close).
+> Phase 6 shipped the lifecycle layer: the static `inkOwner` guard (the successor's onResume
+> precedes the predecessor's detach, so unguarded teardowns killed the new session — guard
+> proved necessary statically), `resumeDrawing()` reclaim, real enable/disableDrawing, and a
+> full `releaseResources` release; ten-scenario lifecycle script passed both devices round 1.
+> Next: Phase 7 (the remaining five drawing hosts).
 
 ---
 
@@ -45,7 +49,7 @@ This plan is written to survive a cleared context. At the start of every session
 | 3 | `RattaNotebookView` — core writing loop | ✅ yes | ✅ DONE (2026-08-08) |
 | 4 | Handoff boundaries & mode transitions | ✅ yes | ✅ DONE (2026-08-09) |
 | 5 | Firmware dashed ink for the live lasso path | ✅ yes | ✅ DONE (2026-08-09) — **+ hover-ahead suppress law; eraser-end folded into barrel suppress** |
-| 6 | Lifecycle, process-global state, close | ✅ yes | ⬜ NOT STARTED |
+| 6 | Lifecycle, process-global state, close | ✅ yes | ✅ DONE (2026-08-09) — **inkOwner guard proved necessary; full-screen disable at final teardown confirmed harmless system-wide** |
 | 7 | The remaining five drawing hosts | ✅ yes | ⬜ NOT STARTED |
 | 8 | Ink mapping & EMR stroke-width tuning | ✅ yes | ⬜ NOT STARTED |
 | 9 | Docs, device tiers, wrap-up | — | ⬜ NOT STARTED |
@@ -1197,7 +1201,7 @@ barrel/eraser-end contacts in Canvas-overlay modes arm the clear ladder on lift.
 
 ---
 
-## Phase 6 — Lifecycle, process-global state, close · ⬜ NOT STARTED
+## Phase 6 — Lifecycle, process-global state, close · ✅ COMPLETE (2026-08-09, both devices)
 
 **Goal:** the parts of the lifecycle Phase 4's boundary table doesn't cover — re-claiming across
 screens, and the fact that firmware ink state is **process-global**, exactly like Onyx's
@@ -1240,15 +1244,46 @@ Install both. In a notebook:
 
 ### Exit criteria
 
-- [ ] No overlay ink ever survives a page change or a screen change.
-- [ ] Ink is live again after every background/foreground and screen-to-screen round trip above.
-- [ ] Covers and snapshots include the final stroke.
-- [ ] Leaving the app entirely restores normal system ink behaviour (nothing left claimed).
-- [ ] Identical on Nomad and Manta.
+- [x] No overlay ink ever survives a page change or a screen change.
+- [x] Ink is live again after every background/foreground and screen-to-screen round trip above.
+- [x] Covers and snapshots include the final stroke.
+- [x] Leaving the app entirely restores normal system ink behaviour (nothing left claimed).
+- [x] Identical on Nomad and Manta.
 
 ### Findings
 
-_(record here)_
+**Device-validated 2026-08-09 — the full ten-scenario script passed on both devices, first
+round.** The full-screen-disable-at-final-teardown choice (below) stood: leaving the app left
+the system's own ink behaviour normal, so the daemon does reset per-claim state — no flip to
+`clearDisableAreas` needed. What was decided at build time:
+
+- **The ownership guard IS necessary — settled statically, no device round needed.** Android runs
+  the incoming screen's `onResume` (→ `setupFirmwareInk`) **before** the outgoing screen's
+  `onDestroy`/`onDetachedFromWindow`, and the Phase 4 detach path unconditionally did
+  `clearAll` + full-screen disable + `enableFullUiAuto(false)` — which would land right on top of
+  the successor's freshly-claimed session. Added `inkOwner` (static, mirroring Onyx's `penOwner`):
+  `setupFirmwareInk` claims it; every process-global teardown (`teardownFirmwareInk`, detach,
+  `releaseForHandoff`, `releaseResources`) and the **gesture-trace clear ladder** (a ladder armed
+  by a lasso lift must not fire `clearAll` into a successor's session after fast navigation) checks
+  `inkOwner === this` first. Detach/`releaseResources` null it when they run as owner (also frees
+  the static view ref — no Activity leak).
+- **Re-claim discipline:** setup now runs from attach **post-layout** (deferred to `onSizeChanged`
+  when width/height are still 0 — a 0×0 full-screen disable is an empty rect and
+  `getLocationOnScreen` is garbage before layout), from focus gain (unchanged), and from the new
+  `resumeDrawing()` override (every host's onResume — the focus-independent reclaim, and the path
+  that flips `inkOwner` back after a translucent overlay host, since our onResume precedes its
+  onDestroy). `onSizeChanged` also re-asserts on every resize so disable-area screen offsets track
+  layout.
+- **`enableDrawing`/`disableDrawing`** (were no-ops): enable = `applyToolToFirmware()` (restores
+  disable areas + armed tool); disable = **bake first** (`releaseFirmwareOverlay` — a same-window
+  view switch like the day window's Note→Events crosses no focus boundary, so pending overlay ink
+  would float above the new view) then full-screen disable. Both ownership-gated.
+- **`releaseResources`** (host onDestroy): when still owner, full firmware release — bake+clear,
+  then **full-screen disable, not the plan's `clearDisableAreas`** (kept Phase 4's detach
+  rationale: nothing may paint stray ink in the app's non-drawing screens; the daemon is expected
+  to reset per-claim state when another app claims the pen). ⚠️ Watch in test: after leaving the
+  app entirely, the Supernote's own notes app must still ink — if it doesn't, the lingering
+  disable area is global, flip this to `clearDisableAreas`.
 
 ---
 

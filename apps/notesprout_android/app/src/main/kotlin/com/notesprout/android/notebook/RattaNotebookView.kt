@@ -78,6 +78,13 @@ import java.util.UUID
 //     firmware — the post-lift selection box, drag preview and snap guides stay Canvas.
 //     Drag-move must suppress from the HOVER stream, before the tip lands — the firmware
 //     latches pen state at contact start (see updateLassoDragHoverSuppress).
+//   • Lifecycle (Phase 6): firmware ink state is PROCESS-GLOBAL (pen claim, full-UI ink,
+//     disable areas, overlay buffer). A static inkOwner guard (Onyx's penOwner mirror)
+//     keeps an outgoing screen's late teardown — Android runs focus loss / detach /
+//     destroy AFTER the successor's onResume — from wiping the successor's session.
+//     Setup re-asserts from attach (post-layout, via onSizeChanged on first layout),
+//     focus gain, and resumeDrawing (host onResume); enableDrawing/disableDrawing gate
+//     input for dialogs and non-drawing views; releaseResources leaves nothing claimed.
 //   • Barrel button: a held side button full-screen-disables the firmware (its native
 //     x-stream button trace ignores the app's pen config but respects disable areas —
 //     lab-measured; see updateBarrelSuppress), while the software erase does the work.
@@ -110,6 +117,18 @@ class RattaNotebookView(context: Context) : View(context), NotebookView {
          * idempotent and invisible once the trace is gone — so retrying costs nothing.
          */
         private val GESTURE_TRACE_CLEAR_DELAYS_MS = longArrayOf(450L, 1000L, 1900L)
+
+        /**
+         * The view currently owning the process-global firmware ink state (pen claim,
+         * full-UI ink, disable areas, overlay buffer) — the Ratta mirror of Onyx's
+         * penOwner guard. Activity transitions run the incoming screen's onResume
+         * (→ [setupFirmwareInk]) BEFORE the outgoing screen's onDestroy/detach, so an
+         * unguarded late teardown would clearAll + full-screen-disable +
+         * fullUiAuto(false) right over the successor's freshly-claimed session — the
+         * "canvas goes dead after switching screens" bug Onyx already solved. Every
+         * process-global teardown checks `inkOwner === this` first.
+         */
+        private var inkOwner: RattaNotebookView? = null
     }
 
     // ── Ratta firmware ink state ─────────────────────────────────────────────
@@ -138,7 +157,9 @@ class RattaNotebookView(context: Context) : View(context), NotebookView {
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
         SupernoteInk.onFailure = firmwareFailureHandler
-        setupFirmwareInk()
+        // Before first layout width/height are 0 — a full-screen disable would be an empty
+        // rect and getLocationOnScreen garbage. onSizeChanged runs the setup instead.
+        if (width > 0 && height > 0) setupFirmwareInk()
     }
 
     override fun onWindowFocusChanged(hasWindowFocus: Boolean) {
@@ -152,12 +173,13 @@ class RattaNotebookView(context: Context) : View(context), NotebookView {
     override fun onDetachedFromWindow() {
         overlayClearArmed = false
         removeCallbacks(overlayClearRunnable)
-        if (firmware) {
+        if (firmware && inkOwner === this) {
             releaseFirmwareOverlay()
             // Full-screen disable, not clearDisableAreas: between this view's death and the
             // next drawing surface's setup nothing should let the firmware paint stray ink.
             SupernoteInk.setFullScreenDisable(width, height)
             SupernoteInk.enableFullUiAuto(context, false)
+            inkOwner = null   // also drops the static view ref — no Activity leak
         }
         if (SupernoteInk.onFailure === firmwareFailureHandler) SupernoteInk.onFailure = null
         super.onDetachedFromWindow()
@@ -166,6 +188,7 @@ class RattaNotebookView(context: Context) : View(context), NotebookView {
     /** (Re-)claim the firmware pen and turn on full-UI ink. Idempotent; safe to call often. */
     private fun setupFirmwareInk() {
         if (!firmware) return
+        inkOwner = this   // process-global claim — a predecessor's late teardown now skips
         SupernoteInk.claimPen()
         SupernoteInk.enableFullUiAuto(context, true)
         SupernoteInk.enableAutoRegal(context, true)   // anti-ghosting waveform; keeps handoffs clean
@@ -174,6 +197,9 @@ class RattaNotebookView(context: Context) : View(context), NotebookView {
 
     private fun teardownFirmwareInk() {
         if (!firmware) return
+        // A successor already set up (translucent scratch pad / sticky editor over us):
+        // the firmware is theirs now — touching it would kill their live ink.
+        if (inkOwner !== this) return
         releaseFirmwareOverlay()
         // "Drop the pen claim": the firmware has no unclaim transaction, so the enforceable
         // equivalent is a full-screen disable — while we are unfocused (dialog up, task
@@ -231,6 +257,9 @@ class RattaNotebookView(context: Context) : View(context), NotebookView {
     private val overlayClearRunnable = object : Runnable {
         override fun run() {
             if (!firmware || !overlayClearArmed) return
+            // Ownership moved to another drawing screen mid-ladder (fast navigation after
+            // a lasso lift): a clearAll now would wipe THEIR live overlay ink. Stand down.
+            if (inkOwner !== this@RattaNotebookView) { overlayClearArmed = false; return }
             // Never wipe live ink: mid-stroke → try again shortly; strokes pending bake →
             // the overlay is showing needed ink, leave it for the next natural boundary.
             if (penDown) { postDelayed(this, GESTURE_TRACE_CLEAR_DELAYS_MS[0]); return }
@@ -665,6 +694,9 @@ class RattaNotebookView(context: Context) : View(context), NotebookView {
         // redrawCanvas records white → template → strokes into the node in one pass, so any strokes
         // loaded before layout (race with loadStrokes()) are not lost on first record.
         redrawCanvas()
+        // First layout after attach (the setup deferred until real dimensions existed) and
+        // any later resize (the disable-area screen offsets shift with layout). Idempotent.
+        if (isAttachedToWindow) setupFirmwareInk()
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
@@ -1874,8 +1906,31 @@ class RattaNotebookView(context: Context) : View(context), NotebookView {
         if (firmware && !firmwareSuppressed) applyDisableAreas()
     }
 
-    override fun enableDrawing() {}
-    override fun disableDrawing() {}
+    // Host-driven input gating (dialog up, non-drawing view in a multi-view host). Both
+    // touch process-global firmware state, so they only act while this view owns it.
+    override fun enableDrawing() {
+        if (!firmware || inkOwner !== this) return
+        applyToolToFirmware()   // restores disable areas + the armed tool's pen state
+    }
+
+    override fun disableDrawing() {
+        if (!firmware || inkOwner !== this) return
+        // Bake first: hosts that switch views inside one window (day window Note→Events)
+        // cross no focus boundary, so pending overlay ink would float above the new view.
+        releaseFirmwareOverlay()
+        SupernoteInk.setFullScreenDisable(width, height)
+    }
+
+    // Every host calls this from onResume. Focus events are unreliable on e-ink (Onyx
+    // measured; assume the same here), and while we were away the firmware handed the pen
+    // to other apps and reset full-UI ink — so re-assert the WHOLE setup, not a partial
+    // re-enable. This is also the reclaim after a translucent overlay host: our onResume
+    // runs before its onDestroy, so claiming here flips [inkOwner] back to us and defuses
+    // that host's late focus-loss/detach teardown.
+    override fun resumeDrawing() {
+        if (width > 0 && height > 0) setupFirmwareInk()
+        // else not laid out yet — onSizeChanged runs the setup after first layout.
+    }
 
     // Fired by the hosts on every toolbar touch — the Ratta analogue of Onyx releasing its
     // EPD overlay: bake pending firmware ink and clear the overlay so chrome paints clean.
@@ -1886,9 +1941,11 @@ class RattaNotebookView(context: Context) : View(context), NotebookView {
     // Before launching (and finishing into) another drawing screen: hand off cleanly and
     // stop painting full-UI ink — the successor's own setup re-claims and re-enables.
     override fun releaseForHandoff() {
-        if (!firmware) return
+        if (!firmware || inkOwner !== this) return
         releaseFirmwareOverlay()
         SupernoteInk.enableFullUiAuto(context, false)
+        // inkOwner stays ours: if the successor never claims (edge), our detach cleans up;
+        // when it does claim, setupFirmwareInk overwrites the token and our teardowns skip.
     }
 
     override fun resetOverlay() {
@@ -2399,6 +2456,16 @@ class RattaNotebookView(context: Context) : View(context), NotebookView {
     }
 
     override fun releaseResources() {
+        // Host onDestroy. If we still own the firmware — leaving the drawing world for a
+        // non-drawing screen (library, Today) or leaving the app — release it fully so
+        // nothing stays claimed. The detach callback that follows would repeat this;
+        // dropping inkOwner here makes it a no-op instead.
+        if (firmware && inkOwner === this) {
+            releaseFirmwareOverlay()
+            SupernoteInk.setFullScreenDisable(width, height)
+            SupernoteInk.enableFullUiAuto(context, false)
+            inkOwner = null
+        }
         committedNode.discardDisplayList()
         dragBackingBitmap?.recycle()
         dragBackingBitmap = null
