@@ -51,6 +51,8 @@ key.properties
 .claude/*
 !.claude/skills/
 !.claude/skills/**
+# The re-include above un-ignores .DS_Store inside skills/ (last matching rule wins) — re-ignore it
+.claude/skills/**/.DS_Store
 
 # Logs
 *.log
