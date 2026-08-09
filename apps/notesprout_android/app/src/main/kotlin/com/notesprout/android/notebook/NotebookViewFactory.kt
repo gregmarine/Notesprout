@@ -22,8 +22,7 @@ fun createNotebookView(context: Context): NotebookView {
     val ratta = isRattaDevice()
     val view = when {
         isBooxDevice() -> OnyxNotebookView(context)
-        // TODO(Phase 3): enable once RattaNotebookView exists.
-        // ratta && SupernoteInk.isAvailable() -> RattaNotebookView(context)
+        ratta && SupernoteInk.isAvailable() -> RattaNotebookView(context)
         else -> GenericNotebookView(context)
     }
     // Log.i, not Slog: one line per screen open is worth having in a release bug report.

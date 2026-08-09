@@ -49,6 +49,7 @@ class SupernoteProbeActivity : AppCompatActivity() {
     private companion object {
         const val SWEEP_EMR = 300      // known-visible; near-zero EMR is an invisible sub-pixel line
         const val FIRMWARE_COLOR = SupernoteInk.Color.BLACK
+        const val DELAY_MS = 2000L     // clear-matrix arming delay — outlives any input event
         val PEN_NAMES = mapOf(
             1 to "eraser-rnd", 3 to "eraser-rect",
             10 to "NEEDLE", 11 to "MARK", 15 to "CALLIGRAPHY", 16 to "INK",
@@ -104,6 +105,48 @@ class SupernoteProbeActivity : AppCompatActivity() {
             "CLEAR" to { SupernoteInk.clearAll(); writeArea.invalidate() },
             "STRIP" to { stripEnabled = !stripEnabled; applyDisableAreas(); writeArea.invalidate() },
             "FULL FRAME" to { SupernoteInk.sendOneFullFrame(this) },
+        ))
+
+        // ── Phase 3 clear-matrix: which sequence removes ALREADY-PAINTED overlay ink with
+        // NO input event near it? Every sequence fires DELAY_MS after the arming tap, so the
+        // tap itself (an input event) is long gone. Write strokes first, tap one button,
+        // lift hand fully away, watch the ink at T+2 s. See SUPERNOTE_SUPPORT_PLAN.md
+        // Phase 3 findings (rounds 1–4: bare clearAll never reconciles the panel; app-side
+        // repaint composites BELOW the overlay; screenRefresh(false,0) full-flickers).
+        root.addView(buttonRow(
+            "dCLR" to { delayed("clearAll") { SupernoteInk.clearAll() } },
+            "dCLR+INV" to { delayed("clearAll+invalidate") {
+                SupernoteInk.clearAll(); writeArea.invalidate()
+            } },
+            "dCLR+PEN" to { delayed("clearAll+claim+setPen") {
+                SupernoteInk.clearAll()
+                SupernoteInk.claimPen()
+                SupernoteInk.setPen(penCode, SWEEP_EMR, FIRMWARE_COLOR)
+            } },
+            "dCLR+DIS" to { delayed("clearAll+disable-roundtrip") {
+                SupernoteInk.clearAll()
+                val dm = resources.displayMetrics
+                SupernoteInk.setFullScreenDisable(dm.widthPixels, dm.heightPixels)
+                writeArea.postDelayed({ applyDisableAreas() }, 300)
+            } },
+        ))
+        root.addView(buttonRow(
+            "dDIS" to { delayed("disable-roundtrip only (no clear)") {
+                val dm = resources.displayMetrics
+                SupernoteInk.setFullScreenDisable(dm.widthPixels, dm.heightPixels)
+                writeArea.postDelayed({ applyDisableAreas() }, 300)
+            } },
+            "dCLR+UI" to { delayed("clearAll+fullUiAuto off/on") {
+                SupernoteInk.clearAll()
+                SupernoteInk.enableFullUiAuto(this, false)
+                writeArea.postDelayed({ SupernoteInk.enableFullUiAuto(this, true) }, 300)
+            } },
+            "dCLR+RF1" to { delayed("clearAll+screenRefresh(false,1)") {
+                SupernoteInk.clearAll(); SupernoteInk.screenRefresh(this, false, 1)
+            } },
+            "dCLR+RF2" to { delayed("clearAll+screenRefresh(false,2)") {
+                SupernoteInk.clearAll(); SupernoteInk.screenRefresh(this, false, 2)
+            } },
         ))
 
         penLabel = TextView(this).apply {
@@ -302,6 +345,15 @@ class SupernoteProbeActivity : AppCompatActivity() {
 
         private fun dp(v: Int): Int = this@SupernoteProbeActivity.dp(v)
         private fun dp(v: Float): Float = this@SupernoteProbeActivity.dp(v.toInt()).toFloat()
+    }
+
+    /** Arm [action] to fire in [DELAY_MS] — hands off the panel so no input event coincides. */
+    private fun delayed(name: String, action: () -> Unit) {
+        Toast.makeText(this, "$name in ${DELAY_MS / 1000}s — hands off!", Toast.LENGTH_SHORT).show()
+        writeArea.postDelayed({
+            android.util.Log.i("SupernoteProbe", "delayed sequence fired: $name")
+            action()
+        }, DELAY_MS)
     }
 
     // ---------------------------------------------------------------- ui helpers

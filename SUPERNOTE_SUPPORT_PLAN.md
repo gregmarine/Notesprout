@@ -1,12 +1,14 @@
 # Supernote (Ratta) Support — Implementation Plan
 
 > **Branch:** `supernote` · **Targets:** Supernote Nomad + Supernote Manta
-> **Overall status:** Phases 0–2 ✅ done (2026-08-08, both devices, firmware 2389).
-> `SupernoteInk` is ported to `notebook/ratta/`; live firmware ink, the full tool-type story, and
-> the pen-code sweep are all proven — **code 4 is a hardware dashed stroke, so Phase 5 is GO.**
-> All six hosts construct their engine via `createNotebookView()`; the gate is proven live on
-> all three test devices (`ratta=true firmware=true` on both Supernotes, BOOX untouched).
-> Next: Phase 3 (`RattaNotebookView` — core writing loop, deferred handoff).
+> **Overall status:** Phases 0–3 ✅ done (2026-08-08, both devices, firmware 2389).
+> `RattaNotebookView` ships the deferred-handoff writing loop — live firmware ink is
+> hardware-validated ("the writing experience is gold"), smart lasso / scribble-erase traces
+> self-clear via the **clear+frame retry ladder** (see Phase 3 findings: the two measured
+> laws of the overlay wipe — a clear needs a co-presented app frame, and clears near pen-lift
+> are eaten by a variable finalization window). **Phases 4–8 must inherit both laws.**
+> Phase 5 remains GO (pen code 4 = hardware dashed stroke, code 3 = x-stream).
+> Next: Phase 4 (handoff boundaries & mode transitions).
 
 ---
 
@@ -37,7 +39,7 @@ This plan is written to survive a cleared context. At the start of every session
 | 0 | Baseline & firmware probe | ✅ yes | ✅ DONE (2026-08-08) |
 | 1 | Port `SupernoteInk` + live-ink proof | ✅ yes | ✅ DONE (2026-08-08) — **dashed style found (code 4): Phase 5 GO** |
 | 2 | Device gate + engine factory (no behaviour change) | ✅ yes | ✅ DONE (2026-08-08) |
-| 3 | `RattaNotebookView` — core writing loop | ✅ yes | ⬜ NOT STARTED |
+| 3 | `RattaNotebookView` — core writing loop | ✅ yes | ✅ DONE (2026-08-08) |
 | 4 | Handoff boundaries & mode transitions | ✅ yes | ⬜ NOT STARTED |
 | 5 | Firmware dashed ink for the live lasso path | ✅ yes | ⬜ NOT STARTED |
 | 6 | Lifecycle, process-global state, close | ✅ yes | ⬜ NOT STARTED |
@@ -674,7 +676,7 @@ Install on: **G102** (flagship, BOOX regression), **Nomad**, **Manta**.
 
 ---
 
-## Phase 3 — `RattaNotebookView`, core writing loop · ⬜ NOT STARTED
+## Phase 3 — `RattaNotebookView`, core writing loop · ✅ DONE
 
 **Goal:** first real ink in a real notebook, on the **deferred handoff** model. Pen tool only —
 other tools are Phase 4.
@@ -758,17 +760,127 @@ Install both. Open a notebook, **pen tool only**:
 
 ### Exit criteria
 
-- [ ] Live ink is instant, and **there is no per-stroke flash, ghost or enlargement**.
-- [ ] The handoff at the first boundary is a single clean transition with no visible size or darkness
+- [x] Live ink is instant, and **there is no per-stroke flash, ghost or enlargement**
+      (user round 1: "everything works really well"; round 7: "the writing experience is gold").
+- [x] The handoff at the first boundary is a single clean transition with no visible size or darkness
       shift (minor width mismatch is Phase 8's tuning, but note it here).
-- [ ] Strokes persist across page flips and close/reopen; covers are correct.
-- [ ] Smart lasso and scribble-erase still fire.
-- [ ] Ink survives a task switch.
-- [ ] Identical on Nomad and Manta.
+- [x] Strokes persist across page flips and close/reopen; covers are correct.
+- [x] Smart lasso and scribble-erase still fire — **and their traces now self-clear** (rounds 2–7).
+- [x] Ink survives a task switch.
+- [x] Identical on Nomad and Manta (the ladder absorbed the Nomad/Manta finalization-window variance).
 
 ### Findings
 
-_(record here)_
+**Built + installed on both devices 2026-08-08; smoke-checked on the Nomad over adb**
+(launch-restore reopened a notebook → `engine=RattaNotebookView ratta=true firmware=true`,
+binder found, `enableFullUiAuto`/`enableAutoRegal` ok on attach *and* focus gain, crash buffer
+clean). Awaiting the user's pen test. Build notes beyond the plan's edit list:
+
+- **`redrawCanvas()` carries the handoff guard**: every re-record bakes the whole `strokes`
+  list (pending included), so if `pendingBake` was set it flips it off and calls `clearAll()`
+  right after recording. `releaseFirmwareOverlay()` is `if (pendingBake) redrawCanvas() else
+  clearAll()` — equivalent to the plan's sketch, but any redraw triggered *outside* the
+  release path (throttled erase redraws, drag-move commit) can never leave the same ink
+  displayed by both layers.
+- **Eraser contact is a Phase-3 boundary too**: `ACTION_DOWN` with `erasing=true` (eraser end,
+  barrel button, or eraser tool) releases the overlay first, so software erase + redraw works
+  on a fully-baked page. (The firmware natively wipes only *its own* overlay pixels under the
+  eraser end — baked strokes need our hit-test, as Phase 0 recorded.)
+- **The three gesture-consuming post-blocks release the overlay** (shape-dwell, smart lasso,
+  scribble-erase): the gesture stroke is firmware ink and would otherwise linger after the
+  stroke is removed from the model.
+- **`clearForPageLoad()` is overridden** (Generic inherits the `eraseAll` fallback): release
+  the overlay, then drop content *without* re-recording, so the outgoing page stays on the
+  panel until `loadStrokesWithBitmap` swaps with a single refresh — no white double-flash.
+- **No disable areas in this phase** — setup calls `clearDisableAreas()`; a pen touch on the
+  toolbar may leave a transient mark that the toolbar's own `releaseRender()` immediately
+  wipes. The real exclusion geometry is Phase 4, as planned.
+- Failure toast: `SupernoteInk.onFailure` is bound on attach (one toast per view instance),
+  unbound on detach.
+
+**Device test round 1 (2026-08-08, user-run, both devices):** everything passed except the two
+smart gestures — the pen path itself was "works really well". ⭐ **New firmware fact: a
+`clearAll()` issued in the immediate wake of a pen-lift is unreliable** — the trace can survive
+it. Evidence: the smart-lasso circle (one immediate clear, ms after lift) *always* lingered
+until the next toolbar tap re-cleared; the scribble (which gets a second clear ~100 ms later
+from the host's erase rebuild) lingered only *sometimes*; a toolbar-tap clear (human-scale
+later) always works, as did the Phase 1 probe's CLEAR button. This is the same hardware
+behaviour behind the PoC's per-lift "ghost" artefact. ~~First fix attempt: a delayed follow-up `clearAll` at 400 ms~~ — **FAILED on both devices
+(round 2), and the failure sharpened the model**: two bare `clearAll`s (immediate + 400 ms)
+both leave the trace standing, yet the *identical call* from a later toolbar tap always works.
+So it is not timing. ⭐ **Corrected firmware fact: overlay ink only leaves the panel where the
+app repaints those pixels — `clearAll` clears the buffer but a pixel the app never redraws
+keeps its stale overlay ink.** Every working clear co-occurs with a repaint of the inked
+pixels (our normal handoff bakes the very strokes the overlay showed; KOReader bakes each
+stroke into its framebuffer before clearing; the PoC's clears all accompany a full-area
+repaint; the round-1 scribble "sometimes cleared" exactly when the host's erase rebuild
+repainted overlapping pixels). A gesture-consumed stroke is the one case where overlay ink
+corresponds to NOTHING in the app layer.
+
+~~Second fix attempt: the gesture-trace ghost (bake the consumed stroke black, then unbake
+to force a black→white push at exactly the trace pixels)~~ — **FAILED on both devices
+(round 3), no visible change at all.** That negative is itself a measurement: ⭐ **the
+overlay composites ABOVE the framebuffer — no app-side repaint of those pixels can ever
+remove painted overlay ink.** (The user's read, consistent with all rounds: `clearAll`
+empties the buffer but the panel is never reconciled; the trace is a stale EPDC layer that
+only firmware-side activity drops. Page turns / tool toggles / toolbar taps clear it as a
+side effect of whatever EPDC reconcile they trigger.) The repaint-invariant theory of round
+3 is dead; the ghost machinery was removed again.
+
+~~Third fix attempt: `screenRefresh(full=false, 0)` after the clear~~ — **FAILED (round 4,
+both devices): it full-screen-flickers ("definitely not good"), and reconciles
+inconsistently** (Manta's lasso trace cleared, Nomad's did not; the scribble trace stood on
+both — a race between the async buffer clear and the refresh). Round 4 also produced a new
+artefact that reveals overlay semantics: **pixels under overlay ink are frozen** — the
+scribble host's rebuild repainted the erased strokes to white everywhere EXCEPT inside the
+scribble's own trace, where the stale stroke pixels survived. The refresh was reverted; the
+engine's `releaseGestureTrace()` is back to bake + clear + guarded 450 ms follow-up.
+
+**Round 5: the probe's delayed clear-matrix (user-run on the Nomad) — the decisive
+measurement.** Eight sequences, each armed by a tap but fired 2 s later hands-off:
+
+| Sequence | Result |
+|---|---|
+| `dCLR` (bare clearAll) | nothing |
+| **`dCLR+INV` (clearAll + invalidate of the view over the ink)** | ⭐ **cleared, no flicker** |
+| `dCLR+PEN` (clear + claim + setPen) | nothing |
+| `dCLR+DIS` / `dDIS` (full-screen-disable round-trips) | nothing |
+| `dCLR+UI` (fullUiAuto off/on) | nothing |
+| `dCLR+RF1` (screenRefresh mode 1) | cleared, but full-screen flicker |
+| `dCLR+RF2` (screenRefresh mode 2) | nothing |
+
+Finger touches never flushed a stale clear (the input theory is dead — and separately,
+⭐ **while the stylus is in EMR range the system suppresses finger taps entirely**, the same
+palm-rejection-above-the-driver behaviour the G102 has; recorded for future gesture
+debugging). Follow-up hover test: `dCLR+INV` **clears even with the pen hovering over the
+ink**, so hover is irrelevant to the wipe.
+
+⭐ **The two measured laws of the overlay wipe:** (1) `clearAll` only reaches the panel when
+an **app frame is presented in the same breath** — a bare clear reconciles nothing, ever;
+(2) a clear issued in the **immediate wake of a pen-lift is eaten** by the daemon's
+stroke-finalization window (~150–200 ms — the scribble host's ~100–200 ms rebuild, which
+does pair clear+frame, cleared only *sometimes*; the probe's 2 s sequences always worked).
+Every prior round split the pair: the immediate attempt paired them but fired inside the
+window; every delayed attempt sent `clearAll` without a frame (or, round 3, a frame without
+a clear).
+
+~~Fix round 6: one `clearAll()` + `invalidate()` pair at 450 ms~~ — **close but not
+pruned**: Manta failed at first then became reliable every time; Nomad still failing. The
+finalization window's length evidently varies by device and moment, and a single attempt
+sits on its edge (the probe's 2 s pair always worked — on the Nomad itself).
+
+**Fix (round 7): retry ladder + contact flush — ✅ PASSED on both devices (2026-08-08).**
+The armed clear fires `clearAll` + `invalidate` pairs at **450 ms → 1 s → 1.9 s**
+(idempotent, invisible once cleared, no refresh calls) plus an immediate attempt at the
+**next EMR pen-down** — the one moment measured working in every round (toolbar tap,
+tap-to-dismiss), which also covers writing again quickly. Guards: mid-stroke → re-post; new
+ink pending → self-disarm (next natural boundary owns the overlay). **Phases 4–8 must
+inherit both laws and the ladder pattern.**
+
+**User verdict:** the gesture-trace clear "reads as a little sluggish" (up to ~2 s worst
+case by design) but is **accepted as good enough for Supernote** — "the writing experience
+is gold. So, these little nuances are okay." Do not chase further latency here without
+being asked; the trace lag is a measured firmware constraint, not an app defect.
 
 ---
 
