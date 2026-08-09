@@ -1515,6 +1515,22 @@ devices confirmed the other half of the contract: baked strokes carry their true
 yellow / purple readable in the framebuffer) on a panel that shows the user only grey — a notebook
 written on a Supernote opens in full colour elsewhere.
 
+**Registration scope caveat (discussed at phase close) — n = 1 per model.** The offset is a
+disagreement between two software readings of the SAME digitizer (the firmware daemon paints true;
+Android's MotionEvent pipeline lands left) — a physical per-unit misalignment would shift both
+paths equally and produce no live-vs-baked divergence at all. That, plus the near-proportional
+numbers (2/1404 ≈ 3/1920 ≈ 0.15% of panel width — smells like a coordinate-scaling/rounding
+artifact in the firmware↔Android mapping), argues the constants are MODEL-level, not unit-level.
+But with one unit of each model that is inference, not measurement: another unit could differ if
+Supernote applies per-unit factory calibration on only one of the two paths. Worst case for a
+mismatched unit is a 1–3 px bake shift — the artifact we shipped unnoticed for five phases — so
+this is deferred, filed for Phase 9's BACKLOG sweep as a **user-facing stylus calibration screen**
+(the probe's REG lab is the prototype: draw, nudge to null, store per-device; would replace the
+hardcoded constants, and would also cover the Paper 7's whole-pipeline tip offset — a different
+class: on the Generic engine live and baked agree with each other but can both miss the pen).
+Note BOOX can never need the Supernote half of this: SDK overlay and bake share one input
+pipeline, so live-vs-baked divergence is structurally impossible there.
+
 ---
 
 ## Phase 9 — Docs, device tiers, wrap-up · ⬜ NOT STARTED
@@ -1542,6 +1558,11 @@ No device test. Documentation and housekeeping.
   - firmware pen types beyond the default (Needle / Mark / Calligraphy, plus whatever the Phase 1
     sweep turns up) as a possible pen-tool offering, alongside the Onyx equivalents in
     `docs/onyx-pen-tools.md`
+  - **user-facing stylus calibration screen** (from Phase 8's registration caveat): the Ratta
+    offsets are believed model-level but were measured on one unit each; a calibration surface
+    (REG-lab pattern — draw, nudge to null, store per-device) would replace the hardcoded
+    constants and also cover whole-pipeline tip offsets on Generic-engine devices (the Paper 7
+    is the known suspect)
   - anything Phases 0–8 punted
 - Decide the fate of `SupernoteProbeActivity`: keep it (like `PenToolSpikeActivity`, as the
   calibration tool for EMR width and colour codes) with its findings written into the debug manifest
