@@ -21,6 +21,7 @@ import android.view.MotionEvent
 import android.view.View
 import com.notesprout.android.core.ImageCodec
 import com.notesprout.android.core.InkColor
+import com.notesprout.android.core.Slog
 import com.notesprout.android.core.markdown.TextObjectRenderer
 import com.notesprout.android.data.HeadingStroke
 import com.notesprout.android.data.LineObject
@@ -60,19 +61,31 @@ import java.util.UUID
 //   • Setup (attach + focus gain): claimPen, enableFullUiAuto(true), enableAutoRegal(true),
 //     setPen(NEEDLE, emrSize(width), BLACK). NEEDLE = uniform width, matching our baked
 //     polyline; the EMR clamp keeps the live ink visible (EMR ≈ 3 is sub-pixel/invisible).
-//   • Phase 3 limits: pen tool only — eraser/lasso/text firmware modes and the toolbar
-//     disable-area geometry are Phase 4; colour mapping (live ink stays BLACK) is Phase 8.
+//   • Per-tool firmware state (Phase 4): pen → setPen(NEEDLE); eraser tool → setEraser
+//     (colour-255 payload — stops the firmware painting ink along the path; our software
+//     hit-test still does the removal); lasso / lasso-eraser / text placement / shape
+//     transform → full-screen disable (their overlays are Canvas-drawn, so the firmware
+//     must paint nothing). Every tool change is a handoff boundary: bake + clearAll FIRST,
+//     then reconfigure. The toolbar/colour-panel exclusion rect arrives via
+//     setToolbarExclusion in view coords and is offset into screen coords before being
+//     sent as a firmware disable area. Colour mapping (live ink stays BLACK) is Phase 8.
+//   • Barrel button: a held side button full-screen-disables the firmware (its native
+//     x-stream button trace ignores the app's pen config but respects disable areas —
+//     lab-measured; see updateBarrelSuppress), while the software erase does the work.
 //   • Failures are loud (Decision 2): SupernoteInk logs at Log.w and this view toasts
 //     once per instance via SupernoteInk.onFailure. No fallback, no engine swap.
 class RattaNotebookView(context: Context) : View(context), NotebookView {
 
     companion object {
+        private const val TAG = "RattaNotebookView"
         private const val ERASER_RADIUS_PX = 15f
         private const val ERASE_REDRAW_INTERVAL_MS = 60L
         private const val LASSO_REFRESH_INTERVAL_MS = 60L
         /** Floor/ceiling for the firmware EMR pen size — the Needle penSizeArray runs ~200…2400. */
         private const val EMR_MIN = 200
         private const val EMR_MAX = 1200
+        /** Floor for the firmware eraser EMR size (PoC-validated: radius*50, min 400). */
+        private const val ERASER_EMR_MIN = 400
         /**
          * Follow-up overlay-clear ladder after a gesture-consumed stroke. A clear issued in
          * the wake of a pen-lift lands inside the ink daemon's stroke-finalization window
@@ -126,7 +139,9 @@ class RattaNotebookView(context: Context) : View(context), NotebookView {
         removeCallbacks(overlayClearRunnable)
         if (firmware) {
             releaseFirmwareOverlay()
-            SupernoteInk.clearDisableAreas()
+            // Full-screen disable, not clearDisableAreas: between this view's death and the
+            // next drawing surface's setup nothing should let the firmware paint stray ink.
+            SupernoteInk.setFullScreenDisable(width, height)
             SupernoteInk.enableFullUiAuto(context, false)
         }
         if (SupernoteInk.onFailure === firmwareFailureHandler) SupernoteInk.onFailure = null
@@ -139,15 +154,17 @@ class RattaNotebookView(context: Context) : View(context), NotebookView {
         SupernoteInk.claimPen()
         SupernoteInk.enableFullUiAuto(context, true)
         SupernoteInk.enableAutoRegal(context, true)   // anti-ghosting waveform; keeps handoffs clean
-        // No disable areas yet — the toolbar exclusion geometry lands in Phase 4. Until then a
-        // pen touch on the toolbar may leave a transient mark; the toolbar's releaseRender wipes it.
-        SupernoteInk.clearDisableAreas()
-        applyPenToFirmware()
+        applyToolToFirmware()
     }
 
     private fun teardownFirmwareInk() {
         if (!firmware) return
         releaseFirmwareOverlay()
+        // "Drop the pen claim": the firmware has no unclaim transaction, so the enforceable
+        // equivalent is a full-screen disable — while we are unfocused (dialog up, task
+        // switched away) the firmware must not paint anywhere on our behalf. Focus gain
+        // re-runs setupFirmwareInk, whose applyToolToFirmware restores the right areas.
+        SupernoteInk.setFullScreenDisable(width, height)
         SupernoteInk.enableFullUiAuto(context, false)
     }
 
@@ -240,6 +257,115 @@ class RattaNotebookView(context: Context) : View(context), NotebookView {
      * visible floor — an EMR near 0 paints an invisible sub-pixel line that reads as "no ink".
      */
     private fun emrSize(widthPx: Float): Int = (widthPx * 100f).toInt().coerceIn(EMR_MIN, EMR_MAX)
+
+    /** Eraser-tool EMR size, from the PoC: radius*50 with a working floor. */
+    private fun eraserEmr(): Int = (ERASER_RADIUS_PX * 50f).toInt().coerceAtLeast(ERASER_EMR_MIN)
+
+    /** True in the modes whose overlays are Canvas-drawn — the firmware must paint nothing. */
+    private val firmwareSuppressed: Boolean
+        get() = isLassoMode || isLassoEraserMode || isTextPlacementMode || isShapeTransformMode
+
+    /** Toolbar/colour-panel exclusion rect, in VIEW coordinates, as pushed by the host. */
+    private var toolbarExclusion: Rect? = null
+
+    /**
+     * Push the current tool state to the firmware — the per-mode half of every handoff.
+     * Callers that change tool MUST release the overlay first (see [firmwareToolBoundary]).
+     */
+    private fun applyToolToFirmware() {
+        if (!firmware) return
+        barrelDown = false   // a tool push supersedes the transient barrel disable
+        if (firmwareSuppressed) {
+            // Lasso / lasso-eraser / text placement / shape transform: the dashed path,
+            // handles and placement tap are all Canvas-drawn — no firmware ink anywhere.
+            SupernoteInk.setFullScreenDisable(width, height)
+            return
+        }
+        applyDisableAreas()
+        if (isEraserActive) {
+            // Round eraser, colour-255 payload: the firmware stops painting ink along the
+            // path (and natively wipes its own overlay pixels); our software hit-test
+            // still does the actual stroke removal.
+            SupernoteInk.setEraser(false, eraserEmr())
+        } else {
+            applyPenToFirmware()
+        }
+    }
+
+    /**
+     * Send the toolbar exclusion as a firmware disable area. ⚠️ Geometry differs from the
+     * PoC: our toolbar OVERLAYS the drawing view inside a FrameLayout (same origin/size),
+     * so the host's rect is in view coordinates and must be offset by getLocationOnScreen
+     * into screen coordinates — the firmware's space. Null/empty ⇒ no disable areas.
+     */
+    private fun applyDisableAreas() {
+        if (!firmware) return
+        val excl = toolbarExclusion
+        if (excl == null || excl.isEmpty) {
+            SupernoteInk.clearDisableAreas()
+            return
+        }
+        val loc = IntArray(2)
+        getLocationOnScreen(loc)
+        SupernoteInk.setDisableAreas(listOf(Rect(excl).apply { offset(loc[0], loc[1]) }))
+    }
+
+    /** Tool-change boundary: bake + clear the overlay FIRST, then push the new tool state. */
+    private fun firmwareToolBoundary() {
+        if (!firmware) return
+        releaseFirmwareOverlay()
+        applyToolToFirmware()
+    }
+
+    // ── Barrel-button erase (EMR pens with a side button) ────────────────────
+
+    /**
+     * Lab-measured on the Nomad (SupernoteProbeActivity barrel lab, 2026-08-09):
+     *  • the side button arrives as BUTTON_STYLUS_PRIMARY on the HOVER stream, well
+     *    before the tip lands (OS pref end_button_behavior=2);
+     *  • while it is held the firmware paints its own lasso-erase x-stream trace along
+     *    the pen path, IGNORING whatever pen/eraser config the app set (setEraser
+     *    mirroring changed nothing) — but disable areas DO suppress it;
+     *  • the trace lingers like any overlay ink.
+     * So: press → full-screen disable (firmware paints nothing; the software erase in
+     * [onTouchEvent]'s `erasing` path does the work and shows progress through its own
+     * redraws); release → re-apply the armed tool. [applyToolToFirmware] resets
+     * [barrelDown], so any tool push supersedes the transient disable and the next
+     * button event re-asserts it if the button is still physically held.
+     */
+    private var barrelDown = false
+    /** True if the side button was seen at any point of the current pen contact. */
+    private var strokeSawBarrel = false
+    /** Whether the current contact began as an erase (eraser end / barrel / eraser tool). */
+    private var strokeBeganErasing = false
+
+    private fun updateBarrelSuppress(event: MotionEvent) {
+        if (!firmware) return
+        val pressed = event.getToolType(0) == MotionEvent.TOOL_TYPE_STYLUS &&
+            (event.buttonState and
+                (MotionEvent.BUTTON_STYLUS_PRIMARY or MotionEvent.BUTTON_SECONDARY)) != 0
+        if (pressed && penDown) strokeSawBarrel = true
+        if (firmwareSuppressed) return   // those modes already own a full-screen disable
+        if (pressed == barrelDown) return
+        barrelDown = pressed
+        Slog.d(TAG) { "barrel ${if (pressed) "PRESS" else "RELEASE"} " +
+            "src=${MotionEvent.actionToString(event.actionMasked)} " +
+            "tool=${event.getToolType(0)} btn=${event.buttonState} penDown=$penDown" }
+        if (pressed) SupernoteInk.setFullScreenDisable(width, height)
+        else applyToolToFirmware()
+    }
+
+    override fun onHoverEvent(event: MotionEvent): Boolean {
+        updateBarrelSuppress(event)
+        return super.onHoverEvent(event)
+    }
+
+    // Some stacks report button changes as ACTION_BUTTON_PRESS/RELEASE generic events
+    // rather than a buttonState change on the hover stream — catch those too.
+    override fun onGenericMotionEvent(event: MotionEvent): Boolean {
+        updateBarrelSuppress(event)
+        return super.onGenericMotionEvent(event)
+    }
 
     private val activePoints = ArrayList<PointF>()
     /**
@@ -479,6 +605,7 @@ class RattaNotebookView(context: Context) : View(context), NotebookView {
             when (event.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
                     penDown = true
+                    strokeSawBarrel = false   // updateBarrelSuppress re-sets it just below
                     // Fresh EMR contact: fire any armed gesture-trace clear before this
                     // contact produces new overlay ink (covers all modes — the gate runs
                     // before per-mode dispatch).
@@ -489,6 +616,9 @@ class RattaNotebookView(context: Context) : View(context), NotebookView {
                     penLastLiftMs = SystemClock.uptimeMillis()
                 }
             }
+            // Contact-time button changes (pressed at pen-down, released at lift, or
+            // toggled mid-stroke) — hover tracking alone would miss them.
+            updateBarrelSuppress(event)
         }
 
         if (isTextPlacementMode) return handleTextPlacementTouch(event)
@@ -510,18 +640,28 @@ class RattaNotebookView(context: Context) : View(context), NotebookView {
         val toolType = event.getToolType(0)
         if (toolType != MotionEvent.TOOL_TYPE_STYLUS && toolType != MotionEvent.TOOL_TYPE_ERASER) return false
 
+        // strokeSawBarrel makes the decision STICKY for the whole contact: the button is
+        // routinely released a beat before the pen lifts (measured on the Nomad —
+        // ACTION_BUTTON_RELEASE arrives mid-contact), and without it the pen-up takes the
+        // normal-pen branch and commits the stale down/up points as a phantom 2-point stroke.
         val erasing = toolType == MotionEvent.TOOL_TYPE_ERASER || isEraserActive
             || (event.buttonState and MotionEvent.BUTTON_STYLUS_PRIMARY) != 0
+            || strokeSawBarrel
 
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
+                Slog.d(TAG) { "penDOWN erasing=$erasing tool=$toolType btn=${event.buttonState} " +
+                    "eraserActive=$isEraserActive barrelDown=$barrelDown" }
                 // Eraser contact (eraser end / barrel button / eraser tool) is a handoff
                 // boundary: bake pending overlay ink first so the software erase + redraw
                 // operates on a fully-baked page (the firmware natively wipes only its own
                 // overlay pixels along the eraser-end path — not the strokes we re-record).
                 if (erasing && firmware) releaseFirmwareOverlay()
+                strokeBeganErasing = erasing
                 activePoints.clear()
-                activePoints.add(PointF(event.x, event.y))
+                gestureHadInk = false
+                if (erasing) activePoints.add(PointF(event.x, event.y))
+                else appendStrokePoints(listOf(PointF(event.x, event.y)))
                 strokeStartTimeMs = System.currentTimeMillis()
                 dwellAnchorX   = event.x
                 dwellAnchorY   = event.y
@@ -538,7 +678,7 @@ class RattaNotebookView(context: Context) : View(context), NotebookView {
                 if (erasing) {
                     eraseAtPath(newPoints)
                 } else {
-                    activePoints.addAll(newPoints)
+                    appendStrokePoints(newPoints)
                     // Update dwell anchor: if any point moves beyond the dwell radius, reset.
                     val dwellRadiusPx = SHAPE_DWELL_RADIUS_DP * resources.displayMetrics.density
                     val now = System.currentTimeMillis()
@@ -557,23 +697,37 @@ class RattaNotebookView(context: Context) : View(context), NotebookView {
                 }
             }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                Slog.d(TAG) { "penUP erasing=$erasing btn=${event.buttonState} " +
+                    "sawBarrel=$strokeSawBarrel beganErasing=$strokeBeganErasing " +
+                    "activePts=${activePoints.size}" }
                 if (erasing) {
                     eraseAtPath(listOf(PointF(event.x, event.y)))
                     finalizeEraseRedraw()
                     activePoints.clear()
                     invalidate()
+                    // Every erase contact ends with the clear ladder: the pen-down
+                    // bake+clear can be eaten (measured on the Nomad — an erased stroke's
+                    // overlay twin stayed frozen on the panel through the whole erase,
+                    // hiding the repaint until a page flip reconciled it), and a contact
+                    // that converted to erasing mid-stroke leaves an abandoned partial pen
+                    // stroke on the overlay. Idempotent and invisible when already clean.
+                    if (firmware) releaseGestureTrace()
                 } else {
-                    activePoints.add(PointF(event.x, event.y))
+                    appendStrokePoints(listOf(PointF(event.x, event.y)))
                     commitActiveStroke()
                     activePoints.clear()
                     // Firmware path: the overlay keeps showing the stroke — no repaint, no
                     // clear, no refresh here (the deferred handoff). Invalidating now would
                     // trigger a pointless EPD update of unchanged committed content.
                     if (!firmware) invalidate()
-                    val now = System.currentTimeMillis()
-                    dwellMs = now - lastMoveTimeMs
-                    val durationMs = (now - strokeStartTimeMs).coerceAtLeast(1L)
-                    checkAndDispatchGesture(durationMs)
+                    // A gesture that never left the exclusion zone committed nothing — do
+                    // not dispatch, or the gates would re-examine a stale earlier stroke.
+                    if (gestureHadInk) {
+                        val now = System.currentTimeMillis()
+                        dwellMs = now - lastMoveTimeMs
+                        val durationMs = (now - strokeStartTimeMs).coerceAtLeast(1L)
+                        checkAndDispatchGesture(durationMs)
+                    }
                 }
             }
         }
@@ -613,6 +767,9 @@ class RattaNotebookView(context: Context) : View(context), NotebookView {
             }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                 isTextPlacementMode = false
+                // Internal mode exit — restore the armed tool's firmware state before the
+                // host opens the editor (whose focus loss/gain re-runs setup anyway).
+                if (firmware) applyToolToFirmware()
                 onTextPlacementTap?.invoke(textPlacementTapX, textPlacementTapY)
             }
         }
@@ -942,8 +1099,37 @@ class RattaNotebookView(context: Context) : View(context), NotebookView {
         }
     }
 
+    /** True once the current pen gesture committed at least one stroke segment. */
+    private var gestureHadInk = false
+
+    /**
+     * Append live points, splitting the stroke around the toolbar exclusion zone so the
+     * model never holds ink the firmware refused to paint. Without this, stylus events
+     * falling through gaps in the chrome (the overflow menu's blank areas don't consume
+     * touches) would silently enter the model and surface at the next bake — invisible
+     * strokes appearing later. Segments outside the zone commit as separate strokes,
+     * matching exactly what the firmware painted; points inside are dropped.
+     */
+    private fun appendStrokePoints(pts: List<PointF>) {
+        val excl = if (firmware) toolbarExclusion else null
+        if (excl == null || excl.isEmpty) {
+            activePoints.addAll(pts)
+            return
+        }
+        for (p in pts) {
+            if (excl.contains(p.x.toInt(), p.y.toInt())) {
+                commitActiveStroke()   // no-op below 2 points
+                activePoints.clear()
+            } else {
+                activePoints.add(p)
+            }
+        }
+    }
+
     private fun commitActiveStroke() {
         if (activePoints.size < 2) return
+        gestureHadInk = true
+        Slog.d(TAG) { "commit stroke pts=${activePoints.size}" }
         val strokeId = UUID.randomUUID().toString()
         val strokePoints = activePoints.toList()
         strokes.add(LiveStroke(strokeId, strokePoints, color = penColorHex))
@@ -1038,6 +1224,7 @@ class RattaNotebookView(context: Context) : View(context), NotebookView {
             }
         }
         if (toRemove.isNotEmpty()) {
+            Slog.d(TAG) { "erase removed=${toRemove.size} strokes" }
             val removeIds = toRemove.mapTo(HashSet(toRemove.size)) { it.id }
             strokes.removeAll { it.id in removeIds }
             toRemove.forEach { onStrokeErased?.invoke(it.id) }
@@ -1321,6 +1508,7 @@ class RattaNotebookView(context: Context) : View(context), NotebookView {
 
         val isSmartLasso = !dwellCandidate && isSmartLassoCandidate(points, durationMs, density)
         val isScribble   = !dwellCandidate && !isSmartLasso && isScribbleCandidate(points)
+        Slog.d(TAG) { "gesture dwell=$dwellCandidate lasso=$isSmartLasso scribble=$isScribble" }
         if (!dwellCandidate && !isSmartLasso && !isScribble) { onPenLifted?.invoke(); return }
 
         val strokeSnapshot      = strokes.filter { it.id != strokeId }.toList()
@@ -1587,9 +1775,14 @@ class RattaNotebookView(context: Context) : View(context), NotebookView {
     // ── NotebookView interface ────────────────────────────────────────────────
 
     override fun asView(): View = this
-    // TODO(Phase 4): send this rect (offset into screen coords via getLocationOnScreen) as a
-    // firmware disable area. Until then the toolbar relies on releaseRender wiping stray marks.
-    override fun setToolbarExclusion(rect: Rect?) {}
+
+    override fun setToolbarExclusion(rect: Rect?) {
+        toolbarExclusion = rect?.takeUnless { it.isEmpty }?.let { Rect(it) }
+        // Apply live unless a full-screen disable owns the areas — leaving a suppressed
+        // mode re-applies via applyToolToFirmware anyway.
+        if (firmware && !firmwareSuppressed) applyDisableAreas()
+    }
+
     override fun enableDrawing() {}
     override fun disableDrawing() {}
 
@@ -1599,8 +1792,23 @@ class RattaNotebookView(context: Context) : View(context), NotebookView {
         releaseFirmwareOverlay()
     }
 
+    // Before launching (and finishing into) another drawing screen: hand off cleanly and
+    // stop painting full-UI ink — the successor's own setup re-claims and re-enables.
+    override fun releaseForHandoff() {
+        if (!firmware) return
+        releaseFirmwareOverlay()
+        SupernoteInk.enableFullUiAuto(context, false)
+    }
+
+    override fun resetOverlay() {
+        if (!firmware) return
+        releaseFirmwareOverlay()
+        setupFirmwareInk()
+    }
+
     override fun setTextPlacementMode(active: Boolean) {
         isTextPlacementMode = active
+        firmwareToolBoundary()
     }
 
     override fun setDragMoveMode(enabled: Boolean) {
@@ -1618,6 +1826,7 @@ class RattaNotebookView(context: Context) : View(context), NotebookView {
 
     override fun setLassoMode(active: Boolean) {
         isLassoMode = active
+        firmwareToolBoundary()
         if (!active) {
             if (isDragMoveActive) setDragMoveMode(false)
             lassoOverlayPath = null
@@ -1630,6 +1839,7 @@ class RattaNotebookView(context: Context) : View(context), NotebookView {
 
     override fun setLassoEraserMode(active: Boolean) {
         isLassoEraserMode = active
+        firmwareToolBoundary()
         if (!active) {
             lassoOverlayPath       = null
             lassoEraserDisplayPath = null
@@ -1645,6 +1855,7 @@ class RattaNotebookView(context: Context) : View(context), NotebookView {
         transformBeforeRender = render
         transformController.attach(render)
         isShapeTransformMode = true
+        firmwareToolBoundary()
         invalidate()
     }
 
@@ -1654,6 +1865,7 @@ class RattaNotebookView(context: Context) : View(context), NotebookView {
         onShapeTransformed?.invoke(before, after)
         transformBeforeRender = null
         isShapeTransformMode  = false
+        firmwareToolBoundary()
         invalidate()
     }
 
@@ -1861,6 +2073,7 @@ class RattaNotebookView(context: Context) : View(context), NotebookView {
 
     override fun setEraserMode(active: Boolean) {
         isEraserActive = active
+        firmwareToolBoundary()
     }
 
     /**
@@ -2032,6 +2245,9 @@ class RattaNotebookView(context: Context) : View(context), NotebookView {
      * Returns null if there are no strokes and no headings, or the view is not yet laid out.
      */
     override fun captureSnapshot(): String? {
+        // Boundary: bake + clear FIRST so the panel matches the snapshot. The snapshot's
+        // data is already correct either way (it renders from [strokes], pending included).
+        releaseFirmwareOverlay()
         if (strokes.isEmpty() && headings.isEmpty() && textObjects.isEmpty() && lineObjects.isEmpty() && links.isEmpty() && stickyNotes.isEmpty()) return null
         val w = width; val h = height
         if (w == 0 || h == 0) return null

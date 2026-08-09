@@ -8,7 +8,8 @@
 > laws of the overlay wipe — a clear needs a co-presented app frame, and clears near pen-lift
 > are eaten by a variable finalization window). **Phases 4–8 must inherit both laws.**
 > Phase 5 remains GO (pen code 4 = hardware dashed stroke, code 3 = x-stream).
-> Next: Phase 4 (handoff boundaries & mode transitions).
+> Next: Phase 5 (firmware dashed ink for the live lasso path — GO per the Phase 0/1 pen
+> sweep: code 4 = dashed, code 3 = x-stream).
 
 ---
 
@@ -884,7 +885,7 @@ being asked; the trace lag is a measured firmware constraint, not an app defect.
 
 ---
 
-## Phase 4 — Handoff boundaries & mode transitions · ⬜ NOT STARTED
+## Phase 4 — Handoff boundaries & mode transitions · ✅ COMPLETE (2026-08-09, both devices)
 
 **Goal:** wire every boundary to `releaseFirmwareOverlay()`, and make every non-writing mode stop the
 firmware painting. **This is where the "no flash, no ghost" behaviour actually comes from** — Phase 3
@@ -946,16 +947,138 @@ shape-transform:
 
 ### Exit criteria
 
-- [ ] No firmware ink over the toolbar, colour panel, any dialog or menu.
-- [ ] Eraser leaves no painted trail.
-- [ ] Every tool switch is one clean handoff with no stale overlay ink.
-- [ ] Lasso / text / shape overlays render clean.
-- [ ] Returning to the pen restores instant firmware ink.
-- [ ] Identical on Nomad and Manta.
+- [x] No firmware ink over the toolbar, colour panel, any dialog or menu.
+- [x] Eraser leaves no painted trail.
+- [x] Every tool switch is one clean handoff with no stale overlay ink.
+- [x] Lasso / text / shape overlays render clean.
+- [x] Returning to the pen restores instant firmware ink.
+- [x] Identical on Nomad and Manta (Manta: full script + barrel in one pass, "all good").
+- [x] *(added this phase)* Barrel-button erase: no x-stream/ink along the path, sticky
+      erase through early button release, no phantom strokes, self-clearing ghosts.
 
 ### Findings
 
-_(record here)_
+**Built + installed on both devices 2026-08-09; smoke-checked on the Nomad over adb**
+(`engine=RattaNotebookView ratta=true firmware=true`, binder found, setup ok on attach and
+focus gain, crash buffer clean). Awaiting the user's device test. Build notes beyond the
+plan's table:
+
+- **One shared boundary helper**: `firmwareToolBoundary()` = `releaseFirmwareOverlay()` then
+  `applyToolToFirmware()` — called from `setEraserMode`, `setLassoMode`, `setLassoEraserMode`,
+  `setTextPlacementMode`, `enterShapeTransform`, `exitShapeTransform`. `applyToolToFirmware()`
+  reads the mode flags: any Canvas-overlay mode (lasso / lasso-eraser / text placement /
+  shape transform, incl. drag-move which lives inside lasso mode) → `setFullScreenDisable`;
+  eraser tool → `setEraser(false, eraserEmr())`; else disable areas + `setPen(NEEDLE…)`.
+- **Text placement's internal exit** (`handleTextPlacementTouch` UP) re-applies the tool
+  itself — the host's later `setTextPlacementMode(false)` is not the only path out.
+- **"Drop the pen claim" on focus loss has no firmware transaction** — implemented as
+  `setFullScreenDisable` in `teardownFirmwareInk()` (and on detach, replacing the Phase 3
+  `clearDisableAreas`), so an unfocused/dying view can never have ink painted on its
+  behalf. Focus gain re-runs `setupFirmwareInk` → `applyToolToFirmware`.
+- **`setToolbarExclusion` applies live** (view rect + `getLocationOnScreen` offset →
+  `setDisableAreas`) unless a full-screen-disable mode owns the areas — leaving that mode
+  re-applies through `applyToolToFirmware`. Hosts already push updated rects for the open
+  overflow menu / shape toolbar / colour panel, so those are covered by the same call.
+- **`captureSnapshot()` releases first**, per the table; `resetOverlay()` = release +
+  full `setupFirmwareInk()`; `releaseForHandoff()` = release + `enableFullUiAuto(false)`.
+- ~~Known edge, deliberately unhandled: barrel-button erase~~ — the user has EMR pens with
+  barrel buttons; handled in round 2 (below).
+
+**Device test round 1 (2026-08-09, user-run, Nomad only):** everything in the test list works
+**except**: drawing in the overflow menu's blank (button-free) areas painted nothing — correct —
+but the strokes **appeared on the page later** (after a page flip round-trip). Cause: the
+firmware disable area stops the *painting*, but the overflow's blank areas don't consume
+touches, so the stylus events fell through to `onTouchEvent` and the points entered the model
+invisibly, surfacing at the next bake. Manta deliberately untested until the fixes land.
+
+**Round 2 fixes (2026-08-09, built + installed on both, Nomad relaunch smoke-checked clean):**
+
+- **Model-side exclusion filter** — `appendStrokePoints()` now feeds every pen point through
+  the toolbar exclusion rect (view coords, `firmware` only): points inside are dropped, and
+  a stroke that crosses the zone is **split into separate segments** at the boundary —
+  the model now matches exactly what the firmware painted. A gesture that never left the
+  zone commits nothing, and `gestureHadInk` gates `checkAndDispatchGesture` so the gesture
+  gates can't re-examine a stale earlier stroke (Generic always commits ≥1 stroke per lift;
+  this engine no longer does).
+- ~~Barrel-button erase support in the engine~~ — **pulled back out of `RattaNotebookView`
+  (user decision): work it out in the lab first.** The engine keeps only the pre-existing
+  behaviour (a button-held contact soft-erases via the `erasing` check; the firmware may
+  paint along the path until the next boundary). The candidate design — mirror the barrel
+  into `setEraser`/`setPen`, tracked from hover so the firmware re-arms before the tip
+  lands — now lives in **`SupernoteProbeActivity`'s barrel lab** behind its MIRROR toggle,
+  and returns to the engine once proven.
+
+**Round 3 — barrel-button lab + OS-preference read (2026-08-09, installed on both):**
+
+- `SupernoteProbeActivity` gained a **barrel line** (live decoded `buttonState` from BOTH
+  streams — hover generic-motion and contact touch — with a press/release transition
+  counter Δ and `Log.i` records), and a **MIRROR button** replicating the engine candidate
+  (barrel held → `setEraser(false, 750)`, released → `setPen`). "Barrel pressed" accepts
+  `BUTTON_STYLUS_PRIMARY` **or** the pre-M `BUTTON_SECONDARY` mapping.
+- ⭐ **The OS side-button preference is app-readable**: `Settings.System`
+  `end_button_behavior` (=2 on the Nomad right now), verified rendering in the probe's
+  report on-device. A pattern scan of all three settings tables (`pen|stylus|button|lamy|
+  eraser`) surfaced no other stylus keys — this is the one preference. The report re-reads
+  on every focus gain, so flip the OS setting → return → the line updates.
+- Kernel level (adb `getevent -pl`): the Wacom digitizer exposes `BTN_STYLUS` +
+  `BTN_STYLUS2`, so the button reaches the input stack; the open question is only whether
+  the framework forwards it to apps under each `end_button_behavior` value.
+- **Lab results (user-run on the Nomad, button pen, `end_button_behavior=2`):**
+  1. ⭐ **The OS delivers the side button to third-party apps, from hover**: `32[S1]`
+     (`BUTTON_STYLUS_PRIMARY`) while held, `0` released, Δ ticking on both edges.
+  2. ⭐ **The firmware natively reacts to the held button by painting its lasso-erase
+     x-stream trace (the code-3 visual) along the pen path, IGNORING the app's pen
+     config** — identical with MIRROR off and on, so `setEraser` mirroring is useless
+     against the button. The trace **lingers** like any overlay ink.
+  3. ⭐ **Disable areas DO suppress the button trace** (no x-stream inside the STRIP band)
+     — the suppression lever the pen config isn't.
+
+**Round 4 — barrel support shipped to the engine (2026-08-09, built + installed on both,
+Nomad smoke-checked clean):** `updateBarrelSuppress()` in `RattaNotebookView`: button
+pressed (tracked on hover, generic-motion AND contact streams; accepts `S1` or the pre-M
+`BUTTON_SECONDARY`) → `setFullScreenDisable` so the firmware paints nothing; released →
+`applyToolToFirmware()` (which also resets the flag, so any tool push supersedes the
+transient disable and the next button event re-asserts it). The software erase does the
+actual removal and shows progress through its own redraws. Safety net: an erase contact
+that involved the barrel — or converted to erasing mid-stroke, abandoning a partial pen
+stroke on the overlay — arms `releaseGestureTrace()`'s clear ladder on lift (idempotent
+when the overlay is already clean). MIRROR stays in the probe as the historical negative.
+
+**Round 5 — two barrel fixes from the instrumented run (2026-08-09, built + installed on
+both).** The round-4 build's user test: barrel-erase painted nothing ✓ and erased the
+crossed stroke from the DB ✓, but the erased stroke stayed visible until a page flip and
+the erase path *reappeared as a normal stroke*. The engine's Slog trace (now permanent —
+barrel PRESS/RELEASE with source stream, penDOWN/penUP with buttonState + flags, commits,
+erase removals, gesture verdicts) pinned both:
+
+- ⭐ **The barrel is released a beat before the pen lifts** (`ACTION_BUTTON_RELEASE`
+  arrives mid-contact, then `penUP btn=0`): per-event `erasing` recomputation sent the UP
+  down the normal-pen branch, committing the stale down/up points as a phantom 2-point
+  stroke. Fix: **the erase decision is sticky per contact** — `erasing` now also includes
+  `strokeSawBarrel`, so a contact that ever saw the button stays an erase until lift.
+- ⭐ **The pen-down bake+clear can be eaten too** (not just near-lift clears): the erased
+  stroke's overlay twin stayed frozen on the panel through the whole erase, hiding the
+  app-side repaint until page nav reconciled it. Fix: **every erase contact now ends by
+  arming `releaseGestureTrace()`'s ladder** (was: only barrel/mid-stroke-conversion
+  contacts) — idempotent and invisible when the panel is already clean.
+
+**Round 5 validated (user, Nomad, 2026-08-09): "looks good now"** — and the log confirms
+the same button-release-before-lift sequence now takes the erase branch on penUP
+(`erasing=true sawBarrel=true`, no phantom commit, `erase removed=1`). Barrel-erase is
+done on the Nomad. Remaining before ticking Phase 4: the full test script on the
+**Manta**, and optionally the OS-setting enumeration below.
+
+**Phase closed 2026-08-09 — Manta full pass ("all good").** Closing bonus, from a
+screencap of both devices: baked strokes are screencap-visible **in colour** (a green
+stroke drawn with the v1.2 colour system round-tripped to the committed layer as true
+green on both devices) — the deferred handoff bakes exactly as designed, and Phase 8's
+remaining work is only the live overlay's grey mapping.
+
+**Deferred lab item (not phase-blocking):** enumerate the OS side-button setting's UI
+options ↔ `end_button_behavior` values (flip each, re-run the probe's hover-Δ test) — if
+some value makes the OS swallow the button, barrel-erase goes inert for that user (no
+misbehaviour beyond the firmware possibly painting its native trace with no app-side
+suppression); the value is app-readable at runtime if it ever warrants a hint.
 
 ---
 

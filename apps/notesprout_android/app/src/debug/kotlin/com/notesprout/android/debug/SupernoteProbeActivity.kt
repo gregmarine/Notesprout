@@ -40,6 +40,15 @@ import com.notesprout.android.notebook.ratta.SupernoteInk
  *    style, which is what unlocks Phase 5's hardware lasso outline
  *  - disable areas: chrome is always excluded; STRIP toggles an extra test band (dashed
  *    outline) inside the write area — ink must stop at its boundary
+ *  - barrel-button lab (Phase 4): does the OS deliver the side button to a third-party app,
+ *    from hover and from contact, and under which value of the OS-level side-button
+ *    preference? The report lists every pen/stylus/button-ish key readable from the
+ *    Settings provider (re-read on every focus gain — flip the OS setting and come back).
+ *    The barrel line shows live decoded buttonState for hover vs contact plus a transition
+ *    counter; MIRROR toggles the engine's candidate behaviour (button held → setEraser,
+ *    released → setPen) so the approach is validated here before it returns to
+ *    RattaNotebookView. Write with the button held: no-MIRROR shows what the firmware does
+ *    natively; MIRROR shows whether our reconfigure beats the tip landing.
  *
  * Launch:
  *   adb shell am start -n com.notesprout.android.dev/com.notesprout.android.debug.SupernoteProbeActivity
@@ -58,6 +67,7 @@ class SupernoteProbeActivity : AppCompatActivity() {
 
     private lateinit var reportText: TextView
     private lateinit var touchText: TextView
+    private lateinit var barrelText: TextView
     private lateinit var penLabel: TextView
     private lateinit var writeArea: WriteArea
 
@@ -65,6 +75,17 @@ class SupernoteProbeActivity : AppCompatActivity() {
     private var stripEnabled = false
     private var toasted = false
     private var lastMoveReport = 0L
+
+    // ── Barrel-button lab state ──────────────────────────────────────────────
+    /** BUTTON_STYLUS_PRIMARY is the M+ mapping of the side button; some stacks still
+     *  report the pre-M BUTTON_SECONDARY. Treat either as "barrel". */
+    private val barrelMask =
+        MotionEvent.BUTTON_STYLUS_PRIMARY or MotionEvent.BUTTON_SECONDARY
+    private var mirrorEnabled = false
+    private var barrelPressed = false
+    private var barrelTransitions = 0
+    private var lastHoverBtn = -1     // -1 = never seen
+    private var lastContactBtn = -1
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -101,10 +122,20 @@ class SupernoteProbeActivity : AppCompatActivity() {
         }
         root.addView(touchText, lp())
 
+        barrelText = TextView(this).apply {
+            setTextColor(Color.BLACK)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 18f)
+            typeface = android.graphics.Typeface.MONOSPACE
+            setPadding(dp(8), dp(4), dp(8), dp(4))
+        }
+        root.addView(barrelText, lp())
+        updateBarrelText()
+
         root.addView(buttonRow(
             "CLEAR" to { SupernoteInk.clearAll(); writeArea.invalidate() },
             "STRIP" to { stripEnabled = !stripEnabled; applyDisableAreas(); writeArea.invalidate() },
             "FULL FRAME" to { SupernoteInk.sendOneFullFrame(this) },
+            "MIRROR" to { toggleMirror() },
         ))
 
         // ── Phase 3 clear-matrix: which sequence removes ALREADY-PAINTED overlay ink with
@@ -184,6 +215,9 @@ class SupernoteProbeActivity : AppCompatActivity() {
         // The firmware hands the pen to other apps while we're away and resets full-UI ink;
         // re-assert the whole setup on every focus gain (attach alone is not enough).
         if (hasFocus) setupFirmware() else teardownFirmware()
+        // Re-read the OS stylus prefs so flipping the side-button setting and coming back
+        // shows the new value next to the barrel readout.
+        if (hasFocus && ::writeArea.isInitialized) reportText.text = buildReport()
     }
 
     override fun onDestroy() {
@@ -277,7 +311,103 @@ class SupernoteProbeActivity : AppCompatActivity() {
         writeArea.getLocationOnScreen(loc)
         appendLine("display=${dm.widthPixels}x${dm.heightPixels} dpi=${dm.densityDpi} " +
             "writeArea@(${loc[0]},${loc[1]})")
+
+        for (line in stylusSettingsLines()) appendLine(line)
     }.trimEnd()
+
+    // ---------------------------------------------------------------- barrel lab
+
+    /**
+     * Track the stylus button state from BOTH input streams (hover generic-motion events
+     * and contact touch events) — the OS could deliver the button in one but not the
+     * other, and the engine's candidate design arms the eraser from hover so the firmware
+     * is reconfigured before the tip lands. Every barrel press/release transition is
+     * counted, logged (grep SupernoteProbe), and — with MIRROR on — mirrored into the
+     * firmware pen config exactly the way RattaNotebookView would do it.
+     */
+    private fun trackButtons(e: MotionEvent, contact: Boolean) {
+        val b = e.buttonState
+        if (contact) lastContactBtn = b else lastHoverBtn = b
+        val pressed = (b and barrelMask) != 0 &&
+            e.getToolType(0) != MotionEvent.TOOL_TYPE_FINGER
+        if (pressed != barrelPressed) {
+            barrelPressed = pressed
+            barrelTransitions++
+            android.util.Log.i("SupernoteProbe",
+                "barrel ${if (pressed) "PRESS" else "RELEASE"} btn=$b " +
+                "src=${if (contact) "contact" else "hover"} " +
+                "tool=${e.getToolType(0)} action=${MotionEvent.actionToString(e.actionMasked)}")
+            if (mirrorEnabled) applyMirror()
+        }
+        updateBarrelText()
+    }
+
+    private fun applyMirror() {
+        if (barrelPressed) SupernoteInk.setEraser(false, 750)
+        else SupernoteInk.setPen(penCode, SWEEP_EMR, FIRMWARE_COLOR)
+    }
+
+    private fun toggleMirror() {
+        mirrorEnabled = !mirrorEnabled
+        // Turning it off while the eraser is armed must hand the pen back.
+        if (!mirrorEnabled && barrelPressed) SupernoteInk.setPen(penCode, SWEEP_EMR, FIRMWARE_COLOR)
+        if (mirrorEnabled) applyMirror()
+        updateBarrelText()
+    }
+
+    private fun updateBarrelText() {
+        barrelText.text = "barrel: hover=${btnFlags(lastHoverBtn)} " +
+            "contact=${btnFlags(lastContactBtn)} Δ=$barrelTransitions " +
+            "mirror=${if (mirrorEnabled) "ON" else "off"}"
+    }
+
+    /** Decode a buttonState int into named flags, e.g. "32[S1]". -1 = never seen. */
+    private fun btnFlags(b: Int): String {
+        if (b < 0) return "—"
+        if (b == 0) return "0"
+        val names = mutableListOf<String>()
+        if (b and MotionEvent.BUTTON_PRIMARY != 0) names.add("PRI")
+        if (b and MotionEvent.BUTTON_SECONDARY != 0) names.add("SEC")
+        if (b and MotionEvent.BUTTON_TERTIARY != 0) names.add("TER")
+        if (b and MotionEvent.BUTTON_STYLUS_PRIMARY != 0) names.add("S1")
+        if (b and MotionEvent.BUTTON_STYLUS_SECONDARY != 0) names.add("S2")
+        return "$b[${names.joinToString("+")}]"
+    }
+
+    /**
+     * Every pen/stylus/button-ish key readable from the Settings provider (all three
+     * tables), plus the known Ratta keys read explicitly. `end_button_behavior` is the
+     * OS-level side-button preference (=2 observed via adb on the Nomad); the open
+     * question is whether its value gates what trackButtons sees.
+     */
+    private fun stylusSettingsLines(): List<String> {
+        val out = mutableListOf<String>()
+        for (key in listOf("end_button_behavior", "stylus_guesture")) {
+            val v = runCatching {
+                android.provider.Settings.System.getString(contentResolver, key)
+            }.getOrElse { "read failed: ${it.message}" }
+            out.add("sys/$key=$v")
+        }
+        val pattern = Regex("pen|stylus|button|lamy|eraser", RegexOption.IGNORE_CASE)
+        val tables = listOf(
+            "sys" to android.provider.Settings.System.CONTENT_URI,
+            "glob" to android.provider.Settings.Global.CONTENT_URI,
+            "sec" to android.provider.Settings.Secure.CONTENT_URI,
+        )
+        for ((label, uri) in tables) {
+            runCatching {
+                contentResolver.query(uri, arrayOf("name", "value"), null, null, null)?.use { c ->
+                    while (c.moveToNext()) {
+                        val name = c.getString(0) ?: continue
+                        if (!pattern.containsMatchIn(name)) continue
+                        val line = "$label/$name=${c.getString(1)}"
+                        if (out.none { it == line || it.startsWith("$label/$name=") }) out.add(line)
+                    }
+                }
+            }.onFailure { out.add("$label scan failed: ${it.message}") }
+        }
+        return out
+    }
 
     // ---------------------------------------------------------------- touch readout
 
@@ -338,9 +468,24 @@ class SupernoteProbeActivity : AppCompatActivity() {
                 MotionEvent.ACTION_DOWN -> strokePoints = 1
                 MotionEvent.ACTION_MOVE -> strokePoints += event.historySize + 1
             }
+            trackButtons(event, contact = true)
             reportTouch(event, strokePoints)
             parent?.requestDisallowInterceptTouchEvent(true)
             return true
+        }
+
+        // Hover stream (pen in EMR range, tip up): where the barrel press should first
+        // appear if the OS delivers it — the engine wants to re-arm BEFORE the tip lands.
+        override fun onHoverEvent(event: MotionEvent): Boolean {
+            trackButtons(event, contact = false)
+            return true
+        }
+
+        // Some stacks report button changes as ACTION_BUTTON_PRESS/RELEASE generic events
+        // rather than a buttonState change on the hover stream — catch those too.
+        override fun onGenericMotionEvent(event: MotionEvent): Boolean {
+            trackButtons(event, contact = false)
+            return super.onGenericMotionEvent(event)
         }
 
         private fun dp(v: Int): Int = this@SupernoteProbeActivity.dp(v)
