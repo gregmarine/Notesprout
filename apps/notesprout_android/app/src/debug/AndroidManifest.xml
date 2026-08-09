@@ -104,6 +104,10 @@
              trail); 4 = STREAM OF DASHES (lasso selector) — the hardware dashed style that
              unlocks Phase 5; 12 renders but sometimes emits a giant laggy blob (broken, never
              use); 6/7/9/13 render nothing; 14 possibly calligraphy, 15 calligraphy.
+             Phase 8 additions: REG lab (dual-render registration measurement — app twin of
+             each stroke at raw MotionEvent coords over the uncleared overlay, X/Y nudge to
+             null; feeds RattaNotebookView.REG_OFFSET_X_PX) and COL (cycles the four firmware
+             colour codes to calibrate RattaInkMap's grey thresholds).
              Keep this activity as the Ratta calibration tool (like PenToolSpikeActivity).
              adb shell am start -n com.notesprout.android.dev/com.notesprout.android.debug.SupernoteProbeActivity -->
         <activity

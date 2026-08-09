@@ -49,6 +49,15 @@ import com.notesprout.android.notebook.ratta.SupernoteInk
  *    released → setPen) so the approach is validated here before it returns to
  *    RattaNotebookView. Write with the button held: no-MIRROR shows what the firmware does
  *    natively; MIRROR shows whether our reconfigure beats the tip landing.
+ *  - REG lab (Phase 8): measures the horizontal registration offset between the firmware's
+ *    live ink (true to the physical tip) and the digitizer's MotionEvent stream (what the
+ *    engine bakes — observed landing a few px LEFT). With REG on, each stylus stroke is
+ *    also drawn app-side at raw MotionEvent coords in the engine's exact bake style
+ *    (2.5 px black; pen armed at the engine's EMR 250) without clearing the overlay —
+ *    both lines sit on the panel at once. Nudge X±/Y± until the twin hides under the
+ *    firmware ink (overlay pixels freeze app updates, so alignment = disappearance); the
+ *    label's offset is the number RattaNotebookView.REG_OFFSET_X_PX wants. COL cycles the
+ *    four firmware colour codes to calibrate RattaInkMap's grey anchors.
  *
  * Launch:
  *   adb shell am start -n com.notesprout.android.dev/com.notesprout.android.debug.SupernoteProbeActivity
@@ -57,11 +66,22 @@ class SupernoteProbeActivity : AppCompatActivity() {
 
     private companion object {
         const val SWEEP_EMR = 300      // known-visible; near-zero EMR is an invisible sub-pixel line
-        const val FIRMWARE_COLOR = SupernoteInk.Color.BLACK
         const val DELAY_MS = 2000L     // clear-matrix arming delay — outlives any input event
         val PEN_NAMES = mapOf(
             1 to "eraser-rnd", 3 to "eraser-rect",
             10 to "NEEDLE", 11 to "MARK", 15 to "CALLIGRAPHY", 16 to "INK",
+        )
+        // ── Phase 8 REG lab ──
+        /** The engine's exact live-pen EMR: RattaNotebookView.emrSize(2.5f) = 250. */
+        const val REG_EMR = 250
+        /** The engine's exact baked-stroke width (RattaNotebookView.strokePaint). */
+        const val REG_STROKE_WIDTH = 2.5f
+        /** The four colour codes the firmware pen accepts, for the COL cycler. */
+        val FW_COLORS = listOf(
+            SupernoteInk.Color.BLACK to "BLACK",
+            SupernoteInk.Color.DARK_GRAY to "DK-GRAY",
+            SupernoteInk.Color.GRAY to "GRAY",
+            SupernoteInk.Color.LIGHT_GRAY to "LT-GRAY",
         )
     }
 
@@ -75,6 +95,29 @@ class SupernoteProbeActivity : AppCompatActivity() {
     private var stripEnabled = false
     private var toasted = false
     private var lastMoveReport = 0L
+
+    // ── Phase 8 REG lab state ────────────────────────────────────────────────
+    /**
+     * Registration lab: with REG on, every stylus stroke is ALSO drawn app-side at its raw
+     * MotionEvent coords (2.5 px black polyline — the engine's exact bake) WITHOUT clearing
+     * the firmware overlay, so panel shows firmware ink and app twin side by side. The
+     * X−/X+/Y−/Y+ buttons nudge the twin in 1 px steps; because pixels under overlay ink
+     * are frozen against app updates (Phase 3 law), the twin VANISHES under the firmware
+     * line when the offset is nulled — read the number off the label at that point. That
+     * offset is the MotionEvent→physical-tip delta RattaNotebookView.REG_OFFSET_X_PX wants.
+     * REG also arms the pen at the engine's exact EMR (250), so weight/darkness of live vs
+     * app-drawn ink is compared in the same glance.
+     */
+    private var regEnabled = false
+    private var regOffX = 0
+    private var regOffY = 0
+    private val regStrokes = mutableListOf<MutableList<android.graphics.PointF>>()
+    private lateinit var regLabel: TextView
+
+    /** Colour cycler (COL button): index into [FW_COLORS], used by every setPen site. */
+    private var fwColorIdx = 0
+    private fun fwColor() = FW_COLORS[fwColorIdx].first
+    private fun sweepEmr() = if (regEnabled) REG_EMR else SWEEP_EMR
 
     // ── Barrel-button lab state ──────────────────────────────────────────────
     /** BUTTON_STYLUS_PRIMARY is the M+ mapping of the side button; some stacks still
@@ -132,11 +175,31 @@ class SupernoteProbeActivity : AppCompatActivity() {
         updateBarrelText()
 
         root.addView(buttonRow(
-            "CLEAR" to { SupernoteInk.clearAll(); writeArea.invalidate() },
+            "CLEAR" to { regStrokes.clear(); SupernoteInk.clearAll(); writeArea.invalidate() },
             "STRIP" to { stripEnabled = !stripEnabled; applyDisableAreas(); writeArea.invalidate() },
             "FULL FRAME" to { SupernoteInk.sendOneFullFrame(this) },
             "MIRROR" to { toggleMirror() },
         ))
+
+        // ── Phase 8 REG lab row: toggle, colour cycler, twin-offset nudges ──
+        regLabel = TextView(this).apply {
+            setTextColor(Color.BLACK)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
+            typeface = android.graphics.Typeface.MONOSPACE
+            gravity = Gravity.CENTER
+        }
+        val regRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        regRow.addView(button("REG") { toggleReg() }, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
+        regRow.addView(button("COL") { cycleColor() }, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
+        regRow.addView(button("X−") { nudgeReg(-1, 0) }, LinearLayout.LayoutParams(0, WRAP_CONTENT, 0.8f))
+        regRow.addView(button("X+") { nudgeReg(1, 0) }, LinearLayout.LayoutParams(0, WRAP_CONTENT, 0.8f))
+        regRow.addView(button("Y−") { nudgeReg(0, -1) }, LinearLayout.LayoutParams(0, WRAP_CONTENT, 0.8f))
+        regRow.addView(button("Y+") { nudgeReg(0, 1) }, LinearLayout.LayoutParams(0, WRAP_CONTENT, 0.8f))
+        regRow.addView(regLabel, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1.6f).apply {
+            gravity = Gravity.CENTER_VERTICAL
+        })
+        root.addView(regRow, lp())
+        updateRegLabel()
 
         // ── Phase 3 clear-matrix: which sequence removes ALREADY-PAINTED overlay ink with
         // NO input event near it? Every sequence fires DELAY_MS after the arming tap, so the
@@ -152,7 +215,7 @@ class SupernoteProbeActivity : AppCompatActivity() {
             "dCLR+PEN" to { delayed("clearAll+claim+setPen") {
                 SupernoteInk.clearAll()
                 SupernoteInk.claimPen()
-                SupernoteInk.setPen(penCode, SWEEP_EMR, FIRMWARE_COLOR)
+                SupernoteInk.setPen(penCode, sweepEmr(), fwColor())
             } },
             "dCLR+DIS" to { delayed("clearAll+disable-roundtrip") {
                 SupernoteInk.clearAll()
@@ -235,7 +298,7 @@ class SupernoteProbeActivity : AppCompatActivity() {
         SupernoteInk.enableFullUiAuto(this, true)
         SupernoteInk.enableAutoRegal(this, true)
         applyDisableAreas()
-        SupernoteInk.setPen(penCode, SWEEP_EMR, FIRMWARE_COLOR)
+        SupernoteInk.setPen(penCode, sweepEmr(), fwColor())
     }
 
     private fun teardownFirmware() {
@@ -263,13 +326,46 @@ class SupernoteProbeActivity : AppCompatActivity() {
 
     private fun changePen(code: Int) {
         penCode = code.coerceIn(0, 31)
-        SupernoteInk.setPen(penCode, SWEEP_EMR, FIRMWARE_COLOR)
+        SupernoteInk.setPen(penCode, sweepEmr(), fwColor())
         updatePenLabel()
     }
 
     private fun updatePenLabel() {
         val name = PEN_NAMES[penCode] ?: "?"
-        penLabel.text = "code $penCode ($name) emr=$SWEEP_EMR"
+        penLabel.text = "code $penCode ($name) emr=${sweepEmr()} col=${FW_COLORS[fwColorIdx].second}"
+    }
+
+    // ---------------------------------------------------------------- Phase 8 REG lab
+
+    private fun toggleReg() {
+        regEnabled = !regEnabled
+        if (!regEnabled) regStrokes.clear()
+        // Re-arm at the engine's exact EMR (REG on) or the sweep EMR (REG off).
+        SupernoteInk.setPen(penCode, sweepEmr(), fwColor())
+        updatePenLabel()
+        updateRegLabel()
+        writeArea.invalidate()
+    }
+
+    private fun cycleColor() {
+        fwColorIdx = (fwColorIdx + 1) % FW_COLORS.size
+        SupernoteInk.setPen(penCode, sweepEmr(), fwColor())
+        updatePenLabel()
+    }
+
+    private fun nudgeReg(dx: Int, dy: Int) {
+        regOffX += dx
+        regOffY += dy
+        updateRegLabel()
+        writeArea.invalidate()
+    }
+
+    private fun updateRegLabel() {
+        regLabel.text = if (regEnabled) {
+            "reg %+d,%+d px n=%d".format(regOffX, regOffY, regStrokes.size)
+        } else {
+            "reg off"
+        }
     }
 
     // ---------------------------------------------------------------- report
@@ -344,13 +440,13 @@ class SupernoteProbeActivity : AppCompatActivity() {
 
     private fun applyMirror() {
         if (barrelPressed) SupernoteInk.setEraser(false, 750)
-        else SupernoteInk.setPen(penCode, SWEEP_EMR, FIRMWARE_COLOR)
+        else SupernoteInk.setPen(penCode, sweepEmr(), fwColor())
     }
 
     private fun toggleMirror() {
         mirrorEnabled = !mirrorEnabled
         // Turning it off while the eraser is armed must hand the pen back.
-        if (!mirrorEnabled && barrelPressed) SupernoteInk.setPen(penCode, SWEEP_EMR, FIRMWARE_COLOR)
+        if (!mirrorEnabled && barrelPressed) SupernoteInk.setPen(penCode, sweepEmr(), fwColor())
         if (mirrorEnabled) applyMirror()
         updateBarrelText()
     }
@@ -449,6 +545,16 @@ class SupernoteProbeActivity : AppCompatActivity() {
             color = Color.BLACK
             textSize = dp(12).toFloat()
         }
+        // The engine's exact bake paint (RattaNotebookView.strokePaint) — the twin must be
+        // the same pixels the real bake would produce, or the comparison lies.
+        private val regPaint = Paint().apply {
+            isAntiAlias = true
+            color = Color.BLACK
+            style = Paint.Style.STROKE
+            strokeCap = Paint.Cap.ROUND
+            strokeJoin = Paint.Join.ROUND
+            strokeWidth = REG_STROKE_WIDTH
+        }
 
         init { setBackgroundColor(Color.WHITE) }
 
@@ -460,6 +566,21 @@ class SupernoteProbeActivity : AppCompatActivity() {
                 canvas.drawText("disable strip — ink must stop here",
                     r.left + dp(8f), r.top + dp(20f), labelPaint)
             }
+            if (regEnabled) {
+                // App-side twins at MotionEvent coords + the current nudge. The firmware
+                // overlay composites ABOVE this — when the nudge nulls the offset the twin
+                // disappears under the firmware line (overlay pixels are frozen against
+                // app updates), which is the measurement signal.
+                for (pts in regStrokes) {
+                    if (pts.size < 2) continue
+                    val path = android.graphics.Path()
+                    path.moveTo(pts[0].x + regOffX, pts[0].y + regOffY)
+                    for (i in 1 until pts.size) path.lineTo(pts[i].x + regOffX, pts[i].y + regOffY)
+                    canvas.drawPath(path, regPaint)
+                }
+                canvas.drawText("REG: twin redraws on pen-up; nudge X/Y until it hides under the firmware ink",
+                    dp(8f), height - dp(12f), labelPaint)
+            }
         }
 
         @SuppressLint("ClickableViewAccessibility")
@@ -467,6 +588,25 @@ class SupernoteProbeActivity : AppCompatActivity() {
             when (event.actionMasked) {
                 MotionEvent.ACTION_DOWN -> strokePoints = 1
                 MotionEvent.ACTION_MOVE -> strokePoints += event.historySize + 1
+            }
+            if (regEnabled && event.getToolType(0) != MotionEvent.TOOL_TYPE_FINGER) {
+                when (event.actionMasked) {
+                    MotionEvent.ACTION_DOWN -> regStrokes.add(
+                        mutableListOf(android.graphics.PointF(event.x, event.y)))
+                    MotionEvent.ACTION_MOVE -> regStrokes.lastOrNull()?.let { pts ->
+                        for (i in 0 until event.historySize) {
+                            pts.add(android.graphics.PointF(event.getHistoricalX(i), event.getHistoricalY(i)))
+                        }
+                        pts.add(android.graphics.PointF(event.x, event.y))
+                    }
+                    MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                        // Draw the twin only at pen-up: an invalidate per MOVE would race
+                        // the firmware's live painting and flicker the EPD.
+                        regStrokes.lastOrNull()?.add(android.graphics.PointF(event.x, event.y))
+                        updateRegLabel()
+                        invalidate()
+                    }
+                }
             }
             trackButtons(event, contact = true)
             reportTouch(event, strokePoints)

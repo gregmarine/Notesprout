@@ -1,7 +1,7 @@
 # Supernote (Ratta) Support — Implementation Plan
 
 > **Branch:** `supernote` · **Targets:** Supernote Nomad + Supernote Manta
-> **Overall status:** Phases 0–6 ✅ done (2026-08-08/09, both devices, firmware 2389).
+> **Overall status:** Phases 0–8 ✅ done (2026-08-08/09, both devices, firmware 2389).
 > `RattaNotebookView` ships the deferred-handoff writing loop — live firmware ink is
 > hardware-validated ("the writing experience is gold"), smart lasso / scribble-erase traces
 > self-clear via the **clear+frame retry ladder** (see Phase 3 findings: the two measured
@@ -21,7 +21,12 @@
 > fullScreenDisable). Passed both devices round 1; the round surfaced a PRE-EXISTING
 > live-vs-baked horizontal registration offset, A/B-verified against a Phase 6 build and
 > filed into Phase 8.
-> Next: Phase 8 (ink mapping, EMR width tuning, and the registration offset).
+> Phase 8 closed the appearance gap: the registration offset was the MotionEvent stream
+> (live ink is true to the tip) — fixed by a per-panel input x-shift (+2 px Nomad / +3 px
+> Manta, REG-lab-measured); live overlay colour now maps to the nearest of the four firmware
+> greys via `RattaInkMap` (thresholds calibrated to measured render tones — the codes paint
+> far lighter than their names); baked ink keeps true hex, screencap-verified in colour.
+> Next: Phase 9 (docs, device tiers, wrap-up — no device test).
 
 ---
 
@@ -1368,7 +1373,7 @@ item added there.
 
 ---
 
-## Phase 8 — Ink mapping & EMR stroke-width tuning · ⬜ NOT STARTED
+## Phase 8 — Ink mapping & EMR stroke-width tuning · ✅ DONE (2026-08-09, both devices)
 
 **Goal:** make the live firmware ink *look like* the ink we bake. Until now Phase 3 has hardcoded
 black at a default width.
@@ -1426,22 +1431,89 @@ Also in this phase:
 
 ### Device test
 
-Install both. In a notebook:
-1. Write with black; compare live ink to baked ink at the moment of lift — same weight, same darkness?
-2. Step through all 16 greys — does the live ink track the baked ink plausibly?
-3. Step through several colours — does the live grey match what the baked stroke renders as?
-4. Write fast and slow — does the width look consistent?
+Install both. **Registration first, in `SupernoteProbeActivity` (both devices — the delta may
+differ between the 1404-wide Nomad and 1920-wide Manta):**
+1. Tap **REG** (pen re-arms at the engine's exact EMR 250; label shows `reg +0,+0`). Draw a few
+   strokes — vertical lines show the x-offset best. Each stroke's app-drawn twin (the engine's
+   exact 2.5 px bake) appears at pen-up next to the firmware ink, which is deliberately NOT
+   cleared.
+2. Nudge **X+** (the twin is expected LEFT of the firmware ink) until the twin **disappears under
+   the firmware line** — overlay pixels freeze app updates, so vanishing = aligned. Check **Y±**
+   too while you're there. Read the offset off the label and report it for each device.
+3. While the double lines are up: same weight and darkness between twin and firmware ink? (This is
+   the width-tuning check — EMR 250 vs the 2.5 px bake.)
+4. Tap **COL** to step BLACK → DK-GRAY → GRAY → LT-GRAY, drawing a line with each — how light is
+   each grey really? (Calibrates `RattaInkMap`'s provisional thresholds.)
+
+Then in a notebook:
+5. Write with black; compare live ink to baked ink at the moment of lift — same weight, same darkness?
+6. Step through all 16 greys — does the live ink track the baked ink plausibly?
+7. Step through several colours — does the live grey match what the baked stroke renders as?
+8. Write fast and slow — does the width look consistent?
 
 ### Exit criteria
 
-- [ ] Live and baked ink are visually indistinguishable at pen-lift for black.
-- [ ] Every palette entry produces a sensible live grey with no jarring jump.
-- [ ] Stroke width matches.
-- [ ] Identical on Nomad and Manta.
+- [x] Live and baked ink are visually indistinguishable at pen-lift for black.
+- [x] Every palette entry produces a sensible live grey with no jarring jump — as far as the
+      hardware allows; see the grey-ladder note in the round-2 findings.
+- [x] Stroke width matches.
+- [x] Baked strokes land under the live ink (registration offset measured and compensated).
+- [x] Identical on Nomad and Manta.
 
 ### Findings
 
-_(record here)_
+**Fix direction settled before the round (2026-08-09, user observation):** while the stylus is
+drawing, the live firmware ink sits correctly under the tip; the leftward shift appears only when
+the bake replaces it. That is the first branch of the registration item — **the `MotionEvent`
+stream is the one that's offset**, so the fix is a measured constant x-shift on the Ratta input
+path, correcting persisted data toward physical truth. Only the constant's value (per device?) is
+still unknown.
+
+**Round-1 build (2026-08-09, installed on both, awaiting device test):**
+- `notebook/ratta/RattaInkMap.kt` (new) — `firmwareColorFor(hex)`: Rec. 601 luma → nearest of the
+  four firmware codes. Thresholds 48 / 128 / 184 are PROVISIONAL midpoints (the Phase 1 sweep never
+  measured what the three grey codes render); the probe's COL cycler calibrates them this round.
+- `RattaNotebookView.applyPenToFirmware()` now arms the mapped grey for the armed ink (was
+  hardcoded BLACK); `setPenColor` re-arms the firmware when the plain pen is the active tool
+  (colour-panel touch is a chrome boundary, so the overlay is already baked+clear — only the pen
+  config needs refreshing).
+- Registration mechanism wired but inert: `REG_OFFSET_X_PX = 0f` + `compensateRegistration(event)`
+  (offsetLocation for stylus/eraser tools only, applied at onTouchEvent / onHoverEvent /
+  onGenericMotionEvent entry — one chokepoint ahead of every consumer, so writing, erasing, lasso
+  and taps stay mutually consistent). Round 2 fills in the measured constant(s).
+- Probe REG lab: with REG on, the pen arms at the engine's exact EMR (250) and every stylus stroke
+  is also drawn app-side at raw MotionEvent coords in the engine's exact bake style (2.5 px black,
+  round caps) WITHOUT clearing the overlay — both renders sit on the panel at once. X±/Y± nudge the
+  twin in 1 px steps; since overlay pixels freeze app updates, the twin vanishes under the firmware
+  line exactly when the offset is nulled. COL cycles the four firmware colour codes through every
+  probe pen site.
+
+**Round-1 measurements (2026-08-09, probe labs, both devices):**
+- **Registration: Nomad +2 px, Manta +3 px** (x only; y clean). The delta scales with the panel
+  (1404- vs 1920-wide), so the constant is per-device — branched on min screen dimension
+  (≥ 1600 → Manta-class), since the Manta reports `Build.MODEL` as `Supernote Nomad`.
+- **Grey codes render far lighter than their names** (identical on both): DARK_GRAY ≈ a light
+  #AAAAAA-ish tone (~luma 170), GRAY ≈ #CCCCCC (~204), LIGHT_GRAY near-invisible on the white
+  panel (≈ #F0F0F0, ~240). The provisional thresholds were far too dark.
+
+**Round-2 build (2026-08-09, installed on both):** `regOffsetXPx` now live —
++2/+3 px by panel size via `compensateRegistration` (REG_OFFSET_MANTA_PX / REG_OFFSET_NOMAD_PX /
+REG_MANTA_MIN_DIM = 1600). `RattaInkMap` thresholds recalibrated to the measured render tones:
+BLACK ≤ 85 · DARK_GRAY ≤ 187 · GRAY ≤ 222 · LIGHT_GRAY above (midpoints of measured anchors
+0/170/204/240). Net effect: most of the palette's dark half stays BLACK live; only genuinely light
+inks get a firmware grey; only near-white ink maps to the near-invisible LIGHT_GRAY (consistent —
+near-white baked ink is equally invisible on paper).
+
+**Round-2 device test (2026-08-09, both devices): PASS — phase complete.** Registration, black
+live-vs-baked, colours, and fast/slow width all pass cleanly; the baked stroke now lands exactly
+under the live ink. The 16-grey ladder is accepted as **best-possible, not perfect**: the firmware
+offers only three visible shades plus a near-invisible one (its GRAY level reads near-white even in
+Supernote's native notes app), so 16 baked tones cannot each get a distinct live grey — the
+nearest-tone mapping is already optimal, and shifting thresholds would only misalign live from
+baked to fake variety the panel cannot render. Not a deficiency to revisit. Screencap check on both
+devices confirmed the other half of the contract: baked strokes carry their true hex (red / green /
+yellow / purple readable in the framebuffer) on a panel that shows the user only grey — a notebook
+written on a Supernote opens in full colour elsewhere.
 
 ---
 

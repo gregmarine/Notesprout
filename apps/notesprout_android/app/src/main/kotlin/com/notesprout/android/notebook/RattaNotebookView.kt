@@ -36,6 +36,7 @@ import com.notesprout.android.data.translate
 import com.notesprout.android.data.LiveStroke
 import com.notesprout.android.data.TextRender
 import com.notesprout.android.data.deepCopy
+import com.notesprout.android.notebook.ratta.RattaInkMap
 import com.notesprout.android.notebook.ratta.SupernoteInk
 import java.io.ByteArrayOutputStream
 import java.util.UUID
@@ -59,8 +60,10 @@ import java.util.UUID
 //     on toolbar touch, focus loss, page load/clear, template change, detach). Never
 //     bake+clear per pen lift: that fights the hardware and produces a flash + ghost.
 //   • Setup (attach + focus gain): claimPen, enableFullUiAuto(true), enableAutoRegal(true),
-//     setPen(NEEDLE, emrSize(width), BLACK). NEEDLE = uniform width, matching our baked
-//     polyline; the EMR clamp keeps the live ink visible (EMR ≈ 3 is sub-pixel/invisible).
+//     setPen(NEEDLE, emrSize(width), mapped grey). NEEDLE = uniform width, matching our
+//     baked polyline; the EMR clamp keeps the live ink visible (EMR ≈ 3 is sub-pixel/
+//     invisible). The colour payload is the armed ink mapped to the nearest of the four
+//     firmware greys (Phase 8, RattaInkMap) — the baked stroke keeps its true hex.
 //   • Per-tool firmware state (Phase 4): pen → setPen(NEEDLE); eraser tool → setEraser
 //     (colour-255 payload — stops the firmware painting ink along the path; our software
 //     hit-test still does the removal); text placement / shape transform / drag-move →
@@ -68,7 +71,7 @@ import java.util.UUID
 //     nothing). Every tool change is a handoff boundary: bake + clearAll FIRST,
 //     then reconfigure. The toolbar/colour-panel exclusion rect arrives via
 //     setToolbarExclusion in view coords and is offset into screen coords before being
-//     sent as a firmware disable area. Colour mapping (live ink stays BLACK) is Phase 8.
+//     sent as a firmware disable area.
 //   • Hardware lasso trails (Phase 5): lasso / lasso-eraser modes arm the firmware's own
 //     lasso pens (LASSO_DASH / LASSO_X — the sweep's codes 4/3) so the live trace is
 //     painted at pen speed instead of chased by the 60 ms-throttled Canvas DashPathEffect.
@@ -108,6 +111,16 @@ class RattaNotebookView(context: Context) : View(context), NotebookView {
          * width mapping: the trail is chrome, not ink.
          */
         private const val LASSO_TRAIL_EMR = 300
+        /**
+         * Phase 8 horizontal registration, measured values (REG-lab nudge-to-null,
+         * 2026-08-09): Nomad +2 px, Manta +3 px — the delta scales with the panel, and the
+         * two must be told apart by size because the Manta reports `Build.MODEL` as
+         * `Supernote Nomad`. Min screen dimension ≥ [REG_MANTA_MIN_DIM] → Manta-class.
+         */
+        private const val REG_OFFSET_MANTA_PX = 3f
+        private const val REG_OFFSET_NOMAD_PX = 2f
+        /** Nomad panel is 1404×1872, Manta 1920×2560 — min dimension splits them cleanly. */
+        private const val REG_MANTA_MIN_DIM = 1600
         /**
          * Follow-up overlay-clear ladder after a gesture-consumed stroke. A clear issued in
          * the wake of a pen-lift lands inside the ink daemon's stroke-finalization window
@@ -317,10 +330,20 @@ class RattaNotebookView(context: Context) : View(context), NotebookView {
         }
     }
 
-    /** NEEDLE (10) = uniform-width ballpoint, matching the uniform-width polyline we bake. */
+    /**
+     * NEEDLE (10) = uniform-width ballpoint, matching the uniform-width polyline we bake.
+     * Colour payload = the armed ink mapped to the nearest firmware grey ([RattaInkMap],
+     * Phase 8) — the greyscale panel would dither the true colour to a grey anyway, so
+     * matching that tone is what makes the pen-lift handoff invisible. The baked stroke
+     * keeps its true stored hex, untouched.
+     */
     private fun applyPenToFirmware() {
         if (!firmware) return
-        SupernoteInk.setPen(SupernoteInk.Pen.NEEDLE, emrSize(strokePaint.strokeWidth), SupernoteInk.Color.BLACK)
+        SupernoteInk.setPen(
+            SupernoteInk.Pen.NEEDLE,
+            emrSize(strokePaint.strokeWidth),
+            RattaInkMap.firmwareColorFor(penColorHex)
+        )
     }
 
     /**
@@ -492,6 +515,7 @@ class RattaNotebookView(context: Context) : View(context), NotebookView {
     }
 
     override fun onHoverEvent(event: MotionEvent): Boolean {
+        compensateRegistration(event)
         updateBarrelSuppress(event)
         updateLassoDragHoverSuppress(event)
         return super.onHoverEvent(event)
@@ -500,9 +524,37 @@ class RattaNotebookView(context: Context) : View(context), NotebookView {
     // Some stacks report button changes as ACTION_BUTTON_PRESS/RELEASE generic events
     // rather than a buttonState change on the hover stream — catch those too.
     override fun onGenericMotionEvent(event: MotionEvent): Boolean {
+        compensateRegistration(event)
         updateBarrelSuppress(event)
         updateLassoDragHoverSuppress(event)
         return super.onGenericMotionEvent(event)
+    }
+
+    /**
+     * The digitizer's `MotionEvent` x lands a few px LEFT of the physical pen tip, while
+     * the firmware's live overlay ink is true to the tip (Phase 7 device round; A/B-verified
+     * pre-existing since Phase 3 — the bake visibly jumped left at every handoff). Shifting
+     * every stylus/eraser event right by the measured constant corrects the *persisted*
+     * data toward physical truth, so strokes written on a Supernote open correctly aligned
+     * on every device — and the bake lands exactly under the live ink.
+     */
+    private val regOffsetXPx: Float by lazy {
+        val dm = resources.displayMetrics
+        if (minOf(dm.widthPixels, dm.heightPixels) >= REG_MANTA_MIN_DIM) REG_OFFSET_MANTA_PX
+        else REG_OFFSET_NOMAD_PX
+    }
+
+    /**
+     * Shift a stylus/eraser event right by [regOffsetXPx] (see that property — the
+     * digitizer reports left of the physical tip). Applied at every input entry point,
+     * before any consumer; affects the event's historical samples too. Finger events are
+     * untouched — the offset is a property of the EMR digitizer, not the touch panel.
+     */
+    private fun compensateRegistration(event: MotionEvent) {
+        val t = event.getToolType(0)
+        if (t == MotionEvent.TOOL_TYPE_STYLUS || t == MotionEvent.TOOL_TYPE_ERASER) {
+            event.offsetLocation(regOffsetXPx, 0f)
+        }
     }
 
     private val activePoints = ArrayList<PointF>()
@@ -584,7 +636,13 @@ class RattaNotebookView(context: Context) : View(context), NotebookView {
     override fun setPenColor(hex: String) {
         penColorHex = hex
         penColorInt = InkColor.paintColor(hex)
-        // No live overlay here — the in-progress stroke is drawn by onDraw, which reads penColorInt.
+        // Re-arm the firmware with the new mapped grey when the plain pen is the active
+        // tool. The colour panel is chrome, so the overlay was already baked + cleared by
+        // that boundary; only the pen config needs refreshing. The other tools own their
+        // own firmware state (eraser / lasso trails / full-screen disable) — leave it.
+        if (firmware && !firmwareSuppressed && !isEraserActive && !isLassoMode && !isLassoEraserMode) {
+            applyPenToFirmware()
+        }
         invalidate()
     }
 
@@ -742,6 +800,9 @@ class RattaNotebookView(context: Context) : View(context), NotebookView {
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
+        // Correct the digitizer offset before ANY consumer — writing, erasing, lasso,
+        // taps and hit-tests must all agree on where the pen physically is.
+        compensateRegistration(event)
         // Pen-activity gate: all ink on this engine arrives as MotionEvents, so tracking the
         // stylus here covers every mode. Runs before any per-mode dispatch/early return.
         val gateToolType = event.getToolType(0)
