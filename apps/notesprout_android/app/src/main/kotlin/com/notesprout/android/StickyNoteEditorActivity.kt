@@ -21,7 +21,7 @@ import androidx.lifecycle.lifecycleScope
 import androidx.room.withTransaction
 import com.notesprout.android.core.IndexGuard
 import com.notesprout.android.core.Slog
-import com.notesprout.android.core.isBooxDevice
+import com.notesprout.android.notebook.createNotebookView
 import com.notesprout.android.data.HeadingStroke
 import com.notesprout.android.data.LineRender
 import com.notesprout.android.data.LiveStroke
@@ -36,10 +36,8 @@ import com.notesprout.android.data.toStickyNoteObject
 import com.notesprout.android.data.deepCopy
 import com.notesprout.android.databinding.ActivityStickyNoteEditorBinding
 import com.notesprout.android.notebook.ActiveTool
-import com.notesprout.android.notebook.GenericNotebookView
 import com.notesprout.android.notebook.LassoGeometry
 import com.notesprout.android.notebook.NotebookView
-import com.notesprout.android.notebook.OnyxNotebookView
 import com.notesprout.android.notebook.ShapeRecognizer
 import com.notesprout.android.notebook.ToolPreferencesManager
 import com.notesprout.android.notebook.PenColorPreferences
@@ -139,7 +137,7 @@ class StickyNoteEditorActivity : AppCompatActivity() {
 
         binding.btnStickyNoteClose.setOnClickListener { finish() }
 
-        drawingView = if (isBooxDevice()) OnyxNotebookView(this) else GenericNotebookView(this)
+        drawingView = createNotebookView(this)
         binding.drawingContainer.addView(
             drawingView.asView(),
             FrameLayout.LayoutParams(

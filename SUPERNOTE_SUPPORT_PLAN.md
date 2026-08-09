@@ -1,10 +1,12 @@
 # Supernote (Ratta) Support — Implementation Plan
 
 > **Branch:** `supernote` · **Targets:** Supernote Nomad + Supernote Manta
-> **Overall status:** Phases 0 + 1 ✅ done (2026-08-08, both devices, firmware 2389).
+> **Overall status:** Phases 0–2 ✅ done (2026-08-08, both devices, firmware 2389).
 > `SupernoteInk` is ported to `notebook/ratta/`; live firmware ink, the full tool-type story, and
 > the pen-code sweep are all proven — **code 4 is a hardware dashed stroke, so Phase 5 is GO.**
-> Next: Phase 2 (device gate + engine factory).
+> All six hosts construct their engine via `createNotebookView()`; the gate is proven live on
+> all three test devices (`ratta=true firmware=true` on both Supernotes, BOOX untouched).
+> Next: Phase 3 (`RattaNotebookView` — core writing loop, deferred handoff).
 
 ---
 
@@ -34,7 +36,7 @@ This plan is written to survive a cleared context. At the start of every session
 |---|---|---|---|
 | 0 | Baseline & firmware probe | ✅ yes | ✅ DONE (2026-08-08) |
 | 1 | Port `SupernoteInk` + live-ink proof | ✅ yes | ✅ DONE (2026-08-08) — **dashed style found (code 4): Phase 5 GO** |
-| 2 | Device gate + engine factory (no behaviour change) | ✅ yes | ⬜ NOT STARTED |
+| 2 | Device gate + engine factory (no behaviour change) | ✅ yes | ✅ DONE (2026-08-08) |
 | 3 | `RattaNotebookView` — core writing loop | ✅ yes | ⬜ NOT STARTED |
 | 4 | Handoff boundaries & mode transitions | ✅ yes | ⬜ NOT STARTED |
 | 5 | Firmware dashed ink for the live lasso path | ✅ yes | ⬜ NOT STARTED |
@@ -328,7 +330,7 @@ byte-for-byte the Generic logic and needs no change.
 
 ---
 
-## Phase 0 — Baseline & firmware probe · 🔧 IN PROGRESS
+## Phase 0 — Baseline & firmware probe · ✅ DONE
 
 **Goal:** answer "is the firmware path even available to us, and does the pen reach us as a stylus?"
 before writing a line of engine code. Also establish the latency baseline we are trying to beat.
@@ -494,7 +496,7 @@ exercised on both devices. **Everything below verified identical on Nomad and Ma
 
 ---
 
-## Phase 1 — Port `SupernoteInk` + live-ink proof · ⬜ NOT STARTED
+## Phase 1 — Port `SupernoteInk` + live-ink proof · ✅ DONE
 
 **Goal:** get the proven firmware client into Notesprout and confirm live ink under a real pen.
 Thanks to the PoC this is now a **port, not a translation** — most of the original Phase 1 scope is
@@ -592,7 +594,7 @@ Consequences:
 
 ---
 
-## Phase 2 — Device gate + engine factory · ⬜ NOT STARTED
+## Phase 2 — Device gate + engine factory · ✅ DONE
 
 **Goal:** one place decides the engine, and all six hosts use it. **Deliberately no behaviour
 change** — this phase is a pure refactor that must leave BOOX and Generic devices byte-identical.
@@ -646,13 +648,29 @@ Install on: **G102** (flagship, BOOX regression), **Nomad**, **Manta**.
 
 ### Exit criteria
 
-- [ ] No visible change anywhere on G102.
-- [ ] No visible change on Nomad/Manta.
-- [ ] `isRattaDevice()` returns true on both Supernotes (check the engine log line).
+- [x] No visible change anywhere on G102.
+- [x] No visible change on Nomad/Manta.
+- [x] `isRattaDevice()` returns true on both Supernotes (check the engine log line).
 
 ### Findings
 
-_(record here)_
+**Built 2026-08-08, awaiting device test.** As planned, plus:
+- The factory log line also reports the binder probe on Ratta devices, so Phase 2's log
+  verifies the *whole* Phase 3 gate ahead of time:
+  `NotebookViewFactory: engine=GenericNotebookView ratta=true firmware=true`
+  (`isAvailable()` is cached + side-effect-free, and only called when `ratta=true`).
+- `HwrEnrollmentActivity`'s KDoc no longer name-drops the two engine classes (imports gone).
+- Installed on Nomad + Manta same day; **G102 was not attached** — its regression pass is
+  pending until it's plugged in. Do not install on a substitute device.
+- **Supernote half PASSED (2026-08-08, user-run):** all surfaces except HWR enrollment
+  (user skipped it deliberately — they are considering dropping the enrollment feature and
+  don't plan to use it on Supernote; do not chase this as a test gap). "Seems the same, as
+  expected." Log pulled from both devices — every screen open reports
+  `engine=GenericNotebookView ratta=true firmware=true`: the gate identifies the device and
+  the binder probe passes, so the whole Phase 3 condition is proven live on both units.
+- **G102 regression PASSED (2026-08-08, user-run):** every screen open logs
+  `engine=OnyxNotebookView ratta=false` with zero `SupernoteInk` lines — the binder probe
+  never runs on BOOX, exactly as the factory's ordering intends.
 
 ---
 

@@ -140,8 +140,6 @@ import com.notesprout.android.data.soilFile
 import com.notesprout.android.databinding.ActivityNotebookBinding
 import com.notesprout.android.databinding.DialogEditHeadingTextBinding
 import com.notesprout.android.notebook.NotebookView
-import com.notesprout.android.notebook.GenericNotebookView
-import com.notesprout.android.notebook.OnyxNotebookView
 import com.notesprout.android.notebook.STICKY_NOTE_ICON_SIZE_DP
 import com.notesprout.android.notebook.ActiveTool
 import com.notesprout.android.notebook.SnapPreferences
@@ -167,7 +165,7 @@ import com.notesprout.android.recognition.HandwritingRecognizer
 import com.notesprout.android.recognition.HandwritingRecognizerProvider
 import com.notesprout.android.toc.TocDialog
 import com.notesprout.android.toc.TocRepository
-import com.notesprout.android.core.isBooxDevice
+import com.notesprout.android.notebook.createNotebookView
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
@@ -1236,7 +1234,7 @@ class NotebookActivity : AppCompatActivity() {
         })
 
         // ── Drawing view ──────────────────────────────────────────────────────
-        drawingView = if (isBooxDevice()) OnyxNotebookView(this) else GenericNotebookView(this)
+        drawingView = createNotebookView(this)
         isSnapEnabled = SnapPreferences.load(this)
         drawingView.isSnapEnabled = isSnapEnabled
         // Restore the pen's ink colour — one global value, the same way the active tool below is.

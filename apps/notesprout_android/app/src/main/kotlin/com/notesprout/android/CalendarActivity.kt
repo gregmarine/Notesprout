@@ -39,7 +39,7 @@ import com.notesprout.android.core.ImageCodec
 import com.notesprout.android.core.IndexGuard
 import com.notesprout.android.core.TopGuard
 import com.notesprout.android.core.TwoFingerSwipeDown
-import com.notesprout.android.core.isBooxDevice
+import com.notesprout.android.notebook.createNotebookView
 import com.notesprout.android.crypto.KeyResolver
 import com.notesprout.android.crypto.KeySession
 import com.notesprout.android.data.BoundingBox
@@ -81,10 +81,8 @@ import com.notesprout.android.databinding.ActivityCalendarBinding
 import com.notesprout.android.notebook.ActiveTool
 import com.notesprout.android.notebook.CalendarTemplateRenderer
 import com.notesprout.android.notebook.CalendarTemplateRenderer.CalView
-import com.notesprout.android.notebook.GenericNotebookView
 import com.notesprout.android.notebook.LassoGeometry
 import com.notesprout.android.notebook.NotebookView
-import com.notesprout.android.notebook.OnyxNotebookView
 import com.notesprout.android.notebook.STICKY_NOTE_ICON_SIZE_DP
 import com.notesprout.android.notebook.ShapeRecognizer
 import com.notesprout.android.notebook.ToolPreferencesManager
@@ -386,7 +384,7 @@ class CalendarActivity : AppCompatActivity() {
         dayHalf = prefs.getInt(KEY_DAY_HALF, if (LocalTime.now().hour >= 12) 1 else 0)
 
         // Drawing view
-        drawingView = if (isBooxDevice()) OnyxNotebookView(this) else GenericNotebookView(this)
+        drawingView = createNotebookView(this)
         binding.calendarContent.addView(
             drawingView.asView(),
             FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT),

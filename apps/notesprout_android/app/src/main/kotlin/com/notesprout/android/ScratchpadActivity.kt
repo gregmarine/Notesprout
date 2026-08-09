@@ -22,7 +22,7 @@ import androidx.core.view.doOnLayout
 import androidx.lifecycle.lifecycleScope
 import com.notesprout.android.core.IndexGuard
 import com.notesprout.android.core.Slog
-import com.notesprout.android.core.isBooxDevice
+import com.notesprout.android.notebook.createNotebookView
 import com.notesprout.android.data.BoundingBox
 import com.notesprout.android.data.HeadingObject
 import com.notesprout.android.data.HeadingStroke
@@ -55,10 +55,8 @@ import com.notesprout.android.notebook.ShapeRecognizer
 import com.notesprout.android.notebook.STICKY_NOTE_ICON_SIZE_DP
 import com.notesprout.android.databinding.ActivityScratchpadBinding
 import com.notesprout.android.notebook.ActiveTool
-import com.notesprout.android.notebook.GenericNotebookView
 import com.notesprout.android.notebook.LassoGeometry
 import com.notesprout.android.notebook.NotebookView
-import com.notesprout.android.notebook.OnyxNotebookView
 import com.notesprout.android.notebook.ScratchpadPreferences
 import com.notesprout.android.notebook.ToolPreferencesManager
 import com.notesprout.android.notebook.PenColorPreferences
@@ -271,7 +269,7 @@ class ScratchpadActivity : AppCompatActivity() {
         binding.btnScratchpadClose.setOnClickListener { finish() }
 
         // ── Drawing view ──────────────────────────────────────────────────────
-        drawingView = if (isBooxDevice()) OnyxNotebookView(this) else GenericNotebookView(this)
+        drawingView = createNotebookView(this)
         binding.drawingContainer.addView(
             drawingView.asView(),
             FrameLayout.LayoutParams(

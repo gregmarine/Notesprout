@@ -14,10 +14,8 @@ import androidx.appcompat.widget.AppCompatTextView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.notesprout.android.core.TopGuard
-import com.notesprout.android.core.isBooxDevice
-import com.notesprout.android.notebook.GenericNotebookView
+import com.notesprout.android.notebook.createNotebookView
 import com.notesprout.android.notebook.NotebookView
-import com.notesprout.android.notebook.OnyxNotebookView
 import com.notesprout.android.recognition.HandwritingRecognizerProvider
 import com.notesprout.android.recognition.StrokeSegmenter
 import com.notesprout.android.recognition.personal.EnrollmentAligner
@@ -30,9 +28,9 @@ import kotlinx.coroutines.launch
  * their normal hand; each becomes a confirmed training pair (full letter/digit/
  * punctuation coverage on day one, before any organic corrections exist).
  *
- * The writing surface is the app's real drawing engine — [OnyxNotebookView] on BOOX
- * (EPD raw-drawing acceleration, so it writes exactly like a page) with the standard
- * [GenericNotebookView] fallback elsewhere — with pen + eraser, same as every other
+ * The writing surface is the app's real drawing engine, chosen per device by
+ * [createNotebookView] (EPD raw-drawing acceleration on BOOX, so it writes exactly
+ * like a page) — with pen + eraser, same as every other
  * host. Ink is captured in memory only (no `.soil`, nothing rendered to disk); the
  * strokes go straight into the training-pair store. Explicitly opt-in by nature, so
  * capture is allowed regardless of notebook encryption state (there is no notebook here).
@@ -153,7 +151,7 @@ class HwrEnrollmentActivity : AppCompatActivity() {
         root.addView(tools)
 
         // The real drawing engine: EPD raw drawing on BOOX, generic canvas elsewhere.
-        drawingView = if (isBooxDevice()) OnyxNotebookView(this) else GenericNotebookView(this)
+        drawingView = createNotebookView(this)
         val canvasFrame = FrameLayout(this).apply {
             setBackgroundResource(R.drawable.shape_bordered)
             val pad = dp(2)
