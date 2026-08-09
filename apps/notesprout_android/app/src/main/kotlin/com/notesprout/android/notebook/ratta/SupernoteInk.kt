@@ -27,7 +27,7 @@ import android.util.Log
  *
  * Reference: https://github.com/plateaukao/supernote_draw (SupernoteInk.kt / HandWriteClient).
  * Pen codes are confirmed for Nomad (deviceType 3 / A5X2); the Manta runs the byte-identical
- * firmware build (measured 2026-08-08, see SUPERNOTE_SUPPORT_PLAN.md Phase 0).
+ * firmware build (measured 2026-08-08; engine doc: docs/drawing-engine.md, Ratta section).
  */
 object SupernoteInk {
     private const val TAG = "SupernoteInk"
@@ -48,7 +48,8 @@ object SupernoteInk {
         const val INK = 16          // highlighter is MARK
         const val MARK = 11
         const val CALLIGRAPHY = 15
-        // Undocumented codes found by the Phase 0/1 sweep (SUPERNOTE_SUPPORT_PLAN.md) —
+        // Undocumented codes found by the probe's 0…31 pen-type sweep (findings in the
+        // debug-manifest comment on SupernoteProbeActivity) —
         // the firmware's own lasso vocabulary. With a black colour payload neither erases
         // (eraser semantics live in the colour-255 payload, not the type code).
         /** Stream of dashes — the Supernote lasso-selector trail. */

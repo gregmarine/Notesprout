@@ -1,13 +1,16 @@
 # Drawing Engine Architecture
 
-> Referenced from `CLAUDE.md`. Covers the two drawing engines, EPD/overlay rules, tool-state
+> Referenced from `CLAUDE.md`. Covers the three drawing engines, EPD/overlay rules, tool-state
 > invariants, performance rules, and the committed-content render model.
 
 ## Files
 
-- `notebook/NotebookView.kt` — interface for both engines; all drawing, lasso, heading, render ops
+- `notebook/NotebookView.kt` — interface for all engines; all drawing, lasso, heading, render ops
 - `notebook/OnyxNotebookView.kt` — BOOX: TouchHelper, RawInputCallback. `onPenLifted` fires on `onEndRawDrawing`. `onBeginRawDrawing` re-enables render guarded by `!isEraserMode`.
 - `notebook/GenericNotebookView.kt` — standard Canvas: two-layer Bitmap, stylus-only (`TOOL_TYPE_STYLUS` + `TOOL_TYPE_ERASER`), historical point capture. `onPenLifted` fires on `ACTION_UP`.
+- `notebook/RattaNotebookView.kt` — Supernote (Ratta): live ink painted by the firmware's ink daemon, points from `MotionEvent`, deferred handoff. ⚠️ A **sibling copy** of `GenericNotebookView` — see the Ratta section below; shared-logic fixes must land in **both** files.
+- `notebook/ratta/SupernoteInk.kt` + `notebook/ratta/RattaInkMap.kt` — the firmware binder client and the live-ink grey mapping (Ratta section below).
+- `notebook/NotebookViewFactory.kt` — `createNotebookView()`: the single engine-selection point for all six drawing hosts (notebook, calendar, day-note, scratch pad, sticky editor, HWR enrollment). BOOX → Onyx decided first (no reflection); `isRattaDevice() && SupernoteInk.isAvailable()` → Ratta; else Generic. Logs the chosen engine per screen open at `Log.i`. `isRattaDevice()` (`core/Device.kt`) matches manufacturer `"supernote"` — **not** `"ratta"`, which appears nowhere in the build props.
 - `NotebookActivity.kt` — fullscreen immersive, multi-page state, incremental save via `insertOrIgnore`. One-finger deliberate swipe for page navigation (three guards: distance ≥50% screen width, velocity ≥1.5× fling threshold, horizontal dominance). Two-finger swipe left/right inserts a page after/before current and navigates to it (same guards). Two-finger swipe **down** opens the [Today dashboard](today-dashboard.md#the-two-finger-swipe-down) — a shared detector (`core/TwoFingerSwipeDown.kt`), not a per-screen port, and vertical-dominant where the insert swipe is horizontal-dominant, so the two can never both fire. Two-finger stationary double-tap = undo; three-finger stationary double-tap = redo. On BOOX the Onyx SDK intercepts 3-finger touches and sends `ACTION_CANCEL` before `ACTION_UP` — the 3-finger detector treats a cancel on an armed, stationary 3-finger gesture as tap completion. All of these detectors sit behind the pen-activity gate (see below) so a resting palm can't drive them.
 - `MainActivity.kt` — notebook list, adaptive grid (3/2 cols at 480dp), pagination, empty state, bottom bar.
 
@@ -82,6 +85,7 @@ Tracked in both engines, from both directions:
 |---|---|
 | `OnyxNotebookView` | `onBeginRawDrawing` / `onEndRawDrawing` **and** `onBeginRawErasing` / `onEndRawErasing` (marked *before* the mode guards), **plus** stylus `MotionEvent`s in `onTouchEvent` — lasso / lasso-eraser / text-placement / shape-transform disable raw drawing, so the SDK callbacks never fire in those modes and the stylus arrives as an ordinary event |
 | `GenericNotebookView` | stylus `MotionEvent`s in `onTouchEvent` — all ink arrives this way, so one hook covers every mode |
+| `RattaNotebookView` | stylus `MotionEvent`s in `onTouchEvent`, same as Generic — the firmware paints the live stroke but returns no points, so every mode's ink still arrives as ordinary events |
 
 **Applied on all five drawing screens.** Each checks `drawingView.isPenActive` at the top of its
 finger branch in `dispatchTouchEvent` and, on the first suppressed event, latches
@@ -126,6 +130,183 @@ When a Dialog is shown over NotebookActivity, focus changes trigger `onWindowFoc
 ## Stylus Barrel Button
 
 The BOOX stylus barrel button is reported to Android as `TOOL_TYPE_ERASER` (not `BUTTON_STYLUS_PRIMARY`). In pen/eraser mode the Onyx SDK intercepts this at the hardware level and fires `onBeginRawErasing` → the existing erasing callbacks handle it. In modes where `setRawDrawingEnabled(false)` is active (lasso, lasso eraser, text placement), the SDK is silent and the button event arrives only via Android's `onTouchEvent`. Both views intercept `TOOL_TYPE_ERASER` (and `BUTTON_STYLUS_PRIMARY` for completeness) **before** the per-mode handler in `onTouchEvent`, routing to `handleBarrelButtonErase` which calls `eraseAtPath` → `finalizeEraseRedraw` → `handwritingRepaint`. This gives consistent erase-on-button behavior regardless of active toolbar tool.
+
+## Ratta (Supernote) Firmware Ink Engine
+
+Supernote devices (Nomad + Manta) run `RattaNotebookView`: live strokes are painted by the
+firmware's ink daemon — the Ratta analogue of the Onyx SDK overlay — while everything else
+(erase hit-testing, lasso, gestures, text, shapes, snapshots, the committed `RenderNode`) is the
+Generic engine's logic. Everything below is hardware-measured on both devices (2026-08, firmware
+`Chauvet.E103…2389`; the ink path survived a firmware update mid-test). The permanent calibration
+tool is `SupernoteProbeActivity` (debug build) — pen-code sweep, REG registration lab, COL grey
+cycler, barrel lab, delayed clear-matrix — with its measured findings recorded in the
+`app/src/debug/AndroidManifest.xml` comment, like `PenToolSpikeActivity` on BOOX.
+
+**⚠️ Sibling copy — the one structural rule.** `RattaNotebookView` is a **copy** of
+`GenericNotebookView` with the live-ink parts edited, not a subclass (deliberate: zero risk to the
+shipping Generic devices). **Any fix to shared logic — lasso, erase, gestures, rendering — must be
+applied to both files.** The collapse into a shared `CanvasNotebookView` base is filed in
+`BACKLOG.md`.
+
+**No fallback, no kill switch** (locked decision). Engine choice happens once, at construction. A
+firmware failure afterwards logs `Log.w` (survives release — never `Slog.d` here) and toasts once
+per view instance, then keeps running. Failures must be loud, never silently papered over.
+
+### How the firmware ink path works
+
+`SupernoteInk` is a thin binder client for the firmware ink daemon (`service_myservice`, raw
+`Parcel`/`transact`): claim the pen for `"notesprout"`, configure the pen (type code, EMR size,
+colour code), send disable-area rects, clear the overlay. `enableFullUiAuto(true)` (reflected off
+the hidden `eink` service) is required for a third-party app to get ink at all;
+`enableAutoRegal(true)` at setup is what keeps handoffs ghost-free. **Never** call
+`screenRefresh`/`sendOneFullFrame` per stroke or handoff — both flash (`sendOneFullFrame` is
+acceptable inside `eraseAll`, where a flash is expected).
+
+The critical architectural facts:
+
+- The daemon paints stroke pixels to the EPDC overlay at sub-frame latency, in **screen
+  coordinates**, composited **above the framebuffer**. Pixels under overlay ink are frozen against
+  app updates, and no app repaint can remove overlay ink. `screencap` cannot see the overlay
+  (chrome yes, ink no) — ink appearance needs eyes/photos on the device.
+- The firmware returns **no point data**. Everything persisted comes from `MotionEvent` in
+  `onTouchEvent`, exactly like Generic — which is why the pen-activity gate and all gestures work
+  unchanged.
+- **`DISABLE_AREA` is also the "firmware off" switch.** There is no disable transaction;
+  `fullScreenDisable()` (a rect covering the whole panel) is how you stop the firmware painting.
+  One transaction accepts at least five rects.
+- Measured constants: production pen = **NEEDLE (10)** (uniform width, matches the baked
+  polyline); lasso trail = **LASSO_DASH (4)**, lasso-eraser trail = **LASSO_X (3)**, both at EMR
+  300 with a BLACK payload (eraser semantics come from the colour-255 payload, not the type code);
+  pen EMR = `(widthPx * 100).coerceIn(200, 1200)` — an EMR near 3 paints an invisible sub-pixel
+  line and reads exactly like a dead firmware path; eraser EMR =
+  `(radius * 50).coerceAtLeast(400)`. Pen code 12 is broken firmware-side (random giant laggy
+  blob) — never use it; codes 17–31 alias to INK (16).
+
+### The deferred handoff (never bake per pen-lift)
+
+Do **not** bake + `clearAll()` on every pen-lift — that fights the hardware and produces a flash
+plus a ghost/enlargement. Finished strokes enter the `strokes` model on pen-up (so saves,
+snapshots, hit-tests and the smart-lasso/scribble gates are correct immediately), but
+`commitActiveStroke()` **skips `redrawCanvas()`**, setting `pendingBake` instead. The visual bake
+and the overlay clear wait for a natural boundary — `releaseFirmwareOverlay()` = bake
+(`redrawCanvas()`, which re-records the node from the whole `strokes` list) then `clearAll()`.
+`redrawCanvas()` itself carries the handoff guard, so any redraw triggered outside the release
+path (throttled erase redraws, drag commits) can never leave the same ink shown by both layers.
+Same discipline `OnyxNotebookView` follows.
+
+**Boundaries** (each releases the overlay): tool change (release **first**, then
+`applyToolToFirmware()` — the shared helper is `firmwareToolBoundary()`); `releaseRender()` (every
+toolbar touch); `releaseForHandoff()` (+ `enableFullUiAuto(false)`); `resetOverlay()`; focus loss
+(+ full-screen disable); snapshot capture (release first so the panel matches); page nav /
+`clearForPageLoad()` / `loadStrokesWithBitmap()` / `setTemplate()` (release **before** the content
+swap); `eraseAll()`; and every erase contact's `ACTION_DOWN` (so software erase works on a
+fully-baked page).
+
+### ⭐ The three overlay laws
+
+Every change to this engine must obey these — each was measured the hard way:
+
+1. **A clear needs a co-presented app frame.** `clearAll()` alone reconciles nothing, ever — the
+   panel drops overlay ink only when an app frame is presented in the same breath. Always pair
+   `clearAll()` + `invalidate()`.
+2. **Clears near pen-lift AND at fresh pen-down can be eaten** by the daemon's
+   stroke-finalization window, whose length varies by device and moment. The remedy is
+   `releaseGestureTrace()`'s **retry ladder** — idempotent `clearAll`+`invalidate` pairs at
+   450 ms → 1 s → 1.9 s, plus an immediate flush at the next EMR pen-down — armed after every
+   gesture-consumed stroke (smart lasso, scribble, lasso trails) and every erase contact. The
+   worst-case ~2 s trace lag is a measured firmware constraint the user accepted — do not chase
+   further latency here.
+3. **The firmware latches pen state at contact start.** A suppress/disable issued at
+   `ACTION_DOWN` is too late — it must be issued from the **hover stream**, before the tip lands.
+   This is why the barrel suppress, the eraser-end suppress, and the lasso drag-move suppress all
+   key off hover (`updateBarrelSuppress`, `updateLassoDragHoverSuppress`); the `ACTION_DOWN`
+   disable is kept only as a no-hover backstop.
+
+### Per-tool firmware state
+
+| Mode | Firmware action |
+|---|---|
+| Pen | `claimPen()` + `setPen(NEEDLE, emrSize(w), RattaInkMap.firmwareColorFor(hex))` |
+| Eraser tool | `setEraser(false, eraserEmr())` — stops firmware ink along the path; the software hit-test does the removal |
+| Lasso / lasso-eraser | `setPen(LASSO_DASH / LASSO_X, 300, BLACK)` — live hardware trail; lift-wipe = the clear ladder |
+| Text placement / shape transform | `fullScreenDisable()` (Canvas-drawn overlays; no firmware ink) |
+| Drag-move inside lasso | `fullScreenDisable()` from **hover** over the selection box (law 3); re-arm on hover-out; `setLassoMode(false)` cancels a live drag *before* the tool boundary |
+| Barrel button held / eraser end in hover range | `fullScreenDisable()` from hover (below) |
+| Leaving a suppressed mode | `applyToolToFirmware()` restores disable areas + the armed tool |
+
+### Disable areas — screen space, complement bands
+
+The firmware knows nothing of view bounds or the window stack, so all geometry is converted
+view → screen via `getLocationOnScreen`:
+
+- `applyDisableAreas()` always sends **complement bands** — up to four rects covering everything
+  outside the view's screen rect — plus the host's chrome exclusion (`setToolbarExclusion`,
+  applied live; hosts push updated rects for the overflow menu / shape toolbar / colour panel).
+  The bands are what keep ink off the calendar/day-window toolbars and off the notebook visible
+  around the translucent scratch-pad/sticky windows. On the full-bleed notebook host all four
+  bands are empty.
+- `fullScreenDisable()` uses the **real panel size** (`Display.getRealSize`, cached at
+  attach/`onSizeChanged`) — view dims miss the panel's bottom strip on inset hosts, and
+  detach-time teardowns can no longer reach the display.
+- **Model-side exclusion filter:** chrome gaps leak `MotionEvent`s (e.g. the overflow menu's blank
+  areas), so `appendStrokePoints()` drops pen points inside the exclusion rect and splits strokes
+  at the boundary — the model always matches what the firmware painted. A gesture that never left
+  the zone commits nothing (`gestureHadInk` gates `checkAndDispatchGesture`).
+
+### Barrel button & eraser end
+
+The OS delivers the side button to apps **from hover** (`BUTTON_STYLUS_PRIMARY`; the OS preference
+is `Settings.System` `end_button_behavior`, app-readable, `=2` delivers). The firmware natively
+reacts to a held button by painting its lasso-x trail **ignoring the app's pen config but
+respecting disable areas** — so `updateBarrelSuppress` full-screen-disables from hover while held
+and `applyToolToFirmware()` restores on release. The erase decision is **sticky per contact**
+(`strokeSawBarrel`): the button is released a beat before pen-lift, and per-event recomputation
+committed phantom strokes. The **physical eraser end** rides the same hover suppress
+(`TOOL_TYPE_ERASER` in hover range) — the firmware's native pixel-wipe only touches its own
+overlay pixels and flashes across baked strokes, so suppressing it and letting the software
+stroke-erase repaint is strictly better. Every erase contact arms the clear ladder on lift.
+
+### Lifecycle — process-global `inkOwner`
+
+Firmware ink state (the pen claim, full-UI ink, disable areas) is process-global, exactly like the
+Onyx pipeline, and Android runs the incoming screen's `onResume` before the outgoing screen's
+detach. The static `inkOwner` guard (mirror of `OnyxNotebookView.penOwner`) gates every
+process-global teardown — `teardownFirmwareInk`, detach, `releaseForHandoff`, `releaseResources`,
+**and the clear ladder** (a ladder armed by a lasso lift must not fire into a successor's
+session). Setup re-asserts from attach **post-layout** (deferred to `onSizeChanged` when 0×0 — an
+empty disable rect and garbage `getLocationOnScreen` otherwise), focus gain, and the
+`resumeDrawing()` override (host `onResume` — the focus-independent reclaim, and what flips
+`inkOwner` back after a translucent overlay host). `enableDrawing()` = `applyToolToFirmware()`;
+`disableDrawing()` = **bake first**, then full-screen disable (same-window view switches, like the
+day window's Note→Events, cross no focus boundary). `releaseResources()` ends in a full-screen
+disable, not `clearDisableAreas()` — device-confirmed harmless system-wide (the daemon resets
+per-claim state; the system's own notes app inks fine after leaving).
+
+### Live-vs-baked appearance
+
+- **Registration.** The `MotionEvent` stream lands slightly **left** of the physical tip; the live
+  firmware ink is true. `compensateRegistration()` (one chokepoint — `offsetLocation` on
+  stylus/eraser tools at all three input entries) shifts **+2 px on the Nomad / +3 px on the
+  Manta**, branched on min screen dimension ≥ 1600 because the Manta reports `Build.MODEL` as
+  `Supernote Nomad`. This corrects persisted data toward physical truth. Caveat: the constants are
+  believed model-level (the offset is a software disagreement between two readings of one
+  digitizer, ≈0.15% of panel width on both) but were measured on one unit per model — the
+  user-facing calibration screen is filed in `BACKLOG.md`.
+- **Colour.** The firmware accepts four colour codes (BLACK / DARK_GRAY / GRAY / LIGHT_GRAY), and
+  they render **far lighter than named** (DARK_GRAY ≈ `#AA`, GRAY ≈ `#CC`, LIGHT_GRAY ≈ `#F0`,
+  near-invisible). `RattaInkMap.firmwareColorFor(hex)` maps the armed ink's Rec. 601 luma with
+  thresholds **85 / 187 / 222**, calibrated to those measured render tones; `setPenColor` re-arms
+  the firmware when the plain pen is active. The 16-grey ladder therefore gets 3 visible live
+  shades — **accepted as best-possible; do not revisit the thresholds** (shifting them only
+  misaligns live from baked to fake variety the panel cannot render). Baked strokes keep their
+  true stored hex — a notebook written on a Supernote opens in full colour elsewhere.
+
+### Device traps
+
+- **The Manta identifies itself as a Nomad** — every `ro.product.*` property is byte-identical.
+  Branch on screen size or not at all; over adb, the serial is the only discriminator.
+- **Finger taps are suppressed system-wide while the stylus is in EMR range** (the Supernote twin
+  of the G102 resting-contact trap) — check for a hovering pen before blaming a gesture detector.
 
 ## Performance Rules (Do Not Regress)
 

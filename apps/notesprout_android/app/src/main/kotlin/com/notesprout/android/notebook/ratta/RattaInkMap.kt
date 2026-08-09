@@ -5,7 +5,7 @@ import com.notesprout.android.core.InkColor
 
 /**
  * Stored ink hex → the nearest of the four colour codes the Supernote firmware pen accepts
- * (Phase 8 of SUPERNOTE_SUPPORT_PLAN.md).
+ * (docs/drawing-engine.md, Ratta section → "Live-vs-baked appearance").
  *
  * The baked stroke always keeps its true stored hex — [InkColor.paintColor] at every render
  * site, same as every other device; nothing about persisted data changes here. This mapping

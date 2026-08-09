@@ -13,7 +13,7 @@ import com.notesprout.android.notebook.ratta.SupernoteInk
  *
  * Engine choice is decided once, at construction; there is no mid-session swap and no
  * kill switch. If the Ratta firmware misbehaves after construction, the view logs and
- * toasts but keeps running (SUPERNOTE_SUPPORT_PLAN.md, Decision 2).
+ * toasts but keeps running (locked no-fallback decision — docs/drawing-engine.md, Ratta section).
  *
  * Ordered so BOOX is decided first (a string compare, no reflection) and the Ratta
  * binder probe only runs on a Supernote device.

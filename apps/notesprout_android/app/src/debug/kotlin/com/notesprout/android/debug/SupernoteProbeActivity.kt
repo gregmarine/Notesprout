@@ -26,7 +26,8 @@ import com.notesprout.android.core.TopGuard
 import com.notesprout.android.notebook.ratta.SupernoteInk
 
 /**
- * Supernote (Ratta) firmware probe — Phase 0 part 2 + Phase 1 of SUPERNOTE_SUPPORT_PLAN.md.
+ * Supernote (Ratta) firmware probe — the permanent Ratta calibration tool (findings in the
+ * debug-manifest comment; the as-built engine is documented in docs/drawing-engine.md).
  * Debug source set only — never ships. The on-screen panel IS the report (EPD overlays can't
  * be screenshotted and the logcat ring buffer floods).
  *
@@ -204,9 +205,10 @@ class SupernoteProbeActivity : AppCompatActivity() {
         // ── Phase 3 clear-matrix: which sequence removes ALREADY-PAINTED overlay ink with
         // NO input event near it? Every sequence fires DELAY_MS after the arming tap, so the
         // tap itself (an input event) is long gone. Write strokes first, tap one button,
-        // lift hand fully away, watch the ink at T+2 s. See SUPERNOTE_SUPPORT_PLAN.md
-        // Phase 3 findings (rounds 1–4: bare clearAll never reconciles the panel; app-side
-        // repaint composites BELOW the overlay; screenRefresh(false,0) full-flickers).
+        // lift hand fully away, watch the ink at T+2 s. Findings: bare clearAll never
+        // reconciles the panel; app-side repaint composites BELOW the overlay;
+        // screenRefresh(false,0) full-flickers. Only clearAll+invalidate clears cleanly —
+        // the first overlay law (docs/drawing-engine.md, Ratta section).
         root.addView(buttonRow(
             "dCLR" to { delayed("clearAll") { SupernoteInk.clearAll() } },
             "dCLR+INV" to { delayed("clearAll+invalidate") {

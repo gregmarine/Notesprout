@@ -42,7 +42,7 @@ import java.io.ByteArrayOutputStream
 import java.util.UUID
 
 // Supernote (Ratta) engine — a SIBLING COPY of GenericNotebookView with the live-ink path
-// replaced by the firmware's binder ink overlay (SUPERNOTE_SUPPORT_PLAN.md, Decision 1).
+// replaced by the firmware's binder ink overlay (docs/drawing-engine.md, Ratta section).
 // The two files are slated to collapse into a shared CanvasNotebookView base (BACKLOG);
 // until then A FIX TO EITHER FILE MUST BE APPLIED TO BOTH.
 //

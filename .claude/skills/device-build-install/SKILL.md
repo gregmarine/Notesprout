@@ -48,9 +48,9 @@ Install all requested devices in a single shell block. If the user says devices 
 
 Tiers mirror README.md — change them in both places or they drift.
 
-- **Tier 1 (primary, always-tested):** BOOX Go 10.3 Gen 2 (**flagship**), Go 6 Gen II, Note Max, Palma2 Pro, NoteAir5C
+- **Tier 1 (primary, always-tested):** BOOX Go 10.3 Gen 2 (**flagship**), Go 6 Gen II, Note Max, Palma2 Pro, NoteAir5C, Supernote Nomad & Manta (RattaNotebookView firmware ink — install **both** for any Ratta work)
 - **Tier 2 (QA):** BOOX NoteAir4C, Tab XC, Go Color 7 Gen II, Wacom Movink Pad 11 & 14 Pro (GenericDrawingEngine)
-- **Future:** Desktop/Web, Supernote Nomad & Manta (GenericDrawingEngine), Android phone, Android tablet
+- **Future:** Desktop/Web, Android phone, Android tablet
 - **On hand, in no tier** — still installable on request, serials above: BOOX Go 10.3, Go 7, Paper 7
-  (GenericDrawingEngine), Supernote Nomad, Samsung Galaxy S26 Ultra. No serial is recorded for the
+  (GenericDrawingEngine), Samsung Galaxy S26 Ultra. No serial is recorded for the
   Movink Pad 14 Pro.

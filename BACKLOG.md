@@ -7,7 +7,6 @@
 > behind any item.
 >
 > Standing design docs that are **not** folded in here (read them directly):
-> - `SUPERNOTE_SUPPORT_PLAN.md` — full Supernote (Ratta) ink-path design, not started.
 > - `NOTEBOOK_SIZE_RESEARCH.md` — `.soil` size-reduction + backup-compaction research (no plan yet).
 > - `docs/handwriting-recognition.md` — page-text / whole-notebook recognition (segmentation layer,
 >   `page_text` cache, RTR mode, export path), not started. Decision/deferred items summarized below.
@@ -40,6 +39,47 @@
 - Only `type='stroke'` rows are `ts`-stripped; images re-encoded are PNG + lossless-WEBP (lossy-WEBP
   and JPEG covers left alone). `ts` embedded in headings/text/links/sticky-notes is a small untouched
   tail; fold it in only if a future pass makes it worthwhile.
+
+---
+
+## Supernote (Ratta) — deferred items
+
+> From the retired `SUPERNOTE_SUPPORT_PLAN.md` (all 10 phases shipped on the `supernote` branch,
+> 2026-08-08/09, validated on both the Nomad and the Manta). The as-built engine is documented in
+> `docs/drawing-engine.md` → "Ratta (Supernote) Firmware Ink Engine"; the full plan with its
+> per-phase findings is in git history.
+
+- **Collapse `GenericNotebookView` + `RattaNotebookView` into a shared `CanvasNotebookView` base.**
+  The explicit follow-up to the locked sibling-copy decision (copy chosen for zero risk to the ten
+  shipping Generic devices). Until then every shared-logic fix (lasso, erase, gestures, rendering)
+  must be applied to both files by hand — the standing tax this item removes.
+- **Onyx: draw the live lasso outline with the SDK's hardware `STROKE_STYLE_DASH` (= 5)** instead of
+  the software `DashPathEffect` Canvas path (throttled to 60 ms; visibly trails the pen — the user
+  has explicitly said the current look is not what they want). This is the BOOX half of Supernote
+  Phase 5, which shipped hardware trails on Ratta. The research is done — `PenToolSpikeActivity`
+  proved `DASH` renders on all five BOOX devices, `setStrokeStyle` needs no `restartRawDrawing`, and
+  it survives the handwriting fast-mode pin (`docs/onyx-pen-tools.md`) — so this is a build task,
+  not a spike. The Ratta lift → selection-box handoff learnings apply directly.
+- **User-facing stylus calibration screen.** The Ratta registration offsets (+2 px Nomad / +3 px
+  Manta input x-shift) are believed model-level but were measured on **one unit per model**; a unit
+  with different factory calibration would show a 1–3 px live-vs-baked shift. A calibration surface
+  (the probe's REG-lab pattern: draw, nudge to null, store per-device) would replace the hardcoded
+  constants — and also cover whole-pipeline tip offsets on Generic-engine devices (the Paper 7 is
+  the known suspect; on Generic, live and baked agree with each other but can both miss the pen).
+  BOOX can never need the Supernote half: SDK overlay and bake share one input pipeline.
+- **Firmware pen types as a pen-tool offering.** The 0…31 sweep found more than the four codes the
+  Supernote UI exposes: 0/5/8 solid steady, 1/2/16 pressure-sensitive, 14/15 calligraphy, plus the
+  lasso vocabulary (3 = x-stream, 4 = dashes). Candidate material for a future pen picker alongside
+  the Onyx styles in `docs/onyx-pen-tools.md`. **Code 12 is broken** (random giant laggy blob) —
+  exclude it from any offering.
+- **Enumerate `end_button_behavior` values.** The OS side-button preference (`Settings.System`,
+  app-readable; `=2` delivers `BUTTON_STYLUS_PRIMARY` from hover) was only tested at its default.
+  If some value makes the OS swallow the button, barrel-erase goes inert for that user (no
+  misbehaviour beyond the firmware possibly painting its native trace unsuppressed); the probe's
+  hover-Δ barrel lab is the test rig, and the value could drive a runtime hint if it ever warrants
+  one.
+- **HWR enrollment on Supernote** was descoped by the user (staying on ML Kit; the custom TrOCR
+  engine may be removed entirely) — not a test gap; revisit only if the enrollment feature survives.
 
 ---
 

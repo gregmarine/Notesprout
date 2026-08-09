@@ -85,8 +85,10 @@
             android:name="com.notesprout.android.debug.TodaySeedActivity"
             android:exported="true"
             android:label="Today Seed" />
-        <!-- Supernote Probe: Phase 0 part 2 + Phase 1 of SUPERNOTE_SUPPORT_PLAN.md (Ratta firmware
-             ink). Runtime binder handshake, eink-service reflection check, pen tool-type/pressure/
+        <!-- Supernote Probe: the permanent Ratta calibration tool (built as Phases 0-1 of the
+             retired SUPERNOTE_SUPPORT_PLAN.md; the as-built engine is documented in
+             docs/drawing-engine.md, Ratta section).
+             Runtime binder handshake, eink-service reflection check, pen tool-type/pressure/
              tilt readout, live firmware ink write area (setup re-asserted on window focus), the
              0…31 pen-type sweep at EMR 300 (hunting a dashed style for Phase 5), and disable-area
              tests (chrome always excluded; STRIP toggles a dashed test band).
