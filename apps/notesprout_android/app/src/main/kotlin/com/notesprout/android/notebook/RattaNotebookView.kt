@@ -63,12 +63,21 @@ import java.util.UUID
 //     polyline; the EMR clamp keeps the live ink visible (EMR ≈ 3 is sub-pixel/invisible).
 //   • Per-tool firmware state (Phase 4): pen → setPen(NEEDLE); eraser tool → setEraser
 //     (colour-255 payload — stops the firmware painting ink along the path; our software
-//     hit-test still does the removal); lasso / lasso-eraser / text placement / shape
-//     transform → full-screen disable (their overlays are Canvas-drawn, so the firmware
-//     must paint nothing). Every tool change is a handoff boundary: bake + clearAll FIRST,
+//     hit-test still does the removal); text placement / shape transform / drag-move →
+//     full-screen disable (their overlays are Canvas-drawn, so the firmware must paint
+//     nothing). Every tool change is a handoff boundary: bake + clearAll FIRST,
 //     then reconfigure. The toolbar/colour-panel exclusion rect arrives via
 //     setToolbarExclusion in view coords and is offset into screen coords before being
 //     sent as a firmware disable area. Colour mapping (live ink stays BLACK) is Phase 8.
+//   • Hardware lasso trails (Phase 5): lasso / lasso-eraser modes arm the firmware's own
+//     lasso pens (LASSO_DASH / LASSO_X — the sweep's codes 4/3) so the live trace is
+//     painted at pen speed instead of chased by the 60 ms-throttled Canvas DashPathEffect.
+//     MOVE still builds lassoGesturePath (the hit test needs the geometry) but skips the
+//     Canvas overlay; lift clears the trace via the releaseGestureTrace ladder (the trace
+//     corresponds to nothing in the app layer). Only the under-pen trails moved to
+//     firmware — the post-lift selection box, drag preview and snap guides stay Canvas.
+//     Drag-move must suppress from the HOVER stream, before the tip lands — the firmware
+//     latches pen state at contact start (see updateLassoDragHoverSuppress).
 //   • Barrel button: a held side button full-screen-disables the firmware (its native
 //     x-stream button trace ignores the app's pen config but respects disable areas —
 //     lab-measured; see updateBarrelSuppress), while the software erase does the work.
@@ -86,6 +95,12 @@ class RattaNotebookView(context: Context) : View(context), NotebookView {
         private const val EMR_MAX = 1200
         /** Floor for the firmware eraser EMR size (PoC-validated: radius*50, min 400). */
         private const val ERASER_EMR_MIN = 400
+        /**
+         * EMR size for the firmware lasso trails (LASSO_DASH / LASSO_X) — the exact size the
+         * Phase 0/1 sweep measured those codes rendering at. Kept independent of the ink pen's
+         * width mapping: the trail is chrome, not ink.
+         */
+        private const val LASSO_TRAIL_EMR = 300
         /**
          * Follow-up overlay-clear ladder after a gesture-consumed stroke. A clear issued in
          * the wake of a pen-lift lands inside the ink daemon's stroke-finalization window
@@ -184,7 +199,8 @@ class RattaNotebookView(context: Context) : View(context), NotebookView {
 
     /**
      * Release the overlay after a gesture consumed its stroke (smart lasso / scribble /
-     * shape dwell). A gesture stroke is the one case where overlay ink corresponds to
+     * shape dwell / erase contact) or a Phase 5 firmware lasso trail lifted. A gesture
+     * stroke or trail is the one case where overlay ink corresponds to
      * NOTHING in the app layer, and Phase 3 device testing proved (both devices, three
      * rounds) that nothing app-side can remove its painted pixels:
      *   • a bare clearAll — even repeated 400 ms later — clears the buffer but the panel
@@ -261,9 +277,14 @@ class RattaNotebookView(context: Context) : View(context), NotebookView {
     /** Eraser-tool EMR size, from the PoC: radius*50 with a working floor. */
     private fun eraserEmr(): Int = (ERASER_RADIUS_PX * 50f).toInt().coerceAtLeast(ERASER_EMR_MIN)
 
-    /** True in the modes whose overlays are Canvas-drawn — the firmware must paint nothing. */
+    /**
+     * True in the modes that own a FULL-SCREEN firmware disable — their visuals are entirely
+     * Canvas-drawn, so the firmware must paint nothing anywhere. Lasso / lasso-eraser are NOT
+     * in this set since Phase 5: their live trails are firmware ink (see [applyToolToFirmware]);
+     * only a drag-move inside a selection suppresses (a drag must not leave a dashed trail).
+     */
     private val firmwareSuppressed: Boolean
-        get() = isLassoMode || isLassoEraserMode || isTextPlacementMode || isShapeTransformMode
+        get() = isTextPlacementMode || isShapeTransformMode || isDragMoveActive
 
     /** Toolbar/colour-panel exclusion rect, in VIEW coordinates, as pushed by the host. */
     private var toolbarExclusion: Rect? = null
@@ -275,20 +296,26 @@ class RattaNotebookView(context: Context) : View(context), NotebookView {
     private fun applyToolToFirmware() {
         if (!firmware) return
         barrelDown = false   // a tool push supersedes the transient barrel disable
+        lassoHoverSuppressed = false   // ditto the hover-ahead drag suppress (re-asserted on next hover)
         if (firmwareSuppressed) {
-            // Lasso / lasso-eraser / text placement / shape transform: the dashed path,
-            // handles and placement tap are all Canvas-drawn — no firmware ink anywhere.
+            // Text placement / shape transform / drag-move: handles, placement tap and the
+            // drag preview are all Canvas-drawn — no firmware ink anywhere.
             SupernoteInk.setFullScreenDisable(width, height)
             return
         }
         applyDisableAreas()
-        if (isEraserActive) {
-            // Round eraser, colour-255 payload: the firmware stops painting ink along the
-            // path (and natively wipes its own overlay pixels); our software hit-test
-            // still does the actual stroke removal.
-            SupernoteInk.setEraser(false, eraserEmr())
-        } else {
-            applyPenToFirmware()
+        when {
+            // Phase 5: the firmware's own lasso vocabulary paints the live trail at pen
+            // speed. BLACK payload = paints, never erases (eraser semantics are colour-255).
+            isLassoMode       -> SupernoteInk.setPen(SupernoteInk.Pen.LASSO_DASH, LASSO_TRAIL_EMR, SupernoteInk.Color.BLACK)
+            isLassoEraserMode -> SupernoteInk.setPen(SupernoteInk.Pen.LASSO_X,    LASSO_TRAIL_EMR, SupernoteInk.Color.BLACK)
+            isEraserActive    -> {
+                // Round eraser, colour-255 payload: the firmware stops painting ink along the
+                // path (and natively wipes its own overlay pixels); our software hit-test
+                // still does the actual stroke removal.
+                SupernoteInk.setEraser(false, eraserEmr())
+            }
+            else              -> applyPenToFirmware()
         }
     }
 
@@ -332,6 +359,10 @@ class RattaNotebookView(context: Context) : View(context), NotebookView {
      * redraws); release → re-apply the armed tool. [applyToolToFirmware] resets
      * [barrelDown], so any tool push supersedes the transient disable and the next
      * button event re-asserts it if the button is still physically held.
+     *
+     * The physical ERASER END rides the same suppress (user-observed on both devices:
+     * its native handling pixel-wipes the panel along the path, visible as a partial
+     * erase across strokes until the software erase's redraw replaces it).
      */
     private var barrelDown = false
     /** True if the side button was seen at any point of the current pen contact. */
@@ -341,9 +372,19 @@ class RattaNotebookView(context: Context) : View(context), NotebookView {
 
     private fun updateBarrelSuppress(event: MotionEvent) {
         if (!firmware) return
-        val pressed = event.getToolType(0) == MotionEvent.TOOL_TYPE_STYLUS &&
-            (event.buttonState and
-                (MotionEvent.BUTTON_STYLUS_PRIMARY or MotionEvent.BUTTON_SECONDARY)) != 0
+        // The physical eraser end gets the same treatment as a held barrel button: its
+        // native firmware handling wipes panel pixels along the path (a pixel-level erase
+        // that flashes across strokes before our stroke-level erase repaints), so while it
+        // is in EMR range — reported on the hover stream, ahead of contact, the only
+        // moment a disable can beat the firmware's contact-start latch — the firmware
+        // must paint (and wipe) nothing. The software erase shows the real progress.
+        val pressed = when (event.getToolType(0)) {
+            MotionEvent.TOOL_TYPE_ERASER -> true
+            MotionEvent.TOOL_TYPE_STYLUS ->
+                (event.buttonState and
+                    (MotionEvent.BUTTON_STYLUS_PRIMARY or MotionEvent.BUTTON_SECONDARY)) != 0
+            else -> false
+        }
         if (pressed && penDown) strokeSawBarrel = true
         if (firmwareSuppressed) return   // those modes already own a full-screen disable
         if (pressed == barrelDown) return
@@ -355,8 +396,36 @@ class RattaNotebookView(context: Context) : View(context), NotebookView {
         else applyToolToFirmware()
     }
 
+    /**
+     * Hover-ahead suppress for the lasso drag-move (Phase 5, device-measured on both):
+     * a full-screen disable issued at the drag's ACTION_DOWN is TOO LATE — the firmware
+     * latches its pen state as the contact begins, so the whole drag still painted a
+     * dashed trail. The disable must be in place before the tip lands, and the hover
+     * stream is the early warning (the same channel that makes the barrel suppress work).
+     * While the stylus hovers over the selection box: full-screen disable; hovering back
+     * out re-arms the trail pen. [applyToolToFirmware] resets the flag (any tool push
+     * supersedes the transient suppress; the next hover event re-asserts it).
+     */
+    private var lassoHoverSuppressed = false
+
+    private fun updateLassoDragHoverSuppress(event: MotionEvent) {
+        if (!firmware || !isLassoMode) return
+        if (event.actionMasked != MotionEvent.ACTION_HOVER_ENTER &&
+            event.actionMasked != MotionEvent.ACTION_HOVER_MOVE) return
+        if (event.getToolType(0) != MotionEvent.TOOL_TYPE_STYLUS) return
+        if (firmwareSuppressed || barrelDown) return   // a stronger suppress already owns the firmware
+        val box = lassoSelectionBox
+        val inside = box != null && lassoSelectedIds.isNotEmpty() && box.contains(event.x, event.y)
+        if (inside == lassoHoverSuppressed) return
+        lassoHoverSuppressed = inside
+        Slog.d(TAG) { "lasso hover ${if (inside) "SUPPRESS" else "REARM"} at ${event.x},${event.y}" }
+        if (inside) SupernoteInk.setFullScreenDisable(width, height)
+        else applyToolToFirmware()
+    }
+
     override fun onHoverEvent(event: MotionEvent): Boolean {
         updateBarrelSuppress(event)
+        updateLassoDragHoverSuppress(event)
         return super.onHoverEvent(event)
     }
 
@@ -364,6 +433,7 @@ class RattaNotebookView(context: Context) : View(context), NotebookView {
     // rather than a buttonState change on the hover stream — catch those too.
     override fun onGenericMotionEvent(event: MotionEvent): Boolean {
         updateBarrelSuppress(event)
+        updateLassoDragHoverSuppress(event)
         return super.onGenericMotionEvent(event)
     }
 
@@ -750,6 +820,10 @@ class RattaNotebookView(context: Context) : View(context), NotebookView {
                 finalizeEraseRedraw()
                 activePoints.clear()
                 invalidate()
+                // Erase contact in a Canvas-overlay mode: any partial firmware trail from
+                // before the button/eraser-end took over must not linger (Phase 4 rule —
+                // every erase contact arms the ladder; idempotent when already clean).
+                if (firmware) releaseGestureTrace()
                 onPenLifted?.invoke()
             }
         }
@@ -790,6 +864,12 @@ class RattaNotebookView(context: Context) : View(context), NotebookView {
                 val box = lassoSelectionBox
                 if (box != null && lassoSelectedIds.isNotEmpty() && box.contains(event.x, event.y)) {
                     isDragMoveActive = true
+                    // A drag must not leave a dashed trail. The REAL suppress happened on the
+                    // hover stream before the tip landed (updateLassoDragHoverSuppress — a
+                    // disable issued here is too late, the firmware latches pen state as the
+                    // contact begins); this one is only the backstop for a contact that
+                    // arrived with no hover warning. ACTION_UP re-arms via applyToolToFirmware.
+                    if (firmware) SupernoteInk.setFullScreenDisable(width, height)
                     dragStartX = event.x; dragStartY = event.y
                     dragThresholdMet = false
                     dragDx = 0f; dragDy = 0f
@@ -879,11 +959,15 @@ class RattaNotebookView(context: Context) : View(context), NotebookView {
                     path.lineTo(event.getHistoricalX(i), event.getHistoricalY(i))
                 }
                 path.lineTo(event.x, event.y)
-                val now = System.currentTimeMillis()
-                if (now - lastLassoRefreshMs >= LASSO_REFRESH_INTERVAL_MS) {
-                    lastLassoRefreshMs = now
-                    lassoOverlayPath = path
-                    invalidate()
+                // Firmware path (Phase 5): the panel paints the dashed trail under the pen —
+                // no Canvas overlay, no throttled invalidate (that throttle WAS the visible lag).
+                if (!firmware) {
+                    val now = System.currentTimeMillis()
+                    if (now - lastLassoRefreshMs >= LASSO_REFRESH_INTERVAL_MS) {
+                        lastLassoRefreshMs = now
+                        lassoOverlayPath = path
+                        invalidate()
+                    }
                 }
             }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
@@ -965,6 +1049,8 @@ class RattaNotebookView(context: Context) : View(context), NotebookView {
                         dragOriginalTextObjects = emptyList(); dragOriginalLineObjects = emptyList()
                         dragOriginalLinks = emptyList(); dragOriginalStickyNotes = emptyList()
                         dragOriginalShapeObjects = emptyList()
+                        // Drag over — re-arm the lasso trail pen (drag entry full-screen-disabled).
+                        if (firmware) applyToolToFirmware()
                         redrawCanvas()
                         onStrokesMoved?.invoke(origStrokes, movedStrokes, origHeadings, movedHeadings, origTextObjects, movedTextObjects, origLineObjects, movedLineObjects, origLinks, movedLinks, origStickyNotes, movedStickyNotes, origShapes, movedShapes)
                     } else {
@@ -977,6 +1063,7 @@ class RattaNotebookView(context: Context) : View(context), NotebookView {
                         dragOriginalTextObjects = emptyList(); dragOriginalLineObjects = emptyList()
                         dragOriginalLinks = emptyList(); dragOriginalStickyNotes = emptyList()
                         dragOriginalShapeObjects = emptyList()
+                        if (firmware) applyToolToFirmware()
                         onLassoTap?.invoke(tapX, tapY)
                     }
                     return true
@@ -991,6 +1078,10 @@ class RattaNotebookView(context: Context) : View(context), NotebookView {
                 lassoGestureStartPoint = null
                 lassoOverlayPath = null
                 invalidate()
+                // The firmware dashed trail corresponds to nothing in the app layer — wipe
+                // it with the proven gesture-trace ladder before the selection box appears.
+                // Runs on the tap outcome too (a tap paints a dash dot at the contact point).
+                if (firmware) releaseGestureTrace()
                 // Tap vs lasso: use the gesture's overall extent, not net start→end displacement.
                 // A small circular lasso returns near its origin (tiny net displacement) but spans
                 // a real bounding box — displacement alone would misclassify it as a tap and paste.
@@ -1820,15 +1911,19 @@ class RattaNotebookView(context: Context) : View(context), NotebookView {
             dragOriginalTextObjects = emptyList(); dragOriginalLineObjects = emptyList()
             dragOriginalLinks = emptyList(); dragOriginalStickyNotes = emptyList()
             dragOriginalShapeObjects = emptyList()
+            // The abandoned drag full-screen-disabled at entry — restore the armed tool.
+            if (firmware) applyToolToFirmware()
             invalidate()
         }
     }
 
     override fun setLassoMode(active: Boolean) {
         isLassoMode = active
+        // Cancel a live drag BEFORE the tool boundary, or applyToolToFirmware would still
+        // see isDragMoveActive and push a stale full-screen disable.
+        if (!active && isDragMoveActive) setDragMoveMode(false)
         firmwareToolBoundary()
         if (!active) {
-            if (isDragMoveActive) setDragMoveMode(false)
             lassoOverlayPath = null
             lassoSelectionBox = null
             lassoGestureStartPoint = null
@@ -1921,7 +2016,9 @@ class RattaNotebookView(context: Context) : View(context), NotebookView {
                 lassoEraserDisplayPath = null
                 invalidate()
                 lassoGesturePath = Path().also { it.moveTo(event.x, event.y) }
-                lassoEraserDisplayPath = Path().also { it.moveTo(event.x, event.y) }
+                // Firmware path (Phase 5): the panel paints the x-stream trail (LASSO_X);
+                // the jittered software display path is the non-firmware stand-in only.
+                if (!firmware) lassoEraserDisplayPath = Path().also { it.moveTo(event.x, event.y) }
                 lassoGestureStartPoint = PointF(event.x, event.y)
             }
             MotionEvent.ACTION_MOVE -> {
@@ -1935,10 +2032,12 @@ class RattaNotebookView(context: Context) : View(context), NotebookView {
                 }
                 path.lineTo(event.x, event.y)
                 display?.lineTo(event.x + jitter(), event.y + jitter())
-                val now = System.currentTimeMillis()
-                if (now - lastLassoRefreshMs >= LASSO_REFRESH_INTERVAL_MS) {
-                    lastLassoRefreshMs = now
-                    invalidate()
+                if (!firmware) {
+                    val now = System.currentTimeMillis()
+                    if (now - lastLassoRefreshMs >= LASSO_REFRESH_INTERVAL_MS) {
+                        lastLassoRefreshMs = now
+                        invalidate()
+                    }
                 }
             }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
@@ -1952,6 +2051,9 @@ class RattaNotebookView(context: Context) : View(context), NotebookView {
                 lassoGestureStartPoint = null
                 lassoEraserDisplayPath = null
                 invalidate()
+                // Wipe the firmware x-stream trail; the erase itself (async hit test →
+                // onLassoEraseComplete → host redraw) co-presents further app frames.
+                if (firmware) releaseGestureTrace()
                 // Classify by gesture extent, not net displacement, so a small circular erase
                 // gesture (returns near its origin) is not mistaken for a tap.
                 val gestureBounds = RectF()

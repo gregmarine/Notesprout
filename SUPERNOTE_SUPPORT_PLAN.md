@@ -1,15 +1,17 @@
 # Supernote (Ratta) Support — Implementation Plan
 
 > **Branch:** `supernote` · **Targets:** Supernote Nomad + Supernote Manta
-> **Overall status:** Phases 0–3 ✅ done (2026-08-08, both devices, firmware 2389).
+> **Overall status:** Phases 0–5 ✅ done (2026-08-08/09, both devices, firmware 2389).
 > `RattaNotebookView` ships the deferred-handoff writing loop — live firmware ink is
 > hardware-validated ("the writing experience is gold"), smart lasso / scribble-erase traces
 > self-clear via the **clear+frame retry ladder** (see Phase 3 findings: the two measured
 > laws of the overlay wipe — a clear needs a co-presented app frame, and clears near pen-lift
-> are eaten by a variable finalization window). **Phases 4–8 must inherit both laws.**
-> Phase 5 remains GO (pen code 4 = hardware dashed stroke, code 3 = x-stream).
-> Next: Phase 5 (firmware dashed ink for the live lasso path — GO per the Phase 0/1 pen
-> sweep: code 4 = dashed, code 3 = x-stream).
+> are eaten by a variable finalization window). **Phases 6–8 must inherit both laws, plus
+> Phase 5's third law: the firmware latches pen state at contact start, so any suppress
+> must be issued from the HOVER stream, before the tip lands.**
+> Phase 5 shipped the hardware lasso trails (code 4 dashes / code 3 x-stream) and folded
+> the physical eraser end into the hover-ahead barrel suppress.
+> Next: Phase 6 (lifecycle, process-global state, close).
 
 ---
 
@@ -41,8 +43,8 @@ This plan is written to survive a cleared context. At the start of every session
 | 1 | Port `SupernoteInk` + live-ink proof | ✅ yes | ✅ DONE (2026-08-08) — **dashed style found (code 4): Phase 5 GO** |
 | 2 | Device gate + engine factory (no behaviour change) | ✅ yes | ✅ DONE (2026-08-08) |
 | 3 | `RattaNotebookView` — core writing loop | ✅ yes | ✅ DONE (2026-08-08) |
-| 4 | Handoff boundaries & mode transitions | ✅ yes | ⬜ NOT STARTED |
-| 5 | Firmware dashed ink for the live lasso path | ✅ yes | ⬜ NOT STARTED |
+| 4 | Handoff boundaries & mode transitions | ✅ yes | ✅ DONE (2026-08-09) |
+| 5 | Firmware dashed ink for the live lasso path | ✅ yes | ✅ DONE (2026-08-09) — **+ hover-ahead suppress law; eraser-end folded into barrel suppress** |
 | 6 | Lifecycle, process-global state, close | ✅ yes | ⬜ NOT STARTED |
 | 7 | The remaining five drawing hosts | ✅ yes | ⬜ NOT STARTED |
 | 8 | Ink mapping & EMR stroke-width tuning | ✅ yes | ⬜ NOT STARTED |
@@ -912,10 +914,10 @@ builds the mechanism, this phase decides when it fires.
 |---|---|
 | Pen | `claimPen()` + `setPen(NEEDLE, emrSize(w), BLACK)` |
 | Eraser | **`setEraser(false, eraserEmr())`** where `eraserEmr() = (eraserRadius * 50).coerceAtLeast(400)`. This stops the firmware painting NEEDLE ink along the eraser path; our software hit-test still does the actual removal. *(An earlier draft said to suppress the pen instead — the PoC uses `setEraser`, and it is proven.)* |
-| Lasso / lasso-eraser | `setFullScreenDisable(w, h)` — we want **no** firmware painting; the Canvas draws the dashed path. **Phase 5 revisits this**: if a dashed firmware style exists, the live path becomes firmware ink instead. |
+| Lasso / lasso-eraser | ~~`setFullScreenDisable(w, h)`~~ **Superseded by Phase 5**: `setPen(LASSO_DASH/LASSO_X, 300, BLACK)` — the firmware paints the live trail; toolbar disable areas only. |
 | Text placement | `setFullScreenDisable(w, h)` so the placement tap starts no ink |
 | Shape transform | `setFullScreenDisable(w, h)` — handles and the rotate knob are Canvas-drawn |
-| Drag-move (inside lasso) | already suppressed by lasso mode; verify no extra call is needed |
+| Drag-move (inside lasso) | **Phase 5**: `setFullScreenDisable(w, h)` issued from the HOVER stream while over the selection box (a disable at ACTION_DOWN is too late — the contact-start latch) |
 | Leaving any of the above | `clearDisableAreas()` then re-apply the toolbar areas |
 
 **`setToolbarExclusion(rect)`** — Generic no-ops this; Ratta must implement it. ⚠️ **Our geometry
@@ -1082,7 +1084,7 @@ suppression); the value is app-readable at runtime if it ever warrants a hint.
 
 ---
 
-## Phase 5 — Firmware dashed ink for the live lasso path · ⬜ NOT STARTED
+## Phase 5 — Firmware dashed ink for the live lasso path · ✅ COMPLETE (2026-08-09, both devices)
 
 > **Gated on Phase 0/1's pen-type sweep.** If no firmware pen code renders a dashed or patterned
 > stroke, mark this phase ⛔ BLOCKED, leave Phase 4's Canvas path in place, and move on. Everything
@@ -1150,16 +1152,48 @@ Install both. In a notebook:
 
 ### Exit criteria
 
-- [ ] The live lasso outline is drawn in hardware and keeps pace with the stylus.
-- [ ] Lift → box handoff is clean, no double image, no residue.
-- [ ] Drag-move leaves no trail.
-- [ ] Smart lasso and scribble-erase (pen mode) are unaffected.
-- [ ] Lasso-eraser trail likewise.
-- [ ] Identical on Nomad and Manta.
+- [x] The live lasso outline is drawn in hardware and keeps pace with the stylus.
+- [x] Lift → box handoff is clean, no double image, no residue.
+- [x] Drag-move leaves no trail (after the hover-ahead fix below).
+- [x] Smart lasso and scribble-erase (pen mode) are unaffected.
+- [x] Lasso-eraser trail likewise.
+- [x] Identical on Nomad and Manta.
 
-### Findings
+### Findings (2026-08-09, both devices — everything but drag-move passed first round)
 
-_(record here — including which firmware pen code was used for each of the two trails)_
+**Pen codes as planned:** lasso trail = `Pen.LASSO_DASH` (4), lasso-eraser trail =
+`Pen.LASSO_X` (3), both at **EMR 300** (the sweep's measured-visible size, kept as
+`LASSO_TRAIL_EMR` independent of the ink pen's width mapping) with a **BLACK** payload
+(paints, never erases — eraser semantics are the colour-255 payload). Both trails look
+native (they *are* the firmware's own lasso vocabulary) and keep pace with the pen; the
+60 ms Canvas throttle is dead code on the firmware path. Lift-wipe reuses the Phase 3
+`releaseGestureTrace` ladder unchanged — a trail is exactly a gesture trace (overlay ink
+corresponding to nothing app-side).
+
+⭐ **The third overlay LAW — the firmware latches pen state at contact start.** A
+full-screen disable issued at the drag-move's `ACTION_DOWN` was too late: the stroke had
+already begun and the whole drag painted a dashed trail (both devices, round 1). A
+suppress can only take effect if it is in place **before the tip lands**, and the hover
+stream is the early warning — this is also, in hindsight, exactly why Phase 4's barrel
+suppress worked (the button reports on HOVER). Fix: `updateLassoDragHoverSuppress` —
+while the stylus hovers over the selection box, full-screen disable; hover out re-arms
+the trail pen; every tool push resets the flag and the next hover event re-asserts.
+The `ACTION_DOWN` disable stays as a backstop for a contact with no hover warning.
+**Every later phase that needs to stop the firmware painting for a given contact must
+arrange the disable from hover, not from the touch stream.**
+
+**Off-script bonus (user-requested): the physical eraser end folded into the barrel
+suppress.** Its native firmware handling pixel-wipes the panel along the path — visible
+as a partial pixel-level erase flashing across strokes before the software stroke-level
+erase repaints. `updateBarrelSuppress` now treats `TOOL_TYPE_ERASER` in hover range
+exactly like a held barrel button (hover-ahead full-screen disable; the native wipe
+respects disable areas, device-confirmed). Flip back to the pen tip re-arms the tool.
+Erase now removes whole strokes with no pixel-wipe artifact; validated on both devices,
+including eraser-end use inside lasso mode and rapid flip-erase-flip-write.
+
+Also fixed en route: `setLassoMode(false)` now cancels a live drag **before** the tool
+boundary (the old order let `applyToolToFirmware` push a stale full-screen disable), and
+barrel/eraser-end contacts in Canvas-overlay modes arm the clear ladder on lift.
 
 ---
 

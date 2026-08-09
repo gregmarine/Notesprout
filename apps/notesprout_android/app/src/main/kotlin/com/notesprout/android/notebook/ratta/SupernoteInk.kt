@@ -48,6 +48,14 @@ object SupernoteInk {
         const val INK = 16          // highlighter is MARK
         const val MARK = 11
         const val CALLIGRAPHY = 15
+        // Undocumented codes found by the Phase 0/1 sweep (SUPERNOTE_SUPPORT_PLAN.md) —
+        // the firmware's own lasso vocabulary. With a black colour payload neither erases
+        // (eraser semantics live in the colour-255 payload, not the type code).
+        /** Stream of dashes — the Supernote lasso-selector trail. */
+        const val LASSO_DASH = 4
+        /** Stream of tiny x's — the Supernote lasso-eraser trail. */
+        const val LASSO_X = 3
+        // Code 12 is broken (random giant laggy blob) — never use it.
     }
 
     /** Firmware color codes (grayscale on e-ink). */
