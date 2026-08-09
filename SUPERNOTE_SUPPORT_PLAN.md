@@ -15,7 +15,13 @@
 > precedes the predecessor's detach, so unguarded teardowns killed the new session — guard
 > proved necessary statically), `resumeDrawing()` reclaim, real enable/disableDrawing, and a
 > full `releaseResources` release; ten-scenario lifecycle script passed both devices round 1.
-> Next: Phase 7 (the remaining five drawing hosts).
+> Phase 7 extended the path to the remaining hosts (HWR enrollment descoped by the user) with
+> ZERO host-side changes — the whole phase was two screen-space fixes in `RattaNotebookView`
+> (complement disable bands clipping ink to the view's screen rect; real-panel-size
+> fullScreenDisable). Passed both devices round 1; the round surfaced a PRE-EXISTING
+> live-vs-baked horizontal registration offset, A/B-verified against a Phase 6 build and
+> filed into Phase 8.
+> Next: Phase 8 (ink mapping, EMR width tuning, and the registration offset).
 
 ---
 
@@ -1287,7 +1293,7 @@ the system's own ink behaviour normal, so the daemon does reset per-claim state 
 
 ---
 
-## Phase 7 — The remaining five drawing hosts · ⬜ NOT STARTED
+## Phase 7 — The remaining five drawing hosts · ✅ DONE (2026-08-09, both devices, round 1)
 
 **Goal:** extend the proven path to calendar, day-note, scratch pad, sticky editor, and HWR
 enrollment. The factory already routes them (Phase 2); this phase is about the host-specific quirks.
@@ -1305,21 +1311,60 @@ any window-offset correction the translucent hosts need.
 
 ### Device test
 
-Install both. On each of the five surfaces: write, switch tools, use lasso, use the eraser, leave and
+Install both. On each of the four surfaces (HWR enrollment descoped — user is staying on ML Kit and
+considering removing the custom engine): write, switch tools, use lasso, use the eraser, leave and
 return, and (scratch pad / sticky note) transfer content back to the page.
 
 Additionally for the calendar: Month, Week and Day views, plus the full-view export.
 
+**Band-specific checks (the Phase 7 fix is disable-area geometry):** write right up to every edge of
+each canvas — ink must stop exactly at the canvas edge; pen taps on the toolbar ABOVE the calendar /
+day-note canvas must leave no firmware streaks; on the translucent hosts nothing may paint on the
+chrome bar, the bottom toolbar, or the notebook visible around the 75% window.
+
 ### Exit criteria
 
-- [ ] Firmware ink works on all five, positioned correctly.
-- [ ] No ink bleeds outside the translucent hosts' windows.
-- [ ] Content transfer (scratch pad → page, sticky → page) is unaffected.
-- [ ] Identical on Nomad and Manta.
+- [x] Firmware ink works on all four in-scope hosts, positioned correctly.
+- [x] No ink bleeds outside the translucent hosts' windows.
+- [x] Content transfer (scratch pad → page, sticky → page) is unaffected.
+- [x] Identical on Nomad and Manta.
 
 ### Findings
 
-_(record here)_
+**Build (2026-08-09, awaiting device test).** The host audit came back clean — all five hosts already
+make every interface call the notebook host does (`resumeDrawing` from onResume, `releaseResources`
+from onDestroy, `releaseRender` on chrome touches, overflow-menu + pen-colour-panel exclusion rects
+in view coords, and the day window's `resumeDrawing`/`disableDrawing` view switch that Phase 6
+designed for). **Zero host-side changes.** The whole phase landed in `RattaNotebookView`, which had
+two full-screen-host assumptions baked in that only `NotebookActivity` satisfies:
+
+1. **"Disable everywhere" was `setFullScreenDisable(width, height)` — view dims at screen origin.**
+   The day-window canvas sits below a toolbar (`Rect(0,0,w,h)` missed the bottom strip of the panel);
+   the translucent hosts inset the view further. Fix: `fullScreenDisable()` helper using the real
+   panel size (`Display.getRealSize`, cached at attach/onSizeChanged because detach-time teardowns
+   can no longer reach the display), replacing all eight call sites (teardown, detach,
+   suppressed-mode push, barrel suppress, lasso-drag hover suppress, drag DOWN backstop,
+   `disableDrawing`, `releaseResources`).
+2. **With no toolbar exclusion pushed, `applyDisableAreas` cleared ALL disable areas** — the firmware
+   (which paints in screen space, knowing nothing of view bounds or the window stack) could ink over
+   the calendar/day-window toolbar, the translucent hosts' chrome, and the notebook visible around
+   the inset window. Fix: `applyDisableAreas` now always sends **complement bands** — up to four
+   rects covering everything outside the view's screen rect — plus the host's overlay exclusion.
+   On the full-bleed notebook host all four bands are empty, so Phases 3–6 behaviour is bit-identical.
+
+**~~Watch item~~ resolved by the round:** the disable-area transaction now carries up to five rects
+where every prior phase sent at most one, and edge containment passed everywhere — **the firmware
+accepts at least five rects per `TX_DISABLE_AREA` transaction.**
+
+**Device round 1 (2026-08-09, both devices): tests pass.** One observation from the round —
+**baked strokes land slightly LEFT of the live firmware ink**, on every writing canvas, visible at
+each bake. **A/B-verified pre-existing, NOT a Phase 7 regression:** the Phase 6 build (c6e2feb,
+where the notebook host's firmware traffic is bit-identical) shows the identical shift on the
+notebook canvas. So it dates to Phase 3 and went unnoticed until this round's edge-precision
+scrutiny. Root cause: a small horizontal registration offset between where the firmware paints its
+live ink (raw pen stream) and where the digitizer's `MotionEvent`s land (what we bake and persist).
+**Filed into Phase 8**, which is the live-vs-baked appearance-matching phase — see the registration
+item added there.
 
 ---
 
@@ -1346,7 +1391,22 @@ greyscale panel. So:
   failure. Decide on-device.
 
 Also in this phase:
-- **Width match.** Phase 3 already ships `emrSize(w) = (w * 100).coerceIn(200, 1200)` from the PoC,
+- **Horizontal registration (found in Phase 7's device round, A/B-verified pre-existing since
+  Phase 3).** Baked strokes land slightly LEFT of the live firmware ink on every canvas — the
+  firmware's raw pen stream and the digitizer's `MotionEvent` x disagree by a few pixels. The fix
+  direction depends on which one is under the physical pen tip, and only an eye on the device can
+  say:
+  - **Live ink tracks the tip; bake jumps left of the tip** → the `MotionEvent` stream is offset —
+    compensate by a measured constant x-shift on the Ratta *input* path (this corrects persisted
+    data toward physical truth; strokes written on Supernote open correctly aligned everywhere).
+  - **Live ink sits right of the tip; bake corrects to under the tip** → the firmware is the one
+    that's off; baked data is already true, so the only options are accept the one-time jump or
+    (if it grates) bias the live EMR rendering — nothing about persisted data may change.
+  - Measurement tool: `SupernoteProbeActivity` — a dual-render lab that draws the app polyline at
+    `MotionEvent` coords WITHOUT clearing the overlay leaves both lines on the panel at once; the
+    offset becomes a directly visible double line (photograph it — screencap cannot see the
+    overlay). Check both devices: Nomad and Manta differ in resolution (1404 vs 1920 wide), so
+    determine whether the delta is constant in px or scales.
   which reports 3px paint ↔ EMR 300 looking good. What is left is *tuning*: our stroke widths are
   2.5f (Generic's paint) and 3.0f (Onyx's), and any mismatch shows as a one-time size or darkness
   shift **at the handoff moment**, when firmware ink is replaced by the baked polyline. Nudge the

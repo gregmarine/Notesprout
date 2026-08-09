@@ -154,8 +154,34 @@ class RattaNotebookView(context: Context) : View(context), NotebookView {
         }
     }
 
+    /**
+     * Real panel size, cached while attached (the display is unreachable after detach,
+     * and detach-time teardowns still need it). The firmware's coordinate space is the
+     * SCREEN, not this view: on the full-bleed notebook host the two coincide, but the
+     * day-window canvas sits below a toolbar and the translucent hosts (scratch pad,
+     * sticky editor) inset the view in a centered window — there "disable everywhere"
+     * built from view dims left the rest of the panel paintable (Phase 7).
+     */
+    private var screenW = 0
+    private var screenH = 0
+
+    private fun refreshScreenSize() {
+        val d = display ?: return
+        val p = android.graphics.Point()
+        @Suppress("DEPRECATION")   // getRealSize: fine on the two Ratta targets; no window-metrics dance at minSdk 29
+        d.getRealSize(p)
+        screenW = p.x
+        screenH = p.y
+    }
+
+    /** Forbid firmware ink everywhere on the PANEL (never just this view's rect). */
+    private fun fullScreenDisable() {
+        SupernoteInk.setFullScreenDisable(maxOf(screenW, width), maxOf(screenH, height))
+    }
+
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
+        refreshScreenSize()
         SupernoteInk.onFailure = firmwareFailureHandler
         // Before first layout width/height are 0 — a full-screen disable would be an empty
         // rect and getLocationOnScreen garbage. onSizeChanged runs the setup instead.
@@ -177,7 +203,7 @@ class RattaNotebookView(context: Context) : View(context), NotebookView {
             releaseFirmwareOverlay()
             // Full-screen disable, not clearDisableAreas: between this view's death and the
             // next drawing surface's setup nothing should let the firmware paint stray ink.
-            SupernoteInk.setFullScreenDisable(width, height)
+            fullScreenDisable()
             SupernoteInk.enableFullUiAuto(context, false)
             inkOwner = null   // also drops the static view ref — no Activity leak
         }
@@ -205,7 +231,7 @@ class RattaNotebookView(context: Context) : View(context), NotebookView {
         // equivalent is a full-screen disable — while we are unfocused (dialog up, task
         // switched away) the firmware must not paint anywhere on our behalf. Focus gain
         // re-runs setupFirmwareInk, whose applyToolToFirmware restores the right areas.
-        SupernoteInk.setFullScreenDisable(width, height)
+        fullScreenDisable()
         SupernoteInk.enableFullUiAuto(context, false)
     }
 
@@ -329,7 +355,7 @@ class RattaNotebookView(context: Context) : View(context), NotebookView {
         if (firmwareSuppressed) {
             // Text placement / shape transform / drag-move: handles, placement tap and the
             // drag preview are all Canvas-drawn — no firmware ink anywhere.
-            SupernoteInk.setFullScreenDisable(width, height)
+            fullScreenDisable()
             return
         }
         applyDisableAreas()
@@ -349,21 +375,34 @@ class RattaNotebookView(context: Context) : View(context), NotebookView {
     }
 
     /**
-     * Send the toolbar exclusion as a firmware disable area. ⚠️ Geometry differs from the
-     * PoC: our toolbar OVERLAYS the drawing view inside a FrameLayout (same origin/size),
-     * so the host's rect is in view coordinates and must be offset by getLocationOnScreen
-     * into screen coordinates — the firmware's space. Null/empty ⇒ no disable areas.
+     * Clip firmware ink to this view's on-screen rect, minus the toolbar exclusion.
+     *
+     * The firmware paints in SCREEN space wherever the pen lands — it knows nothing about
+     * our view bounds or window stack. So the disable set is built from two pieces:
+     *  • complement bands — up to four rects covering everything OUTSIDE the view's screen
+     *    rect. On the full-bleed notebook host all four are empty (Phase 4 behaviour,
+     *    unchanged); on calendar / the day window they shield the toolbar above the canvas,
+     *    and on the translucent hosts (scratch pad, sticky editor) they shield the chrome
+     *    bar, the bottom toolbar and the notebook visible around the inset window (Phase 7).
+     *  • the host's toolbar exclusion — chrome that OVERLAYS the view (notebook toolbar,
+     *    overflow menu, pen colour panel), pushed in view coordinates and offset by
+     *    getLocationOnScreen into the firmware's space.
      */
     private fun applyDisableAreas() {
         if (!firmware) return
-        val excl = toolbarExclusion
-        if (excl == null || excl.isEmpty) {
-            SupernoteInk.clearDisableAreas()
-            return
-        }
         val loc = IntArray(2)
         getLocationOnScreen(loc)
-        SupernoteInk.setDisableAreas(listOf(Rect(excl).apply { offset(loc[0], loc[1]) }))
+        // Never trust a stale/zero screen size below the view's own extent.
+        val sw = maxOf(screenW, loc[0] + width)
+        val sh = maxOf(screenH, loc[1] + height)
+        val rects = mutableListOf<Rect>()
+        if (loc[1] > 0)           rects += Rect(0, 0, sw, loc[1])                            // above
+        if (loc[1] + height < sh) rects += Rect(0, loc[1] + height, sw, sh)                  // below
+        if (loc[0] > 0)           rects += Rect(0, loc[1], loc[0], loc[1] + height)          // left
+        if (loc[0] + width < sw)  rects += Rect(loc[0] + width, loc[1], sw, loc[1] + height) // right
+        toolbarExclusion?.let { rects += Rect(it).apply { offset(loc[0], loc[1]) } }
+        if (rects.isEmpty()) SupernoteInk.clearDisableAreas()
+        else SupernoteInk.setDisableAreas(rects)
     }
 
     /** Tool-change boundary: bake + clear the overlay FIRST, then push the new tool state. */
@@ -421,7 +460,7 @@ class RattaNotebookView(context: Context) : View(context), NotebookView {
         Slog.d(TAG) { "barrel ${if (pressed) "PRESS" else "RELEASE"} " +
             "src=${MotionEvent.actionToString(event.actionMasked)} " +
             "tool=${event.getToolType(0)} btn=${event.buttonState} penDown=$penDown" }
-        if (pressed) SupernoteInk.setFullScreenDisable(width, height)
+        if (pressed) fullScreenDisable()
         else applyToolToFirmware()
     }
 
@@ -448,7 +487,7 @@ class RattaNotebookView(context: Context) : View(context), NotebookView {
         if (inside == lassoHoverSuppressed) return
         lassoHoverSuppressed = inside
         Slog.d(TAG) { "lasso hover ${if (inside) "SUPPRESS" else "REARM"} at ${event.x},${event.y}" }
-        if (inside) SupernoteInk.setFullScreenDisable(width, height)
+        if (inside) fullScreenDisable()
         else applyToolToFirmware()
     }
 
@@ -696,7 +735,10 @@ class RattaNotebookView(context: Context) : View(context), NotebookView {
         redrawCanvas()
         // First layout after attach (the setup deferred until real dimensions existed) and
         // any later resize (the disable-area screen offsets shift with layout). Idempotent.
-        if (isAttachedToWindow) setupFirmwareInk()
+        if (isAttachedToWindow) {
+            refreshScreenSize()
+            setupFirmwareInk()
+        }
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
@@ -901,7 +943,7 @@ class RattaNotebookView(context: Context) : View(context), NotebookView {
                     // disable issued here is too late, the firmware latches pen state as the
                     // contact begins); this one is only the backstop for a contact that
                     // arrived with no hover warning. ACTION_UP re-arms via applyToolToFirmware.
-                    if (firmware) SupernoteInk.setFullScreenDisable(width, height)
+                    if (firmware) fullScreenDisable()
                     dragStartX = event.x; dragStartY = event.y
                     dragThresholdMet = false
                     dragDx = 0f; dragDy = 0f
@@ -1918,7 +1960,7 @@ class RattaNotebookView(context: Context) : View(context), NotebookView {
         // Bake first: hosts that switch views inside one window (day window Note→Events)
         // cross no focus boundary, so pending overlay ink would float above the new view.
         releaseFirmwareOverlay()
-        SupernoteInk.setFullScreenDisable(width, height)
+        fullScreenDisable()
     }
 
     // Every host calls this from onResume. Focus events are unreliable on e-ink (Onyx
@@ -2462,7 +2504,7 @@ class RattaNotebookView(context: Context) : View(context), NotebookView {
         // dropping inkOwner here makes it a no-op instead.
         if (firmware && inkOwner === this) {
             releaseFirmwareOverlay()
-            SupernoteInk.setFullScreenDisable(width, height)
+            fullScreenDisable()
             SupernoteInk.enableFullUiAuto(context, false)
             inkOwner = null
         }
