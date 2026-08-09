@@ -1,8 +1,10 @@
 # Supernote (Ratta) Support — Implementation Plan
 
 > **Branch:** `supernote` · **Targets:** Supernote Nomad + Supernote Manta
-> **Overall status:** Phase 0 part 1 (adb interrogation) ✅ done — see its Findings. Part 2 (the
-> probe app) not started. No production code written yet.
+> **Overall status:** Phases 0 + 1 ✅ done (2026-08-08, both devices, firmware 2389).
+> `SupernoteInk` is ported to `notebook/ratta/`; live firmware ink, the full tool-type story, and
+> the pen-code sweep are all proven — **code 4 is a hardware dashed stroke, so Phase 5 is GO.**
+> Next: Phase 2 (device gate + engine factory).
 
 ---
 
@@ -30,8 +32,8 @@ This plan is written to survive a cleared context. At the start of every session
 
 | # | Phase | Device test | Status |
 |---|---|---|---|
-| 0 | Baseline & firmware probe | ✅ yes | 🔧 IN PROGRESS — adb half ✅, probe app ⬜ |
-| 1 | Port `SupernoteInk` + live-ink proof | ✅ yes | ⬜ NOT STARTED |
+| 0 | Baseline & firmware probe | ✅ yes | ✅ DONE (2026-08-08) |
+| 1 | Port `SupernoteInk` + live-ink proof | ✅ yes | ✅ DONE (2026-08-08) — **dashed style found (code 4): Phase 5 GO** |
 | 2 | Device gate + engine factory (no behaviour change) | ✅ yes | ⬜ NOT STARTED |
 | 3 | `RattaNotebookView` — core writing loop | ✅ yes | ⬜ NOT STARTED |
 | 4 | Handoff boundaries & mode transitions | ✅ yes | ⬜ NOT STARTED |
@@ -368,12 +370,13 @@ Ask the user to, **on each device**:
 
 ### Exit criteria
 
-- [ ] The binder resolves on **both** devices (under either service name — record which).
-- [ ] The `eink` service exists and exposes `enableFullUiAuto(boolean)` on both.
-- [ ] The pen reports `TOOL_TYPE_STYLUS` (Generic's `onTouchEvent` rejects everything else — if the
-      Supernote pen arrives as `TOOL_TYPE_FINGER`, the whole design changes and we stop here).
-- [ ] Baseline writing latency described for both devices.
-- [ ] Nomad and Manta report the same binder / service / tool-type story (the plan's premise that
+- [x] The binder resolves on **both** devices (`service_myservice`; the `service.myservice` alias
+      is absent — the first name always wins).
+- [x] The `eink` service exists and exposes `enableFullUiAuto(boolean)` on both.
+- [x] The pen reports `TOOL_TYPE_STYLUS` (eraser end `TOOL_TYPE_ERASER`, finger `TOOL_TYPE_FINGER` —
+      the full three-way identity, identical on both).
+- [x] Baseline writing latency described for both devices (unusable — see Findings).
+- [x] Nomad and Manta report the same binder / service / tool-type story (the plan's premise that
       they are one target).
 
 ### Findings
@@ -442,10 +445,52 @@ Two of these are likely to matter later and are **not** in the Lua:
 **Prior art found.** `org.iccnet.supernotedemo` — see the *Prior art* section above. It changes how
 Phase 1 should be approached.
 
-#### Part 2 — probe app ⬜ NOT STARTED
+#### Part 2 — probe app ✅ (2026-08-08)
 
-_(still needed: pen `getToolType(0)`, pressure/tilt, eraser-end and barrel-button reporting, the
-runtime binder handshake, and the 0…31 pen-type sweep)_
+Built as one combined Phase 0 part 2 + Phase 1 deliverable: `SupernoteInk.kt` ported to
+`notebook/ratta/` (src/main) and `SupernoteProbeActivity` (debug) — report panel, live touch
+readout, firmware write area, 0…31 pen sweep, CLEAR / STRIP / FULL FRAME buttons. Installed and
+exercised on both devices. **Everything below verified identical on Nomad and Manta unless noted.**
+
+- **Runtime binder handshake works.** `service_myservice: alive=true desc=""`;
+  `service.myservice` null (as the adb half predicted); `SupernoteInk.isAvailable()=true`.
+  `eink=android.os.EinkManager` with `enableFullUiAuto` present.
+- **Pen tip reports `TOOL_TYPE_STYLUS`** — the make-or-break criterion passes. Dense point
+  stream (590/699 pts for one squiggle), real pressure, real tilt (signed, e.g. −6/+27).
+  Risk 7 (coarse MotionEvent stream) is dead: point capture is full-rate.
+- **Eraser end reports `TOOL_TYPE_ERASER`** with its own full point stream. ⭐ **Unplanned
+  finding: the firmware natively erases its own overlay ink along the eraser-end path** —
+  the probe never called `setEraser` (pen was still armed as code 10), yet the physical
+  eraser end wiped overlay pixels. So the eraser-end case comes free at the overlay level;
+  `setEraser` remains relevant for erasing with the pen *tip* when our eraser tool is armed.
+  Caveat for Phase 4: firmware erase only touches pixels the firmware painted — baked
+  app-layer strokes need our software erase + redraw, exactly as the plan already models.
+- **Finger reports `TOOL_TYPE_FINGER`, paints nothing**, and delivers a full drag point
+  stream (129/96 pts) — everything the pen-activity gate and finger gestures need.
+- **Live firmware ink under a real pen: "fantastic" (user's word).** NEEDLE(10) @ EMR 300.
+  CLEAR leaves no ghost.
+- **Screencap cannot see the firmware overlay** (confirmed empirically: blank write area in
+  `screencap` while visible ink on panel) — same trap as the BOOX EPD overlay. Android-UI
+  chrome (report/readout) *is* capturable, so probe readouts can be read over adb; ink
+  appearance needs the user's eyes/photos.
+
+- ⭐ **The ink path survived a firmware update** (2026-08-08, mid-test): the Manta was updated
+  `Chauvet.E103.2605211001.2347_release` → `Chauvet.E103.2606141001.2389_release` and the binder
+  (`alive=true`), `enableFullUiAuto`, and live pen ink all still work. First real evidence the
+  reverse-engineered path has longevity across Ratta firmware revisions. (Nomad being updated to
+  match; until then the two devices span two firmware builds — a behavioural *difference* between
+  them from here on would be firmware drift, not device drift.)
+
+- **STRIP disable-area boundary: works** ("like a charm") — ink stops at the band's edge and
+  returns when cleared. The toolbar-exclusion mechanism is proven.
+- **Home → relaunch → write: passes** on both devices — the `onWindowFocusChanged(true)`
+  re-assert reclaims the pen and full-UI ink after a task switch.
+- **Generic-engine baseline (the thing this branch replaces): unusable.** User's words: *"I
+  could be finished writing a word before the first letter of that word appears."* Strokes do
+  render (slowly) and persist across close/reopen — the data path is fine, the live-ink
+  latency is the whole problem. This is the before-picture Phase 3 is measured against.
+- Both devices ended the session on firmware `2606141001.2389` (Nomad updated mid-test to
+  match the Manta).
 
 ---
 
@@ -502,20 +547,48 @@ Install both. In the probe, on **each** device:
 
 ### Exit criteria
 
-- [ ] Live firmware ink under a **real pen**, on both devices, visibly faster than Generic.
-- [ ] `clearAll()` leaves no ghost.
-- [ ] Disable areas suppress painting in the given rect.
-- [ ] Pen reports `TOOL_TYPE_STYLUS`; finger does not ink.
-- [ ] The 0…31 sweep is recorded, with an explicit yes/no on **whether any code renders a dashed or
-      patterned stroke**. If nothing dashed exists, mark Phase 5 ⛔ BLOCKED — nothing else depends on it.
-- [ ] Identical on Nomad and Manta.
+- [x] Live firmware ink under a **real pen**, on both devices, visibly faster than Generic
+      (user: "fantastic" vs. the Generic baseline's word-behind lag).
+- [x] `clearAll()` leaves no ghost.
+- [x] Disable areas suppress painting in the given rect (STRIP test).
+- [x] Pen reports `TOOL_TYPE_STYLUS`; finger does not ink.
+- [x] The 0…31 sweep is recorded — **YES, a dashed style exists: code 4 (dashes), plus code 3
+      (x-stream). Phase 5 is GO.**
+- [x] Identical on Nomad and Manta (sweep run on both pre-update; production codes 10/4/3
+      re-verified on the updated 2389 firmware).
 
 > **If live ink does not appear, check the EMR size first.** An EMR near zero paints an invisible
 > sub-pixel line and looks exactly like a dead firmware path. The PoC lost time to this. Use 300.
 
 ### Findings
 
-_(record here — especially the full pen-code → appearance table)_
+#### The 0…31 pen-type sweep (2026-08-08, user-run, EMR 300, colour BLACK) ✅
+
+| Code | Renders | Appearance / notes |
+|---|---|---|
+| 0 | ✅ | solid, steady (uniform width) |
+| 1 | ✅ | solid, **pressure-sensitive** — NOT an eraser when sent with black (eraser semantics evidently come from the colour-255 payload, not the code alone) |
+| 2 | ✅ | solid, pressure-sensitive |
+| 3 | ✅ | **stream of tiny x's** — the Supernote lasso-eraser trail. Does not erase (with black). ⭐ Phase 5's lasso-eraser visual |
+| 4 | ✅ | **stream of dashes** — the Supernote lasso-selector trail. ⭐⭐ **THE DASHED STYLE EXISTS — Phase 5 is unblocked** |
+| 5 | ✅ | solid, steady |
+| 6, 7, 9, 13 | ❌ | nothing |
+| 8 | ✅ | solid, steady |
+| 10 | ✅ | solid, steady — matches NEEDLE as assumed (production live-ink pen) |
+| 11 | ✅ | solid, steady — does **not** render as a marker here; explore someday |
+| 12 | ⚠️ | solid, steady, but **sometimes a giant laggy blob — treat as broken, never use** |
+| 14 | ✅ | possibly calligraphy |
+| 15 | ✅ | calligraphy — matches as assumed |
+| 16–31 | ✅ | all identical: solid, pressure-sensitive (16 = INK as assumed). Codes past 16 evidently alias/clamp to INK ⇒ **the real table ends at 16; no extended sweep needed** |
+
+Consequences:
+- **Phase 5 is GO**, with better-than-hoped materials: code 4 (dashes) for the live lasso
+  outline, code 3 (x's) for the lasso-eraser trail — the exact two visuals the phase needs,
+  and they're the firmware's own lasso vocabulary so they'll look native.
+- Codes 1/3 rendering as pens (not erasers) with black confirms the eraser distinction lives
+  in the full payload (colour 255), not the type code alone — `setEraser`'s colour-255 write
+  is load-bearing.
+- Code 12 is a landmine; exclude it from any future pen-tool offering.
 
 ---
 
