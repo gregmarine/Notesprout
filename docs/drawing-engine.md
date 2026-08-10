@@ -368,16 +368,32 @@ isn't laid out (w=0/h=0). **NOT** on navigation, `eraseAll()`, or page delete.
 `closeNotebook()` must capture the cover itself — never rely on a focus-loss hook.
 
 **Page-index / link-picker thumbnails** are rendered **on demand** from page content
-(`NotebookExporter.renderPageThumbnail`, only for the visible pagination page), not from any stored
-snapshot. Three things keep this fast: (1) each thumbnail rasterizes **directly at card scale** via
-`renderPageBitmap`'s `renderScale` (the canvas + template decode are scaled down, so a heavy page
-draws ~scale² fewer pixels than a full render + downscale); (2) the visible grid page renders across a
-**bounded worker pool** (up to `availableProcessors()`, capped at 4) sharing one Room/WAL connection,
-each worker posting its bitmap to Main as it finishes so cards fill in progressively; (3) thumbnails
-use the **lean stroke parse** (`LiveStroke.fromPointsJson`, points-only) since the thumbnail renderer
-draws plain fixed-width black paths and never reads pressure/tilt/color/width. Results are held in a
-per-screen `thumbnailCache` (keyed by page id) invalidated wholesale on content/order reload or a
-card-size change; off-screen entries are evicted (recycled) so memory stays bounded to one grid page.
+(`NotebookExporter.renderPageThumbnail`), not from any stored snapshot. Three things keep a render
+fast: (1) each thumbnail rasterizes **directly at card scale** via `renderPageBitmap`'s
+`renderScale` (the canvas + template decode are scaled down, so a heavy page draws ~scale² fewer
+pixels than a full render + downscale); (2) a grid page renders across a **bounded worker pool** (up
+to `availableProcessors()`, capped at 4) sharing one Room/WAL connection, each worker posting its
+bitmap to Main as it finishes so cards fill in progressively; (3) thumbnails use the **lean stroke
+parse** (`LiveStroke.fromPointsJson`, points-only) since the thumbnail renderer draws plain
+fixed-width black paths and never reads pressure/tilt/color/width.
+
+Both grids additionally keep the whole visit fast (the Supernote perf sweep): the Room connection
+is opened **once per visit** through `KeyOpener.roomFactoryFor` (raw-key open when the derived key
+is cached — skips SQLCipher's ~300–700 ms KDF, which used to be paid per render pass) — the link
+picker, which renders pages of more than one notebook, swaps the held connection when the browsed
+path changes. `loadPageRefs` takes an optional cached raw key (`KeyOpener.cachedRawKey`) for the
+same reason, falling back to the passphrase open if the cached key is stale. Decoded **template
+bitmaps are shared** across renders via an optional `templateCache` on `renderPageThumbnail` (pages
+usually share one template — decode once per size, not once per card; template row ids are UUIDs,
+so the picker's cross-notebook entries coexist). Rendered thumbnails live in a per-visit **LRU
+keyed by page id** (~3 grid pages: visible + both neighbours, which are **prefetched** after the
+visible cards so pagination lands warm). Entries survive reloads, tab switches, and grid flips
+because nothing on either screen changes a surviving page's pixels — the page index's **set
+template** is the one exception and invalidates exactly the affected ids (a page created from the
+picker is a new id → natural miss); the caches clear wholesale only on a card-size change.
+Evicted/cleared bitmaps are dropped to GC, never `recycle()`d — an evicted entry may still be on a
+visible ImageView. The picker's current tab also falls back to the launch-restore-resolved key
+(`KeySession` first, then `resolvedCurrentKey`), so a cold session no longer leaves its cards blank.
 
 **Cleanup:** `NotebookCompactor` (runs on every seal, incl. encrypted, and the manual sweep) strips
 any legacy `data.snapshot` from page rows and hard-deletes legacy `type='cover'` rows.

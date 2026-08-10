@@ -38,6 +38,7 @@ import com.notesprout.android.data.ShapeRender
 import com.notesprout.android.data.LiveStroke
 import com.notesprout.android.notebook.ShapeGeometry
 import com.notesprout.android.data.NotebookDao
+import java.util.concurrent.ConcurrentHashMap
 import com.notesprout.android.data.NotebookObject
 import com.notesprout.android.data.StickyNoteRender
 import com.notesprout.android.data.loadStickyNotesSubtree
@@ -390,17 +391,31 @@ object NotebookExporter {
         page: NotebookObject,
         pageWidth: Int,
         pageHeight: Int,
+        cache: ConcurrentHashMap<String, Bitmap>? = null,
     ): Bitmap? {
         val templateId = page.pageData().template.takeIf { it.isNotEmpty() }
             ?: return null
+        // Pages of a notebook usually share one template; when the caller passes a [cache] each
+        // distinct (template, decode size) is base64+bitmap-decoded once and the bitmap shared
+        // across renders. Cached bitmaps are owned by the caller — never recycled here.
+        val cacheKey = if (cache != null) "$templateId@${pageWidth}x$pageHeight" else null
+        if (cacheKey != null) cache!![cacheKey]?.let { return it }
         val templateRow = dao.getTemplateById(templateId) ?: return null
-        return runCatching {
+        val bmp = runCatching {
             val b64 = templateRow.templateDataOrNull()?.image
                 ?.takeIf { it.isNotEmpty() } ?: return@runCatching null
             val bytes = Base64.decode(b64, Base64.DEFAULT)
             // Bounded decode (M-1): cap to the page size this template renders into.
             BitmapDecode.decodeSampled(bytes, pageWidth, pageHeight)
-        }.getOrNull()
+        }.getOrNull() ?: return null
+        if (cacheKey != null) {
+            // Two workers can race the first decode; keep the winner, drop the duplicate.
+            cache!!.putIfAbsent(cacheKey, bmp)?.let { winner ->
+                bmp.recycle()
+                return winner
+            }
+        }
+        return bmp
     }
 
     /**
@@ -423,6 +438,7 @@ object NotebookExporter {
         includeTemplate: Boolean = true,
         renderScale: Float = 1f,
         leanStrokes: Boolean = false,
+        templateCache: ConcurrentHashMap<String, Bitmap>? = null,
     ): Triple<Bitmap, Bitmap?, List<StickyNoteRender>> {
         val (pw, ph) = parseDimensions(pageRow.boundingBox)
         // For a scaled render (thumbnails) decode the template straight to the scaled size — it is
@@ -430,7 +446,7 @@ object NotebookExporter {
         // pure win (less decode time + memory).
         val tW = if (renderScale < 1f) (pw * renderScale).roundToInt().coerceAtLeast(1) else pw
         val tH = if (renderScale < 1f) (ph * renderScale).roundToInt().coerceAtLeast(1) else ph
-        val templateBitmap = if (includeTemplate) loadTemplate(dao, pageRow, tW, tH) else null
+        val templateBitmap = if (includeTemplate) loadTemplate(dao, pageRow, tW, tH, templateCache) else null
         val density = context.resources.displayMetrics.density
 
         val layer = dao.getLayerForPage(pageRow.id)
@@ -478,6 +494,11 @@ object NotebookExporter {
      * content-heavy page rasterizes ~(scale²) fewer pixels than a full-size render + downscale would.
      * Returns null on failure. The caller owns the returned bitmap (recycle when done). Must be called
      * on a background (IO) dispatcher; never call from the UI thread.
+     *
+     * [templateCache] (optional) shares decoded template bitmaps across the caller's renders —
+     * pages of a notebook usually share one template, so a grid of cards decodes it once instead of
+     * once per card. The caller owns the cached bitmaps (clear the map when done / on size change);
+     * they are never recycled here.
      */
     suspend fun renderPageThumbnail(
         dao: NotebookDao,
@@ -485,14 +506,20 @@ object NotebookExporter {
         context: Context,
         maxW: Int,
         maxH: Int,
+        templateCache: ConcurrentHashMap<String, Bitmap>? = null,
     ): Bitmap? {
         if (maxW <= 0 || maxH <= 0) return null
         val (pw, ph) = parseDimensions(pageRow.boundingBox)
         val scale = minOf(maxW.toFloat() / pw, maxH.toFloat() / ph, 1f)
         return try {
-            val (bitmap, templateBitmap, _) =
-                renderPageBitmap(dao, pageRow, context, includeTemplate = true, renderScale = scale, leanStrokes = true)
-            templateBitmap?.recycle()
+            val (bitmap, templateBitmap, _) = renderPageBitmap(
+                dao, pageRow, context,
+                includeTemplate = true, renderScale = scale, leanStrokes = true,
+                templateCache = templateCache,
+            )
+            // A cache-shared template bitmap is owned by the caller's cache; only a private decode
+            // (no cache passed) is this render's to recycle.
+            if (templateCache == null) templateBitmap?.recycle()
             bitmap
         } catch (e: Exception) {
             null

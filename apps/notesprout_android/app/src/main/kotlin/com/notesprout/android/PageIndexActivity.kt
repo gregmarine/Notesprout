@@ -24,7 +24,7 @@ import com.notesprout.android.core.Slog
 import com.notesprout.android.core.TopGuard
 import com.notesprout.android.crypto.KeyResolver
 import com.notesprout.android.crypto.KeySession
-import com.notesprout.android.crypto.SoilCrypto
+import com.notesprout.android.data.NotebookDao
 import com.notesprout.android.data.SoilDatabase
 import com.notesprout.android.data.index.IndexRepository
 import com.notesprout.android.data.index.NotesproutIndex
@@ -39,6 +39,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -137,16 +138,27 @@ class PageIndexActivity : AppCompatActivity() {
      *  [buildCardGroup], consumed by [renderVisibleThumbnails] which renders on demand. */
     private val thumbnailTargets = mutableMapOf<String, AppCompatImageView>()
 
-    /** Rendered page thumbnails, keyed by page id. Reused across state-only re-renders (selection,
-     *  action mode, destination highlight) so those never re-render a page bitmap. Invalidated
-     *  wholesale when [thumbEpoch] advances (any content/order reload — see [loadPagesFromSoil]) or
-     *  the card size changes; off-screen entries are evicted to bound memory to one grid page. */
-    private val thumbnailCache = mutableMapOf<String, android.graphics.Bitmap>()
-    /** Bumped on every [loadPagesFromSoil]; a mismatch invalidates [thumbnailCache]. */
-    private var thumbEpoch = 0
-    private var thumbCacheEpoch = -1
+    /** Rendered page thumbnails, keyed by page id — an access-ordered LRU. Page content cannot
+     *  change while this screen is open except through its own template action (which invalidates
+     *  the affected ids), and moves/copies/deletes never alter a surviving page's pixels, so
+     *  entries stay valid across reloads and grid-page flips. Bounded to [thumbCacheCap] entries
+     *  (~3 grid pages: current + both prefetched neighbours); evicted bitmaps are dropped to GC,
+     *  never recycled — an evicted entry may still be set on a visible ImageView. Cleared wholesale
+     *  only on a card-size change and in onDestroy. Touched from the main thread only. */
+    private val thumbnailCache = LinkedHashMap<String, android.graphics.Bitmap>(32, 0.75f, true)
     private var thumbCardW = 0
     private var thumbCardH = 0
+
+    /** Decoded template bitmaps shared across thumbnail renders (pages usually share a template,
+     *  so the grid decodes it once, not once per card). See [NotebookExporter.renderPageThumbnail].
+     *  Cleared alongside [thumbnailCache]; entries are dropped to GC, never recycled. */
+    private val templateCache = java.util.concurrent.ConcurrentHashMap<String, android.graphics.Bitmap>()
+
+    /** One Room connection reused by every thumbnail pass (read-only under WAL, so it never
+     *  contends with the raw write ops), opened via the raw-key fast path when the key is cached.
+     *  Built lazily by [thumbDao]; closed in [onDestroy]. */
+    private var thumbDb: SoilDatabase? = null
+    private val thumbDbMutex = kotlinx.coroutines.sync.Mutex()
 
     // ── Action mode (long-press) and destination-picking mode ────────────────
 
@@ -231,6 +243,10 @@ class PageIndexActivity : AppCompatActivity() {
 
     /** Key resolved for this notebook when [KeySession] was cold. See [resolveNotebookKey]. */
     private var resolvedKey: String? = null
+
+    /** This notebook's key scope per the global index (null = plaintext or unknown); set by
+     *  [resolveNotebookKey], consumed by the raw-key fast open paths. */
+    private var keyScope: com.notesprout.android.crypto.KeyScope? = null
 
     /** Pages whose template will be set once the picker returns (snapshot of the selection). */
     private var pendingTemplateTargets: List<String> = emptyList()
@@ -358,6 +374,17 @@ class PageIndexActivity : AppCompatActivity() {
         loadPagesAsync()
     }
 
+    override fun onDestroy() {
+        if (IndexGuard.bounced(this)) { super.onDestroy(); return }
+        super.onDestroy()
+        // lifecycleScope is cancelled by now; a render worker that raced the close reports through
+        // the pass's catch. Cached bitmaps are dropped to GC, not recycled (see thumbnailCache docs).
+        thumbDb?.close()
+        thumbDb = null
+        thumbnailCache.clear()
+        templateCache.clear()
+    }
+
     // ── Data loading ──────────────────────────────────────────────────────────
 
     /**
@@ -370,9 +397,12 @@ class PageIndexActivity : AppCompatActivity() {
      * Mirrors ExportActivity.resolveKey().
      */
     private suspend fun resolveNotebookKey(): String? {
+        // Scope is read up front (not only on a KeySession miss): the raw-key fast paths
+        // ([thumbDao], [loadPagesFromSoil]) need it to find the cached derived key.
+        val info = withContext(Dispatchers.IO) { indexRepo.getEncryptionInfo(notebookId) }
+        keyScope = info?.keyScope
         KeySession.getFor(notebookId)?.let { return it }
-        val info = withContext(Dispatchers.IO) { indexRepo.getEncryptionInfo(notebookId) } ?: return null
-        if (!info.encrypted) return null
+        if (info == null || !info.encrypted) return null
         val key = if (info.keyScope == com.notesprout.android.crypto.KeyScope.GLOBAL) {
             com.notesprout.android.crypto.PassphraseStore.getGlobalPassphrase(this)
         } else {
@@ -402,9 +432,14 @@ class PageIndexActivity : AppCompatActivity() {
     private fun notebookKey(): String? = KeySession.getFor(notebookId) ?: resolvedKey
 
     private fun loadPagesFromSoil(path: String, passphrase: String? = notebookKey()): List<PageEntry> {
-        // Any reload means page content/order may have changed → invalidate cached thumbnails.
-        thumbEpoch++
-        return loadPageRefs(path, passphrase).map { PageEntry(it.id, it.number, it.headingName) }
+        // Reloads do NOT invalidate [thumbnailCache]: entries are keyed by page id, and no reload
+        // source (move / delete / paste / cross-notebook op) changes a surviving page's content.
+        // The one in-screen content change — set template — invalidates its ids directly.
+        // Raw-key fast path only for THIS notebook (dest-notebook loads pass their own passphrase).
+        val rawKey = if (passphrase != null && path == notebookSoilPath) {
+            com.notesprout.android.crypto.KeyOpener.cachedRawKey(this, notebookId, keyScope)
+        } else null
+        return loadPageRefs(path, passphrase, rawKey).map { PageEntry(it.id, it.number, it.headingName) }
     }
 
     // ── Grid specification ────────────────────────────────────────────────────
@@ -517,40 +552,66 @@ class PageIndexActivity : AppCompatActivity() {
         renderVisibleThumbnails(pageItems.toList(), spec)
     }
 
+    /** [thumbnailCache] entry cap: the visible grid page + both prefetched neighbours. */
+    private fun thumbCacheCap(spec: GridSpec): Int = (spec.itemsPerPage * 3).coerceAtLeast(12)
+
+    /** Insert into the LRU and trim past [thumbCacheCap]. Main thread only. */
+    private fun cacheThumbnail(id: String, bitmap: android.graphics.Bitmap, spec: GridSpec) {
+        thumbnailCache[id] = bitmap
+        val cap = thumbCacheCap(spec)
+        val it = thumbnailCache.keys.iterator()
+        while (thumbnailCache.size > cap && it.hasNext()) { it.next(); it.remove() }
+    }
+
+    /**
+     * The shared thumbnail DAO — one Room connection for the whole visit, built on first use.
+     * Opened via [KeyOpener.roomFactoryFor]: with the derived key cached (the normal case) that is
+     * a raw-key open (~35 ms) instead of a fresh KDF (~300–700 ms), and either way the cost is paid
+     * once per visit rather than once per render pass.
+     */
+    private suspend fun thumbDao(path: String, key: String?): NotebookDao =
+        thumbDbMutex.withLock {
+            thumbDb?.let { return it.notebookDao() }
+            val builder = SoilDatabase.builder(this, path)
+            if (key != null) {
+                builder.openHelperFactory(
+                    com.notesprout.android.crypto.KeyOpener.roomFactoryFor(
+                        this, notebookId, java.io.File(path), keyScope, key,
+                    )
+                )
+            }
+            builder.build().also { thumbDb = it }.notebookDao()
+        }
+
     /**
      * Fill each currently-visible card with a page-preview thumbnail. On-demand replacement for the
      * removed per-page snapshot, with a [thumbnailCache] so state-only re-renders (selection, action
-     * mode, destination highlight, before/after toggle) reuse already-rendered bitmaps instead of
-     * re-rendering. Cache hits are set immediately; only misses open a Room connection and render via
-     * [NotebookExporter.renderPageThumbnail], caching the result. The cache is invalidated wholesale
-     * when [thumbEpoch] advances (any content/order reload) or the card size changes, and off-screen
-     * entries are evicted so memory stays bounded to one grid page.
+     * mode, destination highlight, before/after toggle) and revisited grid pages reuse
+     * already-rendered bitmaps. Cache hits are set immediately; misses render via
+     * [NotebookExporter.renderPageThumbnail] on the shared [thumbDao] connection, visible cards
+     * first, then the adjacent grid pages are prefetched into the cache so pagination lands warm.
+     * The cache is cleared only on a card-size change; entry lifetime is the LRU cap (see the
+     * field docs for why entries stay valid across reloads).
      */
     private fun renderVisibleThumbnails(items: List<PageEntry>, spec: GridSpec) {
         val path = notebookSoilPath ?: return
         if (items.isEmpty()) return
 
-        // Invalidate on content/order change or a card-size change; otherwise keep the cache.
-        if (thumbCacheEpoch != thumbEpoch || thumbCardW != spec.cardWidthPx || thumbCardH != spec.cardHeightPx) {
-            thumbnailCache.values.forEach { it.recycle() }
+        // A card-size change (first layout, form-factor change) makes every cached bitmap the
+        // wrong size — drop them all. Dropped, not recycled: GC reclaims pixel data safely even
+        // if a bitmap is still set on a detached ImageView.
+        if (thumbCardW != spec.cardWidthPx || thumbCardH != spec.cardHeightPx) {
             thumbnailCache.clear()
-            thumbCacheEpoch = thumbEpoch
+            templateCache.clear()
             thumbCardW = spec.cardWidthPx
             thumbCardH = spec.cardHeightPx
-        }
-
-        // Evict off-screen thumbnails (bounds memory to the visible grid page). Their previous
-        // ImageViews were detached by renderGridPage's removeAllViews, so recycling is safe.
-        val visibleIds = items.mapTo(HashSet()) { it.id }
-        thumbnailCache.entries.removeAll { (id, bmp) ->
-            (id !in visibleIds).also { if (it) bmp.recycle() }
         }
 
         // Cache hits: set immediately, no render work. Collect misses for the async pass.
         val misses = mutableListOf<PageEntry>()
         for (entry in items) {
-            val cached = thumbnailCache[entry.id]
-            if (cached != null && !cached.isRecycled) {
+            val cached = thumbnailCache[entry.id]   // get() marks LRU recency
+            if (cached != null) {
                 thumbnailTargets[entry.id]?.apply {
                     setImageBitmap(cached)
                     visibility = android.view.View.VISIBLE
@@ -559,25 +620,38 @@ class PageIndexActivity : AppCompatActivity() {
                 misses += entry
             }
         }
-        if (misses.isEmpty()) return
+
+        // Prefetch the next / previous grid pages after the visible misses so a pagination step
+        // usually finds its bitmaps already cached. Their cards aren't in [thumbnailTargets], so
+        // completion just fills the cache. (In cross-notebook dest mode these — like the visible
+        // cards — resolve against the source connection and come up empty; unchanged behaviour.)
+        val perPage = spec.itemsPerPage
+        val prefetch = mutableListOf<PageEntry>()
+        if (perPage > 0) {
+            val next = (currentGridPage + 1) * perPage
+            prefetch += pages.drop(next).take(perPage)
+            if (currentGridPage > 0) {
+                prefetch += pages.drop((currentGridPage - 1) * perPage).take(perPage)
+            }
+            prefetch.retainAll { it.id !in thumbnailCache }
+        }
+        if (misses.isEmpty() && prefetch.isEmpty()) return
 
         val key = notebookKey()
+        val work = misses + prefetch
         val job = lifecycleScope.launch {
             withContext(Dispatchers.IO) {
-                var db: SoilDatabase? = null
                 try {
-                    val builder = SoilDatabase.builder(this@PageIndexActivity, path)
-                    if (key != null) builder.openHelperFactory(SoilCrypto.roomFactory(key))
-                    db = builder.build()
-                    val dao = db.notebookDao()
-                    // Render misses in parallel across a small worker pool sharing this one Room
-                    // connection (WAL allows concurrent reads). Each worker pulls the next index off
-                    // a shared cursor and posts its bitmap to Main as it finishes, so cards fill in
-                    // progressively. Bounded to the cores actually available to keep CPU-bound stroke
-                    // parse + rasterization from over-subscribing.
+                    val dao = thumbDao(path, key)
+                    // Render in parallel across a small worker pool sharing the one Room connection
+                    // (WAL allows concurrent reads). Each worker pulls the next index off a shared
+                    // cursor — visible misses sit ahead of prefetch, so cards fill first — and posts
+                    // its bitmap to Main as it finishes, so cards fill in progressively. Bounded to
+                    // the cores actually available to keep CPU-bound stroke parse + rasterization
+                    // from over-subscribing.
                     val cursor = java.util.concurrent.atomic.AtomicInteger(0)
                     val workers = minOf(
-                        misses.size,
+                        work.size,
                         Runtime.getRuntime().availableProcessors().coerceAtLeast(1),
                         4,
                     )
@@ -586,13 +660,14 @@ class PageIndexActivity : AppCompatActivity() {
                             launch {
                                 while (isActive) {
                                     val i = cursor.getAndIncrement()
-                                    if (i >= misses.size) break
-                                    val entry = misses[i]
+                                    if (i >= work.size) break
+                                    val entry = work[i]
                                     // Per-page guard: one bad page must not blank the rest of the grid.
                                     val bitmap = try {
                                         val pageRow = dao.getObjectById(entry.id) ?: continue
                                         NotebookExporter.renderPageThumbnail(
-                                            dao, pageRow, this@PageIndexActivity, spec.cardWidthPx, spec.cardHeightPx,
+                                            dao, pageRow, this@PageIndexActivity,
+                                            spec.cardWidthPx, spec.cardHeightPx, templateCache,
                                         )
                                     } catch (e: kotlinx.coroutines.CancellationException) {
                                         throw e
@@ -601,13 +676,11 @@ class PageIndexActivity : AppCompatActivity() {
                                         null
                                     } ?: continue
                                     withContext(Dispatchers.Main) {
-                                        if (isActive) {
-                                            thumbnailCache[entry.id] = bitmap
-                                            thumbnailTargets[entry.id]?.apply {
-                                                setImageBitmap(bitmap)
-                                                visibility = android.view.View.VISIBLE
-                                            }
-                                        } else bitmap.recycle()
+                                        cacheThumbnail(entry.id, bitmap, spec)
+                                        thumbnailTargets[entry.id]?.apply {
+                                            setImageBitmap(bitmap)
+                                            visibility = android.view.View.VISIBLE
+                                        }
                                     }
                                 }
                             }
@@ -617,8 +690,6 @@ class PageIndexActivity : AppCompatActivity() {
                     throw e
                 } catch (e: Exception) {
                     Slog.d("PageIndex") { "thumbnail render pass failed: ${e.message}" }
-                } finally {
-                    db?.close()
                 }
             }
         }
@@ -1334,6 +1405,10 @@ class PageIndexActivity : AppCompatActivity() {
 
             val newId = soilTemplateId.takeIf { it.isNotEmpty() }
             pairs.forEach { (pageId, prev) -> templateChanges.add(Triple(pageId, prev, newId)) }
+
+            // The one in-screen operation that changes a page's rendered content — drop exactly
+            // the affected thumbnails so the exitActionMode re-render redraws them.
+            pairs.forEach { (pageId, _) -> thumbnailCache.remove(pageId) }
 
             if (libraryTemplateId.isNotEmpty()) {
                 TemplateRecentsManager.recordUse(this@PageIndexActivity, libraryTemplateId)

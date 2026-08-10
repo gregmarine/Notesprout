@@ -249,8 +249,10 @@ See [`docs/full-notebook-export.md`](full-notebook-export.md) for the `.soil` fo
 
 ## Page Index — Multi-Page Selection (`PageIndexActivity`)
 
-The page index is a paginated grid of page thumbnails (rendered on demand from page content for the
-visible pagination page — there is no stored per-page snapshot). Long-press enters **action mode**; the user can
+The page index is a paginated grid of page thumbnails (rendered on demand from page content — there
+is no stored per-page snapshot; a per-visit LRU + neighbour prefetch + raw-key fast open keep it
+quick, see the thumbnail section of [`docs/drawing-engine.md`](drawing-engine.md)). Long-press
+enters **action mode**; the user can
 then select any number of pages — across pagination — and apply every toolbar action to all of them at
 once. Calm/paper-like per `docs/design-system.md`: selection is shown with the existing card highlight
 (`bg_page_card_current`, 3dp inset border), no color, no Material chrome.
