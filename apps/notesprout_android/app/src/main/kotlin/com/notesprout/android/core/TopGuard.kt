@@ -23,6 +23,10 @@ import androidx.core.view.WindowInsetsCompat
  * Rule of thumb: the guard applies to anything the user taps. It does **not** constrain drawing —
  * canvases stay full-bleed and ink is welcome in the guard band. Drawing is excluded only from the
  * chrome's own bounds, which already follow the shifted toolbar.
+ *
+ * On Ratta (Supernote) the guard is **zero**: those devices have no pull-down status bar — apps get
+ * the full screen — so the hazard this band exists for does not apply, and chrome sits flush at the
+ * top edge. The 1dp top borders that chrome carries land on the bezel there, which is intentional.
  */
 object TopGuard {
 
@@ -31,6 +35,7 @@ object TopGuard {
 
     /** The guard height in pixels for this device. */
     fun heightPx(context: Context): Int {
+        if (isRattaDevice()) return 0
         val id = context.resources.getIdentifier("status_bar_height", "dimen", "android")
         if (id > 0) {
             val px = context.resources.getDimensionPixelSize(id)
