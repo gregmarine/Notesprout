@@ -466,7 +466,9 @@ Month and Week are structurally immune: `monthGeometry()` builds **square, width
 width-derived constant. Day has no such slack band.
 
 This bites on any canvas-height change: a different device, a backup restored onto different
-hardware, or a future toolbar-height tweak.
+hardware, or a future toolbar-height tweak. The 2026-08-10 Ratta full-screen change (top guard → 0
+on Supernote) was exactly such a one-time height change on the Nomad/Manta — accepted knowingly;
+pre-change Supernote Day-view ink re-spaced once. The restructure below remains the real fix.
 
 **Options considered** (Day view left misaligned for now, by decision):
 

@@ -727,7 +727,10 @@ regardless of the half on screen; the off-screen half's content is read straight
 **Native canvas size + toolbar top-margin.** New pages are the calendar canvas's exact pixel size, so
 content copies 1:1 with zero scaling. **But** the calendar canvas sits *below* its 56dp toolbar, while a
 notebook page's drawing area is full-screen with the toolbar **overlaid** on top. So the export reserves
-a blank top strip of height `root.height − calendarContent.height` (the toolbar + 1dp border):
+a blank top strip of height `root.height − calendarContent.height` — the top guard band + 1dp rule +
+56dp toolbar + 1dp rule, i.e. exactly the chrome height the destination notebook reserves on the same
+device (on Ratta the guard term is 0, so the strip is just the toolbar + rules; do **not** "fix" the
+formula to exclude the guard — it tracks the device's chrome by construction):
 
 - page height grows to `canvasH + topOffset`;
 - the grid is composited into the taller bitmap at `y = topOffset` (blank white above);

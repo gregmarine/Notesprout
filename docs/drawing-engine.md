@@ -152,6 +152,12 @@ applied to both files.** The collapse into a shared `CanvasNotebookView` base is
 firmware failure afterwards logs `Log.w` (survives release — never `Slog.d` here) and toasts once
 per view instance, then keeps running. Failures must be loud, never silently papered over.
 
+**True full-screen chrome.** Supernote has no pull-down status bar, so the app's top guard band is
+0 on Ratta (`TopGuard.heightPx()` gates on `isRattaDevice()`): the notebook toolbar and every
+immersive screen's chrome sit flush at the top edge. Nothing engine-side depends on the guard — the
+pen-exclusion band derives from the toolbar's laid-out rect and tracks it automatically. See
+`docs/design-system.md` (top guard band).
+
 ### How the firmware ink path works
 
 `SupernoteInk` is a thin binder client for the firmware ink daemon (`service_myservice`, raw

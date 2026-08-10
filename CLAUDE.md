@@ -121,7 +121,8 @@ information takes inkBlack and is made *smaller* to read as secondary) · `borde
   status bar down instead of tapping). Always via `core/TopGuard.kt` — `applyInsetPadding()` where the
   system bars are visible, `applyRootPadding()` on immersive screens (their inset is 0, so the inset
   listener alone does nothing). Applies to tap targets only — canvases stay full-bleed, and chrome
-  pushed off the edge needs its own 1dp inkBlack top border.
+  pushed off the edge needs its own 1dp inkBlack top border. **On Ratta (Supernote) the guard is 0**
+  (`heightPx()` gates on `isRattaDevice()` — no status-bar hazard, chrome sits flush at the top edge).
 
 Top guard details, AlertDialog styling + BOOX IME-dismissal patterns: [`docs/design-system.md`](docs/design-system.md).
 

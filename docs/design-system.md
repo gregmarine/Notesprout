@@ -115,7 +115,11 @@ hardcode a value or re-derive the inset:
 
 - `TopGuard.heightPx(context)` — the device's `status_bar_height`, read from the platform resource
   (24dp fallback). It resolves whether or not the bar is currently showing, so a top toolbar lands at
-  the same height on an immersive screen as it does in the library.
+  the same height on an immersive screen as it does in the library. **On Ratta (Supernote) it returns
+  0** — those devices have no pull-down status bar (apps get the full screen), so the hazard this band
+  exists for does not apply and every guard consumer collapses: chrome sits flush at the top edge.
+  The live-inset screens need nothing there either — Ratta reports a 0 top inset, so
+  `applyInsetPadding` was already a no-op.
 - `TopGuard.applyInsetPadding(root)` — for screens that leave the system bars **visible**. Pads by
   the live `systemBars()` inset (MainActivity's long-standing behaviour).
 - `TopGuard.applyInsetPadding(root, followIme = true)` — same, but the bottom padding also clears the
@@ -148,7 +152,9 @@ Scope — **the guard applies to anything the user taps, not to drawing bounds:*
   popovers, overflow menus, and secondary toolbars.
 
 Chrome that starts below the top edge needs a **1dp inkBlack top border** of its own — otherwise it
-floats. See `toolbar_background_top/_left/_right.xml` and `shape_toc_panel_border.xml`.
+floats. See `toolbar_background_top/_left/_right.xml` and `shape_toc_panel_border.xml`. (On Ratta the
+guard is 0 and these borders land on the physical top edge — intentional, invisible against the bezel,
+and still needed on BOOX.)
 
 Watch for layouts that shrink a canvas as a side effect: in a vertical `LinearLayout` root, root
 padding pushes the toolbar down *and* shortens everything below it. Prefer the `NotebookActivity`
