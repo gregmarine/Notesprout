@@ -315,9 +315,32 @@
                 android:text="Share" />
 
             <TextView
+                android:id="@+id/rowDestDrive"
+                style="@style/Widget.Notesprout.OptionRow"
+                android:text="Google Drive" />
+
+            <TextView
                 android:id="@+id/rowDestTemplate"
                 style="@style/Widget.Notesprout.OptionRow"
                 android:text="Save as template" />
+
+            <!-- Drive folder line: visible only for the Google Drive destination. Tapping it opens
+                 the folder picker; ExportActivity fills in the chosen path. -->
+            <TextView
+                android:id="@+id/rowDriveFolder"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:minHeight="44dp"
+                android:gravity="center_vertical"
+                android:textSize="14sp"
+                android:textColor="@color/inkBlack"
+                android:background="@drawable/shape_bordered"
+                android:paddingStart="12dp"
+                android:paddingEnd="12dp"
+                android:paddingTop="10dp"
+                android:paddingBottom="10dp"
+                android:layout_marginTop="8dp"
+                android:visibility="gone" />
 
             <!-- Resulting filename (read-only — the SAF picker is where it can be edited). -->
             <TextView

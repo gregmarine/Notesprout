@@ -279,6 +279,14 @@ This is required before the Drive OAuth flow will succeed.
 | `RestoreEngine` | `data/backup/RestoreEngine.kt` | Staging-first, aside-swap restore + `recoverInterrupted()` launch repair |
 | `BackupSettingsActivity` | `BackupSettingsActivity.kt` | The Backup Settings screen (destinations, Back Up Now, Restore) |
 
+> **Shared with the export screen.** `DriveAuth`/`DriveTokenStore`/`DriveApiClient` also power the
+> export screen's **Google Drive destination** (see
+> [`full-notebook-export.md`](full-notebook-export.md)): same OAuth connection and token, uploads to
+> a separate app-owned root **"Notesprout Exports"** (`ROOT_EXPORT_FOLDER`), never "Notesprout
+> Backups". Connecting Drive from the export screen writes `driveAccountEmail` into the backup
+> config so this screen shows "Connected", but deliberately does **not** flip `driveEnabled` — an
+> export connection must not silently opt the device into backups.
+
 ---
 
 ## Backup Settings Screen

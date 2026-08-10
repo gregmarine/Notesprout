@@ -32,6 +32,10 @@ private const val FILES = "https://www.googleapis.com/drive/v3/files"
 private const val UPLOAD = "https://www.googleapis.com/upload/drive/v3/files"
 private const val ABOUT = "https://www.googleapis.com/drive/v3/about?fields=user(emailAddress,displayName)"
 const val ROOT_BACKUP_FOLDER = "Notesprout Backups"
+/** App-owned root for the export screen's Google Drive destination. With the `drive.file` scope
+ *  the app can only see folders it created, so exports live under this tree — the picker browses
+ *  and creates folders inside it, never the user's wider Drive. */
+const val ROOT_EXPORT_FOLDER = "Notesprout Exports"
 
 private val codec = Json { ignoreUnknownKeys = true }
 

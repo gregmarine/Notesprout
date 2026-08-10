@@ -39,7 +39,7 @@ enum class PageScope { ALL, CURRENT, SELECTED }
 
 /** Where the finished file(s) go. */
 @Serializable
-enum class ExportDestination { SAVE, SHARE, TEMPLATE }
+enum class ExportDestination { SAVE, SHARE, TEMPLATE, DRIVE }
 
 /**
  * What to do with an encrypted notebook's key when exporting a portable `.soil`.
@@ -73,6 +73,12 @@ data class ExportSpec(
     val soilKeying: SoilKeying = SoilKeying.KEEP,
     /** The new passphrase for [SoilKeying.NEW]. */
     val newSoilPassphrase: String? = null,
+    /**
+     * Folder path segments under the app-owned Drive root ("Notesprout Exports") for
+     * [ExportDestination.DRIVE]. Names, not Drive ids — the chain is find-or-created at upload
+     * time, so a path chosen in the picker but never exported to creates nothing remotely.
+     */
+    val drivePath: List<String> = emptyList(),
 ) {
     val pageIds: List<String> get() = pages.map { it.id }
 

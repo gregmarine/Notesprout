@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Google Drive export-folder picker (DriveFolderPickerDialog). Browses the app-owned
+  "Notesprout Exports" tree only — the drive.file scope cannot see anything else.
+  Rows (Up / subfolders / New folder…) are inflated into folderRows by the dialog.
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:padding="16dp">
+
+    <!-- Current path, e.g. "Notesprout Exports / Work". -->
+    <TextView
+        android:id="@+id/tvPickerPath"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:textSize="14sp"
+        android:textStyle="bold"
+        android:textColor="@color/inkBlack"
+        android:layout_marginBottom="8dp" />
+
+    <TextView
+        android:id="@+id/tvPickerStatus"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:textSize="14sp"
+        android:textColor="@color/inkBlack"
+        android:visibility="gone" />
+
+    <!-- wrap_content + the dialog window's own height cap = the list scrolls when deep. -->
+    <ScrollView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:fadeScrollbars="false">
+
+        <LinearLayout
+            android:id="@+id/folderRows"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical" />
+    </ScrollView>
+
+</LinearLayout>

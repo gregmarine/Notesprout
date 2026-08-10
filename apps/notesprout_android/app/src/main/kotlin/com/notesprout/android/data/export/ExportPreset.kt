@@ -31,6 +31,8 @@ data class ExportPreset(
     val usePdfPassword: Boolean = false,
     /** For `.soil` of an encrypted notebook. `NEW` re-prompts for the passphrase on selection. */
     val soilKeying: SoilKeying = SoilKeying.KEEP,
+    /** Drive folder path (names under "Notesprout Exports") for [ExportDestination.DRIVE]. */
+    val drivePath: List<String> = emptyList(),
 ) {
     /** True when applying this preset must open a prompt to collect a secret it cannot store. */
     val needsSecret: Boolean
@@ -47,6 +49,7 @@ data class ExportPreset(
             stickyEndnotes = spec.stickyEndnotes,
             usePdfPassword = spec.pdfPassword != null,
             soilKeying = spec.soilKeying,
+            drivePath = spec.drivePath,
         )
     }
 }
