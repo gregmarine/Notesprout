@@ -203,6 +203,7 @@ class RattaNotebookView(context: Context) : View(context), NotebookView {
 
     override fun onWindowFocusChanged(hasWindowFocus: Boolean) {
         super.onWindowFocusChanged(hasWindowFocus)
+        Slog.d(TAG) { "onWindowFocusChanged $hasWindowFocus (${width}x$height attached=$isAttachedToWindow)" }
         // The view stays attached across a task switch, so onAttachedToWindow won't re-run.
         // While we're away the firmware hands the pen to other apps and resets full-UI ink,
         // so a focus gain must re-assert the WHOLE setup, not just re-enable.
@@ -213,6 +214,7 @@ class RattaNotebookView(context: Context) : View(context), NotebookView {
         overlayClearArmed = false
         removeCallbacks(overlayClearRunnable)
         if (firmware && inkOwner === this) {
+            Slog.d(TAG) { "onDetachedFromWindow: tearing down firmware ink (we own it)" }
             releaseFirmwareOverlay()
             // Full-screen disable, not clearDisableAreas: between this view's death and the
             // next drawing surface's setup nothing should let the firmware paint stray ink.
@@ -227,10 +229,36 @@ class RattaNotebookView(context: Context) : View(context), NotebookView {
     /** (Re-)claim the firmware pen and turn on full-UI ink. Idempotent; safe to call often. */
     private fun setupFirmwareInk() {
         if (!firmware) return
+        Slog.d(TAG) { "setupFirmwareInk view=${width}x$height screen=${screenW}x$screenH " +
+            "ownerWasUs=${inkOwner === this}" }
         inkOwner = this   // process-global claim — a predecessor's late teardown now skips
+        penApproachRearmPending = true
         SupernoteInk.claimPen()
         SupernoteInk.enableFullUiAuto(context, true)
         SupernoteInk.enableAutoRegal(context, true)   // anti-ghosting waveform; keeps handoffs clean
+        applyToolToFirmware()
+    }
+
+    /**
+     * One-shot re-assert of the whole firmware session on the first stylus approach after a
+     * [setupFirmwareInk]. An arming issued from attach/focus-gain can land mid-window-transition
+     * and be silently dropped by the daemon — measured on the create→immediately-open path, where
+     * a logcat-complete, correct arming sequence still produced a dead session (no live ink, no
+     * bake) until the next re-arm. The hover stream is the guaranteed pre-contact moment (overlay
+     * law 3's channel), and by the time the pen approaches, this window is definitively front —
+     * so re-assert once there. Direct calls rather than [setupFirmwareInk] so the firing doesn't
+     * re-arm its own one-shot. Ordering: runs BEFORE the barrel/lasso hover suppressors on the
+     * same event, whose re-evaluation immediately re-applies any transient full-screen disable
+     * this re-arm just cleared.
+     */
+    private var penApproachRearmPending = false
+
+    private fun rearmOnPenApproach() {
+        if (!firmware || !penApproachRearmPending || inkOwner !== this) return
+        penApproachRearmPending = false
+        Slog.d(TAG) { "pen-approach re-arm" }
+        SupernoteInk.claimPen()
+        SupernoteInk.enableFullUiAuto(context, true)
         applyToolToFirmware()
     }
 
@@ -239,6 +267,7 @@ class RattaNotebookView(context: Context) : View(context), NotebookView {
         // A successor already set up (translucent scratch pad / sticky editor over us):
         // the firmware is theirs now — touching it would kill their live ink.
         if (inkOwner !== this) return
+        Slog.d(TAG) { "teardownFirmwareInk" }
         releaseFirmwareOverlay()
         // "Drop the pen claim": the firmware has no unclaim transaction, so the enforceable
         // equivalent is a full-screen disable — while we are unfocused (dialog up, task
@@ -375,6 +404,8 @@ class RattaNotebookView(context: Context) : View(context), NotebookView {
         if (!firmware) return
         barrelDown = false   // a tool push supersedes the transient barrel disable
         lassoHoverSuppressed = false   // ditto the hover-ahead drag suppress (re-asserted on next hover)
+        Slog.d(TAG) { "applyToolToFirmware suppressed=$firmwareSuppressed lasso=$isLassoMode " +
+            "lassoEraser=$isLassoEraserMode eraser=$isEraserActive" }
         if (firmwareSuppressed) {
             // Text placement / shape transform / drag-move: handles, placement tap and the
             // drag preview are all Canvas-drawn — no firmware ink anywhere.
@@ -516,6 +547,7 @@ class RattaNotebookView(context: Context) : View(context), NotebookView {
 
     override fun onHoverEvent(event: MotionEvent): Boolean {
         compensateRegistration(event)
+        rearmOnPenApproach()
         updateBarrelSuppress(event)
         updateLassoDragHoverSuppress(event)
         return super.onHoverEvent(event)
@@ -525,6 +557,7 @@ class RattaNotebookView(context: Context) : View(context), NotebookView {
     // rather than a buttonState change on the hover stream — catch those too.
     override fun onGenericMotionEvent(event: MotionEvent): Boolean {
         compensateRegistration(event)
+        rearmOnPenApproach()
         updateBarrelSuppress(event)
         updateLassoDragHoverSuppress(event)
         return super.onGenericMotionEvent(event)
@@ -791,6 +824,7 @@ class RattaNotebookView(context: Context) : View(context), NotebookView {
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
+        Slog.d(TAG) { "onSizeChanged ${w}x$h (was ${oldw}x$oldh) attached=$isAttachedToWindow" }
         if (w == 0 || h == 0) return
         committedNode.setPosition(0, 0, w, h)
         // redrawCanvas records white → template → strokes into the node in one pass, so any strokes
@@ -816,6 +850,9 @@ class RattaNotebookView(context: Context) : View(context), NotebookView {
                 MotionEvent.ACTION_DOWN -> {
                     penDown = true
                     strokeSawBarrel = false   // updateBarrelSuppress re-sets it just below
+                    // No-hover backstop for the pen-approach re-arm (law 3 makes this too
+                    // late for THIS stroke's paint, but it heals the session for the rest).
+                    rearmOnPenApproach()
                     // Fresh EMR contact: fire any armed gesture-trace clear before this
                     // contact produces new overlay ink (covers all modes — the gate runs
                     // before per-mode dispatch).
@@ -2018,11 +2055,13 @@ class RattaNotebookView(context: Context) : View(context), NotebookView {
     // touch process-global firmware state, so they only act while this view owns it.
     override fun enableDrawing() {
         if (!firmware || inkOwner !== this) return
+        Slog.d(TAG) { "enableDrawing" }
         applyToolToFirmware()   // restores disable areas + the armed tool's pen state
     }
 
     override fun disableDrawing() {
         if (!firmware || inkOwner !== this) return
+        Slog.d(TAG) { "disableDrawing" }
         // Bake first: hosts that switch views inside one window (day window Note→Events)
         // cross no focus boundary, so pending overlay ink would float above the new view.
         releaseFirmwareOverlay()
@@ -2036,6 +2075,7 @@ class RattaNotebookView(context: Context) : View(context), NotebookView {
     // runs before its onDestroy, so claiming here flips [inkOwner] back to us and defuses
     // that host's late focus-loss/detach teardown.
     override fun resumeDrawing() {
+        Slog.d(TAG) { "resumeDrawing view=${width}x$height" }
         if (width > 0 && height > 0) setupFirmwareInk()
         // else not laid out yet — onSizeChanged runs the setup after first layout.
     }
@@ -2050,6 +2090,7 @@ class RattaNotebookView(context: Context) : View(context), NotebookView {
     // stop painting full-UI ink — the successor's own setup re-claims and re-enables.
     override fun releaseForHandoff() {
         if (!firmware || inkOwner !== this) return
+        Slog.d(TAG) { "releaseForHandoff" }
         releaseFirmwareOverlay()
         SupernoteInk.enableFullUiAuto(context, false)
         // inkOwner stays ours: if the successor never claims (edge), our detach cleans up;

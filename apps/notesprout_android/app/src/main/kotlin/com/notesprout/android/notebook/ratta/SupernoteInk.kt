@@ -5,6 +5,7 @@ import android.graphics.Rect
 import android.os.IBinder
 import android.os.Parcel
 import android.util.Log
+import com.notesprout.android.core.Slog
 
 /**
  * Binder client for the Supernote (Ratta) firmware's stylus ink daemon.
@@ -149,56 +150,77 @@ object SupernoteInk {
     }
 
     /** tx=0 WRITE_APP_INFO — claim pen ownership for this app. */
-    fun claimPen() = transact(TX_WRITE_APP_INFO) {
-        it.writeInt(0)
-        it.writeInt(0)
+    fun claimPen() {
+        Slog.d(TAG) { "claimPen" }
+        transact(TX_WRITE_APP_INFO) {
+            it.writeInt(0)
+            it.writeInt(0)
+        }
     }
 
     /** tx=2 PEN — set active pen type, EMR size, and color. */
-    fun setPen(type: Int, sizeEmr: Int, color: Int) = transact(TX_PEN) {
-        it.writeInt(type)
-        it.writeInt(sizeEmr)
-        it.writeInt(color)
+    fun setPen(type: Int, sizeEmr: Int, color: Int) {
+        Slog.d(TAG) { "setPen type=$type emr=$sizeEmr color=$color" }
+        transact(TX_PEN) {
+            it.writeInt(type)
+            it.writeInt(sizeEmr)
+            it.writeInt(color)
+        }
     }
 
     /** tx=2 PEN — configure the firmware eraser (type 1 = round, 3 = rectangular). */
-    fun setEraser(rectangular: Boolean, sizeEmr: Int) = transact(TX_PEN) {
-        it.writeInt(if (rectangular) 3 else 1)
-        it.writeInt(sizeEmr)
-        it.writeInt(255)
+    fun setEraser(rectangular: Boolean, sizeEmr: Int) {
+        Slog.d(TAG) { "setEraser rectangular=$rectangular emr=$sizeEmr" }
+        transact(TX_PEN) {
+            it.writeInt(if (rectangular) 3 else 1)
+            it.writeInt(sizeEmr)
+            it.writeInt(255)
+        }
     }
 
     /** tx=6 DRAW_BUFFER — clear the EPDC ink overlay (after baking strokes into our layer). */
-    fun clearAll() = transact(TX_DRAW_BUFFER) {
-        it.writeInt(255)
-        it.writeInt(0)
+    fun clearAll() {
+        Slog.d(TAG) { "clearAll" }
+        transact(TX_DRAW_BUFFER) {
+            it.writeInt(255)
+            it.writeInt(0)
+        }
     }
 
     /** tx=1 DISABLE_AREA — one full-screen rect where the firmware must not paint. */
-    fun setFullScreenDisable(width: Int, height: Int) = transact(TX_DISABLE_AREA) {
-        it.writeInt(1)          // rect count
-        it.writeInt(0)          // x
-        it.writeInt(0)          // y
-        it.writeInt(width)
-        it.writeInt(height)
-        it.writeInt(0)          // reserved / flags
+    fun setFullScreenDisable(width: Int, height: Int) {
+        Slog.d(TAG) { "setFullScreenDisable ${width}x$height" }
+        transact(TX_DISABLE_AREA) {
+            it.writeInt(1)          // rect count
+            it.writeInt(0)          // x
+            it.writeInt(0)          // y
+            it.writeInt(width)
+            it.writeInt(height)
+            it.writeInt(0)          // reserved / flags
+        }
     }
 
     /** tx=1 DISABLE_AREA — keep firmware ink off the given rects (screen coords, e.g. our toolbar). */
-    fun setDisableAreas(rects: List<Rect>) = transact(TX_DISABLE_AREA) { p ->
-        p.writeInt(rects.size)
-        for (r in rects) {
-            p.writeInt(r.left)
-            p.writeInt(r.top)
-            p.writeInt(r.width())
-            p.writeInt(r.height())
-            p.writeInt(0)
+    fun setDisableAreas(rects: List<Rect>) {
+        Slog.d(TAG) { "setDisableAreas ${rects.joinToString { it.toShortString() }}" }
+        transact(TX_DISABLE_AREA) { p ->
+            p.writeInt(rects.size)
+            for (r in rects) {
+                p.writeInt(r.left)
+                p.writeInt(r.top)
+                p.writeInt(r.width())
+                p.writeInt(r.height())
+                p.writeInt(0)
+            }
         }
     }
 
     /** tx=1 DISABLE_AREA — clear all disable areas (firmware may paint everywhere). */
-    fun clearDisableAreas() = transact(TX_DISABLE_AREA) {
-        it.writeInt(0)          // zero rects
+    fun clearDisableAreas() {
+        Slog.d(TAG) { "clearDisableAreas" }
+        transact(TX_DISABLE_AREA) {
+            it.writeInt(0)          // zero rects
+        }
     }
 
     private fun einkService(context: Context): Any? =

@@ -288,6 +288,20 @@ day window's Note→Events, cross no focus boundary). `releaseResources()` ends 
 disable, not `clearDisableAreas()` — device-confirmed harmless system-wide (the daemon resets
 per-claim state; the system's own notes app inks fine after leaving).
 
+**Pen-approach re-arm (the daemon can drop an arming).** An arming issued from attach/focus-gain
+can land mid-window-transition and be silently ignored by the daemon: measured on the
+create-notebook→immediately-open path (Manta, 2026-08-11), a logcat-complete, byte-identical
+correct arming sequence (claim → full-UI ink → areas → pen) still produced a fully dead session —
+no live overlay ink, no canvas bake (the deferred-handoff design shows *nothing* when the overlay
+is dead), strokes still captured and saved — until the next natural re-arm (reopen). Intermittent;
+same family as the eaten clears (law 2). Remedy in the same spirit as the clear ladder:
+`setupFirmwareInk` arms a one-shot, and the **first stylus approach** afterwards re-asserts the
+whole session (`rearmOnPenApproach()` — claim + full-UI ink + tool/area push) from the hover
+stream, law 3's guaranteed pre-contact channel; a pen-down backstop covers a no-hover contact
+(too late for that stroke's paint, heals the rest). It runs *before* the barrel/lasso hover
+suppressors on the same event, so a transient full-screen disable it clears is immediately
+re-applied by their re-evaluation. Cost: four binder transactions once per screen entry.
+
 ### Live-vs-baked appearance
 
 - **Registration.** The `MotionEvent` stream lands slightly **left** of the physical tip; the live
