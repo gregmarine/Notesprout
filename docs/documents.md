@@ -140,6 +140,18 @@ physical keyboard the editor refuses an input connection at all, so the inset st
 keeps the full screen. See [`design-system.md`](design-system.md) for why the manifest's `adjustResize`
 is not sufficient on its own.
 
+> **Ratta exception (2026-08-11):** on Supernote, hardware keys are routed through the IME and the
+> IME translates them **only while it is shown** — with it hidden the firmware drops the keys before
+> the app sees anything at all (measured on the Nomad: soft keyboard hidden, not one key event
+> reached `dispatchKeyEvent`; shown, typing worked). Keeping the input connection alone was tried
+> first and was *not* enough. So on `isRattaDevice()` an attached keyboard is not a reason to hide
+> the soft keyboard: the editor behaves exactly as it does for soft typing, and Supernote itself
+> keeps the panel off-screen while a hardware keyboard is attached, so no room is lost. The
+> long-press-Write override still forces it away — on Ratta that trades typing for reading room.
+> Two costs: Ratta's IME sits upstream and consumes the key-**downs** (only key-ups reach the app),
+> so Ctrl shortcuts may be claimed before the app sees them — untested there; and the BOOX
+> refuse-the-connection defense never runs on Ratta.
+
 ---
 
 ## Four invariants

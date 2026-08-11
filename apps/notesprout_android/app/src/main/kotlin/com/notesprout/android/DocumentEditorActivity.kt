@@ -29,6 +29,7 @@ import androidx.core.content.ContextCompat
 import com.notesprout.android.core.DocumentPreferences
 import com.notesprout.android.core.Slog
 import com.notesprout.android.core.TopGuard
+import com.notesprout.android.core.isRattaDevice
 import com.notesprout.android.core.markdown.DocumentDraft
 import com.notesprout.android.core.markdown.EditableBuffer
 import com.notesprout.android.core.markdown.MarkdownFormatter
@@ -1022,7 +1023,8 @@ class DocumentEditorActivity : AppCompatActivity() {
      * No combination has to be avoided for the IME's sake: with a physical keyboard attached the
      * editor refuses an input connection entirely (see [applyKeyboardMode]), so no input method sits
      * upstream in the key path to claim a shortcut before the app sees it — including the Ctrl+Shift
-     * chords that otherwise cycle soft keyboards.
+     * chords that otherwise cycle soft keyboards. On Ratta the connection stays (hardware typing
+     * arrives only through it there), so its IME sits upstream and may claim a chord first.
      */
     private fun handleShortcut(event: KeyEvent): Boolean {
         val shift = event.isShiftPressed
@@ -1070,10 +1072,19 @@ class DocumentEditorActivity : AppCompatActivity() {
      * what stops a soft keyboard from swallowing Ctrl shortcuts (BOOX's input-method switcher being
      * the offender) or popping open mid-sentence. Typing is unaffected — hardware key events go
      * straight to the editor's key listener.
+     *
+     * **Except on Ratta**, where hardware keys are routed through the IME and the IME translates
+     * them only while it is *shown* — hide it and the firmware drops the keys before the app sees
+     * anything at all (measured on the Nomad: with the soft keyboard hidden, not one key event
+     * reached `dispatchKeyEvent`; shown, typing worked and only the key-ups passed through). So on
+     * Ratta an attached keyboard is not a reason to hide the soft keyboard: the IME stays up and
+     * connected, exactly as it would for soft typing. The long-press-Write override still forces it
+     * away — that is the user trading typing for screen room, and the toast announces the state.
      */
     private fun applyKeyboardMode() {
-        val wantSoftKeyboard = softKeyboardOverride ?: !physicalKeyboardAttached()
-        editor.suppressImeSession = !wantSoftKeyboard
+        val wantSoftKeyboard = softKeyboardOverride
+            ?: (isRattaDevice() || !physicalKeyboardAttached())
+        editor.suppressImeSession = !wantSoftKeyboard && !isRattaDevice()
         editor.showSoftInputOnFocus = wantSoftKeyboard
         // Rebuild (or tear down) the input connection so the change takes effect immediately.
         imm()?.restartInput(editor)
