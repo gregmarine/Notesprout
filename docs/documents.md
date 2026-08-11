@@ -148,9 +148,9 @@ is not sufficient on its own.
 > the soft keyboard: the editor behaves exactly as it does for soft typing, and Supernote itself
 > keeps the panel off-screen while a hardware keyboard is attached, so no room is lost. The
 > long-press-Write override still forces it away — on Ratta that trades typing for reading room.
-> Two costs: Ratta's IME sits upstream and consumes the key-**downs** (only key-ups reach the app),
-> so Ctrl shortcuts may be claimed before the app sees them — untested there; and the BOOX
-> refuse-the-connection defense never runs on Ratta.
+> Ratta's IME consumes the key-downs it translates into text (those arrive as key-ups only), but it
+> passes Ctrl chords through untouched — **the Ctrl shortcuts work on Supernote** (user-verified,
+> 2026-08-11). The one cost is that the BOOX refuse-the-connection defense never runs on Ratta.
 
 ---
 
