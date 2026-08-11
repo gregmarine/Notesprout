@@ -594,34 +594,16 @@
         android:id="@+id/penColorPanel"
         layout="@layout/panel_pen_color" />
 
-    <!-- Opening overlay — shown only while an encrypted notebook is unlocking + loading the first
-         page. Intercepts all touches while visible. Never shown for plaintext notebooks. -->
-    <FrameLayout
+    <!-- Opening overlay — shown on every notebook open (any entry point, incl. cross-notebook
+         links) until the first page renders. Also raised by this activity's own cross-notebook
+         switch paths (link follow, back-swipe, recents, page-index open) so the popup appears at
+         tap time, before the teardown + relaunch. Never shown for page flips or same-notebook
+         link navigation. Shared layout — OpeningOverlay shows the same one in other hosts. -->
+    <include
         android:id="@+id/openingOverlay"
+        layout="@layout/overlay_opening"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:visibility="gone"
-        android:clickable="true"
-        android:focusable="true"
-        android:background="@color/paperWhite">
-
-        <LinearLayout
-            android:layout_gravity="center"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:background="@drawable/shape_bordered"
-            android:padding="24dp">
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="Opening…"
-                android:textColor="@color/inkBlack"
-                android:textSize="16sp" />
-
-        </LinearLayout>
-
-    </FrameLayout>
+        android:visibility="gone" />
 
 </FrameLayout>

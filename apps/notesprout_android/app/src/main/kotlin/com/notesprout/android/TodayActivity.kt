@@ -278,11 +278,14 @@ class TodayActivity : AppCompatActivity() {
         item.tvNotebookTime.text = notebookTime(notebook)
 
         item.notebookRow.setOnClickListener {
-            startActivity(
-                Intent(this, NotebookActivity::class.java)
-                    .putExtra(NotebookActivity.EXTRA_NOTEBOOK_ID, notebook.id)
-                    .putExtra(NotebookActivity.EXTRA_NOTEBOOK_NAME, notebook.name)
-            )
+            // Tap-time "Opening…" overlay; the destination keeps it up until its first page renders.
+            com.notesprout.android.core.OpeningOverlay.showThen(this) {
+                startActivity(
+                    Intent(this, NotebookActivity::class.java)
+                        .putExtra(NotebookActivity.EXTRA_NOTEBOOK_ID, notebook.id)
+                        .putExtra(NotebookActivity.EXTRA_NOTEBOOK_NAME, notebook.name)
+                )
+            }
         }
         return item.root
     }

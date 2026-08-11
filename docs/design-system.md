@@ -177,3 +177,30 @@ equal to the stroke width (2dp) so the border isn't covered.
 - On some BOOX devices the IME does not auto-dismiss on dialog close. Always explicitly hide in button click handlers — **not** `setOnDismissListener`.
 - Use `imm.hideSoftInputFromWindow(editText.windowToken, 0)` while the dialog is still alive. `setNegativeButton("Cancel", null)` must become a real listener that also hides the IME.
 - Never use the activity's `window.decorView.windowToken` — the IME is bound to the dialog's window and ignores hide requests from the wrong token.
+
+**"Opening…" overlay — every notebook open shows one, from the tap itself:**
+
+Opening a notebook is the app's one slow navigation (seal the old file, relaunch, open the `.soil`,
+load the first page — most noticeable on Supernote), so it gets progress feedback nothing else does:
+a centered "Opening…" box (`layout/overlay_opening.xml` — `shape_dialog_bordered`, 2dp, floating
+per the border-weight rule above) inside a full-screen **transparent** touch shield, floating over
+whatever is on screen so only the box region repaints. Page flips and same-notebook link navigation
+never show it.
+
+- **Both ends show the same overlay.** The *source* screen raises it the moment the open is
+  requested — `core/OpeningOverlay.showThen(activity) { launch }` at every launch site (library,
+  Today, day-window lists/dialog, calendar hand-offs, and `NotebookActivity`'s own link-follow,
+  back-swipe, recents-switch, and page-index-open paths). The *destination* `NotebookActivity` shows
+  its own copy (`binding.openingOverlay`, an `<include>` of the same layout) from its first frame
+  until the first page renders (`loadStrokes` hides it; `failOpen` on error), reading as one
+  continuous indicator from tap to page.
+- **The frame-commit contract is the whole point.** `showThen` waits for the overlay's pre-draw and
+  only then posts the launch work. Setting the view visible and continuing in a coroutine does NOT
+  work: Android's `Dispatchers.Main` is an **async** handler, and its resumptions jump the view
+  traversal's sync barrier — the teardown (cover snapshot, seal, relaunch) runs before the overlay
+  ever reaches the screen. Any "show feedback, then do heavy main-thread work" flow must sequence
+  through `showThen` (or an equivalent pre-draw + `post` chain).
+- The invisible full-screen shield swallows all touches while visible — the double-tap a slow e-ink
+  refresh invites cannot hit the source screen twice. `OpeningOverlay` auto-hides on the next
+  resume-after-pause for hosts that stay on the back stack; aborted launches call
+  `OpeningOverlay.hide()` explicitly.

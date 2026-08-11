@@ -470,6 +470,9 @@ a **MainActivity recents browse mode** (notebook cards) and a **NotebookActivity
   `getTimeFormat`), paginated over the resolved list; empty state "No recent notebooks".
 - **Tap → open** calls `launchNotebookActivity(entity)` directly (no mode-clearing). The recents mode
   stays active in both memory and prefs, so closing the notebook returns to the recents screen.
+  `launchNotebookActivity` (every library open) raises the tap-time "Opening…" overlay via
+  `OpeningOverlay.showThen` — see the overlay pattern in
+  [`design-system.md`](design-system.md) — on top of its 800ms double-tap debounce.
 - **Recents persistence:** `enterRecentsMode` saves `recentsMode=true` to `AppStateManager`;
   `exitRecentsMode` clears it. On cold launch, recents mode is restored via `applyRecentsModeUI()`.
 

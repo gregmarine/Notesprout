@@ -1116,11 +1116,14 @@ class DayDetailActivity : AppCompatActivity() {
     }
 
     private fun openNotebookFromList(notebookId: String, notebookName: String) {
-        startActivity(
-            Intent(this, NotebookActivity::class.java)
-                .putExtra(NotebookActivity.EXTRA_NOTEBOOK_ID, notebookId)
-                .putExtra(NotebookActivity.EXTRA_NOTEBOOK_NAME, notebookName)
-        )
+        // Tap-time "Opening…" overlay; the destination keeps it up until its first page renders.
+        com.notesprout.android.core.OpeningOverlay.showThen(this) {
+            startActivity(
+                Intent(this, NotebookActivity::class.java)
+                    .putExtra(NotebookActivity.EXTRA_NOTEBOOK_ID, notebookId)
+                    .putExtra(NotebookActivity.EXTRA_NOTEBOOK_NAME, notebookName)
+            )
+        }
     }
 
     // ── Page load ────────────────────────────────────────────────────────────────
@@ -1817,17 +1820,20 @@ class DayDetailActivity : AppCompatActivity() {
 
     private fun openNotebookWithPaste(destId: String, destName: String, content: NotesproutClipboard.ClipboardContent) {
         CalendarTransfer.pending = content
-        // Hand the shared BOOX pen pipeline to the destination notebook cleanly before it opens its
-        // own — otherwise this view's late onDestroy close is merely skipped by the ownership guard,
-        // leaving a dangling raw-input session.
-        drawingView.releaseForHandoff()
-        startActivity(
-            Intent(this, NotebookActivity::class.java)
-                .putExtra(NotebookActivity.EXTRA_NOTEBOOK_ID, destId)
-                .putExtra(NotebookActivity.EXTRA_NOTEBOOK_NAME, destName)
-                .putExtra(NotebookActivity.EXTRA_PASTE_PENDING, true)
-        )
-        finish()
+        // Tap-time "Opening…" overlay; the destination keeps it up until its first page renders.
+        com.notesprout.android.core.OpeningOverlay.showThen(this) {
+            // Hand the shared BOOX pen pipeline to the destination notebook cleanly before it opens
+            // its own — otherwise this view's late onDestroy close is merely skipped by the
+            // ownership guard, leaving a dangling raw-input session.
+            drawingView.releaseForHandoff()
+            startActivity(
+                Intent(this, NotebookActivity::class.java)
+                    .putExtra(NotebookActivity.EXTRA_NOTEBOOK_ID, destId)
+                    .putExtra(NotebookActivity.EXTRA_NOTEBOOK_NAME, destName)
+                    .putExtra(NotebookActivity.EXTRA_PASTE_PENDING, true)
+            )
+            finish()
+        }
     }
 
     // ── Sticky notes ────────────────────────────────────────────────────────────

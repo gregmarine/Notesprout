@@ -1343,11 +1343,16 @@ class MainActivity : AppCompatActivity() {
         val now = android.os.SystemClock.elapsedRealtime()
         if (now - lastNotebookLaunchAt < 800) return
         lastNotebookLaunchAt = now
-        val intent = Intent(this, NotebookActivity::class.java).apply {
-            putExtra(NotebookActivity.EXTRA_NOTEBOOK_ID,   entity.id)
-            putExtra(NotebookActivity.EXTRA_NOTEBOOK_NAME, entity.name)
+        // Tap-time "Opening…" overlay: shown here, launched once its frame is on screen, and the
+        // destination notebook keeps it up until the first page renders. See OpeningOverlay.
+        com.notesprout.android.core.OpeningOverlay.showThen(this) {
+            startActivity(
+                Intent(this, NotebookActivity::class.java).apply {
+                    putExtra(NotebookActivity.EXTRA_NOTEBOOK_ID,   entity.id)
+                    putExtra(NotebookActivity.EXTRA_NOTEBOOK_NAME, entity.name)
+                }
+            )
         }
-        startActivity(intent)
     }
 
     // ── Pagination ────────────────────────────────────────────────────────────

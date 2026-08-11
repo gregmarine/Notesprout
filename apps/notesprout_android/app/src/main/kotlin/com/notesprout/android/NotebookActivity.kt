@@ -713,19 +713,23 @@ class NotebookActivity : AppCompatActivity() {
             val openNotebookId   = data?.getStringExtra(PageIndexActivity.EXTRA_OPEN_NOTEBOOK_ID)
             val openNotebookName = data?.getStringExtra(PageIndexActivity.EXTRA_OPEN_NOTEBOOK_NAME)
             if (!openNotebookId.isNullOrEmpty() && !openNotebookName.isNullOrEmpty()) {
-                lifecycleScope.launch {
-                    val parentId = withContext(Dispatchers.IO) {
-                        indexRepo.getNotebook(openNotebookId)?.parentId
-                    } ?: ""
-                    AppStateManager.save(this@NotebookActivity, AppViewState(parentId, false))
-                    closeNotebook()
-                    startActivity(
-                        Intent(this@NotebookActivity, NotebookActivity::class.java).apply {
-                            putExtra(EXTRA_NOTEBOOK_ID,   openNotebookId)
-                            putExtra(EXTRA_NOTEBOOK_NAME, openNotebookName)
-                        }
-                    )
-                    finish()
+                // "Opening…" overlay, committed to screen before the teardown — see
+                // openLinkedNotebook for why the frame must be awaited explicitly.
+                com.notesprout.android.core.OpeningOverlay.showThen(this) {
+                    lifecycleScope.launch {
+                        val parentId = withContext(Dispatchers.IO) {
+                            indexRepo.getNotebook(openNotebookId)?.parentId
+                        } ?: ""
+                        AppStateManager.save(this@NotebookActivity, AppViewState(parentId, false))
+                        closeNotebook()
+                        startActivity(
+                            Intent(this@NotebookActivity, NotebookActivity::class.java).apply {
+                                putExtra(EXTRA_NOTEBOOK_ID,   openNotebookId)
+                                putExtra(EXTRA_NOTEBOOK_NAME, openNotebookName)
+                            }
+                        )
+                        finish()
+                    }
                 }
                 return@registerForActivityResult
             }
@@ -2295,6 +2299,12 @@ class NotebookActivity : AppCompatActivity() {
         // Key resolution may show a passphrase dialog, so the open is async.
         val notebookPath = notebookSoilPath
         if (notebookPath != null) {
+            // Every notebook open shows the "Opening…" overlay from the first frame until the first
+            // page renders ([loadStrokes] hides it; [failOpen] on error). Notebook opens are slow
+            // enough to warrant it on e-ink — page flips and same-notebook links never show it.
+            // The source screen raised the same overlay at tap time (OpeningOverlay / the switch
+            // paths below), so this picks up seamlessly from its last frame.
+            binding.openingOverlay.root.visibility = View.VISIBLE
             lifecycleScope.launch {
                 val nbId = notebookId
                 // Existence gate: a stale recents/history tap or replayed intent can carry an id
@@ -2329,12 +2339,6 @@ class NotebookActivity : AppCompatActivity() {
                     undoRedoPersistenceFile(notebookPath).takeIf { it.exists() }?.delete()
                     undoRedoManager = UndoRedoManager()
                     updateUndoRedoButtons()
-                    // Only NOTEBOOK-scope runs the passphrase KDF on open (a real wait worth an
-                    // overlay). GLOBAL-scope opens from a cached raw key almost instantly, so the
-                    // "Opening…" overlay would just flash — skip it (matches plaintext behaviour).
-                    if (info.keyScope == KeyScope.NOTEBOOK) {
-                        binding.openingOverlay.visibility = View.VISIBLE
-                    }
                 }
                 sessionStartTime = System.currentTimeMillis()
                 // Broad on purpose. A .soil that this build cannot open (schema drift from before the
@@ -3931,24 +3935,32 @@ class NotebookActivity : AppCompatActivity() {
      * 4. Launch the selected notebook directly; its [onCreate] fires [RecentsManager.recordOpen].
      */
     private fun switchToRecentNotebook(selectedId: String) {
-        lifecycleScope.launch {
-            val entity = withContext(Dispatchers.IO) { indexRepo.getNotebook(selectedId) } ?: return@launch
-
-            // Return-to-folder: closing the switched notebook should land in *its* folder.
-            AppStateManager.save(this@NotebookActivity, AppViewState(entity.parentId, false))
-
-            // Seal the current notebook (records close), then open the selected one directly.
-            closeNotebook()
-            // Clean pen-pipeline handoff before the destination notebook opens (the ownership guard
-            // still covers the late onDestroy close as a safety net).
-            drawingView.releaseForHandoff()
-            startActivity(
-                Intent(this@NotebookActivity, NotebookActivity::class.java).apply {
-                    putExtra(EXTRA_NOTEBOOK_ID,   entity.id)
-                    putExtra(EXTRA_NOTEBOOK_NAME, entity.name)
+        // Tap-time "Opening…" overlay, committed to screen before the teardown — see
+        // openLinkedNotebook for why the frame must be awaited explicitly.
+        com.notesprout.android.core.OpeningOverlay.showThen(this) {
+            lifecycleScope.launch {
+                val entity = withContext(Dispatchers.IO) { indexRepo.getNotebook(selectedId) }
+                if (entity == null) {
+                    com.notesprout.android.core.OpeningOverlay.hide(this@NotebookActivity)
+                    return@launch
                 }
-            )
-            finish()
+
+                // Return-to-folder: closing the switched notebook should land in *its* folder.
+                AppStateManager.save(this@NotebookActivity, AppViewState(entity.parentId, false))
+
+                // Seal the current notebook (records close), then open the selected one directly.
+                closeNotebook()
+                // Clean pen-pipeline handoff before the destination notebook opens (the ownership
+                // guard still covers the late onDestroy close as a safety net).
+                drawingView.releaseForHandoff()
+                startActivity(
+                    Intent(this@NotebookActivity, NotebookActivity::class.java).apply {
+                        putExtra(EXTRA_NOTEBOOK_ID,   entity.id)
+                        putExtra(EXTRA_NOTEBOOK_NAME, entity.name)
+                    }
+                )
+                finish()
+            }
         }
     }
 
@@ -4011,30 +4023,37 @@ class NotebookActivity : AppCompatActivity() {
      * requested. A missing/deleted target notebook toasts and aborts (no push, no nav).
      */
     private fun openLinkedNotebook(targetId: String, pageId: String?, origin: BackEntry?) {
-        lifecycleScope.launch {
-            val entity = withContext(Dispatchers.IO) { indexRepo.getNotebook(targetId) }
-            if (entity == null || entity.deletedAt != null || entity.type != ObjectType.NOTEBOOK) {
-                toast("Linked notebook is unavailable.")
-                return@launch
-            }
-            if (origin != null) LinkBackStack.push(this@NotebookActivity, origin)
-
-            // Return-to-folder: closing the opened notebook should land in *its* folder.
-            AppStateManager.save(this@NotebookActivity, AppViewState(entity.parentId, false))
-
-            closeNotebook()
-            // Clean pen-pipeline handoff before the linked notebook opens (the ownership guard still
-            // covers the late onDestroy close as a safety net).
-            drawingView.releaseForHandoff()
-            startActivity(
-                Intent(this@NotebookActivity, NotebookActivity::class.java).apply {
-                    putExtra(EXTRA_NOTEBOOK_ID,   entity.id)
-                    putExtra(EXTRA_NOTEBOOK_NAME, entity.name)
-                    putExtra(EXTRA_VIA_LINK, true)
-                    if (pageId != null) putExtra(EXTRA_INITIAL_PAGE_ID, pageId)
+        // Tap-time "Opening…" overlay. showThen defers the teardown until the overlay's frame is
+        // actually committed — a bare visibility change is NOT enough here: Dispatchers.Main is an
+        // async handler, so the IO-hop resume below would jump the traversal sync barrier and run
+        // the heavy close (cover snapshot) + relaunch before the overlay ever reached the screen.
+        com.notesprout.android.core.OpeningOverlay.showThen(this) {
+            lifecycleScope.launch {
+                val entity = withContext(Dispatchers.IO) { indexRepo.getNotebook(targetId) }
+                if (entity == null || entity.deletedAt != null || entity.type != ObjectType.NOTEBOOK) {
+                    com.notesprout.android.core.OpeningOverlay.hide(this@NotebookActivity)
+                    toast("Linked notebook is unavailable.")
+                    return@launch
                 }
-            )
-            finish()
+                if (origin != null) LinkBackStack.push(this@NotebookActivity, origin)
+
+                // Return-to-folder: closing the opened notebook should land in *its* folder.
+                AppStateManager.save(this@NotebookActivity, AppViewState(entity.parentId, false))
+
+                closeNotebook()
+                // Clean pen-pipeline handoff before the linked notebook opens (the ownership guard
+                // still covers the late onDestroy close as a safety net).
+                drawingView.releaseForHandoff()
+                startActivity(
+                    Intent(this@NotebookActivity, NotebookActivity::class.java).apply {
+                        putExtra(EXTRA_NOTEBOOK_ID,   entity.id)
+                        putExtra(EXTRA_NOTEBOOK_NAME, entity.name)
+                        putExtra(EXTRA_VIA_LINK, true)
+                        if (pageId != null) putExtra(EXTRA_INITIAL_PAGE_ID, pageId)
+                    }
+                )
+                finish()
+            }
         }
     }
 
@@ -4178,7 +4197,7 @@ class NotebookActivity : AppCompatActivity() {
         Log.e(TAG, "notebook open failed for $notebookId", e)
         runCatching { soilDatabase?.close() }
         soilDatabase = null
-        binding.openingOverlay.visibility = View.GONE
+        binding.openingOverlay.root.visibility = View.GONE
 
         if (!encryptionInfo.encrypted || openFixAttempted) {
             bailToLibrary(e)
@@ -4308,7 +4327,7 @@ class NotebookActivity : AppCompatActivity() {
                 return@launch
             }
             displayPage(result)
-            binding.openingOverlay.visibility = View.GONE
+            binding.openingOverlay.root.visibility = View.GONE
             if (savedUndoJson != null) {
                 try {
                     undoRedoManager = UndoRedoManager.fromJson(savedUndoJson!!)
