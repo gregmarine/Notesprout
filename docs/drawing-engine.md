@@ -449,6 +449,22 @@ Templates live in **two layers**:
 `.soil` template rows keep `data` JSON `{ "width", "height", "name", "image" (base64) }` (`TemplateData`).
 The library `TemplateObject` differs: the **name lives in `ObjectEntity.name`**, not the JSON.
 
+**Render rule — the template paints into the page's stored rect, not the view.** Page content is
+absolute page coordinates anchored top-left, so the template must stretch to the page's
+`boundingBox` size (the screen of the device that created the page) or a backup restored onto a
+different-size screen skews the template against the ink. `NotebookView.setTemplatePageSize(w, h)`
+carries that rect — sticky per page, set by `NotebookActivity.displayPage()` from `PageLoadResult`;
+`0×0` falls back to stretch-to-view (legacy behavior, and the standing behavior for hosts that never
+call it: calendar / day-note canvases). All three engine views apply it at their **three** template
+draw sites — `drawCommittedContent`, `buildRenderBitmap`, `captureSnapshot` (cover) — via a shared
+`templateDestRect()` helper (sibling-copy rule: keep all three views in step). The export /
+thumbnail renderer (`NotebookExporter.renderPage`) already drew the template into the page rect, so
+screen, thumbnails, covers, and exports now agree. Templates themselves are **stretch-to-page by
+design** (imported PNGs can be any size); the page rect, not the image's pixel size, is the
+authority. New pages take the *current* device's screen size (`addPage`/`addPageBefore` →
+`screenBounds()`), so a travelled notebook can hold mixed page sizes — each page stays
+self-consistent.
+
 **TemplateBrowserActivity** — one full-screen Activity (`Theme.Notesprout`, no immersive mode) drives
 all contexts via `EXTRA_MODE`:
 - `MODE_MANAGE` — launched from the MainActivity toolbar (`btnTemplates`). Full management: browse,

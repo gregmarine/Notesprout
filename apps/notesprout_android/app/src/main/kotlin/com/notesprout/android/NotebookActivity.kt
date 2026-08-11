@@ -243,6 +243,11 @@ class NotebookActivity : AppCompatActivity() {
         val links: List<LinkRender> = emptyList(),
         val stickyNotes: List<StickyNoteRender> = emptyList(),
         val shapeObjects: List<com.notesprout.android.data.ShapeRender> = emptyList(),
+        /** The page's stored size from its `boundingBox` (0 = unknown) — the rect the template
+         *  paints into, so a page restored onto a different-size screen keeps ink and template
+         *  aligned. See [NotebookView.setTemplatePageSize]. */
+        val pageWidth: Int = 0,
+        val pageHeight: Int = 0,
     )
 
     private lateinit var binding: ActivityNotebookBinding
@@ -4446,7 +4451,9 @@ class NotebookActivity : AppCompatActivity() {
      */
     private suspend fun loadCurrentPage(db: SoilDatabase): PageLoadResult {
         setupPageIds(db)
-        val templateBitmap  = loadPageTemplateFromDb(db)
+        val pageRow         = currentPageId.takeIf { it.isNotEmpty() }?.let { db.notebookDao().getObjectById(it) }
+        val pageBox         = pageRow?.parseBoundingBox()
+        val templateBitmap  = loadPageTemplateFromDb(db, pageRow)
         val headings        = loadHeadingsFromDb(db, currentLayerId)
         val textObjects     = loadTextObjectsFromDb(db, currentLayerId)
         val lineObjects     = loadLineObjectsFromDb(db, currentLayerId)
@@ -4454,7 +4461,11 @@ class NotebookActivity : AppCompatActivity() {
         val stickyNotes     = loadStickyNotesFromDb(db, currentLayerId)
         val shapeObjects    = loadShapeObjectsFromDb(db, currentLayerId)
         val strokes         = deserializeStrokesFromDb(db)
-        return PageLoadResult(strokes, templateBitmap, headings = headings, textObjects = textObjects, lineObjects = lineObjects, links = links, stickyNotes = stickyNotes, shapeObjects = shapeObjects)
+        return PageLoadResult(
+            strokes, templateBitmap, headings = headings, textObjects = textObjects, lineObjects = lineObjects,
+            links = links, stickyNotes = stickyNotes, shapeObjects = shapeObjects,
+            pageWidth = pageBox?.width()?.toInt() ?: 0, pageHeight = pageBox?.height()?.toInt() ?: 0,
+        )
     }
 
     /**
@@ -4517,6 +4528,7 @@ class NotebookActivity : AppCompatActivity() {
         // along. (The armed ink itself persists; only the panel closes.)
         hidePenColorPanel()
         currentTemplateBitmap = result.templateBitmap
+        drawingView.setTemplatePageSize(result.pageWidth, result.pageHeight)
         drawingView.loadHeadings(result.headings)
         drawingView.loadTextObjects(result.textObjects)
         drawingView.loadLineObjects(result.lineObjects)
@@ -4550,16 +4562,18 @@ class NotebookActivity : AppCompatActivity() {
         // No-op: GPU committed-content render needs no post-display work.
     }
 
+    /** [loadPageTemplateFromDb] for the current page — fetches the page row itself. */
+    private suspend fun loadPageTemplateFromDb(db: SoilDatabase): Bitmap? =
+        loadPageTemplateFromDb(db, currentPageId.takeIf { it.isNotEmpty() }?.let { db.notebookDao().getObjectById(it) })
+
     /**
-     * Read the current page's `template` property, look up the template row, and decode
+     * Read [page]'s `template` property, look up the template row, and decode
      * its base64 image to a Bitmap.  Returns null if the page has no template (blank).
      *
-     * Must be called on [Dispatchers.IO]. Uses [currentPageId] set by [loadStrokesFromDb].
+     * Must be called on [Dispatchers.IO].
      */
-    private suspend fun loadPageTemplateFromDb(db: SoilDatabase): Bitmap? {
-        val pageId = currentPageId.takeIf { it.isNotEmpty() } ?: return null
-
-        val page = db.notebookDao().getObjectById(pageId) ?: return null
+    private suspend fun loadPageTemplateFromDb(db: SoilDatabase, page: NotebookObject?): Bitmap? {
+        if (page == null) return null
 
         val templateId = page.pageData().template.takeIf { it.isNotEmpty() } ?: return null
 

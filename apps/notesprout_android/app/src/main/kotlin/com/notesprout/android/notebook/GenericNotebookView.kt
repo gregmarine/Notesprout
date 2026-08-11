@@ -66,6 +66,11 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
     /** Template bitmap — drawn as the base layer behind all strokes. Null = white background. */
     private var templateBitmap: Bitmap? = null
 
+    /** The page-coordinate rect the template paints into (the page's stored size — see
+     *  [NotebookView.setTemplatePageSize]). 0 = unknown → stretch to the view. */
+    private var templatePageWidth = 0
+    private var templatePageHeight = 0
+
     // Stroke store — LiveStroke carries the DB row UUID for incremental save / targeted erase.
     private val strokes = mutableListOf<LiveStroke>()
 
@@ -1028,7 +1033,7 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
     private fun drawCommittedContent(canvas: Canvas) {
         canvas.drawColor(Color.WHITE)
         templateBitmap?.let { tb ->
-            canvas.drawBitmap(tb, null, RectF(0f, 0f, width.toFloat(), height.toFloat()), null)
+            canvas.drawBitmap(tb, null, templateDestRect(), null)
         }
         for (heading in headings) {
             if (heading.recognizedText != null) {
@@ -1634,6 +1639,17 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
         redrawCanvas()
     }
 
+    override fun setTemplatePageSize(width: Int, height: Int) {
+        templatePageWidth = width
+        templatePageHeight = height
+    }
+
+    /** Dest rect for the template: the page's stored rect when known, else the full view. */
+    private fun templateDestRect(): RectF =
+        if (templatePageWidth > 0 && templatePageHeight > 0)
+            RectF(0f, 0f, templatePageWidth.toFloat(), templatePageHeight.toFloat())
+        else RectF(0f, 0f, width.toFloat(), height.toFloat())
+
     override fun eraseAll() {
         activePoints.clear()
         strokes.clear()
@@ -1717,7 +1733,7 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
         val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bmp)
         canvas.drawColor(Color.WHITE)
-        templateBitmap?.let { canvas.drawBitmap(it, null, RectF(0f, 0f, w.toFloat(), h.toFloat()), null) }
+        templateBitmap?.let { canvas.drawBitmap(it, null, templateDestRect(), null) }
         for (heading in headings) {
             if (heading.recognizedText != null) {
                 drawHeadingText(canvas, heading)
@@ -1776,7 +1792,7 @@ class GenericNotebookView(context: Context) : View(context), NotebookView {
         val snapshotCanvas = Canvas(bmp)
         snapshotCanvas.drawColor(Color.WHITE)
         templateBitmap?.let { tb ->
-            snapshotCanvas.drawBitmap(tb, null, RectF(0f, 0f, w.toFloat(), h.toFloat()), null)
+            snapshotCanvas.drawBitmap(tb, null, templateDestRect(), null)
         }
         for (heading in headings) {
             if (heading.recognizedText != null) {

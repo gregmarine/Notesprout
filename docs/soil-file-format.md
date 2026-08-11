@@ -340,6 +340,14 @@ the file on export.
 Pages are **fixed screen-size**, never infinite scroll — a core philosophy constraint, not a
 technical one. Page order is the `"order"` column.
 
+**Cross-device render contract:** page content lives in absolute page coordinates anchored at the
+top-left, and the page's `width`×`height` is the coordinate space of the device that created it. A
+renderer must draw the applied template stretched into the **page rect** `{0, 0, w, h}` — never the
+display's rect — so ink and template stay aligned when the file is opened on a different-size screen
+(e.g. a backup restored onto another device). The display shows the page 1:1 from its top-left;
+anything beyond the page rect is off-page white. New pages take the current device's screen size, so
+one document may legitimately hold mixed page sizes — each page is self-consistent under this rule.
+
 ---
 
 ## `layer` — a drawing layer
