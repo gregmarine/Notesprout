@@ -42,6 +42,39 @@
 
 ---
 
+## Notebook close is noticeably slower than jumping to Calendar/Today (look into soon)
+
+Closing a notebook via the toolbar close button has a visible delay; tapping Calendar or Today from
+the same notebook is near-instant. Diagnosed 2026-08-10 (research only, no code changes).
+
+**Why the difference:** the close button runs real teardown **synchronously on the main thread
+before `finish()`** (`NotebookActivity.closeNotebook`, called from the `btnClose` handler), then
+reveals a library screen that rebuilds itself. Calendar/Today are just `startActivity()` — the
+notebook stays alive underneath, and its only bookkeeping (the `onStop` undo/redo persist) runs
+*after* the new screen has already drawn, so the same cost is paid invisibly.
+
+Pre-`finish()` main-thread work on close:
+1. **Undo/redo persist** (encrypted notebooks — i.e. everything): `undoRedoManager.toJson()` of the
+   full history + a synchronous `execSQL` into the SQLCipher `.soil` (JSON build + encryption + disk
+   I/O on main).
+2. **Cover snapshot** — `drawingView.captureSnapshot()`: full-page ARGB_8888 bitmap (~10–20 MB),
+   redraw of template + every object + every stroke, then **WEBP q100 compress + Base64 encode on
+   main** (`ImageCodec.encodeBase64`) — almost certainly the biggest single chunk. On Ratta it also
+   releases the firmware ink overlay first.
+3. Stroke-list deep copy for the seal. (The seal itself is already off-main on `appScope`.)
+
+Then `MainActivity.onResume` → `scanAndRender()` re-queries the index, re-renders the cover grid,
+and the e-ink repaints the whole library.
+
+**Candidate fixes** (same family as the tap-time "Opening…" overlay, commit 513d168):
+- Capture the raw bitmap on main (cheap-ish) but move the WEBP encode + Base64 into the seal on IO.
+- Give the close tap instant visual feedback (a "Closing…" ack via the `OpeningOverlay`
+  pre-draw+post pattern) — the library re-scan + e-ink repaint can only be masked, not removed.
+- Note: `sealForConversion` and the `onDestroy` blocking path share `sealNotebook` — keep their
+  semantics (blocking, no snapshot) intact when moving work around.
+
+---
+
 ## Supernote (Ratta) — deferred items
 
 > From the retired `SUPERNOTE_SUPPORT_PLAN.md` (all 10 phases shipped on the `supernote` branch,
