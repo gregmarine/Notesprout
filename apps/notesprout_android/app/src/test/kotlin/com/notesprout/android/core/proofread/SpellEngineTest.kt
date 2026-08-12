@@ -34,7 +34,7 @@ class SpellEngineTest {
         }
 
         private fun openDictionary() =
-            checkNotNull(SpellEngineTest::class.java.getResourceAsStream("/proofread/en_82765.txt.gz")) {
+            checkNotNull(SpellEngineTest::class.java.getResourceAsStream("/proofread/en_82765.dict")) {
                 "dictionary asset missing from test classpath"
             }
     }

@@ -6,6 +6,7 @@ import android.os.Looper
 import android.text.Editable
 import android.text.Spanned
 import android.text.TextWatcher
+import android.util.Log
 import androidx.appcompat.widget.AppCompatEditText
 import com.notesprout.android.core.DocumentPreferences
 import com.notesprout.android.core.Slog
@@ -14,6 +15,7 @@ import com.notesprout.android.core.proofread.ProofreadDirty
 import com.notesprout.android.core.proofread.SpellEngine
 import com.notesprout.android.core.proofread.WordSpan
 import java.io.InputStream
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -195,7 +197,17 @@ class ProofreadController(
         if (engineRequested) return
         engineRequested = true
         scope.launch {
-            val loaded = SpellEngine.shared(openDictionary)
+            // A dictionary that cannot load must cost the user nothing but spell checking — this
+            // runs under the editor, and an escaped exception here takes the whole screen down.
+            val loaded = try {
+                SpellEngine.shared(openDictionary)
+            } catch (e: CancellationException) {
+                throw e // the activity is going away, not the dictionary failing
+            } catch (e: Exception) {
+                Log.e(TAG, "Dictionary failed to load; proofread stays quiet", e)
+                engineRequested = false // an explicit "Check document" may retry
+                return@launch
+            }
             engine = loaded
             Slog.d(TAG) { "Dictionary ready: ${loaded.wordCount} words" }
             if (enabled) checkDocument()

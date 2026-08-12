@@ -230,8 +230,11 @@ class DocumentEditorActivity : AppCompatActivity() {
 
         // The proofread layer registers its own text watcher, so it comes after setText — the
         // opening text is not an edit. Its first pass runs when the dictionary is ready.
+        // `.dict` rather than `.gz` (the content is gzip): AAPT silently *decompresses* any `.gz`
+        // asset and strips the extension from the APK, so the runtime name would not match the
+        // source tree — found the hard way on the Manta. An opaque extension ships byte-identical.
         proofread = ProofreadController(editor, lifecycleScope) {
-            assets.open("proofread/en_82765.txt.gz")
+            assets.open("proofread/en_82765.dict")
         }
         editor.onWordTap = { offset -> proofread.onTap(offset) }
         proofread.start()

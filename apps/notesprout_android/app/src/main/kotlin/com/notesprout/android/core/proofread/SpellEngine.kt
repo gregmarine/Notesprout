@@ -14,7 +14,9 @@ import java.util.zip.GZIPInputStream
 
 /**
  * The proofread spell checker — SymSpellKt wrapped around the bundled English frequency
- * dictionary (`assets/proofread/en_82765.txt.gz`, attribution in `NOTICE.txt` beside it).
+ * dictionary (`assets/proofread/en_82765.dict`, attribution in `NOTICE.txt` beside it). The
+ * `.dict` file is gzipped `term frequency` lines; the extension is opaque on purpose, because
+ * AAPT decompresses a `.gz` asset at build time and strips the extension from the APK.
  *
  * Pure Kotlin/JVM by design: the dictionary arrives as an [InputStream], so JVM tests load the
  * exact asset the app ships (the test source set mounts `src/main/assets` as resources) and the
