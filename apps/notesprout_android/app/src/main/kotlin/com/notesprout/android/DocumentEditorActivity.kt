@@ -3,6 +3,9 @@ package com.notesprout.android
 import android.content.Context
 import android.content.Intent
 import android.content.res.Configuration
+import android.graphics.Canvas
+import android.graphics.DashPathEffect
+import android.graphics.Paint
 import android.graphics.Typeface
 import android.os.Bundle
 import android.os.Handler
@@ -12,7 +15,9 @@ import android.util.TypedValue
 import android.view.Gravity
 import android.view.InputDevice
 import android.view.KeyEvent
+import android.view.MotionEvent
 import android.view.View
+import android.view.ViewConfiguration
 import android.view.ViewGroup
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputConnection
@@ -26,6 +31,7 @@ import androidx.appcompat.widget.AppCompatEditText
 import androidx.appcompat.widget.AppCompatImageButton
 import androidx.appcompat.widget.AppCompatTextView
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.lifecycleScope
 import com.notesprout.android.core.DocumentPreferences
 import com.notesprout.android.core.Slog
 import com.notesprout.android.core.TopGuard
@@ -38,6 +44,7 @@ import com.notesprout.android.core.markdown.MarkdownReflow
 import com.notesprout.android.core.markdown.MarkdownRenderer
 import com.notesprout.android.core.markdown.TextBuffer
 import com.notesprout.android.notebook.ToolbarOverflowManager
+import kotlin.math.abs
 
 /**
  * Full-screen Markdown document editor.
@@ -134,6 +141,9 @@ class DocumentEditorActivity : AppCompatActivity() {
      */
     private var bringingIn = false
 
+    /** The spell-checking layer — flags, debounce, popup. Thin by design; see ProofreadController. */
+    private lateinit var proofread: ProofreadController
+
     private val autosave = Handler(Looper.getMainLooper())
     private val autosaveTick = Runnable { persist() }
 
@@ -218,6 +228,14 @@ class DocumentEditorActivity : AppCompatActivity() {
             }
         })
 
+        // The proofread layer registers its own text watcher, so it comes after setText — the
+        // opening text is not an edit. Its first pass runs when the dictionary is ready.
+        proofread = ProofreadController(editor, lifecycleScope) {
+            assets.open("proofread/en_82765.txt.gz")
+        }
+        editor.onWordTap = { offset -> proofread.onTap(offset) }
+        proofread.start()
+
         if (savedInstanceState?.getBoolean(STATE_PREVIEWING) == true) setPreviewing(true)
 
         editor.requestFocus()
@@ -264,6 +282,7 @@ class DocumentEditorActivity : AppCompatActivity() {
     override fun onDestroy() {
         super.onDestroy()
         autosave.removeCallbacks(autosaveTick)
+        if (::proofread.isInitialized) proofread.dispose()
     }
 
     // ── Storage (always through the host — see DocumentTransfer) ──────────────
@@ -664,6 +683,29 @@ class DocumentEditorActivity : AppCompatActivity() {
         Slog.d(TAG) { "Reflowed ${if (hasSelection) "selection" else "document"}" }
     }
 
+    // ── Proofread ─────────────────────────────────────────────────────────────
+
+    /**
+     * The proofread sheet: an on-demand full pass, and the on/off switch. Off hides "Check
+     * document" rather than disabling it — a disabled control is invisible on e-ink (see
+     * docs/design-system.md), and turning the feature on checks everything anyway.
+     */
+    private fun promptProofread() {
+        val sheet = ActionSheetDialog(this).title("Proofread")
+        if (proofread.enabled) {
+            sheet.addAction(R.drawable.ic_text_spellcheck, "Check document") {
+                if (!proofread.ready) {
+                    Toast.makeText(this, "Loading the dictionary — it will check when ready.", Toast.LENGTH_SHORT).show()
+                }
+                proofread.checkDocument()
+            }
+            sheet.addAction(R.drawable.ic_eye_off, "Turn off proofread") { proofread.setEnabled(false) }
+        } else {
+            sheet.addAction(R.drawable.ic_eye, "Turn on proofread") { proofread.setEnabled(true) }
+        }
+        sheet.show()
+    }
+
     // ── Page flips ────────────────────────────────────────────────────────────
 
     /**
@@ -715,6 +757,9 @@ class DocumentEditorActivity : AppCompatActivity() {
         // Store this page's seed right away, so the gap where the text exists only in memory is as
         // short on a flip as it is on open.
         persist()
+        // A new page is a fresh document (setText dropped the old spans with the old Editable), so
+        // it gets the same full pass opening one does.
+        proofread.checkDocument()
         if (previewing) renderPreview()
     }
 
@@ -834,6 +879,10 @@ class DocumentEditorActivity : AppCompatActivity() {
         bar.addView(formatIcon(R.drawable.ic_link, "Link  ·  Ctrl+K") { runFormat(MarkdownFormatter::insertLink) })
         bar.addView(formatIcon(R.drawable.ic_photo, "Image  ·  Ctrl+Shift+K") { runFormat(MarkdownFormatter::insertImage) })
         bar.addView(formatIcon(R.drawable.ic_separator_horizontal, "Horizontal rule  ·  Ctrl+Shift+−") { runFormat(MarkdownFormatter::insertRule) })
+        divider()
+        // Last on the bar, so on narrow screens it lives in the overflow panel — a check runs on
+        // its own; this button is for the occasional full pass and the on/off switch.
+        bar.addView(formatIcon(R.drawable.ic_text_spellcheck, "Proofread") { promptProofread() })
 
         // Overflow controls, pinned at the trailing edge and hidden whenever everything fits. The full
         // palette is ~730dp of buttons, so a 6" screen (sw571dp) cannot show it whole — and a bar that
@@ -947,6 +996,8 @@ class DocumentEditorActivity : AppCompatActivity() {
     private fun setPreviewing(on: Boolean) {
         if (previewing == on) return
         previewing = on
+        // Preview is read-only prose; no checking there (and no popup — the editor is gone).
+        proofread.setPaused(on)
         if (on) {
             // Switching to reading is a natural save point, and the writing chrome goes with it.
             persist()
@@ -1140,17 +1191,96 @@ class DocumentEditorActivity : AppCompatActivity() {
 }
 
 /**
- * [AppCompatEditText] that can refuse the IME entirely.
+ * [AppCompatEditText] that can refuse the IME entirely, plus the proofread surface work: it draws
+ * the dashed flag underlines and reports taps for the suggestion popup.
  *
  * When [suppressImeSession] is set, [onCreateInputConnection] returns null: the framework never
  * binds an input method to this field, so no soft keyboard appears and — crucially — no IME sits
  * upstream of the app in the hardware key path, claiming shortcuts on its way past. The editor
  * still handles physical keys through its own key listener.
+ *
+ * The underlines are drawn here rather than by the spans themselves because a `CharacterStyle`
+ * cannot draw a *dashed* line — `UnderlineSpan` is solid, and the design gives spelling a dashed
+ * inkBlack line (dotted is reserved for grammar, Phase 4). [ProofreadFlagSpan] therefore carries
+ * position only, and this view paints under every span each draw pass.
  */
 private class MarkdownEditText(context: Context) : AppCompatEditText(context) {
 
     var suppressImeSession = false
 
+    /** Called with the character offset of a completed tap — the proofread popup's hook. */
+    var onWordTap: ((Int) -> Unit)? = null
+
+    private var downX = 0f
+    private var downY = 0f
+
+    private val density = resources.displayMetrics.density
+
+    private val flagPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = ContextCompat.getColor(context, R.color.inkBlack)
+        style = Paint.Style.STROKE
+        strokeWidth = 1.5f * density
+        // Dashed = spelling. On-off lengths chosen to survive e-ink: long enough to render as
+        // marks, short enough to read as a dash and not a rule.
+        pathEffect = DashPathEffect(floatArrayOf(4f * density, 3f * density), 0f)
+    }
+
     override fun onCreateInputConnection(outAttrs: EditorInfo): InputConnection? =
         if (suppressImeSession) null else super.onCreateInputConnection(outAttrs)
+
+    override fun onTouchEvent(event: MotionEvent): Boolean {
+        if (event.actionMasked == MotionEvent.ACTION_DOWN) {
+            downX = event.x
+            downY = event.y
+        }
+        val handled = super.onTouchEvent(event)
+        // After super: the tap has placed the caret; the popup must follow it, not preempt it. A
+        // drag (selection, scroll) or a long-press (selection handles) is not a tap.
+        if (event.actionMasked == MotionEvent.ACTION_UP) {
+            val slop = ViewConfiguration.get(context).scaledTouchSlop
+            val isTap = abs(event.x - downX) <= slop && abs(event.y - downY) <= slop &&
+                event.eventTime - event.downTime < ViewConfiguration.getLongPressTimeout()
+            if (isTap) {
+                val offset = getOffsetForPosition(event.x, event.y)
+                if (offset >= 0) post { onWordTap?.invoke(offset) }
+            }
+        }
+        return handled
+    }
+
+    override fun onDraw(canvas: Canvas) {
+        super.onDraw(canvas)
+        drawProofreadFlags(canvas)
+    }
+
+    private fun drawProofreadFlags(canvas: Canvas) {
+        val text = text ?: return
+        if (text.isEmpty()) return
+        val spans = text.getSpans(0, text.length, ProofreadFlagSpan::class.java)
+        if (spans.isEmpty()) return
+        val layout = layout ?: return
+        canvas.save()
+        // onDraw's canvas is already scrolled; only the text origin's padding is left to add.
+        canvas.translate(totalPaddingLeft.toFloat(), totalPaddingTop.toFloat())
+        val drop = 2f * density
+        for (span in spans) {
+            val start = text.getSpanStart(span)
+            val end = text.getSpanEnd(span)
+            if (start < 0 || end <= start) continue
+            val firstLine = layout.getLineForOffset(start)
+            val lastLine = layout.getLineForOffset(end - 1)
+            // A long word can soft-wrap mid-word, so a flag may span lines even though a word
+            // never contains a newline.
+            for (line in firstLine..lastLine) {
+                val x1 = if (line == firstLine) layout.getPrimaryHorizontal(start) else layout.getLineLeft(line)
+                var x2 = if (line == lastLine) layout.getPrimaryHorizontal(end) else layout.getLineRight(line)
+                // At a wrap boundary the end offset's position belongs to the next line's start.
+                if (line == lastLine && x2 <= x1) x2 = layout.getLineRight(line)
+                if (x2 <= x1) continue
+                val y = layout.getLineBaseline(line) + drop
+                canvas.drawLine(x1, y, x2, y, flagPaint)
+            }
+        }
+        canvas.restore()
+    }
 }
