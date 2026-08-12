@@ -1,0 +1,25 @@
+English frequency dictionary (en_82765.txt.gz)
+================================================
+
+Source: the SymSpell project by Wolf Garbe
+  https://github.com/wolfgarbe/SymSpell
+  (SymSpell/frequency_dictionary_en_82_765.txt, repository licensed MIT)
+
+The dictionary was created by intersecting two data sources, and their
+terms apply to the word/frequency data itself:
+
+  - Google Books Ngram data — word frequencies.
+    Licensed under Creative Commons Attribution 3.0 (CC BY 3.0):
+    https://creativecommons.org/licenses/by/3.0/
+    Attribution: Google Books Ngram Viewer / Google Inc.
+
+  - SCOWL (Spell Checker Oriented Word Lists) by Kevin Atkinson —
+    genuine-vocabulary filter. Permissive license:
+    http://wordlist.aspell.net/scowl-readme/
+
+Modifications made here: removed the UTF-8 byte-order mark and
+gzip-compressed the file. The word/frequency content is unchanged.
+
+The SymSpellKt library (com.darkrockstudios:symspellkt) that consumes
+this dictionary is licensed MIT:
+  https://github.com/Darkrock-Studios/SymSpellKt
