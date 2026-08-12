@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Tablet tier — matches the Supernote native toolbar's tap target (62dp ≈ 9.8mm at 300ppi,
+         ~34dp visible glyph). See values/dimens.xml for the tier rationale. -->
+    <dimen name="toolbar_button_size">62dp</dimen>
+    <dimen name="toolbar_button_padding">14dp</dimen>
+    <dimen name="toolbar_bar_thickness">70dp</dimen>
+</resources>

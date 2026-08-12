@@ -143,7 +143,7 @@ Rendering: `StaticLayout` + `TextPaint` at **24sp** `Color.BLACK`. Entry point: 
 
 Markdown WYSIWYG/source editor. Two modes: **WYSIWYG** (live formatting spans) and **Markdown** (raw source). Mode toggle is two `AppCompatButton` (weight=1 each) with `bg_toolbar_button` — switching is instant (spans only, text unchanged).
 
-Formatting toolbar (HorizontalScrollView): B, I, S̶, H▾ (H1–H6/Normal), •, 1., ☐ (task checkbox toggle), ❝, —, [⊞] (link). `shape_bordered` background, 36dp height, 10dp H padding.
+Formatting toolbar (HorizontalScrollView): B, I, S̶, H▾ (H1–H6/Normal), •, 1., ☐ (task checkbox toggle), ❝, —, [⊞] (link). `shape_bordered` background, `@dimen/toolbar_button_size` height, 10dp H padding.
 
 Lists on Enter, and renumbering: both defer to `MarkdownFormatter.listEnter` / `renumberOrderedLists` — the same functions the full-screen document editor uses, so the two writing surfaces cannot drift apart (see [`documents.md`](documents.md)). Enter continues bullets, tasks and numbers; a second Enter ends the series and takes the marker with it; ordered runs are renumbered on every `afterTextChanged` to match how they render. This replaced a private, ordered-only implementation here that always renumbered from 1 — which fought the user once the parser started honouring a run's start number.
 

@@ -17,7 +17,7 @@
 
     <!-- Toolbar floats above the canvas.
          On BOOX, setLimitRect excludes this region from pen input.
-         Height is 56dp to comfortably fit 44dp icon buttons + padding.
+         Height is @dimen/toolbar_bar_thickness — the toolbar button size + 4dp padding each side.
          toolbar_background drawable provides the 1dp inkBlack bottom border.
          Buttons are declared here once; ToolbarLayoutManager arranges them per ToolbarConfig
          (order, visibility, auto-dividers, and the trailing weighted spacer before the overflow
@@ -26,7 +26,7 @@
     <LinearLayout
         android:id="@+id/drawingToolbar"
         android:layout_width="match_parent"
-        android:layout_height="56dp"
+        android:layout_height="@dimen/toolbar_bar_thickness"
         android:layout_gravity="top"
         android:background="@drawable/toolbar_background_top"
         android:gravity="center_vertical"
@@ -212,7 +212,7 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_gravity="top"
-        android:layout_marginTop="56dp"
+        android:layout_marginTop="@dimen/toolbar_bar_thickness"
         android:orientation="vertical"
         android:visibility="gone"
         android:background="@drawable/shape_bordered"

@@ -137,7 +137,7 @@ pitfalls). Navigation swaps the page content + template bitmap into the same vie
 
 ```
 LinearLayout (vertical, paperWhite)
-  ├── calendarToolbar (56dp)
+  ├── calendarToolbar (@dimen/toolbar_bar_thickness)
   │     calLeftBar (weight=1, managed by ToolbarOverflowManager):
   │       btnBack · btnCalHome · btnCalNewNotebook │ btnToday │ btnMonthView · btnWeekView · btnDayView │
   │       btnCalPen · btnCalEraser · btnCalStickyNote · btnCalLassoEraser · btnCalLasso ·
@@ -725,10 +725,10 @@ template **library** — the template is written as a plain `type="template"` ro
 regardless of the half on screen; the off-screen half's content is read straight from the DB.
 
 **Native canvas size + toolbar top-margin.** New pages are the calendar canvas's exact pixel size, so
-content copies 1:1 with zero scaling. **But** the calendar canvas sits *below* its 56dp toolbar, while a
+content copies 1:1 with zero scaling. **But** the calendar canvas sits *below* its toolbar, while a
 notebook page's drawing area is full-screen with the toolbar **overlaid** on top. So the export reserves
 a blank top strip of height `root.height − calendarContent.height` — the top guard band + 1dp rule +
-56dp toolbar + 1dp rule, i.e. exactly the chrome height the destination notebook reserves on the same
+toolbar (`@dimen/toolbar_bar_thickness`) + 1dp rule, i.e. exactly the chrome height the destination notebook reserves on the same
 device (on Ratta the guard term is 0, so the strip is just the toolbar + rules; do **not** "fix" the
 formula to exclude the guard — it tracks the device's chrome by construction):
 

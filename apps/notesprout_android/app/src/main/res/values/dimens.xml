@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Unified icon-button tap target + bar chrome, referenced by Widget.Notesprout.ToolbarButton
+         and every fixed-height chrome bar. Base tier serves screens under sw720dp (Palma2 Pro,
+         Go 6/7-class readers, phones), where a 62dp button row would overflow the library bottom
+         bar (its width math lives in layout-sw480dp/activity_main.xml). values-sw720dp holds the
+         tablet tier, sized to match the Supernote native toolbar (62dp target / ~34dp glyph
+         ≈ 9.8mm at 300ppi). Bar thickness = button size + 2×4dp bar padding. -->
+    <dimen name="toolbar_button_size">44dp</dimen>
+    <dimen name="toolbar_button_padding">10dp</dimen>
+    <dimen name="toolbar_bar_thickness">56dp</dimen>
+</resources>

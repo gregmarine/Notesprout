@@ -14,6 +14,7 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.core.view.ViewCompat
 import androidx.core.widget.ImageViewCompat
+import com.notesprout.android.R
 import com.notesprout.android.core.InkColor
 
 /**
@@ -208,16 +209,20 @@ class PenColorPanelController(
      * overflowed the screen and clipped the eighth column clean off. Sizing from
      * [boundsProvider] instead means the panel fits **whatever** it is given — no per-device
      * qualifier to maintain, and no assumption about density that a display-scale setting can
-     * quietly invalidate. Wide screens still cap at [MAX_CELL_DP] so the panel never sprawls.
+     * quietly invalidate. Wide screens still cap at [maxCellPx] — the shared toolbar-button
+     * target size, so a swatch is as tappable as any other button — and the panel never sprawls.
      */
     private fun cellWidthPx(): Int {
         val available = boundsProvider().width()
-        if (available <= 0) return dpi(MAX_CELL_DP)
+        if (available <= 0) return maxCellPx()
         // The panel's own padding + border, then the per-cell horizontal margins.
         val chrome = dpi(10f)
         val perColumn = (available - chrome) / PenPalette.COLUMNS
-        return (perColumn - dpi(2f)).coerceIn(dpi(MIN_CELL_DP), dpi(MAX_CELL_DP))
+        return (perColumn - dpi(2f)).coerceIn(dpi(MIN_CELL_DP), maxCellPx())
     }
+
+    /** Cell-width cap: the app-wide icon-button tap target (44dp under sw720dp, 62dp on tablets). */
+    private fun maxCellPx(): Int = root.resources.getDimensionPixelSize(R.dimen.toolbar_button_size)
 
     /** Tile + caption in a fixed-width column, so all rows align regardless of label length. */
     private inline fun cell(label: String, tile: () -> View): LinearLayout =
@@ -381,9 +386,6 @@ class PenColorPanelController(
     }
 
     companion object {
-        /** Cell width on a roomy screen — the design size. */
-        private const val MAX_CELL_DP = 46f
-
         /** Floor for the narrow end of the fleet; below this a swatch stops being a stylus target. */
         private const val MIN_CELL_DP = 30f
 

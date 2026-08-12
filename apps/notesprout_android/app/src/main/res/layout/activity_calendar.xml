@@ -16,7 +16,7 @@
     <LinearLayout
         android:id="@+id/calendarToolbar"
         android:layout_width="match_parent"
-        android:layout_height="56dp"
+        android:layout_height="@dimen/toolbar_bar_thickness"
         android:orientation="horizontal"
         android:background="@color/paperWhite"
         android:gravity="center_vertical"

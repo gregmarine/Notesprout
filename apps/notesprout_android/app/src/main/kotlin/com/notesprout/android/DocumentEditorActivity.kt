@@ -306,6 +306,14 @@ class DocumentEditorActivity : AppCompatActivity() {
     private fun dp(v: Int): Int =
         TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, v.toFloat(), resources.displayMetrics).toInt()
 
+    // The shared icon-button tap target + glyph inset (44dp/10dp under sw720dp, 62dp/14dp on
+    // tablets) — the same dimens Widget.Notesprout.ToolbarButton uses, so this screen's bars
+    // match every XML toolbar in the app.
+    private val toolbarButtonSize: Int
+        get() = resources.getDimensionPixelSize(R.dimen.toolbar_button_size)
+    private val toolbarButtonInset: Int
+        get() = resources.getDimensionPixelSize(R.dimen.toolbar_button_padding)
+
     private fun buildUi(): View {
         val paper = ContextCompat.getColor(this, R.color.paperWhite)
         val ink = ContextCompat.getColor(this, R.color.inkBlack)
@@ -793,7 +801,7 @@ class DocumentEditorActivity : AppCompatActivity() {
      * happened instead.
      */
     private fun headerIcon(iconRes: Int, hint: String, onClick: () -> Unit): AppCompatImageButton =
-        iconButton(iconRes, hint, size = dp(36), inset = dp(6), onClick = onClick).apply {
+        iconButton(iconRes, hint, size = toolbarButtonSize, inset = toolbarButtonInset, onClick = onClick).apply {
             (layoutParams as LinearLayout.LayoutParams).marginStart = dp(2)
         }
 
@@ -833,7 +841,7 @@ class DocumentEditorActivity : AppCompatActivity() {
         // given screen, so muscle memory still holds; only the tail moves, and it moves to one place.
         dividerOverflow = groupDivider(ink)
         btnOverflow = iconButton(
-            R.drawable.ic_dots, "More tools", size = dp(44), inset = dp(10), closesOverflow = false,
+            R.drawable.ic_dots, "More tools", size = toolbarButtonSize, inset = toolbarButtonInset, closesOverflow = false,
         ) { toggleOverflowMenu() }
         bar.addView(dividerOverflow)
         bar.addView(btnOverflow)
@@ -895,9 +903,9 @@ class DocumentEditorActivity : AppCompatActivity() {
         return x >= xy[0] && x <= xy[0] + view.width && y >= xy[1] && y <= xy[1] + view.height
     }
 
-    /** A format-bar tool: a 44dp target around a 24dp Tabler glyph. */
+    /** A format-bar tool: the shared toolbar-button target around a Tabler glyph. */
     private fun formatIcon(iconRes: Int, hint: String, onClick: () -> Unit): AppCompatImageButton =
-        iconButton(iconRes, hint, size = dp(44), inset = dp(10), onClick = onClick)
+        iconButton(iconRes, hint, size = toolbarButtonSize, inset = toolbarButtonInset, onClick = onClick)
 
     /**
      * The one icon button this screen builds, so every bar shares a hit area, a background and a

@@ -13,7 +13,7 @@
     earns nothing.
 
     The pager is INVISIBLE at one page rather than GONE, and never merely disabled. Not disabled
-    because a disabled control is visually silent on e-ink; not GONE because its 44dp has to stay
+    because a disabled control is visually silent on e-ink; not GONE because its height has to stay
     reserved either way — the list is measured against the space it can actually keep, and a pager
     that appears later would clip the rows that had been made to fit.
 -->
@@ -23,10 +23,11 @@
     android:orientation="vertical"
     android:background="@color/paperWhite">
 
-    <!-- Title row: the section's name and its create action. -->
+    <!-- Title row: the section's name and its create action. Height wraps the create button
+         (the shared toolbar-button size), so the tablet tier never clips its border. -->
     <LinearLayout
         android:layout_width="match_parent"
-        android:layout_height="48dp"
+        android:layout_height="wrap_content"
         android:orientation="horizontal"
         android:gravity="center_vertical"
         android:paddingStart="16dp"
@@ -92,11 +93,11 @@
 
     </FrameLayout>
 
-    <!-- Pager: ‹ n/m › — invisible (but still occupying its 44dp) at one page. -->
+    <!-- Pager: ‹ n/m › — invisible (but still occupying its height) at one page. -->
     <LinearLayout
         android:id="@+id/sectionPager"
         android:layout_width="match_parent"
-        android:layout_height="44dp"
+        android:layout_height="wrap_content"
         android:orientation="horizontal"
         android:gravity="center"
         android:visibility="invisible">

@@ -25,7 +25,7 @@
         <LinearLayout
             android:id="@+id/chromeBar"
             android:layout_width="match_parent"
-            android:layout_height="56dp"
+            android:layout_height="@dimen/toolbar_bar_thickness"
             android:orientation="horizontal"
             android:gravity="center_vertical">
 
@@ -167,6 +167,19 @@
 
             </LinearLayout>
 
+            <!-- Overflow menu for the scratch pad toolbar — rows of the buttons that didn't fit,
+                 anchored to the window bottom directly above the bar they spilled from. Rows are
+                 built by ToolbarOverflowManager. -->
+            <LinearLayout
+                android:id="@+id/scratchOverflowMenu"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_gravity="bottom"
+                android:orientation="vertical"
+                android:visibility="gone"
+                android:background="@drawable/shape_bordered"
+                android:elevation="0dp" />
+
         </FrameLayout>
 
         <!-- 1dp divider between canvas and toolbar -->
@@ -179,7 +192,7 @@
         <LinearLayout
             android:id="@+id/scratchpadToolbar"
             android:layout_width="match_parent"
-            android:layout_height="56dp"
+            android:layout_height="@dimen/toolbar_bar_thickness"
             android:orientation="horizontal"
             android:gravity="center_vertical"
             android:paddingStart="4dp"
@@ -245,12 +258,33 @@
                 android:layout_height="0dp"
                 android:layout_weight="1" />
 
-            <!-- Visible only when launched from a notebook (EXTRA_FROM_NOTEBOOK_ID != null) -->
+            <!-- Visible only when launched from a notebook (EXTRA_FROM_NOTEBOOK_ID != null);
+                 registered as the overflow manager's trailing-pinned view so it stays
+                 right-aligned and never moves into the overflow menu. Removed from the bar
+                 entirely when launched from the library. -->
             <androidx.appcompat.widget.AppCompatImageButton
                 android:id="@+id/btnSendToNotebook"
                 style="@style/Widget.Notesprout.ToolbarButton"
                 android:src="@drawable/ic_sketching_receive"
                 android:contentDescription="Send to Notebook"
+                android:visibility="gone" />
+
+            <!-- Overflow controls — ToolbarOverflowManager shows these only when the tool
+                 buttons don't fit the window width (narrow windows at the tablet button size). -->
+            <View
+                android:id="@+id/dividerScratchOverflow"
+                android:layout_width="1dp"
+                android:layout_height="28dp"
+                android:layout_marginStart="4dp"
+                android:layout_marginEnd="4dp"
+                android:background="@color/inkBlack"
+                android:visibility="gone" />
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnScratchOverflow"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:src="@drawable/ic_dots"
+                android:contentDescription="More tools"
                 android:visibility="gone" />
 
         </LinearLayout>

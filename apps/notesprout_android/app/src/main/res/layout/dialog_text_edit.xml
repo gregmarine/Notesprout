@@ -16,7 +16,7 @@
         <androidx.appcompat.widget.AppCompatButton
             android:id="@+id/btnModeWysiwyg"
             android:layout_width="0dp"
-            android:layout_height="36dp"
+            android:layout_height="@dimen/toolbar_button_size"
             android:layout_weight="1"
             android:background="@drawable/bg_toolbar_button"
             android:text="WYSIWYG"
@@ -33,7 +33,7 @@
         <androidx.appcompat.widget.AppCompatButton
             android:id="@+id/btnModeMarkdown"
             android:layout_width="0dp"
-            android:layout_height="36dp"
+            android:layout_height="@dimen/toolbar_button_size"
             android:layout_weight="1"
             android:background="@drawable/bg_toolbar_button"
             android:text="Markdown"
@@ -54,7 +54,7 @@
     <!-- Formatting toolbar — horizontally scrollable row of compact text buttons -->
     <HorizontalScrollView
         android:layout_width="match_parent"
-        android:layout_height="44dp"
+        android:layout_height="@dimen/toolbar_bar_thickness"
         android:scrollbars="none"
         android:fillViewport="false">
 
@@ -71,7 +71,7 @@
             <androidx.appcompat.widget.AppCompatButton
                 android:id="@+id/btnFmtBold"
                 android:layout_width="wrap_content"
-                android:layout_height="36dp"
+                android:layout_height="@dimen/toolbar_button_size"
                 android:minWidth="0dp"
                 android:background="@drawable/shape_bordered"
                 android:text="B"
@@ -89,7 +89,7 @@
             <androidx.appcompat.widget.AppCompatButton
                 android:id="@+id/btnFmtItalic"
                 android:layout_width="wrap_content"
-                android:layout_height="36dp"
+                android:layout_height="@dimen/toolbar_button_size"
                 android:layout_marginStart="4dp"
                 android:minWidth="0dp"
                 android:background="@drawable/shape_bordered"
@@ -108,7 +108,7 @@
             <androidx.appcompat.widget.AppCompatButton
                 android:id="@+id/btnFmtStrikethrough"
                 android:layout_width="wrap_content"
-                android:layout_height="36dp"
+                android:layout_height="@dimen/toolbar_button_size"
                 android:layout_marginStart="4dp"
                 android:minWidth="0dp"
                 android:background="@drawable/shape_bordered"
@@ -126,7 +126,7 @@
             <androidx.appcompat.widget.AppCompatButton
                 android:id="@+id/btnFmtHeading"
                 android:layout_width="wrap_content"
-                android:layout_height="36dp"
+                android:layout_height="@dimen/toolbar_button_size"
                 android:layout_marginStart="4dp"
                 android:minWidth="0dp"
                 android:background="@drawable/shape_bordered"
@@ -152,7 +152,7 @@
             <androidx.appcompat.widget.AppCompatButton
                 android:id="@+id/btnFmtUl"
                 android:layout_width="wrap_content"
-                android:layout_height="36dp"
+                android:layout_height="@dimen/toolbar_button_size"
                 android:minWidth="0dp"
                 android:background="@drawable/shape_bordered"
                 android:text="•"
@@ -169,7 +169,7 @@
             <androidx.appcompat.widget.AppCompatButton
                 android:id="@+id/btnFmtOl"
                 android:layout_width="wrap_content"
-                android:layout_height="36dp"
+                android:layout_height="@dimen/toolbar_button_size"
                 android:layout_marginStart="4dp"
                 android:minWidth="0dp"
                 android:background="@drawable/shape_bordered"
@@ -187,7 +187,7 @@
             <androidx.appcompat.widget.AppCompatButton
                 android:id="@+id/btnFmtTask"
                 android:layout_width="wrap_content"
-                android:layout_height="36dp"
+                android:layout_height="@dimen/toolbar_button_size"
                 android:layout_marginStart="4dp"
                 android:minWidth="0dp"
                 android:background="@drawable/shape_bordered"
@@ -213,7 +213,7 @@
             <androidx.appcompat.widget.AppCompatButton
                 android:id="@+id/btnFmtBlockquote"
                 android:layout_width="wrap_content"
-                android:layout_height="36dp"
+                android:layout_height="@dimen/toolbar_button_size"
                 android:minWidth="0dp"
                 android:background="@drawable/shape_bordered"
                 android:text="❝"
@@ -230,7 +230,7 @@
             <androidx.appcompat.widget.AppCompatButton
                 android:id="@+id/btnFmtHr"
                 android:layout_width="wrap_content"
-                android:layout_height="36dp"
+                android:layout_height="@dimen/toolbar_button_size"
                 android:layout_marginStart="4dp"
                 android:minWidth="0dp"
                 android:background="@drawable/shape_bordered"
@@ -248,7 +248,7 @@
             <androidx.appcompat.widget.AppCompatButton
                 android:id="@+id/btnFmtLink"
                 android:layout_width="wrap_content"
-                android:layout_height="36dp"
+                android:layout_height="@dimen/toolbar_button_size"
                 android:layout_marginStart="4dp"
                 android:minWidth="0dp"
                 android:background="@drawable/shape_bordered"

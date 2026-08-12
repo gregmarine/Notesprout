@@ -1574,7 +1574,7 @@ class CalendarActivity : AppCompatActivity() {
         val h = binding.calendarContent.height
         if (w <= 0 || h <= 0) { toast("Calendar not ready"); return }
 
-        // The calendar canvas sits *below* its 56dp toolbar (vertical layout), but a notebook page's
+        // The calendar canvas sits *below* its toolbar (vertical layout), but a notebook page's
         // drawing area is full-screen with the toolbar overlaid on top. Reserve that toolbar height as
         // a blank top margin so the exported grid + writing clear the notebook's floating toolbar
         // instead of landing under it (the "off by exactly the toolbar size" alignment).

@@ -103,6 +103,14 @@ information takes inkBlack and is made *smaller* to read as secondary) · `borde
   narrowest device first — P2P is `sw439dp`**; a control that falls off the edge is worse than one that
   must be learned. Details: [`docs/design-system.md`](docs/design-system.md).
 
+- **Tap targets are dimen-driven — never hardcode a button size.** Icon buttons take
+  `Widget.Notesprout.ToolbarButton`; anything hand-sized references `@dimen/toolbar_button_size` /
+  `toolbar_button_padding`, and every chrome bar hosting buttons takes `@dimen/toolbar_bar_thickness`
+  (`res/values/dimens.xml` 44/10/56 below sw720dp · `values-sw720dp` **62/14/70 on tablets** — matched
+  to the Supernote native toolbar, ~9.8mm at 300ppi). A fixed-height row that holds a `ToolbarButton`
+  clips it on the tablet tier; rows wrap or take the bar dimen. Full rationale (incl. why the tier
+  boundary is 720, not 480): [`docs/toolbar.md`](docs/toolbar.md).
+
 - **The one colour exception — ink, and only ink.** Colour appears in chrome *only where the colour
   itself is the thing being chosen or reported*: the pen-colour panel's swatches, and the pen button's
   icon tinted with the armed ink. Nothing else. Every render site routes through
