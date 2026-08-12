@@ -343,9 +343,11 @@ identify a notebook faster than 44dp of its first page, and decoding a snapshot 
 refresh is real work for no information.
 
 The leading icon is a **lock** for NOTEBOOK-scope encryption, so a passphrase prompt is expected
-before the tap rather than after it. It routes through `DayHistoryRepository.coverFor`, which is what
-makes it inherit the rule that a GLOBAL-scope notebook is **not** locked — the index key already
-covers it — instead of restating that rule and getting it wrong. See [`encryption.md`](encryption.md).
+before the tap rather than after it. It routes through `DayHistoryRepository.locksFor` — one batched,
+blob-free read for every row on screen (never `coverFor`, whose full-row fetch drags each cover blob
+out of the index for a boolean) — which inherits the rule that a GLOBAL-scope notebook is **not**
+locked — the index key already covers it — instead of restating that rule and getting it wrong. See
+[`encryption.md`](encryption.md).
 
 A tap opens the notebook through the ordinary `NotebookActivity` path, so an encrypted one meets its
 usual unlock flow; the dashboard knows nothing about keys beyond drawing the icon.
@@ -391,9 +393,15 @@ small by construction, **not** the pagination: `buildCells` inflates and measure
 *whole* result set before packing, so a library with a very long overdue tail pays for every row even
 though only one page is attached. There is no `LIMIT` on `openDueBy`. Recorded in `BACKLOG.md`.
 
-The notebooks read is the expensive one — `notebooksForDay` walks the folder tree three times, lists
-every notebook for the CREATED derivation, and `coverFor` adds a lookup per displayed row. It runs on
-resume, not on every check-off; that is what `refreshTasks()` is for.
+The three sections load **concurrently** — three child coroutines in `refresh()` — so each paints as
+its own data arrives rather than notebooks (the slowest) waiting behind tasks and events.
+
+The notebooks read is still the expensive one, but it is batched: `notebooksForDay` fetches the
+folder list once and shares it across the three kinds, the CREATED derivation is a date-ranged query
+rather than a scan of every notebook, opened/edited ids resolve through one blob-free
+`ObjectSummary` batch read, `RecentsManager.resolve` takes an exclude-set and limit so only rows that
+will actually show are looked up, and the lock icons come from a single `locksFor` batch. Even so it
+runs on resume, not on every check-off; that is what `refreshTasks()` is for.
 
 ---
 

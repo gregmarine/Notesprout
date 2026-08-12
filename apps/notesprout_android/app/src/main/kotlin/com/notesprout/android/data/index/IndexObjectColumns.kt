@@ -31,6 +31,15 @@ private fun flagsOf(encrypted: Boolean, excludeFromBackup: Boolean): Int =
 // The cover snapshot (base64 in the legacy JSON) becomes the binary blob; everything else is a scalar
 // column. Leak hygiene is unchanged — callers still gate the snapshot on `encrypted` before storing it.
 
+/**
+ * The lock state from a **columnar** summary's scalar columns alone: encrypted with anything but
+ * GLOBAL scope (an unknown scope string stays locked, matching [notebookMeta]'s null-on-invalid).
+ * Meaningless on a [ObjectSummary.legacy] row — the truth is in its JSON; callers fall back to a
+ * full read there.
+ */
+fun ObjectSummary.columnarLocked(): Boolean =
+    ((flags ?: 0) and FLAG_ENCRYPTED) != 0 && keyScope != KeyScope.GLOBAL.name
+
 /** Read a notebook row's metadata: typed columns when columnar (`data == ""`), else legacy JSON. */
 fun ObjectEntity.notebookMeta(): NotebookObject =
     if (data.isEmpty()) NotebookObject(

@@ -446,11 +446,14 @@ a **MainActivity recents browse mode** (notebook cards) and a **NotebookActivity
     `timestamp` descending (newest-first). `load()` is tolerant of malformed/absent JSON → empty.
   - `recordClose` is a no-op if the id is blank or not currently listed; `remove` backs the prune.
 - `ResolvedRecent(notebookId, notebookName, folderPath, timestamp)` — display model produced by
-  `RecentsManager.resolve(context)` (`suspend`, `Dispatchers.IO`). Resolves each stored entry
-  against the index; **skips and prunes** (single re-loaded write) any notebook that is missing,
-  soft-deleted, or not a `NOTEBOOK` — self-healing store. `folderPath` is the full breadcrumb
-  (`"Notebooks › A › B"`), matching the search/pinned convention; immediate parent is
-  `folderPath.substringAfterLast(" › ")`.
+  `RecentsManager.resolve(context, exclude, limit)` (`suspend`, `Dispatchers.IO`; both optional —
+  the defaults resolve everything, which is what this screen uses). Resolves the stored entries
+  against the index in **one blob-free `ObjectSummary` batch read** (never a full row per entry —
+  that dragged each cover blob out of the index); **skips and prunes** (single re-loaded write) any
+  notebook that is missing, soft-deleted, or not a `NOTEBOOK` — self-healing store. `exclude` drops
+  entries before lookup and `limit` caps the *valid* results — the Today dashboard's shape; excluded
+  ids are not health-checked. `folderPath` is the full breadcrumb (`"Notebooks › A › B"`), matching
+  the search/pinned convention; immediate parent is `folderPath.substringAfterLast(" › ")`.
 
 ### Record points (`NotebookActivity`)
 

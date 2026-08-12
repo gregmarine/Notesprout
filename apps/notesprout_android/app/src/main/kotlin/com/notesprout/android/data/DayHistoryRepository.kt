@@ -9,7 +9,9 @@ import com.notesprout.android.data.index.NotebookActivityEntity
 import com.notesprout.android.data.index.NotebookObject
 import com.notesprout.android.data.index.NotesproutIndex
 import com.notesprout.android.data.index.ObjectEntity
+import com.notesprout.android.data.index.ObjectSummary
 import com.notesprout.android.data.index.ObjectType
+import com.notesprout.android.data.index.columnarLocked
 import com.notesprout.android.data.index.notebookMeta
 import com.notesprout.android.data.recents.ResolvedRecent
 import kotlinx.coroutines.Dispatchers
@@ -76,31 +78,38 @@ class DayHistoryRepository(
      * rows are dropped. Newest-first.
      */
     suspend fun notebooksFor(date: LocalDate, kind: Kind): List<ResolvedRecent> =
-        withContext(Dispatchers.IO) {
-            val (start, end) = dayBounds(date)
-            val folders = indexRepo.getAllFolders()
+        withContext(Dispatchers.IO) { notebooksFor(date, kind, indexRepo.getAllFolders()) }
 
-            when (kind) {
-                Kind.CREATED -> indexRepo.getAllNotebooks()
-                    .filter { it.createdAt in start until end }
-                    .sortedByDescending { it.createdAt }
-                    .map { it.toResolved(it.createdAt, folders) }
+    /** [notebooksFor] with the folder list prefetched, so [notebooksForDay] shares one across kinds. */
+    private suspend fun notebooksFor(
+        date: LocalDate,
+        kind: Kind,
+        folders: List<ObjectEntity>,
+    ): List<ResolvedRecent> = withContext(Dispatchers.IO) {
+        val (start, end) = dayBounds(date)
 
-                Kind.OPENED, Kind.EDITED -> {
-                    val type = if (kind == Kind.OPENED) ActivityType.OPENED else ActivityType.EDITED
-                    // Rows already come newest-first; keep the first (newest) per notebook.
-                    val newestPerNotebook = LinkedHashMap<String, Long>()
-                    for (row in activityDao.inRange(type, start, end)) {
-                        newestPerNotebook.putIfAbsent(row.notebookId, row.timestamp)
-                    }
-                    newestPerNotebook.entries.mapNotNull { (nbId, ts) ->
-                        val nb = indexRepo.getNotebook(nbId)
-                        if (nb == null || nb.deletedAt != null || nb.type != ObjectType.NOTEBOOK) null
-                        else nb.toResolved(ts, folders)
-                    }.sortedByDescending { it.timestamp }
+        when (kind) {
+            Kind.CREATED -> indexRepo.getNotebooksCreatedIn(start, end)
+                .sortedByDescending { it.createdAt }
+                .map { it.toResolved(it.createdAt, folders) }
+
+            Kind.OPENED, Kind.EDITED -> {
+                val type = if (kind == Kind.OPENED) ActivityType.OPENED else ActivityType.EDITED
+                // Rows already come newest-first; keep the first (newest) per notebook.
+                val newestPerNotebook = LinkedHashMap<String, Long>()
+                for (row in activityDao.inRange(type, start, end)) {
+                    newestPerNotebook.putIfAbsent(row.notebookId, row.timestamp)
                 }
+                // One blob-free batch read instead of a full-row fetch (cover blob included) per id.
+                val summaries = indexRepo.getObjectSummaries(newestPerNotebook.keys)
+                    .filter { it.deletedAt == null && it.type == ObjectType.NOTEBOOK }
+                    .associateBy { it.id }
+                newestPerNotebook.entries.mapNotNull { (nbId, ts) ->
+                    summaries[nbId]?.toResolved(ts, folders)
+                }.sortedByDescending { it.timestamp }
             }
         }
+    }
 
     /**
      * One notebook's activity on a day, merged across all three [Kind]s — the row model behind the
@@ -130,9 +139,10 @@ class DayHistoryRepository(
      * calendar long-press popup shows.
      */
     suspend fun notebooksForDay(date: LocalDate): List<DayNotebook> = withContext(Dispatchers.IO) {
+        val folders = indexRepo.getAllFolders()
         val merged = LinkedHashMap<String, DayNotebook>()
         for (kind in listOf(Kind.CREATED, Kind.OPENED, Kind.EDITED)) {
-            for (r in notebooksFor(date, kind)) {
+            for (r in notebooksFor(date, kind, folders)) {
                 val prev = merged[r.notebookId]
                 merged[r.notebookId] = DayNotebook(
                     notebookId = r.notebookId,
@@ -160,6 +170,21 @@ class DayHistoryRepository(
         val locked = obj.encrypted && obj.keyScope != KeyScope.GLOBAL
         NotebookCover(locked, if (locked) null else obj.snapshot)
     }
+
+    /**
+     * Lock state for a batch of notebooks, keyed by id — the Today dashboard's per-row question,
+     * answered without [coverFor]'s full-row read. Deriving `locked` needs two scalar columns, and
+     * paying for the cover blob (plus a base64 encode of it) per row was most of that list's load
+     * time. A legacy pre-columnar row still takes the full read — its truth is in the JSON — but
+     * those are rare after the compactor sweep. Missing / undecodable ids resolve absent or
+     * unlocked, matching [coverFor].
+     */
+    suspend fun locksFor(ids: Collection<String>): Map<String, Boolean> =
+        withContext(Dispatchers.IO) {
+            indexRepo.getObjectSummaries(ids).associate { s ->
+                s.id to if (s.legacy) coverFor(s.id).locked else s.columnarLocked()
+            }
+        }
 
     /**
      * The page id (`cal-daynote-YYYY-MM-DD`) of the read-only day note for [date], if one exists and
@@ -201,6 +226,14 @@ class DayHistoryRepository(
     // region Helpers
 
     private fun ObjectEntity.toResolved(timestamp: Long, folders: List<ObjectEntity>) =
+        ResolvedRecent(
+            notebookId = id,
+            notebookName = name,
+            folderPath = buildFolderPath(parentId, folders),
+            timestamp = timestamp,
+        )
+
+    private fun ObjectSummary.toResolved(timestamp: Long, folders: List<ObjectEntity>) =
         ResolvedRecent(
             notebookId = id,
             notebookName = name,

@@ -292,10 +292,18 @@ class IndexRepository(private val dao: ObjectDao) {
         dao.getChildren(parentId, type = ObjectType.NOTEBOOK)
 
     suspend fun getAllNotebooks(): List<ObjectEntity> =
-        dao.getAllNotDeleted().filter { it.type == ObjectType.NOTEBOOK }
+        dao.getAllOfType(ObjectType.NOTEBOOK)
 
     suspend fun getAllFolders(): List<ObjectEntity> =
-        dao.getAllNotDeleted().filter { it.type == ObjectType.FOLDER }
+        dao.getAllOfType(ObjectType.FOLDER)
+
+    /** Live notebooks created in `[start, end)` — replaces filtering [getAllNotebooks] in Kotlin. */
+    suspend fun getNotebooksCreatedIn(start: Long, end: Long): List<ObjectEntity> =
+        dao.notebooksCreatedIn(start, end)
+
+    /** Blob-free batch read for list rows — see [ObjectSummary]. Empty in, empty out. */
+    suspend fun getObjectSummaries(ids: Collection<String>): List<ObjectSummary> =
+        if (ids.isEmpty()) emptyList() else dao.objectSummaries(ids.toList())
 
     // endregion
 
