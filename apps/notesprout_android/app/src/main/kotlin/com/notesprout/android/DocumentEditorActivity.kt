@@ -33,6 +33,7 @@ import androidx.appcompat.widget.AppCompatTextView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.notesprout.android.core.DocumentPreferences
+import com.notesprout.android.core.IndexGuard
 import com.notesprout.android.core.Slog
 import com.notesprout.android.core.TopGuard
 import com.notesprout.android.core.isRattaDevice
@@ -159,6 +160,10 @@ class DocumentEditorActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // The proofread user dictionary lives in the global index. In every normal launch the
+        // notebook host (itself guarded) already opened it; this fires only when Android rebuilds
+        // the task after a process kill — where the host is gone and nothing could save durably.
+        if (!IndexGuard.ready(this)) return
 
         notebookName = intent.getStringExtra(EXTRA_NOTEBOOK_NAME).orEmpty()
         // Read before the views are built — both surfaces are sized from it.
@@ -283,6 +288,7 @@ class DocumentEditorActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        if (IndexGuard.bounced(this)) { super.onDestroy(); return }
         super.onDestroy()
         autosave.removeCallbacks(autosaveTick)
         if (::proofread.isInitialized) proofread.dispose()
@@ -689,9 +695,9 @@ class DocumentEditorActivity : AppCompatActivity() {
     // ── Proofread ─────────────────────────────────────────────────────────────
 
     /**
-     * The proofread sheet: an on-demand full pass, and the on/off switch. Off hides "Check
-     * document" rather than disabling it — a disabled control is invisible on e-ink (see
-     * docs/design-system.md), and turning the feature on checks everything anyway.
+     * The proofread sheet: an on-demand full pass, the user dictionary, and the on/off switch.
+     * Off hides "Check document" rather than disabling it — a disabled control is invisible on
+     * e-ink (see docs/design-system.md), and turning the feature on checks everything anyway.
      */
     private fun promptProofread() {
         val sheet = ActionSheetDialog(this).title("Proofread")
@@ -702,6 +708,7 @@ class DocumentEditorActivity : AppCompatActivity() {
                 }
                 proofread.checkDocument()
             }
+            sheet.addAction(R.drawable.ic_book, "User dictionary") { proofread.promptUserDictionary() }
             sheet.addAction(R.drawable.ic_eye_off, "Turn off proofread") { proofread.setEnabled(false) }
         } else {
             sheet.addAction(R.drawable.ic_eye, "Turn on proofread") { proofread.setEnabled(true) }

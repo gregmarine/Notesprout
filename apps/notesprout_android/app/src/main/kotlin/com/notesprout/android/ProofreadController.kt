@@ -7,9 +7,12 @@ import android.text.Editable
 import android.text.Spanned
 import android.text.TextWatcher
 import android.util.Log
+import android.widget.Toast
 import androidx.appcompat.widget.AppCompatEditText
 import com.notesprout.android.core.DocumentPreferences
 import com.notesprout.android.core.Slog
+import com.notesprout.android.data.index.NotesproutIndex
+import com.notesprout.android.data.index.UserDictionaryEntity
 import com.notesprout.android.core.proofread.ProofreadCheck
 import com.notesprout.android.core.proofread.ProofreadDirty
 import com.notesprout.android.core.proofread.SpellEngine
@@ -41,9 +44,9 @@ class ProofreadFlagSpan
  * Spans are **diffed, not rewritten**: a word already flagged at the same offsets keeps its span.
  * On e-ink every needless invalidate is a visible flash, so an unchanged screen costs nothing.
  *
- * Tapping a flagged word opens an [ActionSheetDialog] of suggestions plus *Ignore for now* —
- * session-scoped by design; a durable "Add to dictionary" arrives with Phase 3's user dictionary,
- * and a session-only add would lie about its lifetime.
+ * Tapping a flagged word opens an [ActionSheetDialog] of suggestions plus *Add to dictionary*
+ * (durable — the `user_dictionary` table in the global index, so the host activity must be behind
+ * [com.notesprout.android.core.IndexGuard]) and *Ignore for now* (this session only, by design).
  *
  * The on/off state is global ([DocumentPreferences], default on). While off — or while the editor
  * is in Preview, which pauses the timer — nothing runs and no spans exist. The dictionary is only
@@ -76,6 +79,12 @@ class ProofreadController(
 
     /** Words the user chose to ignore, normalized lowercase. This editor session only. */
     private val ignored = mutableSetOf<String>()
+
+    /**
+     * The durable user dictionary, mirrored in memory so the checking pass never reads the
+     * database. Loaded with the engine (see [loadEngine]); adds and removes keep it in step.
+     */
+    private val userWords = mutableSetOf<String>()
 
     private val handler = Handler(Looper.getMainLooper())
     private val checkTick = Runnable { runPendingCheck() }
@@ -208,8 +217,13 @@ class ProofreadController(
                 engineRequested = false // an explicit "Check document" may retry
                 return@launch
             }
+            // The user's words ride in with the engine — both must be present before the first
+            // pass, or a word added yesterday would flash flagged while the table was on its way.
+            val words = NotesproutIndex.userDictionaryDao().allWords()
+            userWords.clear()
+            userWords.addAll(words)
             engine = loaded
-            Slog.d(TAG) { "Dictionary ready: ${loaded.wordCount} words" }
+            Slog.d(TAG) { "Dictionary ready: ${loaded.wordCount} words + ${words.size} user words" }
             if (enabled) checkDocument()
         }
     }
@@ -253,7 +267,8 @@ class ProofreadController(
         val gen = generation
         scope.launch(Dispatchers.Default) {
             val flags = ProofreadCheck.misspelled(snapshot, clamped, engine::isKnown) {
-                normalize(it) in ignored
+                val w = normalize(it)
+                w in ignored || w in userWords
             }
             withContext(Dispatchers.Main) {
                 if (gen != generation) {
@@ -311,8 +326,56 @@ class ProofreadController(
         for (suggestion in suggestions) {
             sheet.addAction(null, suggestion) { replace(span, suggestion) }
         }
+        sheet.addAction(R.drawable.ic_book, "Add to dictionary") { addToDictionary(word) }
         sheet.addAction(R.drawable.ic_eye_off, "Ignore for now") { ignore(word) }
         sheet.show()
+    }
+
+    /**
+     * The minimal dictionary manager: every saved word, tap one to remove it. Reads the table
+     * fresh rather than trusting [userWords] — that set only exists once the engine has loaded,
+     * and this list must be truthful even before then.
+     */
+    fun promptUserDictionary() {
+        scope.launch {
+            val words = NotesproutIndex.userDictionaryDao().allWords()
+            if (words.isEmpty()) {
+                Toast.makeText(context, "No words added to the dictionary yet", Toast.LENGTH_SHORT).show()
+                return@launch
+            }
+            val sheet = ActionSheetDialog(context)
+            sheet.title("User dictionary — tap a word to remove it")
+            for (word in words) {
+                sheet.addAction(R.drawable.ic_trash, word) { removeFromDictionary(word) }
+            }
+            sheet.show()
+        }
+    }
+
+    /**
+     * Make [word] correct from now on, everywhere: into the in-memory set for this session's
+     * passes, into the global index for every future one. The write goes through the app scope —
+     * an add followed immediately by Back must not be cancelled with the activity.
+     */
+    private fun addToDictionary(word: String) {
+        val w = normalize(word)
+        userWords.add(w)
+        unflag(w)
+        NotesproutApplication.appScope.launch {
+            NotesproutIndex.userDictionaryDao().add(UserDictionaryEntity(w, System.currentTimeMillis()))
+        }
+        Slog.d(TAG) { "Added a word to the user dictionary (${userWords.size} in memory)" }
+    }
+
+    /** Take [word] back out; whatever the document owes in flags, the fresh pass repays. */
+    private fun removeFromDictionary(word: String) {
+        userWords.remove(word)
+        NotesproutApplication.appScope.launch {
+            NotesproutIndex.userDictionaryDao().remove(word)
+        }
+        Toast.makeText(context, "Removed “$word”", Toast.LENGTH_SHORT).show()
+        checkDocument()
+        Slog.d(TAG) { "Removed a word from the user dictionary" }
     }
 
     /**
@@ -332,20 +395,26 @@ class ProofreadController(
 
     /** Ignore [word] for this session and take its flags — all of them — off the screen. */
     private fun ignore(word: String) {
-        ignored.add(normalize(word))
+        val w = normalize(word)
+        ignored.add(w)
+        unflag(w)
+        Slog.d(TAG) { "Ignoring a word for this session (${ignored.size} ignored)" }
+    }
+
+    /** Take every flag whose word normalizes to [w] off the screen. */
+    private fun unflag(w: String) {
         val text = editor.text ?: return
         var changed = false
         for (span in text.getSpans(0, text.length, ProofreadFlagSpan::class.java)) {
             val s = text.getSpanStart(span)
             val e = text.getSpanEnd(span)
             if (s < 0 || e <= s) continue
-            if (normalize(text.subSequence(s, e).toString()) == normalize(word)) {
+            if (normalize(text.subSequence(s, e).toString()) == w) {
                 text.removeSpan(span)
                 changed = true
             }
         }
         if (changed) editor.invalidate()
-        Slog.d(TAG) { "Ignoring a word for this session (${ignored.size} ignored)" }
     }
 
     private fun removeAllFlags() {
@@ -358,7 +427,7 @@ class ProofreadController(
     }
 
     /** The engine's own normalization: knowledge is lowercase, and ’ counts as '. */
-    private fun normalize(word: String): String = word.replace('’', '\'').lowercase()
+    private fun normalize(word: String): String = SpellEngine.normalizeWord(word)
 
     private fun spanKey(start: Int, end: Int): Long = (start.toLong() shl 32) or end.toLong()
 }

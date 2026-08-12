@@ -14,8 +14,9 @@ import com.notesprout.android.data.SoilSchema
         NotebookActivityEntity::class,
         EventEntity::class,
         TaskEntity::class,
+        UserDictionaryEntity::class,
     ],
-    version = 10,
+    version = 11,
     exportSchema = false,
 )
 abstract class NotesproutDatabase : RoomDatabase() {
@@ -26,6 +27,7 @@ abstract class NotesproutDatabase : RoomDatabase() {
     abstract fun notebookActivityDao(): NotebookActivityDao
     abstract fun eventDao(): EventDao
     abstract fun taskDao(): TaskDao
+    abstract fun userDictionaryDao(): UserDictionaryDao
 
     companion object {
         val MIGRATION_1_2 = object : Migration(1, 2) {
@@ -242,6 +244,24 @@ abstract class NotesproutDatabase : RoomDatabase() {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE tasks ADD COLUMN \"remindAmount\" INTEGER")
                 db.execSQL("ALTER TABLE tasks ADD COLUMN \"remindUnit\" TEXT")
+            }
+        }
+
+        /**
+         * The proofread user dictionary (see [UserDictionaryEntity]): words "Add to dictionary"
+         * makes durable. The word — already in the spell engine's normal form — is the key and the
+         * whole payload, so the table needs no index beyond its rowid.
+         */
+        val MIGRATION_10_11 = object : Migration(10, 11) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS user_dictionary (
+                        word    TEXT    NOT NULL PRIMARY KEY,
+                        addedAt INTEGER NOT NULL
+                    )
+                    """.trimIndent()
+                )
             }
         }
 

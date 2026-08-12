@@ -41,7 +41,7 @@ class SpellEngine private constructor(private val checker: SymSpell) {
      * plain ones; a possessive ("gardener's") is known when its stem is.
      */
     fun isKnown(word: String): Boolean {
-        val w = normalize(word)
+        val w = normalizeWord(word)
         if (frequency(w) != null) return true
         val stem = when {
             w.endsWith("'s") -> w.dropLast(2)
@@ -57,7 +57,7 @@ class SpellEngine private constructor(private val checker: SymSpell) {
      * it affords [Verbosity.All] — the full distance-ordered list, not just the nearest tier.
      */
     fun suggestions(word: String, limit: Int = MAX_SUGGESTIONS): List<String> {
-        val w = normalize(word)
+        val w = normalizeWord(word)
         val items = try {
             checker.lookup(w, Verbosity.All)
         } catch (e: SpellCheckException) {
@@ -125,7 +125,12 @@ class SpellEngine private constructor(private val checker: SymSpell) {
                 SpellEngine(checker)
             }
 
-        private fun normalize(word: String): String =
+        /**
+         * The engine's normal form for a word: lowercase, typographic apostrophe folded to plain.
+         * Also the storage form of the user dictionary and every ignore set — membership anywhere
+         * is comparison in this form.
+         */
+        fun normalizeWord(word: String): String =
             word.replace('’', '\'').lowercase()
     }
 }

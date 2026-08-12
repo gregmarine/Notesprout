@@ -157,6 +157,7 @@ object NotesproutIndex {
                 NotesproutDatabase.MIGRATION_7_8,
                 NotesproutDatabase.MIGRATION_8_9,
                 NotesproutDatabase.MIGRATION_9_10,
+                NotesproutDatabase.MIGRATION_10_11,
             )
         // Plaintext opens (factory == null — the one-time upgrade path) must be wrapped too:
         // Room's default framework helper DELETES the database on a corruption report, and this
@@ -188,6 +189,8 @@ object NotesproutIndex {
     fun eventDao(): EventDao = db().eventDao()
 
     fun taskDao(): TaskDao = db().taskDao()
+
+    fun userDictionaryDao(): UserDictionaryDao = db().userDictionaryDao()
 
     suspend fun checkpointAndVacuum() = withContext(Dispatchers.IO) {
         try {
