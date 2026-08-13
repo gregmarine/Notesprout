@@ -37,15 +37,23 @@ object ProofreadTokenizer {
     private val LINK_TARGET = Regex("""]\([^)]*\)""")
 
     /** Word spans of [text]'s prose, in document order. */
-    fun wordSpans(text: String): List<WordSpan> {
-        if (text.isEmpty()) return emptyList()
+    fun wordSpans(text: String): List<WordSpan> =
+        if (text.isEmpty()) emptyList() else collectWords(text, skipMask(text))
+
+    /** Word spans of [text] against an already-computed [skipMask] — one mask, many consumers. */
+    fun wordSpans(text: String, skip: BooleanArray): List<WordSpan> =
+        if (text.isEmpty()) emptyList() else collectWords(text, skip)
+
+    /** True at every index of [text] that is not prose — code, URLs, emails, link targets. */
+    fun skipMask(text: String): BooleanArray {
         val skip = BooleanArray(text.length)
+        if (text.isEmpty()) return skip
         markCodeLines(text, skip)
         markInlineCode(text, skip)
         markRegex(text, skip, URL)
         markRegex(text, skip, EMAIL)
         markLinkTargets(text, skip)
-        return collectWords(text, skip)
+        return skip
     }
 
     /** Marks fenced code blocks (fence lines included) and indented code lines. */

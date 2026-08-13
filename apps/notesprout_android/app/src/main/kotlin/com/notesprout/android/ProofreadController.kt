@@ -13,6 +13,8 @@ import com.notesprout.android.core.DocumentPreferences
 import com.notesprout.android.core.Slog
 import com.notesprout.android.data.index.NotesproutIndex
 import com.notesprout.android.data.index.UserDictionaryEntity
+import com.notesprout.android.core.proofread.GrammarFlag
+import com.notesprout.android.core.proofread.GrammarRules
 import com.notesprout.android.core.proofread.ProofreadCheck
 import com.notesprout.android.core.proofread.ProofreadDirty
 import com.notesprout.android.core.proofread.SpellEngine
@@ -33,7 +35,22 @@ import kotlinx.coroutines.withContext
 class ProofreadFlagSpan
 
 /**
- * Spell checking for the document editor — the thin Android layer over `core/proofread`.
+ * Marks one grammar finding — the dotted-underline sibling of [ProofreadFlagSpan]. Unlike a
+ * spelling flag, whose word is looked up fresh at tap time, a grammar finding's message and fix
+ * were computed against the text as it stood, so the span carries them — plus the [snippet] it
+ * flagged: a tap on a span whose text has drifted mid-debounce is declined, and the imminent
+ * re-check re-flags whatever still deserves it.
+ */
+class GrammarFlagSpan(
+    val rule: String,
+    val message: String,
+    val replacement: String?,
+    val snippet: String,
+)
+
+/**
+ * Spell and grammar checking for the document editor — the thin Android layer over
+ * `core/proofread`.
  *
  * **Debounced, never per-keystroke** (see docs and the proofread plan): edits accumulate in a
  * [ProofreadDirty] range and are re-checked after [CHECK_DELAY_MS] of typing idle, expanded to
@@ -47,6 +64,11 @@ class ProofreadFlagSpan
  * Tapping a flagged word opens an [ActionSheetDialog] of suggestions plus *Add to dictionary*
  * (durable — the `user_dictionary` table in the global index, so the host activity must be behind
  * [com.notesprout.android.core.IndexGuard]) and *Ignore for now* (this session only, by design).
+ *
+ * The same pass runs the [GrammarRules] essentials over the same region; findings get a dotted
+ * underline ([GrammarFlagSpan]) and a popup with the finding's message, a one-tap *Fix* through
+ * the `Editable` (Ctrl+Z-able) when the rule has a mechanical correction, and *Ignore for now*,
+ * which mutes that rule-plus-snippet pair for the session.
  *
  * The on/off state is global ([DocumentPreferences], default on). While off — or while the editor
  * is in Preview, which pauses the timer — nothing runs and no spans exist. The dictionary is only
@@ -79,6 +101,9 @@ class ProofreadController(
 
     /** Words the user chose to ignore, normalized lowercase. This editor session only. */
     private val ignored = mutableSetOf<String>()
+
+    /** Muted grammar findings, keyed rule + snippet ([grammarKey]). This editor session only. */
+    private val ignoredGrammar = mutableSetOf<String>()
 
     /**
      * The durable user dictionary, mirrored in memory so the checking pass never reads the
@@ -182,9 +207,15 @@ class ProofreadController(
      */
     fun onTap(offset: Int) {
         if (!enabled) return
-        val engine = engine ?: return
         val text = editor.text ?: return
-        val span = text.getSpans(offset, offset, ProofreadFlagSpan::class.java).firstOrNull() ?: return
+        val span = text.getSpans(offset, offset, ProofreadFlagSpan::class.java).firstOrNull()
+        val engine = engine
+        if (span == null || engine == null) {
+            // No spelling flag here — a grammar flag may still own the offset.
+            text.getSpans(offset, offset, GrammarFlagSpan::class.java).firstOrNull()
+                ?.let(::showGrammarPopup)
+            return
+        }
         val start = text.getSpanStart(span)
         val end = text.getSpanEnd(span)
         if (start < 0 || end <= start) return
@@ -270,6 +301,9 @@ class ProofreadController(
                 val w = normalize(it)
                 w in ignored || w in userWords
             }
+            val grammar = GrammarRules.check(snapshot, clamped).filter {
+                grammarKey(it.rule, snapshot.substring(it.start, it.end)) !in ignoredGrammar
+            }
             withContext(Dispatchers.Main) {
                 if (gen != generation) {
                     // Typing moved on under us. The region's words still owe a check — fold it
@@ -279,6 +313,7 @@ class ProofreadController(
                     return@withContext
                 }
                 applyFlags(clamped, flags)
+                applyGrammarFlags(clamped, grammar, snapshot)
             }
         }
     }
@@ -318,6 +353,44 @@ class ProofreadController(
         Slog.d(TAG) { "Checked [${region.start}, ${region.end}): ${flags.size} flagged" }
     }
 
+    /**
+     * The grammar twin of [applyFlags], with one more equality axis: a span at unchanged offsets
+     * survives only if it still says the same thing — same rule, message, and fix — since a pass
+     * can re-diagnose the same range.
+     */
+    private fun applyGrammarFlags(region: ProofreadCheck.Region, flags: List<GrammarFlag>, snapshot: String) {
+        val text = editor.text ?: return
+        val fresh = HashMap<Long, GrammarFlag>(flags.size * 2)
+        for (f in flags) fresh[spanKey(f.start, f.end)] = f
+        val kept = HashSet<Long>()
+        var changed = false
+        for (span in text.getSpans(region.start, region.end, GrammarFlagSpan::class.java)) {
+            val s = text.getSpanStart(span)
+            val e = text.getSpanEnd(span)
+            if (e <= region.start || s >= region.end) continue
+            val key = spanKey(s, e)
+            val f = fresh[key]
+            if (f != null && f.rule == span.rule && f.message == span.message &&
+                f.replacement == span.replacement
+            ) {
+                kept.add(key)
+            } else {
+                text.removeSpan(span)
+                changed = true
+            }
+        }
+        for (f in flags) {
+            if (spanKey(f.start, f.end) in kept) continue
+            text.setSpan(
+                GrammarFlagSpan(f.rule, f.message, f.replacement, snapshot.substring(f.start, f.end)),
+                f.start, f.end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE,
+            )
+            changed = true
+        }
+        if (changed) editor.invalidate()
+        Slog.d(TAG) { "Grammar [${region.start}, ${region.end}): ${flags.size} flagged" }
+    }
+
     // ── Popup ─────────────────────────────────────────────────────────────────
 
     private fun showPopup(span: ProofreadFlagSpan, word: String, suggestions: List<String>) {
@@ -328,6 +401,26 @@ class ProofreadController(
         }
         sheet.addAction(R.drawable.ic_book, "Add to dictionary") { addToDictionary(word) }
         sheet.addAction(R.drawable.ic_eye_off, "Ignore for now") { ignore(word) }
+        sheet.show()
+    }
+
+    /**
+     * The grammar finding's popup: what the rule saw, its one-tap fix when it has one, and a
+     * session-scoped mute. A span whose text no longer matches what was flagged is left silent —
+     * the edit that moved it has a re-check already owing.
+     */
+    private fun showGrammarPopup(span: GrammarFlagSpan) {
+        val text = editor.text ?: return
+        val start = text.getSpanStart(span)
+        val end = text.getSpanEnd(span)
+        if (start < 0 || end <= start) return
+        if (text.subSequence(start, end).toString() != span.snippet) return
+        val sheet = ActionSheetDialog(context)
+        sheet.title("${span.message} — “${span.snippet}”")
+        span.replacement?.let { fix ->
+            sheet.addAction(R.drawable.ic_check, "Fix: “$fix”") { replace(span, fix) }
+        }
+        sheet.addAction(R.drawable.ic_eye_off, "Ignore for now") { ignoreGrammar(span) }
         sheet.show()
     }
 
@@ -379,10 +472,10 @@ class ProofreadController(
     }
 
     /**
-     * Replace the flagged word through the `Editable` — the same route the format bar takes, so
-     * the editor's own Ctrl+Z can take it back.
+     * Replace a flagged range — spelling or grammar span alike — through the `Editable`, the same
+     * route the format bar takes, so the editor's own Ctrl+Z can take it back.
      */
-    private fun replace(span: ProofreadFlagSpan, suggestion: String) {
+    private fun replace(span: Any, suggestion: String) {
         val text = editor.text ?: return
         val start = text.getSpanStart(span)
         val end = text.getSpanEnd(span)
@@ -392,6 +485,27 @@ class ProofreadController(
         editor.setSelection((start + suggestion.length).coerceIn(0, text.length))
         Slog.d(TAG) { "Replaced a flagged word (${suggestion.length} chars in)" }
     }
+
+    /**
+     * Mute this finding for the session — every flag saying the same thing about the same text,
+     * not just the tapped one, comes off the screen with it.
+     */
+    private fun ignoreGrammar(span: GrammarFlagSpan) {
+        val key = grammarKey(span.rule, span.snippet)
+        ignoredGrammar.add(key)
+        val text = editor.text ?: return
+        var changed = false
+        for (sp in text.getSpans(0, text.length, GrammarFlagSpan::class.java)) {
+            if (grammarKey(sp.rule, sp.snippet) == key) {
+                text.removeSpan(sp)
+                changed = true
+            }
+        }
+        if (changed) editor.invalidate()
+        Slog.d(TAG) { "Muted a grammar finding for this session (${ignoredGrammar.size} muted)" }
+    }
+
+    private fun grammarKey(rule: String, snippet: String): String = "$rule:${snippet.lowercase()}"
 
     /** Ignore [word] for this session and take its flags — all of them — off the screen. */
     private fun ignore(word: String) {
@@ -420,9 +534,11 @@ class ProofreadController(
     private fun removeAllFlags() {
         generation++ // an in-flight result must not land after this
         val text = editor.text ?: return
-        val spans = text.getSpans(0, text.length, ProofreadFlagSpan::class.java)
-        if (spans.isEmpty()) return
-        for (span in spans) text.removeSpan(span)
+        val spelling = text.getSpans(0, text.length, ProofreadFlagSpan::class.java)
+        val grammar = text.getSpans(0, text.length, GrammarFlagSpan::class.java)
+        if (spelling.isEmpty() && grammar.isEmpty()) return
+        for (span in spelling) text.removeSpan(span)
+        for (span in grammar) text.removeSpan(span)
         editor.invalidate()
     }
 

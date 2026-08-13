@@ -11,6 +11,8 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.text.InputType
+import android.text.Layout
+import android.text.Spanned
 import android.util.TypedValue
 import android.view.Gravity
 import android.view.InputDevice
@@ -1211,8 +1213,8 @@ class DocumentEditorActivity : AppCompatActivity() {
  *
  * The underlines are drawn here rather than by the spans themselves because a `CharacterStyle`
  * cannot draw a *dashed* line — `UnderlineSpan` is solid, and the design gives spelling a dashed
- * inkBlack line (dotted is reserved for grammar, Phase 4). [ProofreadFlagSpan] therefore carries
- * position only, and this view paints under every span each draw pass.
+ * inkBlack line and grammar a dotted one. [ProofreadFlagSpan] and [GrammarFlagSpan] therefore
+ * carry no style, and this view paints under every span each draw pass.
  */
 private class MarkdownEditText(context: Context) : AppCompatEditText(context) {
 
@@ -1233,6 +1235,13 @@ private class MarkdownEditText(context: Context) : AppCompatEditText(context) {
         // Dashed = spelling. On-off lengths chosen to survive e-ink: long enough to render as
         // marks, short enough to read as a dash and not a rule.
         pathEffect = DashPathEffect(floatArrayOf(4f * density, 3f * density), 0f)
+    }
+
+    private val grammarPaint = Paint(flagPaint).apply {
+        // Dotted = grammar. Round caps turn the near-zero dash segments into dots the stroke's
+        // width across — a different texture from the spelling dash at reading distance.
+        strokeCap = Paint.Cap.ROUND
+        pathEffect = DashPathEffect(floatArrayOf(1f, 2.5f * density), 0f)
     }
 
     override fun onCreateInputConnection(outAttrs: EditorInfo): InputConnection? =
@@ -1266,31 +1275,35 @@ private class MarkdownEditText(context: Context) : AppCompatEditText(context) {
     private fun drawProofreadFlags(canvas: Canvas) {
         val text = text ?: return
         if (text.isEmpty()) return
-        val spans = text.getSpans(0, text.length, ProofreadFlagSpan::class.java)
-        if (spans.isEmpty()) return
+        val spelling = text.getSpans(0, text.length, ProofreadFlagSpan::class.java)
+        val grammar = text.getSpans(0, text.length, GrammarFlagSpan::class.java)
+        if (spelling.isEmpty() && grammar.isEmpty()) return
         val layout = layout ?: return
         canvas.save()
         // onDraw's canvas is already scrolled; only the text origin's padding is left to add.
         canvas.translate(totalPaddingLeft.toFloat(), totalPaddingTop.toFloat())
-        val drop = 2f * density
-        for (span in spans) {
-            val start = text.getSpanStart(span)
-            val end = text.getSpanEnd(span)
-            if (start < 0 || end <= start) continue
-            val firstLine = layout.getLineForOffset(start)
-            val lastLine = layout.getLineForOffset(end - 1)
-            // A long word can soft-wrap mid-word, so a flag may span lines even though a word
-            // never contains a newline.
-            for (line in firstLine..lastLine) {
-                val x1 = if (line == firstLine) layout.getPrimaryHorizontal(start) else layout.getLineLeft(line)
-                var x2 = if (line == lastLine) layout.getPrimaryHorizontal(end) else layout.getLineRight(line)
-                // At a wrap boundary the end offset's position belongs to the next line's start.
-                if (line == lastLine && x2 <= x1) x2 = layout.getLineRight(line)
-                if (x2 <= x1) continue
-                val y = layout.getLineBaseline(line) + drop
-                canvas.drawLine(x1, y, x2, y, flagPaint)
-            }
-        }
+        for (span in spelling) underlineSpan(canvas, layout, text, span, flagPaint)
+        for (span in grammar) underlineSpan(canvas, layout, text, span, grammarPaint)
         canvas.restore()
+    }
+
+    private fun underlineSpan(canvas: Canvas, layout: Layout, text: Spanned, span: Any, paint: Paint) {
+        val start = text.getSpanStart(span)
+        val end = text.getSpanEnd(span)
+        if (start < 0 || end <= start) return
+        val drop = 2f * density
+        val firstLine = layout.getLineForOffset(start)
+        val lastLine = layout.getLineForOffset(end - 1)
+        // A long word can soft-wrap mid-word, so a flag may span lines even though a word
+        // never contains a newline.
+        for (line in firstLine..lastLine) {
+            val x1 = if (line == firstLine) layout.getPrimaryHorizontal(start) else layout.getLineLeft(line)
+            var x2 = if (line == lastLine) layout.getPrimaryHorizontal(end) else layout.getLineRight(line)
+            // At a wrap boundary the end offset's position belongs to the next line's start.
+            if (line == lastLine && x2 <= x1) x2 = layout.getLineRight(line)
+            if (x2 <= x1) continue
+            val y = layout.getLineBaseline(line) + drop
+            canvas.drawLine(x1, y, x2, y, paint)
+        }
     }
 }
