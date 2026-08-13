@@ -3,6 +3,7 @@ package com.notesprout.android
 import android.content.Context
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.text.Editable
 import android.text.Spanned
 import android.text.TextWatcher
@@ -17,12 +18,15 @@ import com.notesprout.android.core.proofread.GrammarFlag
 import com.notesprout.android.core.proofread.GrammarRules
 import com.notesprout.android.core.proofread.ProofreadCheck
 import com.notesprout.android.core.proofread.ProofreadDirty
+import com.notesprout.android.core.proofread.ProofreadTokenizer
 import com.notesprout.android.core.proofread.SpellEngine
 import com.notesprout.android.core.proofread.WordSpan
 import java.io.InputStream
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -55,8 +59,8 @@ class GrammarFlagSpan(
  * **Debounced, never per-keystroke** (see docs and the proofread plan): edits accumulate in a
  * [ProofreadDirty] range and are re-checked after [CHECK_DELAY_MS] of typing idle, expanded to
  * whole lines by [ProofreadCheck.lineRegion]. The check itself runs off the main thread against a
- * snapshot; a result that arrives after further typing is discarded and its region folded back
- * into the dirty range, so no word is silently left unchecked.
+ * snapshot; a result that arrives after further typing is discarded and the next tick escalates
+ * to a whole-document pass, so no word is silently left unchecked.
  *
  * Spans are **diffed, not rewritten**: a word already flagged at the same offsets keeps its span.
  * On e-ink every needless invalidate is a visible flash, so an unchanged screen costs nothing.
@@ -100,16 +104,40 @@ class ProofreadController(
     private var engineRequested = false
 
     /** Words the user chose to ignore, normalized lowercase. This editor session only. */
-    private val ignored = mutableSetOf<String>()
+    private val ignored = FilterSet()
 
     /** Muted grammar findings, keyed rule + snippet ([grammarKey]). This editor session only. */
-    private val ignoredGrammar = mutableSetOf<String>()
+    private val ignoredGrammar = FilterSet()
 
     /**
      * The durable user dictionary, mirrored in memory so the checking pass never reads the
      * database. Loaded with the engine (see [loadEngine]); adds and removes keep it in step.
      */
-    private val userWords = mutableSetOf<String>()
+    private val userWords = FilterSet()
+
+    /**
+     * A set whose every mutation bumps [generation], so a pass launched before the change can
+     * never land its now-wrong conclusions (re-installing a flag the user just dismissed). The
+     * bump lives in the mutation seam rather than at each call site — a future site cannot
+     * forget it. Main-thread only; background passes take [snapshot]s.
+     */
+    private inner class FilterSet {
+        private val set = HashSet<String>()
+        val size: Int get() = set.size
+        fun snapshot(): HashSet<String> = HashSet(set)
+        val isEmpty: Boolean get() = set.isEmpty()
+        fun add(value: String) {
+            if (set.add(value)) generation++
+        }
+        fun remove(value: String) {
+            if (set.remove(value)) generation++
+        }
+        fun replaceAll(values: Collection<String>) {
+            set.clear()
+            set.addAll(values)
+            generation++
+        }
+    }
 
     private val handler = Handler(Looper.getMainLooper())
     private val checkTick = Runnable { runPendingCheck() }
@@ -120,8 +148,15 @@ class ProofreadController(
     /** True while the editor is in Preview — checks hold until it returns to Write. */
     private var paused = false
 
-    /** Bumped on every text change; a background result from an older generation is stale. */
+    /**
+     * Bumped whenever what a running pass concluded may no longer hold — on every text change,
+     * and on every ignore/dictionary mutation. A background result from an older generation is
+     * stale and must not land: it would re-install a flag the user just dismissed.
+     */
     private var generation = 0
+
+    /** True while a tap's suggestion lookup is in flight — the second tap of a pile-up is dropped. */
+    private var lookupInFlight = false
 
     init {
         editor.addTextChangedListener(object : TextWatcher {
@@ -196,8 +231,8 @@ class ProofreadController(
             loadEngine()
             return
         }
-        val length = editor.text?.length ?: return
-        check(ProofreadCheck.Region(0, length))
+        val snapshot = editor.text?.toString() ?: return
+        check(ProofreadCheck.Region(0, snapshot.length), snapshot)
     }
 
     /**
@@ -207,6 +242,9 @@ class ProofreadController(
      */
     fun onTap(offset: Int) {
         if (!enabled) return
+        // A tap that lands inside a selection belongs to the selection workflow (copy, cut,
+        // drag handles) — the popup must not cover it.
+        if (editor.hasSelection()) return
         val text = editor.text ?: return
         val span = text.getSpans(offset, offset, ProofreadFlagSpan::class.java).firstOrNull()
         val engine = engine
@@ -216,12 +254,18 @@ class ProofreadController(
                 ?.let(::showGrammarPopup)
             return
         }
+        if (lookupInFlight) return // one popup at a time; the sheet is modal once it shows
+        lookupInFlight = true
         val start = text.getSpanStart(span)
         val end = text.getSpanEnd(span)
-        if (start < 0 || end <= start) return
+        if (start < 0 || end <= start) { lookupInFlight = false; return }
         val word = text.subSequence(start, end).toString()
         scope.launch {
-            val suggestions = withContext(Dispatchers.Default) { engine.suggestions(word) }
+            val suggestions = try {
+                withContext(Dispatchers.Default) { engine.suggestions(word) }
+            } finally {
+                lookupInFlight = false
+            }
             // Re-resolve before showing: the span may have moved — or died — while we looked up.
             val current = editor.text ?: return@launch
             val s = current.getSpanStart(span)
@@ -237,24 +281,47 @@ class ProofreadController(
         if (engineRequested) return
         engineRequested = true
         scope.launch {
-            // A dictionary that cannot load must cost the user nothing but spell checking — this
-            // runs under the editor, and an escaped exception here takes the whole screen down.
-            val loaded = try {
-                SpellEngine.shared(openDictionary)
+            val loadStart = SystemClock.elapsedRealtime()
+            // Neither a dictionary nor an index that cannot load may cost the user more than
+            // spell checking — this runs under the editor, and an escaped exception here takes
+            // the whole screen down. The user's words ride in with the engine: both must be
+            // present before the first pass, or a word added yesterday would flash flagged
+            // while the table was on its way. Independent work, so they load side by side.
+            val (loaded, words) = try {
+                coroutineScope {
+                    val engineJob = async { SpellEngine.shared(openDictionary) }
+                    val wordsJob = async { NotesproutIndex.userDictionaryDao().allWords() }
+                    engineJob.await() to wordsJob.await()
+                }
             } catch (e: CancellationException) {
-                throw e // the activity is going away, not the dictionary failing
+                throw e // the activity is going away, not the load failing
             } catch (e: Exception) {
-                Log.e(TAG, "Dictionary failed to load; proofread stays quiet", e)
+                Log.e(TAG, "Proofread failed to load and stays quiet", e)
                 engineRequested = false // an explicit "Check document" may retry
                 return@launch
             }
-            // The user's words ride in with the engine — both must be present before the first
-            // pass, or a word added yesterday would flash flagged while the table was on its way.
-            val words = NotesproutIndex.userDictionaryDao().allWords()
-            userWords.clear()
-            userWords.addAll(words)
+            userWords.replaceAll(words)
             engine = loaded
-            Slog.d(TAG) { "Dictionary ready: ${loaded.wordCount} words + ${words.size} user words" }
+            Slog.d(TAG) {
+                val ms = SystemClock.elapsedRealtime() - loadStart
+                "Dictionary ready: ${loaded.wordCount} words + ${words.size} user words in ${ms}ms"
+            }
+            // The engine checks the moment the word map is up; the SymSpell suggestion index —
+            // ~40 s of index building on an e-ink CPU — follows in the background, and the tap
+            // popup says "suggestions are loading" until it lands. On the app scope, not this
+            // editor's: the engine is process-shared, and a build cancelled by Back would start
+            // from zero on every open — short sessions would never reach suggestions-ready.
+            if (!loaded.suggestionsReady) NotesproutApplication.appScope.launch {
+                try {
+                    val t = SystemClock.elapsedRealtime()
+                    loaded.loadSuggestionIndex()
+                    Slog.d(TAG) {
+                        "Suggestion index ready in ${SystemClock.elapsedRealtime() - t}ms"
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Suggestion index failed to build; popups stay suggestion-less", e)
+                }
+            }
             if (enabled) checkDocument()
         }
     }
@@ -285,30 +352,38 @@ class ProofreadController(
         } else {
             ProofreadCheck.lineRegion(snapshot, dirtyStart, dirtyEnd)
         }
-        check(region)
+        check(region, snapshot)
     }
 
-    private fun check(region: ProofreadCheck.Region) {
+    private fun check(region: ProofreadCheck.Region, snapshot: String) {
         val engine = engine ?: return
-        val snapshot = editor.text?.toString() ?: return
         val clamped = ProofreadCheck.Region(
             region.start.coerceIn(0, snapshot.length),
             region.end.coerceIn(region.start.coerceIn(0, snapshot.length), snapshot.length),
         )
         val gen = generation
+        // The background pass must not read the live sets — Main mutates them with no
+        // happens-before edge to Dispatchers.Default. Copies are a few hundred entries at most.
+        val skipWords = ignored.snapshot().apply { addAll(userWords.snapshot()) }
+        val mutedGrammar = ignoredGrammar.snapshot()
         scope.launch(Dispatchers.Default) {
-            val flags = ProofreadCheck.misspelled(snapshot, clamped, engine::isKnown) {
-                val w = normalize(it)
-                w in ignored || w in userWords
+            // One tokenizer pass feeds both checks — the mask sweep over the whole text is the
+            // expensive part of a tick, and it would otherwise run twice.
+            val skip = ProofreadTokenizer.skipMask(snapshot)
+            val spans = ProofreadTokenizer.wordSpans(snapshot, skip)
+            val flags = ProofreadCheck.misspelled(spans, clamped, engine::isKnown) {
+                normalize(it) in skipWords
             }
-            val grammar = GrammarRules.check(snapshot, clamped).filter {
-                grammarKey(it.rule, snapshot.substring(it.start, it.end)) !in ignoredGrammar
+            val allGrammar = GrammarRules.check(snapshot, clamped, skip, spans)
+            val grammar = if (mutedGrammar.isEmpty()) allGrammar else allGrammar.filter {
+                grammarKey(it.rule, snapshot.substring(it.start, it.end)) !in mutedGrammar
             }
             withContext(Dispatchers.Main) {
                 if (gen != generation) {
-                    // Typing moved on under us. The region's words still owe a check — fold it
-                    // back in (offsets are near enough; lineRegion re-squares them) and re-arm.
-                    dirty.merge(clamped.start, clamped.end)
+                    // The document moved on under us, so the region's offsets no longer name the
+                    // words that owe a check — an edit *before* the region shifts them wholesale.
+                    // Escalating to a full pass is the only fold that cannot miss.
+                    dirtyWholeDocument = true
                     if (enabled && !paused) schedule()
                     return@withContext
                 }
@@ -370,8 +445,12 @@ class ProofreadController(
             if (e <= region.start || s >= region.end) continue
             val key = spanKey(s, e)
             val f = fresh[key]
+            // The snippet is part of the identity: a same-length edit can leave offsets and
+            // diagnosis unchanged while the text under the span drifts ("the the" → "the The"),
+            // and a kept span with a stale snippet would decline every tap forever.
             if (f != null && f.rule == span.rule && f.message == span.message &&
-                f.replacement == span.replacement
+                f.replacement == span.replacement &&
+                span.snippet == snapshot.substring(f.start, f.end)
             ) {
                 kept.add(key)
             } else {
@@ -395,7 +474,15 @@ class ProofreadController(
 
     private fun showPopup(span: ProofreadFlagSpan, word: String, suggestions: List<String>) {
         val sheet = ActionSheetDialog(context)
-        sheet.title(if (suggestions.isEmpty()) "No suggestions for “$word”" else "“$word”")
+        sheet.title(
+            when {
+                // Read at show time — an index that finished during the lookup stops apologizing.
+                suggestions.isEmpty() && engine?.suggestionsReady != true ->
+                    "“$word” — suggestions are loading"
+                suggestions.isEmpty() -> "No suggestions for “$word”"
+                else -> "“$word”"
+            }
+        )
         for (suggestion in suggestions) {
             sheet.addAction(null, suggestion) { replace(span, suggestion) }
         }
@@ -431,7 +518,15 @@ class ProofreadController(
      */
     fun promptUserDictionary() {
         scope.launch {
-            val words = NotesproutIndex.userDictionaryDao().allWords()
+            val words = try {
+                NotesproutIndex.userDictionaryDao().allWords()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.e(TAG, "User dictionary unavailable", e)
+                Toast.makeText(context, "The dictionary is not available right now", Toast.LENGTH_SHORT).show()
+                return@launch
+            }
             if (words.isEmpty()) {
                 Toast.makeText(context, "No words added to the dictionary yet", Toast.LENGTH_SHORT).show()
                 return@launch
@@ -452,10 +547,14 @@ class ProofreadController(
      */
     private fun addToDictionary(word: String) {
         val w = normalize(word)
-        userWords.add(w)
+        userWords.add(w) // the FilterSet bump keeps any in-flight pass from re-flagging it
         unflag(w)
         NotesproutApplication.appScope.launch {
-            NotesproutIndex.userDictionaryDao().add(UserDictionaryEntity(w, System.currentTimeMillis()))
+            try {
+                NotesproutIndex.userDictionaryDao().add(UserDictionaryEntity(w, System.currentTimeMillis()))
+            } catch (e: Exception) {
+                Log.e(TAG, "User dictionary write failed; the word holds for this session", e)
+            }
         }
         Slog.d(TAG) { "Added a word to the user dictionary (${userWords.size} in memory)" }
     }
@@ -464,7 +563,11 @@ class ProofreadController(
     private fun removeFromDictionary(word: String) {
         userWords.remove(word)
         NotesproutApplication.appScope.launch {
-            NotesproutIndex.userDictionaryDao().remove(word)
+            try {
+                NotesproutIndex.userDictionaryDao().remove(word)
+            } catch (e: Exception) {
+                Log.e(TAG, "User dictionary delete failed; the word returns next session", e)
+            }
         }
         Toast.makeText(context, "Removed “$word”", Toast.LENGTH_SHORT).show()
         checkDocument()

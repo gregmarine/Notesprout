@@ -85,20 +85,24 @@ object ProofreadTokenizer {
             var runEnd = i
             while (runEnd < text.length && text[runEnd] == '`') runEnd++
             val runLen = runEnd - i
-            val close = findBacktickRun(text, runEnd, runLen)
+            val close = findBacktickRun(text, runEnd, runLen, skip)
             if (close < 0) { i = runEnd; continue }
             skip.fill(true, i, close + runLen)
             i = close + runLen
         }
     }
 
-    /** Index of the next backtick run of exactly [length] at or after [from], or -1. */
-    private fun findBacktickRun(text: String, from: Int, length: Int): Int {
+    /**
+     * Index of the next backtick run of exactly [length] at or after [from], or -1. Masked
+     * indices are invisible — a stray prose backtick must not pair with one inside an
+     * already-marked code line and swallow the prose between them.
+     */
+    private fun findBacktickRun(text: String, from: Int, length: Int, skip: BooleanArray): Int {
         var i = from
         while (i < text.length) {
-            if (text[i] != '`') { i++; continue }
+            if (skip[i] || text[i] != '`') { i++; continue }
             var end = i
-            while (end < text.length && text[end] == '`') end++
+            while (end < text.length && !skip[end] && text[end] == '`') end++
             if (end - i == length) return i
             i = end
         }

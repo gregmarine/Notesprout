@@ -19,6 +19,8 @@ class SpellEngineTest {
         private var loadMillis: Long = 0
         private var loadHeapDeltaMb: Long = 0
 
+        private var stageOneMillis: Long = 0
+
         @JvmStatic
         @BeforeClass
         fun loadDictionary() {
@@ -27,6 +29,10 @@ class SpellEngineTest {
             val heapBefore = runtime.totalMemory() - runtime.freeMemory()
             val start = System.nanoTime()
             engine = runBlocking { SpellEngine.load(openDictionary()) }
+            stageOneMillis = (System.nanoTime() - start) / 1_000_000
+            check(!engine.suggestionsReady) { "index cannot be ready before loadSuggestionIndex" }
+            check(engine.suggestions("teh").isEmpty()) { "suggestions must be empty before the index" }
+            runBlocking { engine.loadSuggestionIndex() }
             loadMillis = (System.nanoTime() - start) / 1_000_000
             System.gc()
             val heapAfter = runtime.totalMemory() - runtime.freeMemory()
@@ -41,10 +47,20 @@ class SpellEngineTest {
 
     @Test
     fun dictionary_load_baseline() {
-        // JVM baseline for the Phase-1 record; the on-device number lands in Phase 5's perf check.
-        println("SpellEngine baseline: ${engine.wordCount} words, ${loadMillis}ms load, ~${loadHeapDeltaMb}MB heap")
+        // JVM baseline; the on-device numbers are in docs/proofread.md. Stage 1 is what gates
+        // the first flags on a device — it must stay a small fraction of the full load.
+        println(
+            "SpellEngine baseline: ${engine.wordCount} words, " +
+                "${stageOneMillis}ms word map + ${loadMillis - stageOneMillis}ms index, ~${loadHeapDeltaMb}MB heap"
+        )
         assertTrue("dictionary did not fully load", engine.wordCount > 80_000)
         assertTrue("load took ${loadMillis}ms — investigate before shipping", loadMillis < 60_000)
+        assertTrue("word-map stage took ${stageOneMillis}ms — it must be cheap", stageOneMillis * 3 < loadMillis)
+    }
+
+    @Test
+    fun suggestion_index_ready_after_second_stage() {
+        assertTrue(engine.suggestionsReady)
     }
 
     @Test

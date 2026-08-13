@@ -1,10 +1,10 @@
 package com.notesprout.android.core.proofread
 
+import com.darkrockstudios.symspellkt.common.DictionaryItem
 import com.darkrockstudios.symspellkt.common.SpellCheckSettings
 import com.darkrockstudios.symspellkt.common.Verbosity
 import com.darkrockstudios.symspellkt.exception.SpellCheckException
 import com.darkrockstudios.symspellkt.impl.SymSpell
-import com.darkrockstudios.symspellkt.impl.loadUniGramLine
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -13,28 +13,43 @@ import java.io.InputStream
 import java.util.zip.GZIPInputStream
 
 /**
- * The proofread spell checker — SymSpellKt wrapped around the bundled English frequency
- * dictionary (`assets/proofread/en_82765.dict`, attribution in `NOTICE.txt` beside it). The
- * `.dict` file is gzipped `term frequency` lines; the extension is opaque on purpose, because
- * AAPT decompresses a `.gz` asset at build time and strips the extension from the APK.
+ * The proofread spell checker — the bundled English frequency dictionary
+ * (`assets/proofread/en_82765.dict`, attribution in `NOTICE.txt` beside it), with SymSpellKt
+ * behind it for correction candidates. The `.dict` file is gzipped `term frequency` lines; the
+ * extension is opaque on purpose, because AAPT decompresses a `.gz` asset at build time and
+ * strips the extension from the APK.
  *
  * Pure Kotlin/JVM by design: the dictionary arrives as an [InputStream], so JVM tests load the
  * exact asset the app ships (the test source set mounts `src/main/assets` as resources) and the
  * editor hands in `context.assets.open(...)`. Nothing here touches Android.
+ *
+ * **Loading is two-stage, because checking and suggesting have wildly different costs.**
+ * [isKnown] needs only the word→frequency map — one pass over the file, fast everywhere. The
+ * SymSpell delete index behind [suggestions] is ~30 derived entries per word, and building it
+ * measured **~40 s on a Supernote's CPU** (700 ms on a desktop JVM — the gap is the device).
+ * Flags must not wait on that: [load] builds the map and the engine is immediately able to
+ * check; [loadSuggestionIndex] feeds the same map into SymSpell afterwards — no second read of
+ * the asset, so the index can never diverge from the words — and until it lands [suggestions]
+ * honestly returns nothing and [suggestionsReady] is false, which the popup says out loud
+ * instead of pretending there are no candidates.
  *
  * The dictionary indexes lowercase terms, so knowledge is case-insensitive and casing is this
  * class's job: [suggestions] re-shapes each candidate to the shape of the word being corrected
  * ("Teh" → "The"). [shouldCheck] is the conservative gate — it refuses to judge anything the
  * English dictionary cannot honestly judge (digits, acronyms, mixed case, non-ASCII letters);
  * silence over noise, per the proofread design.
- *
- * Loading builds the SymSpell delete index for ~82k words — seconds, not millis — so it happens
- * once, off the main thread, via [shared]. Word checks after that are microseconds.
  */
-class SpellEngine private constructor(private val checker: SymSpell) {
+class SpellEngine private constructor(private val frequencies: HashMap<String, Double>) {
 
-    /** Number of correctly spelled words indexed — exposed for tests and the load-time log. */
-    val wordCount: Int get() = checker.dictionary.wordCount
+    /** Number of correctly spelled words known — exposed for tests and the load-time log. */
+    val wordCount: Int get() = frequencies.size
+
+    @Volatile
+    private var checker: SymSpell? = null
+    private val indexMutex = Mutex()
+
+    /** True once [loadSuggestionIndex] has finished and [suggestions] can actually suggest. */
+    val suggestionsReady: Boolean get() = checker != null
 
     /**
      * Whether [word] is spelled correctly. Case-insensitive; typographic apostrophes count as
@@ -42,21 +57,23 @@ class SpellEngine private constructor(private val checker: SymSpell) {
      */
     fun isKnown(word: String): Boolean {
         val w = normalizeWord(word)
-        if (frequency(w) != null) return true
+        if (frequencies.containsKey(w)) return true
         val stem = when {
             w.endsWith("'s") -> w.dropLast(2)
             w.endsWith("'") -> w.dropLast(1)
             else -> return false
         }
-        return stem.isNotEmpty() && frequency(stem) != null
+        return stem.isNotEmpty() && frequencies.containsKey(stem)
     }
 
     /**
      * Correction candidates for [word], best first, cased like the input. Empty when nothing
-     * within edit distance 2 is found. Called on tap (popup), not during the checking pass, so
-     * it affords [Verbosity.All] — the full distance-ordered list, not just the nearest tier.
+     * within edit distance 2 is found — or when the suggestion index is still building
+     * ([suggestionsReady] tells the two apart). Called on tap (popup), not during the checking
+     * pass, so it affords [Verbosity.All] — the full distance-ordered list, not the nearest tier.
      */
     fun suggestions(word: String, limit: Int = MAX_SUGGESTIONS): List<String> {
+        val checker = checker ?: return emptyList()
         val w = normalizeWord(word)
         val items = try {
             checker.lookup(w, Verbosity.All)
@@ -72,11 +89,23 @@ class SpellEngine private constructor(private val checker: SymSpell) {
             .toList()
     }
 
-    private fun frequency(term: String): Double? = try {
-        checker.dictionary.getItemFrequency(term)
-    } catch (e: SpellCheckException) {
-        null
-    }
+    /**
+     * Builds the SymSpell suggestion index from the words [load] already parsed — the frequency
+     * carries over, so suggestion ranking matches a file-fed SymSpell exactly (this is what
+     * `loadUniGramLine` does per line, minus the parsing). Safe to call twice (the second call
+     * finds it built and returns); safe to retry after a failure.
+     */
+    suspend fun loadSuggestionIndex(): Unit =
+        withContext(Dispatchers.Default) {
+            indexMutex.withLock {
+                if (checker != null) return@withLock
+                val symSpell = SymSpell(spellCheckSettings = SpellCheckSettings())
+                for ((term, frequency) in frequencies) {
+                    symSpell.dictionary.addItem(DictionaryItem(term, frequency, -1.0))
+                }
+                checker = symSpell
+            }
+        }
 
     private fun matchCase(original: String, suggestion: String): String =
         if (original.first().isUpperCase()) {
@@ -113,16 +142,24 @@ class SpellEngine private constructor(private val checker: SymSpell) {
             }
         }
 
-        /** Builds an engine from a gzipped `term frequency`-per-line dictionary stream. */
+        /**
+         * Builds a checking-ready engine from a gzipped `term frequency`-per-line dictionary
+         * stream — the fast stage; see the class doc. [loadSuggestionIndex] completes it.
+         */
         suspend fun load(gzippedDictionary: InputStream): SpellEngine =
             withContext(Dispatchers.Default) {
-                val checker = SymSpell(spellCheckSettings = SpellCheckSettings())
+                val frequencies = HashMap<String, Double>(110_000)
                 GZIPInputStream(gzippedDictionary).bufferedReader(Charsets.UTF_8).use { reader ->
-                    reader.forEachLine { line ->
-                        checker.dictionary.loadUniGramLine(line.removePrefix("﻿"))
+                    reader.forEachLine { raw ->
+                        val line = raw.removePrefix("﻿")
+                        val cut = line.indexOf(' ')
+                        if (cut > 0) {
+                            val frequency = line.substring(cut + 1).trim().toDoubleOrNull()
+                            if (frequency != null) frequencies[line.substring(0, cut)] = frequency
+                        }
                     }
                 }
-                SpellEngine(checker)
+                SpellEngine(frequencies)
             }
 
         /**

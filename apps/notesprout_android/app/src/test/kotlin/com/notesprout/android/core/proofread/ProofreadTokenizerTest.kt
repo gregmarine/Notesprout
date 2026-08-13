@@ -76,6 +76,16 @@ class ProofreadTokenizerTest {
     }
 
     @Test
+    fun stray_backtick_cannot_pair_into_masked_code() {
+        // The stray prose backtick must not find its partner inside the indented code line and
+        // swallow the prose between them — masked backticks are invisible to inline-code pairing.
+        assertEquals(
+            listOf("a", "stray", "tick", "here", "prose", "after"),
+            words("a stray ` tick here\n    val x = `1`\nprose after"),
+        )
+    }
+
+    @Test
     fun double_backtick_span_is_skipped() {
         assertEquals(listOf("see", "here"), words("see ``code `with` tick`` here"))
     }

@@ -231,6 +231,16 @@ class GrammarRulesTest {
     }
 
     @Test
+    fun single_letters_are_never_judged() {
+        // A single letter is read by its name ("an X-ray" is correct — the tokenizer splits
+        // "X-ray" at the hyphen) and letter-name sounds don't follow the letter.
+        none("an X-ray showed nothing", GrammarRules.RULE_A_AN)
+        none("an F grade", GrammarRules.RULE_A_AN)
+        none("a T junction", GrammarRules.RULE_A_AN)
+        none("an x value", GrammarRules.RULE_A_AN)
+    }
+
+    @Test
     fun article_pairs_across_lines_are_not_judged() {
         none("I picked a\napple stem", GrammarRules.RULE_A_AN)
     }
@@ -282,6 +292,15 @@ class GrammarRulesTest {
     @Test
     fun inch_marks_after_digits_are_not_quotes() {
         none("the board is 24\" long", GrammarRules.RULE_UNPAIRED)
+    }
+
+    @Test
+    fun a_quoted_string_ending_in_a_digit_still_pairs() {
+        // Inside an open quote, a digit-preceded quote is the closing quote, not an inch mark.
+        none("the \"42\" answer", GrammarRules.RULE_UNPAIRED)
+        none("a \"Boeing 747\" model", GrammarRules.RULE_UNPAIRED)
+        // And a genuine inch mark before a real quote still leaves the quote flagged.
+        only("it is 5\" but \"quoted ran on", GrammarRules.RULE_UNPAIRED)
     }
 
     @Test

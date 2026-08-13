@@ -67,7 +67,7 @@ android {
 
     sourceSets {
         // The proofread JVM tests load the real gzipped dictionary the app ships, so the
-        // asset directory doubles as a test-resource root (classpath: proofread/en_82765.txt.gz).
+        // asset directory doubles as a test-resource root (classpath: proofread/en_82765.dict).
         getByName("test") { resources.srcDir("src/main/assets") }
     }
 

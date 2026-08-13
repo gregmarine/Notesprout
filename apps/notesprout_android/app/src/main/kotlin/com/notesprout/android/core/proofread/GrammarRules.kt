@@ -65,9 +65,21 @@ object GrammarRules {
      * mirroring [ProofreadCheck.misspelled].
      */
     fun check(text: String, region: ProofreadCheck.Region): List<GrammarFlag> {
-        if (text.isEmpty() || region.end <= region.start) return emptyList()
         val skip = ProofreadTokenizer.skipMask(text)
-        val spans = ProofreadTokenizer.wordSpans(text, skip)
+        return check(text, region, skip, ProofreadTokenizer.wordSpans(text, skip))
+    }
+
+    /**
+     * As [check], against an already-computed mask and span list — the editor's pass tokenizes
+     * once and hands the same mask to the spelling check and here.
+     */
+    fun check(
+        text: String,
+        region: ProofreadCheck.Region,
+        skip: BooleanArray,
+        spans: List<WordSpan>,
+    ): List<GrammarFlag> {
+        if (text.isEmpty() || region.end <= region.start) return emptyList()
         val out = mutableListOf<GrammarFlag>()
         repeatedWords(text, spans, out)
         sentenceCapitals(text, spans, out)
@@ -186,7 +198,10 @@ object GrammarRules {
             if (!sameLineGap(text, art.end, next.start)) continue
             val word = next.word
             if (!word.all { it.isLetter() }) continue
-            if (word.length > 1 && word.all { it.isUpperCase() }) continue // acronyms are read letter-wise
+            // A single letter is read by its *name* ("an X-ray", "a T junction") and the names'
+            // sounds don't follow the letters — unjudged, like acronyms.
+            if (word.length == 1) continue
+            if (word.all { it.isUpperCase() }) continue // acronyms are read letter-wise
             val nw = word.lowercase()
             if (nw == artLower) continue // "a a" is the repeated-word rule's finding
             if (nw.startsWith("u")) continue // university/uninteresting — the letter tells nothing
@@ -258,7 +273,11 @@ object GrammarRules {
         while (i < lineEnd) {
             if (skip[i]) { i++; continue }
             when (val c = text[i]) {
-                '"' -> if (text.getOrNull(i - 1)?.isDigit() != true) { quoteCount++; lastQuote = i }
+                // A digit-preceded quote is an inch/second mark — but only *outside* a quote:
+                // inside one it is the closing quote of "42"-style quoted text.
+                '"' -> if (text.getOrNull(i - 1)?.isDigit() != true || quoteCount % 2 == 1) {
+                    quoteCount++; lastQuote = i
+                }
                 '“' -> { opens++; lastOpen = i }
                 '”' -> { closes++; lastClose = i }
                 '(', '[', '{' -> stack.addLast(c to i)

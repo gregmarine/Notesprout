@@ -60,7 +60,12 @@ class ProofreadCheckTest {
     private val known = setOf("the", "cat", "sat", "code", "line")
 
     private fun flags(text: String, region: ProofreadCheck.Region, ignored: Set<String> = emptySet()) =
-        ProofreadCheck.misspelled(text, region, { it.lowercase() in known }, { it.lowercase() in ignored })
+        ProofreadCheck.misspelled(
+            ProofreadTokenizer.wordSpans(text),
+            region,
+            { it.lowercase() in known },
+            { it.lowercase() in ignored },
+        )
 
     @Test
     fun flags_only_unknown_words() {
@@ -160,15 +165,4 @@ class ProofreadDirtyTest {
         assertEquals(25, dirty.end)
     }
 
-    @Test
-    fun merge_folds_a_region_back_in() {
-        val dirty = ProofreadDirty()
-        dirty.merge(4, 9)
-        assertEquals(4, dirty.start)
-        assertEquals(9, dirty.end)
-        dirty.note(0, 0, 1)
-        dirty.merge(30, 40)
-        assertEquals(0, dirty.start)
-        assertEquals(40, dirty.end)
-    }
 }

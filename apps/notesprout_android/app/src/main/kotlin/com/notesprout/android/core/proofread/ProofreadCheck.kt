@@ -41,19 +41,20 @@ object ProofreadCheck {
 
     /**
      * The words in [region] that deserve a spelling flag: word-shaped ([SpellEngine.shouldCheck]),
-     * not ignored, and unknown to the dictionary. The whole [text] is tokenized so skip context
-     * (fences, inline code, link targets) is exact; only the region's words are judged.
+     * not ignored, and unknown to the dictionary. [spans] must come from tokenizing the *whole*
+     * text (the caller shares one [ProofreadTokenizer] pass with the grammar rules) so skip
+     * context — fences, inline code, link targets — is exact; only the region's words are judged.
      *
      * A word straddling a region edge is included whole — its span came from the full text, so a
      * flag never covers half a word.
      */
     fun misspelled(
-        text: String,
+        spans: List<WordSpan>,
         region: Region,
         isKnown: (String) -> Boolean,
         isIgnored: (String) -> Boolean,
     ): List<WordSpan> =
-        ProofreadTokenizer.wordSpans(text).filter { span ->
+        spans.filter { span ->
             span.end > region.start && span.start < region.end &&
                 SpellEngine.shouldCheck(span.word) &&
                 !isIgnored(span.word) &&
@@ -92,17 +93,6 @@ class ProofreadDirty {
         if (changeStart < end) end = (end + delta).coerceAtLeast(changeEnd)
         start = minOf(start, changeStart)
         end = maxOf(end, changeEnd)
-    }
-
-    /** Folds a region back in — used when a check's result arrived too late to apply. */
-    fun merge(regionStart: Int, regionEnd: Int) {
-        if (isEmpty) {
-            start = regionStart
-            end = regionEnd
-        } else {
-            start = minOf(start, regionStart)
-            end = maxOf(end, regionEnd)
-        }
     }
 
     fun clear() {

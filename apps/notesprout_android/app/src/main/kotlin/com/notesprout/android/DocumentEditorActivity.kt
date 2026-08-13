@@ -15,11 +15,11 @@ import android.text.Layout
 import android.text.Spanned
 import android.util.TypedValue
 import android.view.Gravity
+import android.view.GestureDetector
 import android.view.InputDevice
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
-import android.view.ViewConfiguration
 import android.view.ViewGroup
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputConnection
@@ -47,7 +47,6 @@ import com.notesprout.android.core.markdown.MarkdownReflow
 import com.notesprout.android.core.markdown.MarkdownRenderer
 import com.notesprout.android.core.markdown.TextBuffer
 import com.notesprout.android.notebook.ToolbarOverflowManager
-import kotlin.math.abs
 
 /**
  * Full-screen Markdown document editor.
@@ -1220,11 +1219,37 @@ private class MarkdownEditText(context: Context) : AppCompatEditText(context) {
 
     var suppressImeSession = false
 
-    /** Called with the character offset of a completed tap — the proofread popup's hook. */
+    /** Called with the character offset of a confirmed single tap — the proofread popup's hook. */
     var onWordTap: ((Int) -> Unit)? = null
 
-    private var downX = 0f
-    private var downY = 0f
+    /**
+     * Confirmed-single-tap detection, so the popup never rides a double-tap: a double tap is the
+     * framework's select-word gesture, and a sheet on top of a fresh selection would break
+     * select-to-copy on every flagged word. `onSingleTapConfirmed` fires only after the
+     * double-tap window has passed — and never for drags or long-presses — well after `super`
+     * has placed the caret.
+     *
+     * The character offset is resolved in `onSingleTapUp`, not at confirmation: the confirmation
+     * arrives ~300 ms after the finger lifted, and a tap that summons the soft keyboard has
+     * resized and scrolled this view by then — the event's x/y against the *new* layout name a
+     * different character.
+     */
+    private val tapDetector = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
+        override fun onSingleTapUp(e: MotionEvent): Boolean {
+            // Resolved here — only for tap-shaped lifts, never scroll/long-press ends — while
+            // the pre-IME layout is still current.
+            tappedOffset = getOffsetForPosition(e.x, e.y)
+            return false
+        }
+
+        override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
+            if (tappedOffset >= 0) onWordTap?.invoke(tappedOffset)
+            return false
+        }
+    })
+
+    /** Offset under the last tap-shaped finger-up, against the layout that was actually tapped. */
+    private var tappedOffset = -1
 
     private val density = resources.displayMetrics.density
 
@@ -1248,22 +1273,8 @@ private class MarkdownEditText(context: Context) : AppCompatEditText(context) {
         if (suppressImeSession) null else super.onCreateInputConnection(outAttrs)
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
-        if (event.actionMasked == MotionEvent.ACTION_DOWN) {
-            downX = event.x
-            downY = event.y
-        }
         val handled = super.onTouchEvent(event)
-        // After super: the tap has placed the caret; the popup must follow it, not preempt it. A
-        // drag (selection, scroll) or a long-press (selection handles) is not a tap.
-        if (event.actionMasked == MotionEvent.ACTION_UP) {
-            val slop = ViewConfiguration.get(context).scaledTouchSlop
-            val isTap = abs(event.x - downX) <= slop && abs(event.y - downY) <= slop &&
-                event.eventTime - event.downTime < ViewConfiguration.getLongPressTimeout()
-            if (isTap) {
-                val offset = getOffsetForPosition(event.x, event.y)
-                if (offset >= 0) post { onWordTap?.invoke(offset) }
-            }
-        }
+        tapDetector.onTouchEvent(event)
         return handled
     }
 
@@ -1275,10 +1286,17 @@ private class MarkdownEditText(context: Context) : AppCompatEditText(context) {
     private fun drawProofreadFlags(canvas: Canvas) {
         val text = text ?: return
         if (text.isEmpty()) return
-        val spelling = text.getSpans(0, text.length, ProofreadFlagSpan::class.java)
-        val grammar = text.getSpans(0, text.length, GrammarFlagSpan::class.java)
-        if (spelling.isEmpty() && grammar.isEmpty()) return
         val layout = layout ?: return
+        // onDraw runs on every keystroke, caret blink, and scroll frame, and each underline
+        // costs a line measurement — so only the flags in the viewport are considered, not
+        // every flag in the document.
+        val topLine = layout.getLineForVertical(scrollY)
+        val bottomLine = layout.getLineForVertical(scrollY + height)
+        val visStart = layout.getLineStart(topLine)
+        val visEnd = layout.getLineEnd(bottomLine)
+        val spelling = text.getSpans(visStart, visEnd, ProofreadFlagSpan::class.java)
+        val grammar = text.getSpans(visStart, visEnd, GrammarFlagSpan::class.java)
+        if (spelling.isEmpty() && grammar.isEmpty()) return
         canvas.save()
         // onDraw's canvas is already scrolled; only the text origin's padding is left to add.
         canvas.translate(totalPaddingLeft.toFloat(), totalPaddingTop.toFloat())

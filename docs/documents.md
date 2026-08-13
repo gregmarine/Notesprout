@@ -78,6 +78,10 @@ The button lives in the header, not in the writing chrome, so it is still reacha
 size matters at least as much as writing size. Below 400dp `smallestScreenWidthDp` the title drops the
 word "Document" and keeps the page label, which is the part that says where you are.
 
+**Proofread** — the editor spell-checks and grammar-checks its prose (dashed / dotted inkBlack
+underlines, tap for suggestions, durable user dictionary, format-bar tail button; debounced, never
+in Preview). Its own subsystem with its own doc: [`proofread.md`](proofread.md).
+
 ### Lists continue themselves
 
 Enter inside a list item writes the next marker, so a series keeps going by itself: the same bullet

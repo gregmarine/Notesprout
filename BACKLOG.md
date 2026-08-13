@@ -574,6 +574,25 @@ per-page and notebook-only; each item below is a deliberate omission, not an ove
 - **A durable undo for "bring in page text".** In-session Ctrl+Z only (the refresh is applied through
   the buffer, like a format-bar edit); beyond the session, the confirmation dialog is the guard.
 
+## Proofread — deferred items
+
+Punted from the proofread work (2026-08-11/12, `docs/proofread.md`). Each is a deliberate scope
+cut, not an oversight.
+
+- **Other languages.** The engine is language-agnostic; a language means a frequency-dictionary
+  asset (gzipped `term frequency` lines — remember the `.dict`-not-`.gz` AAPT trap) plus a way to
+  choose it. The grammar rules are English-only and would simply not run for other languages.
+- **Review-stepper mode.** A "walk the flags" pass — jump flag to flag with the popup open,
+  fix/ignore/next — for proofreading a finished document in one sweep instead of hunting
+  underlines by eye.
+- **Reuse in `TextEditDialog` / sticky notes.** `core/proofread` is pure Kotlin and already
+  host-agnostic; the cost is per-surface integration (underline drawing, tap plumbing, debounce
+  wiring — the `ProofreadController` pattern). Decided out of scope for v1: the document editor
+  is where finished prose happens.
+- **Session-durable ignores.** "Ignore for now" is session-only *by design* (a durable ignore is
+  what Add to dictionary is for); revisit only if real use shows re-ignoring the same finding is
+  a genuine irritation.
+
 ## Routines — an accidental last tick is irreversible
 
 > Found 2026-08-04 while testing the Today dashboard. **Working as designed** (see
