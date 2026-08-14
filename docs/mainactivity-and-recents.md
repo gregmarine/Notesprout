@@ -65,14 +65,18 @@ Device dp = `px × 160 ÷ density`; all current BOOX devices report density 300,
 ## Notebook & Folder Management
 
 - **New Notebook** is a full-screen flow, not an AlertDialog: `btnNewNotebook` launches
-  `TemplateBrowserActivity` in `MODE_PICK` + `EXTRA_COLLECT_NAME=true` + `EXTRA_TITLE="New Notebook"` +
+  `TemplateBrowserActivity` in `MODE_PICK` + `EXTRA_COLLECT_NAME=true` + `EXTRA_TITLE="New"` +
   `EXTRA_TARGET_PARENT_ID=currentParentId`. The browser shows a name field (pre-filled with a
-  `YYYYMMDD_HHmmss` timestamp, editable), the template grid (Blank default-selected), and a **CREATE**
-  button. Name validation: whitelist `[^a-zA-Z0-9_\-. ]`, reject `.`/`..`, non-empty — *format* checked
+  `YYYYMMDD_HHmmss` timestamp, editable), a **type radio (Notebook / Text document)**, the encryption
+  scope radios, the template grid (Blank default-selected), and a **CREATE** button. Name validation:
+  whitelist `[^a-zA-Z0-9_\-. ]`, reject `.`/`..`, non-empty — *format* checked
   in the browser, *duplicate-in-target-folder* checked inside `confirmCreate` (suspend, on IO, via
   `EXTRA_TARGET_PARENT_ID`); a collision Toasts and keeps the user on the screen. `MainActivity` retains
-  a post-result dup check as a harmless safety net. On result, `createNotebook(name, libraryTemplateId)`
-  seeds the first page's template (see Templates below).
+  a post-result dup check as a harmless safety net. On result, `createNotebook(name, libraryTemplateId,
+  scope, textDocument)` seeds the first page's template (see Templates below). A **Text document** is
+  the same bootstrap flagged to open into the document editor — the chosen template still applies to
+  the pages underneath; its card shows the document's opening lines over an `ic_file_text` glyph
+  (see [`documents.md`](documents.md) § Text documents).
 - **Move:** index update only — `.soil` file stays at `Garden/<id>.soil` (UUID unchanged).
 - **Rename:** index update only via `repository.renameNotebook` / `renameFolder` (`.soil` file/UUID untouched, same as Move). Context-menu actions use `ic_edit` (Tabler `edit`): "Rename Notebook" after Move Notebook; "Rename Folder" between Move Folder and Delete. Dialog reuses `DialogNewNotebookBinding`, pre-filled with the current name (cursor at end). Notebook rename runs `validateNotebookName`; folder rename runs `validateFolderRename` — same whitelist + `.`/`..` reject, but duplicate check is against the folder's own `parentId` (not the current browse folder) and excludes itself. No-op when name is unchanged. After rename, `refreshActiveView()` re-renders the active mode (normal/search via `scanAndRender`, pinned, or recents).
 - **Copy notebook:** new `ObjectEntity` + copy `.soil` to new UUID path via `soilFile()`.
@@ -223,7 +227,7 @@ schema, continuous upkeep, and encrypted trade-off.
 
 Consumes a `.soil` produced by full-notebook export. Entry points:
 
-- **Overflow action "Import Notebook (.soil)"** — `importSoilLauncher` (`OpenDocument`, MIME `application/octet-stream` + `*/*`). Shows `startImportFromUri(uri)` with the system file picker.
+- **Overflow Import button** — now an `ActionSheetDialog`: **Notebook (.soil)** → `importSoilLauncher` (`OpenDocument`, MIME `application/octet-stream` + `*/*`) → `startImportFromUri(uri)`; **Text or Markdown…** → `importTextLauncher` → `importTextDocumentFromUri` — a new **text document** in the current folder (name deduped, ≤10 MB, content written as the notebook document during the create bootstrap, opened into the editor). `.md`/`.markdown`/`.txt` files and shared literal text arriving via the intent filters below take the same text path — detected by extension/MIME in `startImportFromUri` before the `.soil` probe.
 - **Open-with / Share-to intent filters** — `AndroidManifest.xml` registers three filters on `MainActivity` (`launchMode="singleTop"`):
   - `ACTION_VIEW` with `scheme=content`, `mimeType=application/octet-stream`
   - `ACTION_VIEW` with `scheme=file`, `mimeType=application/octet-stream` (legacy)

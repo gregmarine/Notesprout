@@ -89,6 +89,13 @@ object DocumentTransfer {
          * the editor's UI right; a no-op when nothing is running.
          */
         fun cancelDocumentRequest()
+
+        /**
+         * Rename the notebook — text documents let the editor's title do this. The host owns the
+         * duplicate check against siblings, the index write, the meta refresh, and its own title;
+         * calls back on the main thread with null on success or a user-facing error message.
+         */
+        fun renameNotebook(name: String, onResult: (String?) -> Unit)
     }
 
     /** Installed before launching the editor; cleared when the host is destroyed. */

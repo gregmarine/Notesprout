@@ -71,6 +71,7 @@ encrypted at rest along with all other data in the file (SQLCipher encrypts the 
 | `folderPath` | `List<FolderRef>` | Full ancestor chain root→immediate-parent; empty for root-level notebooks |
 | `exportedAt` | `Long?` | Epoch ms stamped at export time; `null` on in-DB rows that haven't been exported |
 | `appVersionCode` | `Int?` | `BuildConfig.VERSION_CODE` at time of last refresh |
+| `textDocument` | `Boolean` (default false) | The file is a **text document** (opens straight into the document editor). Import copies it onto the index row, so the identity round-trips with the file — see [`documents.md`](documents.md) § Text documents |
 
 ### `FolderRef` Fields
 

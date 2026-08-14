@@ -105,6 +105,9 @@ class MainActivity : AppCompatActivity() {
          */
         const val NIL_UUID = "00000000-0000-0000-0000-000000000000"
 
+        /** Sanity cap for a text/Markdown import — anything larger is not prose. */
+        private const val MAX_TEXT_IMPORT_BYTES = 10 * 1024 * 1024
+
         /**
          * Boolean intent extra: launch straight into the "pick a folder for a new notebook" picker
          * (used by [CalendarActivity]'s New Notebook button). Consumed once, then removed.
@@ -242,6 +245,7 @@ class MainActivity : AppCompatActivity() {
         val name = data.getStringExtra(TemplateBrowserActivity.RESULT_NOTEBOOK_NAME)?.trim().orEmpty()
         val templateId = data.getStringExtra(TemplateBrowserActivity.RESULT_TEMPLATE_ID).orEmpty()
         val scopeString = data.getStringExtra(TemplateBrowserActivity.RESULT_KEY_SCOPE).orEmpty()
+        val textDocument = data.getBooleanExtra(TemplateBrowserActivity.RESULT_TEXT_DOCUMENT, false)
         val scope: KeyScope? = when (scopeString) {
             "GLOBAL"   -> KeyScope.GLOBAL
             "NOTEBOOK" -> KeyScope.NOTEBOOK
@@ -255,7 +259,7 @@ class MainActivity : AppCompatActivity() {
                 Toast.makeText(this@MainActivity, "A notebook named \"$name\" already exists", Toast.LENGTH_SHORT).show()
                 return@launch
             }
-            createNotebook(name, templateId, scope)
+            createNotebook(name, templateId, scope, textDocument)
         }
     }
 
@@ -265,6 +269,13 @@ class MainActivity : AppCompatActivity() {
         ActivityResultContracts.OpenDocument()
     ) { uri ->
         if (uri != null) startImportFromUri(uri)
+    }
+
+    /** "Text or Markdown…" on the Import sheet — always lands as a new text document. */
+    private val importTextLauncher = registerForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) importTextDocumentFromUri(uri)
     }
 
     // ── Lifecycle ─────────────────────────────────────────────────────────────
@@ -855,7 +866,17 @@ class MainActivity : AppCompatActivity() {
         }
         binding.btnImport.setOnClickListener         {
             closeOverflowToolbar()
-            importSoilLauncher.launch(arrayOf("application/octet-stream", "*/*"))
+            // Two import kinds share the button: a whole notebook, or a text/Markdown file that
+            // becomes a text document (see docs/documents.md § Text documents).
+            ActionSheetDialog(this)
+                .title("Import")
+                .addAction(R.drawable.ic_import, "Notebook (.soil)") {
+                    importSoilLauncher.launch(arrayOf("application/octet-stream", "*/*"))
+                }
+                .addAction(R.drawable.ic_file_text, "Text or Markdown…") {
+                    importTextLauncher.launch(arrayOf("text/markdown", "text/plain", "*/*"))
+                }
+                .show()
         }
         binding.btnTemplates.setOnClickListener      {
             closeOverflowToolbar()
@@ -1201,15 +1222,20 @@ class MainActivity : AppCompatActivity() {
                     FrameLayout.LayoutParams.MATCH_PARENT,
                 ))
 
-                val icon = AppCompatImageView(this).apply {
-                    setImageResource(R.drawable.ic_notebook)
-                }
-                card.addView(icon, FrameLayout.LayoutParams(iconSize, iconSize, Gravity.CENTER))
-
                 // Read snapshot from the index — no .soil file access during list rendering.
                 val notebookObj = try {
                     item.entity.notebookMeta()
                 } catch (_: Exception) { null }
+
+                // Text documents read differently at a glance: a file-text glyph instead of the
+                // notebook, under a cover that is the document's opening lines (see TextCover).
+                val icon = AppCompatImageView(this).apply {
+                    setImageResource(
+                        if (notebookObj?.textDocument == true) R.drawable.ic_file_text
+                        else R.drawable.ic_notebook
+                    )
+                }
+                card.addView(icon, FrameLayout.LayoutParams(iconSize, iconSize, Gravity.CENTER))
 
                 if (notebookObj?.encrypted == true && notebookObj.keyScope != KeyScope.GLOBAL) {
                     // Private (NOTEBOOK-scope) encryption: show lock icon; never decode a snapshot.
@@ -1385,7 +1411,7 @@ class MainActivity : AppCompatActivity() {
         val intent = Intent(this, TemplateBrowserActivity::class.java)
             .putExtra(TemplateBrowserActivity.EXTRA_MODE, TemplateBrowserActivity.MODE_PICK)
             .putExtra(TemplateBrowserActivity.EXTRA_COLLECT_NAME, true)
-            .putExtra(TemplateBrowserActivity.EXTRA_TITLE, "New Notebook")
+            .putExtra(TemplateBrowserActivity.EXTRA_TITLE, "New")
         currentParentId?.let { intent.putExtra(TemplateBrowserActivity.EXTRA_TARGET_PARENT_ID, it) }
         newNotebookLauncher.launch(intent)
     }
@@ -1679,7 +1705,15 @@ class MainActivity : AppCompatActivity() {
 
     // ── Notebook creation ─────────────────────────────────────────────────────
 
-    private suspend fun createNotebook(name: String, libraryTemplateId: String = "", scope: KeyScope? = null) {
+    private suspend fun createNotebook(
+        name: String,
+        libraryTemplateId: String = "",
+        scope: KeyScope? = null,
+        /** True = a **text document**: same bootstrap, flagged to open into the document editor. */
+        textDocument: Boolean = false,
+        /** Text-document import only: written as the notebook document during the bootstrap. */
+        initialDocumentText: String? = null,
+    ) {
         try {
             validateNotebookName(name)?.let { error ->
                 Toast.makeText(this@MainActivity, error, Toast.LENGTH_SHORT).show()
@@ -1791,6 +1825,17 @@ class MainActivity : AppCompatActivity() {
                         "Content", null, com.notesprout.android.data.LAYER_FLAGS_DEFAULT, null,
                     ))
 
+                    // Text-document import: the file's content becomes the notebook document — an
+                    // ordinary `document` row parented to the notebook root, written in the same
+                    // bootstrap so the file is born complete. srcUpdatedAt stays NULL: this text
+                    // was authored elsewhere, not merged from the pages.
+                    if (textDocument && !initialDocumentText.isNullOrBlank()) {
+                        exec(insertSql, arrayOf(
+                            UUID.randomUUID().toString(), notebookId, "", now, now, "document",
+                            initialDocumentText, null, null, null,
+                        ))
+                    }
+
                     val folderPath = repository.getFolderAncestry(currentParentId)
                     val initialMeta = NotebookMeta(
                         notebookId     = entity.id,
@@ -1802,6 +1847,7 @@ class MainActivity : AppCompatActivity() {
                         cover          = null,
                         folderPath     = folderPath,
                         appVersionCode = BuildConfig.VERSION_CODE,
+                        textDocument   = textDocument,
                     )
                     exec(
                         "INSERT OR REPLACE INTO notebook_meta (id, json) VALUES (0, ?)",
@@ -1827,7 +1873,28 @@ class MainActivity : AppCompatActivity() {
                 if (key != null) com.notesprout.android.crypto.KeyOpener.warm(this, entity.id, soilPath, scope, key)
             }
 
-            Toast.makeText(this@MainActivity, "Notebook '$name' created", Toast.LENGTH_SHORT).show()
+            // A text document opens straight into the document editor — NotebookActivity routes
+            // on this index flag, so every entry point (library, recents, Today) inherits it.
+            if (textDocument) {
+                withContext(Dispatchers.IO) {
+                    repository.setTextDocument(entity.id, true)
+                    // Imported content gets its card face right away; the seal keeps it fresh
+                    // afterwards. updateNotebookSnapshot owns the encryption leak gate.
+                    if (!initialDocumentText.isNullOrBlank()) {
+                        runCatching {
+                            repository.updateNotebookSnapshot(
+                                entity.id, com.notesprout.android.data.TextCover.render(initialDocumentText)
+                            )
+                        }
+                    }
+                }
+            }
+
+            Toast.makeText(
+                this@MainActivity,
+                if (textDocument) "Text document '$name' created" else "Notebook '$name' created",
+                Toast.LENGTH_SHORT,
+            ).show()
 
             if (libraryTemplateId.isNotEmpty()) {
                 TemplateRecentsManager.recordUse(this@MainActivity, libraryTemplateId)
@@ -2721,11 +2788,20 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun handleIncomingIntent(intent: Intent) {
-        val uri: Uri = when (intent.action) {
+        val uri: Uri? = when (intent.action) {
             Intent.ACTION_VIEW -> intent.data
             Intent.ACTION_SEND -> @Suppress("DEPRECATION") intent.getParcelableExtra<Uri>(Intent.EXTRA_STREAM)
             else -> null
-        } ?: return
+        }
+        if (uri == null) {
+            // Shared literal text (a browser selection, a note app's share) carries no stream —
+            // ACTION_SEND text/* with EXTRA_TEXT only. It lands as a new text document too.
+            if (intent.action == Intent.ACTION_SEND && intent.type?.startsWith("text/") == true) {
+                val shared = intent.getStringExtra(Intent.EXTRA_TEXT)
+                if (!shared.isNullOrBlank()) createTextDocumentFromImport("Shared Text", shared)
+            }
+            return
+        }
         startImportFromUri(uri)
     }
 
@@ -2743,6 +2819,18 @@ class MainActivity : AppCompatActivity() {
                     }
                 }.getOrNull()
             }
+            // Text/Markdown files are their own import: they become a new text document rather
+            // than passing through the .soil probe (which would just call them Invalid).
+            val lowerName = uriDisplayName?.lowercase().orEmpty()
+            val mime = withContext(Dispatchers.IO) { runCatching { contentResolver.getType(uri) }.getOrNull() }
+            val isTextFile = lowerName.endsWith(".md") || lowerName.endsWith(".markdown") ||
+                lowerName.endsWith(".txt") || mime == "text/markdown" ||
+                (mime == "text/plain" && !lowerName.endsWith(".soil"))
+            if (isTextFile) {
+                importTextDocumentFromUri(uri, uriDisplayName)
+                return@launch
+            }
+
             val fallbackName = uriDisplayName
                 ?.removeSuffix(".soil")
                 ?.trim()
@@ -2814,6 +2902,65 @@ class MainActivity : AppCompatActivity() {
                 val resolvedId = manifestId ?: UUID.randomUUID().toString()
                 showImportPlacementDialog(manifest, tempFile, displayName, resolvedId, enteredPass)
             }
+        }
+    }
+
+    // ── Text/Markdown import (docs/documents.md § Text documents) ─────────────
+
+    /**
+     * Import a text/Markdown file as a **new text document**: the file name becomes the document
+     * name (deduped against the current folder), the content becomes the notebook document, and
+     * it opens straight into the editor via the normal create path.
+     */
+    private fun importTextDocumentFromUri(uri: android.net.Uri, knownDisplayName: String? = null) {
+        lifecycleScope.launch {
+            val displayName = knownDisplayName ?: withContext(Dispatchers.IO) {
+                runCatching {
+                    contentResolver.query(
+                        uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null
+                    )?.use { c -> if (c.moveToFirst()) c.getString(0) else null }
+                }.getOrNull()
+            }
+            val text = withContext(Dispatchers.IO) {
+                runCatching {
+                    contentResolver.openInputStream(uri)?.use { input ->
+                        val bytes = input.readBytes()
+                        if (bytes.size > MAX_TEXT_IMPORT_BYTES) null else String(bytes, Charsets.UTF_8)
+                    }
+                }.getOrNull()
+            }
+            if (text == null) {
+                Toast.makeText(this@MainActivity, "Couldn't read that file (unreadable, or over 10 MB).", Toast.LENGTH_LONG).show()
+                return@launch
+            }
+            if (text.isBlank()) {
+                Toast.makeText(this@MainActivity, "That file is empty.", Toast.LENGTH_SHORT).show()
+                return@launch
+            }
+            val base = displayName?.substringBeforeLast('.')?.trim()?.takeIf { it.isNotEmpty() }
+                ?: "Imported Document"
+            createTextDocumentFromImport(base, text)
+        }
+    }
+
+    /**
+     * Create a text document named after [baseName] (sanitized to the notebook-name whitelist and
+     * deduped against the current folder) holding [text] as its notebook document. Rides
+     * [createNotebook], so encryption-by-default, index registration, the cover, and the
+     * open-into-editor launch all behave exactly like an in-app create.
+     */
+    private fun createTextDocumentFromImport(baseName: String, text: String) {
+        lifecycleScope.launch {
+            val safe = baseName.replace(Regex("[^a-zA-Z0-9_\\-. ]"), " ")
+                .replace(Regex("\\s+"), " ").trim()
+                .takeIf { it.isNotEmpty() && it != "." && it != ".." } ?: "Imported Document"
+            val siblings = withContext(Dispatchers.IO) { repository.getNotebooks(currentParentId) }
+            var name = safe
+            var n = 2
+            while (siblings.any { it.name.equals(name, ignoreCase = true) }) { name = "$safe $n"; n++ }
+            createNotebook(
+                name, scope = KeyScope.GLOBAL, textDocument = true, initialDocumentText = text,
+            )
         }
     }
 

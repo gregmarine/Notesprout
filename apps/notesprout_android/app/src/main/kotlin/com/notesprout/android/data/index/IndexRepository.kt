@@ -123,6 +123,21 @@ class IndexRepository(private val dao: ObjectDao) {
         dao.update(entity.copy(name = newName, updatedAt = System.currentTimeMillis()))
     }
 
+    /**
+     * Mark (or unmark) a notebook as a **text document** — one whose primary surface is its
+     * notebook document, opened straight into the document editor. Set at create and on import
+     * (from `notebook_meta.textDocument`). See docs/documents.md § Text documents.
+     */
+    suspend fun setTextDocument(id: String, textDocument: Boolean) {
+        val entity = dao.getById(id) ?: return
+        val obj = runCatching { entity.notebookMeta() }.getOrNull() ?: return // see updateNotebookSnapshot
+        if (obj.textDocument == textDocument) return
+        dao.update(
+            entity.withNotebookMeta(obj.copy(textDocument = textDocument))
+                .copy(updatedAt = System.currentTimeMillis())
+        )
+    }
+
     suspend fun softDeleteNotebook(id: String) {
         dao.softDelete(id, System.currentTimeMillis())
     }

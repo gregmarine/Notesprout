@@ -120,6 +120,7 @@ import com.notesprout.android.data.toBoundingBoxJson
 import com.notesprout.android.data.toStrokeRow
 import com.notesprout.android.data.index.IndexRepository
 import com.notesprout.android.data.index.NotesproutIndex
+import com.notesprout.android.data.index.notebookMeta
 import com.notesprout.android.data.ScratchpadRepository
 import com.notesprout.android.notebook.ScratchpadPreferences
 import com.notesprout.android.data.index.ObjectType
@@ -947,6 +948,27 @@ class NotebookActivity : AppCompatActivity() {
      */
     private fun notebookCaretKey() = "nb:$notebookId"
 
+    // ── Text documents ────────────────────────────────────────────────────────
+    // A text document is a notebook whose primary surface is its notebook document: it opens
+    // straight into the editor, the canvas loads only when asked for (✓ Done), and the editor
+    // carries a close-notebook control. Routed here so every entry point inherits it.
+    // See docs/documents.md § Text documents.
+
+    /** True when this notebook is flagged as a text document (read from the index at open). */
+    private var isTextDocument = false
+
+    /**
+     * Set on the text-document open path, which launches the editor without loading the canvas.
+     * The deferred [loadStrokes] runs when the editor returns with Done; a close never pays for it.
+     */
+    private var canvasLoadDeferred = false
+
+    /**
+     * The editor asked to close the notebook while the recreated host's async open was still in
+     * flight. The open path drains the held text, seals, and finishes instead of showing anything.
+     */
+    private var pendingCloseAfterOpen = false
+
     /**
      * True while a page flip's session is being loaded. In that window [documentPageId] already names
      * the incoming page but the editor's buffer still holds the outgoing one, so a save arriving then
@@ -980,7 +1002,27 @@ class NotebookActivity : AppCompatActivity() {
      */
     private val documentLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
-    ) { _ ->
+    ) { result ->
+        // Close-the-notebook (text documents): the text is deliberately NOT flushed here — the
+        // session state is left in place so sealNotebook's flushPendingDocument writes
+        // DocumentTransfer.live on the seal's own IO context, which cannot race the connection
+        // close the way a fire-and-forget save from here could.
+        if (result.resultCode == DocumentEditorActivity.RESULT_CLOSE_NOTEBOOK) {
+            DocumentPreferences.saveCaret(
+                this,
+                if (documentNotebookMode) notebookCaretKey() else documentPageId,
+                DocumentTransfer.liveCaret,
+            )
+            if (soilDatabase == null) {
+                // Recreated host, async open still in flight — it drains, seals, and finishes.
+                pendingCloseAfterOpen = true
+            } else {
+                closeNotebook()
+                finish()
+            }
+            return@registerForActivityResult
+        }
+
         val text = DocumentTransfer.live
         val caret = DocumentTransfer.liveCaret
         val pageId = documentPageId
@@ -1007,6 +1049,18 @@ class NotebookActivity : AppCompatActivity() {
                 // Hold the text for the open path — dropping it here would lose the user's writing.
                 pendingDocumentFlush = PendingDocumentFlush(pageId, text, src, notebookDoc)
             }
+        }
+
+        // Text-document open path: the canvas was never loaded — ✓ Done is what asks for it.
+        // The page the editor ended on rides in as the initial page, which loadStrokes consumes
+        // exactly like a followed link, so flips made in page-document mode are honoured.
+        if (canvasLoadDeferred) {
+            canvasLoadDeferred = false
+            if (endedOn >= 0 && endedOn < pages.size) {
+                intent.putExtra(EXTRA_INITIAL_PAGE_ID, pages[endedOn].id)
+            }
+            loadStrokes()
+            return@registerForActivityResult
         }
 
         // Follow the editor's page flips. Deferred to here on purpose: this navigates the drawing
@@ -2381,9 +2435,9 @@ class NotebookActivity : AppCompatActivity() {
                 // whose index row (or .soil) is gone. Without this, getEncryptionInfo defaults to
                 // NONE and Room CREATES a ghost empty .soil at the path — an orphan file shown to
                 // the user as their notebook, mysteriously blank.
-                val exists = withContext(Dispatchers.IO) {
-                    indexRepo.getNotebook(nbId)?.deletedAt == null && soilFile(this@NotebookActivity, nbId).exists()
-                }
+                val indexEntity = withContext(Dispatchers.IO) { indexRepo.getNotebook(nbId) }
+                val exists = indexEntity != null && indexEntity.deletedAt == null &&
+                    withContext(Dispatchers.IO) { soilFile(this@NotebookActivity, nbId).exists() }
                 if (!exists) {
                     android.widget.Toast.makeText(
                         this@NotebookActivity, "This notebook no longer exists.", android.widget.Toast.LENGTH_LONG
@@ -2391,6 +2445,9 @@ class NotebookActivity : AppCompatActivity() {
                     finish()
                     return@launch
                 }
+                isTextDocument = runCatching {
+                    indexEntity!!.notebookMeta().textDocument
+                }.getOrDefault(false)
                 val info = withContext(Dispatchers.IO) { indexRepo.getEncryptionInfo(nbId) }
                 encryptionInfo = info
                 updateLockButtonVisibility(info)
@@ -2444,7 +2501,31 @@ class NotebookActivity : AppCompatActivity() {
                             NotebookMetaStore.refresh(db, indexRepo, notebookId)
                         }.onFailure { Slog.d(TAG) { "meta refresh on open failed: ${it.message}" } }
                     }
-                    loadStrokes()
+                    // Text documents open straight into the document editor; the canvas load is
+                    // deferred until ✓ Done asks for it (and a close never pays for it at all).
+                    // A recreated host with the editor already in front keeps the normal path —
+                    // the canvas renders behind the editor exactly as it does for a notebook.
+                    val editorAlreadyOpen = documentPageId.isNotEmpty()
+                    when {
+                        isTextDocument && pendingCloseAfterOpen -> {
+                            // The editor closed while this open was in flight: drain, seal, leave.
+                            pendingCloseAfterOpen = false
+                            withContext(Dispatchers.IO) { setupPageIds(db) }
+                            binding.openingOverlay.root.visibility = View.GONE
+                            closeNotebook()
+                            finish()
+                        }
+                        isTextDocument && !editorAlreadyOpen -> {
+                            withContext(Dispatchers.IO) { setupPageIds(db) }
+                            canvasLoadDeferred = true
+                            // The overlay deliberately stays up: it covers a first-visit
+                            // auto-merge seed until the editor is in front, and it is what the
+                            // user sees again on ✓ Done while the deferred loadStrokes (which
+                            // hides it) builds the canvas.
+                            openNotebookDocumentEditor(db)
+                        }
+                        else -> loadStrokes()
+                    }
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Throwable) {
@@ -4167,7 +4248,7 @@ class NotebookActivity : AppCompatActivity() {
         // Every step below is individually guarded: this runs fire-and-forget on appScope after
         // the activity is gone, so a throw (disk full, index sealed underneath) has no UI to land
         // in and would take down the whole process — and skip the checkpoint/close that follow.
-        if (nbId.isNotEmpty() && snapshot != null) {
+        if (nbId.isNotEmpty() && snapshot != null && !isTextDocument) {
             runCatching { cacheSnapshotIfAllowed(nbId, snapshot) }
                 .onFailure { android.util.Log.e(TAG, "seal: cover cache failed", it) }
         }
@@ -4176,6 +4257,17 @@ class NotebookActivity : AppCompatActivity() {
         // A document editor may still be in front of this notebook, holding text that only this
         // connection can store. Write it before the connection goes away.
         flushPendingDocument(db)
+        // Text documents: the cover is the document's opening lines, not the canvas — the text IS
+        // the notebook's face. Rendered AFTER the flush above so a close-from-editor seals with
+        // the freshest words; cacheSnapshotIfAllowed still owns the encryption leak gate.
+        if (nbId.isNotEmpty() && isTextDocument) {
+            runCatching {
+                com.notesprout.android.data.DocumentRepository.getNotebookDocument(db.notebookDao())
+                    ?.text?.takeIf { it.isNotBlank() }
+                    ?.let { com.notesprout.android.data.TextCover.render(it) }
+                    ?.let { cacheSnapshotIfAllowed(nbId, it) }
+            }.onFailure { android.util.Log.e(TAG, "seal: text cover failed", it) }
+        }
         // RTR: stop pending debounce jobs and flush the sealed page's text synchronously, on this
         // IO context, so it completes before the DB is closed below (the "run once at page-seal" hook).
         rtrScheduler?.let { scheduler ->
@@ -5112,7 +5204,7 @@ class NotebookActivity : AppCompatActivity() {
             DocumentTransfer.input = session
             DocumentTransfer.live = null
             documentLauncher.launch(
-                DocumentEditorActivity.intent(this@NotebookActivity, notebookDisplayName)
+                DocumentEditorActivity.intent(this@NotebookActivity, notebookDisplayName, isTextDocument)
             )
         }
     }
@@ -5134,7 +5226,7 @@ class NotebookActivity : AppCompatActivity() {
             DocumentTransfer.input = session
             DocumentTransfer.live = null
             documentLauncher.launch(
-                DocumentEditorActivity.intent(this@NotebookActivity, notebookDisplayName)
+                DocumentEditorActivity.intent(this@NotebookActivity, notebookDisplayName, isTextDocument)
             )
         }
     }
@@ -5513,6 +5605,41 @@ class NotebookActivity : AppCompatActivity() {
 
         override fun cancelDocumentRequest() {
             documentMergeJob?.cancel()
+        }
+
+        override fun renameNotebook(name: String, onResult: (String?) -> Unit) {
+            val nbId = notebookId
+            val trimmed = name.trim()
+            lifecycleScope.launch {
+                var error: String? = null
+                try {
+                    val entity = withContext(Dispatchers.IO) { indexRepo.getNotebook(nbId) }
+                    if (entity == null) {
+                        error = "This notebook no longer exists."
+                        return@launch
+                    }
+                    val siblings = withContext(Dispatchers.IO) { indexRepo.getNotebooks(entity.parentId) }
+                    if (siblings.any { it.id != nbId && it.name.equals(trimmed, ignoreCase = true) }) {
+                        error = "A notebook named \"$trimmed\" already exists"
+                        return@launch
+                    }
+                    withContext(Dispatchers.IO) { indexRepo.renameNotebook(nbId, trimmed) }
+                    notebookDisplayName = trimmed
+                    title = trimmed
+                    // Keep the portable in-file meta in step — buildFromIndex reads the index name.
+                    soilDatabase?.let { db ->
+                        lifecycleScope.launch(Dispatchers.IO) {
+                            runCatching { NotebookMetaStore.refresh(db, indexRepo, nbId) }
+                                .onFailure { Slog.d(TAG) { "meta refresh after rename failed: ${it.message}" } }
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Rename from editor failed", e)
+                    error = "Couldn't rename: ${e.message}"
+                } finally {
+                    onResult(error)
+                }
+            }
         }
     }
 

@@ -116,6 +116,13 @@ class TemplateBrowserActivity : AppCompatActivity() {
         const val RESULT_NOTEBOOK_NAME = "result_notebook_name"
         /** Result: only when [EXTRA_COLLECT_NAME]. Scope string: "" = none, "GLOBAL", "NOTEBOOK". */
         const val RESULT_KEY_SCOPE = "result_key_scope"
+        /**
+         * Result: only when [EXTRA_COLLECT_NAME]. True when the user chose **Text document** —
+         * a notebook whose primary surface is its notebook document (typed Markdown), opened
+         * straight into the document editor. The chosen template still applies to the pages
+         * underneath. See docs/documents.md § Text documents.
+         */
+        const val RESULT_TEXT_DOCUMENT = "result_text_document"
 
         // Thumbnail sampling: cap inSampleSize at 4 — mirrors TemplateDialog.computeInSampleSize.
         private const val THUMB_PX = 1300
@@ -284,6 +291,7 @@ class TemplateBrowserActivity : AppCompatActivity() {
             mode = MODE_PICK                      // collectName always implies PICK
             targetParentId = intent.getStringExtra(EXTRA_TARGET_PARENT_ID)
             binding.collectNameBar.visibility = View.VISIBLE
+            binding.collectTypeBar.visibility = View.VISIBLE
             binding.collectScopeBar.visibility = View.VISIBLE
             binding.editNotebookName.setText(
                 java.time.LocalDateTime.now()
@@ -1759,6 +1767,8 @@ class TemplateBrowserActivity : AppCompatActivity() {
                 .putExtra(RESULT_NOTEBOOK_NAME, name)
                 .putExtra(RESULT_TEMPLATE_ID, pendingTemplateId)
                 .putExtra(RESULT_KEY_SCOPE, scopeString)
+                .putExtra(RESULT_TEXT_DOCUMENT,
+                    binding.typeRadioGroup.checkedRadioButtonId == R.id.radioTypeTextDocument)
             setResult(RESULT_OK, resultIntent)
             finish()
         }

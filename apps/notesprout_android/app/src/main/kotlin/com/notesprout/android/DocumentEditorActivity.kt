@@ -47,6 +47,7 @@ import com.notesprout.android.core.markdown.MarkdownParser
 import com.notesprout.android.core.markdown.MarkdownReflow
 import com.notesprout.android.core.markdown.MarkdownRenderer
 import com.notesprout.android.core.markdown.TextBuffer
+import com.notesprout.android.core.markdown.TextSearch
 import com.notesprout.android.notebook.ToolbarOverflowManager
 
 /**
@@ -79,6 +80,20 @@ class DocumentEditorActivity : AppCompatActivity() {
         /** The notebook this document belongs to — the header's title. */
         const val EXTRA_NOTEBOOK_NAME = "notebook_name"
 
+        /**
+         * True when the host notebook is a **text document** — the editor is its primary surface.
+         * The header gains a close-notebook control (seal → library) while in notebook-document
+         * mode, and ✓ Done's hint reads "Show pages". See docs/documents.md § Text documents.
+         */
+        const val EXTRA_TEXT_DOCUMENT = "text_document"
+
+        /**
+         * Result code for the close-notebook control: the host seals the `.soil` and finishes to
+         * the library instead of revealing the canvas. The text itself travels via
+         * [DocumentTransfer.live] and is written by the host's seal — never from the result path.
+         */
+        const val RESULT_CLOSE_NOTEBOOK = RESULT_FIRST_USER
+
         private const val STATE_TEXT = "doc_text"
         private const val STATE_PREVIEWING = "doc_previewing"
         private const val STATE_CARET = "doc_caret"
@@ -94,9 +109,10 @@ class DocumentEditorActivity : AppCompatActivity() {
          */
         private const val READING_POPUP_DELAY_MS = 350L
 
-        fun intent(context: Context, notebookName: String): Intent =
+        fun intent(context: Context, notebookName: String, textDocument: Boolean = false): Intent =
             Intent(context, DocumentEditorActivity::class.java)
                 .putExtra(EXTRA_NOTEBOOK_NAME, notebookName)
+                .putExtra(EXTRA_TEXT_DOCUMENT, textDocument)
     }
 
     private lateinit var editor: MarkdownEditText
@@ -136,6 +152,18 @@ class DocumentEditorActivity : AppCompatActivity() {
 
     /** The notebook's name — the header title. */
     private var notebookName: String = ""
+
+    /** True when the host notebook is a text document — see [EXTRA_TEXT_DOCUMENT]. */
+    private var textDocument = false
+
+    /** The close-notebook control — text documents only, shown in notebook-document mode. */
+    private var btnCloseNotebook: AppCompatImageButton? = null
+
+    // ── Find & replace ────────────────────────────────────────────────────────
+    private lateinit var findBar: View
+    private lateinit var findField: AppCompatEditText
+    private lateinit var replaceField: AppCompatEditText
+    private lateinit var findCount: AppCompatTextView
 
     /** This page's place in the notebook ("4 / 12"), shown between the flip arrows. */
     private var pageLabel: String = ""
@@ -213,6 +241,7 @@ class DocumentEditorActivity : AppCompatActivity() {
         if (!IndexGuard.ready(this)) return
 
         notebookName = intent.getStringExtra(EXTRA_NOTEBOOK_NAME).orEmpty()
+        textDocument = intent.getBooleanExtra(EXTRA_TEXT_DOCUMENT, false)
         // Read before the views are built — both surfaces are sized from it.
         textSizeSp = DocumentPreferences.textSize(this)
 
@@ -433,6 +462,10 @@ class DocumentEditorActivity : AppCompatActivity() {
             addView(formatBar)
             // The overflow panel belongs to the chrome, so Preview takes it away with everything else.
             addView(buildOverflowMenu())
+            // Find & replace lives with the chrome too, so Preview takes it away — search is a
+            // writing act here, and replace certainly is.
+            findBar = buildFindBar(ink, light)
+            addView(findBar)
         }
         root.addView(writingChrome)
         root.addView(rule(ink))
@@ -491,12 +524,41 @@ class DocumentEditorActivity : AppCompatActivity() {
             setPadding(dp(16), dp(10), dp(16), dp(10))
         }
 
+        // Text documents get the notebook's own close control: seal → library, without ever
+        // touching the canvas. Upper LEFT — the app's standard back-button position — leading
+        // the title like every other screen's exit. The host writes the text from its seal (see
+        // documentLauncher), so persist-then-finish is enough here. Shown only in
+        // notebook-document mode (applyModeChrome): page mode has the flip cluster back, and a
+        // ninth control would push the header past the narrowest screens — Done still exits to
+        // the canvas there.
+        if (textDocument) {
+            btnCloseNotebook = headerIcon(R.drawable.ic_close, "Close notebook") {
+                persist()
+                hideIme()
+                setResult(RESULT_CLOSE_NOTEBOOK)
+                finish()
+            }.apply {
+                (layoutParams as LinearLayout.LayoutParams).apply {
+                    marginStart = 0
+                    marginEnd = dp(6)
+                }
+            }.also { header.addView(it) }
+        }
+
         titleText = AppCompatTextView(this).apply {
             setTextColor(ink)
             textSize = 18f
             isSingleLine = true
             ellipsize = android.text.TextUtils.TruncateAt.END
             layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+            // Text documents: the title IS the document's name — tap it to rename. Notebooks keep
+            // their rename in the library, where their name lives.
+            if (textDocument) {
+                setOnClickListener { promptRename() }
+                setOnLongClickListener {
+                    Toast.makeText(context, "Rename document", Toast.LENGTH_SHORT).show(); true
+                }
+            }
         }
         header.addView(titleText)
 
@@ -543,10 +605,12 @@ class DocumentEditorActivity : AppCompatActivity() {
         header.addView(btnPreview)
 
         // A check, not an X: everything is already saved, so this finishes rather than discards, and an
-        // X would promise a way out that does not exist. Keeps the bordered background that set the
-        // commit action apart when it was a word.
-        header.addView(headerIcon(R.drawable.ic_check, "Done") { persist(); hideIme(); finish() }.apply {
-            setBackgroundResource(R.drawable.shape_bordered)
+        // X would promise a way out that does not exist. bg_toolbar_button (the headerIcon default)
+        // shows its border only while pressed — a standing border read as a persistent state rather
+        // than a button. For a text document the check *reveals the pages* (the canvas behind this
+        // screen), so its hint says so.
+        val doneHint = if (textDocument) "Show pages" else "Done"
+        header.addView(headerIcon(R.drawable.ic_check, doneHint) { persist(); hideIme(); finish() }.apply {
             (layoutParams as LinearLayout.LayoutParams).marginStart = dp(8)
         })
 
@@ -601,6 +665,8 @@ class DocumentEditorActivity : AppCompatActivity() {
         btnFlipPrev.visibility = flips
         pageText.visibility = flips
         btnFlipNext.visibility = flips
+        // Close-notebook only where the width freed by the hidden flip cluster pays for it.
+        btnCloseNotebook?.visibility = if (notebookMode) View.VISIBLE else View.GONE
 
         btnScope.setImageResource(if (notebookMode) R.drawable.ic_file_text else R.drawable.ic_notebook)
         val scopeHint = if (notebookMode) "Page document" else "Notebook document"
@@ -611,6 +677,191 @@ class DocumentEditorActivity : AppCompatActivity() {
         val bringHint = if (notebookMode) "Merge the pages' text into this document"
         else "Bring this page's text into the document"
         btnBringIn.setOnLongClickListener { Toast.makeText(this, bringHint, Toast.LENGTH_SHORT).show(); true }
+    }
+
+    // ── Find & replace ────────────────────────────────────────────────────────
+
+    /**
+     * Two rows below the format bar, hidden until asked for (`Ctrl+F` or the bar's search tool):
+     * `[find][n of m][‹][›][✕]` over `[replace][Replace][All]`. No custom highlight spans — the
+     * current match is shown as the editor's own selection, which e-ink renders honestly — and
+     * matches are recomputed per action rather than live-painted. Replaces go through the
+     * `Editable`, the same route the format bar takes, so Ctrl+Z applies.
+     */
+    private fun buildFindBar(ink: Int, light: Int): View {
+        fun field(hintText: String): AppCompatEditText = AppCompatEditText(this).apply {
+            setBackgroundResource(R.drawable.shape_bordered)
+            setTextColor(ink)
+            setHintTextColor(light)
+            hint = hintText
+            isSingleLine = true
+            textSize = 14f
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+            imeOptions = EditorInfo.IME_ACTION_SEARCH or
+                EditorInfo.IME_FLAG_NO_FULLSCREEN or EditorInfo.IME_FLAG_NO_EXTRACT_UI
+            setPadding(dp(10), dp(6), dp(10), dp(6))
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+        }
+
+        val bar = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            visibility = View.GONE
+        }
+        bar.addView(rule(ink))
+
+        val findRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(12), dp(6), dp(8), dp(2))
+        }
+        findField = field("Find")
+        findRow.addView(findField)
+        findCount = AppCompatTextView(this).apply {
+            setTextColor(ink)
+            textSize = 12f
+            isSingleLine = true
+            gravity = Gravity.CENTER
+            minWidth = dp(48)
+            setPadding(dp(4), 0, dp(4), 0)
+        }
+        findRow.addView(findCount)
+        findRow.addView(headerIcon(R.drawable.ic_page_prev, "Previous match") { findStep(backwards = true) })
+        findRow.addView(headerIcon(R.drawable.ic_page_next, "Next match  ·  Enter") { findStep(backwards = false) })
+        findRow.addView(headerIcon(R.drawable.ic_close, "Close find") { closeFindBar() })
+        bar.addView(findRow)
+
+        val replaceRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(12), dp(2), dp(8), dp(6))
+        }
+        replaceField = field("Replace with")
+        replaceRow.addView(replaceField)
+        replaceRow.addView(stripButton(ink, "Replace", "Replace the current match, then find the next") {
+            replaceCurrent()
+        })
+        replaceRow.addView(stripButton(ink, "All", "Replace every match — one edit, one Ctrl+Z") {
+            replaceAllMatches()
+        })
+        bar.addView(replaceRow)
+
+        // Live count as the query is typed; Enter (search action) finds the next match.
+        findField.addTextChangedListener(object : android.text.TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) = Unit
+            override fun onTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) = Unit
+            override fun afterTextChanged(s: android.text.Editable?) = updateFindCount()
+        })
+        findField.setOnEditorActionListener { _, _, _ -> findStep(backwards = false); true }
+        replaceField.setOnEditorActionListener { _, _, _ -> replaceCurrent(); true }
+
+        return bar
+    }
+
+    private fun openFindBar() {
+        if (previewing) setPreviewing(false)
+        findBar.visibility = View.VISIBLE
+        // A short single-line selection is almost always the thing being searched for.
+        val text = editor.text
+        if (text != null && editor.selectionEnd > editor.selectionStart) {
+            val sel = text.subSequence(editor.selectionStart, editor.selectionEnd).toString()
+            if (sel.isNotBlank() && !sel.contains('\n') && sel.length <= 64) findField.setText(sel)
+        }
+        findField.requestFocus()
+        findField.setSelection(findField.text?.length ?: 0)
+        updateFindCount()
+    }
+
+    private fun closeFindBar() {
+        findBar.visibility = View.GONE
+        editor.requestFocus()
+    }
+
+    private fun currentMatches(): List<TextSearch.Match> =
+        TextSearch.matches(currentText(), findField.text?.toString().orEmpty())
+
+    /** Move the selection to the next/previous match — wrapping, and scrolled into view. */
+    private fun findStep(backwards: Boolean) {
+        val ms = currentMatches()
+        if (ms.isEmpty()) {
+            updateFindCount()
+            if (findField.text?.isNotEmpty() == true) {
+                Toast.makeText(this, "No matches.", Toast.LENGTH_SHORT).show()
+            }
+            return
+        }
+        // selectionEnd forward / selectionStart backward is what makes repeated steps advance
+        // when the current selection IS a match.
+        val idx = if (backwards) TextSearch.previousFrom(ms, editor.selectionStart.coerceAtLeast(0))
+        else TextSearch.nextFrom(ms, editor.selectionEnd.coerceAtLeast(0))
+        val m = ms[idx]
+        editor.requestFocus()
+        editor.setSelection(m.start, m.end)
+        keepCaretVisible()
+        findCount.text = "${idx + 1} of ${ms.size}"
+    }
+
+    private fun updateFindCount() {
+        val query = findField.text?.toString().orEmpty()
+        findCount.text = when {
+            query.isEmpty() -> ""
+            else -> "${currentMatches().size}"
+        }
+    }
+
+    /** Replace the selection when it is a match (case-insensitive), then step to the next. */
+    private fun replaceCurrent() {
+        if (previewing) return
+        val text = editor.text ?: return
+        val query = findField.text?.toString().orEmpty()
+        if (query.isEmpty()) return
+        val s = editor.selectionStart
+        val e = editor.selectionEnd
+        if (e > s && text.subSequence(s, e).toString().equals(query, ignoreCase = true)) {
+            val replacement = replaceField.text?.toString().orEmpty()
+            text.replace(s, e, replacement)
+            editor.setSelection((s + replacement.length).coerceAtMost(text.length))
+        }
+        findStep(backwards = false)
+    }
+
+    /** Replace every match in one `Editable` edit — one Ctrl+Z brings it all back. */
+    private fun replaceAllMatches() {
+        if (previewing) return
+        val text = editor.text ?: return
+        val query = findField.text?.toString().orEmpty()
+        if (query.isEmpty()) return
+        val result = TextSearch.replaceAll(
+            text.toString(), query, replaceField.text?.toString().orEmpty(), editor.selectionEnd,
+        )
+        if (result.count == 0) {
+            Toast.makeText(this, "No matches.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        text.replace(0, text.length, result.text)
+        editor.setSelection(result.caret.coerceIn(0, text.length))
+        updateFindCount()
+        Toast.makeText(this, "Replaced ${result.count}.", Toast.LENGTH_SHORT).show()
+        persist()
+    }
+
+    // ── Word count ────────────────────────────────────────────────────────────
+
+    /** Words and characters — for the selection when one exists, otherwise the document. */
+    private fun showWordCount() {
+        val text = editor.text ?: return
+        val hasSelection = !previewing && editor.selectionEnd > editor.selectionStart
+        val slice = if (hasSelection) {
+            text.subSequence(editor.selectionStart, editor.selectionEnd).toString()
+        } else {
+            text.toString()
+        }
+        val (words, chars) = TextSearch.counts(slice)
+        val prefix = if (hasSelection) "Selection: " else ""
+        Toast.makeText(
+            this,
+            "$prefix%,d words  ·  %,d characters".format(java.util.Locale.US, words, chars),
+            Toast.LENGTH_LONG,
+        ).show()
     }
 
     private fun stripButton(ink: Int, label: String, hint: String, onClick: () -> Unit): AppCompatButton =
@@ -1052,6 +1303,67 @@ class DocumentEditorActivity : AppCompatActivity() {
         titleText.text = notebookName.ifBlank { "Document" }
     }
 
+    /**
+     * Rename the text document from its title. Format validation happens here (the same rules the
+     * create screen applies); the duplicate check and every write belong to the host, which owns
+     * the index connection ([DocumentTransfer.Host.renameNotebook]).
+     */
+    private fun promptRename() {
+        val host = DocumentTransfer.host
+        if (host == null) {
+            Toast.makeText(this, "The notebook is no longer open.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val ink = ContextCompat.getColor(this, R.color.inkBlack)
+        val input = AppCompatEditText(this).apply {
+            setText(notebookName)
+            setSelection(text?.length ?: 0)
+            isSingleLine = true
+            setTextColor(ink)
+            setBackgroundResource(R.drawable.shape_bordered)
+            setPadding(dp(10), dp(8), dp(10), dp(8))
+        }
+        val container = android.widget.FrameLayout(this).apply {
+            setPadding(dp(20), dp(12), dp(20), dp(4))
+            addView(input)
+        }
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("Rename document")
+            .setView(container)
+            .setPositiveButton("Rename") { _, _ ->
+                val name = input.text?.toString()?.trim().orEmpty()
+                val error = when {
+                    name.isBlank() -> "Name cannot be empty"
+                    name == "." || name == ".." -> "Invalid name"
+                    name.contains(Regex("[^a-zA-Z0-9_\\-. ]")) ->
+                        "Name may only contain letters, numbers, spaces, and _ - ."
+                    else -> null
+                }
+                if (error != null) {
+                    Toast.makeText(this, error, Toast.LENGTH_SHORT).show()
+                    return@setPositiveButton
+                }
+                if (name == notebookName) return@setPositiveButton
+                host.renameNotebook(name) { hostError ->
+                    if (hostError != null) {
+                        Toast.makeText(this, hostError, Toast.LENGTH_SHORT).show()
+                    } else {
+                        notebookName = name
+                        updateTitle()
+                    }
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .create()
+        dialog.window?.setSoftInputMode(
+            android.view.WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE
+        )
+        dialog.show()
+        dialog.window?.setElevation(0f)
+        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
+        input.requestFocus()
+    }
+
     /** The page's place in the notebook, sitting between the two arrows that change it. */
     private fun updatePageLabel() {
         pageText.text = pageLabel
@@ -1098,6 +1410,9 @@ class DocumentEditorActivity : AppCompatActivity() {
         bar.addView(formatIcon(R.drawable.ic_link, "Link  ·  Ctrl+K") { runFormat(MarkdownFormatter::insertLink) })
         bar.addView(formatIcon(R.drawable.ic_photo, "Image  ·  Ctrl+Shift+K") { runFormat(MarkdownFormatter::insertImage) })
         bar.addView(formatIcon(R.drawable.ic_separator_horizontal, "Horizontal rule  ·  Ctrl+Shift+−") { runFormat(MarkdownFormatter::insertRule) })
+        divider()
+        bar.addView(formatIcon(R.drawable.ic_search, "Find & replace  ·  Ctrl+F") { openFindBar() })
+        bar.addView(formatIcon(R.drawable.ic_letter_case, "Word count") { showWordCount() })
         divider()
         // Last on the bar, so on narrow screens it lives in the overflow panel — a check runs on
         // its own; this button is for the occasional full pass and the on/off switch.
@@ -1317,7 +1632,7 @@ class DocumentEditorActivity : AppCompatActivity() {
             return false
         }
         when (event.keyCode) {
-            KeyEvent.KEYCODE_F -> if (shift) { reflowText(); return true }
+            KeyEvent.KEYCODE_F -> if (shift) { reflowText(); return true } else { openFindBar(); return true }
             KeyEvent.KEYCODE_B -> if (!shift) { wrapInline("**"); return true }
             KeyEvent.KEYCODE_I -> if (!shift) { wrapInline("*"); return true }
             KeyEvent.KEYCODE_X -> if (shift) { wrapInline("~~"); return true }

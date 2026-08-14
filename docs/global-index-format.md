@@ -253,6 +253,7 @@ The row is the app's entire knowledge of a document while it is closed.
 | page count | `pageCount` | For the card subtitle; refreshed on close |
 | encrypted | `flags` bit 0 | |
 | exclude from backup | `flags` bit 1 | |
+| text document | `flags` bit 2 | Opens straight into the document editor (its notebook document is the primary surface). Mirrored by `notebook_meta.textDocument` inside the file, so it survives export/import. No migration — a free bit in the existing bitfield |
 | key scope | `keyScope` | `GLOBAL` / `NOTEBOOK`, non-null only when encrypted |
 | last backed up (local) | `lastBackedUpLocal` | epoch ms, per destination |
 | last backed up (cloud) | `lastBackedUpDrive` | epoch ms, per destination |
@@ -1017,6 +1018,7 @@ The index is step 3 in the overall build order in `soil-file-format.md` Part XI.
 |---|---|---|---|
 | document | 0 | 1 | encrypted |
 | document | 1 | 2 | excludeFromBackup |
+| document | 2 | 4 | textDocument — opens straight into the document editor |
 
 ## Tables at a glance
 

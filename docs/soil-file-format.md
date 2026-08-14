@@ -1185,6 +1185,7 @@ CREATE TABLE IF NOT EXISTS notebook_meta
 | `folderPath` | List\<FolderRef\> | Full ancestry, **ordered root → immediate parent** |
 | `exportedAt` | Long? | Stamped at export |
 | `appVersionCode` | Int? | Producer version |
+| `textDocument` | Boolean (default false) | The file is a **text document** — its notebook document is the primary surface, opened straight into the document editor. Importers copy it onto their index row's flag; additive + defaulted, so older readers ignore it |
 
 ```kotlin
 data class FolderRef(val id: String, val name: String, val parentId: String?)

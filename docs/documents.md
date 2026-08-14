@@ -443,6 +443,60 @@ land on a page row, or vice versa.
 
 ---
 
+## Text documents
+
+**A typed document as a library item — still a notebook underneath.** Choosing **Text document**
+on the create screen (the new-notebook screen's type radio, beside its name/template/scope
+choices) makes an ordinary `.soil` whose *primary surface is its notebook document*: it opens
+straight into this editor, every time, from every entry point. One storage format, so encryption,
+backup, `.soil` export/import, recents, Today and folders all behave identically to notebooks.
+
+- **The flag** is `flags` bit 2 on the index row (`FLAG_TEXT_DOCUMENT`,
+  `data/index/IndexObjectColumns.kt` — no migration) mirrored by `notebook_meta.textDocument`
+  inside the file, so an exported text document reopens as one anywhere.
+  `NotebookMetaStore.buildFromIndex` sources it from the index row — required, or the next open's
+  meta refresh would wipe it. `NotebookImporter` copies it back onto the index on import (both
+  fresh-import and replace).
+- **Routing lives in NotebookActivity**: after the DB opens, a flagged notebook runs the
+  lightweight `setupPageIds` (no stroke deserialization), hides the opening overlay, and launches
+  the editor in notebook-document mode. The **canvas load is deferred** until ✓ Done asks for it —
+  and never happens on a close. The page the editor ended on rides back through
+  `EXTRA_INITIAL_PAGE_ID`, so flips made in page-document mode land the canvas on the right page.
+- **✓ Done means "show pages"** (its hint says so) — the canvas, templates and ink are all still
+  there, one tap down. **Close (`ic_close`, notebook-document mode only — page mode's flip cluster
+  needs the width back) seals to the library** without touching the canvas: the editor sets
+  `RESULT_CLOSE_NOTEBOOK` and the host closes; the text is deliberately flushed by
+  `sealNotebook`'s `flushPendingDocument` on the seal's own IO context, never by a racing
+  fire-and-forget save. A close landing while a recreated host is still opening sets
+  `pendingCloseAfterOpen` — the open path drains, seals, and finishes.
+- **The library card** shows the document's opening lines as its cover — `data/TextCover.kt`
+  renders the Markdown through `TextObjectRenderer` onto a fixed 600×800 canvas (constant density,
+  so covers match across devices), regenerated at every seal *after* the document flush, and once
+  at import. `cacheSnapshotIfAllowed` still owns the leak gate: NOTEBOOK-scope stays cover-less
+  with the lock icon. The card's center glyph is `ic_file_text`.
+- **Rename from the title** (text documents only): tap the header title → the host validates
+  against siblings, writes the index, updates its own title, and refreshes `notebook_meta`
+  (`Host.renameNotebook`).
+- **Import**: the library Import button opens a sheet — *Notebook (.soil)* / *Text or Markdown…* —
+  and `.md`/`.markdown`/`.txt` files (plus shared literal text) arrive via open-with/share-to
+  intent filters. A text import always creates a **new** text document in the current folder
+  (name deduped, content capped at 10 MB), written as the notebook document **in the create
+  bootstrap itself** with `srcUpdatedAt = NULL` (authored elsewhere, not merged), encrypted by
+  default like any create, cover rendered immediately, then opened into the editor.
+
+### Find & replace, word count
+
+Two format-bar tools for every document session, not just text documents. **Find & replace**
+(`Ctrl+F`, `ic_search`) is a two-row bar under the format bar — `[find] [n of m] [‹][›][✕]` over
+`[replace] [Replace] [All]` — hidden with the writing chrome in Preview. No highlight spans: the
+current match is the editor's own selection (e-ink renders that honestly), matches recomputed per
+action, case-insensitive and non-overlapping. Replaces go through the `Editable` — Replace All is
+one edit, one Ctrl+Z. **Word count** (`ic_letter_case`) toasts words · characters, for the
+selection when one exists. Both are pure logic in `core/markdown/TextSearch.kt`, covered by
+`TextSearchTest` (wrapping navigation, caret math under replace-all, the aa→a non-loop case).
+
+---
+
 ## Consumers and page lifecycle
 
 **Export prefers the document.** `NotebookTextExporter.writeFile` — the single funnel behind both
