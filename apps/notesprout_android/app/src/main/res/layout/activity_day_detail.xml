@@ -16,7 +16,7 @@
     <LinearLayout
         android:id="@+id/dayToolbar"
         android:layout_width="match_parent"
-        android:layout_height="56dp"
+        android:layout_height="@dimen/toolbar_bar_thickness"
         android:orientation="horizontal"
         android:background="@color/paperWhite"
         android:gravity="center_vertical"
@@ -199,7 +199,7 @@
     <LinearLayout
         android:id="@+id/dayToolsGroup"
         android:layout_width="match_parent"
-        android:layout_height="56dp"
+        android:layout_height="@dimen/toolbar_bar_thickness"
         android:orientation="horizontal"
         android:background="@color/paperWhite"
         android:gravity="center_vertical"
@@ -521,7 +521,7 @@
                 <!-- Pagination row -->
                 <LinearLayout
                     android:layout_width="match_parent"
-                    android:layout_height="56dp"
+                    android:layout_height="@dimen/toolbar_bar_thickness"
                     android:orientation="horizontal"
                     android:gravity="center"
                     android:paddingStart="8dp"
@@ -598,7 +598,7 @@
             <!-- Header: title + Add -->
             <LinearLayout
                 android:layout_width="match_parent"
-                android:layout_height="56dp"
+                android:layout_height="@dimen/toolbar_bar_thickness"
                 android:orientation="horizontal"
                 android:gravity="center_vertical"
                 android:paddingStart="16dp"

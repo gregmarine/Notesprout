@@ -22,7 +22,7 @@ import androidx.core.view.doOnLayout
 import androidx.lifecycle.lifecycleScope
 import com.notesprout.android.core.IndexGuard
 import com.notesprout.android.core.Slog
-import com.notesprout.android.core.isBooxDevice
+import com.notesprout.android.notebook.createNotebookView
 import com.notesprout.android.data.BoundingBox
 import com.notesprout.android.data.HeadingObject
 import com.notesprout.android.data.HeadingStroke
@@ -55,10 +55,8 @@ import com.notesprout.android.notebook.ShapeRecognizer
 import com.notesprout.android.notebook.STICKY_NOTE_ICON_SIZE_DP
 import com.notesprout.android.databinding.ActivityScratchpadBinding
 import com.notesprout.android.notebook.ActiveTool
-import com.notesprout.android.notebook.GenericNotebookView
 import com.notesprout.android.notebook.LassoGeometry
 import com.notesprout.android.notebook.NotebookView
-import com.notesprout.android.notebook.OnyxNotebookView
 import com.notesprout.android.notebook.ScratchpadPreferences
 import com.notesprout.android.notebook.ToolPreferencesManager
 import com.notesprout.android.notebook.PenColorPreferences
@@ -77,6 +75,7 @@ import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.abs
 import com.notesprout.android.notebook.PenColorPanelController
 import com.notesprout.android.notebook.CustomColorDialog
+import com.notesprout.android.notebook.ToolbarOverflowManager
 import com.notesprout.android.core.TopGuard
 
 class ScratchpadActivity : AppCompatActivity() {
@@ -146,6 +145,15 @@ class ScratchpadActivity : AppCompatActivity() {
     /** Pen-colour swatch panel docked to [btnScratchPen]. See [togglePenColorPanel]. */
     private lateinit var penColorPanel: PenColorPanelController
     private lateinit var repository: ScratchpadRepository
+
+    /** Overflow for the tool bar — at the tablet button size the full row no longer fits a narrow
+     *  window (e.g. the Nomad's 75% window), so surplus tools spill into a menu above the bar. */
+    private lateinit var scratchOverflowManager: ToolbarOverflowManager
+
+    /** Set when a DOWN lands inside the open overflow menu — the close is deferred to UP so the
+     *  tapped button receives the UP and fires its click before the menu hides (mirrors
+     *  NotebookActivity's overflowCloseOnUp). */
+    private var scratchOverflowCloseOnUp = false
 
     private var pages: List<ScratchpadEntity> = emptyList()
     private var currentPageIndex: Int = 0
@@ -245,8 +253,39 @@ class ScratchpadActivity : AppCompatActivity() {
         repository = ScratchpadRepository(NotesproutIndex.db(), NotesproutIndex.scratchpadDao())
 
         fromNotebookId = intent.getStringExtra(EXTRA_FROM_NOTEBOOK_ID)
-        binding.btnSendToNotebook.visibility =
-            if (fromNotebookId != null) View.VISIBLE else View.GONE
+
+        // Send-to-Notebook is trailing-pinned — right-aligned, never spilled into the overflow
+        // menu — when launched from a notebook, and removed from the bar entirely otherwise
+        // (a GONE child would still be counted by the manager's fixed-size math).
+        scratchOverflowManager = ToolbarOverflowManager(
+            toolbar         = binding.scratchpadToolbar,
+            overflowMenu    = binding.scratchOverflowMenu,
+            dividerOverflow = binding.dividerScratchOverflow,
+            btnOverflow     = binding.btnScratchOverflow,
+        )
+        if (fromNotebookId != null) {
+            binding.btnSendToNotebook.visibility = View.VISIBLE
+            scratchOverflowManager.setTrailingPinned(binding.btnSendToNotebook)
+        } else {
+            binding.scratchpadToolbar.removeView(binding.btnSendToNotebook)
+        }
+        binding.btnScratchOverflow.setOnClickListener {
+            drawingView.releaseRender()
+            if (scratchOverflowManager.isOverflowMenuOpen()) scratchOverflowManager.closeOverflowMenu()
+            else scratchOverflowManager.openOverflowMenu()
+        }
+        // First fit pass once the bar has a width; recalc (deferred out of the layout traversal —
+        // recalc reparents views) whenever the window size changes.
+        binding.scratchpadToolbar.doOnLayout {
+            binding.scratchpadToolbar.post { scratchOverflowManager.recalc() }
+        }
+        binding.scratchpadToolbar.addOnLayoutChangeListener { _, l, t, r, b, ol, ot, orr, ob ->
+            val sizeChanged = (r - l) != (orr - ol) || (b - t) != (ob - ot)
+            if (sizeChanged) {
+                scratchOverflowManager.closeOverflowMenu()
+                binding.scratchpadToolbar.post { scratchOverflowManager.recalc() }
+            }
+        }
 
         // Record the scratch pad on the surface stack, so a cold launch reopens it (see SurfaceStack).
         // No payload: the page comes back from ScratchpadPreferences.
@@ -271,7 +310,7 @@ class ScratchpadActivity : AppCompatActivity() {
         binding.btnScratchpadClose.setOnClickListener { finish() }
 
         // ── Drawing view ──────────────────────────────────────────────────────
-        drawingView = if (isBooxDevice()) OnyxNotebookView(this) else GenericNotebookView(this)
+        drawingView = createNotebookView(this)
         binding.drawingContainer.addView(
             drawingView.asView(),
             FrameLayout.LayoutParams(
@@ -279,8 +318,11 @@ class ScratchpadActivity : AppCompatActivity() {
                 FrameLayout.LayoutParams.MATCH_PARENT,
             ),
         )
-        // Bring the floating toolbar above the drawing view.
+        // Bring the floating toolbar and the overflow menu above the drawing view — it is added to
+        // their shared container at runtime, which stacks it over the XML-declared children; without
+        // this the menu opens invisibly behind the canvas (same trap as the pen colour panel).
         binding.floatingSelectionToolbar.bringToFront()
+        binding.scratchOverflowMenu.bringToFront()
 
         wireDrawingCallbacks()
         wireToolButtons()
@@ -1676,6 +1718,41 @@ class ScratchpadActivity : AppCompatActivity() {
     // ── Touch dispatch ────────────────────────────────────────────────────────
 
     override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+        // Overflow: deferred close after a button UP — the tapped button must receive the UP and
+        // fire its click before the menu is hidden (mirrors NotebookActivity).
+        if (scratchOverflowCloseOnUp
+            && (event.actionMasked == MotionEvent.ACTION_UP
+                || event.actionMasked == MotionEvent.ACTION_CANCEL)) {
+            scratchOverflowCloseOnUp = false
+            val result = super.dispatchTouchEvent(event) // button gets UP → click fires (async)
+            scratchOverflowManager.closeOverflowMenu()
+            return result
+        }
+
+        // Overflow menu dismiss rules (both finger and stylus).
+        if (event.actionMasked == MotionEvent.ACTION_DOWN
+            && ::scratchOverflowManager.isInitialized
+            && scratchOverflowManager.isOverflowMenuOpen()) {
+            when {
+                isTouchInView(event, binding.btnScratchOverflow) -> {
+                    // btnScratchOverflow's own click listener handles the toggle; don't intervene.
+                }
+                isTouchInView(event, binding.scratchOverflowMenu) -> {
+                    // Tapped an overflow button — defer close until ACTION_UP (see above).
+                    scratchOverflowCloseOnUp = true
+                }
+                isTouchInView(event, binding.scratchpadToolbar) -> {
+                    scratchOverflowManager.closeOverflowMenu()
+                }
+                else -> {
+                    scratchOverflowManager.closeOverflowMenu()
+                    // Consume finger taps so the dismissal doesn't also start a canvas interaction;
+                    // let stylus events through so a stroke can start immediately.
+                    if (event.getToolType(0) == MotionEvent.TOOL_TYPE_FINGER) return true
+                }
+            }
+        }
+
         if (event.getToolType(0) == MotionEvent.TOOL_TYPE_FINGER) {
             // Pen-activity gate: while the stylus owns the surface (and briefly after it lifts) a
             // finger contact is a palm, not a gesture — see [NotebookView.isPenActive]. Drop it
@@ -1693,10 +1770,13 @@ class ScratchpadActivity : AppCompatActivity() {
             val inToolbar  = isTouchInView(event, binding.scratchpadToolbar)
             val inFloating = binding.floatingSelectionToolbar.visibility == View.VISIBLE &&
                              isTouchInView(event, binding.floatingSelectionToolbar)
+            val inOverflowMenu = ::scratchOverflowManager.isInitialized &&
+                             scratchOverflowManager.isOverflowMenuOpen() &&
+                             isTouchInView(event, binding.scratchOverflowMenu)
 
-            // Release EPD overlay when touching chrome, toolbar, or floating toolbar.
+            // Release EPD overlay when touching chrome, toolbar, overflow menu, or floating toolbar.
             if (event.actionMasked == MotionEvent.ACTION_DOWN) {
-                if (inChrome || inToolbar || inFloating) drawingView.releaseRender()
+                if (inChrome || inToolbar || inFloating || inOverflowMenu) drawingView.releaseRender()
             }
 
             // Sticky note tap: finger down→up with minimal movement in the drawing area.
@@ -1708,10 +1788,10 @@ class ScratchpadActivity : AppCompatActivity() {
             // a swatch drawn over one would raise its tooltip and never register a click.
             val inPenPanel = ::penColorPanel.isInitialized &&
                     penColorPanel.containsScreenPoint(event.rawX.toInt(), event.rawY.toInt())
-            if (!inPenPanel && handleStickyNoteTapGesture(event)) return true
+            if (!inPenPanel && !inOverflowMenu && handleStickyNoteTapGesture(event)) return true
 
             // Swipe outside chrome/toolbar in any tool mode — lasso is stylus-only, finger navigates.
-            if (!inChrome && !inToolbar && !inPenPanel) {
+            if (!inChrome && !inToolbar && !inPenPanel && !inOverflowMenu) {
                 if (!inFloating) handleMultiFingerDoubleTap(event)
                 handlePageSwipe(event)
             }

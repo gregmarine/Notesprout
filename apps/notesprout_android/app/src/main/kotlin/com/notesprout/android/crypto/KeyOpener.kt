@@ -37,10 +37,7 @@ object KeyOpener {
         scope: KeyScope?,
         passphrase: String,
     ): SupportSQLiteOpenHelper.Factory {
-        val cached = when (scope) {
-            KeyScope.GLOBAL -> KeyMaterial.peekOrLoad(context, fileId)
-            else -> KeyMaterial.peek(fileId)   // NOTEBOOK: RAM only, never persisted
-        }
+        val cached = cachedRawKey(context, fileId, scope)
         if (cached != null) {
             Slog.d(TAG) { "raw-key open: $fileId" }
             // The cached key is derived against a specific file salt. If the file behind this id was
@@ -61,6 +58,17 @@ object KeyOpener {
         warm(context, fileId, file, scope, passphrase)
         Slog.d(TAG) { "passphrase open (cold; warming raw key): $fileId" }
         return SoilCrypto.roomFactory(passphrase)
+    }
+
+    /**
+     * The already-derived raw key for [fileId], or null — **never derives**. RAM for every scope;
+     * the Keystore too for GLOBAL. For raw (non-Room) opens that want the fast path: pair with
+     * [SoilCrypto.openRawEncryptedRawKey] and fall back to the passphrase open on failure (a cached
+     * key is stale when the file behind the id was swapped by restore/re-import).
+     */
+    fun cachedRawKey(context: Context, fileId: String, scope: KeyScope?): ByteArray? = when (scope) {
+        KeyScope.GLOBAL -> KeyMaterial.peekOrLoad(context, fileId)
+        else -> KeyMaterial.peek(fileId)   // NOTEBOOK: RAM only, never persisted
     }
 
     /**

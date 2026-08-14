@@ -6,12 +6,14 @@ page overwrites it again unless asked. It is the step before export: where a han
 a finished piece of writing.
 
 One document per page, stored inside the `.soil`, so it is encrypted at rest, travels on
-export/import, and rides along with backup for free.
+export/import, and rides along with backup for free. One more per **notebook** — the [notebook
+document](#the-notebook-document), the whole notebook's pages merged into a single final draft —
+stored the same way.
 
 Surface: `DocumentEditorActivity` — full-screen Markdown editor, `Write` / `Preview`, format bar and
 matching Ctrl shortcuts (`MarkdownFormatter`), opened from the notebook toolbar's **Document** button.
-Page flips (`‹ ›`) and text size (`A`) sit with the page label in the header; **Reflow** and **Bring in**
-sit in the source strip below it.
+Page flips (`‹ ›`), the notebook-document scope toggle, and text size (`A`) sit with the page label
+in the header; **Reflow** and **Bring in** sit in the source strip below it.
 
 Chrome layout, top to bottom: header (notebook name · `‹ 4 / 12 ›` · text-size · Write / Preview /
 Done) — rule — source strip — **rule** — format bar — overflow panel — rule — the text.
@@ -78,6 +80,10 @@ The button lives in the header, not in the writing chrome, so it is still reacha
 size matters at least as much as writing size. Below 400dp `smallestScreenWidthDp` the title drops the
 word "Document" and keeps the page label, which is the part that says where you are.
 
+**Proofread** — the editor spell-checks and grammar-checks its prose (dashed / dotted inkBlack
+underlines, tap for suggestions, durable user dictionary, format-bar tail button; debounced, never
+in Preview). Its own subsystem with its own doc: [`proofread.md`](proofread.md).
+
 ### Lists continue themselves
 
 Enter inside a list item writes the next marker, so a series keeps going by itself: the same bullet
@@ -139,6 +145,18 @@ be changed, and neither edit it makes is a lone newline — so it cannot re-ente
 physical keyboard the editor refuses an input connection at all, so the inset stays 0 and the surface
 keeps the full screen. See [`design-system.md`](design-system.md) for why the manifest's `adjustResize`
 is not sufficient on its own.
+
+> **Ratta exception (2026-08-11):** on Supernote, hardware keys are routed through the IME and the
+> IME translates them **only while it is shown** — with it hidden the firmware drops the keys before
+> the app sees anything at all (measured on the Nomad: soft keyboard hidden, not one key event
+> reached `dispatchKeyEvent`; shown, typing worked). Keeping the input connection alone was tried
+> first and was *not* enough. So on `isRattaDevice()` an attached keyboard is not a reason to hide
+> the soft keyboard: the editor behaves exactly as it does for soft typing, and Supernote itself
+> keeps the panel off-screen while a hardware keyboard is attached, so no room is lost. The
+> long-press-Write override still forces it away — on Ratta that trades typing for reading room.
+> Ratta's IME consumes the key-downs it translates into text (those arrive as key-ups only), but it
+> passes Ctrl chords through untouched — **the Ctrl shortcuts work on Supernote** (user-verified,
+> 2026-08-11). The one cost is that the BOOX refuse-the-connection defense never runs on Ratta.
 
 ---
 
@@ -217,7 +235,8 @@ There is no Cancel: writing on paper is not cancellable. Text is written on a 2 
 | Failure | What closes it |
 |---|---|
 | Host destroyed under the editor (low-memory kill), taking the DB with it | The editor republishes `DocumentTransfer.live` on every save; `sealNotebook` calls `flushPendingDocument(db)` **before** the connection closes |
-| Process death | `NotebookActivity.onSaveInstanceState` keeps `documentPageId` + watermark (next to `pendingStickyNote`); the recreated host reinstalls itself as host, and `documentLauncher` flushes `live` when the editor closes |
+| Process death | `NotebookActivity.onSaveInstanceState` keeps `documentPageId` + watermark (next to `pendingStickyNote`); the recreated host reinstalls itself as host, and `documentLauncher` flushes `live` when the editor closes. The recreated host's result callback fires **before** its async DB open finishes, so the flush is staged through `pendingDocumentFlush` and written the moment the connection is built |
+| Host restarted by a config change | The notebook's manifest declares `keyboard` (as the editor already did): attaching a Bluetooth keyboard must not destroy the host behind the editor, which would clear `DocumentTransfer.host` ("The notebook is no longer open." on every flip) and seal the `.soil` until the editor closes |
 | Editor recreation | The editor's views are built in code with no ids, so `EditText` state is **not** restored for us — it saves its buffer explicitly and prefers it over the hand-off |
 
 `savedText` in the editor means only "this exact text has been handed to the host". Whatever the editor
@@ -317,8 +336,12 @@ The order matters and is load-bearing:
    `DocumentTransfer.live`**, so a teardown in the gap cannot write the outgoing page's text onto the
    incoming one.
 3. The new page's `Session` is loaded through the same `loadDocumentSession` the open path uses — so a
-   flip seeds an undrafted page exactly like opening it does, progress shown in the strip rather than a
-   dialog (the host is stopped; see below).
+   flip seeds an undrafted page exactly like opening it does. Progress is the **editor's own**
+   "Reading this page…" popup — the visual twin of the host's open-time banner, which the host cannot
+   show here (it is stopped; see below) — plus the same line in the strip. The popup appears only if
+   the flip is still in flight after 350 ms (`READING_POPUP_DELAY_MS`), so a drafted page flips
+   instantly with no dialog flash on e-ink; a *Bring in* shows it immediately, since that always reads
+   the page in full.
 4. `applySession` stores the new page's seed immediately, keeping the in-memory-only window as short on a
    flip as it is on open.
 
@@ -334,8 +357,143 @@ arriving at another page is a new document, not an edit to this one, and it must
 stack. Undoing "the flip" would otherwise drop the page you left into the page you arrived at, and the
 next autosave would store it there.
 
+**The flip gap is a no-save zone.** Between step 2 and the session's arrival, the host is keyed to
+the incoming page while the editor's buffer still shows the outgoing one — a save landing then would
+write one page's text onto another (the trigger set is real: an autosave from typing during a slow
+seed, the editor pausing, a Preview tap). Both sides guard it: the editor's `persist` is a no-op
+while a flip is in flight (`flipInFlight` — the outgoing page was persisted as the flip began), and
+the host's `saveDocument` drops writes while `documentPageLoading` is set. If the flip never lands
+(the host torn down mid-load), `requestPage` still answers — `onResult(null)` from a `finally` —
+and reverts `documentPageId`/index to the page the editor is still showing, so the editor is never
+stuck behind its modal popup and later saves target the right page.
+
 At the first or last page the arrows stay visible and say "First page." / "Last page." — a disabled
 button is visually silent on e-ink (see [`design-system.md`](design-system.md)).
+
+---
+
+## The notebook document
+
+**The pages merge into one final draft.** Some notebooks are one piece of writing — a blog post, a
+Bible study — and once the per-page documents are cleaned up, the last step is a single document for
+the whole notebook: merged once, edited as its own text, exported whole. It is the page-document
+model applied one level up, deliberately: hand-owned after the seed, re-merged only by asking,
+staleness reported the same way.
+
+**Storage** — an ordinary `document` row whose `parentId` is the **notebook root object's** id
+(`DocumentRepository.notebookDocParentId`; `MainActivity.NIL_UUID` for legacy files with no root
+row, unambiguous because pages are not `type = 'document'`). No schema change and no `.soil`
+version bump: every sweep, copy, and export walk is keyed on page/layer ids, so none of them can
+see it (audited: soft-delete cascades, seal-time hard-delete, the orphan sweep, the compactor,
+`PageCopier`, the export page walk). Cross-notebook page copy therefore does **not** carry it —
+correct, it belongs to the notebook. Blank-means-absent holds unchanged.
+
+**The merge** is `NotebookTextExporter.assembleMarkdown` — the exact loop text export runs: per
+page the document when non-blank, recognized handwriting otherwise, pages joined by a **blank
+line** (continuous prose; no separator to delete by hand), empty pages dropped. The loop suspends
+per page, so cancelling the coroutine stops it between pages. The watermark is read *before* the
+merge and is notebook-wide.
+
+**Staleness is notebook-wide.** `getNotebookMaxContentUpdatedAt(rootId)` is the content whitelist
+`MAX(updatedAt)` over the whole file **plus every page-parented `document` row** — so new ink *and*
+an edited page document both read as "Pages have changed since this merge" — while the notebook
+document itself is excluded and never invalidates itself. Stamped into `srcUpdatedAt` only at
+merge time, same discipline as pages.
+
+**In the editor** the header's scope toggle (`ic_notebook` ↔ `ic_file_text`) switches between this
+page's document and the notebook document. It is a page flip in every way that matters: text stored
+first, the host switches targets (`documentNotebookMode`), the gap is a no-save zone under the same
+guards, and toggling back is `requestPage(0)` onto the retained page. In notebook mode the
+`‹ label ›` cluster hides (no neighbouring page — and it hands back the width the toggle took),
+the strip reads "Merged from this notebook's pages" / "Pages have changed since this merge", and
+**Bring in** becomes **Merge** — same Replace / Append sheet, Append joined under the `---` rule by
+`DocumentDraft.append`. `Ctrl+PgUp/PgDn` are no-ops. Caret memory uses the `"nb:$notebookId"` key,
+which no page UUID can collide with.
+
+**First toggle auto-merges.** An undrafted notebook document is seeded by merging every page —
+toggling in is the act of drafting, exactly as opening a written page's document is. Because that
+run may recognize every undocumented page, the editor's "Reading the pages…" popup carries a
+**Cancel** button (the one reading popup that does): `Host.cancelDocumentRequest` cancels the
+host's merge job, the request answers null from its `finally`, and the editor stays on the page it
+was on with nothing written.
+
+**From the Page Index**, the Export action button opens a sheet — *Export…* / *Merge into notebook
+document* (a sheet rather than a seventh button: the action bar is at the narrowest device's width
+budget, and Copy/Move set the precedent). The selection travels back through the result funnel
+(`EXTRA_MERGE_DOC_PAGE_IDS`, display order) because Page Index cannot write the `.soil`; the host
+runs the merge on its live connection with a cancellable progress dialog ("Reading page 3 of
+12…"), and lands in the editor on the result. When the document already holds text, the Replace /
+Append sheet comes **first** — before recognition, same rule as Bring in — and it is also the
+guard on the durable overwrite, since this path does not pass through the editor's undo stack.
+
+**Export prefers it — visibly.** When the scope is All pages, the format is Markdown/Text, and the
+notebook holds a non-blank notebook document (`hasNotebookDocument` in `data/PageList.kt`, the same
+cold-file peek as the page list), the export screen shows a **Source** section: *Notebook document
+(merged final draft)* — the default — vs *Page documents*. GONE otherwise, and `buildSpec` falls
+back to `PAGE_DOCUMENTS` whenever the choice is off-screen, so a page selection or single page
+always exports per-page. Presets do not capture it, for the same reason they don't capture scope.
+In the engine it is an early-return at the top of `writeFile`: non-blank notebook document ⇒ that
+is the export (through `toPlainText` for `.txt`); blank/absent falls through to the page walk.
+
+**Process death** carries a `notebook` flag everywhere the page id already travelled:
+`STATE_DOCUMENT_NOTEBOOK` next to the page-id instance state, `PendingDocumentFlush.notebook` for a
+flush that lands before the recreated host's DB open, and mode-aware routing in `saveDocument`,
+`flushPendingDocument` and the launcher flush — so text typed into the notebook document can never
+land on a page row, or vice versa.
+
+---
+
+## Text documents
+
+**A typed document as a library item — still a notebook underneath.** Choosing **Text document**
+on the create screen (the new-notebook screen's type radio, beside its name/template/scope
+choices) makes an ordinary `.soil` whose *primary surface is its notebook document*: it opens
+straight into this editor, every time, from every entry point. One storage format, so encryption,
+backup, `.soil` export/import, recents, Today and folders all behave identically to notebooks.
+
+- **The flag** is `flags` bit 2 on the index row (`FLAG_TEXT_DOCUMENT`,
+  `data/index/IndexObjectColumns.kt` — no migration) mirrored by `notebook_meta.textDocument`
+  inside the file, so an exported text document reopens as one anywhere.
+  `NotebookMetaStore.buildFromIndex` sources it from the index row — required, or the next open's
+  meta refresh would wipe it. `NotebookImporter` copies it back onto the index on import (both
+  fresh-import and replace).
+- **Routing lives in NotebookActivity**: after the DB opens, a flagged notebook runs the
+  lightweight `setupPageIds` (no stroke deserialization), hides the opening overlay, and launches
+  the editor in notebook-document mode. The **canvas load is deferred** until ✓ Done asks for it —
+  and never happens on a close. The page the editor ended on rides back through
+  `EXTRA_INITIAL_PAGE_ID`, so flips made in page-document mode land the canvas on the right page.
+- **✓ Done means "show pages"** (its hint says so) — the canvas, templates and ink are all still
+  there, one tap down. **Close (`ic_close`, notebook-document mode only — page mode's flip cluster
+  needs the width back) seals to the library** without touching the canvas: the editor sets
+  `RESULT_CLOSE_NOTEBOOK` and the host closes; the text is deliberately flushed by
+  `sealNotebook`'s `flushPendingDocument` on the seal's own IO context, never by a racing
+  fire-and-forget save. A close landing while a recreated host is still opening sets
+  `pendingCloseAfterOpen` — the open path drains, seals, and finishes.
+- **The library card** shows the document's opening lines as its cover — `data/TextCover.kt`
+  renders the Markdown through `TextObjectRenderer` onto a fixed 600×800 canvas (constant density,
+  so covers match across devices), regenerated at every seal *after* the document flush, and once
+  at import. `cacheSnapshotIfAllowed` still owns the leak gate: NOTEBOOK-scope stays cover-less
+  with the lock icon. The card's center glyph is `ic_file_text`.
+- **Rename from the title** (text documents only): tap the header title → the host validates
+  against siblings, writes the index, updates its own title, and refreshes `notebook_meta`
+  (`Host.renameNotebook`).
+- **Import**: the library Import button opens a sheet — *Notebook (.soil)* / *Text or Markdown…* —
+  and `.md`/`.markdown`/`.txt` files (plus shared literal text) arrive via open-with/share-to
+  intent filters. A text import always creates a **new** text document in the current folder
+  (name deduped, content capped at 10 MB), written as the notebook document **in the create
+  bootstrap itself** with `srcUpdatedAt = NULL` (authored elsewhere, not merged), encrypted by
+  default like any create, cover rendered immediately, then opened into the editor.
+
+### Find & replace, word count
+
+Two format-bar tools for every document session, not just text documents. **Find & replace**
+(`Ctrl+F`, `ic_search`) is a two-row bar under the format bar — `[find] [n of m] [‹][›][✕]` over
+`[replace] [Replace] [All]` — hidden with the writing chrome in Preview. No highlight spans: the
+current match is the editor's own selection (e-ink renders that honestly), matches recomputed per
+action, case-insensitive and non-overlapping. Replaces go through the `Editable` — Replace All is
+one edit, one Ctrl+Z. **Word count** (`ic_letter_case`) toasts words · characters, for the
+selection when one exists. Both are pure logic in `core/markdown/TextSearch.kt`, covered by
+`TextSearchTest` (wrapping navigation, caret math under replace-all, the aa→a non-loop case).
 
 ---
 
@@ -345,7 +503,9 @@ button is visually silent on e-ink (see [`design-system.md`](design-system.md)).
 `export()` and `exportFromPath()`, so `ExportActivity`/`ExportEngine`, MainActivity and PageIndexActivity
 all inherit it — uses the page's document when non-blank and falls back to recognized text otherwise.
 Pages with a document skip recognition entirely, so export gets faster as documents accumulate.
-`Format.PLAIN` strips Markdown after assembly, so documents get that for free.
+`Format.PLAIN` strips Markdown per page, so documents get that for free. One level up, an all-pages
+text export prefers the **notebook document** when one exists — the export screen's Source row (see
+[The notebook document](#the-notebook-document)).
 
 **Copy carries the document by name.** `PageCopier` deep-copies the *layer* subtree, so a
 page-parented row is invisible to it — harmless for a cache, data loss for a document. All three copy
@@ -369,8 +529,6 @@ Encryption, full-notebook export/import, and backup need no changes at all — t
 
 ## Not built
 
-- **Notebook-level or multi-page documents.** Per-page storage composes into one later (export already
-  concatenates pages) with no storage change.
 - **Documents on Scratch Pad / Calendar day pages.** Those pages live in the global index's
   `scratchpad` / `calendar` tables, which would each need `srcUpdatedAt` added.
 - **Sticky-note text in the seed.** `PageTextRepository.loadPageContent` reads content nested inside

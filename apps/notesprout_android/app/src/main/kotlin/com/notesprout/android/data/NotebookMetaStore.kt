@@ -52,6 +52,9 @@ object NotebookMetaStore {
                 cover          = cover,
                 folderPath     = folderPath,
                 appVersionCode = BuildConfig.VERSION_CODE,
+                // Sourced from the index row — buildFromIndex reconstructs the whole meta, so
+                // omitting this here would wipe the flag from notebook_meta on the next open.
+                textDocument   = notebookObj.textDocument,
             )
         }
 

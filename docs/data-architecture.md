@@ -55,7 +55,7 @@ CREATE INDEX index_objects_parentId_type_deletedAt
 `sortOrder` = position), plus the `CLIPBOARD` and `BACKUP_CONFIG` singleton rows (payload stays JSON
 in `data`, by design). Sentinel ids live in `ListIds.kt`.
 
-### Auxiliary tables (same `notesprout.db`, Room `version = 10`)
+### Auxiliary tables (same `notesprout.db`, Room `version = 11`)
 
 Beyond `objects`, the global index DB holds several auxiliary tables. **The index itself is
 SQLCipher-encrypted at rest** under the global passphrase (encrypt-everything-by-default) — see
@@ -79,6 +79,11 @@ serializer works unchanged.
   (`type` + `parentId`) — and the main-list queries return the first two and never the third.
   `MIGRATION_9_10` adds the look-ahead reminder columns (`remindAmount`/`remindUnit`), which gate
   whether a future-dated task appears in the list at all. See [`docs/tasks.md`](tasks.md).
+- **`user_dictionary`** — added in `MIGRATION_10_11`; the proofread user dictionary ("Add to
+  dictionary" in the document editor's spell popup). Two columns: the word (primary key, stored in
+  the spell engine's normal form — lowercase, `’` folded to `'`) and `addedAt`. Hard DELETE on
+  remove, `REPLACE` on insert — with the word as the key there is no identity for a tombstone to
+  preserve.
 
 `MIGRATION_5_6` / `MIGRATION_6_7` / `MIGRATION_7_8` widen existing tables rather than adding new ones:
 `scratchpad` + `calendar` gain the same columnar columns + `blob` as the `.soil` table; `objects`
@@ -86,7 +91,8 @@ gains the typed payload columns + `blob`, then `refId`/`sortOrder` for `list_ite
 additive, all rewrite zero rows.
 
 `NotesproutDatabase` (`@Database entities = [ObjectEntity, ScratchpadEntity, CalendarEntity,
-NotebookActivityEntity, EventEntity]`, `version = 8`) registers all migrations in `NotesproutIndex`.
+NotebookActivityEntity, EventEntity, TaskEntity, UserDictionaryEntity]`, `version = 11`) registers
+all migrations in `NotesproutIndex`.
 
 ### Key Classes
 

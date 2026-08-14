@@ -189,6 +189,11 @@ Nothing in the schema enforces that bound; readers simply don't need to go deepe
 A page also owns a `page_text` row (`parentId = pageId`) holding cached recognized text — an example
 of adding an entirely new object type with zero migration.
 
+A page may own a `document` row (`parentId = pageId`), and the **notebook** may own one too
+(`parentId` = the notebook meta row's id) — the *notebook document*, a single merged draft of the
+whole file's text. Same type, same columns, distinguished purely by parent. See
+[`document`](#document--the-pages-authored-text).
+
 ## The table
 
 ```sql
@@ -339,6 +344,14 @@ the file on export.
 
 Pages are **fixed screen-size**, never infinite scroll — a core philosophy constraint, not a
 technical one. Page order is the `"order"` column.
+
+**Cross-device render contract:** page content lives in absolute page coordinates anchored at the
+top-left, and the page's `width`×`height` is the coordinate space of the device that created it. A
+renderer must draw the applied template stretched into the **page rect** `{0, 0, w, h}` — never the
+display's rect — so ink and template stay aligned when the file is opened on a different-size screen
+(e.g. a backup restored onto another device). The display shows the page 1:1 from its top-left;
+anything beyond the page rect is off-page white. New pages take the current device's screen size, so
+one document may legitimately hold mixed page sizes — each page is self-consistent under this rule.
 
 ---
 
@@ -585,6 +598,16 @@ a one-line ordering fix and an invisible bug: the export just quietly contains y
 ## `document` — the page's authored text
 
 `parentId` = page id, one per page. Markdown in `text`; no JSON anywhere.
+
+The same type also carries the **notebook document**: at most one row whose `parentId` is the
+*notebook meta row's* id (falling back to the NIL UUID `00000000-…` for a legacy file with no meta
+row — the same fallback pages use, unambiguous because pages are not `type = 'document'`). It is
+the whole file's merged final draft, seeded by concatenating the per-page text (documents first,
+recognized text as fallback, blank line between pages) and hand-owned from then on, exactly like a
+page document one level up. Its `srcUpdatedAt` is the **file-wide** `max(updatedAt)` over content
+rows *plus page-parented document rows* (never itself), so "pages have changed since this merge"
+covers both new ink and edited page documents. No schema change was needed — the row is invisible
+to every page/layer-keyed sweep by construction, and it travels inside the file for free.
 
 | Field | Column | Notes |
 |---|---|---|
@@ -1162,6 +1185,7 @@ CREATE TABLE IF NOT EXISTS notebook_meta
 | `folderPath` | List\<FolderRef\> | Full ancestry, **ordered root → immediate parent** |
 | `exportedAt` | Long? | Stamped at export |
 | `appVersionCode` | Int? | Producer version |
+| `textDocument` | Boolean (default false) | The file is a **text document** — its notebook document is the primary surface, opened straight into the document editor. Importers copy it onto their index row's flag; additive + defaulted, so older readers ignore it |
 
 ```kotlin
 data class FolderRef(val id: String, val name: String, val parentId: String?)

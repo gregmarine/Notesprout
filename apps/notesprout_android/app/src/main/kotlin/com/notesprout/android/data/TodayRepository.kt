@@ -94,32 +94,37 @@ class TodayRepository(
      */
     suspend fun notebooks(context: Context, today: LocalDate): List<TodayGroup<TodayNotebook>> =
         withContext(Dispatchers.IO) {
-            val todayRows = dayHistory.notebooksForDay(today).map {
+            val todayResolved = dayHistory.notebooksForDay(today)
+            val seen = todayResolved.map { it.notebookId }.toSet()
+            val recentResolved = RecentsManager.resolve(context, exclude = seen, limit = RECENT_LIMIT)
+
+            // One batched scalar read answers "locked?" for every row on screen — never coverFor,
+            // whose full-row fetch drags each cover blob out of the index for a boolean.
+            val locks =
+                dayHistory.locksFor(seen + recentResolved.map { it.notebookId })
+
+            val todayRows = todayResolved.map {
                 TodayNotebook(
                     id = it.notebookId,
                     name = it.notebookName,
                     folderPath = it.folderPath,
                     timestamp = it.timestamp,
                     activity = it.activityLabel,
-                    locked = dayHistory.coverFor(it.notebookId).locked,
+                    locked = locks[it.notebookId] == true,
                 )
             }
-            val seen = todayRows.map { it.id }.toSet()
-            val recentRows = RecentsManager.resolve(context)
-                .filter { it.notebookId !in seen }
-                .take(RECENT_LIMIT)
-                .map {
-                    TodayNotebook(
-                        id = it.notebookId,
-                        name = it.notebookName,
-                        folderPath = it.folderPath,
-                        timestamp = it.timestamp,
-                        // Null is what marks a row as *not* today's — the renderer shows a relative
-                        // day where a Today row shows what happened to it.
-                        activity = null,
-                        locked = dayHistory.coverFor(it.notebookId).locked,
-                    )
-                }
+            val recentRows = recentResolved.map {
+                TodayNotebook(
+                    id = it.notebookId,
+                    name = it.notebookName,
+                    folderPath = it.folderPath,
+                    timestamp = it.timestamp,
+                    // Null is what marks a row as *not* today's — the renderer shows a relative
+                    // day where a Today row shows what happened to it.
+                    activity = null,
+                    locked = locks[it.notebookId] == true,
+                )
+            }
 
             listOfNotNull(
                 todayRows.takeIf { it.isNotEmpty() }?.let { TodayGroup("Today", it) },

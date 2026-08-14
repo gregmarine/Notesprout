@@ -7,7 +7,7 @@
 
 - Icons: Tabler Icons, stroke-based, `@color/inkBlack`, 24dp VectorDrawables in `res/drawable/ic_*.xml`. New icons must come from Tabler or match the Tabler stroke style — no filled/solid icon sets.
 - `bg_toolbar_button` StateListDrawable: default = white fill, no border; selected/activated/pressed = white fill + 1.5dp black border
-- `Widget.Notesprout.ToolbarButton` style: 44dp, `bg_toolbar_button`, 10dp padding; overridden to 36dp/7dp in `res/values-sw360dp/` for Palma2 Pro
+- `Widget.Notesprout.ToolbarButton` style: sized by `@dimen/toolbar_button_size` / `toolbar_button_padding` (`res/values/dimens.xml`) — **62dp / 14dp on tablets (`values-sw720dp`), 44dp / 10dp below sw720dp** (Palma2 Pro, Go 6/7-class, phones), `bg_toolbar_button`. The tablet tier matches the Supernote native toolbar's tap target (~9.8mm at 300ppi, ~34dp glyph); the small tier exists because the library bottom bar's three zones don't fit 62dp buttons under ~724dp of width (math in `layout-sw480dp/activity_main.xml`). The old `values-sw360dp` 36dp override is gone — `sw360dp` matches every device ≥360dp, so it was shrinking the whole fleet, not just the Palma2 Pro. Bars hosting these buttons take `@dimen/toolbar_bar_thickness` (70dp / 56dp = button + 2×4dp padding); `DocumentEditorActivity` builds its bars programmatically from the same dimens.
 - Pen/eraser buttons: `isSelected = true` for persistent active-tool state
 - Dividers: `@color/inkBlack`, 1dp × 28dp
 - Undo/Redo: statically always-enabled — empty stack silently does nothing (matches native BOOX behavior)
@@ -30,13 +30,18 @@ stored value is the name of the `ActiveTool` enum: `PEN`, `ERASER`, `LASSO`, `LA
 
 ## Toolbar Overflow System (`notebook/ToolbarOverflowManager.kt`)
 
-> **Shared with the document editor's format bar** (see [`documents.md`](documents.md)) — the manager
-> takes four views and reads the bar's own children, so it knew nothing about NotebookActivity to begin
-> with. Two contracts a caller must honour, because the algorithm depends on them: every moveable item
-> needs an **exact px** main-axis `LayoutParams` dimension (`WRAP_CONTENT` measures as 0 in
-> `naturalSize`), and group separators must be plain `View` instances (`isDivider` tests the class).
+> **Shared with the document editor's format bar** (see [`documents.md`](documents.md)) **and the
+> scratch pad's tool bar** (see [`scratchpad.md`](scratchpad.md)) — the manager takes four views and
+> reads the bar's own children, so it knew nothing about NotebookActivity to begin with. Two contracts
+> a caller must honour, because the algorithm depends on them: every moveable item needs an **exact
+> px** main-axis `LayoutParams` dimension (`WRAP_CONTENT` measures as 0 in `naturalSize`), and group
+> separators must be plain `View` instances (`isDivider` tests the class).
 > The editor's panel sits *in-flow* rather than floating — a text surface may be pushed down, a canvas
-> may not.
+> may not. Alongside `setLeadingPinned` (the FLOAT drag handle) there is **`setTrailingPinned`** — a
+> view kept at the bar's end, after the flexible Space but before the overflow controls, that reserves
+> main-axis space and never spills into the menu (the scratch pad's Send-to-Notebook button). A GONE
+> child still counts in the fixed-size math, so a conditionally-present button must be **removed** from
+> the bar, not hidden (the scratch pad removes Send when launched from the library).
 
 
 - If all buttons + dividers fit, `btnOverflow`/`dividerOverflow` stay `GONE`. Otherwise `btnOverflow` (Tabler "dots") appears at the far right; overflowed buttons move into `overflowMenu` — a vertical `LinearLayout` below the toolbar with `shape_bordered` background.
@@ -99,7 +104,10 @@ so `isSelected` state, icon state, and listeners always survive.
   harmlessly under the append-only rule.
 - **`ToolbarLayoutManager`** — arranges the existing button views into `drawingToolbar` per
   `ToolbarConfig`: resolves the visible key list (`order − hidden`, Close always kept; or the mini
-  set when `miniEnabled && FLOAT`), sets orientation + size + edge-aware background, inserts
+  set when `miniEnabled && FLOAT`), sets orientation + size + edge-aware background, **normalizes
+  each button's margins to the current main axis** (`normalizeButtonMargins` — the XML
+  `layout_marginStart` spacing was authored for a horizontal bar; left on a vertical bar it pushes
+  the button off its exactly-button-wide slot and clips its right edge), inserts
   orientation-aware auto-dividers (1dp × 28dp horizontal / 28dp × 1dp vertical), then appends a
   **manager-owned weighted `Space`** + the overflow controls so `btnOverflow` stays pinned to the
   trailing edge. The weighted spacer is the **only** spacer in the system — never user-facing, never
@@ -111,7 +119,7 @@ so `isSelected` state, icon state, and listeners always survive.
 
 - **Anchoring:** TOP/BOTTOM are horizontal (`match_parent` × thickness); LEFT/RIGHT vertical
   (thickness × `match_parent`); each with an edge-aware 1dp inkBlack border on the inner edge
-  (`toolbar_background_{top,bottom,left,right}`). `barThickness()` (56dp, captured from the inflated
+  (`toolbar_background_{top,bottom,left,right}`). `barThickness()` (`@dimen/toolbar_bar_thickness` — 70dp on tablets, 56dp below sw720dp — captured from the inflated
   layout before any flip) drives overflow-menu / page-indicator / floating-selection positioning so
   none assume a placement.
 - **Float:** a detached bar at `shape_bordered`, main-axis length = `min(natural content extent,
@@ -213,8 +221,9 @@ other tool mode, so that one flag is sufficient).
 - **Cell width is derived, never a dp constant** (`cellWidthPx()`). Eight columns is a lot for the
   narrow end of the fleet, and BOOX's EinkWise settings expose a **per-app dp override**, so a user can
   shrink any screen's effective width at will — a fixed 46dp cell clipped the eighth column clean off a
-  Palma2 Pro. Sizing from `boundsProvider` fits whatever it is given, capped at 46dp and floored at
-  30dp so a swatch stays a viable stylus target.
+  Palma2 Pro. Sizing from `boundsProvider` fits whatever it is given, capped at
+  `@dimen/toolbar_button_size` (the app-wide tap target — 62dp on tablets, 44dp below sw720dp) and
+  floored at 30dp so a swatch stays a viable stylus target.
 - **Controller** — takes the host's differences as inputs rather than branching internally: a
   `sideProvider` (the notebook derives it from `ToolbarConfig.placement`; fixed-toolbar hosts return a
   constant), a `boundsProvider` (full-screen hosts clamp to the root; the scratch pad and sticky editor

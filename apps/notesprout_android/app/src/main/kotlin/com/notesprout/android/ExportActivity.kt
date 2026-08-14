@@ -7,6 +7,7 @@ import android.view.WindowManager
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.addCallback
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.isVisible
@@ -20,14 +21,19 @@ import com.notesprout.android.crypto.KeySession
 import com.notesprout.android.crypto.PassphrasePrompt
 import com.notesprout.android.crypto.PassphraseStore
 import com.notesprout.android.data.PageRef
+import com.notesprout.android.data.backup.DeviceIdentity
+import com.notesprout.android.data.backup.DriveTokenStore
+import com.notesprout.android.data.backup.ROOT_EXPORT_FOLDER
 import com.notesprout.android.data.export.ExportPreset
 import com.notesprout.android.data.export.ExportPresetsManager
 import com.notesprout.android.data.index.IndexRepository
 import com.notesprout.android.data.index.NotesproutIndex
+import com.notesprout.android.data.hasNotebookDocument
 import com.notesprout.android.data.loadPageRefs
 import com.notesprout.android.data.soilFile
 import com.notesprout.android.databinding.ActivityExportBinding
 import com.notesprout.android.databinding.DialogExportPresetNameBinding
+import com.notesprout.android.export.DriveFolderPickerDialog
 import com.notesprout.android.export.ExportDelivery
 import com.notesprout.android.export.ExportDestination
 import com.notesprout.android.export.ExportEngine
@@ -36,6 +42,7 @@ import com.notesprout.android.export.ExportNaming
 import com.notesprout.android.export.ExportSpec
 import com.notesprout.android.export.PageScope
 import com.notesprout.android.export.SoilKeying
+import com.notesprout.android.export.TextSource
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
@@ -107,10 +114,24 @@ class ExportActivity : AppCompatActivity() {
     private var format = ExportFormat.PDF
     private var destination = ExportDestination.SAVE
     private var keying = SoilKeying.KEEP
+    /**
+     * What MARKDOWN/TEXT reads when the Source choice is on offer. Defaults to the notebook
+     * document — the merged final draft is what "export the notebook as text" means once one
+     * exists. Like page scope, deliberately not part of a preset.
+     */
+    private var textSource = TextSource.NOTEBOOK_DOCUMENT
+    /** True when the `.soil` holds a non-blank notebook document — probed once in [onCreate]. */
+    private var hasNotebookDoc = false
     /** Set when "Protect PDF with a password" is checked and a password has been entered. */
     private var pdfPassword: String? = null
     /** Set when "Set a new passphrase…" is chosen and a passphrase has been entered. */
     private var newSoilPassphrase: String? = null
+    /**
+     * Drive folder path (names under "Notesprout Exports") for the Google Drive destination.
+     * Seeded in [onCreate] with the notebook's library folder ancestry so the export tree mirrors
+     * the library by default; the picker or a preset can override it.
+     */
+    private var drivePath: List<String> = emptyList()
 
     private var presets: List<ExportPreset> = emptyList()
     /** The applied preset, cleared as soon as the user changes anything by hand. */
@@ -119,6 +140,15 @@ class ExportActivity : AppCompatActivity() {
     private var applyingPreset = false
 
     private var runningJob: Job? = null
+
+    /** WebView OAuth for a first-time Drive connection started from the destination row. */
+    private val driveConnectLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == RESULT_OK) {
+            onDriveConnected(result.data?.getStringExtra(DriveAuthActivity.EXTRA_EMAIL))
+        }
+    }
 
     // Eagerly constructed on purpose: ExportDelivery registers activity-result launchers in its
     // constructor, and those must be registered before the activity reaches STARTED. A `by lazy`
@@ -185,6 +215,11 @@ class ExportActivity : AppCompatActivity() {
             passphrase = resolveKey()
             locked = encryptionInfo.encrypted && passphrase == null
             allPages = withContext(Dispatchers.IO) { loadPageRefs(soilPath, passphrase) }
+            hasNotebookDoc = withContext(Dispatchers.IO) { hasNotebookDocument(soilPath, passphrase) }
+            // Default Drive folder = the notebook's library placement, mirrored under the root.
+            drivePath = withContext(Dispatchers.IO) {
+                indexRepo.getFolderAncestry(indexRepo.getNotebook(notebookId)?.parentId)
+            }.map { it.name }
             binding.btnRunExport.isVisible = !locked
             renderPresets()
             refreshOptions()
@@ -214,6 +249,11 @@ class ExportActivity : AppCompatActivity() {
         rowScopeCurrent.setOnClickListener { scope = PageScope.CURRENT; refreshOptions() }
         rowScopeSelected.setOnClickListener { scope = PageScope.SELECTED; refreshOptions() }
 
+        // Source isn't part of a preset either (it only exists at all-pages scope, and only for a
+        // notebook that has a merged document), so changing it leaves the active preset intact.
+        rowSourceNotebookDoc.setOnClickListener { textSource = TextSource.NOTEBOOK_DOCUMENT; refreshOptions() }
+        rowSourcePages.setOnClickListener { textSource = TextSource.PAGE_DOCUMENTS; refreshOptions() }
+
         rowFormatPdf.setOnClickListener { selectFormat(ExportFormat.PDF) }
         rowFormatPng.setOnClickListener { selectFormat(ExportFormat.PNG) }
         rowFormatMarkdown.setOnClickListener { selectFormat(ExportFormat.MARKDOWN) }
@@ -226,7 +266,55 @@ class ExportActivity : AppCompatActivity() {
 
         rowDestSave.setOnClickListener { selectDestination(ExportDestination.SAVE) }
         rowDestShare.setOnClickListener { selectDestination(ExportDestination.SHARE) }
+        rowDestDrive.setOnClickListener { onDriveDestinationTapped() }
         rowDestTemplate.setOnClickListener { selectDestination(ExportDestination.TEMPLATE) }
+        rowDriveFolder.setOnClickListener { openDriveFolderPicker() }
+    }
+
+    // ── Google Drive destination ─────────────────────────────────────────────
+
+    private fun onDriveDestinationTapped() {
+        if (DriveTokenStore.getRefreshToken(this) == null) { promptConnectDrive(); return }
+        selectDestination(ExportDestination.DRIVE)
+    }
+
+    private fun promptConnectDrive() {
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("Connect Google Drive")
+            .setMessage(
+                "Exporting to Google Drive uses the same Google account connection as backups. " +
+                "Connect your account to continue."
+            )
+            .setPositiveButton("Connect") { _, _ ->
+                driveConnectLauncher.launch(Intent(this, DriveAuthActivity::class.java))
+            }
+            .setNegativeButton("Cancel", null)
+            .create()
+        dialog.show()
+        dialog.window?.setElevation(0f)
+        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
+    }
+
+    private fun onDriveConnected(email: String?) {
+        lifecycleScope.launch {
+            // Reflect the connection in Backup Settings' status line, but leave driveEnabled
+            // alone — connecting for an export must not silently opt the device into backups.
+            if (email != null) {
+                withContext(Dispatchers.IO) {
+                    val config = indexRepo.ensureBackupConfig(DeviceIdentity.defaultDeviceFolderName())
+                    indexRepo.saveBackupConfig(config.copy(driveAccountEmail = email))
+                }
+            }
+            selectDestination(ExportDestination.DRIVE)
+        }
+    }
+
+    private fun openDriveFolderPicker() {
+        DriveFolderPickerDialog(this, drivePath) { chosen ->
+            clearActivePreset()
+            drivePath = chosen
+            refreshOptions()
+        }.show()
     }
 
     private fun selectDestination(next: ExportDestination) {
@@ -278,6 +366,10 @@ class ExportActivity : AppCompatActivity() {
         activePresetId = preset.id
         format = preset.format
         destination = preset.destination
+        // An empty stored path is "no opinion" — keep the seeded library-mirror default.
+        if (preset.destination == ExportDestination.DRIVE && preset.drivePath.isNotEmpty()) {
+            drivePath = preset.drivePath
+        }
         binding.checkTemplate.isChecked = preset.includeTemplate
         binding.checkStickyEndnotes.isChecked = preset.stickyEndnotes
         binding.checkPdfPassword.isChecked = preset.usePdfPassword
@@ -357,6 +449,14 @@ class ExportActivity : AppCompatActivity() {
             ?.hideSoftInputFromWindow(view.windowToken, 0)
     }
 
+    /**
+     * True while the Source choice is on offer: text format, whole notebook, and a notebook
+     * document to read. Everywhere else the export is per-page regardless of [textSource].
+     */
+    private fun sourceChoiceAvailable(): Boolean =
+        (format == ExportFormat.MARKDOWN || format == ExportFormat.TEXT) &&
+            scope == PageScope.ALL && hasNotebookDoc
+
     /** The pages the current scope covers, in display order. */
     private fun scopedPages(): List<PageRef> = when (scope) {
         PageScope.ALL -> allPages
@@ -373,10 +473,12 @@ class ExportActivity : AppCompatActivity() {
             tvLocked.isVisible = true
             sectionPresets.isVisible = false
             sectionPages.isVisible = false
+            sectionSource.isVisible = false
             sectionOptions.isVisible = false
             sectionEncryption.isVisible = false
             listOf(rowFormatPdf, rowFormatPng, rowFormatMarkdown, rowFormatText, rowFormatSoil,
-                   rowDestSave, rowDestShare, rowDestTemplate, tvFilename)
+                   rowDestSave, rowDestShare, rowDestDrive, rowDestTemplate, rowDriveFolder,
+                   tvFilename)
                 .forEach { it.isVisible = false }
             return@with
         }
@@ -403,6 +505,16 @@ class ExportActivity : AppCompatActivity() {
                rowFormatMarkdown to ExportFormat.MARKDOWN, rowFormatText to ExportFormat.TEXT,
                rowFormatSoil to ExportFormat.SOIL, current = format)
 
+        // ── Source ── the merged notebook document vs the per-page assembly. On offer only for
+        // the text formats over the whole notebook, and only when a notebook document exists —
+        // GONE otherwise (a disabled row is visually silent on e-ink). buildSpec falls back to
+        // PAGE_DOCUMENTS whenever the choice is not on offer.
+        sectionSource.isVisible = sourceChoiceAvailable()
+        if (sectionSource.isVisible) {
+            select(rowSourceNotebookDoc to TextSource.NOTEBOOK_DOCUMENT,
+                   rowSourcePages to TextSource.PAGE_DOCUMENTS, current = textSource)
+        }
+
         // ── Options ── raster formats only; endnotes need sticky notes to exist.
         sectionOptions.isVisible = format.isRaster
         checkStickyEndnotes.isVisible = format == ExportFormat.PDF
@@ -413,13 +525,19 @@ class ExportActivity : AppCompatActivity() {
         // ── Destination ──
         rowDestTemplate.isVisible = format == ExportFormat.PNG
         select(rowDestSave to ExportDestination.SAVE, rowDestShare to ExportDestination.SHARE,
+               rowDestDrive to ExportDestination.DRIVE,
                rowDestTemplate to ExportDestination.TEMPLATE, current = destination)
+        rowDriveFolder.isVisible = destination == ExportDestination.DRIVE
+        rowDriveFolder.text =
+            "Folder: ${(listOf(ROOT_EXPORT_FOLDER) + drivePath).joinToString(" / ")}  (tap to change)"
 
         // ── Filename ──
         tvFilename.isVisible = destination != ExportDestination.TEMPLATE
         tvFilename.text = when {
             pages.isEmpty() -> "No pages to export"
-            format == ExportFormat.PNG && pages.size > 1 -> "${pages.size} PNG files into a folder you pick"
+            format == ExportFormat.PNG && pages.size > 1 ->
+                if (destination == ExportDestination.DRIVE) "${pages.size} PNG files"
+                else "${pages.size} PNG files into a folder you pick"
             else -> outputName(pages)
         }
     }
@@ -534,6 +652,8 @@ class ExportActivity : AppCompatActivity() {
         pdfPassword = pdfPassword,
         soilKeying = keying,
         newSoilPassphrase = newSoilPassphrase,
+        textSource = if (sourceChoiceAvailable()) textSource else TextSource.PAGE_DOCUMENTS,
+        drivePath = drivePath,
     )
 
     private fun runExport() {
@@ -541,6 +661,12 @@ class ExportActivity : AppCompatActivity() {
         val pages = scopedPages()
         if (pages.isEmpty() && format != ExportFormat.SOIL) {
             Toast.makeText(this, "No pages to export", Toast.LENGTH_SHORT).show()
+            return
+        }
+        // A preset can arm the Drive destination on a device that never connected — catch it
+        // before rendering rather than failing at upload time.
+        if (destination == ExportDestination.DRIVE && DriveTokenStore.getRefreshToken(this) == null) {
+            promptConnectDrive()
             return
         }
         val spec = buildSpec(pages)
@@ -580,7 +706,9 @@ class ExportActivity : AppCompatActivity() {
                 ).show()
             }
 
-            binding.tvProgress.text = "Delivering…"
+            binding.tvProgress.text =
+                if (spec.destination == ExportDestination.DRIVE) "Uploading to Google Drive…"
+                else "Delivering…"
             delivery.deliver(spec, files, pages)
         }
     }

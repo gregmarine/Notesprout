@@ -121,6 +121,8 @@ object NotebookImporter {
                 pageCount = manifest.pageCount,
                 encrypted = true,
                 keyScope = scope,
+                // A text document stays a text document on the importing device.
+                textDocument = manifest.meta?.textDocument == true,
             ),
             createdAt = manifest.meta?.createdAt ?: now,
             updatedAt = now,
@@ -169,6 +171,9 @@ object NotebookImporter {
             repo.updateNotebookPageCount(existingId, manifest.pageCount)
             repo.updateNotebookSnapshot(existingId, if (scope == KeyScope.GLOBAL) manifest.meta?.cover else null)
             repo.setEncryptionState(existingId, true, scope)
+            // Follow the incoming file's identity — replacing a notebook with a text document
+            // (or the reverse) must retarget how the row opens.
+            repo.setTextDocument(existingId, manifest.meta?.textDocument == true)
         }
 
         val now = System.currentTimeMillis()

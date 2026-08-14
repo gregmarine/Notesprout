@@ -46,3 +46,24 @@ data class ObjectEntity(
     /** Position within the parent list (a `list_item`'s ordinal). */
     val sortOrder: Int? = null,
 )
+
+/**
+ * A blob-free projection of an [ObjectEntity] — the structural columns plus the scalar notebook
+ * payload, **without** [ObjectEntity.blob] or the legacy `data` JSON. This is what list screens
+ * should read when they need names, folder placement, or the lock state but not the cover bytes:
+ * a full-row read drags the snapshot blob out of the encrypted index only to discard it.
+ *
+ * [legacy] is `data <> ''` — true for a pre-columnar row, whose encrypted/keyScope truth still
+ * lives in the JSON. Callers that derive the lock state must fall back to a full read for those
+ * (see `DayHistoryRepository.locksFor`); the structural columns are always populated either way.
+ */
+data class ObjectSummary(
+    val id: String,
+    val name: String,
+    val parentId: String?,
+    val type: String,
+    val deletedAt: Long?,
+    val flags: Int?,
+    val keyScope: String?,
+    val legacy: Boolean,
+)

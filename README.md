@@ -14,13 +14,16 @@ Notesprout is an open source, handwriting-first notes app built for people who p
 | **v1.0 — Seed** | ✅ Shipped — all major features complete, source preserved on the `seed` branch (archived) |
 | **v1.1 — Sprout** | ✅ Shipped — merged to `main`, source preserved on the `sprout` branch (archived) |
 | **v1.2 — Sapling** | ✅ Shipped — merged to `main`, source preserved on the `sapling` branch (archived) |
+| **v1.3 — Supernote** | ✅ Shipped — merged to `main`, source preserved on the `supernote` branch (archived) |
 
 ---
 
 ## Device Support
 
 **Tier 1 — Primary targets**
-- BOOX Go 10.3 Gen II (large-format e-ink) — flagship
+- Supernote Manta (large-format e-ink) — flagship
+- Supernote Nomad (compact e-ink)
+- BOOX Go 10.3 Gen II (large-format e-ink)
 - BOOX Go 6 Gen II (compact e-ink)
 - BOOX Note Max (extra large-format e-ink)
 - BOOX Palma2 Pro (Android phone form factor color e-ink)
@@ -35,7 +38,6 @@ Notesprout is an open source, handwriting-first notes app built for people who p
 
 **Future**
 - Desktop / Web
-- Supernote Nomad & Manta
 - Android Phone
 - Android Tablet
 
@@ -46,6 +48,7 @@ Notesprout is an open source, handwriting-first notes app built for people who p
 - **Kotlin** — native Android app (Java 17 target)
 - **Room / SQLite** — `.soil` notebook files, single unified table, one file per notebook
 - **Onyx SDK** — low-latency stylus input on BOOX e-ink devices, for both EMR and USI pens
+- **Ratta firmware ink** — low-latency stylus input on Supernote e-ink devices via the firmware's ink service
 - **SQLCipher** — full-database encryption for `.soil` notebooks and the global index; passphrase-derived keys, per-notebook or global scope, with password-protected PDF export via PDFBox
 - **Handwriting recognition** — on-device, two engines: **ML Kit** digital ink (default, always available) and an optional **TrOCR** personal engine running on **ONNX Runtime Mobile**, fine-tuned to your own handwriting; feeds heading text, full-page text extraction, and text/markdown export (Experimental)
 - **kotlinx.serialization** — code-generated JSON, zero reflection

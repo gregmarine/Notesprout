@@ -35,7 +35,7 @@
     <LinearLayout
         android:id="@+id/pickerToolbar"
         android:layout_width="match_parent"
-        android:layout_height="56dp"
+        android:layout_height="@dimen/toolbar_bar_thickness"
         android:orientation="horizontal"
         android:background="@color/paperWhite"
         android:gravity="center_vertical"
@@ -94,7 +94,7 @@
     <LinearLayout
         android:id="@+id/pinnedToolbar"
         android:layout_width="match_parent"
-        android:layout_height="56dp"
+        android:layout_height="@dimen/toolbar_bar_thickness"
         android:orientation="horizontal"
         android:background="@color/paperWhite"
         android:gravity="center_vertical"
@@ -134,7 +134,7 @@
     <LinearLayout
         android:id="@+id/recentsToolbar"
         android:layout_width="match_parent"
-        android:layout_height="56dp"
+        android:layout_height="@dimen/toolbar_bar_thickness"
         android:orientation="horizontal"
         android:background="@color/paperWhite"
         android:gravity="center_vertical"
@@ -174,7 +174,7 @@
     <LinearLayout
         android:id="@+id/searchToolbar"
         android:layout_width="match_parent"
-        android:layout_height="56dp"
+        android:layout_height="@dimen/toolbar_bar_thickness"
         android:orientation="horizontal"
         android:background="@color/paperWhite"
         android:gravity="center_vertical"
@@ -221,7 +221,7 @@
     <LinearLayout
         android:id="@+id/breadcrumbBar"
         android:layout_width="match_parent"
-        android:layout_height="56dp"
+        android:layout_height="@dimen/toolbar_bar_thickness"
         android:orientation="horizontal"
         android:background="@color/paperWhite"
         android:gravity="center_vertical">
@@ -319,7 +319,7 @@
     <LinearLayout
         android:id="@+id/overflowToolbar"
         android:layout_width="match_parent"
-        android:layout_height="56dp"
+        android:layout_height="@dimen/toolbar_bar_thickness"
         android:orientation="horizontal"
         android:background="@color/paperWhite"
         android:gravity="center_vertical|end"
@@ -388,12 +388,12 @@
     <!--
         Bottom bar: 1dp inkBlack top border, sibling-surface buttons left-aligned, pagination
         centred, action buttons right-aligned.
-        Height 56dp — matches the notebook activity toolbar for uniformity.
+        Height @dimen/toolbar_bar_thickness — matches the notebook activity toolbar for uniformity.
     -->
     <RelativeLayout
         android:id="@+id/bottomBar"
         android:layout_width="match_parent"
-        android:layout_height="56dp"
+        android:layout_height="@dimen/toolbar_bar_thickness"
         android:background="@color/paperWhite">
 
         <!-- Top border (1dp inkBlack) -->

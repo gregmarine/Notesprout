@@ -37,6 +37,22 @@ interface ObjectDao {
     @Query("SELECT * FROM objects WHERE deletedAt IS NULL")
     suspend fun getAllNotDeleted(): List<ObjectEntity>
 
+    /**
+     * All live rows of one type. Prefer this over filtering [getAllNotDeleted] in Kotlin: that
+     * loads every row's blob — all template images and notebook covers — to answer a question
+     * about one type (folders carry no blob at all).
+     */
+    @Query("SELECT * FROM objects WHERE type = :type AND deletedAt IS NULL")
+    suspend fun getAllOfType(type: String): List<ObjectEntity>
+
+    /** Live notebooks created in `[start, end)` — the day-window CREATED derivation, in SQL. */
+    @Query("SELECT * FROM objects WHERE type = 'notebook' AND deletedAt IS NULL AND createdAt >= :start AND createdAt < :end")
+    suspend fun notebooksCreatedIn(start: Long, end: Long): List<ObjectEntity>
+
+    /** Blob-free batch read — see [ObjectSummary] for what it carries and when to use it. */
+    @Query("SELECT id, name, parentId, type, deletedAt, flags, keyScope, (data <> '') AS legacy FROM objects WHERE id IN (:ids)")
+    suspend fun objectSummaries(ids: List<String>): List<ObjectSummary>
+
     // ── Phase C: bulk columnar backfill of the index `objects` table ─────────
 
     /** Structural rows still carrying legacy JSON in `data` (convert to columnar on the manual sweep). */

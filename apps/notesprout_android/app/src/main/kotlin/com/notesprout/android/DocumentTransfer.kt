@@ -34,6 +34,12 @@ object DocumentTransfer {
         val hasNext: Boolean,
         /** Where the caret was left last time; 0 (the top) when this page has not been open before. */
         val caret: Int,
+        /**
+         * True when this is the **notebook document** — the whole notebook's merged final draft —
+         * rather than one page's. Page flips don't apply there, and saves land on the
+         * notebook-parented row. See docs/documents.md.
+         */
+        val notebook: Boolean = false,
     )
 
     /** What the host does for the editor. Implemented by [NotebookActivity]. */
@@ -59,6 +65,37 @@ object DocumentTransfer {
          * in front, and driving the drawing surface then is exactly what the EPD rules forbid.
          */
         fun requestPage(delta: Int, onResult: (Session?) -> Unit)
+
+        /**
+         * Switch to the **notebook document** and call back with its session on the main thread —
+         * merging every page's text to seed it if it does not exist yet (that run shows a
+         * cancellable progress popup; cancel calls back null and the editor stays where it is).
+         * The caller must have stored its current text first, same contract as [requestPage].
+         * Toggling back to page mode is `requestPage(0)` — the host retains which page the editor
+         * was on.
+         */
+        fun requestNotebookDocument(onResult: (Session?) -> Unit)
+
+        /**
+         * Re-merge the pages' text and call back with it on the main thread (null when the merge
+         * is unavailable, produced nothing, or was cancelled). The notebook-mode twin of
+         * [requestPageDraft]; powers the source strip's Merge action.
+         */
+        fun requestNotebookMerge(onResult: (Draft?) -> Unit)
+
+        /**
+         * Stop an in-flight [requestNotebookDocument] / [requestNotebookMerge] — the popup's
+         * Cancel button. The cancelled request still calls back (with null), which is what puts
+         * the editor's UI right; a no-op when nothing is running.
+         */
+        fun cancelDocumentRequest()
+
+        /**
+         * Rename the notebook — text documents let the editor's title do this. The host owns the
+         * duplicate check against siblings, the index write, the meta refresh, and its own title;
+         * calls back on the main thread with null on success or a user-facing error message.
+         */
+        fun renameNotebook(name: String, onResult: (String?) -> Unit)
     }
 
     /** Installed before launching the editor; cleared when the host is destroyed. */

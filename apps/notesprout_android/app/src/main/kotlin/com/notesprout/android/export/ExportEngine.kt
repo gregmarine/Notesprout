@@ -77,6 +77,7 @@ object ExportEngine {
                 format = spec.format.textFormat!!,
                 onProgress = { c, t -> onProgress(Phase.RECOGNIZING, c, t) },
                 passphrase = spec.passphrase,
+                preferNotebookDocument = spec.textSource == TextSource.NOTEBOOK_DOCUMENT,
             )
         )
 

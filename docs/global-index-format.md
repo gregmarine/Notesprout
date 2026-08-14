@@ -253,6 +253,7 @@ The row is the app's entire knowledge of a document while it is closed.
 | page count | `pageCount` | For the card subtitle; refreshed on close |
 | encrypted | `flags` bit 0 | |
 | exclude from backup | `flags` bit 1 | |
+| text document | `flags` bit 2 | Opens straight into the document editor (its notebook document is the primary surface). Mirrored by `notebook_meta.textDocument` inside the file, so it survives export/import. No migration — a free bit in the existing bitfield |
 | key scope | `keyScope` | `GLOBAL` / `NOTEBOOK`, non-null only when encrypted |
 | last backed up (local) | `lastBackedUpLocal` | epoch ms, per destination |
 | last backed up (cloud) | `lastBackedUpDrive` | epoch ms, per destination |
@@ -371,7 +372,7 @@ Get this wrong in the "no" direction and every compaction pass re-uploads the us
 
 # Part IV — App-Content Tables
 
-Beyond `objects`, the index carries four tables that are **not** about documents at all. They exist
+Beyond `objects`, the index carries six tables that are **not** about documents at all. They exist
 because the app has content that belongs to the *install* rather than to any document — and that
 content still deserves to be encrypted at rest, backed up, and modeled like everything else.
 
@@ -608,6 +609,34 @@ due date is **derived from the frequency** (weekly → that week's Saturday, mon
 rather than chosen, because a routine is anchored to a calendar period rather than an interval. Same
 columns, different reading — worth noticing before adding parallel ones.
 
+## `user_dictionary` — the proofread user dictionary
+
+Words the user added via *Add to dictionary* in the document editor's spell popup (v11). A user's
+vocabulary belongs to the install, not to any one document — the same word is correct in every
+notebook — so it lives here rather than in a `.soil` file, and backup needs nothing new because the
+index file is already covered.
+
+```sql
+CREATE TABLE user_dictionary (
+    word    TEXT    NOT NULL PRIMARY KEY,
+    addedAt INTEGER NOT NULL
+);
+```
+
+The word is the primary key **and the whole payload**, stored in the spell engine's normal form
+(lowercase, typographic apostrophe `’` folded to plain `'`) so that membership anywhere in the app is
+a plain set lookup — no case games, no secondary index. The checking pass never reads this table:
+each editor session mirrors it into memory alongside the engine load and keeps the mirror in step on
+add/remove.
+
+Two deliberate divergences from the house rules, both consequences of the word being the key:
+
+- **Hard DELETE, not a tombstone.** A removed word must stop vouching for itself immediately;
+  re-adding is one tap; and with no surrogate id there is no identity a `deletedAt` could preserve —
+  an undeleted re-add and a fresh insert are indistinguishable anyway.
+- **`REPLACE` on insert.** Adding a word twice (two surfaces, a re-add after remove) is not an
+  error; the row simply refreshes its `addedAt`.
+
 ---
 
 # Part V — Schema Versions & Migration
@@ -626,6 +655,7 @@ columns, different reading — worth noticing before adding parallel ones.
 | 8 | `objects` gains `refId`, `sortOrder` (list membership as child rows) | 2 × `ALTER TABLE … ADD COLUMN` |
 | 9 | `+ tasks` table (fully columnar — no `data` payload) | `CREATE TABLE IF NOT EXISTS` |
 | 10 | `tasks` gains `remindAmount`, `remindUnit` (look-ahead reminder) | 2 × `ALTER TABLE … ADD COLUMN` |
+| 11 | `+ user_dictionary` table (proofread user dictionary) | `CREATE TABLE IF NOT EXISTS` |
 
 **Every migration is additive and rewrites zero rows.** Nullable columns and
 `CREATE TABLE IF NOT EXISTS`, nothing else. Data conversion happens lazily on write plus an optional
@@ -988,6 +1018,7 @@ The index is step 3 in the overall build order in `soil-file-format.md` Part XI.
 |---|---|---|---|
 | document | 0 | 1 | encrypted |
 | document | 1 | 2 | excludeFromBackup |
+| document | 2 | 4 | textDocument — opens straight into the document editor |
 
 ## Tables at a glance
 
@@ -999,6 +1030,7 @@ The index is step 3 in the overall build order in `soil-file-format.md` Part XI.
 | `notebook_activity` | v4 | Bespoke, append-only | Open/edit telemetry (ids + verbs only) |
 | `events` | v5 | Bespoke, query-optimized | Calendar events + recurrence payload |
 | `tasks` | v9 | Bespoke, **fully columnar** | To-do items + materialized recurrence series |
+| `user_dictionary` | v11 | Bespoke, key-only | Proofread user dictionary (word = key + payload) |
 
 ## Sentinel ids
 

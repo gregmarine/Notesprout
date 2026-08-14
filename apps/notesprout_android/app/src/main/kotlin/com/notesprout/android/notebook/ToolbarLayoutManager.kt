@@ -111,6 +111,7 @@ class ToolbarLayoutManager(
             val view = views[key] ?: continue
             if (!first && spec.group != prevGroup) toolbar.addView(makeDivider())
             (view.parent as? ViewGroup)?.removeView(view)
+            normalizeButtonMargins(view)
             toolbar.addView(view)
             prevGroup = spec.group
             first = false
@@ -123,8 +124,31 @@ class ToolbarLayoutManager(
         // The XML overflow divider is authored vertical (1dp × 28dp); re-shape it to match the bar's
         // current orientation so it reads as a horizontal rule in a vertical bar.
         dividerOverflow.layoutParams = dividerLayoutParams()
+        normalizeButtonMargins(btnOverflow)
         toolbar.addView(dividerOverflow)
         toolbar.addView(btnOverflow)
+    }
+
+    /**
+     * Keep a button's inter-button spacing on the bar's current **main** axis and zero the cross
+     * axis. The XML margins were authored for a horizontal bar (`layout_marginStart="4dp"` between
+     * neighbours); on a vertical bar the button's slot is exactly one button wide (thickness −
+     * 2×4dp bar padding), so a leftover start-margin pushes the button off the slot and clips its
+     * right edge against the bar border. The spacing value survives axis flips because it is read
+     * from whichever axis currently holds it.
+     */
+    private fun normalizeButtonMargins(view: View) {
+        val lp = view.layoutParams as? LinearLayout.LayoutParams ?: return
+        val lead = maxOf(lp.marginStart, lp.topMargin)
+        val trail = maxOf(lp.marginEnd, lp.bottomMargin)
+        if (toolbar.orientation == LinearLayout.HORIZONTAL) {
+            lp.marginStart = lead; lp.marginEnd = trail
+            lp.topMargin = 0; lp.bottomMargin = 0
+        } else {
+            lp.topMargin = lead; lp.bottomMargin = trail
+            lp.marginStart = 0; lp.marginEnd = 0
+        }
+        view.layoutParams = lp
     }
 
     /**

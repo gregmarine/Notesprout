@@ -7,7 +7,6 @@
 > behind any item.
 >
 > Standing design docs that are **not** folded in here (read them directly):
-> - `SUPERNOTE_SUPPORT_PLAN.md` — full Supernote (Ratta) ink-path design, not started.
 > - `NOTEBOOK_SIZE_RESEARCH.md` — `.soil` size-reduction + backup-compaction research (no plan yet).
 > - `docs/handwriting-recognition.md` — page-text / whole-notebook recognition (segmentation layer,
 >   `page_text` cache, RTR mode, export path), not started. Decision/deferred items summarized below.
@@ -40,6 +39,80 @@
 - Only `type='stroke'` rows are `ts`-stripped; images re-encoded are PNG + lossless-WEBP (lossy-WEBP
   and JPEG covers left alone). `ts` embedded in headings/text/links/sticky-notes is a small untouched
   tail; fold it in only if a future pass makes it worthwhile.
+
+---
+
+## Notebook close is noticeably slower than jumping to Calendar/Today (look into soon)
+
+Closing a notebook via the toolbar close button has a visible delay; tapping Calendar or Today from
+the same notebook is near-instant. Diagnosed 2026-08-10 (research only, no code changes).
+
+**Why the difference:** the close button runs real teardown **synchronously on the main thread
+before `finish()`** (`NotebookActivity.closeNotebook`, called from the `btnClose` handler), then
+reveals a library screen that rebuilds itself. Calendar/Today are just `startActivity()` — the
+notebook stays alive underneath, and its only bookkeeping (the `onStop` undo/redo persist) runs
+*after* the new screen has already drawn, so the same cost is paid invisibly.
+
+Pre-`finish()` main-thread work on close:
+1. **Undo/redo persist** (encrypted notebooks — i.e. everything): `undoRedoManager.toJson()` of the
+   full history + a synchronous `execSQL` into the SQLCipher `.soil` (JSON build + encryption + disk
+   I/O on main).
+2. **Cover snapshot** — `drawingView.captureSnapshot()`: full-page ARGB_8888 bitmap (~10–20 MB),
+   redraw of template + every object + every stroke, then **WEBP q100 compress + Base64 encode on
+   main** (`ImageCodec.encodeBase64`) — almost certainly the biggest single chunk. On Ratta it also
+   releases the firmware ink overlay first.
+3. Stroke-list deep copy for the seal. (The seal itself is already off-main on `appScope`.)
+
+Then `MainActivity.onResume` → `scanAndRender()` re-queries the index, re-renders the cover grid,
+and the e-ink repaints the whole library.
+
+**Candidate fixes** (same family as the tap-time "Opening…" overlay, commit 513d168):
+- Capture the raw bitmap on main (cheap-ish) but move the WEBP encode + Base64 into the seal on IO.
+- Give the close tap instant visual feedback (a "Closing…" ack via the `OpeningOverlay`
+  pre-draw+post pattern) — the library re-scan + e-ink repaint can only be masked, not removed.
+- Note: `sealForConversion` and the `onDestroy` blocking path share `sealNotebook` — keep their
+  semantics (blocking, no snapshot) intact when moving work around.
+
+---
+
+## Supernote (Ratta) — deferred items
+
+> From the retired `SUPERNOTE_SUPPORT_PLAN.md` (all 10 phases shipped on the `supernote` branch,
+> 2026-08-08/09, validated on both the Nomad and the Manta). The as-built engine is documented in
+> `docs/drawing-engine.md` → "Ratta (Supernote) Firmware Ink Engine"; the full plan with its
+> per-phase findings is in git history.
+
+- **Collapse `GenericNotebookView` + `RattaNotebookView` into a shared `CanvasNotebookView` base.**
+  The explicit follow-up to the locked sibling-copy decision (copy chosen for zero risk to the ten
+  shipping Generic devices). Until then every shared-logic fix (lasso, erase, gestures, rendering)
+  must be applied to both files by hand — the standing tax this item removes.
+- **Onyx: draw the live lasso outline with the SDK's hardware `STROKE_STYLE_DASH` (= 5)** instead of
+  the software `DashPathEffect` Canvas path (throttled to 60 ms; visibly trails the pen — the user
+  has explicitly said the current look is not what they want). This is the BOOX half of Supernote
+  Phase 5, which shipped hardware trails on Ratta. The research is done — `PenToolSpikeActivity`
+  proved `DASH` renders on all five BOOX devices, `setStrokeStyle` needs no `restartRawDrawing`, and
+  it survives the handwriting fast-mode pin (`docs/onyx-pen-tools.md`) — so this is a build task,
+  not a spike. The Ratta lift → selection-box handoff learnings apply directly.
+- **User-facing stylus calibration screen.** The Ratta registration offsets (+2 px Nomad / +3 px
+  Manta input x-shift) are believed model-level but were measured on **one unit per model**; a unit
+  with different factory calibration would show a 1–3 px live-vs-baked shift. A calibration surface
+  (the probe's REG-lab pattern: draw, nudge to null, store per-device) would replace the hardcoded
+  constants — and also cover whole-pipeline tip offsets on Generic-engine devices (the Paper 7 is
+  the known suspect; on Generic, live and baked agree with each other but can both miss the pen).
+  BOOX can never need the Supernote half: SDK overlay and bake share one input pipeline.
+- **Firmware pen types as a pen-tool offering.** The 0…31 sweep found more than the four codes the
+  Supernote UI exposes: 0/5/8 solid steady, 1/2/16 pressure-sensitive, 14/15 calligraphy, plus the
+  lasso vocabulary (3 = x-stream, 4 = dashes). Candidate material for a future pen picker alongside
+  the Onyx styles in `docs/onyx-pen-tools.md`. **Code 12 is broken** (random giant laggy blob) —
+  exclude it from any offering.
+- **Enumerate `end_button_behavior` values.** The OS side-button preference (`Settings.System`,
+  app-readable; `=2` delivers `BUTTON_STYLUS_PRIMARY` from hover) was only tested at its default.
+  If some value makes the OS swallow the button, barrel-erase goes inert for that user (no
+  misbehaviour beyond the firmware possibly painting its native trace unsuppressed); the probe's
+  hover-Δ barrel lab is the test rig, and the value could drive a runtime hint if it ever warrants
+  one.
+- **HWR enrollment on Supernote** was descoped by the user (staying on ML Kit; the custom TrOCR
+  engine may be removed entirely) — not a test gap; revisit only if the enrollment feature survives.
 
 ---
 
@@ -426,7 +499,9 @@ Month and Week are structurally immune: `monthGeometry()` builds **square, width
 width-derived constant. Day has no such slack band.
 
 This bites on any canvas-height change: a different device, a backup restored onto different
-hardware, or a future toolbar-height tweak.
+hardware, or a future toolbar-height tweak. The 2026-08-10 Ratta full-screen change (top guard → 0
+on Supernote) was exactly such a one-time height change on the Nomad/Manta — accepted knowingly;
+pre-change Supernote Day-view ink re-spaced once. The restructure below remains the real fix.
 
 **Options considered** (Day view left misaligned for now, by decision):
 
@@ -498,6 +573,25 @@ per-page and notebook-only; each item below is a deliberate omission, not an ove
   `MarkdownFormatter.listEnter` / `renumberOrderedLists` and the parser's ordered-item regex.
 - **A durable undo for "bring in page text".** In-session Ctrl+Z only (the refresh is applied through
   the buffer, like a format-bar edit); beyond the session, the confirmation dialog is the guard.
+
+## Proofread — deferred items
+
+Punted from the proofread work (2026-08-11/12, `docs/proofread.md`). Each is a deliberate scope
+cut, not an oversight.
+
+- **Other languages.** The engine is language-agnostic; a language means a frequency-dictionary
+  asset (gzipped `term frequency` lines — remember the `.dict`-not-`.gz` AAPT trap) plus a way to
+  choose it. The grammar rules are English-only and would simply not run for other languages.
+- **Review-stepper mode.** A "walk the flags" pass — jump flag to flag with the popup open,
+  fix/ignore/next — for proofreading a finished document in one sweep instead of hunting
+  underlines by eye.
+- **Reuse in `TextEditDialog` / sticky notes.** `core/proofread` is pure Kotlin and already
+  host-agnostic; the cost is per-surface integration (underline drawing, tap plumbing, debounce
+  wiring — the `ProofreadController` pattern). Decided out of scope for v1: the document editor
+  is where finished prose happens.
+- **Session-durable ignores.** "Ignore for now" is session-only *by design* (a durable ignore is
+  what Add to dictionary is for); revisit only if real use shows re-ignoring the same finding is
+  a genuine irritation.
 
 ## Routines — an accidental last tick is irreversible
 

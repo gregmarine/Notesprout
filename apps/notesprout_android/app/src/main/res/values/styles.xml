@@ -91,22 +91,24 @@
         <item name="android:paddingBottom">8dp</item>
     </style>
 
-    <!-- Toolbar icon button — 44dp square, bg_toolbar_button StateListDrawable,
-         10dp padding so the icon has breathing room. Selected state shows border. -->
+    <!-- Toolbar icon button — square tap target sized by @dimen/toolbar_button_size
+         (44dp under sw720dp, 62dp on tablets to match the Supernote native toolbar), padded so
+         the icon has breathing room. Selected state shows border. -->
     <style name="Widget.Notesprout.ToolbarButton" parent="">
-        <item name="android:layout_width">44dp</item>
-        <item name="android:layout_height">44dp</item>
+        <item name="android:layout_width">@dimen/toolbar_button_size</item>
+        <item name="android:layout_height">@dimen/toolbar_button_size</item>
         <item name="android:background">@drawable/bg_toolbar_button</item>
-        <item name="android:padding">10dp</item>
+        <item name="android:padding">@dimen/toolbar_button_padding</item>
         <item name="android:scaleType">fitCenter</item>
         <item name="android:stateListAnimator">@null</item>
     </style>
 
     <!-- Selectable text toggle button — bg_toolbar_button selector (border on selected),
-         44dp tall, wrap-width text. Used by the Before/After move/copy toggle in the page index. -->
+         toolbar-button height, wrap-width text. Used by the Before/After move/copy toggle in the
+         page index. -->
     <style name="Widget.Notesprout.ToggleTextButton" parent="">
         <item name="android:layout_width">wrap_content</item>
-        <item name="android:layout_height">44dp</item>
+        <item name="android:layout_height">@dimen/toolbar_button_size</item>
         <item name="android:background">@drawable/bg_toolbar_button</item>
         <item name="android:textColor">@color/inkBlack</item>
         <item name="android:textSize">14sp</item>
@@ -124,7 +126,7 @@
     <style name="Widget.Notesprout.OptionRow" parent="">
         <item name="android:layout_width">match_parent</item>
         <item name="android:layout_height">wrap_content</item>
-        <item name="android:minHeight">44dp</item>
+        <item name="android:minHeight">@dimen/toolbar_button_size</item>
         <item name="android:background">@drawable/bg_toolbar_button</item>
         <item name="android:gravity">center_vertical</item>
         <item name="android:textColor">@color/inkBlack</item>
@@ -151,7 +153,7 @@
     <style name="Widget.Notesprout.OptionCheck" parent="">
         <item name="android:layout_width">match_parent</item>
         <item name="android:layout_height">wrap_content</item>
-        <item name="android:minHeight">44dp</item>
+        <item name="android:minHeight">@dimen/toolbar_button_size</item>
         <item name="android:buttonTint">@color/inkBlack</item>
         <item name="android:textColor">@color/inkBlack</item>
         <item name="android:textSize">15sp</item>

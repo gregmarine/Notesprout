@@ -79,25 +79,37 @@ object RecentsManager {
      * Resolve the stored entries against the index into display-ready [ResolvedRecent] models,
      * newest-first. Any entry whose notebook is missing or soft-deleted is skipped and pruned
      * from the store in a single write (self-healing). Runs on [Dispatchers.IO].
+     *
+     * [exclude] drops entries before they are looked up and [limit] caps the *valid* results —
+     * the Today dashboard's shape (skip today's own rows, top up to ten) — so a caller that shows
+     * a few rows doesn't pay an index read for all twenty. Excluded ids are not health-checked;
+     * they were just resolved by whoever produced the exclusion set.
      */
-    suspend fun resolve(context: Context): List<ResolvedRecent> = withContext(Dispatchers.IO) {
-        val entries = load(context)
+    suspend fun resolve(
+        context: Context,
+        exclude: Set<String> = emptySet(),
+        limit: Int = Int.MAX_VALUE,
+    ): List<ResolvedRecent> = withContext(Dispatchers.IO) {
+        val entries = load(context).filter { it.notebookId !in exclude }
         if (entries.isEmpty()) return@withContext emptyList()
 
         val repo = IndexRepository(NotesproutIndex.dao())
         val allFolders = repo.getAllFolders()
+        // One blob-free batch read for every remaining entry (twenty ids at most) instead of a
+        // full-row fetch — cover blob included — per entry.
+        val summaries = repo.getObjectSummaries(entries.map { it.notebookId }).associateBy { it.id }
         val missing = mutableListOf<String>()
 
         val resolved = entries.mapNotNull { entry ->
-            val entity = repo.getNotebook(entry.notebookId)
-            if (entity == null || entity.deletedAt != null || entity.type != ObjectType.NOTEBOOK) {
+            val s = summaries[entry.notebookId]
+            if (s == null || s.deletedAt != null || s.type != ObjectType.NOTEBOOK) {
                 missing.add(entry.notebookId)
                 null
             } else {
                 ResolvedRecent(
-                    notebookId   = entity.id,
-                    notebookName = entity.name,
-                    folderPath   = buildFolderPath(entity.parentId, allFolders),
+                    notebookId   = s.id,
+                    notebookName = s.name,
+                    folderPath   = buildFolderPath(s.parentId, allFolders),
                     timestamp    = entry.timestamp,
                 )
             }
@@ -107,7 +119,7 @@ object RecentsManager {
             // Re-load before pruning so a concurrent open/close isn't clobbered.
             persist(context, load(context).filter { it.notebookId !in missing })
         }
-        resolved
+        resolved.take(limit)
     }
 
     /** Full breadcrumb for [parentId], e.g. `"Notebooks › A › B"` (root → `"Notebooks"`). */

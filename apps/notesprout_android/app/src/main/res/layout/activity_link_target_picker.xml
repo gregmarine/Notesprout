@@ -18,7 +18,7 @@
     <LinearLayout
         android:id="@+id/topBar"
         android:layout_width="match_parent"
-        android:layout_height="56dp"
+        android:layout_height="@dimen/toolbar_bar_thickness"
         android:background="@drawable/toolbar_background"
         android:gravity="center_vertical"
         android:orientation="horizontal"
@@ -70,7 +70,7 @@
         <androidx.appcompat.widget.AppCompatButton
             android:id="@+id/btnConfirm"
             android:layout_width="wrap_content"
-            android:layout_height="40dp"
+            android:layout_height="@dimen/toolbar_button_size"
             android:layout_marginEnd="8dp"
             android:background="@drawable/bg_toolbar_button"
             android:minWidth="72dp"
@@ -113,7 +113,7 @@
             <androidx.appcompat.widget.AppCompatButton
                 android:id="@+id/btnChromeUnderline"
                 android:layout_width="0dp"
-                android:layout_height="36dp"
+                android:layout_height="@dimen/toolbar_button_size"
                 android:layout_weight="1"
                 android:background="@drawable/bg_toolbar_button"
                 android:text="Underline"
@@ -128,7 +128,7 @@
             <androidx.appcompat.widget.AppCompatButton
                 android:id="@+id/btnChromeBox"
                 android:layout_width="0dp"
-                android:layout_height="36dp"
+                android:layout_height="@dimen/toolbar_button_size"
                 android:layout_weight="1"
                 android:background="@drawable/bg_toolbar_button"
                 android:text="Box"
@@ -143,7 +143,7 @@
             <androidx.appcompat.widget.AppCompatButton
                 android:id="@+id/btnChromeNone"
                 android:layout_width="0dp"
-                android:layout_height="36dp"
+                android:layout_height="@dimen/toolbar_button_size"
                 android:layout_weight="1"
                 android:background="@drawable/bg_toolbar_button"
                 android:text="None"
@@ -231,7 +231,7 @@
             <androidx.appcompat.widget.AppCompatButton
                 android:id="@+id/btnTargetCurrent"
                 android:layout_width="0dp"
-                android:layout_height="36dp"
+                android:layout_height="@dimen/toolbar_button_size"
                 android:layout_weight="1"
                 android:background="@drawable/bg_toolbar_button"
                 android:text="This notebook"
@@ -246,7 +246,7 @@
             <androidx.appcompat.widget.AppCompatButton
                 android:id="@+id/btnTargetOther"
                 android:layout_width="0dp"
-                android:layout_height="36dp"
+                android:layout_height="@dimen/toolbar_button_size"
                 android:layout_weight="1"
                 android:background="@drawable/bg_toolbar_button"
                 android:text="Other notebook"
@@ -270,7 +270,7 @@
             <androidx.appcompat.widget.AppCompatButton
                 android:id="@+id/btnKindNotebook"
                 android:layout_width="0dp"
-                android:layout_height="36dp"
+                android:layout_height="@dimen/toolbar_button_size"
                 android:layout_weight="1"
                 android:background="@drawable/bg_toolbar_button"
                 android:text="Notebook"
@@ -285,7 +285,7 @@
             <androidx.appcompat.widget.AppCompatButton
                 android:id="@+id/btnKindPage"
                 android:layout_width="0dp"
-                android:layout_height="36dp"
+                android:layout_height="@dimen/toolbar_button_size"
                 android:layout_weight="1"
                 android:background="@drawable/bg_toolbar_button"
                 android:text="Page"
@@ -304,7 +304,7 @@
     <LinearLayout
         android:id="@+id/otherBrowseBar"
         android:layout_width="match_parent"
-        android:layout_height="48dp"
+        android:layout_height="@dimen/toolbar_bar_thickness"
         android:background="@drawable/toolbar_background"
         android:gravity="center_vertical"
         android:orientation="horizontal"

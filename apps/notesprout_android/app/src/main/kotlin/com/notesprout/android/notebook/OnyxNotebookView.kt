@@ -126,6 +126,11 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
     /** Template bitmap — drawn as the base layer behind all strokes. Null = white background. */
     private var templateBitmap: Bitmap? = null
 
+    /** The page-coordinate rect the template paints into (the page's stored size — see
+     *  [NotebookView.setTemplatePageSize]). 0 = unknown → stretch to the view. */
+    private var templatePageWidth = 0
+    private var templatePageHeight = 0
+
     /**
      * Shared paint for every stroke draw. Its colour is **not** fixed — [drawStrokePath] sets it per
      * stroke from that stroke's own stored ink. Anything drawing a stroke must go through that
@@ -819,7 +824,7 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
     private fun drawCommittedContent(canvas: Canvas) {
         canvas.drawColor(Color.WHITE)
         templateBitmap?.let { tb ->
-            canvas.drawBitmap(tb, null, RectF(0f, 0f, width.toFloat(), height.toFloat()), null)
+            canvas.drawBitmap(tb, null, templateDestRect(), null)
         }
         for (heading in headings) {
             if (heading.recognizedText != null) {
@@ -2257,6 +2262,17 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
         }
     }
 
+    override fun setTemplatePageSize(width: Int, height: Int) {
+        templatePageWidth = width
+        templatePageHeight = height
+    }
+
+    /** Dest rect for the template: the page's stored rect when known, else the full view. */
+    private fun templateDestRect(): RectF =
+        if (templatePageWidth > 0 && templatePageHeight > 0)
+            RectF(0f, 0f, templatePageWidth.toFloat(), templatePageHeight.toFloat())
+        else RectF(0f, 0f, width.toFloat(), height.toFloat())
+
     /**
      * Clear in-memory content for a page navigation with NO EPD refresh: the current page stays
      * visible on the panel (the committed node is left intact) until the incoming page's
@@ -2392,7 +2408,7 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
         val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
         val canvas = android.graphics.Canvas(bmp)
         canvas.drawColor(android.graphics.Color.WHITE)
-        templateBitmap?.let { canvas.drawBitmap(it, null, RectF(0f, 0f, w.toFloat(), h.toFloat()), null) }
+        templateBitmap?.let { canvas.drawBitmap(it, null, templateDestRect(), null) }
         for (heading in headings) {
             if (heading.recognizedText != null) {
                 drawHeadingText(canvas, heading)
@@ -2485,7 +2501,7 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
         val snapshotCanvas = Canvas(bmp)
         snapshotCanvas.drawColor(Color.WHITE)
         templateBitmap?.let { tb ->
-            snapshotCanvas.drawBitmap(tb, null, RectF(0f, 0f, w.toFloat(), h.toFloat()), null)
+            snapshotCanvas.drawBitmap(tb, null, templateDestRect(), null)
         }
         for (heading in headings) {
             if (heading.recognizedText != null) {

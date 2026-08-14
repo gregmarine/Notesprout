@@ -16,6 +16,7 @@ object DocumentPreferences {
     private const val PREFS_NAME = "notesprout_document_prefs"
     private const val KEY_TEXT_SIZE = "text_size_sp"
     private const val KEY_CARETS = "caret_offsets"
+    private const val KEY_PROOFREAD = "proofread_enabled"
 
     /**
      * How many pages' caret positions to remember. Old entries fall off the front, so the store cannot
@@ -51,6 +52,20 @@ object DocumentPreferences {
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             .edit()
             .putFloat(KEY_TEXT_SIZE, sizeSp)
+            .apply()
+    }
+
+    // ── Proofread ─────────────────────────────────────────────────────────────
+
+    /** Whether the editor's proofread pass runs. Global like text size, and on by default. */
+    fun proofreadEnabled(context: Context): Boolean =
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .getBoolean(KEY_PROOFREAD, true)
+
+    fun saveProofreadEnabled(context: Context, enabled: Boolean) {
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .putBoolean(KEY_PROOFREAD, enabled)
             .apply()
     }
 

@@ -6,6 +6,7 @@ import android.graphics.BitmapFactory
 import android.net.Uri
 import android.provider.DocumentsContract
 import android.util.Base64
+import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.FileProvider
@@ -15,6 +16,9 @@ import com.notesprout.android.TemplateBrowserActivity
 import com.notesprout.android.core.ImageCodec
 import com.notesprout.android.core.Slog
 import com.notesprout.android.data.PageRef
+import com.notesprout.android.data.backup.DriveApiClient
+import com.notesprout.android.data.backup.DriveAuth
+import com.notesprout.android.data.backup.ROOT_EXPORT_FOLDER
 import com.notesprout.android.data.index.IndexRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -110,6 +114,8 @@ class ExportDelivery(
 
             ExportDestination.SHARE -> share(spec, files)
 
+            ExportDestination.DRIVE -> uploadToDrive(spec, files)
+
             ExportDestination.TEMPLATE -> pickTemplateFolder.launch(
                 Intent(activity, TemplateBrowserActivity::class.java)
                     .putExtra(TemplateBrowserActivity.EXTRA_MODE, TemplateBrowserActivity.MODE_PICK_FOLDER)
@@ -165,6 +171,49 @@ class ExportDelivery(
         }
         Slog.d(TAG) { "writeFilesToTree: wrote $written of ${files.size}" }
         return written
+    }
+
+    // ── Google Drive ─────────────────────────────────────────────────────────
+
+    /**
+     * Upload [files] into "Notesprout Exports" / [ExportSpec.drivePath] on the connected Drive.
+     * The folder chain is find-or-created here, at upload time — matching the picker's contract
+     * that browsing (and cancelling) creates nothing remotely. A failure keeps the export screen
+     * open via [onCancelled] so the user can retry without re-rendering; the finished files stay
+     * in the export cache until the next export wipes it.
+     */
+    private fun uploadToDrive(spec: ExportSpec, files: List<File>) {
+        activity.lifecycleScope.launch {
+            val error = withContext(Dispatchers.IO) {
+                when (val t = DriveAuth.getAccessTokenSilent(activity)) {
+                    is DriveAuth.TokenResult.Error -> t.message
+                    is DriveAuth.TokenResult.Token -> {
+                        val client = DriveApiClient(t.accessToken)
+                        var folderId = client.ensureFolder(ROOT_EXPORT_FOLDER, "root")
+                        for (segment in spec.drivePath) {
+                            folderId = folderId?.let { client.ensureFolder(segment, it) }
+                        }
+                        if (folderId == null) {
+                            "Couldn't open the Drive folder."
+                        } else {
+                            val failed = files.count { !client.uploadOrReplace(it.name, folderId, it) }
+                            if (failed == 0) null
+                            else "$failed of ${files.size} file${if (files.size == 1) "" else "s"} didn't upload."
+                        }
+                    }
+                }
+            }
+            if (error == null) {
+                val where = (listOf(ROOT_EXPORT_FOLDER) + spec.drivePath).joinToString(" / ")
+                onFinished(
+                    if (files.size == 1) "Uploaded ${files.first().name} to $where"
+                    else "Uploaded ${files.size} files to $where"
+                )
+            } else {
+                Toast.makeText(activity, "Google Drive upload failed: $error", Toast.LENGTH_LONG).show()
+                onCancelled()
+            }
+        }
     }
 
     // ── Share ────────────────────────────────────────────────────────────────

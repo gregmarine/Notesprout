@@ -100,6 +100,21 @@ interface NotebookView {
     fun setTemplate(bitmap: Bitmap?) {}
 
     /**
+     * Set the page-coordinate rect the template paints into: the page's stored size from its
+     * `boundingBox`, i.e. the screen size of the device the page was created on. Page content is
+     * anchored to the top-left in absolute page coordinates, so the template must fill this rect —
+     * not the view — for ink and template to stay aligned when a backup is restored onto a
+     * different-size screen (the export renderer already draws the template into the page rect).
+     * On the creating device the page rect equals the view rect, so nothing changes there.
+     *
+     * Sticky until the next call: the notebook host sets it on every page display, and every later
+     * template swap on that page ([setTemplate], [loadStrokesWithBitmap]) keeps using it. Pass 0×0 when the page's
+     * size is unknown — the template then stretches to the view (legacy behavior, and the standing
+     * behavior for hosts that never call this: calendar / day-note canvases).
+     */
+    fun setTemplatePageSize(width: Int, height: Int) {}
+
+    /**
      * Called by the activity when a stroke is erased in memory.
      * Receives the UUID of the erased stroke so the activity can soft-delete its DB row.
      * Set this before the first user interaction; null by default.

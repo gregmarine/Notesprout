@@ -23,13 +23,33 @@ private val lenientJson = Json { ignoreUnknownKeys = true }
 // Notebook flag bits packed into ObjectEntity.flags.
 private const val FLAG_ENCRYPTED = 1
 private const val FLAG_EXCLUDE_BACKUP = 2
+private const val FLAG_TEXT_DOCUMENT = 4
 
-private fun flagsOf(encrypted: Boolean, excludeFromBackup: Boolean): Int =
-    (if (encrypted) FLAG_ENCRYPTED else 0) or (if (excludeFromBackup) FLAG_EXCLUDE_BACKUP else 0)
+private fun flagsOf(encrypted: Boolean, excludeFromBackup: Boolean, textDocument: Boolean): Int =
+    (if (encrypted) FLAG_ENCRYPTED else 0) or
+        (if (excludeFromBackup) FLAG_EXCLUDE_BACKUP else 0) or
+        (if (textDocument) FLAG_TEXT_DOCUMENT else 0)
+
+/**
+ * True when a **columnar** summary row is a text document (opens into the document editor).
+ * Always false on a legacy row — text documents postdate the columnar migration, so no legacy
+ * JSON row can carry the flag.
+ */
+fun ObjectSummary.columnarTextDocument(): Boolean =
+    ((flags ?: 0) and FLAG_TEXT_DOCUMENT) != 0
 
 // ── Notebook ─────────────────────────────────────────────────────────────────
 // The cover snapshot (base64 in the legacy JSON) becomes the binary blob; everything else is a scalar
 // column. Leak hygiene is unchanged — callers still gate the snapshot on `encrypted` before storing it.
+
+/**
+ * The lock state from a **columnar** summary's scalar columns alone: encrypted with anything but
+ * GLOBAL scope (an unknown scope string stays locked, matching [notebookMeta]'s null-on-invalid).
+ * Meaningless on a [ObjectSummary.legacy] row — the truth is in its JSON; callers fall back to a
+ * full read there.
+ */
+fun ObjectSummary.columnarLocked(): Boolean =
+    ((flags ?: 0) and FLAG_ENCRYPTED) != 0 && keyScope != KeyScope.GLOBAL.name
 
 /** Read a notebook row's metadata: typed columns when columnar (`data == ""`), else legacy JSON. */
 fun ObjectEntity.notebookMeta(): NotebookObject =
@@ -41,6 +61,7 @@ fun ObjectEntity.notebookMeta(): NotebookObject =
         excludeFromBackup = ((flags ?: 0) and FLAG_EXCLUDE_BACKUP) != 0,
         lastBackedUpLocal = lastBackedUpLocal,
         lastBackedUpDrive = lastBackedUpDrive,
+        textDocument = ((flags ?: 0) and FLAG_TEXT_DOCUMENT) != 0,
     ) else lenientJson.decodeFromString(NotebookObject.serializer(), data)
 
 /**
@@ -50,7 +71,7 @@ fun ObjectEntity.notebookMeta(): NotebookObject =
 fun ObjectEntity.withNotebookMeta(meta: NotebookObject): ObjectEntity = copy(
     data = "",
     pageCount = meta.pageCount,
-    flags = flagsOf(meta.encrypted, meta.excludeFromBackup),
+    flags = flagsOf(meta.encrypted, meta.excludeFromBackup, meta.textDocument),
     keyScope = meta.keyScope?.name,
     lastBackedUpLocal = meta.lastBackedUpLocal,
     lastBackedUpDrive = meta.lastBackedUpDrive,

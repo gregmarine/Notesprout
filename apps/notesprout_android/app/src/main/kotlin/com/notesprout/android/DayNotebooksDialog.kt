@@ -70,11 +70,15 @@ object DayNotebooksDialog {
             for (entry in entries) {
                 rows.addView(notebookRow(activity, entry) {
                     dlg.dismiss()
-                    activity.startActivity(
-                        Intent(activity, NotebookActivity::class.java)
-                            .putExtra(NotebookActivity.EXTRA_NOTEBOOK_ID, entry.notebookId)
-                            .putExtra(NotebookActivity.EXTRA_NOTEBOOK_NAME, entry.notebookName)
-                    )
+                    // Tap-time "Opening…" overlay on the host activity; the destination keeps it
+                    // up until its first page renders.
+                    com.notesprout.android.core.OpeningOverlay.showThen(activity) {
+                        activity.startActivity(
+                            Intent(activity, NotebookActivity::class.java)
+                                .putExtra(NotebookActivity.EXTRA_NOTEBOOK_ID, entry.notebookId)
+                                .putExtra(NotebookActivity.EXTRA_NOTEBOOK_NAME, entry.notebookName)
+                        )
+                    }
                 })
             }
         }

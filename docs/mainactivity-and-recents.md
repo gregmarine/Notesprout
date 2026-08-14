@@ -65,14 +65,18 @@ Device dp = `px × 160 ÷ density`; all current BOOX devices report density 300,
 ## Notebook & Folder Management
 
 - **New Notebook** is a full-screen flow, not an AlertDialog: `btnNewNotebook` launches
-  `TemplateBrowserActivity` in `MODE_PICK` + `EXTRA_COLLECT_NAME=true` + `EXTRA_TITLE="New Notebook"` +
+  `TemplateBrowserActivity` in `MODE_PICK` + `EXTRA_COLLECT_NAME=true` + `EXTRA_TITLE="New"` +
   `EXTRA_TARGET_PARENT_ID=currentParentId`. The browser shows a name field (pre-filled with a
-  `YYYYMMDD_HHmmss` timestamp, editable), the template grid (Blank default-selected), and a **CREATE**
-  button. Name validation: whitelist `[^a-zA-Z0-9_\-. ]`, reject `.`/`..`, non-empty — *format* checked
+  `YYYYMMDD_HHmmss` timestamp, editable), a **type radio (Notebook / Text document)**, the encryption
+  scope radios, the template grid (Blank default-selected), and a **CREATE** button. Name validation:
+  whitelist `[^a-zA-Z0-9_\-. ]`, reject `.`/`..`, non-empty — *format* checked
   in the browser, *duplicate-in-target-folder* checked inside `confirmCreate` (suspend, on IO, via
   `EXTRA_TARGET_PARENT_ID`); a collision Toasts and keeps the user on the screen. `MainActivity` retains
-  a post-result dup check as a harmless safety net. On result, `createNotebook(name, libraryTemplateId)`
-  seeds the first page's template (see Templates below).
+  a post-result dup check as a harmless safety net. On result, `createNotebook(name, libraryTemplateId,
+  scope, textDocument)` seeds the first page's template (see Templates below). A **Text document** is
+  the same bootstrap flagged to open into the document editor — the chosen template still applies to
+  the pages underneath; its card shows the document's opening lines over an `ic_file_text` glyph
+  (see [`documents.md`](documents.md) § Text documents).
 - **Move:** index update only — `.soil` file stays at `Garden/<id>.soil` (UUID unchanged).
 - **Rename:** index update only via `repository.renameNotebook` / `renameFolder` (`.soil` file/UUID untouched, same as Move). Context-menu actions use `ic_edit` (Tabler `edit`): "Rename Notebook" after Move Notebook; "Rename Folder" between Move Folder and Delete. Dialog reuses `DialogNewNotebookBinding`, pre-filled with the current name (cursor at end). Notebook rename runs `validateNotebookName`; folder rename runs `validateFolderRename` — same whitelist + `.`/`..` reject, but duplicate check is against the folder's own `parentId` (not the current browse folder) and excludes itself. No-op when name is unchanged. After rename, `refreshActiveView()` re-renders the active mode (normal/search via `scanAndRender`, pinned, or recents).
 - **Copy notebook:** new `ObjectEntity` + copy `.soil` to new UUID path via `soilFile()`.
@@ -223,7 +227,7 @@ schema, continuous upkeep, and encrypted trade-off.
 
 Consumes a `.soil` produced by full-notebook export. Entry points:
 
-- **Overflow action "Import Notebook (.soil)"** — `importSoilLauncher` (`OpenDocument`, MIME `application/octet-stream` + `*/*`). Shows `startImportFromUri(uri)` with the system file picker.
+- **Overflow Import button** — now an `ActionSheetDialog`: **Notebook (.soil)** → `importSoilLauncher` (`OpenDocument`, MIME `application/octet-stream` + `*/*`) → `startImportFromUri(uri)`; **Text or Markdown…** → `importTextLauncher` → `importTextDocumentFromUri` — a new **text document** in the current folder (name deduped, ≤10 MB, content written as the notebook document during the create bootstrap, opened into the editor). `.md`/`.markdown`/`.txt` files and shared literal text arriving via the intent filters below take the same text path — detected by extension/MIME in `startImportFromUri` before the `.soil` probe.
 - **Open-with / Share-to intent filters** — `AndroidManifest.xml` registers three filters on `MainActivity` (`launchMode="singleTop"`):
   - `ACTION_VIEW` with `scheme=content`, `mimeType=application/octet-stream`
   - `ACTION_VIEW` with `scheme=file`, `mimeType=application/octet-stream` (legacy)
@@ -249,8 +253,10 @@ See [`docs/full-notebook-export.md`](full-notebook-export.md) for the `.soil` fo
 
 ## Page Index — Multi-Page Selection (`PageIndexActivity`)
 
-The page index is a paginated grid of page thumbnails (rendered on demand from page content for the
-visible pagination page — there is no stored per-page snapshot). Long-press enters **action mode**; the user can
+The page index is a paginated grid of page thumbnails (rendered on demand from page content — there
+is no stored per-page snapshot; a per-visit LRU + neighbour prefetch + raw-key fast open keep it
+quick, see the thumbnail section of [`docs/drawing-engine.md`](drawing-engine.md)). Long-press
+enters **action mode**; the user can
 then select any number of pages — across pagination — and apply every toolbar action to all of them at
 once. Calm/paper-like per `docs/design-system.md`: selection is shown with the existing card highlight
 (`bg_page_card_current`, 3dp inset border), no color, no Material chrome.
@@ -444,11 +450,14 @@ a **MainActivity recents browse mode** (notebook cards) and a **NotebookActivity
     `timestamp` descending (newest-first). `load()` is tolerant of malformed/absent JSON → empty.
   - `recordClose` is a no-op if the id is blank or not currently listed; `remove` backs the prune.
 - `ResolvedRecent(notebookId, notebookName, folderPath, timestamp)` — display model produced by
-  `RecentsManager.resolve(context)` (`suspend`, `Dispatchers.IO`). Resolves each stored entry
-  against the index; **skips and prunes** (single re-loaded write) any notebook that is missing,
-  soft-deleted, or not a `NOTEBOOK` — self-healing store. `folderPath` is the full breadcrumb
-  (`"Notebooks › A › B"`), matching the search/pinned convention; immediate parent is
-  `folderPath.substringAfterLast(" › ")`.
+  `RecentsManager.resolve(context, exclude, limit)` (`suspend`, `Dispatchers.IO`; both optional —
+  the defaults resolve everything, which is what this screen uses). Resolves the stored entries
+  against the index in **one blob-free `ObjectSummary` batch read** (never a full row per entry —
+  that dragged each cover blob out of the index); **skips and prunes** (single re-loaded write) any
+  notebook that is missing, soft-deleted, or not a `NOTEBOOK` — self-healing store. `exclude` drops
+  entries before lookup and `limit` caps the *valid* results — the Today dashboard's shape; excluded
+  ids are not health-checked. `folderPath` is the full breadcrumb (`"Notebooks › A › B"`), matching
+  the search/pinned convention; immediate parent is `folderPath.substringAfterLast(" › ")`.
 
 ### Record points (`NotebookActivity`)
 
@@ -468,6 +477,9 @@ a **MainActivity recents browse mode** (notebook cards) and a **NotebookActivity
   `getTimeFormat`), paginated over the resolved list; empty state "No recent notebooks".
 - **Tap → open** calls `launchNotebookActivity(entity)` directly (no mode-clearing). The recents mode
   stays active in both memory and prefs, so closing the notebook returns to the recents screen.
+  `launchNotebookActivity` (every library open) raises the tap-time "Opening…" overlay via
+  `OpeningOverlay.showThen` — see the overlay pattern in
+  [`design-system.md`](design-system.md) — on top of its 800ms double-tap debounce.
 - **Recents persistence:** `enterRecentsMode` saves `recentsMode=true` to `AppStateManager`;
   `exitRecentsMode` clears it. On cold launch, recents mode is restored via `applyRecentsModeUI()`.
 

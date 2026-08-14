@@ -51,6 +51,11 @@ class ToolbarOverflowManager(
      *  space. Null for edge-anchored placements. */
     private var leadingPinned: View? = null
 
+    /** A view pinned to the trailing edge, after the flexible Space but before the overflow
+     *  controls — the scratch pad's Send-to-Notebook button. Like [leadingPinned] it never moves to
+     *  the overflow menu; it just reserves main-axis space. */
+    private var trailingPinned: View? = null
+
     private var initialized = false
 
     // ── Public API ────────────────────────────────────────────────────────────
@@ -64,13 +69,23 @@ class ToolbarOverflowManager(
         initialized = false
     }
 
+    /**
+     * Set (or clear) the trailing-pinned view kept at the end of the bar, right-aligned by the
+     * flexible Space. Forces the next [recalc] to re-derive its state.
+     */
+    fun setTrailingPinned(view: View?) {
+        trailingPinned = view
+        initialized = false
+    }
+
     fun initialize() {
         if (initialized) return
         val moveable = mutableListOf<View>()
         var space: View? = null
         for (i in 0 until toolbar.childCount) {
             val child = toolbar.getChildAt(i)
-            if (child === dividerOverflow || child === btnOverflow || child === leadingPinned) continue
+            if (child === dividerOverflow || child === btnOverflow ||
+                child === leadingPinned || child === trailingPinned) continue
             val lp = child.layoutParams as? LinearLayout.LayoutParams
             if ((lp?.weight ?: 0f) > 0f) {
                 space = child
@@ -89,8 +104,10 @@ class ToolbarOverflowManager(
      */
     fun recalc() {
         if (!initialized) initialize()
-        // The leading-pinned drag handle (FLOAT) occupies main-axis space ahead of the buttons.
-        val available = mainAxisExtent() - (leadingPinned?.let { naturalSize(it) } ?: 0)
+        // Pinned views (FLOAT drag handle, trailing button) occupy main-axis space around the buttons.
+        val available = mainAxisExtent() -
+            (leadingPinned?.let { naturalSize(it) } ?: 0) -
+            (trailingPinned?.let { naturalSize(it) } ?: 0)
         if (available <= 0) return
 
         val overflowReserve = naturalSize(dividerOverflow) + naturalSize(btnOverflow)
@@ -158,10 +175,12 @@ class ToolbarOverflowManager(
         // Clear overflow row containers.
         overflowMenu.removeAllViews()
 
-        // Rebuild toolbar: [leadingPinned] [in-toolbar items] [Space] [dividerOverflow] [btnOverflow]
+        // Rebuild toolbar:
+        // [leadingPinned] [in-toolbar items] [Space] [trailingPinned] [dividerOverflow] [btnOverflow]
         leadingPinned?.let { (it.parent as? ViewGroup)?.removeView(it); toolbar.addView(it) }
         for (child in inToolbar) toolbar.addView(child)
         spaceView?.let { toolbar.addView(it) }
+        trailingPinned?.let { (it.parent as? ViewGroup)?.removeView(it); toolbar.addView(it) }
         toolbar.addView(dividerOverflow)
         toolbar.addView(btnOverflow)
 

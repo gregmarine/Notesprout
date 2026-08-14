@@ -115,7 +115,11 @@ hardcode a value or re-derive the inset:
 
 - `TopGuard.heightPx(context)` — the device's `status_bar_height`, read from the platform resource
   (24dp fallback). It resolves whether or not the bar is currently showing, so a top toolbar lands at
-  the same height on an immersive screen as it does in the library.
+  the same height on an immersive screen as it does in the library. **On Ratta (Supernote) it returns
+  0** — those devices have no pull-down status bar (apps get the full screen), so the hazard this band
+  exists for does not apply and every guard consumer collapses: chrome sits flush at the top edge.
+  The live-inset screens need nothing there either — Ratta reports a 0 top inset, so
+  `applyInsetPadding` was already a no-op.
 - `TopGuard.applyInsetPadding(root)` — for screens that leave the system bars **visible**. Pads by
   the live `systemBars()` inset (MainActivity's long-standing behaviour).
 - `TopGuard.applyInsetPadding(root, followIme = true)` — same, but the bottom padding also clears the
@@ -148,7 +152,9 @@ Scope — **the guard applies to anything the user taps, not to drawing bounds:*
   popovers, overflow menus, and secondary toolbars.
 
 Chrome that starts below the top edge needs a **1dp inkBlack top border** of its own — otherwise it
-floats. See `toolbar_background_top/_left/_right.xml` and `shape_toc_panel_border.xml`.
+floats. See `toolbar_background_top/_left/_right.xml` and `shape_toc_panel_border.xml`. (On Ratta the
+guard is 0 and these borders land on the physical top edge — intentional, invisible against the bezel,
+and still needed on BOOX.)
 
 Watch for layouts that shrink a canvas as a side effect: in a vertical `LinearLayout` root, root
 padding pushes the toolbar down *and* shortens everything below it. Prefer the `NotebookActivity`
@@ -171,3 +177,30 @@ equal to the stroke width (2dp) so the border isn't covered.
 - On some BOOX devices the IME does not auto-dismiss on dialog close. Always explicitly hide in button click handlers — **not** `setOnDismissListener`.
 - Use `imm.hideSoftInputFromWindow(editText.windowToken, 0)` while the dialog is still alive. `setNegativeButton("Cancel", null)` must become a real listener that also hides the IME.
 - Never use the activity's `window.decorView.windowToken` — the IME is bound to the dialog's window and ignores hide requests from the wrong token.
+
+**"Opening…" overlay — every notebook open shows one, from the tap itself:**
+
+Opening a notebook is the app's one slow navigation (seal the old file, relaunch, open the `.soil`,
+load the first page — most noticeable on Supernote), so it gets progress feedback nothing else does:
+a centered "Opening…" box (`layout/overlay_opening.xml` — `shape_dialog_bordered`, 2dp, floating
+per the border-weight rule above) inside a full-screen **transparent** touch shield, floating over
+whatever is on screen so only the box region repaints. Page flips and same-notebook link navigation
+never show it.
+
+- **Both ends show the same overlay.** The *source* screen raises it the moment the open is
+  requested — `core/OpeningOverlay.showThen(activity) { launch }` at every launch site (library,
+  Today, day-window lists/dialog, calendar hand-offs, and `NotebookActivity`'s own link-follow,
+  back-swipe, recents-switch, and page-index-open paths). The *destination* `NotebookActivity` shows
+  its own copy (`binding.openingOverlay`, an `<include>` of the same layout) from its first frame
+  until the first page renders (`loadStrokes` hides it; `failOpen` on error), reading as one
+  continuous indicator from tap to page.
+- **The frame-commit contract is the whole point.** `showThen` waits for the overlay's pre-draw and
+  only then posts the launch work. Setting the view visible and continuing in a coroutine does NOT
+  work: Android's `Dispatchers.Main` is an **async** handler, and its resumptions jump the view
+  traversal's sync barrier — the teardown (cover snapshot, seal, relaunch) runs before the overlay
+  ever reaches the screen. Any "show feedback, then do heavy main-thread work" flow must sequence
+  through `showThen` (or an equivalent pre-draw + `post` chain).
+- The invisible full-screen shield swallows all touches while visible — the double-tap a slow e-ink
+  refresh invites cannot hit the source screen twice. `OpeningOverlay` auto-hides on the next
+  resume-after-pause for hosts that stay on the back stack; aborted launches call
+  `OpeningOverlay.hide()` explicitly.

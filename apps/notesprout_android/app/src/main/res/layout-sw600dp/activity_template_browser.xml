@@ -16,7 +16,7 @@
     <LinearLayout
         android:id="@+id/topBar"
         android:layout_width="match_parent"
-        android:layout_height="56dp"
+        android:layout_height="@dimen/toolbar_bar_thickness"
         android:background="@drawable/toolbar_background"
         android:gravity="center_vertical"
         android:orientation="horizontal"
@@ -49,7 +49,7 @@
     <LinearLayout
         android:id="@+id/collectNameBar"
         android:layout_width="match_parent"
-        android:layout_height="56dp"
+        android:layout_height="@dimen/toolbar_bar_thickness"
         android:background="@drawable/toolbar_background"
         android:gravity="center_vertical"
         android:orientation="horizontal"
@@ -130,11 +130,59 @@
 
     </LinearLayout>
 
+
+    <!-- Collect-type bar: shown in PICK+collectName mode to choose what is being created — a
+         notebook (handwriting-first) or a text document (typed Markdown; opens straight into the
+         document editor — see docs/documents.md § Text documents). -->
+    <LinearLayout
+        android:id="@+id/collectTypeBar"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@drawable/toolbar_background"
+        android:orientation="vertical"
+        android:paddingStart="16dp"
+        android:paddingEnd="16dp"
+        android:paddingTop="6dp"
+        android:paddingBottom="6dp"
+        android:visibility="gone">
+
+        <RadioGroup
+            android:id="@+id/typeRadioGroup"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
+
+            <RadioButton
+                android:id="@+id/radioTypeNotebook"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginEnd="24dp"
+                android:checked="true"
+                android:text="Notebook"
+                android:textColor="@color/inkBlack"
+                android:textSize="16sp"
+                android:paddingTop="4dp"
+                android:paddingBottom="4dp" />
+
+            <RadioButton
+                android:id="@+id/radioTypeTextDocument"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Text document"
+                android:textColor="@color/inkBlack"
+                android:textSize="16sp"
+                android:paddingTop="4dp"
+                android:paddingBottom="4dp" />
+
+        </RadioGroup>
+
+    </LinearLayout>
+
     <!-- Breadcrumb bar: back + scrollable breadcrumb. 1dp inkBlack bottom border via toolbar_background. -->
     <LinearLayout
         android:id="@+id/breadcrumbBar"
         android:layout_width="match_parent"
-        android:layout_height="48dp"
+        android:layout_height="@dimen/toolbar_bar_thickness"
         android:background="@drawable/toolbar_background"
         android:gravity="center_vertical"
         android:orientation="horizontal"
@@ -203,7 +251,7 @@
     <LinearLayout
         android:id="@+id/pickerToolbar"
         android:layout_width="match_parent"
-        android:layout_height="48dp"
+        android:layout_height="@dimen/toolbar_bar_thickness"
         android:background="@color/paperWhite"
         android:gravity="center_vertical"
         android:orientation="horizontal"
@@ -261,7 +309,7 @@
     <LinearLayout
         android:id="@+id/pinnedToolbar"
         android:layout_width="match_parent"
-        android:layout_height="48dp"
+        android:layout_height="@dimen/toolbar_bar_thickness"
         android:background="@color/paperWhite"
         android:gravity="center_vertical"
         android:orientation="horizontal"
@@ -298,7 +346,7 @@
     <LinearLayout
         android:id="@+id/recentsToolbar"
         android:layout_width="match_parent"
-        android:layout_height="48dp"
+        android:layout_height="@dimen/toolbar_bar_thickness"
         android:background="@color/paperWhite"
         android:gravity="center_vertical"
         android:orientation="horizontal"
@@ -343,7 +391,7 @@
     <RelativeLayout
         android:id="@+id/bottomBar"
         android:layout_width="match_parent"
-        android:layout_height="56dp"
+        android:layout_height="@dimen/toolbar_bar_thickness"
         android:background="@color/paperWhite">
 
         <View

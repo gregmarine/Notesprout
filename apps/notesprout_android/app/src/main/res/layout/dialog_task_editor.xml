@@ -62,10 +62,10 @@
 
             <androidx.appcompat.widget.AppCompatImageButton
                 android:id="@+id/btnTaskDueClear"
-                android:layout_width="40dp"
-                android:layout_height="40dp"
+                android:layout_width="@dimen/toolbar_button_size"
+                android:layout_height="@dimen/toolbar_button_size"
                 android:layout_marginStart="4dp"
-                android:padding="10dp"
+                android:padding="@dimen/toolbar_button_padding"
                 android:background="@android:color/transparent"
                 android:scaleType="fitCenter"
                 android:stateListAnimator="@null"

@@ -3,15 +3,22 @@ package com.notesprout.android
 import android.content.Context
 import android.content.Intent
 import android.content.res.Configuration
+import android.graphics.Canvas
+import android.graphics.DashPathEffect
+import android.graphics.Paint
 import android.graphics.Typeface
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.text.InputType
+import android.text.Layout
+import android.text.Spanned
 import android.util.TypedValue
 import android.view.Gravity
+import android.view.GestureDetector
 import android.view.InputDevice
 import android.view.KeyEvent
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.inputmethod.EditorInfo
@@ -20,15 +27,19 @@ import android.view.inputmethod.InputMethodManager
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.Toast
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.AppCompatButton
 import androidx.appcompat.widget.AppCompatEditText
 import androidx.appcompat.widget.AppCompatImageButton
 import androidx.appcompat.widget.AppCompatTextView
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.lifecycleScope
 import com.notesprout.android.core.DocumentPreferences
+import com.notesprout.android.core.IndexGuard
 import com.notesprout.android.core.Slog
 import com.notesprout.android.core.TopGuard
+import com.notesprout.android.core.isRattaDevice
 import com.notesprout.android.core.markdown.DocumentDraft
 import com.notesprout.android.core.markdown.EditableBuffer
 import com.notesprout.android.core.markdown.MarkdownFormatter
@@ -36,6 +47,7 @@ import com.notesprout.android.core.markdown.MarkdownParser
 import com.notesprout.android.core.markdown.MarkdownReflow
 import com.notesprout.android.core.markdown.MarkdownRenderer
 import com.notesprout.android.core.markdown.TextBuffer
+import com.notesprout.android.core.markdown.TextSearch
 import com.notesprout.android.notebook.ToolbarOverflowManager
 
 /**
@@ -68,16 +80,39 @@ class DocumentEditorActivity : AppCompatActivity() {
         /** The notebook this document belongs to — the header's title. */
         const val EXTRA_NOTEBOOK_NAME = "notebook_name"
 
+        /**
+         * True when the host notebook is a **text document** — the editor is its primary surface.
+         * The header gains a close-notebook control (seal → library) while in notebook-document
+         * mode, and ✓ Done's hint reads "Show pages". See docs/documents.md § Text documents.
+         */
+        const val EXTRA_TEXT_DOCUMENT = "text_document"
+
+        /**
+         * Result code for the close-notebook control: the host seals the `.soil` and finishes to
+         * the library instead of revealing the canvas. The text itself travels via
+         * [DocumentTransfer.live] and is written by the host's seal — never from the result path.
+         */
+        const val RESULT_CLOSE_NOTEBOOK = RESULT_FIRST_USER
+
         private const val STATE_TEXT = "doc_text"
         private const val STATE_PREVIEWING = "doc_previewing"
         private const val STATE_CARET = "doc_caret"
+        private const val STATE_NOTEBOOK = "doc_notebook"
 
         /** Pen-idle window before the text is written, matching RTR's own debounce. */
         private const val AUTOSAVE_DELAY_MS = 2000L
 
-        fun intent(context: Context, notebookName: String): Intent =
+        /**
+         * How long a page flip may take before the "Reading this page…" popup appears. A page with a
+         * document loads in well under this, so the popup shows only when the page actually has to be
+         * read — an instant flip must not flash a dialog on e-ink.
+         */
+        private const val READING_POPUP_DELAY_MS = 350L
+
+        fun intent(context: Context, notebookName: String, textDocument: Boolean = false): Intent =
             Intent(context, DocumentEditorActivity::class.java)
                 .putExtra(EXTRA_NOTEBOOK_NAME, notebookName)
+                .putExtra(EXTRA_TEXT_DOCUMENT, textDocument)
     }
 
     private lateinit var editor: MarkdownEditText
@@ -90,6 +125,10 @@ class DocumentEditorActivity : AppCompatActivity() {
     private lateinit var sourceText: AppCompatTextView
     private lateinit var titleText: AppCompatTextView
     private lateinit var pageText: AppCompatTextView
+    private lateinit var btnFlipPrev: AppCompatImageButton
+    private lateinit var btnFlipNext: AppCompatImageButton
+    private lateinit var btnScope: AppCompatImageButton
+    private lateinit var btnBringIn: AppCompatButton
 
     /** Source strip + rule + format bar + overflow panel: the writing chrome, shown and hidden together. */
     private lateinit var writingChrome: View
@@ -114,6 +153,18 @@ class DocumentEditorActivity : AppCompatActivity() {
     /** The notebook's name — the header title. */
     private var notebookName: String = ""
 
+    /** True when the host notebook is a text document — see [EXTRA_TEXT_DOCUMENT]. */
+    private var textDocument = false
+
+    /** The close-notebook control — text documents only, shown in notebook-document mode. */
+    private var btnCloseNotebook: AppCompatImageButton? = null
+
+    // ── Find & replace ────────────────────────────────────────────────────────
+    private lateinit var findBar: View
+    private lateinit var findField: AppCompatEditText
+    private lateinit var replaceField: AppCompatEditText
+    private lateinit var findCount: AppCompatTextView
+
     /** This page's place in the notebook ("4 / 12"), shown between the flip arrows. */
     private var pageLabel: String = ""
 
@@ -128,10 +179,46 @@ class DocumentEditorActivity : AppCompatActivity() {
     private var drafted = false
 
     /**
+     * True while the buffer holds the **notebook document** — the whole notebook's merged final
+     * draft — rather than one page's. Toggled by the header's scope button; page flips don't
+     * apply, the source strip speaks of pages-plural, and saves land on the notebook row.
+     */
+    private var notebookMode = false
+
+    /**
      * Set while the host is reading a page for us — a "bring in" or a page flip. Blocks a second
      * request from overlapping it and puts the strip into its reading state.
      */
     private var bringingIn = false
+
+    /**
+     * Set for the flip flavour of [bringingIn] only. While a flip is in flight the host is already
+     * writing to the incoming page but this buffer still shows the outgoing one, so [persist] must
+     * stay silent — see there.
+     */
+    private var flipInFlight = false
+
+    /**
+     * The modal "Reading this page…" — the same banner the notebook shows while seeding a page's
+     * document at open. Null while not shown.
+     */
+    private var readingDialog: AlertDialog? = null
+    private val readingPopup = Handler(Looper.getMainLooper())
+
+    /** What the popup should say when it (or its delayed post) fires — set before showing. */
+    private var readingMessage = "Reading this page…"
+
+    /**
+     * Offered as a Cancel button on the popup when set — only for the notebook-document merge,
+     * which may read every page in the notebook and is too long a run to be unescapable. A page
+     * read stays uncancelable, like the notebook's own open-time banner: recognition has no
+     * partial result to keep.
+     */
+    private var readingCancel: (() -> Unit)? = null
+    private val showReadingPopup = Runnable { showReadingDialog() }
+
+    /** The spell-checking layer — flags, debounce, popup. Thin by design; see ProofreadController. */
+    private lateinit var proofread: ProofreadController
 
     private val autosave = Handler(Looper.getMainLooper())
     private val autosaveTick = Runnable { persist() }
@@ -148,8 +235,13 @@ class DocumentEditorActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // The proofread user dictionary lives in the global index. In every normal launch the
+        // notebook host (itself guarded) already opened it; this fires only when Android rebuilds
+        // the task after a process kill — where the host is gone and nothing could save durably.
+        if (!IndexGuard.ready(this)) return
 
         notebookName = intent.getStringExtra(EXTRA_NOTEBOOK_NAME).orEmpty()
+        textDocument = intent.getBooleanExtra(EXTRA_TEXT_DOCUMENT, false)
         // Read before the views are built — both surfaces are sized from it.
         textSizeSp = DocumentPreferences.textSize(this)
 
@@ -175,9 +267,14 @@ class DocumentEditorActivity : AppCompatActivity() {
         drafted = session?.srcUpdatedAt != null
         hasPrev = session?.hasPrev == true
         hasNext = session?.hasNext == true
+        // The saved flag wins over the hand-off: a recreated editor prefers its own buffer, and
+        // the mode must match the text it goes with.
+        notebookMode = savedInstanceState?.getBoolean(STATE_NOTEBOOK)
+            ?: (session?.notebook == true)
         session?.pageLabel?.takeIf { it.isNotBlank() }?.let { pageLabel = it }
         updateTitle()
         updatePageLabel()
+        applyModeChrome()
         updateSourceStrip()
 
         // Overflow: work out what fits once the bar has a width, and again whenever that width changes
@@ -217,6 +314,17 @@ class DocumentEditorActivity : AppCompatActivity() {
             }
         })
 
+        // The proofread layer registers its own text watcher, so it comes after setText — the
+        // opening text is not an edit. Its first pass runs when the dictionary is ready.
+        // `.dict` rather than `.gz` (the content is gzip): AAPT silently *decompresses* any `.gz`
+        // asset and strips the extension from the APK, so the runtime name would not match the
+        // source tree — found the hard way on the Manta. An opaque extension ships byte-identical.
+        proofread = ProofreadController(editor, lifecycleScope) {
+            assets.open("proofread/en_82765.dict")
+        }
+        editor.onWordTap = { offset -> proofread.onTap(offset) }
+        proofread.start()
+
         if (savedInstanceState?.getBoolean(STATE_PREVIEWING) == true) setPreviewing(true)
 
         editor.requestFocus()
@@ -228,6 +336,7 @@ class DocumentEditorActivity : AppCompatActivity() {
         outState.putString(STATE_TEXT, currentText())
         outState.putBoolean(STATE_PREVIEWING, previewing)
         outState.putInt(STATE_CARET, editor.selectionEnd)
+        outState.putBoolean(STATE_NOTEBOOK, notebookMode)
     }
 
     override fun onResume() {
@@ -236,6 +345,8 @@ class DocumentEditorActivity : AppCompatActivity() {
         // "Reading this page…" and the button refusing forever.
         if (bringingIn && DocumentTransfer.host == null) {
             bringingIn = false
+            flipInFlight = false
+            dismissReadingDialog()
             updateSourceStrip()
         }
         applyKeyboardMode()
@@ -261,8 +372,11 @@ class DocumentEditorActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        if (IndexGuard.bounced(this)) { super.onDestroy(); return }
         super.onDestroy()
         autosave.removeCallbacks(autosaveTick)
+        dismissReadingDialog()
+        if (::proofread.isInitialized) proofread.dispose()
     }
 
     // ── Storage (always through the host — see DocumentTransfer) ──────────────
@@ -281,6 +395,12 @@ class DocumentEditorActivity : AppCompatActivity() {
      * is then the only place the text still exists.
      */
     private fun persist() {
+        // Mid-flip the host is already keyed to the incoming page while this buffer still holds the
+        // outgoing one — a save (or even a republish to `live`) here would land one page's text on
+        // another. The outgoing page was persisted as the flip began, so nothing the host was ever
+        // given is dropped; anything typed into the doomed buffer is discarded by the arriving
+        // session regardless.
+        if (flipInFlight) return
         autosave.removeCallbacks(autosaveTick)
         val text = currentText()
         val caret = editor.selectionEnd
@@ -304,6 +424,14 @@ class DocumentEditorActivity : AppCompatActivity() {
 
     private fun dp(v: Int): Int =
         TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, v.toFloat(), resources.displayMetrics).toInt()
+
+    // The shared icon-button tap target + glyph inset (44dp/10dp under sw720dp, 62dp/14dp on
+    // tablets) — the same dimens Widget.Notesprout.ToolbarButton uses, so this screen's bars
+    // match every XML toolbar in the app.
+    private val toolbarButtonSize: Int
+        get() = resources.getDimensionPixelSize(R.dimen.toolbar_button_size)
+    private val toolbarButtonInset: Int
+        get() = resources.getDimensionPixelSize(R.dimen.toolbar_button_padding)
 
     private fun buildUi(): View {
         val paper = ContextCompat.getColor(this, R.color.paperWhite)
@@ -334,6 +462,10 @@ class DocumentEditorActivity : AppCompatActivity() {
             addView(formatBar)
             // The overflow panel belongs to the chrome, so Preview takes it away with everything else.
             addView(buildOverflowMenu())
+            // Find & replace lives with the chrome too, so Preview takes it away — search is a
+            // writing act here, and replace certainly is.
+            findBar = buildFindBar(ink, light)
+            addView(findBar)
         }
         root.addView(writingChrome)
         root.addView(rule(ink))
@@ -392,12 +524,41 @@ class DocumentEditorActivity : AppCompatActivity() {
             setPadding(dp(16), dp(10), dp(16), dp(10))
         }
 
+        // Text documents get the notebook's own close control: seal → library, without ever
+        // touching the canvas. Upper LEFT — the app's standard back-button position — leading
+        // the title like every other screen's exit. The host writes the text from its seal (see
+        // documentLauncher), so persist-then-finish is enough here. Shown only in
+        // notebook-document mode (applyModeChrome): page mode has the flip cluster back, and a
+        // ninth control would push the header past the narrowest screens — Done still exits to
+        // the canvas there.
+        if (textDocument) {
+            btnCloseNotebook = headerIcon(R.drawable.ic_close, "Close notebook") {
+                persist()
+                hideIme()
+                setResult(RESULT_CLOSE_NOTEBOOK)
+                finish()
+            }.apply {
+                (layoutParams as LinearLayout.LayoutParams).apply {
+                    marginStart = 0
+                    marginEnd = dp(6)
+                }
+            }.also { header.addView(it) }
+        }
+
         titleText = AppCompatTextView(this).apply {
             setTextColor(ink)
             textSize = 18f
             isSingleLine = true
             ellipsize = android.text.TextUtils.TruncateAt.END
             layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+            // Text documents: the title IS the document's name — tap it to rename. Notebooks keep
+            // their rename in the library, where their name lives.
+            if (textDocument) {
+                setOnClickListener { promptRename() }
+                setOnLongClickListener {
+                    Toast.makeText(context, "Rename document", Toast.LENGTH_SHORT).show(); true
+                }
+            }
         }
         header.addView(titleText)
 
@@ -405,7 +566,8 @@ class DocumentEditorActivity : AppCompatActivity() {
         // text. The notebook follows along when this screen closes. Same chevrons the notebook uses for
         // its own page navigation, with the count between them — the number belongs to the control that
         // changes it, and reads as one unit: ‹ 4 / 12 ›
-        header.addView(headerIcon(R.drawable.ic_page_prev, "Previous page  ·  Ctrl+PgUp") { flipPage(-1) })
+        btnFlipPrev = headerIcon(R.drawable.ic_page_prev, "Previous page  ·  Ctrl+PgUp") { flipPage(-1) }
+        header.addView(btnFlipPrev)
         pageText = AppCompatTextView(this).apply {
             setTextColor(ink)
             textSize = 13f
@@ -415,7 +577,15 @@ class DocumentEditorActivity : AppCompatActivity() {
             setPadding(dp(2), 0, dp(2), 0)
         }
         header.addView(pageText)
-        header.addView(headerIcon(R.drawable.ic_page_next, "Next page  ·  Ctrl+PgDn") { flipPage(1) })
+        btnFlipNext = headerIcon(R.drawable.ic_page_next, "Next page  ·  Ctrl+PgDn") { flipPage(1) }
+        header.addView(btnFlipNext)
+
+        // The scope toggle: this page's document ↔ the notebook document (the merged final draft).
+        // It sits with the flip cluster because it is the same kind of control — it moves which
+        // document the buffer holds, not the text. In notebook mode the flip cluster hides (there
+        // is no "next page" of the notebook document), which hands back the width this took.
+        btnScope = headerIcon(R.drawable.ic_notebook, "Notebook document") { toggleScope() }
+        header.addView(btnScope)
 
         // Text size lives in the header rather than the writing chrome so it is still reachable in
         // Preview — reading size matters at least as much as writing size.
@@ -435,10 +605,12 @@ class DocumentEditorActivity : AppCompatActivity() {
         header.addView(btnPreview)
 
         // A check, not an X: everything is already saved, so this finishes rather than discards, and an
-        // X would promise a way out that does not exist. Keeps the bordered background that set the
-        // commit action apart when it was a word.
-        header.addView(headerIcon(R.drawable.ic_check, "Done") { persist(); hideIme(); finish() }.apply {
-            setBackgroundResource(R.drawable.shape_bordered)
+        // X would promise a way out that does not exist. bg_toolbar_button (the headerIcon default)
+        // shows its border only while pressed — a standing border read as a persistent state rather
+        // than a button. For a text document the check *reveals the pages* (the canvas behind this
+        // screen), so its hint says so.
+        val doneHint = if (textDocument) "Show pages" else "Done"
+        header.addView(headerIcon(R.drawable.ic_check, doneHint) { persist(); hideIme(); finish() }.apply {
             (layoutParams as LinearLayout.LayoutParams).marginStart = dp(8)
         })
 
@@ -474,11 +646,222 @@ class DocumentEditorActivity : AppCompatActivity() {
         strip.addView(stripButton(ink, "Reflow", "Join wrapped lines into paragraphs  ·  Ctrl+Shift+F") {
             reflowText()
         })
-        strip.addView(stripButton(ink, "Bring in", "Bring this page's text into the document") {
+        // "Bring in" in page mode, "Merge" in notebook mode — applyModeChrome relabels it.
+        btnBringIn = stripButton(ink, "Bring in", "Bring this page's text into the document") {
             promptBringIn()
-        })
+        }
+        strip.addView(btnBringIn)
 
         return strip
+    }
+
+    /**
+     * Point the chrome at the mode the buffer is in. Notebook mode hides the flip cluster — the
+     * notebook document has no neighbouring page — which hands back the width the scope toggle
+     * took, and relabels the toggle and the strip's action for the way back.
+     */
+    private fun applyModeChrome() {
+        val flips = if (notebookMode) View.GONE else View.VISIBLE
+        btnFlipPrev.visibility = flips
+        pageText.visibility = flips
+        btnFlipNext.visibility = flips
+        // Close-notebook only where the width freed by the hidden flip cluster pays for it.
+        btnCloseNotebook?.visibility = if (notebookMode) View.VISIBLE else View.GONE
+
+        btnScope.setImageResource(if (notebookMode) R.drawable.ic_file_text else R.drawable.ic_notebook)
+        val scopeHint = if (notebookMode) "Page document" else "Notebook document"
+        btnScope.contentDescription = scopeHint
+        btnScope.setOnLongClickListener { Toast.makeText(this, scopeHint, Toast.LENGTH_SHORT).show(); true }
+
+        btnBringIn.text = if (notebookMode) "Merge" else "Bring in"
+        val bringHint = if (notebookMode) "Merge the pages' text into this document"
+        else "Bring this page's text into the document"
+        btnBringIn.setOnLongClickListener { Toast.makeText(this, bringHint, Toast.LENGTH_SHORT).show(); true }
+    }
+
+    // ── Find & replace ────────────────────────────────────────────────────────
+
+    /**
+     * Two rows below the format bar, hidden until asked for (`Ctrl+F` or the bar's search tool):
+     * `[find][n of m][‹][›][✕]` over `[replace][Replace][All]`. No custom highlight spans — the
+     * current match is shown as the editor's own selection, which e-ink renders honestly — and
+     * matches are recomputed per action rather than live-painted. Replaces go through the
+     * `Editable`, the same route the format bar takes, so Ctrl+Z applies.
+     */
+    private fun buildFindBar(ink: Int, light: Int): View {
+        fun field(hintText: String): AppCompatEditText = AppCompatEditText(this).apply {
+            setBackgroundResource(R.drawable.shape_bordered)
+            setTextColor(ink)
+            setHintTextColor(light)
+            hint = hintText
+            isSingleLine = true
+            textSize = 14f
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+            imeOptions = EditorInfo.IME_ACTION_SEARCH or
+                EditorInfo.IME_FLAG_NO_FULLSCREEN or EditorInfo.IME_FLAG_NO_EXTRACT_UI
+            setPadding(dp(10), dp(6), dp(10), dp(6))
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+        }
+
+        val bar = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            visibility = View.GONE
+        }
+        bar.addView(rule(ink))
+
+        val findRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(12), dp(6), dp(8), dp(2))
+        }
+        findField = field("Find")
+        findRow.addView(findField)
+        findCount = AppCompatTextView(this).apply {
+            setTextColor(ink)
+            textSize = 12f
+            isSingleLine = true
+            gravity = Gravity.CENTER
+            minWidth = dp(48)
+            setPadding(dp(4), 0, dp(4), 0)
+        }
+        findRow.addView(findCount)
+        findRow.addView(headerIcon(R.drawable.ic_page_prev, "Previous match") { findStep(backwards = true) })
+        findRow.addView(headerIcon(R.drawable.ic_page_next, "Next match  ·  Enter") { findStep(backwards = false) })
+        findRow.addView(headerIcon(R.drawable.ic_close, "Close find") { closeFindBar() })
+        bar.addView(findRow)
+
+        val replaceRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(12), dp(2), dp(8), dp(6))
+        }
+        replaceField = field("Replace with")
+        replaceRow.addView(replaceField)
+        replaceRow.addView(stripButton(ink, "Replace", "Replace the current match, then find the next") {
+            replaceCurrent()
+        })
+        replaceRow.addView(stripButton(ink, "All", "Replace every match — one edit, one Ctrl+Z") {
+            replaceAllMatches()
+        })
+        bar.addView(replaceRow)
+
+        // Live count as the query is typed; Enter (search action) finds the next match.
+        findField.addTextChangedListener(object : android.text.TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) = Unit
+            override fun onTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) = Unit
+            override fun afterTextChanged(s: android.text.Editable?) = updateFindCount()
+        })
+        findField.setOnEditorActionListener { _, _, _ -> findStep(backwards = false); true }
+        replaceField.setOnEditorActionListener { _, _, _ -> replaceCurrent(); true }
+
+        return bar
+    }
+
+    private fun openFindBar() {
+        if (previewing) setPreviewing(false)
+        findBar.visibility = View.VISIBLE
+        // A short single-line selection is almost always the thing being searched for.
+        val text = editor.text
+        if (text != null && editor.selectionEnd > editor.selectionStart) {
+            val sel = text.subSequence(editor.selectionStart, editor.selectionEnd).toString()
+            if (sel.isNotBlank() && !sel.contains('\n') && sel.length <= 64) findField.setText(sel)
+        }
+        findField.requestFocus()
+        findField.setSelection(findField.text?.length ?: 0)
+        updateFindCount()
+    }
+
+    private fun closeFindBar() {
+        findBar.visibility = View.GONE
+        editor.requestFocus()
+    }
+
+    private fun currentMatches(): List<TextSearch.Match> =
+        TextSearch.matches(currentText(), findField.text?.toString().orEmpty())
+
+    /** Move the selection to the next/previous match — wrapping, and scrolled into view. */
+    private fun findStep(backwards: Boolean) {
+        val ms = currentMatches()
+        if (ms.isEmpty()) {
+            updateFindCount()
+            if (findField.text?.isNotEmpty() == true) {
+                Toast.makeText(this, "No matches.", Toast.LENGTH_SHORT).show()
+            }
+            return
+        }
+        // selectionEnd forward / selectionStart backward is what makes repeated steps advance
+        // when the current selection IS a match.
+        val idx = if (backwards) TextSearch.previousFrom(ms, editor.selectionStart.coerceAtLeast(0))
+        else TextSearch.nextFrom(ms, editor.selectionEnd.coerceAtLeast(0))
+        val m = ms[idx]
+        editor.requestFocus()
+        editor.setSelection(m.start, m.end)
+        keepCaretVisible()
+        findCount.text = "${idx + 1} of ${ms.size}"
+    }
+
+    private fun updateFindCount() {
+        val query = findField.text?.toString().orEmpty()
+        findCount.text = when {
+            query.isEmpty() -> ""
+            else -> "${currentMatches().size}"
+        }
+    }
+
+    /** Replace the selection when it is a match (case-insensitive), then step to the next. */
+    private fun replaceCurrent() {
+        if (previewing) return
+        val text = editor.text ?: return
+        val query = findField.text?.toString().orEmpty()
+        if (query.isEmpty()) return
+        val s = editor.selectionStart
+        val e = editor.selectionEnd
+        if (e > s && text.subSequence(s, e).toString().equals(query, ignoreCase = true)) {
+            val replacement = replaceField.text?.toString().orEmpty()
+            text.replace(s, e, replacement)
+            editor.setSelection((s + replacement.length).coerceAtMost(text.length))
+        }
+        findStep(backwards = false)
+    }
+
+    /** Replace every match in one `Editable` edit — one Ctrl+Z brings it all back. */
+    private fun replaceAllMatches() {
+        if (previewing) return
+        val text = editor.text ?: return
+        val query = findField.text?.toString().orEmpty()
+        if (query.isEmpty()) return
+        val result = TextSearch.replaceAll(
+            text.toString(), query, replaceField.text?.toString().orEmpty(), editor.selectionEnd,
+        )
+        if (result.count == 0) {
+            Toast.makeText(this, "No matches.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        text.replace(0, text.length, result.text)
+        editor.setSelection(result.caret.coerceIn(0, text.length))
+        updateFindCount()
+        Toast.makeText(this, "Replaced ${result.count}.", Toast.LENGTH_SHORT).show()
+        persist()
+    }
+
+    // ── Word count ────────────────────────────────────────────────────────────
+
+    /** Words and characters — for the selection when one exists, otherwise the document. */
+    private fun showWordCount() {
+        val text = editor.text ?: return
+        val hasSelection = !previewing && editor.selectionEnd > editor.selectionStart
+        val slice = if (hasSelection) {
+            text.subSequence(editor.selectionStart, editor.selectionEnd).toString()
+        } else {
+            text.toString()
+        }
+        val (words, chars) = TextSearch.counts(slice)
+        val prefix = if (hasSelection) "Selection: " else ""
+        Toast.makeText(
+            this,
+            "$prefix%,d words  ·  %,d characters".format(java.util.Locale.US, words, chars),
+            Toast.LENGTH_LONG,
+        ).show()
     }
 
     private fun stripButton(ink: Int, label: String, hint: String, onClick: () -> Unit): AppCompatButton =
@@ -510,7 +893,12 @@ class DocumentEditorActivity : AppCompatActivity() {
      * *Bring in* is offered either way.
      */
     private fun updateSourceStrip() {
-        sourceText.text = when {
+        sourceText.text = if (notebookMode) when {
+            bringingIn -> "Reading the pages…"
+            pageChanged -> "Pages have changed since this merge"
+            drafted -> "Merged from this notebook's pages"
+            else -> ""
+        } else when {
             bringingIn -> "Reading this page…"
             pageChanged -> "Page has changed since this draft"
             drafted -> "Drafted from this page"
@@ -655,6 +1043,30 @@ class DocumentEditorActivity : AppCompatActivity() {
         Slog.d(TAG) { "Reflowed ${if (hasSelection) "selection" else "document"}" }
     }
 
+    // ── Proofread ─────────────────────────────────────────────────────────────
+
+    /**
+     * The proofread sheet: an on-demand full pass, the user dictionary, and the on/off switch.
+     * Off hides "Check document" rather than disabling it — a disabled control is invisible on
+     * e-ink (see docs/design-system.md), and turning the feature on checks everything anyway.
+     */
+    private fun promptProofread() {
+        val sheet = ActionSheetDialog(this).title("Proofread")
+        if (proofread.enabled) {
+            sheet.addAction(R.drawable.ic_text_spellcheck, "Check document") {
+                if (!proofread.ready) {
+                    Toast.makeText(this, "Loading the dictionary — it will check when ready.", Toast.LENGTH_SHORT).show()
+                }
+                proofread.checkDocument()
+            }
+            sheet.addAction(R.drawable.ic_book, "User dictionary") { proofread.promptUserDictionary() }
+            sheet.addAction(R.drawable.ic_eye_off, "Turn off proofread") { proofread.setEnabled(false) }
+        } else {
+            sheet.addAction(R.drawable.ic_eye, "Turn on proofread") { proofread.setEnabled(true) }
+        }
+        sheet.show()
+    }
+
     // ── Page flips ────────────────────────────────────────────────────────────
 
     /**
@@ -663,7 +1075,7 @@ class DocumentEditorActivity : AppCompatActivity() {
      * when this screen closes.
      */
     private fun flipPage(delta: Int) {
-        if (bringingIn) return
+        if (bringingIn || notebookMode) return
         val host = DocumentTransfer.host
         if (host == null) {
             Toast.makeText(this, "The notebook is no longer open.", Toast.LENGTH_SHORT).show()
@@ -674,9 +1086,18 @@ class DocumentEditorActivity : AppCompatActivity() {
 
         persist()
         bringingIn = true
+        flipInFlight = true
         updateSourceStrip()
+        // The popup appears only if the flip is still in flight after the delay — that is, when the
+        // page actually has to be read. It is the same banner the notebook shows at editor open,
+        // which cannot be shown from the host here: the host is stopped behind this screen.
+        readingMessage = "Reading this page…"
+        readingCancel = null
+        readingPopup.postDelayed(showReadingPopup, READING_POPUP_DELAY_MS)
         host.requestPage(delta) { session ->
             bringingIn = false
+            flipInFlight = false
+            dismissReadingDialog()
             if (session == null) {
                 updateSourceStrip()
                 Toast.makeText(this, "Couldn't open that page.", Toast.LENGTH_SHORT).show()
@@ -684,6 +1105,55 @@ class DocumentEditorActivity : AppCompatActivity() {
             }
             applySession(session)
         }
+    }
+
+    // ── Notebook document (the merged final draft) ────────────────────────────
+
+    /**
+     * Switch between this page's document and the notebook document. The same shape as a page
+     * flip — text stored first, the host switches which row it writes to as part of the request,
+     * and the gap is a no-save zone on both sides.
+     *
+     * Toggling **in** may be the first visit, which merges every page's text to seed the document
+     * — a run long enough to deserve the Cancel the popup offers (cancelling calls back null and
+     * the editor stays on the page it was on). Toggling **out** is `requestPage(0)`: the host
+     * kept which page the editor was on.
+     */
+    private fun toggleScope() {
+        if (bringingIn) return
+        val host = DocumentTransfer.host
+        if (host == null) {
+            Toast.makeText(this, "The notebook is no longer open.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        persist()
+        bringingIn = true
+        flipInFlight = true
+        updateSourceStrip()
+        if (!notebookMode) {
+            readingMessage = "Reading the pages…"
+            readingCancel = { host.cancelDocumentRequest() }
+            readingPopup.postDelayed(showReadingPopup, READING_POPUP_DELAY_MS)
+            host.requestNotebookDocument { session -> onScopeResult(session) }
+        } else {
+            readingMessage = "Reading this page…"
+            readingCancel = null
+            readingPopup.postDelayed(showReadingPopup, READING_POPUP_DELAY_MS)
+            host.requestPage(0) { session -> onScopeResult(session) }
+        }
+    }
+
+    private fun onScopeResult(session: DocumentTransfer.Session?) {
+        bringingIn = false
+        flipInFlight = false
+        dismissReadingDialog()
+        if (session == null) {
+            // Cancelled, or the load failed — either way the host reverted to the document the
+            // buffer still shows, so staying put is correct and nothing was lost.
+            updateSourceStrip()
+            return
+        }
+        applySession(session)
     }
 
     /** Show a page's document: its text, its provenance, and where it sits in the notebook. */
@@ -701,12 +1171,54 @@ class DocumentEditorActivity : AppCompatActivity() {
         hasPrev = session.hasPrev
         hasNext = session.hasNext
         pageLabel = session.pageLabel
+        notebookMode = session.notebook
+        applyModeChrome()
         updatePageLabel()
         updateSourceStrip()
         // Store this page's seed right away, so the gap where the text exists only in memory is as
         // short on a flip as it is on open.
         persist()
+        // A new page is a fresh document (setText dropped the old spans with the old Editable), so
+        // it gets the same full pass opening one does.
+        proofread.checkDocument()
         if (previewing) renderPreview()
+    }
+
+    /**
+     * The modal "Reading this page…" — visually the twin of the one [NotebookActivity] shows while
+     * seeding a document at editor open, so the two entry points to a page read announce themselves
+     * the same way. Not cancelable, like the original: recognition has no partial result to keep.
+     */
+    private fun showReadingDialog() {
+        if (readingDialog != null || isFinishing || isDestroyed) return
+        val message = AppCompatTextView(this).apply {
+            text = readingMessage
+            setPadding(64, 48, 64, 48)
+            setTextColor(ContextCompat.getColor(this@DocumentEditorActivity, R.color.inkBlack))
+            textSize = 16f
+        }
+        val cancel = readingCancel
+        readingDialog = AlertDialog.Builder(this)
+            .setView(message)
+            .setCancelable(false)
+            .apply {
+                // Only the notebook merge offers a way out — it may read every page. The button
+                // asks the host to stop; the request's own null callback puts the UI right.
+                if (cancel != null) setNegativeButton("Cancel") { _, _ -> cancel() }
+            }
+            .create()
+            .also {
+                it.show()
+                it.window?.setElevation(0f)
+                it.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
+            }
+    }
+
+    /** Put the popup away — and cancel a delayed show that has not fired yet. */
+    private fun dismissReadingDialog() {
+        readingPopup.removeCallbacks(showReadingPopup)
+        readingDialog?.let { runCatching { it.dismiss() } }
+        readingDialog = null
     }
 
     // ── Bringing the page's text in ───────────────────────────────────────────
@@ -723,8 +1235,10 @@ class DocumentEditorActivity : AppCompatActivity() {
             Toast.makeText(this, "The notebook is no longer open.", Toast.LENGTH_SHORT).show()
             return
         }
+        // In notebook mode the same two situations exist one level up: the edits were a false
+        // start, or more was written on the pages after the editing.
         ActionSheetDialog(this)
-            .title("Bring in page text")
+            .title(if (notebookMode) "Merge pages" else "Bring in page text")
             .addAction(null, "Replace this document") { bringIn(replace = true) }
             .addAction(null, "Add below the current text") { bringIn(replace = false) }
             .show()
@@ -732,24 +1246,34 @@ class DocumentEditorActivity : AppCompatActivity() {
 
     private fun bringIn(replace: Boolean) {
         val host = DocumentTransfer.host ?: return
+        val merge = notebookMode
         // Anything typed so far is stored before the page's text lands on top of it.
         persist()
         bringingIn = true
         updateSourceStrip()
-        host.requestPageDraft { draft ->
+        // Shown at once, not on the flip's delay: a bring-in always reads the page(s) in full.
+        readingMessage = if (merge) "Reading the pages…" else "Reading this page…"
+        readingCancel = if (merge) ({ host.cancelDocumentRequest() }) else null
+        showReadingDialog()
+        val onDraft: (DocumentTransfer.Draft?) -> Unit = { draft ->
             bringingIn = false
+            dismissReadingDialog()
             if (draft == null) {
                 updateSourceStrip()
-                Toast.makeText(this, "Nothing to bring in from this page yet.", Toast.LENGTH_SHORT).show()
-                return@requestPageDraft
+                if (!merge) {
+                    Toast.makeText(this, "Nothing to bring in from this page yet.", Toast.LENGTH_SHORT).show()
+                }
+                // A cancelled merge stays silent — the user just said no.
+            } else {
+                applyDraft(draft.text, replace)
+                // The document now matches the page(s) as of this recognition.
+                pageChanged = false
+                drafted = true
+                updateSourceStrip()
+                persist()
             }
-            applyDraft(draft.text, replace)
-            // The document now matches the page as of this recognition.
-            pageChanged = false
-            drafted = true
-            updateSourceStrip()
-            persist()
         }
+        if (merge) host.requestNotebookMerge(onDraft) else host.requestPageDraft(onDraft)
     }
 
     /**
@@ -779,6 +1303,67 @@ class DocumentEditorActivity : AppCompatActivity() {
         titleText.text = notebookName.ifBlank { "Document" }
     }
 
+    /**
+     * Rename the text document from its title. Format validation happens here (the same rules the
+     * create screen applies); the duplicate check and every write belong to the host, which owns
+     * the index connection ([DocumentTransfer.Host.renameNotebook]).
+     */
+    private fun promptRename() {
+        val host = DocumentTransfer.host
+        if (host == null) {
+            Toast.makeText(this, "The notebook is no longer open.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val ink = ContextCompat.getColor(this, R.color.inkBlack)
+        val input = AppCompatEditText(this).apply {
+            setText(notebookName)
+            setSelection(text?.length ?: 0)
+            isSingleLine = true
+            setTextColor(ink)
+            setBackgroundResource(R.drawable.shape_bordered)
+            setPadding(dp(10), dp(8), dp(10), dp(8))
+        }
+        val container = android.widget.FrameLayout(this).apply {
+            setPadding(dp(20), dp(12), dp(20), dp(4))
+            addView(input)
+        }
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("Rename document")
+            .setView(container)
+            .setPositiveButton("Rename") { _, _ ->
+                val name = input.text?.toString()?.trim().orEmpty()
+                val error = when {
+                    name.isBlank() -> "Name cannot be empty"
+                    name == "." || name == ".." -> "Invalid name"
+                    name.contains(Regex("[^a-zA-Z0-9_\\-. ]")) ->
+                        "Name may only contain letters, numbers, spaces, and _ - ."
+                    else -> null
+                }
+                if (error != null) {
+                    Toast.makeText(this, error, Toast.LENGTH_SHORT).show()
+                    return@setPositiveButton
+                }
+                if (name == notebookName) return@setPositiveButton
+                host.renameNotebook(name) { hostError ->
+                    if (hostError != null) {
+                        Toast.makeText(this, hostError, Toast.LENGTH_SHORT).show()
+                    } else {
+                        notebookName = name
+                        updateTitle()
+                    }
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .create()
+        dialog.window?.setSoftInputMode(
+            android.view.WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE
+        )
+        dialog.show()
+        dialog.window?.setElevation(0f)
+        dialog.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
+        input.requestFocus()
+    }
+
     /** The page's place in the notebook, sitting between the two arrows that change it. */
     private fun updatePageLabel() {
         pageText.text = pageLabel
@@ -792,7 +1377,7 @@ class DocumentEditorActivity : AppCompatActivity() {
      * happened instead.
      */
     private fun headerIcon(iconRes: Int, hint: String, onClick: () -> Unit): AppCompatImageButton =
-        iconButton(iconRes, hint, size = dp(36), inset = dp(6), onClick = onClick).apply {
+        iconButton(iconRes, hint, size = toolbarButtonSize, inset = toolbarButtonInset, onClick = onClick).apply {
             (layoutParams as LinearLayout.LayoutParams).marginStart = dp(2)
         }
 
@@ -825,6 +1410,13 @@ class DocumentEditorActivity : AppCompatActivity() {
         bar.addView(formatIcon(R.drawable.ic_link, "Link  ·  Ctrl+K") { runFormat(MarkdownFormatter::insertLink) })
         bar.addView(formatIcon(R.drawable.ic_photo, "Image  ·  Ctrl+Shift+K") { runFormat(MarkdownFormatter::insertImage) })
         bar.addView(formatIcon(R.drawable.ic_separator_horizontal, "Horizontal rule  ·  Ctrl+Shift+−") { runFormat(MarkdownFormatter::insertRule) })
+        divider()
+        bar.addView(formatIcon(R.drawable.ic_search, "Find & replace  ·  Ctrl+F") { openFindBar() })
+        bar.addView(formatIcon(R.drawable.ic_letter_case, "Word count") { showWordCount() })
+        divider()
+        // Last on the bar, so on narrow screens it lives in the overflow panel — a check runs on
+        // its own; this button is for the occasional full pass and the on/off switch.
+        bar.addView(formatIcon(R.drawable.ic_text_spellcheck, "Proofread") { promptProofread() })
 
         // Overflow controls, pinned at the trailing edge and hidden whenever everything fits. The full
         // palette is ~730dp of buttons, so a 6" screen (sw571dp) cannot show it whole — and a bar that
@@ -832,7 +1424,7 @@ class DocumentEditorActivity : AppCompatActivity() {
         // given screen, so muscle memory still holds; only the tail moves, and it moves to one place.
         dividerOverflow = groupDivider(ink)
         btnOverflow = iconButton(
-            R.drawable.ic_dots, "More tools", size = dp(44), inset = dp(10), closesOverflow = false,
+            R.drawable.ic_dots, "More tools", size = toolbarButtonSize, inset = toolbarButtonInset, closesOverflow = false,
         ) { toggleOverflowMenu() }
         bar.addView(dividerOverflow)
         bar.addView(btnOverflow)
@@ -894,9 +1486,9 @@ class DocumentEditorActivity : AppCompatActivity() {
         return x >= xy[0] && x <= xy[0] + view.width && y >= xy[1] && y <= xy[1] + view.height
     }
 
-    /** A format-bar tool: a 44dp target around a 24dp Tabler glyph. */
+    /** A format-bar tool: the shared toolbar-button target around a Tabler glyph. */
     private fun formatIcon(iconRes: Int, hint: String, onClick: () -> Unit): AppCompatImageButton =
-        iconButton(iconRes, hint, size = dp(44), inset = dp(10), onClick = onClick)
+        iconButton(iconRes, hint, size = toolbarButtonSize, inset = toolbarButtonInset, onClick = onClick)
 
     /**
      * The one icon button this screen builds, so every bar shares a hit area, a background and a
@@ -938,6 +1530,8 @@ class DocumentEditorActivity : AppCompatActivity() {
     private fun setPreviewing(on: Boolean) {
         if (previewing == on) return
         previewing = on
+        // Preview is read-only prose; no checking there (and no popup — the editor is gone).
+        proofread.setPaused(on)
         if (on) {
             // Switching to reading is a natural save point, and the writing chrome goes with it.
             persist()
@@ -1022,7 +1616,8 @@ class DocumentEditorActivity : AppCompatActivity() {
      * No combination has to be avoided for the IME's sake: with a physical keyboard attached the
      * editor refuses an input connection entirely (see [applyKeyboardMode]), so no input method sits
      * upstream in the key path to claim a shortcut before the app sees it — including the Ctrl+Shift
-     * chords that otherwise cycle soft keyboards.
+     * chords that otherwise cycle soft keyboards. On Ratta the connection stays (hardware typing
+     * arrives only through it there), so its IME sits upstream and may claim a chord first.
      */
     private fun handleShortcut(event: KeyEvent): Boolean {
         val shift = event.isShiftPressed
@@ -1037,7 +1632,7 @@ class DocumentEditorActivity : AppCompatActivity() {
             return false
         }
         when (event.keyCode) {
-            KeyEvent.KEYCODE_F -> if (shift) { reflowText(); return true }
+            KeyEvent.KEYCODE_F -> if (shift) { reflowText(); return true } else { openFindBar(); return true }
             KeyEvent.KEYCODE_B -> if (!shift) { wrapInline("**"); return true }
             KeyEvent.KEYCODE_I -> if (!shift) { wrapInline("*"); return true }
             KeyEvent.KEYCODE_X -> if (shift) { wrapInline("~~"); return true }
@@ -1070,10 +1665,19 @@ class DocumentEditorActivity : AppCompatActivity() {
      * what stops a soft keyboard from swallowing Ctrl shortcuts (BOOX's input-method switcher being
      * the offender) or popping open mid-sentence. Typing is unaffected — hardware key events go
      * straight to the editor's key listener.
+     *
+     * **Except on Ratta**, where hardware keys are routed through the IME and the IME translates
+     * them only while it is *shown* — hide it and the firmware drops the keys before the app sees
+     * anything at all (measured on the Nomad: with the soft keyboard hidden, not one key event
+     * reached `dispatchKeyEvent`; shown, typing worked and only the key-ups passed through). So on
+     * Ratta an attached keyboard is not a reason to hide the soft keyboard: the IME stays up and
+     * connected, exactly as it would for soft typing. The long-press-Write override still forces it
+     * away — that is the user trading typing for screen room, and the toast announces the state.
      */
     private fun applyKeyboardMode() {
-        val wantSoftKeyboard = softKeyboardOverride ?: !physicalKeyboardAttached()
-        editor.suppressImeSession = !wantSoftKeyboard
+        val wantSoftKeyboard = softKeyboardOverride
+            ?: (isRattaDevice() || !physicalKeyboardAttached())
+        editor.suppressImeSession = !wantSoftKeyboard && !isRattaDevice()
         editor.showSoftInputOnFocus = wantSoftKeyboard
         // Rebuild (or tear down) the input connection so the change takes effect immediately.
         imm()?.restartInput(editor)
@@ -1121,17 +1725,126 @@ class DocumentEditorActivity : AppCompatActivity() {
 }
 
 /**
- * [AppCompatEditText] that can refuse the IME entirely.
+ * [AppCompatEditText] that can refuse the IME entirely, plus the proofread surface work: it draws
+ * the dashed flag underlines and reports taps for the suggestion popup.
  *
  * When [suppressImeSession] is set, [onCreateInputConnection] returns null: the framework never
  * binds an input method to this field, so no soft keyboard appears and — crucially — no IME sits
  * upstream of the app in the hardware key path, claiming shortcuts on its way past. The editor
  * still handles physical keys through its own key listener.
+ *
+ * The underlines are drawn here rather than by the spans themselves because a `CharacterStyle`
+ * cannot draw a *dashed* line — `UnderlineSpan` is solid, and the design gives spelling a dashed
+ * inkBlack line and grammar a dotted one. [ProofreadFlagSpan] and [GrammarFlagSpan] therefore
+ * carry no style, and this view paints under every span each draw pass.
  */
 private class MarkdownEditText(context: Context) : AppCompatEditText(context) {
 
     var suppressImeSession = false
 
+    /** Called with the character offset of a confirmed single tap — the proofread popup's hook. */
+    var onWordTap: ((Int) -> Unit)? = null
+
+    /**
+     * Confirmed-single-tap detection, so the popup never rides a double-tap: a double tap is the
+     * framework's select-word gesture, and a sheet on top of a fresh selection would break
+     * select-to-copy on every flagged word. `onSingleTapConfirmed` fires only after the
+     * double-tap window has passed — and never for drags or long-presses — well after `super`
+     * has placed the caret.
+     *
+     * The character offset is resolved in `onSingleTapUp`, not at confirmation: the confirmation
+     * arrives ~300 ms after the finger lifted, and a tap that summons the soft keyboard has
+     * resized and scrolled this view by then — the event's x/y against the *new* layout name a
+     * different character.
+     */
+    private val tapDetector = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
+        override fun onSingleTapUp(e: MotionEvent): Boolean {
+            // Resolved here — only for tap-shaped lifts, never scroll/long-press ends — while
+            // the pre-IME layout is still current.
+            tappedOffset = getOffsetForPosition(e.x, e.y)
+            return false
+        }
+
+        override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
+            if (tappedOffset >= 0) onWordTap?.invoke(tappedOffset)
+            return false
+        }
+    })
+
+    /** Offset under the last tap-shaped finger-up, against the layout that was actually tapped. */
+    private var tappedOffset = -1
+
+    private val density = resources.displayMetrics.density
+
+    private val flagPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = ContextCompat.getColor(context, R.color.inkBlack)
+        style = Paint.Style.STROKE
+        strokeWidth = 1.5f * density
+        // Dashed = spelling. On-off lengths chosen to survive e-ink: long enough to render as
+        // marks, short enough to read as a dash and not a rule.
+        pathEffect = DashPathEffect(floatArrayOf(4f * density, 3f * density), 0f)
+    }
+
+    private val grammarPaint = Paint(flagPaint).apply {
+        // Dotted = grammar. Round caps turn the near-zero dash segments into dots the stroke's
+        // width across — a different texture from the spelling dash at reading distance.
+        strokeCap = Paint.Cap.ROUND
+        pathEffect = DashPathEffect(floatArrayOf(1f, 2.5f * density), 0f)
+    }
+
     override fun onCreateInputConnection(outAttrs: EditorInfo): InputConnection? =
         if (suppressImeSession) null else super.onCreateInputConnection(outAttrs)
+
+    override fun onTouchEvent(event: MotionEvent): Boolean {
+        val handled = super.onTouchEvent(event)
+        tapDetector.onTouchEvent(event)
+        return handled
+    }
+
+    override fun onDraw(canvas: Canvas) {
+        super.onDraw(canvas)
+        drawProofreadFlags(canvas)
+    }
+
+    private fun drawProofreadFlags(canvas: Canvas) {
+        val text = text ?: return
+        if (text.isEmpty()) return
+        val layout = layout ?: return
+        // onDraw runs on every keystroke, caret blink, and scroll frame, and each underline
+        // costs a line measurement — so only the flags in the viewport are considered, not
+        // every flag in the document.
+        val topLine = layout.getLineForVertical(scrollY)
+        val bottomLine = layout.getLineForVertical(scrollY + height)
+        val visStart = layout.getLineStart(topLine)
+        val visEnd = layout.getLineEnd(bottomLine)
+        val spelling = text.getSpans(visStart, visEnd, ProofreadFlagSpan::class.java)
+        val grammar = text.getSpans(visStart, visEnd, GrammarFlagSpan::class.java)
+        if (spelling.isEmpty() && grammar.isEmpty()) return
+        canvas.save()
+        // onDraw's canvas is already scrolled; only the text origin's padding is left to add.
+        canvas.translate(totalPaddingLeft.toFloat(), totalPaddingTop.toFloat())
+        for (span in spelling) underlineSpan(canvas, layout, text, span, flagPaint)
+        for (span in grammar) underlineSpan(canvas, layout, text, span, grammarPaint)
+        canvas.restore()
+    }
+
+    private fun underlineSpan(canvas: Canvas, layout: Layout, text: Spanned, span: Any, paint: Paint) {
+        val start = text.getSpanStart(span)
+        val end = text.getSpanEnd(span)
+        if (start < 0 || end <= start) return
+        val drop = 2f * density
+        val firstLine = layout.getLineForOffset(start)
+        val lastLine = layout.getLineForOffset(end - 1)
+        // A long word can soft-wrap mid-word, so a flag may span lines even though a word
+        // never contains a newline.
+        for (line in firstLine..lastLine) {
+            val x1 = if (line == firstLine) layout.getPrimaryHorizontal(start) else layout.getLineLeft(line)
+            var x2 = if (line == lastLine) layout.getPrimaryHorizontal(end) else layout.getLineRight(line)
+            // At a wrap boundary the end offset's position belongs to the next line's start.
+            if (line == lastLine && x2 <= x1) x2 = layout.getLineRight(line)
+            if (x2 <= x1) continue
+            val y = layout.getLineBaseline(line) + drop
+            canvas.drawLine(x1, y, x2, y, paint)
+        }
+    }
 }

@@ -192,6 +192,11 @@ the picker inserted a page into the current notebook's `.soil` but the user canc
 
 `isLinkFollowEnabled()` gates the gesture (text-placement mode is the only exclusion).
 
+Cross-notebook follows (and cross-notebook back-swipes) raise the "Opening…" overlay at tap time via
+`OpeningOverlay.showThen`, which commits the overlay's frame to screen **before** the seal + relaunch
+run — see the overlay pattern in [`design-system.md`](design-system.md) for why a bare visibility
+change is not enough. Same-notebook follows navigate directly and never show it.
+
 ---
 
 ## Back-Stack (`LinkBackStack`)

@@ -65,6 +65,12 @@ android {
         }
     }
 
+    sourceSets {
+        // The proofread JVM tests load the real gzipped dictionary the app ships, so the
+        // asset directory doubles as a test-resource root (classpath: proofread/en_82765.dict).
+        getByName("test") { resources.srcDir("src/main/assets") }
+    }
+
     buildTypes {
         debug {
             applicationIdSuffix = ".dev"
@@ -122,6 +128,11 @@ dependencies {
     // PdfBox-Android — post-process exported PDFs to add AES-128 password protection.
     // Apache-2.0 license (compatible with project MIT). Deliberate Phase-2 dependency addition.
     implementation("com.tom-roush:pdfbox-android:2.0.27.0")
+
+    // SymSpellKt — pure-Kotlin SymSpell spell checker for the document editor's proofread
+    // feature (core/proofread/). MIT license. Deliberate, discussed dependency addition;
+    // the English frequency dictionary ships as a gzipped asset (assets/proofread/).
+    implementation("com.darkrockstudios:symspellkt:3.4.0")
 
     // Drive OAuth 2.0 + PKCE via WebView — no GMS dependency (works on SERVICE_INVALID BOOX).
     // Credentials injected into BuildConfig from the environment (above). See docs/backup.md.

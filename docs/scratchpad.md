@@ -72,16 +72,26 @@ scratchpad_root  (type="scratchpad_root", parentId="", fixed id SCRATCHPAD_ROOT_
 ```
 FrameLayout (transparent root)
   └── scratchpadWindow (LinearLayout, shape_bordered, paperWhite)
-        ├── chromeBar (LinearLayout, 56dp)
+        ├── chromeBar (LinearLayout, @dimen/toolbar_bar_thickness)
         │     title "Scratch Pad" · spacer · btnScratchpadPrev · tvScratchpadPageIndicator · btnScratchpadNext
         ├── 1dp divider
         ├── drawingContainer (FrameLayout — drawing view added programmatically)
-        │     └── floatingSelectionToolbar (gone by default)
+        │     ├── floatingSelectionToolbar (gone by default)
+        │     └── scratchOverflowMenu (gone by default — overflow rows, anchored bottom, above the bar)
         ├── 1dp divider
-        └── scratchpadToolbar (LinearLayout, 56dp)
+        └── scratchpadToolbar (LinearLayout, @dimen/toolbar_bar_thickness)
               btnScratchPen · btnScratchEraser · btnScratchLasso · btnScratchAddPage · btnScratchDeletePage
-              spacer · btnSendToNotebook (GONE unless launched-from-notebook)
+              spacer · btnSendToNotebook (launched-from-notebook only) · dividerScratchOverflow · btnScratchOverflow
 ```
+
+**The tool bar overflows via the shared `ToolbarOverflowManager`** (see [`toolbar.md`](toolbar.md)):
+at the tablet button size the full row no longer fits a narrow window (a Nomad's 75% window), so the
+trailing tools spill into `scratchOverflowMenu`, opening *above* the bar. Send-to-Notebook is
+registered as the manager's **trailing-pinned** view — right-aligned, never spilled — when launched
+from a notebook, and **removed from the bar entirely** otherwise (a GONE child would still be counted
+by the manager's fixed-size math). Dismiss rules in `dispatchTouchEvent` mirror the notebook's,
+including the deferred close-on-UP so a tap on an overflowed button fires its click before the menu
+hides.
 
 ---
 

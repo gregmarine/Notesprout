@@ -39,7 +39,7 @@ enum class PageScope { ALL, CURRENT, SELECTED }
 
 /** Where the finished file(s) go. */
 @Serializable
-enum class ExportDestination { SAVE, SHARE, TEMPLATE }
+enum class ExportDestination { SAVE, SHARE, TEMPLATE, DRIVE }
 
 /**
  * What to do with an encrypted notebook's key when exporting a portable `.soil`.
@@ -47,6 +47,14 @@ enum class ExportDestination { SAVE, SHARE, TEMPLATE }
  */
 @Serializable
 enum class SoilKeying { KEEP, REMOVE, NEW }
+
+/**
+ * What MARKDOWN/TEXT export reads: the **notebook document** (the merged final draft, when the
+ * notebook has one) or the per-page assembly (each page's document, recognized text as fallback).
+ * Only meaningful at [PageScope.ALL] — a page selection is always per-page. Not captured by
+ * presets, for the same reason page scope is not. See docs/documents.md.
+ */
+enum class TextSource { NOTEBOOK_DOCUMENT, PAGE_DOCUMENTS }
 
 /**
  * A fully specified export job.
@@ -71,8 +79,16 @@ data class ExportSpec(
     val pdfPassword: String? = null,
     /** How the exported `.soil` copy is keyed. `.soil` of an encrypted notebook only. */
     val soilKeying: SoilKeying = SoilKeying.KEEP,
+    /** What MARKDOWN/TEXT reads. Only honoured at all-pages scope; see [TextSource]. */
+    val textSource: TextSource = TextSource.PAGE_DOCUMENTS,
     /** The new passphrase for [SoilKeying.NEW]. */
     val newSoilPassphrase: String? = null,
+    /**
+     * Folder path segments under the app-owned Drive root ("Notesprout Exports") for
+     * [ExportDestination.DRIVE]. Names, not Drive ids — the chain is find-or-created at upload
+     * time, so a path chosen in the picker but never exported to creates nothing remotely.
+     */
+    val drivePath: List<String> = emptyList(),
 ) {
     val pageIds: List<String> get() = pages.map { it.id }
 

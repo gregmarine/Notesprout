@@ -17,7 +17,7 @@
     <LinearLayout
         android:id="@+id/pickerToolbar"
         android:layout_width="match_parent"
-        android:layout_height="56dp"
+        android:layout_height="@dimen/toolbar_bar_thickness"
         android:orientation="horizontal"
         android:background="@color/paperWhite"
         android:gravity="center_vertical"
@@ -76,7 +76,7 @@
     <LinearLayout
         android:id="@+id/pinnedToolbar"
         android:layout_width="match_parent"
-        android:layout_height="56dp"
+        android:layout_height="@dimen/toolbar_bar_thickness"
         android:orientation="horizontal"
         android:background="@color/paperWhite"
         android:gravity="center_vertical"
@@ -116,7 +116,7 @@
     <LinearLayout
         android:id="@+id/recentsToolbar"
         android:layout_width="match_parent"
-        android:layout_height="56dp"
+        android:layout_height="@dimen/toolbar_bar_thickness"
         android:orientation="horizontal"
         android:background="@color/paperWhite"
         android:gravity="center_vertical"
@@ -156,7 +156,7 @@
     <LinearLayout
         android:id="@+id/searchToolbar"
         android:layout_width="match_parent"
-        android:layout_height="56dp"
+        android:layout_height="@dimen/toolbar_bar_thickness"
         android:orientation="horizontal"
         android:background="@color/paperWhite"
         android:gravity="center_vertical"
@@ -203,7 +203,7 @@
     <LinearLayout
         android:id="@+id/breadcrumbBar"
         android:layout_width="match_parent"
-        android:layout_height="56dp"
+        android:layout_height="@dimen/toolbar_bar_thickness"
         android:orientation="horizontal"
         android:background="@color/paperWhite"
         android:gravity="center_vertical">
@@ -301,7 +301,7 @@
     <LinearLayout
         android:id="@+id/overflowToolbar"
         android:layout_width="match_parent"
-        android:layout_height="56dp"
+        android:layout_height="@dimen/toolbar_bar_thickness"
         android:orientation="horizontal"
         android:background="@color/paperWhite"
         android:gravity="center_vertical|end"
@@ -392,12 +392,12 @@
         With first/last-page shown this comes to 520dp and overflows, so those two are gone here.
         There is likewise no room to centre the pagination group once the action buttons are
         present, so it is anchored to the end of the surface group instead.
-        Height 56dp — matches the notebook activity toolbar for uniformity.
+        Height @dimen/toolbar_bar_thickness — matches the notebook activity toolbar for uniformity.
     -->
     <RelativeLayout
         android:id="@+id/bottomBar"
         android:layout_width="match_parent"
-        android:layout_height="56dp"
+        android:layout_height="@dimen/toolbar_bar_thickness"
         android:background="@color/paperWhite">
 
         <!-- Top border (1dp inkBlack) -->

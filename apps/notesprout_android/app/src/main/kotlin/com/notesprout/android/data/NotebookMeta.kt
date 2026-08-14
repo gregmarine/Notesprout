@@ -23,6 +23,13 @@ data class NotebookMeta(
     val folderPath: List<FolderRef> = emptyList(),
     val exportedAt: Long? = null,
     val appVersionCode: Int? = null,
+    /**
+     * True for a **text document** — a notebook whose primary surface is its notebook document.
+     * Travels with the file so an imported text document opens into the editor on any device;
+     * the importer copies it onto the index row's flag. Additive + defaulted, so older readers
+     * ignore it and older files read as false.
+     */
+    val textDocument: Boolean = false,
 ) {
     fun toJson(): String = codec.encodeToString(serializer(), this)
 

@@ -170,9 +170,9 @@ carrying the one create action:
 
 ```
 ┌──────────────────────────────────────────────┐
-│ ← │ Today │ All │ Done │              📅  ✎  │  56dp nav row
+│ ← │ Today │ All │ Done │              📅  ✎  │  toolbar_bar_thickness nav row
 ├──────────────────────────────────────────────┤
-│ Tasks                                     +  │  56dp title row
+│ Tasks                                     +  │  toolbar_bar_thickness title row
 ├──────────────────────────────────────────────┤
 │ Overdue                                       │
 │ ☐  Change furnace filter            2d ago    │

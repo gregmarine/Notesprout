@@ -400,7 +400,8 @@ Behavior:
   could improve heavily slanted hands later.
 - **Language** — only `en-US` today; multi-language notebooks need model selection + download UX.
 - **Onyx HWR engine** — the `engine` field and interface leave the door open; the AIDL bridge itself
-  is a separate effort (see `SUPERNOTE_SUPPORT_PLAN.md` for the analogous vendor-ink pattern).
+  is a separate effort (the Ratta firmware-ink client in `docs/drawing-engine.md` is the
+  analogous vendor-integration pattern).
 
 ---
 

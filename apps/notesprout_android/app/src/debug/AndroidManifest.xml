@@ -85,6 +85,53 @@
             android:name="com.notesprout.android.debug.TodaySeedActivity"
             android:exported="true"
             android:label="Today Seed" />
+        <!-- Supernote Probe: the permanent Ratta calibration tool (built as Phases 0-1 of the
+             retired SUPERNOTE_SUPPORT_PLAN.md; the as-built engine is documented in
+             docs/drawing-engine.md, Ratta section).
+             Runtime binder handshake, eink-service reflection check, pen tool-type/pressure/
+             tilt readout, live firmware ink write area (setup re-asserted on window focus), the
+             0…31 pen-type sweep at EMR 300 (hunting a dashed style for Phase 5), and disable-area
+             tests (chrome always excluded; STRIP toggles a dashed test band).
+             Findings (2026-08-08, Nomad SN078D10012852 + Manta SN100C10023972, both ending on
+             firmware Chauvet.E103.2606141001.2389): binder service_myservice alive on both
+             (service.myservice alias absent); eink=android.os.EinkManager with enableFullUiAuto;
+             pen=TOOL_TYPE_STYLUS, eraser end=TOOL_TYPE_ERASER, finger=TOOL_TYPE_FINGER (no ink),
+             all with dense point streams + real pressure/tilt. Live NEEDLE ink "fantastic";
+             clearAll ghost-free; disable-area boundary exact; focus re-assert works after Home.
+             The firmware natively erases ITS OWN overlay ink under the eraser end without
+             setEraser (colour-255 payload, not the type code, is what makes a real eraser).
+             Ink path SURVIVED a firmware update (2347→2389) mid-test. Pen-code sweep 0…31 at
+             EMR 300: 0/5/8/10/11 solid steady; 1/2/16 pressure-sensitive (codes 17–31 all alias
+             to 16, so the table ends at 16); 3 = stream of tiny x's (Supernote's lasso-eraser
+             trail); 4 = STREAM OF DASHES (lasso selector) — the hardware dashed style that
+             unlocks Phase 5; 12 renders but sometimes emits a giant laggy blob (broken, never
+             use); 6/7/9/13 render nothing; 14 possibly calligraphy, 15 calligraphy.
+             Phase 8 additions: REG lab (dual-render registration measurement — app twin of
+             each stroke at raw MotionEvent coords over the uncleared overlay, X/Y nudge to
+             null; feeds RattaNotebookView.REG_OFFSET_X_PX) and COL (cycles the four firmware
+             colour codes to calibrate RattaInkMap's grey thresholds).
+             Keep this activity as the Ratta calibration tool (like PenToolSpikeActivity).
+             adb shell am start -n com.notesprout.android.dev/com.notesprout.android.debug.SupernoteProbeActivity -->
+        <activity
+            android:name="com.notesprout.android.debug.SupernoteProbeActivity"
+            android:exported="true"
+            android:label="Supernote Probe" />
+        <!-- Nib Probe: cross-device hover experiment — can a small "current tool" badge be
+             drawn near the pen nib from the HOVER stream, before the tip lands? (The friction:
+             with the toolbar hidden the armed tool is invisible until it marks the page.)
+             Arms the real ink layer per device (Ratta firmware full-UI ink at the engine's
+             NEEDLE/EMR-250 · BOOX TouchHelper raw drawing · app polyline elsewhere) so badge
+             visibility and interference are measured under real pen conditions. Measures hover
+             delivery per source (view hover / generic / BOOX onPenActive), AXIS_DISTANCE range,
+             the ENTER→DOWN warning window (last + median), badge invalidate→draw latency, and
+             whether the hide-at-contact repaint survives (Ratta overlay law 2 territory).
+             TOOL / MODE (follow · enter-only · off) / POS (above · up-left · up-right) / INK /
+             CLEAR.
+             adb shell am start -n com.notesprout.android.dev/com.notesprout.android.debug.NibProbeActivity -->
+        <activity
+            android:name="com.notesprout.android.debug.NibProbeActivity"
+            android:exported="true"
+            android:label="Nib Probe" />
         <!-- Reveals the global passphrase so the encrypted index stays sqlcipher-inspectable. Debug only.
              adb shell am start -n com.notesprout.android.dev/com.notesprout.android.debug.DebugKeyActivity -->
         <activity

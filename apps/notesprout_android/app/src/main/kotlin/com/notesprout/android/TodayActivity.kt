@@ -235,10 +235,12 @@ class TodayActivity : AppCompatActivity() {
         binding.tvTodayDate.text =
             today.format(DateTimeFormatter.ofLocalizedDate(style).withLocale(Locale.getDefault()))
 
+        // Three independent stores, three concurrent reads: each section paints as its own data
+        // arrives instead of the last one (notebooks — also the slowest) waiting on the other two.
         lifecycleScope.launch {
-            tasksSection.submit(todayRepo.tasks(today))
-            eventsSection.submit(todayRepo.events(today))
-            notebooksSection.submit(todayRepo.notebooks(this@TodayActivity, today))
+            launch { tasksSection.submit(todayRepo.tasks(today)) }
+            launch { eventsSection.submit(todayRepo.events(today)) }
+            launch { notebooksSection.submit(todayRepo.notebooks(this@TodayActivity, today)) }
         }
     }
 
@@ -246,11 +248,10 @@ class TodayActivity : AppCompatActivity() {
      * Re-read the tasks section alone — for the check-off, which is the one thing that happens
      * *on* this screen rather than to it.
      *
-     * Ticking a task cannot change an event or a notebook, and a full [refresh] is not free: the
-     * notebooks read alone walks the folder tree three times, lists every notebook in the library,
-     * and looks up a row per card. Paying that on every checkbox tap is work the user waits for on a
-     * device that repaints slowly. Everything else still refreshes on resume, on a date change, and
-     * on return from any surface this screen opens.
+     * Ticking a task cannot change an event or a notebook, and a full [refresh] is still not free:
+     * even batched, the notebooks read is several index queries. Paying that on every checkbox tap
+     * is work the user waits for on a device that repaints slowly. Everything else still refreshes
+     * on resume, on a date change, and on return from any surface this screen opens.
      */
     private fun refreshTasks() {
         lifecycleScope.launch { tasksSection.submit(todayRepo.tasks(LocalDate.now())) }
@@ -278,11 +279,14 @@ class TodayActivity : AppCompatActivity() {
         item.tvNotebookTime.text = notebookTime(notebook)
 
         item.notebookRow.setOnClickListener {
-            startActivity(
-                Intent(this, NotebookActivity::class.java)
-                    .putExtra(NotebookActivity.EXTRA_NOTEBOOK_ID, notebook.id)
-                    .putExtra(NotebookActivity.EXTRA_NOTEBOOK_NAME, notebook.name)
-            )
+            // Tap-time "Opening…" overlay; the destination keeps it up until its first page renders.
+            com.notesprout.android.core.OpeningOverlay.showThen(this) {
+                startActivity(
+                    Intent(this, NotebookActivity::class.java)
+                        .putExtra(NotebookActivity.EXTRA_NOTEBOOK_ID, notebook.id)
+                        .putExtra(NotebookActivity.EXTRA_NOTEBOOK_NAME, notebook.name)
+                )
+            }
         }
         return item.root
     }

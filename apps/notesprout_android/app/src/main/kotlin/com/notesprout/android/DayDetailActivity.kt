@@ -41,7 +41,7 @@ import com.notesprout.android.core.BitmapDecode
 import com.notesprout.android.core.IndexGuard
 import com.notesprout.android.core.TopGuard
 import com.notesprout.android.core.TwoFingerSwipeDown
-import com.notesprout.android.core.isBooxDevice
+import com.notesprout.android.notebook.createNotebookView
 import com.notesprout.android.data.BoundingBox
 import com.notesprout.android.data.CalendarRepository
 import com.notesprout.android.data.DayHistoryRepository
@@ -77,10 +77,8 @@ import com.notesprout.android.data.translate
 import com.notesprout.android.data.deepCopy
 import com.notesprout.android.databinding.ActivityDayDetailBinding
 import com.notesprout.android.notebook.ActiveTool
-import com.notesprout.android.notebook.GenericNotebookView
 import com.notesprout.android.notebook.LassoGeometry
 import com.notesprout.android.notebook.NotebookView
-import com.notesprout.android.notebook.OnyxNotebookView
 import com.notesprout.android.notebook.STICKY_NOTE_ICON_SIZE_DP
 import com.notesprout.android.notebook.ShapeRecognizer
 import com.notesprout.android.notebook.ToolPreferencesManager
@@ -369,7 +367,7 @@ class DayDetailActivity : AppCompatActivity() {
         }
         SurfaceStack.attach(this, surfaceEntry())
 
-        drawingView = if (isBooxDevice()) OnyxNotebookView(this) else GenericNotebookView(this)
+        drawingView = createNotebookView(this)
         binding.dayContent.addView(
             drawingView.asView(),
             FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT),
@@ -1118,11 +1116,14 @@ class DayDetailActivity : AppCompatActivity() {
     }
 
     private fun openNotebookFromList(notebookId: String, notebookName: String) {
-        startActivity(
-            Intent(this, NotebookActivity::class.java)
-                .putExtra(NotebookActivity.EXTRA_NOTEBOOK_ID, notebookId)
-                .putExtra(NotebookActivity.EXTRA_NOTEBOOK_NAME, notebookName)
-        )
+        // Tap-time "Opening…" overlay; the destination keeps it up until its first page renders.
+        com.notesprout.android.core.OpeningOverlay.showThen(this) {
+            startActivity(
+                Intent(this, NotebookActivity::class.java)
+                    .putExtra(NotebookActivity.EXTRA_NOTEBOOK_ID, notebookId)
+                    .putExtra(NotebookActivity.EXTRA_NOTEBOOK_NAME, notebookName)
+            )
+        }
     }
 
     // ── Page load ────────────────────────────────────────────────────────────────
@@ -1819,17 +1820,20 @@ class DayDetailActivity : AppCompatActivity() {
 
     private fun openNotebookWithPaste(destId: String, destName: String, content: NotesproutClipboard.ClipboardContent) {
         CalendarTransfer.pending = content
-        // Hand the shared BOOX pen pipeline to the destination notebook cleanly before it opens its
-        // own — otherwise this view's late onDestroy close is merely skipped by the ownership guard,
-        // leaving a dangling raw-input session.
-        drawingView.releaseForHandoff()
-        startActivity(
-            Intent(this, NotebookActivity::class.java)
-                .putExtra(NotebookActivity.EXTRA_NOTEBOOK_ID, destId)
-                .putExtra(NotebookActivity.EXTRA_NOTEBOOK_NAME, destName)
-                .putExtra(NotebookActivity.EXTRA_PASTE_PENDING, true)
-        )
-        finish()
+        // Tap-time "Opening…" overlay; the destination keeps it up until its first page renders.
+        com.notesprout.android.core.OpeningOverlay.showThen(this) {
+            // Hand the shared BOOX pen pipeline to the destination notebook cleanly before it opens
+            // its own — otherwise this view's late onDestroy close is merely skipped by the
+            // ownership guard, leaving a dangling raw-input session.
+            drawingView.releaseForHandoff()
+            startActivity(
+                Intent(this, NotebookActivity::class.java)
+                    .putExtra(NotebookActivity.EXTRA_NOTEBOOK_ID, destId)
+                    .putExtra(NotebookActivity.EXTRA_NOTEBOOK_NAME, destName)
+                    .putExtra(NotebookActivity.EXTRA_PASTE_PENDING, true)
+            )
+            finish()
+        }
     }
 
     // ── Sticky notes ────────────────────────────────────────────────────────────

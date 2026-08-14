@@ -9,8 +9,10 @@
 ## Overview
 
 Full-notebook export copies the notebook's `.soil` file — the SQLite database itself — to a
-user-chosen destination via **Save to device** (`CreateDocument`) or **Share** (platform share
-sheet via FileProvider). The file is **self-describing**: an embedded `notebook_meta` table inside
+user-chosen destination via **Save to device** (`CreateDocument`), **Share** (platform share
+sheet via FileProvider), or **Google Drive** (direct upload through the backup subsystem's Drive
+client — no share sheet involved, which is what makes it work on Supernote, where the system
+chooser is suppressed by the firmware). The file is **self-describing**: an embedded `notebook_meta` table inside
 the `.soil` carries the import metadata, so no external manifest or wrapper is needed.
 
 Every export in the app — `.soil` included — runs through the single **`ExportActivity`** screen.
@@ -69,6 +71,7 @@ encrypted at rest along with all other data in the file (SQLCipher encrypts the 
 | `folderPath` | `List<FolderRef>` | Full ancestor chain root→immediate-parent; empty for root-level notebooks |
 | `exportedAt` | `Long?` | Epoch ms stamped at export time; `null` on in-DB rows that haven't been exported |
 | `appVersionCode` | `Int?` | `BuildConfig.VERSION_CODE` at time of last refresh |
+| `textDocument` | `Boolean` (default false) | The file is a **text document** (opens straight into the document editor). Import copies it onto the index row, so the identity round-trips with the file — see [`documents.md`](documents.md) § Text documents |
 
 ### `FolderRef` Fields
 
@@ -118,7 +121,17 @@ when it has one and falls back to recognized handwriting otherwise — the docum
 version of the same words, and those pages skip recognition entirely (see [`documents.md`](documents.md)).
 Documents live inside the `.soil`, so `.soil` export/import carries them with no changes at all.
 
-| `export/ExportDelivery.kt` | SAF `CreateDocument` launchers (one per mime), the `OpenDocumentTree` folder write for multi-file PNG, share intents, and the PNG→template import |
+**The Source section** appears only when the scope is All pages, the format is Markdown/Text, and the
+notebook holds a non-blank **notebook document** (the merged final draft — probed cold via
+`hasNotebookDocument` in `data/PageList.kt`): *Notebook document (merged final draft)*, the default,
+vs *Page documents*. GONE otherwise — `buildSpec` falls back to `TextSource.PAGE_DOCUMENTS` whenever
+the choice is off-screen, so page selections always export per-page. Like page scope, the choice is
+**not** captured by presets. In the engine, `spec.textSource` threads to
+`NotebookTextExporter.exportFromPath(preferNotebookDocument = …)`, which early-returns the notebook
+document's text (stripped for `.txt`) and falls through to the page walk when it is blank or absent.
+
+| `export/ExportDelivery.kt` | SAF `CreateDocument` launchers (one per mime), the `OpenDocumentTree` folder write for multi-file PNG, share intents, the Google Drive upload (`uploadToDrive`), and the PNG→template import |
+| `export/DriveFolderPickerDialog.kt` | Folder picker for the Google Drive destination — browses the app-owned "Notesprout Exports" tree |
 | `export/ExportNaming.kt` | Filename/template-name whitelisting and de-duplication |
 | `data/export/ExportPreset.kt` | One saved set of export choices |
 | `data/export/ExportPresetsManager.kt` | SharedPreferences + kotlinx JSON store for the preset list |
@@ -225,6 +238,40 @@ Save/Share `AlertDialog` (`shape_bordered`):
   Android 12+ for chooser intermediaries such as Drive — same pattern as PDF share).
 
 Cancelling Save or Share leaves only the (harmless) cache file, which is wiped at the next export.
+
+---
+
+## Google Drive Destination
+
+The fourth destination row uploads the finished file(s) directly to the connected Google Drive —
+no system chooser, so it works on every device including Supernote (whose firmware suppresses the
+share sheet). It reuses the backup subsystem's OAuth connection and REST client wholesale
+(`DriveAuth` / `DriveTokenStore` / `DriveApiClient` — see [`backup.md`](backup.md)); the one new
+piece is the folder picker.
+
+- **App-owned tree.** The OAuth scope is `drive.file` — the app can only see folders it created.
+  All exports live under an app-created **"Notesprout Exports"** root (`ROOT_EXPORT_FOLDER` in
+  `DriveApiClient.kt`), separate from "Notesprout Backups". The picker browses and creates folders
+  inside that tree only; to move an export elsewhere the user does it in Drive itself.
+- **Default folder mirrors the library.** `ExportActivity` seeds the path with the notebook's
+  folder ancestry from the global index (`getFolderAncestry`), so `Library/Work/Meetings` exports
+  to `Notesprout Exports / Work / Meetings` unless changed.
+- **Folder picker** (`export/DriveFolderPickerDialog.kt`) — browse subfolders / Up / "New
+  folder…", "Use this folder" confirms. The chosen path is **names, not Drive ids**, and *nothing
+  is created while browsing*: a new folder just descends into a not-yet-existing name (empty
+  listing), and the whole chain is find-or-created (`ensureFolder`) at upload time by
+  `ExportDelivery.uploadToDrive`. Cancelling an export therefore never leaves empty folders on
+  Drive.
+- **Connection.** Tapping the row (or Export, if a preset armed the destination) with no stored
+  refresh token opens a Connect dialog → `DriveAuthActivity` (same WebView OAuth as backups). A
+  successful connect writes `driveAccountEmail` into the backup config so Backup Settings shows
+  "Connected", but does **not** enable Drive backups.
+- **Upload semantics.** `uploadOrReplace` — re-exporting the same name into the same folder
+  replaces the file rather than accumulating copies. Multi-file PNG exports upload every page file
+  into the chosen folder (no SAF tree picker needed). Failure keeps the export screen open with a
+  toast so the user can retry without re-rendering.
+- **Presets** capture `drivePath` (names only — no ids, no secrets); an empty stored path keeps
+  the seeded library-mirror default.
 
 ---
 

@@ -123,6 +123,21 @@ class IndexRepository(private val dao: ObjectDao) {
         dao.update(entity.copy(name = newName, updatedAt = System.currentTimeMillis()))
     }
 
+    /**
+     * Mark (or unmark) a notebook as a **text document** — one whose primary surface is its
+     * notebook document, opened straight into the document editor. Set at create and on import
+     * (from `notebook_meta.textDocument`). See docs/documents.md § Text documents.
+     */
+    suspend fun setTextDocument(id: String, textDocument: Boolean) {
+        val entity = dao.getById(id) ?: return
+        val obj = runCatching { entity.notebookMeta() }.getOrNull() ?: return // see updateNotebookSnapshot
+        if (obj.textDocument == textDocument) return
+        dao.update(
+            entity.withNotebookMeta(obj.copy(textDocument = textDocument))
+                .copy(updatedAt = System.currentTimeMillis())
+        )
+    }
+
     suspend fun softDeleteNotebook(id: String) {
         dao.softDelete(id, System.currentTimeMillis())
     }
@@ -292,10 +307,18 @@ class IndexRepository(private val dao: ObjectDao) {
         dao.getChildren(parentId, type = ObjectType.NOTEBOOK)
 
     suspend fun getAllNotebooks(): List<ObjectEntity> =
-        dao.getAllNotDeleted().filter { it.type == ObjectType.NOTEBOOK }
+        dao.getAllOfType(ObjectType.NOTEBOOK)
 
     suspend fun getAllFolders(): List<ObjectEntity> =
-        dao.getAllNotDeleted().filter { it.type == ObjectType.FOLDER }
+        dao.getAllOfType(ObjectType.FOLDER)
+
+    /** Live notebooks created in `[start, end)` — replaces filtering [getAllNotebooks] in Kotlin. */
+    suspend fun getNotebooksCreatedIn(start: Long, end: Long): List<ObjectEntity> =
+        dao.notebooksCreatedIn(start, end)
+
+    /** Blob-free batch read for list rows — see [ObjectSummary]. Empty in, empty out. */
+    suspend fun getObjectSummaries(ids: Collection<String>): List<ObjectSummary> =
+        if (ids.isEmpty()) emptyList() else dao.objectSummaries(ids.toList())
 
     // endregion
 
