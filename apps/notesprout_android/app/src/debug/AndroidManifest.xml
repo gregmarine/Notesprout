@@ -116,6 +116,22 @@
             android:name="com.notesprout.android.debug.SupernoteProbeActivity"
             android:exported="true"
             android:label="Supernote Probe" />
+        <!-- Nib Probe: cross-device hover experiment — can a small "current tool" badge be
+             drawn near the pen nib from the HOVER stream, before the tip lands? (The friction:
+             with the toolbar hidden the armed tool is invisible until it marks the page.)
+             Arms the real ink layer per device (Ratta firmware full-UI ink at the engine's
+             NEEDLE/EMR-250 · BOOX TouchHelper raw drawing · app polyline elsewhere) so badge
+             visibility and interference are measured under real pen conditions. Measures hover
+             delivery per source (view hover / generic / BOOX onPenActive), AXIS_DISTANCE range,
+             the ENTER→DOWN warning window (last + median), badge invalidate→draw latency, and
+             whether the hide-at-contact repaint survives (Ratta overlay law 2 territory).
+             TOOL / MODE (follow · enter-only · off) / POS (above · up-left · up-right) / INK /
+             CLEAR.
+             adb shell am start -n com.notesprout.android.dev/com.notesprout.android.debug.NibProbeActivity -->
+        <activity
+            android:name="com.notesprout.android.debug.NibProbeActivity"
+            android:exported="true"
+            android:label="Nib Probe" />
         <!-- Reveals the global passphrase so the encrypted index stays sqlcipher-inspectable. Debug only.
              adb shell am start -n com.notesprout.android.dev/com.notesprout.android.debug.DebugKeyActivity -->
         <activity
