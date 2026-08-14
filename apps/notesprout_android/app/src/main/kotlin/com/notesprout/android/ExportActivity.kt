@@ -28,6 +28,7 @@ import com.notesprout.android.data.export.ExportPreset
 import com.notesprout.android.data.export.ExportPresetsManager
 import com.notesprout.android.data.index.IndexRepository
 import com.notesprout.android.data.index.NotesproutIndex
+import com.notesprout.android.data.hasNotebookDocument
 import com.notesprout.android.data.loadPageRefs
 import com.notesprout.android.data.soilFile
 import com.notesprout.android.databinding.ActivityExportBinding
@@ -41,6 +42,7 @@ import com.notesprout.android.export.ExportNaming
 import com.notesprout.android.export.ExportSpec
 import com.notesprout.android.export.PageScope
 import com.notesprout.android.export.SoilKeying
+import com.notesprout.android.export.TextSource
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
@@ -112,6 +114,14 @@ class ExportActivity : AppCompatActivity() {
     private var format = ExportFormat.PDF
     private var destination = ExportDestination.SAVE
     private var keying = SoilKeying.KEEP
+    /**
+     * What MARKDOWN/TEXT reads when the Source choice is on offer. Defaults to the notebook
+     * document — the merged final draft is what "export the notebook as text" means once one
+     * exists. Like page scope, deliberately not part of a preset.
+     */
+    private var textSource = TextSource.NOTEBOOK_DOCUMENT
+    /** True when the `.soil` holds a non-blank notebook document — probed once in [onCreate]. */
+    private var hasNotebookDoc = false
     /** Set when "Protect PDF with a password" is checked and a password has been entered. */
     private var pdfPassword: String? = null
     /** Set when "Set a new passphrase…" is chosen and a passphrase has been entered. */
@@ -205,6 +215,7 @@ class ExportActivity : AppCompatActivity() {
             passphrase = resolveKey()
             locked = encryptionInfo.encrypted && passphrase == null
             allPages = withContext(Dispatchers.IO) { loadPageRefs(soilPath, passphrase) }
+            hasNotebookDoc = withContext(Dispatchers.IO) { hasNotebookDocument(soilPath, passphrase) }
             // Default Drive folder = the notebook's library placement, mirrored under the root.
             drivePath = withContext(Dispatchers.IO) {
                 indexRepo.getFolderAncestry(indexRepo.getNotebook(notebookId)?.parentId)
@@ -237,6 +248,11 @@ class ExportActivity : AppCompatActivity() {
         rowScopeAll.setOnClickListener { scope = PageScope.ALL; refreshOptions() }
         rowScopeCurrent.setOnClickListener { scope = PageScope.CURRENT; refreshOptions() }
         rowScopeSelected.setOnClickListener { scope = PageScope.SELECTED; refreshOptions() }
+
+        // Source isn't part of a preset either (it only exists at all-pages scope, and only for a
+        // notebook that has a merged document), so changing it leaves the active preset intact.
+        rowSourceNotebookDoc.setOnClickListener { textSource = TextSource.NOTEBOOK_DOCUMENT; refreshOptions() }
+        rowSourcePages.setOnClickListener { textSource = TextSource.PAGE_DOCUMENTS; refreshOptions() }
 
         rowFormatPdf.setOnClickListener { selectFormat(ExportFormat.PDF) }
         rowFormatPng.setOnClickListener { selectFormat(ExportFormat.PNG) }
@@ -433,6 +449,14 @@ class ExportActivity : AppCompatActivity() {
             ?.hideSoftInputFromWindow(view.windowToken, 0)
     }
 
+    /**
+     * True while the Source choice is on offer: text format, whole notebook, and a notebook
+     * document to read. Everywhere else the export is per-page regardless of [textSource].
+     */
+    private fun sourceChoiceAvailable(): Boolean =
+        (format == ExportFormat.MARKDOWN || format == ExportFormat.TEXT) &&
+            scope == PageScope.ALL && hasNotebookDoc
+
     /** The pages the current scope covers, in display order. */
     private fun scopedPages(): List<PageRef> = when (scope) {
         PageScope.ALL -> allPages
@@ -449,6 +473,7 @@ class ExportActivity : AppCompatActivity() {
             tvLocked.isVisible = true
             sectionPresets.isVisible = false
             sectionPages.isVisible = false
+            sectionSource.isVisible = false
             sectionOptions.isVisible = false
             sectionEncryption.isVisible = false
             listOf(rowFormatPdf, rowFormatPng, rowFormatMarkdown, rowFormatText, rowFormatSoil,
@@ -479,6 +504,16 @@ class ExportActivity : AppCompatActivity() {
         select(rowFormatPdf to ExportFormat.PDF, rowFormatPng to ExportFormat.PNG,
                rowFormatMarkdown to ExportFormat.MARKDOWN, rowFormatText to ExportFormat.TEXT,
                rowFormatSoil to ExportFormat.SOIL, current = format)
+
+        // ── Source ── the merged notebook document vs the per-page assembly. On offer only for
+        // the text formats over the whole notebook, and only when a notebook document exists —
+        // GONE otherwise (a disabled row is visually silent on e-ink). buildSpec falls back to
+        // PAGE_DOCUMENTS whenever the choice is not on offer.
+        sectionSource.isVisible = sourceChoiceAvailable()
+        if (sectionSource.isVisible) {
+            select(rowSourceNotebookDoc to TextSource.NOTEBOOK_DOCUMENT,
+                   rowSourcePages to TextSource.PAGE_DOCUMENTS, current = textSource)
+        }
 
         // ── Options ── raster formats only; endnotes need sticky notes to exist.
         sectionOptions.isVisible = format.isRaster
@@ -617,6 +652,7 @@ class ExportActivity : AppCompatActivity() {
         pdfPassword = pdfPassword,
         soilKeying = keying,
         newSoilPassphrase = newSoilPassphrase,
+        textSource = if (sourceChoiceAvailable()) textSource else TextSource.PAGE_DOCUMENTS,
         drivePath = drivePath,
     )
 

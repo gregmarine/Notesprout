@@ -95,4 +95,27 @@ object DocumentRepository {
     // Deleting a page needs nothing here: every delete path soft-deletes the page's children by
     // parentId (`softDeleteByParentId(pageId)` / `WHERE parentId = ?` in the raw paths), and undo
     // restores them the same way — a page-parented document is carried by both for free.
+
+    // ── Notebook document ─────────────────────────────────────────────────────
+    //
+    // The notebook-level document is an ordinary `document` row whose parentId is the notebook
+    // *root* object's id (type = 'notebook') instead of a page id — no schema change, and every
+    // sweep/copy path is keyed on page/layer ids so none of them can see it. Its `srcUpdatedAt`
+    // is `getNotebookMaxContentUpdatedAt(rootId)` at the last merge. See docs/documents.md.
+
+    /**
+     * The parent id a notebook-level document row uses: the notebook root object's id, falling
+     * back to [MainActivity.NIL_UUID] for legacy notebooks with no root row — the same fallback
+     * pages themselves use, and unambiguous because pages are not `type = 'document'`.
+     */
+    suspend fun notebookDocParentId(dao: NotebookDao): String =
+        dao.getNotebookObject()?.id ?: com.notesprout.android.MainActivity.NIL_UUID
+
+    /** The notebook-level document, or null if this notebook has never been merged. */
+    suspend fun getNotebookDocument(dao: NotebookDao): PageDocument? =
+        get(dao, notebookDocParentId(dao))
+
+    /** Write [text] as the notebook-level document. Same watermark discipline as [save]. */
+    suspend fun saveNotebookDocument(dao: NotebookDao, text: String, srcUpdatedAt: Long?) =
+        save(dao, notebookDocParentId(dao), text, srcUpdatedAt)
 }

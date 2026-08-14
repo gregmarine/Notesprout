@@ -120,6 +120,15 @@ when it has one and falls back to recognized handwriting otherwise — the docum
 version of the same words, and those pages skip recognition entirely (see [`documents.md`](documents.md)).
 Documents live inside the `.soil`, so `.soil` export/import carries them with no changes at all.
 
+**The Source section** appears only when the scope is All pages, the format is Markdown/Text, and the
+notebook holds a non-blank **notebook document** (the merged final draft — probed cold via
+`hasNotebookDocument` in `data/PageList.kt`): *Notebook document (merged final draft)*, the default,
+vs *Page documents*. GONE otherwise — `buildSpec` falls back to `TextSource.PAGE_DOCUMENTS` whenever
+the choice is off-screen, so page selections always export per-page. Like page scope, the choice is
+**not** captured by presets. In the engine, `spec.textSource` threads to
+`NotebookTextExporter.exportFromPath(preferNotebookDocument = …)`, which early-returns the notebook
+document's text (stripped for `.txt`) and falls through to the page walk when it is blank or absent.
+
 | `export/ExportDelivery.kt` | SAF `CreateDocument` launchers (one per mime), the `OpenDocumentTree` folder write for multi-file PNG, share intents, the Google Drive upload (`uploadToDrive`), and the PNG→template import |
 | `export/DriveFolderPickerDialog.kt` | Folder picker for the Google Drive destination — browses the app-owned "Notesprout Exports" tree |
 | `export/ExportNaming.kt` | Filename/template-name whitelisting and de-duplication |

@@ -196,6 +196,7 @@ class NotebookActivity : AppCompatActivity() {
         private const val STATE_DOCUMENT_PAGE_ID    = "document_page_id"
         private const val STATE_DOCUMENT_PAGE_INDEX = "document_page_index"
         private const val STATE_DOCUMENT_SRC        = "document_src_updated_at"
+        private const val STATE_DOCUMENT_NOTEBOOK   = "document_notebook_mode"
 
         /** Intent extra key — the index UUID for the notebook (ObjectEntity id). */
         const val EXTRA_NOTEBOOK_ID   = "notebook_id"
@@ -734,6 +735,18 @@ class NotebookActivity : AppCompatActivity() {
                 return@registerForActivityResult
             }
 
+            // A "Merge into notebook document" selection. The merge runs here, on the live
+            // connection — Page Index cannot write the .soil — and lands in the editor.
+            val mergeIds = data?.getStringExtra(PageIndexActivity.EXTRA_MERGE_DOC_PAGE_IDS)
+                ?.split(",")?.filter { it.isNotBlank() }
+            if (!mergeIds.isNullOrEmpty()) {
+                // Any same-session structural changes still need the canvas reload they would
+                // otherwise get below.
+                if (anySessionActions) navigateToPage(currentPageIndex)
+                startPageIndexMerge(mergeIds)
+                return@registerForActivityResult
+            }
+
             val selected = data?.getIntExtra(PageIndexActivity.EXTRA_SELECTED_PAGE_INDEX, -1) ?: -1
             when {
                 // User tapped a card — navigate to that page (forces full reload).
@@ -914,6 +927,27 @@ class NotebookActivity : AppCompatActivity() {
     private var documentSrcUpdatedAt: Long? = null
 
     /**
+     * True while the editor holds the **notebook document** — the merged final draft, a `document`
+     * row parented to the notebook root — rather than a page's. [documentPageId]/[documentPageIndex]
+     * keep pointing at the page the editor was on, so toggling back and the close-time follow-the-
+     * flips navigation still work; [documentSrcUpdatedAt] holds the notebook document's watermark
+     * meanwhile. See docs/documents.md.
+     */
+    private var documentNotebookMode = false
+
+    /**
+     * The in-flight notebook-document load or merge, so the editor popup's Cancel can stop a run
+     * that may read every page. Cancelling still answers the request (null, from its `finally`).
+     */
+    private var documentMergeJob: kotlinx.coroutines.Job? = null
+
+    /**
+     * The caret-memory key for the notebook document — page carets are keyed by page UUID, and the
+     * `nb:` prefix keeps this from ever colliding with one.
+     */
+    private fun notebookCaretKey() = "nb:$notebookId"
+
+    /**
      * True while a page flip's session is being loaded. In that window [documentPageId] already names
      * the incoming page but the editor's buffer still holds the outgoing one, so a save arriving then
      * (the editor pausing, or an autosave from typing during the wait) would write one page's text
@@ -930,7 +964,13 @@ class NotebookActivity : AppCompatActivity() {
      */
     private var pendingDocumentFlush: PendingDocumentFlush? = null
 
-    private data class PendingDocumentFlush(val pageId: String, val text: String, val srcUpdatedAt: Long?)
+    private data class PendingDocumentFlush(
+        val pageId: String,
+        val text: String,
+        val srcUpdatedAt: Long?,
+        /** True when the text is the notebook document's — the write targets the notebook row. */
+        val notebook: Boolean = false,
+    )
 
     /**
      * Flushes whatever the editor last published, then catches the notebook up to the page the editor
@@ -945,23 +985,27 @@ class NotebookActivity : AppCompatActivity() {
         val caret = DocumentTransfer.liveCaret
         val pageId = documentPageId
         val endedOn = documentPageIndex
+        val notebookDoc = documentNotebookMode
         DocumentTransfer.clearSession()
         documentPageId = ""
         documentPageIndex = -1
+        documentNotebookMode = false
 
         val db = soilDatabase
-        if (text != null && pageId.isNotEmpty()) {
+        if (text != null && (notebookDoc || pageId.isNotEmpty())) {
             val src = documentSrcUpdatedAt
-            DocumentPreferences.saveCaret(this, pageId, caret)
+            DocumentPreferences.saveCaret(this, if (notebookDoc) notebookCaretKey() else pageId, caret)
             if (db != null) {
                 lifecycleScope.launch(Dispatchers.IO) {
-                    runCatching { DocumentRepository.save(db.notebookDao(), pageId, text, src) }
-                        .onFailure { Log.e(TAG, "Failed to save document for page $pageId", it) }
+                    runCatching {
+                        if (notebookDoc) DocumentRepository.saveNotebookDocument(db.notebookDao(), text, src)
+                        else DocumentRepository.save(db.notebookDao(), pageId, text, src)
+                    }.onFailure { Log.e(TAG, "Failed to save document ($pageId, nb=$notebookDoc)", it) }
                 }
             } else {
                 // Recreated behind the editor: the result lands before the async DB open finishes.
                 // Hold the text for the open path — dropping it here would lose the user's writing.
-                pendingDocumentFlush = PendingDocumentFlush(pageId, text, src)
+                pendingDocumentFlush = PendingDocumentFlush(pageId, text, src, notebookDoc)
             }
         }
 
@@ -2301,6 +2345,7 @@ class NotebookActivity : AppCompatActivity() {
             documentPageIndex = savedInstanceState.getInt(STATE_DOCUMENT_PAGE_INDEX, -1)
             documentSrcUpdatedAt =
                 if (savedInstanceState.containsKey(STATE_DOCUMENT_SRC)) savedInstanceState.getLong(STATE_DOCUMENT_SRC) else null
+            documentNotebookMode = savedInstanceState.getBoolean(STATE_DOCUMENT_NOTEBOOK, false)
             DocumentTransfer.host = documentHost
         }
         SurfaceStack.attach(this, surfaceEntry())
@@ -2386,8 +2431,12 @@ class NotebookActivity : AppCompatActivity() {
                         pendingDocumentFlush = null
                         withContext(Dispatchers.IO) {
                             runCatching {
-                                DocumentRepository.save(db.notebookDao(), flush.pageId, flush.text, flush.srcUpdatedAt)
-                            }.onFailure { Log.e(TAG, "Failed to flush held document for page ${flush.pageId}", it) }
+                                if (flush.notebook) {
+                                    DocumentRepository.saveNotebookDocument(db.notebookDao(), flush.text, flush.srcUpdatedAt)
+                                } else {
+                                    DocumentRepository.save(db.notebookDao(), flush.pageId, flush.text, flush.srcUpdatedAt)
+                                }
+                            }.onFailure { Log.e(TAG, "Failed to flush held document (${flush.pageId}, nb=${flush.notebook})", it) }
                         }
                     }
                     lifecycleScope.launch(Dispatchers.IO) {
@@ -2474,6 +2523,7 @@ class NotebookActivity : AppCompatActivity() {
             outState.putString(STATE_DOCUMENT_PAGE_ID, documentPageId)
             outState.putInt(STATE_DOCUMENT_PAGE_INDEX, documentPageIndex)
             documentSrcUpdatedAt?.let { outState.putLong(STATE_DOCUMENT_SRC, it) }
+            outState.putBoolean(STATE_DOCUMENT_NOTEBOOK, documentNotebookMode)
         }
     }
 
@@ -5055,6 +5105,7 @@ class NotebookActivity : AppCompatActivity() {
             withContext(Dispatchers.IO) { saveStrokes(db) }
             documentPageIndex = index
             documentPageId = pages.getOrNull(index)?.id ?: currentPageId
+            documentNotebookMode = false
             val session = loadDocumentSession(db, documentPageId, index, showProgress = true)
             documentSrcUpdatedAt = session.srcUpdatedAt
             DocumentTransfer.host = documentHost
@@ -5063,6 +5114,105 @@ class NotebookActivity : AppCompatActivity() {
             documentLauncher.launch(
                 DocumentEditorActivity.intent(this@NotebookActivity, notebookDisplayName)
             )
+        }
+    }
+
+    /**
+     * Open the editor directly on the **notebook document** — where the Page Index's "Merge into
+     * document" lands after its merge has been written. The retained page identity is the current
+     * page, so toggling out and the close-time navigation behave as if the user had toggled in.
+     */
+    private fun openNotebookDocumentEditor(db: SoilDatabase) {
+        lifecycleScope.launch {
+            withContext(Dispatchers.IO) { saveStrokes(db) }
+            documentPageIndex = currentPageIndex
+            documentPageId = pages.getOrNull(currentPageIndex)?.id ?: currentPageId
+            documentNotebookMode = true
+            val session = loadNotebookDocumentSession(db)
+            documentSrcUpdatedAt = session.srcUpdatedAt
+            DocumentTransfer.host = documentHost
+            DocumentTransfer.input = session
+            DocumentTransfer.live = null
+            documentLauncher.launch(
+                DocumentEditorActivity.intent(this@NotebookActivity, notebookDisplayName)
+            )
+        }
+    }
+
+    /**
+     * A Page Index "Merge into notebook document" selection. When the document already holds text
+     * the Replace/Append choice comes **first** — before recognition runs, same rule as Bring in,
+     * so there is no "cancel after waiting" state. The sheet is also the guard on the durable
+     * overwrite: unlike a Bring in, this write does not pass through the editor's undo stack.
+     */
+    private fun startPageIndexMerge(pageIds: List<String>) {
+        val db = soilDatabase ?: return
+        lifecycleScope.launch {
+            val existing = withContext(Dispatchers.IO) {
+                DocumentRepository.getNotebookDocument(db.notebookDao())?.text?.takeIf { it.isNotBlank() }
+            }
+            if (existing == null) {
+                runPageIndexMerge(db, pageIds, existing = null, replace = true)
+            } else {
+                ActionSheetDialog(this@NotebookActivity)
+                    .title("Merge into notebook document")
+                    .addAction(null, "Replace the document") {
+                        runPageIndexMerge(db, pageIds, existing, replace = true)
+                    }
+                    .addAction(null, "Add below the current text") {
+                        runPageIndexMerge(db, pageIds, existing, replace = false)
+                    }
+                    .show()
+            }
+        }
+    }
+
+    /**
+     * The merge itself: a cancellable progress dialog over [mergeNotebookDraft], the write, then
+     * the editor opened on the result. Cancel (or a torn-down scope) writes nothing.
+     */
+    private fun runPageIndexMerge(db: SoilDatabase, pageIds: List<String>, existing: String?, replace: Boolean) {
+        val message = android.widget.TextView(this).apply {
+            text = "Reading the pages…"
+            setPadding(64, 48, 64, 48)
+            setTextColor(android.graphics.Color.BLACK)
+            textSize = 16f
+        }
+        val dialog = AlertDialog.Builder(this)
+            .setView(message)
+            .setCancelable(false)
+            .setNegativeButton("Cancel") { _, _ -> documentMergeJob?.cancel() }
+            .create()
+            .also {
+                it.show()
+                it.window?.setElevation(0f)
+                it.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
+            }
+        documentMergeJob = lifecycleScope.launch {
+            var opened = false
+            try {
+                val draft = mergeNotebookDraft(db, pageIds) { current, total ->
+                    message.text = "Reading page $current of $total…"
+                }
+                if (draft == null) {
+                    android.widget.Toast.makeText(
+                        this@NotebookActivity, "Nothing to merge from those pages yet.",
+                        android.widget.Toast.LENGTH_SHORT,
+                    ).show()
+                    return@launch
+                }
+                val text = if (replace || existing.isNullOrBlank()) draft.text
+                else DocumentDraft.append(existing, draft.text)
+                withContext(Dispatchers.IO) {
+                    DocumentRepository.saveNotebookDocument(db.notebookDao(), text, draft.srcUpdatedAt)
+                }
+                opened = true
+            } finally {
+                documentMergeJob = null
+                runCatching { dialog.dismiss() }
+            }
+            // Reviewing the merge is the natural next act — land in the editor on the result.
+            if (opened) openNotebookDocumentEditor(db)
         }
     }
 
@@ -5152,8 +5302,77 @@ class NotebookActivity : AppCompatActivity() {
     }
 
     /**
-     * What the editor is allowed to ask of the notebook. Both calls are keyed on [documentPageId] —
-     * never on `currentPageId`, which a recreated host may have moved on from.
+     * Everything the editor needs to show the **notebook document** — the merged final draft.
+     * Undrafted, it is seeded by merging every page's text ([mergeNotebookDraft]); staleness is the
+     * notebook-wide content watermark, so any page ink *or* page-document edit since the merge
+     * counts. The notebook twin of [loadDocumentSession].
+     */
+    private suspend fun loadNotebookDocumentSession(db: SoilDatabase): DocumentTransfer.Session {
+        val dao = db.notebookDao()
+        var draft = withContext(Dispatchers.IO) {
+            DocumentRepository.getNotebookDocument(dao)
+        }?.let { DocumentTransfer.Draft(it.text, it.srcUpdatedAt) }
+
+        if (DocumentDraft.isUndrafted(draft?.text)) {
+            // First visit: the merge is the seed — toggling in is the act of drafting, exactly as
+            // opening a written page's document is. May be cancelled (CancellationException
+            // propagates to the caller's null path) — nothing has been written yet.
+            draft = mergeNotebookDraft(db) ?: draft
+        }
+
+        val notebookMax = withContext(Dispatchers.IO) {
+            dao.getNotebookMaxContentUpdatedAt(DocumentRepository.notebookDocParentId(dao))
+        }
+        return DocumentTransfer.Session(
+            text = draft?.text.orEmpty(),
+            srcUpdatedAt = draft?.srcUpdatedAt,
+            stale = DocumentDraft.isStale(draft?.srcUpdatedAt, notebookMax ?: 0L),
+            pageLabel = "",
+            hasPrev = false,
+            hasNext = false,
+            caret = DocumentPreferences.caret(this, notebookCaretKey()),
+            notebook = true,
+        )
+    }
+
+    /**
+     * Merge the pages' text into one Markdown draft — per page its document when it has one,
+     * recognized handwriting otherwise, joined by blank lines ([NotebookTextExporter.assembleMarkdown],
+     * the same loop text export runs). [pageIds] narrows the merge to a Page Index selection; null
+     * is the whole notebook in display order.
+     *
+     * The watermark is read **before** the merge and covers the whole notebook regardless of
+     * [pageIds] — staleness answers "has anything changed since?", not "what was merged". Null when
+     * no recognizer is ready or the pages have nothing to give; cancellable between pages.
+     */
+    private suspend fun mergeNotebookDraft(
+        db: SoilDatabase,
+        pageIds: List<String>? = null,
+        onProgress: ((Int, Int) -> Unit)? = null,
+    ): DocumentTransfer.Draft? {
+        val hwr = HandwritingRecognizerProvider.instance?.takeIf { it.isReady() } ?: return null
+        val dao = db.notebookDao()
+        return try {
+            withContext(Dispatchers.IO) {
+                val ids = pageIds ?: dao.getPagesSorted().map { it.id }
+                val notebookMax = dao.getNotebookMaxContentUpdatedAt(DocumentRepository.notebookDocParentId(dao))
+                val text = NotebookTextExporter.assembleMarkdown(
+                    dao, ids, com.notesprout.android.recognition.PageTextRecognizer(hwr),
+                ) { current, total -> onProgress?.let { cb -> runOnUiThread { cb(current, total) } } }
+                text.takeIf { it.isNotBlank() }?.let { DocumentTransfer.Draft(it, notebookMax) }
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to merge notebook document", e)
+            null
+        }
+    }
+
+    /**
+     * What the editor is allowed to ask of the notebook. Every call is keyed on [documentPageId] /
+     * [documentNotebookMode] — never on `currentPageId`, which a recreated host may have moved on
+     * from.
      */
     private val documentHost = object : DocumentTransfer.Host {
 
@@ -5163,6 +5382,15 @@ class NotebookActivity : AppCompatActivity() {
             // The outgoing page was persisted before the flip began; nothing is lost by dropping it.
             if (documentPageLoading) return
             val db = soilDatabase ?: return
+            if (documentNotebookMode) {
+                val src = documentSrcUpdatedAt
+                DocumentPreferences.saveCaret(this@NotebookActivity, notebookCaretKey(), caret)
+                lifecycleScope.launch(Dispatchers.IO) {
+                    runCatching { DocumentRepository.saveNotebookDocument(db.notebookDao(), text, src) }
+                        .onFailure { Log.e(TAG, "Failed to save notebook document", it) }
+                }
+                return
+            }
             val pageId = documentPageId.takeIf { it.isNotEmpty() } ?: return
             val src = documentSrcUpdatedAt
             DocumentPreferences.saveCaret(this@NotebookActivity, pageId, caret)
@@ -5200,13 +5428,17 @@ class NotebookActivity : AppCompatActivity() {
             // Switch which page we write to *before* loading, and drop the outgoing page's published
             // text with it: a teardown between here and the editor's next save must not write the page
             // we left onto the page we arrived at. The editor has already stored it.
+            // delta = 0 is the way *back* from the notebook document — same machinery, the retained
+            // page as the target.
             val fromIndex = documentPageIndex
             val fromId = documentPageId
             val fromSrc = documentSrcUpdatedAt
+            val fromNotebook = documentNotebookMode
             DocumentTransfer.live = null
             documentPageIndex = target
             documentPageId = pageId
             documentSrcUpdatedAt = null
+            documentNotebookMode = false
             // From here until the session lands, saves are dropped (see saveDocument): the id above
             // names the incoming page while the editor still shows the outgoing one.
             documentPageLoading = true
@@ -5224,12 +5456,63 @@ class NotebookActivity : AppCompatActivity() {
                         documentPageIndex = fromIndex
                         documentPageId = fromId
                         documentSrcUpdatedAt = fromSrc
+                        documentNotebookMode = fromNotebook
                     }
                     // Answer even when this scope is torn down mid-load — an unanswered flip leaves
                     // the editor stuck behind its modal "Reading this page…".
                     onResult(session)
                 }
             }
+        }
+
+        override fun requestNotebookDocument(onResult: (DocumentTransfer.Session?) -> Unit) {
+            val db = soilDatabase
+            if (db == null || documentNotebookMode) { onResult(null); return }
+            // Same shape as a flip: switch the write target first, drop the published text, and
+            // treat the gap as a no-save zone. The page identity is retained for the way back.
+            val fromSrc = documentSrcUpdatedAt
+            DocumentTransfer.live = null
+            documentNotebookMode = true
+            documentSrcUpdatedAt = null
+            documentPageLoading = true
+            documentMergeJob = lifecycleScope.launch {
+                var session: DocumentTransfer.Session? = null
+                try {
+                    session = loadNotebookDocumentSession(db)
+                    documentSrcUpdatedAt = session.srcUpdatedAt
+                    DocumentTransfer.input = session
+                } finally {
+                    documentMergeJob = null
+                    documentPageLoading = false
+                    if (session == null) {
+                        // Cancelled or failed — the editor still shows the page it was on.
+                        documentNotebookMode = false
+                        documentSrcUpdatedAt = fromSrc
+                    }
+                    onResult(session)
+                }
+            }
+        }
+
+        override fun requestNotebookMerge(onResult: (DocumentTransfer.Draft?) -> Unit) {
+            val db = soilDatabase
+            if (db == null || !documentNotebookMode) { onResult(null); return }
+            documentMergeJob = lifecycleScope.launch {
+                var draft: DocumentTransfer.Draft? = null
+                try {
+                    draft = mergeNotebookDraft(db)
+                    // Re-anchor to the notebook state just merged — only ever here and at the seed,
+                    // which is what makes "pages have changed" meaningful.
+                    if (draft != null) documentSrcUpdatedAt = draft.srcUpdatedAt
+                } finally {
+                    documentMergeJob = null
+                    onResult(draft)
+                }
+            }
+        }
+
+        override fun cancelDocumentRequest() {
+            documentMergeJob?.cancel()
         }
     }
 
@@ -5240,6 +5523,12 @@ class NotebookActivity : AppCompatActivity() {
      */
     private suspend fun flushPendingDocument(db: SoilDatabase) {
         val text = DocumentTransfer.live ?: return
+        if (documentNotebookMode) {
+            DocumentPreferences.saveCaret(this, notebookCaretKey(), DocumentTransfer.liveCaret)
+            runCatching { DocumentRepository.saveNotebookDocument(db.notebookDao(), text, documentSrcUpdatedAt) }
+                .onFailure { Log.e(TAG, "Failed to flush notebook document", it) }
+            return
+        }
         val pageId = documentPageId.takeIf { it.isNotEmpty() } ?: return
         DocumentPreferences.saveCaret(this, pageId, DocumentTransfer.liveCaret)
         runCatching { DocumentRepository.save(db.notebookDao(), pageId, text, documentSrcUpdatedAt) }

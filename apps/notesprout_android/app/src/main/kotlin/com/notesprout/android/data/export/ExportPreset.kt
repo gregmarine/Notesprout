@@ -18,6 +18,10 @@ import java.util.UUID
  * Page scope is deliberately **not** captured: it belongs to how the export screen was opened
  * (a Page Index selection, the current notebook page) rather than to a reusable preference, and a
  * preset demanding "Selected (6)" is meaningless when nothing is selected.
+ *
+ * The text **Source** choice (notebook document vs page documents) is not captured either, for the
+ * same reason — it only exists at all-pages scope, and only for a notebook that has a merged
+ * notebook document; the screen defaults it to the notebook document whenever one exists.
  */
 @Serializable
 data class ExportPreset(

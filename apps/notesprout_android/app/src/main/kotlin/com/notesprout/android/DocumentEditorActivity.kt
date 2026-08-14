@@ -82,6 +82,7 @@ class DocumentEditorActivity : AppCompatActivity() {
         private const val STATE_TEXT = "doc_text"
         private const val STATE_PREVIEWING = "doc_previewing"
         private const val STATE_CARET = "doc_caret"
+        private const val STATE_NOTEBOOK = "doc_notebook"
 
         /** Pen-idle window before the text is written, matching RTR's own debounce. */
         private const val AUTOSAVE_DELAY_MS = 2000L
@@ -108,6 +109,10 @@ class DocumentEditorActivity : AppCompatActivity() {
     private lateinit var sourceText: AppCompatTextView
     private lateinit var titleText: AppCompatTextView
     private lateinit var pageText: AppCompatTextView
+    private lateinit var btnFlipPrev: AppCompatImageButton
+    private lateinit var btnFlipNext: AppCompatImageButton
+    private lateinit var btnScope: AppCompatImageButton
+    private lateinit var btnBringIn: AppCompatButton
 
     /** Source strip + rule + format bar + overflow panel: the writing chrome, shown and hidden together. */
     private lateinit var writingChrome: View
@@ -146,6 +151,13 @@ class DocumentEditorActivity : AppCompatActivity() {
     private var drafted = false
 
     /**
+     * True while the buffer holds the **notebook document** — the whole notebook's merged final
+     * draft — rather than one page's. Toggled by the header's scope button; page flips don't
+     * apply, the source strip speaks of pages-plural, and saves land on the notebook row.
+     */
+    private var notebookMode = false
+
+    /**
      * Set while the host is reading a page for us — a "bring in" or a page flip. Blocks a second
      * request from overlapping it and puts the strip into its reading state.
      */
@@ -164,6 +176,17 @@ class DocumentEditorActivity : AppCompatActivity() {
      */
     private var readingDialog: AlertDialog? = null
     private val readingPopup = Handler(Looper.getMainLooper())
+
+    /** What the popup should say when it (or its delayed post) fires — set before showing. */
+    private var readingMessage = "Reading this page…"
+
+    /**
+     * Offered as a Cancel button on the popup when set — only for the notebook-document merge,
+     * which may read every page in the notebook and is too long a run to be unescapable. A page
+     * read stays uncancelable, like the notebook's own open-time banner: recognition has no
+     * partial result to keep.
+     */
+    private var readingCancel: (() -> Unit)? = null
     private val showReadingPopup = Runnable { showReadingDialog() }
 
     /** The spell-checking layer — flags, debounce, popup. Thin by design; see ProofreadController. */
@@ -215,9 +238,14 @@ class DocumentEditorActivity : AppCompatActivity() {
         drafted = session?.srcUpdatedAt != null
         hasPrev = session?.hasPrev == true
         hasNext = session?.hasNext == true
+        // The saved flag wins over the hand-off: a recreated editor prefers its own buffer, and
+        // the mode must match the text it goes with.
+        notebookMode = savedInstanceState?.getBoolean(STATE_NOTEBOOK)
+            ?: (session?.notebook == true)
         session?.pageLabel?.takeIf { it.isNotBlank() }?.let { pageLabel = it }
         updateTitle()
         updatePageLabel()
+        applyModeChrome()
         updateSourceStrip()
 
         // Overflow: work out what fits once the bar has a width, and again whenever that width changes
@@ -279,6 +307,7 @@ class DocumentEditorActivity : AppCompatActivity() {
         outState.putString(STATE_TEXT, currentText())
         outState.putBoolean(STATE_PREVIEWING, previewing)
         outState.putInt(STATE_CARET, editor.selectionEnd)
+        outState.putBoolean(STATE_NOTEBOOK, notebookMode)
     }
 
     override fun onResume() {
@@ -475,7 +504,8 @@ class DocumentEditorActivity : AppCompatActivity() {
         // text. The notebook follows along when this screen closes. Same chevrons the notebook uses for
         // its own page navigation, with the count between them — the number belongs to the control that
         // changes it, and reads as one unit: ‹ 4 / 12 ›
-        header.addView(headerIcon(R.drawable.ic_page_prev, "Previous page  ·  Ctrl+PgUp") { flipPage(-1) })
+        btnFlipPrev = headerIcon(R.drawable.ic_page_prev, "Previous page  ·  Ctrl+PgUp") { flipPage(-1) }
+        header.addView(btnFlipPrev)
         pageText = AppCompatTextView(this).apply {
             setTextColor(ink)
             textSize = 13f
@@ -485,7 +515,15 @@ class DocumentEditorActivity : AppCompatActivity() {
             setPadding(dp(2), 0, dp(2), 0)
         }
         header.addView(pageText)
-        header.addView(headerIcon(R.drawable.ic_page_next, "Next page  ·  Ctrl+PgDn") { flipPage(1) })
+        btnFlipNext = headerIcon(R.drawable.ic_page_next, "Next page  ·  Ctrl+PgDn") { flipPage(1) }
+        header.addView(btnFlipNext)
+
+        // The scope toggle: this page's document ↔ the notebook document (the merged final draft).
+        // It sits with the flip cluster because it is the same kind of control — it moves which
+        // document the buffer holds, not the text. In notebook mode the flip cluster hides (there
+        // is no "next page" of the notebook document), which hands back the width this took.
+        btnScope = headerIcon(R.drawable.ic_notebook, "Notebook document") { toggleScope() }
+        header.addView(btnScope)
 
         // Text size lives in the header rather than the writing chrome so it is still reachable in
         // Preview — reading size matters at least as much as writing size.
@@ -544,11 +582,35 @@ class DocumentEditorActivity : AppCompatActivity() {
         strip.addView(stripButton(ink, "Reflow", "Join wrapped lines into paragraphs  ·  Ctrl+Shift+F") {
             reflowText()
         })
-        strip.addView(stripButton(ink, "Bring in", "Bring this page's text into the document") {
+        // "Bring in" in page mode, "Merge" in notebook mode — applyModeChrome relabels it.
+        btnBringIn = stripButton(ink, "Bring in", "Bring this page's text into the document") {
             promptBringIn()
-        })
+        }
+        strip.addView(btnBringIn)
 
         return strip
+    }
+
+    /**
+     * Point the chrome at the mode the buffer is in. Notebook mode hides the flip cluster — the
+     * notebook document has no neighbouring page — which hands back the width the scope toggle
+     * took, and relabels the toggle and the strip's action for the way back.
+     */
+    private fun applyModeChrome() {
+        val flips = if (notebookMode) View.GONE else View.VISIBLE
+        btnFlipPrev.visibility = flips
+        pageText.visibility = flips
+        btnFlipNext.visibility = flips
+
+        btnScope.setImageResource(if (notebookMode) R.drawable.ic_file_text else R.drawable.ic_notebook)
+        val scopeHint = if (notebookMode) "Page document" else "Notebook document"
+        btnScope.contentDescription = scopeHint
+        btnScope.setOnLongClickListener { Toast.makeText(this, scopeHint, Toast.LENGTH_SHORT).show(); true }
+
+        btnBringIn.text = if (notebookMode) "Merge" else "Bring in"
+        val bringHint = if (notebookMode) "Merge the pages' text into this document"
+        else "Bring this page's text into the document"
+        btnBringIn.setOnLongClickListener { Toast.makeText(this, bringHint, Toast.LENGTH_SHORT).show(); true }
     }
 
     private fun stripButton(ink: Int, label: String, hint: String, onClick: () -> Unit): AppCompatButton =
@@ -580,7 +642,12 @@ class DocumentEditorActivity : AppCompatActivity() {
      * *Bring in* is offered either way.
      */
     private fun updateSourceStrip() {
-        sourceText.text = when {
+        sourceText.text = if (notebookMode) when {
+            bringingIn -> "Reading the pages…"
+            pageChanged -> "Pages have changed since this merge"
+            drafted -> "Merged from this notebook's pages"
+            else -> ""
+        } else when {
             bringingIn -> "Reading this page…"
             pageChanged -> "Page has changed since this draft"
             drafted -> "Drafted from this page"
@@ -757,7 +824,7 @@ class DocumentEditorActivity : AppCompatActivity() {
      * when this screen closes.
      */
     private fun flipPage(delta: Int) {
-        if (bringingIn) return
+        if (bringingIn || notebookMode) return
         val host = DocumentTransfer.host
         if (host == null) {
             Toast.makeText(this, "The notebook is no longer open.", Toast.LENGTH_SHORT).show()
@@ -773,6 +840,8 @@ class DocumentEditorActivity : AppCompatActivity() {
         // The popup appears only if the flip is still in flight after the delay — that is, when the
         // page actually has to be read. It is the same banner the notebook shows at editor open,
         // which cannot be shown from the host here: the host is stopped behind this screen.
+        readingMessage = "Reading this page…"
+        readingCancel = null
         readingPopup.postDelayed(showReadingPopup, READING_POPUP_DELAY_MS)
         host.requestPage(delta) { session ->
             bringingIn = false
@@ -785,6 +854,55 @@ class DocumentEditorActivity : AppCompatActivity() {
             }
             applySession(session)
         }
+    }
+
+    // ── Notebook document (the merged final draft) ────────────────────────────
+
+    /**
+     * Switch between this page's document and the notebook document. The same shape as a page
+     * flip — text stored first, the host switches which row it writes to as part of the request,
+     * and the gap is a no-save zone on both sides.
+     *
+     * Toggling **in** may be the first visit, which merges every page's text to seed the document
+     * — a run long enough to deserve the Cancel the popup offers (cancelling calls back null and
+     * the editor stays on the page it was on). Toggling **out** is `requestPage(0)`: the host
+     * kept which page the editor was on.
+     */
+    private fun toggleScope() {
+        if (bringingIn) return
+        val host = DocumentTransfer.host
+        if (host == null) {
+            Toast.makeText(this, "The notebook is no longer open.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        persist()
+        bringingIn = true
+        flipInFlight = true
+        updateSourceStrip()
+        if (!notebookMode) {
+            readingMessage = "Reading the pages…"
+            readingCancel = { host.cancelDocumentRequest() }
+            readingPopup.postDelayed(showReadingPopup, READING_POPUP_DELAY_MS)
+            host.requestNotebookDocument { session -> onScopeResult(session) }
+        } else {
+            readingMessage = "Reading this page…"
+            readingCancel = null
+            readingPopup.postDelayed(showReadingPopup, READING_POPUP_DELAY_MS)
+            host.requestPage(0) { session -> onScopeResult(session) }
+        }
+    }
+
+    private fun onScopeResult(session: DocumentTransfer.Session?) {
+        bringingIn = false
+        flipInFlight = false
+        dismissReadingDialog()
+        if (session == null) {
+            // Cancelled, or the load failed — either way the host reverted to the document the
+            // buffer still shows, so staying put is correct and nothing was lost.
+            updateSourceStrip()
+            return
+        }
+        applySession(session)
     }
 
     /** Show a page's document: its text, its provenance, and where it sits in the notebook. */
@@ -802,6 +920,8 @@ class DocumentEditorActivity : AppCompatActivity() {
         hasPrev = session.hasPrev
         hasNext = session.hasNext
         pageLabel = session.pageLabel
+        notebookMode = session.notebook
+        applyModeChrome()
         updatePageLabel()
         updateSourceStrip()
         // Store this page's seed right away, so the gap where the text exists only in memory is as
@@ -821,14 +941,20 @@ class DocumentEditorActivity : AppCompatActivity() {
     private fun showReadingDialog() {
         if (readingDialog != null || isFinishing || isDestroyed) return
         val message = AppCompatTextView(this).apply {
-            text = "Reading this page…"
+            text = readingMessage
             setPadding(64, 48, 64, 48)
             setTextColor(ContextCompat.getColor(this@DocumentEditorActivity, R.color.inkBlack))
             textSize = 16f
         }
+        val cancel = readingCancel
         readingDialog = AlertDialog.Builder(this)
             .setView(message)
             .setCancelable(false)
+            .apply {
+                // Only the notebook merge offers a way out — it may read every page. The button
+                // asks the host to stop; the request's own null callback puts the UI right.
+                if (cancel != null) setNegativeButton("Cancel") { _, _ -> cancel() }
+            }
             .create()
             .also {
                 it.show()
@@ -858,8 +984,10 @@ class DocumentEditorActivity : AppCompatActivity() {
             Toast.makeText(this, "The notebook is no longer open.", Toast.LENGTH_SHORT).show()
             return
         }
+        // In notebook mode the same two situations exist one level up: the edits were a false
+        // start, or more was written on the pages after the editing.
         ActionSheetDialog(this)
-            .title("Bring in page text")
+            .title(if (notebookMode) "Merge pages" else "Bring in page text")
             .addAction(null, "Replace this document") { bringIn(replace = true) }
             .addAction(null, "Add below the current text") { bringIn(replace = false) }
             .show()
@@ -867,27 +995,34 @@ class DocumentEditorActivity : AppCompatActivity() {
 
     private fun bringIn(replace: Boolean) {
         val host = DocumentTransfer.host ?: return
+        val merge = notebookMode
         // Anything typed so far is stored before the page's text lands on top of it.
         persist()
         bringingIn = true
         updateSourceStrip()
-        // Shown at once, not on the flip's delay: a bring-in always reads the page in full.
+        // Shown at once, not on the flip's delay: a bring-in always reads the page(s) in full.
+        readingMessage = if (merge) "Reading the pages…" else "Reading this page…"
+        readingCancel = if (merge) ({ host.cancelDocumentRequest() }) else null
         showReadingDialog()
-        host.requestPageDraft { draft ->
+        val onDraft: (DocumentTransfer.Draft?) -> Unit = { draft ->
             bringingIn = false
             dismissReadingDialog()
             if (draft == null) {
                 updateSourceStrip()
-                Toast.makeText(this, "Nothing to bring in from this page yet.", Toast.LENGTH_SHORT).show()
-                return@requestPageDraft
+                if (!merge) {
+                    Toast.makeText(this, "Nothing to bring in from this page yet.", Toast.LENGTH_SHORT).show()
+                }
+                // A cancelled merge stays silent — the user just said no.
+            } else {
+                applyDraft(draft.text, replace)
+                // The document now matches the page(s) as of this recognition.
+                pageChanged = false
+                drafted = true
+                updateSourceStrip()
+                persist()
             }
-            applyDraft(draft.text, replace)
-            // The document now matches the page as of this recognition.
-            pageChanged = false
-            drafted = true
-            updateSourceStrip()
-            persist()
         }
+        if (merge) host.requestNotebookMerge(onDraft) else host.requestPageDraft(onDraft)
     }
 
     /**

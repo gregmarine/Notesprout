@@ -6,12 +6,14 @@ page overwrites it again unless asked. It is the step before export: where a han
 a finished piece of writing.
 
 One document per page, stored inside the `.soil`, so it is encrypted at rest, travels on
-export/import, and rides along with backup for free.
+export/import, and rides along with backup for free. One more per **notebook** — the [notebook
+document](#the-notebook-document), the whole notebook's pages merged into a single final draft —
+stored the same way.
 
 Surface: `DocumentEditorActivity` — full-screen Markdown editor, `Write` / `Preview`, format bar and
 matching Ctrl shortcuts (`MarkdownFormatter`), opened from the notebook toolbar's **Document** button.
-Page flips (`‹ ›`) and text size (`A`) sit with the page label in the header; **Reflow** and **Bring in**
-sit in the source strip below it.
+Page flips (`‹ ›`), the notebook-document scope toggle, and text size (`A`) sit with the page label
+in the header; **Reflow** and **Bring in** sit in the source strip below it.
 
 Chrome layout, top to bottom: header (notebook name · `‹ 4 / 12 ›` · text-size · Write / Preview /
 Done) — rule — source strip — **rule** — format bar — overflow panel — rule — the text.
@@ -370,13 +372,86 @@ button is visually silent on e-ink (see [`design-system.md`](design-system.md)).
 
 ---
 
+## The notebook document
+
+**The pages merge into one final draft.** Some notebooks are one piece of writing — a blog post, a
+Bible study — and once the per-page documents are cleaned up, the last step is a single document for
+the whole notebook: merged once, edited as its own text, exported whole. It is the page-document
+model applied one level up, deliberately: hand-owned after the seed, re-merged only by asking,
+staleness reported the same way.
+
+**Storage** — an ordinary `document` row whose `parentId` is the **notebook root object's** id
+(`DocumentRepository.notebookDocParentId`; `MainActivity.NIL_UUID` for legacy files with no root
+row, unambiguous because pages are not `type = 'document'`). No schema change and no `.soil`
+version bump: every sweep, copy, and export walk is keyed on page/layer ids, so none of them can
+see it (audited: soft-delete cascades, seal-time hard-delete, the orphan sweep, the compactor,
+`PageCopier`, the export page walk). Cross-notebook page copy therefore does **not** carry it —
+correct, it belongs to the notebook. Blank-means-absent holds unchanged.
+
+**The merge** is `NotebookTextExporter.assembleMarkdown` — the exact loop text export runs: per
+page the document when non-blank, recognized handwriting otherwise, pages joined by a **blank
+line** (continuous prose; no separator to delete by hand), empty pages dropped. The loop suspends
+per page, so cancelling the coroutine stops it between pages. The watermark is read *before* the
+merge and is notebook-wide.
+
+**Staleness is notebook-wide.** `getNotebookMaxContentUpdatedAt(rootId)` is the content whitelist
+`MAX(updatedAt)` over the whole file **plus every page-parented `document` row** — so new ink *and*
+an edited page document both read as "Pages have changed since this merge" — while the notebook
+document itself is excluded and never invalidates itself. Stamped into `srcUpdatedAt` only at
+merge time, same discipline as pages.
+
+**In the editor** the header's scope toggle (`ic_notebook` ↔ `ic_file_text`) switches between this
+page's document and the notebook document. It is a page flip in every way that matters: text stored
+first, the host switches targets (`documentNotebookMode`), the gap is a no-save zone under the same
+guards, and toggling back is `requestPage(0)` onto the retained page. In notebook mode the
+`‹ label ›` cluster hides (no neighbouring page — and it hands back the width the toggle took),
+the strip reads "Merged from this notebook's pages" / "Pages have changed since this merge", and
+**Bring in** becomes **Merge** — same Replace / Append sheet, Append joined under the `---` rule by
+`DocumentDraft.append`. `Ctrl+PgUp/PgDn` are no-ops. Caret memory uses the `"nb:$notebookId"` key,
+which no page UUID can collide with.
+
+**First toggle auto-merges.** An undrafted notebook document is seeded by merging every page —
+toggling in is the act of drafting, exactly as opening a written page's document is. Because that
+run may recognize every undocumented page, the editor's "Reading the pages…" popup carries a
+**Cancel** button (the one reading popup that does): `Host.cancelDocumentRequest` cancels the
+host's merge job, the request answers null from its `finally`, and the editor stays on the page it
+was on with nothing written.
+
+**From the Page Index**, the Export action button opens a sheet — *Export…* / *Merge into notebook
+document* (a sheet rather than a seventh button: the action bar is at the narrowest device's width
+budget, and Copy/Move set the precedent). The selection travels back through the result funnel
+(`EXTRA_MERGE_DOC_PAGE_IDS`, display order) because Page Index cannot write the `.soil`; the host
+runs the merge on its live connection with a cancellable progress dialog ("Reading page 3 of
+12…"), and lands in the editor on the result. When the document already holds text, the Replace /
+Append sheet comes **first** — before recognition, same rule as Bring in — and it is also the
+guard on the durable overwrite, since this path does not pass through the editor's undo stack.
+
+**Export prefers it — visibly.** When the scope is All pages, the format is Markdown/Text, and the
+notebook holds a non-blank notebook document (`hasNotebookDocument` in `data/PageList.kt`, the same
+cold-file peek as the page list), the export screen shows a **Source** section: *Notebook document
+(merged final draft)* — the default — vs *Page documents*. GONE otherwise, and `buildSpec` falls
+back to `PAGE_DOCUMENTS` whenever the choice is off-screen, so a page selection or single page
+always exports per-page. Presets do not capture it, for the same reason they don't capture scope.
+In the engine it is an early-return at the top of `writeFile`: non-blank notebook document ⇒ that
+is the export (through `toPlainText` for `.txt`); blank/absent falls through to the page walk.
+
+**Process death** carries a `notebook` flag everywhere the page id already travelled:
+`STATE_DOCUMENT_NOTEBOOK` next to the page-id instance state, `PendingDocumentFlush.notebook` for a
+flush that lands before the recreated host's DB open, and mode-aware routing in `saveDocument`,
+`flushPendingDocument` and the launcher flush — so text typed into the notebook document can never
+land on a page row, or vice versa.
+
+---
+
 ## Consumers and page lifecycle
 
 **Export prefers the document.** `NotebookTextExporter.writeFile` — the single funnel behind both
 `export()` and `exportFromPath()`, so `ExportActivity`/`ExportEngine`, MainActivity and PageIndexActivity
 all inherit it — uses the page's document when non-blank and falls back to recognized text otherwise.
 Pages with a document skip recognition entirely, so export gets faster as documents accumulate.
-`Format.PLAIN` strips Markdown after assembly, so documents get that for free.
+`Format.PLAIN` strips Markdown per page, so documents get that for free. One level up, an all-pages
+text export prefers the **notebook document** when one exists — the export screen's Source row (see
+[The notebook document](#the-notebook-document)).
 
 **Copy carries the document by name.** `PageCopier` deep-copies the *layer* subtree, so a
 page-parented row is invisible to it — harmless for a cache, data loss for a document. All three copy
@@ -400,8 +475,6 @@ Encryption, full-notebook export/import, and backup need no changes at all — t
 
 ## Not built
 
-- **Notebook-level or multi-page documents.** Per-page storage composes into one later (export already
-  concatenates pages) with no storage change.
 - **Documents on Scratch Pad / Calendar day pages.** Those pages live in the global index's
   `scratchpad` / `calendar` tables, which would each need `srcUpdatedAt` added.
 - **Sticky-note text in the seed.** `PageTextRepository.loadPageContent` reads content nested inside

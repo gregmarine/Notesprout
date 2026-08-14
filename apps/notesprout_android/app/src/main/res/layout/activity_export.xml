@@ -199,6 +199,38 @@
                 style="@style/Widget.Notesprout.OptionRow"
                 android:text="Notebook (.soil)" />
 
+            <!-- ── Source ──────────────────────────────────────────────────
+                 Only for the text formats over the whole notebook, and only when the notebook
+                 has a merged notebook document (see docs/documents.md). GONE otherwise. -->
+            <LinearLayout
+                android:id="@+id/sectionSource"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:visibility="gone">
+
+                <View
+                    android:layout_width="match_parent"
+                    android:layout_height="1dp"
+                    android:background="@color/inkBlack"
+                    android:layout_marginTop="20dp"
+                    android:layout_marginBottom="20dp" />
+
+                <TextView
+                    style="@style/Widget.Notesprout.SectionHeading"
+                    android:text="Source" />
+
+                <TextView
+                    android:id="@+id/rowSourceNotebookDoc"
+                    style="@style/Widget.Notesprout.OptionRow"
+                    android:text="Notebook document (merged final draft)" />
+
+                <TextView
+                    android:id="@+id/rowSourcePages"
+                    style="@style/Widget.Notesprout.OptionRow"
+                    android:text="Page documents" />
+            </LinearLayout>
+
             <!-- ── Options ────────────────────────────────────────────────── -->
             <LinearLayout
                 android:id="@+id/sectionOptions"

@@ -362,6 +362,19 @@ interface NotebookDao {
     suspend fun getMaxContentUpdatedAt(layerId: String): Long?
 
     /**
+     * The maximum [updatedAt] across ALL content rows in the notebook (any layer, soft-deleted
+     * included — they carry `updatedAt = deletedAt`), plus every page-parented `document` row:
+     * everything a notebook-document merge reads. The notebook-level document itself
+     * (parentId = [notebookRootId]) is excluded so it never invalidates itself — the same
+     * discipline that keeps `document` out of [getMaxContentUpdatedAt]'s whitelist.
+     *
+     * Returns null for a notebook with no content at all. Used as the notebook document's
+     * staleness watermark (see docs/documents.md).
+     */
+    @Query("SELECT MAX(updatedAt) FROM notebook WHERE type IN ('stroke', 'heading', 'text', 'line', 'link', 'sticky_note', 'shape') OR (type = 'document' AND parentId != :notebookRootId)")
+    suspend fun getNotebookMaxContentUpdatedAt(notebookRootId: String): Long?
+
+    /**
      * Count of content rows (any layer) whose [NotebookObject.updatedAt] is at or after [since].
      * Soft-deleted rows carry `updatedAt = deletedAt`, so erases count as edits too. Used at seal
      * time to decide whether this session should log an EDITED activity event.

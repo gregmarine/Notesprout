@@ -43,6 +43,46 @@ fun loadPageRefs(path: String, passphrase: String?, rawKey: ByteArray? = null): 
     }
 }
 
+/**
+ * True when the `.soil` at [path] holds a non-blank **notebook document** — a `document` row
+ * parented to the notebook root (see docs/documents.md). The export screen uses this to decide
+ * whether to offer the Source choice. Same short-lived raw-connection contract as [loadPageRefs];
+ * false when the file cannot be opened or the schema predates documents.
+ */
+fun hasNotebookDocument(path: String, passphrase: String?, rawKey: ByteArray? = null): Boolean {
+    if (passphrase != null && rawKey != null) {
+        try {
+            return readHasNotebookDocument(
+                SoilRawDb.Encrypted(SoilCrypto.openRawEncryptedRawKey(File(path), rawKey))
+            )
+        } catch (_: Exception) {
+            // Stale cached key — fall through to the passphrase open below.
+        }
+    }
+    return try {
+        readHasNotebookDocument(SoilCrypto.openRaw(File(path), passphrase))
+    } catch (_: Exception) {
+        false
+    }
+}
+
+private fun readHasNotebookDocument(db: SoilRawDb): Boolean {
+    try {
+        db.rawQuery(
+            // The notebook-root fallback mirrors DocumentRepository.notebookDocParentId: legacy
+            // files with no root row use the NIL UUID.
+            "SELECT COUNT(*) FROM notebook WHERE type = 'document' AND deletedAt IS NULL " +
+                "AND TRIM(COALESCE(text, '')) <> '' AND parentId = COALESCE(" +
+                "(SELECT id FROM notebook WHERE type = 'notebook' LIMIT 1), ?)",
+            arrayOf(com.notesprout.android.MainActivity.NIL_UUID),
+        ).use { c ->
+            return c.moveToNext() && c.getInt(0) > 0
+        }
+    } finally {
+        db.close()
+    }
+}
+
 private fun readPageRefs(db: SoilRawDb): List<PageRef> {
     try {
         val headingNames = topHeadingNamesByPageId(db)

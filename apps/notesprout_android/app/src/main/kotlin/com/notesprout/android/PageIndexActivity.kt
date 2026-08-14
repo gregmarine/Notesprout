@@ -97,6 +97,12 @@ class PageIndexActivity : AppCompatActivity() {
         const val EXTRA_OPEN_NOTEBOOK_ID   = "open_notebook_id"
         /** Display name matching [EXTRA_OPEN_NOTEBOOK_ID]. */
         const val EXTRA_OPEN_NOTEBOOK_NAME = "open_notebook_name"
+        /**
+         * Comma-separated UUIDs (display order) of pages the user asked to merge into the
+         * **notebook document**. This screen never writes the `.soil`, so the merge itself runs in
+         * [NotebookActivity]'s result handler on the host's live connection. See docs/documents.md.
+         */
+        const val EXTRA_MERGE_DOC_PAGE_IDS = "merge_doc_page_ids"
     }
 
     // ── Grid specification ────────────────────────────────────────────────────
@@ -332,7 +338,7 @@ class PageIndexActivity : AppCompatActivity() {
         binding.btnDeletePage.setOnClickListener { executeDelete() }
         binding.btnMovePage.setOnClickListener   { showScopeChooser(isCopy = false) }
         binding.btnSetTemplate.setOnClickListener { chooseTemplateForSelection() }
-        binding.btnExportPage.setOnClickListener { executeExport() }
+        binding.btnExportPage.setOnClickListener { promptExportOrMerge() }
         binding.btnInsertBefore.setOnClickListener { insertBefore = true;  refreshInsertBeforeAfter() }
         binding.btnInsertAfter.setOnClickListener  { insertBefore = false; refreshInsertBeforeAfter() }
         binding.btnConfirmDest.setOnClickListener  { confirmDestination() }
@@ -1481,6 +1487,36 @@ class PageIndexActivity : AppCompatActivity() {
     }
 
     /**
+     * The Export button's sheet: export the selection, or merge it into the notebook document.
+     * A sheet rather than a seventh action button — the action-mode bar is already at the width
+     * budget of the narrowest device, and the Copy/Move buttons set the precedent of a button
+     * opening a chooser.
+     */
+    private fun promptExportOrMerge() {
+        if (!inActionMode()) return
+        ActionSheetDialog(this)
+            .title("Selected pages")
+            .addAction(R.drawable.ic_export, "Export…") { executeExport() }
+            .addAction(R.drawable.ic_notebook, "Merge into notebook document") { executeMergeDocument() }
+            .show()
+    }
+
+    /**
+     * Hand the selection back to the notebook to be merged into the notebook document. This screen
+     * cannot write the `.soil` (its own connection is read-only by design), so the ids travel
+     * through the result — the same funnel every other Page Index action uses — and the host runs
+     * the merge on its live connection, then opens the editor on the result.
+     */
+    private fun executeMergeDocument() {
+        if (!inActionMode()) return
+        // Display order, not selection order — same rule as export.
+        val idSet = selectedPageIds.toSet()
+        val entries = pages.filter { it.id in idSet }.takeIf { it.isNotEmpty() } ?: return
+        mergeDocPageIds = entries.map { it.id }
+        finishWithResult(null)
+    }
+
+    /**
      * Entry point for the Export toolbar button: hand the current selection to [ExportActivity],
      * which owns format, options and destination for every export in the app.
      */
@@ -1500,11 +1536,17 @@ class PageIndexActivity : AppCompatActivity() {
         exitActionMode()
     }
 
+    /** Pages queued for a notebook-document merge — carried out by the host on return. */
+    private var mergeDocPageIds: List<String> = emptyList()
+
     /** Encode all session paste/delete/move actions into the result and finish. */
     private fun finishWithResult(selectedPageIndex: Int?) {
         val result = Intent()
         if (selectedPageIndex != null) {
             result.putExtra(EXTRA_SELECTED_PAGE_INDEX, selectedPageIndex)
+        }
+        if (mergeDocPageIds.isNotEmpty()) {
+            result.putExtra(EXTRA_MERGE_DOC_PAGE_IDS, mergeDocPageIds.joinToString(","))
         }
         if (pastedActions.isNotEmpty()) {
             result.putExtra(EXTRA_PASTED_PAGE_IDS,     pastedActions.joinToString(",") { it.first })

@@ -51,15 +51,63 @@ object NotebookTextExporter {
         format: Format,
         onProgress: (current: Int, total: Int) -> Unit,
         passphrase: String? = null,
+        preferNotebookDocument: Boolean = false,
     ): File {
         val builder = SoilDatabase.builder(context, soilPath)
         if (passphrase != null) builder.openHelperFactory(SoilCrypto.roomFactory(passphrase))
         val db = builder.build()
         try {
-            return writeFile(context, db.notebookDao(), pageIds, notebookTitle, format, onProgress)
+            return writeFile(
+                context, db.notebookDao(), pageIds, notebookTitle, format, onProgress,
+                preferNotebookDocument,
+            )
         } finally {
             db.close()
         }
+    }
+
+    /**
+     * The Markdown one page contributes: its document when non-blank, else its recognized text
+     * (cached-only without a [recognizer]); null for a page with nothing to give.
+     */
+    private suspend fun pageMarkdown(
+        dao: NotebookDao,
+        pageId: String,
+        recognizer: PageTextRecognizer?,
+    ): String? {
+        // A page with a document exports the document: it is the same text carried one step
+        // further, and it is what the user meant by "the writing on this page". Recognition is
+        // skipped entirely for those pages — the draft has already served its purpose.
+        return DocumentRepository.get(dao, pageId)?.text?.takeIf { it.isNotBlank() }
+            ?: run {
+                val pageText = if (recognizer != null) {
+                    PageTextRepository.freshOrRecognize(dao, pageId, recognizer)
+                } else {
+                    PageTextRepository.getCached(dao, pageId)
+                }
+                pageText?.text?.takeIf { it.isNotBlank() }
+            }
+    }
+
+    /**
+     * Assemble [pageIds]'s writing into one Markdown string — per page a document when it has one,
+     * recognized text otherwise, pages joined by a blank line (continuous prose, no visible
+     * separator), empty pages dropped. This is the notebook-document **merge**, and the same loop
+     * text export runs; the loop suspends per page, so cancelling the calling coroutine stops the
+     * merge between pages. See docs/documents.md.
+     */
+    suspend fun assembleMarkdown(
+        dao: NotebookDao,
+        pageIds: List<String>,
+        recognizer: PageTextRecognizer?,
+        onProgress: (current: Int, total: Int) -> Unit = { _, _ -> },
+    ): String {
+        val pageTexts = ArrayList<String>(pageIds.size)
+        for ((i, pageId) in pageIds.withIndex()) {
+            onProgress(i + 1, pageIds.size)
+            pageTexts += pageMarkdown(dao, pageId, recognizer) ?: continue
+        }
+        return pageTexts.joinToString("\n\n").trim()
     }
 
     private suspend fun writeFile(
@@ -69,9 +117,28 @@ object NotebookTextExporter {
         notebookTitle: String,
         format: Format,
         onProgress: (current: Int, total: Int) -> Unit,
+        preferNotebookDocument: Boolean = false,
     ): File {
         val safeTitle = notebookTitle.replace(Regex("[^a-zA-Z0-9_\\-. ]"), "_").trim('_', ' ')
             .ifBlank { "notebook" }
+
+        // The notebook document is the merged, cleaned-up final draft — when the caller asked for
+        // it and it exists, it *is* the export, and the page walk is skipped entirely. Blank or
+        // absent falls through to the pages (the Source row self-repairs the same way).
+        if (preferNotebookDocument) {
+            val nbDoc = DocumentRepository.getNotebookDocument(dao)?.text?.takeIf { it.isNotBlank() }
+            if (nbDoc != null) {
+                val body = when (format) {
+                    Format.MARKDOWN -> nbDoc
+                    Format.PLAIN -> MarkdownText.toPlainText(nbDoc)
+                }.trim() + "\n"
+                val outDir = File(context.cacheDir, "exported_text")
+                    .also { it.deleteRecursively(); it.mkdirs() }
+                val outFile = File(outDir, "$safeTitle.${format.extension}")
+                outFile.writeText(body)
+                return outFile
+            }
+        }
 
         // null pageIds = whole notebook, in display order.
         val ids = pageIds ?: dao.getPagesSorted().map { it.id }
@@ -85,19 +152,7 @@ object NotebookTextExporter {
         val pageTexts = ArrayList<String>(total)
         for ((i, pageId) in ids.withIndex()) {
             onProgress(i + 1, total)
-            // A page with a document exports the document: it is the same text carried one step
-            // further, and it is what the user meant by "the writing on this page". Recognition is
-            // skipped entirely for those pages — the draft has already served its purpose.
-            val md = DocumentRepository.get(dao, pageId)?.text?.takeIf { it.isNotBlank() }
-                ?: run {
-                    val pageText = if (recognizer != null) {
-                        PageTextRepository.freshOrRecognize(dao, pageId, recognizer)
-                    } else {
-                        PageTextRepository.getCached(dao, pageId)
-                    }
-                    pageText?.text?.takeIf { it.isNotBlank() }
-                }
-                ?: continue
+            val md = pageMarkdown(dao, pageId, recognizer) ?: continue
             pageTexts += when (format) {
                 Format.MARKDOWN -> md
                 Format.PLAIN -> MarkdownText.toPlainText(md)

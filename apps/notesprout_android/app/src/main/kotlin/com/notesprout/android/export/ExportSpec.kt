@@ -49,6 +49,14 @@ enum class ExportDestination { SAVE, SHARE, TEMPLATE, DRIVE }
 enum class SoilKeying { KEEP, REMOVE, NEW }
 
 /**
+ * What MARKDOWN/TEXT export reads: the **notebook document** (the merged final draft, when the
+ * notebook has one) or the per-page assembly (each page's document, recognized text as fallback).
+ * Only meaningful at [PageScope.ALL] — a page selection is always per-page. Not captured by
+ * presets, for the same reason page scope is not. See docs/documents.md.
+ */
+enum class TextSource { NOTEBOOK_DOCUMENT, PAGE_DOCUMENTS }
+
+/**
  * A fully specified export job.
  *
  * [pageIds] is already resolved to the scoped, display-ordered set — [ExportEngine] does no
@@ -71,6 +79,8 @@ data class ExportSpec(
     val pdfPassword: String? = null,
     /** How the exported `.soil` copy is keyed. `.soil` of an encrypted notebook only. */
     val soilKeying: SoilKeying = SoilKeying.KEEP,
+    /** What MARKDOWN/TEXT reads. Only honoured at all-pages scope; see [TextSource]. */
+    val textSource: TextSource = TextSource.PAGE_DOCUMENTS,
     /** The new passphrase for [SoilKeying.NEW]. */
     val newSoilPassphrase: String? = null,
     /**
