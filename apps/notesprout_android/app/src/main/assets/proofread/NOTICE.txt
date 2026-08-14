@@ -17,8 +17,16 @@ terms apply to the word/frequency data itself:
     genuine-vocabulary filter. Permissive license:
     http://wordlist.aspell.net/scowl-readme/
 
-Modifications made here: removed the UTF-8 byte-order mark and
-gzip-compressed the file. The word/frequency content is unchanged.
+Modifications made here: removed the UTF-8 byte-order mark,
+gzip-compressed the file, and added 793 missing spelling variants
+(US/UK/CA/AU) so both spellings of every standard pair are accepted —
+the upstream list carried e.g. "favourite" but not "favorite". Each
+added form takes the frequency of its counterpart already in the list,
+matching the upstream convention for the pairs it did merge. The
+variant mapping comes from VarCon (Variant Conversion Info), part of
+the SCOWL project by Kevin Atkinson — permissive license:
+  http://wordlist.aspell.net/varcon-readme/
+Regeneration script: tools/proofread/patch_dictionary.py (monorepo).
 
 The SymSpellKt library (com.darkrockstudios:symspellkt) that consumes
 this dictionary is licensed MIT:

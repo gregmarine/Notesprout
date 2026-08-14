@@ -84,6 +84,20 @@ class SpellEngineTest {
     }
 
     @Test
+    fun knows_both_regional_spellings() {
+        // The upstream SymSpell list shipped "favourite" without "favorite" (and ~790 similar
+        // gaps), flagging American text with British suggestions. The asset is patched via
+        // tools/proofread/patch_dictionary.py so both spellings of every standard pair are
+        // known; this pins the pairs that surfaced on-device against a future dictionary swap.
+        for (word in listOf(
+            "favorite", "favourite", "theater", "theatre", "neighbor", "neighbour",
+            "analyze", "analyse", "color", "colour", "airplane", "aeroplane", "mom", "mum",
+        )) {
+            assertTrue("dictionary lost \"$word\"", engine.isKnown(word))
+        }
+    }
+
+    @Test
     fun rejects_misspellings() {
         assertFalse(engine.isKnown("teh"))
         assertFalse(engine.isKnown("notebok"))

@@ -33,9 +33,16 @@ deliberately thin: Android specifics (handlers, spans, dialogs, Room) live there
   dependency for this feature. Chosen after the grammar-library search came up empty:
   LanguageTool cannot run on Android (known upstream bug), nlprule is dormant with LGPL
   binaries, and ML Kit GenAI proofreading needs AICore, absent on e-ink devices.
-- Dictionary: SymSpell's English `en_82_765` frequency list, shipped gzipped as
-  `assets/proofread/en_82765.dict` (~613 KB). Attribution in `NOTICE.txt` beside it — the
-  *dictionary data* is CC-BY-3.0 (Google Ngram) + SCOWL; the SymSpell repo is MIT.
+- Dictionary: SymSpell's English `en_82_765` frequency list, **patched with VarCon** (the
+  SCOWL variant table) and shipped gzipped as `assets/proofread/en_82765.dict` (~617 KB,
+  83,627 terms). The upstream list merged US/UK spelling pairs inconsistently — `colour`
+  *and* `color`, but `favourite` without `favorite` (also missing: `theater`, `neighbor`,
+  `analyze`, `airplane`, `mom`, ~790 more) — so American text got flagged with British
+  suggestions. The patch (`tools/proofread/patch_dictionary.py`, see its README) adds every
+  missing standard variant at its counterpart's frequency: **both spellings of every
+  standard US/UK/CA/AU pair are accepted; neither is ever flagged.** Attribution in
+  `NOTICE.txt` beside it — the *dictionary data* is CC-BY-3.0 (Google Ngram) + SCOWL +
+  VarCon; the SymSpell repo is MIT.
 - ⚠️ **The extension is `.dict`, not `.gz`, on purpose.** AAPT gunzips any `.gz` asset at build
   time and strips the extension from the APK, so a `.gz` asset's runtime name never matches the
   source tree — this crashed on the Manta before it was understood. An opaque extension ships
