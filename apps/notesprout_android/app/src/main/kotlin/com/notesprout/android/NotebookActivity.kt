@@ -914,6 +914,25 @@ class NotebookActivity : AppCompatActivity() {
     private var documentSrcUpdatedAt: Long? = null
 
     /**
+     * True while a page flip's session is being loaded. In that window [documentPageId] already names
+     * the incoming page but the editor's buffer still holds the outgoing one, so a save arriving then
+     * (the editor pausing, or an autosave from typing during the wait) would write one page's text
+     * onto another. [DocumentTransfer.Host.saveDocument] drops writes while this is set; the editor
+     * suppresses its own persists over the same window as well — belt and braces.
+     */
+    private var documentPageLoading = false
+
+    /**
+     * The editor's text when [documentLauncher] fired before the async DB open finished — this
+     * activity recreated behind the editor (config change, low-memory kill) delivers the result in
+     * `onStart`, well before `soilDatabase` exists. Written by the open path the moment the
+     * connection is up; without this the text would be silently dropped.
+     */
+    private var pendingDocumentFlush: PendingDocumentFlush? = null
+
+    private data class PendingDocumentFlush(val pageId: String, val text: String, val srcUpdatedAt: Long?)
+
+    /**
      * Flushes whatever the editor last published, then catches the notebook up to the page the editor
      * ended on. Fires even on a cancelled return, and after a low-memory kill of *this* activity behind
      * the editor: the recreated host restores [documentPageId] from instance state, and this is where
@@ -931,12 +950,18 @@ class NotebookActivity : AppCompatActivity() {
         documentPageIndex = -1
 
         val db = soilDatabase
-        if (text != null && pageId.isNotEmpty() && db != null) {
+        if (text != null && pageId.isNotEmpty()) {
             val src = documentSrcUpdatedAt
             DocumentPreferences.saveCaret(this, pageId, caret)
-            lifecycleScope.launch(Dispatchers.IO) {
-                runCatching { DocumentRepository.save(db.notebookDao(), pageId, text, src) }
-                    .onFailure { Log.e(TAG, "Failed to save document for page $pageId", it) }
+            if (db != null) {
+                lifecycleScope.launch(Dispatchers.IO) {
+                    runCatching { DocumentRepository.save(db.notebookDao(), pageId, text, src) }
+                        .onFailure { Log.e(TAG, "Failed to save document for page $pageId", it) }
+                }
+            } else {
+                // Recreated behind the editor: the result lands before the async DB open finishes.
+                // Hold the text for the open path — dropping it here would lose the user's writing.
+                pendingDocumentFlush = PendingDocumentFlush(pageId, text, src)
             }
         }
 
@@ -2355,6 +2380,16 @@ class NotebookActivity : AppCompatActivity() {
                     )
                     soilDatabase = builder.build()
                     val db = soilDatabase!!
+                    // Text the document editor handed back before this connection existed (see
+                    // documentLauncher). Written before anything else reads the notebook.
+                    pendingDocumentFlush?.let { flush ->
+                        pendingDocumentFlush = null
+                        withContext(Dispatchers.IO) {
+                            runCatching {
+                                DocumentRepository.save(db.notebookDao(), flush.pageId, flush.text, flush.srcUpdatedAt)
+                            }.onFailure { Log.e(TAG, "Failed to flush held document for page ${flush.pageId}", it) }
+                        }
+                    }
                     lifecycleScope.launch(Dispatchers.IO) {
                         runCatching {
                             NotebookMetaStore.refresh(db, indexRepo, notebookId)
@@ -5123,6 +5158,10 @@ class NotebookActivity : AppCompatActivity() {
     private val documentHost = object : DocumentTransfer.Host {
 
         override fun saveDocument(text: String, caret: Int) {
+            // Mid-flip: documentPageId already names the incoming page while the editor's buffer
+            // still holds the outgoing one — this write would put one page's text onto another.
+            // The outgoing page was persisted before the flip began; nothing is lost by dropping it.
+            if (documentPageLoading) return
             val db = soilDatabase ?: return
             val pageId = documentPageId.takeIf { it.isNotEmpty() } ?: return
             val src = documentSrcUpdatedAt
@@ -5138,11 +5177,18 @@ class NotebookActivity : AppCompatActivity() {
             val pageId = documentPageId
             if (db == null || pageId.isEmpty()) { onResult(null); return }
             lifecycleScope.launch {
-                val draft = seedDocumentDraft(db, pageId, showProgress = false)
-                // Re-anchor the document to the page state it was just drafted from. Only ever here
-                // and at the seed — this is what makes "page has changed" meaningful.
-                if (draft != null) documentSrcUpdatedAt = draft.srcUpdatedAt
-                onResult(draft)
+                var draft: DocumentTransfer.Draft? = null
+                try {
+                    draft = seedDocumentDraft(db, pageId, showProgress = false)
+                    // Re-anchor the document to the page state it was just drafted from. Only ever here
+                    // and at the seed — this is what makes "page has changed" meaningful.
+                    if (draft != null) documentSrcUpdatedAt = draft.srcUpdatedAt
+                } finally {
+                    // Answer even when this scope is torn down mid-read (the host destroyed behind the
+                    // editor): an unanswered request leaves the editor refusing flips and bring-ins
+                    // behind its modal "Reading this page…" forever.
+                    onResult(draft)
+                }
             }
         }
 
@@ -5154,15 +5200,35 @@ class NotebookActivity : AppCompatActivity() {
             // Switch which page we write to *before* loading, and drop the outgoing page's published
             // text with it: a teardown between here and the editor's next save must not write the page
             // we left onto the page we arrived at. The editor has already stored it.
+            val fromIndex = documentPageIndex
+            val fromId = documentPageId
+            val fromSrc = documentSrcUpdatedAt
             DocumentTransfer.live = null
             documentPageIndex = target
             documentPageId = pageId
             documentSrcUpdatedAt = null
+            // From here until the session lands, saves are dropped (see saveDocument): the id above
+            // names the incoming page while the editor still shows the outgoing one.
+            documentPageLoading = true
             lifecycleScope.launch {
-                val session = loadDocumentSession(db, pageId, target, showProgress = false)
-                documentSrcUpdatedAt = session.srcUpdatedAt
-                DocumentTransfer.input = session
-                onResult(session)
+                var session: DocumentTransfer.Session? = null
+                try {
+                    session = loadDocumentSession(db, pageId, target, showProgress = false)
+                    documentSrcUpdatedAt = session.srcUpdatedAt
+                    DocumentTransfer.input = session
+                } finally {
+                    documentPageLoading = false
+                    if (session == null) {
+                        // The flip never landed (torn down mid-load, most likely) — the editor is
+                        // still showing the page it was on, so point the writes back at it.
+                        documentPageIndex = fromIndex
+                        documentPageId = fromId
+                        documentSrcUpdatedAt = fromSrc
+                    }
+                    // Answer even when this scope is torn down mid-load — an unanswered flip leaves
+                    // the editor stuck behind its modal "Reading this page…".
+                    onResult(session)
+                }
             }
         }
     }

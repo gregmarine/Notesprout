@@ -27,6 +27,7 @@ import android.view.inputmethod.InputMethodManager
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.Toast
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.AppCompatButton
 import androidx.appcompat.widget.AppCompatEditText
@@ -85,6 +86,13 @@ class DocumentEditorActivity : AppCompatActivity() {
         /** Pen-idle window before the text is written, matching RTR's own debounce. */
         private const val AUTOSAVE_DELAY_MS = 2000L
 
+        /**
+         * How long a page flip may take before the "Reading this page…" popup appears. A page with a
+         * document loads in well under this, so the popup shows only when the page actually has to be
+         * read — an instant flip must not flash a dialog on e-ink.
+         */
+        private const val READING_POPUP_DELAY_MS = 350L
+
         fun intent(context: Context, notebookName: String): Intent =
             Intent(context, DocumentEditorActivity::class.java)
                 .putExtra(EXTRA_NOTEBOOK_NAME, notebookName)
@@ -142,6 +150,21 @@ class DocumentEditorActivity : AppCompatActivity() {
      * request from overlapping it and puts the strip into its reading state.
      */
     private var bringingIn = false
+
+    /**
+     * Set for the flip flavour of [bringingIn] only. While a flip is in flight the host is already
+     * writing to the incoming page but this buffer still shows the outgoing one, so [persist] must
+     * stay silent — see there.
+     */
+    private var flipInFlight = false
+
+    /**
+     * The modal "Reading this page…" — the same banner the notebook shows while seeding a page's
+     * document at open. Null while not shown.
+     */
+    private var readingDialog: AlertDialog? = null
+    private val readingPopup = Handler(Looper.getMainLooper())
+    private val showReadingPopup = Runnable { showReadingDialog() }
 
     /** The spell-checking layer — flags, debounce, popup. Thin by design; see ProofreadController. */
     private lateinit var proofread: ProofreadController
@@ -264,6 +287,8 @@ class DocumentEditorActivity : AppCompatActivity() {
         // "Reading this page…" and the button refusing forever.
         if (bringingIn && DocumentTransfer.host == null) {
             bringingIn = false
+            flipInFlight = false
+            dismissReadingDialog()
             updateSourceStrip()
         }
         applyKeyboardMode()
@@ -292,6 +317,7 @@ class DocumentEditorActivity : AppCompatActivity() {
         if (IndexGuard.bounced(this)) { super.onDestroy(); return }
         super.onDestroy()
         autosave.removeCallbacks(autosaveTick)
+        dismissReadingDialog()
         if (::proofread.isInitialized) proofread.dispose()
     }
 
@@ -311,6 +337,12 @@ class DocumentEditorActivity : AppCompatActivity() {
      * is then the only place the text still exists.
      */
     private fun persist() {
+        // Mid-flip the host is already keyed to the incoming page while this buffer still holds the
+        // outgoing one — a save (or even a republish to `live`) here would land one page's text on
+        // another. The outgoing page was persisted as the flip began, so nothing the host was ever
+        // given is dropped; anything typed into the doomed buffer is discarded by the arriving
+        // session regardless.
+        if (flipInFlight) return
         autosave.removeCallbacks(autosaveTick)
         val text = currentText()
         val caret = editor.selectionEnd
@@ -736,9 +768,16 @@ class DocumentEditorActivity : AppCompatActivity() {
 
         persist()
         bringingIn = true
+        flipInFlight = true
         updateSourceStrip()
+        // The popup appears only if the flip is still in flight after the delay — that is, when the
+        // page actually has to be read. It is the same banner the notebook shows at editor open,
+        // which cannot be shown from the host here: the host is stopped behind this screen.
+        readingPopup.postDelayed(showReadingPopup, READING_POPUP_DELAY_MS)
         host.requestPage(delta) { session ->
             bringingIn = false
+            flipInFlight = false
+            dismissReadingDialog()
             if (session == null) {
                 updateSourceStrip()
                 Toast.makeText(this, "Couldn't open that page.", Toast.LENGTH_SHORT).show()
@@ -774,6 +813,37 @@ class DocumentEditorActivity : AppCompatActivity() {
         if (previewing) renderPreview()
     }
 
+    /**
+     * The modal "Reading this page…" — visually the twin of the one [NotebookActivity] shows while
+     * seeding a document at editor open, so the two entry points to a page read announce themselves
+     * the same way. Not cancelable, like the original: recognition has no partial result to keep.
+     */
+    private fun showReadingDialog() {
+        if (readingDialog != null || isFinishing || isDestroyed) return
+        val message = AppCompatTextView(this).apply {
+            text = "Reading this page…"
+            setPadding(64, 48, 64, 48)
+            setTextColor(ContextCompat.getColor(this@DocumentEditorActivity, R.color.inkBlack))
+            textSize = 16f
+        }
+        readingDialog = AlertDialog.Builder(this)
+            .setView(message)
+            .setCancelable(false)
+            .create()
+            .also {
+                it.show()
+                it.window?.setElevation(0f)
+                it.window?.setBackgroundDrawableResource(R.drawable.shape_dialog_bordered)
+            }
+    }
+
+    /** Put the popup away — and cancel a delayed show that has not fired yet. */
+    private fun dismissReadingDialog() {
+        readingPopup.removeCallbacks(showReadingPopup)
+        readingDialog?.let { runCatching { it.dismiss() } }
+        readingDialog = null
+    }
+
     // ── Bringing the page's text in ───────────────────────────────────────────
 
     /**
@@ -801,8 +871,11 @@ class DocumentEditorActivity : AppCompatActivity() {
         persist()
         bringingIn = true
         updateSourceStrip()
+        // Shown at once, not on the flip's delay: a bring-in always reads the page in full.
+        showReadingDialog()
         host.requestPageDraft { draft ->
             bringingIn = false
+            dismissReadingDialog()
             if (draft == null) {
                 updateSourceStrip()
                 Toast.makeText(this, "Nothing to bring in from this page yet.", Toast.LENGTH_SHORT).show()

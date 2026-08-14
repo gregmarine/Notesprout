@@ -233,7 +233,8 @@ There is no Cancel: writing on paper is not cancellable. Text is written on a 2 
 | Failure | What closes it |
 |---|---|
 | Host destroyed under the editor (low-memory kill), taking the DB with it | The editor republishes `DocumentTransfer.live` on every save; `sealNotebook` calls `flushPendingDocument(db)` **before** the connection closes |
-| Process death | `NotebookActivity.onSaveInstanceState` keeps `documentPageId` + watermark (next to `pendingStickyNote`); the recreated host reinstalls itself as host, and `documentLauncher` flushes `live` when the editor closes |
+| Process death | `NotebookActivity.onSaveInstanceState` keeps `documentPageId` + watermark (next to `pendingStickyNote`); the recreated host reinstalls itself as host, and `documentLauncher` flushes `live` when the editor closes. The recreated host's result callback fires **before** its async DB open finishes, so the flush is staged through `pendingDocumentFlush` and written the moment the connection is built |
+| Host restarted by a config change | The notebook's manifest declares `keyboard` (as the editor already did): attaching a Bluetooth keyboard must not destroy the host behind the editor, which would clear `DocumentTransfer.host` ("The notebook is no longer open." on every flip) and seal the `.soil` until the editor closes |
 | Editor recreation | The editor's views are built in code with no ids, so `EditText` state is **not** restored for us — it saves its buffer explicitly and prefers it over the hand-off |
 
 `savedText` in the editor means only "this exact text has been handed to the host". Whatever the editor
@@ -333,8 +334,12 @@ The order matters and is load-bearing:
    `DocumentTransfer.live`**, so a teardown in the gap cannot write the outgoing page's text onto the
    incoming one.
 3. The new page's `Session` is loaded through the same `loadDocumentSession` the open path uses — so a
-   flip seeds an undrafted page exactly like opening it does, progress shown in the strip rather than a
-   dialog (the host is stopped; see below).
+   flip seeds an undrafted page exactly like opening it does. Progress is the **editor's own**
+   "Reading this page…" popup — the visual twin of the host's open-time banner, which the host cannot
+   show here (it is stopped; see below) — plus the same line in the strip. The popup appears only if
+   the flip is still in flight after 350 ms (`READING_POPUP_DELAY_MS`), so a drafted page flips
+   instantly with no dialog flash on e-ink; a *Bring in* shows it immediately, since that always reads
+   the page in full.
 4. `applySession` stores the new page's seed immediately, keeping the in-memory-only window as short on a
    flip as it is on open.
 
@@ -349,6 +354,16 @@ stopped activity's window is invisible at best and a bad-token crash at worst.
 arriving at another page is a new document, not an edit to this one, and it must not sit on the undo
 stack. Undoing "the flip" would otherwise drop the page you left into the page you arrived at, and the
 next autosave would store it there.
+
+**The flip gap is a no-save zone.** Between step 2 and the session's arrival, the host is keyed to
+the incoming page while the editor's buffer still shows the outgoing one — a save landing then would
+write one page's text onto another (the trigger set is real: an autosave from typing during a slow
+seed, the editor pausing, a Preview tap). Both sides guard it: the editor's `persist` is a no-op
+while a flip is in flight (`flipInFlight` — the outgoing page was persisted as the flip began), and
+the host's `saveDocument` drops writes while `documentPageLoading` is set. If the flip never lands
+(the host torn down mid-load), `requestPage` still answers — `onResult(null)` from a `finally` —
+and reverts `documentPageId`/index to the page the editor is still showing, so the editor is never
+stuck behind its modal popup and later saves target the right page.
 
 At the first or last page the arrows stay visible and say "First page." / "Last page." — a disabled
 button is visually silent on e-ink (see [`design-system.md`](design-system.md)).

@@ -115,11 +115,15 @@
             android:configChanges="orientation|keyboardHidden|screenSize|smallestScreenSize|screenLayout|density"
             android:windowSoftInputMode="stateHidden" />
 
-        <!-- Notebook screen — prevent recreation on rotation/resize so bitmap survives -->
+        <!-- Notebook screen — prevent recreation on rotation/resize so bitmap survives.
+             `keyboard` matters too: attaching a Bluetooth keyboard is a keyboard config change, and
+             this activity is the document editor's host — destroying it behind the editor clears
+             DocumentTransfer.host and seals the .soil, leaving the editor with "The notebook is no
+             longer open." until the user backs out. -->
         <activity
             android:name=".NotebookActivity"
             android:exported="false"
-            android:configChanges="orientation|keyboardHidden|screenSize|smallestScreenSize|screenLayout|density"
+            android:configChanges="orientation|keyboard|keyboardHidden|screenSize|smallestScreenSize|screenLayout|density"
             android:windowSoftInputMode="stateHidden" />
 
         <!-- Page index screen — full-screen grid of page snapshots -->
