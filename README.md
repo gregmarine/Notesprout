@@ -14,19 +14,20 @@ Notesprout is an open source, handwriting-first notes app built for people who p
 | **v1.0 — Seed** | ✅ Shipped — all major features complete, source preserved on the `seed` branch (archived) |
 | **v1.1 — Sprout** | ✅ Shipped — merged to `main`, source preserved on the `sprout` branch (archived) |
 | **v1.2 — Sapling** | ✅ Shipped — merged to `main`, source preserved on the `sapling` branch (archived) |
+| **v1.3 — Supernote** | ✅ Shipped — merged to `main`, source preserved on the `supernote` branch (archived) |
 
 ---
 
 ## Device Support
 
 **Tier 1 — Primary targets**
-- BOOX Go 10.3 Gen II (large-format e-ink) — flagship
+- Supernote Manta (large-format e-ink) — flagship
+- Supernote Nomad (compact e-ink)
+- BOOX Go 10.3 Gen II (large-format e-ink)
 - BOOX Go 6 Gen II (compact e-ink)
 - BOOX Note Max (extra large-format e-ink)
 - BOOX Palma2 Pro (Android phone form factor color e-ink)
 - BOOX NoteAir5C (large-format color e-ink)
-- Supernote Nomad (compact e-ink)
-- Supernote Manta (large-format e-ink)
 
 **Tier 2 — QA / testing**
 - BOOX NoteAir4C (large-format color e-ink)
