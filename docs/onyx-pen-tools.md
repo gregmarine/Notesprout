@@ -6,8 +6,8 @@
 > the SDK surface.
 >
 > Notesprout's *pen* arms exactly one tool: `STROKE_STYLE_PENCIL` at width 3 + `setStrokeColor(...)`.
-> Since the hardware lasso trails (`onyx` branch), `setStrokeStyle` **is** in production use — the
-> lasso modes arm `DASH` / `CHARCOAL` for their firmware-painted trails (`OnyxNotebookView.applyPenStyle`,
+> Since the hardware lasso trails, `setStrokeStyle` **is** in production use — the lasso modes arm
+> `DASH` / `CHARCOAL` for their firmware-painted trails (`OnyxNotebookView.applyPenStyle`,
 > details in `docs/drawing-engine.md`). Everything else below is still unused headroom.
 
 ## Where these facts come from
