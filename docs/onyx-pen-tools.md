@@ -5,8 +5,10 @@
 > pressure, tilt, texture), written so a future session can plan a tool picker without re-deriving
 > the SDK surface.
 >
-> Notesprout today arms exactly one tool: `setStrokeWidth(3.0f)` + `setStrokeColor(...)`, and never
-> calls `setStrokeStyle` at all. Everything below is unused headroom.
+> Notesprout's *pen* arms exactly one tool: `STROKE_STYLE_PENCIL` at width 3 + `setStrokeColor(...)`.
+> Since the hardware lasso trails (`onyx` branch), `setStrokeStyle` **is** in production use — the
+> lasso modes arm `DASH` / `CHARCOAL` for their firmware-painted trails (`OnyxNotebookView.applyPenStyle`,
+> details in `docs/drawing-engine.md`). Everything else below is still unused headroom.
 
 ## Where these facts come from
 
@@ -473,14 +475,17 @@ Notes on this mapping:
 
 Purely factual, so a future session knows what already exists and what does not.
 
-**Currently armed** (`OnyxNotebookView.kt`):
+**Currently armed** (`OnyxNotebookView.applyPenStyle()` — the single arming chokepoint):
 
 ```kotlin
-touchHelper
-    .setStrokeWidth(3.0f)          // hardcoded, line 2564
-    .setStrokeColor(penColorInt)   // the one thing that is user-controlled
-// setStrokeStyle is never called → the overlay runs whatever style the firmware defaults to
+// Pen:          STROKE_STYLE_PENCIL (0)  width 3     colour = armed ink
+// Lasso:        STROKE_STYLE_DASH (5)    width 3     black      — hardware trail
+// Lasso eraser: STROKE_STYLE_CHARCOAL (4) width 6    grey #969696 — hardware trail
 ```
+
+The pen still runs the firmware-default style it always has (style 0 is now set explicitly);
+the lasso trails are the first production use of `setStrokeStyle` (see `docs/drawing-engine.md`
+→ "Hardware lasso trails").
 
 Committed strokes repaint as a flat polyline: `Path` of `lineTo` segments through
 `strokePaint` (`Style.STROKE`, `Cap.ROUND`, `Join.ROUND`, `strokeWidth = 3f`, anti-aliased), with only

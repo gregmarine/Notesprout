@@ -70,6 +70,22 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
         private const val LASSO_REFRESH_INTERVAL_MS = 60L
 
         /**
+         * Hardware lasso trails — the firmware paints the live outline itself.
+         *
+         * The BOOX overlay is armed per tool via [TouchHelper.setStrokeStyle]: `DASH` for the
+         * selection lasso and `CHARCOAL` for the lasso eraser (the Onyx firmware has no
+         * x-stream/hatched style like Ratta's `LASSO_X`; charcoal is the textured style closest
+         * to the software chalk trail it replaces). Both styles render on all five Tier-1 BOOX
+         * devices, need no `restartRawDrawing()`, and survive the handwriting fast-mode pin —
+         * device-proven by `PenToolSpikeActivity` (docs/onyx-pen-tools.md). Widths/colour are
+         * tuned to read like the software `lassoPaint` / `lassoEraserPaint` they replace.
+         */
+        private const val PEN_STROKE_WIDTH = 3.0f
+        private const val LASSO_TRAIL_WIDTH = 3f
+        private const val LASSO_ERASER_TRAIL_WIDTH = 6f
+        private val LASSO_ERASER_TRAIL_COLOR = Color.rgb(150, 150, 150)
+
+        /**
          * Process-global owner of the single Onyx raw-drawing pipeline.
          *
          * The BOOX pen layer (`TouchHelper` → `EpdController` raw input) is a **process-global
@@ -156,8 +172,60 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
         // host listens for colour changes, so a *paused* notebook sitting under a sticky-note editor
         // would otherwise reach into the session the editor is actively using. A non-owner just
         // stores the value; openRawDrawing re-asserts it when this view reclaims the pipeline.
-        if (isSetup && penOwner === this) touchHelper.setStrokeColor(penColorInt)
+        // In a lasso mode the overlay is armed with the trail ink — the new pen colour is stored
+        // only and re-asserted by applyPenStyle() when the pen tool returns.
+        if (isSetup && penOwner === this && !isLassoMode && !isLassoEraserMode) {
+            touchHelper.setStrokeColor(penColorInt)
+        }
         Slog.d(TAG) { "setPenColor $hex isSetup=$isSetup owner=${penOwner === this}" }
+    }
+
+    /**
+     * Arm the firmware overlay for the current tool: stroke style, width and colour. Pen mode
+     * restores the plain style production has always shipped (the firmware default, style 0);
+     * the lasso modes arm their hardware trail styles. `setStrokeStyle` needs no restart and
+     * takes effect on the very next stroke (device-proven — docs/onyx-pen-tools.md).
+     *
+     * Owner-guarded like [setPenColor]: a paused view stores its mode flags only, and
+     * [openRawDrawing] re-arms via this method when the pipeline is (re)claimed.
+     */
+    private fun applyPenStyle() {
+        if (!isSetup || penOwner !== this) return
+        when {
+            isLassoMode -> {
+                touchHelper.setStrokeStyle(TouchHelper.STROKE_STYLE_DASH)
+                touchHelper.setStrokeWidth(LASSO_TRAIL_WIDTH)
+                touchHelper.setStrokeColor(Color.BLACK)
+            }
+            isLassoEraserMode -> {
+                touchHelper.setStrokeStyle(TouchHelper.STROKE_STYLE_CHARCOAL)
+                touchHelper.setStrokeWidth(LASSO_ERASER_TRAIL_WIDTH)
+                touchHelper.setStrokeColor(LASSO_ERASER_TRAIL_COLOR)
+            }
+            else -> {
+                touchHelper.setStrokeStyle(TouchHelper.STROKE_STYLE_PENCIL)
+                touchHelper.setStrokeWidth(PEN_STROKE_WIDTH)
+                touchHelper.setStrokeColor(penColorInt)
+            }
+        }
+        epd { "APPLY_PEN_STYLE lasso=$isLassoMode lassoEraser=$isLassoEraserMode" }
+    }
+
+    /**
+     * (Re-)enable the SDK raw path for whichever tool is armed. Pen and eraser have always run
+     * on the raw path; since the hardware lasso trails the two lasso modes do too. Overlay
+     * render starts OFF for eraser (software erase feedback) and for the lasso modes (render
+     * is enabled per-outline from onBeginRawDrawing — see the hardware-lasso state block).
+     * Text placement and shape transform stay MotionEvent-driven.
+     */
+    private fun armRawForCurrentMode(caller: String) {
+        if (!isSetup || isTextPlacementMode || isShapeTransformMode) return
+        touchHelper.setRawDrawingEnabled(true)
+        epd { "RAW_DRAWING_ENABLED true caller=$caller" }
+        if (isEraserMode || isLassoMode || isLassoEraserMode) {
+            touchHelper.setRawDrawingRenderEnabled(false)
+            epd { "RENDER_DISABLED caller=$caller" }
+        }
     }
 
     /**
@@ -256,6 +324,22 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
     // static — no per-frame re-randomisation from PathEffect.
     private var lassoEraserDisplayPath: Path? = null
     private val lassoEraserRandom = java.util.Random()
+
+    // ── Hardware lasso trail state ───────────────────────────────────────────
+    // While a lasso mode is active and this view owns a live raw session, the stylus stays on
+    // the SDK raw path: the firmware paints the trail (DASH / CHARCOAL — see the companion
+    // constants) and the gesture is driven from the raw callbacks instead of onTouchEvent.
+    // Overlay render is OFF between gestures and enabled per-outline from the begin callback,
+    // so a drag inside the selection box can never paint a trail blip. The MotionEvent
+    // handlers (handleLassoTouch / handleLassoEraserTouch) remain as the fallback for when
+    // the pipeline is not open (e.g. before layout / after a handoff release).
+    private var rawLassoCapture = false
+    private var rawDragActive = false
+    /** Live per-point stream (onRawDrawingTouchPointMoveReceived) — fallback geometry. */
+    private val rawLassoMovePoints = mutableListOf<PointF>()
+    /** Batched authoritative stream (onRawDrawingTouchPointListReceived; can arrive in
+     *  multiple batches per contact — see docs/onyx-pen-tools.md). */
+    private val rawLassoListPoints = mutableListOf<PointF>()
 
     // ── Lasso drag move state ────────────────────────────────────────────────
 
@@ -392,7 +476,11 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
             // Before the mode guard: the pen is on the glass in every mode, and the gate must
             // hold off finger gestures regardless of what this contact will end up doing.
             markPenDown()
-            if (isLassoMode || isLassoEraserMode || isTextPlacementMode || isShapeTransformMode) return
+            // Hardware lasso trails: in the lasso modes the raw path stays live and the gesture
+            // is driven from these callbacks (the firmware paints the trail).
+            if (isLassoMode)       { beginRawLasso(touchPoint);       return }
+            if (isLassoEraserMode) { beginRawLassoEraser(touchPoint); return }
+            if (isTextPlacementMode || isShapeTransformMode) return
             if (isSetup && !isEraserMode) {
                 touchHelper.setRawDrawingRenderEnabled(true)
                 epd { "RENDER_ENABLED caller=onBeginRawDrawing" }
@@ -411,7 +499,20 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
         override fun onEndRawDrawing(shortcutDrawing: Boolean, touchPoint: TouchPoint) {
             epd { "ON_END_RAW_DRAWING isEraserMode=$isEraserMode isLassoMode=$isLassoMode isLassoEraserMode=$isLassoEraserMode isTextPlacementMode=$isTextPlacementMode" }
             markPenUp()
-            if (isLassoMode || isLassoEraserMode || isTextPlacementMode || isShapeTransformMode) return
+            if (isLassoMode) {
+                if (rawDragActive) {
+                    rawDragActive = false
+                    lassoDragFinish(touchPoint.x, touchPoint.y)
+                } else if (rawLassoCapture) {
+                    finishRawLasso(touchPoint)
+                }
+                return
+            }
+            if (isLassoEraserMode) {
+                if (rawLassoCapture) finishRawLassoEraser(touchPoint)
+                return
+            }
+            if (isTextPlacementMode || isShapeTransformMode) return
             if (isEraserMode) {
                 // Flush any throttled-but-not-yet-drawn erase removals before the EPD repaint.
                 finalizeEraseRedraw()
@@ -433,12 +534,27 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
         }
 
         override fun onRawDrawingTouchPointMoveReceived(touchPoint: TouchPoint) {
-            if (isLassoMode || isLassoEraserMode || isTextPlacementMode || isShapeTransformMode) return
+            if (isLassoMode) {
+                if (rawDragActive) lassoDragMove(touchPoint.x, touchPoint.y)
+                else if (rawLassoCapture) rawLassoMovePoints.add(PointF(touchPoint.x, touchPoint.y))
+                return
+            }
+            if (isLassoEraserMode) {
+                if (rawLassoCapture) rawLassoMovePoints.add(PointF(touchPoint.x, touchPoint.y))
+                return
+            }
+            if (isTextPlacementMode || isShapeTransformMode) return
             if (isEraserMode) eraseAtPath(listOf(PointF(touchPoint.x, touchPoint.y)))
         }
 
         override fun onRawDrawingTouchPointListReceived(pointList: TouchPointList) {
-            if (isLassoMode || isLassoEraserMode || isTextPlacementMode || isShapeTransformMode) return
+            if (isLassoMode || isLassoEraserMode) {
+                // Authoritative geometry for the trail gesture; the batch arrives before
+                // onEndRawDrawing (and can arrive more than once per contact).
+                if (rawLassoCapture && !rawDragActive) rawLassoListPoints.addAll(pointList.toPointFs())
+                return
+            }
+            if (isTextPlacementMode || isShapeTransformMode) return
             // When software eraser mode is active the SDK still routes pen-tip events here.
             if (isEraserMode) {
                 Slog.d(TAG) { "onRawDrawingTouchPointListReceived (eraser mode) count=${pointList.size()}" }
@@ -452,6 +568,9 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
         override fun onBeginRawErasing(shortcutErasing: Boolean, touchPoint: TouchPoint) {
             epd { "ON_BEGIN_RAW_ERASING isSetup=$isSetup" }
             markPenDown()
+            // Barrel button / eraser end during a hardware-lasso gesture: drop the capture so
+            // the erase contact is not also interpreted as a lasso outline.
+            cancelRawLassoGesture("onBeginRawErasing")
             // Release the overlay render immediately so bitmap updates (erased strokes
             // disappearing) are visible right away — same issue as toolbar eraser toggle.
             // Without this the overlay obscures the updated bitmap.
@@ -487,6 +606,133 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
 
     private fun TouchPointList.toPointFs(): List<PointF> =
         points?.map { PointF(it.x, it.y) } ?: emptyList()
+
+    // ── Hardware lasso trails — raw-callback-driven gestures ─────────────────
+
+    /**
+     * True while the stylus is being served by the SDK raw path in a lasso mode. Stylus
+     * MotionEvents do not normally arrive then; the guard lets the MotionEvent handlers
+     * consume any event that slips through so a gesture is never double-driven.
+     */
+    private fun rawLassoDriving(): Boolean =
+        isSetup && penOwner === this && touchHelper.isRawDrawingInputEnabled
+
+    /** Pen-down in lasso mode on the raw path: start a drag (inside the selection box — the
+     *  overlay render is already off, so no trail can blip) or a new outline (render on — the
+     *  firmware paints the DASH trail from here until pen-up). */
+    private fun beginRawLasso(touchPoint: TouchPoint) {
+        rawLassoMovePoints.clear()
+        rawLassoListPoints.clear()
+        if (tryBeginLassoDrag(touchPoint.x, touchPoint.y)) {
+            rawDragActive = true
+            epd { "RAW_LASSO_BEGIN drag=true" }
+            return
+        }
+        rawLassoCapture = true
+        if (isSetup) {
+            touchHelper.setRawDrawingRenderEnabled(true)
+            epd { "RENDER_ENABLED caller=beginRawLasso" }
+        }
+        lassoOutlineBegin(touchPoint.x, touchPoint.y)
+        rawLassoMovePoints.add(PointF(touchPoint.x, touchPoint.y))
+    }
+
+    /** Pen-down in lasso-eraser mode on the raw path: the firmware paints the CHARCOAL trail. */
+    private fun beginRawLassoEraser(touchPoint: TouchPoint) {
+        rawLassoMovePoints.clear()
+        rawLassoListPoints.clear()
+        rawLassoCapture = true
+        if (isSetup) {
+            touchHelper.setRawDrawingRenderEnabled(true)
+            epd { "RENDER_ENABLED caller=beginRawLassoEraser" }
+        }
+        lassoGestureStartPoint = PointF(touchPoint.x, touchPoint.y)
+        rawLassoMovePoints.add(PointF(touchPoint.x, touchPoint.y))
+    }
+
+    /** Assemble the captured raw geometry into a closed-enough Path for classification. */
+    private fun buildRawLassoPath(start: PointF, endX: Float, endY: Float): Path {
+        val pts = if (rawLassoListPoints.isNotEmpty()) rawLassoListPoints else rawLassoMovePoints
+        val path = Path()
+        path.moveTo(start.x, start.y)
+        for (p in pts) path.lineTo(p.x, p.y)
+        path.lineTo(endX, endY)
+        rawLassoMovePoints.clear()
+        rawLassoListPoints.clear()
+        return path
+    }
+
+    /**
+     * Wipe the firmware trail from the panel: render off + an app frame (the proven
+     * smart-lasso wipe), then a handwriting repaint so the trail pixels actually leave the
+     * e-ink. Render stays off until the next outline begin — the between-gestures idle state.
+     */
+    private fun wipeRawLassoTrail(caller: String) {
+        if (!isSetup) return
+        touchHelper.setRawDrawingRenderEnabled(false)
+        epd { "RENDER_DISABLED caller=$caller" }
+        invalidate()
+        post {
+            EpdController.handwritingRepaint(this, Rect(0, 0, width, height))
+            epd { "HANDWRITING_REPAINT caller=$caller" }
+        }
+    }
+
+    /** Pen-up on a raw lasso outline: wipe the trail, then classify tap vs lasso exactly like
+     *  the MotionEvent path. */
+    private fun finishRawLasso(touchPoint: TouchPoint) {
+        rawLassoCapture = false
+        val start = lassoGestureStartPoint ?: PointF(touchPoint.x, touchPoint.y)
+        lassoGestureStartPoint = null
+        val path = buildRawLassoPath(start, touchPoint.x, touchPoint.y)
+        wipeRawLassoTrail("finishRawLasso")
+        lassoOutlineFinish(path, start, touchPoint.x, touchPoint.y)
+    }
+
+    /** Pen-up on a raw lasso-eraser trail: tap keeps the mode and just wipes; a real gesture
+     *  runs the erase (performLassoErase's completion repaint clears the trail). */
+    private fun finishRawLassoEraser(touchPoint: TouchPoint) {
+        rawLassoCapture = false
+        val start = lassoGestureStartPoint ?: PointF(touchPoint.x, touchPoint.y)
+        lassoGestureStartPoint = null
+        val path = buildRawLassoPath(start, touchPoint.x, touchPoint.y)
+        if (isSetup) {
+            touchHelper.setRawDrawingRenderEnabled(false)
+            epd { "RENDER_DISABLED caller=finishRawLassoEraser" }
+        }
+        val bounds = RectF()
+        path.computeBounds(bounds, true)
+        val tapThresholdPx = DRAG_THRESHOLD_DP * resources.displayMetrics.density
+        if (bounds.width() < tapThresholdPx && bounds.height() < tapThresholdPx) {
+            invalidate()
+            epd { "INVALIDATE caller=finishRawLassoEraser_tap" }
+            post {
+                EpdController.handwritingRepaint(this, Rect(0, 0, width, height))
+                epd { "HANDWRITING_REPAINT caller=finishRawLassoEraser_tap" }
+            }
+        } else {
+            performLassoErase(path, start)
+        }
+    }
+
+    /** Drop any in-flight raw lasso capture/drag (barrel-button erase, teardown, mode exit). */
+    private fun cancelRawLassoGesture(caller: String) {
+        if (!rawLassoCapture && !rawDragActive) return
+        epd { "RAW_LASSO_CANCEL caller=$caller capture=$rawLassoCapture drag=$rawDragActive" }
+        rawLassoCapture = false
+        rawLassoMovePoints.clear()
+        rawLassoListPoints.clear()
+        lassoGestureStartPoint = null
+        if (rawDragActive) {
+            rawDragActive = false
+            setDragMoveMode(false)
+        }
+        if (isSetup) {
+            touchHelper.setRawDrawingRenderEnabled(false)
+            epd { "RENDER_DISABLED caller=$caller" }
+            invalidate()
+        }
+    }
 
     // ── Drawing helpers ──────────────────────────────────────────────────────
 
@@ -1390,104 +1636,21 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
         // Only stylus builds the lasso path / drag; finger taps fall through.
         if (toolType != MotionEvent.TOOL_TYPE_STYLUS) return false
 
-        val thresholdPx = DRAG_THRESHOLD_DP * resources.displayMetrics.density
+        // While the raw path owns the stylus the gesture is driven from the raw callbacks
+        // (hardware trail); consume anything that slips through here.
+        if (rawLassoDriving()) return true
 
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 // Check if pen-down is inside the current selection box — if so, start a drag.
-                val box = lassoSelectionBox
-                if (box != null && lassoSelectedIds.isNotEmpty() && box.contains(event.x, event.y)) {
-                    isDragMoveActive = true
-                    dragStartX = event.x; dragStartY = event.y
-                    dragThresholdMet = false
-                    dragDx = 0f; dragDy = 0f
-                    // Deep-copy selected strokes/headings/textObjects — original positions before any drag.
-                    dragOriginalStrokes = strokes
-                        .filter { it.id in lassoSelectedIds }
-                        .map { it.deepCopy() }
-                    dragOriginalHeadings = headings
-                        .filter { it.id in lassoSelectedIds }
-                        .map { h -> HeadingStroke(h.id, android.graphics.RectF(h.boundingBox),
-                            h.strokes.map { s -> s.deepCopy() },
-                            recognizedText = h.recognizedText,
-                            level = h.level) }
-                    dragOriginalTextObjects = textObjects
-                        .filter { it.id in lassoSelectedIds }
-                        .map { TextRender(it.id, RectF(it.boundingBox), it.text) }
-                    dragOriginalLineObjects = lineObjects
-                        .filter { it.id in lassoSelectedIds }
-                        .map { it.copy(boundingBox = RectF(it.boundingBox)) }
-                    dragOriginalLinks = links
-                        .filter { it.id in lassoSelectedIds }
-                        .map { it.translate(0f, 0f) }
-                    dragOriginalStickyNotes = stickyNotes
-                        .filter { it.id in lassoSelectedIds }
-                        .map { it.translate(0f, 0f) }
-                    dragOriginalShapeObjects = shapeObjects
-                        .filter { it.id in lassoSelectedIds }
-                        .map { it.copy(boundingBox = RectF(it.boundingBox)) }
-                    // Build backing bitmap without selected strokes/headings/textObjects/lineObjects/links/stickyNotes/shapes (held for drag).
-                    val nonSelectedStrokes  = strokes.filter { it.id !in lassoSelectedIds }
-                    val nonSelectedHeadings = headings.filter { it.id !in lassoSelectedIds }
-                    val nonSelectedTexts    = textObjects.filter { it.id !in lassoSelectedIds }
-                    val nonSelectedLines    = lineObjects.filter { it.id !in lassoSelectedIds }
-                    val nonSelectedLinks    = links.filter { it.id !in lassoSelectedIds }
-                    val nonSelectedStickyNotes = stickyNotes.filter { it.id !in lassoSelectedIds }
-                    val nonSelectedShapes = shapeObjects.filter { it.id !in lassoSelectedIds }
-                    dragBackingBitmap = buildRenderBitmap(nonSelectedStrokes, templateBitmap, nonSelectedHeadings, nonSelectedTexts, nonSelectedLines, nonSelectedLinks, nonSelectedStickyNotes, shapeObjects = nonSelectedShapes)
-                    snapObjectTargets = if (isSnapEnabled) (nonSelectedHeadings.map { RectF(it.boundingBox) } + nonSelectedTexts.map { RectF(it.boundingBox) } + nonSelectedLines.map { RectF(it.boundingBox) } + nonSelectedLinks.map { RectF(it.boundingBox) }) else emptyList()
-                    epd { "DRAG_START selected=${lassoSelectedIds.size}" }
-                    return true
-                }
+                if (tryBeginLassoDrag(event.x, event.y)) return true
                 // Normal lasso: clear any existing selection so the user sees immediate feedback.
-                lassoGestureHadSelection = lassoSelectionBox != null
-                lassoPreClearSelectionBox = lassoSelectionBox?.let { RectF(it) }
-                lassoSelectionBox  = null
-                lassoOverlayPath   = null
-                invalidate()
-                epd { "INVALIDATE caller=lassoDown-clearSelection" }
-                if (lassoGestureHadSelection) onLassoSelectionCleared?.invoke()
+                lassoOutlineBegin(event.x, event.y)
                 lassoGesturePath = Path().also { it.moveTo(event.x, event.y) }
-                lassoGestureStartPoint = PointF(event.x, event.y)
             }
             MotionEvent.ACTION_MOVE -> {
                 if (isDragMoveActive) {
-                    val dx = event.x - dragStartX
-                    val dy = event.y - dragStartY
-                    if (!dragThresholdMet) {
-                        val dist = Math.sqrt((dx * dx + dy * dy).toDouble()).toFloat()
-                        if (dist >= thresholdPx) {
-                            dragThresholdMet = true
-                            onDragStarted?.invoke()
-                            // Switch to A2 fast mode for responsive visual feedback during drag.
-                            EpdController.setViewDefaultUpdateMode(this, UpdateMode.GU_FAST)
-                            epd { "DRAG_THRESHOLD_MET dist=$dist A2_MODE_ON" }
-                        }
-                    }
-                    if (dragThresholdMet) {
-                        if (isSnapEnabled) {
-                            val density = resources.displayMetrics.density
-                            val snap = SnapEngine.computeSnap(
-                                lassoSelectionBox ?: RectF(),
-                                dx, dy,
-                                width.toFloat(), height.toFloat(),
-                                SNAP_MARGIN_DP * density,
-                                SNAP_THRESHOLD_DP * density,
-                                snapObjectTargets,
-                            )
-                            dragDx = snap.snappedDx; dragDy = snap.snappedDy
-                            activeSnapGuides = snap.activeGuides
-                        } else {
-                            dragDx = dx; dragDy = dy
-                            activeSnapGuides = emptyList()
-                        }
-                        val now = System.currentTimeMillis()
-                        if (now - lastLassoRefreshMs >= LASSO_REFRESH_INTERVAL_MS) {
-                            lastLassoRefreshMs = now
-                            invalidate()
-                            epd { "INVALIDATE caller=dragMove" }
-                        }
-                    }
+                    lassoDragMove(event.x, event.y)
                     return true
                 }
                 val path = lassoGesturePath ?: return true
@@ -1505,118 +1668,7 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
             }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                 if (isDragMoveActive) {
-                    if (dragThresholdMet) {
-                        // Translate selected strokes' points by the final drag offset.
-                        val movedStrokes = dragOriginalStrokes.map { stroke ->
-                            stroke.copy(points = stroke.points.map { pt ->
-                                PointF(pt.x + dragDx, pt.y + dragDy)
-                            })
-                        }
-                        // Translate selected headings (boundingBox + embedded stroke points).
-                        val movedHeadings = dragOriginalHeadings.map { h ->
-                            HeadingStroke(
-                                id = h.id,
-                                boundingBox = android.graphics.RectF(
-                                    h.boundingBox.left + dragDx, h.boundingBox.top + dragDy,
-                                    h.boundingBox.right + dragDx, h.boundingBox.bottom + dragDy,
-                                ),
-                                strokes = h.strokes.map { s ->
-                                    s.copy(points = s.points.map { PointF(it.x + dragDx, it.y + dragDy) })
-                                },
-                                recognizedText = h.recognizedText,
-                                level = h.level,
-                            )
-                        }
-                        // Translate selected text objects (boundingBox only — text content unchanged).
-                        val movedTextObjects = dragOriginalTextObjects.map { t ->
-                            TextRender(t.id, RectF(
-                                t.boundingBox.left + dragDx, t.boundingBox.top + dragDy,
-                                t.boundingBox.right + dragDx, t.boundingBox.bottom + dragDy,
-                            ), t.text)
-                        }
-                        // Translate selected line objects (bbox + start/end coordinates).
-                        val movedLineObjects = dragOriginalLineObjects.map { l ->
-                            l.copy(
-                                boundingBox = RectF(
-                                    l.boundingBox.left + dragDx, l.boundingBox.top + dragDy,
-                                    l.boundingBox.right + dragDx, l.boundingBox.bottom + dragDy,
-                                ),
-                                startX = l.startX + dragDx, startY = l.startY + dragDy,
-                                endX   = l.endX   + dragDx, endY   = l.endY   + dragDy,
-                            )
-                        }
-                        // Translate selected links (bbox + every embedded object's coordinates).
-                        val movedLinks = dragOriginalLinks.map { it.translate(dragDx, dragDy) }
-                        // Translate selected sticky notes (icon bbox only — content is in its own space).
-                        val movedStickyNotes = dragOriginalStickyNotes.map { it.translate(dragDx, dragDy) }
-                        val movedShapes = dragOriginalShapeObjects.map { s ->
-                            s.copy(
-                                centerX = s.centerX + dragDx,
-                                centerY = s.centerY + dragDy,
-                                boundingBox = RectF(s.boundingBox).apply { offset(dragDx, dragDy) },
-                            )
-                        }
-                        // Update in-memory stroke list with translated positions.
-                        val movedById = movedStrokes.associateBy { it.id }
-                        val updated = strokes.map { movedById[it.id] ?: it }
-                        strokes.clear(); strokes.addAll(updated)
-                        // Update in-memory heading list with translated positions.
-                        val headingById = movedHeadings.associateBy { it.id }
-                        headings = headings.map { headingById[it.id] ?: it }
-                        // Update in-memory text object list with translated positions.
-                        val textById = movedTextObjects.associateBy { it.id }
-                        textObjects = textObjects.map { textById[it.id] ?: it }
-                        // Update in-memory line object list with translated positions.
-                        val lineById = movedLineObjects.associateBy { it.id }
-                        lineObjects = lineObjects.map { lineById[it.id] ?: it }
-                        // Update in-memory link list with translated positions.
-                        val linkById = movedLinks.associateBy { it.id }
-                        links = links.map { linkById[it.id] ?: it }
-                        // Update in-memory sticky note list with translated icon boxes.
-                        val stickyById = movedStickyNotes.associateBy { it.id }
-                        stickyNotes = stickyNotes.map { stickyById[it.id] ?: it }
-                        val shapeById = movedShapes.associateBy { it.id }
-                        shapeObjects = shapeObjects.map { shapeById[it.id] ?: it }
-                        // Translate selection box to match new positions.
-                        lassoSelectionBox = lassoSelectionBox?.let { b ->
-                            RectF(b.left + dragDx, b.top + dragDy, b.right + dragDx, b.bottom + dragDy)
-                        }
-                        // Restore normal EPD update mode and commit pixels BEFORE firing callback.
-                        val origStrokes = dragOriginalStrokes
-                        val origHeadings = dragOriginalHeadings
-                        val origTextObjects = dragOriginalTextObjects
-                        val origLineObjects = dragOriginalLineObjects
-                        val origLinks = dragOriginalLinks
-                        val origStickyNotes = dragOriginalStickyNotes
-                        val origShapes = dragOriginalShapeObjects
-                        dragBackingBitmap?.recycle(); dragBackingBitmap = null
-                        isDragMoveActive = false; dragThresholdMet = false
-                        dragDx = 0f; dragDy = 0f; activeSnapGuides = emptyList(); snapObjectTargets = emptyList()
-                        dragOriginalStrokes = emptyList(); dragOriginalHeadings = emptyList()
-                        dragOriginalTextObjects = emptyList(); dragOriginalLineObjects = emptyList()
-                        dragOriginalLinks = emptyList(); dragOriginalStickyNotes = emptyList()
-                        dragOriginalShapeObjects = emptyList()
-                        EpdController.setViewDefaultUpdateMode(this, UpdateMode.GU)
-                        epd { "DRAG_COMMIT A2_MODE_OFF" }
-                        redrawCanvas(caller = "dragCommit")
-                        post {
-                            EpdController.handwritingRepaint(this, Rect(0, 0, width, height))
-                            epd { "HANDWRITING_REPAINT caller=dragCommit" }
-                        }
-                        onStrokesMoved?.invoke(origStrokes, movedStrokes, origHeadings, movedHeadings, origTextObjects, movedTextObjects, origLineObjects, movedLineObjects, origLinks, movedLinks, origStickyNotes, movedStickyNotes, origShapes, movedShapes)
-                    } else {
-                        // Below threshold — treat as a tap inside the selection box.
-                        val tapX = event.x; val tapY = event.y
-                        dragBackingBitmap?.recycle(); dragBackingBitmap = null
-                        isDragMoveActive = false; dragThresholdMet = false
-                        dragDx = 0f; dragDy = 0f; activeSnapGuides = emptyList(); snapObjectTargets = emptyList()
-                        dragOriginalStrokes = emptyList(); dragOriginalHeadings = emptyList()
-                        dragOriginalTextObjects = emptyList(); dragOriginalLineObjects = emptyList()
-                        dragOriginalLinks = emptyList(); dragOriginalStickyNotes = emptyList()
-                        dragOriginalShapeObjects = emptyList()
-                        epd { "DRAG_CANCELLED threshold_not_met -> onLassoTap" }
-                        onLassoTap?.invoke(tapX, tapY)
-                    }
+                    lassoDragFinish(event.x, event.y)
                     return true
                 }
                 val path  = lassoGesturePath       ?: return true
@@ -1630,32 +1682,256 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
                 lassoOverlayPath       = null
                 invalidate()
                 epd { "INVALIDATE caller=lassoUp" }
-                // Tap vs lasso: use the gesture's overall extent, not net start→end displacement.
-                // A small circular lasso returns near its origin (tiny net displacement) but spans
-                // a real bounding box — displacement alone would misclassify it as a tap and paste.
-                val gestureBounds = RectF()
-                path.computeBounds(gestureBounds, true)
-                if (gestureBounds.width() < thresholdPx && gestureBounds.height() < thresholdPx) {
-                    val hadSelection = lassoGestureHadSelection
-                    lassoGestureHadSelection = false
-                    val savedBox = lassoPreClearSelectionBox
-                    lassoPreClearSelectionBox = null
-                    if (hadSelection && savedBox != null && savedBox.contains(event.x, event.y)) {
-                        // Tap inside the former selection — let onLassoTap decide (e.g. shape
-                        // transform, heading edit). selectedObjectIds is still populated.
-                        onLassoTap?.invoke(event.x, event.y)
-                    } else {
-                        onLassoTapToDismiss?.invoke()
-                        if (!hadSelection) onLassoTap?.invoke(event.x, event.y)
-                    }
-                } else {
-                    lassoGestureHadSelection = false
-                    lassoPreClearSelectionBox = null
-                    onLassoComplete?.invoke(path, start)
-                }
+                lassoOutlineFinish(path, start, event.x, event.y)
             }
         }
         return true
+    }
+
+    /** Shared lasso-outline start (MotionEvent + raw paths): clear any showing selection so
+     *  the user gets immediate feedback, remember it for tap classification at pen-up. */
+    private fun lassoOutlineBegin(x: Float, y: Float) {
+        lassoGestureHadSelection = lassoSelectionBox != null
+        lassoPreClearSelectionBox = lassoSelectionBox?.let { RectF(it) }
+        lassoSelectionBox  = null
+        lassoOverlayPath   = null
+        invalidate()
+        epd { "INVALIDATE caller=lassoDown-clearSelection" }
+        if (lassoGestureHadSelection) onLassoSelectionCleared?.invoke()
+        lassoGestureStartPoint = PointF(x, y)
+    }
+
+    /** Shared lasso-outline finish: classify tap vs lasso by the gesture's overall extent, not
+     *  net start→end displacement — a small circular lasso returns near its origin (tiny net
+     *  displacement) but spans a real bounding box; displacement alone would misclassify it as
+     *  a tap and paste. */
+    private fun lassoOutlineFinish(path: Path, start: PointF, upX: Float, upY: Float) {
+        val thresholdPx = DRAG_THRESHOLD_DP * resources.displayMetrics.density
+        val gestureBounds = RectF()
+        path.computeBounds(gestureBounds, true)
+        if (gestureBounds.width() < thresholdPx && gestureBounds.height() < thresholdPx) {
+            val hadSelection = lassoGestureHadSelection
+            lassoGestureHadSelection = false
+            val savedBox = lassoPreClearSelectionBox
+            lassoPreClearSelectionBox = null
+            if (hadSelection && savedBox != null && savedBox.contains(upX, upY)) {
+                // Tap inside the former selection — let onLassoTap decide (e.g. shape
+                // transform, heading edit). selectedObjectIds is still populated.
+                onLassoTap?.invoke(upX, upY)
+            } else {
+                onLassoTapToDismiss?.invoke()
+                if (!hadSelection) onLassoTap?.invoke(upX, upY)
+            }
+        } else {
+            lassoGestureHadSelection = false
+            lassoPreClearSelectionBox = null
+            onLassoComplete?.invoke(path, start)
+        }
+    }
+
+    /** Shared drag-move start (MotionEvent + raw paths). Returns false when the pen-down is not
+     *  a drag (no selection, or outside the box). */
+    private fun tryBeginLassoDrag(x: Float, y: Float): Boolean {
+        val box = lassoSelectionBox
+        if (box == null || lassoSelectedIds.isEmpty() || !box.contains(x, y)) return false
+        isDragMoveActive = true
+        dragStartX = x; dragStartY = y
+        dragThresholdMet = false
+        dragDx = 0f; dragDy = 0f
+        // Deep-copy selected strokes/headings/textObjects — original positions before any drag.
+        dragOriginalStrokes = strokes
+            .filter { it.id in lassoSelectedIds }
+            .map { it.deepCopy() }
+        dragOriginalHeadings = headings
+            .filter { it.id in lassoSelectedIds }
+            .map { h -> HeadingStroke(h.id, android.graphics.RectF(h.boundingBox),
+                h.strokes.map { s -> s.deepCopy() },
+                recognizedText = h.recognizedText,
+                level = h.level) }
+        dragOriginalTextObjects = textObjects
+            .filter { it.id in lassoSelectedIds }
+            .map { TextRender(it.id, RectF(it.boundingBox), it.text) }
+        dragOriginalLineObjects = lineObjects
+            .filter { it.id in lassoSelectedIds }
+            .map { it.copy(boundingBox = RectF(it.boundingBox)) }
+        dragOriginalLinks = links
+            .filter { it.id in lassoSelectedIds }
+            .map { it.translate(0f, 0f) }
+        dragOriginalStickyNotes = stickyNotes
+            .filter { it.id in lassoSelectedIds }
+            .map { it.translate(0f, 0f) }
+        dragOriginalShapeObjects = shapeObjects
+            .filter { it.id in lassoSelectedIds }
+            .map { it.copy(boundingBox = RectF(it.boundingBox)) }
+        // Build backing bitmap without selected strokes/headings/textObjects/lineObjects/links/stickyNotes/shapes (held for drag).
+        val nonSelectedStrokes  = strokes.filter { it.id !in lassoSelectedIds }
+        val nonSelectedHeadings = headings.filter { it.id !in lassoSelectedIds }
+        val nonSelectedTexts    = textObjects.filter { it.id !in lassoSelectedIds }
+        val nonSelectedLines    = lineObjects.filter { it.id !in lassoSelectedIds }
+        val nonSelectedLinks    = links.filter { it.id !in lassoSelectedIds }
+        val nonSelectedStickyNotes = stickyNotes.filter { it.id !in lassoSelectedIds }
+        val nonSelectedShapes = shapeObjects.filter { it.id !in lassoSelectedIds }
+        dragBackingBitmap = buildRenderBitmap(nonSelectedStrokes, templateBitmap, nonSelectedHeadings, nonSelectedTexts, nonSelectedLines, nonSelectedLinks, nonSelectedStickyNotes, shapeObjects = nonSelectedShapes)
+        snapObjectTargets = if (isSnapEnabled) (nonSelectedHeadings.map { RectF(it.boundingBox) } + nonSelectedTexts.map { RectF(it.boundingBox) } + nonSelectedLines.map { RectF(it.boundingBox) } + nonSelectedLinks.map { RectF(it.boundingBox) }) else emptyList()
+        epd { "DRAG_START selected=${lassoSelectedIds.size}" }
+        return true
+    }
+
+    /** Shared drag-move update (MotionEvent + raw paths). */
+    private fun lassoDragMove(x: Float, y: Float) {
+        val dx = x - dragStartX
+        val dy = y - dragStartY
+        if (!dragThresholdMet) {
+            val thresholdPx = DRAG_THRESHOLD_DP * resources.displayMetrics.density
+            val dist = Math.sqrt((dx * dx + dy * dy).toDouble()).toFloat()
+            if (dist >= thresholdPx) {
+                dragThresholdMet = true
+                onDragStarted?.invoke()
+                // Switch to A2 fast mode for responsive visual feedback during drag.
+                EpdController.setViewDefaultUpdateMode(this, UpdateMode.GU_FAST)
+                epd { "DRAG_THRESHOLD_MET dist=$dist A2_MODE_ON" }
+            }
+        }
+        if (dragThresholdMet) {
+            if (isSnapEnabled) {
+                val density = resources.displayMetrics.density
+                val snap = SnapEngine.computeSnap(
+                    lassoSelectionBox ?: RectF(),
+                    dx, dy,
+                    width.toFloat(), height.toFloat(),
+                    SNAP_MARGIN_DP * density,
+                    SNAP_THRESHOLD_DP * density,
+                    snapObjectTargets,
+                )
+                dragDx = snap.snappedDx; dragDy = snap.snappedDy
+                activeSnapGuides = snap.activeGuides
+            } else {
+                dragDx = dx; dragDy = dy
+                activeSnapGuides = emptyList()
+            }
+            val now = System.currentTimeMillis()
+            if (now - lastLassoRefreshMs >= LASSO_REFRESH_INTERVAL_MS) {
+                lastLassoRefreshMs = now
+                invalidate()
+                epd { "INVALIDATE caller=dragMove" }
+            }
+        }
+    }
+
+    /** Shared drag-move finish (MotionEvent + raw paths): commit the move, or treat a
+     *  below-threshold contact as a tap inside the selection box. */
+    private fun lassoDragFinish(upX: Float, upY: Float) {
+        if (dragThresholdMet) {
+            // Translate selected strokes' points by the final drag offset.
+            val movedStrokes = dragOriginalStrokes.map { stroke ->
+                stroke.copy(points = stroke.points.map { pt ->
+                    PointF(pt.x + dragDx, pt.y + dragDy)
+                })
+            }
+            // Translate selected headings (boundingBox + embedded stroke points).
+            val movedHeadings = dragOriginalHeadings.map { h ->
+                HeadingStroke(
+                    id = h.id,
+                    boundingBox = android.graphics.RectF(
+                        h.boundingBox.left + dragDx, h.boundingBox.top + dragDy,
+                        h.boundingBox.right + dragDx, h.boundingBox.bottom + dragDy,
+                    ),
+                    strokes = h.strokes.map { s ->
+                        s.copy(points = s.points.map { PointF(it.x + dragDx, it.y + dragDy) })
+                    },
+                    recognizedText = h.recognizedText,
+                    level = h.level,
+                )
+            }
+            // Translate selected text objects (boundingBox only — text content unchanged).
+            val movedTextObjects = dragOriginalTextObjects.map { t ->
+                TextRender(t.id, RectF(
+                    t.boundingBox.left + dragDx, t.boundingBox.top + dragDy,
+                    t.boundingBox.right + dragDx, t.boundingBox.bottom + dragDy,
+                ), t.text)
+            }
+            // Translate selected line objects (bbox + start/end coordinates).
+            val movedLineObjects = dragOriginalLineObjects.map { l ->
+                l.copy(
+                    boundingBox = RectF(
+                        l.boundingBox.left + dragDx, l.boundingBox.top + dragDy,
+                        l.boundingBox.right + dragDx, l.boundingBox.bottom + dragDy,
+                    ),
+                    startX = l.startX + dragDx, startY = l.startY + dragDy,
+                    endX   = l.endX   + dragDx, endY   = l.endY   + dragDy,
+                )
+            }
+            // Translate selected links (bbox + every embedded object's coordinates).
+            val movedLinks = dragOriginalLinks.map { it.translate(dragDx, dragDy) }
+            // Translate selected sticky notes (icon bbox only — content is in its own space).
+            val movedStickyNotes = dragOriginalStickyNotes.map { it.translate(dragDx, dragDy) }
+            val movedShapes = dragOriginalShapeObjects.map { s ->
+                s.copy(
+                    centerX = s.centerX + dragDx,
+                    centerY = s.centerY + dragDy,
+                    boundingBox = RectF(s.boundingBox).apply { offset(dragDx, dragDy) },
+                )
+            }
+            // Update in-memory stroke list with translated positions.
+            val movedById = movedStrokes.associateBy { it.id }
+            val updated = strokes.map { movedById[it.id] ?: it }
+            strokes.clear(); strokes.addAll(updated)
+            // Update in-memory heading list with translated positions.
+            val headingById = movedHeadings.associateBy { it.id }
+            headings = headings.map { headingById[it.id] ?: it }
+            // Update in-memory text object list with translated positions.
+            val textById = movedTextObjects.associateBy { it.id }
+            textObjects = textObjects.map { textById[it.id] ?: it }
+            // Update in-memory line object list with translated positions.
+            val lineById = movedLineObjects.associateBy { it.id }
+            lineObjects = lineObjects.map { lineById[it.id] ?: it }
+            // Update in-memory link list with translated positions.
+            val linkById = movedLinks.associateBy { it.id }
+            links = links.map { linkById[it.id] ?: it }
+            // Update in-memory sticky note list with translated icon boxes.
+            val stickyById = movedStickyNotes.associateBy { it.id }
+            stickyNotes = stickyNotes.map { stickyById[it.id] ?: it }
+            val shapeById = movedShapes.associateBy { it.id }
+            shapeObjects = shapeObjects.map { shapeById[it.id] ?: it }
+            // Translate selection box to match new positions.
+            lassoSelectionBox = lassoSelectionBox?.let { b ->
+                RectF(b.left + dragDx, b.top + dragDy, b.right + dragDx, b.bottom + dragDy)
+            }
+            // Restore normal EPD update mode and commit pixels BEFORE firing callback.
+            val origStrokes = dragOriginalStrokes
+            val origHeadings = dragOriginalHeadings
+            val origTextObjects = dragOriginalTextObjects
+            val origLineObjects = dragOriginalLineObjects
+            val origLinks = dragOriginalLinks
+            val origStickyNotes = dragOriginalStickyNotes
+            val origShapes = dragOriginalShapeObjects
+            dragBackingBitmap?.recycle(); dragBackingBitmap = null
+            isDragMoveActive = false; dragThresholdMet = false
+            dragDx = 0f; dragDy = 0f; activeSnapGuides = emptyList(); snapObjectTargets = emptyList()
+            dragOriginalStrokes = emptyList(); dragOriginalHeadings = emptyList()
+            dragOriginalTextObjects = emptyList(); dragOriginalLineObjects = emptyList()
+            dragOriginalLinks = emptyList(); dragOriginalStickyNotes = emptyList()
+            dragOriginalShapeObjects = emptyList()
+            EpdController.setViewDefaultUpdateMode(this, UpdateMode.GU)
+            epd { "DRAG_COMMIT A2_MODE_OFF" }
+            redrawCanvas(caller = "dragCommit")
+            post {
+                EpdController.handwritingRepaint(this, Rect(0, 0, width, height))
+                epd { "HANDWRITING_REPAINT caller=dragCommit" }
+            }
+            onStrokesMoved?.invoke(origStrokes, movedStrokes, origHeadings, movedHeadings, origTextObjects, movedTextObjects, origLineObjects, movedLineObjects, origLinks, movedLinks, origStickyNotes, movedStickyNotes, origShapes, movedShapes)
+        } else {
+            // Below threshold — treat as a tap inside the selection box.
+            dragBackingBitmap?.recycle(); dragBackingBitmap = null
+            isDragMoveActive = false; dragThresholdMet = false
+            dragDx = 0f; dragDy = 0f; activeSnapGuides = emptyList(); snapObjectTargets = emptyList()
+            dragOriginalStrokes = emptyList(); dragOriginalHeadings = emptyList()
+            dragOriginalTextObjects = emptyList(); dragOriginalLineObjects = emptyList()
+            dragOriginalLinks = emptyList(); dragOriginalStickyNotes = emptyList()
+            dragOriginalShapeObjects = emptyList()
+            epd { "DRAG_CANCELLED threshold_not_met -> onLassoTap" }
+            onLassoTap?.invoke(upX, upY)
+        }
     }
 
     override fun onDraw(canvas: Canvas) {
@@ -1746,6 +2022,12 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
      */
     private fun closeRawDrawingIfOwner(caller: String) {
         if (!isSetup) return
+        // Any in-flight hardware-lasso capture dies with the session; drop its state so a
+        // reopened session cannot resume a half-built gesture.
+        rawLassoCapture = false
+        rawDragActive = false
+        rawLassoMovePoints.clear()
+        rawLassoListPoints.clear()
         if (penOwner === this) {
             touchHelper.closeRawDrawing()
             penOwner = null
@@ -1782,14 +2064,7 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
     }
 
     override fun enableDrawing() {
-        if (isSetup && !isLassoMode && !isLassoEraserMode && !isTextPlacementMode && !isShapeTransformMode) {
-            touchHelper.setRawDrawingEnabled(true)
-            epd { "RAW_DRAWING_ENABLED true caller=enableDrawing" }
-            if (isEraserMode) {
-                touchHelper.setRawDrawingRenderEnabled(false)
-                epd { "RENDER_DISABLED caller=enableDrawing_eraserMode" }
-            }
-        }
+        armRawForCurrentMode("enableDrawing")
     }
 
     override fun disableDrawing() {
@@ -1875,15 +2150,18 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
         isLassoMode = active
         if (active) {
             if (isSetup) {
-                touchHelper.setRawDrawingEnabled(false)
-                epd { "RAW_DRAWING_ENABLED false caller=setLassoMode_active" }
-                touchHelper.setRawDrawingRenderEnabled(false)
-                epd { "RENDER_DISABLED caller=setLassoMode_active" }
+                // Hardware trail: the raw path stays LIVE — the firmware paints the DASH
+                // outline and the gesture is driven from the raw callbacks. Overlay render is
+                // off until the first outline begins (the between-gestures idle state), so no
+                // stale phantom stroke can surface at the mode boundary.
+                applyPenStyle()
+                armRawForCurrentMode("setLassoMode_active")
                 invalidate()
                 epd { "INVALIDATE caller=setLassoMode_active" }
             }
         } else {
-            // Cancel any in-progress drag before clearing lasso state.
+            // Cancel any in-progress gesture before clearing lasso state.
+            cancelRawLassoGesture("setLassoMode_exit")
             if (isDragMoveActive) setDragMoveMode(false)
             lassoOverlayPath       = null
             lassoSelectionBox      = null
@@ -1895,16 +2173,11 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
                 EpdController.handwritingRepaint(this, Rect(0, 0, width, height))
                 epd { "HANDWRITING_REPAINT caller=setLassoMode_exit" }
                 post {
-                    if (isSetup && !isLassoMode && !isLassoEraserMode && !isShapeTransformMode) {
-                        touchHelper.setRawDrawingEnabled(true)
-                        epd { "RAW_DRAWING_ENABLED true caller=setLassoMode_exit" }
-                        // setRawDrawingEnabled may re-enable the SDK render path internally;
-                        // re-apply the render disable so the next eraser gesture stays clean.
-                        if (isEraserMode) {
-                            touchHelper.setRawDrawingRenderEnabled(false)
-                            epd { "RENDER_DISABLED caller=setLassoMode_exit_eraserMode" }
-                        }
-                    }
+                    // Restore the pen's firmware style, then re-arm the raw path for whatever
+                    // tool is now active (applyPenStyle / armRawForCurrentMode both key off the
+                    // current mode flags, so a lasso→lasso-eraser switch also lands right).
+                    applyPenStyle()
+                    armRawForCurrentMode("setLassoMode_exit")
                 }
             }
         }
@@ -1915,14 +2188,15 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
         isLassoEraserMode = active
         if (active) {
             if (isSetup) {
-                touchHelper.setRawDrawingEnabled(false)
-                epd { "RAW_DRAWING_ENABLED false caller=setLassoEraserMode_active" }
-                touchHelper.setRawDrawingRenderEnabled(false)
-                epd { "RENDER_DISABLED caller=setLassoEraserMode_active" }
+                // Hardware trail: raw path stays LIVE with the CHARCOAL trail armed — see
+                // setLassoMode for the render-off idle rationale.
+                applyPenStyle()
+                armRawForCurrentMode("setLassoEraserMode_active")
                 invalidate()
                 epd { "INVALIDATE caller=setLassoEraserMode_active" }
             }
         } else {
+            cancelRawLassoGesture("setLassoEraserMode_exit")
             lassoOverlayPath       = null
             lassoEraserDisplayPath = null
             lassoGestureStartPoint = null
@@ -1933,14 +2207,8 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
                 EpdController.handwritingRepaint(this, Rect(0, 0, width, height))
                 epd { "HANDWRITING_REPAINT caller=setLassoEraserMode_exit" }
                 post {
-                    if (isSetup && !isLassoMode && !isLassoEraserMode && !isShapeTransformMode) {
-                        touchHelper.setRawDrawingEnabled(true)
-                        epd { "RAW_DRAWING_ENABLED true caller=setLassoEraserMode_exit" }
-                        if (isEraserMode) {
-                            touchHelper.setRawDrawingRenderEnabled(false)
-                            epd { "RENDER_DISABLED caller=setLassoEraserMode_exit_eraserMode" }
-                        }
-                    }
+                    applyPenStyle()
+                    armRawForCurrentMode("setLassoEraserMode_exit")
                 }
             }
         }
@@ -1974,14 +2242,9 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
             EpdController.handwritingRepaint(this, Rect(0, 0, width, height))
             epd { "HANDWRITING_REPAINT caller=exitShapeTransform" }
             post {
-                if (isSetup && !isLassoMode && !isLassoEraserMode && !isShapeTransformMode) {
-                    touchHelper.setRawDrawingEnabled(true)
-                    epd { "RAW_DRAWING_ENABLED true caller=exitShapeTransform" }
-                    if (isEraserMode) {
-                        touchHelper.setRawDrawingRenderEnabled(false)
-                        epd { "RENDER_DISABLED caller=exitShapeTransform_eraserMode" }
-                    }
-                }
+                // Usually returns into lasso mode (transform is entered from a lasso tap) — the
+                // DASH trail style is still armed from before; just re-enable the raw path.
+                armRawForCurrentMode("exitShapeTransform")
             }
         }
     }
@@ -2031,6 +2294,10 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
 
     private fun handleLassoEraserTouch(event: MotionEvent): Boolean {
         if (event.getToolType(0) != MotionEvent.TOOL_TYPE_STYLUS) return false
+
+        // While the raw path owns the stylus the gesture is driven from the raw callbacks
+        // (hardware trail); consume anything that slips through here.
+        if (rawLassoDriving()) return true
 
         val tapThresholdPx = DRAG_THRESHOLD_DP * resources.displayMetrics.density
 
@@ -2250,14 +2517,7 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
             EpdController.handwritingRepaint(this, Rect(0, 0, width, height))
             epd { "HANDWRITING_REPAINT caller=setTemplate" }
             post {
-                if (isSetup && !isLassoMode && !isLassoEraserMode) {
-                    touchHelper.setRawDrawingEnabled(true)
-                    epd { "RAW_DRAWING_ENABLED true caller=setTemplate" }
-                    if (isEraserMode) {
-                        touchHelper.setRawDrawingRenderEnabled(false)
-                        epd { "RENDER_DISABLED caller=setTemplate_eraserMode" }
-                    }
-                }
+                armRawForCurrentMode("setTemplate")
             }
         }
     }
@@ -2315,14 +2575,7 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
             EpdController.handwritingRepaint(this, Rect(0, 0, width, height))
             epd { "HANDWRITING_REPAINT caller=eraseAll" }
             post {
-                if (isSetup && !isLassoMode && !isLassoEraserMode) {
-                    touchHelper.setRawDrawingEnabled(true)
-                    epd { "RAW_DRAWING_ENABLED true caller=eraseAll" }
-                    if (isEraserMode) {
-                        touchHelper.setRawDrawingRenderEnabled(false)
-                        epd { "RENDER_DISABLED caller=eraseAll_eraserMode" }
-                    }
-                }
+                armRawForCurrentMode("eraseAll")
             }
         }
     }
@@ -2469,14 +2722,7 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
             EpdController.handwritingRepaint(this, Rect(0, 0, width, height))
             epd { "HANDWRITING_REPAINT caller=loadStrokesWithBitmap" }
             post {
-                if (isSetup && !isLassoMode && !isLassoEraserMode) {
-                    touchHelper.setRawDrawingEnabled(true)
-                    epd { "RAW_DRAWING_ENABLED true caller=loadStrokesWithBitmap" }
-                    if (isEraserMode) {
-                        touchHelper.setRawDrawingRenderEnabled(false)
-                        epd { "RENDER_DISABLED caller=loadStrokesWithBitmap_eraserMode" }
-                    }
-                }
+                armRawForCurrentMode("loadStrokesWithBitmap")
             }
         }
 
@@ -2576,34 +2822,34 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
         Slog.d(TAG) { "openRawDrawing isSetup=$isSetup toolbarExclusion=$toolbarExclusion size=${width}x${height}" }
         if (!isSetup) {
             applyLimitRect()
-            touchHelper
-                .setStrokeWidth(3.0f)
-                .setStrokeColor(penColorInt)
-                .openRawDrawing()
+            touchHelper.openRawDrawing()
             epd { "OPEN_RAW_DRAWING_SDK_CALL done" }
             isSetup = true
         } else {
             applyLimitRect()
             touchHelper.restartRawDrawing()
-            // Re-assert the ink: the panel does not reliably default to it across a restart (the
-            // same reason init has always had to set it explicitly — see the NoteAir5C note).
-            touchHelper.setStrokeColor(penColorInt)
             epd { "RESTART_RAW_DRAWING caller=openRawDrawing_alreadySetup" }
         }
         // This view now owns the single process-global raw-drawing pipeline (see [penOwner]).
         // Any older view's pending close is neutralised by [closeRawDrawingIfOwner].
         penOwner = this
         epd { "PEN_OWNER_CLAIMED caller=openRawDrawing" }
-        if (!isLassoMode && !isLassoEraserMode && !isTextPlacementMode) {
+        // Arm style/width/ink for the current tool. On the restart path this re-asserts the ink:
+        // the panel does not reliably default to it across a restart (the same reason init has
+        // always had to set it explicitly — see the NoteAir5C note).
+        applyPenStyle()
+        if (!isTextPlacementMode && !isShapeTransformMode) {
             touchHelper.setRawDrawingEnabled(true)
             epd { "RAW_DRAWING_ENABLED true caller=openRawDrawing" }
-            if (isEraserMode) {
+            if (isEraserMode || isLassoMode || isLassoEraserMode) {
                 touchHelper.setRawDrawingRenderEnabled(false)
-                epd { "RENDER_DISABLED caller=openRawDrawing_eraserMode" }
-            } else {
+                epd { "RENDER_DISABLED caller=openRawDrawing_mode" }
+            }
+            if (!isEraserMode) {
                 // First-stroke fix: pin the app into the fast handwriting waveform so the first stroke
                 // after this open / a page-flip doesn't pay a GC→handwriting mode-switch. Stays active
                 // for the whole pen session (across page flips); cleared in closeRawDrawingIfOwner.
+                // Also applied in the lasso modes — the hardware trail rides the same waveform.
                 EpdController.applyAppScopeUpdate(
                     HWR_APP_SCOPE, true, false, UpdateMode.HAND_WRITING_REPAINT_MODE, 0
                 )

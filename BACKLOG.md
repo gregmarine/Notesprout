@@ -86,13 +86,6 @@ and the e-ink repaints the whole library.
   The explicit follow-up to the locked sibling-copy decision (copy chosen for zero risk to the ten
   shipping Generic devices). Until then every shared-logic fix (lasso, erase, gestures, rendering)
   must be applied to both files by hand — the standing tax this item removes.
-- **Onyx: draw the live lasso outline with the SDK's hardware `STROKE_STYLE_DASH` (= 5)** instead of
-  the software `DashPathEffect` Canvas path (throttled to 60 ms; visibly trails the pen — the user
-  has explicitly said the current look is not what they want). This is the BOOX half of Supernote
-  Phase 5, which shipped hardware trails on Ratta. The research is done — `PenToolSpikeActivity`
-  proved `DASH` renders on all five BOOX devices, `setStrokeStyle` needs no `restartRawDrawing`, and
-  it survives the handwriting fast-mode pin (`docs/onyx-pen-tools.md`) — so this is a build task,
-  not a spike. The Ratta lift → selection-box handoff learnings apply directly.
 - **User-facing stylus calibration screen.** The Ratta registration offsets (+2 px Nomad / +3 px
   Manta input x-shift) are believed model-level but were measured on **one unit per model**; a unit
   with different factory calibration would show a 1–3 px live-vs-baked shift. A calibration surface
