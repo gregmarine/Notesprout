@@ -28,11 +28,15 @@
 
 **First-stroke fast-mode (`HWR_APP_SCOPE`):**
 - The first stroke after opening a page / after a page-flip used to lag 1–2s on BOOX (G6/G102): the panel sits in a quality waveform and the first stroke pays a GC→handwriting mode-switch. Fix: `EpdController.applyAppScopeUpdate(HWR_APP_SCOPE, true, false, UpdateMode.HAND_WRITING_REPAINT_MODE, 0)` in `openRawDrawing` (pen branch only), pinning the app in the fast handwriting waveform so there's no switch. Proven the **sole** fix by an on-device sweep of every EPD mode (scribble / view-mode / system-fast all still lagged; only app-scope was instant, no ghosting).
-- Applied once when the pen pipeline opens; stays active across page-flips; **cleared in `closeRawDrawingIfOwner`** (`clearAppScopeUpdate()`) so menus / dialogs / other screens render in normal quality. It follows pen ownership across sticky / scratch-pad handoff automatically. Keep it out of the handoff/lifecycle code — the minimal apply-on-open / clear-on-close placement is deliberate.
+- Applied once when the pen pipeline opens; stays active across page-flips; **cleared in `closeRawDrawingIfOwner`** (`clearAppScopeUpdate()` + `resetUpdListSize()`) so menus / dialogs / other screens render in normal quality. It follows pen ownership across sticky / scratch-pad handoff automatically. Keep it out of the handoff/lifecycle code — the minimal apply-on-open / clear-on-close placement is deliberate.
+- ⚠️ **The scope is registered with the EPD service by NAME, not by process or window** — it governs the whole panel until something clears it, and it survives process death. The policy is *device owns refresh except while a drawing surface is front-most*, enforced at two containment points:
+  - `onWindowVisibilityChanged(≠VISIBLE)` in `OnyxNotebookView` → `closeRawDrawingIfOwner` — Home / app switch / opaque activity / screen-off releases the pipeline and hands refresh back to the device (EInkWise). A Dialog only moves focus (window stays visible), and a translucent scratch-pad / sticky overlay keeps the window VISIBLE, so the first-stroke fix and the pipeline handoffs are untouched. Cross-screen navigation is protected by the `penOwner` guard (successor claims before the predecessor's window hides).
+  - `NotesproutApplication.onCreate` (BOOX-gated) calls `clearAppScopeUpdate()` + `resetUpdListSize()` — heals a pin leaked by a killed process (crash / system kill / **adb install -r over a live pen session**, which is what made "system-wide ghosting until reboot" appear on some dev builds but not others).
+- Lasso-drag A2 mode ends with `EpdController.resetViewUpdateMode(view)` — back to the device's default, never a mode we choose.
 
 **Overlay lifetime:**
 - The overlay ("writing mode") stays active indefinitely while the user writes. No idle-release timer.
-- Legitimate handoff points: `setEraserMode(true)`, `eraseAll()`, `setTemplate()`, `loadStrokesWithBitmap()`, `onWindowFocusChanged(false)`, toolbar finger touch.
+- Legitimate handoff points: `setEraserMode(true)`, `eraseAll()`, `setTemplate()`, `loadStrokesWithBitmap()`, `onWindowFocusChanged(false)`, `onWindowVisibilityChanged(≠VISIBLE)` (full release — see the app-scope rules above), toolbar finger touch.
 - `onPenLifted` is a DB-save trigger only — does NOT touch the overlay.
 
 **Toolbar touch → overlay release:**
@@ -83,7 +87,7 @@ Tracked in both engines, from both directions:
 
 | Engine | Source of truth |
 |---|---|
-| `OnyxNotebookView` | `onBeginRawDrawing` / `onEndRawDrawing` **and** `onBeginRawErasing` / `onEndRawErasing` (marked *before* the mode guards), **plus** stylus `MotionEvent`s in `onTouchEvent` — lasso / lasso-eraser / text-placement / shape-transform disable raw drawing, so the SDK callbacks never fire in those modes and the stylus arrives as an ordinary event |
+| `OnyxNotebookView` | `onBeginRawDrawing` / `onEndRawDrawing` **and** `onBeginRawErasing` / `onEndRawErasing` (marked *before* the mode guards), **plus** stylus `MotionEvent`s in `onTouchEvent` — text-placement / shape-transform disable raw drawing, so the SDK callbacks never fire in those modes and the stylus arrives as an ordinary event. The lasso modes stay ON the raw path (hardware lasso trails — see below), so their pen activity comes from the raw callbacks; the MotionEvent half covers only their no-pipeline fallback |
 | `GenericNotebookView` | stylus `MotionEvent`s in `onTouchEvent` — all ink arrives this way, so one hook covers every mode |
 | `RattaNotebookView` | stylus `MotionEvent`s in `onTouchEvent`, same as Generic — the firmware paints the live stroke but returns no points, so every mode's ink still arrives as ordinary events |
 
@@ -122,14 +126,53 @@ When a Dialog is shown over NotebookActivity, focus changes trigger `onWindowFoc
 |---|---|---|
 | Pen | `true` | `true` (SDK manages) |
 | Eraser | `true` | `false` (prevents phantom pen strokes on overlay) |
-| Lasso / Lasso Eraser | `false` | n/a |
-| Text placement | `false` | n/a |
+| Lasso / Lasso Eraser | `true` (hardware trail — raw-callback-driven) | `false` between gestures; enabled per-outline from `onBeginRawDrawing` |
+| Text placement / shape transform | `false` | n/a |
 
-`openRawDrawing()` and `enableDrawing()` must guard `setRawDrawingEnabled(true)` with `!isLassoMode && !isLassoEraserMode && !isTextPlacementMode`. If the guard passes and `isEraserMode` is true, immediately follow with `setRawDrawingRenderEnabled(false)`. Failing this causes phantom pen strokes on the EPD overlay — they look real but vanish on the next EPD refresh.
+Every raw re-enable site routes through `armRawForCurrentMode()`, which encodes this table:
+no-op in text-placement / shape-transform, else raw on, plus render off for eraser and both
+lasso modes. Failing the render-off half causes phantom pen strokes on the EPD overlay — they
+look real but vanish on the next EPD refresh. `applyPenStyle()` is the single place the
+firmware stroke style/width/ink are armed (pen = `STROKE_STYLE_PENCIL` + armed ink; lasso
+trails below); `openRawDrawing()` calls it on both its open and restart paths, which is also
+what re-asserts the ink across a restart.
+
+### Hardware lasso trails (BOOX half of Supernote Phase 5)
+
+The live lasso outline is painted by the **firmware**, not the Canvas: lasso mode arms
+`TouchHelper.setStrokeStyle(STROKE_STYLE_DASH)` (black, 3px), lasso-eraser arms
+`STROKE_STYLE_CHARCOAL` (grey, 6px — Onyx has no x-stream/hatched style like Ratta's
+`LASSO_X`; charcoal is the textured style closest to the software chalk trail it replaced).
+Both styles are device-proven on all five Tier-1 BOOX devices, need no restart, and survive
+the handwriting fast-mode pin (`docs/onyx-pen-tools.md`).
+
+How a gesture runs (all inside `OnyxNotebookView`, no host changes):
+
+- **The raw path stays enabled in both lasso modes** and the whole gesture is driven from the
+  raw callbacks (`beginRawLasso` / `beginRawLassoEraser` → move/list accumulation →
+  `finishRawLasso` / `finishRawLassoEraser`). Stylus MotionEvents do not arrive while the raw
+  path owns the pen; `handleLassoTouch` / `handleLassoEraserTouch` remain as the
+  no-pipeline fallback (guarded by `rawLassoDriving()` against double-driving).
+- **Overlay render is OFF between gestures** and enabled per-outline at the begin callback.
+  That is what lets a drag-move start inside the selection box without painting a trail blip —
+  no hover suppression needed (unlike Ratta's law 3; the Onyx begin callback decides
+  drag-vs-outline before render is touched).
+- **Drag-move rides the same shared helpers as the MotionEvent path**
+  (`tryBeginLassoDrag` / `lassoDragMove` / `lassoDragFinish`): A2 fast mode, snap, backing
+  bitmap — all unchanged, just fed from raw points.
+- **Trail wipe at pen-up** = the proven smart-lasso wipe: `setRawDrawingRenderEnabled(false)`
+  + `invalidate()` + posted `handwritingRepaint` (`wipeRawLassoTrail`). The selection lasso
+  wipes before dispatching `onLassoComplete`; the eraser lasso's real gestures let
+  `performLassoErase`'s completion repaint do it.
+- Gesture geometry: per-point move stream is the fallback; the batched
+  `onRawDrawingTouchPointListReceived` list (which can arrive in multiple batches per
+  contact) is authoritative.
+- A barrel-button / eraser-end press mid-gesture cancels the capture
+  (`cancelRawLassoGesture` from `onBeginRawErasing`) and the SDK's hardware erase proceeds.
 
 ## Stylus Barrel Button
 
-The BOOX stylus barrel button is reported to Android as `TOOL_TYPE_ERASER` (not `BUTTON_STYLUS_PRIMARY`). In pen/eraser mode the Onyx SDK intercepts this at the hardware level and fires `onBeginRawErasing` → the existing erasing callbacks handle it. In modes where `setRawDrawingEnabled(false)` is active (lasso, lasso eraser, text placement), the SDK is silent and the button event arrives only via Android's `onTouchEvent`. Both views intercept `TOOL_TYPE_ERASER` (and `BUTTON_STYLUS_PRIMARY` for completeness) **before** the per-mode handler in `onTouchEvent`, routing to `handleBarrelButtonErase` which calls `eraseAtPath` → `finalizeEraseRedraw` → `handwritingRepaint`. This gives consistent erase-on-button behavior regardless of active toolbar tool.
+The BOOX stylus barrel button is reported to Android as `TOOL_TYPE_ERASER` (not `BUTTON_STYLUS_PRIMARY`). In every mode that keeps the raw path enabled (pen, eraser, and — since the hardware lasso trails — both lasso modes) the Onyx SDK intercepts this at the hardware level and fires `onBeginRawErasing` → the existing erasing callbacks handle it (in a lasso mode this first cancels any in-flight trail capture). In modes where `setRawDrawingEnabled(false)` is active (text placement, shape transform, or a lasso mode running on its no-pipeline fallback), the SDK is silent and the button event arrives only via Android's `onTouchEvent`. Both views intercept `TOOL_TYPE_ERASER` (and `BUTTON_STYLUS_PRIMARY` for completeness) **before** the per-mode handler in `onTouchEvent`, routing to `handleBarrelButtonErase` which calls `eraseAtPath` → `finalizeEraseRedraw` → `handwritingRepaint`. This gives consistent erase-on-button behavior regardless of active toolbar tool.
 
 ## Ratta (Supernote) Firmware Ink Engine
 

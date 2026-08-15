@@ -1,5 +1,10 @@
 # Lasso & Pen Gestures
 
+> How the **live lasso trail is drawn** is an engine concern, not covered here: on BOOX and
+> Supernote the firmware paints it in hardware (Onyx `STROKE_STYLE_DASH`/`CHARCOAL`, Ratta
+> `LASSO_DASH`/`LASSO_X`), on Generic it is a software Canvas path — see
+> [`drawing-engine.md`](drawing-engine.md).
+
 > Referenced from `CLAUDE.md`. Covers scribble-to-erase, smart lasso, snap-to-guide, and
 > align & distribute. All are always-active in pen mode (no toggle) unless noted.
 
