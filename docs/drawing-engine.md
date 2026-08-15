@@ -28,11 +28,15 @@
 
 **First-stroke fast-mode (`HWR_APP_SCOPE`):**
 - The first stroke after opening a page / after a page-flip used to lag 1–2s on BOOX (G6/G102): the panel sits in a quality waveform and the first stroke pays a GC→handwriting mode-switch. Fix: `EpdController.applyAppScopeUpdate(HWR_APP_SCOPE, true, false, UpdateMode.HAND_WRITING_REPAINT_MODE, 0)` in `openRawDrawing` (pen branch only), pinning the app in the fast handwriting waveform so there's no switch. Proven the **sole** fix by an on-device sweep of every EPD mode (scribble / view-mode / system-fast all still lagged; only app-scope was instant, no ghosting).
-- Applied once when the pen pipeline opens; stays active across page-flips; **cleared in `closeRawDrawingIfOwner`** (`clearAppScopeUpdate()`) so menus / dialogs / other screens render in normal quality. It follows pen ownership across sticky / scratch-pad handoff automatically. Keep it out of the handoff/lifecycle code — the minimal apply-on-open / clear-on-close placement is deliberate.
+- Applied once when the pen pipeline opens; stays active across page-flips; **cleared in `closeRawDrawingIfOwner`** (`clearAppScopeUpdate()` + `resetUpdListSize()`) so menus / dialogs / other screens render in normal quality. It follows pen ownership across sticky / scratch-pad handoff automatically. Keep it out of the handoff/lifecycle code — the minimal apply-on-open / clear-on-close placement is deliberate.
+- ⚠️ **The scope is registered with the EPD service by NAME, not by process or window** — it governs the whole panel until something clears it, and it survives process death. The policy is *device owns refresh except while a drawing surface is front-most*, enforced at two containment points:
+  - `onWindowVisibilityChanged(≠VISIBLE)` in `OnyxNotebookView` → `closeRawDrawingIfOwner` — Home / app switch / opaque activity / screen-off releases the pipeline and hands refresh back to the device (EInkWise). A Dialog only moves focus (window stays visible), and a translucent scratch-pad / sticky overlay keeps the window VISIBLE, so the first-stroke fix and the pipeline handoffs are untouched. Cross-screen navigation is protected by the `penOwner` guard (successor claims before the predecessor's window hides).
+  - `NotesproutApplication.onCreate` (BOOX-gated) calls `clearAppScopeUpdate()` + `resetUpdListSize()` — heals a pin leaked by a killed process (crash / system kill / **adb install -r over a live pen session**, which is what made "system-wide ghosting until reboot" appear on some dev builds but not others).
+- Lasso-drag A2 mode ends with `EpdController.resetViewUpdateMode(view)` — back to the device's default, never a mode we choose.
 
 **Overlay lifetime:**
 - The overlay ("writing mode") stays active indefinitely while the user writes. No idle-release timer.
-- Legitimate handoff points: `setEraserMode(true)`, `eraseAll()`, `setTemplate()`, `loadStrokesWithBitmap()`, `onWindowFocusChanged(false)`, toolbar finger touch.
+- Legitimate handoff points: `setEraserMode(true)`, `eraseAll()`, `setTemplate()`, `loadStrokesWithBitmap()`, `onWindowFocusChanged(false)`, `onWindowVisibilityChanged(≠VISIBLE)` (full release — see the app-scope rules above), toolbar finger touch.
 - `onPenLifted` is a DB-save trigger only — does NOT touch the overlay.
 
 **Toolbar touch → overlay release:**

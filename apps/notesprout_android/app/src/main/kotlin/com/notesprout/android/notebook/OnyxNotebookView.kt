@@ -62,6 +62,13 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
          * BOOX). Proven the sole fix by a device sweep of every EPD mode (scribble / view-mode /
          * system-fast all still lagged; only app-scope was instant, no ghosting). Applied when the pen
          * pipeline opens; cleared when this view relinquishes it ([closeRawDrawingIfOwner]).
+         *
+         * ⚠️ The scope is registered with the EPD service **by this name, not by process or window**
+         * — it governs the panel until something clears it, surviving even process death. Hence the
+         * two containment rules: [onWindowVisibilityChanged] releases the pipeline (clearing the
+         * scope + updListSize) the moment a drawing window stops being visible, and
+         * `NotesproutApplication.onCreate` heals a pin leaked by a killed process (crash / system
+         * kill / adb install mid-session — the "system-wide ghosting until reboot" failure).
          */
         private const val HWR_APP_SCOPE = "notesprout_hwr"
 
@@ -1544,6 +1551,30 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
         }
     }
 
+    /**
+     * Hand the panel back to the device the moment this window stops being visible — the Home
+     * button, an app switch, another opaque activity, or screen-off. The EPD overrides this view
+     * holds (the app-scope handwriting pin and the shortened auto-refresh list) are registered
+     * with the EPD service **by name, not by window**, so without this they keep governing the
+     * whole panel while other apps are on screen — the "serious ghosting after switching apps"
+     * failure. Releasing here means the pin lives exactly as long as a drawing surface is
+     * front-most, and the device's own refresh management (EInkWise) owns everything else.
+     *
+     * Deliberately NOT on focus loss: a Dialog moves focus but keeps this window visible, and
+     * the first-stroke fix must survive dialog round-trips. A translucent scratch-pad / sticky
+     * overlay also keeps this window VISIBLE, so the pipeline handoff those flows rely on is
+     * untouched. Cross-screen navigation is safe via the [penOwner] guard — the successor claims
+     * the pipeline before the predecessor's window goes hidden, so our close is skipped there.
+     * On return, resumeDrawing() / the focus-gain path reopens from `!isSetup`.
+     */
+    override fun onWindowVisibilityChanged(visibility: Int) {
+        super.onWindowVisibilityChanged(visibility)
+        epd { "WINDOW_VISIBILITY_CHANGED vis=$visibility isSetup=$isSetup owner=${penOwner === this}" }
+        if (visibility != View.VISIBLE) {
+            closeRawDrawingIfOwner("onWindowVisibilityChanged")
+        }
+    }
+
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
         if (w == 0 || h == 0) return
@@ -1912,7 +1943,8 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
             dragOriginalTextObjects = emptyList(); dragOriginalLineObjects = emptyList()
             dragOriginalLinks = emptyList(); dragOriginalStickyNotes = emptyList()
             dragOriginalShapeObjects = emptyList()
-            EpdController.setViewDefaultUpdateMode(this, UpdateMode.GU)
+            // Back to the device's own default for this view, not a mode we choose.
+            EpdController.resetViewUpdateMode(this)
             epd { "DRAG_COMMIT A2_MODE_OFF" }
             redrawCanvas(caller = "dragCommit")
             post {
@@ -2031,9 +2063,12 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
         if (penOwner === this) {
             touchHelper.closeRawDrawing()
             penOwner = null
-            // Drop the handwriting fast-mode so menus / dialogs / other screens render in normal
-            // quality; the next owner re-applies it when it opens the pen pipeline.
+            // Hand the panel back to the device: drop the handwriting fast-mode AND restore the
+            // auto-refresh list size, so menus / other screens / other apps run under the
+            // device's own refresh management; the next owner re-applies both when it opens the
+            // pen pipeline.
             EpdController.clearAppScopeUpdate()
+            EpdController.resetUpdListSize()
             epd { "CLOSE_RAW_DRAWING caller=$caller owner=self" }
         } else {
             epd { "CLOSE_RAW_DRAWING_SKIPPED caller=$caller reason=notOwner" }
@@ -2130,7 +2165,8 @@ class OnyxNotebookView(context: Context) : View(context), NotebookView {
         if (!enabled && isDragMoveActive) {
             epd { "SET_DRAG_MOVE_MODE false — cancelling drag" }
             if (dragThresholdMet) {
-                EpdController.setViewDefaultUpdateMode(this, UpdateMode.GU)
+                // Back to the device's own default for this view, not a mode we choose.
+                EpdController.resetViewUpdateMode(this)
                 epd { "A2_MODE_OFF caller=setDragMoveMode_cancel" }
             }
             dragBackingBitmap?.recycle(); dragBackingBitmap = null

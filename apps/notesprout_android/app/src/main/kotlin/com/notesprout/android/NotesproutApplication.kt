@@ -59,6 +59,21 @@ class NotesproutApplication : Application() {
         // before any SDK code runs.
         HiddenApiBypass.addHiddenApiExemptions("")
 
+        // EPD leak heal (BOOX): the writing session registers an app-scope handwriting-waveform
+        // pin and a shortened auto-refresh list with the EPD service, keyed by NAME — not by
+        // process. A process killed mid-session (crash, system kill, adb install -r) leaves them
+        // registered with nobody to clear them, and the whole panel ghosts in every app until
+        // reboot. Clearing on every process start heals that; it no-ops when nothing leaked.
+        // The pen pipeline re-applies both when a drawing surface opens.
+        if (com.notesprout.android.core.isBooxDevice()) {
+            try {
+                com.onyx.android.sdk.api.device.epd.EpdController.clearAppScopeUpdate()
+                com.onyx.android.sdk.api.device.epd.EpdController.resetUpdListSize()
+            } catch (t: Throwable) {
+                android.util.Log.w("NotesproutApplication", "EPD leak heal failed", t)
+            }
+        }
+
         // The index is encrypted (Phase 1b) and may need an async plaintext→encrypted migration or an
         // unlock prompt, so it can no longer open synchronously here. BootstrapActivity (launcher) and
         // MainActivity (deep-link entry) drive NotesproutIndex.ensureReady(); these index-dependent
