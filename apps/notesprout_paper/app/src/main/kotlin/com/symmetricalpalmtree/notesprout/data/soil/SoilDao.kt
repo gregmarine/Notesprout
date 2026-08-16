@@ -30,6 +30,14 @@ interface SoilDao {
     @Query("UPDATE notebook SET deletedAt = :at, updatedAt = :at WHERE id IN (:ids) AND deletedAt IS NULL")
     suspend fun softDelete(ids: List<String>, at: Long)
 
+    /** Un-soft-delete rows (undo of an erase / a page delete). No-op for ids that are already alive. */
+    @Query("UPDATE notebook SET deletedAt = NULL, updatedAt = :at WHERE id IN (:ids) AND deletedAt IS NOT NULL")
+    suspend fun restore(ids: List<String>, at: Long)
+
+    /** Live stroke ids of a page — cheap (no blobs), used when deleting a page. */
+    @Query("SELECT id FROM notebook WHERE parentId = :pageId AND type = 'stroke' AND deletedAt IS NULL")
+    suspend fun liveStrokeIds(pageId: String): List<String>
+
     @Query("UPDATE notebook SET refId = :refId, updatedAt = :at WHERE id = :id")
     suspend fun setRefId(id: String, refId: String?, at: Long)
 

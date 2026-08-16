@@ -3,6 +3,7 @@ package com.symmetricalpalmtree.notesprout.notebook
 import android.content.Context
 import android.graphics.Bitmap
 import android.util.Log
+import androidx.room.withTransaction
 import com.symmetricalpalmtree.notesprout.core.Bitmaps
 import com.symmetricalpalmtree.notesprout.core.Slog
 import com.symmetricalpalmtree.notesprout.crypto.KeySession
@@ -78,7 +79,7 @@ class NotebookSession(
             runCatching { db.seal(file) }
             return@withContext OpenResult.Failed("Notebook has no pages")
         }
-        pages = pageRows.map { it.toPageRef() }
+        pages = pageRows.mapIndexed { i, row -> row.toPageRef(i) }
         val lastOpen = root?.refId
         currentIndex = pages.indexOfFirst { it.id == lastOpen }.takeIf { it >= 0 } ?: 0
         loadTemplateFor(currentPage)
@@ -90,6 +91,131 @@ class NotebookSession(
     suspend fun saveLastOpened(pageId: String = currentPage.id) = withContext(Dispatchers.IO) {
         if (!isOpen) return@withContext
         db.dao().setRefId(notebookId, pageId, System.currentTimeMillis())
+    }
+
+    // ── Page navigation & structure ────────────────────────────────────────────
+
+    /** Move to [index] without changing structure; decodes the target page's template. */
+    suspend fun goTo(index: Int): PageRef = withContext(Dispatchers.IO) {
+        currentIndex = index.coerceIn(0, pages.lastIndex)
+        loadTemplateFor(currentPage)
+        currentPage
+    }
+
+    /**
+     * Snapshot describing one page insert or delete, enough to undo/redo it via [reconcile]:
+     * the live page ids before and after (in order), the page ids current before/after, and the
+     * strokes the op soft-deleted (empty for an insert).
+     */
+    data class Structural(
+        val before: List<String>,
+        val after: List<String>,
+        val strokeIds: List<String>,
+        val beforeCurrentId: String,
+        val afterCurrentId: String,
+    )
+
+    /** Insert a blank page relative to the current one, navigate to it, mirror pageCount + updatedAt. */
+    suspend fun insertBlank(after: Boolean): Structural = withContext(Dispatchers.IO) {
+        val cur = currentPage
+        val before = pages.map { it.id }
+        val now = System.currentTimeMillis()
+        val newId = java.util.UUID.randomUUID().toString()
+        val pos = PageMath.insertPosition(currentIndex, after)
+        val newRow = SoilObjectEntity(
+            id = newId, parentId = notebookId, type = SoilSchema.TYPE_PAGE, order = pos,
+            createdAt = now, updatedAt = now,
+            refId = cur.templateId, width = cur.width.toFloat(), height = cur.height.toFloat(),
+        )
+        val newPages = pages.toMutableList().apply { add(pos, newRow.toPageRef(pos)) }
+        db.withTransaction {
+            db.dao().upsert(newRow)
+            renumber(newPages, now)
+        }
+        pages = newPages.reindexed()
+        currentIndex = pos
+        loadTemplateFor(currentPage)
+        mirror(now)
+        Structural(before, pages.map { it.id }, emptyList(), cur.id, newId)
+    }
+
+    /**
+     * Soft-delete the current page (and its strokes) and navigate to the previous page. Deleting the
+     * only page creates a fresh blank in its place so a notebook always has ≥ 1 page.
+     */
+    suspend fun deleteCurrent(): Structural = withContext(Dispatchers.IO) {
+        val victim = currentPage
+        val before = pages.map { it.id }
+        val now = System.currentTimeMillis()
+        val strokeIds = db.dao().liveStrokeIds(victim.id)
+        if (pages.size == 1) {
+            val newId = java.util.UUID.randomUUID().toString()
+            val replacement = SoilObjectEntity(
+                id = newId, parentId = notebookId, type = SoilSchema.TYPE_PAGE, order = 0,
+                createdAt = now, updatedAt = now,
+                refId = victim.templateId, width = victim.width.toFloat(), height = victim.height.toFloat(),
+            )
+            db.withTransaction {
+                db.dao().upsert(replacement)
+                db.dao().softDelete(listOf(victim.id), now)
+                if (strokeIds.isNotEmpty()) db.dao().softDelete(strokeIds, now)
+            }
+            pages = listOf(replacement.toPageRef(0))
+            currentIndex = 0
+            loadTemplateFor(currentPage)
+            mirror(now)
+            return@withContext Structural(before, listOf(newId), strokeIds, victim.id, newId)
+        }
+        val remaining = pages.filter { it.id != victim.id }
+        db.withTransaction {
+            db.dao().softDelete(listOf(victim.id), now)
+            if (strokeIds.isNotEmpty()) db.dao().softDelete(strokeIds, now)
+            renumber(remaining, now)
+        }
+        pages = remaining.reindexed()
+        currentIndex = PageMath.indexAfterDelete(before.indexOf(victim.id), before.size)
+        loadTemplateFor(currentPage)
+        mirror(now)
+        Structural(before, pages.map { it.id }, strokeIds, victim.id, currentPage.id)
+    }
+
+    /**
+     * Make the live page set exactly [targetAlive] (in that order), restoring/soft-deleting the
+     * given strokes, and land on [currentId]. The undo/redo primitive for [insertBlank] / [deleteCurrent].
+     */
+    suspend fun reconcile(
+        targetAlive: List<String>,
+        restoreStrokeIds: List<String>,
+        deleteStrokeIds: List<String>,
+        currentId: String,
+    ) = withContext(Dispatchers.IO) {
+        val now = System.currentTimeMillis()
+        val alive = db.dao().childrenOfType(notebookId, SoilSchema.TYPE_PAGE).map { it.id }.toSet()
+        val restorePages = PageMath.toRestore(alive, targetAlive)
+        val deletePages = PageMath.toDelete(alive, targetAlive)
+        db.withTransaction {
+            if (restorePages.isNotEmpty()) db.dao().restore(restorePages, now)
+            if (deletePages.isNotEmpty()) db.dao().softDelete(deletePages, now)
+            if (restoreStrokeIds.isNotEmpty()) db.dao().restore(restoreStrokeIds, now)
+            if (deleteStrokeIds.isNotEmpty()) db.dao().softDelete(deleteStrokeIds, now)
+            targetAlive.forEachIndexed { i, id -> db.dao().setOrder(id, i, now) }
+        }
+        val rows = db.dao().byIds(targetAlive).associateBy { it.id }
+        pages = targetAlive.mapIndexedNotNull { i, id -> rows[id]?.toPageRef(i) }
+        currentIndex = pages.indexOfFirst { it.id == currentId }.coerceAtLeast(0)
+        loadTemplateFor(currentPage)
+        mirror(now)
+    }
+
+    private suspend fun renumber(list: List<PageRef>, now: Long) {
+        list.forEachIndexed { i, p -> if (p.order != i) db.dao().setOrder(p.id, i, now) }
+    }
+
+    private fun List<PageRef>.reindexed(): List<PageRef> = mapIndexed { i, p -> p.copy(order = i) }
+
+    private suspend fun mirror(now: Long) {
+        repo.setPageCount(notebookId, pages.size)
+        repo.touch(notebookId, now)
     }
 
     /** Refresh `notebook_meta` from the index (name, folder path) — the file stays self-describing. */
@@ -128,7 +254,7 @@ class NotebookSession(
         template = Bitmaps.decodeBounded(row.blob, MAX_TEMPLATE_EDGE)
     }
 
-    private fun SoilObjectEntity.toPageRef() = PageRef(
+    private fun SoilObjectEntity.toPageRef(order: Int = this.order) = PageRef(
         id = id, order = order,
         width = (width ?: 0f).toInt(), height = (height ?: 0f).toInt(),
         templateId = refId ?: "",

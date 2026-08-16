@@ -62,6 +62,23 @@ class StrokeStore(
         }
     }
 
+    /** Soft-delete strokes by id (undo of a draw). Same primitive as [erase], named for the caller. */
+    fun remove(ids: List<String>) = erase(ids)
+
+    /** Re-add previously-erased strokes as fresh live rows (undo of an erase, redo of a draw). */
+    fun restore(pageId: String, strokes: List<Stroke>) {
+        if (strokes.isEmpty()) return
+        enqueue {
+            val now = System.currentTimeMillis()
+            var order = dao.maxOrder(pageId, SoilSchema.TYPE_STROKE)
+            for (s in strokes) {
+                order += 1
+                dao.upsert(StrokeRows.toRow(s, pageId, order, now))
+            }
+            Slog.d(TAG) { "restore ${strokes.size} to $pageId" }
+        }
+    }
+
     /** Rewrite the moved strokes' geometry — the row is the truth, so translate the persisted points. */
     fun move(ids: List<String>, dx: Float, dy: Float) {
         if (ids.isEmpty() || (dx == 0f && dy == 0f)) return

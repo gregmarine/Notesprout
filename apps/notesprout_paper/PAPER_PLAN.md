@@ -642,7 +642,7 @@ persists across close/reopen; the library card shows the last-open page as its c
 ---
 
 ### Phase 4 — Pages: flip, insert, delete, undo/redo
-**Status:** ⬜ Not started
+**Status:** 🧪 Awaiting device verification (built + launches clean on SNN/NA5C/MIP11; user verifies gestures/ink by eye)
 
 **Goal:** the notebook is a stack of pages.
 
@@ -660,17 +660,39 @@ persists across close/reopen; the library card shows the last-open page as its c
    and close. Undo of a move re-translates by −dx/−dy.
 5. `docs/notebook.md` updated with the gesture contract.
 
-**Questions to resolve at phase start**
-- Swipe left on the last page: insert a new page (reference behaviour) or stop at the last page?
-- Should undo/redo also cover page insert/delete? (Recommend: no — pages are structural; the confirm
-  dialog is the safeguard.)
-- Long-press timing / feedback: a short vibration on fire? (Recommend: none — meditative.)
+**Questions resolved at phase start (2026-08-16)**
+- Swipe-next on the last page → **insert a new page** (reference behaviour).
+- Undo/redo → **also covers page insert/delete** (overrides the plan's "no" recommendation). This forced
+  the undo stack to be **notebook-level, cleared only on close** (not per-page/cleared-on-turn as the
+  Locked-decisions table said) — undoing an insert/delete must reverse the page turn it caused, so the
+  history has to survive turns. Each entry carries its page id; undo navigates back to the affected page.
+- Long-press-to-delete feedback → **no vibration** (meditative).
 
 **Tests**
+- JVM (`PageMathTest`, 12 tests): `indexAfterDelete` (middle/first/last/two-page), `insertPosition`,
+  `toRestore`/`toDelete` diff, insert-undo/redo symmetry. All green.
 - Device (all three): flip both ways with the exact thresholds (short swipes don't flip; palm during
   writing doesn't flip — the gate); insert before/after lands on the new page with the right count;
-  delete middle/first/last/only page; undo/redo draw + erase + move; 3-finger on BOOX (the CANCEL
-  path); everything survives close/reopen; last-open page restored.
+  swipe-next on the last page inserts; delete middle/first/last/only page; undo/redo draw + erase + move
+  + page insert/delete; 3-finger on BOOX (the CANCEL path); undo survives page turns; everything
+  survives close/reopen; last-open page restored.
+
+**Outcome** (Phase 4, commit pending)
+- New files: `notebook/PageGestures.kt` (finger detectors — observer fed from `dispatchTouchEvent`),
+  `notebook/UndoRedoStack.kt` (notebook-level LIFO + `Action` sealed type), `notebook/PageMath.kt`
+  (pure index/set arithmetic), test `PageMathTest`.
+- `NotebookSession`: `goTo` / `insertBlank` / `deleteCurrent` / `reconcile` (+ `Structural` snapshot),
+  renumber-in-transaction, `pageCount` + `updatedAt` mirrors.
+- `SoilDao`: `restore(ids, at)` (un-soft-delete), `liveStrokeIds(pageId)`.
+- `StrokeStore`: `remove(ids)` (= soft delete), `restore(pageId, strokes)` (re-add live rows).
+- `NotebookActivity`: gesture wiring, `liveStrokes` mirror (erase capture), `navigateTo` (single EPD
+  refresh via `clearForContentSwap`), `pageOps` mutex, undo/redo apply via **store→drain→reload**, page
+  delete action sheet + confirm dialog. Strings `delete_page_*`.
+- **Undo/redo model:** notebook-level, cleared on close only (see resolved-questions note). Bounded 100
+  entries. Every replay mutates the store then reloads the affected page, so the `.soil` is the source
+  of truth and paper can't desync. Stands down while a lasso selection is active (g-paper claims finger).
+- g-paper: unchanged (0.1.0).
+- Docs: `docs/notebook.md` extended with the page/gesture/undo contract.
 
 ---
 

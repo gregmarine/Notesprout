@@ -77,3 +77,73 @@ during writing.
 
 `LibraryGrid` decodes the cover with `Bitmaps.decodeBounded(bytes, 512)` into the card's
 `coverImage` (`layout_weight=1` — the Phase 2 layout gave it 0 height, fixed here).
+
+## Pages: flip, insert, delete, undo/redo (Phase 4)
+
+The notebook is a stack of pages on one g-paper surface. `NotebookSession` owns the ordered `pages`
+list + `currentIndex`; `PageGestures` turns finger input into page actions; `UndoRedoStack` is the
+in-memory history.
+
+### Gestures (`PageGestures`)
+
+Fed from `NotebookActivity.dispatchTouchEvent` (observer only — consumes nothing, so pen ink and the
+toolbar buttons still see every event). Ported thresholds:
+
+- **Flip** (1 finger, horizontal-dominant, `|dx| ≥ 0.30×width`, and `|vx| ≥ scaledMinimumFlingVelocity`
+  **or** `|dx| ≥ 0.50×width`): `dx<0` → next, `dx>0` → previous. Direction from `dx` sign, never
+  velocity. **Swiping next past the last page inserts a new page after it** (phase-4 decision).
+- **Insert** (2 fingers, same gates on the centroid): `dx<0` → insert **after** + navigate; `dx>0` →
+  **before**.
+- **Undo / redo** (multi-finger stationary double-tap; arms on `POINTER_DOWN`, ≥4 disarms; stationary
+  = centroid ≤ `touchSlop`; each tap ≤ `longPressTimeout`; second tap ≤ `doubleTapTimeout` &
+  ≤ `doubleTapSlop` of the first): 2 fingers = undo, 3 = redo. **BOOX sends `ACTION_CANCEL` for
+  3-finger touches** → a cancel on an armed, stationary 3-finger gesture counts as the tap.
+- **Delete** (1 finger long-press ≥ `longPressTimeout`, stationary ≤ `touchSlop`): `ActionSheetDialog`
+  "Delete page" → `AlertDialog` "Delete this page? / Its ink cannot be recovered." [Delete] [Cancel].
+
+**Gating (every recogniser):** refuse to start / act while `paper.isPenActive`; re-check at the gate;
+tap-actions (undo/redo, long-press) commit after a `PEN_ACTIVE_TAIL_MS` escrow and drop if the gate
+closed. The whole detector **stands down while a lasso selection is active** (g-paper claims finger
+input then — dismiss the selection before you can flip/undo) and never arms on a stylus down or a down
+over chrome. No haptic feedback (meditative).
+
+### Page structure (`NotebookSession`)
+
+- `goTo(i)` — navigate only (loads the page's template).
+- `insertBlank(after)` — new page row copying the current page's geometry + template ref, renumber
+  siblings 0..N-1 in one transaction, mirror `pageCount` + `updatedAt`, land on the new page. Returns
+  a `Structural` snapshot.
+- `deleteCurrent()` — soft-delete the page + its strokes, renumber, land on the previous page
+  (`PageMath.indexAfterDelete`). **Deleting the only page creates a fresh blank in its place** so a
+  notebook always has ≥ 1 page. Returns a `Structural` snapshot.
+- `reconcile(targetAlive, restoreStrokeIds, deleteStrokeIds, currentId)` — the undo/redo primitive:
+  makes the live page set exactly `targetAlive` (diff via `PageMath.toRestore` / `toDelete`, using the
+  DAO's `restore` to un-soft-delete), toggles the given strokes, renumbers, lands on `currentId`.
+
+`SoilDao` gained `restore(ids, at)` (un-soft-delete) and `liveStrokeIds(pageId)` (cheap, no blobs).
+`PageMath` holds the pure index/set arithmetic (JVM-tested in `PageMathTest`).
+
+### Undo / redo (`UndoRedoStack`) — notebook-level
+
+**Deviation from the plan's "per-page, cleared on page turn":** because the phase-start answer put
+**page insert/delete inside undo**, and undoing an insert/delete must reverse the page turn it caused,
+the stack is **notebook-level and cleared only on close** (never on a turn). Each entry carries its
+page id, so undo navigates back to the affected page. Bounded at 100 entries (oldest dropped;
+`Erased` holds the full stroke geometry). Redo clears on any new edit.
+
+Actions and their replay (all go **store → drain → reload the affected page**, so the DB is always the
+source of truth and paper never desyncs):
+
+| Action | undo | redo |
+|---|---|---|
+| `Drew(pageId, stroke)` | `store.remove` | `store.restore` |
+| `Erased(pageId, strokes)` | `store.restore` | `store.remove` |
+| `Moved(pageId, ids, dx, dy)` | `store.move(-dx,-dy)` | `store.move(dx,dy)` |
+| `Page(Structural)` | `reconcile(before, strokeIds→restore, …, beforeCurrentId)` | `reconcile(after, …, strokeIds→delete, afterCurrentId)` |
+
+`StrokeStore` gained `remove(ids)` (= soft delete) and `restore(pageId, strokes)` (re-add as live
+rows). `NotebookActivity` keeps `liveStrokes` (a `Map<id,Stroke>` of the visible page) so an erase can
+capture the full `Stroke` objects the undo needs; it is rebuilt on every page load/navigate.
+
+All page/undo operations run under a `Mutex` (`pageOps`) so overlapping gestures can't corrupt the
+page list, and are dropped once `closing`.
