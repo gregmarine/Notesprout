@@ -31,6 +31,17 @@ The library is Paper's home screen — a paginated card grid of folders and note
 - **Notebook card:** cover image (or blank placeholder) + name + last-modified date/time
   (`DateFormat.getMediumDateFormat/getTimeFormat`).
 
+**Cover loading is lazy (Phase 6 perf).** The DAO listing is blob-free (`ObjectSummary`, no `blob`
+column). Covers are read one **page** at a time: `bindCurrentPage()` fetches `repo.cover(id)` only for
+the visible slice's notebooks, memoised in a `coverCache` that lives for the current listing and is
+cleared on every `refresh()` (so an edited notebook's new cover is picked up). A 40-notebook folder
+therefore reads ~one screen of covers, not 40. `LibraryGrid.bind(items, pageIndex, covers)` takes the
+cache and renders a card without an image when its id isn't present. Several `bindCurrentPage`
+coroutines can be in flight at once (a page tap racing `onResume`); each fetches its page's covers into
+a *local* map on IO and merges into `coverCache` back on the Main dispatcher, so the shared `HashMap` is
+only ever written single-threaded. The page indicator (`renderPager`) is drawn **after** the bind, so
+"n / N" can't advance before the cards it names appear.
+
 Tap opens; long-press shows an `ActionSheetDialog`:
 - Notebook: Rename · Move · Delete.
 - Folder: Rename · Move · Delete.
@@ -78,9 +89,13 @@ row id or `""` for blank) → `notebook_meta` → seal → index row → open no
 
 `BuiltInTemplates` in `data/template/`:
 - Blank: no template row; page `refId = ""`.
-- Lined: horizontal rules every 8 mm (at device DPI), starting after a one-spacing top margin.
-- Dotted: dots on an 8 mm grid.
-- Grid: lines both axes every 8 mm.
+- Lined: horizontal rules every 8 mm (at device DPI), starting after a one-spacing top margin
+  (`linePositions`, first rule at 2×spacing).
+- Dotted: dots on an 8 mm grid (`dotPositions`, first at one spacing).
+- Grid: lines both axes every 8 mm, **symmetric origin** — verticals via `gridPositionsX` and
+  horizontals via `gridPositionsY`, both starting at one spacing. The grid must **not** borrow
+  `linePositions` for its horizontals: that function's 2×spacing writing-line top margin would leave a
+  double-height top row of cells (Phase 6 fix).
 - Feature sizes are density-scaled (`lineWidthPx` = max(1, dpi/160) px, `dotRadiusPx` = max(1, 2·dpi/160) px):
   ~2 px rules and ~0.6 mm dots on a 300 ppi e-ink panel — 1 px / 1.5 px read as faint grey there.
   Baked into the file at creation, so a change only affects new notebooks.

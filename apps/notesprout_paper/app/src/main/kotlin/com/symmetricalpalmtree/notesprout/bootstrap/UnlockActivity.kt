@@ -11,6 +11,7 @@ import androidx.lifecycle.lifecycleScope
 import com.symmetricalpalmtree.notesprout.R
 import com.symmetricalpalmtree.notesprout.core.TopGuard
 import com.symmetricalpalmtree.notesprout.crypto.AttemptLimiter
+import com.symmetricalpalmtree.notesprout.crypto.GlobalKey
 import com.symmetricalpalmtree.notesprout.crypto.PassphraseStore
 import com.symmetricalpalmtree.notesprout.data.index.PaperIndex
 import com.symmetricalpalmtree.notesprout.databinding.ActivityUnlockBinding
@@ -71,10 +72,11 @@ class UnlockActivity : AppCompatActivity() {
         binding.errorText.visibility = View.GONE
         binding.progressText.visibility = View.VISIBLE
         lifecycleScope.launch {
-            // Recovery keys are upper-case Crockford; accept a lower-case transcription too.
+            // Recovery keys are upper-case Crockford; accept a hand-transcription too (case + the
+            // O→0, I/L→1 confusables the alphabet omits — see GlobalKey.normalize).
             var ok = PaperIndex.unlockAndOpen(this@UnlockActivity, typed)
-            val upper = typed.uppercase()
-            if (!ok && upper != typed) ok = PaperIndex.unlockAndOpen(this@UnlockActivity, upper)
+            val normalized = GlobalKey.normalize(typed)
+            if (!ok && normalized != typed) ok = PaperIndex.unlockAndOpen(this@UnlockActivity, normalized)
             busy = false
             binding.progressText.visibility = View.GONE
             if (ok) {

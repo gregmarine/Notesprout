@@ -57,6 +57,21 @@ class TemplateGeometryTest {
         assertTrue(xs.all { it > 0 && it < 1000 })
     }
 
+    /** The grid must be symmetric: horizontals start at one spacing (like the verticals), NOT at the
+     *  2×spacing writing-line top margin that would leave a double-height top row of cells. */
+    @Test
+    fun gridPositionsYStartAtOneSpacing_symmetricWithX() {
+        val spacing = BuiltInTemplates.spacingPx(300f)
+        val ys = BuiltInTemplates.gridPositionsY(1000, spacing)
+        val xs = BuiltInTemplates.gridPositionsX(1000, spacing)
+        assertTrue(ys.isNotEmpty())
+        assertEquals(spacing, ys.first(), 0.01f)
+        // Same origin as the vertical lines — no double-height top band.
+        assertEquals(xs.first(), ys.first(), 0.01f)
+        assertTrue(ys.all { it > 0 && it < 1000 })
+        for (i in 1 until ys.size) assertEquals(spacing, ys[i] - ys[i - 1], 0.01f)
+    }
+
     @Test
     fun featureSizesScaleWithDensity_andNeverDropBelowOnePixel() {
         assertEquals(1f, BuiltInTemplates.lineWidthPx(160f), 0.001f)

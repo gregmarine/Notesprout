@@ -747,9 +747,43 @@ pinnedNotebookIds`, `RecentsPrefs`, `BrowseState.mode`/`lastOpenNotebookId`, `No
 ---
 
 ### Phase 6 — Hardening, review, docs freeze
-**Status:** ⬜ Not started
+**Status:** ✅ Complete — user-verified SNN + NA5C 2026-08-16 (full regression + all 4 Phase-6 fixes pass;
+MIP11 not re-flashed this pass). Sole open v0 item: the **v0.1 carry-over list** (deliverable 5) awaits
+the user's input.
 
 **Goal:** v0 is trustworthy enough to live in daily.
+
+**Outcome** (Phase 6, code complete 2026-08-15 — awaiting device regression)
+- **Code review** (`/code-review high` over `main...HEAD` = the whole Paper tree, 143 files / 9.3k
+  lines + the working-tree lazy-cover change). The crypto layer, undo/redo + page math, and stroke
+  codec were found clean. Four genuine findings, all fixed + covered by tests where pure:
+  1. **coverCache data race** (introduced by the perf fix below) — a plain `HashMap` was written from
+     `Dispatchers.IO` inside `bindCurrentPage`, which several concurrent coroutines can run. Reworked
+     to fetch into a local map on IO and merge into `coverCache` on the Main dispatcher (writes
+     single-threaded).
+  2. **Recovery-key transcription** — `UnlockActivity` tried only verbatim + upper-case, never the
+     Crockford folds the alphabet exists for. Added `GlobalKey.normalize` (upper-case + O→0, I/L→1;
+     a valid key never contains I/L/O/U so the fold is safe) and used it as the second attempt. This
+     is v0's only recovery path. (`GlobalKeyTest` +1.)
+  3. **GRID template top band** — `drawGrid` reused `linePositions` (2×spacing writing-line top margin)
+     for horizontals while verticals started at 1×spacing → a double-height top row. Added
+     `gridPositionsY` (symmetric origin) and used it. (`TemplateGeometryTest` +1.)
+  4. **Pager/label desync** (also from the perf fix) — `goToPage` advanced "n / N" synchronously
+     before the async bind. `renderPager` now runs after `g.bind` inside `bindCurrentPage`.
+  (The first two review attempts targeted the wrong diff — a bare commit ref reviews *that commit*, and
+  `HEAD==origin` made the default range empty; the correct target is the range `main...HEAD`.)
+- **Data-loss audit** (all six points walked against source, recorded in `docs/crypto.md` §"Data-loss
+  audit"): every open wrapped; no create-capable open outside the two named bootstrap entry points;
+  missing file never loops into unlock; no passphrase in logs/intents/prefs; no names in prefs. One gap
+  found + fixed: `deleteNotebookFiles` called `DerivedKeyStore.remove` (Keystore only, leaking the RAM
+  entry) — now `KeyMaterial.invalidate` (RAM + Keystore).
+- **Perf pass** (`docs/library.md`): the DAO listing was already blob-free, but the library then
+  fetched covers for the **entire** listing (unbounded), defeating "lazy covers". Now covers load one
+  **page** at a time via `bindCurrentPage`/`coverCache` — a 40-notebook folder reads ~one screen of
+  covers, not 40. (On-device timing on the slowest device is part of the pending regression.)
+- **Docs freeze:** `README.md` written; `docs/{crypto,library}.md` updated for the above. `CLAUDE.md`
+  unchanged (still accurate).
+- 63 JVM tests green; debug APK assembles. g-paper unchanged (0.1.0).
 
 **Deliverables**
 1. `/code-review` (high) over the whole `apps/notesprout_paper` tree; fix confirmed findings.

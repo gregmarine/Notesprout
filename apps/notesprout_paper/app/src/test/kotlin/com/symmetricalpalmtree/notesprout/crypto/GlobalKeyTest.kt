@@ -37,4 +37,13 @@ class GlobalKeyTest {
     fun consecutiveMints_differ() {
         assertNotEquals(GlobalKey.mint(), GlobalKey.mint())
     }
+
+    @Test
+    fun normalize_upperCasesAndFoldsCrockfordConfusables() {
+        // A hand-transcription that used O for 0 and I/l for 1 recovers the canonical key.
+        assertEquals("NSPT-0011-VWXY", GlobalKey.normalize("nspt-oOIl-vwxy"))
+        // A correct minted key (never contains I/L/O/U) is unchanged by normalization.
+        val k = GlobalKey.format(ByteArray(20) { it.toByte() })
+        assertEquals(k, GlobalKey.normalize(k))
+    }
 }

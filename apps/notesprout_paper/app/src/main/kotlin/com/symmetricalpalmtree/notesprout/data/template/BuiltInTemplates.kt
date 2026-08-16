@@ -64,6 +64,19 @@ object BuiltInTemplates {
         return positions
     }
 
+    /** Horizontal grid lines. Symmetric with [gridPositionsX] (first at one spacing, uniform cells) —
+     *  the grid must NOT reuse [linePositions], whose 2×spacing writing-line top margin would leave a
+     *  double-height top row of cells. */
+    fun gridPositionsY(heightPx: Int, spacingPx: Float): List<Float> {
+        val positions = mutableListOf<Float>()
+        var y = spacingPx
+        while (y < heightPx) {
+            positions.add(y)
+            y += spacingPx
+        }
+        return positions
+    }
+
     fun dotPositions(widthPx: Int, heightPx: Int, spacingPx: Float): List<Pair<Float, Float>> {
         val positions = mutableListOf<Pair<Float, Float>>()
         var y = spacingPx
@@ -94,7 +107,7 @@ object BuiltInTemplates {
 
     private fun drawGrid(canvas: Canvas, paint: Paint, w: Int, h: Int, spacingPx: Float, lineWidth: Float) {
         paint.strokeWidth = lineWidth
-        for (y in linePositions(h, spacingPx)) {
+        for (y in gridPositionsY(h, spacingPx)) {
             canvas.drawLine(0f, y, w.toFloat(), y, paint)
         }
         for (x in gridPositionsX(w, spacingPx)) {

@@ -19,7 +19,7 @@ import com.symmetricalpalmtree.notesprout.core.ActionSheetDialog
 import com.symmetricalpalmtree.notesprout.core.Dialogs
 import com.symmetricalpalmtree.notesprout.core.IndexGuard
 import com.symmetricalpalmtree.notesprout.core.TopGuard
-import com.symmetricalpalmtree.notesprout.crypto.DerivedKeyStore
+import com.symmetricalpalmtree.notesprout.crypto.KeyMaterial
 import com.symmetricalpalmtree.notesprout.data.index.IndexRepository
 import com.symmetricalpalmtree.notesprout.data.index.ObjectSummary
 import com.symmetricalpalmtree.notesprout.data.index.ObjectType
@@ -50,6 +50,8 @@ class LibraryActivity : AppCompatActivity() {
     private var pageIndex = 0
     private var pageCount = 1
     private var items = emptyList<CardItem>()
+    /** Covers fetched for pages already viewed in the current listing; cleared on every [refresh]. */
+    private val coverCache = HashMap<String, ByteArray?>()
     private var grid: LibraryGrid? = null
     private var gridMeasured = false
     private var coldLaunch = false
@@ -161,6 +163,8 @@ class LibraryActivity : AppCompatActivity() {
 
     private suspend fun refresh() {
         renderChrome()
+        // Covers may have changed since the last listing (a notebook was edited); re-fetch lazily.
+        coverCache.clear()
         val pinnedIds = repo.pinnedNotebookIds().toSet()
         items = when (mode) {
             BrowseMode.NORMAL -> buildNormalItems(pinnedIds)
@@ -181,8 +185,36 @@ class LibraryActivity : AppCompatActivity() {
         val perPage = grid?.cardsPerPage ?: 1
         pageCount = if (total == 0) 1 else (total - 1) / perPage + 1
         pageIndex = pageIndex.coerceIn(0, pageCount - 1)
+        bindCurrentPage() // renders the pager after the cards are bound
+    }
+
+    /**
+     * Bind only the current page's cards, fetching covers for the visible slice on demand (cached for
+     * the life of this listing). Blobs are never read for off-page notebooks — the DAO listing is
+     * blob-free and covers stay lazy, which is what keeps a 40-notebook folder cheap to render.
+     */
+    private suspend fun bindCurrentPage() {
+        val g = grid ?: return
+        val perPage = g.cardsPerPage
+        val start = pageIndex * perPage
+        val end = minOf(start + perPage, items.size)
+        val missing = if (start < end) {
+            (start until end)
+                .mapNotNull { (items[it] as? CardItem.Notebook)?.summary?.id }
+                .filter { it !in coverCache }
+        } else emptyList()
+        if (missing.isNotEmpty()) {
+            // Fetch into a local map on IO, then merge on the main thread. bindCurrentPage runs on the
+            // Main dispatcher and several can be in flight at once (a page tap racing onResume); writing
+            // coverCache only here — never from the IO block — keeps the shared HashMap single-threaded.
+            val fetched = withContext(Dispatchers.IO) {
+                HashMap<String, ByteArray?>(missing.size).apply { for (id in missing) put(id, repo.cover(id)) }
+            }
+            coverCache.putAll(fetched)
+        }
+        g.bind(items, pageIndex, coverCache)
+        // Page label after the bind, so the indicator can't advance before the cards it names appear.
         renderPager()
-        grid?.bind(items, pageIndex)
     }
 
     private suspend fun buildNormalItems(pinnedIds: Set<String>): List<CardItem> {
@@ -192,10 +224,7 @@ class LibraryActivity : AppCompatActivity() {
         val sortedNotebooks = sortItems(repo.notebooks(folderId), sf, so)
         val out = mutableListOf<CardItem>()
         for (f in sortedFolders) out.add(CardItem.Folder(f))
-        for (nb in sortedNotebooks) {
-            val cover = withContext(Dispatchers.IO) { repo.cover(nb.id) }
-            out.add(CardItem.Notebook(nb, cover, pinned = nb.id in pinnedIds))
-        }
+        for (nb in sortedNotebooks) out.add(CardItem.Notebook(nb, pinned = nb.id in pinnedIds))
         return out
     }
 
@@ -203,10 +232,7 @@ class LibraryActivity : AppCompatActivity() {
     private suspend fun buildPinnedItems(pinnedIds: Set<String>): List<CardItem> {
         val summaries = pinnedIds.mapNotNull { repo.alive(it) }.filter { it.type == ObjectType.NOTEBOOK }
         val sorted = sortItems(summaries, sortPrefs.field, sortPrefs.order)
-        return sorted.map { nb ->
-            val cover = withContext(Dispatchers.IO) { repo.cover(nb.id) }
-            CardItem.Notebook(nb, cover, pinned = true)
-        }
+        return sorted.map { nb -> CardItem.Notebook(nb, pinned = true) }
     }
 
     /** Recents mode: newest-first, parent-folder subtitle, dead ids pruned on read. */
@@ -221,8 +247,7 @@ class LibraryActivity : AppCompatActivity() {
         for (entry in recentsPrefs.entries()) {
             val nb = repo.alive(entry.notebookId)?.takeIf { it.type == ObjectType.NOTEBOOK } ?: continue
             aliveIds.add(nb.id)
-            val cover = withContext(Dispatchers.IO) { repo.cover(nb.id) }
-            out.add(CardItem.Notebook(nb, cover, pinned = nb.id in pinnedIds, subtitle = parentName(nb.parentId)))
+            out.add(CardItem.Notebook(nb, pinned = nb.id in pinnedIds, subtitle = parentName(nb.parentId)))
         }
         recentsPrefs.pruneDeleted(aliveIds)
         return out
@@ -321,8 +346,7 @@ class LibraryActivity : AppCompatActivity() {
         val clamped = index.coerceIn(0, pageCount - 1)
         if (clamped == pageIndex) return
         pageIndex = clamped
-        renderPager()
-        grid?.bind(items, pageIndex)
+        lifecycleScope.launch { bindCurrentPage() }
     }
 
     private fun renderPager() {
@@ -516,7 +540,7 @@ class LibraryActivity : AppCompatActivity() {
         val file = soilFile(this, notebookId)
         file.delete()
         sidecarsOf(file).forEach { it.delete() }
-        DerivedKeyStore.remove(this, notebookId)
+        KeyMaterial.invalidate(this, notebookId)
     }
 
     // ── Move ─────────────────────────────────────────────────────────────────

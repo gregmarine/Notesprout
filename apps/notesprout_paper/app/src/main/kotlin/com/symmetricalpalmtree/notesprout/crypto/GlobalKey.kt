@@ -29,6 +29,16 @@ object GlobalKey {
     /** A fresh 160-bit recovery key, e.g. "NSPT-4K7P-9WXQ-2M3F-8VBN-5H0T-…" (8 groups of 4). */
     fun mint(): String = format(ByteArray(ENTROPY_BYTES).also { SecureRandom().nextBytes(it) })
 
+    /**
+     * Fold a hand-transcribed key back onto the canonical alphabet before verifying it: upper-case,
+     * then map the confusables the alphabet deliberately omits (O→0, I/L→1). A correct key never
+     * contains I/L/O/U, so these folds can't corrupt a valid key — they only rescue a reader who
+     * wrote "O" for "0" or "l" for "1". This is v0's only recovery path, so it must be forgiving.
+     */
+    fun normalize(typed: String): String = buildString(typed.length) {
+        for (c in typed.uppercase()) append(when (c) { 'O' -> '0'; 'I', 'L' -> '1'; else -> c })
+    }
+
     /** Deterministic formatting of 20 entropy bytes — split out so it is unit-testable. */
     fun format(entropy: ByteArray): String {
         require(entropy.size == ENTROPY_BYTES) { "expected $ENTROPY_BYTES bytes" }

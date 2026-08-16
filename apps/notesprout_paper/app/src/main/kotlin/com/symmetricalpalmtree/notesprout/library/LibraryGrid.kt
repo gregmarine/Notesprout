@@ -23,7 +23,6 @@ sealed class CardItem(val summary: ObjectSummary) {
      */
     class Notebook(
         s: ObjectSummary,
-        val coverBytes: ByteArray?,
         val pinned: Boolean = false,
         val subtitle: String? = null,
     ) : CardItem(s)
@@ -55,7 +54,12 @@ class LibraryGrid(
         cardsPerPage = columns * rows
     }
 
-    fun bind(items: List<CardItem>, pageIndex: Int) {
+    /**
+     * Render the [pageIndex] slice. [covers] supplies a notebook's cover blob by id — the host loads
+     * covers lazily for the visible page only (never the whole listing), so a missing entry just means
+     * "not fetched"; the card renders without a cover image.
+     */
+    fun bind(items: List<CardItem>, pageIndex: Int, covers: Map<String, ByteArray?>) {
         currentGrid?.let { container.removeView(it) }
         currentGrid = null
         if (items.isEmpty()) return
@@ -82,7 +86,7 @@ class LibraryGrid(
             val item = items[i]
             val view = when (item) {
                 is CardItem.Folder -> bindFolder(inflater, item, context)
-                is CardItem.Notebook -> bindNotebook(inflater, item, context)
+                is CardItem.Notebook -> bindNotebook(inflater, item, context, covers[item.summary.id])
             }
             val lp = GridLayout.LayoutParams().apply {
                 width = cardW
@@ -104,7 +108,7 @@ class LibraryGrid(
         return view
     }
 
-    private fun bindNotebook(inflater: LayoutInflater, item: CardItem.Notebook, context: Context): View {
+    private fun bindNotebook(inflater: LayoutInflater, item: CardItem.Notebook, context: Context, coverBytes: ByteArray?): View {
         val view = inflater.inflate(R.layout.card_notebook, null)
         val coverImage = view.findViewById<ImageView>(R.id.coverImage)
         val nameView = view.findViewById<TextView>(R.id.cardName)
@@ -122,7 +126,7 @@ class LibraryGrid(
 
         pinBadge.visibility = if (item.pinned) View.VISIBLE else View.GONE
 
-        val bmp = Bitmaps.decodeBounded(item.coverBytes, COVER_DECODE_EDGE)
+        val bmp = Bitmaps.decodeBounded(coverBytes, COVER_DECODE_EDGE)
         if (bmp != null) coverImage.setImageBitmap(bmp)
 
         return view
