@@ -642,7 +642,7 @@ persists across close/reopen; the library card shows the last-open page as its c
 ---
 
 ### Phase 4 — Pages: flip, insert, delete, undo/redo
-**Status:** 🧪 Awaiting device verification (built + launches clean on SNN/NA5C/MIP11; user verifies gestures/ink by eye)
+**Status:** ✅ Complete (commit 9874a63; user-verified SNN/NA5C/MIP11 2026-08-16 — all 10 checklist items pass)
 
 **Goal:** the notebook is a stack of pages.
 
