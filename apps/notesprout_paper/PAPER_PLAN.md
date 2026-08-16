@@ -420,8 +420,7 @@ test devices, and shows a placeholder — plus the project scaffolding every lat
 ---
 
 ### Phase 1 — Container, index, encryption & the launch spine
-**Status:** 🧪 Awaiting device verification (Claude-verified MIP11 end-to-end; SNN + NA5C reach the
-recovery-key screen — user walks the checklist by eye)
+**Status:** ✅ Complete (commit 6635cfe; user-verified SNN + NA5C + MIP11 2026-08-15)
 
 **Outcome:** Both databases exist encrypted-from-first-byte with the greenfield schemas (`docs/data.md`);
 crypto stack + non-destructive open wrapper + `KeyOpener` verify-then-fallback (`docs/crypto.md`);
