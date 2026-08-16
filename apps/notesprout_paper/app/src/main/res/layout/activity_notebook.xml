@@ -1,58 +1,113 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<!-- Full-bleed paper with chrome overlaying it. The PaperView is added programmatically as
+     paperContainer's only child (GPaper.create needs a Context). Both chrome bars are pushed to
+     paper.setExclusionRects after layout so the stylus can never ink under them. -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/root"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:orientation="vertical"
     android:background="@color/paperWhite">
 
-    <!-- Top bar -->
+    <FrameLayout
+        android:id="@+id/paperContainer"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent" />
+
+    <!-- Top toolbar: flush at the top edge, TopGuard-padded (BOOX status bar), 1dp bottom border. -->
     <LinearLayout
         android:id="@+id/topBar"
         android:layout_width="match_parent"
-        android:layout_height="@dimen/toolbar_bar_thickness"
-        android:orientation="horizontal"
-        android:gravity="center_vertical"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top"
+        android:orientation="vertical"
         android:background="@color/paperWhite">
 
-        <androidx.appcompat.widget.AppCompatImageButton
-            android:id="@+id/btnBack"
-            style="@style/Widget.Notesprout.ToolbarButton"
-            android:src="@drawable/ic_arrow_left"
-            android:contentDescription="@string/cd_back" />
-
-        <TextView
-            android:id="@+id/notebookName"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:textSize="16sp"
-            android:textStyle="bold"
-            android:textColor="@color/inkBlack"
-            android:singleLine="true"
-            android:ellipsize="end"
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="@dimen/toolbar_bar_thickness"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
             android:paddingStart="4dp"
-            android:paddingEnd="12dp" />
+            android:paddingEnd="4dp">
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnBack"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:src="@drawable/ic_arrow_left"
+                android:contentDescription="@string/cd_back" />
+
+            <View
+                android:layout_width="12dp"
+                android:layout_height="0dp" />
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnPen"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:src="@drawable/ic_pen"
+                android:contentDescription="@string/cd_tool_pen" />
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnEraser"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:src="@drawable/ic_eraser"
+                android:contentDescription="@string/cd_tool_eraser" />
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnLasso"
+                style="@style/Widget.Notesprout.ToolbarButton"
+                android:src="@drawable/ic_lasso"
+                android:contentDescription="@string/cd_tool_lasso" />
+        </LinearLayout>
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="@color/inkBlack" />
     </LinearLayout>
 
-    <View
+    <!-- Bottom strip: "<name>   n / N", static, 1dp top border. -->
+    <LinearLayout
+        android:id="@+id/bottomStrip"
         android:layout_width="match_parent"
-        android:layout_height="1dp"
-        android:background="@color/inkBlack" />
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom"
+        android:orientation="vertical"
+        android:background="@color/paperWhite">
 
-    <!-- Stub body — Phase 3 replaces with g-paper PaperView -->
-    <FrameLayout
-        android:id="@+id/canvasContainer"
-        android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_weight="1">
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="@color/inkBlack" />
 
-        <TextView
-            android:layout_width="wrap_content"
+        <LinearLayout
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_gravity="center"
-            android:text="@string/notebook_stub"
-            android:textSize="16sp"
-            android:textColor="@color/inkLight" />
-    </FrameLayout>
-</LinearLayout>
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:paddingStart="12dp"
+            android:paddingEnd="12dp"
+            android:paddingTop="6dp"
+            android:paddingBottom="6dp">
+
+            <TextView
+                android:id="@+id/notebookName"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:textSize="13sp"
+                android:textColor="@color/inkBlack"
+                android:singleLine="true"
+                android:ellipsize="end" />
+
+            <TextView
+                android:id="@+id/pageIndicator"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textSize="13sp"
+                android:textColor="@color/inkBlack"
+                android:singleLine="true"
+                android:paddingStart="16dp"
+                android:paddingEnd="0dp" />
+        </LinearLayout>
+    </LinearLayout>
+</FrameLayout>

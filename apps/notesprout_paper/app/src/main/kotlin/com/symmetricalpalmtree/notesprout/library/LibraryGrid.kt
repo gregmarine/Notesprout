@@ -1,7 +1,6 @@
 package com.symmetricalpalmtree.notesprout.library
 
 import android.content.Context
-import android.graphics.BitmapFactory
 import android.text.format.DateFormat
 import android.view.LayoutInflater
 import android.view.View
@@ -11,6 +10,7 @@ import android.widget.GridLayout
 import android.widget.ImageView
 import android.widget.TextView
 import com.symmetricalpalmtree.notesprout.R
+import com.symmetricalpalmtree.notesprout.core.Bitmaps
 import com.symmetricalpalmtree.notesprout.data.index.ObjectSummary
 import com.symmetricalpalmtree.notesprout.data.index.ObjectType
 import java.util.Date
@@ -103,14 +103,14 @@ class LibraryGrid(
         val d = Date(item.summary.updatedAt)
         dateView.text = "${dateFmt.format(d)} ${timeFmt.format(d)}"
 
-        val bytes = item.coverBytes
-        if (bytes != null && bytes.isNotEmpty()) {
-            val bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
-            if (bmp != null) {
-                coverImage.setImageBitmap(bmp)
-            }
-        }
+        val bmp = Bitmaps.decodeBounded(item.coverBytes, COVER_DECODE_EDGE)
+        if (bmp != null) coverImage.setImageBitmap(bmp)
 
         return view
+    }
+
+    private companion object {
+        /** Covers are stored at ≤ 512 px long edge; decode is bounded regardless of what the blob says. */
+        const val COVER_DECODE_EDGE = 512
     }
 }

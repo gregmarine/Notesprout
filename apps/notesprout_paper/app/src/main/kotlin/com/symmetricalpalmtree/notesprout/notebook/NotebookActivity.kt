@@ -2,44 +2,267 @@ package com.symmetricalpalmtree.notesprout.notebook
 
 import android.content.Context
 import android.content.Intent
+import android.graphics.Rect
 import android.os.Bundle
+import android.util.Log
+import android.view.MotionEvent
+import android.view.View
+import android.widget.FrameLayout
+import android.widget.Toast
+import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AppCompatActivity
-import androidx.appcompat.widget.TooltipCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
+import androidx.lifecycle.lifecycleScope
+import com.symmetricalpalmtree.gpaper.core.engine.GPaper
+import com.symmetricalpalmtree.gpaper.core.PaperListener
+import com.symmetricalpalmtree.gpaper.core.PaperView
+import com.symmetricalpalmtree.gpaper.core.Tool
+import com.symmetricalpalmtree.gpaper.core.model.SelectionMove
+import com.symmetricalpalmtree.gpaper.core.model.Stroke
+import com.symmetricalpalmtree.gpaper.core.model.StrokeStyle
+import com.symmetricalpalmtree.notesprout.R
 import com.symmetricalpalmtree.notesprout.core.IndexGuard
+import com.symmetricalpalmtree.notesprout.core.InkColorCodec
+import com.symmetricalpalmtree.notesprout.core.Slog
 import com.symmetricalpalmtree.notesprout.core.TopGuard
+import com.symmetricalpalmtree.notesprout.data.index.IndexRepository
 import com.symmetricalpalmtree.notesprout.data.prefs.BrowseState
+import com.symmetricalpalmtree.notesprout.data.prefs.RecentsPrefs
 import com.symmetricalpalmtree.notesprout.databinding.ActivityNotebookBinding
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
+/**
+ * The notebook screen: full-bleed g-paper surface with the toolbar and page strip overlaying it.
+ * Lifecycle, wiring, chrome and exclusion rects live here; the data lives in [NotebookSession] /
+ * [StrokeStore]; the cover in [CoverSnapshot]; the buttons in [NotebookToolbar].
+ *
+ * Immersive (system bars hidden, transient by swipe). The toolbar is TopGuard-padded because on
+ * BOOX the status bar still overlays the window top.
+ */
 class NotebookActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityNotebookBinding
+    private lateinit var paper: PaperView
+    private lateinit var toolbar: NotebookToolbar
+    private lateinit var session: NotebookSession
+    private val repo by lazy { IndexRepository() }
+
+    private var notebookId: String = ""
+    private var opened = false
+    private var closing = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         if (!IndexGuard.ready(this)) return
+        notebookId = intent.getStringExtra(EXTRA_NOTEBOOK_ID) ?: run { finish(); return }
+        val name = intent.getStringExtra(EXTRA_NOTEBOOK_NAME) ?: ""
+
         binding = ActivityNotebookBinding.inflate(layoutInflater)
         setContentView(binding.root)
-        TopGuard.applyInsetPadding(binding.root)
+        goImmersive()
+        TopGuard.applyRootPadding(binding.topBar)
 
-        val name = intent.getStringExtra(EXTRA_NOTEBOOK_NAME) ?: ""
-        val notebookId = intent.getStringExtra(EXTRA_NOTEBOOK_ID) ?: run { finish(); return }
+        paper = GPaper.create(this).also {
+            binding.paperContainer.addView(
+                it.asView(),
+                FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT),
+            )
+        }
+        Slog.d(TAG) { "engine=${paper.engineId}" }
+        paper.tool = Tool.PEN
+        paper.penColor = InkColorCodec.BLACK
+        paper.penWidth = PEN_WIDTH_PX
+        paper.penStyle = StrokeStyle.PEN
+        paper.eraserRadius = ERASER_RADIUS_PX
+        paper.smartLassoEnabled = false
+        paper.scribbleEraseEnabled = false
+        paper.setPaperListener(listener)
 
+        toolbar = NotebookToolbar(
+            binding.topBar, binding.btnBack, binding.btnPen, binding.btnEraser, binding.btnLasso, paper,
+        ) { close() }
         binding.notebookName.text = name
-        binding.btnBack.setOnClickListener { finish() }
-        TooltipCompat.setTooltipText(binding.btnBack, binding.btnBack.contentDescription)
+        binding.pageIndicator.text = ""
+
+        binding.root.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> binding.root.post { pushExclusions() } }
+
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() { close() }
+        })
 
         BrowseState(this).lastOpenNotebookId = notebookId
+        RecentsPrefs(this).record(notebookId)
+
+        session = NotebookSession(this, notebookId, repo)
+        lifecycleScope.launch { openSession() }
+    }
+
+    // ── Open ─────────────────────────────────────────────────────────────────
+
+    private suspend fun openSession() {
+        val alive = withContext(Dispatchers.IO) { repo.alive(notebookId) }
+        if (alive == null) { failOpen("not in the library"); return }
+        when (val r = session.open()) {
+            is NotebookSession.OpenResult.Failed -> { failOpen(r.reason); return }
+            NotebookSession.OpenResult.Ok -> Unit
+        }
+        if (isFinishing) { session.seal(); return }
+        val page = session.currentPage
+        val strokes = session.store.loadPage(page.id)
+        paper.setPageSize(page.width, page.height)
+        paper.setTemplate(session.template)
+        paper.loadStrokes(strokes)
+        opened = true
+        setPageIndicator(session.currentIndex + 1, session.pages.size)
+        Slog.d(TAG) { "page ${page.id} loaded: ${strokes.size} strokes, ${page.width}x${page.height}" }
+    }
+
+    private fun failOpen(reason: String) {
+        Log.w(TAG, "open failed: $reason")
+        Toast.makeText(this, getString(R.string.notebook_open_failed, reason), Toast.LENGTH_LONG).show()
+        BrowseState(this).lastOpenNotebookId = null
+        finish()
+    }
+
+    // ── g-paper → store ──────────────────────────────────────────────────────
+
+    private val listener = object : PaperListener {
+        override fun onStrokeCommitted(stroke: Stroke) {
+            if (opened) session.store.commit(session.currentPage.id, stroke)
+        }
+        override fun onStrokesErased(ids: List<String>) {
+            if (opened) session.store.erase(ids)
+        }
+        override fun onSelectionMoved(move: SelectionMove) {
+            if (opened) session.store.move(move.strokeIds.toList(), move.dx, move.dy)
+        }
+        override fun onToolChanged(tool: Tool) {
+            toolbar.sync(tool)
+        }
+    }
+
+    // ── Chrome ───────────────────────────────────────────────────────────────
+
+    private fun goImmersive() {
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        WindowInsetsControllerCompat(window, binding.root).apply {
+            hide(WindowInsetsCompat.Type.systemBars())
+            systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        }
+    }
+
+    private fun pushExclusions() {
+        if (!::paper.isInitialized) return
+        val paperLoc = IntArray(2).also { paper.asView().getLocationInWindow(it) }
+        val rects = listOfNotNull(NotebookToolbar.rectOf(binding.topBar), NotebookToolbar.rectOf(binding.bottomStrip))
+            .map { Rect(it.left - paperLoc[0], it.top - paperLoc[1], it.right - paperLoc[0], it.bottom - paperLoc[1]) }
+        paper.setExclusionRects(rects)
+    }
+
+    /**
+     * Frame-silence rule: never present an app frame while the pen is active (Ratta overlay ink
+     * lags for every frame it must mask). Chrome text changes wait for the gate to open.
+     */
+    private fun setPageIndicator(n: Int, total: Int) {
+        val text = getString(R.string.notebook_page_indicator, n, total)
+        whenPenIdle { binding.pageIndicator.text = text }
+    }
+
+    private fun whenPenIdle(action: () -> Unit) {
+        if (!paper.isPenActive) { action(); return }
+        binding.root.postDelayed({ whenPenIdle(action) }, PaperView.PEN_ACTIVE_TAIL_MS)
+    }
+
+    /** EPD chrome-release: a finger landing on chrome must release the overlay so the tap's visual
+     *  result shows. Done here because the buttons consume the touch. Palm-gated. */
+    override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+        if (ev.actionMasked == MotionEvent.ACTION_DOWN && ::paper.isInitialized) {
+            val tool = ev.getToolType(0)
+            val finger = tool != MotionEvent.TOOL_TYPE_STYLUS && tool != MotionEvent.TOOL_TYPE_ERASER
+            if (finger && !paper.isPenActive && overChrome(ev)) paper.releaseRender()
+        }
+        return super.dispatchTouchEvent(ev)
+    }
+
+    private fun overChrome(ev: MotionEvent): Boolean {
+        val top = NotebookToolbar.rectOf(binding.topBar)
+        val bottom = NotebookToolbar.rectOf(binding.bottomStrip)
+        val x = ev.x.toInt(); val y = ev.y.toInt()
+        return (top?.contains(x, y) == true) || (bottom?.contains(x, y) == true)
+    }
+
+    // ── Lifecycle ────────────────────────────────────────────────────────────
+
+    override fun onResume() {
+        super.onResume()
+        if (::paper.isInitialized) paper.resumeDrawing()
+    }
+
+    override fun onStop() {
+        super.onStop()
+        if (!opened || closing || !session.isOpen) return
+        // Cheap durability point while backgrounded: cover + last-open page. Ink is already in rows.
+        val p = paper; val s = session; val id = notebookId
+        appScope.launch {
+            try {
+                if (!closing) CoverSnapshot.capture(p, id, repo)
+                if (!closing) s.saveLastOpened()
+            } catch (e: Exception) { Log.w(TAG, "onStop persist failed", e) }
+        }
+    }
+
+    /**
+     * Normal close: cover → last-open page → meta → drain writes + seal, on an application-scoped
+     * NonCancellable coroutine (each step guarded), then finish. Idempotent.
+     */
+    private fun close() {
+        if (closing) return
+        closing = true
+        BrowseState(this).lastOpenNotebookId = null
+        if (!::session.isInitialized || !session.isOpen) { finish(); return }
+        val p = paper; val s = session; val id = notebookId
+        val versionCode = packageManager.getPackageInfo(packageName, 0).longVersionCode.toInt()
+        appScope.launch {
+            withContext(NonCancellable) {
+                if (opened) try { CoverSnapshot.capture(p, id, repo) } catch (e: Exception) { Log.w(TAG, "cover failed", e) }
+                try { s.saveLastOpened() } catch (e: Exception) { Log.w(TAG, "saveLastOpened failed", e) }
+                try { s.refreshMeta(versionCode) } catch (e: Exception) { Log.w(TAG, "refreshMeta failed", e) }
+                try { s.seal() } catch (e: Exception) { Log.w(TAG, "seal failed", e) }
+            }
+            if (!isFinishing && !isDestroyed) finish()
+        }
     }
 
     override fun onDestroy() {
         if (IndexGuard.bounced(this)) { super.onDestroy(); return }
-        BrowseState(this).lastOpenNotebookId = null
+        if (::paper.isInitialized) paper.release()
+        // A destroy that isn't a normal close (e.g. finish() from failOpen after open) still seals.
+        if (::session.isInitialized && session.isOpen && !closing) {
+            closing = true
+            val s = session
+            appScope.launch { withContext(NonCancellable) { try { s.seal() } catch (e: Exception) { Log.w(TAG, "seal failed", e) } } }
+        }
         super.onDestroy()
     }
 
     companion object {
+        private const val TAG = "NotebookActivity"
         const val EXTRA_NOTEBOOK_ID = "notebookId"
         const val EXTRA_NOTEBOOK_NAME = "notebookName"
+
+        /** Phase-3 decisions: raw px, not dp (matches the reference pen and g-paper's defaults). */
+        const val PEN_WIDTH_PX = 3f
+        const val ERASER_RADIUS_PX = 15f
+
+        /** Outlives the Activity so a close in flight always completes its seal. */
+        private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
         fun intent(context: Context, notebookId: String, name: String): Intent =
             Intent(context, NotebookActivity::class.java).apply {

@@ -563,7 +563,7 @@ name (Phase 3 fills it).
 ---
 
 ### Phase 3 — The notebook: g-paper, one page, persistence, cover
-**Status:** ⬜ Not started
+**Status:** 🧪 Awaiting device verification (Claude-smoked on SNN/NA5C/MIP11: engines select, open/close, cover)
 
 **Goal:** open a notebook and write on page 1 with pen / eraser / lasso on all three engines; ink
 persists across close/reopen; the library card shows the last-open page as its cover.
@@ -595,13 +595,12 @@ persists across close/reopen; the library card shows the last-open page as its c
 6. Library card shows the cover (bounded decode of the blob at card size).
 7. `docs/notebook.md`.
 
-**Questions to resolve at phase start**
-- Pen width and eraser radius defaults (recommend: width 3 px at the device density's baseline the
-  reference uses — check `docs/drawing-engine.md`; eraser radius as g-paper's default).
-- Toolbar look: floating bar with 1dp border, or flush at the top edge? (Recommend flush with a
-  bottom border, TopGuard-padded.)
-- Should the bottom strip hide while writing? (Recommend: it never repaints during writing — static
-  content, so no; it stays.)
+**Questions resolved (2026-08-15)**
+- Pen width **3 px**, eraser radius **15 px** — raw px, not dp (matches the reference
+  `OnyxNotebookView` pen and g-paper's `Stroke.DEFAULT_WIDTH` / `DEFAULT_ERASER_RADIUS_PX`).
+- Toolbar: **flush at the top edge**, full width, 1dp inkBlack bottom border, TopGuard-padded;
+  selected tool = the bordered button state.
+- Bottom strip: **always visible**, static; any text change is deferred until the pen gate opens.
 
 **Tests**
 - Device (all three — this is the phase where the three engines are proven): write, erase, lasso
@@ -612,6 +611,25 @@ persists across close/reopen; the library card shows the last-open page as its c
 - Ratta-specific: verify no ghosting/lag after ~5 min of writing (frame-silence rule: nothing repaints
   while `isPenActive`).
 - Onyx-specific: leave the notebook, then the app; return — pipeline reclaims (`resumeDrawing`).
+
+**Outcome** (Phase 3)
+- New files: `notebook/{NotebookSession,StrokeStore,StrokeRows,CoverSnapshot,NotebookToolbar}.kt`,
+  `core/Bitmaps.kt` (bounded decode, shared by template + card cover), test `StrokeRowsTest`
+  (5 tests). `NotebookActivity` rewritten (full-bleed paper, overlays, exclusion rects,
+  immersive, close sequence). `activity_notebook.xml` rewritten; icons `ic_pen/ic_eraser/ic_lasso`
+  copied from the reference app. `SoilDao` gained `byIds` + `maxOrder`.
+- Recents: `RecentsPrefs` (Phase 2) already covers `record`; no separate `RecentsManager` created —
+  `NotebookActivity.onCreate` records the open. Recents UI is Phase 5.
+- `updatedAt` discipline implemented as a trailing 2 s debounce on **every** edit (flushed on
+  close), not only the first — so the card's "last modified" tracks a long session.
+- Fixed a latent Phase 2 bug: `card_notebook.xml` cover `ImageView` had `layout_height=0dp` and no
+  weight (never visible). Now `layout_weight=1`.
+- g-paper: version unchanged (0.1.0) but the mavenLocal artifact predated g-paper's Phase 9
+  commit (`smartLassoEnabled`, `onToolChanged`); republished from committed HEAD
+  (`./gradlew publishToMavenLocal`, no source change). `GPaper` lives in `core.engine`.
+- Claude smoke: engines `generic` (MIP11) / `ratta` (SNN) / `onyx` (NA5C) selected; open, tool
+  taps, back-close, cover on card all verified by screencap. Ink itself awaits the user's hands.
+- `docs/notebook.md` written.
 
 ---
 

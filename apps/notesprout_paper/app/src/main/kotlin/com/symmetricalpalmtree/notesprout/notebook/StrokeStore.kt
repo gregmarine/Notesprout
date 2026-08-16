@@ -1,0 +1,118 @@
+package com.symmetricalpalmtree.notesprout.notebook
+
+import android.util.Log
+import com.symmetricalpalmtree.gpaper.core.model.Stroke
+import com.symmetricalpalmtree.notesprout.core.Slog
+import com.symmetricalpalmtree.notesprout.data.soil.SoilDao
+import com.symmetricalpalmtree.notesprout.data.soil.SoilSchema
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+
+/**
+ * Mirrors g-paper's data-out callbacks into `stroke` rows. All writes go through one serial IO
+ * coroutine (a [Channel] of jobs) so they land in callback order — a commit followed by an erase of
+ * the same stroke can never race. Reads ([loadPage]) are plain suspend calls.
+ *
+ * The `updatedAt` discipline: every real edit schedules a trailing-debounced (2 s) bump of the
+ * notebook's index row via [onEdited], so the library card's "last modified" tracks ink without a
+ * write per stroke. [drain] waits for everything queued so far — call it before sealing.
+ */
+class StrokeStore(
+    private val dao: SoilDao,
+    private val onEdited: suspend () -> Unit,
+) {
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val queue = Channel<suspend () -> Unit>(Channel.UNLIMITED)
+    private var touchJob: Job? = null
+
+    init {
+        scope.launch {
+            for (job in queue) {
+                try { job() } catch (e: Exception) { Log.e(TAG, "stroke write failed", e) }
+            }
+        }
+    }
+
+    // ── Reads ────────────────────────────────────────────────────────────────
+
+    /** Live strokes of [pageId] in `"order"`. A bad blob is dropped, the page still renders. IO-safe. */
+    suspend fun loadPage(pageId: String): List<Stroke> =
+        dao.childrenOfType(pageId, SoilSchema.TYPE_STROKE).mapNotNull { StrokeRows.toStroke(it) }
+
+    // ── Writes (callback thread → serial IO) ─────────────────────────────────
+
+    fun commit(pageId: String, stroke: Stroke) = enqueue {
+        val now = System.currentTimeMillis()
+        val order = dao.maxOrder(pageId, SoilSchema.TYPE_STROKE) + 1
+        dao.upsert(StrokeRows.toRow(stroke, pageId, order, now))
+        Slog.d(TAG) { "commit ${stroke.id} (${stroke.points.size} pts) order=$order" }
+    }
+
+    fun erase(ids: List<String>) {
+        if (ids.isEmpty()) return
+        enqueue {
+            dao.softDelete(ids, System.currentTimeMillis())
+            Slog.d(TAG) { "erase ${ids.size}" }
+        }
+    }
+
+    /** Rewrite the moved strokes' geometry — the row is the truth, so translate the persisted points. */
+    fun move(ids: List<String>, dx: Float, dy: Float) {
+        if (ids.isEmpty() || (dx == 0f && dy == 0f)) return
+        enqueue {
+            val now = System.currentTimeMillis()
+            for (row in dao.byIds(ids)) {
+                if (row.deletedAt != null) continue
+                val stroke = StrokeRows.toStroke(row) ?: continue
+                val moved = StrokeRows.toRow(stroke.translated(dx, dy), row.parentId, row.order, now)
+                dao.upsert(moved.copy(createdAt = row.createdAt))
+            }
+            Slog.d(TAG) { "move ${ids.size} by ($dx,$dy)" }
+        }
+    }
+
+    /** Suspends until every write queued before this call has been applied. */
+    suspend fun drain() {
+        val done = CompletableDeferred<Unit>()
+        queue.send { done.complete(Unit) }
+        done.await()
+    }
+
+    /** Stop accepting work. Anything already queued still runs; call [drain] first if it matters. */
+    fun close() {
+        queue.close()
+    }
+
+    private fun enqueue(job: suspend () -> Unit) {
+        val r = queue.trySend(job)
+        if (r.isFailure) Log.w(TAG, "write dropped: store closed")
+        else scheduleTouch()
+    }
+
+    private fun scheduleTouch() {
+        touchJob?.cancel()
+        touchJob = scope.launch {
+            delay(TOUCH_DEBOUNCE_MS)
+            try { onEdited() } catch (e: Exception) { Log.w(TAG, "updatedAt bump failed", e) }
+        }
+    }
+
+    /** Flush a pending debounced bump now (close path). */
+    suspend fun flushTouch() {
+        val j = touchJob ?: return
+        touchJob = null
+        j.cancel()
+        try { onEdited() } catch (e: Exception) { Log.w(TAG, "updatedAt bump failed", e) }
+    }
+
+    private companion object {
+        const val TAG = "StrokeStore"
+        const val TOUCH_DEBOUNCE_MS = 2_000L
+    }
+}

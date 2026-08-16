@@ -59,7 +59,11 @@
     <string name="template_grid">Grid</string>
 
     <!-- Notebook -->
-    <string name="notebook_stub">Drawing surface arrives in Phase 3</string>
+    <string name="cd_tool_pen">Pen</string>
+    <string name="cd_tool_eraser">Eraser</string>
+    <string name="cd_tool_lasso">Lasso</string>
+    <string name="notebook_page_indicator">%1$d / %2$d</string>
+    <string name="notebook_open_failed">Could not open notebook: %1$s</string>
 
     <!-- Library actions -->
     <string name="action_rename">Rename</string>

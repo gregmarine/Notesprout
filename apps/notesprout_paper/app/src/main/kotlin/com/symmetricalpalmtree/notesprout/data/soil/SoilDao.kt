@@ -5,7 +5,7 @@ import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
 
-/** Row-level access to the `notebook` table. Higher-level logic (page lists, stroke store) is Phase 3. */
+/** Row-level access to the `notebook` table. Higher-level logic lives in `notebook/` (session, stroke store). */
 @Dao
 interface SoilDao {
 
@@ -41,4 +41,11 @@ interface SoilDao {
 
     @Query("UPDATE notebook SET blob = :blob, updatedAt = :at WHERE id = :id")
     suspend fun setBlob(id: String, blob: ByteArray?, at: Long)
+
+    @Query("SELECT * FROM notebook WHERE id IN (:ids)")
+    suspend fun byIds(ids: List<String>): List<SoilObjectEntity>
+
+    /** Highest live `"order"` among [parentId]'s children of [type], or -1 when there are none. */
+    @Query("SELECT COALESCE(MAX(`order`), -1) FROM notebook WHERE parentId = :parentId AND type = :type AND deletedAt IS NULL")
+    suspend fun maxOrder(parentId: String, type: String): Int
 }

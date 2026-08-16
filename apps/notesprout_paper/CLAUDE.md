@@ -27,6 +27,14 @@ runBlocking on UI, IndexGuard, Slog, encryption hygiene, design system). In addi
 - **Every SQLCipher open goes through `crypto/SoilCrypto`** (non-destructive factories; opens are
   exists-guarded; creation only via the named create entry points). Read `docs/crypto.md` and
   `docs/data.md` before touching `crypto/` or `data/`.
+- **Notebook screen** (`notebook/`): read `docs/notebook.md` first. The paper is full-bleed and chrome
+  overlays it — every chrome rect goes to `setExclusionRects`; no app frame while `paper.isPenActive`
+  (route chrome text changes through `whenPenIdle`); all `.soil` writes go through `StrokeStore`'s
+  serial writer; the file is opened by `NotebookSession.open()` only (exists-guarded — never created
+  there) and closed only by the `close()` sequence (cover → lastOpened → meta → seal). `GPaper` is in
+  `com.symmetricalpalmtree.gpaper.core.engine`.
+- **mavenLocal can lag the g-paper checkout** — if a g-paper symbol from `docs/api.md` is unresolved,
+  `cd ~/git/g-paper && ./gradlew publishToMavenLocal` before suspecting anything else.
 
 ## Build & install
 
