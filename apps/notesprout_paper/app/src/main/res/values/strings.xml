@@ -32,7 +32,12 @@
     <!-- Library -->
     <string name="library_root">Notebooks</string>
     <string name="library_empty">No notebooks yet</string>
-    <string name="library_later">Coming in a later phase</string>
+    <string name="library_pinned_title">Pinned</string>
+    <string name="library_recents_title">Recent</string>
+    <string name="library_pinned_empty">No pinned notebooks</string>
+    <string name="library_recents_empty">No recent notebooks</string>
+    <string name="cd_close_mode">Close</string>
+    <string name="recents_parent_root">Notebooks</string>
     <string name="cd_up_folder">Go up one folder</string>
     <string name="cd_pinned">Pinned notebooks</string>
     <string name="cd_recents">Recent notebooks</string>
@@ -69,6 +74,8 @@
     <string name="action_rename">Rename</string>
     <string name="action_move">Move</string>
     <string name="action_delete">Delete</string>
+    <string name="action_pin">Pin</string>
+    <string name="action_unpin">Unpin</string>
     <string name="new_folder_title">New folder</string>
     <string name="new_folder_hint">Folder name</string>
     <string name="new_folder_duplicate">A folder with that name already exists here</string>

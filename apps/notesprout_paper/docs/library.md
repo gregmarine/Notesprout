@@ -87,6 +87,39 @@ row id or `""` for blank) → `notebook_meta` → seal → index row → open no
 
 Geometry functions (`linePositions`, `dotPositions`, `gridPositionsX`) are pure and JVM-testable.
 
+## Modes: Pinned & Recents
+
+The library has three modes (`BrowseMode`, persisted in `BrowseState.mode`): `NORMAL` (folder
+browsing), `PINNED`, `RECENTS`. The two bottom-bar buttons toggle their mode on/off; the top bar swaps
+the breadcrumb for a title ("Pinned" / "Recent") + a ✕ (`btnCloseMode`); back-press exits a mode before
+navigating folders. `renderChrome()` hides +Folder / +Notebook / Up while in a mode; Sort stays active.
+A mode is a flat overlay — the folder stack underneath is untouched and restored on exit.
+
+- **Pin/Unpin** lives in the notebook long-press action sheet. Pinning is an index `list_item` edge on
+  `PINNED_LIST_ID` (`IndexRepository.pin/unpin`); pinned cards show a corner badge (`R.id.pinBadge`,
+  `bg_pin_badge` white backing so the outline pin reads over ink). `CardItem.Notebook` carries
+  `pinned` (badge) and an optional `subtitle` (Recents' parent-folder line).
+- **Pinned mode** shows pinned notebooks (no folders) **in the current sort** — one sort model
+  everywhere; `sortOrder` is still recorded on the edge but not used for display. Empty: "No pinned
+  notebooks".
+- **Recents mode** shows `RecentsPrefs` entries newest-first (recency order, *not* re-sorted), each with
+  its immediate-parent-folder name as the subtitle; dead ids are pruned on read (`pruneDeleted`). Empty:
+  "No recent notebooks". Opening a notebook records it (`recentsPrefs.record`) before launch, so it
+  jumps to the top on return.
+
+**Empty-state trap:** `emptyState` is a sibling of the grid inside `gridContainer`. `LibraryGrid.bind`
+removes only its own last `GridLayout` (`currentGrid`), **never** `container.removeAllViews()` — the
+latter deletes `emptyState` and no empty message ever shows again once a card has rendered.
+
+## Cold-launch reopen
+
+If a notebook was open when the app last died/closed, it reopens on top of the library on the next cold
+launch. `NotebookActivity.onCreate` writes `BrowseState.lastOpenNotebookId`; a normal close clears it.
+`LibraryActivity.reopenLastNotebookIfNeeded()` runs **only on cold launch** (`savedInstanceState ==
+null`, captured as `coldLaunch`), reads-and-clears the id, and relaunches the notebook only if its index
+row is alive **and** its `.soil` exists — never mints a ghost file. Not gating on cold launch would
+re-fire on every config-change/recreate.
+
 ## Browse state & recents
 
 - `BrowseState` (`paper_view_state`): `folderId`, `mode`, `lastOpenNotebookId`.

@@ -697,7 +697,26 @@ persists across close/reopen; the library card shows the last-open page as its c
 ---
 
 ### Phase 5 — Pin, Recents, browse-state polish
-**Status:** ⬜ Not started
+**Status:** ✅ Complete (user-verified SNN + NA5C + MIP11 2026-08-15)
+
+**Outcome:** Most plumbing already existed from Phases 1–2 (`IndexRepository.pin/unpin/isPinned/
+pinnedNotebookIds`, `RecentsPrefs`, `BrowseState.mode`/`lastOpenNotebookId`, `NotebookActivity`'s
+`lastOpenNotebookId` writes). Phase 5 wired the UI in `LibraryActivity`/`LibraryGrid`:
+- **Pin/Unpin** action in the notebook long-press sheet + a corner **pin badge** on pinned cards
+  (`bg_pin_badge` white backing so the outline pin reads over ink). `CardItem.Notebook` carries
+  `pinned` + an optional `subtitle`.
+- **Pinned mode** (bottom-bar pin toggles it; top bar swaps breadcrumb → "Pinned" + ✕): flat grid of
+  pinned notebooks **in the current sort** (phase-start decision), empty state "No pinned notebooks".
+- **Recents mode**: newest-first, parent-folder subtitle replaces the date line, dead ids pruned on
+  read (`pruneDeleted`), empty state "No recent notebooks".
+- **Mode persisted** (`BrowseState.mode`) and restored on cold launch; back-press exits a mode before
+  folders; `renderChrome()` hides +Folder/+Notebook/Up while in a mode.
+- **Cold-launch reopen** gated on `savedInstanceState == null` (no re-fire on recreate) and now checks
+  the `.soil` **exists** before relaunch, else clears the id.
+- **Bug fixed (pre-existing):** `LibraryGrid.bind` called `container.removeAllViews()` on the
+  `gridContainer`, deleting the sibling `emptyState` TextView after the first non-empty render — so
+  *no* empty state ever showed once a card had been drawn. Now it removes only its own last GridLayout
+  (`currentGrid`). Surfaced by Pinned-with-nothing; also fixed the normal "No notebooks yet" empty state.
 
 **Goal:** the remaining library features from the brief.
 

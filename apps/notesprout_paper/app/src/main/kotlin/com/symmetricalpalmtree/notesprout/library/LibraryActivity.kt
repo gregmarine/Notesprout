@@ -23,6 +23,7 @@ import com.symmetricalpalmtree.notesprout.crypto.DerivedKeyStore
 import com.symmetricalpalmtree.notesprout.data.index.IndexRepository
 import com.symmetricalpalmtree.notesprout.data.index.ObjectSummary
 import com.symmetricalpalmtree.notesprout.data.index.ObjectType
+import com.symmetricalpalmtree.notesprout.data.prefs.BrowseMode
 import com.symmetricalpalmtree.notesprout.data.prefs.BrowseState
 import com.symmetricalpalmtree.notesprout.data.prefs.RecentsPrefs
 import com.symmetricalpalmtree.notesprout.data.prefs.SortField
@@ -45,11 +46,13 @@ class LibraryActivity : AppCompatActivity() {
     private val repo by lazy { IndexRepository() }
 
     private var folderId: String? = null
+    private var mode: BrowseMode = BrowseMode.NORMAL
     private var pageIndex = 0
     private var pageCount = 1
     private var items = emptyList<CardItem>()
     private var grid: LibraryGrid? = null
     private var gridMeasured = false
+    private var coldLaunch = false
 
     private val newNotebookLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -76,6 +79,8 @@ class LibraryActivity : AppCompatActivity() {
         sortPrefs = SortPrefs(this)
         recentsPrefs = RecentsPrefs(this)
         folderId = browseState.folderId
+        mode = browseState.mode
+        coldLaunch = savedInstanceState == null
 
         wireBars()
         DebugMenu.install(this, binding.breadcrumbBar)
@@ -91,7 +96,7 @@ class LibraryActivity : AppCompatActivity() {
                         folderId = null
                         browseState.folderId = null
                     }
-                    reopenLastNotebookIfNeeded()
+                    if (coldLaunch) reopenLastNotebookIfNeeded()
                     refresh()
                 }
             }
@@ -104,11 +109,14 @@ class LibraryActivity : AppCompatActivity() {
     }
 
     private fun wireBars() {
-        val later = View.OnClickListener {
-            Toast.makeText(this, R.string.library_later, Toast.LENGTH_SHORT).show()
+        // A mode button toggles its mode on/off; while in a mode the other button switches to it.
+        binding.btnPinned.setOnClickListener {
+            setMode(if (mode == BrowseMode.PINNED) BrowseMode.NORMAL else BrowseMode.PINNED)
         }
-        binding.btnPinned.setOnClickListener(later)
-        binding.btnRecents.setOnClickListener(later)
+        binding.btnRecents.setOnClickListener {
+            setMode(if (mode == BrowseMode.RECENTS) BrowseMode.NORMAL else BrowseMode.RECENTS)
+        }
+        binding.btnCloseMode.setOnClickListener { setMode(BrowseMode.NORMAL) }
 
         binding.btnSort.setOnClickListener { showSortSheet() }
         binding.btnNewFolder.setOnClickListener { showNewFolderDialog() }
@@ -121,40 +129,53 @@ class LibraryActivity : AppCompatActivity() {
         binding.btnNext.setOnClickListener { goToPage(pageIndex + 1) }
         binding.btnLast.setOnClickListener { goToPage(pageCount - 1) }
 
-        listOf(binding.btnPinned, binding.btnRecents, binding.btnSort, binding.btnNewFolder,
-               binding.btnNewNotebook, binding.btnUp, binding.btnFirst, binding.btnPrev,
-               binding.btnNext, binding.btnLast)
+        listOf(binding.btnPinned, binding.btnRecents, binding.btnCloseMode, binding.btnSort,
+               binding.btnNewFolder, binding.btnNewNotebook, binding.btnUp, binding.btnFirst,
+               binding.btnPrev, binding.btnNext, binding.btnLast)
             .forEach { TooltipCompat.setTooltipText(it, it.contentDescription) }
     }
 
+    private fun setMode(newMode: BrowseMode) {
+        if (mode == newMode) return
+        mode = newMode
+        browseState.mode = newMode
+        pageIndex = 0
+        lifecycleScope.launch { refresh() }
+    }
+
+    /**
+     * Cold-launch reopen: if a notebook was open when the app last died/closed, relaunch it on top of
+     * the library — but only when its index row is still alive **and** its `.soil` exists (never mint a
+     * ghost file). The id is read once and cleared regardless of outcome.
+     */
     private fun reopenLastNotebookIfNeeded() {
         val id = browseState.lastOpenNotebookId ?: return
         browseState.lastOpenNotebookId = null
         lifecycleScope.launch {
             val s = repo.alive(id) ?: return@launch
+            val exists = withContext(Dispatchers.IO) { soilFile(this@LibraryActivity, id).exists() }
+            if (!exists) return@launch
             startActivity(NotebookActivity.intent(this@LibraryActivity, s.id, s.name))
         }
     }
 
     private suspend fun refresh() {
-        renderBreadcrumb()
-        val folders = repo.folders(folderId)
-        val notebooks = repo.notebooks(folderId)
-
-        val sf = sortPrefs.field
-        val so = sortPrefs.order
-        val sortedFolders = sortItems(folders, sf, so)
-        val sortedNotebooks = sortItems(notebooks, sf, so)
-
-        val newItems = mutableListOf<CardItem>()
-        for (f in sortedFolders) newItems.add(CardItem.Folder(f))
-        for (nb in sortedNotebooks) {
-            val cover = withContext(Dispatchers.IO) { repo.cover(nb.id) }
-            newItems.add(CardItem.Notebook(nb, cover))
+        renderChrome()
+        val pinnedIds = repo.pinnedNotebookIds().toSet()
+        items = when (mode) {
+            BrowseMode.NORMAL -> buildNormalItems(pinnedIds)
+            BrowseMode.PINNED -> buildPinnedItems(pinnedIds)
+            BrowseMode.RECENTS -> buildRecentsItems(pinnedIds)
         }
-        items = newItems
 
         val total = items.size
+        binding.emptyState.setText(
+            when (mode) {
+                BrowseMode.NORMAL -> R.string.library_empty
+                BrowseMode.PINNED -> R.string.library_pinned_empty
+                BrowseMode.RECENTS -> R.string.library_recents_empty
+            }
+        )
         binding.emptyState.visibility = if (total == 0) View.VISIBLE else View.GONE
 
         val perPage = grid?.cardsPerPage ?: 1
@@ -162,6 +183,68 @@ class LibraryActivity : AppCompatActivity() {
         pageIndex = pageIndex.coerceIn(0, pageCount - 1)
         renderPager()
         grid?.bind(items, pageIndex)
+    }
+
+    private suspend fun buildNormalItems(pinnedIds: Set<String>): List<CardItem> {
+        val sf = sortPrefs.field
+        val so = sortPrefs.order
+        val sortedFolders = sortItems(repo.folders(folderId), sf, so)
+        val sortedNotebooks = sortItems(repo.notebooks(folderId), sf, so)
+        val out = mutableListOf<CardItem>()
+        for (f in sortedFolders) out.add(CardItem.Folder(f))
+        for (nb in sortedNotebooks) {
+            val cover = withContext(Dispatchers.IO) { repo.cover(nb.id) }
+            out.add(CardItem.Notebook(nb, cover, pinned = nb.id in pinnedIds))
+        }
+        return out
+    }
+
+    /** Pinned mode: flat grid of pinned notebooks in the current sort. */
+    private suspend fun buildPinnedItems(pinnedIds: Set<String>): List<CardItem> {
+        val summaries = pinnedIds.mapNotNull { repo.alive(it) }.filter { it.type == ObjectType.NOTEBOOK }
+        val sorted = sortItems(summaries, sortPrefs.field, sortPrefs.order)
+        return sorted.map { nb ->
+            val cover = withContext(Dispatchers.IO) { repo.cover(nb.id) }
+            CardItem.Notebook(nb, cover, pinned = true)
+        }
+    }
+
+    /** Recents mode: newest-first, parent-folder subtitle, dead ids pruned on read. */
+    private suspend fun buildRecentsItems(pinnedIds: Set<String>): List<CardItem> {
+        val folderNames = HashMap<String?, String>()
+        suspend fun parentName(parentId: String?): String {
+            if (parentId == null) return getString(R.string.recents_parent_root)
+            return folderNames.getOrPut(parentId) { repo.summary(parentId)?.name ?: getString(R.string.recents_parent_root) }
+        }
+        val out = mutableListOf<CardItem>()
+        val aliveIds = mutableSetOf<String>()
+        for (entry in recentsPrefs.entries()) {
+            val nb = repo.alive(entry.notebookId)?.takeIf { it.type == ObjectType.NOTEBOOK } ?: continue
+            aliveIds.add(nb.id)
+            val cover = withContext(Dispatchers.IO) { repo.cover(nb.id) }
+            out.add(CardItem.Notebook(nb, cover, pinned = nb.id in pinnedIds, subtitle = parentName(nb.parentId)))
+        }
+        recentsPrefs.pruneDeleted(aliveIds)
+        return out
+    }
+
+    /** Top bar (breadcrumb vs mode title + close) and bottom-bar affordances that don't apply in a mode. */
+    private fun renderChrome() {
+        val inMode = mode != BrowseMode.NORMAL
+        binding.breadcrumbScroll.visibility = if (inMode) View.GONE else View.VISIBLE
+        binding.modeTitle.visibility = if (inMode) View.VISIBLE else View.GONE
+        binding.btnCloseMode.visibility = if (inMode) View.VISIBLE else View.GONE
+        binding.btnNewFolder.visibility = if (inMode) View.GONE else View.VISIBLE
+        binding.btnNewNotebook.visibility = if (inMode) View.GONE else View.VISIBLE
+
+        if (inMode) {
+            binding.btnUp.visibility = View.GONE
+            binding.modeTitle.setText(
+                if (mode == BrowseMode.PINNED) R.string.library_pinned_title else R.string.library_recents_title
+            )
+        } else {
+            renderBreadcrumb()
+        }
     }
 
     private fun sortItems(list: List<ObjectSummary>, field: SortField, order: SortOrder): List<ObjectSummary> {
@@ -270,10 +353,21 @@ class LibraryActivity : AppCompatActivity() {
                 .show()
             is CardItem.Notebook -> ActionSheetDialog(this)
                 .title(s.name)
+                .addAction(
+                    R.drawable.ic_pinned,
+                    getString(if (item.pinned) R.string.action_unpin else R.string.action_pin)
+                ) { togglePin(s, item.pinned) }
                 .addAction(R.drawable.ic_edit, getString(R.string.action_rename)) { showRenameDialog(s) }
                 .addAction(R.drawable.ic_move_page, getString(R.string.action_move)) { showMovePicker(s) }
                 .addAction(R.drawable.ic_trash, getString(R.string.action_delete)) { confirmDeleteNotebook(s) }
                 .show()
+        }
+    }
+
+    private fun togglePin(s: ObjectSummary, pinned: Boolean) {
+        lifecycleScope.launch {
+            if (pinned) repo.unpin(s.id) else repo.pin(s.id)
+            refresh()
         }
     }
 
@@ -477,7 +571,9 @@ class LibraryActivity : AppCompatActivity() {
 
     @Suppress("OVERRIDE_DEPRECATION")
     override fun onBackPressed() {
-        if (folderId != null) {
+        if (mode != BrowseMode.NORMAL) {
+            setMode(BrowseMode.NORMAL)
+        } else if (folderId != null) {
             navigateUp()
         } else {
             @Suppress("DEPRECATION")

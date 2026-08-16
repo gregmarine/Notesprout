@@ -17,7 +17,16 @@ import java.util.Date
 
 sealed class CardItem(val summary: ObjectSummary) {
     class Folder(s: ObjectSummary) : CardItem(s)
-    class Notebook(s: ObjectSummary, val coverBytes: ByteArray?) : CardItem(s)
+    /**
+     * [pinned] shows the corner badge; [subtitle] overrides the modified-date line (Recents mode uses
+     * it for the parent-folder name).
+     */
+    class Notebook(
+        s: ObjectSummary,
+        val coverBytes: ByteArray?,
+        val pinned: Boolean = false,
+        val subtitle: String? = null,
+    ) : CardItem(s)
 }
 
 class LibraryGrid(
@@ -32,6 +41,9 @@ class LibraryGrid(
 
     private var gap = 0
 
+    /** The GridLayout we added last — removed on the next bind so the container's [R.id.emptyState] survives. */
+    private var currentGrid: View? = null
+
     fun measure(context: Context, containerWidth: Int, containerHeight: Int) {
         val density = context.resources.displayMetrics.density
         gap = (8 * density).toInt()
@@ -44,7 +56,8 @@ class LibraryGrid(
     }
 
     fun bind(items: List<CardItem>, pageIndex: Int) {
-        container.removeAllViews()
+        currentGrid?.let { container.removeView(it) }
+        currentGrid = null
         if (items.isEmpty()) return
         val start = pageIndex * cardsPerPage
         val end = minOf(start + cardsPerPage, items.size)
@@ -82,6 +95,7 @@ class LibraryGrid(
             grid.addView(view)
         }
         container.addView(grid)
+        currentGrid = grid
     }
 
     private fun bindFolder(inflater: LayoutInflater, item: CardItem.Folder, context: Context): View {
@@ -95,13 +109,18 @@ class LibraryGrid(
         val coverImage = view.findViewById<ImageView>(R.id.coverImage)
         val nameView = view.findViewById<TextView>(R.id.cardName)
         val dateView = view.findViewById<TextView>(R.id.cardDate)
+        val pinBadge = view.findViewById<ImageView>(R.id.pinBadge)
 
         nameView.text = item.summary.name
 
-        val dateFmt = DateFormat.getMediumDateFormat(context)
-        val timeFmt = DateFormat.getTimeFormat(context)
-        val d = Date(item.summary.updatedAt)
-        dateView.text = "${dateFmt.format(d)} ${timeFmt.format(d)}"
+        dateView.text = item.subtitle ?: run {
+            val dateFmt = DateFormat.getMediumDateFormat(context)
+            val timeFmt = DateFormat.getTimeFormat(context)
+            val d = Date(item.summary.updatedAt)
+            "${dateFmt.format(d)} ${timeFmt.format(d)}"
+        }
+
+        pinBadge.visibility = if (item.pinned) View.VISIBLE else View.GONE
 
         val bmp = Bitmaps.decodeBounded(item.coverBytes, COVER_DECODE_EDGE)
         if (bmp != null) coverImage.setImageBitmap(bmp)
