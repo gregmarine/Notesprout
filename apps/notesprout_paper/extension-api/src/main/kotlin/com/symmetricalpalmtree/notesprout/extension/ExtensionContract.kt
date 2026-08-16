@@ -1,0 +1,41 @@
+package com.symmetricalpalmtree.notesprout.extension
+
+/**
+ * The stable contract shared by the Notesprout Paper core (host) and every extension. This library
+ * depends on nothing in `:app` and on no library beyond the Kotlin stdlib, so a third party can
+ * consume it as a plain artifact.
+ *
+ * v1 has exactly one extension point: [ACTION_TEMPLATE_PROVIDER] (interface `ITemplateProvider`).
+ */
+object ExtensionContract {
+
+    /** Current API version. An extension is used only if its `<service>` meta-data equals this. */
+    const val API_VERSION: Int = 1
+
+    /** Intent action a template-provider `<service>` declares in its intent-filter. */
+    const val ACTION_TEMPLATE_PROVIDER: String =
+        "com.symmetricalpalmtree.notesprout.extension.TEMPLATE_PROVIDER"
+
+    /** `<meta-data>` name (on the `<service>`) carrying the extension's API version. */
+    const val META_API_VERSION: String =
+        "com.symmetricalpalmtree.notesprout.extension.API_VERSION"
+
+    /** MIME type of the bytes a [RenderedTemplate] carries. */
+    const val MIME_WEBP: String = "image/webp"
+
+    /** Hard cap the host enforces on a render result (16 MiB). */
+    const val MAX_RENDER_BYTES: Int = 16 * 1024 * 1024
+
+    /** Extension-namespaced template identity: `"<extension package>:<template id>"`. */
+    fun templateIdentity(pkg: String, id: String): String = "$pkg:$id"
+
+    /**
+     * Split a template identity at the FIRST `:` into `(pkg, id)`. Returns null if there is no `:` or
+     * either side is empty. The Blank sentinel is the host's concern, not the contract's.
+     */
+    fun parseIdentity(s: String): Pair<String, String>? {
+        val i = s.indexOf(':')
+        if (i <= 0 || i >= s.length - 1) return null
+        return s.substring(0, i) to s.substring(i + 1)
+    }
+}

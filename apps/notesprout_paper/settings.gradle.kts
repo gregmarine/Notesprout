@@ -20,4 +20,4 @@ dependencyResolutionManagement {
 }
 
 rootProject.name = "notesprout_paper"
-include(":app")
+include(":app", ":extension-api", ":ext-templates")

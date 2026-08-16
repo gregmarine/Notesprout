@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Puzzle piece (white with dark border): tabs out on top & right, blanks in on bottom & left -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:strokeColor="#333333"
+        android:strokeWidth="1.5"
+        android:strokeLineJoin="round"
+        android:pathData="M34,34 L48,34 C46,24 62,24 60,34 L74,34 L74,48 C84,46 84,62 74,60 L74,74 L60,74 C62,84 46,84 48,74 L34,74 L34,60 C24,62 24,46 34,48 Z" />
+    <!-- Sprout stem -->
+    <path
+        android:fillColor="@android:color/transparent"
+        android:strokeColor="#4CAF50"
+        android:strokeWidth="2.5"
+        android:strokeLineCap="round"
+        android:pathData="M54,66 C54,57 51,53 54,47" />
+    <!-- Left leaf -->
+    <path
+        android:fillColor="#4CAF50"
+        android:pathData="M54,55 C48,50 43,52 42,55 C44,59 49,58 54,55 Z" />
+    <!-- Right leaf -->
+    <path
+        android:fillColor="#66BB6A"
+        android:pathData="M54,49 C60,44 65,46 66,49 C64,53 59,52 54,49 Z" />
+</vector>

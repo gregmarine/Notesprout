@@ -37,16 +37,26 @@ runBlocking on UI, IndexGuard, Slog, encryption hygiene, design system). In addi
   `com.symmetricalpalmtree.gpaper.core.engine`.
 - **mavenLocal can lag the g-paper checkout** — if a g-paper symbol from `docs/api.md` is unresolved,
   `cd ~/git/g-paper && ./gradlew publishToMavenLocal` before suspecting anything else.
+- **Extensions** (`PAPER_EXTENSIONS_PLAN.md`, `docs/extensions.md`): the project has three modules —
+  `:app` (the core/host), `:extension-api` (the shared contract library), and `:ext-templates` (the
+  first-party Templates extension APK). **`:extension-api` depends on nothing in `:app`, ever** (Gradle
+  enforces `:app → :extension-api` and `:ext-templates → :extension-api`; `:app` and `:ext-templates`
+  never depend on each other). An extension is a separate APK with **no launcher Activity**, bound over
+  AIDL; the core trusts it only if `checkSignatures == SIGNATURE_MATCH` (in dev, the shared
+  `~/.android/debug.keystore` satisfies this).
 
 ## Build & install
 
 ```sh
 cd ~/git/Notesprout/apps/notesprout_paper
-./gradlew :app:assembleDebug            # → app/build/outputs/apk/debug/app-debug.apk
-./gradlew :app:testDebugUnitTest
+./gradlew assembleDebug                  # all modules → app + ext-templates debug APKs
+./gradlew testDebugUnitTest              # all modules
 adb -s SN078D10012852 install -r app/build/outputs/apk/debug/app-debug.apk   # SNN (Nomad)
 adb -s 92c16533       install -r app/build/outputs/apk/debug/app-debug.apk   # NA5C
 adb -s 5HL21V5007384  install -r app/build/outputs/apk/debug/app-debug.apk   # MIP11
+# The Templates extension (install alongside the app on the same device):
+adb -s <serial> install -r ext-templates/build/outputs/apk/debug/ext-templates-debug.apk
+adb -s <serial> shell pm enable com.symmetricalpalmtree.notesprout.ext.templates.dev  # BOOX sideload trap
 ```
 
 Debug launch: `adb -s <serial> shell am start -n com.symmetricalpalmtree.notesprout.dev/com.symmetricalpalmtree.notesprout.bootstrap.BootstrapActivity`

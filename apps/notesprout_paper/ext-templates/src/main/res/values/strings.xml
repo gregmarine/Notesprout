@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="ext_label">Notesprout Paper · Templates</string>
+    <string name="template_lined">Lined</string>
+    <string name="template_dotted">Dotted</string>
+    <string name="template_grid">Grid</string>
+</resources>

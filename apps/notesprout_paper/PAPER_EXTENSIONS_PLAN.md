@@ -314,7 +314,7 @@ exact equality. Never reorder or remove AIDL methods or parcel fields.
 ## Phases
 
 ### Phase E0 — Contract + the Templates extension APK
-**Status:** ⬜ Not started
+**Status:** ✅ Complete (commit a8b90b8)
 
 **Goal:** `:extension-api` and `:ext-templates` exist, build, and install; the extension is invisible
 in every launcher and answers the AIDL contract. **The core is not touched in this phase** (except
@@ -365,6 +365,17 @@ in every launcher and answers the AIDL contract. **The core is not touched in th
 
 **Close-out:** status ✅ + Outcome (record: label, ids, whether Supernote's launcher hid it as
 expected); docs; memory; commit + push `paper`.
+
+**Outcome (E0):** Label `Notesprout Paper · Templates` (debug `… Dev`); package
+`com.symmetricalpalmtree.notesprout.ext.templates` (debug `.dev`); ids `lined`/`dotted`/`grid`; icon =
+puzzle piece with a green sprout (Paper greens `#4CAF50`/`#66BB6A`). Three modules build; JVM tests
+green (geometry test moved to `:ext-templates`, refs `TemplateRenderer`). Verified SNN + NA5C
+2026-08-16. **Launcher visibility differs by device:** the extension declares no launcher Activity
+(`pm resolve-activity LAUNCHER` → "No activity found" on both), and BOOX hides it from the Apps tab as
+intended — reach it via Settings → Apps → "See all apps" to uninstall. **Supernote's launcher lists
+every sideloaded _package_ regardless of a `LAUNCHER` intent, so an icon shows there — not preventable
+via manifest;** revisit in the Extensions-UI arc if it matters. BOOX sideload trap seen (landed
+disabled → `pm enable`). Regression: existing Paper still creates a Lined notebook (core untouched).
 
 ---
 
