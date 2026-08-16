@@ -1,0 +1,142 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@color/paperWhite">
+
+    <!-- Top bar -->
+    <LinearLayout
+        android:id="@+id/topBar"
+        android:layout_width="match_parent"
+        android:layout_height="@dimen/toolbar_bar_thickness"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:background="@color/paperWhite">
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnBack"
+            style="@style/Widget.Notesprout.ToolbarButton"
+            android:src="@drawable/ic_arrow_left"
+            android:contentDescription="@string/cd_back" />
+
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="@string/new_notebook_title"
+            android:textSize="16sp"
+            android:textStyle="bold"
+            android:textColor="@color/inkBlack"
+            android:paddingStart="4dp"
+            android:paddingEnd="12dp" />
+    </LinearLayout>
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="@color/inkBlack" />
+
+    <ScrollView
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:fillViewport="true">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="24dp">
+
+            <!-- Name -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/new_notebook_name_label"
+                android:textSize="14sp"
+                android:textColor="@color/inkBlack"
+                android:layout_marginBottom="8dp" />
+
+            <EditText
+                android:id="@+id/nameField"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:inputType="text"
+                android:maxLines="1"
+                android:textSize="16sp"
+                android:textColor="@color/inkBlack"
+                android:background="@drawable/shape_bordered"
+                android:padding="12dp"
+                android:layout_marginBottom="24dp" />
+
+            <!-- Template -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/new_notebook_template_label"
+                android:textSize="14sp"
+                android:textColor="@color/inkBlack"
+                android:layout_marginBottom="8dp" />
+
+            <RadioGroup
+                android:id="@+id/templateGroup"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical">
+
+                <RadioButton
+                    android:id="@+id/radioBlank"
+                    style="@style/Widget.Notesprout.RadioButton"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="@string/template_blank"
+                    android:checked="true" />
+
+                <RadioButton
+                    android:id="@+id/radioLined"
+                    style="@style/Widget.Notesprout.RadioButton"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="@string/template_lined" />
+
+                <RadioButton
+                    android:id="@+id/radioDotted"
+                    style="@style/Widget.Notesprout.RadioButton"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="@string/template_dotted" />
+
+                <RadioButton
+                    android:id="@+id/radioGrid"
+                    style="@style/Widget.Notesprout.RadioButton"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="@string/template_grid" />
+            </RadioGroup>
+        </LinearLayout>
+    </ScrollView>
+
+    <!-- Bottom bar with CREATE -->
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="@color/inkBlack" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="@dimen/toolbar_bar_thickness"
+        android:orientation="horizontal"
+        android:gravity="center"
+        android:background="@color/paperWhite">
+
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/btnCreate"
+            style="@style/Widget.Notesprout.ElevatedButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/new_notebook_create" />
+    </LinearLayout>
+
+</LinearLayout>

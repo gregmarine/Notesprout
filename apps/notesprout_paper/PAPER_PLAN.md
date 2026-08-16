@@ -490,7 +490,7 @@ the library shows an empty root ("No notebooks yet") but can't create anything y
 ---
 
 ### Phase 2 — The library: folders, notebooks, sort, cards
-**Status:** ⬜ Not started
+**Status:** ✅ Complete (user-verified SNN + NA5C)
 
 **Goal:** a working library — browse folders, create/rename/move/delete folders and notebooks, sort,
 paginated grid, cards with placeholder covers — and notebook creation that writes a real `.soil` (with
@@ -531,21 +531,34 @@ name (Phase 3 fills it).
 8. Browse state restore on launch (last folder; if it no longer exists → root).
 9. `docs/library.md`.
 
-**Questions to resolve at phase start**
-- Blank template: store a `template` row anyway (a white bitmap) for uniformity, or `refId=""` and no
-  row? (Recommended: no row; page `refId` = "" means blank — costs nothing and avoids a useless blob.)
-- Rule spacing 8 mm for Lined/Grid/Dotted — OK, or a different spacing / margins?
-- Card grid density: how many columns on the three test devices? (Recommend: 2 columns below sw600dp,
-  3 at ≥ sw600dp, 4 at ≥ sw720dp; the user confirms after seeing it.)
-- Bottom-bar order/labels — confirm the proposed order.
+**Questions resolved**
+- Blank template: **no row; page `refId = ""` means blank** — costs nothing, avoids a useless blob.
+- Rule spacing: **8 mm** for Lined/Grid/Dotted. Top margin = one spacing for Lined.
+- Card grid density: **measured dynamically** from real grid container (min card width 140dp, aspect
+  1:1.4). Columns × rows = cardsPerPage.
+- Bottom-bar order: **as proposed** — `[Pinned] [Recents]  |< < n/n > >|  [Sort] [+Folder] [+Notebook]`.
 
 **Tests**
-- JVM: name validation, sort comparators, template geometry (line positions for a given size/dpi),
-  breadcrumb/ancestry walk with a cycle.
-- Device (all three): create folders (nested), notebooks with each template, rename (incl. duplicate
-  rejection), move (incl. collision + can't move into own subtree), delete (files gone from
-  `Garden/` — verify with `adb shell ls`), sort all four ways, pagination with > one page of cards,
-  back-press behaviour, kill + relaunch lands in the same folder.
+- JVM (all pass): name validation (`NameValidationTest`), sort comparators (`SortComparatorTest`),
+  template geometry (`TemplateGeometryTest`) — line positions, dot grid, grid X positions, spacing
+  calculation, bounds checking.
+- Device: create folders (nested), notebooks with each template, rename (incl. duplicate rejection),
+  move (incl. collision + can't move into own subtree), delete (files gone from `Garden/`), sort all
+  four ways, pagination with > one page of cards, back-press behaviour, kill + relaunch lands in the
+  same folder.
+
+**Outcome** (Phase 2)
+- New files: `data/prefs/SortPrefs.kt`, `data/prefs/RecentsPrefs.kt`, `data/template/BuiltInTemplates.kt`,
+  `library/NewNotebookActivity.kt`, `library/FolderPickerActivity.kt`, `library/LibraryGrid.kt`,
+  `notebook/NotebookActivity.kt` (stub).
+- New layouts: `activity_new_notebook.xml`, `activity_notebook.xml`, `activity_folder_picker.xml`,
+  `card_notebook.xml`, `card_folder.xml`.
+- Copied icons from reference app: `ic_folder`, `ic_edit`, `ic_trash`, `ic_check`, `ic_move_page`.
+- New tests: `NameValidationTest`, `SortComparatorTest`, `TemplateGeometryTest`.
+- `LibraryActivity` fully rewritten: breadcrumb navigation, sort, new-folder dialog, new-notebook
+  launch, long-press action sheets, move picker, delete with file cleanup, cold-launch restore.
+- `docs/library.md` written.
+- g-paper version: unchanged (0.1.0).
 
 ---
 

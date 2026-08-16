@@ -86,4 +86,19 @@
         <item name="android:paddingBottom">8dp</item>
     </style>
 
+    <style name="Widget.Notesprout.DialogButton" parent="Widget.AppCompat.Button.ButtonBar.AlertDialog">
+        <item name="android:textColor">@color/inkBlack</item>
+        <item name="android:textAllCaps">false</item>
+        <item name="android:stateListAnimator">@null</item>
+        <item name="android:background">@android:color/transparent</item>
+    </style>
+
+    <style name="Widget.Notesprout.RadioButton" parent="Widget.AppCompat.CompoundButton.RadioButton">
+        <item name="android:textColor">@color/inkBlack</item>
+        <item name="android:textSize">16sp</item>
+        <item name="android:button">@drawable/radio_selector</item>
+        <item name="android:stateListAnimator">@null</item>
+        <item name="android:padding">8dp</item>
+    </style>
+
 </resources>

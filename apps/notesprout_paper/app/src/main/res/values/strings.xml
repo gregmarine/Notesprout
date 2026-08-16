@@ -44,4 +44,48 @@
     <string name="cd_new_folder">New folder</string>
     <string name="cd_new_notebook">New notebook</string>
     <string name="cd_debug">Debug tools</string>
+    <string name="cd_back">Back</string>
+
+    <!-- New notebook -->
+    <string name="new_notebook_title">New notebook</string>
+    <string name="new_notebook_name_label">Name</string>
+    <string name="new_notebook_template_label">Template</string>
+    <string name="new_notebook_create">Create</string>
+    <string name="new_notebook_creating">Creating…</string>
+    <string name="new_notebook_duplicate">A notebook with that name already exists here</string>
+    <string name="template_blank">Blank</string>
+    <string name="template_lined">Lined</string>
+    <string name="template_dotted">Dotted</string>
+    <string name="template_grid">Grid</string>
+
+    <!-- Notebook -->
+    <string name="notebook_stub">Drawing surface arrives in Phase 3</string>
+
+    <!-- Library actions -->
+    <string name="action_rename">Rename</string>
+    <string name="action_move">Move</string>
+    <string name="action_delete">Delete</string>
+    <string name="new_folder_title">New folder</string>
+    <string name="new_folder_hint">Folder name</string>
+    <string name="new_folder_duplicate">A folder with that name already exists here</string>
+    <string name="rename_title">Rename</string>
+    <string name="rename_hint">Name</string>
+    <string name="rename_duplicate_notebook">A notebook named \"%1$s\" already exists here</string>
+    <string name="rename_duplicate_folder">A folder named \"%1$s\" already exists here</string>
+    <string name="delete_notebook_title">Delete \"%1$s\"?</string>
+    <string name="delete_notebook_body">This cannot be undone.</string>
+    <string name="delete_folder_title">Delete \"%1$s\"?</string>
+    <string name="delete_folder_body">This will permanently remove all notebooks and subfolders inside it. This cannot be undone.</string>
+    <string name="delete_confirm">Delete</string>
+    <string name="cancel">Cancel</string>
+    <string name="move_title">Move to…</string>
+    <string name="move_here">Move here</string>
+    <string name="move_collision_notebook">A notebook named \"%1$s\" already exists here.</string>
+    <string name="move_collision_folder">A folder named \"%1$s\" already exists here.</string>
+
+    <!-- Sort -->
+    <string name="sort_name_asc">Name ↑</string>
+    <string name="sort_name_desc">Name ↓</string>
+    <string name="sort_modified_asc">Modified ↑</string>
+    <string name="sort_modified_desc">Modified ↓</string>
 </resources>
