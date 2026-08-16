@@ -380,7 +380,7 @@ disabled → `pm enable`). Regression: existing Paper still creates a Lined note
 ---
 
 ### Phase E1 — Host integration: discovery, client, New-notebook wiring, core renderer removed
-**Status:** ✅ Complete (commit TBD)
+**Status:** ✅ Complete (commit fdeeb91)
 
 **Goal:** the core offers templates only via discovered, trusted providers; the built-in renderer is
 gone from the core; with no extension installed the New-notebook screen has no Template section and
