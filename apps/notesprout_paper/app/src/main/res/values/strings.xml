@@ -58,10 +58,8 @@
     <string name="new_notebook_create">Create</string>
     <string name="new_notebook_creating">Creating…</string>
     <string name="new_notebook_duplicate">A notebook with that name already exists here</string>
+    <string name="new_notebook_template_failed">Template extension didn\'t respond — try again or choose Blank</string>
     <string name="template_blank">Blank</string>
-    <string name="template_lined">Lined</string>
-    <string name="template_dotted">Dotted</string>
-    <string name="template_grid">Grid</string>
 
     <!-- Notebook -->
     <string name="cd_tool_pen">Pen</string>

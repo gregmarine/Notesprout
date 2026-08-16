@@ -27,6 +27,14 @@ object SoilSchema {
     /** The notebook meta row's `parentId` (it is the root). */
     const val ROOT_PARENT = ""
 
+    /**
+     * Label written to the index `templateKind` column for a notebook created with no template. A
+     * templated notebook carries the extension-namespaced identity `"<extension package>:<template id>"`
+     * there and in its `template` row's `text` (v0 notebooks keep `LINED`/`DOTTED`/`GRID`). Informational
+     * only — nothing reads these yet.
+     */
+    const val TEMPLATE_BLANK = "BLANK"
+
     const val CREATE_NOTEBOOK = """
         CREATE TABLE IF NOT EXISTS notebook (
             id          TEXT    NOT NULL PRIMARY KEY,

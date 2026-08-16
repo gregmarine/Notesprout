@@ -7,7 +7,7 @@ The library is Paper's home screen — a paginated card grid of folders and note
 | Screen | Class | Purpose |
 |---|---|---|
 | Library | `library/LibraryActivity` | Browse folders, create/rename/move/delete notebooks and folders, sort, paginated grid |
-| New notebook | `library/NewNotebookActivity` | Name + template radio + CREATE |
+| New notebook | `library/NewNotebookActivity` | Name + (extension-provided) template radios + CREATE |
 | Folder picker | `library/FolderPickerActivity` | Move-destination picker (same grid, restricted navigation) |
 | Notebook (stub) | `notebook/NotebookActivity` | Shows notebook name; Phase 3 fills with g-paper |
 
@@ -78,29 +78,33 @@ folder) → toast, stay in picker. Self-into-self guard for folders.
 
 ## New notebook
 
-`NewNotebookActivity`: name field (pre-filled `YYYYMMDD_HHmmss`), template radio (Blank / Lined /
-Dotted / Grid, Blank default), CREATE button.
+`NewNotebookActivity`: name field (pre-filled `YYYYMMDD_HHmmss`), an optional **Template** section, CREATE
+button. **The core has no template renderer** — templates come only from discovered, trusted
+extension providers (`extension/ExtensionRegistry`; see `docs/extensions.md`).
 
-Creation (on IO): mint UUID → `SoilDatabase.create` → notebook row → template row (if non-blank:
-`BuiltInTemplates.render` → WEBP q100 blob) → page 1 (full portrait screen px, `refId` = template
-row id or `""` for blank) → `notebook_meta` → seal → index row → open notebook.
+- On `onCreate` a `lifecycleScope` job runs `ExtensionRegistry.templateProviders` → for each provider
+  `TemplateProviderClient.list()` (a provider that throws is skipped with a `Slog.d`, never a toast).
+  If at least one template exists, one `RadioButton` per template (inflated from
+  `layout/item_template_radio.xml`, `tag` = `TemplateChoice`) is appended after `radioBlank` and the
+  section (`templateSection`, `GONE` in XML) becomes visible; with more than one provider each group is
+  preceded by a 14sp heading carrying the extension's label. **With no extension installed the section
+  never appears** — nothing hints at templates; notebooks are created blank. Default = Blank.
+- `attemptCreate`: name validation + duplicate check, then, if a template is chosen, **render first**
+  (`client.render(id, pageW, pageH, dpi)`) before any file exists. On `ExtensionCallException` or a
+  null/empty result: reset the button, toast `new_notebook_template_failed` ("Template extension didn't
+  respond — try again or choose Blank") and **stay on the screen** — never a silent downgrade to Blank.
+- Creation (on IO): mint UUID → `SoilDatabase.create` → notebook row → template row (if chosen: `text` =
+  `TemplateChoice.identity` = `"<extension package>:<template id>"`, `blob` = the WEBP the extension
+  returned) → page 1 (full portrait screen px, `refId` = template row id or `""` for blank) →
+  `notebook_meta` → seal → index row (`templateKind` = identity or `SoilSchema.TEMPLATE_BLANK` =
+  `"BLANK"`) → open notebook.
 
 ## Templates
 
-`BuiltInTemplates` in `data/template/`:
-- Blank: no template row; page `refId = ""`.
-- Lined: horizontal rules every 8 mm (at device DPI), starting after a one-spacing top margin
-  (`linePositions`, first rule at 2×spacing).
-- Dotted: dots on an 8 mm grid (`dotPositions`, first at one spacing).
-- Grid: lines both axes every 8 mm, **symmetric origin** — verticals via `gridPositionsX` and
-  horizontals via `gridPositionsY`, both starting at one spacing. The grid must **not** borrow
-  `linePositions` for its horizontals: that function's 2×spacing writing-line top margin would leave a
-  double-height top row of cells (Phase 6 fix).
-- Feature sizes are density-scaled (`lineWidthPx` = max(1, dpi/160) px, `dotRadiusPx` = max(1, 2·dpi/160) px):
-  ~2 px rules and ~0.6 mm dots on a 300 ppi e-ink panel — 1 px / 1.5 px read as faint grey there.
-  Baked into the file at creation, so a change only affects new notebooks.
-
-Geometry functions (`linePositions`, `dotPositions`, `gridPositionsX`) are pure and JVM-testable.
+Rendered by the **Templates extension** (`:ext-templates`, `TemplateRenderer` — the v0 `BuiltInTemplates`
+moved verbatim; geometry documented in `docs/extensions.md`). The core only stores and draws the WEBP;
+a notebook opened on a device without the extension still shows its template. Identity strings in the
+index / template row are informational: `BLANK` · `<pkg>:<id>` · legacy v0 `LINED`/`DOTTED`/`GRID`.
 
 ## Modes: Pinned & Recents
 

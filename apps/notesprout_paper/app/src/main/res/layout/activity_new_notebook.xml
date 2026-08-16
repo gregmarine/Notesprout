@@ -71,50 +71,39 @@
                 android:padding="12dp"
                 android:layout_marginBottom="24dp" />
 
-            <!-- Template -->
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="@string/new_notebook_template_label"
-                android:textSize="14sp"
-                android:textColor="@color/inkBlack"
-                android:layout_marginBottom="8dp" />
-
-            <RadioGroup
-                android:id="@+id/templateGroup"
+            <!-- Template — GONE until a trusted template provider answers; stays GONE when none is
+                 installed (the core is paper; nothing hints at templates). Provider radios are inflated
+                 from item_template_radio.xml after radioBlank. -->
+            <LinearLayout
+                android:id="@+id/templateSection"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:orientation="vertical">
+                android:orientation="vertical"
+                android:visibility="gone">
 
-                <RadioButton
-                    android:id="@+id/radioBlank"
-                    style="@style/Widget.Notesprout.RadioButton"
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/new_notebook_template_label"
+                    android:textSize="14sp"
+                    android:textColor="@color/inkBlack"
+                    android:layout_marginBottom="8dp" />
+
+                <RadioGroup
+                    android:id="@+id/templateGroup"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="@string/template_blank"
-                    android:checked="true" />
+                    android:orientation="vertical">
 
-                <RadioButton
-                    android:id="@+id/radioLined"
-                    style="@style/Widget.Notesprout.RadioButton"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:text="@string/template_lined" />
-
-                <RadioButton
-                    android:id="@+id/radioDotted"
-                    style="@style/Widget.Notesprout.RadioButton"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:text="@string/template_dotted" />
-
-                <RadioButton
-                    android:id="@+id/radioGrid"
-                    style="@style/Widget.Notesprout.RadioButton"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:text="@string/template_grid" />
-            </RadioGroup>
+                    <RadioButton
+                        android:id="@+id/radioBlank"
+                        style="@style/Widget.Notesprout.RadioButton"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="@string/template_blank"
+                        android:checked="true" />
+                </RadioGroup>
+            </LinearLayout>
         </LinearLayout>
     </ScrollView>
 

@@ -66,8 +66,13 @@ CREATE TABLE notebook_meta (id INTEGER PRIMARY KEY CHECK (id = 0), json TEXT NOT
 
 Hierarchy: `notebook` row (`parentId = ''`, `text` = title, `refId` = last-open page) → `page` rows
 (`refId` = template row id, `width`/`height` px, ordered by `"order"`) → `stroke` rows (`color`,
-`strokeWidth`, `style`, `blob` = format B). One `template` row under the notebook row (`text` = kind,
-`blob` = WEBP q100). **No layers.** `"order"` is always double-quoted in SQL / backticked in Room.
+`strokeWidth`, `style`, `blob` = format B). One `template` row under the notebook row (`text` = template
+identity, `blob` = WEBP q100). **No layers.** `"order"` is always double-quoted in SQL / backticked in Room.
+
+**Template identity values** (index `objects.templateKind` and the template row's `text` — informational
+labels, nothing reads them yet): `BLANK` (`SoilSchema.TEMPLATE_BLANK`, no template row) ·
+`<extension package>:<template id>` (e.g. `com.symmetricalpalmtree.notesprout.ext.templates:lined`,
+`ExtensionContract.templateIdentity`) · legacy v0 `LINED` / `DOTTED` / `GRID` (untouched, no migration).
 
 `NotebookMeta` (kotlinx.serialization, `ignoreUnknownKeys`, `explicitNulls=false`) — the same
 field set as Notesprout's so the file stays in the family: `formatVersion=1, notebookId, name,

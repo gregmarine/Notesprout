@@ -380,7 +380,7 @@ disabled → `pm enable`). Regression: existing Paper still creates a Lined note
 ---
 
 ### Phase E1 — Host integration: discovery, client, New-notebook wiring, core renderer removed
-**Status:** ⬜ Not started
+**Status:** ✅ Complete (commit TBD)
 
 **Goal:** the core offers templates only via discovered, trusted providers; the built-in renderer is
 gone from the core; with no extension installed the New-notebook screen has no Template section and
@@ -442,6 +442,19 @@ v0's.
 
 **Close-out:** status ✅ + Outcome (record any timing numbers and any e-ink layout-jump observation);
 docs; memory; commit + push `paper`.
+
+**Outcome (E1):** Built as specified; all four phase-start answers = defaults except the toast, which
+reads **"Template extension didn't respond — try again or choose Blank"**. Full checklist 1–9 passed on
+**SNN + NA5C** 2026-08-16. Logs: one bind/unbind pair per list and per render, 0 `leaked
+ServiceConnection`. Timings (logcat): SNN list ≈540 ms cold / ≈110 ms warm, render 280–590 ms
+(≈0.8 s after a force-stop); NA5C list ≈400 ms cold / ≈50 ms warm, render 130–260 ms (≈0.5 s after a
+force-stop). No layout-jump complaint on either e-ink device (section appears with the first paint or
+one refresh after). One trap: **on NA5C, BOOX re-disabled the extension a few seconds *after*
+`install -r`, overwriting the immediate `pm enable`** — discovery correctly saw 0 candidates until it was
+enabled again (recorded in `docs/extensions.md` + `CLAUDE.md`). Provider headings are shown only when
+more than one provider *contributed templates* (not merely was discovered) — a provider that failed to
+list would otherwise leave a lone heading. Deleted from `:app`: `data/template/`, `TemplateGeometryTest`,
+`bitmapToWebp`, `template_lined/dotted/grid` strings.
 
 ---
 

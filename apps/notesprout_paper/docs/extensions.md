@@ -1,8 +1,8 @@
 # Extensions — the extension model & contract v1
 
 > Arc: `PAPER_EXTENSIONS_PLAN.md` (the cross-session memory for the extensions work). This doc is the
-> subsystem reference. **Phase E0** established the contract library and the first extension APK; the
-> host (`:app`) is wired to discover and call them in **E1**.
+> subsystem reference. **Phase E0** established the contract library and the first extension APK;
+> **Phase E1** wired the host (`:app`) to discover and call them and removed the core's renderer.
 
 Notesprout's original design baked too many features into the core. Paper's core is **paper with
 strokes** — a library of notebooks, each a stack of pages you write on. Everything else is added by
@@ -146,6 +146,43 @@ An Android **application** APK — `applicationId com.symmetricalpalmtree.notesp
   2×spacing, symmetric GRID origin at 1×spacing) + the WEBP encode (`WEBP_LOSSLESS`, quality 100).
   Templates: `lined` "Lined", `dotted` "Dotted", `grid` "Grid" (ids ASCII lower-case; names from
   `strings.xml`). **Blank is not a template** — it is the host's "no template" option.
+
+---
+
+## Host behaviour (`:app`, package `extension/`)
+
+- **Manifest:** `<queries><intent><action android:name="…TEMPLATE_PROVIDER"/></intent></queries>` as a
+  child of `<manifest>` — without it the discovery query is empty on API 30+.
+- **`ExtensionRegistry.templateProviders(context)`** (IO): `queryIntentServices(Intent(action),
+  GET_META_DATA)`; keeps a candidate only if `serviceInfo.exported`, `metaData[META_API_VERSION] ==
+  API_VERSION`, and `checkSignatures(core, ext) == SIGNATURE_MATCH`; each rejection is a `Slog.d`
+  (tag `ExtensionRegistry`). Returns `ProviderRef(component, packageName, label, apiVersion)` sorted by
+  label then package. Disabled packages are not returned by the query.
+- **`TemplateProviderClient(context, ref)`** — bind-per-operation. `call(timeoutMs, block)`: explicit
+  intent (`action` + `component`), `bindService(BIND_AUTO_CREATE)` on the **application** context,
+  await `onServiceConnected` ≤ **3 s**, run `block` on IO under `withTimeout`, **unbind in `finally`**.
+  Because a Binder transaction can't be interrupted, the call runs in a supervisor scope: on timeout the
+  caller resumes with an exception while the orphaned call finishes on its own IO thread and is
+  discarded. `onServiceDisconnected` / `onBindingDied` / `onNullBinding` / `bindService == false` /
+  `SecurityException` / `RemoteException` / timeout / bad payload → **one** `ExtensionCallException`
+  (genuine coroutine cancellation is re-thrown, not wrapped). `list()` = 2 s; `render()` = **15 s**
+  (e-ink CPUs; the lossless WEBP encode is the slow part) — copies out of the `SharedMemory` after
+  checking `mimeType == MIME_WEBP` and `0 < byteCount ≤ min(MAX_RENDER_BYTES, memory.size)`, unmaps and
+  closes the region on every path, returns null only when the extension returned null. Every bind /
+  unbind is a `Slog.d` (tag `TemplateProviderClient`) — one pair per list and per render, no
+  `leaked ServiceConnection` (verified SNN + NA5C).
+- **`TemplateChoice(provider, id, name)`** with `identity` = `templateIdentity(provider.packageName, id)`.
+- **New-notebook screen** (`docs/library.md`): the section is `GONE` until a provider answers with at
+  least one template; no extension → no section, blank notebook. Render happens **before** any file
+  is created; failure = toast + stay on the screen, never a silent Blank. Payload outward: template id,
+  page width/height px, dpi — nothing else.
+- **Failure surface:** the core decides what the user sees; the only user-visible failure is the
+  render toast on CREATE. Discovery/list failures are silent (log only).
+
+**BOOX sideload trap (NA5C):** the launcher/firmware flips a freshly installed sideloaded package to
+DISABLED_USER shortly *after* `install`, so a `pm enable` issued immediately can be overwritten. Enable,
+wait a few seconds, then confirm with `pm list packages -d` (must not list the extension). Discovery
+correctly reports 0 candidates while it is disabled.
 
 ---
 

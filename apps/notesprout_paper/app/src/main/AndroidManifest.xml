@@ -2,6 +2,13 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
+    <!-- Package visibility (API 30+): without this the extension discovery query returns nothing. -->
+    <queries>
+        <intent>
+            <action android:name="com.symmetricalpalmtree.notesprout.extension.TEMPLATE_PROVIDER" />
+        </intent>
+    </queries>
+
     <application
         android:name=".PaperApplication"
         android:label="Notesprout Paper"

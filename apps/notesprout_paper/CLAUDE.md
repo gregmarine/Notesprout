@@ -44,6 +44,10 @@ runBlocking on UI, IndexGuard, Slog, encryption hygiene, design system). In addi
   never depend on each other). An extension is a separate APK with **no launcher Activity**, bound over
   AIDL; the core trusts it only if `checkSignatures == SIGNATURE_MATCH` (in dev, the shared
   `~/.android/debug.keystore` satisfies this).
+- **Notebook creation:** templates come **only** from `ExtensionRegistry` providers via
+  `TemplateProviderClient` (bind-per-operation, timeouts, unbind in `finally`); **the core has no
+  renderer**. No extension → no Template section, blank notebook. A render failure stays on the screen
+  with a toast — never a silent Blank. Identity labels: `BLANK` | `<pkg>:<id>` | legacy `LINED`/… .
 
 ## Build & install
 
@@ -56,7 +60,8 @@ adb -s 92c16533       install -r app/build/outputs/apk/debug/app-debug.apk   # N
 adb -s 5HL21V5007384  install -r app/build/outputs/apk/debug/app-debug.apk   # MIP11
 # The Templates extension (install alongside the app on the same device):
 adb -s <serial> install -r ext-templates/build/outputs/apk/debug/ext-templates-debug.apk
-adb -s <serial> shell pm enable com.symmetricalpalmtree.notesprout.ext.templates.dev  # BOOX sideload trap
+adb -s <serial> shell pm enable com.symmetricalpalmtree.notesprout.ext.templates.dev  # BOOX sideload trap — BOOX may
+#   re-disable a few seconds AFTER install; re-run enable and confirm with `pm list packages -d`
 ```
 
 Debug launch: `adb -s <serial> shell am start -n com.symmetricalpalmtree.notesprout.dev/com.symmetricalpalmtree.notesprout.bootstrap.BootstrapActivity`
