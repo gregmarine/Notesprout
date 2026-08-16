@@ -60,6 +60,7 @@ cd ~/git/Notesprout/apps/notesprout_paper
 ./gradlew :app:assembleDebug            # → app/build/outputs/apk/debug/app-debug.apk
 ./gradlew :app:testDebugUnitTest
 adb -s <serial> install -r app/build/outputs/apk/debug/app-debug.apk
+adb -s <serial> shell am start -n com.symmetricalpalmtree.notesprout.dev/com.symmetricalpalmtree.notesprout.bootstrap.BootstrapActivity
 ```
 
 **Paper test devices** (only these three unless told otherwise):

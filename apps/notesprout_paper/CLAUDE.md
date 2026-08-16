@@ -24,6 +24,9 @@ runBlocking on UI, IndexGuard, Slog, encryption hygiene, design system). In addi
 - **Portrait-locked** on every screen.
 - **No colour in chrome** — ink itself is black in v0.
 - **One layout per screen** — no width-variant XML files unless the narrowest device (MIP11) can't fit.
+- **Every SQLCipher open goes through `crypto/SoilCrypto`** (non-destructive factories; opens are
+  exists-guarded; creation only via the named create entry points). Read `docs/crypto.md` and
+  `docs/data.md` before touching `crypto/` or `data/`.
 
 ## Build & install
 
@@ -36,7 +39,11 @@ adb -s 92c16533       install -r app/build/outputs/apk/debug/app-debug.apk   # N
 adb -s 5HL21V5007384  install -r app/build/outputs/apk/debug/app-debug.apk   # MIP11
 ```
 
-Debug launch: `adb -s <serial> shell am start -n com.symmetricalpalmtree.notesprout.dev/com.symmetricalpalmtree.notesprout.library.LibraryActivity`
+Debug launch: `adb -s <serial> shell am start -n com.symmetricalpalmtree.notesprout.dev/com.symmetricalpalmtree.notesprout.bootstrap.BootstrapActivity`
+(BootstrapActivity is the launcher and the only thing that opens the index; every other screen
+bounces there via `IndexGuard`.) The debug build's library ⋯ menu has "Show recovery key" and
+"Forget cached key" (kills the process → next launch is the Unlock screen). The app's files are
+readable from `adb shell` at `/sdcard/Android/data/<appId>/files/` (index + `Garden/`).
 
 BOOX trap: `install -r` can leave the package disabled → `pm enable com.symmetricalpalmtree.notesprout.dev`.
 

@@ -1,4 +1,47 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Notesprout Paper</string>
+
+    <!-- Bootstrap -->
+    <string name="boot_preparing">Preparing your library…</string>
+    <string name="boot_error_title">Couldn\'t open your library</string>
+    <string name="boot_error_body">Something went wrong while preparing Paper:\n\n%1$s\n\nYour notebooks are untouched. Retry usually resolves a temporary problem (e.g. right after a device restart).</string>
+    <string name="boot_error_foreign">The library index is not a Paper database (it is unencrypted). It was left untouched.</string>
+    <string name="retry">Retry</string>
+    <string name="close_app">Close app</string>
+
+    <!-- Recovery key -->
+    <string name="recovery_title">🌱  Save your recovery key</string>
+    <string name="recovery_body">Your notes are encrypted. This recovery key is the one secret that unlocks them on a new device or after a reinstall. It is the only copy — write it down or save it in a password manager. We can\'t recover it for you.</string>
+    <string name="recovery_copy">Copy</string>
+    <string name="recovery_saved">I\'ve saved it</string>
+    <string name="recovery_continue">Continue</string>
+    <string name="recovery_copied">Recovery key copied</string>
+    <string name="recovery_tick_first">Tick “I\'ve saved it” to continue</string>
+    <string name="recovery_clip_label">Paper recovery key</string>
+
+    <!-- Unlock -->
+    <string name="unlock_title">Unlock Paper</string>
+    <string name="unlock_body">Enter your recovery key to open your library on this device.</string>
+    <string name="unlock_hint">NSPT-…</string>
+    <string name="unlock_button">Unlock</string>
+    <string name="unlock_wrong">That key didn\'t open your library. Try again.</string>
+    <string name="unlock_checking">Checking…</string>
+    <string name="unlock_locked_out">Too many attempts. Try again in %1$s.</string>
+
+    <!-- Library -->
+    <string name="library_root">Notebooks</string>
+    <string name="library_empty">No notebooks yet</string>
+    <string name="library_later">Coming in a later phase</string>
+    <string name="cd_up_folder">Go up one folder</string>
+    <string name="cd_pinned">Pinned notebooks</string>
+    <string name="cd_recents">Recent notebooks</string>
+    <string name="cd_first_page">First page</string>
+    <string name="cd_prev_page">Previous page</string>
+    <string name="cd_next_page">Next page</string>
+    <string name="cd_last_page">Last page</string>
+    <string name="cd_sort">Sort</string>
+    <string name="cd_new_folder">New folder</string>
+    <string name="cd_new_notebook">New notebook</string>
+    <string name="cd_debug">Debug tools</string>
 </resources>

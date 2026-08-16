@@ -420,7 +420,18 @@ test devices, and shows a placeholder — plus the project scaffolding every lat
 ---
 
 ### Phase 1 — Container, index, encryption & the launch spine
-**Status:** ⬜ Not started
+**Status:** 🧪 Awaiting device verification (Claude-verified MIP11 end-to-end; SNN + NA5C reach the
+recovery-key screen — user walks the checklist by eye)
+
+**Outcome:** Both databases exist encrypted-from-first-byte with the greenfield schemas (`docs/data.md`);
+crypto stack + non-destructive open wrapper + `KeyOpener` verify-then-fallback (`docs/crypto.md`);
+`PaperIndex` state machine; Bootstrap → RecoveryKey → Library / Unlock; `IndexGuard` real; format-B
+`StrokeCodec` (+ pressure/tilt channels) + `InkColorCodec`; library shell (breadcrumb, bottom bar,
+pager, empty state, browse-state prefs); debug-only ⋯ menu (Show recovery key / Forget cached key).
+29 JVM tests green. MIP11: fresh install → key screen → library; kill+relaunch → library; forget →
+Unlock; wrong key → error with the index md5 unchanged; lower-case right key → library; pulled
+`notesprout.db` opens in the Mac `sqlcipher` CLI with the passphrase (portability proven).
+Phase-start answers: reference wording + required checkbox; AttemptLimiter verbatim; debug tools yes.
 
 **Goal:** the two databases exist encrypted-from-first-byte with the greenfield schemas; the launch
 state machine (bootstrap → recovery key → library / unlock) works; the stroke codec is done and tested;
