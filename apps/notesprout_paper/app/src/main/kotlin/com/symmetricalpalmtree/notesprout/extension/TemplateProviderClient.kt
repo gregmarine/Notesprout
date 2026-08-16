@@ -4,8 +4,10 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.ServiceConnection
+import android.content.pm.PackageManager
 import android.os.IBinder
 import android.os.SharedMemory
+import com.symmetricalpalmtree.notesprout.core.Bitmaps
 import com.symmetricalpalmtree.notesprout.core.Slog
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
@@ -31,21 +33,23 @@ class TemplateProviderClient(context: Context, private val ref: ProviderRef) {
     private val appContext = context.applicationContext
 
     /** The provider's templates, in its display order. */
-    suspend fun list(): List<TemplateInfo> = call(LIST_TIMEOUT_MS) { it.listTemplates() ?: emptyList() }
+    suspend fun list(): List<TemplateInfo> =
+        call(LIST_TIMEOUT_MS) { it.listTemplates()?.filterNotNull() ?: emptyList() }   // AIDL lists may carry nulls
 
     /**
      * Render [templateId] at [widthPx]×[heightPx] for [dpi]. Returns the complete WEBP file, or null
      * only when the extension itself returned null (unknown id). The payload is untrusted: the MIME
-     * type must be [ExtensionContract.MIME_WEBP] and `0 < byteCount ≤ MAX_RENDER_BYTES`; the
-     * `SharedMemory` is always closed.
+     * type must be [ExtensionContract.MIME_WEBP], `0 < byteCount ≤ MAX_RENDER_BYTES`, and the bytes
+     * must decode (header probe) to an image of exactly [widthPx]×[heightPx]; the `SharedMemory` is
+     * always closed.
      */
     suspend fun render(templateId: String, widthPx: Int, heightPx: Int, dpi: Float): ByteArray? =
         call(RENDER_TIMEOUT_MS) { provider ->
             val result = provider.render(templateId, widthPx, heightPx, dpi) ?: return@call null
-            copyOut(result)
+            copyOut(result, widthPx, heightPx)
         }
 
-    private fun copyOut(result: RenderedTemplate): ByteArray {
+    private fun copyOut(result: RenderedTemplate, widthPx: Int, heightPx: Int): ByteArray {
         val memory: SharedMemory = result.memory
         try {
             if (result.mimeType != ExtensionContract.MIME_WEBP) {
@@ -56,13 +60,20 @@ class TemplateProviderClient(context: Context, private val ref: ProviderRef) {
                 throw ExtensionCallException("bad byte count $n (region ${memory.size})")
             }
             val buffer = memory.mapReadOnly()
+            val bytes = ByteArray(n)
             try {
-                val bytes = ByteArray(n)
                 buffer.get(bytes)
-                return bytes
             } finally {
                 SharedMemory.unmap(buffer)
             }
+            // Untrusted payload: the header must decode to an image of exactly the requested size
+            // before the bytes are stored anywhere (a wrong-size template would be stretched onto
+            // every page forever; the full decode happens bounded, at open, in NotebookSession).
+            val size = Bitmaps.imageSize(bytes) ?: throw ExtensionCallException("payload is not a decodable image")
+            if (size.first != widthPx || size.second != heightPx) {
+                throw ExtensionCallException("payload is ${size.first}x${size.second}, requested ${widthPx}x$heightPx")
+            }
+            return bytes
         } finally {
             memory.close()
         }
@@ -93,6 +104,11 @@ class TemplateProviderClient(context: Context, private val ref: ProviderRef) {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
         Slog.d(TAG) { "bind ${ref.component.flattenToShortString()}" }
         try {
+            // Trust is re-checked at bind time, not only at discovery: the package could have been
+            // replaced (same name, different key) while the screen holding this ProviderRef was open.
+            if (appContext.packageManager.checkSignatures(appContext.packageName, ref.packageName)
+                != PackageManager.SIGNATURE_MATCH
+            ) throw ExtensionCallException("signature no longer matches for ${ref.packageName}")
             val bound = try {
                 appContext.bindService(intent, connection, Context.BIND_AUTO_CREATE)
             } catch (e: SecurityException) {

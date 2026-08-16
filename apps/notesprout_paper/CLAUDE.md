@@ -45,9 +45,19 @@ runBlocking on UI, IndexGuard, Slog, encryption hygiene, design system). In addi
   AIDL; the core trusts it only if `checkSignatures == SIGNATURE_MATCH` (in dev, the shared
   `~/.android/debug.keystore` satisfies this).
 - **Notebook creation:** templates come **only** from `ExtensionRegistry` providers via
-  `TemplateProviderClient` (bind-per-operation, timeouts, unbind in `finally`); **the core has no
-  renderer**. No extension → no Template section, blank notebook. A render failure stays on the screen
-  with a toast — never a silent Blank. Identity labels: `BLANK` | `<pkg>:<id>` | legacy `LINED`/… .
+  `TemplateProviderClient` (bind-per-operation, signature re-checked at bind, timeouts, unbind in
+  `finally`, payload = mime + byte cap + exact requested size); **the core has no renderer**. No
+  extension → no Template section, blank notebook. A render failure stays on the screen with a toast —
+  never a silent Blank. Identity labels: `BLANK` | `<pkg>:<id>` | legacy `LINED`/… .
+- **Extension boundary (frozen in E2):** nothing but what a call needs crosses outward (templates: id +
+  page geometry + dpi — never keys, paths, ids, names, strokes); everything inward is untrusted. Adding
+  an extension point follows `docs/extensions.md` §"Rules for adding a future extension point" and adds
+  its rows to §"Boundary audit". `:ext-templates` depends on `:extension-api` only — it is the
+  third-party reference implementation; keep it that clean.
+- **Notebook screen "Opening…" popup** (`openingOverlay`) is visible from the first frame and hidden
+  only when `opened` is set — do not hide it earlier, and do not gate the hide on the pen (hover counts
+  as active). While it is up the whole paper is an exclusion rect (no pen input); `pushExclusions()`
+  restores the chrome rects at the same moment.
 
 ## Build & install
 

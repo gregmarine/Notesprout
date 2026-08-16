@@ -115,7 +115,10 @@ class NotebookActivity : AppCompatActivity() {
             listener = gestureListener,
         )
 
-        binding.root.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> binding.root.post { pushExclusions() } }
+        binding.root.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
+            if (!opened) pushExclusions()   // whole-paper block needs no chrome geometry — apply now, not a frame later
+            binding.root.post { pushExclusions() }
+        }
 
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() { close() }
@@ -146,6 +149,13 @@ class NotebookActivity : AppCompatActivity() {
         liveStrokes = strokes.associateBy { it.id }.toMutableMap()
         opened = true
         setPageIndicator(session.currentIndex + 1, session.pages.size)
+        // The "Opening…" popup (visible from the first frame) comes down only now — the page is on
+        // the paper and strokes are being persisted — and the pen is let in at the same moment
+        // (pushExclusions swaps the whole-paper block for the chrome rects). Deliberately NOT
+        // pen-idle gated: isPenActive is true while the pen merely hovers, and a readiness popup
+        // that lingers over paper that is already keeping ink would say the opposite of the truth.
+        binding.openingOverlay.visibility = View.GONE
+        pushExclusions()
         Slog.d(TAG) { "page ${page.id} loaded: ${strokes.size} strokes, ${page.width}x${page.height}" }
     }
 
@@ -312,9 +322,20 @@ class NotebookActivity : AppCompatActivity() {
         }
     }
 
+    /**
+     * Chrome rects the stylus must not ink under. Until the notebook is open ([opened]) the whole
+     * paper is excluded instead: no pen input while the "Opening…" popup is up (ink written before
+     * the page is loaded would be dropped, and the popup promises exactly that nothing is taken yet).
+     * Exclusion is applied to the hardware pen layer and filtered model-side by g-paper.
+     */
     private fun pushExclusions() {
         if (!::paper.isInitialized) return
-        val paperLoc = IntArray(2).also { paper.asView().getLocationInWindow(it) }
+        val view = paper.asView()
+        if (!opened) {
+            paper.setExclusionRects(listOf(Rect(0, 0, maxOf(view.width, 1), maxOf(view.height, 1))))
+            return
+        }
+        val paperLoc = IntArray(2).also { view.getLocationInWindow(it) }
         val rects = listOfNotNull(NotebookToolbar.rectOf(binding.topBar), NotebookToolbar.rectOf(binding.bottomStrip))
             .map { Rect(it.left - paperLoc[0], it.top - paperLoc[1], it.right - paperLoc[0], it.bottom - paperLoc[1]) }
         paper.setExclusionRects(rects)

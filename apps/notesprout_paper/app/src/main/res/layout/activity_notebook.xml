@@ -110,4 +110,30 @@
                 android:paddingEnd="0dp" />
         </LinearLayout>
     </LinearLayout>
+
+    <!-- "Opening…" popup: visible from the first frame until the page's strokes are on the paper
+         (NotebookActivity hides it when opened, pen-idle gated). Not chrome — no exclusion rect;
+         no scrim (a grey wash is not e-ink friendly). 75% width via the weight. -->
+    <LinearLayout
+        android:id="@+id/openingOverlay"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center"
+        android:orientation="horizontal"
+        android:gravity="center"
+        android:weightSum="1">
+
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="0.75"
+            android:background="@drawable/shape_dialog_bordered"
+            android:gravity="center"
+            android:paddingStart="24dp"
+            android:paddingEnd="24dp"
+            android:paddingTop="28dp"
+            android:paddingBottom="28dp"
+            android:text="@string/notebook_opening"
+            android:textAppearance="@style/TextAppearance.Notesprout.TitleMedium" />
+    </LinearLayout>
 </FrameLayout>

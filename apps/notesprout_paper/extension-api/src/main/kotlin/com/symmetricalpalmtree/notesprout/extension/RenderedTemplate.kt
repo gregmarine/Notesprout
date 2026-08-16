@@ -31,7 +31,8 @@ class RenderedTemplate(
         dest.writeString(mimeType)
     }
 
-    override fun describeContents(): Int = 0
+    /** Carries a file descriptor (the ashmem region) — must say so, or `Bundle.hasFileDescriptors()` lies. */
+    override fun describeContents(): Int = Parcelable.CONTENTS_FILE_DESCRIPTOR
 
     companion object {
         @JvmField

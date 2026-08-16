@@ -38,6 +38,19 @@ last-open page from the notebook row's `refId` → template decoded with `Bitmap
 (≤ 4096 px). Then on Main: `setPageSize(w,h)` (the page's authored px rect, so ink registration
 survives a different screen), `setTemplate`, `loadStrokes(store.loadPage(id))`, page indicator.
 
+**"Opening…" popup** (`openingOverlay` in the layout — a bordered, 75 %-width box, no scrim, centred
+over the paper): **visible from the first frame** so the screen never looks ready before it is, and
+hidden (`GONE`) at the end of `openSession`, once the page's template and strokes are on the paper and
+`opened` is set. **No pen input while it is up:** until `opened`, `pushExclusions` pushes a single
+whole-paper exclusion rect (applied at the first layout pass, before the posted chrome-rect push), so
+the stylus cannot ink anywhere; the moment the popup hides, `pushExclusions()` swaps it for the normal
+chrome rects. The hide is deliberately **not** `whenPenIdle`-gated: `isPenActive` is true while the
+pen merely hovers, and a readiness popup lingering over paper that is already keeping ink would say
+the opposite of the truth — one removal, one frame. Also — the layout doc above: "both bars are pushed
+to `setExclusionRects` after every root layout pass" holds only once `opened`. On the Nomad the template can take a beat to appear;
+the popup is the signal that ink written before then is not yet persisted (`onStrokeCommitted`
+ignores strokes while `!opened`). It is not chrome: no exclusion rect, not tappable.
+
 Tool defaults: `PEN`, black, **3 px** width, `StrokeStyle.PEN`, eraser **15 px** (raw px on every
 device — same as the reference and g-paper's own defaults). Smart-lasso and scribble-erase are off.
 

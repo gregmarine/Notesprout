@@ -4,6 +4,7 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
+import android.os.Build
 import java.io.ByteArrayOutputStream
 
 /**
@@ -20,17 +21,21 @@ object TemplateRenderer {
     private const val LINE_WIDTH_MDPI = 1f
     private const val DOT_RADIUS_MDPI = 2f
 
-    enum class Kind { LINED, DOTTED, GRID }
+    /** The catalogue — one source of truth for id (stable, ASCII), display name, and display order. */
+    enum class Kind(val id: String, val nameRes: Int) {
+        LINED("lined", R.string.template_lined),
+        DOTTED("dotted", R.string.template_dotted),
+        GRID("grid", R.string.template_grid);
+
+        companion object {
+            fun forId(id: String): Kind? = entries.firstOrNull { it.id == id }
+        }
+    }
 
     /** The ids this provider offers, in display order. */
-    val TEMPLATE_IDS: List<String> = listOf("lined", "dotted", "grid")
+    val TEMPLATE_IDS: List<String> = Kind.entries.map { it.id }
 
-    fun kindForId(id: String): Kind? = when (id) {
-        "lined" -> Kind.LINED
-        "dotted" -> Kind.DOTTED
-        "grid" -> Kind.GRID
-        else -> null
-    }
+    fun kindForId(id: String): Kind? = Kind.forId(id)
 
     /** Render [templateId] at exactly [widthPx]×[heightPx] for [dpi] as a lossless WEBP, or null if unknown. */
     fun renderWebp(templateId: String, widthPx: Int, heightPx: Int, dpi: Float): ByteArray? {
@@ -141,9 +146,13 @@ object TemplateRenderer {
         }
     }
 
+    /** Lossless WEBP: `WEBP_LOSSLESS` exists from API 30; on API 29 (minSdk) `WEBP` at quality 100 is lossless. */
     private fun bitmapToWebp(bitmap: Bitmap): ByteArray {
         val out = ByteArrayOutputStream()
-        bitmap.compress(Bitmap.CompressFormat.WEBP_LOSSLESS, 100, out)
+        @Suppress("DEPRECATION")
+        val format = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) Bitmap.CompressFormat.WEBP_LOSSLESS
+                     else Bitmap.CompressFormat.WEBP
+        bitmap.compress(format, 100, out)
         return out.toByteArray()
     }
 }

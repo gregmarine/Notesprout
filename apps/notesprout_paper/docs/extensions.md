@@ -2,7 +2,9 @@
 
 > Arc: `PAPER_EXTENSIONS_PLAN.md` (the cross-session memory for the extensions work). This doc is the
 > subsystem reference. **Phase E0** established the contract library and the first extension APK;
-> **Phase E1** wired the host (`:app`) to discover and call them and removed the core's renderer.
+> **Phase E1** wired the host (`:app`) to discover and call them and removed the core's renderer;
+> **Phase E2** reviewed and hardened both sides and froze this doc as the pattern every later extension
+> point follows (§"Rules for adding a future extension point", §"Boundary audit").
 
 Notesprout's original design baked too many features into the core. Paper's core is **paper with
 strokes** — a library of notebooks, each a stack of pages you write on. Everything else is added by
@@ -100,8 +102,14 @@ interface ITemplateProvider {
   can never travel as a plain `byte[]`; `SharedMemory` is ashmem-backed and Parcelable. **Handshake:**
   the **extension** creates the region (`SharedMemory.create(null, byteCount)`, maps RW, writes, unmaps,
   `setProtect(PROT_READ)`); the **host** maps read-only, copies out `byteCount` bytes, unmaps, closes.
+  Writing the parcelable **dups** the region's file descriptor into the reply, so the extension closes
+  its own handle once the transaction is marshalled (the Templates extension does this from
+  `onTransact`'s `finally` via a per-Binder-thread `ThreadLocal`); leaving it to GC leaks one
+  descriptor per render until a collection.
 
 Both parcelables carry `@JvmField val CREATOR` and match their `.aidl` declarations.
+`RenderedTemplate.describeContents()` returns `CONTENTS_FILE_DESCRIPTOR` (it carries the region's fd —
+`Bundle.hasFileDescriptors()` relies on this); `TemplateInfo` returns 0.
 
 ### Versioning rules (for the next point / next version)
 
@@ -139,13 +147,17 @@ An Android **application** APK — `applicationId com.symmetricalpalmtree.notesp
 - **`TemplateProviderService`** returns an `ITemplateProvider.Stub`. **Every** stub method first calls
   `CallerCheck.enforce(context)`: `Binder.getCallingUid()` → `getPackagesForUid(uid)` must contain
   `BuildConfig.HOST_PACKAGE` **and** `checkSignatures(uid, Process.myUid()) == SIGNATURE_MATCH`, else
-  `SecurityException`. `render` renders into a `SharedMemory` per the handshake above. Binder threads
-  call in — the stub holds no mutable state.
+  `SecurityException`. `render` renders into a `SharedMemory` per the handshake above and parks the
+  region in a `ThreadLocal`; the stub's `onTransact` override closes it in `finally`, after the reply
+  (holding a dup of the descriptor) has been written. Binder threads call in — the stub holds no other
+  mutable state.
 - **`TemplateRenderer`** — the v0 core `BuiltInTemplates` moved **verbatim** (same geometry: 8 mm
   spacing at device dpi, mdpi-authored 1 px rule / 2 px dot radius scaled by dpi, LINED top margin
-  2×spacing, symmetric GRID origin at 1×spacing) + the WEBP encode (`WEBP_LOSSLESS`, quality 100).
-  Templates: `lined` "Lined", `dotted` "Dotted", `grid` "Grid" (ids ASCII lower-case; names from
-  `strings.xml`). **Blank is not a template** — it is the host's "no template" option.
+  2×spacing, symmetric GRID origin at 1×spacing) + the WEBP encode (`WEBP_LOSSLESS`, quality 100 —
+  `WEBP_LOSSLESS` exists from API 30, so on API 29 the legacy `WEBP` at quality 100 is used, which is
+  lossless too). The catalogue is one `enum Kind(id, nameRes)`: `lined` "Lined", `dotted` "Dotted",
+  `grid` "Grid" (ids ASCII lower-case; names from `strings.xml`) — id list, lookup, and names all derive
+  from `Kind.entries`, so a template cannot be half-registered. **Blank is not a template** — it is the host's "no template" option.
 
 ---
 
@@ -156,10 +168,14 @@ An Android **application** APK — `applicationId com.symmetricalpalmtree.notesp
 - **`ExtensionRegistry.templateProviders(context)`** (IO): `queryIntentServices(Intent(action),
   GET_META_DATA)`; keeps a candidate only if `serviceInfo.exported`, `metaData[META_API_VERSION] ==
   API_VERSION`, and `checkSignatures(core, ext) == SIGNATURE_MATCH`; each rejection is a `Slog.d`
-  (tag `ExtensionRegistry`). Returns `ProviderRef(component, packageName, label, apiVersion)` sorted by
+  (tag `ExtensionRegistry`). Callers treat discovery itself as fallible (a `PackageManager` failure is
+  logged and means "no providers", never a crash). Returns `ProviderRef(component, packageName, label, apiVersion)` sorted by
   label then package. Disabled packages are not returned by the query.
 - **`TemplateProviderClient(context, ref)`** — bind-per-operation. `call(timeoutMs, block)`: explicit
-  intent (`action` + `component`), `bindService(BIND_AUTO_CREATE)` on the **application** context,
+  intent (`action` + `component`), **`checkSignatures` re-run immediately before the bind** (the
+  package could have been replaced under a different key while the screen holding the `ProviderRef`
+  was open — trust is not a discovery-time-only property), `bindService(BIND_AUTO_CREATE)` on the
+  **application** context,
   await `onServiceConnected` ≤ **3 s**, run `block` on IO under `withTimeout`, **unbind in `finally`**.
   Because a Binder transaction can't be interrupted, the call runs in a supervisor scope: on timeout the
   caller resumes with an exception while the orphaned call finishes on its own IO thread and is
@@ -168,10 +184,19 @@ An Android **application** APK — `applicationId com.symmetricalpalmtree.notesp
   (genuine coroutine cancellation is re-thrown, not wrapped). `list()` = 2 s; `render()` = **15 s**
   (e-ink CPUs; the lossless WEBP encode is the slow part) — copies out of the `SharedMemory` after
   checking `mimeType == MIME_WEBP` and `0 < byteCount ≤ min(MAX_RENDER_BYTES, memory.size)`, unmaps and
-  closes the region on every path, returns null only when the extension returned null. Every bind /
+  closes the region on every path, then requires the bytes to decode (`Bitmaps.imageSize`, header-only
+  probe) to an image of **exactly** the requested `widthPx × heightPx` — an undecodable or wrong-size
+  payload is a failed render, never stored (a wrong-size template would be stretched onto every page
+  forever); returns null only when the extension returned null. `list()` drops null elements (AIDL
+  lists may carry them). Every bind /
   unbind is a `Slog.d` (tag `TemplateProviderClient`) — one pair per list and per render, no
   `leaked ServiceConnection` (verified SNN + NA5C).
 - **`TemplateChoice(provider, id, name)`** with `identity` = `templateIdentity(provider.packageName, id)`.
+  **Accepted:** the identity uses the *installed* package name, so the debug extension writes
+  `…ext.templates.dev:lined` and a release one will write `…ext.templates:lined` — two labels for the
+  same first-party template. Nothing reads these labels yet; the future template-switch consumer of
+  `parseIdentity` must treat the `.dev` package as an alias of the release one (or the Extensions-UI arc
+  namespaces by a stable provider id). Recorded here so it is a decision, not a surprise.
 - **New-notebook screen** (`docs/library.md`): the section is `GONE` until a provider answers with at
   least one template; no extension → no section, blank notebook. Render happens **before** any file
   is created; failure = toast + stay on the screen, never a silent Blank. Payload outward: template id,
@@ -183,6 +208,70 @@ An Android **application** APK — `applicationId com.symmetricalpalmtree.notesp
 DISABLED_USER shortly *after* `install`, so a `pm enable` issued immediately can be overwritten. Enable,
 wait a few seconds, then confirm with `pm list packages -d` (must not list the extension). Discovery
 correctly reports 0 candidates while it is disabled.
+
+---
+
+## Boundary audit (E2 — walked 2026-08-16, all ✅)
+
+What crosses the process boundary, in which direction, and what guards it. Re-walk this table
+whenever an extension point is added or a contract field changes.
+
+| # | Invariant | Where it holds |
+|---|---|---|
+| 1 | **Host-side signature check on every discovery — and again at every bind.** No candidate is used unless exported, `META_API_VERSION == API_VERSION`, and `checkSignatures(core, ext) == SIGNATURE_MATCH`. Discovery is the only way a `ProviderRef` is made; every bind uses an explicit `ComponentName` from a `ProviderRef` and re-runs `checkSignatures` first (no TOCTOU window across the screen's lifetime). | `ExtensionRegistry.discover` (each rejection a `Slog.d`); `TemplateProviderClient.call` |
+| 2 | **Extension-side caller check in every stub method.** `listTemplates` and `render` both call `CallerCheck.enforce` first: caller uid → packages must contain `BuildConfig.HOST_PACKAGE` **and** `checkSignatures(uid, myUid) == SIGNATURE_MATCH`, else `SecurityException`. The service has no other entry point (`onBind` only returns the stub). | `TemplateProviderService`, `CallerCheck` |
+| 3 | **Nothing but geometry crosses outward.** `listTemplates()` carries no arguments; `render` carries a template id the extension itself issued, `widthPx`, `heightPx`, `dpi`. No passphrase, key, file path, index row, notebook id, page id, name, or stroke ever reaches the extension — the client API has no parameter that could carry one. | `ITemplateProvider.aidl`, `TemplateProviderClient.list/render`, `NewNotebookActivity.attemptCreate` (`pageWidthPx/pageHeightPx/dpi` only) |
+| 4 | **Nothing but WEBP bytes (and id/name strings) crosses inward.** `TemplateInfo(id, name)` is used only to build radios and the `<pkg>:<id>` label; `RenderedTemplate` is reduced to a `ByteArray` in `copyOut` — the `SharedMemory` never leaves the client. | `TemplateProviderClient.copyOut`, `TemplateChoice` |
+| 5 | **Byte cap + bounded decode on the way in.** `mimeType == MIME_WEBP`, `0 < byteCount ≤ min(MAX_RENDER_BYTES, memory.size)`, then `Bitmaps.imageSize` (header probe) must equal the requested `widthPx × heightPx` before the bytes are handed to the caller. The stored blob is later decoded only through `Bitmaps.decodeBounded(…, MAX_TEMPLATE_EDGE)` at open. | `TemplateProviderClient.copyOut`, `NotebookSession.loadTemplateFor` |
+| 6 | **Every bind has an unbind in `finally`; the region is always closed.** `call()` unbinds in `finally` on every path (bind refused, bind timeout, call timeout, exception, success); `copyOut` unmaps and closes in nested `finally`. Extension side: the region is closed in `onTransact`'s `finally` after the reply is written. Verified on device: one bind/unbind pair per list and per render, no `leaked ServiceConnection`. | `TemplateProviderClient.call/copyOut`, `TemplateProviderService.onTransact` |
+| 7 | **Every call has a timeout.** Bind ≤ 3 s, list ≤ 2 s, render ≤ 15 s; an un-interruptible Binder call that outlives its timeout finishes on its own supervisor-scope IO thread and is discarded — the caller never hangs. | `TemplateProviderClient` constants + `call()` |
+| 8 | **Failure never creates a notebook silently different from what the user chose.** Render runs **before** any file exists; a failed / null / empty / undecodable / wrong-size render → toast + stay on the screen; Blank is only ever the user's own selection. No extension → no Template section, and the notebook created is the Blank the user saw. A recreated screen (keyboard attach on Ratta, locale) saves the chosen identity and re-checks that radio once discovery rebuilds the list — Blank is re-checked only if nothing was chosen or the template is no longer offered. | `NewNotebookActivity.attemptCreate` / `onSaveInstanceState`, `docs/library.md` §New notebook |
+| 9 | **The core has no renderer and no dependency on the extension.** `:app` depends on `:extension-api` only; the template WEBP is drawn from the `.soil` blob exactly as v0 drew it, so a notebook opens with its template whether or not the extension is installed. | `app/build.gradle.kts`, `NotebookSession.loadTemplateFor` |
+
+## Rules for adding a future extension point (write-once, follow later)
+
+1. Add the action + AIDL + parcelables to `:extension-api`; keep the dependency direction.
+2. Add discovery to `ExtensionRegistry` (same trust filter) and a client class with explicit timeouts,
+   bind-per-operation, unbind-in-finally, and untrusted-payload caps.
+3. The core decides what the user sees on failure; extensions never show UI in the core's flow.
+4. Document the point here (contract + host behaviour + failure behaviour) and add its rows to the
+   boundary audit.
+5. Nothing crosses the boundary that the call doesn't need — never keys, files, index rows.
+
+## Writing an extension
+
+What a third party will do once `:extension-api` is published (today: the same steps, with the module
+consumed in-project — see `:ext-templates` for the reference implementation).
+
+1. **Depend on the contract:** `implementation("com.symmetricalpalmtree.notesprout:extension-api:<v>")`
+   (in-project: `implementation(project(":extension-api"))`). Nothing else from Paper.
+2. **Be an app with no launcher Activity.** `com.android.application`, your own `applicationId`, an
+   `<application>` with a label (that label is what a future Extensions UI shows) and an icon, **no
+   Activity**, `allowBackup="false"`.
+3. **Declare one exported `<service>` per extension point** with the point's action in its
+   intent-filter and the API version as meta-data:
+   ```xml
+   <service android:name=".TemplateProviderService" android:exported="true">
+       <intent-filter>
+           <action android:name="com.symmetricalpalmtree.notesprout.extension.TEMPLATE_PROVIDER" />
+       </intent-filter>
+       <meta-data android:name="com.symmetricalpalmtree.notesprout.extension.API_VERSION" android:value="1" />
+   </service>
+   ```
+4. **Implement the stub.** `onBind` returns an `ITemplateProvider.Stub`. Methods run on Binder threads
+   — hold no mutable state, or synchronise. `listTemplates()` returns stable ASCII ids (unique within
+   your package) with display names; `render(id, w, h, dpi)` returns a complete lossless WEBP of exactly
+   `w × h` in a `SharedMemory` (`create` → map RW → write → unmap → `setProtect(PROT_READ)`), or null
+   for an unknown id. The host rejects a payload whose decoded size differs from the request. Close
+   your handle after the reply is written (`onTransact` `finally`, as `:ext-templates` does). Keep a
+   render under 15 s on an e-ink CPU. Note `WEBP_LOSSLESS` is API 30+ — on API 29 use `WEBP` at
+   quality 100 (lossless).
+5. **Check the caller in every method** (`CallerCheck.enforce` pattern): `Binder.getCallingUid()` →
+   `getPackagesForUid` must contain the host package (`com.symmetricalpalmtree.notesprout`, or `.dev`
+   for the debug host) **and** `checkSignatures(uid, Process.myUid()) == SIGNATURE_MATCH`; else throw
+   `SecurityException`. In API v1 the host only binds same-signature extensions, so a third-party
+   extension is not yet reachable — the trust rule lifts with the Extensions-UI arc's consent step.
+6. **Never** reorder or remove AIDL methods or parcel fields; follow the versioning rules above.
 
 ---
 

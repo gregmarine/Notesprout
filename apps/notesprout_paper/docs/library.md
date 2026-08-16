@@ -88,10 +88,13 @@ extension providers (`extension/ExtensionRegistry`; see `docs/extensions.md`).
   `layout/item_template_radio.xml`, `tag` = `TemplateChoice`) is appended after `radioBlank` and the
   section (`templateSection`, `GONE` in XML) becomes visible; with more than one provider each group is
   preceded by a 14sp heading carrying the extension's label. **With no extension installed the section
-  never appears** — nothing hints at templates; notebooks are created blank. Default = Blank.
+  never appears** — nothing hints at templates; notebooks are created blank. Default = Blank. On a
+  recreation the chosen template's identity is saved (`onSaveInstanceState`) and re-checked once
+  discovery rebuilds the radios; Blank is re-checked immediately so the group is never left empty.
+  Provider headings use `TextAppearance.Notesprout.BodyMedium` (never hardcoded size/colour).
 - `attemptCreate`: name validation + duplicate check, then, if a template is chosen, **render first**
-  (`client.render(id, pageW, pageH, dpi)`) before any file exists. On `ExtensionCallException` or a
-  null/empty result: reset the button, toast `new_notebook_template_failed` ("Template extension didn't
+  (`client.render(id, pageW, pageH, dpi)`) before any file exists. On `ExtensionCallException` (which includes a
+  payload that is undecodable or not exactly the requested size) or a null/empty result: reset the button, toast `new_notebook_template_failed` ("Template extension didn't
   respond — try again or choose Blank") and **stay on the screen** — never a silent downgrade to Blank.
 - Creation (on IO): mint UUID → `SoilDatabase.create` → notebook row → template row (if chosen: `text` =
   `TemplateChoice.identity` = `"<extension package>:<template id>"`, `blob` = the WEBP the extension

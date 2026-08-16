@@ -4,13 +4,11 @@ import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
-import android.util.TypedValue
 import android.widget.RadioButton
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.TooltipCompat
-import androidx.core.content.ContextCompat
 import androidx.core.view.isVisible
 import androidx.lifecycle.lifecycleScope
 import com.symmetricalpalmtree.notesprout.R
@@ -48,6 +46,8 @@ class NewNotebookActivity : AppCompatActivity() {
     private val repo by lazy { IndexRepository() }
     private var parentFolderId: String? = null
     private var creating = false
+    /** Identity of the template checked before a recreation (provider radios are rebuilt async). */
+    private var restoreIdentity: String? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -65,7 +65,19 @@ class NewNotebookActivity : AppCompatActivity() {
         TooltipCompat.setTooltipText(binding.btnBack, binding.btnBack.contentDescription)
         binding.btnCreate.setOnClickListener { attemptCreate() }
 
+        // Recreation (keyboard attach on Ratta, locale…): the provider radios are gone until discovery
+        // rebuilds them, and radioBlank restores as unchecked if a provider radio had been chosen —
+        // re-check Blank now so the group is never left with nothing selected, and remember the
+        // chosen identity so discovery can re-check it (or leave Blank if it is no longer offered).
+        restoreIdentity = savedInstanceState?.getString(STATE_TEMPLATE_IDENTITY)
+        if (binding.templateGroup.checkedRadioButtonId == -1) binding.radioBlank.isChecked = true
+
         lifecycleScope.launch { discoverTemplates() }
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        selectedTemplate()?.let { outState.putString(STATE_TEMPLATE_IDENTITY, it.identity) }
     }
 
     /**
@@ -74,7 +86,12 @@ class NewNotebookActivity : AppCompatActivity() {
      * if at least one template exists; otherwise it stays GONE and the notebook is created blank.
      */
     private suspend fun discoverTemplates() {
-        val providers = ExtensionRegistry.templateProviders(this)
+        val providers = try {
+            ExtensionRegistry.templateProviders(this)
+        } catch (e: Exception) {   // a PackageManager hiccup must not take the screen down: Blank only
+            Slog.d(TAG) { "discovery failed: ${e.message}" }
+            return
+        }
         val listed = ArrayList<Pair<ProviderRef, List<TemplateInfo>>>(providers.size)
         for (ref in providers) {
             val templates = try {
@@ -91,18 +108,20 @@ class NewNotebookActivity : AppCompatActivity() {
             if (listed.size > 1) group.addView(providerHeading(ref))
             for (t in templates) {
                 val radio = layoutInflater.inflate(R.layout.item_template_radio, group, false) as RadioButton
+                val choice = TemplateChoice(ref, t.id, t.name)
                 radio.text = t.name
-                radio.tag = TemplateChoice(ref, t.id, t.name)
+                radio.tag = choice
                 group.addView(radio)
+                if (choice.identity == restoreIdentity) radio.isChecked = true
             }
         }
+        restoreIdentity = null
         binding.templateSection.isVisible = true
     }
 
     private fun providerHeading(ref: ProviderRef): TextView = TextView(this).apply {
         text = ref.label
-        setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
-        setTextColor(ContextCompat.getColor(this@NewNotebookActivity, R.color.inkBlack))
+        setTextAppearance(R.style.TextAppearance_Notesprout_BodyMedium)
     }
 
     private fun defaultName(): String =
@@ -228,6 +247,7 @@ class NewNotebookActivity : AppCompatActivity() {
 
     companion object {
         private const val TAG = "NewNotebookActivity"
+        private const val STATE_TEMPLATE_IDENTITY = "templateIdentity"
         const val EXTRA_PARENT_FOLDER_ID = "parentFolderId"
         const val EXTRA_NOTEBOOK_ID = "notebookId"
         const val EXTRA_NOTEBOOK_NAME = "notebookName"

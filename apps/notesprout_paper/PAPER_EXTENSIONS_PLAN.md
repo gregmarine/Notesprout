@@ -459,7 +459,7 @@ list would otherwise leave a lone heading. Deleted from `:app`: `data/template/`
 ---
 
 ### Phase E2 — Hardening, review, docs freeze
-**Status:** ⬜ Not started
+**Status:** ✅ Complete (commit — see git log; hash recorded in the follow-up commit)
 
 **Goal:** the API v1 + Templates extension are trustworthy enough to be the pattern every later
 extension follows.
@@ -488,6 +488,29 @@ extension follows.
 write/flip/insert/delete page, library create/rename/move/delete, cold-launch reopen).
 
 **Close-out:** status ✅ + Outcome; commit + push `paper`.
+
+**Outcome (E2):** Full checklist (E1 items 1–9 + E2 popup items + v0 regression subset) passed on
+**SNN + NA5C + MIP11** 2026-08-16 — the first phase verified on all three test devices. Logs: one
+bind/unbind pair per render, 0 `leaked ServiceConnection`. `/code-review high 611de61...HEAD` → 10
+findings, 9 fixed, 1 accepted+documented: (fixed) `WEBP_LOSSLESS` is API 30+ vs minSdk 29 — guarded
+(inherited from v0); New-notebook lost the chosen template on Activity recreation — identity saved /
+restored; host rejects a render whose decoded size ≠ requested w×h (+ header probe); signature
+re-checked before every bind (TOCTOU); `RenderedTemplate.describeContents` = `CONTENTS_FILE_DESCRIPTOR`;
+extension closes its `SharedMemory` in `onTransact` finally; `list()` filters nulls + discovery
+failure caught; catalogue = one `enum Kind(id, nameRes)`; `:ext-templates` depends on `:extension-api`
+only; heading uses `BodyMedium`. (Accepted) identity uses the installed package, so `.dev` and release
+extensions write different labels for the same template — recorded in `docs/extensions.md`. **Added on
+the user's request (Q1):** the notebook screen's **"Opening…" popup** — visible from the first frame,
+whole-paper exclusion rect until `opened` (no pen input while it is up), hidden + chrome rects restored
+the moment the page is loaded (not pen-idle gated: hover counts as active). Docs frozen: Boundary
+audit (9 rows), Rules for a future point, Writing an extension; README extensions paragraph + two-APK
+install; CLAUDE.md standing rules. **Arc complete.**
+
+**Phase-start answers (2026-08-16):** Q1 — one change requested from E1 testing: on SNN the template
+takes a beat to show after the notebook screen opens, and ink written before then is dropped
+(`onStrokeCommitted` ignores strokes while `!opened`); the user asked for an e-ink-friendly
+**"Opening…" popup (75 % width)** on the notebook screen until it is ready for writing. Q2 — scope:
+**overlay only** (no change to the early-stroke behaviour); otherwise fixes only.
 
 ---
 
