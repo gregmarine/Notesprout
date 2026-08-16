@@ -747,9 +747,9 @@ pinnedNotebookIds`, `RecentsPrefs`, `BrowseState.mode`/`lastOpenNotebookId`, `No
 ---
 
 ### Phase 6 — Hardening, review, docs freeze
-**Status:** ✅ Complete — user-verified SNN + NA5C 2026-08-16 (full regression + all 4 Phase-6 fixes pass;
-MIP11 not re-flashed this pass). Sole open v0 item: the **v0.1 carry-over list** (deliverable 5) awaits
-the user's input.
+**Status:** ✅ Complete (commit 87277da) — user-verified SNN + NA5C 2026-08-16 (full regression + all 4
+Phase-6 fixes pass; MIP11 not re-flashed this pass). Sole open v0 item: the **v0.1 carry-over list**
+(deliverable 5) awaits the user's input.
 
 **Goal:** v0 is trustworthy enough to live in daily.
 
