@@ -697,7 +697,7 @@ persists across close/reopen; the library card shows the last-open page as its c
 ---
 
 ### Phase 5 — Pin, Recents, browse-state polish
-**Status:** ✅ Complete (user-verified SNN + NA5C + MIP11 2026-08-15)
+**Status:** ✅ Complete (commit bd555ce; user-verified SNN + NA5C + MIP11 2026-08-15)
 
 **Outcome:** Most plumbing already existed from Phases 1–2 (`IndexRepository.pin/unpin/isPinned/
 pinnedNotebookIds`, `RecentsPrefs`, `BrowseState.mode`/`lastOpenNotebookId`, `NotebookActivity`'s
