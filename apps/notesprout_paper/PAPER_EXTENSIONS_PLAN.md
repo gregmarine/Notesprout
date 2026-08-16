@@ -5,7 +5,8 @@
 > tasks, tests, status — is here or in the files this document points at. If it isn't written down
 > here (or in the repo / project memory), it doesn't exist. **Read this file top to bottom at the
 > start of every session**, after `PAPER_PLAN.md` (v0, complete — it holds the architecture this arc
-> builds on) and both `CLAUDE.md` files.
+> builds on) and both `CLAUDE.md` files. **Arc 1 is complete and this file is frozen; arc 2 (the
+> extension store + the Naming extension) is `PAPER_NAMING_PLAN.md`.**
 
 ## Why
 
