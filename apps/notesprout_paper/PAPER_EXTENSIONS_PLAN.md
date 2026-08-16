@@ -512,6 +512,19 @@ takes a beat to show after the notebook screen opens, and ink written before the
 **"Opening…" popup (75 % width)** on the notebook screen until it is ready for writing. Q2 — scope:
 **overlay only** (no change to the early-stroke behaviour); otherwise fixes only.
 
+**Post-arc retrospective (2026-08-16, after E2):** the user weighed alternative hostings (in-package
+first-party extensions toggled via component enable/disable, split APKs, DexClassLoader, data packs) and
+**kept separate installable APKs**. Supernote's sidebar Apps grid + My Apps list every user-installed
+package regardless of a `LAUNCHER` intent — accepted as a Ratta quirk (every other target hides it).
+Mitigation shipped: extension label convention **`NSE · <Name>`** (Templates → `NSE · Templates`,
+debug `… Dev`; `NPE` rejected — reads as NullPointerException), extension icon = **Tabler `puzzle`**
+black outline, app icon = bare **Tabler `seedling`** black outline (green sprout + page dropped; "Paper"
+is a codename, the sprout is the brand), both scaled ×3.1–3.4 to sit at Ratta's own icon size.
+Sprout-inside-puzzle tried and dropped (mush at launcher size). Reference: `docs/extensions.md`
+§"Naming + icon convention". Deferred: the host's discovery is variant-blind (a same-key release
+extension is discovered by the dev host and fails `CallerCheck` per call rather than being hidden) — a
+`HOST_PACKAGE` `<meta-data>` on the `<service>` would fix it; cross that bridge with the Extensions UI.
+
 ---
 
 ## Appendix A — Constants (this arc)

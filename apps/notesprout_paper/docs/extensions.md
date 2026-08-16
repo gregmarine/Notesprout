@@ -31,7 +31,19 @@ There is **no Extensions UI yet**: extensions are installed and removed by hand 
   `TemplateProvider`.**
 - **No launcher** — an extension declares **no launcher Activity**; it shows no icon in any app drawer.
   It is visible only under Settings → Apps (which is also how a user removes one until the Extensions UI
-  exists).
+  exists). **Supernote is the exception:** Ratta's sidebar "Apps" grid and Settings → Apps → My Apps
+  enumerate every user-installed *package*, launcher Activity or not, so an extension shows up there
+  beside the app (tapping it does nothing). Accepted 2026-08-16 as the platform cost of separate APKs;
+  the mitigation is the naming + icon convention below, so it at least reads as an add-on, not an app.
+- **Naming + icon convention** — an extension's label is **`NSE · <Name>`** ("Notesprout Extension";
+  debug builds append ` Dev`) and its icon is the **Tabler `puzzle`** outline in ink-black on white — the
+  same visual vocabulary as the app's own launcher icon (the Tabler `seedling`, bare: "Paper" is a
+  codename, the sprout is the brand). The prefix groups extensions in any alphabetical list and survives
+  Ratta's ~18-character label truncation with the extension's own name intact; the puzzle says "not
+  runnable" where the word can't. (`NPE` was rejected — it reads as NullPointerException.) Adaptive-icon
+  vectors keep Tabler's stroke ratio (2 units per 24) with the glyph scaled ×3.1–3.4 and centred — sized
+  like Ratta's own icons, inside the rounded-square mask, only brushing a circular one; a sprout inside
+  the puzzle piece was tried and dropped — at launcher size it is a smudge.
 - **Discovery** — the core runs
   `PackageManager.queryIntentServices(Intent(action), GET_META_DATA)`. The core manifest must declare
   the action in `<queries>` (mandatory on API 30+, or the query silently returns nothing). Disabled
@@ -132,9 +144,9 @@ An Android **application** APK — `applicationId com.symmetricalpalmtree.notesp
 (the dev extension serves the dev core; release serves release). Dependencies: `:extension-api` +
 `androidx.core:core-ktx`.
 
-- **Label:** "Notesprout Paper · Templates" (debug: "Notesprout Paper · Templates Dev"). **Icon:** a
-  puzzle piece with a green sprout inside it (`drawable/ic_launcher_foreground.xml`; adaptive icon,
-  white background).
+- **Label:** "NSE · Templates" (debug: "NSE · Templates Dev"). **Icon:** the Tabler `puzzle` outline,
+  black on white (`drawable/ic_launcher_foreground.xml`; adaptive icon, white background) — per the
+  convention above.
 - **Manifest:** `android:allowBackup="false"`, **no Activity**, one exported `<service>`:
   ```xml
   <service android:name=".TemplateProviderService" android:exported="true">
@@ -246,8 +258,8 @@ consumed in-project — see `:ext-templates` for the reference implementation).
 1. **Depend on the contract:** `implementation("com.symmetricalpalmtree.notesprout:extension-api:<v>")`
    (in-project: `implementation(project(":extension-api"))`). Nothing else from Paper.
 2. **Be an app with no launcher Activity.** `com.android.application`, your own `applicationId`, an
-   `<application>` with a label (that label is what a future Extensions UI shows) and an icon, **no
-   Activity**, `allowBackup="false"`.
+   `<application>` with a label (`NSE · <Name>` — that label is what a future Extensions UI shows) and
+   the puzzle icon (see the naming + icon convention), **no Activity**, `allowBackup="false"`.
 3. **Declare one exported `<service>` per extension point** with the point's action in its
    intent-filter and the API version as meta-data:
    ```xml

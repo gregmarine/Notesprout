@@ -60,7 +60,7 @@ adb -s <serial> shell pm enable com.symmetricalpalmtree.notesprout.ext.templates
 Two APKs: the core (`:app`) and the Templates extension (`:ext-templates`). Both are debug-signed by
 the same `~/.android/debug.keystore`, which is what satisfies the same-signature trust rule in dev; an
 extension built on another machine is not trusted by this one's core (expected). The extension has no
-launcher icon — remove it via Settings → Apps (or `adb uninstall`).
+launcher icon (it is listed as "NSE · Templates Dev") — remove it via Settings → Apps (or `adb uninstall`).
 
 The drawing surface (g-paper) is consumed from **mavenLocal**
 (`com.symmetricalpalmtree.gpaper:gpaper-{core,onyx,ratta}:0.1.0`). If a g-paper symbol is unresolved,

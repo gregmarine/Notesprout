@@ -43,7 +43,10 @@ runBlocking on UI, IndexGuard, Slog, encryption hygiene, design system). In addi
   enforces `:app → :extension-api` and `:ext-templates → :extension-api`; `:app` and `:ext-templates`
   never depend on each other). An extension is a separate APK with **no launcher Activity**, bound over
   AIDL; the core trusts it only if `checkSignatures == SIGNATURE_MATCH` (in dev, the shared
-  `~/.android/debug.keystore` satisfies this).
+  `~/.android/debug.keystore` satisfies this). **Naming + icon convention:** label `NSE · <Name>`
+  (debug appends ` Dev`), icon = Tabler `puzzle` black outline; the app's own icon is the bare Tabler
+  `seedling` (both sized like Ratta's icons — Supernote lists every installed package, launcher or not;
+  accepted). Details: `docs/extensions.md` §"Naming + icon convention".
 - **Notebook creation:** templates come **only** from `ExtensionRegistry` providers via
   `TemplateProviderClient` (bind-per-operation, signature re-checked at bind, timeouts, unbind in
   `finally`, payload = mime + byte cap + exact requested size); **the core has no renderer**. No
