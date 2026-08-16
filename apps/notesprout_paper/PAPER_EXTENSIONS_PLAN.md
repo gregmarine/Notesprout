@@ -459,7 +459,7 @@ list would otherwise leave a lone heading. Deleted from `:app`: `data/template/`
 ---
 
 ### Phase E2 — Hardening, review, docs freeze
-**Status:** ✅ Complete (commit — see git log; hash recorded in the follow-up commit)
+**Status:** ✅ Complete (commit c215aaa)
 
 **Goal:** the API v1 + Templates extension are trustworthy enough to be the pattern every later
 extension follows.
