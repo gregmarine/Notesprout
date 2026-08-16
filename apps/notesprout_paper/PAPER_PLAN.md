@@ -677,7 +677,7 @@ persists across close/reopen; the library card shows the last-open page as its c
   + page insert/delete; 3-finger on BOOX (the CANCEL path); undo survives page turns; everything
   survives close/reopen; last-open page restored.
 
-**Outcome** (Phase 4, commit pending)
+**Outcome** (Phase 4, commit 9874a63)
 - New files: `notebook/PageGestures.kt` (finger detectors — observer fed from `dispatchTouchEvent`),
   `notebook/UndoRedoStack.kt` (notebook-level LIFO + `Action` sealed type), `notebook/PageMath.kt`
   (pure index/set arithmetic), test `PageMathTest`.
