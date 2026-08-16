@@ -369,7 +369,13 @@ inkBlack for anything that must be seen. AlertDialogs use the reference `ThemeOv
 ## Phases
 
 ### Phase 0 — Foundation & skeleton
-**Status:** ⬜ Not started
+**Status:** ✅ Complete
+
+**Outcome:** Gradle project scaffolded, all Appendix B deps wired, g-paper 0.1.0 from mavenLocal,
+theme/colors/dimens/styles/drawables ported, core utilities (Slog, TopGuard, IndexGuard stub,
+ActionSheetDialog, Device), placeholder LibraryActivity, launcher icon (paper + green sprout),
+CLAUDE.md + skill updated. Verified on SNN + NA5C + MIP11 — all three launch, portrait-locked,
+no crashes. Labels: "Notesprout Paper" / "Notesprout Paper Dev".
 
 **Goal:** an installable "Paper" app that builds against g-paper from mavenLocal, launches on all three
 test devices, and shows a placeholder — plus the project scaffolding every later phase relies on.

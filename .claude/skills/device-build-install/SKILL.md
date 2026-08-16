@@ -46,6 +46,34 @@ Install all requested devices in a single shell block. If the user says devices 
 > 1920×2560, both at density 300. Note also that `Build.MANUFACTURER` is `"Supernote"`, **not**
 > `"ratta"`.
 
+---
+
+## Paper (experimental rebuild)
+
+Paper lives in `apps/notesprout_paper/` with its own Gradle project. See `apps/notesprout_paper/CLAUDE.md`.
+
+- **applicationId:** `com.symmetricalpalmtree.notesprout` (debug: `com.symmetricalpalmtree.notesprout.dev`)
+- **Launcher label:** "Notesprout Paper" (debug: "Notesprout Paper Dev")
+
+```sh
+cd ~/git/Notesprout/apps/notesprout_paper
+./gradlew :app:assembleDebug            # → app/build/outputs/apk/debug/app-debug.apk
+./gradlew :app:testDebugUnitTest
+adb -s <serial> install -r app/build/outputs/apk/debug/app-debug.apk
+```
+
+**Paper test devices** (only these three unless told otherwise):
+
+| Nickname | Device | Serial | Engine |
+|---|---|---|---|
+| SNN | Supernote Nomad | `SN078D10012852` | `gpaper-ratta` |
+| NA5C | BOOX NoteAir5C | `92c16533` | `gpaper-onyx` |
+| MIP11 | Wacom Movink Pad 11 | `5HL21V5007384` | `gpaper-core` |
+
+---
+
+## Notesprout (main app) Tiers
+
 Tiers mirror README.md — change them in both places or they drift.
 
 - **Tier 1 (primary, always-tested):** Supernote Manta (**flagship**) & Nomad (RattaNotebookView firmware ink — install **both** for any Ratta work), BOOX Go 10.3 Gen 2, Go 6 Gen II, Note Max, Palma2 Pro, NoteAir5C

@@ -154,6 +154,8 @@ skill (`.claude/skills/device-build-install/SKILL.md`) — invoked automatically
   under the merge commit)
 - `sprout` — archived (v1.1, everything merged to `main`; branch deleted local + remote, history preserved
   under the merge commit)
+- `paper` — experimental from-scratch rebuild of Notesprout (v0 "Paper"); see
+  `apps/notesprout_paper/PAPER_PLAN.md` and `apps/notesprout_paper/CLAUDE.md`
 - `germination` — previous post-MVP feature branch (reference, not active)
 - `seed` — archived (v1.0, all major features shipped in final commit cc2c7ca)
 
