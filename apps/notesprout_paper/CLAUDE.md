@@ -5,7 +5,9 @@ global-index model, global encryption model, and e-ink design philosophy — and
 
 - **Branch:** `paper`
 - **Location:** `apps/notesprout_paper/`
-- **Plan:** `PAPER_PLAN.md` — read top-to-bottom at the start of every session
+- **Plans:** `PAPER_PLAN.md` (v0, complete — architecture + locked decisions) then
+  `PAPER_EXTENSIONS_PLAN.md` (**active**: extension API + Templates extension) — read both top-to-bottom
+  at the start of every session
 - **Package / applicationId:** `com.symmetricalpalmtree.notesprout` (debug: `.dev` suffix)
 - **Launcher label:** "Notesprout Paper" (debug: "Notesprout Paper Dev")
 

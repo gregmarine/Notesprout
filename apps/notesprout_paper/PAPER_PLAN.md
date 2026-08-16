@@ -11,6 +11,9 @@ e-ink design philosophy — and drops everything else. v0 is **"a set of paper n
 folders and notebooks, each notebook a stack of pages you write on with a pen and flip through.
 
 - **Branch:** `paper` (cut from `main` at `2ce08c9`, 2026-08-15). All work lands here; `main` is untouched.
+- **v0 is complete (Phases 0–6 ✅).** Active work continues in **`PAPER_EXTENSIONS_PLAN.md`** (the extension
+  API + the Templates extension) — read that file after this one; this file is v0's record and its
+  Architecture / Locked decisions / Appendices remain the base.
 - **Location:** `apps/notesprout_paper/` (its own Gradle project, sibling of `apps/notesprout_android/`).
 - **Package / applicationId:** `com.symmetricalpalmtree.notesprout` (debug: `.dev` suffix).
 - **Launcher label:** **"Paper"** while experimental (so it is distinguishable from the installed
@@ -81,7 +84,7 @@ component gap in the host.
 | Object-table name | `notebook` (Paper is the successor; its files are notebooks). |
 | Global index | `notesprout.db`, `objects` table with the universal row shape (see Architecture), lean: no legacy `data` column, no app-content tables. Types: `folder`, `notebook`, `list`, `list_item`. |
 | Encryption | **Encrypt-by-default, global key only.** Auto-minted `NSPT-` recovery key shown once at first launch; Keystore-backed passphrase + raw-key caches; unlock screen after reinstall/restore; non-destructive open helper on every path; attempt rate-limiter. **No per-notebook keys, no rotation / change-passphrase UI in v0.** |
-| Templates | Built-in set only — **Blank / Lined / Dotted / Grid**, drawn procedurally at page size, **chosen once per notebook at creation**, copied into the `.soil` as one `template` row (WEBP q100 blob); every page's `refId` points at it. No library, no image import, not changeable after creation. |
+| Templates | Built-in set only — **Blank / Lined / Dotted / Grid**, drawn procedurally at page size, **chosen once per notebook at creation**, copied into the `.soil` as one `template` row (WEBP q100 blob); every page's `refId` points at it. No library, no image import, not changeable after creation. **Superseded after v0:** the built-in renderer + choice list move to the Templates *extension* (`PAPER_EXTENSIONS_PLAN.md`); the `.soil` template row and how it is drawn are unchanged. |
 | Page geometry | Page = the device's **full portrait screen in px** at creation, stored on the page row. **Full-bleed paper; chrome overlays it** and is registered via `setExclusionRects`. `setPageSize(w,h)` on load so template/ink registration survives other screens. |
 | Orientation | **Portrait-locked** on every screen (`android:screenOrientation="portrait"`). |
 | Tools | Toolbar: **Pen · Eraser · Lasso**, fixed defaults: pen black / one width / `StrokeStyle.PEN`; eraser one radius, whole-stroke; lasso select + drag-move only. Smart-lasso and scribble-erase recognizers **off**. No panels. |
@@ -748,8 +751,8 @@ pinnedNotebookIds`, `RecentsPrefs`, `BrowseState.mode`/`lastOpenNotebookId`, `No
 
 ### Phase 6 — Hardening, review, docs freeze
 **Status:** ✅ Complete (commit 87277da) — user-verified SNN + NA5C 2026-08-16 (full regression + all 4
-Phase-6 fixes pass; MIP11 not re-flashed this pass). Sole open v0 item: the **v0.1 carry-over list**
-(deliverable 5) awaits the user's input.
+Phase-6 fixes pass; MIP11 not re-flashed this pass). Deliverable 5's "v0.1 carry-over list" was
+**dropped 2026-08-16** (Paper is an experiment; no versioning/shipping decisions yet) — v0 is closed.
 
 **Goal:** v0 is trustworthy enough to live in daily.
 
@@ -794,7 +797,7 @@ Phase-6 fixes pass; MIP11 not re-flashed this pass). Sole open v0 item: the **v0
    listing, lazy covers); notebook open < 1 s warm.
 4. Freeze `docs/*.md`, `CLAUDE.md`; write `apps/notesprout_paper/README.md` (short: what Paper is,
    how to build, what it is not).
-5. Memory: mark v0 complete; list what the user asked to carry into v0.1.
+5. Memory: mark v0 complete. ~~List what the user asked to carry into v0.1~~ (dropped 2026-08-16).
 
 **Tests:** full regression of every earlier phase's device checklist on all three devices.
 
