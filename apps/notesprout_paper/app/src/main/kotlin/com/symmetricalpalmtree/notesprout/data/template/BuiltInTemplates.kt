@@ -10,8 +10,10 @@ enum class TemplateKind { BLANK, LINED, DOTTED, GRID }
 object BuiltInTemplates {
 
     private const val SPACING_MM = 8f
-    private const val LINE_WIDTH = 1f
-    private const val DOT_RADIUS = 0.75f
+    /** Feature sizes are authored at mdpi (160 dpi) and scaled by density — a 1 px rule / 1.5 px dot
+     *  at 300 ppi was ~0.13 mm and read as faint grey on e-ink (Phase 3 finding). */
+    private const val LINE_WIDTH_MDPI = 1f
+    private const val DOT_RADIUS_MDPI = 2f
 
     fun render(kind: TemplateKind, widthPx: Int, heightPx: Int, dpi: Float): Bitmap? {
         if (kind == TemplateKind.BLANK) return null
@@ -22,16 +24,24 @@ object BuiltInTemplates {
         val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.BLACK
         }
+        val lineWidth = lineWidthPx(dpi)
+        val dotRadius = dotRadiusPx(dpi)
         when (kind) {
-            TemplateKind.LINED -> drawLined(canvas, paint, widthPx, heightPx, spacingPx)
-            TemplateKind.DOTTED -> drawDotted(canvas, paint, widthPx, heightPx, spacingPx)
-            TemplateKind.GRID -> drawGrid(canvas, paint, widthPx, heightPx, spacingPx)
+            TemplateKind.LINED -> drawLined(canvas, paint, widthPx, heightPx, spacingPx, lineWidth)
+            TemplateKind.DOTTED -> drawDotted(canvas, paint, widthPx, heightPx, spacingPx, dotRadius)
+            TemplateKind.GRID -> drawGrid(canvas, paint, widthPx, heightPx, spacingPx, lineWidth)
             TemplateKind.BLANK -> {}
         }
         return bitmap
     }
 
     fun spacingPx(dpi: Float): Float = SPACING_MM * dpi / 25.4f
+
+    /** Rule thickness: 1 px at mdpi, never below 1 px (≈ 2 px on a 300 ppi panel). */
+    fun lineWidthPx(dpi: Float): Float = maxOf(1f, LINE_WIDTH_MDPI * dpi / 160f)
+
+    /** Dot radius: 2 px at mdpi (≈ 3.75 px radius, ~0.6 mm dot at 300 ppi). */
+    fun dotRadiusPx(dpi: Float): Float = maxOf(1f, DOT_RADIUS_MDPI * dpi / 160f)
 
     fun linePositions(heightPx: Int, spacingPx: Float): List<Float> {
         val topMargin = spacingPx
@@ -68,22 +78,22 @@ object BuiltInTemplates {
         return positions
     }
 
-    private fun drawLined(canvas: Canvas, paint: Paint, w: Int, h: Int, spacingPx: Float) {
-        paint.strokeWidth = LINE_WIDTH
+    private fun drawLined(canvas: Canvas, paint: Paint, w: Int, h: Int, spacingPx: Float, lineWidth: Float) {
+        paint.strokeWidth = lineWidth
         for (y in linePositions(h, spacingPx)) {
             canvas.drawLine(0f, y, w.toFloat(), y, paint)
         }
     }
 
-    private fun drawDotted(canvas: Canvas, paint: Paint, w: Int, h: Int, spacingPx: Float) {
+    private fun drawDotted(canvas: Canvas, paint: Paint, w: Int, h: Int, spacingPx: Float, dotRadius: Float) {
         paint.style = Paint.Style.FILL
         for ((x, y) in dotPositions(w, h, spacingPx)) {
-            canvas.drawCircle(x, y, DOT_RADIUS, paint)
+            canvas.drawCircle(x, y, dotRadius, paint)
         }
     }
 
-    private fun drawGrid(canvas: Canvas, paint: Paint, w: Int, h: Int, spacingPx: Float) {
-        paint.strokeWidth = LINE_WIDTH
+    private fun drawGrid(canvas: Canvas, paint: Paint, w: Int, h: Int, spacingPx: Float, lineWidth: Float) {
+        paint.strokeWidth = lineWidth
         for (y in linePositions(h, spacingPx)) {
             canvas.drawLine(0f, y, w.toFloat(), y, paint)
         }

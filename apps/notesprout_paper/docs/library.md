@@ -78,9 +78,12 @@ row id or `""` for blank) → `notebook_meta` → seal → index row → open no
 
 `BuiltInTemplates` in `data/template/`:
 - Blank: no template row; page `refId = ""`.
-- Lined: 1px horizontal rules every 8 mm (at device DPI), starting after a one-spacing top margin.
-- Dotted: 1.5px dots on an 8 mm grid.
-- Grid: 1px lines both axes every 8 mm.
+- Lined: horizontal rules every 8 mm (at device DPI), starting after a one-spacing top margin.
+- Dotted: dots on an 8 mm grid.
+- Grid: lines both axes every 8 mm.
+- Feature sizes are density-scaled (`lineWidthPx` = max(1, dpi/160) px, `dotRadiusPx` = max(1, 2·dpi/160) px):
+  ~2 px rules and ~0.6 mm dots on a 300 ppi e-ink panel — 1 px / 1.5 px read as faint grey there.
+  Baked into the file at creation, so a change only affects new notebooks.
 
 Geometry functions (`linePositions`, `dotPositions`, `gridPositionsX`) are pure and JVM-testable.
 

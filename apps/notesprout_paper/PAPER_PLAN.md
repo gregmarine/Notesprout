@@ -563,7 +563,7 @@ name (Phase 3 fills it).
 ---
 
 ### Phase 3 — The notebook: g-paper, one page, persistence, cover
-**Status:** 🧪 Awaiting device verification (Claude-smoked on SNN/NA5C/MIP11: engines select, open/close, cover)
+**Status:** ✅ Complete (user-verified SNN/NA5C/MIP11 — commit hash below)
 
 **Goal:** open a notebook and write on page 1 with pen / eraser / lasso on all three engines; ink
 persists across close/reopen; the library card shows the last-open page as its cover.
@@ -630,6 +630,14 @@ persists across close/reopen; the library card shows the last-open page as its c
 - Claude smoke: engines `generic` (MIP11) / `ratta` (SNN) / `onyx` (NA5C) selected; open, tool
   taps, back-close, cover on card all verified by screencap. Ink itself awaits the user's hands.
 - `docs/notebook.md` written.
+- User verification (2026-08-15): every checklist item passed on all three devices. One finding:
+  template features were too fine for e-ink (1 px rules, 1.5 px dots ≈ 0.13 mm at 300 ppi read as
+  faint grey). Fixed: `BuiltInTemplates` sizes are now authored at mdpi and scaled by density
+  (`lineWidthPx` = max(1, dpi/160) px, `dotRadiusPx` = max(1, 2·dpi/160) px) — affects newly
+  created notebooks only (the template is baked into the file at creation). Covers are honest
+  renders of the page (`renderToBitmap` → 512 px → card), so thin features look softer there by
+  design; accepted.
+- Phase 3 commits: a2e63b8 (build) + the template-size follow-up.
 
 ---
 

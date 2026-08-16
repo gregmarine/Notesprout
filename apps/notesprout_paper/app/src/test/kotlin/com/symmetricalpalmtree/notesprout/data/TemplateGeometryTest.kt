@@ -56,4 +56,13 @@ class TemplateGeometryTest {
         assertTrue(xs.isNotEmpty())
         assertTrue(xs.all { it > 0 && it < 1000 })
     }
+
+    @Test
+    fun featureSizesScaleWithDensity_andNeverDropBelowOnePixel() {
+        assertEquals(1f, BuiltInTemplates.lineWidthPx(160f), 0.001f)
+        assertEquals(1.875f, BuiltInTemplates.lineWidthPx(300f), 0.001f)
+        assertEquals(1f, BuiltInTemplates.lineWidthPx(120f), 0.001f)
+        assertEquals(2f, BuiltInTemplates.dotRadiusPx(160f), 0.001f)
+        assertEquals(3.75f, BuiltInTemplates.dotRadiusPx(300f), 0.001f)
+    }
 }
