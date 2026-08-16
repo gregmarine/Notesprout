@@ -314,7 +314,7 @@ exact equality. Never reorder or remove AIDL methods or parcel fields.
 ## Phases
 
 ### Phase E0 — Contract + the Templates extension APK
-**Status:** ✅ Complete (commit a8b90b8)
+**Status:** ✅ Complete (commit ebfc31b)
 
 **Goal:** `:extension-api` and `:ext-templates` exist, build, and install; the extension is invisible
 in every launcher and answers the AIDL contract. **The core is not touched in this phase** (except
