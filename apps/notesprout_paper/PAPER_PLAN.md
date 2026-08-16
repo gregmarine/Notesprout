@@ -563,7 +563,7 @@ name (Phase 3 fills it).
 ---
 
 ### Phase 3 — The notebook: g-paper, one page, persistence, cover
-**Status:** ✅ Complete (user-verified SNN/NA5C/MIP11 — commit hash below)
+**Status:** ✅ Complete (commit d94e2a4; user-verified SNN/NA5C/MIP11)
 
 **Goal:** open a notebook and write on page 1 with pen / eraser / lasso on all three engines; ink
 persists across close/reopen; the library card shows the last-open page as its cover.
@@ -637,7 +637,7 @@ persists across close/reopen; the library card shows the last-open page as its c
   created notebooks only (the template is baked into the file at creation). Covers are honest
   renders of the page (`renderToBitmap` → 512 px → card), so thin features look softer there by
   design; accepted.
-- Phase 3 commits: a2e63b8 (build) + the template-size follow-up.
+- Phase 3 commits: a2e63b8 (build) + d94e2a4 (template sizes, ✅).
 
 ---
 
