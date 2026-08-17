@@ -5,10 +5,12 @@ package com.symmetricalpalmtree.notesprout.extension
  * depends on nothing in `:app` and on no library beyond the Kotlin stdlib, so a third party can
  * consume it as a plain artifact.
  *
- * v1 has two extension points: [ACTION_TEMPLATE_PROVIDER] (interface `ITemplateProvider`) and
- * [ACTION_NOTEBOOK_NAMER] (interface `INotebookNamer`, arc 2). `IExtensionStore` (arc 2) is not a
- * point — it is the host-owned store handed *to* an extension as an in-parameter of a call; its caps
- * are the `STORE_*` constants below.
+ * v1 has three extension points: [ACTION_TEMPLATE_PROVIDER] (interface `ITemplateProvider`),
+ * [ACTION_NOTEBOOK_NAMER] (interface `INotebookNamer`, arc 2) and [ACTION_HANDWRITING_RECOGNIZER]
+ * (interface `IHandwritingRecognizer`, arc 3 — a *capability* point: the host binds it and may lend
+ * it to other extensions later). `IExtensionStore` (arc 2) is not a point — it is the host-owned
+ * store handed *to* an extension as an in-parameter of a call; its caps are the `STORE_*` constants
+ * below.
  */
 object ExtensionContract {
 
@@ -22,6 +24,10 @@ object ExtensionContract {
     /** Intent action a notebook-namer `<service>` declares in its intent-filter (arc 2). */
     const val ACTION_NOTEBOOK_NAMER: String =
         "com.symmetricalpalmtree.notesprout.extension.NOTEBOOK_NAMER"
+
+    /** Intent action a handwriting-recognizer `<service>` declares in its intent-filter (arc 3). */
+    const val ACTION_HANDWRITING_RECOGNIZER: String =
+        "com.symmetricalpalmtree.notesprout.extension.HANDWRITING_RECOGNIZER"
 
     /** `<meta-data>` name (on the `<service>`) carrying the extension's API version. */
     const val META_API_VERSION: String =
@@ -46,6 +52,21 @@ object ExtensionContract {
 
     /** Host-side cap on a notebook name / naming-scheme text an extension returns (chars). */
     const val MAX_NAME_CHARS: Int = 100
+
+    // ── Handwriting-recognizer caps (`IHandwritingRecognizer`, arc 3) ──────
+    // Enforced by the host BEFORE the call (no bind over the cap) and re-checked by the extension.
+
+    /** Most strokes in one `recognizeInk` / `recognizePage` call. */
+    const val MAX_INK_STROKES: Int = 2_000
+
+    /** Most points (summed over all strokes) in one recognize call (≈ 480 KB of floats). */
+    const val MAX_INK_POINTS: Int = 60_000
+
+    /** The host truncates `preContext` to its last this-many chars before the call. */
+    const val MAX_PRECONTEXT_CHARS: Int = 20
+
+    /** Host-side cap on the text a recognize call returns (chars); the rest is dropped. */
+    const val MAX_RECOGNIZED_CHARS: Int = 20_000
 
     /** Extension-namespaced template identity: `"<extension package>:<template id>"`. */
     fun templateIdentity(pkg: String, id: String): String = "$pkg:$id"

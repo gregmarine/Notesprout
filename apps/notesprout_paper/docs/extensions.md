@@ -8,6 +8,9 @@
 > **Arc 2** (`PAPER_NAMING_PLAN.md`): **N0** added the host-owned encrypted extension store; **N1**
 > added the second point, **NotebookNamer**, and the Naming extension (§"The Naming extension",
 > §"NotebookNamer — host behaviour").
+> **Arc 3** (`PAPER_RECOGNITION_PLAN.md`): **M0** added the third point — the engine-neutral
+> **HandwritingRecognizer** *capability* point — and the ML Kit extension (§"HandwritingRecognizer
+> (contract)", §"The ML Kit extension"); the host client + debug test surface come in M1.
 
 Notesprout's original design baked too many features into the core. Paper's core is **paper with
 strokes** — a library of notebooks, each a stack of pages you write on. Everything else is added by
@@ -71,8 +74,8 @@ There is **no Extensions UI yet**: extensions are installed and removed by hand 
 `minSdk 29`, AIDL enabled) that **depends on nothing in `:app` and on no library beyond the Kotlin
 stdlib**. Third parties will consume it as a published Maven artifact later; the module boundary keeps
 that true. Dependency direction (Gradle-enforced, never violated): `:app → :extension-api` and
-`:ext-templates → :extension-api`, `:ext-naming → :extension-api`; `:app` and the extension modules
-never depend on each other.
+`:ext-templates → :extension-api`, `:ext-naming → :extension-api`, `:ext-mlkit → :extension-api`; `:app`
+and the extension modules never depend on each other.
 
 ### `ExtensionContract`
 
@@ -81,6 +84,7 @@ never depend on each other.
 | `API_VERSION` | `1` |
 | `ACTION_TEMPLATE_PROVIDER` | `"com.symmetricalpalmtree.notesprout.extension.TEMPLATE_PROVIDER"` |
 | `ACTION_NOTEBOOK_NAMER` | `"com.symmetricalpalmtree.notesprout.extension.NOTEBOOK_NAMER"` (arc 2 / N1) |
+| `ACTION_HANDWRITING_RECOGNIZER` | `"com.symmetricalpalmtree.notesprout.extension.HANDWRITING_RECOGNIZER"` (arc 3 / M0) |
 | `META_API_VERSION` | `"com.symmetricalpalmtree.notesprout.extension.API_VERSION"` |
 | `MIME_WEBP` | `"image/webp"` |
 | `MAX_RENDER_BYTES` | `16 * 1024 * 1024` (16 MiB — hard cap the host enforces on a render result) |
@@ -88,6 +92,10 @@ never depend on each other.
 | `STORE_MAX_VALUE_BYTES` | `256 * 1024` — largest `IExtensionStore` value |
 | `STORE_MAX_KEYS` | `50_000` — most keys one extension's store may hold |
 | `MAX_NAME_CHARS` | `100` — host-side cap on a notebook name / scheme text an extension returns |
+| `MAX_INK_STROKES` | `2_000` — most strokes in one `recognizeInk` / `recognizePage` call (host-enforced **before** the call, re-checked by the extension) |
+| `MAX_INK_POINTS` | `60_000` — most points summed over the strokes of one call (≈ 480 KB of floats, under the ~1 MB Binder buffer) |
+| `MAX_PRECONTEXT_CHARS` | `20` — the host truncates `preContext` to its tail before the call |
+| `MAX_RECOGNIZED_CHARS` | `20_000` — host-side cap on the text a recognize call returns (the rest is dropped) |
 | `templateIdentity(pkg, id)` | `"$pkg:$id"` |
 | `parseIdentity(s)` | `Pair<pkg, id>?` — splits at the **first** `:`; null if `:` absent or either side empty. The Blank sentinel is the host's, not the contract's. |
 
@@ -144,7 +152,35 @@ interface ITemplateProvider {
      *  Returns null if the id is unknown. Called on a Binder thread; may take seconds on e-ink CPUs. */
     RenderedTemplate render(String templateId, int widthPx, int heightPx, float dpi);
 }
+
+// InkStroke.aidl
+package com.symmetricalpalmtree.notesprout.extension;
+parcelable InkStroke;
+
+// IHandwritingRecognizer.aidl — the HANDWRITING_RECOGNIZER point (arc 3 / M0).
+// Engine-neutral. Every argument is bare geometry; every result is plain text. Stateless.
+interface IHandwritingRecognizer {
+    /** One of RecognizerStatus.* — READY / NEEDS_DOWNLOAD / DOWNLOADING / UNAVAILABLE. Fast. */
+    int status();
+    /** Start acquiring what the engine needs (model download). Returns at once; poll status().
+     *  A no-op while READY or already DOWNLOADING. */
+    void prepare();
+    /** Recognize one writing area (no layout analysis). [strokes] in the area's px space,
+     *  [areaWidth]/[areaHeight] > 0, [preContext] = the text just before this ink ("" if none).
+     *  Returns the top candidate ("" if none). Throws IllegalStateException if status() != READY,
+     *  IllegalArgumentException over the MAX_INK_* caps. */
+    String recognizeInk(in List<InkStroke> strokes, float areaWidth, float areaHeight, String preContext);
+    /** Recognize a whole page: the engine finds lines / paragraphs itself and chains context.
+     *  [strokes] in page px; [pageWidth]/[pageHeight] the page size. Returns lines joined by '\n',
+     *  paragraphs separated by a blank line ("" if nothing recognizable). Same exceptions. */
+    String recognizePage(in List<InkStroke> strokes, float pageWidth, float pageHeight);
+}
 ```
+
+`RecognizerStatus` is a Kotlin `object` of `Int` constants (AIDL carries `int` — no parcelable, no
+enum): `READY 0` (model on device, engine constructed) · `NEEDS_DOWNLOAD 1` (call `prepare()`) ·
+`DOWNLOADING 2` (a `prepare()` is in flight) · `UNAVAILABLE 3` (the engine cannot run here). The host
+treats any other value as `UNAVAILABLE`.
 
 ### Parcelables (hand-written — no `kotlin-parcelize`)
 
@@ -164,16 +200,23 @@ interface ITemplateProvider {
   a namer's one text field: caption above, grey hint inside, one help line below. Untrusted on the host
   side — truncated to 40 / 60 / 200 chars before display.
 
+- `InkStroke(x: FloatArray, y: FloatArray)` — `writeInt(n); writeFloatArray(x); writeFloatArray(y)`
+  (M0). One stroke of **bare geometry** in the caller's px space; `require(x.size == y.size &&
+  x.isNotEmpty())` runs in the constructor, so a malformed stroke is rejected at unmarshal time on the
+  receiving side too. Nothing else is in it — no id, no time, no pressure, no colour, no width. A
+  compatible tail (e.g. a time channel) may be appended after `y` later; readers of this version stop
+  after `y`.
+
 All parcelables carry `@JvmField val CREATOR` and match their `.aidl` declarations.
 `RenderedTemplate.describeContents()` returns `CONTENTS_FILE_DESCRIPTOR` (it carries the region's fd —
-`Bundle.hasFileDescriptors()` relies on this); `TemplateInfo` and `SchemeField` return 0.
+`Bundle.hasFileDescriptors()` relies on this); `TemplateInfo`, `SchemeField` and `InkStroke` return 0.
 
 ### `HostCallerCheck` (N1 — shared extension-side trust gate)
 
 `HostCallerCheck.enforce(context, hostPackage)` lives in `:extension-api` so every extension (first- or
 third-party) gets the belt-and-braces caller check for free: `Binder.getCallingUid()` →
 `getPackagesForUid(uid)` must contain `hostPackage` **and** `checkSignatures(uid, Process.myUid()) ==
-SIGNATURE_MATCH`, else `SecurityException`. Both first-party extensions call it first in **every** stub
+SIGNATURE_MATCH`, else `SecurityException`. Every first-party extension calls it first in **every** stub
 method with `BuildConfig.HOST_PACKAGE` (the per-build-type host id). It replaced the Templates
 extension's private `CallerCheck` (the one permitted N1 touch to `:ext-templates`); it uses only
 `android.*` — the library still depends on nothing.
@@ -305,6 +348,87 @@ behaviour without the extension is unchanged.
   `(\d{1,9})`; zero-padded to K, never truncated (`{n:2}` after 99 → `100`).
 - **Field wording** (`SchemeField` from `strings.xml`): label "Default notebook name" · hint
   "e.g. Meeting {date} {n:2}" · help "Tokens: {date} {time} {n} {n:3}. Leave empty for the standard name."
+
+## HandwritingRecognizer (contract — arc 3 / M0)
+
+The third point and the first **capability point**: an extension point whose implementation the core
+binds itself and — in a later arc — *lends* to other extensions through a per-bind, uid-bound,
+revocable proxy implementing the same `IHandwritingRecognizer` interface (the `IExtensionStore`
+pattern; see `PAPER_RECOGNITION_PLAN.md` §"The capability pattern"). Extensions never bind each other.
+Paper's core is "paper with strokes" and never learns what handwriting *says*: recognition results
+are not stored anywhere by the core (no `page_text`, no `.soil` / index change).
+
+- **Action** `ACTION_HANDWRITING_RECOGNIZER`; interface `IHandwritingRecognizer`; parcelable
+  `InkStroke`; status constants `RecognizerStatus`. Engine-neutral — a TrOCR or Onyx-firmware
+  extension can implement it later.
+- **Outward payload — the recorded widening of boundary-audit row 3 for this point only:** per stroke
+  the x/y point arrays (px), plus the writing-area or page size, plus ≤ `MAX_PRECONTEXT_CHARS` of
+  pre-context. **Never** stroke ids, notebook/page ids, names, colour, width, style, pressure, tilt,
+  timestamps, keys or paths. This is the first point that sends ink to an extension.
+- **Protocol:** `status()` first (fast); `NEEDS_DOWNLOAD` → `prepare()` (returns at once) and poll;
+  `recognize*` only when `READY` — otherwise the extension throws `IllegalStateException` (so a real
+  failure is never mistaken for a blank page). `prepare()` is idempotent (a no-op while `READY` or
+  `DOWNLOADING`).
+- **Two calls:** `recognizePage(strokes, pageW, pageH)` — the extension segments the page into lines
+  and paragraphs itself and chains pre-context line to line (the core gains no HWR/layout knowledge);
+  `recognizeInk(strokes, areaW, areaH, preContext)` — one writing area, no segmentation (the primitive a
+  future consumer wants for a lasso'd selection or a heading). Both return plain text (`""` allowed).
+- **Caps** (`MAX_INK_STROKES` 2 000 · `MAX_INK_POINTS` 60 000): a plain-parcel transport (`List<InkStroke>`
+  in the transaction) — enforced **host-side before the call** (no bind over the cap) and **re-checked
+  extension-side** (`IllegalArgumentException`). A `SharedMemory` transport is a later compatible
+  change if a real page ever hits it.
+- **Everything inward is untrusted:** status outside `0..3` → `UNAVAILABLE`; text `?: ""` and truncated
+  to `MAX_RECOGNIZED_CHARS`.
+- **Timeouts (host, M1):** bind ≤ 3 s · `status`/`prepare` ≤ 2 s · `recognizeInk` ≤ 10 s ·
+  `recognizePage` ≤ 30 s.
+- **No store:** the point is stateless (`en-US` only in v1; language selection is a later arc).
+- **Logging rule (both sides):** recognized text is never logged — counts and durations only.
+
+## The ML Kit extension (`:ext-mlkit` — arc 3 / M0)
+
+The first implementation of `HANDWRITING_RECOGNIZER`, using **Google ML Kit Digital Ink Recognition**
+(`com.google.mlkit:digital-ink-recognition:19.0.0` — the same artifact + version the original Notesprout
+ships; on-device, no Play Services required). **The dependency lives in `:ext-mlkit` only** — never
+`:app`, never `:extension-api`.
+
+- **APK:** `applicationId com.symmetricalpalmtree.notesprout.ext.mlkit` (debug `.dev`), `versionName
+  0.1.0`, Gradle/manifest shape identical to `:ext-naming` (no Activity, `allowBackup="false"`,
+  `BuildConfig.HOST_PACKAGE` per build type) plus the ML Kit dependency. Label **"NSE · ML Kit"** (debug
+  "NSE · ML Kit Dev"), puzzle icon. One exported `<service android:name=".HandwritingRecognizerService">`
+  with the `HANDWRITING_RECOGNIZER` action + `API_VERSION` meta-data `1`.
+- **`HandwritingRecognizerService`** returns an `IHandwritingRecognizer.Stub`; every method first calls
+  `HostCallerCheck.enforce`. `status()`/`prepare()` delegate to `ModelManager`; `recognizeInk` /
+  `recognizePage` re-check the `MAX_INK_*` caps + positive sizes (`IllegalArgumentException`), require
+  `READY` (`IllegalStateException`), then run `MlKitEngine` **synchronously on the Binder thread**
+  (`Tasks.await`; the host's timeout is the ceiling, ML Kit's executor does the work; each ML Kit call
+  is additionally bounded to 10 s so a wedged engine can't pin a Binder thread). Any engine failure →
+  `IllegalStateException` — only Binder-marshalable exceptions leave the stub (arc-2 lesson).
+- **`ModelManager`** (process-lifetime `object`) owns the `en-US` `DigitalInkRecognitionModel` and the
+  client. `status()` = `READY` if the client is built, else `RemoteModelManager.isModelDownloaded`
+  (`Tasks.await` ≤ 1.5 s — inside the host's 2 s) → builds the client and `READY` / `NEEDS_DOWNLOAD` /
+  `DOWNLOADING` (a `prepare()` task in flight) / `UNAVAILABLE` (identifier null, await failure).
+  `prepare()` = `RemoteModelManager.download(model, DownloadConditions())` (**any network**, as the
+  original), once (idempotent while in flight, no-op while `READY`), returns immediately; success builds
+  the client → `READY`; failure logs the exception class and stays retryable (`NEEDS_DOWNLOAD` again).
+- **Where the model lives — the recorded exception to "extensions keep data in the host store":** the
+  ~20 MB model is downloaded and managed by ML Kit **in the extension's own app storage**. Engine assets
+  are not user data (and exceed the 256 KiB store value cap); user data still goes to the host store
+  only. Uninstalling the extension removes the model; disable/enable keeps it.
+- **`MlKitEngine`:** `recognizeInk` builds one `Ink` from the x/y arrays (`Ink.Point.create(x, y)` — no
+  time channel), `WritingArea(max(w,1), max(h,1))`, `RecognitionContext(preContext = tail ≤ 20 chars)`
+  → top candidate's text or `""`. `recognizePage` = `StrokeSegmenter.segment(strokes)` → for each
+  paragraph, for each line: `recognizeInk(line.strokes, line.bounds.width, layout.medianLineHeight
+  (fallback: the line's own height), preContext = the previous recognized line)` → trimmed; a line that
+  recognizes to `""` contributes nothing (no "unrecognized" placeholder); lines joined by `\n`,
+  paragraphs by a blank line (`PageText.join`, pure + tested).
+- **`StrokeSegmenter`** (pure Kotlin, 8 JVM tests) — a **verbatim port** of the original
+  `recognition/StrokeSegmenter` (`RectF` → the tiny pure `Box`, `LiveStroke` → `InkStroke`): vertical
+  projection profile → writing bands; each stroke to its (nearest) band; lines ordered left→right;
+  a ≤ 3-stroke fragment with > 0.4 vertical overlap folds into its neighbour; a blank gap > 0.9 × the
+  median line height starts a new paragraph. Constants unchanged: `PARA_GAP_FRAC 0.9` ·
+  `BAND_COVERAGE_FRAC 0.15` · `FRAGMENT_MAX_STROKES 3` · `MERGE_OVERLAP_FRAC 0.4`. The only
+  differences from the original file: no logging (pure), and the AABB is computed once per stroke
+  (`Box.of`) since `InkStroke` carries no precomputed box.
 
 ## Host behaviour (`:app`, package `extension/`)
 
@@ -524,12 +648,14 @@ cd ~/git/Notesprout/apps/notesprout_paper
 adb -s <serial> install -r app/build/outputs/apk/debug/app-debug.apk
 adb -s <serial> install -r ext-templates/build/outputs/apk/debug/ext-templates-debug.apk
 adb -s <serial> install -r ext-naming/build/outputs/apk/debug/ext-naming-debug.apk
+adb -s <serial> install -r ext-mlkit/build/outputs/apk/debug/ext-mlkit-debug.apk        # ML Kit model downloads on first prepare() (Wi-Fi once per device)
 adb -s <serial> shell pm enable com.symmetricalpalmtree.notesprout.ext.templates.dev          # BOOX sideload trap
 adb -s <serial> shell pm enable com.symmetricalpalmtree.notesprout.ext.naming.dev
+adb -s <serial> shell pm enable com.symmetricalpalmtree.notesprout.ext.mlkit.dev
 adb -s <serial> shell pm disable-user --user 0 com.symmetricalpalmtree.notesprout.ext.templates.dev  # simulate "not installed"
 adb -s <serial> uninstall com.symmetricalpalmtree.notesprout.ext.templates.dev
 ```
 
-All three APKs are signed by the same debug keystore (`~/.android/debug.keystore`) — that is what satisfies
+All four APKs are signed by the same debug keystore (`~/.android/debug.keystore`) — that is what satisfies
 the same-signature trust rule in dev. An extension built on another machine will **not** be trusted by
 this Mac's core build (different debug key) — expected, not a bug.

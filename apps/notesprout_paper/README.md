@@ -38,8 +38,12 @@ paper notebooks.
   {n:2}`) from the New-folder dialog or the folder's long-press, and +Notebook in that folder opens
   pre-named by it; the schemes live in a **core-owned encrypted store** (`Garden/<pkg>.db`, under the
   global key — the extension never sees a key or a path) that survives the extension's removal.
-  Without it every entry point is absent and names are the standard `yyyyMMdd_HHmmss`. The contract
-  lives in `:extension-api`; see `docs/extensions.md`.
+  Without it every entry point is absent and names are the standard `yyyyMMdd_HHmmss`. The third is
+  **ML Kit** (`:ext-mlkit`): the first implementation of the engine-neutral *handwriting recognizer*
+  capability point — bare stroke geometry in, plain text out, the ~20 MB `en-US` model downloaded on
+  first use into the extension's own sandbox. Nothing user-visible calls it yet (a debug-build-only
+  "Recognize page" action arrives in arc 3 / M1; later extensions will consume it *through the core*).
+  The contract lives in `:extension-api`; see `docs/extensions.md`.
 
 ## What Paper is **not** (v0)
 
@@ -55,21 +59,24 @@ over from Notesprout just because it exists there).
 
 ```sh
 cd apps/notesprout_paper
-./gradlew assembleDebug               # all modules → app-debug.apk + ext-templates-debug.apk + ext-naming-debug.apk
+./gradlew assembleDebug               # all modules → app-debug.apk + ext-templates-debug.apk + ext-naming-debug.apk + ext-mlkit-debug.apk
 ./gradlew testDebugUnitTest           # all modules
 adb -s <serial> install -r app/build/outputs/apk/debug/app-debug.apk
 adb -s <serial> install -r ext-templates/build/outputs/apk/debug/ext-templates-debug.apk   # the Templates extension
 adb -s <serial> install -r ext-naming/build/outputs/apk/debug/ext-naming-debug.apk         # the Naming extension
+adb -s <serial> install -r ext-mlkit/build/outputs/apk/debug/ext-mlkit-debug.apk           # the ML Kit extension (model needs Wi-Fi once)
 adb -s <serial> shell pm enable com.symmetricalpalmtree.notesprout.ext.templates.dev        # BOOX may land it disabled
 adb -s <serial> shell pm enable com.symmetricalpalmtree.notesprout.ext.naming.dev
+adb -s <serial> shell pm enable com.symmetricalpalmtree.notesprout.ext.mlkit.dev
 ```
 
-Three APKs: the core (`:app`), the Templates extension (`:ext-templates`) and the Naming extension
+Four APKs: the core (`:app`), the Templates extension (`:ext-templates`), the Naming extension
 (`:ext-naming` — per-folder default-name schemes such as `Meeting {date} {n:2}`, kept in a core-owned
-encrypted store). All are debug-signed by the same `~/.android/debug.keystore`, which is what satisfies
+encrypted store) and the ML Kit extension (`:ext-mlkit` — the handwriting recognizer; the only module
+that depends on ML Kit). All are debug-signed by the same `~/.android/debug.keystore`, which is what satisfies
 the same-signature trust rule in dev; an extension built on another machine is not trusted by this
 one's core (expected). Extensions have no launcher icon (listed as "NSE · Templates Dev" / "NSE ·
-Naming Dev") — remove them via Settings → Apps (or `adb uninstall`).
+Naming Dev" / "NSE · ML Kit Dev") — remove them via Settings → Apps (or `adb uninstall`).
 
 The drawing surface (g-paper) is consumed from **mavenLocal**
 (`com.symmetricalpalmtree.gpaper:gpaper-{core,onyx,ratta}:0.1.0`). If a g-paper symbol is unresolved,
@@ -81,10 +88,10 @@ run `./gradlew publishToMavenLocal` in `~/git/g-paper` first. Requires a Temurin
 
 | Concern | Path |
 |---|---|
-| Project memory / plan (read first) | `PAPER_PLAN.md` (v0), `PAPER_EXTENSIONS_PLAN.md` (arc 1 — extension API + Templates), `PAPER_NAMING_PLAN.md` (arc 2 — extension store + Naming) |
+| Project memory / plan (read first) | `PAPER_PLAN.md` (v0), `PAPER_EXTENSIONS_PLAN.md` (arc 1 — extension API + Templates), `PAPER_NAMING_PLAN.md` (arc 2 — extension store + Naming), `PAPER_RECOGNITION_PLAN.md` (arc 3 — handwriting-recognizer capability point + ML Kit) |
 | Standing rules + build facts | `CLAUDE.md` |
 | Encryption & launch spine | `docs/crypto.md` |
 | Containers & global index | `docs/data.md` |
 | Library screen | `docs/library.md` |
 | Notebook screen (paper, gestures, pages, undo) | `docs/notebook.md` |
-| Extensions (model, contract v1, Templates + Naming extensions, the extension store, boundary audit, writing one) | `docs/extensions.md` |
+| Extensions (model, contract v1, Templates + Naming + ML Kit extensions, the extension store, the recognizer point, boundary audit, writing one) | `docs/extensions.md` |

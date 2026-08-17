@@ -8,7 +8,7 @@ global-index model, global encryption model, and e-ink design philosophy — and
 - **Plans:** `PAPER_PLAN.md` (v0, complete — architecture + locked decisions), then
   `PAPER_EXTENSIONS_PLAN.md` (arc 1, complete + frozen: extension API v1 + Templates extension), then
   `PAPER_NAMING_PLAN.md` (arc 2, complete + frozen: the host-owned encrypted extension store + the
-  Naming extension), then `PAPER_RECOGNITION_PLAN.md` (**arc 3, planned 2026-08-17, M0–M2 ⬜**: the
+  Naming extension), then `PAPER_RECOGNITION_PLAN.md` (**arc 3, M0 ✅ 2026-08-17, M1–M2 ⬜**: the
   engine-neutral `HANDWRITING_RECOGNIZER` capability point + the ML Kit extension `NSE · ML Kit`,
   debug-only "Recognize page" test surface) — read all four top-to-bottom at the start of every
   session; the next `⬜` phase is the work
@@ -41,12 +41,13 @@ runBlocking on UI, IndexGuard, Slog, encryption hygiene, design system). In addi
   `com.symmetricalpalmtree.gpaper.core.engine`.
 - **mavenLocal can lag the g-paper checkout** — if a g-paper symbol from `docs/api.md` is unresolved,
   `cd ~/git/g-paper && ./gradlew publishToMavenLocal` before suspecting anything else.
-- **Extensions** (`PAPER_EXTENSIONS_PLAN.md`, `docs/extensions.md`): the project has four modules —
+- **Extensions** (`PAPER_EXTENSIONS_PLAN.md`, `docs/extensions.md`): the project has five modules —
   `:app` (the core/host), `:extension-api` (the shared contract library), `:ext-templates` (the
-  first-party Templates extension APK) and `:ext-naming` (the Naming extension APK, arc 2).
+  first-party Templates extension APK), `:ext-naming` (the Naming extension APK, arc 2) and
+  `:ext-mlkit` (the ML Kit handwriting-recognizer extension APK, arc 3).
   **`:extension-api` depends on nothing in `:app`, ever** (Gradle enforces `:app → :extension-api`,
-  `:ext-templates → :extension-api`, `:ext-naming → :extension-api`; `:app` and the extension modules
-  never depend on each other). Extension-side caller check = `HostCallerCheck.enforce(ctx,
+  `:ext-templates → :extension-api`, `:ext-naming → :extension-api`, `:ext-mlkit → :extension-api`;
+  `:app` and the extension modules never depend on each other). Extension-side caller check = `HostCallerCheck.enforce(ctx,
   BuildConfig.HOST_PACKAGE)` from `:extension-api`, first thing in every stub method. An extension is a separate APK with **no launcher Activity**, bound over
   AIDL; the core trusts it only if `checkSignatures == SIGNATURE_MATCH` (in dev, the shared
   `~/.android/debug.keystore` satisfies this). **Naming + icon convention:** label `NSE · <Name>`
@@ -76,6 +77,18 @@ runBlocking on UI, IndexGuard, Slog, encryption hygiene, design system). In addi
   (`acceptDefaultName` = name rule + `MAX_NAME_CHARS`). Outward payload = folder UUID + sibling
   notebook names (+ the typed scheme) — the one recorded widening of the boundary rule; the core never
   interprets a scheme.
+- **HandwritingRecognizer** (arc 3 / M0, `docs/extensions.md` §"HandwritingRecognizer (contract)" +
+  §"The ML Kit extension"): the third point (`ACTION_HANDWRITING_RECOGNIZER`, `IHandwritingRecognizer`,
+  `InkStroke`, `RecognizerStatus`) is a **capability point** — engine-neutral, stateless, `en-US` only;
+  the core binds it (M1) and later lends it to consumer extensions through a proxy, never
+  extension-to-extension. Outward = bare x/y geometry + area/page size + ≤ 20 chars pre-context (the
+  recorded widening of the boundary rule for this point); caps `MAX_INK_STROKES 2 000` /
+  `MAX_INK_POINTS 60 000` host-enforced before the call and re-checked by the extension.
+  **`com.google.mlkit:digital-ink-recognition` lives in `:ext-mlkit` only** — never `:app` or
+  `:extension-api`. The model lives in the extension's own sandbox (the recorded exception to
+  "extension data goes to the host store" — engine assets are not user data). `status()` →
+  `prepare()` → `recognize*`; not READY throws `IllegalStateException`. **Recognized text is never
+  logged on either side** — counts + durations only.
 - **Extension boundary (frozen in E2):** nothing but what a call needs crosses outward (templates: id +
   page geometry + dpi — never keys, paths, ids, names, strokes); everything inward is untrusted. Adding
   an extension point follows `docs/extensions.md` §"Rules for adding a future extension point" and adds
@@ -90,7 +103,7 @@ runBlocking on UI, IndexGuard, Slog, encryption hygiene, design system). In addi
 
 ```sh
 cd ~/git/Notesprout/apps/notesprout_paper
-./gradlew assembleDebug                  # all modules → app + ext-templates + ext-naming debug APKs
+./gradlew assembleDebug                  # all modules → app + ext-templates + ext-naming + ext-mlkit debug APKs
 ./gradlew testDebugUnitTest              # all modules
 adb -s SN078D10012852 install -r app/build/outputs/apk/debug/app-debug.apk   # SNN (Nomad)
 adb -s 92c16533       install -r app/build/outputs/apk/debug/app-debug.apk   # NA5C
@@ -98,9 +111,10 @@ adb -s 5HL21V5007384  install -r app/build/outputs/apk/debug/app-debug.apk   # M
 # The extensions (install alongside the app on the same device):
 adb -s <serial> install -r ext-templates/build/outputs/apk/debug/ext-templates-debug.apk
 adb -s <serial> install -r ext-naming/build/outputs/apk/debug/ext-naming-debug.apk
+adb -s <serial> install -r ext-mlkit/build/outputs/apk/debug/ext-mlkit-debug.apk      # ~40 MB; the en-US model (~20 MB) downloads on first prepare() — Wi-Fi once per device
 adb -s <serial> shell pm enable com.symmetricalpalmtree.notesprout.ext.templates.dev  # BOOX sideload trap — BOOX may
 adb -s <serial> shell pm enable com.symmetricalpalmtree.notesprout.ext.naming.dev     #   re-disable a few seconds AFTER
-#   install; re-run enable and confirm with `pm list packages -d`
+adb -s <serial> shell pm enable com.symmetricalpalmtree.notesprout.ext.mlkit.dev      #   install; re-run enable and confirm with `pm list packages -d`
 ```
 
 Debug launch: `adb -s <serial> shell am start -n com.symmetricalpalmtree.notesprout.dev/com.symmetricalpalmtree.notesprout.bootstrap.BootstrapActivity`

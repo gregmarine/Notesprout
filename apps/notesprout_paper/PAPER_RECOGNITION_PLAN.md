@@ -9,7 +9,7 @@
 > store + Naming extension, frozen) and both `CLAUDE.md` files. `docs/extensions.md` is the subsystem
 > reference all three arcs write into.
 >
-> **Status: planned 2026-08-17 — M0 ⬜ · M1 ⬜ · M2 ⬜.**
+> **Status: M0 ✅ (2026-08-17, user-verified SNN + NA5C) · M1 ⬜ · M2 ⬜.**
 
 ## Why
 
@@ -339,7 +339,7 @@ extensions. The recipe, fixed by this arc so a consumer arc can't drift from it:
 ## Phases
 
 ### Phase M0 — Contract + the ML Kit extension (no host change)
-**Status:** ⬜ Not started
+**Status:** ✅ Complete (commit — see below; user-verified SNN + NA5C 2026-08-17)
 
 **Goal:** `IHandwritingRecognizer` exists in the contract; `NSE · ML Kit` installs, is discovered
 by nothing yet, and can be exercised end-to-end from a JVM test (segmenter) and from adb (`dumpsys`
@@ -390,6 +390,36 @@ user-visible change.
 **Close-out:** status ✅ + Outcome (incl. the download-after-unbind experiment result if it can be run
 from an adb-driven `am start-service`/`bindService` probe — else deferred to M1's first real
 `prepare()`); docs; memory; commit + push.
+
+**Outcome (2026-08-17):**
+- **Q&A:** all five recommended defaults taken — `RecognizerStatus` = `object` of `Int`s · not-READY
+  throws `IllegalStateException` · download conditions none (any network) · `prepare()` no-op while
+  READY/DOWNLOADING · six segmenter cases written (the original has no `StrokeSegmenterTest`).
+- **M0 base commit (for M2's review range):** `4cdf74e` (the commit before M0's first commit).
+- **Built:** `:extension-api` + `InkStroke`/`RecognizerStatus`/AIDL/constants (4 tests);
+  `:ext-mlkit` (`HandwritingRecognizerService`, `ModelManager`, `MlKitEngine` + pure `PageText`,
+  `StrokeSegmenter`, `Box`; 15 tests: 8 segmenter · 4 box · 3 page-text). `assembleDebug` builds
+  five modules; all-module `testDebugUnitTest` green. `ext-mlkit-debug.apk` = **40 MB** (ML Kit's
+  on-device engine; the ~20 MB model downloads separately on first `prepare()`).
+- **Port notes:** the segmenter is verbatim except (a) no log line (pure module — the count log
+  moved to the service) and (b) the AABB is computed once per stroke via `Box.of` (`InkStroke` has
+  no precomputed box). Two of the first-cut fixtures were unrealistic (8-stroke lines with touching
+  extents → one band) — the fixtures were made realistic (20-stroke lines / a 10 px gap); the
+  algorithm was not touched. `MlKitEngine` bounds each ML Kit call to 10 s (`Tasks.await` timeout)
+  so a wedged engine cannot pin a Binder thread; the host's per-call timeout remains the ceiling.
+- **Download-after-unbind experiment:** **deferred to M1's first real `prepare()`** — `HostCallerCheck`
+  refuses the adb shell uid, so no adb-driven probe can call `prepare()` (and nothing else binds
+  the service before M1).
+- **Device sanity (SNN + NA5C, 2026-08-17 — Claude):** `ext-mlkit-debug.apk` installs on both;
+  `pm list packages` shows `…ext.mlkit.dev`; `dumpsys package` resolves the
+  `HANDWRITING_RECOGNIZER` action to `HandwritingRecognizerService`; `pm resolve-activity …LAUNCHER` →
+  "No activity found"; NA5C stayed enabled after the `pm enable` dance (`pm list packages -d` empty);
+  merged manifest carries `API_VERSION = 1`. **Note:** ML Kit's Play-Services dependency merges a
+  non-exported, non-launcher `com.google.android.gms.common.api.GoogleApiActivity` into the APK
+  (same as the original app) — the extension still declares no Activity of its own. `logcat -s
+  HandwritingRecognizerService ModelManager` silent (nothing binds). MIP11 not attached — not installed (M1 verifies all three).
+- **User checklist:** both items pass on SNN + NA5C (label + icon, no launcher icon; Paper +
+  Templates + Naming unchanged).
 
 ---
 
