@@ -53,6 +53,14 @@ runBlocking on UI, IndexGuard, Slog, encryption hygiene, design system). In addi
   `finally`, payload = mime + byte cap + exact requested size); **the core has no renderer**. No
   extension → no Template section, blank notebook. A render failure stays on the screen with a toast —
   never a silent Blank. Identity labels: `BLANK` | `<pkg>:<id>` | legacy `LINED`/… .
+- **Extension store** (arc 2 / N0, `data/extstore/`, `docs/extensions.md` §"The extension store"): an
+  extension's data lives in a **core-owned** SQLCipher key/value DB `Garden/<pkg>.db` under the global
+  key (raw-key id `ext:<pkg>`), opened only by `ExtensionStores.open` (open-or-create — the **third
+  named create entry point**, `docs/crypto.md` audit item 2) and reached by the extension only through
+  an `ExtensionStoreBinder` the host mints **per bind, uid-bound, revoked in the unbind `finally`**;
+  caps `ExtensionContract.STORE_*` (512 chars / 256 KiB / 50 000 keys). Never a key, path, or `File`
+  across the boundary. Open the store on IO **before** binding (cold KDF must not sit inside the call
+  timeout). The `.db` survives the extension's uninstall.
 - **Extension boundary (frozen in E2):** nothing but what a call needs crosses outward (templates: id +
   page geometry + dpi — never keys, paths, ids, names, strokes); everything inward is untrusted. Adding
   an extension point follows `docs/extensions.md` §"Rules for adding a future extension point" and adds

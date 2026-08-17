@@ -10,6 +10,7 @@ through `crypto/SoilCrypto` factories wrapped in `data/NonDestructiveOpenHelperF
 | `indexFile(ctx)` | `getExternalFilesDir(null)/notesprout.db` |
 | `gardenDir(ctx)` | `getExternalFilesDir(null)/Garden/` |
 | `soilFile(ctx, id)` | `Garden/<uuid>.soil` |
+| `extensionStoreFile(ctx, pkg)` | `Garden/<ext package>.db` — an extension's host-owned store (arc 2, N0); `pkg` must pass `isValidExtensionPackage` (`[a-zA-Z0-9_.]+`) or it throws. Nothing enumerates `Garden/`, so `.db` and `.soil` never mix. |
 | `sidecarsOf(file)` | `-wal`, `-shm`, `-journal` next to a db file |
 
 ## Global index — `notesprout.db` (`data/index/`)
@@ -88,6 +89,23 @@ combination; derives the stride from the known bits; drops a partial trailing po
 inflate loop on a zero-progress round. `encode(x, y, pressure?, tilt?)` / `decode(blob): Points`
 (parallel arrays — no Android / g-paper dependency). `core/InkColorCodec` maps `#RRGGBB` /
 `#AARRGGBB` ⇄ ARGB Int (garbage → black). JVM tests: `StrokeCodecTest`, `InkColorCodecTest`.
+
+## Extension stores — `Garden/<pkg>.db` (`data/extstore/`)
+
+One encrypted key/value database per extension package, **owned by the core** and opened only by
+`ExtensionStores.open(ctx, pkg)` (open-or-create; process-lifetime cache; `closeAll()` for
+tests/debug). Encrypted under the **global** passphrase from `KeySession`; raw-key cache file id
+**`ext:<pkg>`** (namespaced so it never collides with a notebook UUID or `KeyMaterial.INDEX_FILE_ID`).
+`ExtensionStoreDatabase` (Room, `user_version` = 1, WAL, `wal_autocheckpoint=100`, `busy_timeout=5000`).
+
+```sql
+CREATE TABLE kv (`key` TEXT NOT NULL PRIMARY KEY, `value` BLOB NOT NULL, updatedAt INTEGER NOT NULL);
+```
+
+The extension reaches it only through `IExtensionStore` (an `ExtensionStoreBinder` the host mints
+per bind, uid-bound and revocable); it never sees the path or a key. The file **survives** the
+extension's uninstall / disable. Full model, caps and rules: `docs/extensions.md` §"The extension
+store". "Forget cached key" (debug) clears `ext:*` raw keys with everything else.
 
 ## Prefs (ids and enum names only — never names)
 

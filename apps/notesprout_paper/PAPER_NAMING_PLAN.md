@@ -76,8 +76,8 @@ Opus is fine for N2. Either model follows the phase-start question ritual.
 
 | Area | Decision |
 |---|---|
-| Where extension data lives | **Host-owned store, one `.db` per extension package**: `<app files>/Extensions/<ext package>.db`, SQLCipher under the **global key** (same passphrase / raw-key machinery as the index and every `.soil`). The extension never sees a key or a path; unlock, lockout, key caching, and deletion stay in the core. Rejected: extension-owned DB with a host-derived sub-key (a key would cross the boundary; SQLCipher dep + recovery burden on every extension); extension-owned DB with the actual passphrase (rejected outright); JSON/prefs (not encrypted). |
-| Store shape | **Key/value**: `kv(key TEXT PRIMARY KEY, value BLOB NOT NULL, updatedAt INTEGER NOT NULL)`. Extension serialises whatever it wants. Caps enforced by the host: key ≤ 256 chars, value ≤ 64 KiB, ≤ 10 000 keys per extension. No namespaces, no extension-defined SQL. |
+| Where extension data lives | **Host-owned store, one `.db` per extension package**: `<app files>/Garden/<ext package>.db` (N0 Q2 — inside `Garden/`, beside the `.soil` files, not a separate `Extensions/` dir), SQLCipher under the **global key** (same passphrase / raw-key machinery as the index and every `.soil`). The extension never sees a key or a path; unlock, lockout, key caching, and deletion stay in the core. Rejected: extension-owned DB with a host-derived sub-key (a key would cross the boundary; SQLCipher dep + recovery burden on every extension); extension-owned DB with the actual passphrase (rejected outright); JSON/prefs (not encrypted). |
+| Store shape | **Key/value**: `kv(key TEXT PRIMARY KEY, value BLOB NOT NULL, updatedAt INTEGER NOT NULL)`. Extension serialises whatever it wants. Caps enforced by the host: key ≤ 512 chars, value ≤ 256 KiB, ≤ 50 000 keys per extension (N0 Q1, 2026-08-16 — loosened from the planned 256 / 64 KiB / 10 000). No namespaces, no extension-defined SQL. |
 | Store handoff | **Passed as an in-parameter on each AIDL call** that may need it (`IExtensionStore store`). The host mints one store binder per bind (bound to that extension's uid), and **revokes it on unbind** — a call on a revoked binder throws `SecurityException`. Stateless extension side; no reverse discovery, no exported host service. |
 | Store lifetime vs. the extension | The `.db` **survives extension uninstall/disable**. Removing an extension's data is Extensions-UI territory. Store DBs are keyed by the *installed* package name, so the `.dev` and release builds of an extension get separate stores (consistent with arc 1's template-identity note). |
 | Scheme editor UI | **The core draws one text field from extension data** — the extension describes the field (label, hint, one help line); the core renders a plain `EditText` in the New-folder dialog and in a "Default notebook name…" dialog from the folder long-press. On OK the core asks the extension to validate then save; invalid → the extension's error string as a toast, dialog stays. Extensions still place no UI in the core's flow. |
@@ -114,10 +114,11 @@ apps/notesprout_paper/
 ├── PAPER_NAMING_PLAN.md           this file
 ├── docs/extensions.md             gains: "The extension store", "NotebookNamer", audit rows 10–13
 ├── app/…/notesprout/
-│   ├── data/SoilFile.kt           + extensionsDir(ctx), extensionStoreFile(ctx, pkg)
+│   ├── data/SoilFile.kt           + extensionStoreFile(ctx, pkg)  (Garden/<pkg>.db)
 │   ├── data/extstore/             ExtensionStoreDatabase (Room: KvEntity + KvDao), ExtensionStores
-│   │                              (open-or-create per package, process cache), ExtensionStoreBinder
-│   │                              (IExtensionStore.Stub — uid check, caps, revoke)
+│   │                              (open-or-create per package, process cache), ExtensionStoreGate
+│   │                              (uid check, caps, revoke — no Android types, JVM-tested),
+│   │                              ExtensionStoreBinder (IExtensionStore.Stub delegating to the gate)
 │   ├── extension/                 + NamerClient, ExtensionRegistry.notebookNamer(), NamerField
 │   └── library/                   LibraryActivity (New-folder field, long-press item, prefill),
 │                                  NewNotebookActivity (EXTRA_DEFAULT_NAME)
@@ -136,9 +137,8 @@ Dependency direction unchanged: `:app → :extension-api`, `:ext-templates → :
 
 ### The extension store (host side, `:app` `data/extstore/`)
 
-- **File:** `extensionStoreFile(ctx, pkg) = File(extensionsDir(ctx), "$pkg.db")` where
-  `extensionsDir(ctx) = File(getExternalFilesDir(null), "Extensions")` — added to `data/SoilFile.kt`
-  (the only path constructors). `pkg` is the extension's *installed* package name as returned by
+- **File:** `extensionStoreFile(ctx, pkg) = File(gardenDir(ctx), "$pkg.db")` — inside `Garden/`
+  beside the `.soil` files (N0 Q2) — added to `data/SoilFile.kt` (the only path constructors). `pkg` is the extension's *installed* package name as returned by
   discovery; it is validated `[a-zA-Z0-9_.]+` before use (a `ProviderRef` package name — never user
   input — but the guard costs nothing).
 - **Encryption:** the global passphrase from `KeySession.get()` (process RAM; set once the index is
@@ -163,7 +163,7 @@ Dependency direction unchanged: `:app → :extension-api`, `:ext-templates → :
   - every method first: `check(Binder.getCallingUid() == extUid && !revoked)` else
     `SecurityException` (the binder was handed to exactly one process; nothing else may use it, and
     not after unbind). `revoke()` is called from the client's `finally`.
-  - caps: key `1..256` chars; value `≤ 64 KiB`; `put` of a *new* key when `count() ≥ 10 000` →
+  - caps: key `1..512` chars; value `≤ 256 KiB`; `put` of a *new* key when `count() ≥ 50 000` →
     `IllegalStateException` (surfaces to the extension as a `RemoteException`… AIDL maps runtime
     exceptions of the standard set — the extension treats any exception as "store unavailable").
   - methods run synchronously on the host's Binder thread (Room blocking DAO — never Main).
@@ -178,9 +178,9 @@ Dependency direction unchanged: `:app → :extension-api`, `:ext-templates → :
 | Constant | Value |
 |---|---|
 | `ACTION_NOTEBOOK_NAMER` | `"com.symmetricalpalmtree.notesprout.extension.NOTEBOOK_NAMER"` |
-| `STORE_MAX_KEY_CHARS` | `256` |
-| `STORE_MAX_VALUE_BYTES` | `64 * 1024` |
-| `STORE_MAX_KEYS` | `10_000` |
+| `STORE_MAX_KEY_CHARS` | `512` |
+| `STORE_MAX_VALUE_BYTES` | `256 * 1024` |
+| `STORE_MAX_KEYS` | `50_000` |
 | `MAX_NAME_CHARS` | `100` (host-side cap on a returned default name / scheme text) |
 
 AIDL (`extension-api/src/main/aidl/com/symmetricalpalmtree/notesprout/extension/`):
@@ -191,7 +191,7 @@ package com.symmetricalpalmtree.notesprout.extension;
 interface IExtensionStore {
     /** Value for [key], or null if absent. */
     byte[] get(String key);
-    /** Insert or replace. key 1..256 chars, value ≤ 64 KiB, ≤ 10 000 keys per extension. */
+    /** Insert or replace. key 1..512 chars, value ≤ 256 KiB, ≤ 50 000 keys per extension. */
     void put(String key, in byte[] value);
     /** Remove [key] (no-op if absent). */
     void delete(String key);
@@ -307,25 +307,28 @@ interface INotebookNamer {
 ## Phases
 
 ### Phase N0 — The extension store (contract + host implementation, no UI)
-**Status:** ⬜ Not started
+**Status:** ✅ Complete (commit — see below)
 
 **Goal:** `IExtensionStore` exists in the contract; the core can open-or-create an encrypted
 per-extension store under the global key, mint a uid-bound revocable binder over it, and enforce the
 caps. **No user-visible change** — nothing calls it yet except tests and a debug probe.
 
 **Questions to resolve at phase start** (one at a time; recommended default first):
-1. Caps — key 256 chars / value 64 KiB / 10 000 keys (rec.) / other values?
+1. Caps — key 256 chars / value 64 KiB / 10 000 keys (rec.) / other values? **→ Answered
+   2026-08-16: looser — 512 chars / 256 KiB / 50 000 keys.**
 2. Store file location — `<app files>/Extensions/<pkg>.db` (rec.) / inside `Garden/` / other?
+   **→ Answered: inside `Garden/` (`Garden/<pkg>.db`).**
 3. Debug probe — a debug-menu item "Extension store self-test" that round-trips a value in a store
    for a fake package `probe.test` and toasts OK/FAIL (rec.: yes — Room+SQLCipher can't run on the
    JVM, so this is the only pre-N1 on-device check) / skip and rely on N1's device checklist?
+   **→ Answered: yes.**
 4. Confirm the third create entry point is acceptable (`ExtensionStores.open` creates a missing
-   store exactly the way `SoilDatabase.create` creates a `.soil`) — rec.: yes.
+   store exactly the way `SoilDatabase.create` creates a `.soil`) — rec.: yes. **→ Answered: yes.**
 
 **Deliverables**
 1. `:extension-api`: `IExtensionStore.aidl`; `ExtensionContract` gains `STORE_MAX_KEY_CHARS`,
    `STORE_MAX_VALUE_BYTES`, `STORE_MAX_KEYS`, `MAX_NAME_CHARS`.
-2. `:app` `data/SoilFile.kt`: `extensionsDir`, `extensionStoreFile` (+ package-name guard).
+2. `:app` `data/SoilFile.kt`: `extensionStoreFile` (`Garden/<pkg>.db`, + package-name guard).
 3. `:app` `data/extstore/`: `KvEntity`, `KvDao`, `ExtensionStoreDatabase`, `ExtensionStores`
    (open-or-create, process cache, `closeAll()`), `ExtensionStoreBinder` (uid check, revoke, caps) —
    exactly as in "The extension store".
@@ -334,21 +337,27 @@ caps. **No user-visible change** — nothing calls it yet except tests and a deb
    revoked → `SecurityException`; key too long / empty, value too big, keys cap → rejected; `keys("")`
    ordering; `LIKE` escaping of `%`/`_` in prefix); `SoilFileTest` for the package-name guard.
 6. Docs: `docs/extensions.md` §"The extension store" (model, file, key, caps, handoff/revoke rules,
-   pre-open rule, survives-uninstall); `docs/data.md` (Extensions/ dir, `ext:<pkg>` file ids);
+   pre-open rule, survives-uninstall); `docs/data.md` (`Garden/<pkg>.db` store files, `ext:<pkg>` file ids);
    `docs/crypto.md` audit item 2 lists the third create entry point.
 
 **Tests**
 - JVM: `./gradlew testDebugUnitTest` green; `assembleDebug` builds all four modules (`:ext-naming`
   is **not** created in N0 — three modules).
 - On device (Claude runs; user watches): install `app-debug.apk`; run the debug probe (Q3) → "OK";
-  `adb shell ls /sdcard/Android/data/com.symmetricalpalmtree.notesprout.dev/files/Extensions/` shows
+  `adb shell ls /sdcard/Android/data/com.symmetricalpalmtree.notesprout.dev/files/Garden/` shows
   `probe.test.db`; `xxd -l 16` of the file is **not** `SQLite format 3` (encrypted header); Debug ⋯ →
   Forget cached key → relaunch → unlock → probe again → "OK" (raw-key re-derivation path).
 - **User device checklist:** 1. Library, notebooks, templates all behave as before (regression only).
 
 **Close-out:** status ✅ + Outcome; docs; memory; commit + push `paper`.
 
-**Outcome (N0):** —
+**Outcome (N0):** JVM half built 2026-08-16 (base commit for N2's review range: **4fe2ed6**).
+Answers: caps 512 / 256 KiB / 50 000; store file `Garden/<pkg>.db`; probe yes; third create entry
+point accepted. One structural addition beyond the plan's file list: `ExtensionStoreGate` — the
+checks/caps with no Android types, because `IExtensionStore.Stub` extends `android.os.Binder` and
+cannot be constructed on the JVM (`ExtensionStoreBinderTest` drives the gate with a fake `KvDao`; 9
+tests + 2 `SoilFileTest`). `KvDao.keysLike` takes a ready `LIKE … ESCAPE '\\'` pattern built by
+`ExtensionStoreGate.likePattern`. Device probe: OK on SNN + NA5C + MIP11 (encrypted `Garden/probe.test.db`); forget-key → unlock → probe OK on MIP11 (cold open 668 ms, warm 0 ms). User regression check passed on all three 2026-08-16.
 
 ---
 
@@ -485,9 +494,9 @@ regression subset (create/open/write/flip, library create/rename/move/delete, co
 |---|---|
 | `ACTION_NOTEBOOK_NAMER` | `com.symmetricalpalmtree.notesprout.extension.NOTEBOOK_NAMER` |
 | `META_API_VERSION` / `API_VERSION` | unchanged (`…extension.API_VERSION` / `1`) |
-| Store caps | key 1..256 chars · value ≤ 64 KiB · ≤ 10 000 keys per extension |
+| Store caps | key 1..512 chars · value ≤ 256 KiB · ≤ 50 000 keys per extension |
 | `MAX_NAME_CHARS` | 100 |
-| Store file | `<app files>/Extensions/<ext package>.db`; key-cache file id `ext:<pkg>` |
+| Store file | `<app files>/Garden/<ext package>.db`; key-cache file id `ext:<pkg>` |
 | Timeouts | bind 3 000 ms · every namer call 2 000 ms |
 | Naming extension package | `com.symmetricalpalmtree.notesprout.ext.naming` (debug `.dev`) |
 | Store key used by the Naming extension | `folder:<folder UUID>` → UTF-8 scheme |
@@ -513,7 +522,7 @@ adb -s <serial> install -r ext-naming/build/outputs/apk/debug/ext-naming-debug.a
 adb -s <serial> shell pm enable com.symmetricalpalmtree.notesprout.ext.naming.dev      # BOOX: re-run after a few seconds, confirm `pm list packages -d`
 adb -s <serial> shell pm disable-user --user 0 com.symmetricalpalmtree.notesprout.ext.naming.dev
 adb -s <serial> uninstall com.symmetricalpalmtree.notesprout.ext.naming.dev
-adb -s <serial> shell ls /sdcard/Android/data/com.symmetricalpalmtree.notesprout.dev/files/Extensions/
+adb -s <serial> shell ls /sdcard/Android/data/com.symmetricalpalmtree.notesprout.dev/files/Garden/   # <pkg>.db store files beside the .soil files
 ```
 
 ## Appendix D — Reference map

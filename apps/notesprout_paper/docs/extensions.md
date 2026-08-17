@@ -79,6 +79,10 @@ that true. Dependency direction (Gradle-enforced, never violated): `:app → :ex
 | `META_API_VERSION` | `"com.symmetricalpalmtree.notesprout.extension.API_VERSION"` |
 | `MIME_WEBP` | `"image/webp"` |
 | `MAX_RENDER_BYTES` | `16 * 1024 * 1024` (16 MiB — hard cap the host enforces on a render result) |
+| `STORE_MAX_KEY_CHARS` | `512` — longest `IExtensionStore` key (the empty key is rejected) |
+| `STORE_MAX_VALUE_BYTES` | `256 * 1024` — largest `IExtensionStore` value |
+| `STORE_MAX_KEYS` | `50_000` — most keys one extension's store may hold |
+| `MAX_NAME_CHARS` | `100` — host-side cap on a notebook name / scheme text an extension returns |
 | `templateIdentity(pkg, id)` | `"$pkg:$id"` |
 | `parseIdentity(s)` | `Pair<pkg, id>?` — splits at the **first** `:`; null if `:` absent or either side empty. The Blank sentinel is the host's, not the contract's. |
 
@@ -94,6 +98,19 @@ parcelable TemplateInfo;
 // RenderedTemplate.aidl
 package com.symmetricalpalmtree.notesprout.extension;
 parcelable RenderedTemplate;
+
+// IExtensionStore.aidl — host-owned encrypted key/value store, scoped to the calling extension.
+// Not an extension point: the host hands one in as a parameter of the calls that may need it.
+interface IExtensionStore {
+    /** Value for [key], or null if absent. */
+    byte[] get(String key);
+    /** Insert or replace. key 1..512 chars, value <= 256 KiB, <= 50 000 keys per extension. */
+    void put(String key, in byte[] value);
+    /** Remove [key] (no-op if absent). */
+    void delete(String key);
+    /** Keys starting with [prefix] ("" = all), ascending. */
+    List<String> keys(String prefix);
+}
 
 // ITemplateProvider.aidl
 interface ITemplateProvider {
@@ -172,6 +189,52 @@ An Android **application** APK — `applicationId com.symmetricalpalmtree.notesp
   from `Kind.entries`, so a template cannot be half-registered. **Blank is not a template** — it is the host's "no template" option.
 
 ---
+
+## The extension store (arc 2 / N0 — `:app` `data/extstore/`)
+
+**Where an extension keeps its own data.** The core owns **one encrypted key/value database per
+extension package** and lends the extension a small binder over it; the extension never sees a key,
+a passphrase, a path, or a `File`, and cannot open anything itself.
+
+- **File:** `extensionStoreFile(ctx, pkg)` = `Garden/<ext package>.db` (`data/SoilFile.kt`, the only
+  path constructor; `pkg` is the *installed* package name from discovery, guarded
+  `[a-zA-Z0-9_.]+`). So the `.dev` and release builds of an extension get separate stores.
+- **Encryption:** SQLCipher under the **global** passphrase (`KeySession.get()` — process RAM, set once
+  the index is open; every caller is behind `IndexGuard`). Raw-key cache file id `ext:<pkg>`. Same
+  passphrase / raw-key / lockout / "forget key" machinery as the index and every `.soil`.
+- **Open-or-create — `ExtensionStores.open(ctx, pkg)`** (IO, `@Synchronized`, process-lifetime cache
+  keyed by package, closed only by `closeAll()`). Missing / empty file → **create** exactly the
+  `SoilDatabase.create` way (`SoilCrypto.roomFactory(pass)` → force-open → `KeyOpener.warm`) — the
+  **third named create entry point** (`docs/crypto.md` audit item 2). Existing file →
+  `SoilCrypto.requireExisting` → `KeyOpener.roomFactoryFor` (cached raw key verified against the file,
+  passphrase fallback + warm) — the `SoilDatabase.open` way. Every factory is
+  `NonDestructiveOpenHelperFactory`-wrapped by `SoilCrypto`. No global key in session →
+  `SoilLockedException`.
+- **Schema:** `ExtensionStoreDatabase` (Room v1, WAL, `busy_timeout=5000`):
+  `kv(key TEXT PRIMARY KEY, value BLOB NOT NULL, updatedAt INTEGER NOT NULL)`. The extension
+  serialises whatever it wants into `value`. No namespaces, no extension-defined SQL.
+- **Handoff:** `IExtensionStore` is passed as an **in-parameter** on each AIDL call that may need it.
+  The host mints one `ExtensionStoreBinder(db, extUid)` per bind (`extUid` =
+  `PackageManager.getPackageUid(pkg)` at bind time) and **`revoke()`s it in the same `finally` as the
+  unbind**. Every method first checks `Binder.getCallingUid() == extUid && !revoked`, else
+  `SecurityException` — the binder was handed to exactly one process and is dead after the bind.
+  Stateless extension side; no reverse discovery, no exported host service.
+- **Caps (host-enforced, `ExtensionContract.STORE_*`):** key `1..512` chars, value `≤ 256 KiB`, a
+  `put` of a *new* key when the store already holds `50 000` → `IllegalStateException`; bad
+  arguments → `IllegalArgumentException`. All are in the set AIDL marshals across the boundary; the
+  extension treats **any** exception as "store unavailable". `keys(prefix)` LIKE-escapes `%`, `_`,
+  `\` in the prefix and returns ascending. Methods run synchronously on the host's Binder thread
+  over the blocking DAO — never Main. (`ExtensionStoreGate` holds the checks with no Android types
+  so they are JVM-tested; the `Stub` delegates to it.)
+- **Pre-open rule:** the host opens the store on IO **before** binding the extension for any call that
+  carries one, so a cold open (KDF ≈ 0.5–1.5 s on e-ink when the raw key isn't cached) is never
+  inside the extension call's 2 s timeout window.
+- **Lifetime:** the `.db` **survives** the extension's uninstall / disable — removing an extension's
+  data is Extensions-UI territory. Backup / restore / compaction: none in Paper (no backup subsystem).
+  Debug "Forget cached key" clears `ext:*` raw keys with everything else.
+- **Debug probe:** library ⋯ → "Extension store self-test" (`DebugMenu`, debug builds only) —
+  open-or-create `probe.test`, round-trip through a real `ExtensionStoreBinder`, verify the encrypted
+  header, wrong-uid and revoked refusal; toast OK / FAIL.
 
 ## Host behaviour (`:app`, package `extension/`)
 

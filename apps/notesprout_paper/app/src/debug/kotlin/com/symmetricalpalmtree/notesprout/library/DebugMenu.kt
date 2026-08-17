@@ -10,12 +10,21 @@ import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.AppCompatImageButton
 import androidx.appcompat.widget.TooltipCompat
+import androidx.lifecycle.lifecycleScope
 import com.symmetricalpalmtree.notesprout.R
 import com.symmetricalpalmtree.notesprout.core.ActionSheetDialog
 import com.symmetricalpalmtree.notesprout.core.Dialogs
 import com.symmetricalpalmtree.notesprout.crypto.KeyMaterial
 import com.symmetricalpalmtree.notesprout.crypto.KeySession
 import com.symmetricalpalmtree.notesprout.crypto.PassphraseStore
+import com.symmetricalpalmtree.notesprout.crypto.SoilCrypto
+import com.symmetricalpalmtree.notesprout.crypto.SoilFileKind
+import com.symmetricalpalmtree.notesprout.data.extensionStoreFile
+import com.symmetricalpalmtree.notesprout.data.extstore.ExtensionStoreBinder
+import com.symmetricalpalmtree.notesprout.data.extstore.ExtensionStores
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * Debug build only (this file has a no-op twin in `src/release`): a ⋯ button on the library's
@@ -23,6 +32,10 @@ import com.symmetricalpalmtree.notesprout.crypto.PassphraseStore
  *  - **Show recovery key** — reveal + copy the global passphrase.
  *  - **Forget cached key** — clear the Keystore-cached passphrase and raw keys, then kill the
  *    process; the next launch must land on the Unlock screen with the file intact.
+ *  - **Extension store self-test** — open-or-create the store of a fake package `probe.test`
+ *    (`Garden/probe.test.db`), round-trip a value through a real [ExtensionStoreBinder] (uid = ours),
+ *    check the file is encrypted and that a revoked binder refuses; toast OK / FAIL. Room + SQLCipher
+ *    can't run on the JVM, so this is the store's only pre-N1 on-device check.
  */
 object DebugMenu {
 
@@ -48,7 +61,42 @@ object DebugMenu {
             .title("Debug tools")
             .addAction(null, "Show recovery key") { showKey(activity) }
             .addAction(null, "Forget cached key (relaunch → Unlock)") { confirmForget(activity) }
+            .addAction(null, "Extension store self-test") { storeSelfTest(activity) }
             .show()
+    }
+
+    private fun storeSelfTest(activity: AppCompatActivity) {
+        activity.lifecycleScope.launch {
+            val result = withContext(Dispatchers.IO) { runCatching { runStoreProbe(activity) } }
+            val msg = result.fold({ "Extension store: OK ($it)" }, { "Extension store: FAIL — ${it.message}" })
+            Toast.makeText(activity, msg, Toast.LENGTH_LONG).show()
+        }
+    }
+
+    /** IO. Returns a short summary; throws on the first failed check. */
+    private fun runStoreProbe(activity: AppCompatActivity): String {
+        val pkg = "probe.test"
+        val t0 = System.currentTimeMillis()
+        val db = ExtensionStores.open(activity, pkg)
+        val openMs = System.currentTimeMillis() - t0
+        val file = extensionStoreFile(activity, pkg)
+        check(SoilCrypto.probe(file) == SoilFileKind.Encrypted) { "file is not encrypted" }
+        // Called in-process, Binder.getCallingUid() is our own uid — a real ExtensionStoreBinder works.
+        val store = ExtensionStoreBinder(db, android.os.Process.myUid())
+        val key = "probe:" + System.currentTimeMillis()
+        val value = "hello".toByteArray()
+        store.put(key, value)
+        check(store.get(key)?.contentEquals(value) == true) { "get after put mismatch" }
+        check(key in store.keys("probe:")) { "keys(prefix) missing the key" }
+        check(store.keys("zzz").isEmpty()) { "keys(zzz) not empty" }
+        store.delete(key)
+        check(store.get(key) == null) { "get after delete not null" }
+        check(runCatching { store.get("") }.exceptionOrNull() is IllegalArgumentException) { "empty key accepted" }
+        val other = ExtensionStoreBinder(db, android.os.Process.myUid() + 1)
+        check(runCatching { other.get("x") }.exceptionOrNull() is SecurityException) { "wrong uid accepted" }
+        store.revoke()
+        check(runCatching { store.get("x") }.exceptionOrNull() is SecurityException) { "revoked binder accepted" }
+        return "open ${openMs}ms, ${file.name}"
     }
 
     private fun showKey(activity: AppCompatActivity) {

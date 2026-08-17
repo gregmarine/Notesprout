@@ -55,7 +55,10 @@ passphrase → invalidate + re-derive raw key → open. Never opens Room with an
 
 ⋯ on the library top bar: **Show recovery key** (reveal + copy) · **Forget cached key** (clears
 `PassphraseStore` + `KeyMaterial`, kills the process so the next launch really re-runs bootstrap
-→ Unlock screen).
+→ Unlock screen) · **Extension store self-test** (opens-or-creates the store of a fake package
+`probe.test`, round-trips a value through a real `ExtensionStoreBinder`, checks the file header is
+encrypted and that a wrong-uid / revoked binder refuses; toasts OK / FAIL — the store's only
+pre-N1 on-device check, since Room + SQLCipher can't run on the JVM).
 
 ## Leak hygiene (standing)
 
@@ -71,9 +74,11 @@ The v0 close-out audit — every claim below verified against the source, not as
    `onCorruption` logs + throws (never deletes). `KeyOpener` and `PaperIndex`/`SoilDatabase` build
    through those factories; no factory is constructed elsewhere. The only raw (non-Room) opens are
    `openRaw`/`openRawKey`, used solely by the read-only `verify*` helpers.
-2. **No create-capable open outside the two bootstrap entry points.** Creation is `SoilCrypto.createRaw`
-   + `SoilDatabase.create` (new-notebook) and `PaperIndex.ensureReady`'s `Invalid` branch (new index);
-   all three `require(!file.exists() || length==0)`. Every non-creation open first calls
+2. **No create-capable open outside the named create entry points.** Creation is `SoilCrypto.createRaw`
+   + `SoilDatabase.create` (new-notebook), `PaperIndex.ensureReady`'s `Invalid` branch (new index), and
+   — since arc 2 / N0 — `ExtensionStores.open`'s missing-or-empty branch (a new extension store,
+   `Garden/<pkg>.db`, built byte-for-byte the `SoilDatabase.create` way: `SoilCrypto.roomFactory(pass)`
+   → force-open → `KeyOpener.warm`); all four `require(!file.exists() || length==0)`. Every non-creation open first calls
    `SoilCrypto.requireExisting` (missing/empty → `SoilLockedException`), so a create-capable primitive
    pointed at a missing path can never fabricate a stub that masquerades as real data.
 3. **Missing file never loops into unlock.** A missing/empty `.soil` → `NotebookSession.open` returns

@@ -6,6 +6,8 @@ package com.symmetricalpalmtree.notesprout.extension
  * consume it as a plain artifact.
  *
  * v1 has exactly one extension point: [ACTION_TEMPLATE_PROVIDER] (interface `ITemplateProvider`).
+ * `IExtensionStore` (arc 2) is not a point — it is the host-owned store handed *to* an extension as an
+ * in-parameter of a call; its caps are the `STORE_*` constants below.
  */
 object ExtensionContract {
 
@@ -25,6 +27,20 @@ object ExtensionContract {
 
     /** Hard cap the host enforces on a render result (16 MiB). */
     const val MAX_RENDER_BYTES: Int = 16 * 1024 * 1024
+
+    // ── Extension store caps (`IExtensionStore`, enforced by the host) ──────
+
+    /** Longest key an extension may store (chars); the empty key is rejected. */
+    const val STORE_MAX_KEY_CHARS: Int = 512
+
+    /** Largest value an extension may store (256 KiB). */
+    const val STORE_MAX_VALUE_BYTES: Int = 256 * 1024
+
+    /** Most keys one extension's store may hold. */
+    const val STORE_MAX_KEYS: Int = 50_000
+
+    /** Host-side cap on a notebook name / naming-scheme text an extension returns (chars). */
+    const val MAX_NAME_CHARS: Int = 100
 
     /** Extension-namespaced template identity: `"<extension package>:<template id>"`. */
     fun templateIdentity(pkg: String, id: String): String = "$pkg:$id"
