@@ -9,7 +9,8 @@
 > files. `docs/extensions.md` is the subsystem reference both arcs write into.
 >
 > **Arc 2 is complete (N0 04c5894 · N1 c339ee3 · N2 56d112b) and this
-> file is frozen.** The next arc is not planned — ask the user first.
+> file is frozen.** Arc 3 (the `HANDWRITING_RECOGNIZER` capability point + the ML Kit extension) is
+> planned in `PAPER_RECOGNITION_PLAN.md` (2026-08-17).
 
 ## Why
 

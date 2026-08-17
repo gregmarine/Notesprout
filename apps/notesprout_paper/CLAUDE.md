@@ -8,8 +8,10 @@ global-index model, global encryption model, and e-ink design philosophy — and
 - **Plans:** `PAPER_PLAN.md` (v0, complete — architecture + locked decisions), then
   `PAPER_EXTENSIONS_PLAN.md` (arc 1, complete + frozen: extension API v1 + Templates extension), then
   `PAPER_NAMING_PLAN.md` (arc 2, complete + frozen: the host-owned encrypted extension store + the
-  Naming extension) — read all three top-to-bottom at the start of every session; **no next arc is
-  planned — ask the user first**
+  Naming extension), then `PAPER_RECOGNITION_PLAN.md` (**arc 3, planned 2026-08-17, M0–M2 ⬜**: the
+  engine-neutral `HANDWRITING_RECOGNIZER` capability point + the ML Kit extension `NSE · ML Kit`,
+  debug-only "Recognize page" test surface) — read all four top-to-bottom at the start of every
+  session; the next `⬜` phase is the work
 - **Package / applicationId:** `com.symmetricalpalmtree.notesprout` (debug: `.dev` suffix)
 - **Launcher label:** "Notesprout Paper" (debug: "Notesprout Paper Dev")
 
